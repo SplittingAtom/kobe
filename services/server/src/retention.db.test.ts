@@ -826,6 +826,59 @@ describe("export (D18)", () => {
   });
 });
 
+describe("/export of one conversation (KOBE-450, Pi's /export)", () => {
+  const md = (bytes: Uint8Array) => strFromU8(bytes);
+  const exportsOf = async (threadId: string) =>
+    (await audits("thread.transcript_exported")).filter((a) => a.target.threadId === threadId);
+
+  it("downloads the owner's conversation as Markdown (active branch), audited", async () => {
+    const mine = await thread({ owner: ids.bob, title: "Budget 2027", entries: 4 });
+    const res = await download(as.bob, `/v1/threads/${mine}/export?team=${team}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/markdown; charset=utf-8");
+    expect(res.headers.get("content-disposition")).toMatch(
+      new RegExp(
+        `^attachment; filename="\\d{4}-\\d{2}-\\d{2}-budget-2027-${mine.slice(0, 8)}\\.md"$`,
+      ),
+    );
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const text = md(res.bytes);
+    expect(text).toMatch(/^# Budget 2027/);
+    expect(text).toContain("question 1 from Budget 2027");
+    expect(text).toContain("answer 4");
+    expect(await exportsOf(mine)).toEqual([
+      expect.objectContaining({ actor_id: ids.bob, target: { threadId: mine, entries: 4 } }),
+    ]);
+  });
+
+  it("only the owner's, in the active team: another member's or team's thread is not found", async () => {
+    const carols = await thread({ owner: ids.carol, title: "Carol secret" });
+    const elsewhere = await thread({ teamId: other, owner: ids.bob, title: "Legal matter" });
+    for (const id of [carols, elsewhere]) {
+      const res = await download(as.bob, `/v1/threads/${id}/export`);
+      expect(res.status).toBe(404);
+      expect(md(res.bytes)).not.toMatch(/Carol secret|Legal matter/);
+      expect(await exportsOf(id)).toEqual([]);
+    }
+  });
+
+  it("refuses a stale tab's team, a bad id and a download another site starts", async () => {
+    const mine = await thread({ owner: ids.bob, title: "Plan" });
+    expect((await download(as.bob, `/v1/threads/${mine}/export?team=${other}`)).status).toBe(409);
+    expect((await download(as.bob, "/v1/threads/not-a-uuid/export")).status).toBe(400);
+    const cross = await h.app.request(`http://kobe.test/v1/threads/${mine}/export`, {
+      headers: {
+        origin: "http://kobe.test",
+        "sec-fetch-site": "cross-site",
+        "x-forwarded-for": as.bob.ip,
+        cookie: [...as.bob.cookies].map(([k, v]) => `${k}=${v}`).join("; "),
+      },
+    });
+    expect(cross.status).toBe(403);
+    expect(await exportsOf(mine)).toEqual([]);
+  });
+});
+
 describe("one replica at a time, once a day", () => {
   it("lets one replica run a pass while another holds the lock; skips when not due", async () => {
     const job = (now?: Date, pool: { connect: () => Promise<PoolClient> } = h.deps.database.pool) =>

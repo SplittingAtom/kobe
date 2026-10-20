@@ -1,10 +1,15 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
 import { deleteReleasedBlobs } from "../retention/blobs.js";
 import { deleteForever, type DeleteForeverError } from "../retention/delete-forever.js";
 import { exportResponseBody, recordExport } from "../retention/export.js";
+import {
+  recordThreadExport,
+  threadExportBody,
+  threadExportFileName,
+} from "../retention/export-thread.js";
 import { blobRecorder } from "../retention/job.js";
 import { isLockTimeout } from "../threads/repository.js";
 import { uuidSchema } from "../threads/schemas.js";
@@ -30,7 +35,8 @@ const SAME_SITE_FETCH = new Set(["same-origin", "none"]);
  * The user's own retention actions on threads (spec D18): "Delete forever" from Trash and the
  * export of their threads in the active team. Team-scoped (`team.chat`); both act only on threads
  * the signed-in user owns — team admins get nothing more here (D18: they can't read or delete
- * members' threads). Mounted before the thread API so `/export` isn't taken for a thread id.
+ * members' threads), and one conversation's Markdown (`/:id/export`, KOBE-450). Mounted before
+ * the thread API so `/export` isn't taken for a thread id.
  */
 export function threadRetentionRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
@@ -72,28 +78,9 @@ export function threadRetentionRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
    * page believes is active comes as `?team=` and must match the session's (stale-tab guard).
    */
   app.get("/export", async (c) => {
-    // CSRF: a GET skips the Origin check, so refuse downloads another site starts (each would
-    // write an audit row and stream a whole export).
-    const site = c.req.header("sec-fetch-site");
-    const origin = c.req.header("origin");
-    if (
-      (site !== undefined && !SAME_SITE_FETCH.has(site)) ||
-      (origin !== undefined && origin !== deps.publicUrl)
-    ) {
-      return c.json({ code: "forbidden_origin", message: "Cross-origin request rejected." }, 403);
-    }
+    const refused = refuseDownload(c, deps.publicUrl);
+    if (refused) return refused;
     const team = c.get("team");
-    const claimed = c.req.query("team");
-    if (claimed !== undefined && claimed !== team.id) {
-      return c.json(
-        {
-          code: "team_mismatch",
-          message: "Your active team changed in another tab. Reload to continue.",
-          activeTeamId: team.id,
-        },
-        409,
-      );
-    }
     const userId = c.get("user").id;
     if (exporting.has(userId) || exporting.size >= MAX_EXPORTS_PER_REPLICA) {
       return c.json(
@@ -146,5 +133,59 @@ export function threadRetentionRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
     });
   });
 
+  /**
+   * `GET /v1/threads/:id/export` → one conversation as Markdown (`/export`, KOBE-450): the
+   * owner's only, under the same download guards as the full export, audited before it starts.
+   */
+  app.get("/:id/export", async (c) => {
+    const refused = refuseDownload(c, deps.publicUrl);
+    if (refused) return refused;
+    const id = uuidSchema.safeParse(c.req.param("id"));
+    if (!id.success) return invalidRequest(c);
+    const viewer = { teamId: c.get("team").id, userId: c.get("user").id };
+    const thread = await recordThreadExport(db, viewer, id.data);
+    if (thread === null) {
+      const [status, message] = ERRORS.thread_not_found;
+      return c.json({ code: "thread_not_found", message }, status);
+    }
+    return new Response(threadExportBody(db, viewer, deps.blobs, thread), {
+      headers: {
+        "content-type": "text/markdown; charset=utf-8",
+        "content-disposition": `attachment; filename="${threadExportFileName(thread)}"`,
+        "cache-control": "no-store",
+      },
+    });
+  });
+
   return app;
+}
+
+/**
+ * Why a download can't start, or null. CSRF: a GET skips the Origin check, so refuse downloads
+ * another site starts (each would write an audit row and stream an export). A link can't send
+ * `X-Kobe-Team`, so the team the page believes is active comes as `?team=` and must match the
+ * session's (stale-tab guard).
+ */
+function refuseDownload(c: Context<{ Variables: TeamVariables }>, publicUrl: string) {
+  const site = c.req.header("sec-fetch-site");
+  const origin = c.req.header("origin");
+  if (
+    (site !== undefined && !SAME_SITE_FETCH.has(site)) ||
+    (origin !== undefined && origin !== publicUrl)
+  ) {
+    return c.json({ code: "forbidden_origin", message: "Cross-origin request rejected." }, 403);
+  }
+  const team = c.get("team");
+  const claimed = c.req.query("team");
+  if (claimed !== undefined && claimed !== team.id) {
+    return c.json(
+      {
+        code: "team_mismatch",
+        message: "Your active team changed in another tab. Reload to continue.",
+        activeTeamId: team.id,
+      },
+      409,
+    );
+  }
+  return null;
 }
