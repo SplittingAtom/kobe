@@ -156,6 +156,10 @@ style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'
 - An app can show the member misleading content about their own data. This is no worse than the
   connector's own text results.
 - An app can put misleading text in the composer. The member reads it before sending.
+- Connectors-off (KOBE-451) holds on app calls only when the call names the thread (KOBE-460):
+  a picker in a new conversation names none, and the member's own session could leave it out.
+  It is the member's per-conversation choice, not a permission; an off connector's context is
+  still refused at send.
 - The upstream sees each call under the member's credential (or the shared site key, KOBE-303).
   The upstream's own authorization applies, as it does for model-initiated calls.
 - **WebRTC in browsers without `webrtc 'block'`** (amended 2026-10-19, coordinator decision on
@@ -221,7 +225,34 @@ _Rejected:_
 - The artifact column as the main surface: an app's output belongs to the moment in the
   conversation that produced it, and the model refers to it there.
 - Rendering inside the 280 px rail: too narrow for a tree and a preview (Catalyst's own breakpoint
-  is 480 px).
+  is 480 px). Picker apps are now the exception (amendment below).
+
+_Amended 2026-10-20 (Chris, KOBE-460): picker apps may render live in the rail._ The Apps tab has
+two sections. Below, the app list exactly as before (every app, pickers included; a click inserts
+an app card, MA11). Above, a **Pickers** section, hidden when the member has no live picker: a
+dropdown of None and the live apps (MA8) whose display name contains "Picker" (case-insensitive;
+choice 4), remembered per member (`rail_picker`, a layout preference); the chosen one renders
+live in the section, laid out like the Files tree (it fills the section and scrolls inside it).
+One live picker frame at a time; a picker that stops being live (drift, connector off for the
+team, key gone) falls back to None with a short note.
+
+1. Its `ui/message` inserts into the composer draft of the conversation on screen (or the
+   new-conversation draft), with the §8 marker and gate; `ui/update-model-context` attaches its
+   chip there. Nothing is sent without the member and nothing is stored in a thread.
+2. Selecting a picker widens the rail to at least 400 px when the window allows (the drawer to
+   `min(400px, 85vw)`); None restores the member's own width, which is never overwritten by the
+   widening. The member can still drag it wider.
+3. The bottom list keeps every app.
+4. A picker is recognised by "Picker" in the display name; nothing else marks it.
+
+Security is the cards': the same member frame route and header CSP (MA4, `sandbox
+allow-scripts`), only pinned, approved, not drifted templates, MA8 visibility, and the same bridge
+(§7). Its `tools/call` goes through `POST /v1/team/apps/{appId}/calls` under the member's browser
+principal with every §6 check. It has no card, so it names the thread on screen (`thread_id`):
+the server then also refuses a thread the member may not read (`thread_not_found`) and one where
+the app's connector is off (`connector_off`), both audited `mcp.app_call`. In a new conversation
+it names no thread, and Kobe does not run it while the draft has its connector off. The picker
+runs only while the Apps tab is on screen in an expanded rail.
 
 **MA4. Server-mediated `resources/read`, never the sandbox.** Templates are fetched only by the
 server's pin and refresh probes, through mcp-proxy's internal probe endpoint (server key only,
@@ -444,8 +475,10 @@ thread or run. It needs the `team.chat` permission. A deactivated user's session
   SHA-256 of `connectorId:uri`.
 - `GET /v1/team/apps/{appId}/template` returns `{html, sha256, connectorId, uri}`
   (JSON only, MA4).
-- `POST /v1/team/apps/{appId}/calls {tool, arguments}` returns
+- `POST /v1/team/apps/{appId}/calls {tool, arguments, thread_id?}` returns
   `{result} | {error: {code, message}}`. It serves the app's own `tools/call` from any card.
+  Every frame names its thread as `thread_id` (KOBE-460): a card's frame (inline or expanded)
+  its own thread, a rail picker (MA3 as amended 2026-10-20) the thread on screen.
 - `POST /v1/threads/{threadId}/app-cards {appId}` (or `POST /v1/threads/app-cards {appId}`,
   which starts a new thread) performs the rail launch (MA11). It answers `{entryId}` when it
   inserted the card, or `{queued: true}` during a run.
@@ -453,7 +486,9 @@ thread or run. It needs the `team.chat` permission. A deactivated user's session
 
 **Server checks for each call**, in order (fail closed, one audit row each):
 
-1. The app is visible to this member (MA8). The tool belongs to the app's connector.
+1. The app is visible to this member (MA8). The tool belongs to the app's connector. With
+   `thread_id` (cards and pickers), the member may read that thread and the app's connector is
+   not off in it.
 2. The tool is pinned and not drifted, has `readOnlyHint: true`, a visibility that includes
    `"app"`, and is in the team's exposure. For `custom` exposure, the tool must be ticked.
 3. `arguments` is a JSON object of at most 64 KiB, and validates against the pinned `inputSchema`
@@ -499,7 +534,8 @@ it because Catalyst does not mark it `"app"`-visible. Kobe does not hard-code th
 
 - **`ui/message`** with role `user` and text content inserts the text **at the caret of the
   composer draft of the card's own thread** (always the thread on screen, since frames run only
-  for visible cards). It **never sends and never moves the focus** (amended 2026-10-19,
+  for visible cards; a rail picker's, the conversation on screen or the new-conversation draft,
+  MA3 as amended 2026-10-20). It **never sends and never moves the focus** (amended 2026-10-19,
   coordinator decision on the KOBE-439 review): the text carries a visible "From _app_" marker,
   and Enter and Send do nothing until the member edits it or confirms it, so an Enter pressed in
   the app cannot send it. Text is capped at 4 KiB, other content types are ignored, and text that

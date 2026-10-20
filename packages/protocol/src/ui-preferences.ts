@@ -17,6 +17,8 @@ import { z } from "zod";
  * `rail_tab` (KOBE-448): the tab that section shows, Files (the default) or Apps.
  * `workbench_editor_width` (KOBE-459): the Workbench editor rail's dragged width; `null` goes back
  * to the default (the rail takes the width the file tree leaves).
+ * `rail_picker` (KOBE-460): the picker app (its app id) the Apps tab renders live, or `null` for
+ * None (the default); a picker that is not live for the member shows None.
  */
 
 /** Threads' share of the rail's height over Files (CE5): never squeezing either section out. */
@@ -48,6 +50,9 @@ export type RailPanels = (typeof RAIL_PANELS)[number];
 /** The rail section's tabs (KOBE-448): the member's last one is kept. */
 export const RAIL_TABS = ["files", "apps"] as const;
 export type RailTab = (typeof RAIL_TABS)[number];
+
+/** An MCP App's id (KOBE-436): the SHA-256 of `connectorId:uri`, lowercase hex. */
+const APP_ID_PATTERN = /^[0-9a-f]{64}$/;
 
 /** Largest PUT body the server reads (bytes); the whole document is far smaller. */
 export const UI_PREFERENCES_MAX_BODY = 1024;
@@ -91,6 +96,7 @@ export const uiPreferencesSchema = z.strictObject({
     .max(WORKBENCH_EDITOR_WIDTH_BOUNDS.max)
     .nullable()
     .optional(),
+  rail_picker: z.string().regex(APP_ID_PATTERN).nullable().optional(),
 });
 export type UiPreferences = z.infer<typeof uiPreferencesSchema>;
 

@@ -20,8 +20,9 @@ import { parseBody } from "../teams/http.js";
  * - `GET /v1/team/apps`: the member's live apps (MA8), never bytes or credentials.
  * - `GET /v1/team/apps/:appId/template`: `{html, sha256, connectorId, uri}` as **JSON only**
  *   (MA4: `no-store`, `nosniff`, `default-src 'none'`), never `text/html`.
- * - `POST /v1/team/apps/:appId/calls {tool, arguments}`: `{result}` or `{error: {code,
- *   message}}`, decided and audited by `callApp`.
+ * - `POST /v1/team/apps/:appId/calls {tool, arguments, thread_id?}`: `{result}` or `{error:
+ *   {code, message}}`, decided and audited by `callApp`. A rail picker (KOBE-460) names the
+ *   thread on screen in `thread_id`, which must be readable with the connector not off there.
  * - `GET /v1/team/apps/:appId/frame?team=&sha256=` (KOBE-437, spec MA4 as amended): the
  *   document of the app's iframe, the only `text/html` here, with `APP_FRAME_HEADERS` (CSP
  *   `sandbox allow-scripts`: an opaque origin even top-level, no network). Only pinned and
@@ -45,6 +46,7 @@ const principal = (c: Context<{ Variables: TeamVariables }>): BrowserPrincipal =
 const callSchema = z.strictObject({
   tool: z.string().min(1).max(128),
   arguments: z.unknown().optional(),
+  thread_id: uuidSchema.optional(),
 });
 
 /** Strict: the team the page believes is active, and the template bytes it was given. */
@@ -178,11 +180,15 @@ export function teamAppsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
     const body = await parseBody(c, callSchema);
     if (!body) {
       return c.json(
-        { error: { code: "invalid_request", message: "Send {tool, arguments}." } },
+        { error: { code: "invalid_request", message: "Send {tool, arguments, thread_id?}." } },
         400,
       );
     }
-    const outcome = await callApp(callDeps, principal(c), appId, body);
+    const outcome = await callApp(callDeps, principal(c), appId, {
+      tool: body.tool,
+      arguments: body.arguments,
+      threadId: body.thread_id,
+    });
     if (outcome.ok) return c.json({ result: outcome.result });
     return c.json({ error: { code: outcome.code, message: outcome.message } }, outcome.status);
   });

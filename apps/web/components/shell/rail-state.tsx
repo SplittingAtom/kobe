@@ -13,7 +13,7 @@ import { RAIL_PANELS, RAIL_TABS, type RailPanels, type RailTab } from "@kobe/pro
 import { useStoredPreference, type LayoutPreferences } from "../../lib/shell/preferences";
 import { railDocked } from "../../lib/shell/layout";
 import { DEFAULT_RAIL_PANELS, shows, withPanel } from "../../lib/shell/rail-panels";
-import { applyRailWidth, railWidthWithin } from "../../lib/shell/rail-width";
+import { applyRailWidth, railWidthWithin, shownRailWidth } from "../../lib/shell/rail-width";
 import { IconAction } from "./icon-action";
 import { useShellBand } from "./shell-band";
 
@@ -83,6 +83,19 @@ export interface RailApi {
   setWidth(width: number): void;
   /** Back to the default width (double-click on the handle), saved as `null`. */
   resetWidth(): void;
+  /**
+   * The width the grid shows (KOBE-460): {@link width}, widened to at least 400 px while a picker
+   * shows in the Apps tab ({@link setPickerShown}). Only `width` is the member's, and saved.
+   */
+  readonly shownWidth: number | null;
+  /** The Apps tab shows a live picker: the rail (and the drawer) are widened for it. */
+  readonly pickerShown: boolean;
+  /** The Apps tab shows a live picker (or no longer does): widens the rail, unsaved. */
+  setPickerShown(on: boolean): void;
+  /** The Apps tab's picker (KOBE-460): its app id, or null for None; saved per member. */
+  readonly picker: string | null;
+  /** The member chose a picker (or None): shown and saved. */
+  setPicker(appId: string | null): void;
   /** Which panels show (KOBE-419): Threads, Files or both. */
   readonly panels: RailPanels;
   /** The member's toggle on the rail's top line: saved; the last panel on stays on. */
@@ -170,6 +183,20 @@ function useRailTab(
   return { tab: stored.value, setTab: stored.commit };
 }
 
+/** The Apps tab's picker (KOBE-460): stored per member, None until the member picks one. */
+function useRailPicker(
+  preferences: LayoutPreferences | null,
+  onSave: ((change: LayoutPreferences) => void) | undefined,
+) {
+  const stored = useStoredPreference<string | null>({
+    initial: null,
+    ready: preferences !== null,
+    resolve: () => preferences?.railPicker ?? null,
+    save: onSave && ((railPicker) => onSave({ railPicker })),
+  });
+  return { picker: stored.value, setPicker: stored.commit };
+}
+
 const RailContext = createContext<RailApi | null>(null);
 
 export function useRail(): RailApi | null {
@@ -236,6 +263,9 @@ export function RailProvider({
   const requestFiles = useCallback(() => setFilesRequests((n) => n + 1), []);
   const [revealed, setRevealed] = useState<RailApi["revealed"]>(null);
   const { tab, setTab } = useRailTab(preferences, onSave);
+  const { picker, setPicker } = useRailPicker(preferences, onSave);
+  const [pickerShown, setPickerShown] = useState(false);
+  const shownWidth = shownRailWidth(width, pickerShown);
   // Only the docked rail's toggle is the member's layout; the drawer is not saved.
   // Expanding shows the section again if it was hidden (the rail had collapsed for it).
   const toggle = useCallback(
@@ -273,6 +303,11 @@ export function RailProvider({
       width,
       setWidth,
       resetWidth,
+      shownWidth,
+      pickerShown,
+      setPickerShown,
+      picker,
+      setPicker,
       panels,
       setPanel,
       showPanel,
@@ -296,6 +331,10 @@ export function RailProvider({
       width,
       setWidth,
       resetWidth,
+      shownWidth,
+      pickerShown,
+      picker,
+      setPicker,
       panels,
       setPanel,
       showPanel,

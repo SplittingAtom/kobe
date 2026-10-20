@@ -49,11 +49,15 @@ const id = z.uuid();
  * Why an app call was allowed or denied (KOBE-436, spec §6, MA5). `app_no_prompt`: an ask rule
  * matched, and the browser principal is never prompted; `app_read_only`: not a read tool;
  * `validation_busy`: the argument validator had no room for the member's call (one at a time per
- * member, a bounded queue), so nothing was judged.
+ * member, a bounded queue), so nothing was judged. `thread_not_found` and `connector_off`
+ * (KOBE-460): a rail picker's call names the thread on screen, which the member may not read, or
+ * where the app's connector is off.
  */
 export const APP_CALL_REASONS = [
   "allowed",
   "app_not_available",
+  "thread_not_found",
+  "connector_off",
   "tool_not_in_app",
   "tool_drifted",
   "tool_not_read_only",

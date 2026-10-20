@@ -33,6 +33,10 @@ describe("uiPreferencesSchema", () => {
     expect(uiPreferencesSchema.parse({ workbench_editor_width: null })).toEqual({
       workbench_editor_width: null,
     });
+    // KOBE-460: the rail's picker app (its app id), or none.
+    const picker = "a".repeat(64);
+    expect(uiPreferencesSchema.parse({ rail_picker: picker })).toEqual({ rail_picker: picker });
+    expect(uiPreferencesSchema.parse({ rail_picker: null })).toEqual({ rail_picker: null });
   });
 
   it("refuses unknown keys (strict, not stripped)", () => {
@@ -66,6 +70,9 @@ describe("uiPreferencesSchema", () => {
     { rail_collapsed: 1 },
     { detail_expanded: "yes" },
     { rail_panels: "none" },
+    { rail_picker: "A".repeat(64) },
+    { rail_picker: "a".repeat(63) },
+    { rail_picker: 1 },
     { rail_panels: null },
     { rail_panels: ["threads"] },
     { rail_tab: "threads" },

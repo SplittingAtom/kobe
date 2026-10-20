@@ -214,7 +214,7 @@ function WorkspaceGrid(
     <ShellGrid
       {...props}
       artifactWidth={panel?.width ?? null}
-      railWidth={rail?.width ?? null}
+      railWidth={rail?.shownWidth ?? null}
       artifactSheet={panel?.sheetOpen ?? false}
       artifactHidden={panel?.hidden ?? false}
     />

@@ -314,6 +314,110 @@ describe("app calls (ac-1, ac-4)", () => {
   });
 });
 
+/**
+ * KOBE-460: a picker in the rail has no card. Its calls name the thread on screen (`thread_id`),
+ * and pass every card check plus: that thread is one the member may read, and the app's
+ * connector is not off in it.
+ */
+describe("rail picker calls naming the thread on screen (KOBE-460)", () => {
+  const thread = async (owner: string, teamId = team) =>
+    (
+      await h.admin.query<{ id: string }>(
+        `INSERT INTO threads (team_id, owner_user_id, title) VALUES ($1, $2, 't') RETURNING id`,
+        [teamId, owner],
+      )
+    ).rows[0]?.id ?? "";
+  const pickerCall = (who: TestBrowser, appId: string, tool: string, threadId: string) =>
+    who.post(`/v1/team/apps/${appId}/calls`, {
+      tool,
+      arguments: { table: "t" },
+      thread_id: threadId,
+    });
+
+  it("allows a call from the member's own thread and refuses one where the connector is off", async () => {
+    const id = await connector("apps460-off");
+    const appId = appIdOf(id, "ui://cat/explorer");
+    const own = await thread(aliceId);
+    calls.length = 0;
+    const ok = await pickerCall(alice, appId, "preview_table", own);
+    expect(ok.status).toBe(200);
+    expect(calls).toHaveLength(1);
+
+    await h.admin.query(
+      `INSERT INTO thread_connectors_off (team_id, thread_id, connector_id) VALUES ($1, $2, $3)`,
+      [team, own, id],
+    );
+    const off = await pickerCall(alice, appId, "preview_table", own);
+    expect([off.status, off.json.error.code]).toEqual([403, "connector_off"]);
+    expect(calls).toHaveLength(1);
+    // Another thread of hers still takes the call; with no thread (a new conversation), too.
+    expect((await pickerCall(alice, appId, "preview_table", await thread(aliceId))).status).toBe(
+      200,
+    );
+    expect((await appCall(alice, appId, "preview_table")).status).toBe(200);
+    expect((await audits(id)).map((r) => r.target.reason)).toEqual([
+      "allowed",
+      "connector_off",
+      "allowed",
+      "allowed",
+    ]);
+  });
+
+  it("refuses a thread the member may not read: another member's, another team's, an unknown id", async () => {
+    const id = await connector("apps460-who");
+    const appId = appIdOf(id, "ui://cat/explorer");
+    calls.length = 0;
+    for (const other of [await thread(bobId), await thread(aliceId, otherTeam), randomUUID()]) {
+      const res = await pickerCall(alice, appId, "preview_table", other);
+      expect([res.status, res.json.error.code]).toEqual([404, "thread_not_found"]);
+    }
+    expect(calls).toEqual([]);
+    expect((await audits(id)).map((r) => r.target.reason)).toEqual([
+      "thread_not_found",
+      "thread_not_found",
+      "thread_not_found",
+    ]);
+    const bad = await alice.post(`/v1/team/apps/${appId}/calls`, {
+      tool: "preview_table",
+      thread_id: "not-a-uuid",
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it("allows a thread shared with the team; refuses another member's trashed shared thread (review)", async () => {
+    const id = await connector("apps460-share");
+    const appId = appIdOf(id, "ui://cat/explorer");
+    const shared = await thread(bobId);
+    await h.admin.query(`UPDATE threads SET shared_to_team = true WHERE id = $1`, [shared]);
+    expect((await pickerCall(alice, appId, "preview_table", shared)).status).toBe(200);
+    await h.admin.query(`UPDATE threads SET deleted_at = now() WHERE id = $1`, [shared]);
+    const trashed = await pickerCall(alice, appId, "preview_table", shared);
+    expect([trashed.status, trashed.json.error.code]).toEqual([404, "thread_not_found"]);
+  });
+
+  it("keeps every card check: write tools, exposure, and an app of another team", async () => {
+    const id = await connector("apps460-rules");
+    const appId = appIdOf(id, "ui://cat/explorer");
+    const own = await thread(aliceId);
+    expect((await pickerCall(alice, appId, "drop_table", own)).json.error.code).toBe(
+      "tool_not_read_only",
+    );
+    await enable(id, "custom", ["mcp__apps460_rules__open_explorer"]);
+    expect((await pickerCall(alice, appId, "preview_table", own)).json.error.code).toBe(
+      "connector_exposure",
+    );
+    // Enabled for the other team only: not alice's app in her active team.
+    await h.admin.query(`DELETE FROM team_connectors WHERE connector_id = $1`, [id]);
+    await h.admin.query(
+      `INSERT INTO team_connectors (team_id, connector_id, exposure, enabled_tools, enabled_by)
+       VALUES ($1, $2, 'all', '{}', $3)`,
+      [otherTeam, id, rootId],
+    );
+    const elsewhere = await pickerCall(alice, appId, "preview_table", own);
+    expect([elsewhere.status, elsewhere.json.error.code]).toEqual([404, "app_not_available"]);
+  });
+});
+
 describe("member app frame and tools/list (KOBE-437, MA-5)", () => {
   const frameUrl = (appId: string, query: Record<string, string>) =>
     `/v1/team/apps/${appId}/frame?${new URLSearchParams(query).toString()}`;
