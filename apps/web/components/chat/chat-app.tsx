@@ -37,6 +37,7 @@ import {
 import { DetailProvider } from "./detail";
 import { AnswerFeedbackProvider } from "./answer-feedback";
 import { ThreadUsageProvider } from "./message-footer";
+import { ThreadOnScreenContext } from "./thread-on-screen";
 import { TeamModelsProvider } from "./use-team-models";
 import { ThreadMarkersProvider } from "./markers";
 import { ThreadAppsProvider } from "../apps/thread-apps";
@@ -337,66 +338,71 @@ function ChatWorkspace({
         <RetentionNotice />
         <SavedSkillNotice />
         <ThreadGroupsProvider fetchFn={fetchFn}>
-          <RailProvider preferences={layout.preferences} onSave={layout.save}>
-            <DetailProvider preferences={layout.preferences} onSave={layout.save}>
-              <ThreadUsageProvider>
-                <AnswerFeedbackProvider>
-                  <TeamModelsProvider>
-                    <ThreadMarkersProvider>
-                      <ThreadAppsProvider>
-                        <ArtifactPanelProvider
-                          teamId={session.teamId}
-                          threadId={threadId}
-                          preferences={layout.preferences}
-                          onSavePreferences={layout.save}
-                        >
-                          <FileGoneNotice />
-                          {/* The rail's run and approval dots stay current; the tab title (KOBE-301). */}
-                          <ThreadActivityWatch pollMs={activityPollMs} />
-                          <AppCommands />
-                          {/* CE23 (KOBE-225): the keys, the palette and the `?` sheet run the bindings. */}
-                          <ShortcutKeys />
-                          <CommandPalette onOpenThread={setThreadId} />
-                          <ShortcutSheet />
-                          <ShellSlot name="search">
-                            <ThreadSearch onOpenThread={setThreadId} />
-                          </ShellSlot>
-                          <ShellSlot name="nav">
-                            <RailDrawerButton teamName={teamName} />
-                          </ShellSlot>
-                          <WorkspaceGrid
-                            rail={
-                              <WorkspaceRail
-                                teamName={teamName || "Workspace"}
-                                listError={listError}
-                                filesApi={filesApi}
-                              />
-                            }
-                            artifact={<ArtifactPanel filesApi={filesApi} />}
-                            conversation={
-                              <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
-                                <ThreadView onOpenThread={setThreadId} inShell />
-                              </main>
-                            }
-                          />
-                          {/* The Threads panel (KOBE-453) needs the thread list: it renders in here. */}
-                          {threadsPanel !== undefined && (
-                            <WorkspacePanel
-                              panel={threadsPanel}
-                              path={pathname}
-                              onClose={onClosePanel}
-                            >
-                              <ThreadsPanelContent listError={listError} onChosen={chooseThread} />
-                            </WorkspacePanel>
-                          )}
-                        </ArtifactPanelProvider>
-                      </ThreadAppsProvider>
-                    </ThreadMarkersProvider>
-                  </TeamModelsProvider>
-                </AnswerFeedbackProvider>
-              </ThreadUsageProvider>
-            </DetailProvider>
-          </RailProvider>
+          <ThreadOnScreenContext value={threadId ?? null}>
+            <RailProvider preferences={layout.preferences} onSave={layout.save}>
+              <DetailProvider preferences={layout.preferences} onSave={layout.save}>
+                <ThreadUsageProvider>
+                  <AnswerFeedbackProvider>
+                    <TeamModelsProvider>
+                      <ThreadMarkersProvider>
+                        <ThreadAppsProvider>
+                          <ArtifactPanelProvider
+                            teamId={session.teamId}
+                            threadId={threadId}
+                            preferences={layout.preferences}
+                            onSavePreferences={layout.save}
+                          >
+                            <FileGoneNotice />
+                            {/* The rail's run and approval dots stay current; the tab title (KOBE-301). */}
+                            <ThreadActivityWatch pollMs={activityPollMs} />
+                            <AppCommands />
+                            {/* CE23 (KOBE-225): the keys, the palette and the `?` sheet run the bindings. */}
+                            <ShortcutKeys />
+                            <CommandPalette onOpenThread={setThreadId} />
+                            <ShortcutSheet />
+                            <ShellSlot name="search">
+                              <ThreadSearch onOpenThread={setThreadId} />
+                            </ShellSlot>
+                            <ShellSlot name="nav">
+                              <RailDrawerButton teamName={teamName} />
+                            </ShellSlot>
+                            <WorkspaceGrid
+                              rail={
+                                <WorkspaceRail
+                                  teamName={teamName || "Workspace"}
+                                  listError={listError}
+                                  filesApi={filesApi}
+                                />
+                              }
+                              artifact={<ArtifactPanel filesApi={filesApi} />}
+                              conversation={
+                                <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
+                                  <ThreadView onOpenThread={setThreadId} inShell />
+                                </main>
+                              }
+                            />
+                            {/* The Threads panel (KOBE-453) needs the thread list: it renders in here. */}
+                            {threadsPanel !== undefined && (
+                              <WorkspacePanel
+                                panel={threadsPanel}
+                                path={pathname}
+                                onClose={onClosePanel}
+                              >
+                                <ThreadsPanelContent
+                                  listError={listError}
+                                  onChosen={chooseThread}
+                                />
+                              </WorkspacePanel>
+                            )}
+                          </ArtifactPanelProvider>
+                        </ThreadAppsProvider>
+                      </ThreadMarkersProvider>
+                    </TeamModelsProvider>
+                  </AnswerFeedbackProvider>
+                </ThreadUsageProvider>
+              </DetailProvider>
+            </RailProvider>
+          </ThreadOnScreenContext>
         </ThreadGroupsProvider>
       </CommandBindingsProvider>
     </AssistantRuntimeProvider>

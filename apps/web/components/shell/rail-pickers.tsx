@@ -5,6 +5,8 @@ import { isPicker, type RailApp } from "../../lib/apps/app-cards";
 import type { ToolCallAnswer } from "../../lib/apps/host-bridge";
 import { AppFrame } from "../apps/app-frame";
 import { useAppComposer } from "../apps/use-app-composer";
+import { useThreadSettled } from "../chat/thread-on-screen";
+import { OpenedPicker } from "./rail-picker-opening";
 import { useChatSession, useKobeExtras } from "../chat/kobe-runtime";
 import type { RailApi } from "./rail-state";
 import styles from "./rail.module.css";
@@ -22,7 +24,8 @@ export { PICKER_RAIL_PX } from "../../lib/shell/rail-width";
  * It has no card and no thread of its own. Its `ui/message` fills the draft of the conversation
  * on screen (or the new-conversation draft) and never sends; its context is a chip there; its
  * calls name the thread on screen, which the server checks like a card's thread (readable, the
- * connector not off there). Nothing is written to a thread. It runs only while the Apps tab is
+ * connector not off there). It opens with its opening tool's result, called for it when shown
+ * (`OpenedPicker`), as a card opens with its stored one. Nothing is written to a thread. It runs only while the Apps tab is
  * on screen in an expanded rail; elsewhere the frame is removed and reloads when shown again. A picker that is no longer live
  * (drift, connector off for the team, key gone) falls back to None with a note; one whose
  * connector is off in this conversation says so.
@@ -30,6 +33,8 @@ export { PICKER_RAIL_PX } from "../../lib/shell/rail-width";
 const GONE =
   "Your picker is no longer available: it changed, or its connector or your key is gone.";
 const CARD_KEY = "rail-picker";
+/** The opening tool's arguments, as a rail launch sends them (MA11). */
+const OPENING_INPUT: Record<string, unknown> = Object.freeze({});
 
 const offNote = (app: RailApp) =>
   `${app.connectorName} is off in this conversation. Turn it on from the + menu to use ${app.title}.`;
@@ -84,6 +89,8 @@ function LivePicker({
   onUnavailable(): void;
 }) {
   const session = useChatSession();
+  // A thread being opened is first shown as a new conversation: the opening waits for it.
+  const threadReady = useThreadSettled(threadId);
   const composer = useAppComposer(
     {
       appId: app.appId,
@@ -94,6 +101,10 @@ function LivePicker({
     { newConversation: true, active: visible },
   );
   const { off, onCall } = useConnectorOff(app, threadId);
+  const answered = (answer: ToolCallAnswer, calledFor: string | null) => {
+    onCall(answer, calledFor);
+    if (!answer.ok && answer.code === "app_not_available") onUnavailable();
+  };
   if (off && threadId === null) {
     return <p className={styles.pickerNote}>{offNote(app)}</p>;
   }
@@ -104,20 +115,29 @@ function LivePicker({
           {offNote(app)}
         </p>
       )}
-      <AppFrame
+      <OpenedPicker
         app={app}
         teamId={session.teamId}
-        cardKey={CARD_KEY}
-        placement="rail"
         threadId={threadId}
-        onCall={(answer, calledFor) => {
-          onCall(answer, calledFor);
-          if (!answer.ok && answer.code === "app_not_available") onUnavailable();
-        }}
-        onMessage={composer.onMessage}
-        onModelContext={composer.onModelContext}
-        onDisplayMode={() => "inline"}
-      />
+        ready={threadReady}
+        onAnswer={answered}
+      >
+        {(result) => (
+          <AppFrame
+            app={app}
+            teamId={session.teamId}
+            cardKey={CARD_KEY}
+            placement="rail"
+            threadId={threadId}
+            toolInput={OPENING_INPUT}
+            toolResult={result}
+            onCall={answered}
+            onMessage={composer.onMessage}
+            onModelContext={composer.onModelContext}
+            onDisplayMode={() => "inline"}
+          />
+        )}
+      </OpenedPicker>
     </>
   );
 }

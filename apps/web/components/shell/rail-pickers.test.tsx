@@ -65,6 +65,11 @@ const pickerSelect = (section: HTMLElement) =>
 const puts = () => fake.requests.filter((r) => r.method === "PUT" && r.path === PREFERENCES_PATH);
 const appCalls = () =>
   fake.requests.filter((r) => r.method === "POST" && /^\/v1\/team\/apps\/.+\/calls$/.test(r.path));
+/** The picker's opening calls (its opening tool with `{}`), and the calls it makes itself. */
+const openings = () =>
+  appCalls().filter((r) => (r.body as { tool?: unknown }).tool === PICKER.tool);
+const ownCalls = () =>
+  appCalls().filter((r) => (r.body as { tool?: unknown }).tool !== PICKER.tool);
 const messages = () => chatRequests(fake, "POST").filter((r) => r.path.endsWith("/messages"));
 const railVar = () =>
   must(
@@ -195,8 +200,8 @@ describe("the live picker (KOBE-460 ac-4, ac-6)", () => {
       method: "tools/call",
       params: { name: "list_catalog_namespaces", arguments: {} },
     });
-    await waitFor(() => expect(appCalls()).toHaveLength(1));
-    expect(must(appCalls()[0]).body).toEqual({
+    await waitFor(() => expect(ownCalls()).toHaveLength(1));
+    expect(must(ownCalls()[0]).body).toEqual({
       tool: "list_catalog_namespaces",
       arguments: {},
       thread_id: t,
@@ -233,8 +238,8 @@ describe("the live picker (KOBE-460 ac-4, ac-6)", () => {
       method: "tools/call",
       params: { name: "list_catalog_namespaces", arguments: {} },
     });
-    await waitFor(() => expect(appCalls()).toHaveLength(1));
-    expect(must(appCalls()[0]).body).toEqual({ tool: "list_catalog_namespaces", arguments: {} });
+    await waitFor(() => expect(ownCalls()).toHaveLength(1));
+    expect(must(ownCalls()[0]).body).toEqual({ tool: "list_catalog_namespaces", arguments: {} });
     expect(chatRequests(fake, "POST")).toEqual([]);
   });
 
@@ -262,13 +267,13 @@ describe("the live picker (KOBE-460 ac-4, ac-6)", () => {
   it("says so when a call finds the connector off in this conversation", async () => {
     fake.teamApps = [PICKER];
     fake.preferences = { rail_picker: PICKER.appId, rail_tab: "apps" };
+    openApp(fake, answered());
+    const picker = await pickerWindow();
     fake.appCallError = {
       status: 403,
       code: "connector_off",
       message: "This app's connector is off in this conversation.",
     };
-    openApp(fake, answered());
-    const picker = await pickerWindow();
     await picker.send({
       jsonrpc: "2.0",
       id: 8,
@@ -280,6 +285,147 @@ describe("the live picker (KOBE-460 ac-4, ac-6)", () => {
         timeout: 4_000,
       }),
     ).toBeTruthy();
+  });
+});
+
+const initialized = { jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} };
+const ROWS = { content: [{ type: "text", text: "rows" }] };
+
+describe("the picker's opening tool result (KOBE-460 fix: Loading catalogs…)", () => {
+  it("calls the app's opening tool with {} naming the thread, then gives the frame its input and result", async () => {
+    fake.teamApps = [PICKER];
+    fake.preferences = { rail_picker: PICKER.appId, rail_tab: "apps" };
+    const t = answered();
+    openApp(fake, t);
+    const picker = await pickerWindow();
+    expect(openings().map((r) => r.body)).toEqual([
+      { tool: PICKER.tool, arguments: {}, thread_id: t },
+    ]);
+    await picker.send(initialized);
+    await waitFor(() =>
+      expect(picker.replies()).toEqual([
+        { jsonrpc: "2.0", method: "ui/notifications/tool-input", params: { arguments: {} } },
+        { jsonrpc: "2.0", method: "ui/notifications/tool-result", params: ROWS },
+      ]),
+    );
+    // Nothing is stored or written to a thread: no card, no message.
+    expect(fake.requests.filter((r) => r.path.includes("app-cards"))).toEqual([]);
+    expect(messages()).toEqual([]);
+  });
+
+  it("names no thread in a new conversation", async () => {
+    fake.teamApps = [PICKER];
+    fake.preferences = { rail_picker: PICKER.appId, rail_tab: "apps" };
+    openApp(fake);
+    await pickerWindow();
+    expect(openings().map((r) => r.body)).toEqual([{ tool: PICKER.tool, arguments: {} }]);
+  });
+
+  it("calls once per selection, and again when the picker comes back on screen", async () => {
+    fake.teamApps = [PICKER];
+    openApp(fake, answered());
+    const section = await appsTab();
+    await userEvent.setup().selectOptions(pickerSelect(section), PICKER.appId);
+    await pickerWindow();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(openings()).toHaveLength(1);
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+    await waitFor(() => expect(screen.queryByTitle(PICKER_FRAME)).toBeNull());
+    await appsTab();
+    await pickerWindow();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(openings()).toHaveLength(2);
+  });
+
+  it("shows a short error with a retry when the opening call fails, not a spinner", async () => {
+    fake.teamApps = [PICKER];
+    fake.preferences = { rail_picker: PICKER.appId, rail_tab: "apps" };
+    fake.appCallError = {
+      status: 502,
+      code: "upstream_error",
+      message: "Catalyst did not answer.",
+    };
+    openApp(fake, answered());
+    const retry = await screen.findByRole("button", { name: "Retry" }, { timeout: 4_000 });
+    expect(screen.getByText(/Lakehouse Picker could not be opened/)).toBeTruthy();
+    expect(screen.queryByTitle(PICKER_FRAME)).toBeNull();
+    fake.appCallError = null;
+    fireEvent.click(retry);
+    const picker = await pickerWindow();
+    expect(openings()).toHaveLength(2);
+    await picker.send(initialized);
+    await waitFor(() =>
+      expect(picker.replies()).toContainEqual({
+        jsonrpc: "2.0",
+        method: "ui/notifications/tool-result",
+        params: ROWS,
+      }),
+    );
+  });
+
+  it("shows the connector-off note when the opening call finds the connector off here", async () => {
+    fake.teamApps = [PICKER];
+    fake.preferences = { rail_picker: PICKER.appId, rail_tab: "apps" };
+    fake.appCallError = {
+      status: 403,
+      code: "connector_off",
+      message: "This app's connector is off in this conversation.",
+    };
+    openApp(fake, answered());
+    expect(
+      await screen.findByText(/Catalyst is off in this conversation/, undefined, {
+        timeout: 4_000,
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByTitle(PICKER_FRAME)).toBeNull();
+  });
+
+  it("treats an opening result marked isError as a failed open", async () => {
+    fake.teamApps = [PICKER];
+    fake.preferences = { rail_picker: PICKER.appId, rail_tab: "apps" };
+    fake.appCallResult = { isError: true, content: [{ type: "text", text: "boom" }] };
+    openApp(fake, answered());
+    expect(await screen.findByRole("button", { name: "Retry" }, { timeout: 4_000 })).toBeTruthy();
+    expect(screen.queryByTitle(PICKER_FRAME)).toBeNull();
+  });
+});
+
+describe("the picker's opening, more cases (review LOW-2)", () => {
+  it("re-reads the apps list when the opening finds the app no longer available", async () => {
+    fake.teamApps = [PICKER];
+    fake.preferences = { rail_picker: PICKER.appId, rail_tab: "apps" };
+    fake.appCallError = { status: 404, code: "app_not_available", message: "Gone." };
+    // The app goes away as the call is refused: only a read after the refusal can see it.
+    vi.stubGlobal("fetch", async (...args: Parameters<typeof fetch>) => {
+      const res = await fake.fetch(...args);
+      if (String(args[0] instanceof Request ? args[0].url : args[0]).includes("/calls")) {
+        fake.teamApps = [];
+      }
+      return res;
+    });
+    openApp(fake, answered());
+    await waitFor(() => expect(openings()).toHaveLength(1), { timeout: 4_000 });
+    // Re-read: the picker is gone, and so is the section.
+    await waitFor(() => expect(screen.queryByRole("combobox", { name: "Picker" })).toBeNull(), {
+      timeout: 4_000,
+    });
+    expect(screen.queryByTitle(PICKER_FRAME)).toBeNull();
+  });
+
+  it("switching pickers fast opens the last one with its own result, once each", async () => {
+    const OTHER_FRAME = "query picker (app from Catalyst)";
+    fake.teamApps = [PICKER, QUERY_PICKER];
+    openApp(fake, answered());
+    const section = await appsTab();
+    const user = userEvent.setup();
+    await user.selectOptions(pickerSelect(section), PICKER.appId);
+    await user.selectOptions(pickerSelect(section), QUERY_PICKER.appId);
+    expect(await screen.findByTitle(OTHER_FRAME, undefined, { timeout: 4_000 })).toBeTruthy();
+    expect(screen.queryByTitle(PICKER_FRAME)).toBeNull();
+    await new Promise((r) => setTimeout(r, 50));
+    const tools = appCalls().map((r) => (r.body as { tool: string }).tool);
+    expect(tools.filter((t) => t === QUERY_PICKER.tool)).toHaveLength(1);
+    expect(tools.filter((t) => t === PICKER.tool).length).toBeLessThanOrEqual(1);
   });
 });
 
