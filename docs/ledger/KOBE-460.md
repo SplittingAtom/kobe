@@ -29,7 +29,14 @@
   screen; in a new conversation it sends none, and the web does not run the picker while the
   draft has its connector off (`draftConnectors`; the server refuses that context at send anyway,
   KOBE-451 LOW-5). No other route changed.
-- Card frames still send no `thread_id` (behaviour unchanged; see open question 1).
+- **Review LOWs (fixed in follow-up commits).** LOW-1: card frames (`tool-card-app.tsx` inline,
+  `artifact-panel.tsx` expanded tab) now send their own `thread_id`, which closes the
+  pre-existing gap: a connector turned off in a thread is now refused for that thread's card
+  frames too (it was checked only at launch and at send). LOW-2: the picker is unmounted (with
+  `ui/resource-teardown`) while the Files tab shows or the rail is collapsed, so a hidden picker
+  calls nothing. LOW-3: `onCall` gets the thread the call was sent for, so the connector-off note
+  sticks to that thread, not the one on screen when the answer arrives. The browser spec says
+  why it skipped (`KOBE_APPS_CONNECTOR` unset vs no picker); the runbook says a skip is not a pass.
 - **Composer.** `useAppComposer(app, {newConversation, active})`: the thread on screen, else the
   `new` draft; `active: false` (picker not on screen: Files tab or rail collapsed) refuses both.
   The composer's insert listener now keys on its draft (`remoteId ?? "new"`), so a new
@@ -47,9 +54,7 @@
 
 ## Open questions (for Chris or the coordinator)
 
-1. Card frames' calls do not check the thread's connectors-off today (only launches and sends
-   do). Sending `thread_id` from cards too is a one-line change in `tool-card-app.tsx` /
-   `app-card.tsx`; left out to keep card behaviour unchanged.
+1. (Closed by LOW-1: card frames now name their thread.)
 2. The browser spec needs Catalyst's picker env on gate1 (`KOBE_APPS_PICKER_PATH`,
    `KOBE_APPS_PICKER_USE_LABEL`, `KOBE_APPS_PICKER_TEXT`); not run here (no cluster access).
 

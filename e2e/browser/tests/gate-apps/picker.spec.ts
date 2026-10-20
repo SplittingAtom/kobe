@@ -19,7 +19,8 @@ import { pageApi } from "../support/gate5.js";
  * and `KOBE_APPS_PICKER_TEXT` (text the composer then contains; default: the table's name).
  * Without a live picker for the member (k3d's test server has none) the file skips.
  */
-const CONNECTOR = process.env["KOBE_APPS_CONNECTOR"] ?? "e2e-apps";
+const CONNECTOR_SET = (process.env["KOBE_APPS_CONNECTOR"] ?? "") !== "";
+const CONNECTOR = CONNECTOR_SET ? (process.env["KOBE_APPS_CONNECTOR"] as string) : "e2e-apps";
 const TITLE = process.env["KOBE_APPS_PICKER"];
 const PATH = (
   process.env["KOBE_APPS_PICKER_PATH"] ??
@@ -55,7 +56,13 @@ async function thePicker(page: Page): Promise<App | undefined> {
 async function openWithPicker(chat: Chat, page: Page): Promise<App> {
   await chat.open();
   const picker = await thePicker(page);
-  test.skip(picker === undefined, `no live picker app of ${CONNECTOR} for this member`);
+  test.skip(
+    picker === undefined,
+    CONNECTOR_SET
+      ? `SKIPPED: no live picker app of connector "${CONNECTOR}" for this member`
+      : 'SKIPPED: KOBE_APPS_CONNECTOR is not set (the default "e2e-apps" has no picker); ' +
+          "set it to the connector that offers the picker (gate1: catalyst_2)",
+  );
   return picker as App;
 }
 

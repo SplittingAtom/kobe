@@ -37,7 +37,7 @@ import { useModalLayer } from "../shell/use-modal-layer";
 import { ArtifactTabStrip, artifactTabId, artifactTabpanelId } from "./artifact-tab-strip";
 import { ArtifactPanelRequest, useArtifactEventCount, useArtifactPanel } from "./artifact-state";
 import { ArtifactBody } from "./artifact-views";
-import { useChatSession } from "./kobe-runtime";
+import { useChatSession, useKobeExtras } from "./kobe-runtime";
 
 interface Detail {
   readonly artifact: ArtifactDetailView | null;
@@ -248,6 +248,8 @@ function FileTab({
  */
 function AppTab({ spec }: { readonly spec: AppTabSpec }) {
   const session = useChatSession();
+  // Its card's thread, the one on screen: calls name it (KOBE-460 review LOW-1).
+  const threadId = useKobeExtras()?.state.threadId ?? null;
   const composer = useAppComposer({
     appId: spec.app.appId,
     connectorId: spec.connectorId,
@@ -261,6 +263,7 @@ function AppTab({ spec }: { readonly spec: AppTabSpec }) {
         teamId={session.teamId}
         cardKey={spec.cardKey}
         placement="expanded"
+        threadId={threadId}
         toolInput={spec.toolInput}
         toolResult={spec.toolResult}
         onMessage={composer.onMessage}

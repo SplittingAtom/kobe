@@ -245,6 +245,7 @@ export function LiveApp({
         teamId={teamId}
         cardKey={cardKey}
         placement="inline"
+        threadId={threadId}
         toolInput={input}
         onMessage={composer.onMessage}
         onModelContext={composer.onModelContext}

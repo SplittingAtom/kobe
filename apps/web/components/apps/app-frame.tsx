@@ -45,13 +45,13 @@ export interface AppFrameProps {
   readonly cardKey: string;
   readonly placement: Placement;
   /**
-   * The thread on screen, sent with each `tools/call` (a rail picker, KOBE-460: the server checks
-   * the member may read it and the connector is not off there). Read at call time. A card's
-   * frame sends none.
+   * The thread sent with each `tools/call` (KOBE-460): a card's own thread, or the thread on
+   * screen for a rail picker. The server checks the member may read it and the app's connector
+   * is not off there. Read when the call is made.
    */
   readonly threadId?: string | null | undefined;
-  /** Each `tools/call`'s answer from Kobe (a refusal's code, for the owner to explain). */
-  readonly onCall?: ((answer: ToolCallAnswer) => void) | undefined;
+  /** Each `tools/call`'s answer from Kobe, with the thread that call was sent for. */
+  readonly onCall?: ((answer: ToolCallAnswer, threadId: string | null) => void) | undefined;
   /** Sent as `ui/notifications/tool-input` and `tool-result` once the app has initialized. */
   readonly toolInput?: Record<string, unknown> | undefined;
   readonly toolResult?: unknown;
@@ -155,8 +155,10 @@ function FrameInstance(
         }),
       handlers: {
         callTool: async (name, args) => {
-          const answer = await callAppTool(appId, team, name, args, fetchFn, current().threadId);
-          current().onCall?.(answer);
+          // The thread is the one this call goes for, kept across the await (review LOW-3).
+          const thread = current().threadId ?? null;
+          const answer = await callAppTool(appId, team, name, args, fetchFn, thread);
+          current().onCall?.(answer, thread);
           return answer;
         },
         listTools: () => listAppTools(appId, team, fetchFn),

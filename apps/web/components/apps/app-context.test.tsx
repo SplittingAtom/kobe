@@ -110,6 +110,26 @@ function insert(app: Awaited<ReturnType<typeof appWindow>>, text: string) {
 const posts = () => chatRequests(fake, "POST").filter((r) => r.path.endsWith("/messages"));
 
 describe("ui/message and model context (KOBE-439)", () => {
+  it("a card's tool calls name its own thread, so a connector off there is refused (KOBE-460 LOW-1)", async () => {
+    const t = thread();
+    openApp(fake, t);
+    const app = await appWindow();
+    await app.send({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "preview_table", arguments: {} },
+    });
+    const calls = () =>
+      fake.requests.filter((r) => r.method === "POST" && r.path.endsWith("/calls"));
+    await waitFor(() => expect(calls()).toHaveLength(1));
+    expect(must(calls()[0]).body).toEqual({
+      tool: "preview_table",
+      arguments: {},
+      thread_id: t,
+    });
+  });
+
   it("puts ui/message text into this thread's composer without moving the focus; an Enter in the app sends nothing (ac-1, MEDIUM-2)", async () => {
     openApp(fake, thread());
     const app = await appWindow();

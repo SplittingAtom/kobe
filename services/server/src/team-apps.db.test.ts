@@ -384,6 +384,17 @@ describe("rail picker calls naming the thread on screen (KOBE-460)", () => {
     expect(bad.status).toBe(400);
   });
 
+  it("allows a thread shared with the team; refuses another member's trashed shared thread (review)", async () => {
+    const id = await connector("apps460-share");
+    const appId = appIdOf(id, "ui://cat/explorer");
+    const shared = await thread(bobId);
+    await h.admin.query(`UPDATE threads SET shared_to_team = true WHERE id = $1`, [shared]);
+    expect((await pickerCall(alice, appId, "preview_table", shared)).status).toBe(200);
+    await h.admin.query(`UPDATE threads SET deleted_at = now() WHERE id = $1`, [shared]);
+    const trashed = await pickerCall(alice, appId, "preview_table", shared);
+    expect([trashed.status, trashed.json.error.code]).toEqual([404, "thread_not_found"]);
+  });
+
   it("keeps every card check: write tools, exposure, and an app of another team", async () => {
     const id = await connector("apps460-rules");
     const appId = appIdOf(id, "ui://cat/explorer");

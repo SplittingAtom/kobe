@@ -22,7 +22,8 @@ export { PICKER_RAIL_PX } from "../../lib/shell/rail-width";
  * It has no card and no thread of its own. Its `ui/message` fills the draft of the conversation
  * on screen (or the new-conversation draft) and never sends; its context is a chip there; its
  * calls name the thread on screen, which the server checks like a card's thread (readable, the
- * connector not off there). Nothing is written to a thread. A picker that is no longer live
+ * connector not off there). Nothing is written to a thread. It runs only while the Apps tab is
+ * on screen in an expanded rail; elsewhere the frame is removed and reloads when shown again. A picker that is no longer live
  * (drift, connector off for the team, key gone) falls back to None with a note; one whose
  * connector is off in this conversation says so.
  */
@@ -61,9 +62,10 @@ function useConnectorOff(app: RailApp | null, threadId: string | null) {
   const off =
     app !== null &&
     (threadId === null ? draftOff.has(app.connectorId) : offIn === `${threadId}:${app.appId}`);
-  const onCall = (answer: ToolCallAnswer) => {
-    if (threadId === null || app === null) return;
-    const key = `${threadId}:${app.appId}`;
+  // Keyed by the thread the call was sent for, not the one on screen when it answers (LOW-3).
+  const onCall = (answer: ToolCallAnswer, calledFor: string | null) => {
+    if (calledFor === null || app === null) return;
+    const key = `${calledFor}:${app.appId}`;
     if (!answer.ok && answer.code === "connector_off") setOffIn(key);
     else if (offIn === key) setOffIn(null);
   };
@@ -108,8 +110,8 @@ function LivePicker({
         cardKey={CARD_KEY}
         placement="rail"
         threadId={threadId}
-        onCall={(answer) => {
-          onCall(answer);
+        onCall={(answer, calledFor) => {
+          onCall(answer, calledFor);
           if (!answer.ok && answer.code === "app_not_available") onUnavailable();
         }}
         onMessage={composer.onMessage}
@@ -178,7 +180,9 @@ export function RailPickers({
           {GONE}
         </p>
       )}
-      {chosen !== null && (
+      {/* Only while on screen (review LOW-2): on the Files tab or in a collapsed rail the frame
+          is removed (it gets ui/resource-teardown), so a hidden picker calls nothing. */}
+      {shown && (
         <LivePicker
           key={chosen.appId}
           app={chosen}

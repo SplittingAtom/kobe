@@ -60,7 +60,9 @@ KOBE_BROWSER_RESULTS=results.json \
   connector that offers "Lakehouse Picker" (`KOBE_APPS_PICKER` names another title),
   `KOBE_APPS_PICKER_PATH` (default `KOBE_APPS_PATH`), `KOBE_APPS_PICKER_USE_LABEL` if a button
   follows the table, and `KOBE_APPS_PICKER_TEXT` (what the composer then contains; default the
-  table's name). It skips where the member has no live picker, and leaves the choice at None.
+  table's name). It skips where the member has no live picker (the reason says whether
+  `KOBE_APPS_CONNECTOR` was unset), and leaves the choice at None. A skip is not a pass: check
+  `results.json` reports its three tests as run, with no skips, before marking it green.
 - Keep `results.json`, `playwright-report/` and `test-results/` (traces, screenshots).
 
 The spec asserts, in this order: the model's `open_lakehouse_explorer` call renders the tree in

@@ -156,6 +156,10 @@ style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'
 - An app can show the member misleading content about their own data. This is no worse than the
   connector's own text results.
 - An app can put misleading text in the composer. The member reads it before sending.
+- Connectors-off (KOBE-451) holds on app calls only when the call names the thread (KOBE-460):
+  a picker in a new conversation names none, and the member's own session could leave it out.
+  It is the member's per-conversation choice, not a permission; an off connector's context is
+  still refused at send.
 - The upstream sees each call under the member's credential (or the shared site key, KOBE-303).
   The upstream's own authorization applies, as it does for model-initiated calls.
 - **WebRTC in browsers without `webrtc 'block'`** (amended 2026-10-19, coordinator decision on
@@ -247,7 +251,8 @@ allow-scripts`), only pinned, approved, not drifted templates, MA8 visibility, a
 principal with every §6 check. It has no card, so it names the thread on screen (`thread_id`):
 the server then also refuses a thread the member may not read (`thread_not_found`) and one where
 the app's connector is off (`connector_off`), both audited `mcp.app_call`. In a new conversation
-it names no thread, and Kobe does not run it while the draft has its connector off.
+it names no thread, and Kobe does not run it while the draft has its connector off. The picker
+runs only while the Apps tab is on screen in an expanded rail.
 
 **MA4. Server-mediated `resources/read`, never the sandbox.** Templates are fetched only by the
 server's pin and refresh probes, through mcp-proxy's internal probe endpoint (server key only,
@@ -472,7 +477,8 @@ thread or run. It needs the `team.chat` permission. A deactivated user's session
   (JSON only, MA4).
 - `POST /v1/team/apps/{appId}/calls {tool, arguments, thread_id?}` returns
   `{result} | {error: {code, message}}`. It serves the app's own `tools/call` from any card.
-  A rail picker (MA3 as amended 2026-10-20) sends the thread on screen as `thread_id`.
+  Every frame names its thread as `thread_id` (KOBE-460): a card's frame (inline or expanded)
+  its own thread, a rail picker (MA3 as amended 2026-10-20) the thread on screen.
 - `POST /v1/threads/{threadId}/app-cards {appId}` (or `POST /v1/threads/app-cards {appId}`,
   which starts a new thread) performs the rail launch (MA11). It answers `{entryId}` when it
   inserted the card, or `{queued: true}` during a run.
@@ -481,8 +487,8 @@ thread or run. It needs the `team.chat` permission. A deactivated user's session
 **Server checks for each call**, in order (fail closed, one audit row each):
 
 1. The app is visible to this member (MA8). The tool belongs to the app's connector. With
-   `thread_id` (a rail picker), the member may read that thread and the app's connector is not
-   off in it.
+   `thread_id` (cards and pickers), the member may read that thread and the app's connector is
+   not off in it.
 2. The tool is pinned and not drifted, has `readOnlyHint: true`, a visibility that includes
    `"app"`, and is in the team's exposure. For `custom` exposure, the tool must be ticked.
 3. `arguments` is a JSON object of at most 64 KiB, and validates against the pinned `inputSchema`

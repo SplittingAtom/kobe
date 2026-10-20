@@ -130,6 +130,51 @@ describe("AppFrame (KOBE-437)", () => {
     expect(posted()).toContainEqual({ jsonrpc: "2.0", id: 7, result: { content: [] } });
   });
 
+  it("reports each call's answer with the thread it was sent for, even after a switch (KOBE-460 LOW-3)", async () => {
+    const A = "22222222-2222-4222-8222-222222222222";
+    const B = "33333333-3333-4333-8333-333333333333";
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const fetchFn = vi.fn(async () => {
+      await gate;
+      return new Response(JSON.stringify({ error: { code: "connector_off", message: "off" } }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const onCall = vi.fn();
+    const { fromApp, view } = mount({ fetchFn, threadId: A, onCall });
+    await fromApp({
+      jsonrpc: "2.0",
+      id: 7,
+      method: "tools/call",
+      params: { name: "preview_table", arguments: {} },
+    });
+    await settle();
+    const body = JSON.parse(
+      String((fetchFn.mock.calls[0] as unknown[] as [string, RequestInit])[1].body),
+    );
+    expect(body).toMatchObject({ thread_id: A });
+    view.rerender(
+      <AppFrame
+        app={APP}
+        teamId={TEAM}
+        cardKey="call-1"
+        placement="inline"
+        fetchFn={fetchFn}
+        threadId={B}
+        onCall={onCall}
+      />,
+    );
+    release();
+    await settle();
+    await settle();
+    expect(onCall).toHaveBeenCalledTimes(1);
+    expect(onCall.mock.calls[0]?.[1]).toBe(A);
+  });
+
   it("refuses ui/message without a composer, and stops answering once unmounted", async () => {
     const { fromApp, posted } = mount();
     await fromApp({

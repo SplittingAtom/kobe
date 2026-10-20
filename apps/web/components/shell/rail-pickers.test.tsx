@@ -310,6 +310,17 @@ describe("the rail's width with a picker (KOBE-460 ac-5)", () => {
     await waitFor(() => expect(railVar()).toBe("480px"));
   });
 
+  it("is not running while the Files tab is on screen; it comes back on Apps (LOW-2)", async () => {
+    fake.teamApps = [PICKER];
+    fake.preferences = { rail_picker: PICKER.appId, rail_tab: "apps" };
+    openApp(fake, answered());
+    expect(await screen.findByTitle(PICKER_FRAME, undefined, { timeout: 4_000 })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+    await waitFor(() => expect(screen.queryByTitle(PICKER_FRAME)).toBeNull());
+    await appsTab();
+    expect(await screen.findByTitle(PICKER_FRAME)).toBeTruthy();
+  });
+
   it("does not widen while the Files tab is on screen", async () => {
     fake.teamApps = [PICKER];
     fake.preferences = { rail_picker: PICKER.appId, rail_tab: "files" };
