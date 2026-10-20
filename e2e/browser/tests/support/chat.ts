@@ -109,6 +109,8 @@ export class Chat {
    */
   async openThreads(): Promise<Locator> {
     const panel = this.threadsPanel;
+    // After a load or a reload the workspace first (at /threads the panel opens with it).
+    await this.railHeader.first().waitFor({ state: "attached", timeout: SHELL_TIMEOUT_MS });
     if (await panel.isVisible()) return panel;
     // The name carries the activity while a conversation runs ("Threads panel, …").
     const line = this.railHeader.getByRole("button", { name: /^Threads panel/ });

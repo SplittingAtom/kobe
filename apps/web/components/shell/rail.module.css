@@ -97,7 +97,9 @@
   gap: 0.25rem;
   align-items: center;
   min-height: 2.75rem;
-  padding: 0.25rem 0.5rem 0.25rem 1rem;
+  /* Narrow sides: at the rail's 200 px minimum the team name keeps 30 px beside the five actions
+     of a team admin (New conversation, Threads, Files, Team console, collapse; KOBE-453). */
+  padding: 0.25rem 0.25rem 0.25rem 0.5rem;
 }
 
 /* The slot clips (nothing paints over the buttons) and is a container, so the role can hide
