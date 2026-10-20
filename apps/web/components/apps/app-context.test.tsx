@@ -114,6 +114,10 @@ describe("ui/message and model context (KOBE-439)", () => {
     const t = thread();
     openApp(fake, t);
     const app = await appWindow();
+    // Let the chat finish opening first, as the next test does: a message sent before the card's
+    // host listens is dropped (the merge-queue run of #331 lost it once).
+    await composer();
+    await act(() => new Promise((r) => setTimeout(r, 300)));
     await app.send({
       jsonrpc: "2.0",
       id: 3,
