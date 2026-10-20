@@ -55,6 +55,7 @@ import {
   moveThreadBodySchema,
   setLeafBodySchema,
   switchAgentVersionBodySchema,
+  chooseThreadAgentBodySchema,
   trashQuerySchema,
   updateThreadBodySchema,
   uuidSchema,
@@ -66,6 +67,7 @@ import { threadCard } from "../threads/card.js";
 import { isModelEnabled } from "../models/team-store.js";
 import { moveThread, setArchived, setPinned } from "../threads/organize.js";
 import { testChatStart } from "../skills/drafts/test-chat.js";
+import { chooseThreadAgent } from "../threads/choose-agent.js";
 
 type ThreadContext = Context<{ Variables: TeamVariables }>;
 
@@ -90,6 +92,8 @@ const ERRORS = {
     "That model isn't enabled for your team. Pick one of the team's models, or ask a team admin.",
   ],
   no_agent: [409, "This thread uses the default agent, which has no versions to switch."],
+  agent_already_chosen: [409, "This thread already has an agent; it can only change version."],
+  scheduled_thread: [409, "A scheduled conversation runs its schedule's agent."],
   project_not_found: [404, "No project with that id is available to you."],
   draft_not_found: [404, "No draft with that id is available to you."],
   test_chat_agent: [400, "A Workbench test chat runs the Kobe agent: leave agent_id out."],
@@ -452,6 +456,13 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const body = await parseBody(c, switchAgentVersionBodySchema);
     if (!id || !body) return invalidRequest(c, "Give the version to switch to, or nothing.");
     return change(c, (tx, viewer) => switchAgentVersion(tx, viewer, id, body.version));
+  });
+
+  app.post("/:id/agent", async (c) => {
+    const id = threadIdParam(c);
+    const body = await parseBody(c, chooseThreadAgentBodySchema);
+    if (!id || !body) return invalidRequest(c, "Give the agent_id to chat with.");
+    return change(c, (tx, viewer) => chooseThreadAgent(tx, viewer, id, body.agent_id));
   });
 
   /** Pin, unpin, archive, unarchive (CE19, KOBE-220): the owner's own; idempotent. */

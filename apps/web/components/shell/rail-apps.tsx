@@ -86,7 +86,9 @@ export function RailApps({
       if (!session || busy !== null) return;
       setBusy(app.appId);
       setError(null);
-      const res = await launchAppCard(target, app.appId, session.teamId);
+      // From the new-conversation view the thread starts with its choices (KOBE-458).
+      const draft = target === null && remoteId === undefined ? session.launchDraft() : undefined;
+      const res = await launchAppCard(target, app.appId, session.teamId, undefined, draft);
       setBusy(null);
       if (!res.ok) {
         setError(res.error.message);
@@ -94,13 +96,14 @@ export function RailApps({
       }
       if (rail.drawer) rail.closeDrawer();
       if (target === null) {
+        if (draft) session.launchDraftTaken();
         session.threadCreated();
         aui.threads.switchToThread(res.data.threadId);
       } else {
         session.appCards.changed(target);
       }
     },
-    [session, busy, target, rail, aui],
+    [session, busy, target, remoteId, rail, aui],
   );
 
   const where = target === null ? "in a new conversation" : "in this conversation";

@@ -15,6 +15,7 @@ import {
 } from "@kobe/db";
 import { z } from "zod";
 import { canPinAgent, siteVisibleTo } from "./versions.js";
+import { isDefaultNewThreadAgent } from "./default-agent.js";
 import { SITE, TEAM, toRecord, type AgentRecord } from "./store.js";
 
 /**
@@ -51,6 +52,8 @@ export interface RunnableAgent {
   readonly slug: string;
   /** Stable gallery key (gallery agents only): clients identify built-ins by it, not by name. */
   readonly galleryKey?: string;
+  /** The agent a new conversation starts with (`isDefaultNewThreadAgent`, KOBE-458); one at most. */
+  readonly default?: true;
   readonly name: string;
   readonly description?: string;
   readonly icon?: string;
@@ -189,6 +192,7 @@ const toRunnable = (
   scope: a.scope,
   slug: a.slug,
   ...(a.scope === "gallery" && galleryKey !== undefined ? { galleryKey } : {}),
+  ...(isDefaultNewThreadAgent({ scope: a.scope, galleryKey }) ? { default: true as const } : {}),
   name: a.frontmatter.name,
   ...(a.frontmatter.description !== undefined ? { description: a.frontmatter.description } : {}),
   ...(a.frontmatter.icon !== undefined ? { icon: a.frontmatter.icon } : {}),

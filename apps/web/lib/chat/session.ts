@@ -69,10 +69,15 @@ export function titleFrom(text: string): string | undefined {
   return line.length > TITLE_MAX ? `${line.slice(0, TITLE_MAX - 1).trimEnd()}…` : line;
 }
 
+/** The new-conversation choices a rail launch from that view carries (KOBE-458). */
+export interface AppLaunchDraft {
+  /** Absent: the server's default agent; null: No agent. */
+  readonly agentId?: string | null;
+  readonly connectorsOff: readonly string[];
+}
+
 /** How long the agent list is reused by the picker and the header. */
 export const AGENTS_TTL_MS = 30_000;
-/** Stable gallery key of Kobe, the one gallery agent (KOBE-254), preselected for new chats (KOBE-124). */
-export const DEFAULT_AGENT_GALLERY_KEY = "kobe";
 
 export class ChatSession {
   readonly teamId: string;
@@ -334,11 +339,32 @@ export class ChatSession {
     return agent;
   }
 
-  /** New chats start with the gallery agent Kobe when it is runnable here, else No agent. */
+  /**
+   * What a rail launch from the new-conversation view carries (KOBE-458 review MEDIUM-1): the
+   * agent picked there (null: No agent) once the member touched the picker, else nothing, so the
+   * server applies the same default; and the connectors turned off there.
+   */
+  launchDraft(): AppLaunchDraft {
+    return {
+      ...(this.canChooseAgent && this.#agentTouched
+        ? { agentId: this.#nextAgent?.id ?? null }
+        : {}),
+      connectorsOff: [...this.draftConnectors.snapshot()],
+    };
+  }
+
+  /** That launch created the thread: the next new conversation starts afresh, as after a send. */
+  launchDraftTaken(): void {
+    this.takeNextAgent();
+    this.draftConnectors.take();
+  }
+
+  /**
+   * New chats start with the agent the server marks `default` (gallery Kobe when it is runnable
+   * here; KOBE-458: the same rule a rail launch's new thread follows), else No agent.
+   */
   #applyDefaultAgent(agents: readonly RunnableAgent[]): void {
-    this.#defaultAgent =
-      agents.find((a) => a.scope === "gallery" && a.galleryKey === DEFAULT_AGENT_GALLERY_KEY) ??
-      null;
+    this.#defaultAgent = agents.find((a) => a.default === true) ?? null;
     if (!this.#agentTouched) this.#setAgent(this.#defaultAgent);
   }
 

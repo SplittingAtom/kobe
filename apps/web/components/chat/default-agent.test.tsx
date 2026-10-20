@@ -6,13 +6,17 @@ import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
 import { agentChoices, chatRequests, composer, openApp } from "./testing";
 
-/** KOBE-124, KOBE-254: new chats preselect the gallery agent Kobe (by gallery key) when it is runnable. */
+/**
+ * KOBE-124, KOBE-254, KOBE-458: new chats preselect the agent the server marks `default` (gallery
+ * Kobe when runnable): the server owns the rule, so a rail launch's new thread gets the same agent.
+ */
 let fake: FakeKobe;
 
 const KOBE = {
   id: "a-kobe",
   scope: "gallery",
   galleryKey: "kobe",
+  default: true,
   name: "Helper",
   model: null,
 } as const;
@@ -36,7 +40,7 @@ const checked = async () =>
     .map((r) => r.closest("label")?.querySelector(".font-medium")?.textContent);
 
 describe("default agent", () => {
-  it("preselects the gallery agent Kobe by key, not by display name", async () => {
+  it("preselects the agent the server marks default, not one by display name or key", async () => {
     fake.runnableAgents.push(KOBE);
     openApp(fake);
     await waitFor(async () => expect(await checked()).toEqual(["Helper"]));
@@ -46,6 +50,9 @@ describe("default agent", () => {
   });
 
   it("falls back to No agent when Kobe is not runnable (suspended or missing)", async () => {
+    // A gallery Kobe the server doesn't mark default (say, an older server) is not preselected.
+    const { default: _default, ...notDefault } = KOBE;
+    fake.runnableAgents.push(notDefault);
     openApp(fake);
     expect(await checked()).toEqual(["No agent"]);
     await userEvent.setup().type(await composer(), "hi{Enter}");

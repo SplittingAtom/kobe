@@ -1,4 +1,5 @@
 import { apiRequest, type ApiResult } from "../api/client";
+import type { AppLaunchDraft } from "../chat/session";
 
 /**
  * MCP Apps in the rail (KOBE-440, spec MA3, MA8, MA11): the member's apps, the ones a key of their
@@ -41,12 +42,16 @@ export function listRailApps(teamId: string, fetchFn?: typeof fetch): Promise<Ap
   return apiRequest<RailApps>("/v1/team/apps", { teamId, ...(fetchFn ? { fetchFn } : {}) });
 }
 
-/** Launches `appId` into `threadId`, or into a new thread (titled after the app) when null. */
+/**
+ * Launches `appId` into `threadId`, or into a new thread (titled after the app) when null; a new
+ * thread starts with `draft`, the new-conversation view's agent and connectors off (KOBE-458).
+ */
 export function launchAppCard(
   threadId: string | null,
   appId: string,
   teamId: string,
   fetchFn?: typeof fetch,
+  draft?: AppLaunchDraft,
 ): Promise<ApiResult<LaunchResult>> {
   const path =
     threadId === null
@@ -54,7 +59,13 @@ export function launchAppCard(
       : `/v1/threads/${encodeURIComponent(threadId)}/app-cards`;
   return apiRequest<LaunchResult>(path, {
     method: "POST",
-    json: { app_id: appId },
+    json: {
+      app_id: appId,
+      ...(threadId !== null || draft?.agentId === undefined ? {} : { agent_id: draft.agentId }),
+      ...(threadId !== null || !draft || draft.connectorsOff.length === 0
+        ? {}
+        : { connectors_off: draft.connectorsOff }),
+    },
     teamId,
     ...(fetchFn ? { fetchFn } : {}),
   });

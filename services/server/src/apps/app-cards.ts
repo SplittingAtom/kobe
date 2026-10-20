@@ -28,6 +28,12 @@ import { abortPending } from "../runs/store.js";
 import { fallbackTitle } from "../threads/title.js";
 import { appTitle } from "./app-title.js";
 import { createThread } from "../threads/repository.js";
+import {
+  checkNewThreadDraft,
+  writeDraftOff,
+  type DraftRefusal,
+  type NewThreadDraft,
+} from "./new-thread-draft.js";
 import { callApp, type AppCallDeps, type BrowserPrincipal } from "./call.js";
 import { memberApp, type MemberApp } from "./catalog.js";
 import { exposedToApps } from "./decide.js";
@@ -103,6 +109,29 @@ const CONNECTOR_OFF = refusal(
   "connector_off",
   "This app's connector is off in this conversation. Turn it on from the + menu first.",
 );
+/** KOBE-458 review MEDIUM-1: the new-conversation view's agent or connectors-off, refused. */
+const DRAFT_REFUSED: Record<DraftRefusal, LaunchOutcome> = {
+  agent_not_found: refusal(
+    404,
+    "agent_not_found",
+    "No agent with that id is available in this team.",
+  ),
+  agent_unavailable: refusal(
+    409,
+    "agent_unavailable",
+    "That agent can't start conversations: it is suspended, archived or not published yet.",
+  ),
+  connector_not_found: refusal(
+    422,
+    "connector_not_found",
+    "A connector to turn off isn't available to you in this team.",
+  ),
+  connector_not_working: refusal(
+    422,
+    "connector_not_working",
+    "A connector to turn off isn't working right now.",
+  ),
+};
 const TOO_MANY_QUEUED = refusal(
   429,
   "too_many_queued",
@@ -236,21 +265,28 @@ export async function insertAppCardInTx(
 }
 
 /**
- * Launches `appId` into `threadId` (or a new thread, titled after the app, with the team's
- * default agent). Fails closed: nothing is stored, inserted or created unless the call succeeded
- * and the card can go in.
+ * Launches `appId` into `threadId`, or into a new thread titled after the app that starts as the
+ * member's new conversation would (`draft`: its agent, else the default; its connectors off).
+ * Fails closed: nothing is stored, inserted or created unless the call succeeded and the card
+ * can go in.
  */
 export async function launchAppCard(
   deps: AppCardDeps,
   p: BrowserPrincipal,
   threadId: string | null,
   appId: string,
+  draft: NewThreadDraft = { connectorsOff: [] },
 ): Promise<LaunchOutcome> {
   if (deps.launches.take(p.userId) !== 0) return RATE_LIMITED;
   const db = deps.call.db;
   const app = await memberApp(db, p.teamId, p.userId, appId);
   if (!app) return NOT_AVAILABLE;
-  if (threadId !== null) {
+  if (threadId === null) {
+    // Checked before the app is called, and again where the thread is created.
+    if (draft.connectorsOff.includes(app.connector.id)) return CONNECTOR_OFF;
+    const checked = await withTeam(db, p.teamId, (tx) => checkNewThreadDraft(tx, p, draft));
+    if (!checked.ok) return DRAFT_REFUSED[checked.error];
+  } else {
     const pre = await withTeam(db, p.teamId, async (tx) => {
       const thread = await lockWritable(tx, p.teamId, threadId, p.userId);
       if (!thread) return THREAD_NOT_FOUND;
@@ -268,7 +304,9 @@ export async function launchAppCard(
   const called = await callApp(deps.call, p, appId, { tool: app.tool.name, arguments: {} });
   if (!called.ok) return called;
   if (called.result["isError"] === true) return OPEN_FAILED;
-  return storeCard(deps.store, p, threadId, app, called.result, deps.abortHoldMs?.() ?? 0);
+  return storeCard(deps.store, p, { existing: threadId, draft }, app, called.result, {
+    abortHoldMs: deps.abortHoldMs?.() ?? 0,
+  });
 }
 
 /** The app's title as a thread title: the title rules' unsafe characters removed (LOW-5). */
@@ -279,10 +317,10 @@ export function titleOf(app: Pick<MemberApp, "tool" | "title">): string {
 async function storeCard(
   store: AppResultStoreDeps,
   p: BrowserPrincipal,
-  existing: string | null,
+  { existing, draft }: { existing: string | null; draft: NewThreadDraft },
   app: MemberApp,
   result: Record<string, unknown>,
-  abortHoldMs: number,
+  { abortHoldMs }: { abortHoldMs: number },
 ): Promise<LaunchOutcome> {
   const id = randomUUID();
   // A new thread is created in the same transaction as its card (review LOW-4): a refusal or a
@@ -310,14 +348,18 @@ async function storeCard(
       result,
       async (tx, storage, kept, bytes) => {
         if (existing === null) {
+          // KOBE-458: the thread the member's new conversation would be, checked as at creation.
+          const checked = await checkNewThreadDraft(tx, p, draft);
+          if (!checked.ok) return { stored: false, value: DRAFT_REFUSED[checked.error] };
           await createThread(tx, {
             id: threadId,
             teamId: p.teamId,
             ownerUserId: p.userId,
             projectId: null,
-            agent: null,
+            agent: checked.pin,
             title: titleOf(app),
           });
+          await writeDraftOff(tx, p, threadId, draft);
         }
         let thread = await lockWritable(tx, p.teamId, threadId, p.userId);
         if (!thread) return { stored: false, value: THREAD_NOT_FOUND };

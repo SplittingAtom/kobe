@@ -880,6 +880,13 @@ export const AUDIT_EVENTS = {
     fromVersion: version,
     toVersion: version,
   }),
+  /** An agentless thread took the agent its owner picked (KOBE-458), at its current version. */
+  "thread.agent_chosen": event("team", {
+    threadId: id,
+    agentId: id,
+    scope: agentScope,
+    version,
+  }),
 
   /** The owner asked to delete a thread from Trash for good (D18); purged at once unless held. */
   "thread.purge_requested": event("team", { threadId: id }),

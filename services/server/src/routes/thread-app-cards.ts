@@ -15,6 +15,7 @@ import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz
 import type { ServerDeps } from "../deps.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
+import { draftOf, launchNewThreadBodySchema } from "../apps/new-thread-draft.js";
 
 /**
  * Rail launches (KOBE-440, spec MA11, §6), under the browser principal (the member and the active
@@ -23,10 +24,13 @@ import { uuidSchema } from "../threads/schemas.js";
  * - `POST /v1/threads/{id}/app-cards {app_id}`: calls the app's opening tool as the member and
  *   inserts an app card at the thread's leaf (201 `{thread_id, entry_id, result_ref, queued:
  *   false}`), or, during an active run, queues it (201 `{thread_id, result_ref, queued: true}`).
- * - `POST /v1/threads/app-cards {app_id}`: the same into a new thread titled after the app.
+ * - `POST /v1/threads/app-cards {app_id, agent_id?, connectors_off?}`: the same into a new thread
+ *   titled after the app, started as the member's new conversation would be (KOBE-458).
  * - `DELETE /v1/threads/{id}/app-cards/{ref}`: removes a waiting card (204), else 404.
  */
 const BODY_MAX = 1024;
+/** A new-thread launch may carry up to 64 connector ids to turn off (as thread creation). */
+const NEW_THREAD_BODY_MAX = 4096;
 
 const principal = (c: Context<{ Variables: TeamVariables }>): BrowserPrincipal => ({
   kind: "browser",
@@ -67,13 +71,20 @@ export function threadAppCardRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
     maxSize: BODY_MAX,
     onError: (c) => c.json({ code: "too_large", message: "The request is too large." }, 413),
   });
-  app.use("/app-cards", limit);
+  app.use(
+    "/app-cards",
+    bodyLimit({
+      maxSize: NEW_THREAD_BODY_MAX,
+      onError: (c) => c.json({ code: "too_large", message: "The request is too large." }, 413),
+    }),
+  );
   app.use("/:id/app-cards", limit);
 
   app.post("/app-cards", async (c) => {
-    const body = await parseBody(c, launchAppCardBodySchema);
-    if (!body) return invalidRequest(c, "Send {app_id}.");
-    return answer(c, await launchAppCard(cardDeps, principal(c), null, body.app_id));
+    const body = await parseBody(c, launchNewThreadBodySchema);
+    if (!body)
+      return invalidRequest(c, "Send {app_id} and, optionally, agent_id and connectors_off.");
+    return answer(c, await launchAppCard(cardDeps, principal(c), null, body.app_id, draftOf(body)));
   });
 
   app.post("/:id/app-cards", async (c) => {

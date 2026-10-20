@@ -271,6 +271,74 @@ test("from the rail: a click inserts an app card with no run; the next run sees 
     .toMatch(/^\{"active":\[\],"ended":\["[0-9a-f-]{36}"\]\}$/);
 });
 
+test("from the rail with no thread open: the new thread has the default agent and its follow-up is offered the app's tools (KOBE-458)", async ({
+  chat,
+  page,
+}) => {
+  record(page);
+  await chat.open();
+  const app = await theApp(page);
+  const runnable = await pageApi<{ agents?: { id: string; name: string; default?: boolean }[] }>(
+    page,
+    "GET",
+    "/v1/agents/runnable",
+  );
+  const preset = (runnable.json.agents ?? []).find((a) => a.default === true);
+  expect(preset, "the server marks the new-conversation agent").toBeDefined();
+  await showAppsTab(page);
+  await railButton(page, app, "a new conversation").click();
+  const threadId = await chat.threadId();
+  await expect(page.locator("[data-kobe-app-card-entry]")).toBeVisible({ timeout: RUN_TIMEOUT_MS });
+  // ac-1: the thread pinned the agent a new conversation gets, and the composer names it.
+  const thread = await pageApi<{ agent_id?: string | null }>(
+    page,
+    "GET",
+    `/v1/threads/${threadId}`,
+  );
+  expect(thread.json.agent_id).toBe(preset?.id);
+  await expect(page.getByText(`Agent: ${preset?.name ?? ""}`)).toBeVisible();
+
+  // ac-4, deterministic: the thread's connectors offer the app's own, on and usable (no key
+  // missing), so a run with this agent lists it (the server test asserts `run.start.mcp`).
+  const listed = await pageApi<{
+    connectors?: { connector_id: string; name: string; enabled: boolean; problem: unknown }[];
+  }>(page, "GET", `/v1/threads/${threadId}/connectors`);
+  expect(listed.status).toBe(200);
+  expect(
+    (listed.json.connectors ?? []).find((c) => c.name === app.connectorName),
+    "the app's connector is on and usable in the launched thread",
+  ).toMatchObject({ enabled: true, problem: null });
+
+  // The follow-up runs with that agent; the model (scripted on k3d) then calls the app's opening
+  // tool, and its result renders the app. With a real model that choice is the model's, so on the
+  // gate install a miss is reported as a warning annotation, not a failure.
+  await chat.ask(OPEN);
+  const toolRan = async () => {
+    const results = await pageApi<{ results?: { tool_call_id: string | null }[] }>(
+      page,
+      "GET",
+      `/v1/threads/${threadId}/app-results`,
+    );
+    return (results.json.results ?? []).some((r) => r.tool_call_id !== null);
+  };
+  const poll = { timeout: RUN_TIMEOUT_MS, message: "a tool from the app's connector ran" };
+  if (FAKE_MODEL) {
+    await expect.poll(toolRan, poll).toBe(true);
+  } else {
+    const ran = await expect
+      .poll(toolRan, poll)
+      .toBe(true)
+      .then(() => true)
+      .catch(() => false);
+    if (!ran) {
+      test.info().annotations.push({
+        type: "warning",
+        description: `${poll.message}: the model answered without calling it (offered, not chosen)`,
+      });
+    }
+  }
+});
+
 test("from the rail during a run: the launch waits as a chip and goes in after the run", async ({
   chat,
   page,

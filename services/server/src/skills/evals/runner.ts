@@ -1,15 +1,4 @@
-import {
-  and,
-  eq,
-  isNull,
-  siteAgents,
-  siteSkillSettings,
-  sql,
-  teams,
-  withTeam,
-  type KobeDb,
-  type KobeTx,
-} from "@kobe/db";
+import { siteSkillSettings, sql, teams, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import {
   evalOutputWalkRoots,
   evalSnapshotResultSchema,
@@ -23,8 +12,8 @@ import {
 import { judgeOutputs } from "./judge-outputs.js";
 import type { SkillEvalJudge } from "./judge.js";
 import type { Logger } from "pino";
-import { resolveAgentPin, type AgentPin } from "../../agents/versions.js";
-import { KOBE_GALLERY_KEY } from "../../gallery/definitions.js";
+import type { AgentPin } from "../../agents/versions.js";
+import { defaultNewThreadPin } from "../../agents/default-agent.js";
 import type { BlobStore } from "../../retention/blobs.js";
 import type { ServerRunOrchestrator } from "../../runs/orchestrator.js";
 import type { SandboxProvider } from "../../sandbox/provider.js";
@@ -522,23 +511,7 @@ export async function siteEvalLimits(db: KobeDb): Promise<SkillEvalLimits> {
   return parsed.success ? parsed.data : skillEvalLimitsSchema.parse({});
 }
 
-/** The Kobe gallery agent's pin, as Workbench test chats use it. */
-export async function kobePin(
-  tx: KobeTx,
-  teamId: string,
-  userId: string,
-): Promise<AgentPin | null> {
-  const [kobe] = await tx
-    .select({ id: siteAgents.id })
-    .from(siteAgents)
-    .where(
-      and(
-        eq(siteAgents.scope, "gallery"),
-        eq(siteAgents.galleryKey, KOBE_GALLERY_KEY),
-        isNull(siteAgents.archivedAt),
-      ),
-    );
-  if (!kobe) return null;
-  const pin = await resolveAgentPin(tx, { teamId, userId }, kobe.id);
-  return pin.ok ? pin.value : null;
+/** The Kobe gallery agent's pin, as Workbench test chats use it (the new-thread default). */
+export function kobePin(tx: KobeTx, teamId: string, userId: string): Promise<AgentPin | null> {
+  return defaultNewThreadPin(tx, { teamId, userId });
 }
