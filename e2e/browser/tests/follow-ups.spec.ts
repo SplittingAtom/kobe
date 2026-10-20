@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/chat.js";
 import { SHELL_TIMEOUT_MS } from "./support/constants.js";
+import { panelOf } from "./support/panel.js";
 
 /**
  * KOBE-222 (CE21): with the team's Follow-ups switch on (Team console, off by default), the server
@@ -17,13 +18,13 @@ const TEAM_KEY = "kobe.lastTeamId";
 /** Turns the team switch on or off in the Team console, as a team admin would. */
 async function setSwitch(page: Page, on: boolean): Promise<void> {
   await page.goto("/admin/team/follow-ups");
-  const toggle = page.getByRole("checkbox", { name: /Suggest follow-up messages/ });
+  const toggle = panelOf(page).getByRole("checkbox", { name: /Suggest follow-up messages/ });
   await expect(toggle).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
   if ((await toggle.isChecked()) === on) return;
   await toggle.setChecked(on);
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await panelOf(page).getByRole("button", { name: "Save", exact: true }).click();
   await expect(
-    page.getByText(on ? /Follow-up suggestions are on/ : /Follow-up suggestions are off/),
+    panelOf(page).getByText(on ? /Follow-up suggestions are on/ : /Follow-up suggestions are off/),
   ).toBeVisible();
 }
 

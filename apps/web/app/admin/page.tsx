@@ -6,8 +6,8 @@ export const metadata: Metadata = { title: "Administration · Kobe" };
 
 export default function AdminHome() {
   return (
+    // In its panel over the workspace (KOBE-452), whose heading names it: no h1 of its own.
     <main>
-      <h1>Administration</h1>
       <ConsoleLinks />
       <p>
         The site console is for the site Owner and Admins; the team console is for team admins of

@@ -16,6 +16,9 @@ export class FakeNavigation implements NavigationLike {
   index = 0;
   private n = 0;
   private readonly listeners = new Set<() => void>();
+  private readonly navigateListeners = new Set<(e: Event) => void>();
+  /** Keys `traverseTo` was asked for (a guarded Back let through). */
+  readonly traversals: string[] = [];
 
   constructor(url: string) {
     this.list = [{ key: this.nextKey(), index: 0, url }];
@@ -38,12 +41,30 @@ export class FakeNavigation implements NavigationLike {
     return this.list;
   }
 
-  addEventListener(_type: "currententrychange", listener: () => void): void {
-    this.listeners.add(listener);
+  addEventListener(type: string, listener: (e: Event) => void): void {
+    if (type === "navigate") this.navigateListeners.add(listener);
+    else this.listeners.add(listener as () => void);
   }
 
-  removeEventListener(_type: "currententrychange", listener: () => void): void {
-    this.listeners.delete(listener);
+  removeEventListener(type: string, listener: (e: Event) => void): void {
+    if (type === "navigate") this.navigateListeners.delete(listener);
+    else this.listeners.delete(listener as () => void);
+  }
+
+  traverseTo(key: string): void {
+    this.traversals.push(key);
+  }
+
+  /** A Back the page may cancel: the `navigate` event; returns whether it was cancelled. */
+  dispatchTraverse(delta: number): boolean {
+    const destination = this.list[this.index + delta];
+    if (!destination) return false;
+    const event = Object.assign(new Event("navigate", { cancelable: true }), {
+      navigationType: "traverse",
+      destination: { key: destination.key },
+    });
+    for (const l of [...this.navigateListeners]) l(event);
+    return event.defaultPrevented;
   }
 
   private changed(): void {

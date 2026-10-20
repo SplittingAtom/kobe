@@ -105,7 +105,9 @@ describe("site console", () => {
         <Page />
       </ConsoleShell>,
     );
-    expect((await screen.findByRole("alert")).textContent).toMatch(/Owner and Admins/);
+    expect((await screen.findByRole("alert")).textContent).toMatch(
+      /You don.t have access to the Site console\. Ask your site Owner or an Admin\./,
+    );
     expect(screen.queryByRole("navigation", { name: /sections/ })).toBeNull();
     expect(pageMounted).not.toHaveBeenCalled();
   });

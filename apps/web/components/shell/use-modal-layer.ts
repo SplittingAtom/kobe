@@ -4,6 +4,28 @@ import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import { CHAT_PORTALLED as PORTALLED } from "../ui/chat-portal";
 
 /**
+ * Keeps everything in the chat outside `el` inert while it is mounted, also what mounts later
+ * beside it (the chat that loads under a panel opened by a link or a reload, KOBE-452): the
+ * siblings along its ancestors are watched and marked again. Returns the undo.
+ */
+export function inertOutsideWhileOpen(el: HTMLElement): () => void {
+  let undo = inertOutside(el);
+  const root = el.closest("[data-kobe-chat]") ?? el.ownerDocument.body;
+  const observer = new MutationObserver(() => {
+    undo();
+    undo = inertOutside(el);
+  });
+  for (let node: HTMLElement | null = el.parentElement; node; node = node.parentElement) {
+    observer.observe(node, { childList: true });
+    if (node === root) break;
+  }
+  return () => {
+    observer.disconnect();
+    undo();
+  };
+}
+
+/**
  * Makes everything in the chat outside `el` inert (no focus, no pointer, hidden from assistive
  * tech), as a modal dialog does; returns the undo. Only attributes this call set are removed.
  */
@@ -14,7 +36,8 @@ export function inertOutside(el: HTMLElement): () => void {
     const parent: HTMLElement = node.parentElement;
     for (const sibling of Array.from(parent.children)) {
       if (sibling === node || !(sibling instanceof HTMLElement)) continue;
-      if (sibling.hasAttribute("inert")) continue;
+      // Content portalled out of a layer (its menus, tooltips, dialogs) stays reachable.
+      if (sibling.hasAttribute("inert") || sibling.matches(PORTALLED)) continue;
       sibling.setAttribute("inert", "");
       changed.push(sibling);
     }
@@ -59,7 +82,7 @@ export function useModalLayer(
   useEffect(() => {
     const el = ref.current;
     if (!active || !el) return;
-    const undoInert = modal ? inertOutside(el) : () => {};
+    const undoInert = modal ? inertOutsideWhileOpen(el) : () => {};
     if (!el.contains(document.activeElement)) el.focus();
     const onKeyDown = (e: KeyboardEvent) => {
       if (!escape || e.key !== "Escape" || e.defaultPrevented) return;

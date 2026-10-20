@@ -36,8 +36,8 @@ const DEFAULT_LOADERS: Readonly<Record<ConsoleKind, () => Promise<ApiResult<Cons
 };
 
 const DENIED: Readonly<Record<ConsoleKind, string>> = {
-  site: "The site console is for the site Owner and Admins.",
-  team: "The team console is for team admins of the active team.",
+  site: "You don't have access to the Site console. Ask your site Owner or an Admin.",
+  team: "You don't have access to this team's Team console. Ask one of its team admins.",
 };
 
 type AccessState =

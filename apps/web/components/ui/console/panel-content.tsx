@@ -40,6 +40,23 @@ function editedForm(target: EventTarget): HTMLFormElement | null {
   return form && form.getAttribute("role") !== "search" ? form : null;
 }
 
+/** The part of the Navigation API's `navigate` event used here. */
+interface TraverseEvent extends Event {
+  readonly navigationType: string;
+  readonly destination: { readonly key: string };
+}
+
+interface NavigationTraversal {
+  addEventListener(type: "navigate", listener: (e: TraverseEvent) => void): void;
+  removeEventListener(type: "navigate", listener: (e: TraverseEvent) => void): void;
+  traverseTo(key: string): unknown;
+}
+
+function navigationApi(): NavigationTraversal | undefined {
+  const nav = (window as unknown as { readonly navigation?: NavigationTraversal }).navigation;
+  return nav && typeof nav.traverseTo === "function" ? nav : undefined;
+}
+
 /** Asked before the panel closes: resolves true when it may (nothing unsaved, or discarded). */
 export type PanelCloseGuard = () => Promise<boolean>;
 
@@ -73,21 +90,60 @@ export function PanelContent({
     if (dirty) pages.current.add(id);
     else pages.current.delete(id);
   }, []);
+  // Edits a close would lose; once discarded they no longer count.
+  const unsaved = useCallback(
+    () => pages.current.size > 0 || [...forms.current].some((form) => form.isConnected),
+    [],
+  );
+  const discard = useCallback(() => {
+    forms.current.clear();
+    pages.current.clear();
+  }, []);
   useEffect(() => {
     guard.current = async () => {
-      const unsaved = pages.current.size > 0 || [...forms.current].some((form) => form.isConnected);
-      if (!unsaved) return true;
-      return confirm({
+      if (!unsaved()) return true;
+      const yes = await confirm({
         title: "Discard your changes?",
         description: `Your edits in ${title} are not saved yet.`,
         confirmLabel: "Discard and close",
         cancelLabel: "Keep editing",
       });
+      if (yes) discard();
+      return yes;
     };
     return () => {
       guard.current = null;
     };
-  }, [guard, confirm, title]);
+  }, [guard, confirm, title, unsaved, discard]);
+  // A reload or leaving the site asks too (the browser's own question), and so does Back, where
+  // the browser lets a page cancel it (the Navigation API's traverse).
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (unsaved()) e.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    const nav = navigationApi();
+    const onNavigate = (e: TraverseEvent) => {
+      if (e.navigationType !== "traverse" || !e.cancelable || !unsaved()) return;
+      const key = e.destination.key;
+      e.preventDefault();
+      void confirm({
+        title: "Discard your changes?",
+        description: `Your edits in ${title} are not saved yet.`,
+        confirmLabel: "Discard and leave",
+        cancelLabel: "Keep editing",
+      }).then((yes) => {
+        if (!yes) return;
+        discard();
+        nav?.traverseTo(key);
+      });
+    };
+    nav?.addEventListener("navigate", onNavigate);
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      nav?.removeEventListener("navigate", onNavigate);
+    };
+  }, [confirm, title, unsaved, discard]);
   const onEdit = (e: FormEvent) => {
     const form = editedForm(e.target);
     if (form) forms.current.add(form);

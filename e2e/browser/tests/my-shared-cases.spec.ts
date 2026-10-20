@@ -1,5 +1,6 @@
 import { expect, test } from "./support/chat.js";
 import { SHELL_TIMEOUT_MS } from "./support/constants.js";
+import { panelOf } from "./support/panel.js";
 
 /**
  * KOBE-276 ac-3: a member shares a thumbs down as an eval case, clears the rating (the chat no
@@ -42,10 +43,12 @@ test("share, clear the rating, withdraw from My shared cases", async ({ chat, pa
   await expect(down).toHaveAttribute("aria-pressed", "false");
 
   await page.goto("/me/shared-cases");
-  await expect(page.getByRole("heading", { level: 1, name: "Shared cases" })).toBeVisible({
+  await expect(panelOf(page).getByRole("heading", { level: 1, name: "Shared cases" })).toBeVisible({
     timeout: SHELL_TIMEOUT_MS,
   });
-  const card = page.getByRole("listitem").filter({ hasText: "Reply with the single word CASE." });
+  const card = panelOf(page)
+    .getByRole("listitem")
+    .filter({ hasText: "Reply with the single word CASE." });
   await expect(card.first()).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
   const before = await card.count();
   await card
@@ -54,6 +57,6 @@ test("share, clear the rating, withdraw from My shared cases", async ({ chat, pa
     .click();
   const confirm = page.getByRole("alertdialog", { name: "Withdraw this shared case?" });
   await confirm.getByRole("button", { name: "Withdraw", exact: true }).click();
-  await expect(page.getByText("Withdrawn.")).toBeVisible();
+  await expect(panelOf(page).getByText("Withdrawn.")).toBeVisible();
   await expect(card).toHaveCount(before - 1);
 });

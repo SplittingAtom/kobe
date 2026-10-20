@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render } from "@testing-library/react";
-import { useRef } from "react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { useRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useModalLayer } from "./use-modal-layer";
 
@@ -39,5 +39,36 @@ describe("useModalLayer and portalled dialogs", () => {
     const { getByTestId } = render(<Layer onClose={onClose} />);
     fireEvent.pointerDown(getByTestId("outside"));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+/** KOBE-452 review: content that mounts after the layer opened (the chat loading under a panel). */
+function LateLayer() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [ready, setReady] = useState(false);
+  useModalLayer(ref, true, () => {}, { modal: true, escape: true });
+  return (
+    <div data-kobe-chat>
+      <button type="button" data-testid="ready" onClick={() => setReady(true)}>
+        ready
+      </button>
+      {ready ? <main data-testid="late">chat</main> : <p data-testid="loading">Loading</p>}
+      <div ref={ref} tabIndex={-1} data-testid="layer" />
+      {ready && <div data-kobe-portal data-testid="portal" />}
+    </div>
+  );
+}
+
+describe("useModalLayer keeps the background inert", () => {
+  it("also what mounts beside the layer after it opened; portals stay reachable", async () => {
+    const { getByTestId, unmount } = render(<LateLayer />);
+    expect(getByTestId("loading").hasAttribute("inert")).toBe(true);
+    act(() => getByTestId("ready").click());
+    await vi.waitFor(() => expect(getByTestId("late").hasAttribute("inert")).toBe(true));
+    expect(getByTestId("portal").hasAttribute("inert")).toBe(false);
+    expect(getByTestId("layer").hasAttribute("inert")).toBe(false);
+    const late = getByTestId("late");
+    unmount();
+    expect(late.hasAttribute("inert")).toBe(false);
   });
 });

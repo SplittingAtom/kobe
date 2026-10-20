@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { SHELL_TIMEOUT_MS } from "./support/constants.js";
+import { panelOf } from "./support/panel.js";
 
 /**
  * KOBE-321: the Skills page and the Workbench editor against a real deployment. The page renders
@@ -15,10 +16,10 @@ test("the Skills page loads from the server, on every tab", async ({ page }) => 
   for (const tab of ["catalog", "team", "mine", "workbench"]) {
     const res = await page.goto(`/me/skills?tab=${tab}`);
     expect(res?.status(), tab).toBe(200);
-    await expect(page.getByRole("heading", { level: 1, name: "Skills" })).toBeVisible({
+    await expect(panelOf(page).getByRole("heading", { level: 1, name: "Skills" })).toBeVisible({
       timeout: SHELL_TIMEOUT_MS,
     });
-    const tabs = page.getByRole("tablist", { name: "Skills" });
+    const tabs = panelOf(page).getByRole("tablist", { name: "Skills" });
     await expect(tabs.getByRole("tab", { selected: true })).toHaveText(
       tab === "mine" ? "Mine" : tab[0]?.toUpperCase() + tab.slice(1),
     );
@@ -36,40 +37,40 @@ test("a draft autosaves, lints and scans, and keeps an edit made just before lea
   page,
 }) => {
   await page.goto("/me/skills?tab=workbench");
-  await page.getByLabel("Skill name").fill(NAME);
-  await page.getByRole("button", { name: "Start a draft" }).click();
-  await expect(page.getByRole("heading", { level: 1, name: NAME })).toBeVisible({
+  await panelOf(page).getByLabel("Skill name").fill(NAME);
+  await panelOf(page).getByRole("button", { name: "Start a draft" }).click();
+  await expect(panelOf(page).getByRole("heading", { level: 1, name: NAME })).toBeVisible({
     timeout: SHELL_TIMEOUT_MS,
   });
-  await expect(page.getByText(/^Scanned as saved \(revision \d+\)\.$/)).toBeVisible();
+  await expect(panelOf(page).getByText(/^Scanned as saved \(revision \d+\)\.$/)).toBeVisible();
 
-  const description = page.getByLabel("Description");
+  const description = panelOf(page).getByLabel("Description");
   await description.fill("Writes test reports. Use when asked for a test report.");
   // Lint is immediate; the save and the scan of it follow within 2 s.
   await expect(
-    page.getByText(/^\d+ errors?, \d+ warnings?\.$|^No problems found\.$/),
+    panelOf(page).getByText(/^\d+ errors?, \d+ warnings?\.$|^No problems found\.$/),
   ).toBeVisible();
-  await expect(page.getByText("All changes saved.")).toBeVisible({ timeout: 2_000 });
-  await expect(page.getByText(/^Scanned as saved \(revision \d+\)\.$/)).toBeVisible({
+  await expect(panelOf(page).getByText("All changes saved.")).toBeVisible({ timeout: 2_000 });
+  await expect(panelOf(page).getByText(/^Scanned as saved \(revision \d+\)\.$/)).toBeVisible({
     timeout: 2_000,
   });
-  await expect(page.getByText("Pass", { exact: true })).toBeVisible();
+  await expect(panelOf(page).getByText("Pass", { exact: true })).toBeVisible();
 
   // Leave by an in-app link straight after typing: the edit is written on the way out.
-  await page.getByLabel("Instructions (SKILL.md body)").fill("Kept while leaving.");
-  await page.getByRole("link", { name: "Workbench" }).first().click();
-  await expect(page.getByRole("tab", { name: "Workbench", selected: true })).toBeVisible();
-  await page.getByRole("link", { name: NAME }).click();
-  await expect(page.getByLabel("Instructions (SKILL.md body)")).toHaveValue(
+  await panelOf(page).getByLabel("Instructions (SKILL.md body)").fill("Kept while leaving.");
+  await panelOf(page).getByRole("link", { name: "Workbench" }).first().click();
+  await expect(panelOf(page).getByRole("tab", { name: "Workbench", selected: true })).toBeVisible();
+  await panelOf(page).getByRole("link", { name: NAME }).click();
+  await expect(panelOf(page).getByLabel("Instructions (SKILL.md body)")).toHaveValue(
     /Kept while leaving\./,
     { timeout: SHELL_TIMEOUT_MS },
   );
 
-  await page.getByRole("button", { name: "Delete draft" }).click();
+  await panelOf(page).getByRole("button", { name: "Delete draft" }).click();
   await page
     .getByRole("alertdialog", { name: `Delete the draft ${NAME}?` })
     .getByRole("button", { name: "Delete draft" })
     .click();
   await expect(page).toHaveURL(/\/me\/skills\?tab=workbench$/);
-  await expect(page.getByRole("link", { name: NAME })).toHaveCount(0);
+  await expect(panelOf(page).getByRole("link", { name: NAME })).toHaveCount(0);
 });

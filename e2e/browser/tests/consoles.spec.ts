@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { SHELL_TIMEOUT_MS } from "./support/constants.js";
+import { panelOf } from "./support/panel.js";
 
 /**
  * Screenshots of every console and My-area page in light and dark (KOBE-294 ac-3), for the move
@@ -98,7 +99,9 @@ async function settle(page: Page, theme: Theme): Promise<void> {
     timeout: SHELL_TIMEOUT_MS,
   });
   await expect(
-    page.getByRole("status").filter({ hasText: /^(Checking your access|Loading)/ }),
+    panelOf(page)
+      .getByRole("status")
+      .filter({ hasText: /^(Checking your access|Loading)/ }),
   ).toHaveCount(0, { timeout: SHELL_TIMEOUT_MS });
   // Late requests (counts, previews) settle; a page that keeps polling is shot as it stands.
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
@@ -113,7 +116,7 @@ async function navPages(page: Page, theme: Theme): Promise<string[]> {
   for (const { home, nav } of CONSOLE_NAVS) {
     await page.goto(home);
     await settle(page, theme);
-    const links = page.getByRole("navigation", { name: nav }).getByRole("link");
+    const links = panelOf(page).getByRole("navigation", { name: nav }).getByRole("link");
     for (const href of await links.evaluateAll((as) => as.map((a) => a.getAttribute("href")))) {
       if (href) out.push(href);
     }
@@ -226,7 +229,7 @@ test("console and My-area pages at phone width", async ({ page, context, baseURL
   }
   // The folded section list, opened from its toggle.
   await shoot(page, theme, "/admin/team/invites", ["mobile", "team-nav-open.png"], failures, () =>
-    page
+    panelOf(page)
       .getByRole("navigation", { name: "Team console sections" })
       .getByRole("button", { expanded: false })
       .click(),

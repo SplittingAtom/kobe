@@ -43,6 +43,23 @@
 - Removed: `area-panel.tsx`, `area-beside.tsx`, `openBeside`/`showArea`/`closeArea`, the
   `.artifact:has([data-kobe-area])` rule.
 
+## Review fixes (Sonnet, 0 HIGH / 2 MEDIUM / 4 LOW)
+
+- M1: `useModalLayer` keeps the background inert while open (`inertOutsideWhileOpen`: a
+  MutationObserver on the layer's ancestors marks late siblings, e.g. the chat that loads under a
+  deep-linked panel; portalled content stays reachable). Tests: `use-modal-layer.test.tsx`,
+  panel test "a link or a reload…" (fails without the fix).
+- M2: browser specs scope panel pages to `panelOf(page)` (`support/panel.ts`): theme, consoles,
+  console-sections, eval-cases-gate, agent-ratings, shared-cases-review, my-shared-cases,
+  remember-approvals, follow-ups, skills-workbench, skill-creator-workbench.
+- L3: "Back to Kobe" in a panel closes it through the guard (`PanelCloseContext`), no new entry.
+- L4: `/admin` landing has no h1 of its own (the panel's heading names it).
+- L5: unsaved edits also guard reload (`beforeunload`) and Back (Navigation API `navigate`
+  traverse, cancelled, asked, then `traverseTo`).
+- L6: refusals read "You don't have access to the Site console. Ask your site Owner or an Admin."
+  (team: "…this team's Team console. Ask one of its team admins.").
+- `/skills` (no app link used it; the ticket names it) redirects to `/me/skills` (`lib/skills/redirects.ts`).
+
 ## Shared files touched
 
 - `apps/web/app/layout.tsx`, `app/page.tsx`, `components/chat/chat-app.tsx` (route prop, panel,
@@ -52,8 +69,6 @@
 
 ## Open questions
 
-- A deep link to a console the member can't open shows the console's refusal inside the panel
-  (as the page did); entry points stay hidden for them. OK?
 - `consoles.spec.ts` screenshots need a new baseline (every page is now the panel over the chat).
 
 ## Evidence (acceptance criteria → test or command output)

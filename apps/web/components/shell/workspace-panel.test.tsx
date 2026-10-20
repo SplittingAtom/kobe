@@ -335,8 +335,15 @@ describe("addresses, Back and reload (KOBE-452 ac-2)", () => {
     open("/admin/team");
     const panel = await dialog("Team console");
     expect(within(panel).getByRole("heading", { level: 1, name: "Members" })).toBeTruthy();
-    // The workspace under it is the member's last thread in this tab.
-    expect(await screen.findByRole("heading", { level: 2, name: "Forecast" }, WAIT)).toBeTruthy();
+    // The workspace under it is the member's last thread in this tab, inert although it loaded
+    // after the panel opened (review M1).
+    const heading = await waitFor(
+      () => must(document.querySelector<HTMLElement>("#kobe-chat-main h2")),
+      WAIT,
+    );
+    expect(heading.textContent).toBe("Forecast");
+    await waitFor(() => expect(heading.closest("[inert]")).not.toBeNull());
+    expect((await composer()).closest("[inert]")).not.toBeNull();
     const before = nav.entries().length;
     await userEvent
       .setup()
@@ -387,6 +394,42 @@ describe("closing (KOBE-452 ac-3)", () => {
     await waitFor(() => expect(panelEl()).toBeNull());
   });
 
+  it("with unsaved edits, a reload and Back ask too (review L5)", async () => {
+    await openThread();
+    const user = userEvent.setup();
+    await user.click(await teamConsoleLink());
+    const panel = await dialog("Team console");
+    const reload = () => {
+      const e = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(e);
+      return e.defaultPrevented;
+    };
+    expect(reload()).toBe(false);
+    expect(nav.dispatchTraverse(-1)).toBe(false);
+    await user.type(within(panel).getByLabelText("Email"), "bo@example.test");
+    expect(reload()).toBe(true);
+    let cancelled = false;
+    act(() => {
+      cancelled = nav.dispatchTraverse(-1);
+    });
+    expect(cancelled).toBe(true);
+    const ask = await screen.findByRole("alertdialog", { name: "Discard your changes?" });
+    await user.click(within(ask).getByRole("button", { name: "Discard and leave" }));
+    await waitFor(() => expect(nav.traversals).toEqual([must(nav.entries()[0]).key]));
+    expect(reload()).toBe(false);
+  });
+
+  it("Back to Kobe in a panel closes it like Close: no new entry, edits asked about (L3)", async () => {
+    open("/admin/site");
+    const panel = await dialog("Site console");
+    const back = await within(panel).findByRole("link", { name: "Back to Kobe" }, WAIT);
+    const before = nav.entries().length;
+    await userEvent.setup().click(back);
+    await waitFor(() => expect(panelEl()).toBeNull());
+    expect(nav.entries()).toHaveLength(before);
+    expect(window.location.pathname).toBe("/");
+  });
+
   it("a submitted form closes without asking", async () => {
     await openThread();
     const user = userEvent.setup();
@@ -431,7 +474,7 @@ describe("permissions (KOBE-452 ac-4)", () => {
     open("/admin/site");
     const panel = await dialog("Site console");
     expect(
-      await within(panel).findByText(/The site console is for the site Owner and Admins/, {}, WAIT),
+      await within(panel).findByText(/You don't have access to the Site console/, {}, WAIT),
     ).toBeTruthy();
     expect(within(panel).queryByRole("heading", { level: 1, name: "Users" })).toBeNull();
     // In a panel the console leaves its brand (the way back) to the panel's Close.

@@ -5,6 +5,7 @@ import type { Panel } from "../../lib/shell/panels";
 import { ensureConsolePortal } from "../ui/chat-portal";
 import { PanelContent, type PanelCloseGuard } from "../ui/console/panel-content";
 import { IconAction } from "./icon-action";
+import { PanelCloseContext } from "./panel-close";
 import { useModalLayer } from "./use-modal-layer";
 import styles from "./workspace-panel.module.css";
 
@@ -80,9 +81,11 @@ export function WorkspacePanel({
           <IconAction command="area-close" label={`Close ${panel.title}`} onClick={requestClose} />
         </div>
         <div className={styles.body}>
-          <PanelContent title={panel.title} path={path} embedded={panel.embedded} guard={guard}>
-            {children}
-          </PanelContent>
+          <PanelCloseContext.Provider value={requestClose}>
+            <PanelContent title={panel.title} path={path} embedded={panel.embedded} guard={guard}>
+              {children}
+            </PanelContent>
+          </PanelCloseContext.Provider>
         </div>
       </section>
     </>

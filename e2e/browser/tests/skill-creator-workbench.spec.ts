@@ -1,5 +1,6 @@
 import { expect, test } from "./support/chat.js";
 import { RUN_TIMEOUT_MS, SHELL_TIMEOUT_MS } from "./support/constants.js";
+import { panelOf } from "./support/panel.js";
 
 /**
  * KOBE-442: skill-creator saves its skill straight into the Workbench. A Kobe-agent conversation
@@ -49,20 +50,20 @@ test("skill-creator saves a private Workbench draft, and saving again updates it
 
   // The link opens the private draft in the Workbench, with the second save's change.
   await page.getByRole("link", { name: "Open in Workbench" }).last().click();
-  await expect(page.getByRole("heading", { level: 1, name: NAME })).toBeVisible({
+  await expect(panelOf(page).getByRole("heading", { level: 1, name: NAME })).toBeVisible({
     timeout: SHELL_TIMEOUT_MS,
   });
-  await expect(page.getByLabel("Instructions (SKILL.md body)")).toHaveValue(
+  await expect(panelOf(page).getByLabel("Instructions (SKILL.md body)")).toHaveValue(
     /Keep it to three lines\./,
   );
   await page.goto("/me/skills?tab=workbench");
-  await expect(page.getByRole("link", { name: NAME })).toHaveCount(1, {
+  await expect(panelOf(page).getByRole("link", { name: NAME })).toHaveCount(1, {
     timeout: SHELL_TIMEOUT_MS,
   });
 
   // Clean-up: delete the draft (its thread goes to Trash with the chat fixture).
-  await page.getByRole("link", { name: NAME }).click();
-  await page.getByRole("button", { name: "Delete draft" }).click();
+  await panelOf(page).getByRole("link", { name: NAME }).click();
+  await panelOf(page).getByRole("button", { name: "Delete draft" }).click();
   await page
     .getByRole("alertdialog", { name: `Delete the draft ${NAME}?` })
     .getByRole("button", { name: "Delete draft" })
