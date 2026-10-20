@@ -93,7 +93,9 @@ function ProvidedCard({ connector: c }: { readonly connector: TeamConnector }) {
   return (
     <Card role="article" aria-label={c.name} title={c.name} level={2}>
       <p className="m-0 text-sm text-console-muted">
-        Provided by your organization: you need no key of your own.
+        {c.siteKeyReady
+          ? "Provided by your organization: you need no key of your own."
+          : "Your organization provides the key but has not set it yet: ask a site admin. You need no key of your own."}
       </p>
     </Card>
   );

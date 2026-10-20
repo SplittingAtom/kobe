@@ -66,7 +66,9 @@ const TOOLS = [
     _meta: { ui: { visibility: ["app"] } },
   },
 ];
-const TEMPLATE = "<!doctype html><p>explorer</p>";
+// KOBE-447: the tool has no title, so the app takes the template's <title>.
+const TEMPLATE =
+  "<!doctype html><html><head><title>Lakehouse &amp; Explorer</title></head><body><p>explorer</p></body></html>";
 const RESOURCES = [{ uri: "ui://cat/explorer", mimeType: MIME, text: TEMPLATE, meta: {} }];
 
 /** Every log line, to check no key is ever logged (ac-2). */
@@ -183,7 +185,7 @@ describe("app calls (ac-1, ac-4)", () => {
       connectorName: "apps4-none",
       iconUrl: null,
       tool: "open_explorer",
-      title: "open_explorer",
+      title: "Lakehouse & Explorer",
       uri: "ui://cat/explorer",
       sha256: sha(TEMPLATE),
     });
@@ -518,7 +520,7 @@ describe("credentials (ac-2) and who may call (ac-3)", () => {
     expect(list.needsKey).toContainEqual({
       connectorId: own,
       connectorName: "apps6-own",
-      title: "open_explorer",
+      title: "Lakehouse & Explorer",
     });
     // A site key that is missing is not the member's to add.
     expect(list.needsKey.map((k: { connectorId: string }) => k.connectorId)).not.toContain(site);

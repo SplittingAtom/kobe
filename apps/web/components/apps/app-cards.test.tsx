@@ -152,6 +152,33 @@ describe("the rail's Apps section (KOBE-440)", () => {
     );
   });
 
+  it("shows a waiting card the server inserts after the run's end was read (KOBE-415)", async () => {
+    // The server ends the run, then inserts its waiting cards in a later transaction: the reads
+    // that follow the end can see the run ended and the card still waiting.
+    fake.teamApps = [APP];
+    fake.deferCardInsertion = true;
+    const t = answered();
+    openApp(fake, t);
+    const user = userEvent.setup();
+    await user.type(await composer(), "first{Enter}");
+    await waitFor(() => expect(fake.activeRun(t)).toBeDefined());
+    const runId = must(fake.activeRun(t)).run_id;
+    await streaming(fake, runId);
+    await user.click(
+      within(await appsSection()).getByRole("button", { name: /Open Lakehouse Explorer/ }),
+    );
+    expect(await screen.findByText("App: Lakehouse Explorer (waits for the run)")).toBeTruthy();
+    fake.agent.commitPrompt(runId);
+    fake.agent.commit(runId, { role: "assistant", content: [{ type: "text", text: "one" }] });
+    fake.agent.complete(runId);
+    await waitFor(() => expect(screen.getByText("one")).toBeTruthy());
+    await new Promise((r) => setTimeout(r, 300)); // the reads after the end have answered
+    fake.insertWaitingCards(t);
+    await waitFor(() => expect(screen.getByTitle(FRAME)).toBeTruthy(), { timeout: 6_000 });
+    expect(screen.queryByText("App: Lakehouse Explorer (waits for the run)")).toBeNull();
+    expect(screen.queryByText(/Not added to the conversation/)).toBeNull();
+  });
+
   it("says when the server dropped a waiting card at the run's end (review LOW-2)", async () => {
     fake.teamApps = [APP];
     fake.dropWaitingCards = true;

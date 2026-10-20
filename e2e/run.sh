@@ -3365,6 +3365,43 @@ if [[ -n "${KOBE_SANDBOX_IMAGE:-}" && -n "${sandbox_id:-}" && "${client_ready:-0
   contains "KOBE-303: no server log line holds it" '^0$' \
     "$(for pod in $($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=server -o name); do
         $KUBECTL -n "$NS" logs "$pod" -c server 2>/dev/null || true; done | grep -c -- "$SITE_KEY" || true)"
+  # KOBE-449: a real run of a member with no key of their own gets the site-key connector in
+  # run.start.mcp, so Pi offers its tool and the model calls it (the fake model's "tools?" echo and
+  # "steps:" script). The Owner holds no grant for it (a site connector refuses members' keys).
+  if [[ "${KOBE_E2E_TOOL_EXECUTOR:-}" == 1 ]]; then
+    echo "SKIP KOBE-449 site-key run (runs in the suite shard only)"
+  elif [[ "$(type -t chat_run)" == function && -n "${owner_id:-}" ]]; then
+    SITE_AGENT=5e6f7081-92a3-4b4c-9d6e-7f8091a2b3c5
+    psql_kobe "DELETE FROM site_agents WHERE id = '$SITE_AGENT' AND current_version IS NULL;
+      INSERT INTO site_agents (id, scope, owner_user_id, slug, frontmatter, prompt)
+        SELECT '$SITE_AGENT', 'personal', '$owner_id', 'e2e-site-key',
+          (a.frontmatter - 'tools') || '{\"name\":\"E2E site key\",\"connectors\":[\"e2e-site\"]}'::jsonb, a.prompt
+        FROM site_agents a WHERE a.gallery_key = 'kobe' ON CONFLICT DO NOTHING;
+      INSERT INTO site_agent_versions (agent_id, version, frontmatter, prompt, tool_manifest, draft_revision)
+        SELECT a.id, 1, a.frontmatter, a.prompt,
+          (SELECT v.tool_manifest FROM site_agent_versions v JOIN site_agents g ON g.id = v.agent_id AND v.version = g.current_version
+            WHERE g.gallery_key = 'kobe') || '{\"connectors\":[\"e2e-site\"]}'::jsonb, 1
+        FROM site_agents a WHERE a.id = '$SITE_AGENT' ON CONFLICT DO NOTHING;
+      UPDATE site_agents SET current_version = 1 WHERE id = '$SITE_AGENT';" >/dev/null
+    contains "KOBE-449: the Owner holds no key of their own for the site-key connector" '^0$' \
+      "$(psql_kobe "SELECT count(*) FROM connector_grants WHERE connector_id = '$SITE_CONNECTOR'")"
+    site_tools=$(chat_run "tools?" 240000 "" "$SITE_AGENT")
+    contains "KOBE-449: the run's model is offered the site-key connector's tool" '^text=.*mcp__e2e_site__get_thing' "$site_tools"
+    site_steps='[{"name":"mcp__e2e_site__get_thing","args":{"id":"site-run"}}]'
+    site_run=$(chat_run "steps: $site_steps" 240000 "" "$SITE_AGENT")
+    printf '     site-key run: %s\n' "$(printf '%s' "$site_run" | tr '\n' ' ' | cut -c1-400)"
+    contains "KOBE-449: the run calling the site-key tool completed" '^terminal=run.completed$' "$site_run"
+    contains "KOBE-449: the model saw the fake server's answer" 'tool said: .*fake:get_thing' "$site_run"
+    site_log=$($KUBECTL -n "$MCP_NS" logs fake-mcp 2>&1 || true)
+    contains "KOBE-449: the run's call reached the remote server exactly once" '^1$' \
+      "$(printf '%s\n' "$site_log" | grep -cxF 'CALL get_thing {"id":"site-run"}' || true)"
+    contains "KOBE-449: ...with the site key" '^[3-9]$|^[1-9][0-9]+$' \
+      "$(printf '%s\n' "$site_log" | grep -cxF "AUTH Bearer $SITE_KEY" || true)"
+  elif [[ "${CI:-}" == "true" ]]; then
+    fail "KOBE-449: the site-key run needs the model setup (chat_run) and the Owner"
+  else
+    echo "SKIP KOBE-449 site-key run (no model setup)"
+  fi
   # Sandboxes cannot skip the proxy and ask the server's internal port themselves.
   internal=$(in_sandbox "curl -s -o /dev/null -m 5 http://$server_ip:8081/healthz && echo control=REACHED || echo control=BLOCKED; \
     curl -s -o /dev/null -m 5 http://$server_ip:8082/healthz && echo internal=REACHED || echo internal=BLOCKED")

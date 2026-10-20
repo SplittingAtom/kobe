@@ -142,7 +142,9 @@ function expectIsolated(report: Report): void {
   expect(blocked("connect-src", "/ws")).toBe(true);
   expect(blocked("img-src", "/img.png")).toBe(true);
   // No popup, no cookies or storage, no access to Kobe's page.
-  expect(results["window_open"]).toBe("null");
+  // A blocked window.open returns null (Chromium, WebKit) or throws (Firefox: InvalidAccessError,
+  // KOBE-446); either way no popup page opens (asserted below).
+  expect(results["window_open"]).toMatch(/^(null|threw:)/);
   expect(results["cookie"]).toMatch(/^threw:SecurityError/);
   expect(results["local_storage"]).toMatch(/^threw:SecurityError/);
   expect(results["parent_dom"]).toMatch(/^threw:SecurityError/);

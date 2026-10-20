@@ -13,6 +13,7 @@ import {
 import { listAppResults, type AppResultView } from "../../lib/apps/app-results";
 import { releaseSlot, takeSlot } from "../../lib/apps/live-slots";
 import { approvalKey, runToolKey } from "../../lib/chat/markers";
+import { isThreadRunning } from "../../lib/chat/thread-state";
 import { useChatSession, useKobeExtras } from "../chat/kobe-runtime";
 
 /**
@@ -26,6 +27,11 @@ export interface ThreadApps {
   /** By prompt entry and tool call (`approvalKey`); the live run's by `runToolKey`. */
   readonly byPrompt: ReadonlyMap<string, AppResultView>;
   readonly byRun: ReadonlyMap<string, AppResultView>;
+  /**
+   * By tool call id, for ids that occur once in the thread (KOBE-445): a card the prompt key does
+   * not place still finds its result.
+   */
+  readonly byTool: ReadonlyMap<string, AppResultView>;
   /** Rail-launched app cards in the thread, by entry id (KOBE-440). */
   readonly byEntry: ReadonlyMap<string, AppResultView>;
   /** Cards launched during the run, waiting for it to end (KOBE-440), in launch order. */
@@ -48,6 +54,13 @@ export interface ThreadApps {
 }
 
 const NONE: ReadonlyMap<string, AppResultView> = new Map();
+
+/**
+ * Re-reads of the list while cards wait on an idle thread (KOBE-415): the server inserts them in
+ * the promotion that follows a run's end, a transaction after the one the end's reads may see.
+ * Backs off from the first delay; a later run's end or a launch reads again anyway.
+ */
+export const WAITING_RECHECK_MS = [500, 1_000, 2_000, 4_000, 8_000] as const;
 const ThreadAppsContext = createContext<ThreadApps | null>(null);
 
 export function useThreadApps(): ThreadApps | null {
@@ -68,11 +81,25 @@ function useLiveMarkers(): string {
   );
 }
 
+/** Results by tool call id, leaving out ids that occur more than once (never a guess). */
+function uniqueByToolCall(results: readonly AppResultView[]): ReadonlyMap<string, AppResultView> {
+  const counts = new Map<string, number>();
+  for (const r of results) {
+    if (r.toolCallId !== null) counts.set(r.toolCallId, (counts.get(r.toolCallId) ?? 0) + 1);
+  }
+  return new Map(
+    results.flatMap((r) =>
+      r.toolCallId !== null && counts.get(r.toolCallId) === 1 ? [[r.toolCallId, r] as const] : [],
+    ),
+  );
+}
+
 export function ThreadAppsProvider({ children }: { readonly children: ReactNode }) {
   const extras = useKobeExtras();
   const { teamId } = useChatSession();
   const threadId = extras?.state.threadId ?? null;
   const ended = extras?.state.live?.terminal ? extras.state.live.runId : null;
+  const running = extras ? isThreadRunning(extras.state) : false;
   const markers = useLiveMarkers();
   const [read, setRead] = useState<{
     threadId: string;
@@ -133,6 +160,7 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
           ),
     [results],
   );
+  const byTool = useMemo(() => (results === null ? NONE : uniqueByToolCall(results)), [results]);
   const byEntry = useMemo(
     () =>
       results === null
@@ -159,8 +187,13 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
       ([ref]) => !present.has(ref) && !removed.current.has(ref),
     );
     if (gone.length > 0) setDropped((prev) => [...prev, ...gone.map(([, title]) => title)]);
+    // A waiting card now has its entry (KOBE-415): the thread read after the run's end may have
+    // come before the insertion, so read the entries again.
+    const inserted = results.some((r) => waiting.current.has(r.resultRef) && r.queued !== true);
+    if (inserted) void controller?.refresh();
     waiting.current = new Map(queued.map((r) => [r.resultRef, r.app?.title ?? r.tool]));
-  }, [results, queued]);
+  }, [results, queued, controller]);
+  useWaitingRecheck(queued.length > 0 && !running, load);
   useEffect(() => {
     waiting.current = new Map();
     setDropped([]);
@@ -177,6 +210,7 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
       teamId,
       byPrompt,
       byRun,
+      byTool,
       byEntry,
       queued,
       live,
@@ -192,6 +226,7 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
       teamId,
       byPrompt,
       byRun,
+      byTool,
       byEntry,
       queued,
       live,
@@ -204,4 +239,22 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
     ],
   );
   return <ThreadAppsContext.Provider value={value}>{children}</ThreadAppsContext.Provider>;
+}
+
+/** While `waiting` (cards wait on an idle thread), reads the list again with backoff. */
+function useWaitingRecheck(waiting: boolean, load: () => void): void {
+  useEffect(() => {
+    if (!waiting) return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const next = (attempt: number) => {
+      const delay = WAITING_RECHECK_MS[attempt];
+      if (delay === undefined) return;
+      timer = setTimeout(() => {
+        load();
+        next(attempt + 1);
+      }, delay);
+    };
+    next(0);
+    return () => clearTimeout(timer);
+  }, [waiting, load]);
 }

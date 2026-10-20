@@ -99,6 +99,12 @@ test("U18: while scrolled up, the Jump pill counts the messages that arrive", as
     timeout: RUN_START_TIMEOUT_MS,
   });
   await chat.send("No tools. Reply with the single word ARRIVED.");
+  // The second answer is streaming before the scroll, so the pill starts from four messages (two
+  // prompts, two answers) and counts only the queued prompt and its answer. Scrolling up before
+  // its first line would count it as well (KOBE-415).
+  await expect(chat.answers.nth(1).getByRole("listitem").first()).toBeVisible({
+    timeout: RUN_START_TIMEOUT_MS,
+  });
   // Scrolled up mid-stream: the list is unpinned and holds.
   const list = chat.list;
   const box = await list.boundingBox();
@@ -108,8 +114,11 @@ test("U18: while scrolled up, the Jump pill counts the messages that arrive", as
   await expect(list).toHaveAttribute("data-kobe-follow", "unpinned");
   const jump = page.getByRole("button", { name: /^Jump to latest/ });
   await expect(jump).toBeVisible();
-  // The queued message and its answer arrive after the long answer: two new messages.
-  await expect(page.getByText("ARRIVED").first()).toBeAttached({ timeout: 2 * RUN_TIMEOUT_MS });
+  // The queued message and its answer arrive after the long answer: two new messages. The third
+  // answer, not the text: the queued message's chip says ARRIVED from the start.
+  const arrived = chat.answers.nth(2);
+  await expect(arrived).toContainText("ARRIVED", { timeout: 2 * RUN_TIMEOUT_MS });
+  await expect(arrived).not.toHaveAttribute("aria-busy", "true", { timeout: RUN_TIMEOUT_MS });
   await expect(jump).toHaveAccessibleName(/\b2 new messages\b/, { timeout: RUN_TIMEOUT_MS });
   await expect(list).toHaveAttribute("data-kobe-follow", "unpinned");
 });

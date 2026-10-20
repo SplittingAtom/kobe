@@ -28,6 +28,8 @@ let files: Map<string, number>;
 let seen: Seen[];
 let pageSize: number;
 let overrides: Record<string, () => Response>;
+/** While set, listings of these folders wait for it (a slow answer). */
+let held: { readonly folders: readonly string[]; readonly until: Promise<void> } | null;
 
 const areaOf = (path: string) =>
   path === "uploads" || path.startsWith("uploads/")
@@ -74,6 +76,7 @@ const fetchFn: typeof fetch = async (input, init = {}) => {
   if (url.pathname === "/v1/workspace/wake") return json({ status: "waking" }, 202);
   if (method === "GET" && url.pathname === "/v1/workspace/files") {
     const path = url.searchParams.get("path") ?? "";
+    if (held?.folders.includes(path)) await held.until;
     const all = children(path);
     if (path !== "" && all.length === 0) return json({ code: "not_found", message: "No." }, 404);
     const at = Number(url.searchParams.get("cursor") ?? "0");
@@ -191,6 +194,7 @@ beforeEach(() => {
   seen = [];
   pageSize = 5000;
   overrides = {};
+  held = null;
 });
 
 afterEach(() => {
@@ -489,6 +493,23 @@ describe("moving (ac-7)", () => {
     await waitFor(() => expect(document.activeElement).toBe(item("report.csv")));
     expect(onMoved).toHaveBeenCalledWith("report.csv", "notes/report.csv");
     expect(screen.getByText("Moved report.csv to notes")).toBeTruthy();
+  });
+
+  it("never shows a moved file twice, whichever folder's listing answers first (KOBE-415)", async () => {
+    mount();
+    const csv = await findItem("report.csv");
+    let answer: () => void = () => undefined;
+    held = { folders: [""], until: new Promise<void>((r) => (answer = r)) };
+    drag(csv, item("notes"));
+    await findItem("todo.md"); // the destination listed, the source not yet
+    expect(within(tree()).getAllByRole("treeitem", { name: "report.csv" })).toHaveLength(1);
+    expect(item("report.csv").getAttribute("aria-level")).toBe("2");
+    await act(async () => {
+      answer();
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(within(tree()).getAllByRole("treeitem", { name: "report.csv" })).toHaveLength(1);
+    expect(item("report.csv").getAttribute("aria-level")).toBe("2");
   });
 
   it("a folder moves with its contents; expanded folders inside it stay open where it went", async () => {

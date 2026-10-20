@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { PinnedTool } from "@kobe/db";
 import type { TeamConnector } from "../mcp/catalog.js";
 import { pinnedTool } from "../testing/mcp-fixtures.js";
-import { buildRunMcp, connectedConnectorNames, type GrantFact } from "./run-mcp.js";
+import {
+  buildRunMcp,
+  connectedConnectorNames,
+  type GrantFact,
+  type RunConnectorRow,
+} from "./run-mcp.js";
 
 const NOW = new Date("2026-10-10T12:00:00Z");
 const ID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -14,8 +19,18 @@ function connector(
   authKind: TeamConnector["authKind"],
   tools: PinnedTool[] = [],
   exposure: TeamConnector["exposure"] = "all",
-): TeamConnector {
-  return { id, name, url: "https://up.example/mcp", authKind, exposure, enabledTools: [], tools };
+  credentialSource: RunConnectorRow["credentialSource"] = "member",
+): RunConnectorRow {
+  return {
+    id,
+    name,
+    url: "https://up.example/mcp",
+    authKind,
+    credentialSource,
+    exposure,
+    enabledTools: [],
+    tools,
+  };
 }
 
 const grant = (connectorId: string, kind: GrantFact["kind"], expiresAt: Date | null = null) => ({
@@ -50,6 +65,28 @@ describe("connectedConnectorNames (the user-connected stub, KOBE-111)", () => {
 
   it("ignores a grant whose kind no longer matches the connector", () => {
     expect(connectedConnectorNames([jira], [grant(ID_A, "oauth")], NOW)).toEqual([]);
+  });
+});
+
+describe("connectedConnectorNames with a site-wide key (KOBE-303, KOBE-449)", () => {
+  const site = connector(ID_A, "catalyst", "api_key", [], "all", "site");
+  const own = connector(ID_B, "jira", "api_key");
+
+  it("a site connector with a usable site key is connected for a member without a grant", () => {
+    expect(connectedConnectorNames([site, own], [], NOW, new Set([ID_A]))).toEqual(["catalyst"]);
+  });
+
+  it("a stale or removed site key does not count, not even with a leftover member grant", () => {
+    expect(connectedConnectorNames([site], [], NOW, new Set())).toEqual([]);
+    expect(connectedConnectorNames([site], [grant(ID_A, "api_key")], NOW, new Set())).toEqual([]);
+  });
+
+  it("no site keys given (a skill eval): the site connector is not connected", () => {
+    expect(connectedConnectorNames([site], [], NOW)).toEqual([]);
+  });
+
+  it("a member-key connector still needs the member's own grant", () => {
+    expect(connectedConnectorNames([own], [], NOW, new Set([ID_B]))).toEqual([]);
   });
 });
 

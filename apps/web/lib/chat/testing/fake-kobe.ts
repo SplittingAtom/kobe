@@ -468,6 +468,18 @@ export class FakeKobe {
   /** Like the server's re-check at insertion (review LOW-2): waiting cards are dropped. */
   dropWaitingCards = false;
 
+  /**
+   * Like the real server, where the run's end commits first and the promotion that inserts its
+   * waiting cards follows in a transaction of its own (KOBE-415): the cards stay waiting at the
+   * end until `insertWaitingCards` is called.
+   */
+  deferCardInsertion = false;
+
+  /** The promotion after a run's end (with `deferCardInsertion`). */
+  insertWaitingCards(threadId: string): void {
+    this.#insertQueuedCards(threadId);
+  }
+
   /** The run ended: its waiting cards go in at the leaf, in launch order. */
   #insertQueuedCards(threadId: string): void {
     const waiting = this.#queuedCards.get(threadId) ?? [];
@@ -745,7 +757,7 @@ export class FakeKobe {
     run.status = status;
     if (wasActive) thread.status = status === "interrupted" ? "interrupted" : "idle";
     // Like the server's promote: app cards launched during the run go in when it ends (KOBE-440).
-    if (wasActive) this.#insertQueuedCards(run.thread_id);
+    if (wasActive && !this.deferCardInsertion) this.#insertQueuedCards(run.thread_id);
     // Like the server: a run's undecided approvals expire with it.
     for (const approval of this.approvals.values()) {
       if (approval.runId === run.run_id && approval.status === "pending")

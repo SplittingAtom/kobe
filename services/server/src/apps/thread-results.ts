@@ -166,7 +166,7 @@ export async function appResultViews(
         ? {
             view: "app" as const,
             app: {
-              title: live?.tool.title ?? live?.tool.annotations.title ?? live?.tool.name ?? r.tool,
+              title: live?.title ?? r.tool,
             },
           }
         : { view: "text" as const, reason: decided.reason }),

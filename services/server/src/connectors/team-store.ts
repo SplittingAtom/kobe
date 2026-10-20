@@ -11,6 +11,7 @@ import {
   type KobeDb,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
+import { usableSiteKeyIds } from "./site-key.js";
 
 /**
  * Team connector enablement (spec D27, KOBE-104). Connectors are off by default: no
@@ -34,6 +35,11 @@ export interface TeamConnectorView {
   readonly auth_kind: "oauth" | "api_key" | "none";
   /** `site`: the organization provides the key (KOBE-303); members add none. */
   readonly credential_source: "member" | "site";
+  /**
+   * `site` only: the key is usable now (set, still bound to the URL; KOBE-449), the same check
+   * the proxy and runs make. Never the key or its hint.
+   */
+  readonly site_key_ready: boolean;
   readonly status: "active" | "disabled";
   readonly icon_url: string | null;
   readonly enabled: boolean;
@@ -45,12 +51,19 @@ export interface TeamConnectorView {
 type Row = typeof connectors.$inferSelect;
 type Enablement = Pick<typeof teamConnectors.$inferSelect, "exposure" | "enabledTools">;
 
-function view(row: Row, e: Enablement | undefined): TeamConnectorView {
+const NONE: ReadonlySet<string> = new Set();
+
+function view(
+  row: Row,
+  e: Enablement | undefined,
+  siteKeys: ReadonlySet<string>,
+): TeamConnectorView {
   return {
     id: row.id,
     name: row.name,
     auth_kind: row.authKind,
     credential_source: row.credentialSource,
+    site_key_ready: siteKeys.has(row.id),
     status: row.status,
     icon_url: row.iconUrl,
     enabled: e !== undefined,
@@ -79,7 +92,11 @@ export async function listTeamConnectors(db: KobeDb, teamId: string): Promise<Te
       tx.select().from(teamConnectors).where(eq(teamConnectors.teamId, teamId)),
     ]);
     const byId = new Map(enabled.map((e) => [e.connectorId, e]));
-    return rows.map((r) => view(r, byId.get(r.id)));
+    const siteKeys = await usableSiteKeyIds(
+      tx,
+      rows.filter((r) => r.credentialSource === "site").map((r) => r.id),
+    );
+    return rows.map((r) => view(r, byId.get(r.id), siteKeys));
   });
 }
 
@@ -145,7 +162,8 @@ export async function setTeamConnector(
         },
       });
     }
-    return { ok: true, connector: view(row, next) } as const;
+    const siteKeys = row.credentialSource === "site" ? await usableSiteKeyIds(tx, [row.id]) : NONE;
+    return { ok: true, connector: view(row, next, siteKeys) } as const;
   });
 }
 

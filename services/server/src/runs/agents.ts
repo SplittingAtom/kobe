@@ -22,6 +22,7 @@ import {
   connectedConnectorNames,
   loadTeamConnectorRows,
   loadUserGrantFacts,
+  loadUsableSiteKeys,
 } from "./run-mcp.js";
 import type { AgentResolution, AgentResolutionInput, RunAgentResolver } from "./seams.js";
 
@@ -185,11 +186,15 @@ export const PINNED_AGENTS: RunAgentResolver = {
               : {}),
           });
     const connectorRows = await loadTeamConnectorRows(tx, input.teamId);
-    const connectedConnectors = connectedConnectorNames(
-      connectorRows,
-      input.noPersonalGrants ? [] : await loadUserGrantFacts(tx, input.teamId, input.ownerUserId),
-      new Date(),
-    );
+    // A skill eval reads neither the owner's grants nor a site key (KOBE-325/326).
+    const connectedConnectors = input.noPersonalGrants
+      ? connectedConnectorNames(connectorRows, [], new Date())
+      : connectedConnectorNames(
+          connectorRows,
+          await loadUserGrantFacts(tx, input.teamId, input.ownerUserId),
+          new Date(),
+          await loadUsableSiteKeys(tx, connectorRows),
+        );
     const resolved = resolveEffective(
       buildResolveInput({
         connectedConnectors,

@@ -159,7 +159,16 @@ export function useFileTree(api: FilesApi, storageKey: string): FileTree {
 
   const moved = useCallback((from: string, to: string) => {
     setExpanded((prev) => new Set([...prev].map((p) => movedPath(p, from, to))));
-    setFolders((prev) => new Map([...prev].filter(([p]) => p === "" || !isWithin(p, from))));
+    // The moved entry leaves its old folder's listing now (KOBE-415): the old and new folders are
+    // listed again separately, and the new one answering first showed the entry in both.
+    setFolders(
+      (prev) =>
+        new Map(
+          [...prev]
+            .filter(([p]) => p === "" || !isWithin(p, from))
+            .map(([p, l]) => [p, dropEntry(l, from)] as const),
+        ),
+    );
   }, []);
 
   const rows = useMemo(() => visibleRows(folders, expanded, limits), [folders, expanded, limits]);
@@ -188,4 +197,11 @@ export function useFileTree(api: FilesApi, storageKey: string): FileTree {
     reveal,
     moved,
   };
+}
+
+/** `load` without the entry at `path` (the same listing when it has none). */
+function dropEntry(load: FolderLoad, path: string): FolderLoad {
+  return load.entries.some((e) => e.path === path)
+    ? { ...load, entries: load.entries.filter((e) => e.path !== path) }
+    : load;
 }
