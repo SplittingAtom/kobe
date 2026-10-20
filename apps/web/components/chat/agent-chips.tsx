@@ -12,7 +12,9 @@ import { useKobeExtras } from "./kobe-runtime";
 export function AgentChips({ compact = false }: { readonly compact?: boolean } = {}) {
   const summary = useKobeExtras()?.state.summary;
   const draftName = useDraftAgentName();
-  const name = summary?.agentName ?? (summary?.agentId == null ? draftName : null);
+  // The draft's choice only before the thread exists: a started agentless thread has no agent
+  // (KOBE-458: it showed the draft's default as if the thread had it).
+  const name = summary ? (summary.agentName ?? null) : draftName;
   if (!name) return null;
   const status = summary?.agentStatus;
   return (

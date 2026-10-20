@@ -72,6 +72,7 @@ describe("agent picker", () => {
         id: "g-kobe",
         scope: "gallery",
         galleryKey: "kobe",
+        default: true,
         slug: "kobe",
         name: "Kobe",
         model: null,

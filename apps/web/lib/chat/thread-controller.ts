@@ -877,6 +877,25 @@ export class ThreadController {
   };
 
   /**
+   * Gives this agentless thread the agent picked in the composer (KOBE-458 ac-3): the next run uses
+   * it and its connectors. Once only; refused while a run is active (`thread_busy`).
+   */
+  readonly chooseAgent = async (agent: { readonly id: string; readonly name: string }) => {
+    const threadId = this.#state.threadId;
+    if (threadId === null || this.#state.busy.includes("agent")) return false;
+    const res = await this.#busy("agent", () => this.#api.chooseThreadAgent(threadId, agent.id));
+    if (!res.ok) {
+      this.#fail(res.error);
+      return false;
+    }
+    this.#set((s) => ({ ...s, summary: res.data }));
+    this.#announce(`Chatting with ${agent.name}. Your next message uses it.`);
+    // The read adds the agent's name, status and current version (the answer is a summary).
+    void this.refresh();
+    return true;
+  };
+
+  /**
    * Chooses the thread's thinking level for its next runs (KOBE-260); null = the model's default.
    * Each run is clamped to the site and team settings of its model by the server.
    */

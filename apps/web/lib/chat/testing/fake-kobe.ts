@@ -75,6 +75,8 @@ export interface FakeRunnableAgent {
   readonly id: string;
   readonly scope: "team" | "personal" | "gallery";
   readonly galleryKey?: string;
+  /** The server's new-conversation default (KOBE-458). */
+  readonly default?: true;
   /** Default: derived from the name. */
   readonly slug?: string;
   readonly name: string;
@@ -1485,7 +1487,18 @@ export class FakeKobe {
     if (id === "app-cards" && method === "POST") {
       const app = this.teamApps.find((a) => a.appId === body?.app_id);
       if (!app) return error(404, "app_not_available", "This app is not available to you.");
-      return this.#launch(this.addThread(app.title as string), body?.app_id);
+      // Like the server (KOBE-458): the new thread pins the agent a new conversation starts with.
+      const threadId = this.addThread(app.title as string);
+      const preset = this.runnableAgents.find((a) => a.default === true);
+      if (preset) {
+        Object.assign(this.#thread(threadId), {
+          agent_id: preset.id,
+          agent_model: preset.model,
+          agent_name: preset.name,
+          agent_status: "active",
+        });
+      }
+      return this.#launch(threadId, body?.app_id);
     }
     if (id === undefined && method === "POST") {
       const model = (body?.model as string | null | undefined) ?? null;
@@ -1610,6 +1623,7 @@ export class FakeKobe {
     }
     if (action === "compact" && method === "POST") return this.#compact(thread, body);
     if (action === "agent-version" && method === "POST") return this.#switchAgent(thread, body);
+    if (action === "agent" && method === "POST") return this.#chooseAgent(thread, body);
     if (ORGANIZE.has(action) && method === "POST") return this.#organize(thread, action, body);
     if (action === "fork" && method === "POST") {
       // Root to the entry (default: the leaf), with the source as provenance (KOBE-216).
@@ -1714,6 +1728,25 @@ export class FakeKobe {
       return error(409, "thread_busy", "The thread is busy. Try again when the run ends.");
     const version = typeof body?.version === "number" ? body.version : thread.agent_current_version;
     thread.agent_version = version ?? thread.agent_version;
+    return json(200, this.#summary(thread));
+  }
+
+  /** Like the server (KOBE-458): the owner's idle agentless thread takes a runnable agent once. */
+  #chooseAgent(thread: FakeThread, body: Json | undefined): Response {
+    if (thread.read_only) return error(404, "thread_not_found", "No thread with that id.");
+    if (thread.agent_id != null) {
+      return error(409, "agent_already_chosen", "This thread already has an agent.");
+    }
+    if (this.activeRun(thread.thread_id))
+      return error(409, "thread_busy", "The thread is busy. Try again when the run ends.");
+    const agent = this.runnableAgents.find((a) => a.id === body?.agent_id);
+    if (!agent) return error(404, "agent_not_found", "No agent with that id.");
+    Object.assign(thread, {
+      agent_id: agent.id,
+      agent_model: agent.model,
+      agent_name: agent.name,
+      agent_status: "active",
+    });
     return json(200, this.#summary(thread));
   }
 

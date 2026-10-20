@@ -71,8 +71,6 @@ export function titleFrom(text: string): string | undefined {
 
 /** How long the agent list is reused by the picker and the header. */
 export const AGENTS_TTL_MS = 30_000;
-/** Stable gallery key of Kobe, the one gallery agent (KOBE-254), preselected for new chats (KOBE-124). */
-export const DEFAULT_AGENT_GALLERY_KEY = "kobe";
 
 export class ChatSession {
   readonly teamId: string;
@@ -334,11 +332,12 @@ export class ChatSession {
     return agent;
   }
 
-  /** New chats start with the gallery agent Kobe when it is runnable here, else No agent. */
+  /**
+   * New chats start with the agent the server marks `default` (gallery Kobe when it is runnable
+   * here; KOBE-458: the same rule a rail launch's new thread follows), else No agent.
+   */
   #applyDefaultAgent(agents: readonly RunnableAgent[]): void {
-    this.#defaultAgent =
-      agents.find((a) => a.scope === "gallery" && a.galleryKey === DEFAULT_AGENT_GALLERY_KEY) ??
-      null;
+    this.#defaultAgent = agents.find((a) => a.default === true) ?? null;
     if (!this.#agentTouched) this.#setAgent(this.#defaultAgent);
   }
 

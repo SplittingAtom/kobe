@@ -16,8 +16,9 @@ import { IconAction } from "../shell/icon-action";
 import { useShellBand } from "../shell/shell-band";
 import { CHAT_PORTALLED } from "../ui/chat-portal";
 import { AgentChips } from "./agent-chips";
-import { AgentPickerMenu } from "./agent-picker";
-import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
+import { AgentPickerMenu, ThreadAgentPickerMenu } from "./agent-picker";
+import type { RunnableAgent } from "../../lib/chat/types";
+import { useChatSession, useKobeExtras, type KobeThreadExtras } from "./kobe-runtime";
 import { ModelSelects, useModelPicker, type ModelPickerData } from "./model-picker";
 
 /**
@@ -58,11 +59,34 @@ export function useFoldedSelectors(panel: HTMLElement | null): boolean {
   return single || narrow;
 }
 
-/** The thread's agent: the picker while the conversation is new, then its name (and state). */
+/**
+ * The thread's agent: the picker while the conversation is new, then its name (and state). A
+ * started conversation of the member's own with no agent keeps a picker (KOBE-458 ac-3): choosing
+ * gives the thread that agent for its next runs.
+ */
 function AgentControl({ compact = false }: { readonly compact?: boolean }) {
   const session = useChatSession();
+  const extras = useKobeExtras();
   const isNew = useAuiState((s) => s.threadListItem.remoteId) === undefined;
-  return isNew && session.canChooseAgent ? <AgentPickerMenu /> : <AgentChips compact={compact} />;
+  const controller = extras?.controller ?? null;
+  const onChoose = useCallback(
+    (agent: RunnableAgent) => void controller?.chooseAgent(agent),
+    [controller],
+  );
+  if (!session.canChooseAgent) return <AgentChips compact={compact} />;
+  if (isNew) return <AgentPickerMenu />;
+  const summary = extras?.state.summary;
+  const agentless =
+    summary !== undefined &&
+    summary.agentId === null &&
+    summary.readOnly !== true &&
+    summary.isTest !== true &&
+    summary.deletedAt == null;
+  return agentless && controller ? (
+    <ThreadAgentPickerMenu onChoose={onChoose} />
+  ) : (
+    <AgentChips compact={compact} />
+  );
 }
 
 /** A press outside the menu closes it; one in portalled content (the agent popover) does not. */

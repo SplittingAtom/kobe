@@ -155,6 +155,11 @@ export interface ChatApi {
    * active (`thread_busy`).
    */
   switchAgentVersion(threadId: string, version?: number): Promise<ApiResult<ThreadSummary>>;
+  /**
+   * Gives an agentless thread an agent, at its current version (`POST /v1/threads/:id/agent`,
+   * KOBE-458). The owner's own; once only (`agent_already_chosen`); refused while a run is active.
+   */
+  chooseThreadAgent(threadId: string, agentId: string): Promise<ApiResult<ThreadSummary>>;
   /** Sets the thread's thinking level for its next runs (KOBE-260; null = the model's default). */
   setThreadThinking(
     threadId: string,
@@ -354,6 +359,8 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
         `/v1/threads/${enc(id)}/agent-version`,
         version === undefined ? {} : { version },
       ),
+    chooseThreadAgent: (id, agentId) =>
+      send("POST", `/v1/threads/${enc(id)}/agent`, { agent_id: agentId }),
     setThreadThinking: (id, level) =>
       send("PATCH", `/v1/threads/${enc(id)}`, { thinking_level: level }),
     listModels: () => listTeamModels(teamId, fetchFn),
