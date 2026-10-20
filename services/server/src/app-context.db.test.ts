@@ -60,6 +60,18 @@ describe("app context on a message (KOBE-439)", () => {
     expect((await ws.started(runId)).message).toBe(expected);
   });
 
+  it("refuses a part whose connector is off in the thread (KOBE-451 review LOW-5)", async () => {
+    const w = await f.world();
+    const { connector, part } = await app(w);
+    const threadId = await f.thread(w.owner);
+    await f.fx.admin.query(
+      `INSERT INTO thread_connectors_off (team_id, thread_id, connector_id) VALUES ($1, $2, $3)`,
+      [w.team, threadId, connector.id],
+    );
+    const res = await f.send(w.owner, threadId, "Use this table", 0, { app_context: [part] });
+    expect([res.status, res.json.code]).toEqual([422, "app_context_invalid"]);
+  });
+
   it("refuses a part for an app the member cannot open, or another template", async () => {
     const w = await f.world();
     const { part } = await app(w);

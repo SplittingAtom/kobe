@@ -6,6 +6,7 @@ import {
   withSkillRequest,
 } from "@kobe/protocol";
 import { effectiveSkillNames } from "./effective-skills.js";
+import { connectorsOffIn } from "../connectors/thread-connectors.js";
 import { RUN_INPUT_MAX_CHARS } from "@kobe/db";
 import {
   resolveAppContexts,
@@ -394,6 +395,13 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         // A repeated submission (same key, same thread) answers with the run it created.
         const seen = await runByClientKey(tx, teamId, thread.id, clientKey);
         if (seen) return { result: { run_id: seen.id, queued: seen.status === "queued" } };
+      }
+      // App context from a connector turned off in this thread is refused (review LOW-5).
+      if (appContext.length > 0) {
+        const off = await connectorsOffIn(tx, teamId, thread.id);
+        if (appContext.some((a) => a.connectorId !== undefined && off.has(a.connectorId))) {
+          throw new RunError("app_context_invalid");
+        }
       }
       // @file mentions (KOBE-223) resolve against the owner's own workspace, never the client's
       // word. A member's bad mention refuses the message; a schedule's file that is gone by now

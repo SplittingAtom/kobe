@@ -1,3 +1,4 @@
+import { imitatesAppContext, imitatesSkillRequest } from "@kobe/protocol";
 import { Hono } from "hono";
 import {
   createScheduleBodySchema,
@@ -41,6 +42,14 @@ import {
   updateSchedule,
   type ScheduleRow,
 } from "../schedules/store.js";
+
+/**
+ * Only the server writes a skill line or app context into a run's input (KOBE-439, KOBE-451
+ * review LOW-7): a schedule's prompt that imitates them is refused when it is saved.
+ */
+const MARKERS_REFUSED = "A prompt can't contain Kobe's skill or app-context markers.";
+const serverMarkers = (prompt: string) =>
+  imitatesSkillRequest(prompt) || imitatesAppContext(prompt);
 
 /** A schedule's `@file` mentions checked against the owner's workspace now (KOBE-223 S3). */
 async function mentionsAnswer(
@@ -131,6 +140,7 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
     const parsed = await parseScheduleBody<CreateScheduleBody>(c, createScheduleBodySchema);
     if (!parsed.ok) return send(c, parsed.answer);
     const body = parsed.data;
+    if (serverMarkers(body.prompt)) return invalidRequest(c, MARKERS_REFUSED);
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
     const due = body.active ? nextDueAt(body.recurrence, body.tz) : null;
@@ -194,6 +204,9 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
     const parsed = await parseScheduleBody<PatchScheduleBody>(c, patchScheduleBodySchema);
     if (!parsed.ok) return send(c, parsed.answer);
     const patch = parsed.data;
+    if (patch.prompt !== undefined && serverMarkers(patch.prompt)) {
+      return invalidRequest(c, MARKERS_REFUSED);
+    }
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
     const answer = await inTeam(

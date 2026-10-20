@@ -358,3 +358,88 @@ describe("the proxy's decision point enforces the run's MCP set (review HIGH-1)"
     await f.until(s.w.team, run, "completed");
   });
 });
+
+describe("connectors off before the first message (review MEDIUM-3)", () => {
+  it("a new thread can start with working connectors off; forged or broken ids are refused", async () => {
+    const s = await setup();
+    const b = f.on(0, s.w.owner);
+    const agentId = (
+      await f.fx.admin.query<{ agent_id: string }>(`SELECT agent_id FROM threads WHERE id = $1`, [
+        s.thread,
+      ])
+    ).rows[0]?.agent_id;
+    const created = await b.post("/v1/threads", {
+      agent_id: agentId,
+      connectors_off: [s.keyed.id],
+    });
+    expect(created.status, JSON.stringify(created.json)).toBe(201);
+    const thread = created.json.thread_id as string;
+    expect(await mcpOf(s.w.team, s.w.owner.id, thread)).toEqual([s.open.name]);
+    const listed = listOf((await b.get(`/v1/threads/${thread}/connectors`)).json);
+    expect(listed.find((c) => c.connector_id === s.keyed.id)?.enabled).toBe(false);
+    const { rows } = await f.fx.admin.query<{ target: Json }>(
+      `SELECT target FROM audit_log WHERE action = 'thread.connector_toggled' AND team_id = $1`,
+      [s.w.team],
+    );
+    expect(rows.map((r) => r.target)).toEqual([
+      { threadId: thread, connectorId: s.keyed.id, enabled: false },
+    ]);
+    // The original thread and the next new one are all on.
+    expect(await mcpOf(s.w.team, s.w.owner.id, s.thread)).toEqual([s.keyed.name, s.open.name]);
+
+    const count = async () =>
+      (
+        await f.fx.admin.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM threads WHERE team_id = $1`,
+          [s.w.team],
+        )
+      ).rows[0]?.n;
+    const before = await count();
+    for (const [ids, code] of [
+      [[s.elsewhere.id], "connector_not_found"],
+      [[s.bare.id], "connector_not_working"],
+    ] as const) {
+      const res = await b.post("/v1/threads", { agent_id: agentId, connectors_off: ids });
+      expect(res.status).toBe(422);
+      expect(res.json.code).toBe(code);
+    }
+    expect(
+      (await b.post("/v1/threads", { agent_id: agentId, test: true, connectors_off: [s.keyed.id] }))
+        .status,
+    ).toBe(400);
+    expect((await b.post("/v1/threads", { connectors_off: [s.keyed.id, s.keyed.id] })).status).toBe(
+      400,
+    );
+    expect(await count()).toBe(before);
+  });
+});
+
+describe("other teams and forged values (review LOW-6)", () => {
+  it("a thread of the member's other team is 404 from the active team, never 500", async () => {
+    const s = await setup();
+    const other = await f.world();
+    await f.fx.admin.query(
+      `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member')`,
+      [other.team, s.w.owner.id],
+    );
+    const b = f.on(0, s.w.owner);
+    expect((await b.put("/v1/me/teams/active", { teamId: other.team })).status).toBe(200);
+    b.team = other.team;
+    expect((await b.get(`/v1/threads/${s.thread}/connectors`)).status).toBe(404);
+    expect((await b.get(`/v1/threads/${s.thread}/skills`)).status).toBe(404);
+    expect(
+      (await b.put(`/v1/threads/${s.thread}/connectors/${s.keyed.id}`, { enabled: false })).status,
+    ).toBe(404);
+    expect(await mcpOf(s.w.team, s.w.owner.id, s.thread)).toEqual([s.keyed.name, s.open.name]);
+  });
+
+  it("enabled: true forged for a broken or unoffered connector changes nothing", async () => {
+    const s = await setup();
+    const b = f.on(0, s.w.owner);
+    const on = (id: string) => b.put(`/v1/threads/${s.thread}/connectors/${id}`, { enabled: true });
+    expect((await on(s.bare.id)).status).toBe(409);
+    expect((await on(s.stale.id)).status).toBe(409);
+    expect((await on(s.elsewhere.id)).status).toBe(404);
+    expect(await mcpOf(s.w.team, s.w.owner.id, s.thread)).toEqual([s.keyed.name, s.open.name]);
+  });
+});

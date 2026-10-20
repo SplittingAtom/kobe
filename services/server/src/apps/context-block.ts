@@ -13,6 +13,8 @@ import { memberApps } from "./catalog.js";
 export { APP_CONTEXT_PREAMBLE };
 
 export interface ResolvedAppContext {
+  /** The app's connector (KOBE-451 review LOW-5: refused where the thread has it off). */
+  readonly connectorId?: string;
   readonly connectorName: string;
   readonly data: AppContextPart["data"];
 }
@@ -63,7 +65,11 @@ export async function resolveAppContexts(
     if (!app || app.connector.id !== part.connector_id || app.sha256 !== part.template_sha256) {
       return undefined;
     }
-    resolved.push({ connectorName: app.connector.name, data: part.data });
+    resolved.push({
+      connectorId: app.connector.id,
+      connectorName: app.connector.name,
+      data: part.data,
+    });
   }
   return resolved;
 }

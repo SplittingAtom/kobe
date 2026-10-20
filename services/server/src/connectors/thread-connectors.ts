@@ -212,3 +212,45 @@ export async function setThreadConnector(
   }
   return { ok: true, connector: { ...listed, enabled } };
 }
+
+/**
+ * The connectors a new conversation starts with off (KOBE-451 review MEDIUM-3), checked before
+ * the thread is created: each must be offered to the member and working, as for the toggle.
+ * Null when they all are, else the refusal.
+ */
+export async function checkConnectorsOff(
+  tx: KobeTx,
+  viewer: ChatViewer,
+  ids: readonly string[],
+): Promise<"connector_not_found" | "connector_not_working" | null> {
+  if (ids.length === 0) return null;
+  const listed = new Map((await listChatConnectors(tx, viewer, null)).map((c) => [c.id, c]));
+  for (const id of ids) {
+    const c = listed.get(id);
+    if (!c) return "connector_not_found";
+    if (c.problem !== null) return "connector_not_working";
+  }
+  return null;
+}
+
+/** Writes a new thread's off connectors (checked by `checkConnectorsOff`), each audited. */
+export async function turnOffAtCreation(
+  tx: KobeTx,
+  viewer: ChatViewer,
+  threadId: string,
+  ids: readonly string[],
+): Promise<void> {
+  for (const connectorId of ids) {
+    await tx.insert(threadConnectorsOff).values({
+      teamId: viewer.teamId,
+      threadId,
+      connectorId,
+      turnedOffBy: viewer.userId,
+    });
+    await recordAudit(tx, {
+      action: "thread.connector_toggled",
+      teamId: viewer.teamId,
+      target: { threadId, connectorId, enabled: false },
+    });
+  }
+}

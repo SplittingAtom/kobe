@@ -178,4 +178,39 @@ describe("the composer's skills (KOBE-451)", () => {
     );
     expect(rows[0]?.payload.error?.code).toBe("skill_not_available");
   });
+
+  it("another team's skill, a teammate's personal skill or a draft outside the Workbench is refused (review LOW-6)", async () => {
+    const { w, thread } = await world();
+    const elsewhere = await f.world();
+    await seedTeamSkill(elsewhere.team, elsewhere.owner.id, "their-skill");
+    const mate = must(w.others[0], "mate");
+    const { rows } = await f.fx.admin.query<{ id: string }>(
+      `INSERT INTO personal_skills (owner_user_id, slug, description) VALUES ($1, 'mates-own', 'd') RETURNING id`,
+      [mate.id],
+    );
+    await f.fx.admin.query(
+      `INSERT INTO personal_skill_versions (skill_id, version, frontmatter, source, content_hash,
+         storage_key, size_bytes, file_count, uncompressed_bytes, uploaded_by, semver, seq)
+       VALUES ($1, 1, '{}', 'zip', $2, 'k', 1, 1, 1, $3, '0.1.0', 1)`,
+      [rows[0]?.id, "b".repeat(64), mate.id],
+    );
+    await f.fx.admin.query(
+      `INSERT INTO skill_drafts (team_id, owner_user_id, updated_by, name, updated_at)
+       VALUES ($1, $2, $2, 'my-draft', now())`,
+      [w.team, w.owner.id],
+    );
+    for (const skill of ["their-skill", "mates-own", "my-draft"]) {
+      const res = await f.send(w.owner, thread, "Use it", 0, { skill });
+      expect(res.status, skill).toBe(422);
+      expect(res.json.code).toBe("skill_not_available");
+    }
+    expect(
+      (
+        await f.fx.admin.query(`SELECT 1 FROM runs WHERE team_id = $1 AND thread_id = $2`, [
+          w.team,
+          thread,
+        ])
+      ).rows,
+    ).toEqual([]);
+  });
 });

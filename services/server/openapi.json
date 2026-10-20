@@ -6870,6 +6870,15 @@
             "type": "string",
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "connectors_off": {
+            "maxItems": 64,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            }
           }
         },
         "additionalProperties": false
@@ -8461,6 +8470,7 @@
                     "not_available",
                     "policy_error",
                     "run_not_active",
+                    "connector_not_in_run",
                     "not_a_member",
                     "sandbox_policy_unavailable",
                     "install_deny_rule",
@@ -8681,6 +8691,7 @@
                           "not_available",
                           "policy_error",
                           "run_not_active",
+                          "connector_not_in_run",
                           "not_a_member",
                           "sandbox_policy_unavailable",
                           "install_deny_rule",
