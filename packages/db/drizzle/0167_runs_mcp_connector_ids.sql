@@ -1,0 +1,1 @@
+ALTER TABLE "runs" ADD COLUMN "mcp_connector_ids" uuid[];

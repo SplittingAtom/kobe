@@ -1170,6 +1170,13 @@
       "when": 1792470461683,
       "tag": "0166_thread_connectors_off_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 167,
+      "version": "7",
+      "when": 1792472799849,
+      "tag": "0167_runs_mcp_connector_ids",
+      "breakpoints": true
     }
   ]
 }
