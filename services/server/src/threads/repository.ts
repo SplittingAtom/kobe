@@ -72,6 +72,7 @@ export type ThreadError =
   | "nothing_to_fork"
   | "project_not_found"
   | "no_agent"
+  | "agent_already_chosen"
   | "model_not_enabled"
   | "thread_archived"
   | "test_thread"

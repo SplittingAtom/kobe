@@ -111,6 +111,9 @@ export const switchAgentVersionBodySchema = z.strictObject({
   version: z.number().int().min(1).max(2_147_483_647).optional(),
 });
 
+/** `POST /v1/threads/{id}/agent` (KOBE-458): the agent an agentless thread takes. */
+export const chooseThreadAgentBodySchema = z.strictObject({ agent_id: uuidSchema });
+
 const limitParam = (max: number, fallback: number) =>
   z
     .string()

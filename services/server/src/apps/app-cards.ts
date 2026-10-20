@@ -28,6 +28,7 @@ import { abortPending } from "../runs/store.js";
 import { fallbackTitle } from "../threads/title.js";
 import { appTitle } from "./app-title.js";
 import { createThread } from "../threads/repository.js";
+import { defaultNewThreadPin } from "../agents/default-agent.js";
 import { callApp, type AppCallDeps, type BrowserPrincipal } from "./call.js";
 import { memberApp, type MemberApp } from "./catalog.js";
 import { exposedToApps } from "./decide.js";
@@ -236,8 +237,8 @@ export async function insertAppCardInTx(
 }
 
 /**
- * Launches `appId` into `threadId` (or a new thread, titled after the app, with the team's
- * default agent). Fails closed: nothing is stored, inserted or created unless the call succeeded
+ * Launches `appId` into `threadId` (or a new thread, titled after the app, with the agent a new
+ * conversation starts with: `defaultNewThreadPin`). Fails closed: nothing is stored, inserted or created unless the call succeeded
  * and the card can go in.
  */
 export async function launchAppCard(
@@ -310,12 +311,13 @@ async function storeCard(
       result,
       async (tx, storage, kept, bytes) => {
         if (existing === null) {
+          // KOBE-458: the agent a new conversation starts with, as the composer's default.
           await createThread(tx, {
             id: threadId,
             teamId: p.teamId,
             ownerUserId: p.userId,
             projectId: null,
-            agent: null,
+            agent: await defaultNewThreadPin(tx, { teamId: p.teamId, userId: p.userId }),
             title: titleOf(app),
           });
         }

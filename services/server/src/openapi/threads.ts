@@ -11,6 +11,7 @@ import {
   moveThreadBodySchema,
   setLeafBodySchema,
   switchAgentVersionBodySchema,
+  chooseThreadAgentBodySchema,
   threadCardSchema,
   threadDetailSchema,
   threadActivityListSchema,
@@ -352,6 +353,28 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         },
       },
     },
+    "/v1/threads/{id}/agent": {
+      post: {
+        operationId: "chooseThreadAgent",
+        summary: "Give an agentless thread an agent (owner only)",
+        description:
+          "KOBE-458: the agent's current published version, checked as at creation. Only a " +
+          "thread with no agent (`agent_already_chosen` otherwise); refused while a run is " +
+          "active (`thread_busy`). Audited (`thread.agent_chosen`).",
+        parameters: change([idParameter]),
+        requestBody: body("ChooseThreadAgentBody"),
+        responses: {
+          "200": json("Thread", "The thread with its new pin."),
+          "404": json("Error", "`thread_not_found` or `agent_not_found`."),
+          ...ERROR_RESPONSES,
+          "409": json(
+            "Error",
+            "`agent_already_chosen`, `agent_unavailable`, `thread_busy`, `thread_in_trash`, " +
+              "`test_thread`, or a team conflict.",
+          ),
+        },
+      },
+    },
     "/v1/threads/{id}/share": {
       post: {
         operationId: "shareThread",
@@ -471,6 +494,7 @@ export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
     SetLeafBody: withoutDialect(input(setLeafBodySchema)),
     MoveThreadBody: withoutDialect(input(moveThreadBodySchema)),
     SwitchAgentVersionBody: withoutDialect(input(switchAgentVersionBodySchema)),
+    ChooseThreadAgentBody: withoutDialect(input(chooseThreadAgentBodySchema)),
     CreatedThread: withoutDialect(output(createdThreadSchema)),
   };
 }

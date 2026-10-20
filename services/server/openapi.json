@@ -1532,6 +1532,106 @@
         }
       }
     },
+    "/v1/threads/{id}/agent": {
+      "post": {
+        "operationId": "chooseThreadAgent",
+        "summary": "Give an agentless thread an agent (owner only)",
+        "description": "KOBE-458: the agent's current published version, checked as at creation. Only a thread with no agent (`agent_already_chosen` otherwise); refused while a run is active (`thread_busy`). Audited (`thread.agent_chosen`).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": true,
+            "description": "The team the client believes is active. Required on changes; must match.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChooseThreadAgentBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The thread with its new pin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Thread"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`, `invalid_cursor` or `team_header_required`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, `forbidden` (team role) or `read_only`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`thread_not_found` or `agent_not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`agent_already_chosen`, `agent_unavailable`, `thread_busy`, `thread_in_trash`, `test_thread`, or a team conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/threads/{id}/share": {
       "post": {
         "operationId": "shareThread",
@@ -6998,6 +7098,18 @@
             "maximum": 2147483647
           }
         },
+        "additionalProperties": false
+      },
+      "ChooseThreadAgentBody": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "required": ["agent_id"],
         "additionalProperties": false
       },
       "CreatedThread": {
