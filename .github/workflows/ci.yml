@@ -23,7 +23,7 @@ defaults:
 
 jobs:
   checks:
-    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-24.04') || vars.KOBE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -66,7 +66,7 @@ jobs:
   # KOBE-300: the server's test:db (~13 min serial) runs in the db-server shards beside this job;
   # every other package's test:db, the schema check and the upgrade path stay here.
   db-core:
-    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-24.04') || vars.KOBE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     services:
       postgres:
@@ -125,7 +125,7 @@ jobs:
   # shard (KOBE_DB_TEST_WORKERS; each file peaks at ~12 connections, within max_connections 100).
   db-server:
     name: db-server (${{ matrix.shard }}/2)
-    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-24.04') || vars.KOBE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -165,7 +165,7 @@ jobs:
     # always(): a skipped required check counts as passed, so this job must run (and fail)
     # even when a shard was cancelled or skipped.
     if: ${{ always() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: db-core and every db-server shard passed
@@ -181,7 +181,7 @@ jobs:
     # required `checks` job stays fast. Pins: Orbit v1.0.3 (commit below, keep in step with
     # ORBIT_PIN in services/server/src/agents/orbit/orbit-schema.ts); its dependencies come from
     # Orbit's uv.lock with hashes (ci/orbit/requirements.txt).
-    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-24.04') || vars.KOBE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
