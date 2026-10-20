@@ -6,7 +6,8 @@ import type { SkillSaved } from "../../lib/admin/api/team/skills";
 import type { ApiError } from "../../lib/api/client";
 import { deleteDraft, type Destination } from "../../lib/skills/drafts-api";
 import { lintSkill } from "../../lib/skills/lint";
-import { SKILL_MD } from "../../lib/skills/skill-md";
+import type { DraftTab } from "../../lib/skills/draft-tabs";
+import { SKILL_MD, splitSkillMd } from "../../lib/skills/skill-md";
 import {
   Button,
   eventTrigger,
@@ -28,6 +29,9 @@ import { SkillMdEditor } from "./skill-md-editor";
 import { EvalsPanel } from "./evals-panel";
 import { SkillTestPane } from "./test-pane";
 import { useDraftEditor, type DraftEditor, type SaveStatus } from "./use-draft-editor";
+import { DefineLayout } from "./define-layout";
+import { useSavedSkillRuns } from "./use-saved-skill-runs";
+import { WorkbenchTabs } from "./workbench-tabs";
 import { useNavigate } from "../shell/use-navigate";
 
 export const WORKBENCH_HREF = "/me/skills?tab=workbench";
@@ -43,11 +47,20 @@ const STATUS_TEXT: Readonly<Record<SaveStatus, string>> = {
 const Back = () => <Link href={WORKBENCH_HREF}>Workbench</Link>;
 const NO_SCRIPTS: readonly string[] = [];
 
-/** The Workbench editor of one draft (KOBE-321, SK12). */
-export function DraftEditorPage({ draftId }: { readonly draftId: string }) {
+/**
+ * The Workbench editor of one draft (KOBE-321, SK12), in Define, Test and Eval tabs (KOBE-459);
+ * `tab` is the address's `?tab=` (null: none).
+ */
+export function DraftEditorPage({
+  draftId,
+  tab = null,
+}: {
+  readonly draftId: string;
+  readonly tab?: DraftTab | null;
+}) {
   const teamId = useTeamAccess().team.id;
   const load = useDraftEditor(teamId, draftId);
-  if (load.status === "ready") return <Editor editor={load.editor} />;
+  if (load.status === "ready") return <Editor editor={load.editor} tab={tab} />;
   return (
     <>
       <p className="m-0 mb-1 text-sm">
@@ -62,7 +75,7 @@ export function DraftEditorPage({ draftId }: { readonly draftId: string }) {
   );
 }
 
-function Editor({ editor }: { readonly editor: DraftEditor }) {
+function Editor({ editor, tab }: { readonly editor: DraftEditor; readonly tab: DraftTab | null }) {
   const access = useTeamAccess();
   const teamId = access.team.id;
   const { draft, files, texts, scan } = editor;
@@ -74,6 +87,8 @@ function Editor({ editor }: { readonly editor: DraftEditor }) {
   const [problem, setProblem] = useState<ApiError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [confirm, confirmDialog] = useConfirm();
+  // Each saved version re-reads the saved skill's eval runs (KOBE-459).
+  const [savedSeq, setSavedSeq] = useState(0);
 
   const scripts =
     scan.status === "ready"
@@ -95,6 +110,7 @@ function Editor({ editor }: { readonly editor: DraftEditor }) {
 
   const saved = (data: SkillSaved, destination: Destination) => {
     setSaving(false);
+    setSavedSeq((n) => n + 1);
     setNotice(
       destination === "team"
         ? `Saved ${data.skill.slug} ${data.version.semver} to ${access.team.name}. It waits for a Team admin's review.`
@@ -146,19 +162,33 @@ function Editor({ editor }: { readonly editor: DraftEditor }) {
         </Notice>
       )}
       {draft.mine && <DraftSettings editor={editor} teamId={teamId} confirm={confirm} />}
-      <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-[14rem_minmax(0,1fr)] 2xl:grid-cols-[14rem_minmax(0,1fr)_minmax(0,28rem)]">
-        <FileTree files={files} selected={selected} onSelect={select} onAdd={editor.addFile} />
-        <div className="min-w-0">
-          <FilePane editor={editor} path={selected} onRemove={remove} />
-          <LintPanel items={lint} />
-          <ScanPanel state={scan} />
-        </div>
-        {/* Beside the editor on wide screens, below it otherwise (KOBE-323). */}
-        <div className="min-w-0 md:col-span-2 2xl:col-span-1">
-          <SkillTestPane teamId={teamId} draftId={draft.id} flush={editor.flush} />
-          <EvalsPanel teamId={teamId} editor={editor} />
-        </div>
-      </div>
+      <WorkbenchTabs
+        draftId={draft.id}
+        requested={tab}
+        flush={editor.flush}
+        panels={(t, shown) =>
+          t === "define" ? (
+            <DefineLayout
+              tree={
+                <FileTree
+                  files={files}
+                  selected={selected}
+                  onSelect={select}
+                  onAdd={editor.addFile}
+                />
+              }
+            >
+              <FilePane editor={editor} path={selected} onRemove={remove} />
+              <LintPanel items={lint} />
+              <ScanPanel state={scan} />
+            </DefineLayout>
+          ) : t === "test" ? (
+            <SkillTestPane teamId={teamId} draftId={draft.id} flush={editor.flush} />
+          ) : (
+            <EvalTab teamId={teamId} editor={editor} active={shown} refresh={savedSeq} />
+          )
+        }
+      />
       <SaveVersionDialog
         open={saving}
         onOpenChange={setSaving}
@@ -172,6 +202,43 @@ function Editor({ editor }: { readonly editor: DraftEditor }) {
         returnFocus={() => saveButton.current}
       />
       {confirmDialog}
+    </>
+  );
+}
+
+/** Eval: the evals panel, its history merged with the saved skill's version runs (KOBE-459). */
+function EvalTab({
+  teamId,
+  editor,
+  active,
+  refresh,
+}: {
+  readonly teamId: string;
+  readonly editor: DraftEditor;
+  readonly active: boolean;
+  readonly refresh: number;
+}) {
+  const skillMd = editor.texts[SKILL_MD] ?? "";
+  const draftName = editor.draft.name;
+  const name = useMemo(() => {
+    const parts = splitSkillMd(skillMd);
+    return parts.ok && parts.value.name ? parts.value.name : draftName;
+  }, [skillMd, draftName]);
+  const { saved, error } = useSavedSkillRuns({
+    teamId,
+    name,
+    mine: editor.draft.mine,
+    active,
+    refresh,
+  });
+  return (
+    <>
+      {error && (
+        <Notice tone="warn">
+          <p>The saved skill&apos;s evals can&apos;t be listed right now: {error.message}</p>
+        </Notice>
+      )}
+      <EvalsPanel teamId={teamId} editor={editor} saved={saved} />
     </>
   );
 }

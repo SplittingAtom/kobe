@@ -48,6 +48,12 @@ const KEY_STEPS: Readonly<Record<string, KeyStep>> = {
   End: (_v, r) => r.max,
 };
 
+/** The arrows for a pane after the handle. */
+const MIRRORED: Readonly<Record<string, string>> = {
+  ArrowLeft: "ArrowRight",
+  ArrowRight: "ArrowLeft",
+};
+
 /** Arrow and Page keys: a step from `from` to `to` that crosses `snap` stops on it. */
 export function snapStep(from: number, to: number, snap: number | undefined): number {
   if (snap === undefined) return to;
@@ -78,6 +84,11 @@ export interface SplitterOptions {
   readonly revert?: (() => void) | undefined;
   /** One arrow key's step in px. */
   readonly step: number;
+  /**
+   * The sized pane is after the handle (KOBE-459, the Workbench editor rail): Left widens it and
+   * Right narrows it, so the arrows move the handle the way they point.
+   */
+  readonly reversed?: boolean | undefined;
   /** The aria values until the first measure. */
   readonly fallback: SplitterRange;
 }
@@ -163,7 +174,7 @@ export function useSplitter(options: SplitterOptions): SplitterProps {
     },
     [],
   );
-  const { measure, pointerValue, preview, commit, reset, snap, step, fallback } = options;
+  const { measure, pointerValue, preview, commit, reset, snap, step, fallback, reversed } = options;
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -201,7 +212,7 @@ export function useSplitter(options: SplitterOptions): SplitterProps {
       reset();
       return;
     }
-    const keyStep = KEY_STEPS[e.key];
+    const keyStep = KEY_STEPS[reversed ? (MIRRORED[e.key] ?? e.key) : e.key];
     const now = measure(e.currentTarget);
     if (!keyStep || !now) {
       setRange(now);
