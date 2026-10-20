@@ -51,7 +51,9 @@ describe("thread list (RemoteThreadListAdapter)", () => {
       expect.stringContaining("Older"),
     ]);
     await userEvent.setup().click(items.getByRole("button", { name: "Newer" }));
-    expect(await screen.findByText("hello from newer")).toBeTruthy();
+    // In the conversation: the pointer stays on the row it clicked, so the rail's hover card
+    // (which shows the thread's first message) opens after its delay on a slow run (KOBE-415).
+    expect(await within(screen.getByRole("main")).findByText("hello from newer")).toBeTruthy();
     expect(window.location.search).toBe(`?thread=${newer}`);
   });
 
