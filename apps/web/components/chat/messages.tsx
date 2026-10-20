@@ -1,6 +1,7 @@
 "use client";
 
 import { splitAppContext } from "../../lib/apps/app-context";
+import { splitSkillRequest } from "@kobe/protocol";
 import {
   ActionBarPrimitive,
   AuiIf,
@@ -10,7 +11,7 @@ import {
   type DataMessagePartProps,
   type TextMessagePartProps,
 } from "@assistant-ui/react";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, WandSparklesIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
 import {
   branchPoint,
@@ -44,24 +45,43 @@ import { ToolCallCard } from "./tool-call";
 import { useArriving } from "./use-arriving";
 import styles from "./chat.module.css";
 
+/** A skill the member picked for this message (KOBE-451): the server's line, shown as a chip. */
+function SentSkill({ name }: { readonly name: string }) {
+  return (
+    <p
+      data-kobe-sent-skill={name}
+      className="text-muted-foreground m-0 mb-1 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs"
+    >
+      <WandSparklesIcon aria-hidden className="size-3" />
+      Skill: {name}
+    </p>
+  );
+}
+
 /** The user's message as typed (React escapes it). */
 function PlainText({ text }: TextMessagePartProps) {
   // MCP Apps context sent with the message (KOBE-439): shown as chips, the JSON one click away.
-  const { contexts, rest } = splitAppContext(text);
-  if (contexts.length === 0) return <span>{text}</span>;
+  const { contexts, rest: afterContext } = splitAppContext(text);
+  const { skill, rest } = splitSkillRequest(afterContext);
+  if (contexts.length === 0 && skill === null) return <span>{text}</span>;
   return (
     <>
-      <ul aria-label="App context sent" className="m-0 mb-1 flex list-none flex-col gap-1 p-0">
-        {contexts.map((c, i) => (
-          <li key={i} data-kobe-sent-app-context className="rounded-md border px-2 py-1 text-xs">
-            <details>
-              <summary className="cursor-pointer">Context from {c.source} (untrusted data)</summary>
-              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap">{c.json}</pre>
-            </details>
-          </li>
-        ))}
-      </ul>
-      <span>{rest}</span>
+      {contexts.length > 0 && (
+        <ul aria-label="App context sent" className="m-0 mb-1 flex list-none flex-col gap-1 p-0">
+          {contexts.map((c, i) => (
+            <li key={i} data-kobe-sent-app-context className="rounded-md border px-2 py-1 text-xs">
+              <details>
+                <summary className="cursor-pointer">
+                  Context from {c.source} (untrusted data)
+                </summary>
+                <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap">{c.json}</pre>
+              </details>
+            </li>
+          ))}
+        </ul>
+      )}
+      {skill !== null && <SentSkill name={skill} />}
+      <span className={skill !== null ? "block" : undefined}>{rest}</span>
     </>
   );
 }

@@ -74,9 +74,7 @@ describe("whole-composer focus (ac-2)", () => {
     expect(document.activeElement).toBe(input);
     expect(box.contains(document.activeElement)).toBe(true);
     // A button inside the panel lights the panel too, and keeps its own ring.
-    within(box)
-      .getByRole("button", { name: /attach/i })
-      .focus();
+    within(box).getByRole("button", { name: "Add to your message" }).focus();
     expect(box.contains(document.activeElement)).toBe(true);
     expect(CSS).not.toMatch(/\.panel\s+button/);
   });

@@ -181,6 +181,8 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
     const mentions = session.mentions.forText(draft, text);
     // MCP Apps context chips (KOBE-439): exactly the ones shown with this draft.
     const contexts = appContextBody(session.appContexts.forDraft(draft));
+    // A skill picked from the + menu (KOBE-451): the server checks it is one a run here loads.
+    const skill = session.skillPicks.get(draft);
     const created = threadId === undefined;
     if (threadId === undefined) {
       try {
@@ -193,12 +195,13 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
     const target = session.peek(threadId) ?? controller;
     // The controller reports its own failures; a throw must never leave the composer stuck.
     const sent = await (
-      target?.send(text, parentEntryId, attach, mentions, contexts) ?? Promise.resolve(false)
+      target?.send(text, parentEntryId, attach, mentions, contexts, skill) ?? Promise.resolve(false)
     ).catch(() => false);
     if (sent) {
       session.attachments.sent(draft);
       session.mentions.clear(draft);
       session.appContexts.clear(draft);
+      session.skillPicks.clear(draft);
     }
     // The thread exists but the message did not go: the composer is on that thread now, so the
     // files (and picked mentions) follow it instead of staying under the abandoned "new" draft
@@ -206,6 +209,7 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
     else if (created) {
       session.attachments.move(draft, threadId);
       session.mentions.move(draft, threadId);
+      session.skillPicks.move(draft, threadId);
     }
     if (created) session.threadCreated();
     return sent;

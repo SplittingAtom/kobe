@@ -46,6 +46,7 @@ import {
   PinIcon,
   PinOffIcon,
   PlayIcon,
+  PlusIcon,
   RefreshCcwDotIcon,
   RefreshCwIcon,
   ServerCogIcon,
@@ -450,7 +451,8 @@ const LIST = [
   { id: "next-branch", name: "Next version", icon: ChevronRightIcon, scope: "message" },
   { id: "copy-code", name: "Copy code", icon: CopyIcon, scope: "message" },
   { id: "open-artifact", name: "Open artifact", icon: PanelRightOpenIcon, scope: "message" },
-  // Composer.
+  // Composer. The + menu (KOBE-451) holds Attach files, Connectors, Memory, Skills and Apps.
+  { id: "plus-menu", name: "Add to your message", icon: PlusIcon, scope: "composer" },
   { id: "attach", name: "Attach files", icon: PaperclipIcon, scope: "composer" },
   // A narrow composer folds its Agent, Model and Thinking selectors into this menu (KOBE-418).
   {

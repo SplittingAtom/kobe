@@ -516,12 +516,30 @@ export class FakeKobe {
 
   /** Offloaded entry bodies (KOBE-208), by entry id. */
   readonly entryBodies = new Map<string, Json>();
+  /**
+   * The composer's + menu (KOBE-451): the member's connectors (wire casing, without `enabled`),
+   * each thread's off ones, and the skills a run loads.
+   */
+  readonly chatConnectors: Json[] = [];
+  readonly connectorsOff = new Map<string, Set<string>>();
+  readonly chatSkills: string[] = [];
   /** `GET /v1/threads/{id}/export` answers this error instead of the Markdown (KOBE-450). */
   exportRefusal: { status: number; code: string; message: string } | null = null;
   /** `GET /v1/threads/{id}/usage` runs (KOBE-43/208), by thread id. */
   readonly threadUsage = new Map<string, Json[]>();
   /** Its `latest_call` (KOBE-211, wire casing), by thread id; absent: null. */
   readonly threadLatestCall = new Map<string, Json>();
+
+  #chatConnectors(threadId: string | null): Response {
+    const off =
+      threadId === null ? new Set<string>() : (this.connectorsOff.get(threadId) ?? new Set());
+    return json(200, {
+      connectors: this.chatConnectors.map((c) => ({
+        ...c,
+        enabled: !off.has(String(c.connector_id)),
+      })),
+    });
+  }
 
   #thread(id: string): FakeThread {
     const thread = this.threads.get(id);
@@ -1460,6 +1478,10 @@ export class FakeKobe {
       for (const t of mine) t.deleted_at = NOW;
       return json(200, { cleared: mine.length });
     }
+    if (id === "connectors" && method === "GET") return this.#chatConnectors(null);
+    if (id === "skills" && method === "GET") {
+      return json(200, { skills: this.chatSkills.map((name) => ({ name })) });
+    }
     if (id === "app-cards" && method === "POST") {
       const app = this.teamApps.find((a) => a.appId === body?.app_id);
       if (!app) return error(404, "app_not_available", "This app is not available to you.");
@@ -1499,6 +1521,22 @@ export class FakeKobe {
       return this.#toolOutput(thread, sub);
     }
     if (action === "entries") return json(200, this.#entryPage(thread, url));
+    if (action === "connectors" && method === "GET") return this.#chatConnectors(thread.thread_id);
+    if (action === "connectors" && method === "PUT" && sub !== undefined) {
+      const row = this.chatConnectors.find((c) => c.connector_id === sub);
+      if (!row) return error(404, "connector_not_found", "That connector isn't available.");
+      if (row.problem != null) {
+        return error(409, "connector_not_working", "That connector isn't working right now.");
+      }
+      const off = new Set(this.connectorsOff.get(thread.thread_id) ?? []);
+      if (body?.enabled === false) off.add(String(sub));
+      else off.delete(String(sub));
+      this.connectorsOff.set(thread.thread_id, off);
+      return json(200, { connector: { ...row, enabled: body?.enabled !== false } });
+    }
+    if (action === "skills" && method === "GET") {
+      return json(200, { skills: this.chatSkills.map((name) => ({ name })) });
+    }
     // `/export` (KOBE-450): the owner's conversation as Markdown, or the refusal set here.
     if (action === "export" && method === "GET") {
       const refusal = this.exportRefusal;

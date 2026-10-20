@@ -9,7 +9,7 @@ import { chatRequests, composer, openApp } from "./testing";
 
 /**
  * KOBE-418 ac-1/ac-2: the bar has no row two; the conversation's Agent, Model and Thinking
- * selectors sit in the composer's toolbar after Attach. On a narrow composer (a phone, or the
+ * selectors sit in the composer's toolbar after the + menu (Attach, KOBE-451). On a narrow composer (a phone, or the
  * column squeezed beside the rail and an artifact) they fold into one "Agent and model" menu, so
  * the toolbar stays one line and Send stays on it.
  */
@@ -80,7 +80,7 @@ describe("the bar keeps row one only (ac-1)", () => {
 });
 
 describe("the composer's selectors (ac-2)", { timeout: 30_000 }, () => {
-  it("a new conversation: Attach, then Chat with, Model and (for a model that has it) Thinking", async () => {
+  it("a new conversation: the + menu, then Chat with, Model and (for a model that has it) Thinking", async () => {
     openApp(fake);
     const bar = await toolbar();
     await within(bar).findByRole("button", { name: "Chat with: No agent" }, WAIT);
@@ -94,7 +94,7 @@ describe("the composer's selectors (ac-2)", { timeout: 30_000 }, () => {
     await within(bar).findByRole("combobox", { name: "Thinking level for this conversation" });
     const names = controlNames(bar);
     expect(names.slice(0, 4)).toEqual([
-      "Attach files",
+      "Add to your message",
       "Chat with: No agent",
       "Model for this conversation",
       "Thinking level for this conversation",
@@ -160,8 +160,8 @@ describe("narrow composers fold the selectors into one menu (ac-2)", { timeout: 
         hidden: true,
       }),
     ).toBeTruthy();
-    // One line: Attach, the menu, then Send at the end.
-    expect(controlNames(bar)).toEqual(["Attach files", "Agent and model", "Send"]);
+    // One line: the + menu, the selectors menu, then Send at the end.
+    expect(controlNames(bar)).toEqual(["Add to your message", "Agent and model", "Send"]);
     const user = userEvent.setup();
     await user.click(button);
     expect(button.getAttribute("aria-expanded")).toBe("true");
@@ -250,7 +250,7 @@ describe(
   "after the first prompt the selectors sit below the composer (KOBE-450)",
   { timeout: 30_000 },
   () => {
-    it("ac-1: below, before the right-aligned gauge; the toolbar keeps Attach and Send", async () => {
+    it("ac-1: below, before the right-aligned gauge; the toolbar keeps the + menu and Send", async () => {
       openApp(fake, startedThread());
       const bar = await toolbar();
       const below = await footer();
@@ -268,7 +268,7 @@ describe(
       ).toBeTruthy();
       expect(gauge.className).toMatch(/\bms-auto\b/);
       expect(below.className).toMatch(/\bflex-wrap\b/);
-      expect(controlNames(bar)).toEqual(["Attach files", "Send"]);
+      expect(controlNames(bar)).toEqual(["Add to your message", "Send"]);
       expect(within(bar).queryByRole("button", { name: "Agent and model" })).toBeNull();
     });
 
@@ -306,10 +306,10 @@ describe(
         within(below).getByRole("combobox", { name: "Thinking level for this conversation" }),
       ).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Agent and model" })).toBeNull();
-      expect(controlNames(bar)).toEqual(["Attach files", "Send"]);
+      expect(controlNames(bar)).toEqual(["Add to your message", "Send"]);
     });
 
-    it("ac-1: Tab goes Attach, Send, then Model and Thinking below (review LOW-7)", async () => {
+    it("ac-1: Tab goes +, Send, then Model and Thinking below (review LOW-7)", async () => {
       openApp(fake, startedThread());
       const bar = await toolbar();
       const below = await footer();

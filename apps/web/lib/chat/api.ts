@@ -192,6 +192,8 @@ export interface ChatApi {
       readonly mentions?: readonly string[] | undefined;
       /** MCP Apps context chips, wire casing (KOBE-439). */
       readonly appContext?: readonly AppContextWire[] | undefined;
+      /** A skill picked from the composer's + menu (KOBE-451). */
+      readonly skill?: string | undefined;
     },
     idempotencyKey: string,
   ): Promise<ApiResult<SubmitResult>>;
@@ -380,6 +382,7 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
           ...(body.appContext === undefined || body.appContext.length === 0
             ? {}
             : { app_context: body.appContext }),
+          ...(body.skill === undefined ? {} : { skill: body.skill }),
         },
         teamId,
         idempotencyKey,

@@ -38,6 +38,8 @@ import { useBindCommands, useBoundCommands } from "../shell/command-bindings";
 import { cn } from "../../lib/utils";
 import { ComposerSelectors, useComposerPicker, useFoldedSelectors } from "./composer-selectors";
 import { ModelWarning } from "./model-picker";
+import { PlusMenu } from "./plus-menu";
+import { SkillPickChip } from "./plus-skills";
 import { SlashMenu } from "./slash-menu";
 import styles from "./chat.module.css";
 import panelStyles from "./composer.module.css";
@@ -89,7 +91,8 @@ function wantsEditLast(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
  * into the running agent at its next safe point. The Steer now and Stop buttons sit in the
  * steering panel above the input (CE10, `steering-panel.tsx`). The text is cleared only
  * once the server accepted it. The mic button dictates into the prompt (`lib/chat/dictation.ts`);
- * sending stops dictation. Before the first prompt its toolbar holds Attach, then the
+ * sending stops dictation. Its toolbar starts with the + menu (KOBE-451: Attach files,
+ * Connectors, Memory, Skills, Apps). Before the first prompt the toolbar then holds the
  * conversation's Agent, Model and Thinking selectors (KOBE-418), folded into one menu on a narrow
  * composer; after it they move to the line below, before the context gauge (KOBE-450).
  */
@@ -165,10 +168,12 @@ export function Composer({
     const mentions = session.mentions.forText(draft, text);
     const attach = session.attachments.ready(draft);
     const contexts = appContextBody(session.appContexts.forDraft(draft));
-    if (await controller.send(text.trim(), undefined, attach, mentions, contexts)) {
+    const skill = session.skillPicks.get(draft);
+    if (await controller.send(text.trim(), undefined, attach, mentions, contexts, skill)) {
       session.attachments.sent(draft);
       session.mentions.clear(draft);
       session.appContexts.clear(draft);
+      session.skillPicks.clear(draft);
       aui.composer.setText("");
     }
   };
@@ -290,6 +295,7 @@ export function Composer({
           <ComposerAttachments draft={draft} threadId={remoteId} />
           <MentionChips draft={draft} />
           <AppContextChips draft={draft} />
+          <SkillPickChip draft={draft} />
           {appInsert.pending && (
             <p
               role="note"
@@ -334,10 +340,10 @@ export function Composer({
               className="sr-only"
               onChange={onPick}
             />
-            <IconAction
-              command="attach"
-              className="size-7 shrink-0 rounded-full"
-              onClick={() => filePicker.current?.click()}
+            <PlusMenu
+              draft={draft}
+              threadId={remoteId ?? null}
+              onAttach={() => filePicker.current?.click()}
             />
             {started ? (
               <span className="flex-1" />
