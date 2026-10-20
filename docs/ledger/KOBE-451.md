@@ -85,6 +85,10 @@ its SKILL.md first and follow it.` before the member's text (after any app conte
   line or app context are refused. LOW-8: follow-up for the coordinator to file: after G11a and
   G11b merge, `rail-apps.tsx` uses `useAppLaunch` (one launch rule).
 - 450 LOW: the `/export` fetch reports a body that fails part way.
+- Re-review (2026-10-20, all closed; LOW-5 strict confirmed). R-1 accepted as a residual risk
+  (coordinator): a run's code naming another of the member's running threads in the sandbox gets
+  that run's connectors; recorded in `docs/specs/mcp-apps-host.md` §3, on Chris's gate list.
+  R-2: the null-list rollout fallback is to be removed next release (`docs/install.md`).
 
 ## Evidence
 

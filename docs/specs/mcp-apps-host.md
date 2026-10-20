@@ -168,6 +168,13 @@ style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'
   Chromium and WebKit the constructor is gone and a fresh `about:blank` realm is blocked
   (`frame-src`/`child-src 'none'`), so "another realm" is theoretical there today; Firefox is
   measured at the gate.
+- **A sandbox run naming another of the member's running threads** (added 2026-10-20,
+  coordinator decision on the KOBE-451 re-review, R-1; on Chris's gate list). The MCP decision
+  point allows only connectors in the named run's `run.start.mcp` and not off in its thread, but
+  the thread is the sandbox's claim: code started by one thread's run can name another of the
+  same member's running threads in the same sandbox and use that run's connectors. Every call is
+  still the member's own, decided under every active run's policy (review M1) and audited; the
+  member's "off for this thread" does not hold against their own other running thread.
 
 ## 4. Decisions
 
