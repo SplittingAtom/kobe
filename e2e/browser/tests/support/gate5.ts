@@ -1,5 +1,6 @@
 import { expect, type Browser, type Locator, type Page } from "@playwright/test";
 import { RUN_TIMEOUT_MS, SHELL_TIMEOUT_MS } from "./constants.js";
+import { pinTeam } from "./team.js";
 
 /**
  * Helpers for the Gate 5 story checks (KOBE-227, `tests/gate5/`) and the specs they reuse. CI's
@@ -130,6 +131,8 @@ export async function secondBrowser(
   await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeVisible({
     timeout: SHELL_TIMEOUT_MS,
   });
+  // Its own session: the same team as the specs' (KOBE-457), not the first team by name.
+  await pinTeam(page);
   return page;
 }
 

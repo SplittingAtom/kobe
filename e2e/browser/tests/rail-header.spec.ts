@@ -52,13 +52,18 @@ test("the top line: team, Threads, Files, Team console (admins), collapse (ac-1,
     "href",
     "/admin/team",
   );
-  // One line: every control on it shares a centre.
+  // One line: every control on it shares a centre. Only the ones on screen: with several teams
+  // the selector's closed menu holds a button per team, laid out below the line but not shown
+  // (KOBE-457).
   const ys = await line.evaluate((el) =>
-    [...el.querySelectorAll<HTMLElement>("button, a, summary")].map((c) => {
-      const r = c.getBoundingClientRect();
-      return Math.round(r.top + r.height / 2);
-    }),
+    [...el.querySelectorAll<HTMLElement>("button, a, summary")]
+      .filter((c) => c.checkVisibility())
+      .map((c) => {
+        const r = c.getBoundingClientRect();
+        return Math.round(r.top + r.height / 2);
+      }),
   );
+  expect(ys.length).toBeGreaterThanOrEqual(4);
   expect(Math.max(...ys) - Math.min(...ys)).toBeLessThanOrEqual(4);
   await shoot(page, "rail-header", page.locator('[data-shell-region="rail"]'));
   // KOBE-452: it opens the console as a panel over the workspace; Close returns focus to it.

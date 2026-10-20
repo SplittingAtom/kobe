@@ -73,16 +73,34 @@ export class Chat {
   }
 
   /**
-   * Turns the rail's Files section on, on its Files tab (saved per member, so another spec or device may have left it
-   * off). The threads are a panel since KOBE-453 (`openThreads`). Nothing to do where the rail is
-   * not on screen (a phone, collapsed).
+   * Turns the rail's Files section on, on its Files tab (saved per member, so another spec or
+   * device may have left it off). The threads are a panel since KOBE-453 (`openThreads`). Nothing
+   * to do where the rail is not on screen (a phone); below 1100 px it is set up in the drawer,
+   * which is closed again.
    */
   async showBothPanels(tab: "files" | "apps" = "files"): Promise<void> {
     const toggle = this.railHeader.getByRole("button", { name: FILES_TOGGLE });
     // Files hidden collapses the rail (KOBE-453 review): its strip's section icon shows it again.
     const strip = this.page.getByRole("button", { name: /^Show (files|apps)$/ });
-    if (!(await toggle.isVisible()) && (await strip.isVisible())) await strip.click();
+    // Below 1100 px the strip opens the rail as a modal drawer instead (the rest of the chat inert):
+    // set the section up in it, then close it (KOBE-457).
+    let opened = false;
+    if (!(await toggle.isVisible()) && (await strip.isVisible())) {
+      await strip.click();
+      opened = true;
+    }
     if (!(await toggle.isVisible())) return;
+    await this.pickTab(tab);
+    const drawer = this.page.locator("#kobe-workspace-rail[data-drawer]");
+    if (opened && (await drawer.isVisible())) {
+      await this.page.keyboard.press("Escape");
+      await expect(drawer).toHaveCount(0);
+    }
+  }
+
+  /** The Files section on, on the wanted tab (where the team has apps). */
+  private async pickTab(tab: "files" | "apps"): Promise<void> {
+    const toggle = this.railHeader.getByRole("button", { name: FILES_TOGGLE });
     if ((await toggle.getAttribute("aria-pressed")) === "false") await toggle.click();
     // Files | Apps (KOBE-448): the tab is stored per member, so another spec may have left Apps.
     // Wait for the apps list to settle (a member last on Apps sees "Loading apps…"), then pick
