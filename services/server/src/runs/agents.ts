@@ -233,7 +233,11 @@ export const PINNED_AGENTS: RunAgentResolver = {
             { teamId: input.teamId, userId: input.ownerUserId },
             value.skills,
           );
-    const omissions = [...value.omissions, ...unavailableOmissions(unavailable)];
+    // A connector the owner turned off here is no "connect it" notice (review LOW-4): left out.
+    const omissions = [
+      ...value.omissions.filter((o) => !(o.kind === "connector" && offNames.has(o.name))),
+      ...unavailableOmissions(unavailable),
+    ];
     const config = {
       ...(pinned.version.definition.prompt.trim() === ""
         ? {}

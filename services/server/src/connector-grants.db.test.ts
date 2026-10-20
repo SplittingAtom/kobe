@@ -6,7 +6,7 @@ import { createMcpService } from "./mcp/service.js";
 import { createInternalApp } from "./routes/internal.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
-import { INTERNAL_KEY, MCP_SESSION_KEY, mcpToken } from "./testing/mcp-fixtures.js";
+import { INTERNAL_KEY, MCP_SESSION_KEY, mcpToken, activeSandbox } from "./testing/mcp-fixtures.js";
 
 /**
  * Per-user API-key grants (KOBE-108): the key is sealed at rest, no API returns it, only the run's
@@ -114,7 +114,11 @@ afterAll(async () => {
 });
 
 const grantFor = async (team: string, user: string, connectorId: string, withKey = true) => {
-  const token = mcpToken({ sandboxId: randomUUID(), teamId: team, userId: user });
+  const token = mcpToken({
+    sandboxId: await activeSandbox(h.admin, team, user),
+    teamId: team,
+    userId: user,
+  });
   const res = await internal.request(`/internal/v1/mcp/connectors/${connectorId}/grant`, {
     method: "POST",
     headers: {
@@ -289,7 +293,11 @@ describe("whose key is used", () => {
 
 describe("nothing else carries the key", () => {
   it("is not in the tools listing the proxy receives", async () => {
-    const token = mcpToken({ sandboxId: randomUUID(), teamId: teamT, userId: aliceId });
+    const token = mcpToken({
+      sandboxId: await activeSandbox(h.admin, teamT, aliceId),
+      teamId: teamT,
+      userId: aliceId,
+    });
     const res = await internal.request(`/internal/v1/mcp/connectors/${apiKeyConnector}/tools`, {
       method: "POST",
       headers: { authorization: `Bearer ${INTERNAL_KEY}`, "kobe-sandbox-token": token },

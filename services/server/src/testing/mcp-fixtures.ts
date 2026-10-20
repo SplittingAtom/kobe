@@ -199,3 +199,30 @@ export async function allowApproval(
   );
   return { approvalId, toolCallId };
 }
+
+/**
+ * A sandbox with one active run of `userId` leased to it (a thread, a running run, its lease):
+ * the MCP proxy's tools/list and grant reveal serve only connectors of an active run of the
+ * sandbox (KOBE-451 review HIGH-1). The run's MCP set is not recorded (as for a run from before
+ * KOBE-451), so every team connector its thread hasn't turned off counts. Returns its id.
+ */
+export async function activeSandbox(
+  admin: pg.Client,
+  teamId: string,
+  userId: string,
+): Promise<string> {
+  const sandboxId = randomUUID();
+  const threadId = randomUUID();
+  const runId = randomUUID();
+  await admin.query(
+    `INSERT INTO threads (team_id, id, owner_user_id, status) VALUES ($1, $2, $3, 'running')`,
+    [teamId, threadId, userId],
+  );
+  await admin.query(
+    `INSERT INTO runs (team_id, id, thread_id, trigger, status, started_at)
+     VALUES ($1, $2, $3, 'user', 'running', now())`,
+    [teamId, runId, threadId],
+  );
+  await leaseRun(admin, teamId, runId, userId, sandboxId);
+  return sandboxId;
+}

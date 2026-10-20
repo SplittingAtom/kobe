@@ -8,6 +8,7 @@ import { createRateLimiter } from "../sandbox/rate-limit.js";
 import type { RunPolicyContextSource } from "../sandbox-wire/types.js";
 import { DENY_UNVERIFIED_APPROVALS, type McpApprovalVerifier } from "./approvals.js";
 import { exposedTools, loadTeamConnector } from "./catalog.js";
+import { loadActiveRuns, runHasConnector } from "./run-context.js";
 import type { PolicySources } from "./fan-out.js";
 import {
   decideMcpCall,
@@ -63,6 +64,7 @@ async function auditListRefused(
   principal: McpPrincipal,
   connectorId: string,
   limiter: ReturnType<typeof createRateLimiter>,
+  reason: "connector_not_enabled" | "connector_not_in_run" = "connector_not_enabled",
 ): Promise<void> {
   if (limiter.take(principal.sandboxId) !== 0) return;
   try {
@@ -75,7 +77,7 @@ async function auditListRefused(
           sandboxId: principal.sandboxId,
           userId: principal.userId,
           connectorId,
-          reason: "connector_not_enabled",
+          reason,
         },
       }),
     );
@@ -106,11 +108,30 @@ export function createMcpService(options: McpServiceOptions): McpService {
           refresh,
         )
       : Promise.resolve({ ok: false, failure: "unavailable" });
+  /**
+   * KOBE-451 review HIGH-1: a tools/list or a grant reveal is for a connector of some active run
+   * of this sandbox's user (its `run.start.mcp`); the call itself is then decided for the run it
+   * names. Fails closed when the runs can't be read.
+   */
+  const inSomeRun = async (principal: McpPrincipal, connectorId: string): Promise<boolean> => {
+    const loaded = await loadActiveRuns(options.db, options.runContext, principal);
+    return loaded.ok && loaded.runs.some((r) => runHasConnector(r, connectorId));
+  };
   return {
     async listTools(principal, connectorId) {
       const connector = await loadTeamConnector(options.db, principal.teamId, connectorId);
       if (!connector) {
         await auditListRefused(options.db, principal, connectorId, deniedAudits);
+        return undefined;
+      }
+      if (!(await inSomeRun(principal, connector.id))) {
+        await auditListRefused(
+          options.db,
+          principal,
+          connectorId,
+          deniedAudits,
+          "connector_not_in_run",
+        );
         return undefined;
       }
       return {
@@ -119,8 +140,17 @@ export function createMcpService(options: McpServiceOptions): McpService {
       };
     },
     decide: (principal, request) => decideMcpCall(deps, principal, request),
-    revealCredential: (principal, connectorId) =>
-      reveal(principal.teamId, principal.userId, connectorId),
+    async revealCredential(principal, connectorId) {
+      if (!options.envelope) return { ok: false, failure: "unavailable" };
+      if (!(await inSomeRun(principal, connectorId))) {
+        logger.info(
+          { sandboxId: principal.sandboxId, teamId: principal.teamId, connectorId },
+          "mcp: grant refused, connector in no active run",
+        );
+        return { ok: false, failure: "not_available" };
+      }
+      return reveal(principal.teamId, principal.userId, connectorId);
+    },
     revealForMember: reveal,
   };
 }

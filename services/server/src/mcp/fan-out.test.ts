@@ -12,6 +12,8 @@ const run = (id: string, extra: Partial<ActiveRunContext> = {}): ActiveRunContex
   mode: "ask-on-write",
   toolsAllow: [],
   toolsDeny: [],
+  mcpConnectorIds: null,
+  connectorsOff: [],
   ...extra,
 });
 

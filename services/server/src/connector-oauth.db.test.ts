@@ -6,7 +6,7 @@ import { createInternalApp } from "./routes/internal.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { FakeOauthServer } from "./testing/fake-oauth-server.js";
 import { openHarness, type Harness } from "./testing/harness.js";
-import { INTERNAL_KEY, MCP_SESSION_KEY, mcpToken } from "./testing/mcp-fixtures.js";
+import { INTERNAL_KEY, MCP_SESSION_KEY, activeSandbox, mcpToken } from "./testing/mcp-fixtures.js";
 
 /**
  * Per-user OAuth grants (KOBE-109) against a fake authorization server following the MCP
@@ -131,7 +131,11 @@ const grantFor = async (team: string, user: string, connectorId: string) => {
     method: "POST",
     headers: {
       authorization: `Bearer ${INTERNAL_KEY}`,
-      "kobe-sandbox-token": mcpToken({ sandboxId: randomUUID(), teamId: team, userId: user }),
+      "kobe-sandbox-token": mcpToken({
+        sandboxId: await activeSandbox(h.admin, team, user),
+        teamId: team,
+        userId: user,
+      }),
     },
   });
   return { status: res.status, text: await res.text() };

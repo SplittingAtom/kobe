@@ -8,7 +8,13 @@ import { createInternalApp } from "./routes/internal.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 import { signSessionToken } from "@kobe/session-token";
-import { INTERNAL_KEY, MCP_SESSION_KEY, leaseRun, mcpToken } from "./testing/mcp-fixtures.js";
+import {
+  INTERNAL_KEY,
+  MCP_SESSION_KEY,
+  leaseRun,
+  mcpToken,
+  activeSandbox,
+} from "./testing/mcp-fixtures.js";
 
 /**
  * A site-wide API key for an MCP connector (KOBE-303): a site admin sets one key, every member of
@@ -107,7 +113,11 @@ afterAll(async () => {
 });
 
 const grantFor = async (team: string, user: string, connectorId: string) => {
-  const token = mcpToken({ sandboxId: randomUUID(), teamId: team, userId: user });
+  const token = mcpToken({
+    sandboxId: await activeSandbox(h.admin, team, user),
+    teamId: team,
+    userId: user,
+  });
   const res = await internal.request(`/internal/v1/mcp/connectors/${connectorId}/grant`, {
     method: "POST",
     headers: { authorization: `Bearer ${INTERNAL_KEY}`, "kobe-sandbox-token": token },
@@ -270,7 +280,7 @@ describe("members use it (ac-3, ac-5)", () => {
     expect(res.status).toBe(401);
     expect(JSON.stringify(res.body)).not.toContain(SITE_KEY);
     const revealed = await h.deps.mcp.revealCredential(
-      { sandboxId: randomUUID(), teamId: teamOn, userId: bobId },
+      { sandboxId: await activeSandbox(h.admin, teamOn, bobId), teamId: teamOn, userId: bobId },
       id,
     );
     expect(revealed).toEqual({ ok: false, failure: "not_available" });
@@ -455,7 +465,7 @@ describe("review follow-ups", () => {
     ]);
     expect((await grantFor(teamOn, bobId, id)).status).toBe(401);
     const revealed = await h.deps.mcp.revealCredential(
-      { sandboxId: randomUUID(), teamId: teamOn, userId: bobId },
+      { sandboxId: await activeSandbox(h.admin, teamOn, bobId), teamId: teamOn, userId: bobId },
       id,
     );
     expect(revealed).toEqual({ ok: false, failure: "not_available" });

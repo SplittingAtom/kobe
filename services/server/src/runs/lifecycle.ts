@@ -237,6 +237,7 @@ export async function promoteInTx(
       })
       .where(and(eq(runs.teamId, teamId), eq(runs.id, next.id)));
     await recordRunSkillRefsInTx(tx, teamId, next.id, resolved.skillRefs ?? []);
+    await recordRunMcpInTx(tx, teamId, next.id, resolved);
     // KOBE-315 (CE12): skills at another version than this thread's last run with them.
     const updates = await skillUpdatesInTx(tx, teamId, threadId, next.id, resolved.skillRefs ?? []);
     if (updates.length > 0) {
@@ -313,6 +314,23 @@ export function requestedModel(
   if (pinned !== undefined) return { alias: pinned, source: "agent" };
   if (thread.modelAlias !== null) return { alias: thread.modelAlias, source: "thread" };
   return { alias: undefined, source: "default" };
+}
+
+/**
+ * The connectors of the run's `run.start.mcp` (KOBE-451 review HIGH-1), kept with the run: the
+ * MCP proxy's decisions, lists and reveals allow only these for it (`mcp/run-context.ts`).
+ */
+async function recordRunMcpInTx(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+  resolved: Resolved,
+): Promise<void> {
+  const ids = (resolved.mcp?.servers ?? []).map((s) => s.connector_id);
+  await tx
+    .update(runs)
+    .set({ mcpConnectorIds: ids })
+    .where(and(eq(runs.teamId, teamId), eq(runs.id, runId)));
 }
 
 /** The skill a run's input asks for (the server's line after any app context), or null. */
@@ -413,6 +431,7 @@ export async function restartPlanInTx(
   if (!resolved.ok) return undefined;
   // The re-sent start lists the skills resolved now: only those count as used (KOBE-297).
   await recordRunSkillRefsInTx(tx, run.teamId, run.id, resolved.skillRefs ?? [], true);
+  await recordRunMcpInTx(tx, run.teamId, run.id, resolved);
   // The model the run started with (`run.started.model`), so a re-sent start does not switch
   // models; the resolver's alias only when the run had none.
   const started = await startedModelAlias(tx, run.teamId, run.id);
