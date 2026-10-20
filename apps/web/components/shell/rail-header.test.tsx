@@ -2,7 +2,8 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { isMacPlatform } from "../../lib/shell/shortcuts";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
@@ -315,18 +316,21 @@ describe("Threads and the Files toggle (ac-3, KOBE-453)", { timeout: 30_000 }, (
     expect(window.location.pathname).toBe("/threads");
   });
 
-  it("the Files toggle hides and shows the section", async () => {
+  it("hiding Files collapses the rail to its strip; Show files brings both back (review H2)", async () => {
     openApp(fake);
     await composer();
     await header();
     const user = userEvent.setup();
-    await user.click(toggle("Files panel"));
-    expect(toggle("Files panel").getAttribute("aria-pressed")).toBe("false");
     expect(toggle("Files panel").hasAttribute("aria-disabled")).toBe(false);
-    expect(section("kobe-rail-files").hidden).toBe(true);
     await user.click(toggle("Files panel"));
-    expect(toggle("Files panel").getAttribute("aria-pressed")).toBe("true");
+    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(true));
+    expect(section("kobe-rail-files").hidden).toBe(true);
+    // The strip keeps New conversation and Threads; Show files expands with Files on.
+    expect(within(rail()).getByRole("button", { name: "Show threads" })).toBeTruthy();
+    await user.click(within(rail()).getByRole("button", { name: "Show files" }));
+    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(false));
     expect(section("kobe-rail-files").hidden).toBe(false);
+    expect(toggle("Files panel").getAttribute("aria-pressed")).toBe("true");
   });
 
   it("is saved per member and read back on the next load (another device)", async () => {
@@ -338,9 +342,18 @@ describe("Threads and the Files toggle (ac-3, KOBE-453)", { timeout: 30_000 }, (
     act(() => cleanup());
     openApp(fake);
     await composer();
-    await header();
-    await waitFor(() => expect(section("kobe-rail-files").hidden).toBe(true));
-    expect(toggle("Files panel").getAttribute("aria-pressed")).toBe("false");
+    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(true));
+    expect(section("kobe-rail-files").hidden).toBe(true);
+    // Mod+B expands it again, with Files on (saved like the toggle).
+    act(() => {
+      fireEvent.keyDown(document.body, {
+        key: "b",
+        code: "KeyB",
+        ...(isMacPlatform() ? { metaKey: true } : { ctrlKey: true }),
+      });
+    });
+    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(false));
+    await waitFor(() => expect(puts().at(-1)?.body).toMatchObject({ rail_panels: "both" }), WAIT);
   });
 });
 

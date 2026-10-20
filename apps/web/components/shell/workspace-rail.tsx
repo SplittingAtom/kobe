@@ -16,6 +16,7 @@ import { THREADS_PANEL_HREF } from "../../lib/shell/panels";
 import { shortcutOf } from "../../lib/shell/shortcuts";
 import { IconAction } from "./icon-action";
 import { useOpenPanel } from "./panel-close";
+import { OVERALL_LABEL, useOverallActivity } from "../chat/thread-activity";
 import {
   RailDropNotice,
   RailDropOverlay,
@@ -105,7 +106,10 @@ function CollapsedIcons({
   );
 }
 
-/** Opens the Threads panel over the workspace (KOBE-453). */
+/**
+ * Opens the Threads panel over the workspace (KOBE-453). With the rows out of the rail, it carries
+ * their activity: a dot while any conversation runs or waits for the member's approval.
+ */
 function ThreadsButton({
   command,
   size,
@@ -118,9 +122,12 @@ function ThreadsButton({
   readonly className: string;
 }) {
   const openPanel = useOpenPanel();
+  const activity = useOverallActivity();
   return (
     <IconAction
       command={command}
+      badge={activity === "idle" ? undefined : OVERALL_LABEL[activity]}
+      data-kobe-activity={activity}
       size={size}
       side={side}
       variant={RAIL_ACTION_VARIANT}

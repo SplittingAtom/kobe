@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
 import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
-import { composer, openApp } from "../chat/testing";
+import { composer, openApp, openRowMenu } from "../chat/testing";
 
 /**
  * KOBE-453: the threads leave the rail for a Threads panel over the workspace (KOBE-452's large
@@ -34,7 +34,7 @@ const rail = () => screen.getByRole("complementary", { name: "Workspace" });
 const threadsButton = () => within(rail()).getByRole("button", { name: "Threads panel" });
 const panel = () => screen.findByRole("dialog", { name: "Threads" }, WAIT);
 const closed = () =>
-  waitFor(() => expect(screen.queryByRole("dialog", { name: "Threads" })).toBeNull(), WAIT);
+  waitFor(() => expect(document.querySelector('[data-kobe-panel="threads"]')).toBeNull(), WAIT);
 
 async function openOn(threadId?: string) {
   openApp(fake, threadId);
@@ -65,22 +65,45 @@ describe("the Threads panel (ac-1, ac-5)", () => {
     await waitFor(() => expect(document.activeElement).toBe(threadsButton()));
   });
 
-  it("searches the titles, ignoring case and accents, across every group", async () => {
-    fake.addThread("Café budget");
+  it("searches with the server (?q=), the hits as rows with their menu, and what matched", async () => {
+    fake.addThread("Quarterly budget");
     fake.addThread("Hiring plan");
-    const old = fake.addThread("Old budget");
-    must(fake.threads.get(old)).deleted_at = "2026-10-01T10:00:00.000Z";
     const { user, dialog } = await openOn();
     await within(dialog).findByRole("button", { name: "Hiring plan" }, WAIT);
-    await user.type(within(dialog).getByLabelText("Search threads"), "CAFE");
-    expect(within(dialog).getByRole("button", { name: "Café budget" })).toBeTruthy();
-    expect(within(dialog).queryByRole("button", { name: "Hiring plan" })).toBeNull();
-    await user.clear(within(dialog).getByLabelText("Search threads"));
     await user.type(within(dialog).getByLabelText("Search threads"), "budget");
-    // A match in Trash shows too, its group opened.
-    expect(within(dialog).getByRole("button", { name: "Restore Old budget" })).toBeTruthy();
+    const hits = within(await within(dialog).findByRole("list", { name: "Search results" }, WAIT));
+    await waitFor(() =>
+      expect(fake.requests.some((r) => r.path === "/v1/threads?q=budget")).toBe(true),
+    );
+    // One request for the whole word: the field waits for the last key.
+    expect(fake.requests.filter((r) => r.path.startsWith("/v1/threads?q=b"))).toHaveLength(1);
+    expect(hits.getAllByRole("listitem")).toHaveLength(1);
+    expect(hits.getByRole("button", { name: "Quarterly budget" })).toBeTruthy();
+    // The same row as in its group: its ⋯ menu, and the snippet under it.
+    expect(hits.getByRole("button", { name: "Actions for Quarterly budget" })).toBeTruthy();
+    expect(hits.getByText("Quarterly budget", { selector: "mark" })).toBeTruthy();
+    expect(within(dialog).queryByRole("button", { name: "Hiring plan" })).toBeNull();
     await user.type(within(dialog).getByLabelText("Search threads"), " nothing");
-    expect(within(dialog).getByText("No threads match “budget nothing”.")).toBeTruthy();
+    expect(
+      await within(dialog).findByText("No threads match “budget nothing”.", {}, WAIT),
+    ).toBeTruthy();
+    await user.clear(within(dialog).getByLabelText("Search threads"));
+    expect(await within(dialog).findByRole("button", { name: "Hiring plan" }, WAIT)).toBeTruthy();
+  });
+
+  it("a hit the list has not read yet still opens, closing the panel", async () => {
+    fake.addThread("Near");
+    const { user, dialog } = await openOn();
+    await within(dialog).findByRole("button", { name: "Near" }, WAIT);
+    // Made since the list was read (as one further down its pages): only the server knows it.
+    const t = fake.addThread("Far back");
+    await user.type(within(dialog).getByLabelText("Search threads"), "far");
+    const hits = within(await within(dialog).findByRole("list", { name: "Search results" }, WAIT));
+    const row = await hits.findByRole("button", { name: "Far back" }, WAIT);
+    expect(hits.queryByRole("button", { name: "Actions for Far back" })).toBeNull();
+    await user.click(row);
+    await closed();
+    await waitFor(() => expect(window.location.search).toBe(`?thread=${t}`));
   });
 
   it("choosing a thread opens it and closes the panel; Back returns to the one before", async () => {
@@ -149,6 +172,9 @@ describe("Trash (ac-2)", () => {
     expect(list.getByRole("button", { name: "Delete Old idea forever" })).toBeTruthy();
     await user.click(list.getByRole("button", { name: "Restore Old idea" }));
     await waitFor(() => expect(fake.threads.get(old)?.deleted_at).toBeNull(), WAIT);
+    // Restoring opens nothing: the panel stays, on the same thread (review M5).
+    expect(screen.getByRole("dialog", { name: "Threads" })).toBe(dialog);
+    expect(window.location.pathname).toBe("/threads");
     expect(await within(dialog).findByRole("button", { name: "Old idea" }, WAIT)).toBeTruthy();
   });
 });
@@ -162,5 +188,78 @@ describe("New conversation (ac-4)", () => {
       b.getAttribute("aria-label"),
     );
     expect(labels.indexOf("Threads panel")).toBe(labels.indexOf("New conversation") + 1);
+  });
+});
+
+describe("actions from the panel (review M5)", () => {
+  it("Regenerate opens its thread and closes the panel onto it; Copy keeps it open", async () => {
+    const a = fake.addThread("Alpha");
+    const b = fake.addThread("Budget");
+    const root = fake.addSystemEntry(b, null, "thinking_level_change", { thinkingLevel: "off" });
+    const u = fake.addEntry(b, root, { role: "user", content: "sum it" });
+    const answer = fake.addEntry(b, u, {
+      role: "assistant",
+      content: [{ type: "text", text: "42" }],
+    });
+    must(fake.threads.get(b)).leaf_entry_id = answer;
+    const { user } = await openOn(a);
+    const copy = await openRowMenu("Actions for Budget");
+    await user.click(within(copy).getByRole("menuitem", { name: "Copy" }));
+    expect(await screen.findByText("Copied “Budget” as Markdown.", {}, WAIT)).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Threads" })).toBeTruthy();
+    const regen = await openRowMenu("Actions for Budget");
+    await user.click(within(regen).getByRole("menuitem", { name: "Regenerate" }));
+    await closed();
+    await waitFor(() => expect(window.location.search).toBe(`?thread=${b}`));
+  });
+});
+
+describe("the Threads button's activity (review M4)", () => {
+  it("shows a dot while any conversation runs, named for screen readers", async () => {
+    const t = fake.addThread("Report");
+    openApp(fake, t);
+    const user = userEvent.setup();
+    await user.type(await composer(), "go{Enter}");
+    await waitFor(() => expect(fake.activeRun(t)).toBeDefined(), WAIT);
+    const button = await within(rail()).findByRole(
+      "button",
+      { name: "Threads panel, a conversation is running" },
+      WAIT,
+    );
+    expect(button.getAttribute("data-kobe-activity")).toBe("running");
+    expect(button.querySelector("[data-badge]")).not.toBeNull();
+  });
+
+  it("has no dot while nothing runs", async () => {
+    fake.addThread("Quiet");
+    openApp(fake);
+    await composer();
+    expect(threadsButton().getAttribute("data-kobe-activity")).toBe("idle");
+    expect(threadsButton().querySelector("[data-badge]")).toBeNull();
+  });
+});
+
+describe("on a phone (review L7)", () => {
+  it("focus goes back to the drawer's Threads after Escape; choosing closes panel and drawer", async () => {
+    resizeWindow(390);
+    const t = fake.addThread("Alpha");
+    openApp(fake);
+    await composer();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Show the workspace" }));
+    const drawer = await screen.findByRole("dialog", { name: "Workspace" });
+    const threads = within(drawer).getByRole("button", { name: "Threads panel" });
+    await user.click(threads);
+    const dialog = await panel();
+    within(dialog).getByLabelText("Search threads").focus();
+    await user.keyboard("{Escape}");
+    await closed();
+    await waitFor(() => expect(document.activeElement).toBe(threads));
+    expect(screen.getByRole("dialog", { name: "Workspace" })).toBeTruthy();
+    await user.click(threads);
+    await user.click(await within(await panel()).findByRole("button", { name: "Alpha" }, WAIT));
+    await closed();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Workspace" })).toBeNull());
+    expect(window.location.search).toBe(`?thread=${t}`);
   });
 });

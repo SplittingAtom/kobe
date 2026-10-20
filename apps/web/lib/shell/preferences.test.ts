@@ -2,7 +2,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyArtifactWidth,
-  applyThreadsShare,
   createPreferencesSaver,
   loadPreferences,
   PREFERENCES_PATH,
@@ -13,16 +12,6 @@ import {
 
 /** KOBE-202 (CE8): layout preferences, applied when they still fit and saved debounced. */
 describe("apply (ac-3)", () => {
-  it("applies a share within the rail's bounds and ignores one outside", () => {
-    expect(applyThreadsShare(0.45)).toBe(0.45);
-    expect(applyThreadsShare(0.2)).toBe(0.2);
-    expect(applyThreadsShare(0.8)).toBe(0.8);
-    expect(applyThreadsShare(0.85)).toBeNull();
-    expect(applyThreadsShare(0.1)).toBeNull();
-    expect(applyThreadsShare(Number.NaN)).toBeNull();
-    expect(applyThreadsShare(undefined)).toBeNull();
-  });
-
   it("applies a width that fits beside the conversation's floor, else the default", () => {
     expect(applyArtifactWidth(600, 1000)).toBe(600); // 600 + 400 = 1000
     expect(applyArtifactWidth(601, 1000)).toBeNull(); // wider than the space now holds
@@ -39,7 +28,8 @@ describe("wire", () => {
       readPreferences({
         preferences: { railCollapsed: true, threadsShare: 0.4, artifactWidth: 720 },
       }),
-    ).toEqual({ railCollapsed: true, threadsShare: 0.4, artifactWidth: 720 });
+      // The Threads share (KOBE-198) is no longer read since KOBE-453.
+    ).toEqual({ railCollapsed: true, artifactWidth: 720 });
     expect(readPreferences({ preferences: { artifactWidth: null } })).toEqual({
       artifactWidth: null,
     });
@@ -48,8 +38,6 @@ describe("wire", () => {
         preferences: { railCollapsed: "yes", threadsShare: "0.4", artifactWidth: 1.5 },
       }),
     ).toEqual({});
-    // Read with the protocol's reader: a share outside the rail's bounds is dropped, not clamped.
-    expect(readPreferences({ preferences: { threadsShare: 0.95 } })).toEqual({});
     expect(readPreferences(null)).toEqual({});
     expect(readPreferences({ preferences: [] })).toEqual({});
     // KOBE-208: the Detail toggle.
@@ -69,8 +57,8 @@ describe("wire", () => {
 
   it("writes only the keys that changed, in wire casing", () => {
     expect(toWire({ railCollapsed: false })).toEqual({ rail_collapsed: false });
-    expect(toWire({ threadsShare: 0.5, artifactWidth: null })).toEqual({
-      threads_share: 0.5,
+    expect(toWire({ railWidth: 360, artifactWidth: null })).toEqual({
+      rail_width: 360,
       artifact_width: null,
     });
     expect(toWire({ detailExpanded: false })).toEqual({ detail_expanded: false });
@@ -117,14 +105,14 @@ describe("save", () => {
   it("debounces changes into one PUT of the keys that changed", async () => {
     const fetchFn = putFetch();
     const saver = createPreferencesSaver({ fetchFn, delayMs: 500 });
-    saver.save({ threadsShare: 0.55 });
-    saver.save({ threadsShare: 0.5 });
+    saver.save({ railWidth: 330 });
+    saver.save({ railWidth: 320 });
     await vi.advanceTimersByTimeAsync(400);
     saver.save({ railCollapsed: true });
     expect(fetchFn).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(500);
     expect(bodies(fetchFn)).toEqual([
-      { path: PREFERENCES_PATH, method: "PUT", body: { threads_share: 0.5, rail_collapsed: true } },
+      { path: PREFERENCES_PATH, method: "PUT", body: { rail_width: 320, rail_collapsed: true } },
     ]);
   });
 

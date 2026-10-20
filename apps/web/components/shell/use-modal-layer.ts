@@ -84,15 +84,23 @@ export function useModalLayer(
     if (!active || !el) return;
     const undoInert = modal ? inertOutsideWhileOpen(el) : () => {};
     if (!el.contains(document.activeElement)) el.focus();
+    // Another modal layer opened over this one (the Threads panel over the phone's drawer,
+    // KOBE-453) takes its own keys and presses: the top layer closes, not the one under it.
+    const inLayerAbove = (target: EventTarget | null) =>
+      target instanceof Element &&
+      !el.contains(target) &&
+      target.closest('[aria-modal="true"]') !== null;
     const onKeyDown = (e: KeyboardEvent) => {
       if (!escape || e.key !== "Escape" || e.defaultPrevented) return;
       if (e.target instanceof Element && e.target.closest(PORTALLED)) return;
+      if (inLayerAbove(e.target)) return;
       e.preventDefault();
       close.current();
     };
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target instanceof Element ? e.target : null;
       if (!modal || !target || el.contains(target) || target.closest(PORTALLED)) return;
+      if (inLayerAbove(target)) return;
       close.current();
     };
     document.addEventListener("keydown", onKeyDown);

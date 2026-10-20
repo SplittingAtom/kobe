@@ -3,6 +3,7 @@
 import { ThreadListItemPrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import { useId } from "react";
 import { THREAD_DRAG_TYPE } from "../../lib/chat/organize";
+import { useHitNote } from "./hit-note";
 import { placementOf } from "../../lib/chat/thread-groups";
 import { IconAction } from "../shell/icon-action";
 import { RailThreadCard } from "../shell/rail-thread-card";
@@ -27,6 +28,8 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
   // A run going or an approval waiting, live, also while another thread is open (KOBE-301).
   const activity = useRowActivity();
   const activityId = useId();
+  // In the Threads panel's search (KOBE-453): where this thread matched.
+  const hitNote = useHitNote(remoteId);
 
   return (
     <li
@@ -81,6 +84,7 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
           )}
         </span>
       </ThreadListItemPrimitive.Root>
+      {hitNote}
     </li>
   );
 }

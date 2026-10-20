@@ -8,7 +8,7 @@ import {
   activityIn,
   readActivity,
   stripTitlePrefix,
-  titlePrefix,
+  TITLE_PREFIX,
   type ActivitySnapshot,
   type ThreadActivity,
   type ThreadActivityStore,
@@ -150,9 +150,20 @@ export function ThreadActivityWatch({
 }) {
   const session = useContext(ChatSessionContext);
   useActivityPoll(session, pollMs);
-  const snapshot = useActivitySnapshot(session?.activity);
+  const overall = useOverallActivity();
+  useTabTitle(overall === "idle" ? "" : TITLE_PREFIX[overall]);
+  return null;
+}
+
+/**
+ * The member's threads at a glance (KOBE-301, KOBE-453): "approval" while any waits for the
+ * member, else "running" while any runs, else "idle". Live for the threads this tab holds, else as
+ * the server last said, else as the list said. The tab title and the rail's Threads button show it.
+ */
+export function useOverallActivity(): ThreadActivity {
+  const snapshot = useActivitySnapshot(useContext(ChatSessionContext)?.activity);
   const items = useAuiState((s) => s.threads.threadItems);
-  const prefix = useMemo(() => {
+  return useMemo(() => {
     // Every thread either source knows, each once: a held thread's live state wins over a
     // polled answer from before it changed.
     const listed = new Map(
@@ -165,8 +176,14 @@ export function ThreadActivityWatch({
       ...snapshot.live.keys(),
       ...(snapshot.polled?.keys() ?? []),
     ]);
-    return titlePrefix([...ids].map((id) => activityIn(snapshot, id) ?? listed.get(id) ?? "idle"));
+    const all = [...ids].map((id) => activityIn(snapshot, id) ?? listed.get(id) ?? "idle");
+    if (all.includes("approval")) return "approval";
+    return all.includes("running") ? "running" : "idle";
   }, [items, snapshot]);
-  useTabTitle(prefix);
-  return null;
 }
+
+/** The words for the overall activity, for a badge on the Threads button. */
+export const OVERALL_LABEL: Readonly<Record<Exclude<ThreadActivity, "idle">, string>> = {
+  running: "a conversation is running",
+  approval: "a conversation is waiting for your approval",
+};

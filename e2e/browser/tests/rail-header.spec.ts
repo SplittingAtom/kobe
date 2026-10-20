@@ -79,7 +79,7 @@ test("Threads opens its panel; the Files toggle hides Files and is saved (KOBE-4
   await chat.open();
   const line = chat.railHeader;
   const newThread = line.getByRole("button", { name: "New conversation", exact: true });
-  const threadsButton = line.getByRole("button", { name: "Threads panel", exact: true });
+  const threadsButton = line.getByRole("button", { name: /^Threads panel/ });
   const filesToggle = line.getByRole("button", { name: "Files panel", exact: true });
   const files = page.getByRole("region", { name: "Files" });
   // New conversation sits immediately left of Threads.
@@ -95,9 +95,13 @@ test("Threads opens its panel; the Files toggle hides Files and is saved (KOBE-4
     await expect(chat.threadsPanel).toBeHidden();
     await expect(threadsButton).toBeFocused();
 
+    // Hiding Files leaves the rail nothing to show: it collapses to its strip.
     await filesToggle.click();
-    await expect(filesToggle).toHaveAttribute("aria-pressed", "false");
     await expect(files).toBeHidden();
+    await expect(page.locator('aside[aria-label="Workspace"]')).toHaveAttribute(
+      "data-collapsed",
+      "",
+    );
     await expect.poll(() => storedPanels(page)).toBe("threads");
     await shoot(page, "rail-files-hidden", page.locator('[data-shell-region="rail"]'));
 
@@ -107,7 +111,10 @@ test("Threads opens its panel; the Files toggle hides Files and is saved (KOBE-4
     const other = await browser.newContext({ storageState: await context.storageState() });
     const second = await other.newPage();
     await second.goto("/");
-    await expect(second.locator("[data-rail-header]")).toBeVisible();
+    await expect(second.locator('aside[aria-label="Workspace"]')).toHaveAttribute(
+      "data-collapsed",
+      "",
+    );
     await expect(second.getByRole("region", { name: "Files" })).toBeHidden();
     await other.close();
 
@@ -119,7 +126,7 @@ test("Threads opens its panel; the Files toggle hides Files and is saved (KOBE-4
 
     // The collapsed rail keeps New conversation and Threads; Threads opens the panel.
     await chat.composer.press("ControlOrMeta+b");
-    await page.getByRole("button", { name: "Show threads" }).click();
+    await page.getByRole("button", { name: /^Show threads/ }).click();
     await expect(chat.threadsPanel).toBeVisible();
     await chat.closeThreads();
     await chat.composer.press("ControlOrMeta+b");

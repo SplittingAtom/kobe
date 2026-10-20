@@ -84,20 +84,18 @@ async function openArtifact() {
 
 describe("loading (ac-1)", () => {
   it("applies what the member saved, loaded once at shell start", async () => {
-    fake.preferences = { rail_collapsed: false, rail_panels: "threads" };
+    fake.preferences = { rail_collapsed: true };
     await openShell();
-    await waitFor(() => expect(filesShown()).toBe("false"));
-    expect(rail().hasAttribute("data-collapsed")).toBe(false);
+    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(true));
     expect(loads()).toHaveLength(1);
   });
 
   it("follows the member to another browser: saved here, applied there", async () => {
     await openShell();
     const user = userEvent.setup();
-    await user.click(filesToggle()); // Files hidden, then collapsed: one PUT
     await user.click(within(rail()).getByRole("button", { name: "Collapse the rail" }));
     await waitFor(() => expect(puts()).toHaveLength(1), { timeout: 3000 });
-    expect(puts()[0]?.body).toEqual({ rail_panels: "threads", rail_collapsed: true });
+    expect(puts()[0]?.body).toEqual({ rail_collapsed: true });
     cleanup();
 
     // Another browser, same member: the server is the only thing the two share.
@@ -105,7 +103,6 @@ describe("loading (ac-1)", () => {
     localStorage.clear();
     await openShell();
     await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(true));
-    expect(filesShown()).toBe("false");
   });
 
   it("applies a stored artifact width that fits this window", async () => {

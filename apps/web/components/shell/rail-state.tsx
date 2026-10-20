@@ -185,19 +185,38 @@ export function RailProvider({
     (next: boolean) => (docked ? setChosen(next) : openDrawer(!next)),
     [docked, setChosen, openDrawer],
   );
-  const collapsedNow = useCallback(
-    () => (docked ? chosenNow() : !drawerOpen),
-    [docked, chosenNow, drawerOpen],
-  );
   const { width, setWidth, resetWidth } = useRailWidth(preferences, onSave);
-  const { panels, setPanel, showPanel, setSectionShown } = useRailPanels(preferences, onSave);
+  const {
+    panels,
+    setPanel,
+    showPanel,
+    setSectionShown: setShown,
+  } = useRailPanels(preferences, onSave);
+  // With its section hidden the rail has nothing to show: it is its 48 px strip (KOBE-453 review).
+  const sectionHidden = !shows(panels, "files");
+  const collapsedNow = useCallback(
+    () => (docked ? chosenNow() || sectionHidden : !drawerOpen),
+    [docked, chosenNow, sectionHidden, drawerOpen],
+  );
+  const setSectionShown = useCallback(
+    (on: boolean) => {
+      setShown(on);
+      if (!on) openDrawer(false);
+    },
+    [setShown, openDrawer],
+  );
   const [filesRequests, setFilesRequests] = useState(0);
   const requestFiles = useCallback(() => setFilesRequests((n) => n + 1), []);
   const [revealed, setRevealed] = useState<RailApi["revealed"]>(null);
   // Only the docked rail's toggle is the member's layout; the drawer is not saved.
+  // Expanding shows the section again if it was hidden (the rail had collapsed for it).
   const toggle = useCallback(
-    (next: boolean) => (docked ? commitChosen(next) : openDrawer(!next)),
-    [docked, commitChosen, openDrawer],
+    (next: boolean) => {
+      if (!next) showPanel("files");
+      if (docked) commitChosen(next);
+      else openDrawer(!next);
+    },
+    [docked, commitChosen, openDrawer, showPanel],
   );
   const reveal = useCallback(
     (section: RailSection, options?: { readonly toggle?: boolean }) => {
@@ -211,7 +230,7 @@ export function RailProvider({
   );
   const api = useMemo(
     () => ({
-      collapsed: docked ? chosen.value : !drawerOpen,
+      collapsed: docked ? chosen.value || sectionHidden : !drawerOpen,
       drawer: drawerOpen,
       revealed,
       filesRequests,
@@ -232,6 +251,7 @@ export function RailProvider({
     [
       docked,
       chosen.value,
+      sectionHidden,
       drawerOpen,
       revealed,
       filesRequests,

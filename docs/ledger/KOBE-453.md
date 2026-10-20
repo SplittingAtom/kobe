@@ -33,6 +33,26 @@
 - **Router outside Next:** `ChatApp` falls back to `window.history` for its route (tests), and gives
   the rail `OpenPanelContext` (route push) for the Threads buttons.
 
+## Review fixes (Sonnet: 2 HIGH, 3 MEDIUM, 2 LOW; coordinator decisions)
+
+- H1: the panel's search is the server's (`GET /v1/threads?q=`, U15 titles and content), 250 ms
+  after the last key, older requests aborted (`threads-search.tsx`). Hits the list holds are their
+  own rows (menu, dot, drag), with the snippet under them (`hit-note.ts`); others are plain rows
+  that open; More results pages on.
+- H2: hiding Files collapses the rail to its strip (derived in `rail-state.tsx`); expanding (Show
+  files, Mod+B, the toggle) shows Files again, saved.
+- M4: the Threads buttons (top line, strip) carry a dot and words while any conversation runs or
+  waits for approval (`useOverallActivity`, shared with the tab title). The row states have no
+  "unread"; none added.
+- M5: Restore keeps the panel open; an action that opens a thread (Regenerate) closes it onto it.
+  Fork is not on the row menu (it is the conversation's own action), so it can't run from here.
+- Apps disappearing when Files is hidden: KOBE-448 (one Files | Apps section).
+- L6: the client no longer reads or writes `threads_share` (the protocol still accepts it).
+- L7: phone drawer → Threads → Escape returns focus to the drawer's Threads; a choice closes both.
+  Found on the way: Escape (and a press) in a modal layer opened over another went to the one
+  underneath; `useModalLayer` now leaves them to the top layer.
+- Stale divider comment in the panel removed.
+
 ## Shared files touched
 
 - `components/chat/chat-app.tsx` (Threads panel, history route, OpenPanelContext; no composer code),
@@ -40,9 +60,6 @@
   the panel first; `openRowMenu` opens it for thread rows). `commands.ts` untouched.
 
 ## Open questions
-
-- With Files hidden the expanded rail shows only its top line. Collapse instead? (448 may settle it.)
-- Search filters loaded titles; the bar's search still searches the server (content, `?q=`).
 
 ## Evidence
 

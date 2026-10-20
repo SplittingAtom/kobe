@@ -80,15 +80,16 @@ export class Chat {
   async openThreads(): Promise<Locator> {
     const panel = this.threadsPanel;
     if (await panel.isVisible()) return panel;
-    const line = this.railHeader.getByRole("button", { name: "Threads panel", exact: true });
-    const strip = this.page.getByRole("button", { name: "Show threads", exact: true });
+    // The name carries the activity while a conversation runs ("Threads panel, …").
+    const line = this.railHeader.getByRole("button", { name: /^Threads panel/ });
+    const strip = this.page.getByRole("button", { name: /^Show threads/ });
     if (await line.first().isVisible()) await line.first().click();
     else if (await strip.isVisible()) await strip.click();
     else {
       await this.page.getByRole("button", { name: "Show the workspace" }).click();
       await this.page
         .getByRole("dialog", { name: "Workspace" })
-        .getByRole("button", { name: "Threads panel", exact: true })
+        .getByRole("button", { name: /^Threads panel/ })
         .click();
     }
     await expect(panel).toBeVisible({ timeout: SHELL_TIMEOUT_MS });

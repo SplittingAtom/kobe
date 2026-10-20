@@ -56,7 +56,12 @@ test("status cues: a green Running badge and the rail's dot, also from another t
     .evaluate((dot) => getComputedStyle(dot).animationName);
   expect(pulse).not.toBe("none");
 
-  // The row in the Threads panel (KOBE-453): a green dot, and "Running" for screen readers.
+  // With the rows in the Threads panel (KOBE-453), its button on the rail carries the activity.
+  await expect(
+    chat.railHeader.getByRole("button", { name: "Threads panel, a conversation is running" }),
+  ).toHaveAttribute("data-kobe-activity", "running");
+
+  // The row in the Threads panel: a green dot, and "Running" for screen readers.
   await chat.openThreads();
   const row = page.locator(`li[data-kobe-thread="${threadId}"]`);
   const dot = row.locator('[data-status-dot="running"]');

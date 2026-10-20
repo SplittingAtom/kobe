@@ -5,7 +5,6 @@ import { ChevronRightIcon } from "lucide-react";
 import {
   useCallback,
   useId,
-  useMemo,
   useState,
   type DragEvent,
   type MouseEvent,
@@ -21,6 +20,7 @@ import { THREAD_ITEM, TRASH_ITEM } from "../chat/thread-item";
 import { RailAnnounce } from "../chat/use-organize-menu";
 import { IconAction } from "./icon-action";
 import { useThreadGroups } from "./thread-groups";
+import { SearchHits, useThreadsSearch } from "./threads-search";
 import { InlineLink } from "./text-links";
 import chat from "../chat/chat.module.css";
 import styles from "./rail.module.css";
@@ -72,14 +72,11 @@ function Group({
   open,
   onToggle,
   onMove,
-  shown,
 }: {
   readonly group: ThreadGroup;
   readonly open: boolean;
   onToggle(): void;
   onMove(threadId: string, projectId: string): void;
-  /** The search's matches in this group (all of them without a search). */
-  readonly shown: readonly ThreadGroup["threads"][number][];
 }) {
   const listId = useId();
   const trash = group.kind === "trash";
@@ -99,7 +96,7 @@ function Group({
           <ChevronRightIcon aria-hidden className={styles.chevron} />
           <span className={styles.groupLabel}>{group.label}</span>
           <span aria-hidden className={styles.groupCount}>
-            {shown.length}
+            {group.threads.length}
           </span>
         </button>
       </h4>
@@ -107,7 +104,7 @@ function Group({
         {HINTS[group.kind] && <p className={chat.hint}>{HINTS[group.kind]}</p>}
         <ul className={chat.threadList} aria-label={group.label}>
           {open &&
-            shown.map((t) => (
+            group.threads.map((t) => (
               <ThreadListPrimitive.ItemByIndex
                 key={t.id}
                 index={t.index}
@@ -121,12 +118,10 @@ function Group({
   );
 }
 
-/** Lower case, without accents: what the search compares. */
-const fold = (text: string) => text.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase();
-
 /**
- * The Threads panel's content (KOBE-453, CE5): a search over the titles, then assistant-ui's thread
- * list in the fixed group order with counts and activity dots, Trash collapsed at the end. Rows keep
+ * The Threads panel's content (KOBE-453, CE5): the server's search (titles and content, as rows),
+ * else assistant-ui's thread list in the fixed group order with counts and activity dots, Trash
+ * collapsed at the end. Rows keep
  * the rail's menu, keyboard access and drag onto a project header. Choosing a thread (its title)
  * calls `onChosen`: the panel closes onto it.
  */
@@ -143,26 +138,15 @@ export function ThreadsPanelContent({
   const loading = useAuiState((s) => s.threads.isLoading);
   const { groups, projects } = useThreadGroups();
   const [query, setQuery] = useState("");
-  // Groups the member opened or closed against their default (in memory: CE8 keeps per user
-  // only the rail state, the divider and the artifact width, KOBE-202).
+  // Groups the member opened or closed against their default (in memory, not a preference).
   const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());
   // One polite region for the rows' changes: a row that moves to another group is remounted.
   const [announcement, setAnnouncement] = useState("");
   const announce = useCallback((text: string) => setAnnouncement(text), []);
-  const titles = useMemo(
-    () => new Map(items.map((i) => [i.id, i.title || "Untitled conversation"])),
-    [items],
-  );
   const titleOf = (threadId: string) =>
     items.find((i) => i.remoteId === threadId)?.title || "Untitled conversation";
-  const needle = fold(query.trim());
-  const matches = (group: ThreadGroup) =>
-    needle === ""
-      ? group.threads
-      : group.threads.filter((t) => fold(titles.get(t.id) ?? "").includes(needle));
-  const shownGroups = groups
-    .map((g) => ({ group: g, shown: matches(g) }))
-    .filter(({ shown }) => needle === "" || shown.length > 0);
+  const search = useThreadsSearch(query);
+  const searching = query.trim() !== "";
   const moveByDrop = (threadId: string, projectId: string) => {
     const change = { action: "move", projectId } as const;
     const title = titleOf(threadId);
@@ -221,27 +205,26 @@ export function ThreadsPanelContent({
               Project names could not be loaded.
             </p>
           )}
-          {!loading && groups.length === 0 && <p className={chat.hint}>No threads yet.</p>}
-          {needle !== "" && shownGroups.length === 0 && (
-            <p className={chat.hint} role="status">
-              No threads match “{query.trim()}”.
-            </p>
-          )}
-          {shownGroups.map(({ group: g, shown }) => (
-            <Group
-              key={g.key}
-              group={g}
-              shown={shown}
-              // A search opens every group with a match, Trash included.
-              open={needle !== "" || START_FOLDED.has(g.kind) === flipped.has(g.key)}
-              onToggle={() => flip(g.key)}
-              onMove={moveByDrop}
-            />
-          ))}
-          {hasMore && (
-            <ThreadListPrimitive.LoadMore className={styles.loadMore}>
-              Load more
-            </ThreadListPrimitive.LoadMore>
+          {searching ? (
+            <SearchHits state={search.state} more={search.more} />
+          ) : (
+            <>
+              {!loading && groups.length === 0 && <p className={chat.hint}>No threads yet.</p>}
+              {groups.map((g) => (
+                <Group
+                  key={g.key}
+                  group={g}
+                  open={START_FOLDED.has(g.kind) === flipped.has(g.key)}
+                  onToggle={() => flip(g.key)}
+                  onMove={moveByDrop}
+                />
+              ))}
+              {hasMore && (
+                <ThreadListPrimitive.LoadMore className={styles.loadMore}>
+                  Load more
+                </ThreadListPrimitive.LoadMore>
+              )}
+            </>
           )}
           <p role="status" className="sr-only" data-kobe-rail-status="">
             {announcement}

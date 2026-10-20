@@ -17,12 +17,7 @@
  * as a sheet.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  readUiPreferences,
-  THREADS_SHARE_BOUNDS,
-  type RailPanels,
-  type UiPreferences,
-} from "@kobe/protocol";
+import { readUiPreferences, type RailPanels, type UiPreferences } from "@kobe/protocol";
 import { apiRequest } from "../api/client";
 import { ARTIFACT_FLOOR_PX, CONVERSATION_FLOOR_PX } from "../chat/artifact-tabs";
 
@@ -32,14 +27,17 @@ export const SAVE_DELAY_MS = 600;
 
 export interface LayoutPreferences {
   readonly railCollapsed?: boolean;
-  readonly threadsShare?: number;
   /** null: the default, half the space right of the rail. */
   readonly artifactWidth?: number | null;
   /** The Detail toggle (KOBE-208): every reasoning block and tool card open. */
   readonly detailExpanded?: boolean;
   /** The expanded rail's dragged width (KOBE-305); null: the default, 280 px. */
   readonly railWidth?: number | null;
-  /** Which rail panels show (KOBE-419): Threads, Files or both (the default). */
+  /**
+   * Whether the rail's Files section shows (KOBE-419, KOBE-453): "both" or "files" yes, "threads"
+   * no. The Threads share of KOBE-198 is no longer read or written (the threads are a panel); the
+   * server still accepts what older clients stored.
+   */
   readonly railPanels?: RailPanels;
 }
 
@@ -48,7 +46,6 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 
 const fromWire = (p: UiPreferences): LayoutPreferences => ({
   ...(p.rail_collapsed !== undefined ? { railCollapsed: p.rail_collapsed } : {}),
-  ...(p.threads_share !== undefined ? { threadsShare: p.threads_share } : {}),
   ...(p.artifact_width !== undefined ? { artifactWidth: p.artifact_width } : {}),
   ...(p.detail_expanded !== undefined ? { detailExpanded: p.detail_expanded } : {}),
   ...(p.rail_width !== undefined ? { railWidth: p.rail_width } : {}),
@@ -59,7 +56,6 @@ const fromWire = (p: UiPreferences): LayoutPreferences => ({
 export function toWire(change: LayoutPreferences): UiPreferences {
   return {
     ...(change.railCollapsed !== undefined ? { rail_collapsed: change.railCollapsed } : {}),
-    ...(change.threadsShare !== undefined ? { threads_share: change.threadsShare } : {}),
     ...(change.artifactWidth !== undefined ? { artifact_width: change.artifactWidth } : {}),
     ...(change.detailExpanded !== undefined ? { detail_expanded: change.detailExpanded } : {}),
     ...(change.railWidth !== undefined ? { rail_width: change.railWidth } : {}),
@@ -76,19 +72,12 @@ export function readPreferences(data: unknown): LayoutPreferences {
   return fromWire(
     readUiPreferences({
       rail_collapsed: raw.railCollapsed,
-      threads_share: raw.threadsShare,
       artifact_width: raw.artifactWidth,
       detail_expanded: raw.detailExpanded,
       rail_width: raw.railWidth,
       rail_panels: raw.railPanels,
     }),
   );
-}
-
-/** The stored share if it is within the rail's bounds, else null (the default applies). */
-export function applyThreadsShare(stored: number | undefined): number | null {
-  if (stored === undefined || !Number.isFinite(stored)) return null;
-  return stored >= THREADS_SHARE_BOUNDS.min && stored <= THREADS_SHARE_BOUNDS.max ? stored : null;
 }
 
 /**
