@@ -9,6 +9,7 @@ import { ProfileMenu } from "./profile-menu";
 import { useShellBand } from "./shell-band";
 import { ThemeToggle } from "./theme-toggle";
 import { ShellSlotTarget, useBarMenu } from "./shell-slots";
+import { useNavigate } from "./use-navigate";
 import styles from "./shell.module.css";
 
 const MENU_ID = "kobe-bar-menu";
@@ -73,6 +74,8 @@ export function UtilityBar({
   const close = useCallback(() => setOpen(false), [setOpen]);
   useMenuDismiss(header, open, close);
   const folded = single && !open;
+  // A skill from a notification opens in the Skills panel, the workspace kept (KOBE-452).
+  const navigate = useNavigate();
   return (
     <header
       ref={header}
@@ -98,7 +101,12 @@ export function UtilityBar({
             <AreaLinks />
             <ConsoleIconLinks />
             {teamId !== null && (
-              <NotificationBell teamId={teamId} fetchFn={fetchFn} onOpenThread={onOpenThread} />
+              <NotificationBell
+                teamId={teamId}
+                fetchFn={fetchFn}
+                onOpenThread={onOpenThread}
+                onOpenSkill={navigate}
+              />
             )}
             <ThemeToggle />
             <ProfileMenu />

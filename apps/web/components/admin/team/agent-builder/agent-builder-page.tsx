@@ -28,6 +28,7 @@ import {
   Textarea,
   TextInput,
   useConfirm,
+  useUnsavedChanges,
 } from "../../../ui/console";
 import { useTeamAccess } from "../../console-context";
 import { MutationStatus } from "../../error-notice";
@@ -43,6 +44,7 @@ import { PublishDialog } from "./publish-dialog";
 import { leftOutText, SkillUpdates } from "./skill-updates";
 import { AgentTestPane } from "./test-pane";
 import { VersionHistory } from "./version-history";
+import { useNavigate } from "../../../shell/use-navigate";
 
 export type BuilderScope = "team" | "personal";
 
@@ -157,6 +159,8 @@ function Builder({
   const [evalStarted, setEvalStarted] = useState<AgentEval | null>(null);
   const [evaluating, setEvaluating] = useState(false);
   const mutation = useMutation();
+  // A new agent opens at its own address, inside the panel (KOBE-452): no page load.
+  const navigate = useNavigate();
   const [confirm, confirmDialog] = useConfirm();
   const publishButton = useRef<HTMLButtonElement>(null);
 
@@ -176,6 +180,8 @@ function Builder({
     : {};
   const problemCount = Object.values(errors).reduce((n, list) => n + (list?.length ?? 0), 0);
   const dirty = JSON.stringify({ form, prompt }) !== JSON.stringify(baseline);
+  // In its panel (KOBE-452), closing asks while the form has edits not saved.
+  useUnsavedChanges(dirty);
 
   function apply(next: AgentDetail) {
     const fresh = baselineOf(next);
@@ -200,7 +206,7 @@ function Builder({
           ? await saveTeamAgent(teamId, agent, body)
           : await createTeamAgent(teamId, { ...body, slug: slug || undefined }, scope);
         if (res.ok && agent) apply(res.data.agent);
-        if (res.ok && !agent) window.location.assign(`${home.base}/${res.data.agent.id}`);
+        if (res.ok && !agent) navigate(`${home.base}/${res.data.agent.id}`);
         return res;
       },
       () => (agent ? "Draft saved." : "Agent created."),

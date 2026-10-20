@@ -412,7 +412,7 @@ describe("how the text arrives (ac-3)", { timeout: 30_000 }, () => {
 });
 
 describe("navigation actions (S2)", { timeout: 30_000 }, () => {
-  it("/agents navigates client-side, /memory opens beside the thread; the draft's attachments stay", async () => {
+  it("/agents and /memory navigate client-side (panels, KOBE-452); the draft's attachments stay", async () => {
     const push = vi.fn();
     const router = {
       push,
@@ -448,9 +448,8 @@ describe("navigation actions (S2)", { timeout: 30_000 }, () => {
     await user.type(input, "/mem");
     await menu();
     await user.keyboard("{Enter}");
-    // CE4 (KOBE-424): beside the thread, no navigation.
-    expect(await screen.findByRole("region", { name: "My memory" })).toBeTruthy();
-    expect(push).not.toHaveBeenCalled();
+    // KOBE-452: a panel over the workspace, opened client-side like every page.
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/me/memory"));
     expect(screen.getByRole("list", { name: "Attached files" })).toBeTruthy();
     await user.type(input, "/agen");
     await menu();

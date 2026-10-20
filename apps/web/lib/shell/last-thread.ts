@@ -55,3 +55,12 @@ export function lastThreadHref(activeTeamId: string | null): string {
   if (last === null || last.teamId !== activeTeamId) return "/";
   return `/?thread=${last.threadId.toLowerCase()}`;
 }
+
+/**
+ * The remembered thread of `teamId`, if any: the workspace under a panel opened by a link or a
+ * reload (KOBE-452) shows it, as Close then returns to it.
+ */
+export function lastThreadId(teamId: string): string | undefined {
+  const last = stored();
+  return last !== null && last.teamId === teamId ? last.threadId.toLowerCase() : undefined;
+}

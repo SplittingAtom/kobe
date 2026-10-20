@@ -14,9 +14,11 @@ import type { UploadTransport } from "../../lib/chat/uploads";
 import { createThreadListAdapter } from "../../lib/chat/thread-list-adapter";
 import { ACTIVE_TEAM_EVENT, fetchMyTeams } from "../../lib/teams";
 import { createFilesApi } from "../../lib/files/api";
-import { rememberLastThread } from "../../lib/shell/last-thread";
+import { AREAS, areaFromUrl, onChatPage } from "../../lib/shell/areas";
+import { lastThreadHref, lastThreadId, rememberLastThread } from "../../lib/shell/last-thread";
+import { followWorkspaceEntries, stepsBackToWorkspace } from "../../lib/shell/panel-history";
+import { panelOfPath } from "../../lib/shell/panels";
 import { ArtifactPanel } from "./artifact-panel";
-import { AreaPanel, useAreaUrl } from "../shell/area-panel";
 import { ArtifactPanelProvider, useArtifactPanel } from "./artifact-state";
 import { AppCommands } from "../shell/app-commands";
 import { CommandBindingsProvider } from "../shell/command-bindings";
@@ -34,6 +36,7 @@ import { ThreadUsageProvider } from "./message-footer";
 import { TeamModelsProvider } from "./use-team-models";
 import { ThreadMarkersProvider } from "./markers";
 import { ThreadAppsProvider } from "../apps/thread-apps";
+import { WorkspacePanel } from "../shell/workspace-panel";
 import { WorkspaceRail } from "../shell/workspace-rail";
 import { FileGoneNotice } from "../files/file-tab";
 import { IconActionProvider } from "../shell/icon-action";
@@ -58,17 +61,33 @@ function threadFromUrl(): string | undefined {
   return UUID.test(id) ? id.toLowerCase() : undefined;
 }
 
-/** `?thread=<id>` follows the thread on screen, so a link or a refresh reopens it. */
-function useThreadUrl(): readonly [string | undefined, (id: string | undefined) => void] {
-  const [threadId, setThreadId] = useState<string | undefined>(threadFromUrl);
+/**
+ * `?thread=<id>` follows the thread on screen, so a link or a refresh reopens it. Under a panel
+ * (KOBE-452) the address is the panel's: the workspace keeps its thread (opened by a link or a
+ * reload, the one last on screen in this tab), and follows the address again once the chat is.
+ */
+function useThreadUrl(
+  teamId: string,
+  pathname: string,
+): readonly [string | undefined, (id: string | undefined) => void] {
+  const [threadId, setThreadId] = useState<string | undefined>(() =>
+    onChatPage() ? threadFromUrl() : lastThreadId(teamId),
+  );
   useEffect(() => {
-    const onPop = () => setThreadId(threadFromUrl());
+    const onPop = () => {
+      if (onChatPage()) setThreadId(threadFromUrl());
+    };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+  // Back on the chat from a panel (Close, or a link to a thread): its address names the thread.
+  useEffect(() => {
+    if (pathname === "/" && onChatPage()) setThreadId(threadFromUrl());
+  }, [pathname]);
   const change = useCallback((id: string | undefined) => {
     setThreadId(id);
-    if (threadFromUrl() === id) return;
+    // Under a panel the thread changes without touching its address (Close returns to it).
+    if (!onChatPage() || threadFromUrl() === id) return;
     const url = new URL(window.location.href);
     if (id === undefined) url.searchParams.delete(THREAD_PARAM);
     else url.searchParams.set(THREAD_PARAM, id);
@@ -77,8 +96,21 @@ function useThreadUrl(): readonly [string | undefined, (id: string | undefined) 
   return [threadId, change];
 }
 
+/**
+ * How the workspace moves between the chat and its panels (KOBE-452): the router's address and
+ * page, from the root layout (components/shell/workspace-host.tsx). Without one (tests of the chat
+ * alone) the chat is all there is.
+ */
+export interface WorkspaceRoute {
+  readonly pathname: string;
+  /** The route's page: shown in the panel when `pathname` names one. */
+  readonly page: ReactNode;
+  readonly push: (href: string) => void;
+  readonly replace: (href: string) => void;
+}
+
 /** Opens a thread from outside the workspace (the bell in the bar): `useThreadUrl` follows. */
-function openThreadFromHeader(id: string): void {
+function openThreadInChat(id: string): void {
   const url = new URL(window.location.href);
   url.searchParams.set(THREAD_PARAM, id);
   window.history.pushState(null, "", url);
@@ -133,16 +165,12 @@ function useActiveTeam(fetchFn?: typeof fetch): TeamState {
 }
 
 /** The shell grid with the rail's and the artifact column's dragged widths (CE6) and sheet (CE7). */
-function WorkspaceGrid({
-  areaOpen,
-  ...props
-}: Omit<
-  Parameters<typeof ShellGrid>[0],
-  "artifactWidth" | "railWidth" | "artifactSheet" | "artifactHidden"
-> & {
-  /** A My area page is beside the thread (CE4): the column (or its sheet) shows it. */
-  readonly areaOpen: boolean;
-}) {
+function WorkspaceGrid(
+  props: Omit<
+    Parameters<typeof ShellGrid>[0],
+    "artifactWidth" | "railWidth" | "artifactSheet" | "artifactHidden"
+  >,
+) {
   const panel = useArtifactPanel();
   const rail = useRail();
   return (
@@ -150,8 +178,8 @@ function WorkspaceGrid({
       {...props}
       artifactWidth={panel?.width ?? null}
       railWidth={rail?.width ?? null}
-      artifactSheet={areaOpen || (panel?.sheetOpen ?? false)}
-      artifactHidden={!areaOpen && (panel?.hidden ?? false)}
+      artifactSheet={panel?.sheetOpen ?? false}
+      artifactHidden={panel?.hidden ?? false}
     />
   );
 }
@@ -180,19 +208,30 @@ function ChatWorkspace({
   teamName,
   fetchFn,
   activityPollMs,
+  pathname,
+  replace,
 }: {
   readonly session: ChatSession;
+  /** The address (KOBE-452): the chat, or a panel over it. */
+  readonly pathname: string;
+  readonly replace: ((href: string) => void) | undefined;
   readonly activityPollMs: number | undefined;
   /** The rail's header (CE2): the workspace is the member's view of this team. */
   readonly teamName: string;
   readonly fetchFn: typeof fetch | undefined;
 }) {
   const filesApi = useMemo(() => createFilesApi(session.teamId, fetchFn), [session, fetchFn]);
-  const [threadId, setThreadId] = useThreadUrl();
-  // A My area page beside the thread (CE4, KOBE-424): `?area=`, with Back and Forward.
-  const area = useAreaUrl();
-  // The consoles and builders return here, to this thread (CE4).
+  const [threadId, setThreadId] = useThreadUrl(session.teamId, pathname);
+  // The panels return here, to this thread (CE4, KOBE-452).
   useEffect(() => rememberLastThread(session.teamId, threadId), [session, threadId]);
+  // A link from before KOBE-452 (`/?thread=…&area=memory`) opens that page's panel over the thread.
+  useEffect(() => {
+    const area = onChatPage() ? areaFromUrl() : undefined;
+    if (area === undefined || replace === undefined) return;
+    rememberLastThread(session.teamId, threadFromUrl());
+    replace(AREAS[area].href);
+    // Read once: the address of the first render.
+  }, [session]);
   // The one-row bar's Menu closes once another thread is on screen (a search hit, the bell).
   const { setOpen: setBarMenuOpen } = useBarMenu();
   useEffect(() => setBarMenuOpen(false), [threadId, setBarMenuOpen]);
@@ -258,7 +297,6 @@ function ChatWorkspace({
                             <RailDrawerButton teamName={teamName} />
                           </ShellSlot>
                           <WorkspaceGrid
-                            areaOpen={area !== undefined}
                             rail={
                               <WorkspaceRail
                                 teamName={teamName || "Workspace"}
@@ -266,12 +304,7 @@ function ChatWorkspace({
                                 filesApi={filesApi}
                               />
                             }
-                            artifact={
-                              <>
-                                <AreaPanel area={area} fetchFn={fetchFn} />
-                                <ArtifactPanel filesApi={filesApi} />
-                              </>
-                            }
+                            artifact={<ArtifactPanel filesApi={filesApi} />}
                             conversation={
                               <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
                                 <ThreadView onOpenThread={setThreadId} inShell />
@@ -303,6 +336,8 @@ export interface ChatAppProps {
   readonly threadListSync?: ((teamId: string) => ThreadListSync | undefined) | undefined;
   /** How often the rail rereads an active thread's state (KOBE-301); tests shorten it. */
   readonly activityPollMs?: number | undefined;
+  /** The router's address and page: a panel over the workspace (KOBE-452). */
+  readonly route?: WorkspaceRoute | undefined;
 }
 
 /**
@@ -318,6 +353,7 @@ export function ChatApp({
   uploadTransport,
   threadListSync = browserThreadListSync,
   activityPollMs,
+  route,
 }: ChatAppProps) {
   const team = useActiveTeam(fetchFn);
   const teamId = team.status === "ready" ? team.teamId : null;
@@ -340,6 +376,23 @@ export function ChatApp({
   useEffect(() => () => session?.dispose(), [session]);
   const [appEl, setAppEl] = useState<HTMLDivElement | null>(null);
   useViewportHeight(appEl);
+  const pathname = route?.pathname ?? "/";
+  const panel = panelOfPath(pathname);
+  // The chat entry a panel returns to (KOBE-452): the latest one shown without a panel.
+  useEffect(() => followWorkspaceEntries(onChatPage), []);
+  const closePanel = useCallback(() => {
+    const steps = stepsBackToWorkspace();
+    if (steps !== null) window.history.go(steps);
+    else route?.replace(lastThreadHref(teamId));
+  }, [route, teamId]);
+  // The bell under a panel: the thread opens in the chat, and the panel closes.
+  const openThreadFromHeader = useCallback(
+    (id: string) => {
+      if (panel !== undefined && route !== undefined) route.push(`/?thread=${id}`);
+      else openThreadInChat(id);
+    },
+    [panel, route],
+  );
 
   let body: ReactNode;
   if (team.status === "loading" || team.status === "choosing")
@@ -373,6 +426,8 @@ export function ChatApp({
           teamName={team.status === "ready" ? team.teamName : ""}
           fetchFn={fetchFn}
           activityPollMs={activityPollMs}
+          pathname={pathname}
+          replace={route?.replace}
         />
       </ChatSessionContext.Provider>
     );
@@ -392,6 +447,14 @@ export function ChatApp({
             {/* No active team yet: activates one (the selector itself is in the rail, KOBE-419). */}
             <TeamActivation />
             {body}
+            {/* A console, My agents, Skills or a My area page over the workspace (KOBE-452). */}
+            {panel !== undefined ? (
+              <WorkspacePanel panel={panel} path={pathname} onClose={closePanel}>
+                {route?.page}
+              </WorkspacePanel>
+            ) : (
+              route?.page
+            )}
           </div>
         </ShellSlotsProvider>
       </ShellBandProvider>

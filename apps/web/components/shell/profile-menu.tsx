@@ -2,7 +2,6 @@
 
 import { useState, type MouseEvent } from "react";
 import { authClient } from "../../lib/auth-client";
-import { openBeside, plainClick } from "../../lib/shell/areas";
 import { forgetLastThread } from "../../lib/shell/last-thread";
 import { barMenuProps } from "./bar-menu";
 import { IconAction } from "./icon-action";
@@ -11,17 +10,14 @@ import styles from "./shell.module.css";
 
 /**
  * The profile menu at the bar's right end (CE3): the member's other areas and sign-out. A
- * disclosure, like the team switcher; one of the two is open at a time. On the chat page My
- * approvals and My connectors open beside the thread (CE4, KOBE-424); Projects and My shared cases stay
- * full pages (Skills is a bar command, KOBE-321). Slot: a member settings page joins this menu when
- * one exists.
+ * disclosure, like the team switcher; one of the two is open at a time. Each page opens as a panel
+ * over the workspace (KOBE-452; Skills is a bar command, KOBE-321), and the menu closes behind it.
+ * Slot: a member settings page joins this menu when one exists.
  */
 export function ProfileMenu() {
   const [error, setError] = useState<string | null>(null);
-  /** CE4 (KOBE-424): My approvals and My connectors open beside the thread on the chat page. */
-  const beside = (e: MouseEvent<HTMLAnchorElement>) => {
-    if (!plainClick(e) || !openBeside(e.currentTarget.getAttribute("href") ?? "")) return;
-    e.preventDefault();
+  /** The page opens in a panel (KOBE-452): the menu doesn't stay open behind it. */
+  const close = (e: MouseEvent<HTMLAnchorElement>) => {
     const menu = e.currentTarget.closest("details");
     if (menu) menu.open = false;
   };
@@ -46,20 +42,24 @@ export function ProfileMenu() {
       <IconAction command="profile" as="summary" className={styles.iconLink} />
       <ul className={styles.menuList}>
         <li>
-          <MenuLink href="/me/projects">Projects</MenuLink>
+          <MenuLink href="/me/projects" onClick={close}>
+            Projects
+          </MenuLink>
         </li>
         <li>
-          <MenuLink href="/me/connectors" onClick={beside}>
+          <MenuLink href="/me/connectors" onClick={close}>
             My connectors
           </MenuLink>
         </li>
         <li>
-          <MenuLink href="/me/approvals" onClick={beside}>
+          <MenuLink href="/me/approvals" onClick={close}>
             My approvals
           </MenuLink>
         </li>
         <li>
-          <MenuLink href="/me/shared-cases">My shared cases</MenuLink>
+          <MenuLink href="/me/shared-cases" onClick={close}>
+            My shared cases
+          </MenuLink>
         </li>
         <li>
           <button type="button" onClick={() => void signOut()}>

@@ -10,7 +10,7 @@ import { ConsoleAccessContext } from "../admin/console-context";
 import { ConsoleThemeToggle } from "../admin/console-theme-toggle";
 import { ErrorNotice } from "../admin/error-notice";
 import { ChatReturnLink } from "../shell/chat-return-link";
-import { ConsoleLayout, ConsoleMain, ConsoleWho } from "../ui/console";
+import { ConsoleLayout, ConsoleMain, ConsoleWho, useInPanel } from "../ui/console";
 
 type State =
   | { readonly status: "loading" }
@@ -66,8 +66,11 @@ export function MyAgentsShell({
     // `loadAccess` is a stable default or a test stub; `attempt` drives the re-check.
   }, [attempt]);
 
+  // Over the workspace (KOBE-452) the panel's header names the page and closes it.
+  const panel = useInPanel();
   return (
     <ConsoleLayout
+      panel={panel}
       brand={
         <>
           <ChatReturnLink>Kobe</ChatReturnLink> <span aria-hidden="true">/</span> My area

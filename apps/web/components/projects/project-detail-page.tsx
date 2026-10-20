@@ -14,6 +14,7 @@ import { ProjectFiles } from "./project-files";
 import { ProjectMembers } from "./project-members";
 import { ProjectThreads } from "./project-threads";
 import { useProjectAgents, useProjectsApi } from "./use-projects";
+import { useNavigate } from "../shell/use-navigate";
 
 /** One project: settings, members, files and conversations (`/v1/projects/:id`, KOBE-161/162/163). */
 export function ProjectDetailPage({ projectId }: { readonly projectId: string }) {
@@ -40,6 +41,7 @@ function ProjectView({
   const api = useProjectsApi();
   const agents = useProjectAgents(api);
   const mutation = useMutation();
+  const navigate = useNavigate();
   const [confirm, confirmDialog] = useConfirm();
   const can = projectPermissions(access.role, project.myRole ?? undefined);
   const archived = project.archivedAt !== null;
@@ -91,7 +93,7 @@ function ProjectView({
       async () => worded(await api.remove(project.id)),
       () => "Deleted.",
     );
-    if (done) window.location.assign("/me/projects");
+    if (done) navigate("/me/projects");
   }
 
   return (

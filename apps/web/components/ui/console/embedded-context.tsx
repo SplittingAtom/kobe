@@ -4,8 +4,9 @@ import { createContext, useContext, type ReactNode } from "react";
 import { cn } from "../../../lib/utils";
 
 /**
- * Embedded beside the thread (CE4, KOBE-424), a My area page sits under its panel's own heading
- * (the area's name): the page's title is left out there; its description and actions stay.
+ * In a panel over the workspace (KOBE-424, KOBE-452), a single My area page sits under the panel's
+ * own heading (the page's name): the page's title is left out there; its description and actions
+ * stay.
  *
  * A client module of its own so `PageHeader` stays usable from Server Components: only this
  * part reads the context.
@@ -29,4 +30,14 @@ export function PageHeaderText({
       )}
     </>
   );
+}
+
+/**
+ * Inside a panel over the workspace (KOBE-452, components/shell/workspace-panel.tsx): the console
+ * and My area shells drop the brand that leads back to the chat (`ConsoleLayout`'s `panel`).
+ */
+export const InPanel = createContext(false);
+
+export function useInPanel(): boolean {
+  return useContext(InPanel);
 }

@@ -36,15 +36,14 @@ function Links({
 }
 
 /**
- * The bar's right side: the member's own areas. On the chat page My memory and My schedules open
- * beside the thread (CE4, KOBE-424, `IconAction` through `lib/shell/areas.ts`); My agents, the
- * agent builder, stays a full page.
+ * The bar's right side: the member's own areas (My memory, My schedules, My agents, Skills), each
+ * a panel over the workspace (KOBE-452).
  */
 export function AreaLinks() {
   return <Links commands={linksOf("areas", { consoles: [] })} label="My area" />;
 }
 
-/** The consoles, role-gated by the server's answer (CE3); full-page routes (CE4). */
+/** The consoles, role-gated by the server's answer (CE3); panels over the workspace (KOBE-452). */
 export function ConsoleIconLinks() {
   const consoles = useOpenConsoles();
   return <Links commands={linksOf("consoles", { consoles })} label="Administration" />;

@@ -8,6 +8,7 @@ import { MutationStatus } from "../admin/error-notice";
 import { ResourceView } from "../admin/parts";
 import { useMutation, useResource } from "../admin/use-resource";
 import { draftHref } from "./draft-href";
+import { useNavigate } from "../shell/use-navigate";
 
 /**
  * Catalog skills the team has installed, to fork into a draft of your own (KOBE-322): Kobe's
@@ -18,6 +19,7 @@ export function CatalogForks() {
   const teamId = access.team.id;
   const { state } = useResource(() => getSkillChoices(teamId));
   const mutation = useMutation();
+  const navigate = useNavigate();
   if (!access.permissions.includes("team.personal.create")) return null;
   return (
     <Section
@@ -45,7 +47,7 @@ export function CatalogForks() {
                           { kind: "catalog", skillId: c.skillId },
                           c.name.length <= 57 ? `${c.name}-custom` : c.name,
                         );
-                        if (res.ok) window.location.assign(draftHref(res.data.id));
+                        if (res.ok) navigate(draftHref(res.data.id));
                         return res;
                       })
                     }

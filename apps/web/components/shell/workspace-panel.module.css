@@ -1,0 +1,68 @@
+/* A panel over the workspace (KOBE-452): a large centred overlay, about 90% of the window, over a
+   dimmed workspace; a full-screen sheet under 820 px, like the artifact sheet. Above the rail's
+   drawer (40) and the chat's sheets; under the console's dialogs (50, at the document's top). */
+.backdrop {
+  position: fixed;
+  z-index: 45;
+  inset: 0;
+  background: var(--kobe-console-overlay);
+}
+
+.panel {
+  position: fixed;
+  z-index: 46;
+  inset: 5dvh 5vw;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--foreground);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 25%);
+  outline: none;
+}
+
+/* Focus lands on the dialog itself when it opens (as on the artifact sheet): no ring around the
+   whole panel. Doubled to outrank the chat's `.app :focus-visible`. */
+.panel.panel:focus-visible {
+  outline: none;
+}
+
+@media (width < 820px) {
+  .panel {
+    inset: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+.header {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.25rem;
+  align-items: center;
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.title {
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding-inline: 0.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.5rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.body {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  overscroll-behavior: contain;
+}

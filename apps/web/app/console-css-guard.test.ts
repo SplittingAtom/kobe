@@ -93,7 +93,10 @@ describe("Tailwind on the consoles (KOBE-294)", () => {
     expect(withoutComments(read("app/admin/admin-global.css")).trimStart()).toMatch(
       /^@import "\.\.\/tailwind\.css";/,
     );
-    expect(read("app/page.tsx")).toContain('import "./chat-global.css";');
+    // The workspace (the chat and its panels, KOBE-452) is in the root layout.
+    expect(read("components/shell/workspace-host.tsx")).toContain(
+      'import "../../app/chat-global.css";',
+    );
     // Layouts: /admin (landing, Site and Team consoles) and /me.
     expect(read("app/admin/layout.tsx")).toContain('import "./admin-global.css";');
     expect(read("app/me/layout.tsx")).toContain('import "../admin/admin-global.css";');
@@ -231,8 +234,7 @@ function moduleImports(file: string): string[] {
 
 /**
  * The global stylesheets console code may import: the two layouts load the console sheet, the
- * test panes (the agent builder's, the Workbench's, KOBE-323) the chat's (they render the chat),
- * and the My area pages beside the thread the console's (the chat renders them).
+ * test panes (the agent builder's, the Workbench's, KOBE-323) the chat's (they render the chat).
  */
 const CSS_IMPORTS: Readonly<Record<string, string>> = {
   [join("app", "admin", "layout.tsx")]: "./admin-global.css",
@@ -240,9 +242,16 @@ const CSS_IMPORTS: Readonly<Record<string, string>> = {
   [join("components", "admin", "team", "agent-builder", "test-pane.tsx")]:
     "../../../../app/chat-global.css",
   [join("components", "skills", "test-pane.tsx")]: "../../app/chat-global.css",
-  // My area pages beside the thread in the chat (CE4, KOBE-424): the chat page gets the sheet.
-  [join("components", "me", "area-beside.tsx")]: "../../app/admin/admin-global.css",
 };
+
+/**
+ * Chat code that hosts a console page: the panel over the workspace (KOBE-452) is the chat's frame
+ * (its own CSS module) around `PanelContent`, which lives with the primitives.
+ */
+const CONSOLE_BRIDGES = [
+  join("components", "shell", "workspace-panel.tsx"),
+  join("components", "shell", "workspace-panel.test.tsx"),
+];
 
 /** Pages that render a component built on the primitives and add no markup of their own. */
 const DELEGATING_PAGES = [join("components", "me", "my-memory-page.tsx")];
@@ -305,6 +314,7 @@ describe("no CSS modules in the consoles or the My area (KOBE-296)", () => {
     const outside = ["app", "components"]
       .flatMap(sources)
       .filter((f) => !guarded(f) && f !== join("app", "console-css-guard.test.ts"))
+      .filter((f) => !CONSOLE_BRIDGES.includes(f))
       .filter(consoleCode);
     expect(outside).toEqual([]);
   });

@@ -1,4 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
+import { SHELL_TIMEOUT_MS } from "./support/constants.js";
 import { expect, test } from "./support/chat.js";
 
 /**
@@ -60,6 +61,14 @@ test("the top line: team, Threads, Files, Team console (admins), collapse (ac-1,
   );
   expect(Math.max(...ys) - Math.min(...ys)).toBeLessThanOrEqual(4);
   await shoot(page, "rail-header", page.locator('[data-shell-region="rail"]'));
+  // KOBE-452: it opens the console as a panel over the workspace; Close returns focus to it.
+  const teamConsole = line.getByRole("link", { name: "Team console" });
+  await teamConsole.click();
+  const panel = page.getByRole("dialog", { name: "Team console" });
+  await expect(panel).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  await panel.getByRole("button", { name: "Close Team console" }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(teamConsole).toBeFocused();
 });
 
 test("panel toggles: one panel fills the rail, the last stays on, the choice is saved (ac-3, ac-4)", async ({
