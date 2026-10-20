@@ -36,6 +36,24 @@ was `{}`. A new conversation from the composer gets the agent the web preselecte
   owner's grants, the thread's connectors-off, and `runs.mcp_connector_ids` enforced by the MCP
   decision point (KOBE-451 HIGH-1). No migration.
 
+## Review fixes (Opus review: 1 MEDIUM, 5 LOW)
+
+- MEDIUM-1: `POST /v1/threads/app-cards` takes `agent_id` (null = No agent) and
+  `connectors_off`, using `createThreadBodySchema`'s own fields, checked with `resolveAgentPin` /
+  `checkConnectorsOff` and written with `turnOffAtCreation` (`apps/new-thread-draft.ts`), before
+  the app call and again in the creating transaction; absent agent = `defaultNewThreadPin`; the
+  app's own connector off = `connector_off`. The web sends the new-conversation view's agent (only
+  once the picker was touched) and off set from the rail and the + menu, then resets the draft.
+  `launchAppCardBodySchema` in `@kobe/protocol` is unchanged (the server extends it).
+- LOW-1/2: choose-agent refuses archived (`thread_archived`), builder/Workbench/eval
+  (`test_thread`; eval threads are already refused upstream with `skill_eval_thread`) and
+  schedule threads (`scheduled_thread`), and queued as well as active runs (`thread_busy`).
+- LOW-3: `thread-choose-agent.db.test.ts` covers each refusal and the audit target.
+- LOW-5: the browser spec asserts deterministically that the thread's connectors list the app's
+  connector on and usable; the model's tool call is fatal only with the scripted model, a
+  warning annotation on the gate install. No API exposes a run's MCP set to the browser.
+- LOW-4: D19 question left for Chris (below).
+
 ## Security notes
 
 - Choosing an agent later is equivalent to starting a new thread with it (same pin check, owner
@@ -45,7 +63,7 @@ was `{}`. A new conversation from the composer gets the agent the web preselecte
 
 ## Open questions (for Chris or the coordinator)
 
-- Product: is "an agentless thread may take an agent once" acceptable under D19 ("threads pin
+- For Chris (D19, review LOW-4; must be answered before merge): is "an agentless thread may take an agent once" acceptable under D19 ("threads pin
   the version they started on")? It only applies to threads that started on no agent.
 - The ten agentless app-launch threads on gate1 are not changed; their owners can pick an agent
   in the composer after deploy.

@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
-import { chatRequests, composer, openApp } from "./testing";
+import { agentChoices, chatRequests, composer, openApp } from "./testing";
 
 /**
  * KOBE-451: the composer's + menu. Attach files, Connectors (on or off for this thread, a broken
@@ -303,5 +303,44 @@ describe("Apps (ac-7)", { timeout: 30_000 }, () => {
     await waitFor(() =>
       expect(posts("/app-cards").map((r) => r.path)).toEqual(["/v1/threads/app-cards"]),
     );
+    // Untouched choices: the server applies the default agent; nothing is off.
+    expect(must(posts("/app-cards")[0]).body).toEqual({ app_id: APP.appId });
+  });
+
+  it("from a new conversation the launch carries the agent and connectors chosen there (KOBE-458)", async () => {
+    fake.teamApps = [APP];
+    fake.runnableAgents.push({
+      id: "a-kobe",
+      scope: "gallery",
+      galleryKey: "kobe",
+      default: true,
+      name: "Kobe",
+      model: null,
+    });
+    openApp(fake);
+    const user = userEvent.setup();
+    await waitFor(async () =>
+      expect(
+        (within(await agentChoices()).getByRole("radio", { name: /Kobe/ }) as HTMLInputElement)
+          .checked,
+      ).toBe(true),
+    );
+    await user.click(within(await agentChoices()).getByRole("radio", { name: /No agent/ }));
+    await user.keyboard("{Escape}");
+    const connectors = await openSub("Connectors");
+    await connectors.user.click(
+      await within(connectors.sub).findByRole("menuitemcheckbox", { name: /catalyst/ }, WAIT),
+    );
+    await connectors.user.keyboard("{Escape}");
+    const { sub } = await openSub("Apps");
+    await user.click(
+      await within(sub).findByRole("menuitem", { name: /Lakehouse Explorer/ }, WAIT),
+    );
+    await waitFor(() => expect(posts("/app-cards")).toHaveLength(1));
+    expect(must(posts("/app-cards")[0]).body).toEqual({
+      app_id: APP.appId,
+      agent_id: null,
+      connectors_off: [KEYED],
+    });
   });
 });

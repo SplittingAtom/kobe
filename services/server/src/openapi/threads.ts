@@ -359,8 +359,8 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         summary: "Give an agentless thread an agent (owner only)",
         description:
           "KOBE-458: the agent's current published version, checked as at creation. Only a " +
-          "thread with no agent (`agent_already_chosen` otherwise); refused while a run is " +
-          "active (`thread_busy`). Audited (`thread.agent_chosen`).",
+          "plain thread with no agent (`agent_already_chosen` otherwise); refused while a run " +
+          "is queued or active (`thread_busy`). Audited (`thread.agent_chosen`).",
         parameters: change([idParameter]),
         requestBody: body("ChooseThreadAgentBody"),
         responses: {
@@ -370,7 +370,7 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
           "409": json(
             "Error",
             "`agent_already_chosen`, `agent_unavailable`, `thread_busy`, `thread_in_trash`, " +
-              "`test_thread`, or a team conflict.",
+              "`thread_archived`, `test_thread`, `scheduled_thread`, or a team conflict.",
           ),
         },
       },

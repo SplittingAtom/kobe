@@ -30,13 +30,16 @@ export function useAppLaunch(): {
       if (!session || busy !== null) return false;
       setBusy(app.appId);
       setError(null);
-      const res = await launchAppCard(target, app.appId, session.teamId);
+      // From the new-conversation view the thread starts with its choices (KOBE-458).
+      const draft = target === null && remoteId === undefined ? session.launchDraft() : undefined;
+      const res = await launchAppCard(target, app.appId, session.teamId, undefined, draft);
       setBusy(null);
       if (!res.ok) {
         setError(res.error.message);
         return false;
       }
       if (target === null) {
+        if (draft) session.launchDraftTaken();
         session.threadCreated();
         aui.threads.switchToThread(res.data.threadId);
       } else {
@@ -44,7 +47,7 @@ export function useAppLaunch(): {
       }
       return true;
     },
-    [session, busy, target, aui],
+    [session, busy, target, remoteId, aui],
   );
   return { busy, error, launch };
 }

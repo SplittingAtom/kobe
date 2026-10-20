@@ -1489,7 +1489,11 @@ export class FakeKobe {
       if (!app) return error(404, "app_not_available", "This app is not available to you.");
       // Like the server (KOBE-458): the new thread pins the agent a new conversation starts with.
       const threadId = this.addThread(app.title as string);
-      const preset = this.runnableAgents.find((a) => a.default === true);
+      // The new-conversation view's choice when sent (null: No agent), else the default.
+      const preset =
+        body?.agent_id === undefined
+          ? this.runnableAgents.find((a) => a.default === true)
+          : this.runnableAgents.find((a) => a.id === body.agent_id);
       if (preset) {
         Object.assign(this.#thread(threadId), {
           agent_id: preset.id,

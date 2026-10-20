@@ -73,6 +73,7 @@ export type ThreadError =
   | "project_not_found"
   | "no_agent"
   | "agent_already_chosen"
+  | "scheduled_thread"
   | "model_not_enabled"
   | "thread_archived"
   | "test_thread"
