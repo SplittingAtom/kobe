@@ -15,6 +15,8 @@ import { z } from "zod";
  * never none, so the rail always has something to show. Since KOBE-453 the threads are a panel:
  * "both" or "files" shows the rail's Files | Apps section, "threads" hides it.
  * `rail_tab` (KOBE-448): the tab that section shows, Files (the default) or Apps.
+ * `workbench_editor_width` (KOBE-459): the Workbench editor rail's dragged width; `null` goes back
+ * to the default (the rail takes the width the file tree leaves).
  */
 
 /** Threads' share of the rail's height over Files (CE5): never squeezing either section out. */
@@ -31,6 +33,13 @@ export const ARTIFACT_WIDTH_BOUNDS = { min: 360, max: 8192 } as const;
  * whether it fits beside the conversation is decided on the screen it is applied to.
  */
 export const RAIL_WIDTH_BOUNDS = { min: 200, max: 560 } as const;
+
+/**
+ * The Workbench editor rail's dragged width in px (KOBE-459): never under 320 (the frontmatter
+ * form stays usable); the upper bound only keeps the stored value sane (whether it fits beside the
+ * file tree is decided on the screen it is applied to).
+ */
+export const WORKBENCH_EDITOR_WIDTH_BOUNDS = { min: 320, max: 8192 } as const;
 
 /** The rail's panels on screen (KOBE-419): one of them, or both. */
 export const RAIL_PANELS = ["both", "threads", "files"] as const;
@@ -75,6 +84,13 @@ export const uiPreferencesSchema = z.strictObject({
     .optional(),
   rail_panels: z.enum(RAIL_PANELS).optional(),
   rail_tab: z.enum(RAIL_TABS).optional(),
+  workbench_editor_width: z
+    .number()
+    .int()
+    .min(WORKBENCH_EDITOR_WIDTH_BOUNDS.min)
+    .max(WORKBENCH_EDITOR_WIDTH_BOUNDS.max)
+    .nullable()
+    .optional(),
 });
 export type UiPreferences = z.infer<typeof uiPreferencesSchema>;
 
