@@ -2,21 +2,31 @@
 
 import { useCallback } from "react";
 import type { ModelContext } from "../../lib/apps/bridge-schema";
+import { NEW_DRAFT } from "../../lib/chat/attachments";
 import { useChatSession, useKobeExtras } from "../chat/kobe-runtime";
 
 /**
  * An app frame's `ui/message` and `ui/update-model-context` (KOBE-439, spec §8): the text goes to
  * the composer of the card's own thread (keyed by thread id), never sent, never moving the focus; the context becomes that thread's chip for this app (last write
  * wins), sent only with the member's next message there.
+ *
+ * A rail picker (KOBE-460) has no thread of its own: it uses the conversation on screen, and
+ * with `newConversation` the new-conversation draft when none is (its chip goes with that
+ * conversation's first message). `active: false` refuses both (the picker is not on screen).
  */
-export function useAppComposer(app: {
-  readonly appId: string;
-  readonly connectorId: string;
-  readonly templateSha256: string;
-  readonly title: string;
-}) {
+export function useAppComposer(
+  app: {
+    readonly appId: string;
+    readonly connectorId: string;
+    readonly templateSha256: string;
+    readonly title: string;
+  },
+  options: { readonly newConversation?: boolean; readonly active?: boolean } = {},
+) {
   const session = useChatSession();
-  const threadId = useKobeExtras()?.state.threadId ?? null;
+  const onScreen = useKobeExtras()?.state.threadId ?? null;
+  const threadId =
+    options.active === false ? null : (onScreen ?? (options.newConversation ? NEW_DRAFT : null));
   const { appId, connectorId, templateSha256, title } = app;
   const onMessage = useCallback(
     (text: string) => threadId !== null && session.composerInserts.request(threadId, text, title),

@@ -26,3 +26,16 @@ export function applyRailWidth(stored: number | null | undefined): number | null
   if (stored === null || stored === undefined || !Number.isInteger(stored)) return null;
   return stored >= RAIL_PX.min && stored <= RAIL_PX.max ? stored : null;
 }
+
+/**
+ * The rail's width while a picker shows in its Apps tab (KOBE-460, spec MA3 as amended
+ * 2026-10-20): at least this, when the window allows (the grid keeps the conversation's floor);
+ * a member's wider width stays. Never saved: None brings the member's own width back.
+ */
+export const PICKER_RAIL_PX = 400;
+
+/** The width the grid shows: the member's, widened for a picker (null: the 280 px default). */
+export function shownRailWidth(member: number | null, picker: boolean): number | null {
+  if (!picker) return member;
+  return Math.max(member ?? RAIL_PX.expanded, PICKER_RAIL_PX);
+}

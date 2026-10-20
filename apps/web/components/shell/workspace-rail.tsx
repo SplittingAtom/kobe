@@ -410,6 +410,7 @@ export function WorkspaceRail({
         aria-label="Workspace"
         className={styles.rail}
         {...(collapsed ? { "data-collapsed": "" } : {})}
+        {...(rail.pickerShown ? { "data-picker": "" } : {})}
         {...(drawer ? { "data-drawer": "", role: "dialog", "aria-modal": true, tabIndex: -1 } : {})}
         {...drop.handlers}
       >
@@ -449,7 +450,11 @@ export function WorkspaceRail({
         </div>
       </aside>
       {resizable && (
-        <RailResizeHandle width={rail.width} onChange={rail.setWidth} onReset={rail.resetWidth} />
+        <RailResizeHandle
+          width={rail.shownWidth}
+          onChange={rail.setWidth}
+          onReset={rail.resetWidth}
+        />
       )}
     </>
   );

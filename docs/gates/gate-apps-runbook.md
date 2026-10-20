@@ -56,6 +56,11 @@ KOBE_BROWSER_RESULTS=results.json \
   and check with the browser's accessibility tree; `treeitem`, else `button`).
   `KOBE_APPS_USE_LABEL` if Catalyst's button is not named "Use in chat".
 - The probes test skips (`KOBE_APPS_PROBES` is for the k3d test app).
+- The rail picker (KOBE-460): `gate-apps/picker.spec.ts` with `KOBE_APPS_CONNECTOR` set to the
+  connector that offers "Lakehouse Picker" (`KOBE_APPS_PICKER` names another title),
+  `KOBE_APPS_PICKER_PATH` (default `KOBE_APPS_PATH`), `KOBE_APPS_PICKER_USE_LABEL` if a button
+  follows the table, and `KOBE_APPS_PICKER_TEXT` (what the composer then contains; default the
+  table's name). It skips where the member has no live picker, and leaves the choice at None.
 - Keep `results.json`, `playwright-report/` and `test-results/` (traces, screenshots).
 
 The spec asserts, in this order: the model's `open_lakehouse_explorer` call renders the tree in

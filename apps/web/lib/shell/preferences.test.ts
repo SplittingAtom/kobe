@@ -61,6 +61,13 @@ describe("wire", () => {
       workbenchEditorWidth: 640,
     });
     expect(readPreferences({ preferences: { workbenchEditorWidth: 12 } })).toEqual({});
+    // KOBE-460: the rail's picker, an app id or null.
+    const picker = "b".repeat(64);
+    expect(readPreferences({ preferences: { railPicker: picker } })).toEqual({
+      railPicker: picker,
+    });
+    expect(readPreferences({ preferences: { railPicker: null } })).toEqual({ railPicker: null });
+    expect(readPreferences({ preferences: { railPicker: "x" } })).toEqual({});
   });
 
   it("writes only the keys that changed, in wire casing", () => {
@@ -75,6 +82,7 @@ describe("wire", () => {
     expect(toWire({ railPanels: "threads" })).toEqual({ rail_panels: "threads" });
     expect(toWire({ railTab: "apps" })).toEqual({ rail_tab: "apps" });
     expect(toWire({ workbenchEditorWidth: null })).toEqual({ workbench_editor_width: null });
+    expect(toWire({ railPicker: null })).toEqual({ rail_picker: null });
     expect(toWire({})).toEqual({});
   });
 });

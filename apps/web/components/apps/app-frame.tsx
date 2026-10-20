@@ -13,7 +13,7 @@ import {
 import { appFrameUrl, callAppTool, listAppTools } from "../../lib/apps/app-api";
 import { APP_FRAME_SANDBOX } from "../../lib/apps/app-frame";
 import type { DisplayMode, ModelContext } from "../../lib/apps/bridge-schema";
-import { attachHostBridge, type HostBridge } from "../../lib/apps/host-bridge";
+import { attachHostBridge, type HostBridge, type ToolCallAnswer } from "../../lib/apps/host-bridge";
 import { buildHostContext, type Placement } from "../../lib/apps/host-context";
 
 /**
@@ -22,7 +22,9 @@ import { buildHostContext, type Placement } from "../../lib/apps/host-context";
  * permissions, no referrer, under a host-drawn header the app cannot cover ("App from
  * _connector_"). Kobe's host bridge answers only this frame. MA-9 and MA-6 place it in tool cards
  * and app cards (and call `AppFrameHandle.teardown` before they remove a frame); MA-7 wires
- * `onMessage` and `onModelContext` to the composer.
+ * `onMessage` and `onModelContext` to the composer. KOBE-460 places one picker in the rail
+ * (`placement: "rail"`: it fills its section and scrolls inside it), whose calls name the thread
+ * on screen (`threadId`) so the server checks it as it checks a card's thread.
  */
 export const INLINE_HEIGHT = 360;
 export const INLINE_MAX_HEIGHT = 720;
@@ -42,6 +44,14 @@ export interface AppFrameProps {
   /** The card this frame belongs to (a tool call or an app card entry). */
   readonly cardKey: string;
   readonly placement: Placement;
+  /**
+   * The thread on screen, sent with each `tools/call` (a rail picker, KOBE-460: the server checks
+   * the member may read it and the connector is not off there). Read at call time. A card's
+   * frame sends none.
+   */
+  readonly threadId?: string | null | undefined;
+  /** Each `tools/call`'s answer from Kobe (a refusal's code, for the owner to explain). */
+  readonly onCall?: ((answer: ToolCallAnswer) => void) | undefined;
   /** Sent as `ui/notifications/tool-input` and `tool-result` once the app has initialized. */
   readonly toolInput?: Record<string, unknown> | undefined;
   readonly toolResult?: unknown;
@@ -94,9 +104,12 @@ export function AppFrame(props: AppFrameProps & { readonly ref?: Ref<AppFrameHan
     }),
     [],
   );
+  const fill = props.placement === "rail";
   return (
     <section
-      className="flex flex-col overflow-hidden rounded-md border border-border bg-card"
+      className={`flex flex-col overflow-hidden rounded-md border border-border bg-card${
+        fill ? " min-h-0 flex-1" : ""
+      }`}
       data-kobe-app-frame={app.appId}
       aria-label={`${app.title}, an app from ${app.connectorName}`}
     >
@@ -141,7 +154,11 @@ function FrameInstance(
           maxHeight: maxHeight(current().placement),
         }),
       handlers: {
-        callTool: (name, args) => callAppTool(appId, team, name, args, fetchFn),
+        callTool: async (name, args) => {
+          const answer = await callAppTool(appId, team, name, args, fetchFn, current().threadId);
+          current().onCall?.(answer);
+          return answer;
+        },
         listTools: () => listAppTools(appId, team, fetchFn),
         message: (text) => current().onMessage?.(text) ?? false,
         updateModelContext: (context) => current().onModelContext?.(context) ?? false,
@@ -188,7 +205,7 @@ function FrameInstance(
     });
   }, [placement]);
 
-  return (
+  const iframe = (
     <iframe
       ref={frame}
       title={`${app.title} (app from ${app.connectorName})`}
@@ -196,7 +213,20 @@ function FrameInstance(
       sandbox={APP_FRAME_SANDBOX}
       referrerPolicy="no-referrer"
       className="w-full border-0 bg-background"
-      style={placement === "expanded" ? { height: "100%", minHeight: height } : { height }}
+      style={
+        placement === "expanded"
+          ? { height: "100%", minHeight: height }
+          : placement === "rail"
+            ? { height, minHeight: "100%" }
+            : { height }
+      }
     />
+  );
+  // In the rail (KOBE-460) the frame fills its section and scrolls inside it, like the Files tree.
+  if (placement !== "rail") return iframe;
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" data-kobe-app-scroll>
+      {iframe}
+    </div>
   );
 }

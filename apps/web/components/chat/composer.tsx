@@ -143,7 +143,8 @@ export function Composer({
   const readOnly = extras.state.summary?.readOnly === true;
   // A workspace row from the Files tree is a mention (KOBE-374); files from the computer attach.
   const rowDrop = useComposerMentionDrop({ draft, text, input, writable: !readOnly && !inTrash });
-  const appInsert = useAppInserts(input, text, remoteId, !readOnly && !inTrash);
+  // A new conversation's draft takes a rail picker's text too (KOBE-460).
+  const appInsert = useAppInserts(input, text, draft, !readOnly && !inTrash);
   const hasFiles = (e: DragEvent) => e.dataTransfer.types.includes("Files");
   const onDragOver = (e: DragEvent) => {
     if (rowDrop.over(e) || !hasFiles(e)) return;
@@ -462,8 +463,9 @@ export function settlesInsert(pending: PendingInsert, text: string, now: number)
  * in at the caret of this thread's composer and **never moves the focus**: an Enter the member
  * presses in the app (or anywhere else) cannot send it. Until the member changes the inserted text
  * or confirms it, it carries a visible "From <app>" marker, and Enter, Send, Queue and every way
- * of steering do nothing (LOW-J, LOW-L). It is never sent by itself. Only a writable composer of a
- * thread listens.
+ * of steering do nothing (LOW-J, LOW-L). It is never sent by itself. Only a writable composer
+ * listens, under its draft: the thread's id, or the new-conversation draft (a rail picker's text,
+ * KOBE-460; no card is ever in a new conversation).
  */
 function useAppInserts(
   input: RefObject<HTMLTextAreaElement | null>,

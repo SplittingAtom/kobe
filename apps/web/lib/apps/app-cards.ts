@@ -13,6 +13,16 @@ export interface RailApp {
   readonly connectorName: string;
   readonly tool: string;
   readonly title: string;
+  /** The approved template's hash (the frame route serves only these bytes). */
+  readonly sha256: string;
+}
+
+/**
+ * A picker app (KOBE-460, spec MA3 as amended 2026-10-20): its display name contains "Picker",
+ * in any case. One may run live in the rail's Apps tab.
+ */
+export function isPicker(app: Pick<RailApp, "title">): boolean {
+  return /picker/i.test(app.title);
 }
 
 export interface MissingKeyApp {

@@ -5,7 +5,8 @@ import { OS_DARK_QUERY, parseTheme, type Theme } from "../theme/theme";
  * ext-apps CSS variables, the display mode, the locale and the container size. Never a user or
  * team identifier.
  */
-export type Placement = "inline" | "expanded";
+/** `rail`: a picker in the rail's Apps tab (KOBE-460), inline to the app, filling its section. */
+export type Placement = "inline" | "expanded" | "rail";
 
 /** ext-apps style variable → Kobe's theme token (`app/theme.css`). */
 const STYLE_TOKENS: Readonly<Record<string, string>> = {

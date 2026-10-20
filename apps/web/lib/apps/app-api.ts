@@ -74,8 +74,15 @@ export async function callAppTool(
   tool: string,
   args: Record<string, unknown>,
   fetchFn: typeof fetch = fetch,
+  /** The thread on screen, for a rail picker's call (KOBE-460); a card's call names none. */
+  threadId?: string | null,
 ): Promise<ToolCallAnswer> {
-  const sent = await send(appPath(appId, "calls"), teamId, fetchFn, { tool, arguments: args });
+  if (threadId != null && !UUID.test(threadId)) throw new Error("not a thread id");
+  const sent = await send(appPath(appId, "calls"), teamId, fetchFn, {
+    tool,
+    arguments: args,
+    ...(threadId == null ? {} : { thread_id: threadId }),
+  });
   if ("ok" in sent) return sent;
   const result = (sent.json as { result?: unknown } | null)?.result;
   if (sent.status === 200 && typeof result === "object" && result !== null) {

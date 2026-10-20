@@ -13,6 +13,7 @@ import {
 import { ChatSessionContext, useKobeExtras } from "../chat/kobe-runtime";
 import type { RailApi } from "./rail-state";
 import { RAIL_TAB_IDS } from "./rail-tabs";
+import { RailPickers } from "./rail-pickers";
 import { InlineLink } from "./text-links";
 import styles from "./rail.module.css";
 
@@ -22,38 +23,50 @@ import styles from "./rail.module.css";
  * an app card (the server calls its opening tool as the member; no run, no model call), or into
  * a new thread from the new-thread view, a thread shared read-only or one in Trash. During a run
  * the card waits as a chip in the thread's queue. An app missing only the member's own key shows
- * "Add your key", linking to My connector keys.
+ * "Add your key", linking to My connector keys. Above the list, the Pickers section (KOBE-460,
+ * `rail-pickers.tsx`) runs one picker app live; the list below still lists every app.
  */
 export const APPS_SECTION_ID = RAIL_TAB_IDS.apps.panel;
 
-/** The member's apps, read when the rail mounts and when the team changes. */
-export function useRailApps(): RailApps | null {
+/** The member's apps as read, and whether that read failed (it then shows none). */
+export interface RailAppsState extends RailApps {
+  readonly failed: boolean;
+  /** Reads the list again (a picker found its app no longer live, KOBE-460). */
+  refresh(): void;
+}
+
+/** The member's apps, read when the rail mounts, when the team changes and on `refresh`. */
+export function useRailApps(): RailAppsState | null {
   const session = useContext(ChatSessionContext);
   const teamId = session?.teamId;
-  const [apps, setApps] = useState<{ teamId: string; value: RailApps } | null>(null);
+  const [reads, setReads] = useState(0);
+  const refresh = useCallback(() => setReads((n) => n + 1), []);
+  const [apps, setApps] = useState<{ teamId: string; value: RailAppsState } | null>(null);
   useEffect(() => {
     if (teamId === undefined) return undefined;
     let alive = true;
     void listRailApps(teamId).then(
       (res) => {
         // Apps are a nicety: a failed read shows none (and settles, so the rail never waits).
-        if (alive) setApps({ teamId, value: normalized(res.ok ? res.data : null) });
+        if (alive) setApps({ teamId, value: normalized(res.ok ? res.data : null, refresh) });
       },
       () => {
-        if (alive) setApps({ teamId, value: normalized(null) });
+        if (alive) setApps({ teamId, value: normalized(null, refresh) });
       },
     );
     return () => {
       alive = false;
     };
-  }, [teamId]);
+  }, [teamId, reads, refresh]);
   return apps !== null && apps.teamId === teamId ? apps.value : null;
 }
 
-function normalized(data: Partial<RailApps> | null): RailApps {
+function normalized(data: Partial<RailApps> | null, refresh: () => void): RailAppsState {
   return {
     apps: Array.isArray(data?.apps) ? data.apps : [],
     needsKey: Array.isArray(data?.needsKey) ? data.needsKey : [],
+    failed: data === null,
+    refresh,
   };
 }
 
@@ -67,8 +80,8 @@ export function RailApps({
   hidden,
 }: {
   readonly rail: RailApi;
-  readonly apps: RailApps;
-  /** Files is the tab on screen: kept mounted (its launch state), not shown. */
+  readonly apps: RailAppsState;
+  /** Files is the tab on screen: kept mounted (its launch state, the picker), not shown. */
   readonly hidden: boolean;
 }) {
   const aui = useAui();
@@ -115,7 +128,15 @@ export function RailApps({
       tabIndex={-1}
       className={styles.appsSection}
       hidden={hidden}
+      {...(rail.pickerShown ? { "data-picker-live": "" } : {})}
     >
+      <RailPickers
+        rail={rail}
+        apps={apps.apps}
+        settled={!apps.failed}
+        visible={!hidden && !rail.collapsed}
+        onUnavailable={apps.refresh}
+      />
       <ul className={styles.appsList}>
         {apps.apps.map((app) => (
           <li key={app.appId}>
