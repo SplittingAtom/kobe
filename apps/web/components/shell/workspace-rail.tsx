@@ -241,30 +241,22 @@ function RailHeader({
 }
 
 /**
- * Lists the files each time the Files tab comes on screen (KOBE-461): a tab click, a page load on
- * Files, the drawer opening on Files. Once per showing, after the member's layout has loaded (so a
- * member last on Apps, or with the rail collapsed, wakes nothing). An ask that itself brings Files
- * on screen (Show files, Mod+Shift+F) is that showing's listing, not a second one.
+ * Lists the files the first time the Files tab is on screen in this page (KOBE-461): a tab click,
+ * a load on Files, the drawer opening on Files. After that the kept listing is shown again without
+ * waking (Apps then Files, collapse and expand, the drawer again); Refresh files, Show files,
+ * Mod+Shift+F and `/files` list again. Only after the member's layout has loaded, so a member last
+ * on Apps, or with the rail collapsed, wakes nothing.
  */
 function useListWhenShown(rail: RailApi, showing: boolean) {
   const { filesRequests, requestFiles } = rail;
-  const listed = useRef(false);
-  const requestsWhileHidden = useRef(filesRequests);
   useEffect(() => {
-    if (!showing) {
-      listed.current = false;
-      requestsWhileHidden.current = filesRequests;
-      return;
-    }
-    if (listed.current) return;
-    listed.current = true;
-    if (filesRequests === requestsWhileHidden.current) requestFiles();
+    if (showing && filesRequests === 0) requestFiles();
   }, [showing, filesRequests, requestFiles]);
 }
 
 /**
- * The Files section: listed (and the sandbox woken) whenever its tab is on screen in an expanded
- * rail (KOBE-461), never while Apps is, or the rail is collapsed. Each ask (Show files,
+ * The Files section: listed (and the sandbox woken) the first time its tab is on screen in an
+ * expanded rail (KOBE-461), never while Apps is, or the rail is collapsed. Each ask (Show files,
  * Mod+Shift+F, `/files`) and Refresh files, in the file browser's top row, wakes and lists again.
  */
 function RailFiles({

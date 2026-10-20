@@ -1,11 +1,14 @@
 // @vitest-environment happy-dom
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { ChatApp } from "../chat/chat-app";
 import { must } from "../../lib/testing/must";
-import { openRowMenu, pressModShift } from "../chat/testing";
+import { isMacPlatform } from "../../lib/shell/shortcuts";
+import { composer, openRowMenu, pressModShift } from "../chat/testing";
+
+const MOD = () => (isMacPlatform() ? { metaKey: true } : { ctrlKey: true });
 
 interface Seen {
   readonly method: string;
@@ -152,25 +155,29 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     await waitFor(() => expect(wakes()).toBe(4));
   });
 
-  it("keeps its folder through collapse and expand; collapsed it wakes nothing, shown again it lists once", async () => {
+  it("keeps its folder and listing through collapse and expand, without waking again (KOBE-461)", async () => {
     const { user, panel } = await open();
     await waitFor(() => expect(wakes()).toBe(1));
     await user.click(within(panel).getByRole("treeitem", { name: "notes" }));
     await within(panel).findByText("todo.md");
     await user.click(screen.getByRole("button", { name: "Collapse the rail" }));
     expect(screen.getByText("todo.md").closest("[hidden]")).not.toBeNull(); // hidden, still mounted
+    // Mod+B expands it again: the kept listing, no new wake or listing.
+    act(() => void fireEvent.keyDown(document.body, { key: "b", code: "KeyB", ...MOD() }));
+    await waitFor(() => expect(within(panel).getByText("todo.md").closest("[hidden]")).toBeNull());
     await new Promise((r) => setTimeout(r, 50));
     expect(wakes()).toBe(1);
-    // The Threads panel leaves the rail collapsed: still nothing woken.
-    await user.click(screen.getByRole("button", { name: "Show threads" }));
-    await new Promise((r) => setTimeout(r, 50));
-    expect(wakes()).toBe(1);
-    await user.click(screen.getByRole("button", { name: "Show files" }));
-    expect(await within(panel).findByText("todo.md")).toBeTruthy();
-    expect(within(panel).getByText("todo.md").closest("[hidden]")).toBeNull();
+    expect(rootListings()).toBe(1);
+  });
+
+  it("/files lists again", async () => {
+    const { user } = await open();
+    await waitFor(() => expect(wakes()).toBe(1));
+    await user.click(await composer());
+    await user.keyboard("/files");
+    await user.keyboard("{Enter}");
     await waitFor(() => expect(wakes()).toBe(2));
-    await new Promise((r) => setTimeout(r, 50));
-    expect(wakes()).toBe(2);
+    expect(rootListings()).toBe(2);
   });
 
   it("wakes nothing on a load with the rail collapsed, and lists when it expands (KOBE-461 ac-2)", async () => {

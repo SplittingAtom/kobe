@@ -70,7 +70,7 @@ describe("Files | Apps (ac-1, ac-3)", () => {
     expect(within(files).getByRole("button", { name: "Refresh files" })).toBeTruthy();
   });
 
-  it("lists nothing on a load on Apps; the Files tab lists once per showing (KOBE-461 ac-2)", async () => {
+  it("lists nothing on a load on Apps; the Files tab lists the first time, then reuses it (KOBE-461 ac-2)", async () => {
     fake.preferences = { rail_tab: "apps" };
     const wakes = () =>
       fake.requests.filter((r) => r.method === "POST" && r.path === "/v1/workspace/wake").length;
@@ -89,9 +89,12 @@ describe("Files | Apps (ac-1, ac-3)", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(wakes()).toBe(1);
     await user.click(tab("Files"));
-    await waitFor(() => expect(wakes()).toBe(2), WAIT);
     await new Promise((r) => setTimeout(r, 50));
-    expect(wakes()).toBe(2);
+    expect(wakes()).toBe(1);
+    expect(listings()).toBe(1);
+    // Mod+Shift+F still lists again.
+    act(() => void pressModShift("F"));
+    await waitFor(() => expect(wakes()).toBe(2), WAIT);
   });
 
   it("remembers the member's tab across loads (another device too)", async () => {

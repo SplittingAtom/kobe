@@ -193,7 +193,7 @@ describe("the CE7 table, per band (ac-1)", () => {
     expect(menuPanel().querySelector('summary[aria-label="Profile"]')).not.toBeNull();
   });
 
-  it("390: the closed drawer lists nothing; opening it on Files lists them once (KOBE-461 ac-2)", async () => {
+  it("390: the closed drawer lists nothing; opening it on Files lists once, reopening reuses it (KOBE-461 ac-2)", async () => {
     resizeWindow(390);
     openApp(fake);
     await composer();
@@ -206,8 +206,15 @@ describe("the CE7 table, per band (ac-1)", () => {
     const files = await screen.findByRole("region", { name: "Files" });
     await within(files).findByRole("button", { name: "Refresh files" });
     await waitFor(() => expect(wakes()).toBe(1));
+    // Closed and opened again: the kept listing, no new wake.
+    const user = userEvent.setup();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Workspace" })).toBeNull());
+    await user.click(screen.getByRole("button", { name: "Show the workspace" }));
+    await screen.findByRole("dialog", { name: "Workspace" });
     await new Promise((r) => setTimeout(r, 50));
     expect(wakes()).toBe(1);
+    expect(fake.workspaceListings).toHaveLength(1);
   });
 
   it("390: the Menu stays open through a press inside it; Escape and a press outside close it", async () => {

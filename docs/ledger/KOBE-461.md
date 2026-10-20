@@ -14,29 +14,29 @@
   opening tool is called once, for the right picker. The default is not saved.
 - **Gone pick:** the first live picker shows with the "no longer available" note; the stale id
   stays remembered (not overwritten) until the member chooses (before: cleared to None).
-- **Files listing** (`workspace-rail.tsx` `useListWhenShown`): each time Files comes on screen in an
-  expanded rail, after the layout loads (tab click, load on Files, the drawer, expanding) it asks
-  once. If a reveal (Show files, Mod+Shift+F, `/files`) is what brought it on screen, that ask is
-  the listing, with no second one. Apps tab, a collapsed rail and a closed drawer wake nothing.
-  The "Open files" button is removed: it could never show.
+- **Files listing** (`workspace-rail.tsx` `useListWhenShown`): once per page load, the first time
+  Files is on screen in an expanded rail after the layout loads (tab click, load on Files, the
+  drawer). Later showings (Apps then Files, collapse and expand, the drawer again) reuse the kept
+  listing without waking (coordinator, 2026-10-20). Refresh files, Show files, Mod+Shift+F and
+  `/files` list again. Apps tab, a collapsed rail and a closed drawer wake nothing. The "Open
+  files" button is removed: it could never show.
 - **Refresh files** moved into `FileBrowser`'s top row (`onRefresh` prop, after Upload; ghost
   `IconAction` like Upload's look, same `refresh-files` command/tooltip). It still clears the
   drop notice.
 
 ## Open questions (for Chris or the coordinator)
 
-- "Once per showing" means collapsing and expanding the rail on Files, or going Apps then Files,
-  wakes and lists again (before KOBE-461 nothing re-woke). Say if it should list only on the
-  first showing per page.
+- none (once-per-load listing settled by the coordinator)
 
 ## Evidence (acceptance criteria → test or command output)
 
 - ac-1: `rail-pickers.test.tsx` (first live picker when never chose, remembered None, remembered
   pick with one opening call, gone pick → first live with note); e2e `gate-apps/picker.spec.ts`
   adds "a remembered None stays None on load".
-- ac-2: `rail-files.test.tsx` (listed on load, collapsed load wakes nothing, collapse/expand),
-  `rail-tabs.test.tsx` (load on Apps wakes nothing; Files tab lists once per showing),
-  `breakpoints.test.tsx` (390 px drawer lists once when opened).
+- ac-2: `rail-files.test.tsx` (listed on load, collapsed load wakes nothing, collapse/Mod+B
+  expand reuses, `/files` lists again), `rail-tabs.test.tsx` (load on Apps wakes nothing; Files
+  lists the first time, Apps then Files reuses, Mod+Shift+F lists again), `breakpoints.test.tsx`
+  (390 px drawer lists once; close and reopen reuses).
 - ac-3: `rail-files.test.tsx` (Refresh in the top row beside Upload, only one); e2e
   `files-tree.spec.ts` checks the same.
 - ac-4: specs updated: files-tree, composer-cues, row-menus, rail-resize, gate5/u18-never-lose
