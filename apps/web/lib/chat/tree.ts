@@ -729,9 +729,10 @@ function overlayLive(
 
   if (!run.promptCommitted && live.prompt) {
     const parentEntryId = live.prompt.parentEntryId;
-    // A hidden parent at the root (a root edit) puts the prompt beside the first message; an
-    // unloaded one under the head.
-    const at = parentEntryId === null ? null : place(parentEntryId);
+    // A hidden parent at the root (a root edit, always a named entry) puts the prompt beside the
+    // first message; an unloaded one under the head, and so does none: a queued message continues
+    // from the leaf its run starts on, which the server names only then (KOBE-415).
+    const at = parentEntryId === null ? undefined : place(parentEntryId);
     const parentNode = at === undefined ? headId : at;
     const id = `${PREFIX_PROMPT}${run.runId}`;
     const meta: KobeMessageMeta = {
