@@ -1,7 +1,7 @@
 "use client";
 
 import { ThreadListPrimitive, useAuiState } from "@assistant-ui/react";
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef } from "react";
 import type { ApiError } from "../../lib/api/client";
 import type { FileEntry, FilesApi } from "../../lib/files/api";
 import { ErrorNotice } from "../admin/error-notice";
@@ -25,7 +25,8 @@ import {
 } from "./rail-drop-zone";
 import { railDocked } from "../../lib/shell/layout";
 import { RAIL_ID, RailResizeHandle } from "./rail-resize";
-import { useRail, type RailApi } from "./rail-state";
+import { useRail, type RailApi, type RailTab } from "./rail-state";
+import { RAIL_TAB_IDS, RailTabList } from "./rail-tabs";
 import { useShellBand } from "./shell-band";
 import { useModalLayer } from "./use-modal-layer";
 import { RailTeam, RailTeamIcon } from "./rail-team";
@@ -33,7 +34,7 @@ import { RailApps, hasRailApps, useRailApps } from "./rail-apps";
 import styles from "./rail.module.css";
 import { RAIL_ACTION, RAIL_ACTION_VARIANT } from "./rail-action";
 
-const SECTION_IDS = { files: "kobe-rail-files" } as const;
+const SECTION_IDS = { files: RAIL_TAB_IDS.files.panel, apps: RAIL_TAB_IDS.apps.panel } as const;
 
 /** The drawer closes once a thread is on screen, however it was opened (CE8). */
 function useFoldOnThreadChange({ closeDrawer }: RailApi) {
@@ -52,27 +53,28 @@ function useRevealFocus({ revealed, collapsed }: RailApi) {
   useEffect(() => {
     if (revealed === null || collapsed || handled.current === revealed.seq) return;
     handled.current = revealed.seq;
-    // The rail has one section since KOBE-453 (the threads are a panel): Files.
-    document.getElementById(SECTION_IDS.files)?.focus();
+    // The tab asked for, in the rail's one section (KOBE-448).
+    document.getElementById(SECTION_IDS[revealed.section])?.focus();
   }, [revealed, collapsed]);
 }
 
 /**
- * The icons of the collapsed rail (CE5): New conversation, Threads (the panel, KOBE-453), Files and
- * Apps. New keeps the rail as it is. Hidden, not unmounted,
- * while the rail is expanded, so focus can return to the icon that opened a drawer.
+ * The icons of the collapsed rail (CE5): New conversation, Threads (the panel, KOBE-453) and one
+ * for the Files | Apps section, which opens it on the member's last tab (KOBE-448). New keeps the
+ * rail as it is. Hidden, not unmounted, while the rail is expanded, so focus can return to the
+ * icon that opened a drawer.
  */
 function CollapsedIcons({
   rail,
   teams,
   teamName,
-  onShowApps,
+  tab,
 }: {
   readonly rail: RailApi;
   readonly teams: MyTeamsState;
   readonly teamName: string;
-  /** Present when the member has apps (KOBE-440): expands the rail at its Apps section. */
-  readonly onShowApps?: (() => void) | undefined;
+  /** The tab the section opens on: Apps only when the member has apps. */
+  readonly tab: RailTab;
 }) {
   return (
     <div className={styles.icons} hidden={!rail.collapsed}>
@@ -87,21 +89,12 @@ function CollapsedIcons({
       </ThreadListPrimitive.New>
       <ThreadsButton command="show-threads" side="right" className={RAIL_ACTION} />
       <IconAction
-        command="show-files"
+        command={tab === "apps" ? "show-apps" : "show-files"}
         side="right"
         variant={RAIL_ACTION_VARIANT}
         className={RAIL_ACTION}
-        onClick={() => rail.reveal("files", { toggle: true })}
+        onClick={() => rail.reveal(tab, { toggle: true })}
       />
-      {onShowApps && (
-        <IconAction
-          command="show-apps"
-          side="right"
-          variant={RAIL_ACTION_VARIANT}
-          className={RAIL_ACTION}
-          onClick={onShowApps}
-        />
-      )}
     </div>
   );
 }
@@ -164,12 +157,16 @@ function ThreadActions() {
   );
 }
 
-/** Shows or hides the rail's Files section (KOBE-453: the rail's one section; saved per member). */
-function FilesToggle({ rail }: { readonly rail: RailApi }) {
+/**
+ * Shows or hides the rail's section (KOBE-453, KOBE-448: Files, or Files | Apps; saved per
+ * member). Hidden, the rail collapses to its strip.
+ */
+function FilesToggle({ rail, withApps }: { readonly rail: RailApi; readonly withApps: boolean }) {
   const on = shows(rail.panels, "files");
   return (
     <IconAction
       command="rail-files"
+      label={withApps ? "Files and apps" : undefined}
       size="sm"
       side="bottom"
       variant={RAIL_ACTION_VARIANT}
@@ -205,10 +202,13 @@ function RailHeader({
   rail,
   teams,
   teamName,
+  withApps,
 }: {
   readonly rail: RailApi;
   readonly teams: MyTeamsState;
   readonly teamName: string;
+  /** The section has an Apps tab: its toggle says so. */
+  readonly withApps: boolean;
 }) {
   return (
     <>
@@ -216,7 +216,7 @@ function RailHeader({
         <RailTeam teams={teams} teamName={teamName} />
         <div className={styles.headerActions}>
           <ThreadActions />
-          <FilesToggle rail={rail} />
+          <FilesToggle rail={rail} withApps={withApps} />
           <TeamConsoleLink />
           <IconAction
             command="toggle-rail"
@@ -251,6 +251,7 @@ function RailFiles({
   showFolder,
   clearDrop,
   hidden,
+  tabbed,
 }: {
   readonly rail: RailApi;
   readonly api: FilesApi;
@@ -258,8 +259,10 @@ function RailFiles({
   readonly showFolder: { readonly path: string; readonly seq: number } | null;
   /** A Files action (open, refresh) clears the last drop's notice and errors. */
   clearDrop(): void;
-  /** Turned off on the rail's top line: kept mounted (its tree and listing), not shown. */
+  /** Not on screen (Apps is, or the section is off): kept mounted (its tree, listing), not shown. */
   hidden: boolean;
+  /** A tab beside Apps (KOBE-448): its tab names it, so its own title is for screen readers. */
+  tabbed: boolean;
 }) {
   const request = () => {
     clearDrop();
@@ -283,16 +286,13 @@ function RailFiles({
         return refused;
       }
     : undefined;
-  return (
-    <section
-      id={SECTION_IDS.files}
-      aria-labelledby="kobe-rail-files-title"
-      tabIndex={-1}
-      className={styles.section}
-      hidden={hidden}
-    >
+  const content = (
+    <>
       <div className={styles.sectionHeader}>
-        <h3 id="kobe-rail-files-title" className={styles.sectionTitle}>
+        <h3
+          id="kobe-rail-files-title"
+          className={tabbed ? `${styles.sectionTitle} sr-only` : styles.sectionTitle}
+        >
           Files
         </h3>
         {rail.filesRequests > 0 && (
@@ -323,6 +323,35 @@ function RailFiles({
           onMention={mention}
         />
       )}
+    </>
+  );
+  // Beside Apps (KOBE-448) the Files tab's panel holds the same Files region, so it is found and
+  // named as it was without tabs.
+  if (tabbed) {
+    return (
+      <div
+        id={SECTION_IDS.files}
+        role="tabpanel"
+        aria-labelledby={RAIL_TAB_IDS.files.tab}
+        tabIndex={-1}
+        className={styles.section}
+        hidden={hidden}
+      >
+        <section aria-labelledby="kobe-rail-files-title" className={styles.tabSection}>
+          {content}
+        </section>
+      </div>
+    );
+  }
+  return (
+    <section
+      id={SECTION_IDS.files}
+      aria-labelledby="kobe-rail-files-title"
+      tabIndex={-1}
+      className={styles.section}
+      hidden={hidden}
+    >
+      {content}
     </section>
   );
 }
@@ -366,15 +395,12 @@ export function WorkspaceRail({
   // One read of the member's teams for the top line and the collapsed strip.
   const teams = useMyTeams(false);
   const filesShown = shows(rail.panels, "files");
-  // The Apps section (KOBE-440) sits between Threads and Files, only when the member has apps.
+  // Files | Apps (KOBE-448): the Apps tab (KOBE-440) only when the member has apps or a key to add;
+  // else the section is Files alone, without a tablist, whatever tab is stored.
   const apps = useRailApps();
   const showsApps = hasRailApps(apps);
-  const [appsFocus, setAppsFocus] = useState(0);
-  const showApps = () => {
-    rail.toggle(false);
-    setAppsFocus((n) => n + 1);
-  };
-  const gridRows = showsApps && filesShown ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)";
+  const tab: RailTab = showsApps ? rail.tab : "files";
+  const gridRows = showsApps ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)";
 
   return (
     <>
@@ -388,16 +414,9 @@ export function WorkspaceRail({
         {...drop.handlers}
       >
         {drop.active && <RailDropOverlay />}
-        {!single && (
-          <CollapsedIcons
-            rail={rail}
-            teams={teams}
-            teamName={teamName}
-            onShowApps={showsApps ? showApps : undefined}
-          />
-        )}
+        {!single && <CollapsedIcons rail={rail} teams={teams} teamName={teamName} tab={tab} />}
         <div className={styles.expanded} hidden={collapsed}>
-          <RailHeader rail={rail} teams={teams} teamName={teamName} />
+          <RailHeader rail={rail} teams={teams} teamName={teamName} withApps={showsApps} />
           {listError && (
             <div className={styles.listError}>
               <ErrorNotice error={listError} />
@@ -408,15 +427,19 @@ export function WorkspaceRail({
             className={styles.sections}
             style={{ gridTemplateRows: gridRows }}
           >
-            {showsApps && filesShown && <RailApps rail={rail} apps={apps} focusSeq={appsFocus} />}
+            {showsApps && <RailTabList tab={tab} onChange={rail.setTab} />}
             <RailFiles
               rail={rail}
               api={filesApi}
               drop={drop.status}
               showFolder={drop.showFolder}
               clearDrop={drop.clear}
-              hidden={!filesShown}
+              hidden={!filesShown || tab !== "files"}
+              tabbed={showsApps}
             />
+            {showsApps && (
+              <RailApps rail={rail} apps={apps} hidden={!filesShown || tab !== "apps"} />
+            )}
           </div>
         </div>
       </aside>

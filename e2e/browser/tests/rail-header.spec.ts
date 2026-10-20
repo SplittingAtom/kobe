@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { SHELL_TIMEOUT_MS } from "./support/constants.js";
-import { expect, test } from "./support/chat.js";
+import { expect, FILES_TOGGLE, test } from "./support/chat.js";
 
 /**
  * KOBE-419: the rail's top line. The team selector (moved from the bar), the Threads and Files
@@ -38,7 +38,7 @@ test("the top line: team, Threads, Files, Team console (admins), collapse (ac-1,
   const line = chat.railHeader;
   const bar = page.locator('[data-bar-row="1"]');
   await expect(line.getByRole("button", { name: "Threads panel", exact: true })).toBeVisible();
-  await expect(line.getByRole("button", { name: "Files panel", exact: true })).toBeVisible();
+  await expect(line.getByRole("button", { name: FILES_TOGGLE })).toBeVisible();
   await expect(line.getByRole("button", { name: "Collapse the rail" })).toBeVisible();
   // The selector (a menu with several teams, the name with one) is here, not in the bar.
   await expect(
@@ -80,7 +80,7 @@ test("Threads opens its panel; the Files toggle hides Files and is saved (KOBE-4
   const line = chat.railHeader;
   const newThread = line.getByRole("button", { name: "New conversation", exact: true });
   const threadsButton = line.getByRole("button", { name: /^Threads panel/ });
-  const filesToggle = line.getByRole("button", { name: "Files panel", exact: true });
+  const filesToggle = line.getByRole("button", { name: FILES_TOGGLE });
   const files = page.getByRole("region", { name: "Files" });
   // New conversation sits immediately left of Threads.
   const newBox = await newThread.boundingBox();
@@ -153,6 +153,38 @@ test("a phone: the drawer is headed by the team selector (ac-2)", async ({ chat,
   await expect(
     line.getByRole("navigation", { name: "Teams" }).or(line.getByRole("heading", { level: 2 })),
   ).toBeVisible();
-  await expect(line.getByRole("button", { name: "Files panel", exact: true })).toBeVisible();
+  await expect(line.getByRole("button", { name: FILES_TOGGLE })).toBeVisible();
   await shoot(page, "rail-header-phone", drawer);
+});
+
+test("Files | Apps: one tabbed section, arrow keys, the last tab kept (KOBE-448)", async ({
+  chat,
+  page,
+}) => {
+  await chat.open();
+  const tabs = page.getByRole("tablist", { name: "Files and apps" });
+  if (!(await tabs.isVisible())) {
+    // No apps and no key to add on this deployment: Files alone, without a tablist.
+    await expect(page.getByRole("region", { name: "Files" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Apps" })).toHaveCount(0);
+    return;
+  }
+  const files = tabs.getByRole("tab", { name: "Files", exact: true });
+  const apps = tabs.getByRole("tab", { name: "Apps", exact: true });
+  try {
+    await expect(files).toHaveAttribute("aria-selected", "true");
+    await files.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(apps).toBeFocused();
+    await expect(apps).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tabpanel", { name: "Apps" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Files" })).toBeHidden();
+    await shoot(page, "rail-tabs-apps", page.locator('[data-shell-region="rail"]'));
+    // Kept per member: a reload opens on Apps.
+    await page.reload();
+    await expect(apps).toHaveAttribute("aria-selected", "true", { timeout: SHELL_TIMEOUT_MS });
+  } finally {
+    await chat.showBothPanels();
+    await expect(files).toHaveAttribute("aria-selected", "true");
+  }
 });

@@ -21,6 +21,10 @@ describe("uiPreferencesSchema", () => {
     for (const panels of ["both", "threads", "files"] as const) {
       expect(uiPreferencesSchema.parse({ rail_panels: panels })).toEqual({ rail_panels: panels });
     }
+    // KOBE-448: the rail section's last tab.
+    for (const tab of ["files", "apps"] as const) {
+      expect(uiPreferencesSchema.parse({ rail_tab: tab })).toEqual({ rail_tab: tab });
+    }
   });
 
   it("refuses unknown keys (strict, not stripped)", () => {
@@ -56,6 +60,8 @@ describe("uiPreferencesSchema", () => {
     { rail_panels: "none" },
     { rail_panels: null },
     { rail_panels: ["threads"] },
+    { rail_tab: "threads" },
+    { rail_tab: null },
   ])("refuses %o", (body) => {
     expect(uiPreferencesSchema.safeParse(body).success).toBe(false);
   });

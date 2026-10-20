@@ -53,6 +53,9 @@ describe("wire", () => {
       railPanels: "files",
     });
     expect(readPreferences({ preferences: { railPanels: "none" } })).toEqual({});
+    // KOBE-448: the rail section's last tab.
+    expect(readPreferences({ preferences: { railTab: "apps" } })).toEqual({ railTab: "apps" });
+    expect(readPreferences({ preferences: { railTab: "threads" } })).toEqual({});
   });
 
   it("writes only the keys that changed, in wire casing", () => {
@@ -65,6 +68,7 @@ describe("wire", () => {
     expect(toWire({ railWidth: 400 })).toEqual({ rail_width: 400 });
     expect(toWire({ railWidth: null })).toEqual({ rail_width: null });
     expect(toWire({ railPanels: "threads" })).toEqual({ rail_panels: "threads" });
+    expect(toWire({ railTab: "apps" })).toEqual({ rail_tab: "apps" });
     expect(toWire({})).toEqual({});
   });
 });

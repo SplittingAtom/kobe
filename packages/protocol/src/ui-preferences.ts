@@ -12,7 +12,9 @@ import { z } from "zod";
  * `detail_expanded` (KOBE-208, CE12): the Detail toggle, all reasoning and tool cards open.
  * `rail_width` (KOBE-305): the expanded rail's dragged width; `null` goes back to the default.
  * `rail_panels` (KOBE-419): which of the rail's panels show, Threads, Files or both (the default);
- * never none, so the rail always has something to show.
+ * never none, so the rail always has something to show. Since KOBE-453 the threads are a panel:
+ * "both" or "files" shows the rail's Files | Apps section, "threads" hides it.
+ * `rail_tab` (KOBE-448): the tab that section shows, Files (the default) or Apps.
  */
 
 /** Threads' share of the rail's height over Files (CE5): never squeezing either section out. */
@@ -33,6 +35,10 @@ export const RAIL_WIDTH_BOUNDS = { min: 200, max: 560 } as const;
 /** The rail's panels on screen (KOBE-419): one of them, or both. */
 export const RAIL_PANELS = ["both", "threads", "files"] as const;
 export type RailPanels = (typeof RAIL_PANELS)[number];
+
+/** The rail section's tabs (KOBE-448): the member's last one is kept. */
+export const RAIL_TABS = ["files", "apps"] as const;
+export type RailTab = (typeof RAIL_TABS)[number];
 
 /** Largest PUT body the server reads (bytes); the whole document is far smaller. */
 export const UI_PREFERENCES_MAX_BODY = 1024;
@@ -68,6 +74,7 @@ export const uiPreferencesSchema = z.strictObject({
     .nullable()
     .optional(),
   rail_panels: z.enum(RAIL_PANELS).optional(),
+  rail_tab: z.enum(RAIL_TABS).optional(),
 });
 export type UiPreferences = z.infer<typeof uiPreferencesSchema>;
 

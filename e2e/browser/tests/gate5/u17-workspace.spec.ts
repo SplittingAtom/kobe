@@ -1,5 +1,5 @@
 import { RUN_TIMEOUT_MS, SHELL_TIMEOUT_MS } from "../support/constants.js";
-import { expect, test, type Chat } from "../support/chat.js";
+import { expect, FILES_TOGGLE, test, type Chat } from "../support/chat.js";
 import {
   preferences,
   putPreferences,
@@ -110,7 +110,7 @@ test("U17: rail state, divider and artifact width persist across two browsers", 
     // The rail's Files section hidden (KOBE-453: the threads are a panel, the rail is Files).
     const filesToggle = page
       .locator("[data-rail-header]")
-      .getByRole("button", { name: "Files panel", exact: true });
+      .getByRole("button", { name: FILES_TOGGLE });
     await filesToggle.click();
     await expect(filesToggle).toHaveAttribute("aria-pressed", "false");
     // The rail collapses (Mod+B).
@@ -134,9 +134,7 @@ test("U17: rail state, divider and artifact width persist across two browsers", 
     await second.locator("body").press("ControlOrMeta+b");
     await expect.poll(() => widthOf(r2.rail)).toBeGreaterThan(48 + SLACK_PX);
     await expect(
-      second
-        .locator("[data-rail-header]")
-        .getByRole("button", { name: "Files panel", exact: true }),
+      second.locator("[data-rail-header]").getByRole("button", { name: FILES_TOGGLE }),
     ).toHaveAttribute("aria-pressed", "false");
     // The artifact width applies once a column opens there: the same thread's artifact, reopened
     // from the thread's artifact list (the open set itself is per browser, CE6).

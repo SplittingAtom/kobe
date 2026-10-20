@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { RAIL_PANELS, type RailPanels } from "@kobe/protocol";
+import { RAIL_PANELS, RAIL_TABS, type RailPanels, type RailTab } from "@kobe/protocol";
 import { useStoredPreference, type LayoutPreferences } from "../../lib/shell/preferences";
 import { railDocked } from "../../lib/shell/layout";
 import { DEFAULT_RAIL_PANELS, shows, withPanel } from "../../lib/shell/rail-panels";
@@ -43,13 +43,16 @@ import { useShellBand } from "./shell-band";
  */
 export type RailSection = "threads" | "files";
 
+/** What the member can ask to see in the rail (KOBE-448): a tab of its one section. */
+export type { RailTab };
+
 export interface RailApi {
   /** Showing the collapsed icons (48 px): the member's choice when docked, else no drawer. */
   readonly collapsed: boolean;
   /** Expanded below 1100 px: the rail is a modal drawer over the shell. */
   readonly drawer: boolean;
   /** The section the member asked to see; the rail focuses it once rendered. */
-  readonly revealed: { readonly section: RailSection; readonly seq: number } | null;
+  readonly revealed: { readonly section: RailTab; readonly seq: number } | null;
   /** Collapses or expands the rail on this page only (automatic; not saved). */
   setCollapsed(collapsed: boolean): void;
   /** Closes the drawer, if open (a thread opened from it). */
@@ -64,7 +67,14 @@ export interface RailApi {
    * Expands the rail and moves focus to a section (the collapsed icons, Mod+Shift+F).
    * `toggle`: the member expanded the collapsed rail with its own icons (saved like `toggle`).
    */
-  reveal(section: RailSection, options?: { readonly toggle?: boolean }): void;
+  reveal(section: RailTab, options?: { readonly toggle?: boolean }): void;
+  /**
+   * The section's tab (KOBE-448): the member's last one, saved per member; Files the first time.
+   * Where there are no apps the section is Files whatever is stored (the rail decides).
+   */
+  readonly tab: RailTab;
+  /** The member chose a tab: shown and saved. */
+  setTab(tab: RailTab): void;
   /** Lists the workspace and wakes the sandbox (first use, Show files, refresh). */
   requestFiles(): void;
   /** The expanded rail's dragged width in px (KOBE-305); null is the default, 280 px. */
@@ -143,6 +153,23 @@ function useRailPanels(
   return { panels: stored.value, setPanel, showPanel, setSectionShown };
 }
 
+/** The section's tab (KOBE-448): stored per member, Files until the member picks Apps. */
+function useRailTab(
+  preferences: LayoutPreferences | null,
+  onSave: ((change: LayoutPreferences) => void) | undefined,
+) {
+  const stored = useStoredPreference<RailTab>({
+    initial: "files",
+    ready: preferences !== null,
+    resolve: () => {
+      const tab = preferences?.railTab;
+      return tab !== undefined && RAIL_TABS.includes(tab) ? tab : null;
+    },
+    save: onSave && ((railTab) => onSave({ railTab })),
+  });
+  return { tab: stored.value, setTab: stored.commit };
+}
+
 const RailContext = createContext<RailApi | null>(null);
 
 export function useRail(): RailApi | null {
@@ -208,6 +235,7 @@ export function RailProvider({
   const [filesRequests, setFilesRequests] = useState(0);
   const requestFiles = useCallback(() => setFilesRequests((n) => n + 1), []);
   const [revealed, setRevealed] = useState<RailApi["revealed"]>(null);
+  const { tab, setTab } = useRailTab(preferences, onSave);
   // Only the docked rail's toggle is the member's layout; the drawer is not saved.
   // Expanding shows the section again if it was hidden (the rail had collapsed for it).
   const toggle = useCallback(
@@ -219,14 +247,16 @@ export function RailProvider({
     [docked, commitChosen, openDrawer, showPanel],
   );
   const reveal = useCallback(
-    (section: RailSection, options?: { readonly toggle?: boolean }) => {
+    (section: RailTab, options?: { readonly toggle?: boolean }) => {
       if (options?.toggle && collapsedNow()) toggle(false);
       else setCollapsed(false);
-      showPanel(section);
+      showPanel("files");
+      // Asking for a tab is using it: the section shows it, and remembers it.
+      setTab(section);
       setRevealed((prev) => ({ section, seq: (prev?.seq ?? 0) + 1 }));
       if (section === "files") setFilesRequests((n) => n + 1);
     },
-    [collapsedNow, toggle, setCollapsed, showPanel],
+    [collapsedNow, toggle, setCollapsed, showPanel, setTab],
   );
   const api = useMemo(
     () => ({
@@ -247,6 +277,8 @@ export function RailProvider({
       setPanel,
       showPanel,
       setSectionShown,
+      tab,
+      setTab,
     }),
     [
       docked,
@@ -268,6 +300,8 @@ export function RailProvider({
       setPanel,
       showPanel,
       setSectionShown,
+      tab,
+      setTab,
     ],
   );
   return <RailContext.Provider value={api}>{children}</RailContext.Provider>;

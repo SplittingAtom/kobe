@@ -17,7 +17,12 @@
  * as a sheet.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { readUiPreferences, type RailPanels, type UiPreferences } from "@kobe/protocol";
+import {
+  readUiPreferences,
+  type RailPanels,
+  type RailTab,
+  type UiPreferences,
+} from "@kobe/protocol";
 import { apiRequest } from "../api/client";
 import { ARTIFACT_FLOOR_PX, CONVERSATION_FLOOR_PX } from "../chat/artifact-tabs";
 
@@ -39,6 +44,8 @@ export interface LayoutPreferences {
    * server still accepts what older clients stored.
    */
   readonly railPanels?: RailPanels;
+  /** The rail section's last tab (KOBE-448): Files (the default) or Apps. */
+  readonly railTab?: RailTab;
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -50,6 +57,7 @@ const fromWire = (p: UiPreferences): LayoutPreferences => ({
   ...(p.detail_expanded !== undefined ? { detailExpanded: p.detail_expanded } : {}),
   ...(p.rail_width !== undefined ? { railWidth: p.rail_width } : {}),
   ...(p.rail_panels !== undefined ? { railPanels: p.rail_panels } : {}),
+  ...(p.rail_tab !== undefined ? { railTab: p.rail_tab } : {}),
 });
 
 /** The wire body (snake_case) for a change. */
@@ -60,6 +68,7 @@ export function toWire(change: LayoutPreferences): UiPreferences {
     ...(change.detailExpanded !== undefined ? { detail_expanded: change.detailExpanded } : {}),
     ...(change.railWidth !== undefined ? { rail_width: change.railWidth } : {}),
     ...(change.railPanels !== undefined ? { rail_panels: change.railPanels } : {}),
+    ...(change.railTab !== undefined ? { rail_tab: change.railTab } : {}),
   };
 }
 
@@ -76,6 +85,7 @@ export function readPreferences(data: unknown): LayoutPreferences {
       detail_expanded: raw.detailExpanded,
       rail_width: raw.railWidth,
       rail_panels: raw.railPanels,
+      rail_tab: raw.railTab,
     }),
   );
 }

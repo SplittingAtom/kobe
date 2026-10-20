@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true,"handleDisabledFileLoadingAsSuccess":true},"width":1280,"height":800}
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
@@ -57,7 +57,11 @@ function answered() {
   return t;
 }
 
-const appsSection = () => screen.findByRole("region", { name: "Apps" });
+/** The rail's Apps tab (KOBE-448: beside Files), chosen. */
+async function appsSection(): Promise<HTMLElement> {
+  fireEvent.click(await screen.findByRole("tab", { name: "Apps" }));
+  return screen.findByRole("tabpanel", { name: "Apps" });
+}
 const launches = () => chatRequests(fake, "POST").filter((r) => r.path.endsWith("/app-cards"));
 const messages = () => chatRequests(fake, "POST").filter((r) => r.path.endsWith("/messages"));
 
@@ -205,7 +209,9 @@ describe("the rail's Apps section (KOBE-440)", () => {
   it("is absent without apps, and says 'Add your key' when only the member's key is missing (ac-1)", async () => {
     openApp(fake, answered());
     await screen.findByLabelText("Message");
-    expect(screen.queryByRole("region", { name: "Apps" })).toBeNull();
+    // KOBE-448: no Apps tab and no tablist; the section is Files alone.
+    expect(screen.queryByRole("tab", { name: "Apps" })).toBeNull();
+    expect(screen.queryByRole("tablist")).toBeNull();
     cleanup();
     fake.teamAppsNeedKey = [
       { connectorId: APP.connectorId, connectorName: "Catalyst", title: "Lakehouse Explorer" },

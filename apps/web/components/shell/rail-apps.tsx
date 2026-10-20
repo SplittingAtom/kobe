@@ -2,7 +2,7 @@
 
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { AppWindowIcon } from "lucide-react";
-import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useState } from "react";
 import {
   MY_CONNECTOR_KEYS,
   launchAppCard,
@@ -12,18 +12,19 @@ import {
 } from "../../lib/apps/app-cards";
 import { ChatSessionContext, useKobeExtras } from "../chat/kobe-runtime";
 import type { RailApi } from "./rail-state";
+import { RAIL_TAB_IDS } from "./rail-tabs";
 import { InlineLink } from "./text-links";
 import styles from "./rail.module.css";
 
 /**
- * The rail's Apps section (KOBE-440, spec MA3, MA8, MA11): the member's apps, between Threads and
- * Files, hidden when there is none. A click launches the app into the conversation on screen as
+ * The rail's Apps tab (KOBE-440, spec MA3, MA8, MA11; a tab beside Files since KOBE-448): the
+ * member's apps; no tab when there is none. A click launches the app into the conversation on screen as
  * an app card (the server calls its opening tool as the member; no run, no model call), or into
  * a new thread from the new-thread view, a thread shared read-only or one in Trash. During a run
  * the card waits as a chip in the thread's queue. An app missing only the member's own key shows
  * "Add your key", linking to My connector keys.
  */
-export const APPS_SECTION_ID = "kobe-rail-apps";
+export const APPS_SECTION_ID = RAIL_TAB_IDS.apps.panel;
 
 /** The member's apps, read when the rail mounts and when the team changes. */
 export function useRailApps(): RailApps | null {
@@ -58,12 +59,12 @@ export function hasRailApps(apps: RailApps | null): apps is RailApps {
 export function RailApps({
   rail,
   apps,
-  focusSeq,
+  hidden,
 }: {
   readonly rail: RailApi;
   readonly apps: RailApps;
-  /** Bumped by the collapsed rail's Apps icon: the section takes the focus once shown. */
-  readonly focusSeq: number;
+  /** Files is the tab on screen: kept mounted (its launch state), not shown. */
+  readonly hidden: boolean;
 }) {
   const aui = useAui();
   const session = useContext(ChatSessionContext);
@@ -74,13 +75,6 @@ export function RailApps({
   const target = remoteId !== undefined && own ? remoteId : null;
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const section = useRef<HTMLElement>(null);
-  const focused = useRef(0);
-  useEffect(() => {
-    if (focusSeq === focused.current || rail.collapsed) return;
-    focused.current = focusSeq;
-    section.current?.focus();
-  }, [focusSeq, rail.collapsed]);
 
   const launch = useCallback(
     async (app: RailApp) => {
@@ -107,17 +101,13 @@ export function RailApps({
   const where = target === null ? "in a new conversation" : "in this conversation";
   return (
     <section
-      ref={section}
       id={APPS_SECTION_ID}
-      aria-labelledby="kobe-rail-apps-title"
+      role="tabpanel"
+      aria-labelledby={RAIL_TAB_IDS.apps.tab}
       tabIndex={-1}
       className={styles.appsSection}
+      hidden={hidden}
     >
-      <div className={styles.sectionHeader}>
-        <h3 id="kobe-rail-apps-title" className={styles.sectionTitle}>
-          Apps
-        </h3>
-      </div>
       <ul className={styles.appsList}>
         {apps.apps.map((app) => (
           <li key={app.appId}>

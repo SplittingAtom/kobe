@@ -253,6 +253,37 @@ button.teamIcon {
   min-height: 0;
 }
 
+/* Files | Apps (KOBE-448): the section's tabs, a quiet underline for the chosen one. */
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem 0;
+  border-bottom: 1px solid var(--admin-border);
+}
+
+.tab {
+  margin-bottom: -1px;
+  padding: 0.25rem 0.5rem;
+  color: var(--admin-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--admin-fg);
+}
+
+.tab[aria-selected="true"] {
+  color: var(--admin-fg);
+  border-bottom-color: var(--admin-accent);
+}
+
 /* A thread that could not be read (KOBE-453: the threads are a panel, the error stays in sight). */
 .listError {
   padding: 0 0.5rem;
@@ -269,6 +300,15 @@ button.teamIcon {
 /* A panel turned off on the top line (KOBE-419): kept mounted, not shown. */
 .section[hidden] {
   display: none;
+}
+
+/* The Files region inside its tab's panel (KOBE-448): the panel's whole height. */
+.tabSection {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 
 .sectionBody {
@@ -475,21 +515,22 @@ button.teamIcon {
   color: var(--accent-foreground);
 }
 
-/* The Apps section (KOBE-440): between Threads and Files, as tall as its rows up to a cap. */
+/* The Apps tab (KOBE-440, KOBE-448): the section's height, its list scrolling. */
 .appsSection {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  max-height: 10rem;
+  min-height: 0;
+  padding-top: 0.25rem;
   outline: none;
 }
 
-.appsSection:focus-visible .sectionTitle {
-  color: var(--admin-fg);
-  text-decoration: underline;
+.appsSection[hidden] {
+  display: none;
 }
 
 .appsList {
+  flex: 1;
   min-height: 0;
   margin: 0;
   padding: 0 0.25rem 0.25rem;

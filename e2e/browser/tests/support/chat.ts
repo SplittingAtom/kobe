@@ -6,6 +6,12 @@ import {
   WAITING_FOR_AGENT,
 } from "./constants.js";
 
+/**
+ * The rail's section toggle (KOBE-419/453/448): "Files panel", or "Files and apps" when the
+ * member has apps (the section's Files | Apps tabs).
+ */
+export const FILES_TOGGLE = /^(Files panel|Files and apps)$/;
+
 /** The chat's address parameter for the open thread (`/?thread=<id>`). */
 const THREAD_PARAM = "thread";
 /** The active team, recorded by the chat in local storage; the API wants it as a header. */
@@ -58,14 +64,21 @@ export class Chat {
   }
 
   /**
-   * Turns the rail's Files section on (saved per member, so another spec or device may have left it
+   * Turns the rail's Files section on, on its Files tab (saved per member, so another spec or device may have left it
    * off). The threads are a panel since KOBE-453 (`openThreads`). Nothing to do where the rail is
    * not on screen (a phone, collapsed).
    */
   async showBothPanels(): Promise<void> {
-    const toggle = this.railHeader.getByRole("button", { name: "Files panel", exact: true });
+    const toggle = this.railHeader.getByRole("button", { name: FILES_TOGGLE });
     if (!(await toggle.isVisible())) return;
     if ((await toggle.getAttribute("aria-pressed")) === "false") await toggle.click();
+    // With apps the section has Files | Apps tabs (KOBE-448): the specs start on Files.
+    const files = this.page
+      .getByRole("tablist", { name: "Files and apps" })
+      .getByRole("tab", { name: "Files", exact: true });
+    if ((await files.isVisible()) && (await files.getAttribute("aria-selected")) !== "true") {
+      await files.click();
+    }
   }
 
   /** The Threads panel over the workspace (KOBE-453). */
