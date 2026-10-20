@@ -187,7 +187,9 @@ test("a phone: the picker runs in the drawer and fills the draft; no page scroll
   expect(box?.width ?? 0).toBeLessThanOrEqual(PHONE.width);
   await noPageScroll(page);
   await pickTable(frame);
-  await page.keyboard.press("Escape");
+  // The focus is inside the app's frame now, where the page can't hear Escape: close the drawer
+  // the way a phone user does.
+  await drawer.getByRole("button", { name: "Close the workspace" }).click();
   await expect(drawer).toHaveCount(0);
   await expect(chat.composer).toHaveValue(new RegExp(TEXT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });

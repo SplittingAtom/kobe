@@ -63,6 +63,11 @@ KOBE_BROWSER_RESULTS=results.json \
   table's name). It skips where the member has no live picker (the reason says whether
   `KOBE_APPS_CONNECTOR` was unset), and leaves the choice at None. A skip is not a pass: check
   `results.json` reports its three tests as run, with no skips, before marking it green.
+  Catalyst's Picker names its items differently from the Explorer: buttons "Expand <catalog>",
+  "Expand <namespace>", then "Table <name>"; a click inserts the backticked identifier. So run it
+  on its own with `KOBE_APPS_ITEM_ROLE=button`, for example
+  `KOBE_APPS_PICKER_PATH="Expand home,Expand assistant,Table states"` and
+  ``KOBE_APPS_PICKER_TEXT="`home.assistant.states`"`` (the Explorer run keeps `treeitem`).
 - Keep `results.json`, `playwright-report/` and `test-results/` (traces, screenshots).
 
 The spec asserts, in this order: the model's `open_lakehouse_explorer` call renders the tree in
