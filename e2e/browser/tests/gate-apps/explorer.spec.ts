@@ -271,6 +271,51 @@ test("from the rail: a click inserts an app card with no run; the next run sees 
     .toMatch(/^\{"active":\[\],"ended":\["[0-9a-f-]{36}"\]\}$/);
 });
 
+test("from the rail with no thread open: the new thread has the default agent and its follow-up is offered the app's tools (KOBE-458)", async ({
+  chat,
+  page,
+}) => {
+  record(page);
+  await chat.open();
+  const app = await theApp(page);
+  const runnable = await pageApi<{ agents?: { id: string; name: string; default?: boolean }[] }>(
+    page,
+    "GET",
+    "/v1/agents/runnable",
+  );
+  const preset = (runnable.json.agents ?? []).find((a) => a.default === true);
+  expect(preset, "the server marks the new-conversation agent").toBeDefined();
+  await showAppsTab(page);
+  await railButton(page, app, "a new conversation").click();
+  const threadId = await chat.threadId();
+  await expect(page.locator("[data-kobe-app-card-entry]")).toBeVisible({ timeout: RUN_TIMEOUT_MS });
+  // ac-1: the thread pinned the agent a new conversation gets, and the composer names it.
+  const thread = await pageApi<{ agent_id?: string | null }>(
+    page,
+    "GET",
+    `/v1/threads/${threadId}`,
+  );
+  expect(thread.json.agent_id).toBe(preset?.id);
+  await expect(page.getByText(`Agent: ${preset?.name ?? ""}`)).toBeVisible();
+
+  // ac-4: the follow-up's run is offered the app's connector: the model calls its opening tool,
+  // and the tool's result renders the app (a result with a tool call, not just the card).
+  await chat.ask(OPEN);
+  await expect
+    .poll(
+      async () => {
+        const results = await pageApi<{ results?: { tool_call_id: string | null }[] }>(
+          page,
+          "GET",
+          `/v1/threads/${threadId}/app-results`,
+        );
+        return (results.json.results ?? []).some((r) => r.tool_call_id !== null);
+      },
+      { timeout: RUN_TIMEOUT_MS, message: "a tool from the app's connector ran in the follow-up" },
+    )
+    .toBe(true);
+});
+
 test("from the rail during a run: the launch waits as a chip and goes in after the run", async ({
   chat,
   page,
