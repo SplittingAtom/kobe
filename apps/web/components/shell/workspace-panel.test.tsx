@@ -22,6 +22,7 @@ import { ChatApp } from "../chat/chat-app";
 import { composer, streamed, streaming } from "../chat/testing";
 import { consolePortalContainer } from "../ui/chat-portal";
 import { useUnsavedChanges } from "../ui/console";
+import { useEditorWidth } from "../skills/define-layout";
 
 // Next's Link navigates through the app router, which a test has none of: a plain link that pushes
 // on the router in context, as the real one does on a plain click.
@@ -106,6 +107,7 @@ function TestPage({ path }: { readonly path: string }) {
   }
   if (path === "/admin/team/usage") return <Section title="Usage" />;
   if (path === "/me/agents") return <EditorSection />;
+  if (path.startsWith("/me/skills/drafts/")) return <EditorWidthPage />;
   return (
     <Section title="Members">
       <form aria-label="Invite" onSubmit={(e) => e.preventDefault()}>
@@ -139,6 +141,19 @@ function EditorSection() {
       </button>
       <button type="button" onClick={() => setDirty(false)}>
         Save the prompt
+      </button>
+    </Section>
+  );
+}
+
+/** KOBE-459: a Skills panel page that reads and saves the Workbench editor rail's width. */
+function EditorWidthPage() {
+  const { width, setWidth } = useEditorWidth();
+  return (
+    <Section title="Draft">
+      <p>Width {width ?? "default"}</p>
+      <button type="button" onClick={() => setWidth(640)}>
+        Widen
       </button>
     </Section>
   );
@@ -211,6 +226,18 @@ const dialog = (name: string) => screen.findByRole("dialog", { name }, WAIT);
 const panelEl = () => document.querySelector<HTMLElement>("[data-kobe-panel]");
 const teamConsoleLink = () =>
   screen.findByRole("link", { name: "Team console" }, WAIT) as Promise<HTMLAnchorElement>;
+
+describe("the shell's layout preferences in a panel page (KOBE-459)", () => {
+  it("a Skills panel page loads the member's stored editor width and saves a new one", async () => {
+    fake.preferences = { workbench_editor_width: 500 };
+    open("/me/skills/drafts/d-1");
+    const panel = await dialog("Skills");
+    expect(await within(panel).findByText("Width 500", undefined, WAIT)).toBeTruthy();
+    await userEvent.click(within(panel).getByRole("button", { name: "Widen" }));
+    expect(within(panel).getByText("Width 640")).toBeTruthy();
+    await waitFor(() => expect(fake.preferences).toEqual({ workbench_editor_width: 640 }), WAIT);
+  });
+});
 
 describe("a panel over the workspace (KOBE-452 ac-1, ac-5)", () => {
   it("Team console opens over the workspace; the thread, draft and scroll stay as they were", async () => {

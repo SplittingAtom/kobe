@@ -16,7 +16,15 @@
  * or a drawer, unsaved), and the artifact width is neither applied nor saved while artifacts open
  * as a sheet.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   readUiPreferences,
   type RailPanels,
@@ -46,6 +54,8 @@ export interface LayoutPreferences {
   readonly railPanels?: RailPanels;
   /** The rail section's last tab (KOBE-448): Files (the default) or Apps. */
   readonly railTab?: RailTab;
+  /** The Workbench editor rail's dragged width (KOBE-459); null: the default. */
+  readonly workbenchEditorWidth?: number | null;
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -58,6 +68,9 @@ const fromWire = (p: UiPreferences): LayoutPreferences => ({
   ...(p.rail_width !== undefined ? { railWidth: p.rail_width } : {}),
   ...(p.rail_panels !== undefined ? { railPanels: p.rail_panels } : {}),
   ...(p.rail_tab !== undefined ? { railTab: p.rail_tab } : {}),
+  ...(p.workbench_editor_width !== undefined
+    ? { workbenchEditorWidth: p.workbench_editor_width }
+    : {}),
 });
 
 /** The wire body (snake_case) for a change. */
@@ -69,6 +82,9 @@ export function toWire(change: LayoutPreferences): UiPreferences {
     ...(change.railWidth !== undefined ? { rail_width: change.railWidth } : {}),
     ...(change.railPanels !== undefined ? { rail_panels: change.railPanels } : {}),
     ...(change.railTab !== undefined ? { rail_tab: change.railTab } : {}),
+    ...(change.workbenchEditorWidth !== undefined
+      ? { workbench_editor_width: change.workbenchEditorWidth }
+      : {}),
   };
 }
 
@@ -86,6 +102,7 @@ export function readPreferences(data: unknown): LayoutPreferences {
       rail_width: raw.railWidth,
       rail_panels: raw.railPanels,
       rail_tab: raw.railTab,
+      workbench_editor_width: raw.workbenchEditorWidth,
     }),
   );
 }
@@ -199,11 +216,16 @@ export interface LayoutPreferencesApi {
  * Loads the preferences once when the shell starts and saves changes, debounced. What is queued
  * is sent at once (keepalive) when the page is hidden or left, and when the shell unmounts.
  */
-export function useLayoutPreferences(fetchFn?: typeof fetch): LayoutPreferencesApi {
+export function useLayoutPreferences(
+  fetchFn?: typeof fetch,
+  /** False until there is a member to load them for (signed in, a team chosen). */
+  enabled = true,
+): LayoutPreferencesApi {
   const [preferences, setPreferences] = useState<LayoutPreferences | null>(null);
   const saver = useRef<PreferencesSaver | null>(null);
   const fetchRef = useRef(fetchFn);
   useEffect(() => {
+    if (!enabled) return;
     let current = true;
     void loadPreferences(fetchRef.current).then((p) => {
       if (current) setPreferences(p);
@@ -223,9 +245,21 @@ export function useLayoutPreferences(fetchFn?: typeof fetch): LayoutPreferencesA
       own.flush();
       if (saver.current === own) saver.current = null;
     };
-  }, []);
+  }, [enabled]);
   const save = useCallback((change: LayoutPreferences) => saver.current?.save(change), []);
   return useMemo(() => ({ preferences, save }), [preferences, save]);
+}
+
+/**
+ * The shell's preferences for pages inside it (KOBE-459: the Workbench editor rail's width): the
+ * console and My area pages open as panels beside the workspace, so `ChatApp` provides them to
+ * both (one instance: two would load twice and race their debounced PUTs).
+ * Outside the shell (tests, a page rendered on its own) it is null: defaults, nothing saved.
+ */
+export const LayoutPreferencesContext = createContext<LayoutPreferencesApi | null>(null);
+
+export function useShellPreferences(): LayoutPreferencesApi | null {
+  return useContext(LayoutPreferencesContext);
 }
 
 export interface StoredPreference<T> {

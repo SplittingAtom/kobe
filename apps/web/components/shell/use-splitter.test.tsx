@@ -143,6 +143,18 @@ describe("keys", () => {
     expect(commit).toHaveBeenLastCalledWith(560);
   });
 
+  it("reversed (the pane after the handle, KOBE-459): Left widens it, Right narrows it", async () => {
+    const { handle, commit } = harness({ reversed: true, snap: undefined });
+    handle().focus();
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(commit).toHaveBeenLastCalledWith(304);
+    await userEvent.keyboard("{ArrowRight}");
+    expect(commit).toHaveBeenLastCalledWith(256);
+    // Home and End still go to the pane's bounds.
+    await userEvent.keyboard("{End}");
+    expect(commit).toHaveBeenLastCalledWith(560);
+  });
+
   it("snapStep only stops on a crossing", () => {
     expect(snapStep(200, 296, 280)).toBe(280);
     expect(snapStep(560, 464, 280)).toBe(464);

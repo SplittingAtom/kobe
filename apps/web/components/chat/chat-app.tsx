@@ -29,7 +29,11 @@ import { ThreadGroupsProvider } from "../shell/thread-groups";
 import { ShellGrid } from "../shell/shell-grid";
 import { RailDrawerButton, RailProvider, useRail } from "../shell/rail-state";
 import { ShellBandProvider } from "../shell/shell-band";
-import { useLayoutPreferences } from "../../lib/shell/preferences";
+import {
+  LayoutPreferencesContext,
+  useLayoutPreferences,
+  type LayoutPreferencesApi,
+} from "../../lib/shell/preferences";
 import { DetailProvider } from "./detail";
 import { AnswerFeedbackProvider } from "./answer-feedback";
 import { ThreadUsageProvider } from "./message-footer";
@@ -244,8 +248,11 @@ function ChatWorkspace({
   pathname,
   replace,
   onClosePanel,
+  layout,
 }: {
   readonly session: ChatSession;
+  /** The member's layout, from any device (CE8): loaded once by ChatApp, saved debounced. */
+  readonly layout: LayoutPreferencesApi;
   /** The address (KOBE-452): the chat, or a panel over it. */
   readonly pathname: string;
   readonly replace: ((href: string) => void) | undefined;
@@ -323,8 +330,6 @@ function ChatWorkspace({
       chooseThread(threadId);
     }
   }, [threadsOpen, threadId, chooseThread]);
-  // The member's layout, from any device (CE8): loaded once, changes saved debounced.
-  const layout = useLayoutPreferences(fetchFn);
   return (
     <AssistantRuntimeProvider aui={aui} runtime={runtime}>
       {/* What each action does now: the `/` menu (KOBE-224), the palette and keys (KOBE-225). */}
@@ -448,6 +453,8 @@ export function ChatApp({
     [teamId, fetchFn, eventSource, newKey, reopenDelayMs, uploadTransport, threadListSync],
   );
   useEffect(() => () => session?.dispose(), [session]);
+  // The member's layout (CE8), for the workspace and the panel page over it (KOBE-459).
+  const layout = useLayoutPreferences(fetchFn, session !== null);
   const [appEl, setAppEl] = useState<HTMLDivElement | null>(null);
   useViewportHeight(appEl);
   const { pathname } = route;
@@ -503,38 +510,41 @@ export function ChatApp({
           pathname={pathname}
           replace={route.replace}
           onClosePanel={closePanel}
+          layout={layout}
         />
       </ChatSessionContext.Provider>
     );
   }
 
   return (
-    <OpenPanelContext.Provider value={route.push}>
-      <IconActionProvider>
-        <ShellBandProvider>
-          <ShellSlotsProvider>
-            <div ref={setAppEl} className={styles.app} data-kobe-chat>
-              {/* eslint-disable-next-line no-restricted-syntax -- a skip link is text by design (WCAG 2.4.1) */}
-              <a className={styles.skipLink} href="#kobe-chat-main">
-                Skip to the conversation
-              </a>
-              <UtilityBar teamId={teamId} fetchFn={fetchFn} onOpenThread={openThreadFromHeader} />
-              <TeamInvites />
-              {/* No active team yet: activates one (the selector itself is in the rail, KOBE-419). */}
-              <TeamActivation />
-              {body}
-              {/* A console, My agents, Skills or a My area page over the workspace (KOBE-452). */}
-              {panel !== undefined && panel.id !== "threads" ? (
-                <WorkspacePanel panel={panel} path={pathname} onClose={closePanel}>
-                  {route.page}
-                </WorkspacePanel>
-              ) : (
-                route.page
-              )}
-            </div>
-          </ShellSlotsProvider>
-        </ShellBandProvider>
-      </IconActionProvider>
-    </OpenPanelContext.Provider>
+    <LayoutPreferencesContext value={layout}>
+      <OpenPanelContext.Provider value={route.push}>
+        <IconActionProvider>
+          <ShellBandProvider>
+            <ShellSlotsProvider>
+              <div ref={setAppEl} className={styles.app} data-kobe-chat>
+                {/* eslint-disable-next-line no-restricted-syntax -- a skip link is text by design (WCAG 2.4.1) */}
+                <a className={styles.skipLink} href="#kobe-chat-main">
+                  Skip to the conversation
+                </a>
+                <UtilityBar teamId={teamId} fetchFn={fetchFn} onOpenThread={openThreadFromHeader} />
+                <TeamInvites />
+                {/* No active team yet: activates one (the selector itself is in the rail, KOBE-419). */}
+                <TeamActivation />
+                {body}
+                {/* A console, My agents, Skills or a My area page over the workspace (KOBE-452). */}
+                {panel !== undefined && panel.id !== "threads" ? (
+                  <WorkspacePanel panel={panel} path={pathname} onClose={closePanel}>
+                    {route.page}
+                  </WorkspacePanel>
+                ) : (
+                  route.page
+                )}
+              </div>
+            </ShellSlotsProvider>
+          </ShellBandProvider>
+        </IconActionProvider>
+      </OpenPanelContext.Provider>
+    </LayoutPreferencesContext>
   );
 }

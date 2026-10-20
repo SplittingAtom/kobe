@@ -12,6 +12,7 @@ import { EVAL_POLL_MS, STREAM_RETRIES, STREAM_RETRY_MS } from "../../lib/skills/
 import { must } from "../../lib/testing/must";
 import { CASES_PATH, EvalsPanel } from "./evals-panel";
 import type { DraftEditor } from "./use-draft-editor";
+import type { SkillEvalRun } from "../../lib/skills/evals-api";
 
 /**
  * KOBE-328: the scorecard shows every metric with a link per case run (ac-1), suggestions add a
@@ -174,6 +175,52 @@ describe("the evals panel", () => {
     expect((await screen.findByLabelText("Eval of revision 4")).textContent).toContain(
       "1 of 5 runs done",
     );
+  });
+
+  it("KOBE-459 ac-5: merges the saved skill's version runs, labelled by source, newest first", async () => {
+    stubApi({
+      "GET /v1/skill-evals?draft_id=d-1": [
+        200,
+        { evals: [run({ id: "e-1", startedAt: "2026-10-19T10:00:00.000Z" })] },
+      ],
+    });
+    const team = {
+      id: "s-1",
+      scope: "team",
+      slug: "sales-report",
+      description: "",
+      latestVersion: 2,
+      latestSemver: "1.1.0",
+      ownerUserId: null,
+      createdAt: "x",
+      updatedAt: "x",
+    } as const;
+    const versionRun = run({
+      id: "v-2",
+      subject: { kind: "version", scope: "team", skillId: "s-1", seq: 2 },
+      startedAt: "2026-10-18T10:00:00.000Z",
+    }) as unknown as SkillEvalRun;
+    renderTeam(
+      <EvalsPanel
+        teamId="t-1"
+        editor={editor()}
+        saved={[{ skill: team, runs: [versionRun], versions: [{ seq: 2, semver: "1.1.0" }] }]}
+      />,
+    );
+    const history = await screen.findByRole("table", { name: "Eval history" });
+    const rows = within(history).getAllByRole("row").slice(1);
+    expect(rows.map((r) => within(r).getAllByRole("cell")[0]?.textContent)).toEqual([
+      "This draft",
+      "Team skill sales-report (same name)",
+    ]);
+    expect(within(must(rows[1])).getByText("v1.1.0")).toBeDefined();
+    // Each opens as today: its scorecard page, or Show here.
+    const link = within(must(rows[1])).getByRole("link");
+    expect(link.getAttribute("href")).toContain("v-2");
+    await userEvent.click(
+      within(must(rows[1])).getByRole("button", { name: /^Show the eval of Team skill/ }),
+    );
+    expect(await screen.findByLabelText("Eval of version 2")).toBeDefined();
   });
 
   it("shows why a budget-stopped eval ended", async () => {

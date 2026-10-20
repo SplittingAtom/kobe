@@ -5,6 +5,7 @@ import {
   readUiPreferences,
   THREADS_SHARE_BOUNDS,
   uiPreferencesSchema,
+  WORKBENCH_EDITOR_WIDTH_BOUNDS,
 } from "./ui-preferences.js";
 
 /** KOBE-202 (CE8): the layout preferences a user stores. */
@@ -25,6 +26,13 @@ describe("uiPreferencesSchema", () => {
     for (const tab of ["files", "apps"] as const) {
       expect(uiPreferencesSchema.parse({ rail_tab: tab })).toEqual({ rail_tab: tab });
     }
+    // KOBE-459: the Workbench editor rail's dragged width.
+    expect(uiPreferencesSchema.parse({ workbench_editor_width: 640 })).toEqual({
+      workbench_editor_width: 640,
+    });
+    expect(uiPreferencesSchema.parse({ workbench_editor_width: null })).toEqual({
+      workbench_editor_width: null,
+    });
   });
 
   it("refuses unknown keys (strict, not stripped)", () => {
@@ -62,6 +70,10 @@ describe("uiPreferencesSchema", () => {
     { rail_panels: ["threads"] },
     { rail_tab: "threads" },
     { rail_tab: null },
+    { workbench_editor_width: WORKBENCH_EDITOR_WIDTH_BOUNDS.min - 1 },
+    { workbench_editor_width: WORKBENCH_EDITOR_WIDTH_BOUNDS.max + 1 },
+    { workbench_editor_width: 500.5 },
+    { workbench_editor_width: "500" },
   ])("refuses %o", (body) => {
     expect(uiPreferencesSchema.safeParse(body).success).toBe(false);
   });
@@ -93,6 +105,13 @@ describe("readUiPreferences", () => {
     expect(readUiPreferences({ rail_width: 360 })).toEqual({ rail_width: 360 });
     expect(readUiPreferences({ rail_width: null })).toEqual({ rail_width: null });
     expect(readUiPreferences({ rail_width: 9000 })).toEqual({});
+  });
+
+  it("reads a stored Workbench editor width, dropping one out of bounds (KOBE-459)", () => {
+    expect(readUiPreferences({ workbench_editor_width: 700 })).toEqual({
+      workbench_editor_width: 700,
+    });
+    expect(readUiPreferences({ workbench_editor_width: 10 })).toEqual({});
   });
 
   it("drops a share outside the rail's bounds instead of clamping it", () => {

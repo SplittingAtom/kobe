@@ -56,6 +56,11 @@ describe("wire", () => {
     // KOBE-448: the rail section's last tab.
     expect(readPreferences({ preferences: { railTab: "apps" } })).toEqual({ railTab: "apps" });
     expect(readPreferences({ preferences: { railTab: "threads" } })).toEqual({});
+    // KOBE-459: the Workbench editor rail's width.
+    expect(readPreferences({ preferences: { workbenchEditorWidth: 640 } })).toEqual({
+      workbenchEditorWidth: 640,
+    });
+    expect(readPreferences({ preferences: { workbenchEditorWidth: 12 } })).toEqual({});
   });
 
   it("writes only the keys that changed, in wire casing", () => {
@@ -69,6 +74,7 @@ describe("wire", () => {
     expect(toWire({ railWidth: null })).toEqual({ rail_width: null });
     expect(toWire({ railPanels: "threads" })).toEqual({ rail_panels: "threads" });
     expect(toWire({ railTab: "apps" })).toEqual({ rail_tab: "apps" });
+    expect(toWire({ workbenchEditorWidth: null })).toEqual({ workbench_editor_width: null });
     expect(toWire({})).toEqual({});
   });
 });

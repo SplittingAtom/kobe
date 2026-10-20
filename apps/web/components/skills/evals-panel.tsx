@@ -9,6 +9,7 @@ import { readDraftText } from "../../lib/skills/drafts-api";
 import { evalHref } from "../../lib/skills/eval-href";
 import { RUN_STATUS_TEXT, isOpen, liftText, pct } from "../../lib/skills/eval-format";
 import { listDraftEvals, subjectLabel, type SkillEvalRun } from "../../lib/skills/evals-api";
+import { DRAFT_SOURCE, mergeEvalHistory, type SavedSkillRuns } from "../../lib/skills/eval-history";
 import { SKILL_MD, splitSkillMd } from "../../lib/skills/skill-md";
 import { STALLED_MESSAGE, useLiveEval } from "../../lib/skills/use-live-eval";
 import {
@@ -30,17 +31,22 @@ import type { DraftEditor } from "./use-draft-editor";
  * The Workbench evals panel (KOBE-328, SK15–SK18): suggest trigger cases into
  * `evals/cases.yaml` (edited as YAML in the file pane), the estimate and Run, live progress (the
  * eval stream, polling if it fails), the scorecard of the run picked, and the history of every
- * eval of this draft by revision.
+ * eval of this draft by revision. Since KOBE-459 the history also lists the runs of the skill the
+ * draft was saved as (`saved`), each row labelled by its source, newest first.
  */
 export const CASES_PATH = "evals/cases.yaml";
+const NO_SAVED: readonly SavedSkillRuns[] = [];
 
 export function EvalsPanel({
   teamId,
   editor,
+  saved = NO_SAVED,
   eventSource,
 }: {
   readonly teamId: string;
   readonly editor: DraftEditor;
+  /** The saved skill's version runs (KOBE-459), merged into the history. */
+  readonly saved?: readonly SavedSkillRuns[];
   /** Tests inject the event stream. */
   readonly eventSource?: EventSourceFactory;
 }) {
@@ -99,15 +105,19 @@ export function EvalsPanel({
     );
   }
 
+  const history = mergeEvalHistory(runs ?? [], saved);
   const shown =
-    runs?.find((r) => r.id === picked) ?? runs?.find((r) => r.status === "completed") ?? null;
+    history.find((r) => r.run.id === picked)?.run ??
+    runs?.find((r) => r.status === "completed") ??
+    null;
   // A picked eval that is no longer listed: back to the default (review L6).
+  const stale = picked !== null && runs !== null && !history.some((r) => r.run.id === picked);
   useEffect(() => {
-    if (picked && runs && !runs.some((r) => r.id === picked)) setPicked(null);
-  }, [picked, runs]);
+    if (stale) setPicked(null);
+  }, [stale]);
 
   return (
-    <section aria-labelledby="evals-heading" className="mt-6">
+    <section aria-labelledby="evals-heading">
       <h2 id="evals-heading" className="m-0 mb-2 text-base font-semibold">
         Evals
       </h2>
@@ -140,10 +150,11 @@ export function EvalsPanel({
           <p>{STALLED_MESSAGE}</p>
         </Notice>
       )}
-      {runs && runs.length > 0 && (
+      {history.length > 0 && (
         <Table caption="Eval history">
           <TableHead>
             <TableRow>
+              <TableHeader>Source</TableHeader>
               <TableHeader>Of</TableHeader>
               <TableHeader>Started</TableHeader>
               <TableHeader>Status</TableHeader>
@@ -155,32 +166,37 @@ export function EvalsPanel({
             </TableRow>
           </TableHead>
           <TableBody>
-            {runs.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell>{subjectLabel(r)}</TableCell>
-                <TableCell>
-                  <Link href={evalHref(r.id)}>{new Date(r.startedAt).toLocaleString()}</Link>
-                </TableCell>
-                <TableCell>
-                  {RUN_STATUS_TEXT[r.status]}
-                  {isOpen(r.status) && ` (${r.progress.done} of ${r.progress.total})`}
-                </TableCell>
-                <TableCell>{pct(r.scorecard?.passRate)}</TableCell>
-                <TableCell>{liftText(r.scorecard?.lift)}</TableCell>
-                <TableCell>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-pressed={shown?.id === r.id}
-                    aria-label={`Show the eval of ${subjectLabel(r)} started ${new Date(r.startedAt).toLocaleString()}`}
-                    onClick={() => setPicked(r.id)}
-                  >
-                    Show
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
+            {history.map(({ run: r, source, of }) => {
+              const what = source === DRAFT_SOURCE ? of : `${source} ${of}`;
+              const started = new Date(r.startedAt).toLocaleString();
+              return (
+                <TableRow key={r.id}>
+                  <TableCell>{source}</TableCell>
+                  <TableCell>{of}</TableCell>
+                  <TableCell>
+                    <Link href={evalHref(r.id)}>{started}</Link>
+                  </TableCell>
+                  <TableCell>
+                    {RUN_STATUS_TEXT[r.status]}
+                    {isOpen(r.status) && ` (${r.progress.done} of ${r.progress.total})`}
+                  </TableCell>
+                  <TableCell>{pct(r.scorecard?.passRate)}</TableCell>
+                  <TableCell>{liftText(r.scorecard?.lift)}</TableCell>
+                  <TableCell>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-pressed={shown?.id === r.id}
+                      aria-label={`Show the eval of ${what} started ${started}`}
+                      onClick={() => setPicked(r.id)}
+                    >
+                      Show
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       )}
