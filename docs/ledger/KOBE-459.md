@@ -23,27 +23,35 @@ console `Tabs` (Radix) with Define | Test | Eval (`components/skills/workbench-t
 - **Resizable rail:** `components/skills/define-layout.tsx` reuses the shell's `useSplitter`
   (KOBE-305; ARIA separator, keys, drag, Enter/double-click reset). New option `reversed` in
   `use-splitter.ts`: the rail sits after the handle, so Left widens it. Floors: tree 12rem, rail
-  320 px; the default rail is what a 14rem tree leaves. Below md: no handle, tree above the rail.
+  320 px; the default rail is what a 14rem tree leaves. The columns follow a container query on
+  the page's width (review LOW-3), not the viewport: under 36rem no handle, tree above the rail.
 - **Width per member:** saved with the layout preferences (server-side, debounced PUT) via
   `useStoredPreference`. This needed a new optional key `workbench_editor_width` (320..8192, null =
   default) in `@kobe/protocol` `ui-preferences.ts`. The server's route already validates with
   that schema, so **no server code change**, but it is an additive protocol change in a feature
   PR (the coordinator may split it out). The shell now provides `LayoutPreferencesContext`
   (`chat-app.tsx`) so panel pages can read and save preferences; outside the shell: defaults.
-- **Eval history:** a draft keeps **no link** to the skill it was saved as. Save version files it
-  under the skill named by SKILL.md (else the draft) in the chosen destination, and the bump
-  suggestion finds it by name too. So the history matches by name: the same-named team skill and,
-  for the author only, their personal skill (`lib/skills/eval-history.ts`). Runs come from
-  `GET /v1/skill-evals?draft_id=` and `?scope=&skill_id=`, merged newest first in the Evals
-  panel's existing "Eval history" table with a Source column ("This draft", "Team skill x",
-  "Personal skill x"); rows still link to the scorecard page and Show the scorecard here. Read
-  while the Eval tab is shown and again after each saved version. A failed read is a warning
-  notice; the draft's runs still show.
+- **Eval history (review MEDIUM-1):** a saved version keeps **no link** to its draft (only the
+  `skill.uploaded` audit row names `draftId`; a `draft_id` column on versions needs a migration,
+  so it is a follow-up). Save version files a draft under the skill named by SKILL.md, so the
+  history matches by name, narrowly: the same-named team skill and, for the author only, their
+  personal skill, and of those **only versions the viewer saved** (`uploadedBy` from
+  `GET /v1/skills/:id/versions`, no server change). Those rows read "Team skill x (same name)",
+  every version as `v<semver>` (LOW-2). Runs come from `GET /v1/skill-evals?draft_id=` and
+  `?scope=&skill_id=`, merged newest first in the Evals panel's "Eval history" table (Source
+  column); rows link to the scorecard and Show it here. Read while Eval is shown and after each
+  save; a failed read is a warning notice, the draft's runs still show.
+- **Preferences provider (review HIGH-1):** `ChatApp` owns the one `useLayoutPreferences` (loaded
+  once a session exists) and provides it around both the workspace and the panel page, so the
+  Skills panel's draft page loads and saves the width (test in `workspace-panel.test.tsx`).
+- **Rolling deploy (LOW-1):** a new web against an old server gets 400 on a PUT carrying
+  `workbench_editor_width` (strict schema); only that save fails. Server and web deploy together
+  on gate1, so no window there; landing the protocol commit first removes it elsewhere.
 
 ## Open questions (for Chris or the coordinator)
 
-- Name matching shows a same-named team skill's runs even if this draft never saved into it (e.g.
-  another member's skill of that name). A stored draft->skill link would need a server change.
+- Follow-up: record `draft_id` on saved versions (migration) so the history uses the real link,
+  not the name plus the viewer's own versions.
 - `workbench_editor_width` in `@kobe/protocol`: keep in this group PR or land it first on its own?
 
 ## Evidence (acceptance criteria -> test or command output)

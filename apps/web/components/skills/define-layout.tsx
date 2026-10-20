@@ -12,8 +12,9 @@ import { useSplitter, type SplitterRange } from "../shell/use-splitter";
  * workspace rail and the artifact column): drag it, or Left/Right (the rail is after the handle,
  * so Left widens it), Page Up/Down, Home/End; Enter or a double-click goes back to the default.
  * The tree and the rail each keep a minimum width. The width is saved per member with the other
- * layout preferences (server-side, `workbench_editor_width`). Below md the tree stacks above a
- * full-width rail and there is no handle.
+ * layout preferences (server-side, `workbench_editor_width`). The columns follow the page's own
+ * width (a container query, so a narrow panel on a wide window too): under 36rem, where the two
+ * floors and the handle don't fit, the tree stacks above a full-width rail and there is no handle.
  */
 export const EDITOR_WIDTH_VAR = "--kobe-editor-width";
 export const EDITOR_RAIL_ID = "kobe-workbench-editor";
@@ -30,7 +31,7 @@ const STEP_PX = 24;
 const GRID = [
   "grid grid-cols-[minmax(0,1fr)] gap-4",
   "[--kobe-editor-width:calc(100%_-_14rem_-_12px)]",
-  "md:gap-0 md:grid-cols-[minmax(12rem,1fr)_12px_minmax(min(20rem,100%),min(var(--kobe-editor-width),calc(100%_-_12rem_-_12px)))]",
+  "@min-[36rem]:gap-0 @min-[36rem]:grid-cols-[minmax(12rem,1fr)_12px_minmax(min(20rem,100%),min(var(--kobe-editor-width),calc(100%_-_12rem_-_12px)))]",
 ].join(" ");
 
 function regions(handle: HTMLElement | null) {
@@ -116,7 +117,7 @@ function EditorRailHandle({
       {...splitter}
       aria-label="Resize the editor"
       aria-controls={EDITOR_RAIL_ID}
-      className="group hidden cursor-col-resize touch-none justify-center focus-visible:outline-none md:flex"
+      className="group hidden cursor-col-resize touch-none justify-center focus-visible:outline-none @min-[36rem]:flex"
     >
       <span
         aria-hidden="true"
@@ -138,11 +139,13 @@ export function DefineLayout({
   const style =
     width === null ? undefined : ({ [EDITOR_WIDTH_VAR]: `${width}px` } as CSSProperties);
   return (
-    <div data-workbench-define="" className={GRID} style={style}>
-      <div className="min-w-0 md:pe-3">{tree}</div>
-      <EditorRailHandle width={width} onChange={setWidth} onReset={resetWidth} />
-      <div id={EDITOR_RAIL_ID} data-workbench-editor="" className="min-w-0 md:ps-3">
-        {children}
+    <div className="@container">
+      <div data-workbench-define="" className={GRID} style={style}>
+        <div className="min-w-0 @min-[36rem]:pe-3">{tree}</div>
+        <EditorRailHandle width={width} onChange={setWidth} onReset={resetWidth} />
+        <div id={EDITOR_RAIL_ID} data-workbench-editor="" className="min-w-0 @min-[36rem]:ps-3">
+          {children}
+        </div>
       </div>
     </div>
   );

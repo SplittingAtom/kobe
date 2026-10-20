@@ -35,7 +35,7 @@ describe("savedSkillsOf", () => {
 });
 
 describe("mergeEvalHistory", () => {
-  it("lists every run once, newest first, each labelled by its source", () => {
+  it("lists every run once, newest first, labelled by source; only versions the viewer saved", () => {
     const team = skill({});
     const draftRuns = [
       run("d-2", "2026-10-19T10:00:00Z", { kind: "draft", draftId: "d-1", rev: 4 }),
@@ -61,13 +61,24 @@ describe("mergeEvalHistory", () => {
         skillId: "s-1",
         seq: 1,
       }),
+      // Version 3 was saved by another member: not this draft's.
+      run("v-3", "2026-10-20T10:00:00Z", {
+        kind: "version",
+        scope: "team",
+        skillId: "s-1",
+        seq: 3,
+      }),
     ];
-    const rows = mergeEvalHistory(draftRuns, [{ skill: team, runs: skillRuns }]);
+    const versions = [
+      { seq: 1, semver: "1.0.0" },
+      { seq: 2, semver: "1.1.0" },
+    ];
+    const rows = mergeEvalHistory(draftRuns, [{ skill: team, runs: skillRuns, versions }]);
     expect(rows.map((r) => [r.run.id, r.source, r.of])).toEqual([
       ["d-2", "This draft", "revision 4"],
-      ["v-2", "Team skill report-writer", "v1.1.0"],
+      ["v-2", "Team skill report-writer (same name)", "v1.1.0"],
       ["d-1", "This draft", "revision 2"],
-      ["v-1", "Team skill report-writer", "version 1"],
+      ["v-1", "Team skill report-writer (same name)", "v1.0.0"],
     ]);
   });
 
@@ -86,9 +97,10 @@ describe("mergeEvalHistory", () => {
               seq: 2,
             }),
           ],
+          versions: [{ seq: 2, semver: "0.2.0" }],
         },
       ],
     );
-    expect(rows.map((r) => r.source)).toEqual(["Personal skill report-writer"]);
+    expect(rows.map((r) => r.source)).toEqual(["Personal skill report-writer (same name)"]);
   });
 });

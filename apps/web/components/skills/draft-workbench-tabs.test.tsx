@@ -97,6 +97,16 @@ const ROUTES = {
       ],
     },
   ],
+  // Version 2 the viewer saved; version 3 another member did (not this draft's).
+  "GET /v1/skills/s-1/versions": [
+    200,
+    {
+      versions: [
+        { version: 3, seq: 3, semver: "1.2.0", uploaded_by: "u-other" },
+        { version: 2, seq: 2, semver: "1.1.0", uploaded_by: "u-me" },
+      ],
+    },
+  ],
   "GET /v1/skill-evals?scope=team&skill_id=s-1": [
     200,
     {
@@ -106,6 +116,12 @@ const ROUTES = {
           scope: "team",
           skill_id: "s-1",
           seq: 2,
+        }),
+        evalRun("e-other", "2026-10-19T10:00:00Z", {
+          kind: "version",
+          scope: "team",
+          skill_id: "s-1",
+          seq: 3,
         }),
       ],
     },
@@ -236,7 +252,7 @@ describe("Eval: the merged history (ac-5)", () => {
     await waitFor(() => expect(within(history).getAllByRole("row")).toHaveLength(3));
     const rows = within(history).getAllByRole("row").slice(1);
     expect(rows.map((r) => within(r).getAllByRole("cell")[0]?.textContent)).toEqual([
-      "Team skill report-writer",
+      "Team skill report-writer (same name)",
       "This draft",
     ]);
     expect(within(must(rows[0])).getByText("v1.1.0")).toBeDefined();

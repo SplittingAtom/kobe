@@ -45,6 +45,25 @@ export async function listSkills(
   return res.ok ? { ...res, data: res.data.skills } : res;
 }
 
+/** A saved version as the versions list serves it: who saved it (KOBE-459's history). */
+export interface SkillVersionSaved {
+  readonly seq: number;
+  readonly semver: string;
+  readonly uploadedBy: string;
+}
+
+/** A skill's saved versions (`GET /v1/skills/:id/versions`), newest first. */
+export async function listSkillVersions(
+  teamId: string,
+  id: string,
+): Promise<ApiResult<readonly SkillVersionSaved[]>> {
+  const res = await apiRequest<{ versions: SkillVersionSaved[] }>(
+    `/v1/skills/${enc(id)}/versions`,
+    { teamId },
+  );
+  return res.ok ? { ...res, data: res.data.versions } : res;
+}
+
 export async function getSkill(teamId: string, id: string): Promise<ApiResult<SkillSummary>> {
   const res = await apiRequest<{ skill: SkillSummary }>(`/v1/skills/${enc(id)}`, { teamId });
   return res.ok ? { ...res, data: res.data.skill } : res;

@@ -224,8 +224,10 @@ function EvalTab({
     const parts = splitSkillMd(skillMd);
     return parts.ok && parts.value.name ? parts.value.name : draftName;
   }, [skillMd, draftName]);
+  const viewerId = useTeamAccess().user.id;
   const { saved, error } = useSavedSkillRuns({
     teamId,
+    viewerId,
     name,
     mine: editor.draft.mine,
     active,
