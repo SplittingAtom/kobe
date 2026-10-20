@@ -4,6 +4,8 @@
  * list (`seed`) is ready before its view mounts, so the first message goes to the same controller.
  */
 import { AppContextStore, ComposerInsertChannel } from "../apps/app-context";
+import { SkillPickStore } from "./skill-picks";
+import { DraftConnectorStore } from "./draft-connectors";
 import { AppCardSignal } from "../apps/app-cards";
 import type { ThinkingLevel } from "@kobe/protocol";
 import type { ApiResult } from "../api/client";
@@ -85,6 +87,10 @@ export class ChatSession {
   readonly composerMentions = new ComposerMentionChannel();
   /** MCP Apps context chips per composer draft (KOBE-439). */
   readonly appContexts = new AppContextStore();
+  /** The skill picked from the composer's + menu per draft (KOBE-451). */
+  readonly skillPicks = new SkillPickStore();
+  /** Connectors turned off before the first message (KOBE-451 review MEDIUM-3). */
+  readonly draftConnectors = new DraftConnectorStore();
   /** MCP Apps `ui/message` text for the composer on screen (KOBE-439); never sent by itself. */
   readonly composerInserts = new ComposerInsertChannel();
   /** A rail launch changed a thread's app cards (KOBE-440): the thread reads them again. */

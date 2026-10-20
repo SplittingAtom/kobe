@@ -1,3 +1,4 @@
+import { connectorsOffIn } from "../connectors/thread-connectors.js";
 import { randomUUID } from "node:crypto";
 import {
   APP_CARD_CUSTOM_TYPE,
@@ -96,6 +97,12 @@ const refusal = (status: Status, code: string, message: string): LaunchOutcome =
 });
 const THREAD_NOT_FOUND = refusal(404, "thread_not_found", "No thread with that id.");
 const NOT_AVAILABLE = refusal(404, "app_not_available", "This app is not available to you.");
+/** KOBE-451 review LOW-5: the owner turned the app's connector off for this conversation. */
+const CONNECTOR_OFF = refusal(
+  409,
+  "connector_off",
+  "This app's connector is off in this conversation. Turn it on from the + menu first.",
+);
 const TOO_MANY_QUEUED = refusal(
   429,
   "too_many_queued",
@@ -247,6 +254,9 @@ export async function launchAppCard(
     const pre = await withTeam(db, p.teamId, async (tx) => {
       const thread = await lockWritable(tx, p.teamId, threadId, p.userId);
       if (!thread) return THREAD_NOT_FOUND;
+      if ((await connectorsOffIn(tx, p.teamId, threadId)).has(app.connector.id)) {
+        return CONNECTOR_OFF;
+      }
       if ((await queuedCount(tx, p.teamId, threadId)) >= MAX_QUEUED_APP_CARDS) {
         return TOO_MANY_QUEUED;
       }

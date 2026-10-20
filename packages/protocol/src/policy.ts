@@ -144,6 +144,7 @@ export const POLICY_REASON_CODES = [
   "not_available", // the tool exists but is not offered in this version (e.g. MCP resource tools)
   "policy_error", // the decision could not be made (internal error, unreadable state) → deny
   "run_not_active", // the run ended (or is not this sandbox's) before the call was decided → deny
+  "connector_not_in_run", // KOBE-451: not in the named run's run.start.mcp (off, or not the agent's) → deny
   "not_a_member", // the run's user is deactivated or no longer in the team → deny
   // Sandbox-side deny (kobe-policy / kobe-sandbox-agent): no server decision could be obtained
   // (policy channel closed, timed out, extension refused). Never produced by the server.

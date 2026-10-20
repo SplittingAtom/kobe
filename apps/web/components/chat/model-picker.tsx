@@ -14,7 +14,13 @@ import { isBusy, type ThreadState } from "../../lib/chat/thread-state";
 import type { MenuBinding } from "../../lib/shell/menu";
 import { useBindCommands } from "../shell/command-bindings";
 import { useChatSession } from "./kobe-runtime";
-import { ThinkingPicker } from "./thinking-picker";
+import {
+  THINKING_LABELS,
+  ThinkingPicker,
+  shownThinking,
+  thinkingChoices,
+  thinkingDefaultLabel,
+} from "./thinking-picker";
 import { useThreadTeamModels } from "./use-team-models";
 import styles from "./chat.module.css";
 
@@ -43,6 +49,36 @@ function modelBinding(
       { key: DEFAULT, label: teamDefaultLabel(choices), current: chosen === null },
       ...enabled.map((m) => ({ key: m.alias, label: modelName(m), current: m.alias === chosen })),
     ].map((c) => ({ ...c, onSelect: () => choose(c.key) })),
+  };
+}
+
+/**
+ * `/thinking` (KOBE-450, Pi's /thinking): the thinking picker's own choices (the model's default,
+ * then the levels the team allows for the conversation's model), or why it can't change now.
+ */
+function thinkingBinding(
+  models: TeamModels,
+  alias: string | null,
+  chosen: ThinkingLevel | null,
+  blocker: string | null,
+  choose: (level: ThinkingLevel | null) => void,
+): MenuBinding {
+  const { levels, default: fallback } = thinkingChoices(models, alias);
+  if (levels.length === 0) {
+    return { choices: [], blocker: "This conversation's model has no thinking levels to choose." };
+  }
+  const shown = shownThinking(chosen, levels);
+  return {
+    blocker,
+    choices: [
+      { key: "default", label: thinkingDefaultLabel(fallback), level: null },
+      ...levels.map((l) => ({ key: l, label: THINKING_LABELS[l], level: l })),
+    ].map((c) => ({
+      key: c.key,
+      label: c.label,
+      current: c.level === shown,
+      onSelect: () => choose(c.level),
+    })),
   };
 }
 
@@ -129,6 +165,13 @@ export function useModelPicker({
             disabled ? "The model can't be changed right now." : null,
             choose,
           ),
+          "choose-thinking": thinkingBinding(
+            loaded.data,
+            all.pinned ?? all.chosen,
+            thinkingChosen,
+            thinkingDisabled ? "The thinking level can't be changed right now." : null,
+            chooseThinking,
+          ),
         }
       : {},
   );
@@ -150,8 +193,16 @@ export function useModelPicker({
  * model selector: native selects, so keyboard and screen readers come for free. The hints stay
  * short there: a pinned model says so in its description and tooltip.
  */
-export function ModelSelects({ picker }: { readonly picker: ModelPickerData }) {
+export function ModelSelects({
+  picker,
+  compact = false,
+}: {
+  readonly picker: ModelPickerData;
+  /** The smaller pills on the line below the composer (KOBE-450). */
+  readonly compact?: boolean;
+}) {
   const { id, models, choices, disabled, thinkingChosen, thinkingDisabled } = picker;
+  const pill = compact ? `${styles.modelPicker} ${styles.compactPicker}` : styles.modelPicker;
   const { enabled, chosen, unavailable, pinned } = choices;
 
   if (pinned !== null) {
@@ -159,7 +210,7 @@ export function ModelSelects({ picker }: { readonly picker: ModelPickerData }) {
     const hint = `This agent always uses ${name}.`;
     return (
       <>
-        <label className={styles.modelPicker} title={hint}>
+        <label className={pill} title={hint}>
           <span className={styles.visuallyHidden}>Model for this conversation</span>
           <select value={pinned} disabled aria-describedby={`${id}-pinned`}>
             <option value={pinned}>{name}</option>
@@ -174,6 +225,7 @@ export function ModelSelects({ picker }: { readonly picker: ModelPickerData }) {
           chosen={thinkingChosen}
           disabled={thinkingDisabled}
           onChoose={picker.chooseThinking}
+          compact={compact}
         />
       </>
     );
@@ -190,7 +242,7 @@ export function ModelSelects({ picker }: { readonly picker: ModelPickerData }) {
   const chosenName = chosen === null ? null : aliasName(models, chosen);
   return (
     <>
-      <label className={styles.modelPicker}>
+      <label className={pill}>
         <span className={styles.visuallyHidden}>Model for this conversation</span>
         <select
           value={chosen ?? DEFAULT}
@@ -217,6 +269,7 @@ export function ModelSelects({ picker }: { readonly picker: ModelPickerData }) {
           chosen={thinkingChosen}
           disabled={thinkingDisabled}
           onChoose={picker.chooseThinking}
+          compact={compact}
         />
       )}
     </>

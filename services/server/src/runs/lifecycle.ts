@@ -1,3 +1,4 @@
+import { splitAppContext, splitSkillRequest } from "@kobe/protocol";
 import {
   isActiveRunStatus,
   queueMayAdvance,
@@ -236,6 +237,7 @@ export async function promoteInTx(
       })
       .where(and(eq(runs.teamId, teamId), eq(runs.id, next.id)));
     await recordRunSkillRefsInTx(tx, teamId, next.id, resolved.skillRefs ?? []);
+    await recordRunMcpInTx(tx, teamId, next.id, resolved);
     // KOBE-315 (CE12): skills at another version than this thread's last run with them.
     const updates = await skillUpdatesInTx(tx, teamId, threadId, next.id, resolved.skillRefs ?? []);
     if (updates.length > 0) {
@@ -292,6 +294,7 @@ const OWN_START_CODES = new Set([
   "skill_draft_changed",
   "skill_draft_personal_off",
   "skill_draft_declined",
+  "skill_not_available",
 ]);
 const startFailureCode = (code: string) => (OWN_START_CODES.has(code) ? code : "agent_unavailable");
 
@@ -311,6 +314,28 @@ export function requestedModel(
   if (pinned !== undefined) return { alias: pinned, source: "agent" };
   if (thread.modelAlias !== null) return { alias: thread.modelAlias, source: "thread" };
   return { alias: undefined, source: "default" };
+}
+
+/**
+ * The connectors of the run's `run.start.mcp` (KOBE-451 review HIGH-1), kept with the run: the
+ * MCP proxy's decisions, lists and reveals allow only these for it (`mcp/run-context.ts`).
+ */
+async function recordRunMcpInTx(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+  resolved: Resolved,
+): Promise<void> {
+  const ids = (resolved.mcp?.servers ?? []).map((s) => s.connector_id);
+  await tx
+    .update(runs)
+    .set({ mcpConnectorIds: ids })
+    .where(and(eq(runs.teamId, teamId), eq(runs.id, runId)));
+}
+
+/** The skill a run's input asks for (the server's line after any app context), or null. */
+export function requestedSkill(input: string): string | null {
+  return splitSkillRequest(splitAppContext(input).rest).skill;
 }
 
 /** The thread's agent version for a start; the resolver may only tighten the run's mode. */
@@ -337,6 +362,11 @@ export async function resolveForStart(
     })
     .catch(() => ({ ok: false as const, error: { code: "agent_unavailable", message: "" } }));
   if (!resolved.ok) return resolved;
+  // KOBE-451: a skill picked in the composer must still be in the run's effective set.
+  const asked = requestedSkill(run.input);
+  if (asked !== null && !(resolved.config?.skills ?? []).includes(asked)) {
+    return { ok: false, error: { code: "skill_not_available", message: "" } };
+  }
   // A scheduled run (D32, KOBE-174) is always `auto`: nobody is there to approve, so the agent
   // version's own (stricter) mode must not make it wait. Only the site floor tightens it.
   if (run.trigger === "schedule") {
@@ -401,6 +431,7 @@ export async function restartPlanInTx(
   if (!resolved.ok) return undefined;
   // The re-sent start lists the skills resolved now: only those count as used (KOBE-297).
   await recordRunSkillRefsInTx(tx, run.teamId, run.id, resolved.skillRefs ?? [], true);
+  await recordRunMcpInTx(tx, run.teamId, run.id, resolved);
   // The model the run started with (`run.started.model`), so a re-sent start does not switch
   // models; the resolver's alias only when the run had none.
   const started = await startedModelAlias(tx, run.teamId, run.id);

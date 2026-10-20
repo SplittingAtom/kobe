@@ -31,6 +31,24 @@ export interface ActiveRunContext {
   readonly toolsAllow: string[];
   readonly toolsDeny: string[];
   readonly projectId?: string;
+  /**
+   * The connectors of the run's `run.start.mcp` (KOBE-451 review HIGH-1); null for a run started
+   * before they were recorded (or by an older replica during a rollout).
+   */
+  readonly mcpConnectorIds: readonly string[] | null;
+  /** The connectors turned off in the run's thread: the only check left for a null list. */
+  readonly connectorsOff: readonly string[];
+}
+
+/**
+ * Whether the run may use `connectorId` at all: it is in the run's `run.start.mcp` and its thread
+ * doesn't have it off now. A run whose list was not recorded (from before KOBE-451, or started by
+ * an older replica during a rollout) is checked against the thread's off set only.
+ */
+export function runHasConnector(run: ActiveRunContext, connectorId: string): boolean {
+  // Turning one off mid-run applies at once: the thread's off set is read with every call.
+  if (run.connectorsOff.includes(connectorId)) return false;
+  return run.mcpConnectorIds === null || run.mcpConnectorIds.includes(connectorId);
 }
 
 export type ActiveRuns =
@@ -51,9 +69,13 @@ export async function loadActiveRuns(
       agent_version: number | null;
       project_id: string | null;
       skill_eval: boolean;
+      mcp_connector_ids: string[] | null;
+      connectors_off: string[];
     }>(sql`
       SELECT r.id AS run_id, t.id AS thread_id, r.trigger, t.agent_id, t.agent_version, t.project_id,
-             t.skill_eval
+             t.skill_eval, r.mcp_connector_ids,
+             ARRAY(SELECT o.connector_id FROM thread_connectors_off o
+                    WHERE o.team_id = t.team_id AND o.thread_id = t.id) AS connectors_off
         FROM runs r
         JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
         JOIN sandbox_run_leases l ON l.team_id = r.team_id AND l.run_id = r.id
@@ -93,6 +115,8 @@ export async function loadActiveRuns(
         toolsAllow: [...(context.toolsAllow ?? [])],
         toolsDeny: [...(context.toolsDeny ?? [])],
         ...(projectId === undefined ? {} : { projectId }),
+        mcpConnectorIds: row.mcp_connector_ids,
+        connectorsOff: row.connectors_off,
       });
     }
     return { ok: true, runs };

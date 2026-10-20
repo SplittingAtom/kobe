@@ -31,6 +31,7 @@ import {
   FolderInputIcon,
   FolderKanbanIcon,
   GitForkIcon,
+  InfoIcon,
   GripVerticalIcon,
   KeyboardIcon,
   MessagesSquareIcon,
@@ -45,6 +46,7 @@ import {
   PinIcon,
   PinOffIcon,
   PlayIcon,
+  PlusIcon,
   RefreshCcwDotIcon,
   RefreshCwIcon,
   ServerCogIcon,
@@ -251,6 +253,31 @@ const LIST = [
     slash: "model",
     arg: "model",
   },
+  // KOBE-450 (Pi's /thinking, /session, /export): the thinking picker's levels, bound by
+  // `useModelPicker`; this conversation's details and usage; its Markdown download (the owner's).
+  {
+    id: "choose-thinking",
+    name: "Thinking level for this conversation",
+    icon: BrainIcon,
+    scope: "thread",
+    slash: "thinking",
+    arg: "level",
+  },
+  {
+    id: "thread-info",
+    name: "This conversation's details and usage",
+    icon: InfoIcon,
+    scope: "thread",
+    slash: "session",
+    readOnlySafe: true,
+  },
+  {
+    id: "export-thread",
+    name: "Download this conversation as Markdown",
+    icon: DownloadIcon,
+    scope: "thread",
+    slash: "export",
+  },
   // Rail.
   {
     id: "new-thread",
@@ -424,7 +451,8 @@ const LIST = [
   { id: "next-branch", name: "Next version", icon: ChevronRightIcon, scope: "message" },
   { id: "copy-code", name: "Copy code", icon: CopyIcon, scope: "message" },
   { id: "open-artifact", name: "Open artifact", icon: PanelRightOpenIcon, scope: "message" },
-  // Composer.
+  // Composer. The + menu (KOBE-451) holds Attach files, Connectors, Memory, Skills and Apps.
+  { id: "plus-menu", name: "Add to your message", icon: PlusIcon, scope: "composer" },
   { id: "attach", name: "Attach files", icon: PaperclipIcon, scope: "composer" },
   // A narrow composer folds its Agent, Model and Thinking selectors into this menu (KOBE-418).
   {
@@ -493,6 +521,7 @@ const LIST = [
     icon: CommandIcon,
     scope: "app",
     shortcut: "Mod+K",
+    slash: "search",
     readOnlySafe: true,
   },
   {
@@ -501,6 +530,7 @@ const LIST = [
     icon: KeyboardIcon,
     scope: "app",
     shortcut: "?",
+    slash: "shortcuts",
     readOnlySafe: true,
   },
   {

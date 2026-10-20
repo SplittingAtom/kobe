@@ -205,6 +205,13 @@ export const runs = pgTable(
      */
     skillRefs: jsonb().$type<readonly RunSkillRef[]>().notNull().default([]),
     /**
+     * The connectors of the run's `run.start.mcp` (KOBE-451 review HIGH-1), written with
+     * `run.start` (and again by a recovery restart): the MCP proxy's decisions, tools/list and
+     * grant reveals allow only these for the run. Null for runs from before the column (or started
+     * by an older replica during a rollout): the server then refuses only the thread's off ones.
+     */
+    mcpConnectorIds: uuid().array(),
+    /**
      * Skills the run used (KOBE-297): a successful `read` of a SKILL.md under one of `skill_refs`'
      * directories, matched by the server (never a sandbox label), at most
      * {@link RUN_SKILL_USES_MAX}. Kept with the run (not in `run_events`, which D18 compacts), so the

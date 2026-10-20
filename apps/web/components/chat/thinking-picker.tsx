@@ -7,12 +7,17 @@ import styles from "./chat.module.css";
 /** The `<select>` value of "the model's default level". */
 const DEFAULT = "";
 
-const LABELS: Readonly<Record<ThinkingLevel, string>> = {
+export const THINKING_LABELS: Readonly<Record<ThinkingLevel, string>> = {
   off: "Thinking off",
   low: "Thinking low",
   medium: "Thinking medium",
   high: "Thinking high",
 };
+
+/** The "model's default" choice, naming the level when the team sets one. */
+export function thinkingDefaultLabel(fallback: ThinkingLevel | null): string {
+  return fallback === null ? "Thinking: default" : `${THINKING_LABELS[fallback]} (default)`;
+}
 
 /**
  * The levels the conversation's model offers in this team (KOBE-260), or none: its team
@@ -49,6 +54,7 @@ export function ThinkingPicker({
   chosen,
   disabled,
   onChoose,
+  compact = false,
 }: {
   readonly models: TeamModels;
   /** The conversation's effective model alias (the agent's pin, the choice, else the default). */
@@ -56,12 +62,16 @@ export function ThinkingPicker({
   readonly chosen: ThinkingLevel | null;
   readonly disabled: boolean;
   readonly onChoose: (level: ThinkingLevel | null) => void;
+  /** The smaller pill on the line below the composer (KOBE-450). */
+  readonly compact?: boolean;
 }) {
   const { levels, default: fallback } = thinkingChoices(models, alias);
   if (levels.length === 0) return null;
   const value = shownThinking(chosen, levels);
   return (
-    <label className={styles.modelPicker}>
+    <label
+      className={compact ? `${styles.modelPicker} ${styles.compactPicker}` : styles.modelPicker}
+    >
       <span className={styles.visuallyHidden}>Thinking level for this conversation</span>
       <select
         value={value ?? DEFAULT}
@@ -70,12 +80,10 @@ export function ThinkingPicker({
           onChoose(e.target.value === DEFAULT ? null : (e.target.value as ThinkingLevel))
         }
       >
-        <option value={DEFAULT}>
-          {fallback === null ? "Thinking: default" : `${LABELS[fallback]} (default)`}
-        </option>
+        <option value={DEFAULT}>{thinkingDefaultLabel(fallback)}</option>
         {levels.map((l) => (
           <option key={l} value={l}>
-            {LABELS[l]}
+            {THINKING_LABELS[l]}
           </option>
         ))}
       </select>

@@ -1,3 +1,4 @@
+import { withSkillRequest } from "@kobe/protocol";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -243,6 +244,18 @@ describe("CRUD (ac-1)", () => {
     expect(extra.status).toBe(400);
     expect((await as.carol.request("PATCH", `/v1/schedules/${randomUUID()}`, {})).status).toBe(400);
     expect((await as.carol.get("/v1/schedules/not-a-uuid")).status).toBe(400);
+  });
+
+  it("refuses a prompt imitating Kobe's skill line (KOBE-451 review LOW-7)", async () => {
+    const line = withSkillRequest("pdf-report", "Summarise.");
+    const res = await create("carol", financeAgent, { prompt: line });
+    expect(res.status).toBe(400);
+    const ok = await create("carol", financeAgent, { active: false });
+    expect(ok.status).toBe(201);
+    const patched = await as.carol.request("PATCH", `/v1/schedules/${ok.json.schedule_id}`, {
+      prompt: line,
+    });
+    expect(patched.status).toBe(400);
   });
 
   it("records audit events with ids only", async () => {

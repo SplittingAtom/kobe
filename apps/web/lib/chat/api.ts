@@ -130,6 +130,8 @@ export interface ChatApi {
     thinkingLevel?: ThinkingLevel | null,
     /** A Workbench test chat (KOBE-323): the Kobe agent on this draft; `agent` is then left out. */
     skillDraftId?: string,
+    /** Connectors off from the start (KOBE-451): checked by the server like the toggle. */
+    connectorsOff?: readonly string[],
   ): Promise<ApiResult<ThreadSummary>>;
   /** Shares the thread with its project or the team, or makes it private (owner only; CE20). */
   shareThread(threadId: string, visibility: ThreadVisibility): Promise<ApiResult<ThreadSummary>>;
@@ -192,6 +194,8 @@ export interface ChatApi {
       readonly mentions?: readonly string[] | undefined;
       /** MCP Apps context chips, wire casing (KOBE-439). */
       readonly appContext?: readonly AppContextWire[] | undefined;
+      /** A skill picked from the composer's + menu (KOBE-451). */
+      readonly skill?: string | undefined;
     },
     idempotencyKey: string,
   ): Promise<ApiResult<SubmitResult>>;
@@ -311,8 +315,11 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
         ...(options.entryId === undefined ? {} : { entry_id: options.entryId }),
         ...(options.title === undefined ? {} : { title: options.title }),
       }),
-    createThread: (title, model, agent, projectId, thinkingLevel, skillDraftId) =>
+    createThread: (title, model, agent, projectId, thinkingLevel, skillDraftId, connectorsOff) =>
       send("POST", "/v1/threads", {
+        ...(connectorsOff === undefined || connectorsOff.length === 0
+          ? {}
+          : { connectors_off: connectorsOff }),
         ...(skillDraftId === undefined ? {} : { skill_draft_id: skillDraftId }),
         ...(projectId === undefined || projectId === null ? {} : { project_id: projectId }),
         ...(title === undefined ? {} : { title }),
@@ -380,6 +387,7 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
           ...(body.appContext === undefined || body.appContext.length === 0
             ? {}
             : { app_context: body.appContext }),
+          ...(body.skill === undefined ? {} : { skill: body.skill }),
         },
         teamId,
         idempotencyKey,
@@ -458,6 +466,14 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
  */
 export function threadExportUrl(teamId: string): string {
   return `/v1/threads/export${query({ team: teamId })}`;
+}
+
+/**
+ * The download URL of one conversation as Markdown (`/export`, KOBE-450): the owner's only; the
+ * team goes in the query as for `threadExportUrl`.
+ */
+export function threadExportOneUrl(threadId: string, teamId: string): string {
+  return `/v1/threads/${enc(threadId)}/export${query({ team: teamId })}`;
 }
 
 /** The SSE URL of a run's events after `seq` (KOBE-31; the session cookie authenticates it). */

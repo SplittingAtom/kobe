@@ -62,6 +62,15 @@ export const createThreadBodySchema = z.strictObject({
    * that agent) whose runs load only this draft, one the caller can see. No project, not `test`.
    */
   skill_draft_id: uuidSchema.optional(),
+  /**
+   * Connectors turned off before the first message (KOBE-451 review MEDIUM-3): each must be one
+   * the caller is offered and that works now, as for the per-thread toggle. Not for test chats.
+   */
+  connectors_off: z
+    .array(uuidSchema)
+    .max(64)
+    .refine((ids) => new Set(ids).size === ids.length, "duplicate connector ids")
+    .optional(),
 });
 export type CreateThreadBody = z.infer<typeof createThreadBodySchema>;
 

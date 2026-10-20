@@ -616,9 +616,10 @@ export class ThreadController {
     attach?: MessageFiles,
     mentions?: readonly string[],
     appContext?: readonly AppContextWire[],
+    skill?: string,
   ): Promise<boolean> => {
     try {
-      return await this.#send(text, parentEntryId, attach, mentions, appContext);
+      return await this.#send(text, parentEntryId, attach, mentions, appContext, skill);
     } catch {
       // Whatever failed, the composer must not stay stuck: the message is offered back.
       this.#set((s) => ({ ...s, sending: undefined }));
@@ -633,6 +634,7 @@ export class ThreadController {
     attach?: MessageFiles,
     mentions?: readonly string[],
     appContext?: readonly AppContextWire[],
+    skill?: string,
   ): Promise<boolean> {
     const threadId = this.#state.threadId;
     // One message at a time: a second Enter before the server answered is not a second message.
@@ -648,7 +650,14 @@ export class ThreadController {
       followups: undefined, // shown until the next send (KOBE-222)
       queuePaused: false, // sending releases a queue held by Stop
     }));
-    const body = { content: text, parentEntryId, fileIds: attach?.fileIds, mentions, appContext };
+    const body = {
+      content: text,
+      parentEntryId,
+      fileIds: attach?.fileIds,
+      mentions,
+      appContext,
+      skill,
+    };
     let res = await this.#api.sendMessage(threadId, body, key);
     if (!res.ok && res.error.status === 0) res = await this.#api.sendMessage(threadId, body, key);
     if (this.#disposed) return res.ok;

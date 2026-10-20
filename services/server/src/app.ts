@@ -88,6 +88,8 @@ import { threadAppResultRoutes } from "./routes/thread-app-results.js";
 import { threadAppCardRoutes } from "./routes/thread-app-cards.js";
 import { threadRetentionRoutes } from "./routes/thread-retention.js";
 import { threadRoutes } from "./routes/threads.js";
+import { threadConnectorRoutes } from "./routes/thread-connectors.js";
+import { threadSkillRoutes } from "./routes/thread-skills.js";
 import { runFeedbackRoutes, threadFeedbackRoutes } from "./routes/feedback.js";
 import { evalCaseRoutes, runEvalCaseRoutes } from "./eval-cases/routes.js";
 import {
@@ -213,6 +215,8 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/threads", threadUsageRoutes(deps));
   api.route("/threads", threadFeedbackRoutes(deps));
   api.route("/threads", threadRetentionRoutes(deps));
+  api.route("/threads", threadConnectorRoutes(deps));
+  api.route("/threads", threadSkillRoutes(deps));
   api.route("/threads", threadRoutes(deps));
   api.route("/artifacts", artifactRoutes(deps));
   api.route("/schedules", scheduleRoutes(deps));

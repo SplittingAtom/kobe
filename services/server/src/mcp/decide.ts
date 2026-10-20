@@ -33,7 +33,7 @@ import {
   mapLimited,
   type PolicySources,
 } from "./fan-out.js";
-import { loadActiveRuns, type ActiveRunContext } from "./run-context.js";
+import { loadActiveRuns, runHasConnector, type ActiveRunContext } from "./run-context.js";
 import { appliedUserRule, recordRuleApplied } from "../policy/rule-applied.js";
 import { recordSkippedActionInTx } from "../policy/skipped-actions.js";
 
@@ -389,6 +389,14 @@ export async function decideMcpCall(
       return await denied("run_not_active", "No active run of this thread runs in this sandbox.");
     }
     facts = { ...facts, runId: named.runId };
+    // KOBE-451 review HIGH-1: only a connector of the named run's run.start.mcp (not one the
+    // owner turned off for the thread, nor one the agent doesn't name) whatever the sandbox sends.
+    if (!runHasConnector(named, connector.id)) {
+      return await denied(
+        "connector_not_in_run",
+        "This connector is not available to this run (it is off for this conversation, or the agent does not use it).",
+      );
+    }
 
     const toolCallId = request.toolCallId ?? `mcp-proxy-${randomUUID()}`;
     const engine = engineForCall(deps.policy);

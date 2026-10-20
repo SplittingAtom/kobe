@@ -1,3 +1,4 @@
+import { checkConnectorsOff, turnOffAtCreation } from "../connectors/thread-connectors.js";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type { z } from "zod";
@@ -107,6 +108,8 @@ const ERRORS = {
   invalid_cursor: [400, "The cursor is not valid. Start from the first page."],
   invalid_query: [400, "The search needs at least one term that is not excluded with -."],
   search_timeout: [503, "The search took too long. Try more specific terms."],
+  connector_not_found: [422, "A connector to turn off isn't available to you in this team."],
+  connector_not_working: [422, "A connector to turn off isn't working right now."],
 } as const satisfies Record<string, readonly [number, string]>;
 
 type ErrorCode = keyof typeof ERRORS;
@@ -264,6 +267,10 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     if (draftId !== undefined && (test || body.project_id)) {
       return invalidRequest(c, "A Workbench test chat is not a builder test and has no project.");
     }
+    const off = body.connectors_off ?? [];
+    if (off.length > 0 && (test || draftId !== undefined)) {
+      return invalidRequest(c, "A test conversation starts with every connector on.");
+    }
     const actor = { userId: c.get("user").id, role: c.get("team").role };
     const result = await asViewer(c, async (tx, viewer) => {
       const projectId = body.project_id ?? null;
@@ -292,7 +299,11 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
       if (model !== null && !(await isModelEnabled(tx, viewer.teamId, model))) {
         return "model_not_enabled" as const;
       }
-      return createThread(tx, {
+      // KOBE-451 review MEDIUM-3: connectors turned off before the first message, checked like
+      // the toggle and written with the thread, so its first run already goes without them.
+      const offRefused = await checkConnectorsOff(tx, viewer, off);
+      if (offRefused !== null) return offRefused;
+      const created = await createThread(tx, {
         teamId: viewer.teamId,
         ownerUserId: viewer.userId,
         projectId,
@@ -303,6 +314,8 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
         modelAlias: model,
         thinkingLevel: body.thinking_level ?? null,
       });
+      await turnOffAtCreation(tx, viewer, created.thread_id, off);
+      return created;
     });
     return typeof result === "string" ? fail(c, result) : c.json(result, 201);
   });

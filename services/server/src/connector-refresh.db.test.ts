@@ -9,7 +9,7 @@ import { openHarness, type Harness } from "./testing/harness.js";
 import { grantContext, revealCredential } from "./connectors/grants.js";
 import { parseOauthBundle, serializeOauthBundle } from "./connectors/oauth/bundle.js";
 import { RefreshGate } from "./connectors/oauth/refresh-gate.js";
-import { INTERNAL_KEY, MCP_SESSION_KEY, mcpToken } from "./testing/mcp-fixtures.js";
+import { INTERNAL_KEY, MCP_SESSION_KEY, activeSandbox, mcpToken } from "./testing/mcp-fixtures.js";
 
 /**
  * OAuth grant refresh, revoke and suspension (KOBE-110): rotating refresh tokens are used once
@@ -86,7 +86,11 @@ const grantFor = async () => {
     method: "POST",
     headers: {
       authorization: `Bearer ${INTERNAL_KEY}`,
-      "kobe-sandbox-token": mcpToken({ sandboxId: randomUUID(), teamId: team, userId: aliceId }),
+      "kobe-sandbox-token": mcpToken({
+        sandboxId: await activeSandbox(h.admin, team, aliceId),
+        teamId: team,
+        userId: aliceId,
+      }),
     },
   });
   return { status: res.status, body: (await res.json()) as Record<string, string> };
@@ -107,7 +111,7 @@ const expire = () =>
 const reveal = async () =>
   (
     await h.deps.mcp.revealCredential(
-      { sandboxId: randomUUID(), teamId: team, userId: aliceId },
+      { sandboxId: await activeSandbox(h.admin, team, aliceId), teamId: team, userId: aliceId },
       connectorId,
     )
   ).ok;

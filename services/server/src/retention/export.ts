@@ -40,14 +40,14 @@ const TRASH_INTERVAL = sql.raw(`interval '${TRASH_RETENTION_DAYS} days'`);
 
 /** Raw queries return timestamps as text (or Date, depending on the driver's parsers). */
 type Timestamp = Date | string;
-const iso = (t: Timestamp): string => new Date(t).toISOString();
+export const iso = (t: Timestamp): string => new Date(t).toISOString();
 
 export interface ExportViewer {
   readonly teamId: string;
   readonly userId: string;
 }
 
-type ThreadRow = {
+export type ThreadRow = {
   readonly id: string;
   readonly title: string | null;
   readonly leaf_entry_id: string | null;
@@ -67,7 +67,7 @@ type EntryRow = {
 };
 
 /** The viewer's own threads (alias `t`), live or restorable from Trash; add the team yourself. */
-const OWN_THREADS = (viewer: ExportViewer) => sql`
+export const OWN_THREADS = (viewer: ExportViewer) => sql`
   t.owner_user_id = ${viewer.userId}
   AND (t.deleted_at IS NULL OR t.deleted_at > now() - ${TRASH_INTERVAL})`;
 
@@ -137,7 +137,7 @@ async function entryPage(db: KobeDb, viewer: ExportViewer, threadId: string, aft
   });
 }
 
-async function* entries(db: KobeDb, viewer: ExportViewer, threadId: string) {
+export async function* entries(db: KobeDb, viewer: ExportViewer, threadId: string) {
   let after = 0;
   for (;;) {
     const rows = await entryPage(db, viewer, threadId, after);
@@ -148,7 +148,7 @@ async function* entries(db: KobeDb, viewer: ExportViewer, threadId: string) {
 }
 
 /** The entry ids on the active branch (leaf to root), walked in Postgres. */
-async function activeBranchIds(
+export async function activeBranchIds(
   db: KobeDb,
   viewer: ExportViewer,
   threadId: string,
@@ -187,7 +187,7 @@ async function offloaded(
 }
 
 /** The stored Pi entry, or a stub that keeps the tree intact when its body is unavailable. */
-async function piEntry(
+export async function piEntry(
   row: EntryRow,
   blobs: BlobStore | undefined,
   viewer: ExportViewer,

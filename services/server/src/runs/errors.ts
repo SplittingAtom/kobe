@@ -22,7 +22,8 @@ export type OrchestratorErrorCode =
   | "sandbox_unavailable" // 503: the workspace did not answer a steer
   | "invalid_mention" // 422: an @file mention is malformed, outside /workspace or unknown (KOBE-223)
   | "app_context_invalid" // 422: an app context chip names an app the member can't open now (KOBE-439)
-  | "invalid_content"; // 422: the text imitates Kobe's app-context markers (KOBE-439)
+  | "invalid_content" // 422: the text imitates Kobe's app-context or skill markers (KOBE-439/451)
+  | "skill_not_available"; // 422: the picked skill is not in the run's effective set (KOBE-451)
 
 export const RUN_ERROR_STATUS: Record<OrchestratorErrorCode, number> = {
   run_not_found: 404,
@@ -48,6 +49,7 @@ export const RUN_ERROR_STATUS: Record<OrchestratorErrorCode, number> = {
   invalid_mention: 422,
   app_context_invalid: 422,
   invalid_content: 422,
+  skill_not_available: 422,
 };
 
 const DEFAULT_MESSAGES: Record<OrchestratorErrorCode, string> = {
@@ -74,7 +76,9 @@ const DEFAULT_MESSAGES: Record<OrchestratorErrorCode, string> = {
   sandbox_unavailable: "Your workspace did not answer. Try again.",
   invalid_mention: "A mentioned file is not in your workspace.",
   app_context_invalid: "An app's context can no longer be sent. Remove its chip and try again.",
-  invalid_content: "Your message can't contain Kobe's app-context markers.",
+  invalid_content: "Your message can't contain Kobe's app-context or skill markers.",
+  skill_not_available:
+    "That skill isn't available to this agent in your team. Remove it and send again.",
 };
 
 export class RunError extends Error {

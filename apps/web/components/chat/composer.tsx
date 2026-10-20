@@ -30,6 +30,7 @@ import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { IconAction } from "../shell/icon-action";
 import { Button } from "../ui/button";
 import { ariaKeyShortcuts } from "../../lib/shell/commands";
+import { refusedPiCommand } from "../../lib/shell/pi-commands";
 import { IN_TRASH, READ_ONLY } from "../../lib/chat/thread-commands";
 import type { MenuBindings } from "../../lib/shell/menu";
 import { shortcutOf } from "../../lib/shell/shortcuts";
@@ -37,6 +38,8 @@ import { useBindCommands, useBoundCommands } from "../shell/command-bindings";
 import { cn } from "../../lib/utils";
 import { ComposerSelectors, useComposerPicker, useFoldedSelectors } from "./composer-selectors";
 import { ModelWarning } from "./model-picker";
+import { PlusMenu } from "./plus-menu";
+import { SkillPickChip } from "./plus-skills";
 import { SlashMenu } from "./slash-menu";
 import styles from "./chat.module.css";
 import panelStyles from "./composer.module.css";
@@ -88,8 +91,10 @@ function wantsEditLast(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
  * into the running agent at its next safe point. The Steer now and Stop buttons sit in the
  * steering panel above the input (CE10, `steering-panel.tsx`). The text is cleared only
  * once the server accepted it. The mic button dictates into the prompt (`lib/chat/dictation.ts`);
- * sending stops dictation. Its toolbar holds Attach, then the conversation's Agent, Model and
- * Thinking selectors (KOBE-418), folded into one menu on a narrow composer.
+ * sending stops dictation. Its toolbar starts with the + menu (KOBE-451: Attach files,
+ * Connectors, Memory, Skills, Apps). Before the first prompt the toolbar then holds the
+ * conversation's Agent, Model and Thinking selectors (KOBE-418), folded into one menu on a narrow
+ * composer; after it they move to the line below, before the context gauge (KOBE-450).
  */
 export function Composer({
   extras,
@@ -107,6 +112,8 @@ export function Composer({
   const running = isThreadRunning(state);
   const inTrash = state.summary?.deletedAt != null;
   const empty = text.trim() === "";
+  // A message starting with a Pi command Kobe doesn't offer is never sent (KOBE-450, LOW-5).
+  const piRefusal = refusedPiCommand(text);
   const dictation = useComposerDictation();
   const { steer, unavailable } = useSteer(extras);
   const draft = remoteId ?? NEW_DRAFT;
@@ -117,6 +124,8 @@ export function Composer({
   const [panel, setPanel] = useState<HTMLDivElement | null>(null);
   const folded = useFoldedSelectors(panel);
   const picker = useComposerPicker(extras);
+  // KOBE-450: the selectors leave the toolbar once the thread has its first prompt.
+  const started = remoteId !== undefined;
   // A fork at a prompt opens with that prompt as its draft (KOBE-216), once.
   useEffect(() => {
     if (remoteId === undefined) return;
@@ -154,15 +163,17 @@ export function Composer({
   };
 
   const queue = async () => {
-    if (!controller || empty || blocker !== undefined) return;
+    if (!controller || empty || blocker !== undefined || piRefusal !== null) return;
     dictation.stop();
     const mentions = session.mentions.forText(draft, text);
     const attach = session.attachments.ready(draft);
     const contexts = appContextBody(session.appContexts.forDraft(draft));
-    if (await controller.send(text.trim(), undefined, attach, mentions, contexts)) {
+    const skill = session.skillPicks.get(draft);
+    if (await controller.send(text.trim(), undefined, attach, mentions, contexts, skill)) {
       session.attachments.sent(draft);
       session.mentions.clear(draft);
       session.appContexts.clear(draft);
+      session.skillPicks.clear(draft);
       aui.composer.setText("");
     }
   };
@@ -190,6 +201,17 @@ export function Composer({
       e.preventDefault();
       return;
     }
+    // An open trigger popover (the / menu) takes Enter itself; otherwise a refused Pi word stays.
+    if (
+      e.key === "Enter" &&
+      !newLine &&
+      !e.nativeEvent.isComposing &&
+      piRefusal !== null &&
+      e.currentTarget.getAttribute("aria-expanded") !== "true"
+    ) {
+      e.preventDefault();
+      return;
+    }
     if (e.key !== "Enter" || e.nativeEvent.isComposing || !running) return;
     // An open trigger popover (the @ picker, the / menu) takes Enter to pick, not to queue.
     if (e.currentTarget.getAttribute("aria-expanded") === "true") return;
@@ -202,8 +224,14 @@ export function Composer({
     }
   };
 
-  const footerRow = (hint: ReactNode) => (
-    <div data-composer-footer className="flex min-h-6 items-center gap-2 px-2">
+  // The line under the box: after the first prompt the selectors lead it (KOBE-450), then the
+  // hint, then the gauge at its end. It wraps on a narrow composer instead of overflowing.
+  const footerRow = (hint: ReactNode, lead?: ReactNode) => (
+    <div
+      data-composer-footer
+      className="flex min-h-6 min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-2"
+    >
+      {lead}
       {hint}
       <span data-composer-gauge className="ms-auto flex shrink-0 items-center">
         {footer}
@@ -267,6 +295,7 @@ export function Composer({
           <ComposerAttachments draft={draft} threadId={remoteId} />
           <MentionChips draft={draft} />
           <AppContextChips draft={draft} />
+          <SkillPickChip draft={draft} />
           {appInsert.pending && (
             <p
               role="note"
@@ -311,13 +340,19 @@ export function Composer({
               className="sr-only"
               onChange={onPick}
             />
-            <IconAction
-              command="attach"
-              className="size-7 shrink-0 rounded-full"
-              onClick={() => filePicker.current?.click()}
+            <PlusMenu
+              draft={draft}
+              threadId={remoteId ?? null}
+              onAttach={() => filePicker.current?.click()}
             />
-            <ComposerSelectors picker={picker} folded={folded} />
-            {folded && <span className="flex-1" />}
+            {started ? (
+              <span className="flex-1" />
+            ) : (
+              <>
+                <ComposerSelectors picker={picker} folded={folded} />
+                {folded && <span className="flex-1" />}
+              </>
+            )}
             {dictation.supported && (
               <IconAction
                 command="dictate"
@@ -341,7 +376,9 @@ export function Composer({
                 size="sm"
                 className="h-8 shrink-0 rounded-full px-3"
                 onClick={() => void queue()}
-                disabled={empty || blocker !== undefined || appInsert.pending !== null}
+                disabled={
+                  empty || blocker !== undefined || appInsert.pending !== null || piRefusal !== null
+                }
               >
                 Queue
               </Button>
@@ -352,7 +389,9 @@ export function Composer({
                   type="button"
                   variant="default"
                   className="size-7 shrink-0 rounded-full"
-                  disabled={blocker !== undefined || appInsert.pending !== null}
+                  disabled={
+                    blocker !== undefined || appInsert.pending !== null || piRefusal !== null
+                  }
                 />
               </ComposerPrimitive.Send>
             )}
@@ -360,7 +399,10 @@ export function Composer({
           {picker && <ModelWarning picker={picker} />}
         </div>
         {footerRow(
-          <p id="kobe-composer-hint" className="text-muted-foreground m-0 min-w-0 text-xs">
+          <p
+            id="kobe-composer-hint"
+            className="text-muted-foreground m-0 min-w-0 flex-1 basis-40 text-xs"
+          >
             {rowDrop.rowDrop === "file" ? (
               "Drop to mention this file"
             ) : rowDrop.rowDrop === "folder" ? (
@@ -369,6 +411,10 @@ export function Composer({
               <span role="status">{rowDrop.notice}</span>
             ) : blocker !== undefined ? (
               <span role="status">{blocker}</span>
+            ) : piRefusal !== null ? (
+              <span role="status" data-kobe-pi-refusal>
+                {piRefusal}
+              </span>
             ) : dictation.error ? (
               <span role="alert">{dictation.error}</span>
             ) : dictation.listening ? (
@@ -383,6 +429,9 @@ export function Composer({
               <span className="block truncate">Enter sends · Shift+Enter new line</span>
             )}
           </p>,
+          started ? (
+            <ComposerSelectors picker={picker} folded={false} placement="below" />
+          ) : undefined,
         )}
       </ComposerPrimitive.Root>
     </ComposerPrimitive.TriggerPopoverRoot>

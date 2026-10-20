@@ -355,6 +355,31 @@ async function stillRuns(
   return start;
 }
 
+describe("a connector off in the thread (KOBE-451 review LOW-5)", () => {
+  it("refuses the app's card there; another thread still takes it", async () => {
+    const w = await f.world();
+    const { appId } = await app(w);
+    const threadId = await f.thread(w.owner);
+    const connectorId = (
+      await f.fx.admin.query<{ connector_id: string }>(
+        `SELECT connector_id FROM team_connectors WHERE team_id = $1`,
+        [w.team],
+      )
+    ).rows[0]?.connector_id;
+    await f.fx.admin.query(
+      `INSERT INTO thread_connectors_off (team_id, thread_id, connector_id) VALUES ($1, $2, $3)`,
+      [w.team, threadId, connectorId],
+    );
+    const before = calls.length;
+    const refused = await launch(w, threadId, appId);
+    expect([refused.status, refused.json.code]).toEqual([409, "connector_off"]);
+    expect(calls.length).toBe(before);
+    expect(await entries(w.team, threadId)).toEqual([]);
+    const other = await f.thread(w.owner);
+    expect((await launch(w, other, appId)).status).toBe(201);
+  });
+});
+
 describe("no app card leaves a thread unable to run (KOBE-440 review)", () => {
   it("fits any result into the card, inserted or queued: < and invisible characters (MEDIUM-1)", async () => {
     const w = await f.world();

@@ -1,4 +1,4 @@
-import { splitAppContext } from "@kobe/protocol";
+import { splitAppContext, splitSkillRequest } from "@kobe/protocol";
 import { sql, type KobeTx } from "@kobe/db";
 
 export { cutText } from "./entry-output.js";
@@ -37,7 +37,8 @@ export interface FirstMessage {
  * and exports carry it.
  */
 export function memberText(text: string): string {
-  return splitAppContext(text).rest.trim();
+  // ... and so is the server's line for a skill picked in the composer (KOBE-451).
+  return splitSkillRequest(splitAppContext(text).rest).rest.trim();
 }
 
 /** The thread's first user message (by append order), or undefined before there is one. */

@@ -1,6 +1,7 @@
 "use client";
 
 import { splitAppContext } from "../../lib/apps/app-context";
+import { splitSkillRequest } from "@kobe/protocol";
 import {
   ActionBarPrimitive,
   AuiIf,
@@ -10,7 +11,8 @@ import {
   type DataMessagePartProps,
   type TextMessagePartProps,
 } from "@assistant-ui/react";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, WandSparklesIcon, XIcon } from "lucide-react";
+import { useEffect } from "react";
 import { cn } from "../../lib/utils";
 import {
   branchPoint,
@@ -22,7 +24,8 @@ import { shortcutOf } from "../../lib/shell/shortcuts";
 import { Button } from "../ui/button";
 import { IconAction } from "../shell/icon-action";
 import { AppCardPart } from "../apps/app-card";
-import { useKobeExtras } from "./kobe-runtime";
+import { editSkillKey, useChatSession, useKobeExtras } from "./kobe-runtime";
+import { useSkillPick } from "./plus-skills";
 import { isReadOnlyThread } from "./project-bar";
 import { SentAttachments } from "./attachment-chips";
 import { Markdown } from "./markdown";
@@ -44,24 +47,48 @@ import { ToolCallCard } from "./tool-call";
 import { useArriving } from "./use-arriving";
 import styles from "./chat.module.css";
 
+/** A skill the member picked for this message (KOBE-451): the server's line, shown as a chip. */
+function SentSkill({ name }: { readonly name: string }) {
+  return (
+    <p
+      data-kobe-sent-skill={name}
+      className="text-muted-foreground m-0 mb-1 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs"
+    >
+      <WandSparklesIcon aria-hidden className="size-3" />
+      Skill: {name}
+    </p>
+  );
+}
+
 /** The user's message as typed (React escapes it). */
 function PlainText({ text }: TextMessagePartProps) {
   // MCP Apps context sent with the message (KOBE-439): shown as chips, the JSON one click away.
-  const { contexts, rest } = splitAppContext(text);
-  if (contexts.length === 0) return <span>{text}</span>;
+  const { contexts, rest: afterContext } = splitAppContext(text);
+  // The skill it was sent with (KOBE-451): the projection takes the server's line out of the text
+  // (meta.skill); a prompt shown before Pi saved it may still carry the line.
+  const meta = useMeta();
+  const parsed = splitSkillRequest(afterContext);
+  const skill = (meta?.kind === "user" ? meta.skill : undefined) ?? parsed.skill;
+  const rest = parsed.rest;
+  if (contexts.length === 0 && skill === null) return <span>{text}</span>;
   return (
     <>
-      <ul aria-label="App context sent" className="m-0 mb-1 flex list-none flex-col gap-1 p-0">
-        {contexts.map((c, i) => (
-          <li key={i} data-kobe-sent-app-context className="rounded-md border px-2 py-1 text-xs">
-            <details>
-              <summary className="cursor-pointer">Context from {c.source} (untrusted data)</summary>
-              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap">{c.json}</pre>
-            </details>
-          </li>
-        ))}
-      </ul>
-      <span>{rest}</span>
+      {contexts.length > 0 && (
+        <ul aria-label="App context sent" className="m-0 mb-1 flex list-none flex-col gap-1 p-0">
+          {contexts.map((c, i) => (
+            <li key={i} data-kobe-sent-app-context className="rounded-md border px-2 py-1 text-xs">
+              <details>
+                <summary className="cursor-pointer">
+                  Context from {c.source} (untrusted data)
+                </summary>
+                <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap">{c.json}</pre>
+              </details>
+            </li>
+          ))}
+        </ul>
+      )}
+      {skill !== null && <SentSkill name={skill} />}
+      <span className={skill !== null ? "block" : undefined}>{rest}</span>
     </>
   );
 }
@@ -318,10 +345,45 @@ function AnswerMessage({ meta }: { readonly meta: KobeMessageMeta | undefined })
 }
 
 /** Edit-and-regenerate: sending the edit branches from the edited message's parent entry. */
+/**
+ * The edited message's skill (KOBE-451 review MEDIUM-2): kept for the new version unless the
+ * member removes the chip. Seeded from the message when the edit box opens.
+ */
+function EditSkillChip() {
+  const meta = useMeta();
+  const messageId = useAuiState((s) => s.message.id);
+  const session = useChatSession();
+  const key = editSkillKey(messageId);
+  const sent = meta?.kind === "user" ? meta.skill : undefined;
+  useEffect(() => {
+    if (sent !== undefined) session.skillPicks.set(key, sent);
+    return () => session.skillPicks.clear(key);
+  }, [session, key, sent]);
+  const picked = useSkillPick(key);
+  if (picked === undefined) return null;
+  return (
+    <span
+      data-kobe-edit-skill={picked}
+      className="mx-4 mt-2 inline-flex items-center gap-1.5 self-start rounded-full border px-2 py-0.5 text-xs"
+    >
+      <WandSparklesIcon aria-hidden className="size-3" />
+      Skill: {picked}
+      <button
+        type="button"
+        aria-label={`Remove the skill ${picked}`}
+        onClick={() => session.skillPicks.clear(key)}
+      >
+        <XIcon aria-hidden className="size-3" />
+      </button>
+    </span>
+  );
+}
+
 export function EditComposer() {
   return (
     <div className="flex flex-col px-2">
       <ComposerPrimitive.Root className="border-foreground/10 focus-within:border-foreground/25 bg-muted/30 ms-auto flex w-full max-w-[85%] cursor-text flex-col rounded-2xl border transition-[border-color]">
+        <EditSkillChip />
         <label className="sr-only" htmlFor="kobe-edit-message">
           Edit your message
         </label>

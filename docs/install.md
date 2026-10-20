@@ -481,6 +481,12 @@ after rolling forward); while old and new server pods run side by side, an old p
 member's own key for a site-key connector (the new pods ignore it) and fails an auth-kind edit of a
 site-key connector (a database check refuses it). Avoid editing site-key connectors during a rollout.
 
+**Connectors per run (KOBE-451).** Each run records the connectors of its `run.start.mcp`, and the
+server allows MCP calls, tool lists and key reveals only for those (and never one the member has
+turned off in the thread). A run started by an older server pod during a rolling upgrade has no
+such record: it is checked against its thread's turned-off connectors only. That fallback exists
+for the rollout and is to be removed in the next release.
+
 **Probing and drift.** Kobe pins a connector's tools from its `tools/list`, and re-checks every
 pinned connector each `KOBE_CONNECTOR_REFRESH_SECONDS` (default 3600) for changed tools, which stay
 disabled until a site admin approves them. For a connector that asks for a credential, both probes
