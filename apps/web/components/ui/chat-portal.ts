@@ -36,9 +36,9 @@ export function consolePortalContainer(): HTMLElement | undefined {
 }
 
 /**
- * A console root at the document's top for the portals of a My area page beside the thread
- * (CE4, KOBE-424): outside the chat root and its stacking contexts (the column, its sheet), so a
- * confirm dialog covers the whole window, bar included, with the console's scoped rules. Marked
+ * A console root at the document's top for the portals of a page in a panel over the workspace
+ * (KOBE-424, KOBE-452): outside the chat root and its stacking contexts (the panel), so a
+ * confirm dialog covers the whole window, panel included, with the console's scoped rules. Marked
  * as portalled content for the chat's modal layers (`CHAT_PORTALLED`). Created once, kept.
  */
 export const CONSOLE_PORTAL = "data-kobe-console-portal";

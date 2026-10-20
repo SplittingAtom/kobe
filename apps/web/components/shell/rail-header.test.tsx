@@ -2,7 +2,8 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { isMacPlatform } from "../../lib/shell/shortcuts";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
@@ -10,12 +11,12 @@ import { PREFERENCES_PATH } from "../../lib/shell/preferences";
 import { LAST_TEAM_KEY } from "../../lib/teams";
 import { must } from "../../lib/testing/must";
 import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
-import { composer, openApp, pressModShift } from "../chat/testing";
+import { composer, openApp, openThreads, pressModShift } from "../chat/testing";
 
 /**
- * KOBE-419: the rail's top line. The team selector (moved from the bar), the Threads and Files
- * panel toggles (the last one on stays on; the choice is saved per member), Team console for team
- * admins (moved from the bar's Administration links), then collapse.
+ * KOBE-419: the rail's top line. The team selector (moved from the bar), New conversation and
+ * Threads (KOBE-453: the Threads panel over the workspace), the Files toggle (saved per member),
+ * Team console for team admins (moved from the bar's Administration links), then collapse.
  */
 const RAIL_CSS = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "rail.module.css"),
@@ -69,10 +70,10 @@ const header = () =>
 const bar = () => must(document.querySelector<HTMLElement>('[data-bar-row="1"]'));
 const toggle = (name: "Threads panel" | "Files panel") =>
   within(rail()).getByRole("button", { name });
+const threadsButton = () => toggle("Threads panel");
 const section = (id: string) => must(document.getElementById(id));
 const rows = () =>
   must(document.getElementById("kobe-rail-sections")).style.gridTemplateRows.replace(/\s+/g, " ");
-const divider = () => screen.queryByRole("separator", { name: "Resize Threads and Files" });
 const puts = () => fake.requests.filter((r) => r.method === "PUT" && r.path === PREFERENCES_PATH);
 const names = (root: HTMLElement) =>
   [...root.querySelectorAll<HTMLElement>("a, button, summary, h2")].map(
@@ -80,12 +81,19 @@ const names = (root: HTMLElement) =>
   );
 
 describe("the rail's top line (ac-1)", () => {
-  it("team name, Threads panel, Files panel, then collapse, for a member", async () => {
+  it("team name, New conversation, Threads, Files, then collapse, for a member", async () => {
     openApp(fake);
     await composer();
     const line = await header();
     await within(line).findByRole("heading", { name: "Finance", level: 2 });
-    expect(names(line)).toEqual(["Finance", "Threads panel", "Files panel", "Collapse the rail"]);
+    // New conversation immediately left of Threads (KOBE-453).
+    expect(names(line)).toEqual([
+      "Finance",
+      "New conversation",
+      "Threads panel",
+      "Files panel",
+      "Collapse the rail",
+    ]);
     // The name truncates with its full text as a tooltip, never the buttons.
     expect(within(line).getByRole("heading", { name: "Finance" }).getAttribute("title")).toBe(
       "Finance",
@@ -284,50 +292,45 @@ describe("the collapsed rail's team (KOBE-419 review S2)", { timeout: 30_000 }, 
   });
 });
 
-describe("the Threads and Files toggles (ac-3)", { timeout: 30_000 }, () => {
-  it("ignore a stored value this build doesn't know: both panels show", async () => {
+describe("Threads and the Files toggle (ac-3, KOBE-453)", { timeout: 30_000 }, () => {
+  it("ignore a stored value this build doesn't know: Files shows", async () => {
     fake.preferences = { rail_panels: "none" };
     openApp(fake);
     await composer();
     await header();
     await new Promise((r) => setTimeout(r, 100));
-    expect(section("kobe-rail-threads").hidden).toBe(false);
     expect(section("kobe-rail-files").hidden).toBe(false);
+    expect(document.getElementById("kobe-rail-threads")).toBeNull();
   });
 
-  it("are pressed for both panels by default, with the divider between", async () => {
+  it("Threads opens the Threads panel; Files is pressed by default and fills the rail", async () => {
     openApp(fake);
     await composer();
     await header();
-    expect(toggle("Threads panel").getAttribute("aria-pressed")).toBe("true");
+    expect(threadsButton().hasAttribute("aria-pressed")).toBe(false);
+    expect(threadsButton().getAttribute("aria-haspopup")).toBe("dialog");
     expect(toggle("Files panel").getAttribute("aria-pressed")).toBe("true");
-    expect(divider()).not.toBeNull();
-    expect(rows()).toBe("minmax(0, 0.6fr) auto minmax(0, 0.4fr)");
+    expect(rows()).toBe("minmax(0, 1fr)");
+    await userEvent.setup().click(threadsButton());
+    expect(await screen.findByRole("dialog", { name: "Threads" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/threads");
   });
 
-  it("one panel fills the rail without the divider; the last one on can't be turned off", async () => {
+  it("hiding Files collapses the rail to its strip; Show files brings both back (review H2)", async () => {
     openApp(fake);
     await composer();
     await header();
     const user = userEvent.setup();
-    await user.click(toggle("Threads panel"));
-    expect(toggle("Threads panel").getAttribute("aria-pressed")).toBe("false");
-    expect(section("kobe-rail-threads").hidden).toBe(true);
+    expect(toggle("Files panel").hasAttribute("aria-disabled")).toBe(false);
+    await user.click(toggle("Files panel"));
+    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(true));
+    expect(section("kobe-rail-files").hidden).toBe(true);
+    // The strip keeps New conversation and Threads; Show files expands with Files on.
+    expect(within(rail()).getByRole("button", { name: "Show threads" })).toBeTruthy();
+    await user.click(within(rail()).getByRole("button", { name: "Show files" }));
+    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(false));
     expect(section("kobe-rail-files").hidden).toBe(false);
-    expect(divider()).toBeNull();
-    expect(rows()).toBe("minmax(0, 1fr)");
-    // Files is the last panel on: its toggle says why it stays.
-    const files = toggle("Files panel");
-    expect(files.getAttribute("aria-disabled")).toBe("true");
-    const why = must(document.getElementById(must(files.getAttribute("aria-describedby"))));
-    expect(why.textContent).toBe("At least one panel stays on.");
-    await user.click(files);
-    expect(files.getAttribute("aria-pressed")).toBe("true");
-    expect(section("kobe-rail-files").hidden).toBe(false);
-    // Both on again: the divider and the share come back.
-    await user.click(toggle("Threads panel"));
-    expect(divider()).not.toBeNull();
-    expect(rows()).toBe("minmax(0, 0.6fr) auto minmax(0, 0.4fr)");
+    expect(toggle("Files panel").getAttribute("aria-pressed")).toBe("true");
   });
 
   it("is saved per member and read back on the next load (another device)", async () => {
@@ -339,10 +342,18 @@ describe("the Threads and Files toggles (ac-3)", { timeout: 30_000 }, () => {
     act(() => cleanup());
     openApp(fake);
     await composer();
-    await header();
-    await waitFor(() => expect(section("kobe-rail-files").hidden).toBe(true));
-    expect(toggle("Files panel").getAttribute("aria-pressed")).toBe("false");
-    expect(toggle("Threads panel").getAttribute("aria-disabled")).toBe("true");
+    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(true));
+    expect(section("kobe-rail-files").hidden).toBe(true);
+    // Mod+B expands it again, with Files on (saved like the toggle).
+    act(() => {
+      fireEvent.keyDown(document.body, {
+        key: "b",
+        code: "KeyB",
+        ...(isMacPlatform() ? { metaKey: true } : { ctrlKey: true }),
+      });
+    });
+    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(false));
+    await waitFor(() => expect(puts().at(-1)?.body).toMatchObject({ rail_panels: "both" }), WAIT);
   });
 });
 
@@ -370,17 +381,16 @@ describe("existing paths turn a panel on (ac-4)", { timeout: 30_000 }, () => {
     expect(puts().filter((r) => "rail_panels" in (r.body as object))).toEqual([]);
   });
 
-  it("the collapsed rail's Show threads expands it with Threads on", async () => {
-    fake.preferences = { rail_panels: "files", rail_collapsed: true };
+  it("the collapsed rail keeps New conversation and Threads; Threads opens the panel", async () => {
+    fake.preferences = { rail_collapsed: true };
     openApp(fake);
     await composer();
     await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(true));
+    const strip = names(must(rail().querySelector<HTMLElement>("[class*='icons']")));
+    expect(strip.indexOf("Show threads")).toBe(strip.indexOf("New conversation") + 1);
     await userEvent.setup().click(within(rail()).getByRole("button", { name: "Show threads" }));
-    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(false));
-    await waitFor(() => expect(section("kobe-rail-threads").hidden).toBe(false));
-    await waitFor(() => expect(document.activeElement?.id).toBe("kobe-rail-threads"));
-    // Saved like the toggle: the next load (another device) shows both.
-    await waitFor(() => expect(fake.preferences["rail_panels"]).toBe("both"), WAIT);
+    expect(await screen.findByRole("dialog", { name: "Threads" })).toBeTruthy();
+    expect(rail().hasAttribute("data-collapsed")).toBe(true);
   });
 });
 
@@ -417,19 +427,22 @@ describe("one look for the rail's icon actions", () => {
   // Export my conversations) had none and the link blue. Every icon action carries one look.
   const LOOK = ["border", "bg-background", "text-foreground", "p-0"];
 
-  it("links and buttons on the top line and in the Threads header share the same classes", async () => {
+  it("links and buttons on the top line and in the Threads panel share the same classes", async () => {
     withAccess("team_admin");
     openApp(fake);
     await composer();
     const line = await header();
     await within(line).findByRole("link", { name: "Team console" }, WAIT);
-    const actions = [
+    const lineActions = [
       ...line.querySelectorAll<HTMLElement>(
         "a[data-slot='tooltip-trigger'], button[data-slot='tooltip-trigger']",
       ),
-      screen.getByRole("link", { name: "Export my conversations" }),
-      within(rail()).getByRole("button", { name: "New conversation" }),
     ];
+    const actions = [
+      ...lineActions,
+      within(await openThreads()).getByRole("link", { name: "Export my conversations" }),
+    ];
+    expect(lineActions.map((a) => a.getAttribute("aria-label"))).toContain("New conversation");
     expect(actions.map((a) => a.tagName)).toEqual(expect.arrayContaining(["A", "BUTTON"]));
     for (const action of actions) {
       for (const cls of LOOK)
@@ -447,8 +460,8 @@ describe("one look for the rail's icon actions", () => {
   it("a pressed panel toggle shows the accent", async () => {
     openApp(fake);
     await composer();
-    const threads = toggle("Threads panel");
-    await waitFor(() => expect(threads.getAttribute("aria-pressed")).toBe("true"));
-    expect(threads.className).toMatch(/aria-pressed:bg-accent/);
+    const files = toggle("Files panel");
+    await waitFor(() => expect(files.getAttribute("aria-pressed")).toBe("true"));
+    expect(files.className).toMatch(/aria-pressed:bg-accent/);
   });
 });

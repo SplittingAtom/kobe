@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { expect, test } from "./support/chat.js";
+import { expect, test, filesSection } from "./support/chat.js";
 import { expectThemed, paintOf, type Theme } from "./support/colours.js";
 
 /**
@@ -87,12 +87,15 @@ test("thread and file row menus in light and dark; header rename; Copy as Markdo
   await name.fill(title);
   await name.press("Enter");
   await expect(page.getByRole("heading", { level: 2, name: title, exact: true })).toBeVisible();
-  const threads = page.getByRole("list", { name: "Your threads" });
+  // The thread rows are in the Threads panel (KOBE-453), the file rows in the rail.
+  const threads = chat.threadsPanel.getByRole("list", { name: "Your threads" });
   const threadRow = threads.getByRole("listitem").filter({ hasText: title });
+  await chat.openThreads();
   await expect(threadRow).toHaveCount(1);
+  await chat.closeThreads();
 
   // A file of our own in the workspace root, for its row's menu.
-  const files = page.getByRole("region", { name: "Files" });
+  const files = filesSection(page);
   const openFiles = files.getByRole("button", { name: "Open files" });
   if (await openFiles.isVisible()) await openFiles.click();
   await files.getByLabel("Upload a file to the workspace root").setInputFiles({
@@ -111,11 +114,14 @@ test("thread and file row menus in light and dark; header rename; Copy as Markdo
       await themeToggle(page).click();
       await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     }
+    await chat.openThreads();
     await checkRowMenu(page, threadRow, `Actions for ${title}`, THREAD_ITEMS, theme);
+    await chat.closeThreads();
     await checkRowMenu(page, fileRow, `Actions for ${fileName}`, FILE_ITEMS, theme);
   }
 
   // Copy: the conversation on screen as Markdown.
+  await chat.openThreads();
   await threadRow.hover();
   await threadRow.getByRole("button", { name: `Actions for ${title}` }).click();
   await page.getByRole("menuitem", { name: "Copy", exact: true }).click();
@@ -124,6 +130,7 @@ test("thread and file row menus in light and dark; header rename; Copy as Markdo
     .toMatch(new RegExp(`^# ${title}\\n[\\s\\S]*## You[\\s\\S]*## Assistant[\\s\\S]*OK`));
 
   // Clean up the file through its menu (Delete asks first).
+  await chat.closeThreads();
   await fileRow.hover();
   await fileRow.getByRole("button", { name: `Actions for ${fileName}` }).click();
   await page.getByRole("menuitem", { name: "Delete", exact: true }).click();

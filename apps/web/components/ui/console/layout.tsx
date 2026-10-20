@@ -13,6 +13,7 @@ export function ConsoleLayout({
   headerStart,
   headerEnd,
   nav,
+  panel = false,
   children,
 }: {
   readonly brand: ReactNode;
@@ -20,13 +21,22 @@ export function ConsoleLayout({
   readonly headerEnd?: ReactNode;
   /** The section navigation; without it the page takes the full width. */
   readonly nav?: ReactNode;
+  /**
+   * In a panel over the workspace (KOBE-452, `InPanel`): the panel's own header names it and
+   * closes it, so the brand (the way back to the chat) is left out; the switcher, who is signed in
+   * and the theme toggle stay on a slim line above the page.
+   */
+  readonly panel?: boolean;
   /** The page: a `ConsoleMain`. */
   readonly children: ReactNode;
 }) {
   return (
     <div
       data-kobe-console=""
-      className="min-h-screen bg-console-bg font-sans leading-normal text-console-fg"
+      className={cn(
+        "bg-console-bg font-sans leading-normal text-console-fg",
+        panel ? "min-h-full" : "min-h-screen",
+      )}
     >
       <a
         href="#console-main"
@@ -34,13 +44,20 @@ export function ConsoleLayout({
       >
         Skip to content
       </a>
-      <header className="box-border flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-0 border-b border-console-border px-4 py-3">
-        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
-          <p className="m-0">{brand}</p>
-          {headerStart}
+      {panel ? (
+        <div className="box-border flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-0 border-b border-console-border px-4 py-2">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">{headerStart}</div>
+          <div className="flex items-center gap-3">{headerEnd}</div>
         </div>
-        <div className="flex items-center gap-3">{headerEnd}</div>
-      </header>
+      ) : (
+        <header className="box-border flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-0 border-b border-console-border px-4 py-3">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2">
+            <p className="m-0">{brand}</p>
+            {headerStart}
+          </div>
+          <div className="flex items-center gap-3">{headerEnd}</div>
+        </header>
+      )}
       <div
         className={cn(
           "grid grid-cols-[minmax(0,1fr)]",

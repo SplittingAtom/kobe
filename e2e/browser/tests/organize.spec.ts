@@ -28,7 +28,9 @@ async function api(page: Page, method: string, path: string, body?: unknown) {
   );
 }
 
-const group = (page: Page, kind: string) => page.locator(`[data-group="${kind}"]`);
+/** A group of the Threads panel (KOBE-453: the threads left the rail for it). */
+const threads = (page: Page) => page.getByRole("dialog", { name: "Threads" });
+const group = (page: Page, kind: string) => threads(page).locator(`[data-group="${kind}"]`);
 
 async function menuChoice(page: Page, row: Locator, title: string, item: string) {
   await row.hover();
@@ -38,7 +40,7 @@ async function menuChoice(page: Page, row: Locator, title: string, item: string)
   await expect(menu).toBeHidden();
 }
 
-test("pin, archive and move to project, in the rail and after a reload", async ({
+test("pin, archive and move to project, in the Threads panel and after a reload", async ({
   chat,
   page,
   context,
@@ -55,6 +57,7 @@ test("pin, archive and move to project, in the rail and after a reload", async (
   const name = page.getByRole("textbox", { name: "Conversation name", exact: true });
   await name.fill(title);
   await name.press("Enter");
+  await chat.openThreads();
   const rowIn = (kind: string) =>
     group(page, kind).locator("[data-kobe-thread]").filter({ hasText: title });
   await expect(rowIn("ungrouped")).toHaveCount(1);
@@ -62,8 +65,13 @@ test("pin, archive and move to project, in the rail and after a reload", async (
   // ac-1: Pin → the Pinned group at the top, kept after a reload; Unpin puts it back.
   await menuChoice(page, rowIn("ungrouped"), title, "Pin");
   await expect(rowIn("pinned")).toHaveCount(1);
-  await expect(page.locator("[data-group]").first()).toHaveAttribute("data-group", "pinned");
+  await expect(threads(page).locator("[data-group]").first()).toHaveAttribute(
+    "data-group",
+    "pinned",
+  );
+  // The panel's address reloads with it open.
   await page.reload();
+  await chat.openThreads();
   await expect(rowIn("pinned")).toHaveCount(1);
   await menuChoice(page, rowIn("pinned"), title, "Unpin");
   await expect(rowIn("ungrouped")).toHaveCount(1);
@@ -74,8 +82,11 @@ test("pin, archive and move to project, in the rail and after a reload", async (
   const archivedToggle = group(page, "archived").getByRole("button", { expanded: false });
   await expect(archivedToggle).toBeVisible();
   await page.reload();
+  await chat.openThreads();
   await group(page, "archived").getByRole("button", { expanded: false }).click();
   await expect(rowIn("archived")).toHaveCount(1);
+  // The bar's search is behind the panel: closed first.
+  await chat.closeThreads();
   const search = page.getByRole("searchbox", { name: "Search conversations" });
   await search.fill(`"${title}"`);
   await search.press("Enter");
@@ -84,6 +95,8 @@ test("pin, archive and move to project, in the rail and after a reload", async (
   await expect(hit).toHaveCount(1);
   await expect(hit.locator("[data-kobe-archived]")).toHaveText("Archived");
   await search.press("Escape");
+  await chat.openThreads();
+  await group(page, "archived").getByRole("button", { expanded: false }).click();
   await menuChoice(page, rowIn("archived"), title, "Unarchive");
   await expect(rowIn("ungrouped")).toHaveCount(1);
 
@@ -93,6 +106,7 @@ test("pin, archive and move to project, in the rail and after a reload", async (
   const projectId = (made.json as { id: string }).id;
   try {
     await page.reload();
+    await chat.openThreads();
     const row = rowIn("ungrouped");
     await row.hover();
     await row.getByRole("button", { name: `Actions for ${title}`, exact: true }).click();
@@ -104,17 +118,19 @@ test("pin, archive and move to project, in the rail and after a reload", async (
     const projects = page.getByRole("menu", { name: "Move to project", exact: true });
     expectThemed("Move to project menu", await paintOf(projects), "light");
     await projects.getByRole("menuitem", { name: projectName, exact: true }).click();
-    const projectGroup = page
+    const projectGroup = threads(page)
       .locator('[data-group="project"]')
       .filter({ has: page.getByRole("button", { name: new RegExp(projectName) }) });
     await expect(projectGroup.locator("[data-kobe-thread]").filter({ hasText: title })).toHaveCount(
       1,
     );
     await page.reload();
+    await chat.openThreads();
     await expect(projectGroup.locator("[data-kobe-thread]").filter({ hasText: title })).toHaveCount(
       1,
     );
 
+    await chat.closeThreads();
     await chat.ask("No tools. Reply with the single word MOVED.");
     const marker = page.locator('[data-kobe-marker="project"]');
     await expect(marker).toHaveCount(1);

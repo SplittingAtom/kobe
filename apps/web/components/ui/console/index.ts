@@ -21,7 +21,7 @@ export {
   type ConfirmOptions,
 } from "./confirm-dialog";
 export { Dialog, DialogClose } from "./dialog";
-export { EmbeddedPage } from "./embedded-context";
+export { EmbeddedPage, InPanel, useInPanel } from "./embedded-context";
 export { EmptyState } from "./empty-state";
 export { Field, FieldError, FormRow, RequiredMark, useFieldControl } from "./field";
 export { FOCUS_RING } from "./focus";
@@ -29,6 +29,7 @@ export { Checkbox, ChoiceGroup, Radio, Select, Switch, Textarea, TextInput } fro
 export { ConsoleLayout, ConsoleMain, ConsoleWho } from "./layout";
 export { Notice, type NoticeTone } from "./notice";
 export { PageHeader } from "./page-header";
+export { PanelContent, useUnsavedChanges, type PanelCloseGuard } from "./panel-content";
 export { RowMenu, type RowMenuItem } from "./row-menu";
 export { Card, Section } from "./section";
 export { SideNav, SideNavGroup, SideNavLink } from "./side-nav";

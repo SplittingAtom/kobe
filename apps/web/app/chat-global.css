@@ -13,8 +13,8 @@ body:has([data-kobe-chat]) {
 /* The slice of Tailwind's preflight the components rely on, scoped to the chat. The chat's portals
    (tooltips, dialogs, menus) mount inside the chat root (components/ui/chat-portal.ts), so it
    applies to them too; tooltips also carry their own box-sizing for any surface without a root.
-   A My area page beside the thread (`[data-kobe-console]`, CE4, KOBE-424) is left out: it keeps
-   the console's own styling, as on its full page. */
+   A page in a panel over the workspace (`[data-kobe-console]`, KOBE-424, KOBE-452) is left out:
+   it keeps the console's own styling. */
 @layer base {
   [data-kobe-chat] *:where(:not([data-kobe-console], [data-kobe-console] *)),
   [data-kobe-chat] :where(:not([data-kobe-console], [data-kobe-console] *))::before,

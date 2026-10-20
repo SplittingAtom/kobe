@@ -1,5 +1,5 @@
 import { RUN_TIMEOUT_MS, SHELL_TIMEOUT_MS } from "../support/constants.js";
-import { expect, test, type Chat } from "../support/chat.js";
+import { expect, FILES_TOGGLE, test, type Chat } from "../support/chat.js";
 import {
   preferences,
   putPreferences,
@@ -84,7 +84,7 @@ test("U17: the CE7 table holds at 1280, 960, 800 and 390 px, the conversation ne
   }
 });
 
-test("U17: rail state, divider and artifact width persist across two browsers", async ({
+test("U17: rail state (width, tab, section) and artifact width persist across two browsers", async ({
   chat,
   page,
   browser,
@@ -107,23 +107,31 @@ test("U17: rail state, divider and artifact width persist across two browsers", 
     await columnHandle.focus();
     await page.keyboard.press("Home");
     await expect.poll(() => widthOf(artifact)).toBeLessThanOrEqual(360 + SLACK_PX);
-    // The Threads/Files divider: Home is the smallest Threads share.
-    const divider = page.getByRole("separator", { name: "Resize Threads and Files" });
-    await divider.focus();
+    // The rail (CE7's "rail state and divider" since KOBE-453/448: the threads are a panel and
+    // the rail is one Files | Apps section): its width, its tab where the team has apps, then
+    // collapsed (Mod+B).
+    const railHandle = page.getByRole("separator", { name: "Resize the workspace rail" });
+    await railHandle.focus();
     await page.keyboard.press("Home");
-    const share = Number(await divider.getAttribute("aria-valuenow"));
-    // The rail collapses (Mod+B).
+    await expect.poll(() => widthOf(rail)).toBeLessThanOrEqual(200 + SLACK_PX);
+    const appsTab = page
+      .getByRole("tablist", { name: "Files and apps" })
+      .getByRole("tab", { name: "Apps", exact: true });
+    const tabs = await appsTab.isVisible();
+    if (tabs) await appsTab.click();
     await page.locator("body").press("ControlOrMeta+b");
     await expect.poll(() => widthOf(rail)).toBeLessThanOrEqual(48 + SLACK_PX);
 
     // Stored on the server for the member (CE8), not in this browser.
     await expect.poll(async () => (await preferences(page))["rail_collapsed"]).toBe(true);
+    await expect.poll(async () => (await preferences(page))["rail_width"]).toBe(200);
     await expect
       .poll(async () => (await preferences(page))["artifact_width"])
       .toBeLessThanOrEqual(360 + SLACK_PX);
-    await expect.poll(async () => (await preferences(page))["threads_share"]).toBeDefined();
+    if (tabs) await expect.poll(async () => (await preferences(page))["rail_tab"]).toBe("apps");
 
-    // The second browser, signed in on its own, gets the same layout.
+    // The second browser, signed in on its own, gets the same layout: collapsed, then expanded
+    // at the same width on the same tab.
     await second.reload();
     await expect(second.getByRole("textbox", { name: "Message", exact: true })).toBeVisible({
       timeout: SHELL_TIMEOUT_MS,
@@ -131,9 +139,31 @@ test("U17: rail state, divider and artifact width persist across two browsers", 
     const r2 = regions(second);
     await expect.poll(() => widthOf(r2.rail)).toBeLessThanOrEqual(48 + SLACK_PX);
     await second.locator("body").press("ControlOrMeta+b");
-    await expect.poll(() => widthOf(r2.rail)).toBeGreaterThan(48 + SLACK_PX);
-    const divider2 = second.getByRole("separator", { name: "Resize Threads and Files" });
-    await expect(divider2).toHaveAttribute("aria-valuenow", String(share));
+    await expect.poll(() => widthOf(r2.rail)).toBeGreaterThan(200 - SLACK_PX);
+    await expect.poll(() => widthOf(r2.rail)).toBeLessThanOrEqual(200 + SLACK_PX);
+    if (tabs) {
+      await expect(
+        second
+          .getByRole("tablist", { name: "Files and apps" })
+          .getByRole("tab", { name: "Apps", exact: true }),
+      ).toHaveAttribute("aria-selected", "true");
+    }
+
+    // The section's visibility: hidden here, the rail is its strip there too.
+    await page.locator("body").press("ControlOrMeta+b");
+    const filesToggle = page
+      .locator("[data-rail-header]")
+      .getByRole("button", { name: FILES_TOGGLE });
+    await filesToggle.click();
+    await expect.poll(() => widthOf(rail)).toBeLessThanOrEqual(48 + SLACK_PX);
+    await expect.poll(async () => (await preferences(page))["rail_panels"]).toBe("threads");
+    await second.reload();
+    await expect(second.getByRole("textbox", { name: "Message", exact: true })).toBeVisible({
+      timeout: SHELL_TIMEOUT_MS,
+    });
+    await expect.poll(() => widthOf(r2.rail)).toBeLessThanOrEqual(48 + SLACK_PX);
+    await expect(second.locator("#kobe-rail-files")).toBeHidden();
+
     // The artifact width applies once a column opens there: the same thread's artifact, reopened
     // from the thread's artifact list (the open set itself is per browser, CE6).
     await second.goto(page.url());
@@ -148,7 +178,9 @@ test("U17: rail state, divider and artifact width persist across two browsers", 
     await putPreferences(page, {
       rail_collapsed: before["rail_collapsed"] ?? false,
       artifact_width: before["artifact_width"] ?? null,
-      ...(before["threads_share"] === undefined ? {} : { threads_share: before["threads_share"] }),
+      rail_panels: before["rail_panels"] ?? "both",
+      rail_width: before["rail_width"] ?? null,
+      rail_tab: before["rail_tab"] ?? "files",
     });
   }
 });

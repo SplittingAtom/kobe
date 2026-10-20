@@ -276,13 +276,12 @@ describe("thread search in the bar", () => {
     older();
     await new Promise((r) => setTimeout(r, 20));
     expect(screen.getByRole("region", { name: "Results for hiring" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Quarterly revenue", hidden: false })).toBeTruthy(); // the rail
     expect(within(must(resultsPanel())).queryByText("Quarterly revenue")).toBeNull();
   });
 
   it("closes the results on a click outside, on focus leaving, and when a thread opens", async () => {
-    fake.addThread("Quarterly revenue");
-    const other = fake.addThread("Hiring plan");
+    const quarterly = fake.addThread("Quarterly revenue");
+    fake.addThread("Hiring plan");
     openApp(fake);
     await composer();
     const user = userEvent.setup();
@@ -301,13 +300,14 @@ describe("thread search in the bar", () => {
     expect(resultsPanel()).toBeNull();
 
     await search();
-    const rail = within(region("rail"));
-    fireEvent.click(await rail.findByRole("button", { name: "Hiring plan" }));
-    await waitFor(() => expect(window.location.search).toBe(`?thread=${other}`));
+    fireEvent.click(
+      await within(must(resultsPanel())).findByRole("button", { name: "Quarterly revenue" }),
+    );
+    await waitFor(() => expect(window.location.search).toBe(`?thread=${quarterly}`));
     expect(resultsPanel()).toBeNull();
   });
 
-  it("closes the rail's drawer on narrow screens when a thread opens from it", async () => {
+  it("closes the rail's drawer on narrow screens when a thread opens from the Threads panel", async () => {
     vi.spyOn(window, "matchMedia").mockImplementation(
       (query) => ({ matches: query.includes("max-width"), media: query }) as MediaQueryList,
     );
@@ -317,8 +317,12 @@ describe("thread search in the bar", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Show the workspace" }));
     const drawer = within(await screen.findByRole("dialog", { name: "Workspace" }));
-    await user.click(await drawer.findByRole("button", { name: "Quarterly revenue" }));
+    // KOBE-453: Threads in the drawer opens the Threads panel; choosing a thread closes both.
+    await user.click(drawer.getByRole("button", { name: "Threads panel" }));
+    const panel = within(await screen.findByRole("dialog", { name: "Threads" }));
+    await user.click(await panel.findByRole("button", { name: "Quarterly revenue" }));
     await waitFor(() => expect(window.location.search).toBe(`?thread=${t}`));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Threads" })).toBeNull());
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Workspace" })).toBeNull());
   });
 });

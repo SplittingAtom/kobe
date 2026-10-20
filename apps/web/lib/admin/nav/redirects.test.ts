@@ -32,9 +32,14 @@ describe("retired skill editor URLs", () => {
         destination: "/me/skills?tab=workbench",
         permanent: true,
       },
+      // KOBE-452: the Skills panel's short address.
+      { source: "/skills", destination: "/me/skills", permanent: false },
+      { source: "/skills/:path*", destination: "/me/skills/:path*", permanent: false },
       { source: "/me/skills/:id", destination: "/me/skills?tab=mine", permanent: false },
     ]);
     // `:id` is one segment: /me/skills/drafts/<id> is the editor, not a redirect.
-    expect(skills.some((r) => r.source.includes(":path"))).toBe(false);
+    expect(
+      skills.some((r) => r.source.startsWith("/me/skills") && r.source.includes(":path")),
+    ).toBe(false);
   });
 });

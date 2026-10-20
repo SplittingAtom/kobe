@@ -56,12 +56,21 @@ test("status cues: a green Running badge and the rail's dot, also from another t
     .evaluate((dot) => getComputedStyle(dot).animationName);
   expect(pulse).not.toBe("none");
 
-  // The rail row: a green dot, and "Running" for screen readers.
+  // With the rows in the Threads panel (KOBE-453), its button on the rail carries the activity.
+  await expect(
+    chat.railHeader.getByRole("button", { name: "Threads panel, a conversation is running" }),
+  ).toHaveAttribute("data-kobe-activity", "running");
+
+  // The row in the Threads panel: a green dot, and "Running" for screen readers.
+  await chat.openThreads();
   const row = page.locator(`li[data-kobe-thread="${threadId}"]`);
   const dot = row.locator('[data-status-dot="running"]');
   await expect(dot).toBeVisible();
   expect(greenish(await rgbOf(dot))).toBe(true);
   await expect(row.getByRole("button").first()).toHaveAccessibleDescription("Running");
+
+  await shoot(page, "rail-row", row);
+  await chat.closeThreads();
 
   // The Stop button is tinted red while the run streams.
   const stop = chat.steering.locator("[data-kobe-stop]");
@@ -69,13 +78,14 @@ test("status cues: a green Running badge and the rail's dot, also from another t
   expect(reddish(await rgbOf(stop))).toBe(true);
 
   await shoot(page, "header-badge", badge);
-  await shoot(page, "rail-row", row);
   await shoot(page, "stop", stop);
 
-  // Another conversation opened from the rail, in the app: the dot stays, from the live
+  // Another conversation opened from the Threads panel, in the app: the dot stays, from the live
   // activity read (the run's own stream is closed once its thread is off screen).
+  await chat.openThreads();
   await rowButton(otherId).click();
   await expect(page).toHaveURL(new RegExp(`thread=${otherId}`));
+  await chat.openThreads();
   const away = page.locator(`li[data-kobe-thread="${threadId}"] [data-status-dot="running"]`);
   await expect(away).toBeVisible();
   await expect(rowButton(threadId)).toHaveAccessibleDescription("Running");
@@ -85,6 +95,7 @@ test("status cues: a green Running badge and the rail's dot, also from another t
   await expect(page).toHaveURL(new RegExp(`thread=${threadId}`));
   await chat.steering.locator("[data-kobe-stop]").click();
   await chat.waitForIdle();
+  await chat.openThreads();
   await expect(page.locator(`li[data-kobe-thread="${threadId}"] [data-status-dot]`)).toHaveCount(0);
 });
 
@@ -93,9 +104,11 @@ test("reduced motion stops the pulse", async ({ chat, page }) => {
   await chat.open();
   await chat.send(STORY);
   const threadId = await chat.threadId();
+  await chat.openThreads();
   const dot = page.locator(`li[data-kobe-thread="${threadId}"] [data-status-dot="running"]`);
   await expect(dot).toBeVisible({ timeout: RUN_START_TIMEOUT_MS });
   expect(await dot.evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
+  await chat.closeThreads();
   await chat.steering.locator("[data-kobe-stop]").click();
   await chat.waitForIdle();
 });

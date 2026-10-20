@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { SHELL_TIMEOUT_MS } from "./support/constants.js";
+import { panelOf } from "./support/panel.js";
 
 /**
  * Screenshots of every console and My-area page in light and dark (KOBE-294 ac-3), for the move
@@ -13,7 +14,8 @@ import { SHELL_TIMEOUT_MS } from "./support/constants.js";
  * team (every Team console section, plus the My area). The pages come from the consoles' own
  * navigation, so sections added later are covered without editing this file; detail pages use the
  * first item of their list when there is one. Nothing is changed on the deployment.
- * Screenshots show deployment data: they stay out of git (`console-shots/` is ignored).
+ * Screenshots show deployment data: they stay out of git (`console-shots/` is ignored). Since
+ * KOBE-452 each page is a panel over the workspace: take a new baseline after that change.
  */
 
 const THEMES = ["light", "dark"] as const;
@@ -92,9 +94,14 @@ const MAX_CHOICE_GAP_PX = 20;
 /** Waits until the shell has checked access and the page has loaded its data. */
 async function settle(page: Page, theme: Theme): Promise<void> {
   await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
-  await expect(page.locator("main").first()).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  // Since KOBE-452 every page is a panel over the workspace.
+  await expect(page.locator("[data-kobe-panel] main").first()).toBeVisible({
+    timeout: SHELL_TIMEOUT_MS,
+  });
   await expect(
-    page.getByRole("status").filter({ hasText: /^(Checking your access|Loading)/ }),
+    panelOf(page)
+      .getByRole("status")
+      .filter({ hasText: /^(Checking your access|Loading)/ }),
   ).toHaveCount(0, { timeout: SHELL_TIMEOUT_MS });
   // Late requests (counts, previews) settle; a page that keeps polling is shot as it stands.
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
@@ -109,7 +116,7 @@ async function navPages(page: Page, theme: Theme): Promise<string[]> {
   for (const { home, nav } of CONSOLE_NAVS) {
     await page.goto(home);
     await settle(page, theme);
-    const links = page.getByRole("navigation", { name: nav }).getByRole("link");
+    const links = panelOf(page).getByRole("navigation", { name: nav }).getByRole("link");
     for (const href of await links.evaluateAll((as) => as.map((a) => a.getAttribute("href")))) {
       if (href) out.push(href);
     }
@@ -127,7 +134,7 @@ async function detailPages(page: Page, theme: Theme): Promise<{ path: string; na
     await page.goto(from);
     await settle(page, theme);
     const hrefs = await page
-      .locator("main a[href]")
+      .locator("[data-kobe-panel] main a[href]")
       .evaluateAll((as) => as.map((a) => a.getAttribute("href") ?? ""));
     const path = hrefs.map((h) => h.split(/[?#]/)[0] ?? "").find((h) => link.test(h));
     if (path) out.push({ path, name });
@@ -222,7 +229,7 @@ test("console and My-area pages at phone width", async ({ page, context, baseURL
   }
   // The folded section list, opened from its toggle.
   await shoot(page, theme, "/admin/team/invites", ["mobile", "team-nav-open.png"], failures, () =>
-    page
+    panelOf(page)
       .getByRole("navigation", { name: "Team console sections" })
       .getByRole("button", { expanded: false })
       .click(),

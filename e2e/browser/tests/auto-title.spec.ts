@@ -40,7 +40,9 @@ test("a new thread gets its title after the first answer, in the rail and the he
   );
   expect(saved).toBe(title);
   // This thread's own row, by its id: an older thread may carry the same title.
-  const row = page
+  // In the Threads panel since KOBE-453.
+  const panel = await chat.openThreads();
+  const row = panel
     .getByRole("list", { name: "Your threads" })
     .locator(`li[data-kobe-thread="${threadId}"]`)
     .getByRole("button", { name: title, exact: true });

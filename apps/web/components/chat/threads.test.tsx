@@ -12,6 +12,9 @@ import {
   openRowMenu,
   streamed,
   streaming,
+  openThreads,
+  closeThreads,
+  threadGroup,
 } from "./testing";
 import { must } from "../../lib/testing/must";
 
@@ -30,7 +33,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const list = () => screen.findByRole("list", { name: "Your threads" });
+const list = () => threadGroup("Your threads");
 
 /** Delete in a thread row's ⋯ menu (KOBE-292): moves it to Trash. */
 async function trashFromMenu(user: ReturnType<typeof userEvent.setup>, title: string) {
@@ -60,6 +63,7 @@ describe("thread list (RemoteThreadListAdapter)", () => {
   it("creates a thread on the first message, shown by its first line until the server titles it", async () => {
     openApp(fake);
     const user = userEvent.setup();
+    await openThreads();
     await screen.findByText("No threads yet.");
     await user.type(
       await composer(),
@@ -85,6 +89,7 @@ describe("thread list (RemoteThreadListAdapter)", () => {
   it("shows the server's title in the rail and the bar as soon as it arrives (KOBE-219 ac-2)", async () => {
     openApp(fake);
     const user = userEvent.setup();
+    await openThreads();
     await screen.findByText("No threads yet.");
     await user.type(await composer(), "What drives revenue?{Enter}");
     await waitFor(() => expect(fake.threads.size).toBe(1));
@@ -142,7 +147,7 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     });
     await user.click(screen.getByRole("button", { name: "Trash" }));
     expect(screen.getByText("Threads in Trash are deleted for good after 30 days.")).toBeTruthy();
-    const trash = within(await screen.findByRole("list", { name: "Trash" }));
+    const trash = within(await threadGroup("Trash"));
     // Trash rows keep their own two actions, no menu.
     expect(trash.queryByRole("button", { name: "Actions for Budget" })).toBeNull();
     await user.click(await trash.findByRole("button", { name: "Restore Budget" }));
@@ -161,7 +166,7 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     await waitFor(() => expect(fake.threads.get(t)?.deleted_at).not.toBeNull());
     expect(confirm).not.toHaveBeenCalled(); // Trash is undoable: only Delete forever asks
     await user.click(screen.getByRole("button", { name: "Trash" }));
-    const trash = within(await screen.findByRole("list", { name: "Trash" }));
+    const trash = within(await threadGroup("Trash"));
     // Cancelled: nothing is sent.
     await user.click(await trash.findByRole("button", { name: "Delete Old plan forever" }));
     expect(confirm).toHaveBeenCalledOnce();
@@ -180,7 +185,10 @@ describe("thread list (RemoteThreadListAdapter)", () => {
 
   it("offers the export of the team's conversations as a download (KOBE-18)", async () => {
     openApp(fake);
-    const link = await screen.findByRole("link", { name: "Export my conversations" });
+    // In the Threads panel since KOBE-453.
+    const link = await within(await openThreads()).findByRole("link", {
+      name: "Export my conversations",
+    });
     expect(link.getAttribute("href")).toBe(`/v1/threads/export?team=${fake.teamId}`);
     expect(link.hasAttribute("download")).toBe(true);
   });
@@ -204,6 +212,7 @@ describe("thread list (RemoteThreadListAdapter)", () => {
 
     cleanup();
     openApp(fake);
+    await openThreads();
     await screen.findByText("No threads yet.");
     expect(screen.queryByText(/will be deleted from/)).toBeNull();
 
@@ -234,6 +243,7 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     openApp(fake);
     const user = userEvent.setup();
     await list();
+    await closeThreads();
     await user.type(screen.getByLabelText("Search conversations"), "revenue{Enter}");
     const results = within(await screen.findByRole("list", { name: "Search results" }));
     expect(results.getAllByRole("listitem")).toHaveLength(1);
@@ -407,10 +417,12 @@ describe("accessibility", () => {
     );
     openApp(fake);
     const rail = await screen.findByRole("complementary", { name: "Workspace" });
-    expect(within(rail).queryByRole("heading", { name: "Threads" })).toBeNull();
+    expect(within(rail).queryByRole("heading", { name: "Files" })).toBeNull();
     await userEvent.setup().click(screen.getByRole("button", { name: "Show the workspace" }));
     // The drawer is a modal dialog (KOBE-201).
     const drawer = await screen.findByRole("dialog", { name: "Workspace" });
-    expect(await within(drawer).findByRole("heading", { name: "Threads" })).toBeTruthy();
+    // Since KOBE-453 it holds Files, and Threads opens the Threads panel.
+    expect(await within(drawer).findByRole("heading", { name: "Files" })).toBeTruthy();
+    expect(within(drawer).getByRole("button", { name: "Threads panel" })).toBeTruthy();
   });
 });

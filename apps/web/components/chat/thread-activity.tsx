@@ -8,7 +8,7 @@ import {
   activityIn,
   readActivity,
   stripTitlePrefix,
-  titlePrefix,
+  TITLE_PREFIX,
   type ActivitySnapshot,
   type ThreadActivity,
   type ThreadActivityStore,
@@ -17,7 +17,7 @@ import { StatusDot } from "../ui/status";
 import { ChatSessionContext } from "./kobe-runtime";
 import styles from "./chat.module.css";
 
-const EMPTY: ActivitySnapshot = { live: new Map(), polled: null };
+const EMPTY: ActivitySnapshot = { live: new Map(), polled: null, unread: new Set() };
 const noopSubscribe = () => () => {};
 
 /** Held threads live and the last activity read (empty outside a chat session). */
@@ -27,6 +27,13 @@ function useActivitySnapshot(store: ThreadActivityStore | undefined): ActivitySn
     store?.snapshot ?? (() => EMPTY),
     () => EMPTY,
   );
+}
+
+/** Whether a row's thread has new activity the member has not seen (KOBE-453). */
+export function useRowUnread(): boolean {
+  const snapshot = useActivitySnapshot(useContext(ChatSessionContext)?.activity);
+  const remoteId = useAuiState((s) => s.threadListItem.remoteId);
+  return remoteId !== undefined && snapshot.unread.has(remoteId);
 }
 
 /** One rail row's activity: live while this tab holds it, else as the server last said. */
@@ -51,11 +58,24 @@ const ROW_LABEL: Record<ThreadActivity, string> = {
 export function ThreadActivityDot({
   activity,
   id,
+  unread = false,
 }: {
   readonly activity: ThreadActivity;
   readonly id: string;
+  /** New activity not seen yet (KOBE-453): a quiet dot once nothing runs or waits. */
+  readonly unread?: boolean;
 }) {
-  if (activity === "idle") return null;
+  if (activity === "idle") {
+    if (!unread) return null;
+    return (
+      <>
+        <StatusDot tone="done" className={styles.railDot} />
+        <span id={id} className={styles.visuallyHidden}>
+          New activity
+        </span>
+      </>
+    );
+  }
   return (
     <>
       <StatusDot
@@ -150,9 +170,23 @@ export function ThreadActivityWatch({
 }) {
   const session = useContext(ChatSessionContext);
   useActivityPoll(session, pollMs);
-  const snapshot = useActivitySnapshot(session?.activity);
+  const overall = useOverallActivity();
+  useTabTitle(overall === "running" || overall === "approval" ? TITLE_PREFIX[overall] : "");
+  return null;
+}
+
+/**
+ * The member's threads at a glance (KOBE-301, KOBE-453): "approval" while any waits for the
+ * member, else "running" while any runs, else "unread" while any has new activity the member has
+ * not seen, else "idle". The tab title shows the first two. Live for the threads this tab holds, else as
+ * the server last said, else as the list said. The tab title and the rail's Threads button show it.
+ */
+export type OverallActivity = ThreadActivity | "unread";
+
+export function useOverallActivity(): OverallActivity {
+  const snapshot = useActivitySnapshot(useContext(ChatSessionContext)?.activity);
   const items = useAuiState((s) => s.threads.threadItems);
-  const prefix = useMemo(() => {
+  return useMemo(() => {
     // Every thread either source knows, each once: a held thread's live state wins over a
     // polled answer from before it changed.
     const listed = new Map(
@@ -165,8 +199,16 @@ export function ThreadActivityWatch({
       ...snapshot.live.keys(),
       ...(snapshot.polled?.keys() ?? []),
     ]);
-    return titlePrefix([...ids].map((id) => activityIn(snapshot, id) ?? listed.get(id) ?? "idle"));
+    const all = [...ids].map((id) => activityIn(snapshot, id) ?? listed.get(id) ?? "idle");
+    if (all.includes("approval")) return "approval";
+    if (all.includes("running")) return "running";
+    return snapshot.unread.size > 0 ? "unread" : "idle";
   }, [items, snapshot]);
-  useTabTitle(prefix);
-  return null;
 }
+
+/** The words for the overall activity, for a badge on the Threads button. */
+export const OVERALL_LABEL: Readonly<Record<Exclude<OverallActivity, "idle">, string>> = {
+  running: "a conversation is running",
+  approval: "a conversation is waiting for your approval",
+  unread: "a conversation has new activity",
+};

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
-import { composer, openApp, streaming } from "./testing";
+import { composer, openApp, streaming, threadGroup } from "./testing";
 
 /**
  * KOBE-205 (CE9): the message list follows the stream while pinned, shows Jump to latest when the
@@ -367,7 +367,7 @@ describe("a scroll up in the last frames of a stream (KOBE-288)", () => {
 });
 
 describe("scroll position per thread (ac-2)", () => {
-  const titles = () => within(screen.getByRole("list", { name: "Your threads" }));
+  const titles = async () => within(await threadGroup("Your threads"));
 
   it("a thread opens at the bottom, and reopening one restores where it was left", async () => {
     const a = threadWithHistory("Alpha");
@@ -377,11 +377,11 @@ describe("scroll position per thread (ac-2)", () => {
     await waitFor(() => expect(sessionStorage.getItem(`kobe.scroll:${a}`)).toBe("300"));
 
     const user = userEvent.setup();
-    await user.click(titles().getByRole("button", { name: "Beta" }));
+    await user.click((await titles()).getByRole("button", { name: "Beta" }));
     expect(await screen.findByText("Beta answer")).toBeTruthy();
     await waitFor(() => expect(list().scrollTop).toBe(maxTop()));
 
-    await user.click(titles().getByRole("button", { name: "Alpha" }));
+    await user.click((await titles()).getByRole("button", { name: "Alpha" }));
     expect(await screen.findByText("Alpha answer")).toBeTruthy();
     await waitFor(() => expect(list().scrollTop).toBe(300));
     expect(await screen.findByRole("button", { name: "Jump to latest" })).toBeTruthy();
@@ -424,7 +424,7 @@ describe("scroll position per thread (ac-2)", () => {
     scrollTo(300);
     expect(sessionStorage.getItem(`kobe.scroll:${a}`)).toBeNull(); // not written yet: debounced
 
-    await userEvent.setup().click(titles().getByRole("button", { name: "Beta" }));
+    await userEvent.setup().click((await titles()).getByRole("button", { name: "Beta" }));
     await waitFor(() => expect(pill()).toBeNull()); // Alpha left, Beta not restored yet
     expect(sessionStorage.getItem(`kobe.scroll:${a}`)).toBe("300");
     // A late scroll while Beta loads belongs to neither thread.
@@ -455,7 +455,7 @@ describe("scroll position per thread (ac-2)", () => {
       await screen.findByRole("button", { name: "Jump to latest, 1 new message" }),
     ).toBeTruthy();
 
-    await userEvent.setup().click(titles().getByRole("button", { name: "Beta" }));
+    await userEvent.setup().click((await titles()).getByRole("button", { name: "Beta" }));
     expect(await screen.findByText("Beta answer")).toBeTruthy();
     await waitFor(() => expect(list().scrollTop).toBe(100));
     expect(await screen.findByRole("button", { name: "Jump to latest" })).toBeTruthy();

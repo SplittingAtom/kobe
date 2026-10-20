@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { SHELL_TIMEOUT_MS } from "./support/constants.js";
+import { panelOf } from "./support/panel.js";
 
 /**
  * KOBE-275 ac-3: the agent's Ratings section on its page in the Team console. Read-only: it
@@ -14,7 +15,7 @@ test("Ratings: fixed periods, counts only, withheld numbers say so", async ({ pa
   const first = page.waitForResponse((r) => r.url().includes(`/feedback?window=30`));
   await page.goto(`/admin/team/agents/${AGENT_ID}`);
   expect((await first).status()).toBe(200);
-  const ratings = page.getByRole("region", { name: "Ratings" });
+  const ratings = panelOf(page).getByRole("region", { name: "Ratings" });
   await expect(ratings).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
 
   const period = ratings.getByLabel("Period");

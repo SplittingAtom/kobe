@@ -16,6 +16,7 @@ import {
   Switch,
   Textarea,
   useConfirm,
+  useUnsavedChanges,
 } from "../ui/console";
 import { useTeamAccess } from "../admin/console-context";
 import { ErrorNotice, MutationStatus } from "../admin/error-notice";
@@ -27,6 +28,7 @@ import { SkillMdEditor } from "./skill-md-editor";
 import { EvalsPanel } from "./evals-panel";
 import { SkillTestPane } from "./test-pane";
 import { useDraftEditor, type DraftEditor, type SaveStatus } from "./use-draft-editor";
+import { useNavigate } from "../shell/use-navigate";
 
 export const WORKBENCH_HREF = "/me/skills?tab=workbench";
 
@@ -64,6 +66,8 @@ function Editor({ editor }: { readonly editor: DraftEditor }) {
   const access = useTeamAccess();
   const teamId = access.team.id;
   const { draft, files, texts, scan } = editor;
+  // In the Skills panel (KOBE-452), closing asks while an edit isn't written yet.
+  useUnsavedChanges(editor.status !== "saved");
   const [selected, setSelected] = useState(SKILL_MD);
   const [saving, setSaving] = useState(false);
   const saveButton = useRef<HTMLButtonElement>(null);
@@ -223,6 +227,7 @@ function DraftSettings({
   readonly confirm: ReturnType<typeof useConfirm>[0];
 }) {
   const mutation = useMutation();
+  const navigate = useNavigate();
   const { draft } = editor;
   return (
     <div className="flex flex-wrap items-center gap-4">
@@ -256,7 +261,7 @@ function DraftSettings({
             return;
           await mutation.run(async () => {
             const res = await deleteDraft(teamId, draft.id);
-            if (res.ok) window.location.assign(WORKBENCH_HREF);
+            if (res.ok) navigate(WORKBENCH_HREF);
             return res;
           });
         }}

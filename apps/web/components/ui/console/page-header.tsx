@@ -6,7 +6,7 @@ import { PageHeaderText } from "./embedded-context";
  * A console page's title (the page's only h1), what it is for, and its page-wide actions. `back`
  * is a link up for detail pages ("All agents"), shown above the title. Usable from Server
  * Components: the title and description go through the client `PageHeaderText`, which leaves the
- * title out on a page embedded beside the thread (KOBE-424).
+ * title out on a single page whose panel already names it (KOBE-424, KOBE-452).
  */
 export function PageHeader({
   title,

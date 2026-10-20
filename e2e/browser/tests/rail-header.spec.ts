@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
-import { expect, test } from "./support/chat.js";
+import { SHELL_TIMEOUT_MS } from "./support/constants.js";
+import { expect, FILES_TOGGLE, test, filesSection } from "./support/chat.js";
 
 /**
  * KOBE-419: the rail's top line. The team selector (moved from the bar), the Threads and Files
@@ -37,7 +38,7 @@ test("the top line: team, Threads, Files, Team console (admins), collapse (ac-1,
   const line = chat.railHeader;
   const bar = page.locator('[data-bar-row="1"]');
   await expect(line.getByRole("button", { name: "Threads panel", exact: true })).toBeVisible();
-  await expect(line.getByRole("button", { name: "Files panel", exact: true })).toBeVisible();
+  await expect(line.getByRole("button", { name: FILES_TOGGLE })).toBeVisible();
   await expect(line.getByRole("button", { name: "Collapse the rail" })).toBeVisible();
   // The selector (a menu with several teams, the name with one) is here, not in the bar.
   await expect(
@@ -60,63 +61,79 @@ test("the top line: team, Threads, Files, Team console (admins), collapse (ac-1,
   );
   expect(Math.max(...ys) - Math.min(...ys)).toBeLessThanOrEqual(4);
   await shoot(page, "rail-header", page.locator('[data-shell-region="rail"]'));
+  // KOBE-452: it opens the console as a panel over the workspace; Close returns focus to it.
+  const teamConsole = line.getByRole("link", { name: "Team console" });
+  await teamConsole.click();
+  const panel = page.getByRole("dialog", { name: "Team console" });
+  await expect(panel).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  await panel.getByRole("button", { name: "Close Team console" }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(teamConsole).toBeFocused();
 });
 
-test("panel toggles: one panel fills the rail, the last stays on, the choice is saved (ac-3, ac-4)", async ({
+test("Threads opens its panel; the Files toggle hides Files and is saved (KOBE-453)", async ({
   chat,
   page,
   context,
 }) => {
   await chat.open();
   const line = chat.railHeader;
-  const threadsToggle = line.getByRole("button", { name: "Threads panel", exact: true });
-  const filesToggle = line.getByRole("button", { name: "Files panel", exact: true });
-  const threads = page.getByRole("region", { name: "Threads" });
-  const files = page.getByRole("region", { name: "Files" });
-  const divider = page.getByRole("separator", { name: "Resize Threads and Files" });
+  const newThread = line.getByRole("button", { name: "New conversation", exact: true });
+  const threadsButton = line.getByRole("button", { name: /^Threads panel/ });
+  const filesToggle = line.getByRole("button", { name: FILES_TOGGLE });
+  const files = filesSection(page);
+  // New conversation sits immediately left of Threads.
+  const newBox = await newThread.boundingBox();
+  const threadsBox = await threadsButton.boundingBox();
+  expect(newBox && threadsBox && threadsBox.x - (newBox.x + newBox.width)).toBeLessThan(12);
+  await expect(page.getByRole("region", { name: "Threads" })).toHaveCount(0);
   try {
-    await threadsToggle.click();
-    await expect(threadsToggle).toHaveAttribute("aria-pressed", "false");
-    await expect(threads).toBeHidden();
-    await expect(divider).toHaveCount(0);
-    await expect(files).toBeVisible();
-    // The last panel on stays on. Playwright won't click an aria-disabled control, so this
-    // activates it as a keyboard user would, then asks for Files through its command.
-    await expect(filesToggle).toHaveAttribute("aria-disabled", "true");
-    await filesToggle.focus();
-    await page.keyboard.press("Enter");
-    await page.keyboard.press("Space");
-    await expect(files).toBeVisible();
-    await expect(filesToggle).toHaveAttribute("aria-pressed", "true");
-    await chat.composer.focus();
-    await page.keyboard.press("ControlOrMeta+Shift+F");
-    await expect(files).toBeVisible();
-    await expect(threads).toBeHidden();
-    await expect.poll(() => storedPanels(page)).toBe("files");
-    await shoot(page, "rail-files-only", page.locator('[data-shell-region="rail"]'));
+    await threadsButton.click();
+    await expect(chat.threadsPanel).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/threads");
+    await page.keyboard.press("Escape");
+    await expect(chat.threadsPanel).toBeHidden();
+    await expect(threadsButton).toBeFocused();
 
-    // Another browser context of the same member (another device) gets the same panels.
+    // Hiding Files leaves the rail nothing to show: it collapses to its strip.
+    await filesToggle.click();
+    await expect(files).toBeHidden();
+    await expect(page.locator('aside[aria-label="Workspace"]')).toHaveAttribute(
+      "data-collapsed",
+      "",
+    );
+    await expect.poll(() => storedPanels(page)).toBe("threads");
+    await shoot(page, "rail-files-hidden", page.locator('[data-shell-region="rail"]'));
+
+    // Another browser context of the same member (another device) gets the same choice.
     const browser = context.browser();
     if (!browser) throw new Error("no browser for a second context");
     const other = await browser.newContext({ storageState: await context.storageState() });
     const second = await other.newPage();
     await second.goto("/");
-    await expect(second.getByRole("region", { name: "Files" })).toBeVisible();
-    await expect(second.getByRole("region", { name: "Threads" })).toBeHidden();
+    await expect(second.locator('aside[aria-label="Workspace"]')).toHaveAttribute(
+      "data-collapsed",
+      "",
+    );
+    await expect(filesSection(second)).toBeHidden();
     await other.close();
 
-    // Show threads from the keyboard path: the collapsed rail's icon turns it back on.
-    await chat.composer.press("ControlOrMeta+b");
-    await page.getByRole("button", { name: "Show threads" }).click();
-    await expect(threads).toBeVisible();
-    // Turning a hidden panel on this way is saved exactly like its toggle.
+    // Mod+Shift+F shows Files again, saved exactly like the toggle.
+    await chat.composer.focus();
+    await page.keyboard.press("ControlOrMeta+Shift+F");
+    await expect(files).toBeVisible();
     await expect.poll(() => storedPanels(page)).toBe("both");
+
+    // The collapsed rail keeps New conversation and Threads; Threads opens the panel.
+    await chat.composer.press("ControlOrMeta+b");
+    await page.getByRole("button", { name: /^Show threads/ }).click();
+    await expect(chat.threadsPanel).toBeVisible();
+    await chat.closeThreads();
+    await chat.composer.press("ControlOrMeta+b");
   } finally {
     await chat.showBothPanels();
     await expect.poll(() => storedPanels(page)).toBe("both");
   }
-  await page.reload();
-  await expect(divider).toBeVisible();
 });
 
 test("a phone: the drawer is headed by the team selector (ac-2)", async ({ chat, page }) => {
@@ -136,6 +153,38 @@ test("a phone: the drawer is headed by the team selector (ac-2)", async ({ chat,
   await expect(
     line.getByRole("navigation", { name: "Teams" }).or(line.getByRole("heading", { level: 2 })),
   ).toBeVisible();
-  await expect(line.getByRole("button", { name: "Files panel", exact: true })).toBeVisible();
+  await expect(line.getByRole("button", { name: FILES_TOGGLE })).toBeVisible();
   await shoot(page, "rail-header-phone", drawer);
+});
+
+test("Files | Apps: one tabbed section, arrow keys, the last tab kept (KOBE-448)", async ({
+  chat,
+  page,
+}) => {
+  await chat.open();
+  const tabs = page.getByRole("tablist", { name: "Files and apps" });
+  if (!(await tabs.isVisible())) {
+    // No apps and no key to add on this deployment: Files alone, without a tablist.
+    await expect(filesSection(page)).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Apps" })).toHaveCount(0);
+    return;
+  }
+  const files = tabs.getByRole("tab", { name: "Files", exact: true });
+  const apps = tabs.getByRole("tab", { name: "Apps", exact: true });
+  try {
+    await expect(files).toHaveAttribute("aria-selected", "true");
+    await files.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(apps).toBeFocused();
+    await expect(apps).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tabpanel", { name: "Apps" })).toBeVisible();
+    await expect(filesSection(page)).toBeHidden();
+    await shoot(page, "rail-tabs-apps", page.locator('[data-shell-region="rail"]'));
+    // Kept per member: a reload opens on Apps.
+    await page.reload();
+    await expect(apps).toHaveAttribute("aria-selected", "true", { timeout: SHELL_TIMEOUT_MS });
+  } finally {
+    await chat.showBothPanels();
+    await expect(files).toHaveAttribute("aria-selected", "true");
+  }
 });

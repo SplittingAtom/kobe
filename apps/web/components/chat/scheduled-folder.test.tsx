@@ -3,7 +3,7 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
-import { openApp } from "./testing";
+import { openApp, threadGroup } from "./testing";
 
 let fake: FakeKobe;
 const SCHEDULE = "00000000-0000-4000-8000-0000000005c1";
@@ -24,13 +24,13 @@ describe("Scheduled folder (KOBE-175, ac-3)", () => {
     const ran = fake.addThread("Morning digest");
     fake.setScheduleId(ran, SCHEDULE);
     openApp(fake);
-    const conversations = within(await screen.findByRole("list", { name: "Your threads" }));
+    const conversations = within(await threadGroup("Your threads"));
     await waitFor(() =>
       expect(conversations.getByRole("button", { name: "Plain chat" })).toBeTruthy(),
     );
     expect(conversations.queryByRole("button", { name: "Morning digest" })).toBeNull();
 
-    const scheduled = within(await screen.findByRole("list", { name: "Scheduled" }));
+    const scheduled = within(await threadGroup("Scheduled"));
     expect(scheduled.getByRole("button", { name: "Morning digest" })).toBeTruthy();
     expect(scheduled.queryByRole("button", { name: "Plain chat" })).toBeNull();
   });

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
-import { chatRequests, openApp, openRowMenu } from "./testing";
+import { chatRequests, openApp, openRowMenu, openThreads } from "./testing";
 
 /**
  * KOBE-221 (CE20): Share from a thread row's ⋯ menu (only you, the project's members, everyone in
@@ -74,6 +74,7 @@ describe("share from the thread menu (ac-1)", () => {
   it("shares with the team and revokes it again, the scope marked current", async () => {
     const t = fake.addThread("Budget");
     openApp(fake);
+    await openThreads();
     await screen.findByRole("button", { name: "Actions for Budget" });
     let sub = await submenu("Actions for Budget", "Share");
     // Outside a project there is no project scope to offer.
@@ -105,6 +106,7 @@ describe("share from the thread menu (ac-1)", () => {
     const t = fake.addThread("Budget");
     must(fake.threads.get(t)).project_id = q4;
     openApp(fake);
+    await openThreads();
     await screen.findByRole("button", { name: "Actions for Budget" });
     const sub = await submenu("Actions for Budget", "Share");
     expect(choices(sub)).toEqual(["Only you (current)", "Project members", "Everyone in the team"]);
@@ -122,6 +124,7 @@ describe("share from the thread menu (ac-1)", () => {
       }),
     );
     openApp(fake);
+    await openThreads();
     await screen.findByRole("button", { name: "Actions for Budget" });
     const sub = await submenu("Actions for Budget", "Share");
     within(sub).getByRole("menuitem", { name: "Everyone in the team" }).focus();
@@ -133,6 +136,7 @@ describe("share from the thread menu (ac-1)", () => {
   it("is unavailable on a thread shared with you, with the reason", async () => {
     sharedWithMe("Their plan", "team");
     openApp(fake);
+    await openThreads();
     const menu = await openRowMenu("Actions for Their plan");
     const item = within(menu).getByRole("menuitem", { name: "Share" });
     expect(item.getAttribute("aria-disabled")).toBe("true");
@@ -149,6 +153,7 @@ describe("Shared with me (ac-2)", () => {
     sharedWithMe("Team notes", "team");
     sharedWithMe("Project notes", "project", q4);
     openApp(fake);
+    await openThreads();
     await screen.findByRole("button", { name: "Actions for Mine" });
     await waitFor(() =>
       expect(groups()).toEqual([
@@ -167,6 +172,7 @@ describe("read-only view (ac-1)", () => {
   it("names the author in the banner and forks into a private thread", async () => {
     const id = sharedWithMe("Their plan", "team");
     openApp(fake, id);
+    await openThreads();
     const banner = await screen.findByRole("note", { name: "Shared thread" });
     expect(banner.textContent).toContain("Shared by Alice Author.");
     expect(banner.textContent).toMatch(/shared with you read-only/);
@@ -186,12 +192,14 @@ describe("read-only view (ac-1)", () => {
       agent_status: "suspended",
     });
     openApp(fake, id);
+    await openThreads();
     const banner = await screen.findByRole("note", { name: "Shared thread" });
     expect(await within(banner).findByText("Agent: Ledger Bot")).toBeTruthy();
     expect(within(banner).getByText("Suspended")).toBeTruthy();
     cleanup();
     const plain = sharedWithMe("Plain plan", "team");
     openApp(fake, plain);
+    await openThreads();
     const again = await screen.findByRole("note", { name: "Shared thread" });
     expect(within(again).queryByText(/^Agent: /)).toBeNull();
   });
@@ -200,6 +208,7 @@ describe("read-only view (ac-1)", () => {
     const id = sharedWithMe("Old plan", "team");
     must(fake.threads.get(id)).owner_name = null;
     openApp(fake, id);
+    await openThreads();
     const banner = await screen.findByRole("note", { name: "Shared thread" });
     expect(banner.textContent).toContain("Shared by a former member.");
   });
@@ -209,6 +218,7 @@ describe("read-only view (ac-1)", () => {
     must(fake.threads.get(t)).visibility = "team";
     fake.addEntry(t, null, { role: "user", content: "hello" });
     openApp(fake, t);
+    await openThreads();
     const bar = await screen.findByRole("group", { name: "Sharing" });
     expect(bar.textContent).toContain("Everyone in the team can read and fork this conversation.");
     await userEvent.setup().click(within(bar).getByRole("button", { name: "Make private" }));

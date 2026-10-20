@@ -21,6 +21,7 @@ import {
 import { useTeamAccess } from "../admin/console-context";
 import { DateTime, ResourceView } from "../admin/parts";
 import { useResource } from "../admin/use-resource";
+import { useNavigate } from "../shell/use-navigate";
 
 const TITLES: Readonly<Record<SkillScope, string>> = {
   team: "Team skills",
@@ -47,10 +48,11 @@ export function SkillList({ scope }: { readonly scope: SkillScope }) {
   const [promoting, setPromoting] = useState<string | null>(null);
   const { state } = useResource(() => listSkills(teamId, scope));
   const mutation = useMutation();
+  const navigate = useNavigate();
   const edit = (skillId: string) =>
     mutation.run(async () => {
       const res = await forkToDraft(teamId, { kind: scope, skillId });
-      if (res.ok) window.location.assign(draftHref(res.data.id));
+      if (res.ok) navigate(draftHref(res.data.id));
       return res;
     });
   return (

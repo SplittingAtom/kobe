@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { THREAD_DRAG_TYPE } from "../../lib/chat/organize";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
-import { openApp, openRowMenu } from "./testing";
+import { openApp, openRowMenu, openThreads } from "./testing";
 
 /**
  * KOBE-220 (CE19): Pin, Archive and Move to project from a row's ⋯ menu (and Move by dragging a
@@ -65,6 +65,7 @@ describe("pin and archive (ac-1)", () => {
     fake.addThread("Budget");
     fake.addThread("Plan");
     openApp(fake);
+    await openThreads();
     await screen.findByRole("button", { name: "Actions for Budget" });
     expect(groups()).toEqual([["ungrouped", ["Plan", "Budget"]]]);
 
@@ -79,6 +80,7 @@ describe("pin and archive (ac-1)", () => {
 
     cleanup();
     openApp(fake);
+    await openThreads();
     await screen.findByRole("button", { name: "Actions for Budget" });
     expect(groups()[0]).toEqual(["pinned", ["Budget"]]);
 
@@ -92,6 +94,7 @@ describe("pin and archive (ac-1)", () => {
     fake.addThread("Budget");
     fake.addThread("Plan");
     openApp(fake);
+    await openThreads();
     await choose("Actions for Budget", "Archive");
     await waitFor(() =>
       expect(groups()).toEqual([
@@ -134,6 +137,7 @@ describe("pin and archive (ac-1)", () => {
     render(
       <ChatApp fetchFn={fake.fetch} eventSource={fake.eventSource} threadListSync={() => sync} />,
     );
+    await openThreads();
     await screen.findByRole("button", { name: "Actions for Budget" });
     must(fake.threads.get(t)).pinned_at = "2026-10-03T10:00:00.000Z"; // pinned in the other tab
     for (const listener of posted) listener(t);
@@ -149,6 +153,7 @@ describe("move to project (ac-2)", () => {
     fake.addProject("Ops");
     fake.addThread("Budget");
     openApp(fake);
+    await openThreads();
     const sub = await submenu("Actions for Budget", "Move to project");
     expect(
       within(sub)
@@ -168,6 +173,7 @@ describe("move to project (ac-2)", () => {
     fake.addProject("Q4");
     fake.addThread("Budget");
     openApp(fake);
+    await openThreads();
     fake.refuseOrganize = {
       status: 404,
       code: "project_not_found",
@@ -191,6 +197,7 @@ describe("move to project (ac-2)", () => {
     must(fake.threads.get(plan)).project_id = q4;
     const budget = fake.addThread("Budget");
     openApp(fake);
+    await openThreads();
     await screen.findByRole("button", { name: "Actions for Budget" });
     await waitFor(() => expect(groups()[0]?.[0]).toBe("project"));
     const row = must(document.querySelector(`[data-kobe-thread="${budget}"]`));
@@ -247,6 +254,7 @@ describe("move to project (ac-2)", () => {
       ],
     });
     openApp(fake, t);
+    await openThreads();
     const markers = await waitFor(() => {
       const found = [...document.querySelectorAll<HTMLElement>('[data-kobe-marker="project"]')];
       expect(found).toHaveLength(2);
@@ -265,7 +273,7 @@ describe("search (ac-3)", () => {
     const t = fake.addThread("Budget");
     must(fake.threads.get(t)).archived_at = "2026-10-03T10:00:00.000Z";
     openApp(fake);
-    const search = await screen.findByRole("searchbox", { name: /search/i });
+    const search = await screen.findByRole("searchbox", { name: "Search conversations" });
     const user = userEvent.setup();
     await user.type(search, "budget{Enter}");
     const hits = await screen.findByRole("list", { name: "Search results" });

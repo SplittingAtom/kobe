@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { SHELL_TIMEOUT_MS } from "./support/constants.js";
 import { type Chat, expect, test } from "./support/chat.js";
 import { expectThemed, MIN_CONTRAST, type Paint, paintOf, type Theme } from "./support/colours.js";
+import { panelOf } from "./support/panel.js";
 
 const THEME_COOKIE = "kobe-theme";
 
@@ -93,10 +94,11 @@ test("theme toggle: popups in light and dark, the choice survives a reload, admi
   await expect(chat.composer).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
   await expectTheme(page, "dark");
 
-  // The admin console's header has the same toggle and the same saved choice.
+  // The admin console has the same toggle and the same saved choice.
+  // Since KOBE-452 the console is a panel over the workspace, its toggle in the panel's header line.
   await page.goto("/admin/team/connectors");
   await expectTheme(page, "dark");
-  await themeToggle(page).click();
+  await panelOf(page).getByRole("button", { name: "Dark theme", exact: true }).click();
   await expectTheme(page, "light");
   expect((await context.cookies()).find((c) => c.name === THEME_COOKIE)?.value).toBe("light");
 });

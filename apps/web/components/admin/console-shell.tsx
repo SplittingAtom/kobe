@@ -21,7 +21,14 @@ import { ConsoleThemeToggle } from "./console-theme-toggle";
 import { ErrorNotice } from "./error-notice";
 import { IsolationBanner } from "./isolation-banner";
 import { ChatReturnLink } from "../shell/chat-return-link";
-import { ConsoleLayout, ConsoleMain, ConsoleWho, Notice, PageHeader } from "../ui/console";
+import {
+  ConsoleLayout,
+  ConsoleMain,
+  ConsoleWho,
+  Notice,
+  PageHeader,
+  useInPanel,
+} from "../ui/console";
 
 const DEFAULT_LOADERS: Readonly<Record<ConsoleKind, () => Promise<ApiResult<ConsoleAccess>>>> = {
   site: () => fetchSiteAccess(),
@@ -29,8 +36,8 @@ const DEFAULT_LOADERS: Readonly<Record<ConsoleKind, () => Promise<ApiResult<Cons
 };
 
 const DENIED: Readonly<Record<ConsoleKind, string>> = {
-  site: "The site console is for the site Owner and Admins.",
-  team: "The team console is for team admins of the active team.",
+  site: "You don't have access to the Site console. Ask your site Owner or an Admin.",
+  team: "You don't have access to this team's Team console. Ask one of its team admins.",
 };
 
 type AccessState =
@@ -195,8 +202,11 @@ function Frame({
   readonly nav?: ReactNode;
   readonly children: ReactNode;
 }) {
+  // Over the workspace (KOBE-452) the panel's header names the console and closes it.
+  const panel = useInPanel();
   return (
     <ConsoleLayout
+      panel={panel}
       brand={
         <>
           <ChatReturnLink>Kobe</ChatReturnLink> <span aria-hidden="true">/</span> {title}

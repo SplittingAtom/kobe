@@ -81,8 +81,16 @@ async function theApp(page: Page): Promise<App> {
  */
 function railButton(page: Page, app: App, where: "this conversation" | "a new conversation") {
   return page
-    .getByRole("region", { name: "Apps", exact: true })
+    .getByRole("tabpanel", { name: "Apps", exact: true })
     .getByTitle(`Open ${app.title} from ${app.connectorName} in ${where}`, { exact: true });
+}
+
+/** The rail's Apps tab (KOBE-448: Files | Apps), chosen; the member's choice is kept. */
+async function showAppsTab(page: Page): Promise<void> {
+  const tab = page
+    .getByRole("tablist", { name: "Files and apps" })
+    .getByRole("tab", { name: "Apps", exact: true });
+  if ((await tab.getAttribute("aria-selected")) !== "true") await tab.click();
 }
 
 /** The app's frame inside the conversation (the card's), by its host-drawn title. */
@@ -232,6 +240,7 @@ test("from the rail: a click inserts an app card with no run; the next run sees 
   record(page);
   await chat.open();
   const app = await theApp(page);
+  await showAppsTab(page);
   await railButton(page, app, "a new conversation").click();
   const threadId = await chat.threadId();
   await expect(page.locator("[data-kobe-app-card-entry]")).toBeVisible({ timeout: RUN_TIMEOUT_MS });
@@ -273,6 +282,7 @@ test("from the rail during a run: the launch waits as a chip and goes in after t
     longAnswer("Write a numbered list of 40 short facts about tables, one per line."),
   );
   await chat.waitForBusy();
+  await showAppsTab(page);
   await railButton(page, app, "this conversation").click();
   const chip = page.getByText(`App: ${app.title} (waits for the run)`);
   await expect(chip).toBeVisible();
@@ -294,6 +304,7 @@ test("no credential reaches the browser or the frame", async ({ chat, page }) =>
   });
   await chat.open();
   const app = await theApp(page);
+  await showAppsTab(page);
   await railButton(page, app, "a new conversation").click();
   await chat.threadId();
   const frame = frameOf(page, app);

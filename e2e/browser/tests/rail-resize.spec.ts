@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { expect, test } from "./support/chat.js";
+import { expect, test, filesSection } from "./support/chat.js";
 
 /**
  * KOBE-305: the resizable rail. Drags the handle on the rail's right edge, checks the width
@@ -111,7 +111,7 @@ test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a fil
   await expectWidth(rail, 400);
 
   // Screenshots with the Files tree, light and dark.
-  const files = page.getByRole("region", { name: "Files" });
+  const files = filesSection(page);
   const openFiles = files.getByRole("button", { name: "Open files" });
   if (await openFiles.isVisible()) await openFiles.click();
   // Attached, not visible: an empty workspace's tree has no rows, so no height.
@@ -145,13 +145,14 @@ test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a fil
     ys.push(Math.round(box.y + box.height / 2));
   }
   expect(Math.max(...ys) - Math.min(...ys)).toBeLessThanOrEqual(4);
-  // The team name (or menu) ends before the first toggle: nothing overlaps (review S1).
+  // The team name (or menu) ends before the first action (New conversation since KOBE-453):
+  // nothing overlaps (review S1).
   const slot = await chat.railHeader
     .getByRole("navigation", { name: "Teams" })
     .or(chat.railHeader.getByRole("heading", { level: 2 }))
     .boundingBox();
   const firstToggle = await chat.railHeader
-    .getByRole("button", { name: "Threads panel", exact: true })
+    .getByRole("button", { name: "New conversation", exact: true })
     .boundingBox();
   expect(slot).not.toBeNull();
   expect(firstToggle).not.toBeNull();

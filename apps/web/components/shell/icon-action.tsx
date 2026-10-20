@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { openBeside, plainClick } from "../../lib/shell/areas";
 import { useId, type ComponentProps, type MouseEvent, type ReactNode } from "react";
 import {
   ariaKeyShortcuts,
@@ -138,11 +137,6 @@ export function IconAction({
         return;
       }
       onClick?.(e as MouseEvent<HTMLButtonElement>);
-      // CE4 (KOBE-424): a My area link opens beside the thread on the chat page; a new tab or
-      // window (a modifier key) still gets the full page.
-      if (!e.defaultPrevented && target !== undefined && !download && plainClick(e)) {
-        if (openBeside(target)) e.preventDefault();
-      }
     },
   };
   const face = (

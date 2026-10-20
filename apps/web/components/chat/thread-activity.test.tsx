@@ -1,13 +1,13 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { KobeEventPayload } from "@kobe/protocol";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
 import { ChatApp } from "./chat-app";
-import { composer, streaming } from "./testing";
+import { composer, openThreads, streaming, threadGroup } from "./testing";
 
 /**
  * KOBE-301 ac-2 and ac-5: the rail shows a pulsing green dot on a thread whose run is going and an
@@ -53,7 +53,7 @@ function open(threadId: string, pollMs = 30) {
   );
 }
 
-const rail = () => screen.findByRole("list", { name: "Your threads" });
+const rail = () => threadGroup("Your threads");
 
 /** The rail row (its `<li>`) of a thread, by title. */
 async function row(title: string): Promise<HTMLElement> {
@@ -136,7 +136,40 @@ describe("rail activity dots (ac-2)", () => {
 
     fake.agent.complete(runId);
     await waitFor(async () => expect(await activityOf("Deploy")).toBe("idle"));
-    expect((await row("Deploy")).querySelector("[data-status-dot]")).toBeNull();
+    // Ended off screen: new activity (KOBE-453), a quiet dot named for screen readers.
+    const quiet = await waitFor(async () =>
+      must((await row("Deploy")).querySelector('[data-status-dot="done"]')),
+    );
+    expect(quiet).toBeTruthy();
+    expect(
+      within(await rail()).getByRole("button", { name: "Deploy", description: "New activity" }),
+    ).toBeTruthy();
+  });
+
+  it("the Threads button shows new activity until the member opens that thread (KOBE-453)", async () => {
+    const a = fake.addThread("Deploy");
+    const b = fake.addThread("Notes");
+    open(a);
+    const runId = await startRun(a);
+    await userEvent
+      .setup()
+      .click(await within(await rail()).findByRole("button", { name: /^Notes/ }));
+    await waitFor(() => expect(window.location.search).toBe(`?thread=${b}`));
+    const threads = () =>
+      must(document.querySelector<HTMLElement>('[data-rail-header] [data-command="rail-threads"]'));
+    await waitFor(() => expect(threads().getAttribute("data-kobe-activity")).toBe("running"));
+    fake.agent.complete(runId);
+    await waitFor(() => expect(threads().getAttribute("data-kobe-activity")).toBe("unread"));
+    expect(threads().getAttribute("aria-label")).toBe(
+      "Threads panel, a conversation has new activity",
+    );
+    // The tab title marks runs and approvals only.
+    expect(document.title).toBe("Kobe");
+    await userEvent
+      .setup()
+      .click(await within(await rail()).findByRole("button", { name: /^Deploy/ }));
+    await waitFor(() => expect(window.location.search).toBe(`?thread=${a}`));
+    await waitFor(() => expect(threads().getAttribute("data-kobe-activity")).toBe("idle"));
   });
 
   it("an approval in the open thread turns its dot amber live", async () => {
@@ -171,6 +204,7 @@ describe("rail activity dots (ac-2)", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     fake.failNext.set("GET /v1/threads/activity", new Response(null, { status: 500 }));
     open(t, 60_000);
+    await openThreads();
     const theirs = await waitFor(() =>
       must(document.querySelector(`li[data-kobe-thread="${shared}"]`)),
     );

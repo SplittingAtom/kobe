@@ -12,7 +12,9 @@ const SECOND_USER = process.env["KOBE_USER2"];
 const SECOND_PW = process.env["KOBE_PW2"];
 const TEAM_KEY = "kobe.lastTeamId";
 
-const group = (page: Page, kind: string) => page.locator(`[data-group="${kind}"]`);
+/** A group of the Threads panel (KOBE-453). */
+const group = (page: Page, kind: string) =>
+  page.getByRole("dialog", { name: "Threads" }).locator(`[data-group="${kind}"]`);
 const rowIn = (page: Page, kind: string, title: string) =>
   group(page, kind).locator("[data-kobe-thread]").filter({ hasText: title });
 
@@ -72,17 +74,19 @@ test("share with the team, read and fork as another member, then revoke", async 
   const name = page.getByRole("textbox", { name: "Conversation name", exact: true });
   await name.fill(title);
   await name.press("Enter");
+  await chat.openThreads();
   await expect(rowIn(page, "ungrouped", title)).toHaveCount(1);
 
   await shareAs(page, rowIn(page, "ungrouped", title), title, "Everyone in the team");
+  await chat.closeThreads();
   const bar = page.getByRole("group", { name: "Sharing" });
   await expect(bar).toContainText("Everyone in the team can read and fork");
 
   const second = await signInSecond(browser);
   let forkId: string | null = null;
   try {
-    // ac-2: the rail's Shared with me group lists it.
-    await second.goto("/");
+    // ac-2: the Threads panel's Shared with me group lists it (its address opens it).
+    await second.goto("/threads");
     await expect(rowIn(second, "shared", title)).toHaveCount(1, { timeout: SHELL_TIMEOUT_MS });
 
     // ac-1: read-only with the banner, no composer; Fork makes a private copy of their own.
@@ -101,10 +105,12 @@ test("share with the team, read and fork as another member, then revoke", async 
     await expect(second.getByRole("note", { name: "Shared thread" })).toHaveCount(0);
 
     // Revoke: Only you. The second member loses the thread at once.
+    await chat.openThreads();
     await shareAs(page, rowIn(page, "ungrouped", title), title, "Only you");
+    await chat.closeThreads();
     await expect(page.getByRole("group", { name: "Sharing" })).toHaveCount(0);
-    await second.goto("/");
-    await expect(second.getByRole("textbox", { name: "Message", exact: true })).toBeVisible({
+    await second.goto("/threads");
+    await expect(second.getByRole("dialog", { name: "Threads" })).toBeVisible({
       timeout: SHELL_TIMEOUT_MS,
     });
     await expect(rowIn(second, "shared", title)).toHaveCount(0);

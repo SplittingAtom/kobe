@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/chat.js";
 import { RUN_TIMEOUT_MS, SHELL_TIMEOUT_MS } from "./support/constants.js";
+import { panelOf } from "./support/panel.js";
 
 /**
  * KOBE-289: an approval remembered for "this conversation" lets the next share_file of that
@@ -77,21 +78,21 @@ test("remember for this conversation, run without a card, list, revoke, ask agai
 
     // My area, Approvals lists it with its conversation.
     await page.goto("/me/approvals");
-    const mine = page.getByRole("table", { name: /Your remembered approvals/ });
+    const mine = panelOf(page).getByRole("table", { name: /Your remembered approvals/ });
     await expect(mine).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
     await expect(mine).toContainText("share_file");
     await expect(mine).toContainText("this conversation");
 
     // The team Policy page shows it too; revoke it there.
     await page.goto("/admin/team/policy");
-    const members = page.getByRole("table", { name: /Remembered approvals/ });
+    const members = panelOf(page).getByRole("table", { name: /Remembered approvals/ });
     await expect(members).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
     await members
       .getByRole("button", { name: /rule for share_file/ })
       .first()
       .click();
     await page.getByRole("alertdialog").getByRole("button", { name: "Revoke" }).click();
-    await expect(page.getByText(/Revoked: share_file/)).toBeVisible();
+    await expect(panelOf(page).getByText(/Revoked: share_file/)).toBeVisible();
     expect((await myRules(page)).filter((r) => r.tool_glob === "share_file")).toEqual([]);
 
     // Back in the conversation, the next share asks again.

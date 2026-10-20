@@ -259,7 +259,7 @@ describe("with the rest of the shell (ac-4)", () => {
     }
     resizeWindow(960);
     const user = userEvent.setup();
-    await user.click(within(aside()).getByRole("button", { name: "Show threads" }));
+    await user.click(within(aside()).getByRole("button", { name: "Show files" }));
     await waitFor(() => expect(aside().hasAttribute("data-drawer")).toBe(true));
     expect(handle()).toBeNull();
     // The stored width is untouched and comes back on a wide window.

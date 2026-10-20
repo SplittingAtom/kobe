@@ -76,3 +76,36 @@ describe("thread activity (KOBE-301)", () => {
     expect(store.snapshot()).toBe(before);
   });
 });
+
+describe("new activity (KOBE-453)", () => {
+  it("a thread that ran off screen and is idle again is unread until it is on screen", () => {
+    const store = new ThreadActivityStore();
+    store.setOnScreen("b");
+    store.setPolled(new Map([["a", "running"]]));
+    expect(store.snapshot().unread.size).toBe(0);
+    store.setPolled(new Map());
+    expect([...store.snapshot().unread]).toEqual(["a"]);
+    store.setOnScreen("a");
+    expect(store.snapshot().unread.size).toBe(0);
+  });
+
+  it("the thread on screen never becomes unread; an approval that went counts too", () => {
+    const store = new ThreadActivityStore();
+    store.setOnScreen("a");
+    store.set("a", "running");
+    store.set("a", "idle");
+    expect(store.snapshot().unread.size).toBe(0);
+    store.setOnScreen(null);
+    store.setPolled(new Map([["c", "approval"]]));
+    store.setPolled(new Map([["c", "idle"]]));
+    expect([...store.snapshot().unread]).toEqual(["c"]);
+  });
+
+  it("still running elsewhere (released, the poll not in yet) is not unread", () => {
+    const store = new ThreadActivityStore();
+    store.setPolled(new Map([["a", "running"]]));
+    store.set("a", "running");
+    store.release("a");
+    expect(store.snapshot().unread.size).toBe(0);
+  });
+});

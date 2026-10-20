@@ -13,13 +13,17 @@ import { Button, Field, Section, Select, TextInput } from "../ui/console";
 import { MutationStatus } from "../admin/error-notice";
 import { useMutation, useResource } from "../admin/use-resource";
 import { draftHref } from "./draft-href";
+import { useNavigate } from "../shell/use-navigate";
 
 const BLANK = "";
 
-/** Opens the draft a start made. */
-async function opened(res: ApiResult<DraftSummary>): Promise<ApiResult<DraftSummary>> {
-  if (res.ok) window.location.assign(draftHref(res.data.id));
-  return res;
+/** Opens the draft a start made (client-side: the panel stays, KOBE-452). */
+function useOpenDraft(): (res: ApiResult<DraftSummary>) => ApiResult<DraftSummary> {
+  const navigate = useNavigate();
+  return (res) => {
+    if (res.ok) navigate(draftHref(res.data.id));
+    return res;
+  };
 }
 
 /**
@@ -41,6 +45,7 @@ function StartForm({ teamId }: { readonly teamId: string }) {
   const [template, setTemplate] = useState(BLANK);
   const [attempted, setAttempted] = useState(false);
   const mutation = useMutation();
+  const opened = useOpenDraft();
   const { state } = useResource(() => listTemplates(teamId));
   const templates = state.status === "ready" ? state.data : [];
   const chosen = templates.find((t) => t.id === template);
@@ -87,6 +92,7 @@ function UploadForm({ teamId }: { readonly teamId: string }) {
   const [file, setFile] = useState<File | null>(null);
   const [attempted, setAttempted] = useState(false);
   const mutation = useMutation();
+  const opened = useOpenDraft();
   return (
     <form
       noValidate

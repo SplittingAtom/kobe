@@ -1,5 +1,6 @@
-/* The workspace rail (CE5, KOBE-198): team name, then Threads over Files, each scrolling on its
-   own. The grid gives it 280 px, or 48 px collapsed (shell.module.css). */
+/* The workspace rail (CE5, KOBE-198): its top line, then Apps and Files (the threads are a panel
+   over the workspace since KOBE-453; the group styles below serve it). The grid gives it 280 px,
+   or 48 px collapsed (shell.module.css). */
 
 .rail {
   position: relative; /* the drop overlay covers exactly the rail (KOBE-199) */
@@ -96,7 +97,9 @@
   gap: 0.25rem;
   align-items: center;
   min-height: 2.75rem;
-  padding: 0.25rem 0.5rem 0.25rem 1rem;
+  /* Narrow sides: at the rail's 200 px minimum the team name keeps 30 px beside the five actions
+     of a team admin (New conversation, Threads, Files, Team console, collapse; KOBE-453). */
+  padding: 0.25rem 0.25rem 0.25rem 0.5rem;
 }
 
 /* The slot clips (nothing paints over the buttons) and is a container, so the role can hide
@@ -252,6 +255,42 @@ button.teamIcon {
   min-height: 0;
 }
 
+/* Files | Apps (KOBE-448): the section's tabs, a quiet underline for the chosen one. */
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem 0;
+  border-bottom: 1px solid var(--admin-border);
+}
+
+.tab {
+  margin-bottom: -1px;
+  padding: 0.25rem 0.5rem;
+  color: var(--admin-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--admin-fg);
+}
+
+.tab[aria-selected="true"] {
+  color: var(--admin-fg);
+  border-bottom-color: var(--admin-accent);
+}
+
+/* A thread that could not be read (KOBE-453: the threads are a panel, the error stays in sight). */
+.listError {
+  padding: 0 0.5rem;
+}
+
 .section {
   display: flex;
   flex-direction: column;
@@ -263,6 +302,15 @@ button.teamIcon {
 /* A panel turned off on the top line (KOBE-419): kept mounted, not shown. */
 .section[hidden] {
   display: none;
+}
+
+/* The Files region inside its tab's panel (KOBE-448): the panel's whole height. */
+.tabSection {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 
 .sectionBody {
@@ -302,30 +350,6 @@ button.teamIcon {
   padding: 0 0.5rem 0.75rem;
   overflow-y: auto;
   overscroll-behavior: contain;
-}
-
-.divider {
-  position: relative;
-  min-width: 0;
-  height: 0.5rem;
-  cursor: row-resize;
-  touch-action: none;
-  outline: none;
-}
-
-.divider::after {
-  position: absolute;
-  inset: calc(50% - 0.5px) 0 auto;
-  height: 1px;
-  background: var(--admin-border);
-  content: "";
-}
-
-.divider:hover::after,
-.divider:focus-visible::after {
-  inset: calc(50% - 1.5px) 0 auto;
-  height: 3px;
-  background: var(--admin-accent);
 }
 
 .group + .group {
@@ -493,21 +517,29 @@ button.teamIcon {
   color: var(--accent-foreground);
 }
 
-/* The Apps section (KOBE-440): between Threads and Files, as tall as its rows up to a cap. */
+/* The Apps tab (KOBE-440, KOBE-448): the section's height, its list scrolling. */
 .appsSection {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  max-height: 10rem;
+  min-height: 0;
+  padding-top: 0.25rem;
   outline: none;
 }
 
-.appsSection:focus-visible .sectionTitle {
-  color: var(--admin-fg);
-  text-decoration: underline;
+.appsPending {
+  margin: 0;
+  padding: 0.5rem 1rem;
+  color: var(--admin-muted);
+  font-size: 0.8rem;
+}
+
+.appsSection[hidden] {
+  display: none;
 }
 
 .appsList {
+  flex: 1;
   min-height: 0;
   margin: 0;
   padding: 0 0.25rem 0.25rem;

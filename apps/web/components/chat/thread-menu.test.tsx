@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
-import { chatRequests, composer, openApp, openRowMenu } from "./testing";
+import { chatRequests, composer, openApp, openRowMenu, threadGroup } from "./testing";
 
 /**
  * KOBE-292 (ac-1): a thread row has no rename or Trash icons; its ⋯ button opens Copy,
@@ -31,7 +31,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const list = () => screen.findByRole("list", { name: "Your threads" });
+const list = () => threadGroup("Your threads");
 const say = (text: string) => ({ role: "assistant", content: [{ type: "text", text }] });
 const messagePosts = () => chatRequests(fake, "POST").filter((r) => r.path.endsWith("/messages"));
 
@@ -87,7 +87,10 @@ describe("thread row menu (KOBE-292)", () => {
     expect(await navigator.clipboard.readText()).toBe(
       "# Budget\n\n## You\n\nsummarise it\n\n## Assistant\n\nsecond version\n",
     );
-    expect(window.location.search).toBe(`?thread=${other}`);
+    // Nothing opened: the Threads panel stays, and closes back onto the same thread.
+    const panel = screen.getByRole("dialog", { name: "Threads" });
+    await user.click(within(panel).getByRole("button", { name: "Close Threads" }));
+    await waitFor(() => expect(window.location.search).toBe(`?thread=${other}`));
   });
 
   it("Regenerate opens the thread and regenerates its last answer from the same branch point", async () => {

@@ -6,6 +6,20 @@ import {
   WAITING_FOR_AGENT,
 } from "./constants.js";
 
+/**
+ * The rail's section toggle (KOBE-419/453/448): "Files panel", or "Files and apps" when the
+ * member has apps (the section's Files | Apps tabs).
+ */
+export const FILES_TOGGLE = /^(Files panel|Files and apps)$/;
+
+/**
+ * The rail's Files section: a region named Files, or with apps the Files tab's panel (KOBE-448),
+ * the same element either way.
+ */
+export function filesSection(page: Page): Locator {
+  return page.locator("#kobe-rail-files");
+}
+
 /** The chat's address parameter for the open thread (`/?thread=<id>`). */
 const THREAD_PARAM = "thread";
 /** The active team, recorded by the chat in local storage; the API wants it as a header. */
@@ -45,28 +59,81 @@ export class Chat {
     return this.page.locator('[data-role="assistant"]');
   }
 
-  /** A new conversation: the chat's root opens an empty draft, with both rail panels on. */
+  /** A new conversation: the chat's root opens an empty draft, with the rail's Files on. */
   async open(): Promise<void> {
     await this.page.goto("/");
     await expect(this.composer).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
-    await this.showBothPanels();
+    // Every spec starts on the rail's Files tab, whatever this member last chose (KOBE-448).
+    await this.showBothPanels("files");
   }
 
-  /** The rail's top line (KOBE-419): team selector, panel toggles, Team console, collapse. */
+  /** The rail's top line (KOBE-419): team selector, New, Threads, Files, Team console, collapse. */
   get railHeader(): Locator {
     return this.page.locator("[data-rail-header]");
   }
 
   /**
-   * Turns both rail panels on (KOBE-419 saves the choice per member, so another spec or device may
-   * have left one off). Nothing to do where the rail is not on screen (a phone, collapsed).
+   * Turns the rail's Files section on, on its Files tab (saved per member, so another spec or device may have left it
+   * off). The threads are a panel since KOBE-453 (`openThreads`). Nothing to do where the rail is
+   * not on screen (a phone, collapsed).
    */
-  async showBothPanels(): Promise<void> {
-    for (const name of ["Threads panel", "Files panel"]) {
-      const toggle = this.railHeader.getByRole("button", { name, exact: true });
-      if (!(await toggle.isVisible())) continue;
-      if ((await toggle.getAttribute("aria-pressed")) === "false") await toggle.click();
+  async showBothPanels(tab: "files" | "apps" = "files"): Promise<void> {
+    const toggle = this.railHeader.getByRole("button", { name: FILES_TOGGLE });
+    // Files hidden collapses the rail (KOBE-453 review): its strip's section icon shows it again.
+    const strip = this.page.getByRole("button", { name: /^Show (files|apps)$/ });
+    if (!(await toggle.isVisible()) && (await strip.isVisible())) await strip.click();
+    if (!(await toggle.isVisible())) return;
+    if ((await toggle.getAttribute("aria-pressed")) === "false") await toggle.click();
+    // Files | Apps (KOBE-448): the tab is stored per member, so another spec may have left Apps.
+    // Wait for the apps list to settle (a member last on Apps sees "Loading apps…"), then pick
+    // the tab this spec needs.
+    await expect(this.page.getByText("Loading apps…")).toHaveCount(0, {
+      timeout: SHELL_TIMEOUT_MS,
+    });
+    const wanted = this.page
+      .getByRole("tablist", { name: "Files and apps" })
+      .getByRole("tab", { name: tab === "files" ? "Files" : "Apps", exact: true });
+    if (!(await wanted.isVisible())) return; // no apps here: Files alone
+    if ((await wanted.getAttribute("aria-selected")) !== "true") await wanted.click();
+    await expect(wanted).toHaveAttribute("aria-selected", "true");
+  }
+
+  /** The Threads panel over the workspace (KOBE-453). */
+  get threadsPanel(): Locator {
+    return this.page.getByRole("dialog", { name: "Threads" });
+  }
+
+  /**
+   * Opens the Threads panel the way a member does: Threads on the rail's top line, the collapsed
+   * rail's Show threads, or on a phone the drawer's Threads. Returns the panel.
+   */
+  async openThreads(): Promise<Locator> {
+    const panel = this.threadsPanel;
+    // After a load or a reload the workspace first (at /threads the panel opens with it).
+    await this.railHeader.first().waitFor({ state: "attached", timeout: SHELL_TIMEOUT_MS });
+    if (await panel.isVisible()) return panel;
+    // The name carries the activity while a conversation runs ("Threads panel, …").
+    const line = this.railHeader.getByRole("button", { name: /^Threads panel/ });
+    const strip = this.page.getByRole("button", { name: /^Show threads/ });
+    if (await line.first().isVisible()) await line.first().click();
+    else if (await strip.isVisible()) await strip.click();
+    else {
+      await this.page.getByRole("button", { name: "Show the workspace" }).click();
+      await this.page
+        .getByRole("dialog", { name: "Workspace" })
+        .getByRole("button", { name: /^Threads panel/ })
+        .click();
     }
+    await expect(panel).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+    return panel;
+  }
+
+  /** Closes the Threads panel if it is open (its Close button). */
+  async closeThreads(): Promise<void> {
+    const panel = this.threadsPanel;
+    if (!(await panel.isVisible())) return;
+    await panel.getByRole("button", { name: "Close Threads" }).click();
+    await expect(panel).toBeHidden();
   }
 
   async send(text: string): Promise<void> {

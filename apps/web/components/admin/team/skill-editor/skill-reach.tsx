@@ -17,6 +17,7 @@ import { useTeamAccess } from "../../console-context";
 import { MutationStatus } from "../../error-notice";
 import { DateTime } from "../../parts";
 import { useMutation, useResource } from "../../use-resource";
+import { useNavigate } from "../../../shell/use-navigate";
 
 const HINT = "m-0 my-1 text-sm text-console-muted";
 
@@ -136,13 +137,14 @@ function AddToAgent({
   readonly agents: readonly SkillReachAgent[];
 }) {
   const [chosen, setChosen] = useState("");
+  const navigate = useNavigate();
   const choices = agents.filter((a) => a.canEdit && a.via !== "named" && !a.inDraft);
   if (choices.length === 0) return null;
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        if (chosen !== "") window.location.assign(addSkillHref(chosen, slug));
+        if (chosen !== "") navigate(addSkillHref(chosen, slug));
       }}
     >
       <FormRow className="mb-1">

@@ -47,7 +47,10 @@ afterEach(() => {
 const rail = () => screen.getByRole("complementary", { name: "Workspace" });
 /** The rail as a drawer is a dialog (KOBE-201). */
 const railAside = () => must(document.querySelector<HTMLElement>('aside[aria-label="Workspace"]'));
-const divider = () => screen.getByRole("separator", { name: "Resize Threads and Files" });
+/** The Files toggle on the rail's top line, shown or not (the threads are a panel, KOBE-453). */
+const filesToggle = () =>
+  must(document.querySelector<HTMLElement>('[data-rail-header] [data-command="rail-files"]'));
+const filesShown = () => filesToggle().getAttribute("aria-pressed");
 const puts = () => fake.requests.filter((r) => r.method === "PUT" && r.path === PREFERENCES_PATH);
 const loads = () => fake.requests.filter((r) => r.method === "GET" && r.path === PREFERENCES_PATH);
 const gridWidth = () =>
@@ -81,21 +84,18 @@ async function openArtifact() {
 
 describe("loading (ac-1)", () => {
   it("applies what the member saved, loaded once at shell start", async () => {
-    fake.preferences = { rail_collapsed: false, threads_share: 0.4 };
+    fake.preferences = { rail_collapsed: true };
     await openShell();
-    await waitFor(() => expect(divider().getAttribute("aria-valuenow")).toBe("40"));
-    expect(rail().hasAttribute("data-collapsed")).toBe(false);
+    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(true));
     expect(loads()).toHaveLength(1);
   });
 
   it("follows the member to another browser: saved here, applied there", async () => {
     await openShell();
     const user = userEvent.setup();
-    divider().focus();
-    await user.keyboard("{ArrowUp}{ArrowUp}"); // 50%, two key presses: one PUT
     await user.click(within(rail()).getByRole("button", { name: "Collapse the rail" }));
     await waitFor(() => expect(puts()).toHaveLength(1), { timeout: 3000 });
-    expect(puts()[0]?.body).toEqual({ threads_share: 0.5, rail_collapsed: true });
+    expect(puts()[0]?.body).toEqual({ rail_collapsed: true });
     cleanup();
 
     // Another browser, same member: the server is the only thing the two share.
@@ -103,8 +103,6 @@ describe("loading (ac-1)", () => {
     localStorage.clear();
     await openShell();
     await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(true));
-    await user.click(within(rail()).getByRole("button", { name: "Show threads" }));
-    await waitFor(() => expect(divider().getAttribute("aria-valuenow")).toBe("50"));
   });
 
   it("applies a stored artifact width that fits this window", async () => {
@@ -139,25 +137,13 @@ describe("saving", () => {
     expect(puts()).toHaveLength(0);
   });
 
-  it("doesn't save a share that didn't change", async () => {
-    await openShell();
-    divider().focus();
-    await userEvent.setup().keyboard("{Home}{Home}");
-    await waitFor(() => expect(puts()).toHaveLength(1), { timeout: 3000 });
-    divider().focus();
-    await userEvent.setup().keyboard("{Home}");
-    await new Promise((r) => setTimeout(r, 900));
-    expect(puts()).toHaveLength(1);
-  });
-
   it("sends a queued change at once when the page is left", async () => {
     await openShell();
-    divider().focus();
-    await userEvent.setup().keyboard("{ArrowUp}");
+    await userEvent.setup().click(filesToggle());
     expect(puts()).toHaveLength(0); // still in the debounce
     window.dispatchEvent(new Event("pagehide"));
     await waitFor(() => expect(puts()).toHaveLength(1), { timeout: 300 });
-    expect(puts()[0]?.body).toEqual({ threads_share: 0.55 });
+    expect(puts()[0]?.body).toEqual({ rail_panels: "threads" });
   });
 
   it("saves the rail's own toggles, but not an expansion Show the files asked for", async () => {
@@ -173,19 +159,18 @@ describe("saving", () => {
     expect(puts()).toHaveLength(1);
     // The collapsed rail's own icons are the member's way to expand it: saved.
     await user.click(within(rail()).getByRole("button", { name: "Collapse the rail" }));
-    await user.click(within(rail()).getByRole("button", { name: "Show threads" }));
+    await user.click(within(rail()).getByRole("button", { name: "Show files" }));
     await waitFor(() => expect(puts()).toHaveLength(2), { timeout: 3000 });
     expect(puts()[1]?.body).toEqual({ rail_collapsed: false });
   });
 });
 
 describe("values that no longer fit (ac-3)", () => {
-  it("ignores a width the window can't hold and a share out of bounds: the defaults apply", async () => {
-    fake.preferences = { artifact_width: 700, threads_share: 0.95 };
+  it("ignores a width the window can't hold: the default applies", async () => {
+    fake.preferences = { artifact_width: 700 };
     await openArtifact();
     await waitFor(() => expect(loads()).toHaveLength(1));
     expect(gridWidth()).toBe(""); // half the space (CSS default)
-    expect(divider().getAttribute("aria-valuenow")).toBe("60");
   });
 
   it("keeps the rail collapsed on a narrow screen, and doesn't save its drawer", async () => {
@@ -208,7 +193,7 @@ describe("values that no longer fit (ac-3)", () => {
     );
     await openShell();
     await waitFor(() => expect(warn).toHaveBeenCalled());
-    expect(divider().getAttribute("aria-valuenow")).toBe("60");
+    expect(filesShown()).toBe("true");
     expect(rail().hasAttribute("data-collapsed")).toBe(false);
   });
 });

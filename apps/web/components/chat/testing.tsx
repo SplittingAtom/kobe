@@ -1,4 +1,12 @@
-import { fireEvent, render, screen, waitFor, type MatcherFunction } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+  type MatcherFunction,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect } from "vitest";
 import type { UploadTransport } from "../../lib/chat/uploads";
@@ -28,6 +36,10 @@ export function openApp(
 
 /** Opens a rail row's ⋯ menu (KOBE-292) by its button's name; returns the menu, named alike. */
 export async function openRowMenu(name: string): Promise<HTMLElement> {
+  // Thread rows are in the Threads panel since KOBE-453: opened first when none is on screen.
+  if (screen.queryByRole("button", { name }) === null && !/\.[a-z0-9]+$/i.test(name)) {
+    await openThreads();
+  }
   await userEvent.setup().click(await screen.findByRole("button", { name }));
   return screen.findByRole("menu", { name });
 }
@@ -49,7 +61,16 @@ export async function streaming(fake: FakeKobe, runId?: string) {
 }
 
 export async function composer() {
+  await closeThreads();
   return (await screen.findByLabelText("Message")) as HTMLTextAreaElement;
+}
+
+/** Closes the Threads panel (KOBE-453) if it is open, as its Close button does. */
+export async function closeThreads(): Promise<void> {
+  const panel = screen.queryByRole("dialog", { name: "Threads" });
+  if (panel === null) return;
+  fireEvent.click(within(panel).getByRole("button", { name: "Close Threads" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Threads" })).toBeNull());
 }
 
 /** The status line screen readers hear (the thread's polite live region, not the phase one). */
@@ -129,4 +150,26 @@ export function browserSpaced(root: ParentNode): string[] {
     .filter((el) => !el.classList.contains("sr-only"))
     .filter((el) => (el.tagName === "P" ? !has(el, "m-0") : !has(el, "m-0", "list-none", "ps-0")))
     .map((el) => `${el.tagName.toLowerCase()}: ${(el.textContent ?? "").trim().slice(0, 40)}`);
+}
+
+/**
+ * Opens the Threads panel over the workspace (KOBE-453) at its address, as the rail's Threads
+ * button does, and returns it (or the one already open). Choosing a thread in it closes it.
+ */
+export async function openThreads(): Promise<HTMLElement> {
+  const open = screen.queryByRole("dialog", { name: "Threads" });
+  if (open) return open;
+  // The workspace first (its thread on screen), as a member clicks Threads in a loaded rail.
+  await screen.findByLabelText("Message", undefined, { timeout: 5_000 });
+  act(() => {
+    window.history.pushState(null, "", "/threads");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  return screen.findByRole("dialog", { name: "Threads" }, { timeout: 5_000 });
+}
+
+/** A group's list of thread rows in the Threads panel (KOBE-453), opening the panel first. */
+export async function threadGroup(name: string): Promise<HTMLElement> {
+  await openThreads();
+  return screen.findByRole("list", { name }, { timeout: 5_000 });
 }

@@ -19,6 +19,9 @@ export function skillEditorRedirects(): SkillRedirect[] {
       destination: `${SKILLS_PAGE}?tab=workbench`,
       permanent: true,
     },
+    // The Skills panel's short address (KOBE-452 names it `/skills`).
+    { source: "/skills", destination: SKILLS_PAGE, permanent: false },
+    { source: "/skills/:path*", destination: `${SKILLS_PAGE}/:path*`, permanent: false },
     // Not permanent (no cached 308): a later /me/skills/<slug> page (C7) must stay possible.
     { source: "/me/skills/:id", destination: `${SKILLS_PAGE}?tab=mine`, permanent: false },
   ];

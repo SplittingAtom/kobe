@@ -1,5 +1,5 @@
 import { RUN_START_TIMEOUT_MS, RUN_TIMEOUT_MS, SHELL_TIMEOUT_MS } from "../support/constants.js";
-import { expect, test } from "../support/chat.js";
+import { expect, test, filesSection } from "../support/chat.js";
 import {
   deleteWorkspacePath,
   longAnswer,
@@ -35,7 +35,7 @@ test("U18: an artifact and a workspace file open beside the thread", async ({ ch
     expect(await widthOf(conversation)).toBeGreaterThanOrEqual(399);
 
     expect(await workspaceFile(page, `${dir}/notes.txt`, "notes beside the thread\n")).toBe(201);
-    const files = page.getByRole("region", { name: "Files" });
+    const files = filesSection(page);
     const openFiles = files.getByRole("button", { name: "Open files" });
     if (await openFiles.isVisible()) await openFiles.click();
     await files.getByRole("button", { name: "Refresh files" }).click();
@@ -50,38 +50,37 @@ test("U18: an artifact and a workspace file open beside the thread", async ({ ch
   }
 });
 
-test("U18: memory and the member's settings open beside the thread (CE4)", async ({
+test("U18: memory and the member's settings open over the thread and return to it (CE4)", async ({
   chat,
   page,
 }) => {
-  // KOBE-424: My memory, My approvals (and My schedules, My connectors) open in the artifact
-  // column; the thread, its answer and the composer stay on screen.
-  const { artifact } = regions(page);
+  // KOBE-424, as panels since KOBE-452: My memory and My approvals open as a large overlay over
+  // the workspace, at their own addresses; the thread, its answer and the composer are where they
+  // were when the panel closes.
   await chat.open();
   await chat.ask("No tools. Reply with the single word MEMORY.");
   const thread = await chat.threadId();
   await page.locator('[data-command="my-memory"]').click();
-  await expect(artifact.getByRole("region", { name: "My memory" })).toBeVisible({
-    timeout: SHELL_TIMEOUT_MS,
-  });
+  const memory = page.getByRole("dialog", { name: "My memory" });
+  await expect(memory).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  expect(new URL(page.url()).pathname).toBe("/me/memory");
+  await memory.getByRole("button", { name: "Close My memory" }).click();
+  await expect(page.locator("[data-kobe-panel]")).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get("thread")).toBe(thread);
   await expect(chat.composer).toBeInViewport();
   await expect(chat.answers.last()).toBeInViewport();
-  expect(new URL(page.url()).searchParams.get("thread")).toBe(thread);
-  expect(new URL(page.url()).searchParams.get("area")).toBe("memory");
   await page.locator('[data-command="profile"]').click();
   await page.getByRole("link", { name: "My approvals" }).click();
-  await expect(artifact.getByRole("region", { name: "My approvals" })).toBeVisible({
-    timeout: SHELL_TIMEOUT_MS,
-  });
-  await expect(chat.composer).toBeInViewport();
-  expect(new URL(page.url()).searchParams.get("thread")).toBe(thread);
-  await expect(artifact.getByRole("heading", { name: "Remembered approvals" })).toBeVisible();
-  // One page replaces the other: Back returns to the thread alone, and Forward reopens it.
+  const approvals = page.getByRole("dialog", { name: "My approvals" });
+  await expect(approvals).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  await expect(approvals.getByRole("heading", { name: "Remembered approvals" })).toBeVisible();
+  // Back closes it and returns to the thread; Forward opens it again.
   await page.goBack();
-  await expect(page.locator("[data-kobe-area]")).toHaveCount(0);
+  await expect(page.locator("[data-kobe-panel]")).toHaveCount(0);
   await expect(chat.composer).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("thread")).toBe(thread);
   await page.goForward();
-  await expect(artifact.getByRole("region", { name: "My approvals" })).toBeVisible();
+  await expect(approvals).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
 });
 
 test("U18: while scrolled up, the Jump pill counts the messages that arrive", async ({

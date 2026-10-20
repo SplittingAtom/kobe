@@ -61,6 +61,31 @@ describe("ConsoleLayout", () => {
     expect(main.tabIndex).toBe(-1);
   });
 
+  it("in a panel (KOBE-452) leaves the brand out and keeps the switcher, who and the toggle", () => {
+    const { container } = render(
+      <ConsoleLayout
+        panel
+        brand={<a href="/">Kobe</a>}
+        headerStart={<button type="button">Team</button>}
+        headerEnd={<ConsoleWho>Ada · Owner</ConsoleWho>}
+      >
+        <ConsoleMain tabIndex={-1}>
+          <h1>Users</h1>
+        </ConsoleMain>
+      </ConsoleLayout>,
+    );
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.hasAttribute("data-kobe-console")).toBe(true);
+    expect(root.className).toContain("min-h-full");
+    expect(root.className).not.toContain("min-h-screen");
+    expect(screen.queryByRole("link", { name: "Kobe" })).toBeNull();
+    // The panel's own header is the dialog's; no second banner inside it.
+    expect(screen.queryByRole("banner")).toBeNull();
+    expect(screen.getByRole("button", { name: "Team" })).toBeTruthy();
+    expect(screen.getByText("Ada · Owner")).toBeTruthy();
+    expect(screen.getByRole("main").id).toBe("console-main");
+  });
+
   it("takes two columns on wide screens only with a section navigation", () => {
     const grid = (c: HTMLElement) => c.querySelector("header + div")?.className ?? "";
     const { container, unmount } = renderConsole(false);

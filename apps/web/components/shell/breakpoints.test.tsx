@@ -6,7 +6,7 @@ import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { PREFERENCES_PATH } from "../../lib/shell/preferences";
 import { must } from "../../lib/testing/must";
 import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
-import { composer, openApp, streaming } from "../chat/testing";
+import { composer, openApp, openThreads, streaming } from "../chat/testing";
 
 /**
  * KOBE-201 (CE7, CE8): the shell at the four widths the gate measures (1280, 960, 800, 390 px),
@@ -103,7 +103,7 @@ describe("the CE7 table, per band (ac-1)", () => {
     openApp(fake);
     await composer();
     const user = userEvent.setup();
-    const show = await within(aside()).findByRole("button", { name: "Show threads" });
+    const show = await within(aside()).findByRole("button", { name: "Show files" });
     await user.click(show);
     const drawer = await screen.findByRole("dialog", { name: "Workspace" });
     expect(drawer.getAttribute("aria-modal")).toBe("true");
@@ -257,9 +257,7 @@ describe("the CE7 table, per band (ac-1)", () => {
     expect(grid().querySelector('[data-shell-region="conversation"]')?.hasAttribute("inert")).toBe(
       true,
     );
-    // The drawer's divider moves the drawer only: nothing is saved on a phone (KOBE-202).
-    within(drawer).getByRole("separator", { name: "Resize Threads and Files" }).focus();
-    await user.keyboard("{ArrowUp}");
+    // Nothing is saved on a phone (KOBE-202).
     await user.click(within(drawer).getByRole("button", { name: "Close the workspace" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Workspace" })).toBeNull());
     expect(document.activeElement).toBe(open);
@@ -285,27 +283,26 @@ describe("the CE7 table, per band (ac-1)", () => {
 });
 
 describe("review round 1", () => {
-  it("Escape that closes a row's menu in the drawer leaves the drawer open (KOBE-292)", async () => {
+  it("Escape that closes a row's menu in the Threads panel leaves the panel open (KOBE-292, KOBE-453)", async () => {
     resizeWindow(960);
     fake.addThread("Budget");
     openApp(fake);
     await composer();
     const user = userEvent.setup();
-    await user.click(await within(aside()).findByRole("button", { name: "Show threads" }));
-    const drawer = within(await screen.findByRole("dialog", { name: "Workspace" }));
-    const button = await drawer.findByRole("button", { name: "Actions for Budget" });
+    const panel = within(await openThreads());
+    const button = await panel.findByRole("button", { name: "Actions for Budget" });
     button.focus();
     await user.keyboard("{Enter}");
     expect(await screen.findByRole("menu", { name: "Actions for Budget" })).toBeTruthy();
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
-    expect(screen.getByRole("dialog", { name: "Workspace" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Threads" })).toBeTruthy();
     expect(document.activeElement).toBe(button);
-    // The button's tooltip (shown on focus) takes the next Escape; then the drawer's.
+    // The button's tooltip (shown on focus) takes the next Escape; then the panel's.
     await user.keyboard("{Escape}");
-    expect(screen.getByRole("dialog", { name: "Workspace" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Threads" })).toBeTruthy();
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Workspace" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Threads" })).toBeNull());
   });
 
   it("a sheet crossing 768 px stays open, and Back still returns focus to its opener", async () => {
@@ -329,25 +326,6 @@ describe("review round 1", () => {
     await waitFor(() => expect(header().getAttribute("data-bar-layout")).toBe("single"));
     expect(artifactRegion().hasAttribute("data-sheet-open")).toBe(false);
     expect(header().hasAttribute("inert")).toBe(false);
-  });
-
-  it("the drawer's divider stays in the drawer: the docked rail keeps the member's share", async () => {
-    fake.preferences = { threads_share: 0.4 };
-    resizeWindow(960);
-    openApp(fake);
-    await composer();
-    const user = userEvent.setup();
-    await user.click(await within(aside()).findByRole("button", { name: "Show threads" }));
-    const drawer = within(await screen.findByRole("dialog", { name: "Workspace" }));
-    const divider = () => screen.getByRole("separator", { name: "Resize Threads and Files" });
-    await waitFor(() => expect(divider().getAttribute("aria-valuenow")).toBe("40"));
-    drawer.getByRole("separator", { name: "Resize Threads and Files" }).focus();
-    await user.keyboard("{ArrowDown}{ArrowDown}");
-    expect(divider().getAttribute("aria-valuenow")).toBe("50");
-    resizeWindow(DESKTOP_WIDTH);
-    await waitFor(() => expect(divider().getAttribute("aria-valuenow")).toBe("40"));
-    await new Promise((r) => setTimeout(r, 900));
-    expect(puts()).toHaveLength(0);
   });
 });
 
@@ -402,7 +380,7 @@ describe("manual choices come back when space returns (ac-2)", () => {
     await composer();
     await userEvent
       .setup()
-      .click(await within(aside()).findByRole("button", { name: "Show threads" }));
+      .click(await within(aside()).findByRole("button", { name: "Show files" }));
     await screen.findByRole("dialog", { name: "Workspace" });
     resizeWindow(DESKTOP_WIDTH);
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Workspace" })).toBeNull());
