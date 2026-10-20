@@ -5,6 +5,7 @@ import { logger } from "../logger.js";
 import { deleteReleasedBlobs } from "../retention/blobs.js";
 import { deleteForever, type DeleteForeverError } from "../retention/delete-forever.js";
 import { exportResponseBody, recordExport } from "../retention/export.js";
+import { trackedDownload } from "../retention/export-stream.js";
 import {
   recordThreadExport,
   threadExportBody,
@@ -82,17 +83,8 @@ export function threadRetentionRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
     if (refused) return refused;
     const team = c.get("team");
     const userId = c.get("user").id;
-    if (exporting.has(userId) || exporting.size >= MAX_EXPORTS_PER_REPLICA) {
-      return c.json(
-        {
-          code: "export_in_progress",
-          message: "An export is already running. Try again when it has finished.",
-        },
-        429,
-      );
-    }
-    // Claimed before any await, so concurrent requests can't both pass the checks above.
-    exporting.add(userId);
+    // Claimed before any await, so concurrent requests can't both pass the check.
+    if (!claimExport(userId)) return exportInProgress(c);
     const viewer = { teamId: team.id, userId };
     try {
       await recordExport(db, viewer);
@@ -100,42 +92,23 @@ export function threadRetentionRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
       exporting.delete(userId);
       throw err;
     }
-    const body = exportResponseBody(db, viewer, deps.blobs);
-    // Released when the stream ends, fails or the client goes away.
-    const done = () => exporting.delete(userId);
-    const reader = body.getReader();
-    const tracked = new ReadableStream<Uint8Array>({
-      async pull(controller) {
-        try {
-          const { value, done: finished } = await reader.read();
-          if (finished) {
-            done();
-            controller.close();
-          } else controller.enqueue(value);
-        } catch (err) {
-          done();
-          logger.error({ err, teamId: team.id }, "thread export failed");
-          controller.error(err);
-        }
-      },
-      async cancel(reason) {
-        done();
-        await reader.cancel(reason);
-      },
+    const body = tracked(exportResponseBody(db, viewer, deps.blobs), userId, {
+      teamId: team.id,
     });
     const day = new Date().toISOString().slice(0, 10);
-    return new Response(tracked, {
+    return new Response(body, {
       headers: {
+        ...DOWNLOAD_HEADERS,
         "content-type": "application/zip",
         "content-disposition": `attachment; filename="kobe-${team.slug}-${day}.zip"`,
-        "cache-control": "no-store",
       },
     });
   });
 
   /**
    * `GET /v1/threads/:id/export` → one conversation as Markdown (`/export`, KOBE-450): the
-   * owner's only, under the same download guards as the full export, audited before it starts.
+   * owner's only, under the same download guards and per-user slot as the full export, audited
+   * before it starts.
    */
   app.get("/:id/export", async (c) => {
     const refused = refuseDownload(c, deps.publicUrl);
@@ -143,21 +116,77 @@ export function threadRetentionRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
     const id = uuidSchema.safeParse(c.req.param("id"));
     if (!id.success) return invalidRequest(c);
     const viewer = { teamId: c.get("team").id, userId: c.get("user").id };
-    const thread = await recordThreadExport(db, viewer, id.data);
+    if (!claimExport(viewer.userId)) return exportInProgress(c);
+    let thread;
+    try {
+      thread = await recordThreadExport(db, viewer, id.data);
+    } catch (err) {
+      exporting.delete(viewer.userId);
+      throw err;
+    }
     if (thread === null) {
+      exporting.delete(viewer.userId);
       const [status, message] = ERRORS.thread_not_found;
       return c.json({ code: "thread_not_found", message }, status);
     }
-    return new Response(threadExportBody(db, viewer, deps.blobs, thread), {
+    const body = tracked(
+      threadExportBody(db, viewer, deps.blobs, thread),
+      viewer.userId,
+      { teamId: viewer.teamId, threadId: thread.id },
+      INCOMPLETE_MARKDOWN,
+    );
+    return new Response(body, {
       headers: {
+        ...DOWNLOAD_HEADERS,
         "content-type": "text/markdown; charset=utf-8",
         "content-disposition": `attachment; filename="${threadExportFileName(thread)}"`,
-        "cache-control": "no-store",
       },
     });
   });
 
   return app;
+}
+
+const DOWNLOAD_HEADERS = {
+  "cache-control": "no-store",
+  // Model-written content: never sniffed into something the browser would render (LOW-3).
+  "x-content-type-options": "nosniff",
+} as const;
+
+/** The Markdown export's last line when reading it failed part way (the error is logged). */
+const INCOMPLETE_MARKDOWN = new TextEncoder().encode(
+  "\n\n_Export incomplete: Kobe could not read the rest of this conversation._\n",
+);
+
+/** One export at a time per user, and at most `MAX_EXPORTS_PER_REPLICA` on this replica. */
+function claimExport(userId: string): boolean {
+  if (exporting.has(userId) || exporting.size >= MAX_EXPORTS_PER_REPLICA) return false;
+  exporting.add(userId);
+  return true;
+}
+
+function exportInProgress(c: Context<{ Variables: TeamVariables }>) {
+  return c.json(
+    {
+      code: "export_in_progress",
+      message: "An export is already running. Try again when it has finished.",
+    },
+    429,
+  );
+}
+
+/** `body` releasing the user's slot when it ends, fails or the client goes away; failures logged. */
+function tracked(
+  body: ReadableStream<Uint8Array>,
+  userId: string,
+  context: Readonly<Record<string, string>>,
+  tail?: Uint8Array,
+): ReadableStream<Uint8Array> {
+  return trackedDownload(body, {
+    release: () => exporting.delete(userId),
+    failed: (err) => logger.error({ err, ...context }, "thread export failed"),
+    ...(tail ? { tail } : {}),
+  });
 }
 
 /**
