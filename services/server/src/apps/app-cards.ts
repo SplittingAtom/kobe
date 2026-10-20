@@ -19,7 +19,7 @@ import {
   type KobeTx,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
-import { urlSha256 } from "../connectors/site-key.js";
+import { usableSiteKeyIds } from "../connectors/site-key.js";
 import type { RateLimiter } from "../sandbox/rate-limit.js";
 import { loadUserGrantFacts } from "../runs/run-mcp.js";
 import { piBranchPoint } from "../runs/run-prompt.js";
@@ -384,13 +384,12 @@ async function stillLaunchable(tx: KobeTx, teamId: string, row: QueuedRow): Prom
   const res = await tx.execute<{
     auth_kind: string;
     credential_source: string;
-    url: string;
     tools_snapshot: unknown;
     exposure: string | null;
     enabled_tools: string[] | null;
     template: boolean;
   }>(sql`
-    SELECT c.auth_kind, c.credential_source, c.url, c.tools_snapshot, tc.exposure, tc.enabled_tools,
+    SELECT c.auth_kind, c.credential_source, c.tools_snapshot, tc.exposure, tc.enabled_tools,
            EXISTS (SELECT 1 FROM connector_ui_resources u
                     WHERE u.connector_id = c.id AND u.uri = ${row.template_uri}
                       AND u.status = 'pinned' AND u.approved AND u.sha256 = ${row.template_sha256})
@@ -411,10 +410,7 @@ async function stillLaunchable(tx: KobeTx, teamId: string, row: QueuedRow): Prom
   if (!exposedToApps(exposure, tool)) return false;
   if (c.auth_kind === "none") return true;
   if (c.credential_source === "site") {
-    const key = await tx.execute(sql`
-      SELECT 1 FROM connector_site_keys
-       WHERE connector_id = ${row.connector_id} AND url_sha256 = ${urlSha256(c.url)}`);
-    return (key.rowCount ?? key.rows.length) > 0;
+    return (await usableSiteKeyIds(tx, [row.connector_id])).has(row.connector_id);
   }
   const grants = await loadUserGrantFacts(tx, teamId, row.opened_by);
   return grants.some((g) => g.connectorId === row.connector_id && g.kind === c.auth_kind);

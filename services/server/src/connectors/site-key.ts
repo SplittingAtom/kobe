@@ -5,6 +5,7 @@ import {
   connectorSiteKeys,
   connectors,
   eq,
+  inArray,
   isNull,
   sql,
   type KobeDb,
@@ -40,18 +41,16 @@ export function siteKeyContext(connectorId: string, url: string) {
 }
 
 /**
- * The connector's site key, if it is a live `api_key` connector in `site` mode, has one, and still
- * has the URL the key was set for. Fails closed: a URL that changed by any path (an older release
- * that knows nothing of site keys included), or a ciphertext that does not open (another envelope
- * key, tampering), is no key.
+ * What makes a stored site key usable (KOBE-303): the connector is live (not removed), in `site`
+ * mode, `api_key` auth, and the key was set for the URL the connector has now (review M2). The one
+ * definition shared by the proxy's reveal, probes, MCP Apps (MA8) and the run's connectors
+ * (KOBE-449). Fails closed: a URL that changed by any path, an older release that knows nothing
+ * of site keys included, leaves no usable key.
  */
-export async function revealSiteKey(
-  db: KobeDb | KobeTx,
-  envelope: Envelope,
-  connectorId: string,
-): Promise<string | undefined> {
-  const [row] = await db
+const usableSiteKeyRows = (db: KobeDb | KobeTx, connectorIds: readonly string[]) =>
+  db
     .select({
+      connectorId: connectorSiteKeys.connectorId,
       sealed: connectorSiteKeys.sealed,
       boundTo: connectorSiteKeys.urlSha256,
       url: connectors.url,
@@ -60,13 +59,38 @@ export async function revealSiteKey(
     .innerJoin(connectors, eq(connectors.id, connectorSiteKeys.connectorId))
     .where(
       and(
-        eq(connectorSiteKeys.connectorId, connectorId),
+        inArray(connectorSiteKeys.connectorId, [...connectorIds]),
         eq(connectors.credentialSource, "site"),
         eq(connectors.authKind, "api_key"),
         isNull(connectors.deletedAt),
       ),
-    );
-  if (!row || row.boundTo !== urlSha256(row.url)) return undefined;
+    )
+    .then((rows) => rows.filter((r) => r.boundTo === urlSha256(r.url)));
+
+/**
+ * Which of `connectorIds` have a usable site key right now, without opening any secret: what
+ * "a member can call it with the site key" means for MA8 and for a run's connectors (KOBE-449).
+ * The reveal may still fail on a ciphertext that does not open; the proxy then refuses the call.
+ */
+export async function usableSiteKeyIds(
+  db: KobeDb | KobeTx,
+  connectorIds: readonly string[],
+): Promise<Set<string>> {
+  if (connectorIds.length === 0) return new Set();
+  return new Set((await usableSiteKeyRows(db, connectorIds)).map((r) => r.connectorId));
+}
+
+/**
+ * The connector's site key, if it is usable ({@link usableSiteKeyRows}) and its ciphertext opens
+ * (another envelope key or tampering is no key).
+ */
+export async function revealSiteKey(
+  db: KobeDb | KobeTx,
+  envelope: Envelope,
+  connectorId: string,
+): Promise<string | undefined> {
+  const [row] = await usableSiteKeyRows(db, [connectorId]);
+  if (!row) return undefined;
   try {
     return envelope.openString(row.sealed, siteKeyContext(connectorId, row.url));
   } catch {

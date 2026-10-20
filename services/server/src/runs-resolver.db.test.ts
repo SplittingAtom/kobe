@@ -410,7 +410,12 @@ describe("run start resolves skills (KOBE-80)", () => {
 });
 
 describe("effective connectors from grants (KOBE-111)", () => {
-  async function resolveFor(team: string, ownerId: string, thread: string) {
+  async function resolveFor(
+    team: string,
+    ownerId: string,
+    thread: string,
+    extra: { readonly noPersonalGrants?: true } = {},
+  ) {
     const db = f.fx.replica(0).deps.database.db;
     return withTeam(db, team, async (tx) => {
       const { rows } = await tx.execute<{ agent_scope: string; agent_id: string; v: number }>(
@@ -428,6 +433,7 @@ describe("effective connectors from grants (KOBE-111)", () => {
         agentId: t.agent_id,
         agentVersion: t.v,
         approvalMode: "auto",
+        ...extra,
       });
     });
   }
@@ -481,6 +487,78 @@ describe("effective connectors from grants (KOBE-111)", () => {
     if (mate === undefined) throw new Error("no teammate");
     const theirs = await resolveFor(w.team, mate.id, thread);
     expect(theirs.ok && theirs.mcp?.servers.map((s) => s.name)).toEqual([open.name]);
+  });
+
+  it("KOBE-449: a usable site-wide key connects every member; exposure and globs apply; stale, removed and evals do not", async () => {
+    const w = await f.world(1);
+    await catalog(w.team, w.owner.id, [["fast", true]]);
+    const site = await registerConnector(f.fx.admin, {
+      name: `site-${randomBytes(3).toString("hex")}`,
+      url: "https://site.example/mcp",
+      authKind: "api_key",
+    });
+    await f.fx.admin.query(`UPDATE connectors SET credential_source = 'site' WHERE id = $1`, [
+      site.id,
+    ]);
+    await enableTeamConnector(f.fx.admin, w.team, site.id, w.owner.id, "read_only");
+    const setKey = () =>
+      f.fx.admin.query(
+        `INSERT INTO connector_site_keys (connector_id, sealed, key_id, url_sha256, hint, updated_by)
+         SELECT id, 'e1.k.sealed', 'k', encode(sha256(convert_to(url, 'UTF8')), 'hex'), '••••', $2
+           FROM connectors WHERE id = $1`,
+        [site.id, w.owner.id],
+      );
+    await setKey();
+    const seg = site.name.replace(/-/g, "_");
+    const thread = await pinnedThread(w.owner, { connectors: [site.name] });
+    const mate = w.others[0];
+    if (mate === undefined) throw new Error("no teammate");
+    const tools = async (user: string, extra: { readonly noPersonalGrants?: true } = {}) => {
+      const r = await resolveFor(w.team, user, thread, extra);
+      return r.ok ? (r.mcp?.servers.flatMap((s) => s.tools.map((t) => t.pi_name)) ?? []) : "failed";
+    };
+    // Neither member holds a grant: the site key alone connects both; read_only exposure applies.
+    const grants = await f.fx.admin.query(
+      `SELECT 1 FROM connector_grants WHERE connector_id = $1`,
+      [site.id],
+    );
+    expect(grants.rowCount).toBe(0);
+    expect(await tools(w.owner.id)).toEqual([`mcp__${seg}__get_issue`]);
+    expect(await tools(mate.id)).toEqual([`mcp__${seg}__get_issue`]);
+    const res = await resolveFor(w.team, mate.id, thread);
+    expect(res.ok && res.config?.mcp_servers?.map((s) => s.name)).toEqual([site.name]);
+    expect(res.ok && res.omissions).toEqual([]);
+    // The agent's globs still apply.
+    const denied = await pinnedThread(w.owner, {
+      connectors: [site.name],
+      tools: { deny: [`mcp__${seg}__*`] },
+    });
+    const none = await resolveFor(w.team, mate.id, denied);
+    expect(none.ok && none.mcp).toEqual({ servers: [] });
+    // A skill eval (noPersonalGrants) never gets the site-key connector (KOBE-325/326).
+    expect(await tools(mate.id, { noPersonalGrants: true })).toEqual([]);
+    // Stale: the URL changed after the key was set.
+    await f.fx.admin.query(
+      `UPDATE connectors SET url = 'https://moved.example/mcp' WHERE id = $1`,
+      [site.id],
+    );
+    expect(await tools(mate.id)).toEqual([]);
+    const stale = await resolveFor(w.team, mate.id, thread);
+    expect(stale.ok && stale.omissions).toEqual([
+      { kind: "connector", name: site.name, reason: "not_user_connected" },
+    ]);
+    // Re-entered for the new URL, then removed.
+    await f.fx.admin.query(`DELETE FROM connector_site_keys WHERE connector_id = $1`, [site.id]);
+    await setKey();
+    expect(await tools(mate.id)).toEqual([`mcp__${seg}__get_issue`]);
+    await f.fx.admin.query(`DELETE FROM connector_site_keys WHERE connector_id = $1`, [site.id]);
+    expect(await tools(mate.id)).toEqual([]);
+    // A key left behind after the connector went back to member keys does not count either.
+    await setKey();
+    await f.fx.admin.query(`UPDATE connectors SET credential_source = 'member' WHERE id = $1`, [
+      site.id,
+    ]);
+    expect(await tools(mate.id)).toEqual([]);
   });
 
   it("the agent's tools.allow narrows the tools; a connector left empty is not offered", async () => {

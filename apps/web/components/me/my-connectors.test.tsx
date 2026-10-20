@@ -14,6 +14,7 @@ const connector = (over: Record<string, unknown> = {}) => ({
   name: "jira",
   auth_kind: "api_key",
   credential_source: "member",
+  site_key_ready: false,
   status: "active",
   icon_url: null,
   enabled: true,
@@ -150,13 +151,37 @@ describe("site-wide keys (KOBE-303)", () => {
     stubApi({
       [`GET ${TEAM_CONNECTORS}`]: [
         200,
-        { connectors: [connector({ id: "c-9", name: "catalyst", credential_source: "site" })] },
+        {
+          connectors: [
+            connector({
+              id: "c-9",
+              name: "catalyst",
+              credential_source: "site",
+              site_key_ready: true,
+            }),
+          ],
+        },
       ],
       [`GET ${GRANTS}`]: [200, { grants: [] }],
     });
     renderTeam(<MyConnectorsPage />, MEMBER);
     await screen.findByRole("article", { name: "catalyst" });
     expect(card("catalyst").getByText(/Provided by your organization/)).toBeTruthy();
+    expect(card("catalyst").queryByLabelText("API key")).toBeNull();
+  });
+
+  it("says the organization has not set its key yet while none is usable (KOBE-449)", async () => {
+    stubApi({
+      [`GET ${TEAM_CONNECTORS}`]: [
+        200,
+        { connectors: [connector({ id: "c-9", name: "catalyst", credential_source: "site" })] },
+      ],
+      [`GET ${GRANTS}`]: [200, { grants: [] }],
+    });
+    renderTeam(<MyConnectorsPage />, MEMBER);
+    await screen.findByRole("article", { name: "catalyst" });
+    expect(card("catalyst").queryByText(/Provided by your organization/)).toBeNull();
+    expect(card("catalyst").getByText(/has not set it yet/)).toBeTruthy();
     expect(card("catalyst").queryByLabelText("API key")).toBeNull();
   });
 });
