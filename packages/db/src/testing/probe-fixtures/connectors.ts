@@ -4,6 +4,8 @@ import {
   connectors,
   teamConnectors,
   teamWebSearch,
+  threadConnectorsOff,
+  threads,
   users,
 } from "../../schema/index.js";
 import type { connectors as connectorsDomain } from "../../tenancy/connectors.js";
@@ -43,6 +45,22 @@ export const connectorsFixtures: Record<(typeof connectorsDomain.team)[number], 
       keyId: "probe",
       hint: "••••test",
     });
+  },
+  thread_connectors_off: async (tx, teamId) => {
+    const userId = randomUUID();
+    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+    const [thread] = await tx
+      .insert(threads)
+      .values({ teamId, ownerUserId: userId, title: "Probe" })
+      .returning({ id: threads.id });
+    const [connector] = await tx
+      .insert(connectors)
+      .values({ name: `probe-${randomUUID().slice(0, 8)}`, url: "https://mcp.probe.test/mcp" })
+      .returning({ id: connectors.id });
+    if (!thread || !connector) throw new Error("probe: insert returned nothing");
+    await tx
+      .insert(threadConnectorsOff)
+      .values({ teamId, threadId: thread.id, connectorId: connector.id, turnedOffBy: userId });
   },
   team_web_search: async (tx, teamId) => {
     const userId = randomUUID();

@@ -5,7 +5,8 @@ export const connectors = defineDomain({
   // Team enablement and exposure of a connector (KOBE-58 minimal model; KOBE-60 manages it), and
   // each user's own API-key grant for it (KOBE-108; sealed with the KOBE-107 envelope), and the
   // team's opt-in to web search (KOBE-113).
-  team: ["team_connectors", "connector_grants", "team_web_search"],
+  // A conversation's connectors turned off by its owner (KOBE-451).
+  team: ["team_connectors", "connector_grants", "team_web_search", "thread_connectors_off"],
   siteWide: ["connectors", "web_search_settings", "connector_site_keys", "connector_ui_resources"],
   grants: {
     // The connector registry (site admins, KOBE-59): server URL, auth kind, pinned tools; no
