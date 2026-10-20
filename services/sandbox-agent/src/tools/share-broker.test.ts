@@ -66,7 +66,15 @@ function setup(options: { sends?: boolean; push?: (rel: string) => Promise<Pushe
       }),
   });
   const reply = (r: KobeToolsResponse) => replies.push(r);
-  const settle = () => new Promise((r) => setTimeout(r, 20));
+  const settle = async () => {
+    // Every call ends in a frame or a reply; wait for one (file I/O is slow under load),
+    // then a little longer so a late frame would still show.
+    const deadline = Date.now() + 5000;
+    while (frames.length === 0 && replies.length === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    await new Promise((r) => setTimeout(r, 30));
+  };
   return { broker, frames, pushed, order, replies, reply, settle };
 }
 
@@ -210,7 +218,8 @@ describe("FileShareBroker", () => {
     let release: (f: PushedFile) => void = () => {};
     const t = setup({ push: () => new Promise((r) => (release = r)) });
     t.broker.share(THREAD, RUN, request({ path: "out/report.csv" }), t.reply);
-    await t.settle();
+    // The push is gated, so no frame or reply can come yet; a short tick is all there is to wait for.
+    await new Promise((r) => setTimeout(r, 20));
     t.broker.failRun(RUN, "run ended");
     release({ path: "out/report.csv", rev: 1, sha256: SHA, size: 8 });
     await t.settle();
