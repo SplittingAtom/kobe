@@ -257,7 +257,14 @@ describe("rail drop zone: upload (ac-1)", () => {
       const rail = await mount();
       fireEvent.drop(rail, files(fileOf("a.txt")));
       expect(await screen.findByText("Added a.txt to uploads.")).toBeTruthy();
-      act(() => vi.advanceTimersByTime(DROP_NOTICE_MS));
+      // The drop also lists Files again (KOBE-461), which can land after it on a slow runner and
+      // start the notice's timer later: advance until it is gone.
+      for (let i = 0; i < 5 && screen.queryByText("Added a.txt to uploads."); i += 1) {
+        await act(async () => {
+          vi.advanceTimersByTime(DROP_NOTICE_MS);
+          await Promise.resolve();
+        });
+      }
       expect(screen.queryByText("Added a.txt to uploads.")).toBeNull();
 
       answers.push(refusal(413, "file_too_large", "Too big."));
