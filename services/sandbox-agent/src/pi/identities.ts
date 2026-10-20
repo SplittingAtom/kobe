@@ -61,7 +61,8 @@ export type HelperRunner = (
 export const RECLAIM_TIMEOUT_MS = 5 * 60_000;
 export const RECLAIM_RETRY_DELAYS_MS = [5_000, 30_000] as const;
 
-const runHelper: HelperRunner = (helper, args, timeoutMs = HELPER_TIMEOUT_MS) =>
+/** The real runner: a child process killed (SIGKILL) at `timeoutMs`. Exported for tests. */
+export const runHelper: HelperRunner = (helper, args, timeoutMs = HELPER_TIMEOUT_MS) =>
   new Promise((resolve) => {
     let child;
     try {
