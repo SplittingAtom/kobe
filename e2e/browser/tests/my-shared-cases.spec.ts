@@ -11,6 +11,8 @@ import { panelOf } from "./support/panel.js";
  */
 const AGENT = process.env["KOBE_AGENT"];
 
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 test("share, clear the rating, withdraw from My shared cases", async ({ chat, page }) => {
   test.skip(!AGENT, "set KOBE_AGENT to a team agent's name");
   await chat.open();
@@ -20,7 +22,8 @@ test("share, clear the rating, withdraw from My shared cases", async ({ chat, pa
   // member does, then check the radio took it.
   // (`has` is matched inside each label, so the radio's locator starts from the page.)
   const picker = page.getByRole("radiogroup", { name: "Chat with" });
-  const radio = page.getByRole("radio", { name: new RegExp(AGENT as string) });
+  // The agent's name as text: gate1's "Kobe (Team1)" has regex metacharacters (KOBE-457).
+  const radio = page.getByRole("radio", { name: new RegExp(escapeRegExp(AGENT as string)) });
   await picker.locator("label").filter({ has: radio }).click();
   await expect(picker.locator(radio)).toBeChecked();
   await page.keyboard.press("Escape");
