@@ -390,6 +390,45 @@ describe("the picker's opening tool result (KOBE-460 fix: Loading catalogs…)",
   });
 });
 
+describe("the picker's opening, more cases (review LOW-2)", () => {
+  it("re-reads the apps list when the opening finds the app no longer available", async () => {
+    fake.teamApps = [PICKER];
+    fake.preferences = { rail_picker: PICKER.appId, rail_tab: "apps" };
+    fake.appCallError = { status: 404, code: "app_not_available", message: "Gone." };
+    // The app goes away as the call is refused: only a read after the refusal can see it.
+    vi.stubGlobal("fetch", async (...args: Parameters<typeof fetch>) => {
+      const res = await fake.fetch(...args);
+      if (String(args[0] instanceof Request ? args[0].url : args[0]).includes("/calls")) {
+        fake.teamApps = [];
+      }
+      return res;
+    });
+    openApp(fake, answered());
+    await waitFor(() => expect(openings()).toHaveLength(1), { timeout: 4_000 });
+    // Re-read: the picker is gone, and so is the section.
+    await waitFor(() => expect(screen.queryByRole("combobox", { name: "Picker" })).toBeNull(), {
+      timeout: 4_000,
+    });
+    expect(screen.queryByTitle(PICKER_FRAME)).toBeNull();
+  });
+
+  it("switching pickers fast opens the last one with its own result, once each", async () => {
+    const OTHER_FRAME = "query picker (app from Catalyst)";
+    fake.teamApps = [PICKER, QUERY_PICKER];
+    openApp(fake, answered());
+    const section = await appsTab();
+    const user = userEvent.setup();
+    await user.selectOptions(pickerSelect(section), PICKER.appId);
+    await user.selectOptions(pickerSelect(section), QUERY_PICKER.appId);
+    expect(await screen.findByTitle(OTHER_FRAME, undefined, { timeout: 4_000 })).toBeTruthy();
+    expect(screen.queryByTitle(PICKER_FRAME)).toBeNull();
+    await new Promise((r) => setTimeout(r, 50));
+    const tools = appCalls().map((r) => (r.body as { tool: string }).tool);
+    expect(tools.filter((t) => t === QUERY_PICKER.tool)).toHaveLength(1);
+    expect(tools.filter((t) => t === PICKER.tool).length).toBeLessThanOrEqual(1);
+  });
+});
+
 describe("the rail's width with a picker (KOBE-460 ac-5)", () => {
   it("widens to at least 400 px while a picker shows, and None restores the member's width", async () => {
     fake.teamApps = [PICKER];

@@ -19,6 +19,16 @@ export type PickerOpening =
   | { readonly kind: "open"; readonly result: unknown }
   | { readonly kind: "failed"; readonly code: string; readonly message: string };
 
+/** A settled answer, with the thread it was for (a failure stands only on that thread). */
+type Settled =
+  | { readonly kind: "open"; readonly result: unknown }
+  | {
+      readonly kind: "failed";
+      readonly code: string;
+      readonly message: string;
+      readonly for: string | null;
+    };
+
 const TOOL_ERROR = "its tool returned an error.";
 const inflight = new Map<string, Promise<ToolCallAnswer>>();
 
@@ -33,7 +43,7 @@ function openOnce(appId: string, tool: string, teamId: string, threadId: string 
   return call;
 }
 
-export function openingOf(answer: ToolCallAnswer): PickerOpening {
+export function openingOf(answer: ToolCallAnswer): Exclude<PickerOpening, { kind: "opening" }> {
   if (!answer.ok) return { kind: "failed", code: answer.code, message: answer.message };
   if ((answer.result as { isError?: unknown }).isError === true) {
     return { kind: "failed", code: "tool_error", message: TOOL_ERROR };
@@ -41,7 +51,11 @@ export function openingOf(answer: ToolCallAnswer): PickerOpening {
   return { kind: "open", result: answer.result };
 }
 
-/** Opens `app` on mount and on `retry`; `onAnswer` sees the answer with the thread it named. */
+/**
+ * Opens `app` on mount and on `retry`; `onAnswer` sees the answer with the thread it named. Until
+ * it is open, a change of thread on screen opens it again for that thread (the earlier answer is
+ * dropped, review MEDIUM-1); once open, the frame stays and is not opened again.
+ */
 function usePickerOpening(
   app: RailApp,
   teamId: string,
@@ -49,31 +63,39 @@ function usePickerOpening(
   ready: boolean,
   onAnswer: (answer: ToolCallAnswer, calledFor: string | null) => void,
 ) {
-  const [opening, setOpening] = useState<PickerOpening>({ kind: "opening" });
+  const [settled, setSettled] = useState<Settled | null>(null);
   const [attempt, setAttempt] = useState(0);
-  // Read when the call starts: a thread change later does not reopen the frame.
-  const thread = useRef(threadId);
-  thread.current = threadId;
   const report = useRef(onAnswer);
-  report.current = onAnswer;
-  const { appId, tool } = app;
   useEffect(() => {
-    if (!ready) return;
+    report.current = onAnswer;
+  }, [onAnswer]);
+  const { appId, tool } = app;
+  const open = settled?.kind === "open";
+  useEffect(() => {
+    if (!ready || open) return;
     let live = true;
-    const calledFor = thread.current;
+    const calledFor = threadId;
     void openOnce(appId, tool, teamId, calledFor).then((answer) => {
       if (!live) return;
       report.current(answer, calledFor);
-      setOpening(openingOf(answer));
+      const next = openingOf(answer);
+      setSettled(next.kind === "failed" ? { ...next, for: calledFor } : next);
     });
     return () => {
       live = false;
     };
-  }, [appId, tool, teamId, ready, attempt]);
+  }, [appId, tool, teamId, ready, open, threadId, attempt]);
   const retry = () => {
-    setOpening({ kind: "opening" });
+    setSettled(null);
     setAttempt((n) => n + 1);
   };
+  // A failure for another thread is not this thread's: it is being opened again.
+  const opening: PickerOpening =
+    settled === null || (settled.kind === "failed" && settled.for !== threadId)
+      ? { kind: "opening" }
+      : settled.kind === "open"
+        ? settled
+        : { kind: "failed", code: settled.code, message: settled.message };
   return { opening, retry };
 }
 

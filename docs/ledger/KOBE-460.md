@@ -89,3 +89,9 @@
 - Tests: `rail-pickers.test.tsx` (+6: input/result after initialize, thread_id, new conversation,
   once per selection and again after Files, error + retry, connector off, isError), new
   `rail-picker-opening.test.tsx` (StrictMode once, waits for thread, failures).
+- Review 84654ecd fixes: MEDIUM-1 a failure stands only on its thread; until open, a thread
+  change re-opens for the new thread (stale answers dropped), once open it stays. MEDIUM-2
+  `useThreadSettled` stops waiting after `THREAD_SETTLE_MS` (3 s), then opens for the runtime's
+  thread (none in a new conversation). LOW-1 ref write moved to an effect (thread ref gone).
+  LOW-2 tests: in-flight thread switch, connector_off then switch, open not re-opened, settle
+  timeout, app_not_available re-read, fast picker switch.
