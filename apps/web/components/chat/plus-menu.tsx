@@ -2,22 +2,56 @@
 
 import { AppWindowIcon, BrainIcon, KeyRoundIcon, PaperclipIcon } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import { listChatConnectors } from "../../lib/chat/composer-plus-api";
 import { MY_CONNECTOR_KEYS } from "../../lib/apps/app-cards";
 import { useAppLaunch } from "../apps/use-app-launch";
 import { IconAction } from "../shell/icon-action";
 import { hasRailApps, useRailApps } from "../shell/rail-apps";
 import { useNavigate } from "../shell/use-navigate";
 import { chatPortalContainer } from "../ui/chat-portal";
+import { useChatSession } from "./kobe-runtime";
 import { ConnectorsSubmenu } from "./plus-connectors";
 import { PLUS_CONTENT, PLUS_ITEM } from "./plus-menu-styles";
 import { SkillsSubmenu } from "./plus-skills";
 
 export const MEMORY_SOON = "Coming soon";
 
+/** The connectors off in the thread on screen (none for a new conversation), read on open. */
+function useConnectorsOff(threadId: string | null, open: boolean): ReadonlySet<string> {
+  const session = useChatSession();
+  const [off, setOff] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    if (!open || threadId === null) {
+      setOff(new Set());
+      return undefined;
+    }
+    let alive = true;
+    void listChatConnectors(session.teamId, threadId).then((res) => {
+      if (alive && res.ok) {
+        setOff(new Set(res.data.connectors.filter((c) => !c.enabled).map((c) => c.connectorId)));
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [session.teamId, threadId, open]);
+  return off;
+}
+
 /** The + menu's Apps (KOBE-451): the rail's Apps, launched exactly as the rail launches them. */
-function AppsSubmenu() {
+function AppsSubmenu({
+  threadId,
+  open,
+}: {
+  readonly threadId: string | null;
+  readonly open: boolean;
+}) {
   const apps = useRailApps();
+  // An app whose connector is off in this conversation is not offered here (review LOW-5); the
+  // server refuses its card there too.
+  const off = useConnectorsOff(threadId, open);
+  const shown = (apps?.apps ?? []).filter((app) => !off.has(app.connectorId));
   const navigate = useNavigate();
   const { busy, error, launch } = useAppLaunch();
   return (
@@ -33,10 +67,10 @@ function AppsSubmenu() {
           sideOffset={4}
           className={PLUS_CONTENT}
         >
-          {!hasRailApps(apps) && (
+          {(!hasRailApps(apps) || (shown.length === 0 && apps.needsKey.length === 0)) && (
             <p className="text-muted-foreground m-0 px-2 py-1.5 text-sm">No apps for you here.</p>
           )}
-          {apps?.apps.map((app) => (
+          {shown.map((app) => (
             <DropdownMenu.Item
               key={app.appId}
               className={PLUS_ITEM}
@@ -126,7 +160,7 @@ export function PlusMenu({
             </span>
           </DropdownMenu.Item>
           <SkillsSubmenu draft={draft} threadId={threadId} open={open} />
-          <AppsSubmenu />
+          <AppsSubmenu threadId={threadId} open={open} />
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

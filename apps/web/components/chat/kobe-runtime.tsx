@@ -216,13 +216,18 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
   };
 
   /** Edit and Regenerate: a new version beside the prompt, from its parent entry (`branchPoint`). */
-  const branchAndSend = async (text: string, userMessageId: string | null | undefined) => {
+  const branchAndSend = async (
+    text: string,
+    userMessageId: string | null | undefined,
+    skill: string | undefined,
+  ) => {
     const point = branchPoint(projectionRef.current, userMessageId);
     if (!point) {
       controller?.reportError(CANNOT_BRANCH, text);
       return;
     }
-    await controller?.send(text, point.parentEntryId);
+    // KOBE-451 review MEDIUM-2: the skill goes again by name; the server re-checks it.
+    await controller?.send(text, point.parentEntryId, undefined, undefined, undefined, skill);
   };
 
   const inTrash = state.summary?.deletedAt != null;
@@ -241,10 +246,17 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
       // A message that never reached the server goes back into the composer.
       if (!(await send(textOf(message)))) throw new MessageNotSentError();
     },
-    onEdit: async (message) => branchAndSend(textOf(message), message.sourceId),
+    // An edit keeps the message's skill unless the member removed its chip (EditComposer).
+    onEdit: async (message) => {
+      const key = editSkillKey(message.sourceId ?? "");
+      const skill = session.skillPicks.get(key);
+      session.skillPicks.clear(key);
+      await branchAndSend(textOf(message), message.sourceId, skill);
+    },
+    // A regenerate sends the same text with the same skill.
     onReload: async (parentId) => {
       const point = branchPoint(projectionRef.current, parentId);
-      await branchAndSend(point?.text ?? "", parentId);
+      await branchAndSend(point?.text ?? "", parentId, point?.skill);
     },
     onCancel: async () => controller?.stop(),
     setMessages: () => {
@@ -263,6 +275,11 @@ function threadRuntimeHookFor(session: ChatSession): () => AssistantRuntime {
   return function useSessionThreadRuntime() {
     return useKobeThreadRuntime(session);
   };
+}
+
+/** Where an edit box keeps the skill of the message it edits (KOBE-451 review MEDIUM-2). */
+export function editSkillKey(messageId: string): string {
+  return `edit:${messageId}`;
 }
 
 /** The app-level runtime: the thread list (controlled by `threadId`) and the thread on screen. */

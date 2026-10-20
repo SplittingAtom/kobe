@@ -2,7 +2,7 @@
 
 import { CheckIcon, CircleXIcon, PlugIcon } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useState, useSyncExternalStore } from "react";
 import {
   listChatConnectors,
   setThreadConnector,
@@ -13,9 +13,8 @@ import { chatPortalContainer } from "../ui/chat-portal";
 import { useChatSession } from "./kobe-runtime";
 import { PLUS_CONTENT, PLUS_ITEM } from "./plus-menu-styles";
 
-/** Why a connector can't be turned off before the conversation exists. */
-export const NOT_STARTED =
-  "Every connector is on for a new conversation; turn one off after your first message.";
+/** What a toggle means before the first message (KOBE-451 review MEDIUM-3). */
+export const NOT_STARTED = "Applies to this new conversation once you send its first message.";
 
 type Load =
   | { readonly status: "loading" }
@@ -80,7 +79,8 @@ function Broken({ connector }: { readonly connector: ChatConnector }) {
 /**
  * The + menu's Connectors (KOBE-451): the member's MCP servers in this team as the server lists
  * them. A working one is a checkbox for this conversation only (on by default; stored on the
- * server, which refuses a connector the member can't use); a broken one shows a red ✕, the
+ * server, which refuses a connector the member can't use; before the first message the choice
+ * goes with the thread's creation); a broken one shows a red ✕, the
  * server's reason and, where it applies, its fix link, and no toggle.
  */
 export function ConnectorsSubmenu({
@@ -93,9 +93,20 @@ export function ConnectorsSubmenu({
   const session = useChatSession();
   const [load, setLoad] = useChatConnectors(threadId, open);
   const [error, setError] = useState<string | null>(null);
+  // Before the first message the choice is the draft's; the thread's creation sends it.
+  const draftOff = useSyncExternalStore(
+    session.draftConnectors.subscribe,
+    session.draftConnectors.snapshot,
+    session.draftConnectors.snapshot,
+  );
+  const enabledOf = (c: ChatConnector) =>
+    threadId === null ? !draftOff.has(c.connectorId) : c.enabled;
   const toggle = useCallback(
     async (c: ChatConnector) => {
-      if (threadId === null) return;
+      if (threadId === null) {
+        session.draftConnectors.set(c.connectorId, draftOff.has(c.connectorId));
+        return;
+      }
       setError(null);
       const res = await setThreadConnector(session.teamId, threadId, c.connectorId, !c.enabled);
       if (!res.ok) {
@@ -112,7 +123,7 @@ export function ConnectorsSubmenu({
           : l,
       );
     },
-    [session.teamId, threadId, setLoad],
+    [session, threadId, setLoad, draftOff],
   );
   return (
     <DropdownMenu.Sub>
@@ -149,9 +160,7 @@ export function ConnectorsSubmenu({
                   key={c.connectorId}
                   className={PLUS_ITEM}
                   data-kobe-connector={c.connectorId}
-                  checked={c.enabled}
-                  aria-disabled={threadId === null || undefined}
-                  title={threadId === null ? NOT_STARTED : undefined}
+                  checked={enabledOf(c)}
                   onSelect={(e) => {
                     // The menu stays open: several can be turned off in a row.
                     e.preventDefault();
@@ -165,7 +174,7 @@ export function ConnectorsSubmenu({
                   </span>
                   <span className="truncate">{c.name}</span>
                   <span className="text-muted-foreground ms-auto text-xs">
-                    {c.enabled ? "On" : "Off"}
+                    {enabledOf(c) ? "On" : "Off"}
                   </span>
                 </DropdownMenu.CheckboxItem>
               ),

@@ -1,3 +1,4 @@
+import { splitAppContext, splitSkillRequest } from "@kobe/protocol";
 /**
  * Projects the Pi entry tree (`thread_entries`, D15) and the active run's live stream into the
  * branchable message list assistant-ui renders (D16: `ThreadMessage[]` with `parentId` + `headId`).
@@ -44,6 +45,11 @@ export type KobeMessageMeta =
       /** Where an edit of this message branches from (its entry's parent). */
       readonly parentEntryId: string | null;
       readonly text: string;
+      /**
+       * The skill the message was sent with (KOBE-451): the server's line, taken out of `text`, so
+       * an edit or a regenerate sends the member's text and names the skill again.
+       */
+      readonly skill?: string | undefined;
       /** Not an entry yet: the run's prompt as sent, shown until Pi saves it (no edit, no fork). */
       readonly pending: boolean;
       /** Its run still holds the thread ("Sent, waiting for the agent"); never once it ended. */
@@ -454,13 +460,14 @@ export function projectThread(
     if (node.role === "user") {
       const p = parsed.get(first.entryId);
       const split = splitAttachedFiles(p?.kind === "user" ? p.text : "");
-      const text = split.text;
+      const { text, skill } = withoutSkillLine(split.text);
       const { deps: markerDeps, ...markers } = markersOf(node);
       const meta: KobeMessageMeta = {
         kind: "user",
         entryId: first.entryId,
         parentEntryId: first.parentId,
         text,
+        ...(skill === null ? {} : { skill }),
         pending: false,
         ...(split.files.length > 0 ? { attachments: split.files } : {}),
         ...markers,
@@ -600,10 +607,30 @@ function emptyVersion(id: string): ProjectedItem {
  * (`parent_entry_id` can't name the root itself), or one whose parent isn't loaded here (the new
  * version could not be placed beside it).
  */
+/** A branch point: where it branches from, the member's text and the skill it was sent with. */
+export interface BranchPoint {
+  readonly parentEntryId: string;
+  readonly text: string;
+  readonly skill?: string | undefined;
+}
+
+/**
+ * The server's skill line (KOBE-451) out of a user message's text, kept after any app context
+ * (which stays in the text, as sent): the member's text and the skill, null when none.
+ */
+export function withoutSkillLine(text: string): {
+  readonly text: string;
+  readonly skill: string | null;
+} {
+  const ctx = splitAppContext(text);
+  const { skill, rest } = splitSkillRequest(ctx.rest);
+  return skill === null ? { text, skill } : { text: text.slice(0, ctx.restAt) + rest, skill };
+}
+
 export function branchPoint(
   projection: Projection,
   messageId: string | null | undefined,
-): { readonly parentEntryId: string; readonly text: string } | undefined {
+): BranchPoint | undefined {
   if (!messageId) return undefined;
   const item = projection.items.find((i) => i.message.id === messageId);
   return branchPointOfMeta(projection, item ? messageMeta(item.message) : undefined);
@@ -613,10 +640,14 @@ export function branchPoint(
 export function branchPointOfMeta(
   projection: Projection,
   meta: KobeMessageMeta | undefined,
-): { readonly parentEntryId: string; readonly text: string } | undefined {
+): BranchPoint | undefined {
   if (meta?.kind !== "user" || meta.pending || meta.parentEntryId === null) return undefined;
   if (!projection.loaded.has(meta.parentEntryId)) return undefined;
-  return { parentEntryId: meta.parentEntryId, text: meta.text };
+  return {
+    parentEntryId: meta.parentEntryId,
+    text: meta.text,
+    ...(meta.skill === undefined ? {} : { skill: meta.skill }),
+  };
 }
 
 /** The nearest shown message at or above `entryId` (hidden entries belong to none). */

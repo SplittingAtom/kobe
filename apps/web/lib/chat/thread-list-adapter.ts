@@ -118,6 +118,10 @@ export function createThreadListAdapter(
       const agent = session.takeNextAgent();
       const projectId = session.takeNextProject();
       const provisional = session.takeNextTitle();
+      // KOBE-451 review MEDIUM-3: connectors turned off before the first message; never for a
+      // test chat (the server refuses them there). Taken: the next new conversation starts on.
+      const off =
+        test === undefined && skillDraftId === undefined ? session.draftConnectors.take() : [];
       const created = await unwrap(
         api.createThread(
           // Untitled on purpose: the server titles it after the first answer (KOBE-219).
@@ -132,8 +136,13 @@ export function createThreadListAdapter(
           skillDraftId === undefined ? projectId : null,
           thinking,
           skillDraftId,
+          off,
         ),
-      );
+      ).catch((err: unknown) => {
+        // A refused creation gives the draft its off connectors back.
+        for (const id of off) session.draftConnectors.set(id, false);
+        throw err;
+      });
       session.setProvisionalTitle(created.threadId, provisional);
       session.seed(created);
       return { remoteId: created.threadId, externalId: undefined };

@@ -139,14 +139,95 @@ describe("Connectors (ac-2, ac-3, ac-6)", { timeout: 30_000 }, () => {
     expect(fake.connectorsOff.get(t)).toEqual(new Set([KEYED]));
   });
 
-  it("a new conversation lists them all on, to change after the first message", async () => {
+  it("a new conversation's toggles go with its creation (review MEDIUM-3)", async () => {
     openApp(fake);
     const { user, sub } = await openSub("Connectors");
     const on = await within(sub).findByRole("menuitemcheckbox", { name: /catalyst/ }, WAIT);
-    expect(on.getAttribute("aria-disabled")).toBe("true");
-    expect(sub.textContent).toContain("turn one off after your first message");
+    expect(on.getAttribute("aria-disabled")).toBeNull();
     await user.click(on);
+    await waitFor(() => expect(on.getAttribute("aria-checked")).toBe("false"));
     expect(chatRequests(fake, "PUT")).toEqual([]);
+    await user.keyboard("{Escape}");
+    await user.type(await composer(), "first{Enter}");
+    await waitFor(() => expect(posts("/messages")).toHaveLength(1));
+    const created = chatRequests(fake, "POST").find((r) => r.path === "/v1/threads");
+    expect(created?.body).toMatchObject({ connectors_off: [KEYED] });
+  });
+
+  it("an app whose connector is off here is not offered (review LOW-5)", async () => {
+    fake.teamApps = [APP];
+    const t = answered();
+    fake.connectorsOff.set(t, new Set([KEYED]));
+    openApp(fake, t);
+    const { sub } = await openSub("Apps");
+    expect(await within(sub).findByText("No apps for you here.", {}, WAIT)).toBeTruthy();
+    expect(within(sub).queryByRole("menuitem", { name: /Lakehouse Explorer/ })).toBeNull();
+  });
+});
+
+describe("a message sent with a skill (review MEDIUM-2)", { timeout: 30_000 }, () => {
+  const LINE =
+    'Use the skill "pdf-report" for this message: read its SKILL.md first and follow it.\n\n';
+  function skilled() {
+    const t = fake.addThread("Skilled");
+    const root = fake.addSystemEntry(t, null, "model_change", {
+      provider: "kobe",
+      modelId: "kimi",
+    });
+    const u = fake.addEntry(t, root, { role: "user", content: `${LINE}Q3 report` });
+    fake.addEntry(t, u, { role: "assistant", content: [{ type: "text", text: "done" }] });
+    return { t, root };
+  }
+
+  it("regenerate sends the same text with the same skill", async () => {
+    const { t, root } = skilled();
+    openApp(fake, t);
+    await screen.findByText("done", {}, WAIT);
+    await userEvent.setup().click(must(screen.getAllByRole("button", { name: "Regenerate" })[0]));
+    await waitFor(() =>
+      expect(must(posts("/messages")[0]).body).toEqual({
+        content: "Q3 report",
+        parent_entry_id: root,
+        skill: "pdf-report",
+      }),
+    );
+  });
+
+  it("edit keeps the skill as a chip; removing the chip sends none", async () => {
+    const { t, root } = skilled();
+    openApp(fake, t);
+    await screen.findByText("done", {}, WAIT);
+    const user = userEvent.setup();
+    await user.click(must(screen.getAllByRole("button", { name: "Edit" })[0]));
+    const editor = await screen.findByLabelText("Edit your message");
+    expect((editor as HTMLTextAreaElement).value).toBe("Q3 report");
+    expect(document.querySelector('[data-kobe-edit-skill="pdf-report"]')).not.toBeNull();
+    await user.type(editor, " for Berlin");
+    await user.click(within(must(editor.closest("form"))).getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(must(posts("/messages")[0]).body).toEqual({
+        content: "Q3 report for Berlin",
+        parent_entry_id: root,
+        skill: "pdf-report",
+      }),
+    );
+  });
+
+  it("edit without the chip sends no skill", async () => {
+    const { t, root } = skilled();
+    openApp(fake, t);
+    await screen.findByText("done", {}, WAIT);
+    const user = userEvent.setup();
+    await user.click(must(screen.getAllByRole("button", { name: "Edit" })[0]));
+    const editor = await screen.findByLabelText("Edit your message");
+    await user.click(screen.getByRole("button", { name: "Remove the skill pdf-report" }));
+    await user.click(within(must(editor.closest("form"))).getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(must(posts("/messages")[0]).body).toEqual({
+        content: "Q3 report",
+        parent_entry_id: root,
+      }),
+    );
   });
 });
 

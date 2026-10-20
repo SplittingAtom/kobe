@@ -130,6 +130,8 @@ export interface ChatApi {
     thinkingLevel?: ThinkingLevel | null,
     /** A Workbench test chat (KOBE-323): the Kobe agent on this draft; `agent` is then left out. */
     skillDraftId?: string,
+    /** Connectors off from the start (KOBE-451): checked by the server like the toggle. */
+    connectorsOff?: readonly string[],
   ): Promise<ApiResult<ThreadSummary>>;
   /** Shares the thread with its project or the team, or makes it private (owner only; CE20). */
   shareThread(threadId: string, visibility: ThreadVisibility): Promise<ApiResult<ThreadSummary>>;
@@ -313,8 +315,11 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
         ...(options.entryId === undefined ? {} : { entry_id: options.entryId }),
         ...(options.title === undefined ? {} : { title: options.title }),
       }),
-    createThread: (title, model, agent, projectId, thinkingLevel, skillDraftId) =>
+    createThread: (title, model, agent, projectId, thinkingLevel, skillDraftId, connectorsOff) =>
       send("POST", "/v1/threads", {
+        ...(connectorsOff === undefined || connectorsOff.length === 0
+          ? {}
+          : { connectors_off: connectorsOff }),
         ...(skillDraftId === undefined ? {} : { skill_draft_id: skillDraftId }),
         ...(projectId === undefined || projectId === null ? {} : { project_id: projectId }),
         ...(title === undefined ? {} : { title }),

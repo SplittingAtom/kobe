@@ -122,3 +122,23 @@ test("the + menu: a picked skill is a chip, goes with the message and shows in t
   await expect(page.locator("[data-kobe-skill-chip]")).toHaveCount(0);
   await expect(chat.userMessages.last().locator(`[data-kobe-sent-skill="${name}"]`)).toBeVisible();
 });
+
+test("the + menu: a connector turned off before the first message is off in the new thread (review MEDIUM-3)", async ({
+  chat,
+  page,
+}) => {
+  await chat.open();
+  const sub = await openSub(page, "Connectors");
+  await expect(sub.getByText("Loading…")).toHaveCount(0);
+  const toggle = sub.getByRole("menuitemcheckbox").first();
+  test.skip((await toggle.count()) === 0, "no working connector for this member");
+  const id = (await toggle.getAttribute("data-kobe-connector")) ?? "";
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await page.keyboard.press("Escape");
+  const threadId = await chat.ask(PROMPT);
+  await chat.waitForIdle();
+  expect((await serverConnectors(page, threadId)).find((c) => c.connector_id === id)?.enabled).toBe(
+    false,
+  );
+});

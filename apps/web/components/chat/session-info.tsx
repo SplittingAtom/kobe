@@ -25,6 +25,11 @@ import {
 import { useThreadTeamModels } from "./use-team-models";
 
 const NOT_OWNER = "Only its owner can download this conversation.";
+const DOWNLOAD_FAILED = {
+  status: 0,
+  code: "download_failed",
+  message: "The download didn't finish. Try /export again.",
+};
 const ZERO: UsageTotals = {
   calls: 0,
   inputTokens: 0,
@@ -191,10 +196,13 @@ export function SessionCommands({
         // server's message in the thread's error banner instead of saving it as a file.
         void apiTextFile(threadExportOneUrl(threadId, session.teamId), {
           teamId: session.teamId,
-        }).then((res) => {
-          if (res.ok) save(res.data.text, res.data.filename ?? "conversation.md");
-          else extras.controller?.reportError(res.error);
-        });
+        })
+          .then((res) => {
+            if (res.ok) save(res.data.text, res.data.filename ?? "conversation.md");
+            else extras.controller?.reportError(res.error);
+          })
+          // The body can fail part way (the connection dropped): say so (review 450 LOW).
+          .catch(() => extras.controller?.reportError(DOWNLOAD_FAILED));
       },
       blocker: notOwner ?? (summary === null ? NO_THREAD : null),
     },

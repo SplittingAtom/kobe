@@ -60,6 +60,32 @@ its SKILL.md first and follow it.` before the member's text (after any app conte
 - Apps: `useRailApps` (read only) + `components/apps/use-app-launch.ts`, the rail's launch rules
   without its drawer handling. `rail-apps.tsx` (g11a's area) is not touched.
 
+## Review fixes (security and DB review: 1 HIGH, 2 MEDIUM, 5 LOW)
+
+- HIGH-1: migration `0167_runs_mcp_connector_ids` (generated, nullable, own commit, upgrade
+  test). Each run records its `run.start.mcp` connector ids at start and on a recovery restart.
+  `decideMcpCall` denies and audits `connector_not_in_run` (new protocol reason, own commit) for
+  a connector outside the named run's set or off in its thread now (mid-run off applies at
+  once); tools/list (`mcp.list_refused`) and the grant reveal (`not_available`) serve only a
+  connector of some active run of the sandbox. Covers agent connector lists too.
+  Rolling upgrade: a run started by an older replica (or before 0167) has null ids and is
+  checked against its thread's off set only. The proxy treats decision codes as opaque, so an
+  older proxy passes the new code; the internal API is unchanged. Tests that listed or revealed
+  without any run now lease one (`activeSandbox` in `testing/mcp-fixtures.ts`).
+- MEDIUM-2: the projection takes the skill line out of a user message (`meta.skill`); regenerate
+  sends the same skill, edit keeps it as a removable chip in the edit box; the server re-checks.
+- MEDIUM-3: `POST /v1/threads` `connectors_off` (checked like the toggle, 422 otherwise, refused
+  for test chats, audited per connector, same transaction). Web: `DraftConnectorStore`, taken by
+  the thread's creation (given back if it is refused). App launches don't carry it.
+- LOW-4: an off connector is no `not_user_connected` omission. LOW-5 (taken strictly): a launch
+  into a thread with the app's connector off is refused (409 `connector_off`), app context from
+  it too, and the + menu hides such apps; calls from an already open app frame are team-level
+  (no thread) and unchanged. LOW-6: tests for another team's thread, forged `enabled: true`, and
+  skills of another team, a teammate and a draft. LOW-7: schedule prompts imitating the skill
+  line or app context are refused. LOW-8: follow-up for the coordinator to file: after G11a and
+  G11b merge, `rail-apps.tsx` uses `useAppLaunch` (one launch rule).
+- 450 LOW: the `/export` fetch reports a body that fails part way.
+
 ## Evidence
 
 - ac-1: `components/chat/plus-menu.test.tsx` (items, Memory disabled, Attach opens the picker,
