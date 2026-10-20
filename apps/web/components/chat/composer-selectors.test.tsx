@@ -53,6 +53,9 @@ afterEach(() => {
 
 const toolbar = () =>
   waitFor(() => must(document.querySelector<HTMLElement>("[data-composer-toolbar]")), WAIT);
+/** The line under the composer (KOBE-418 gauge; KOBE-450 the selectors after the first prompt). */
+const footer = () =>
+  waitFor(() => must(document.querySelector<HTMLElement>("[data-composer-footer]")), WAIT);
 
 /** The toolbar's controls in order, by accessible name (a select by its label). */
 function controlNames(root: HTMLElement): string[] {
@@ -111,33 +114,12 @@ describe("the composer's selectors (ac-2)", { timeout: 30_000 }, () => {
     await user.type(await composer(), "reconcile{Enter}");
     await waitFor(() => expect(fake.threads.size).toBe(1));
     expect(chatRequests(fake, "POST")[0]).toMatchObject({ body: { agent_id: "a-ledger" } });
-    // Once the conversation exists its agent is a fixed chip.
-    expect(await within(bar).findByText("Agent: Ledger Bot", {}, WAIT)).toBeTruthy();
-    expect(within(bar).queryByRole("button", { name: /^Chat with:/ })).toBeNull();
-  });
-
-  it("a started conversation: a fixed agent chip, the model and thinking still changeable", async () => {
-    const t = fake.addThread("Books");
-    Object.assign(must(fake.threads.get(t)), {
-      agent_id: "a-ledger",
-      agent_name: "Ledger Bot",
-      model: "glm",
-    });
-    openApp(fake, t);
-    const bar = await toolbar();
-    expect(await within(bar).findByText("Agent: Ledger Bot", {}, WAIT)).toBeTruthy();
-    expect(within(bar).queryByRole("button", { name: /^Chat with:/ })).toBeNull();
-    const user = userEvent.setup();
-    const thinking = await within(bar).findByRole("combobox", {
-      name: "Thinking level for this conversation",
-    });
-    await user.selectOptions(thinking, "off");
-    await waitFor(() => expect(fake.threads.get(t)?.thinking_level).toBe("off"));
-    await user.selectOptions(
-      within(bar).getByRole("combobox", { name: "Model for this conversation" }),
-      "kimi",
-    );
-    await waitFor(() => expect(fake.threads.get(t)?.model).toBe("kimi"));
+    // Once the conversation exists (KOBE-450 ac-5) its agent is today's fixed chip, on the line
+    // below the composer: only its position moved.
+    const below = await footer();
+    expect(await within(below).findByText("Agent: Ledger Bot", {}, WAIT)).toBeTruthy();
+    expect(within(bar).queryByText("Agent: Ledger Bot")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Chat with:/ })).toBeNull();
   });
 
   it("a conversation shared with you read-only: the reader's banner, no selectors", async () => {
@@ -247,3 +229,88 @@ describe("narrow composers fold the selectors into one menu (ac-2)", { timeout: 
     expect(within(bar).getByRole("combobox", { name: "Model for this conversation" })).toBeTruthy();
   });
 });
+
+/** A started conversation: agent Ledger Bot on GLM, which offers thinking levels. */
+function startedThread(): string {
+  const t = fake.addThread("Books");
+  const q = fake.addEntry(t, null, { role: "user", content: "Sum" });
+  fake.addEntry(t, q, { role: "assistant", content: [{ type: "text", text: "42." }] });
+  Object.assign(must(fake.threads.get(t)), {
+    agent_id: "a-ledger",
+    agent_name: "Ledger Bot",
+    model: "glm",
+  });
+  return t;
+}
+
+describe(
+  "after the first prompt the selectors sit below the composer (KOBE-450)",
+  { timeout: 30_000 },
+  () => {
+    it("ac-1: below, before the right-aligned gauge; the toolbar keeps Attach and Send", async () => {
+      openApp(fake, startedThread());
+      const bar = await toolbar();
+      const below = await footer();
+      await within(below).findByRole("combobox", { name: "Model for this conversation" }, WAIT);
+      const selectors = must(below.querySelector<HTMLElement>('[data-composer-selectors="below"]'));
+      expect(controlNames(selectors)).toEqual([
+        "Model for this conversation",
+        "Thinking level for this conversation",
+      ]);
+      expect(within(selectors).getByText("Agent: Ledger Bot")).toBeTruthy();
+      // Selectors first, the gauge last (pushed right); the line wraps instead of overflowing.
+      const gauge = must(below.querySelector<HTMLElement>("[data-composer-gauge]"));
+      expect(
+        selectors.compareDocumentPosition(gauge) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(gauge.className).toMatch(/\bms-auto\b/);
+      expect(below.className).toMatch(/\bflex-wrap\b/);
+      expect(controlNames(bar)).toEqual(["Attach files", "Send"]);
+      expect(within(bar).queryByRole("button", { name: "Agent and model" })).toBeNull();
+    });
+
+    it("ac-1: behaviour unchanged: model and thinking still save on the thread", async () => {
+      const t = startedThread();
+      openApp(fake, t);
+      const below = await footer();
+      const user = userEvent.setup();
+      const thinking = await within(below).findByRole(
+        "combobox",
+        { name: "Thinking level for this conversation" },
+        WAIT,
+      );
+      await user.selectOptions(thinking, "off");
+      await waitFor(() => expect(fake.threads.get(t)?.thinking_level).toBe("off"));
+      await user.selectOptions(
+        within(below).getByRole("combobox", { name: "Model for this conversation" }),
+        "kimi",
+      );
+      await waitFor(() => expect(fake.threads.get(t)?.model).toBe("kimi"));
+    });
+
+    it("ac-1: on a phone they stay inline below (no fold menu), every control reachable", async () => {
+      resizeWindow(390);
+      openApp(fake, startedThread());
+      const bar = await toolbar();
+      const below = await footer();
+      const model = await within(below).findByRole(
+        "combobox",
+        { name: "Model for this conversation" },
+        WAIT,
+      );
+      expect(model.closest("[hidden]")).toBeNull();
+      expect(
+        within(below).getByRole("combobox", { name: "Thinking level for this conversation" }),
+      ).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Agent and model" })).toBeNull();
+      expect(controlNames(bar)).toEqual(["Attach files", "Send"]);
+    });
+
+    it("ac-5: the agent keeps today's rules after the first prompt: a fixed chip, never a picker", async () => {
+      openApp(fake, startedThread());
+      const below = await footer();
+      expect(await within(below).findByText("Agent: Ledger Bot", {}, WAIT)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^Chat with:/ })).toBeNull();
+    });
+  },
+);

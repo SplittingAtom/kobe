@@ -131,7 +131,10 @@ export class Chat {
     return action;
   }
 
-  /** The composer's toolbar: Attach, the Agent, Model and Thinking selectors, Send (KOBE-418). */
+  /**
+   * The composer's toolbar: Attach, the Agent, Model and Thinking selectors (until the first
+   * prompt, KOBE-418/450), Send.
+   */
   get toolbar(): Locator {
     return this.page.locator("[data-composer-toolbar]");
   }
@@ -141,11 +144,19 @@ export class Chat {
     return this.answers.last().getByRole("button", { name: "Compact now", exact: true });
   }
 
+  /** The line below the composer: after the first prompt, the selectors, then the gauge (KOBE-450). */
+  get footer(): Locator {
+    return this.page.locator("[data-composer-footer]");
+  }
+
   /**
-   * The composer's Model and Thinking selectors: in the toolbar, or in its folded "Agent and
-   * model" menu on a narrow composer (opened here when it is closed).
+   * The composer's Model and Thinking selectors. After the first prompt they sit on the line
+   * below the composer (KOBE-450); before it in the toolbar, or in its folded "Agent and model"
+   * menu on a narrow composer (opened here when it is closed).
    */
   async selectors(): Promise<Locator> {
+    const below = this.page.locator('[data-composer-selectors="below"]');
+    if ((await below.count()) > 0) return below;
     const folded = this.toolbar.getByRole("button", { name: "Agent and model", exact: true });
     if (await folded.isVisible()) {
       if ((await folded.getAttribute("aria-expanded")) !== "true") await folded.click();

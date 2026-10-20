@@ -14,7 +14,8 @@ test("thinking off: the answer has no reasoning block and the run records off", 
   page,
 }) => {
   await chat.open();
-  // In the composer's toolbar (KOBE-418), or its folded menu on a narrow window.
+  // A new conversation: in the composer's toolbar (KOBE-418), or its folded menu on a narrow
+  // window.
   const selectors = await chat.selectors();
   const models = selectors.getByRole("combobox", { name: "Model for this conversation" });
   const thinking = selectors.getByRole("combobox", {
@@ -59,5 +60,10 @@ test("thinking off: the answer has no reasoning block and the run records off", 
     { id: threadId, teamKey: TEAM_KEY },
   );
   expect(recorded).toEqual({ chosen: "off", runs: ["off"] });
-  await expect(thinking).toHaveValue("off");
+  // After the first prompt the selectors sit below the composer (KOBE-450), still on off.
+  await expect(
+    (await chat.selectors()).getByRole("combobox", {
+      name: "Thinking level for this conversation",
+    }),
+  ).toHaveValue("off");
 });

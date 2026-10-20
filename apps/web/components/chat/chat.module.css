@@ -333,6 +333,14 @@
   font-size: 0.8rem;
 }
 
+/* Below the composer after the first prompt (KOBE-450): smaller pills that wrap, never overflow. */
+.compactPicker select {
+  max-width: 10rem;
+  height: 1.5rem;
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+}
+
 .modelPicker select[aria-invalid="true"] {
   border-color: var(--admin-danger);
 }

@@ -59,10 +59,10 @@ export function useFoldedSelectors(panel: HTMLElement | null): boolean {
 }
 
 /** The thread's agent: the picker while the conversation is new, then its name (and state). */
-function AgentControl() {
+function AgentControl({ compact = false }: { readonly compact?: boolean }) {
   const session = useChatSession();
   const isNew = useAuiState((s) => s.threadListItem.remoteId) === undefined;
-  return isNew && session.canChooseAgent ? <AgentPickerMenu /> : <AgentChips />;
+  return isNew && session.canChooseAgent ? <AgentPickerMenu /> : <AgentChips compact={compact} />;
 }
 
 /** A press outside the menu closes it; one in portalled content (the agent popover) does not. */
@@ -153,18 +153,37 @@ function SelectorsMenu({
   );
 }
 
+/** Where the selectors sit (KOBE-450): in the toolbar until the first prompt, then below. */
+export type SelectorsPlacement = "toolbar" | "below";
+
 /**
- * The conversation's Agent, Model and Thinking selectors in the composer's toolbar, after Attach
- * (KOBE-418; bar row two before). Inline while they fit; folded into one menu on a narrow
- * composer, so the toolbar stays one line and Send is never pushed off it.
+ * The conversation's Agent, Model and Thinking selectors. A new conversation has them in the
+ * composer's toolbar, after Attach (KOBE-418): inline while they fit, folded into one menu on a
+ * narrow composer, so the toolbar stays one line and Send is never pushed off it. Once the thread
+ * has its first prompt they sit on the line below the composer as compact pills, before the
+ * context gauge (KOBE-450): never folded there, they wrap onto another line instead. The same
+ * controls and rules either way; only their position changes.
  */
 export function ComposerSelectors({
   picker,
   folded,
+  placement = "toolbar",
 }: {
   readonly picker: ModelPickerData | null;
   readonly folded: boolean;
+  readonly placement?: SelectorsPlacement;
 }) {
+  if (placement === "below") {
+    return (
+      <div
+        data-composer-selectors="below"
+        className="flex max-w-full min-w-0 flex-wrap items-center gap-1.5"
+      >
+        <AgentControl compact />
+        {picker && <ModelSelects picker={picker} compact />}
+      </div>
+    );
+  }
   return (
     <SelectorsMenu folded={folded}>
       <AgentControl />

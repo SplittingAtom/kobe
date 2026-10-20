@@ -4,7 +4,8 @@ import { FAKE_MODEL } from "./support/gate5.js";
 
 /**
  * KOBE-418: the chat without the bar's row two. The Agent, Model and Thinking selectors sit in the
- * composer's toolbar (folded into one "Agent and model" menu on a phone), Show details and Compact
+ * composer's toolbar (folded into one "Agent and model" menu on a phone) until the first prompt,
+ * then on the line below it before the gauge (KOBE-450), Show details and Compact
  * now sit on the answers, the context gauge under the composer, and the conversation column is up
  * to 80rem wide. Light, dark and phone-width screenshots of the composer and an answer's action
  * bar, and full-window ones at 1440 and 1920 px, are attached to the report (the ledger's
@@ -99,6 +100,14 @@ test("one bar row; the composer holds the selectors and the gauge (ac-1, ac-2, a
     expect(footer.x + footer.width - (gauge.x + gauge.width)).toBeLessThan(48);
   }
   await expectOneLine(toolbar);
+  // After the first prompt the selectors sit below the composer, before the gauge (KOBE-450).
+  await expect(toolbar.getByRole("combobox", { name: "Model for this conversation" })).toHaveCount(
+    0,
+  );
+  const below = page.locator('[data-composer-selectors="below"]');
+  await expect(below.getByRole("combobox", { name: "Model for this conversation" })).toBeVisible();
+  const selectors = await below.boundingBox();
+  if (selectors && gauge) expect(selectors.x).toBeLessThan(gauge.x);
   await shoot(page, "composer-started", page.locator("[data-kobe-composer]"));
 });
 
@@ -150,6 +159,16 @@ test("a phone: the selectors fold into one menu on one toolbar line (ac-2)", asy
 
   await chat.ask(PROMPT);
   await expect(chat.compactNow).toBeVisible();
+  // Started: no fold menu; the selectors wrap on the line below, never off the page (KOBE-450).
+  await expect(menu).toHaveCount(0);
+  await expect(
+    page
+      .locator('[data-composer-selectors="below"]')
+      .getByRole("combobox", { name: "Model for this conversation" }),
+  ).toBeVisible();
+  await expectOneLine(toolbar);
+  await noPageScrollX(page);
+  await shoot(page, "composer-phone-started", page.locator("[data-kobe-composer]"));
   await shoot(page, "answer-actions-phone", chat.answers.last());
 });
 

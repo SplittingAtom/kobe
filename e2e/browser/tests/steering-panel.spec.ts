@@ -30,9 +30,10 @@ test("steering panel: queue, keyboard reorder, pause and resume, delete, stop", 
   await expect(panel).toHaveAttribute("data-state", /^(active|waiting)$/, {
     timeout: RUN_START_TIMEOUT_MS,
   });
-  // Queue mode keeps the composer's toolbar on one line: Queue beside the selectors (KOBE-418).
+  // Queue mode keeps the composer's toolbar on one line: Queue beside Attach (KOBE-418; the
+  // selectors sit below the composer once the thread has its first prompt, KOBE-450).
   const queue = chat.toolbar.getByRole("button", { name: "Queue", exact: true });
-  const model = chat.toolbar.getByRole("combobox", { name: "Model for this conversation" });
+  const model = chat.toolbar.getByRole("button", { name: "Attach files", exact: true });
   const [q, m] = [await queue.boundingBox(), await model.boundingBox()];
   expect(q).not.toBeNull();
   expect(m).not.toBeNull();

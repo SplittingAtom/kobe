@@ -35,6 +35,19 @@ const picker = () =>
     name: "Model for this conversation",
   }) as Promise<HTMLSelectElement>;
 
+/**
+ * An open conversation's picker: on the line below the composer once the thread has loaded
+ * (KOBE-450), not the new-conversation one in the toolbar shown while the app opens.
+ */
+const openPicker = async () => {
+  const below = await waitFor(() =>
+    must(document.querySelector<HTMLElement>('[data-composer-selectors="below"]')),
+  );
+  return within(below).findByRole("combobox", {
+    name: "Model for this conversation",
+  }) as Promise<HTMLSelectElement>;
+};
+
 const optionNames = (select: HTMLSelectElement) =>
   within(select)
     .getAllByRole("option")
@@ -75,14 +88,14 @@ describe("model picker", () => {
     const t = fake.addThread("Budget");
     openApp(fake, t);
     const user = userEvent.setup();
-    await user.selectOptions(await picker(), "glm");
+    await user.selectOptions(await openPicker(), "glm");
     await waitFor(() => expect(fake.threads.get(t)?.model).toBe("glm"));
     expect(chatRequests(fake, "PATCH").at(-1)).toMatchObject({
       path: `/v1/threads/${t}`,
       body: { model: "glm" },
       team: fake.teamId,
     });
-    await user.selectOptions(await picker(), "");
+    await user.selectOptions(await openPicker(), "");
     await waitFor(() => expect(fake.threads.get(t)?.model).toBeNull());
     expect(chatRequests(fake, "PATCH").at(-1)?.body).toEqual({ model: null });
   });
@@ -91,7 +104,7 @@ describe("model picker", () => {
     const t = fake.addThread("Old choice");
     must(fake.threads.get(t)).model = "gpt";
     openApp(fake, t);
-    const select = await picker();
+    const select = await openPicker();
     await waitFor(() => expect(select.value).toBe("gpt"));
     expect(optionNames(select)).toContain("gpt (unavailable)");
     expect(select.getAttribute("aria-invalid")).toBe("true");
@@ -131,7 +144,7 @@ describe("model picker", () => {
     const t = fake.addThread("Race");
     openApp(fake, t);
     const user = userEvent.setup();
-    const select = await picker();
+    const select = await openPicker();
     must(fake.teamModels[1]).enabled = false; // disabled after the list was read
     await user.selectOptions(select, "glm");
     expect(await screen.findByText(/That model isn't enabled for your team/)).toBeTruthy();
@@ -144,7 +157,7 @@ describe("model picker", () => {
     thread.model = "glm";
     thread.agent_model = "kimi";
     openApp(fake, t);
-    const select = await picker();
+    const select = await openPicker();
     await waitFor(() => expect(select.value).toBe("kimi"));
     expect(select.disabled).toBe(true);
     expect(optionNames(select)).toEqual(["Kimi K2.7 Code"]);

@@ -49,6 +49,7 @@ export function ThinkingPicker({
   chosen,
   disabled,
   onChoose,
+  compact = false,
 }: {
   readonly models: TeamModels;
   /** The conversation's effective model alias (the agent's pin, the choice, else the default). */
@@ -56,12 +57,16 @@ export function ThinkingPicker({
   readonly chosen: ThinkingLevel | null;
   readonly disabled: boolean;
   readonly onChoose: (level: ThinkingLevel | null) => void;
+  /** The smaller pill on the line below the composer (KOBE-450). */
+  readonly compact?: boolean;
 }) {
   const { levels, default: fallback } = thinkingChoices(models, alias);
   if (levels.length === 0) return null;
   const value = shownThinking(chosen, levels);
   return (
-    <label className={styles.modelPicker}>
+    <label
+      className={compact ? `${styles.modelPicker} ${styles.compactPicker}` : styles.modelPicker}
+    >
       <span className={styles.visuallyHidden}>Thinking level for this conversation</span>
       <select
         value={value ?? DEFAULT}
