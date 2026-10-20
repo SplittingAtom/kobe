@@ -386,6 +386,8 @@ export class FakeKobe {
   teamAppsNeedKey: Json[] = [];
   /** An app's own `tools/call` (KOBE-436): answered with this refusal when set, else a result. */
   appCallError: { status: number; code: string; message: string } | null = null;
+  /** `POST /v1/team/apps/{id}/calls` result when not refused. */
+  appCallResult: Record<string, unknown> = { content: [{ type: "text", text: "rows" }] };
   #cardN = 0;
   readonly #queuedCards = new Map<string, { threadId: string; app: Json; ref: string }[]>();
 
@@ -995,7 +997,7 @@ export class FakeKobe {
       if (refusal) {
         return json(refusal.status, { error: { code: refusal.code, message: refusal.message } });
       }
-      return json(200, { result: { content: [{ type: "text", text: "rows" }] } });
+      return json(200, { result: this.appCallResult });
     }
     if (url.pathname === "/v1/team" && method === "GET") {
       return json(200, {

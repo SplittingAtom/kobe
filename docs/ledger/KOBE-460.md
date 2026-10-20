@@ -73,3 +73,19 @@
 - ac-8: `e2e/browser/tests/gate-apps/picker.spec.ts` (pick, choose a table, composer text, no
   send, width; reload keeps it, collapsed rail; phone drawer, no page scroll); runbook updated.
 - Protocol: `ui-preferences.test.ts`; web `lib/shell/preferences.test.ts`.
+
+## Fix 2026-10-20: picker stuck on "Loading catalogs…" (branch group-13b-picker-opening)
+
+- Cause: the rail mounted `AppFrame` with no `toolInput`/`toolResult`; Catalyst's Picker takes
+  its catalogs from the opening tool result.
+- Fix: `components/shell/rail-picker-opening.tsx` (`OpenedPicker`) calls `RailApp.tool` (the
+  server's `app.tool.name`, the tool a rail launch calls) with `{}` through
+  `/v1/team/apps/:id/calls` (`thread_id` when a thread is on screen), once per mount (in-flight
+  calls shared, so StrictMode calls once), then the frame gets `tool-input {}` and the result.
+  It waits until the runtime shows the thread the address asks for (new `ThreadOnScreenContext`
+  from `chat-app`), so a load never names "no thread" first. Failure: short error + Retry;
+  `connector_off` shows the existing note; `app_not_available` re-reads the list. No server
+  change. Spec MA3 item 5.
+- Tests: `rail-pickers.test.tsx` (+6: input/result after initialize, thread_id, new conversation,
+  once per selection and again after Files, error + retry, connector off, isError), new
+  `rail-picker-opening.test.tsx` (StrictMode once, waits for thread, failures).

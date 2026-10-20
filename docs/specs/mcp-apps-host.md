@@ -244,6 +244,10 @@ team, key gone) falls back to None with a short note.
    widening. The member can still drag it wider.
 3. The bottom list keeps every app.
 4. A picker is recognised by "Picker" in the display name; nothing else marks it.
+5. It opens like a card: each time it is shown, Kobe calls its opening tool (the MA11 launch
+   tool, with `{}`) through the call route below, naming the thread on screen, and gives the
+   frame `ui/notifications/tool-input` (`{}`) and `tool-result` after initialize. Nothing is
+   stored. A failed open shows a short error and Retry; `connector_off` shows the note above.
 
 Security is the cards': the same member frame route and header CSP (MA4, `sandbox
 allow-scripts`), only pinned, approved, not drifted templates, MA8 visibility, and the same bridge
