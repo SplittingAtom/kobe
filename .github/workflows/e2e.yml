@@ -52,7 +52,7 @@ jobs:
   # Docs-only pull requests skip the images and shards, but `k3d` must still report (it is a
   # required check), so the filter lives here rather than in `paths-ignore`.
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -85,7 +85,7 @@ jobs:
     name: image (${{ matrix.name }})
     needs: changes
     if: needs.changes.outputs.code == 'true' && needs.changes.outputs.ready == 'true'
-    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_BUILD_RUNNER || vars.KOBE_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-24.04') || vars.KOBE_BUILD_RUNNER || vars.KOBE_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
     strategy:
       fail-fast: true
@@ -155,7 +155,7 @@ jobs:
   images:
     needs: [changes, image]
     if: ${{ !cancelled() && needs.changes.outputs.ready == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Every image built and is non-root
@@ -170,7 +170,7 @@ jobs:
   e2e:
     name: e2e (${{ matrix.shard }})
     needs: image
-    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-latest') || vars.KOBE_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-24.04') || vars.KOBE_RUNNER || 'ubuntu-24.04' }}
     # Healthy shards take about 10 min; under peak load the self-hosted runners' Docker data
     # (Longhorn on the nodes' HDDs) is far slower (ci/runners/README.md).
     timeout-minutes: 45
@@ -382,7 +382,7 @@ jobs:
   stories:
     needs: [changes, e2e]
     if: ${{ !cancelled() && needs.changes.outputs.ready == 'true' && needs.changes.outputs.code == 'true' && needs.e2e.result != 'skipped' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -414,7 +414,7 @@ jobs:
   k3d:
     needs: [changes, image, e2e, stories]
     if: ${{ !cancelled() && needs.changes.outputs.ready == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Every image build and e2e shard passed
