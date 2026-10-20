@@ -29,6 +29,20 @@
 - Drawer, drop zone, Files keyboard, rename, drag-to-move, Move to and mentions are untouched
   (Files' own code); the phone drawer opens on the last tab.
 
+## Review fixes (Sonnet: 2 MEDIUM, 3 LOW)
+
+- A stored Apps tab no longer flashes Files: while the apps list loads the section says "Loading
+  apps…" and shows neither tab; a failed read settles to Files (`useRailApps`).
+- The Files tab's panel is the one Files element (no region inside it); the specs find it by
+  `#kobe-rail-files` (`filesSection`).
+- Tab saves go through the preferences saver, already debounced (600 ms): quick arrows, one PUT
+  (test).
+- `showBothPanels(tab)` waits for the apps list, picks the tab the spec needs (`open()`: Files)
+  and shows Files again from the strip when hiding it collapsed the rail.
+- An older server refuses a PUT with `rail_tab` (strict schema): the client logs it and goes on
+  (the tab still works on the page; that save's other keys are lost). Server and web ship together
+  in one chart release (same image tag), so this lasts only during a rolling upgrade.
+
 ## Shared files touched
 
 - `packages/protocol/src/ui-preferences.ts` (+ test): `RAIL_TABS`, `rail_tab`.

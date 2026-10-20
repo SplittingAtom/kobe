@@ -325,8 +325,8 @@ function RailFiles({
       )}
     </>
   );
-  // Beside Apps (KOBE-448) the Files tab's panel holds the same Files region, so it is found and
-  // named as it was without tabs.
+  // Beside Apps (KOBE-448) the Files tab's panel is the section, named by its tab (one name, no
+  // second landmark inside it).
   if (tabbed) {
     return (
       <div
@@ -337,9 +337,7 @@ function RailFiles({
         className={styles.section}
         hidden={hidden}
       >
-        <section aria-labelledby="kobe-rail-files-title" className={styles.tabSection}>
-          {content}
-        </section>
+        <div className={styles.tabSection}>{content}</div>
       </div>
     );
   }
@@ -399,7 +397,9 @@ export function WorkspaceRail({
   // else the section is Files alone, without a tablist, whatever tab is stored.
   const apps = useRailApps();
   const showsApps = hasRailApps(apps);
-  const tab: RailTab = showsApps ? rail.tab : "files";
+  // A member last on Apps sees nothing else while the apps list is on its way (no Files flash).
+  const appsPending = apps === null && rail.tab === "apps";
+  const tab: RailTab = showsApps || appsPending ? rail.tab : "files";
   const gridRows = showsApps ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)";
 
   return (
@@ -437,6 +437,11 @@ export function WorkspaceRail({
               hidden={!filesShown || tab !== "files"}
               tabbed={showsApps}
             />
+            {appsPending && (
+              <p role="status" className={styles.appsPending}>
+                Loading apps…
+              </p>
+            )}
             {showsApps && (
               <RailApps rail={rail} apps={apps} hidden={!filesShown || tab !== "apps"} />
             )}

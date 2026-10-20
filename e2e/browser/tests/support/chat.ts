@@ -12,6 +12,14 @@ import {
  */
 export const FILES_TOGGLE = /^(Files panel|Files and apps)$/;
 
+/**
+ * The rail's Files section: a region named Files, or with apps the Files tab's panel (KOBE-448),
+ * the same element either way.
+ */
+export function filesSection(page: Page): Locator {
+  return page.locator("#kobe-rail-files");
+}
+
 /** The chat's address parameter for the open thread (`/?thread=<id>`). */
 const THREAD_PARAM = "thread";
 /** The active team, recorded by the chat in local storage; the API wants it as a header. */
@@ -55,7 +63,8 @@ export class Chat {
   async open(): Promise<void> {
     await this.page.goto("/");
     await expect(this.composer).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
-    await this.showBothPanels();
+    // Every spec starts on the rail's Files tab, whatever this member last chose (KOBE-448).
+    await this.showBothPanels("files");
   }
 
   /** The rail's top line (KOBE-419): team selector, New, Threads, Files, Team console, collapse. */
@@ -68,17 +77,25 @@ export class Chat {
    * off). The threads are a panel since KOBE-453 (`openThreads`). Nothing to do where the rail is
    * not on screen (a phone, collapsed).
    */
-  async showBothPanels(): Promise<void> {
+  async showBothPanels(tab: "files" | "apps" = "files"): Promise<void> {
     const toggle = this.railHeader.getByRole("button", { name: FILES_TOGGLE });
+    // Files hidden collapses the rail (KOBE-453 review): its strip's section icon shows it again.
+    const strip = this.page.getByRole("button", { name: /^Show (files|apps)$/ });
+    if (!(await toggle.isVisible()) && (await strip.isVisible())) await strip.click();
     if (!(await toggle.isVisible())) return;
     if ((await toggle.getAttribute("aria-pressed")) === "false") await toggle.click();
-    // With apps the section has Files | Apps tabs (KOBE-448): the specs start on Files.
-    const files = this.page
+    // Files | Apps (KOBE-448): the tab is stored per member, so another spec may have left Apps.
+    // Wait for the apps list to settle (a member last on Apps sees "Loading apps…"), then pick
+    // the tab this spec needs.
+    await expect(this.page.getByText("Loading apps…")).toHaveCount(0, {
+      timeout: SHELL_TIMEOUT_MS,
+    });
+    const wanted = this.page
       .getByRole("tablist", { name: "Files and apps" })
-      .getByRole("tab", { name: "Files", exact: true });
-    if ((await files.isVisible()) && (await files.getAttribute("aria-selected")) !== "true") {
-      await files.click();
-    }
+      .getByRole("tab", { name: tab === "files" ? "Files" : "Apps", exact: true });
+    if (!(await wanted.isVisible())) return; // no apps here: Files alone
+    if ((await wanted.getAttribute("aria-selected")) !== "true") await wanted.click();
+    await expect(wanted).toHaveAttribute("aria-selected", "true");
   }
 
   /** The Threads panel over the workspace (KOBE-453). */

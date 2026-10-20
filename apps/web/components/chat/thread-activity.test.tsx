@@ -136,7 +136,40 @@ describe("rail activity dots (ac-2)", () => {
 
     fake.agent.complete(runId);
     await waitFor(async () => expect(await activityOf("Deploy")).toBe("idle"));
-    expect((await row("Deploy")).querySelector("[data-status-dot]")).toBeNull();
+    // Ended off screen: new activity (KOBE-453), a quiet dot named for screen readers.
+    const quiet = await waitFor(async () =>
+      must((await row("Deploy")).querySelector('[data-status-dot="done"]')),
+    );
+    expect(quiet).toBeTruthy();
+    expect(
+      within(await rail()).getByRole("button", { name: "Deploy", description: "New activity" }),
+    ).toBeTruthy();
+  });
+
+  it("the Threads button shows new activity until the member opens that thread (KOBE-453)", async () => {
+    const a = fake.addThread("Deploy");
+    const b = fake.addThread("Notes");
+    open(a);
+    const runId = await startRun(a);
+    await userEvent
+      .setup()
+      .click(await within(await rail()).findByRole("button", { name: /^Notes/ }));
+    await waitFor(() => expect(window.location.search).toBe(`?thread=${b}`));
+    const threads = () =>
+      must(document.querySelector<HTMLElement>('[data-rail-header] [data-command="rail-threads"]'));
+    await waitFor(() => expect(threads().getAttribute("data-kobe-activity")).toBe("running"));
+    fake.agent.complete(runId);
+    await waitFor(() => expect(threads().getAttribute("data-kobe-activity")).toBe("unread"));
+    expect(threads().getAttribute("aria-label")).toBe(
+      "Threads panel, a conversation has new activity",
+    );
+    // The tab title marks runs and approvals only.
+    expect(document.title).toBe("Kobe");
+    await userEvent
+      .setup()
+      .click(await within(await rail()).findByRole("button", { name: /^Deploy/ }));
+    await waitFor(() => expect(window.location.search).toBe(`?thread=${a}`));
+    await waitFor(() => expect(threads().getAttribute("data-kobe-activity")).toBe("idle"));
   });
 
   it("an approval in the open thread turns its dot amber live", async () => {

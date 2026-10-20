@@ -1,5 +1,5 @@
 import { RUN_START_TIMEOUT_MS, RUN_TIMEOUT_MS, SHELL_TIMEOUT_MS } from "../support/constants.js";
-import { expect, test } from "../support/chat.js";
+import { expect, test, filesSection } from "../support/chat.js";
 import {
   deleteWorkspacePath,
   longAnswer,
@@ -35,7 +35,7 @@ test("U18: an artifact and a workspace file open beside the thread", async ({ ch
     expect(await widthOf(conversation)).toBeGreaterThanOrEqual(399);
 
     expect(await workspaceFile(page, `${dir}/notes.txt`, "notes beside the thread\n")).toBe(201);
-    const files = page.getByRole("region", { name: "Files" });
+    const files = filesSection(page);
     const openFiles = files.getByRole("button", { name: "Open files" });
     if (await openFiles.isVisible()) await openFiles.click();
     await files.getByRole("button", { name: "Refresh files" }).click();

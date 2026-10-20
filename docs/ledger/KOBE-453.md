@@ -42,8 +42,11 @@
 - H2: hiding Files collapses the rail to its strip (derived in `rail-state.tsx`); expanding (Show
   files, Mod+B, the toggle) shows Files again, saved.
 - M4: the Threads buttons (top line, strip) carry a dot and words while any conversation runs or
-  waits for approval (`useOverallActivity`, shared with the tab title). The row states have no
-  "unread"; none added.
+  waits for approval (`useOverallActivity`, shared with the tab title), and (coordinator, after
+  448's review) while any has new activity: a run that ended or an approval that went while the
+  thread was off screen, unread until opened (`ThreadActivityStore.unread`, per tab; the rows show
+  a quiet "New activity" dot). The tab title keeps runs and approvals only. The old rows had no
+  unread state, so this is new, client-side.
 - M5: Restore keeps the panel open; an action that opens a thread (Regenerate) closes it onto it.
   Fork is not on the row menu (it is the conversation's own action), so it can't run from here.
 - Apps disappearing when Files is hidden: KOBE-448 (one Files | Apps section).

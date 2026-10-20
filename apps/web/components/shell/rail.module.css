@@ -525,6 +525,13 @@ button.teamIcon {
   outline: none;
 }
 
+.appsPending {
+  margin: 0;
+  padding: 0.5rem 1rem;
+  color: var(--admin-muted);
+  font-size: 0.8rem;
+}
+
 .appsSection[hidden] {
   display: none;
 }

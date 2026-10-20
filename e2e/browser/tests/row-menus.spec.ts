@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { expect, test } from "./support/chat.js";
+import { expect, test, filesSection } from "./support/chat.js";
 import { expectThemed, paintOf, type Theme } from "./support/colours.js";
 
 /**
@@ -95,7 +95,7 @@ test("thread and file row menus in light and dark; header rename; Copy as Markdo
   await chat.closeThreads();
 
   // A file of our own in the workspace root, for its row's menu.
-  const files = page.getByRole("region", { name: "Files" });
+  const files = filesSection(page);
   const openFiles = files.getByRole("button", { name: "Open files" });
   if (await openFiles.isVisible()) await openFiles.click();
   await files.getByLabel("Upload a file to the workspace root").setInputFiles({

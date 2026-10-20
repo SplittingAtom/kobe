@@ -69,8 +69,13 @@ export function stripTitlePrefix(title: string): string {
   return title;
 }
 
-/** What the store knows: held threads live, and the last activity read (null before one). */
+/**
+ * What the store knows: held threads live, the last activity read (null before one), and the
+ * threads with new activity the member has not seen (KOBE-453): a run that ended, or an approval
+ * that went, while the thread was not on screen; unread until the member opens it.
+ */
 export interface ActivitySnapshot {
+  readonly unread: ReadonlySet<string>;
   readonly live: ReadonlyMap<string, ThreadActivity>;
   readonly polled: ReadonlyMap<string, ThreadActivity> | null;
 }
@@ -92,7 +97,8 @@ export function activityIn(
  * go after it saw a run is reported `stale`: the activity is read again at once.
  */
 export class ThreadActivityStore {
-  #snapshot: ActivitySnapshot = { live: new Map(), polled: null };
+  #snapshot: ActivitySnapshot = { live: new Map(), polled: null, unread: new Set() };
+  #onScreen: string | null = null;
   #sawRun: ReadonlySet<string> = new Set();
   readonly #listeners = new Set<() => void>();
   readonly #staleListeners = new Set<(threadId: string) => void>();
@@ -143,11 +149,36 @@ export class ThreadActivityStore {
 
   clear(): void {
     this.#sawRun = new Set();
-    this.#update({ live: new Map(), polled: null });
+    this.#update({ live: new Map(), polled: null, unread: new Set() });
+  }
+
+  /** The thread on screen (null: a new conversation): seen, so never unread. */
+  setOnScreen(threadId: string | null): void {
+    this.#onScreen = threadId;
+    if (threadId !== null && this.#snapshot.unread.has(threadId)) {
+      const unread = new Set(this.#snapshot.unread);
+      unread.delete(threadId);
+      this.#update({ ...this.#snapshot, unread });
+    }
   }
 
   #update(next: ActivitySnapshot): void {
+    next = this.#withUnread(this.#snapshot, next);
     this.#snapshot = next;
     for (const listener of this.#listeners) listener();
+  }
+
+  /** A thread that ran or waited and is now idle, off screen, has new activity. */
+  #withUnread(prev: ActivitySnapshot, next: ActivitySnapshot): ActivitySnapshot {
+    const ids = new Set([...prev.live.keys(), ...(prev.polled?.keys() ?? [])]);
+    let unread: Set<string> | null = null;
+    for (const id of ids) {
+      if (id === this.#onScreen || next.unread.has(id)) continue;
+      const before = activityIn(prev, id);
+      if (before === undefined || before === "idle" || activityIn(next, id) !== "idle") continue;
+      unread ??= new Set(next.unread);
+      unread.add(id);
+    }
+    return unread === null ? next : { ...next, unread };
   }
 }

@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "./support/chat.js";
+import { expect, test, filesSection } from "./support/chat.js";
 
 /**
  * KOBE-304: the rail's Files as a compact tree. Uploads three small files into a new folder of the
@@ -52,7 +52,7 @@ test("Files tree: open, keys, icons, light and dark, rename, drag to move, Move 
     expect(await api(page, "POST", path, body)).toBe(201);
   }
   try {
-    const files = page.getByRole("region", { name: "Files" });
+    const files = filesSection(page);
     const openFiles = files.getByRole("button", { name: "Open files" });
     if (await openFiles.isVisible()) await openFiles.click();
     const tree = files.getByRole("tree", { name: "Files in your workspace" });

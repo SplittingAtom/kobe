@@ -260,6 +260,8 @@ function ChatWorkspace({
   const [threadId, setThreadId] = useThreadUrl(session.teamId, pathname);
   // The panels return here, to this thread (CE4, KOBE-452).
   useEffect(() => rememberLastThread(session.teamId, threadId), [session, threadId]);
+  // The thread on screen is seen: never "new activity" (KOBE-453, the Threads button's dot).
+  useEffect(() => session.activity.setOnScreen(threadId ?? null), [session, threadId]);
   // A link from before KOBE-452 (`/?thread=…&area=memory`) opens that page's panel over the thread.
   useEffect(() => {
     const area = onChatPage() ? areaFromUrl() : undefined;

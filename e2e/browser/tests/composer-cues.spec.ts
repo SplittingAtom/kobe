@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { RUN_START_TIMEOUT_MS, RUN_TIMEOUT_MS } from "./support/constants.js";
-import { expect, test } from "./support/chat.js";
+import { expect, test, filesSection } from "./support/chat.js";
 
 /**
  * KOBE-374: gold tool badges, the whole-composer focus outline, its pulse while a run goes (none
@@ -134,7 +134,7 @@ test("drag a workspace file onto the composer: an @file chip (ac-4)", async ({ c
   await chat.open();
   expect(await workspace(page, "POST", `${dir}/notes.txt`)).toBe(201);
   try {
-    const files = page.getByRole("region", { name: "Files" });
+    const files = filesSection(page);
     const openFiles = files.getByRole("button", { name: "Open files" });
     if (await openFiles.isVisible()) await openFiles.click();
     const tree = files.getByRole("tree", { name: "Files in your workspace" });

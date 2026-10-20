@@ -169,3 +169,56 @@ describe("the collapsed rail (ac-3)", () => {
     await waitFor(() => expect(tab("Files").getAttribute("aria-selected")).toBe("true"));
   });
 });
+
+describe("review fixes (KOBE-448)", () => {
+  it("a stored Apps tab never flashes Files while the apps list loads", async () => {
+    fake.teamApps = [APP];
+    fake.preferences = { rail_tab: "apps" };
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    const inner = fake.fetch;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (new URL(String(input), "http://kobe.test").pathname === "/v1/team/apps") await held;
+      return inner(input, init);
+    });
+    openApp(fake);
+    await composer();
+    await waitFor(() => expect(screen.getByText("Loading apps…")).toBeTruthy());
+    // Files stays hidden meanwhile: no flash of the wrong tab.
+    expect(must(document.getElementById("kobe-rail-files")).hidden).toBe(true);
+    release();
+    await tablist();
+    expect(tab("Apps").getAttribute("aria-selected")).toBe("true");
+    expect(screen.queryByText("Loading apps…")).toBeNull();
+  });
+
+  it("an apps list that can't be read leaves Files, without waiting", async () => {
+    fake.preferences = { rail_tab: "apps" };
+    fake.failNext.set("GET /v1/team/apps", new Response(null, { status: 500 }));
+    openApp(fake);
+    await composer();
+    await waitFor(() =>
+      expect(must(document.getElementById("kobe-rail-files")).hidden).toBe(false),
+    );
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.queryByText("Loading apps…")).toBeNull();
+  });
+
+  it("quick arrow presses save the last tab once (the saves are debounced)", async () => {
+    await withApps();
+    tab("Files").focus();
+    const user = userEvent.setup();
+    await user.keyboard("{ArrowRight}{ArrowRight}{ArrowRight}");
+    await waitFor(() => expect(puts()).toHaveLength(1), WAIT);
+    expect(puts()[0]?.body).toEqual({ rail_tab: "apps" });
+    await new Promise((r) => setTimeout(r, 900));
+    expect(puts()).toHaveLength(1);
+  });
+
+  it("the Files tab's panel is the one Files element: no region inside it", async () => {
+    await withApps();
+    const panel = screen.getByRole("tabpanel", { name: "Files" });
+    expect(panel.id).toBe("kobe-rail-files");
+    expect(within(panel).queryByRole("region")).toBeNull();
+  });
+});

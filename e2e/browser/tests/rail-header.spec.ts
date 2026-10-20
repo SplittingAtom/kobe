@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { SHELL_TIMEOUT_MS } from "./support/constants.js";
-import { expect, FILES_TOGGLE, test } from "./support/chat.js";
+import { expect, FILES_TOGGLE, test, filesSection } from "./support/chat.js";
 
 /**
  * KOBE-419: the rail's top line. The team selector (moved from the bar), the Threads and Files
@@ -81,7 +81,7 @@ test("Threads opens its panel; the Files toggle hides Files and is saved (KOBE-4
   const newThread = line.getByRole("button", { name: "New conversation", exact: true });
   const threadsButton = line.getByRole("button", { name: /^Threads panel/ });
   const filesToggle = line.getByRole("button", { name: FILES_TOGGLE });
-  const files = page.getByRole("region", { name: "Files" });
+  const files = filesSection(page);
   // New conversation sits immediately left of Threads.
   const newBox = await newThread.boundingBox();
   const threadsBox = await threadsButton.boundingBox();
@@ -115,7 +115,7 @@ test("Threads opens its panel; the Files toggle hides Files and is saved (KOBE-4
       "data-collapsed",
       "",
     );
-    await expect(second.getByRole("region", { name: "Files" })).toBeHidden();
+    await expect(filesSection(second)).toBeHidden();
     await other.close();
 
     // Mod+Shift+F shows Files again, saved exactly like the toggle.
@@ -165,7 +165,7 @@ test("Files | Apps: one tabbed section, arrow keys, the last tab kept (KOBE-448)
   const tabs = page.getByRole("tablist", { name: "Files and apps" });
   if (!(await tabs.isVisible())) {
     // No apps and no key to add on this deployment: Files alone, without a tablist.
-    await expect(page.getByRole("region", { name: "Files" })).toBeVisible();
+    await expect(filesSection(page)).toBeVisible();
     await expect(page.getByRole("tab", { name: "Apps" })).toHaveCount(0);
     return;
   }
@@ -178,7 +178,7 @@ test("Files | Apps: one tabbed section, arrow keys, the last tab kept (KOBE-448)
     await expect(apps).toBeFocused();
     await expect(apps).toHaveAttribute("aria-selected", "true");
     await expect(page.getByRole("tabpanel", { name: "Apps" })).toBeVisible();
-    await expect(page.getByRole("region", { name: "Files" })).toBeHidden();
+    await expect(filesSection(page)).toBeHidden();
     await shoot(page, "rail-tabs-apps", page.locator('[data-shell-region="rail"]'));
     // Kept per member: a reload opens on Apps.
     await page.reload();

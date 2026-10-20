@@ -8,7 +8,7 @@ import { placementOf } from "../../lib/chat/thread-groups";
 import { IconAction } from "../shell/icon-action";
 import { RailThreadCard } from "../shell/rail-thread-card";
 import styles from "./chat.module.css";
-import { ThreadActivityDot, useRowActivity } from "./thread-activity";
+import { ThreadActivityDot, useRowActivity, useRowUnread } from "./thread-activity";
 import { ThreadRowMenu } from "./thread-row-menu";
 
 /**
@@ -27,6 +27,8 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
   const movable = !archived && !shared && remoteId !== undefined;
   // A run going or an approval waiting, live, also while another thread is open (KOBE-301).
   const activity = useRowActivity();
+  const unread = useRowUnread();
+  const described = activity !== "idle" || unread;
   const activityId = useId();
   // In the Threads panel's search (KOBE-453): where this thread matched.
   const hitNote = useHitNote(remoteId);
@@ -48,12 +50,12 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
         className={`group/row ${styles.threadItem}`}
         data-kobe-activity={activity}
       >
-        <ThreadActivityDot activity={activity} id={activityId} />
+        <ThreadActivityDot activity={activity} id={activityId} unread={unread} />
         <RailThreadCard>
           <ThreadListItemPrimitive.Trigger
             className={styles.threadTrigger}
             title={typeof forkHint === "string" ? forkHint : undefined}
-            aria-describedby={activity === "idle" ? undefined : activityId}
+            aria-describedby={described ? activityId : undefined}
           >
             <ThreadListItemPrimitive.Title fallback="Untitled conversation" />
           </ThreadListItemPrimitive.Trigger>

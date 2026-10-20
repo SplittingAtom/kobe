@@ -34,10 +34,15 @@ export function useRailApps(): RailApps | null {
   useEffect(() => {
     if (teamId === undefined) return undefined;
     let alive = true;
-    void listRailApps(teamId).then((res) => {
-      // Apps are a nicety: a failed read shows none.
-      if (alive && res.ok) setApps({ teamId, value: normalized(res.data) });
-    });
+    void listRailApps(teamId).then(
+      (res) => {
+        // Apps are a nicety: a failed read shows none (and settles, so the rail never waits).
+        if (alive) setApps({ teamId, value: normalized(res.ok ? res.data : null) });
+      },
+      () => {
+        if (alive) setApps({ teamId, value: normalized(null) });
+      },
+    );
     return () => {
       alive = false;
     };
