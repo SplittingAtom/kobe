@@ -17,15 +17,7 @@ default), **external** (operated by the site, not shipped by Kobe), **dev-only**
 
 ## Pending gate review
 
-Outside the allowed family and not decided yet; every gate review clears this list with
-Chris (`pnpm license:gate` fails while it is not empty):
-
-- protobuf 5.29.6 (3-Clause BSD License, exception in images/skill-scan/license-exceptions.json): BSD-3-Clause declared as a free-text label. Cisco skill-scanner dependency (KOBE-341).
-- multidict 6.7.1 (Apache License 2.0, exception in images/skill-scan/license-exceptions.json): Apache-2.0 declared as a free-text label (approved for 6.7.1 in the Orbit eval image, KOBE-92). aiohttp dependency (KOBE-341).
-- regex 2026.4.4 (Apache-2.0 AND CNRI-Python, exception in images/skill-scan/license-exceptions.json): Apache-2.0 with code under the CNRI Python license (BSD-like, permissive, not copyleft); the same licence was approved for another version in the Orbit eval image. tiktoken dependency (KOBE-341).
-- tiktoken 0.12.0 (MIT License, exception in images/skill-scan/license-exceptions.json): MIT declared with the license text instead of an SPDX id (approved for 0.13.0 in the Orbit eval image). litellm dependency (KOBE-341).
-- typing_extensions 4.15.0 (PSF-2.0, exception in images/skill-scan/license-exceptions.json): Python Software Foundation license: permissive, not copyleft (approved for 4.16.0 in the Orbit eval image) (KOBE-341).
-- aiohappyeyeballs 2.6.1 (Python-2.0, exception in images/skill-scan/license-exceptions.json): PSF-2.0 (the PyPI classifier maps to Python-2.0): permissive, not copyleft (approved for 2.7.1 in the Orbit eval image). aiohttp dependency (KOBE-341).
+Nothing is pending: every component outside the allowed family has Chris's approval.
 
 ## Web and services: npm packages (pnpm workspace)
 
@@ -1412,12 +1404,12 @@ What the same script finds in the optional external skill scanner image (`kobe-s
 
 Documented exceptions (`images/skill-scan/license-exceptions.json`):
 
-- `aiohappyeyeballs` 2.6.1 (Python-2.0): PSF-2.0 (the PyPI classifier maps to Python-2.0): permissive, not copyleft (approved for 2.7.1 in the Orbit eval image). aiohttp dependency (KOBE-341). Pending gate review.
-- `multidict` 6.7.1 (Apache License 2.0): Apache-2.0 declared as a free-text label (approved for 6.7.1 in the Orbit eval image, KOBE-92). aiohttp dependency (KOBE-341). Pending gate review.
-- `protobuf` 5.29.6 (3-Clause BSD License): BSD-3-Clause declared as a free-text label. Cisco skill-scanner dependency (KOBE-341). Pending gate review.
-- `regex` 2026.4.4 (Apache-2.0 AND CNRI-Python): Apache-2.0 with code under the CNRI Python license (BSD-like, permissive, not copyleft); the same licence was approved for another version in the Orbit eval image. tiktoken dependency (KOBE-341). Pending gate review.
-- `tiktoken` 0.12.0 (MIT License): MIT declared with the license text instead of an SPDX id (approved for 0.13.0 in the Orbit eval image). litellm dependency (KOBE-341). Pending gate review.
-- `typing_extensions` 4.15.0 (PSF-2.0): Python Software Foundation license: permissive, not copyleft (approved for 4.16.0 in the Orbit eval image) (KOBE-341). Pending gate review.
+- `aiohappyeyeballs` 2.6.1 (Python-2.0): PSF-2.0 (the PyPI classifier maps to Python-2.0): permissive, not copyleft (approved for 2.7.1 in the Orbit eval image). aiohttp dependency (KOBE-341). Approved by Chris on 2026-10-20.
+- `multidict` 6.7.1 (Apache License 2.0): Apache-2.0 declared as a free-text label (approved for 6.7.1 in the Orbit eval image, KOBE-92). aiohttp dependency (KOBE-341). Approved by Chris on 2026-10-20.
+- `protobuf` 5.29.6 (3-Clause BSD License): BSD-3-Clause declared as a free-text label. Cisco skill-scanner dependency (KOBE-341). Approved by Chris on 2026-10-20.
+- `regex` 2026.4.4 (Apache-2.0 AND CNRI-Python): Apache-2.0 with code under the CNRI Python license (BSD-like, permissive, not copyleft); the same licence was approved for another version in the Orbit eval image. tiktoken dependency (KOBE-341). Approved by Chris on 2026-10-20.
+- `tiktoken` 0.12.0 (MIT License): MIT declared with the license text instead of an SPDX id (approved for 0.13.0 in the Orbit eval image). litellm dependency (KOBE-341). Approved by Chris on 2026-10-20.
+- `typing_extensions` 4.15.0 (PSF-2.0): Python Software Foundation license: permissive, not copyleft (approved for 4.16.0 in the Orbit eval image) (KOBE-341). Approved by Chris on 2026-10-20.
 
 ## Container and base images
 
