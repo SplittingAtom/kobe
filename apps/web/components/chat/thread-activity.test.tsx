@@ -1,13 +1,13 @@
 // @vitest-environment happy-dom
 import { readFileSync } from "node:fs";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { KobeEventPayload } from "@kobe/protocol";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
 import { ChatApp } from "./chat-app";
-import { composer, streaming } from "./testing";
+import { composer, openThreads, streaming, threadGroup } from "./testing";
 
 /**
  * KOBE-301 ac-2 and ac-5: the rail shows a pulsing green dot on a thread whose run is going and an
@@ -53,7 +53,7 @@ function open(threadId: string, pollMs = 30) {
   );
 }
 
-const rail = () => screen.findByRole("list", { name: "Your threads" });
+const rail = () => threadGroup("Your threads");
 
 /** The rail row (its `<li>`) of a thread, by title. */
 async function row(title: string): Promise<HTMLElement> {
@@ -171,6 +171,7 @@ describe("rail activity dots (ac-2)", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     fake.failNext.set("GET /v1/threads/activity", new Response(null, { status: 500 }));
     open(t, 60_000);
+    await openThreads();
     const theirs = await waitFor(() =>
       must(document.querySelector(`li[data-kobe-thread="${shared}"]`)),
     );

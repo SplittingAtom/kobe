@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
-import { chatRequests, composer, openApp } from "./testing";
+import { chatRequests, composer, openApp, threadGroup } from "./testing";
 
 /**
  * KOBE-292 (ac-2): the conversation header shows the thread's name with a pencil; the name edits
@@ -26,7 +26,7 @@ afterEach(() => {
 
 const heading = () => screen.findByRole("heading", { level: 2, name: "Budget" });
 const header = async () => must((await heading()).closest("header"));
-const rail = () => screen.findByRole("list", { name: "Your threads" });
+const rail = () => threadGroup("Your threads");
 const patches = () => chatRequests(fake, "PATCH");
 
 describe("conversation header name (KOBE-292)", () => {
@@ -48,9 +48,9 @@ describe("conversation header name (KOBE-292)", () => {
       team: fake.teamId,
     });
     expect(await screen.findByRole("heading", { level: 2, name: "Budget 2027" })).toBeTruthy();
-    expect(within(await rail()).getByRole("button", { name: "Budget 2027" })).toBeTruthy();
     expect(screen.queryByRole("textbox", { name: "Conversation name" })).toBeNull();
     expect(document.activeElement?.getAttribute("aria-label")).toBe("Rename Budget 2027");
+    expect(within(await rail()).getByRole("button", { name: "Budget 2027" })).toBeTruthy();
   });
 
   it("Escape cancels: nothing is sent and the name stays", async () => {

@@ -5,6 +5,7 @@
  * root layout keeps the workspace mounted under it (components/shell/workspace-host.tsx).
  */
 export type PanelId =
+  | "threads"
   | "team-console"
   | "site-console"
   | "administration"
@@ -31,6 +32,7 @@ export interface Panel {
 
 /** First match wins: the more specific prefixes come first. */
 const PANELS: readonly (Panel & { readonly prefix: string })[] = [
+  { prefix: "/threads", id: "threads", title: "Threads", embedded: false },
   { prefix: "/admin/team", id: "team-console", title: "Team console", embedded: false },
   { prefix: "/admin/site", id: "site-console", title: "Site console", embedded: false },
   { prefix: "/admin", id: "administration", title: "Administration", embedded: false },
@@ -62,3 +64,6 @@ export const WORKSPACE_PATH = "/";
 export function isWorkspacePath(pathname: string): boolean {
   return pathname === WORKSPACE_PATH || panelOfPath(pathname) !== undefined;
 }
+
+/** The Threads panel (KOBE-453): the member's threads, from the rail's top line. */
+export const THREADS_PANEL_HREF = "/threads";

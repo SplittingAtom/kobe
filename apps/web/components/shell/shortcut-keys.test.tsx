@@ -6,7 +6,14 @@ import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { isMacPlatform } from "../../lib/shell/shortcuts";
 import { must } from "../../lib/testing/must";
 import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
-import { chatRequests, composer, openApp, streaming } from "../chat/testing";
+import {
+  chatRequests,
+  composer,
+  openApp,
+  streaming,
+  openThreads,
+  closeThreads,
+} from "../chat/testing";
 
 /**
  * KOBE-225 (CE23): each of the twelve shortcuts runs its command's binding (ac-2), the `?` sheet
@@ -232,7 +239,9 @@ describe.each<Place>(["page", "composer"])(
       const newer = conversation("Newer", "Newer answer");
       must(fake.threads.get(newer)).last_activity_at = "2030-01-01T00:00:00.000Z";
       await opened(older, "Older answer");
-      await within(rail()).findByText("Newer", undefined, WAIT);
+      // The order is the Threads panel's (KOBE-453); the keys work with it closed.
+      await within(await openThreads()).findByText("Newer", undefined, WAIT);
+      await closeThreads();
       hit("[");
       await screen.findByText("Newer answer", undefined, WAIT);
       expect(threadParam()).toBe(newer);
@@ -268,11 +277,13 @@ describe("previous and next follow the rail's exact order (ac-2)", { timeout: 30
     must(fake.threads.get(inZeta)).last_activity_at = "2030-01-03T00:00:00.000Z";
     must(fake.threads.get(loose)).last_activity_at = "2030-01-02T00:00:00.000Z";
     await opened(inAlpha, "Alpha answer");
+    const panel = await openThreads();
     const groups = () =>
-      [...rail().querySelectorAll("[data-group]")].map(
+      [...panel.querySelectorAll("[data-group]")].map(
         (g) => g.querySelector("[class*=groupLabel]")?.textContent,
       );
     await waitFor(() => expect(groups()).toEqual(["Alpha", "Zeta", "Your threads"]), WAIT);
+    await closeThreads();
     press("]");
     await screen.findByText("Zeta answer", undefined, WAIT);
     expect(threadParam()).toBe(inZeta);

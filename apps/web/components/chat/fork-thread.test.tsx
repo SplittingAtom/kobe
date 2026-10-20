@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
-import { chatRequests, openApp } from "./testing";
+import { chatRequests, openApp, threadGroup } from "./testing";
 
 /** KOBE-216 (CE16): "Fork to a new thread" from a message, the fork's marker, the rail hint. */
 let fake: FakeKobe;
@@ -205,7 +205,7 @@ describe("the fork's origin (ac-1, ac-3, ac-6)", () => {
     const named = forkOf(src, src.a1, true);
     must(fake.threads.get(forkOf(src, src.u1, false))).title = "Hidden source";
     openApp(fake, named);
-    const list = within(await screen.findByRole("list", { name: "Your threads" }));
+    const list = within(await threadGroup("Your threads"));
     const item = await list.findByRole("button", { name: "Renewals deep dive" });
     expect(item.getAttribute("title")).toBe("Forked from “Quarterly plan”");
     const hidden = await list.findByRole("button", { name: "Hidden source" });

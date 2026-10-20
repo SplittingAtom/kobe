@@ -9,12 +9,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { RAIL_PANELS, THREADS_SHARE_BOUNDS, type RailPanels } from "@kobe/protocol";
-import {
-  applyThreadsShare,
-  useStoredPreference,
-  type LayoutPreferences,
-} from "../../lib/shell/preferences";
+import { RAIL_PANELS, type RailPanels } from "@kobe/protocol";
+import { useStoredPreference, type LayoutPreferences } from "../../lib/shell/preferences";
 import { railDocked } from "../../lib/shell/layout";
 import { DEFAULT_RAIL_PANELS, shows, withPanel } from "../../lib/shell/rail-panels";
 import { applyRailWidth, railWidthWithin } from "../../lib/shell/rail-width";
@@ -22,8 +18,9 @@ import { IconAction } from "./icon-action";
 import { useShellBand } from "./shell-band";
 
 /**
- * The workspace rail's state (CE5, KOBE-198): collapsed (48 px) or expanded (280 px), and the
- * share of the height the Threads section takes over Files.
+ * The workspace rail's state (CE5, KOBE-198): collapsed (48 px) or expanded (280 px). Since KOBE-453
+ * the threads are a panel over the workspace, so the rail's height is Files' alone (the stored
+ * Threads share is no longer read).
  *
  * Both are per user, server-side (CE8, KOBE-202, `lib/shell/preferences.ts`): the provider applies
  * the stored values once they load (unless the member already changed that value on this page)
@@ -39,40 +36,18 @@ import { useShellBand } from "./shell-band";
  * The expanded rail's width (KOBE-305) is dragged on wide windows only and saved with the other
  * preferences (per user, server-side); collapsing keeps it, so expanding again restores it.
  *
- * Its panels (KOBE-419): Threads, Files or both, from the toggles on the rail's top line, saved per
- * user. Asking for a hidden panel (Show threads, Show files, Mod+Shift+F, a drop, and the phone's
- * drawer button, which reveals Threads) turns it on and saves that exactly as its toggle would, so
- * what the toggles show is always what the member has stored.
+ * Its panels (KOBE-419): the stored value says whether Files shows ("files" or "both") or not
+ * ("threads", from before KOBE-453, when Threads could be the one panel left on). The Files toggle
+ * on the top line shows or hides it, saved per user; asking for it (Show files, Mod+Shift+F, a drop,
+ * the phone's drawer button) turns it on and saves that exactly as its toggle would.
  */
 export type RailSection = "threads" | "files";
-
-/** Threads' share of the rail's height: 60% by default, never squeezing either section out. */
-export const THREADS_SHARE = {
-  initial: 0.6,
-  min: THREADS_SHARE_BOUNDS.min,
-  max: THREADS_SHARE_BOUNDS.max,
-  step: 0.05,
-} as const;
-
-export function clampShare(share: number): number {
-  if (!Number.isFinite(share)) return THREADS_SHARE.initial;
-  const clamped = Math.min(THREADS_SHARE.max, Math.max(THREADS_SHARE.min, share));
-  return round(clamped);
-}
-
-const round = (n: number) => Math.round(n * 1000) / 1000;
-
-/** The sections grid's rows for a Threads share: Threads, the divider, Files. */
-export function sectionRows(share: number): string {
-  return `minmax(0, ${round(share)}fr) auto minmax(0, ${round(1 - share)}fr)`;
-}
 
 export interface RailApi {
   /** Showing the collapsed icons (48 px): the member's choice when docked, else no drawer. */
   readonly collapsed: boolean;
   /** Expanded below 1100 px: the rail is a modal drawer over the shell. */
   readonly drawer: boolean;
-  readonly threadsShare: number;
   /** The section the member asked to see; the rail focuses it once rendered. */
   readonly revealed: { readonly section: RailSection; readonly seq: number } | null;
   /** Collapses or expands the rail on this page only (automatic; not saved). */
@@ -83,7 +58,6 @@ export interface RailApi {
   toggle(collapsed: boolean): void;
   /** True once the member's stored layout has been applied (or failed to load). */
   readonly settled: boolean;
-  setThreadsShare(share: number): void;
   /** Times the member asked for Files: 0 = not yet (nothing listed or woken); each ask re-wakes. */
   readonly filesRequests: number;
   /**
@@ -103,6 +77,8 @@ export interface RailApi {
   readonly panels: RailPanels;
   /** The member's toggle on the rail's top line: saved; the last panel on stays on. */
   setPanel(section: RailSection, on: boolean): void;
+  /** The Files toggle (KOBE-453): shows or hides the rail's section, saved. */
+  setSectionShown(on: boolean): void;
   /** Turns a hidden panel on, saved like its toggle (a reveal, a drop's notice). */
   showPanel(section: RailSection): void;
 }
@@ -163,7 +139,8 @@ function useRailPanels(
     },
     [commit, current],
   );
-  return { panels: stored.value, setPanel, showPanel };
+  const setSectionShown = useCallback((on: boolean) => commit(on ? "both" : "threads"), [commit]);
+  return { panels: stored.value, setPanel, showPanel, setSectionShown };
 }
 
 const RailContext = createContext<RailApi | null>(null);
@@ -192,12 +169,6 @@ export function RailProvider({
     resolve: () => preferences?.railCollapsed ?? null,
     save: onSave && ((railCollapsed) => onSave({ railCollapsed })),
   });
-  const share = useStoredPreference<number>({
-    initial: THREADS_SHARE.initial,
-    ready,
-    resolve: () => applyThreadsShare(preferences?.threadsShare),
-    save: onSave && ((threadsShare) => onSave({ threadsShare })),
-  });
   // Set in the same pass as the stored values above, so it renders together with them.
   const [settled, setSettled] = useState(false);
   useEffect(() => {
@@ -219,7 +190,7 @@ export function RailProvider({
     [docked, chosenNow, drawerOpen],
   );
   const { width, setWidth, resetWidth } = useRailWidth(preferences, onSave);
-  const { panels, setPanel, showPanel } = useRailPanels(preferences, onSave);
+  const { panels, setPanel, showPanel, setSectionShown } = useRailPanels(preferences, onSave);
   const [filesRequests, setFilesRequests] = useState(0);
   const requestFiles = useCallback(() => setFilesRequests((n) => n + 1), []);
   const [revealed, setRevealed] = useState<RailApi["revealed"]>(null);
@@ -228,15 +199,6 @@ export function RailProvider({
     (next: boolean) => (docked ? commitChosen(next) : openDrawer(!next)),
     [docked, commitChosen, openDrawer],
   );
-  // The drawer's divider sits in a different height: it moves the drawer only, unsaved, and the
-  // docked rail keeps the member's share.
-  const [drawerShare, setDrawerShare] = useState<number | null>(null);
-  const commitShare = share.commit;
-  const setThreadsShare = useCallback(
-    (next: number) => (docked ? commitShare : setDrawerShare)(clampShare(next)),
-    [docked, commitShare],
-  );
-  const threadsShare = docked ? share.value : (drawerShare ?? share.value);
   const reveal = useCallback(
     (section: RailSection, options?: { readonly toggle?: boolean }) => {
       if (options?.toggle && collapsedNow()) toggle(false);
@@ -251,14 +213,12 @@ export function RailProvider({
     () => ({
       collapsed: docked ? chosen.value : !drawerOpen,
       drawer: drawerOpen,
-      threadsShare,
       revealed,
       filesRequests,
       settled,
       setCollapsed,
       closeDrawer,
       toggle,
-      setThreadsShare,
       reveal,
       requestFiles,
       width,
@@ -267,19 +227,18 @@ export function RailProvider({
       panels,
       setPanel,
       showPanel,
+      setSectionShown,
     }),
     [
       docked,
       chosen.value,
       drawerOpen,
-      threadsShare,
       revealed,
       filesRequests,
       settled,
       setCollapsed,
       closeDrawer,
       toggle,
-      setThreadsShare,
       reveal,
       requestFiles,
       width,
@@ -288,6 +247,7 @@ export function RailProvider({
       panels,
       setPanel,
       showPanel,
+      setSectionShown,
     ],
   );
   return <RailContext.Provider value={api}>{children}</RailContext.Provider>;
@@ -308,7 +268,11 @@ export function RailDrawerButton({ teamName = "" }: { readonly teamName?: string
         command="open-rail"
         aria-haspopup="dialog"
         aria-expanded={rail.drawer}
-        onClick={() => rail.reveal("threads", { toggle: true })}
+        onClick={() => {
+          // The drawer opens on Files without listing them (that waits for Open files).
+          rail.showPanel("files");
+          rail.toggle(false);
+        }}
       />
       {teamName !== "" && (
         <span

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
 import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
-import { announcement, composer, openApp, streaming } from "./testing";
+import { announcement, composer, openApp, streaming, threadGroup } from "./testing";
 
 /**
  * Compact now (CE15, KOBE-213): the dialog behind the gauge's red action and the Compact now icon
@@ -264,7 +264,7 @@ describe("Compact now (KOBE-213)", { timeout: 30_000 }, () => {
     await user.click(within(dialog).getByRole("button", { name: "Compact now" }));
     await within(dialog).findByRole("button", { name: "Compacting…" }, WAIT);
     await user.click(within(dialog).getByRole("button", { name: "Close" }));
-    const threads = within(await screen.findByRole("list", { name: "Your threads" }));
+    const threads = within(await threadGroup("Your threads"));
     await user.click(threads.getByRole("button", { name: "Beta" }));
     await waitFor(() => expect(window.location.search).toBe(`?thread=${b}`), WAIT);
     await user.click(await compactNow());

@@ -7,7 +7,7 @@ import { initialThreadState } from "../../lib/chat/thread-state";
 import { must } from "../../lib/testing/must";
 import type { KobeThreadExtras } from "./kobe-runtime";
 import { FollowupChips } from "./suggestion-chips";
-import { announcement, composer, openApp, streaming } from "./testing";
+import { announcement, composer, openApp, streaming, threadGroup } from "./testing";
 
 /**
  * KOBE-222 (CE21): the agent's starters on the welcome screen send at once; the server's follow-ups
@@ -186,7 +186,7 @@ describe("review fixes (S4, S5, N1, N2, N5)", () => {
     const { runId } = await completedRun("What drives revenue?");
     fake.agent.suggest(runId, ["Chart it by region"]);
     await screen.findByRole("group", { name: "Suggested follow-ups" });
-    const rail = await screen.findByRole("list", { name: "Your threads" });
+    const rail = await threadGroup("Your threads");
     await userEvent.setup().click(within(rail).getByRole("button", { name: "Other" }));
     expect(await screen.findByText("from the other thread")).toBeTruthy();
     expect(followups()).toBeNull();

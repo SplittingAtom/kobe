@@ -6,7 +6,7 @@ import { viewport } from "../../app/layout";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { BAND_QUERIES, BREAKPOINTS } from "../../lib/shell/layout";
 import { must } from "../../lib/testing/must";
-import { composer, openApp } from "../chat/testing";
+import { composer, openApp, openThreads } from "../chat/testing";
 import { useViewportHeight } from "../chat/use-viewport-height";
 
 /**
@@ -285,12 +285,8 @@ describe("rail width (KOBE-267)", () => {
     vi.unstubAllGlobals();
   });
 
-  it("the sections grid is one column exactly the rail's width, so the divider is too", () => {
+  it("the sections grid is one column exactly the rail's width", () => {
     expect(declares(RAIL, ".sections", "grid-template-columns: minmax(0, 1fr);")).toBe(true);
-    // An explicit width or min-width on the divider could still push past the rail.
-    const divider = rules(RAIL, ".divider").join("");
-    expect(divider).toContain("min-width: 0;");
-    expect(divider).not.toMatch(/(^|[^-])width:/);
   });
 
   it("nothing in the rail is sized by a title's length: every level may shrink", () => {
@@ -308,17 +304,17 @@ describe("rail width (KOBE-267)", () => {
     }
   });
 
-  it("a 200-character title renders inside the ellipsizing trigger, in the rail", async () => {
+  it("a 200-character title renders inside the ellipsizing trigger, in the Threads panel", async () => {
     const kobe = new FakeKobe();
     vi.stubGlobal("fetch", kobe.fetch);
     const title = "Quarterly revenue reconciliation ".repeat(7).slice(0, 200);
     kobe.addThread(title);
     openApp(kobe);
-    const rail = await screen.findByRole("complementary", { name: "Workspace" });
-    const text = await within(rail).findByText(title);
+    const panel = await openThreads();
+    const text = await within(panel).findByText(title);
     const trigger = must(text.closest("button"), "trigger");
     expect(trigger.className).toMatch(/threadTrigger/);
-    expect(trigger.closest("aside")).toBe(rail);
+    expect(trigger.closest("[data-kobe-panel]")).toBe(panel);
   });
 });
 

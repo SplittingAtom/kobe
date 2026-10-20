@@ -162,7 +162,7 @@ const filesRegion = () => screen.getByRole("region", { name: "Files" });
 describe("rail drop zone: overlay (ac-1)", () => {
   it("shows over the whole rail while files are dragged, without flicker over its children", async () => {
     const rail = await mount();
-    const threads = within(rail).getByRole("region", { name: "Threads" });
+    const threads = within(rail).getByRole("region", { name: "Files" });
     fireEvent.dragEnter(rail, files(fileOf("a.txt")));
     expect(overlay()).toBeTruthy();
     fireEvent.dragEnter(threads, files(fileOf("a.txt")));

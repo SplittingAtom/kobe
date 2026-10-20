@@ -2,7 +2,7 @@
 
 import "../../lib/security/zod-jitless";
 import { AssistantRuntimeProvider, Suggestions, useAui } from "@assistant-ui/react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { TeamInvites } from "../../app/team-invites";
 import { TeamActivation } from "../../app/team-switcher";
 import type { ApiError } from "../../lib/api/client";
@@ -17,7 +17,7 @@ import { createFilesApi } from "../../lib/files/api";
 import { AREAS, areaFromUrl, onChatPage } from "../../lib/shell/areas";
 import { lastThreadHref, lastThreadId, rememberLastThread } from "../../lib/shell/last-thread";
 import { followWorkspaceEntries, stepsBackToWorkspace } from "../../lib/shell/panel-history";
-import { panelOfPath } from "../../lib/shell/panels";
+import { panelOfPath, type Panel } from "../../lib/shell/panels";
 import { ArtifactPanel } from "./artifact-panel";
 import { ArtifactPanelProvider, useArtifactPanel } from "./artifact-state";
 import { AppCommands } from "../shell/app-commands";
@@ -36,7 +36,9 @@ import { ThreadUsageProvider } from "./message-footer";
 import { TeamModelsProvider } from "./use-team-models";
 import { ThreadMarkersProvider } from "./markers";
 import { ThreadAppsProvider } from "../apps/thread-apps";
+import { OpenPanelContext } from "../shell/panel-close";
 import { WorkspacePanel } from "../shell/workspace-panel";
+import { ThreadsPanelContent } from "../shell/threads-panel";
 import { WorkspaceRail } from "../shell/workspace-rail";
 import { FileGoneNotice } from "../files/file-tab";
 import { IconActionProvider } from "../shell/icon-action";
@@ -107,6 +109,37 @@ export interface WorkspaceRoute {
   readonly page: ReactNode;
   readonly push: (href: string) => void;
   readonly replace: (href: string) => void;
+}
+
+/**
+ * Without the router (the chat rendered alone, in tests), the address itself: `history` moves it
+ * and Back and Forward follow, so the panels that live in the workspace (Threads, KOBE-453) open
+ * and close as they do under Next.
+ */
+function useHistoryRoute(route: WorkspaceRoute | undefined): WorkspaceRoute {
+  const [pathname, setPathname] = useState(() =>
+    typeof window === "undefined" ? "/" : window.location.pathname,
+  );
+  useEffect(() => {
+    if (route) return;
+    const follow = () => setPathname(window.location.pathname);
+    window.addEventListener("popstate", follow);
+    return () => window.removeEventListener("popstate", follow);
+  }, [route]);
+  const own = useMemo<WorkspaceRoute>(() => {
+    const go = (href: string, replace: boolean) => {
+      if (replace) window.history.replaceState(null, "", href);
+      else window.history.pushState(null, "", href);
+      setPathname(window.location.pathname);
+    };
+    return {
+      pathname,
+      page: null,
+      push: (href) => go(href, false),
+      replace: (href) => go(href, true),
+    };
+  }, [pathname]);
+  return route ?? own;
 }
 
 /** Opens a thread from outside the workspace (the bell in the bar): `useThreadUrl` follows. */
@@ -210,11 +243,14 @@ function ChatWorkspace({
   activityPollMs,
   pathname,
   replace,
+  onClosePanel,
 }: {
   readonly session: ChatSession;
   /** The address (KOBE-452): the chat, or a panel over it. */
   readonly pathname: string;
   readonly replace: ((href: string) => void) | undefined;
+  /** Closes the panel open over the workspace (the Threads panel renders in here). */
+  readonly onClosePanel: () => void;
   readonly activityPollMs: number | undefined;
   /** The rail's header (CE2): the workspace is the member's view of this team. */
   readonly teamName: string;
@@ -260,6 +296,31 @@ function ChatWorkspace({
     [session, runtime],
   );
   const aui = useAui({ suggestions: Suggestions(STARTER_SUGGESTIONS) });
+  const panel = panelOfPath(pathname);
+  const threadsPanel: Panel | undefined = panel?.id === "threads" ? panel : undefined;
+  // A thread chosen in the Threads panel is on screen (assistant-ui switched to it): the panel's
+  // entry becomes that thread's, so Back returns to the conversation before it.
+  const chooseThread = useCallback(
+    (id: string) => {
+      if (replace !== undefined) replace(`/?thread=${id}`);
+      else onClosePanel();
+    },
+    [replace, onClosePanel],
+  );
+  // Another thread on screen while the Threads panel is open (its title, Regenerate, Make a skill
+  // from this): the panel closes onto it.
+  const shownAtOpen = useRef<string | undefined>(undefined);
+  const threadsOpen = threadsPanel !== undefined;
+  useEffect(() => {
+    if (!threadsOpen) return;
+    shownAtOpen.current = threadId;
+    // Only the thread on screen when the panel opened: later switches are below.
+  }, [threadsOpen]);
+  useEffect(() => {
+    if (threadsOpen && threadId !== undefined && threadId !== shownAtOpen.current) {
+      chooseThread(threadId);
+    }
+  }, [threadsOpen, threadId, chooseThread]);
   // The member's layout, from any device (CE8): loaded once, changes saved debounced.
   const layout = useLayoutPreferences(fetchFn);
   return (
@@ -311,6 +372,16 @@ function ChatWorkspace({
                               </main>
                             }
                           />
+                          {/* The Threads panel (KOBE-453) needs the thread list: it renders in here. */}
+                          {threadsPanel !== undefined && (
+                            <WorkspacePanel
+                              panel={threadsPanel}
+                              path={pathname}
+                              onClose={onClosePanel}
+                            >
+                              <ThreadsPanelContent listError={listError} onChosen={chooseThread} />
+                            </WorkspacePanel>
+                          )}
                         </ArtifactPanelProvider>
                       </ThreadAppsProvider>
                     </ThreadMarkersProvider>
@@ -353,8 +424,9 @@ export function ChatApp({
   uploadTransport,
   threadListSync = browserThreadListSync,
   activityPollMs,
-  route,
+  route: givenRoute,
 }: ChatAppProps) {
+  const route = useHistoryRoute(givenRoute);
   const team = useActiveTeam(fetchFn);
   const teamId = team.status === "ready" ? team.teamId : null;
   const session = useMemo(
@@ -376,19 +448,19 @@ export function ChatApp({
   useEffect(() => () => session?.dispose(), [session]);
   const [appEl, setAppEl] = useState<HTMLDivElement | null>(null);
   useViewportHeight(appEl);
-  const pathname = route?.pathname ?? "/";
+  const { pathname } = route;
   const panel = panelOfPath(pathname);
   // The chat entry a panel returns to (KOBE-452): the latest one shown without a panel.
   useEffect(() => followWorkspaceEntries(onChatPage), []);
   const closePanel = useCallback(() => {
     const steps = stepsBackToWorkspace();
     if (steps !== null) window.history.go(steps);
-    else route?.replace(lastThreadHref(teamId));
+    else route.replace(lastThreadHref(teamId));
   }, [route, teamId]);
   // The bell under a panel: the thread opens in the chat, and the panel closes.
   const openThreadFromHeader = useCallback(
     (id: string) => {
-      if (panel !== undefined && route !== undefined) route.push(`/?thread=${id}`);
+      if (panel !== undefined) route.push(`/?thread=${id}`);
       else openThreadInChat(id);
     },
     [panel, route],
@@ -427,37 +499,40 @@ export function ChatApp({
           fetchFn={fetchFn}
           activityPollMs={activityPollMs}
           pathname={pathname}
-          replace={route?.replace}
+          replace={route.replace}
+          onClosePanel={closePanel}
         />
       </ChatSessionContext.Provider>
     );
   }
 
   return (
-    <IconActionProvider>
-      <ShellBandProvider>
-        <ShellSlotsProvider>
-          <div ref={setAppEl} className={styles.app} data-kobe-chat>
-            {/* eslint-disable-next-line no-restricted-syntax -- a skip link is text by design (WCAG 2.4.1) */}
-            <a className={styles.skipLink} href="#kobe-chat-main">
-              Skip to the conversation
-            </a>
-            <UtilityBar teamId={teamId} fetchFn={fetchFn} onOpenThread={openThreadFromHeader} />
-            <TeamInvites />
-            {/* No active team yet: activates one (the selector itself is in the rail, KOBE-419). */}
-            <TeamActivation />
-            {body}
-            {/* A console, My agents, Skills or a My area page over the workspace (KOBE-452). */}
-            {panel !== undefined ? (
-              <WorkspacePanel panel={panel} path={pathname} onClose={closePanel}>
-                {route?.page}
-              </WorkspacePanel>
-            ) : (
-              route?.page
-            )}
-          </div>
-        </ShellSlotsProvider>
-      </ShellBandProvider>
-    </IconActionProvider>
+    <OpenPanelContext.Provider value={route.push}>
+      <IconActionProvider>
+        <ShellBandProvider>
+          <ShellSlotsProvider>
+            <div ref={setAppEl} className={styles.app} data-kobe-chat>
+              {/* eslint-disable-next-line no-restricted-syntax -- a skip link is text by design (WCAG 2.4.1) */}
+              <a className={styles.skipLink} href="#kobe-chat-main">
+                Skip to the conversation
+              </a>
+              <UtilityBar teamId={teamId} fetchFn={fetchFn} onOpenThread={openThreadFromHeader} />
+              <TeamInvites />
+              {/* No active team yet: activates one (the selector itself is in the rail, KOBE-419). */}
+              <TeamActivation />
+              {body}
+              {/* A console, My agents, Skills or a My area page over the workspace (KOBE-452). */}
+              {panel !== undefined && panel.id !== "threads" ? (
+                <WorkspacePanel panel={panel} path={pathname} onClose={closePanel}>
+                  {route.page}
+                </WorkspacePanel>
+              ) : (
+                route.page
+              )}
+            </div>
+          </ShellSlotsProvider>
+        </ShellBandProvider>
+      </IconActionProvider>
+    </OpenPanelContext.Provider>
   );
 }

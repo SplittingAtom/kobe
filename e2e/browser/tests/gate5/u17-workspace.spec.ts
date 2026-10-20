@@ -107,11 +107,12 @@ test("U17: rail state, divider and artifact width persist across two browsers", 
     await columnHandle.focus();
     await page.keyboard.press("Home");
     await expect.poll(() => widthOf(artifact)).toBeLessThanOrEqual(360 + SLACK_PX);
-    // The Threads/Files divider: Home is the smallest Threads share.
-    const divider = page.getByRole("separator", { name: "Resize Threads and Files" });
-    await divider.focus();
-    await page.keyboard.press("Home");
-    const share = Number(await divider.getAttribute("aria-valuenow"));
+    // The rail's Files section hidden (KOBE-453: the threads are a panel, the rail is Files).
+    const filesToggle = page
+      .locator("[data-rail-header]")
+      .getByRole("button", { name: "Files panel", exact: true });
+    await filesToggle.click();
+    await expect(filesToggle).toHaveAttribute("aria-pressed", "false");
     // The rail collapses (Mod+B).
     await page.locator("body").press("ControlOrMeta+b");
     await expect.poll(() => widthOf(rail)).toBeLessThanOrEqual(48 + SLACK_PX);
@@ -121,7 +122,7 @@ test("U17: rail state, divider and artifact width persist across two browsers", 
     await expect
       .poll(async () => (await preferences(page))["artifact_width"])
       .toBeLessThanOrEqual(360 + SLACK_PX);
-    await expect.poll(async () => (await preferences(page))["threads_share"]).toBeDefined();
+    await expect.poll(async () => (await preferences(page))["rail_panels"]).toBe("threads");
 
     // The second browser, signed in on its own, gets the same layout.
     await second.reload();
@@ -132,8 +133,11 @@ test("U17: rail state, divider and artifact width persist across two browsers", 
     await expect.poll(() => widthOf(r2.rail)).toBeLessThanOrEqual(48 + SLACK_PX);
     await second.locator("body").press("ControlOrMeta+b");
     await expect.poll(() => widthOf(r2.rail)).toBeGreaterThan(48 + SLACK_PX);
-    const divider2 = second.getByRole("separator", { name: "Resize Threads and Files" });
-    await expect(divider2).toHaveAttribute("aria-valuenow", String(share));
+    await expect(
+      second
+        .locator("[data-rail-header]")
+        .getByRole("button", { name: "Files panel", exact: true }),
+    ).toHaveAttribute("aria-pressed", "false");
     // The artifact width applies once a column opens there: the same thread's artifact, reopened
     // from the thread's artifact list (the open set itself is per browser, CE6).
     await second.goto(page.url());
@@ -148,7 +152,7 @@ test("U17: rail state, divider and artifact width persist across two browsers", 
     await putPreferences(page, {
       rail_collapsed: before["rail_collapsed"] ?? false,
       artifact_width: before["artifact_width"] ?? null,
-      ...(before["threads_share"] === undefined ? {} : { threads_share: before["threads_share"] }),
+      rail_panels: before["rail_panels"] ?? "both",
     });
   }
 });

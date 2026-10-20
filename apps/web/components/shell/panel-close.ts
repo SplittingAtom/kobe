@@ -12,3 +12,13 @@ export const PanelCloseContext = createContext<(() => void) | null>(null);
 export function usePanelClose(): (() => void) | null {
   return useContext(PanelCloseContext);
 }
+
+/**
+ * Opens a panel over the workspace at its address (KOBE-453: the Threads panel from the rail), on
+ * the workspace's router; null outside the workspace.
+ */
+export const OpenPanelContext = createContext<((href: string) => void) | null>(null);
+
+export function useOpenPanel(): ((href: string) => void) | null {
+  return useContext(OpenPanelContext);
+}

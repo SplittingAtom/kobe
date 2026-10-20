@@ -8,7 +8,7 @@ import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
 import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
 import { ChatApp } from "./chat-app";
-import { chatRequests, composer, openApp } from "./testing";
+import { chatRequests, composer, openApp, openThreads } from "./testing";
 
 /**
  * KOBE-224 (CE22): `/` at the start of the composer opens a listbox of the registry's actions
@@ -372,6 +372,7 @@ describe("how the text arrives (ac-3)", { timeout: 30_000 }, () => {
     const { t: second } = conversation("Second");
     const input = await opened(first);
     const user = userEvent.setup();
+    await openThreads();
     const row = await waitFor(() =>
       must(document.querySelector<HTMLElement>(`[data-kobe-thread="${second}"]`)),
     );
