@@ -7,12 +7,17 @@ import styles from "./chat.module.css";
 /** The `<select>` value of "the model's default level". */
 const DEFAULT = "";
 
-const LABELS: Readonly<Record<ThinkingLevel, string>> = {
+export const THINKING_LABELS: Readonly<Record<ThinkingLevel, string>> = {
   off: "Thinking off",
   low: "Thinking low",
   medium: "Thinking medium",
   high: "Thinking high",
 };
+
+/** The "model's default" choice, naming the level when the team sets one. */
+export function thinkingDefaultLabel(fallback: ThinkingLevel | null): string {
+  return fallback === null ? "Thinking: default" : `${THINKING_LABELS[fallback]} (default)`;
+}
 
 /**
  * The levels the conversation's model offers in this team (KOBE-260), or none: its team
@@ -75,12 +80,10 @@ export function ThinkingPicker({
           onChoose(e.target.value === DEFAULT ? null : (e.target.value as ThinkingLevel))
         }
       >
-        <option value={DEFAULT}>
-          {fallback === null ? "Thinking: default" : `${LABELS[fallback]} (default)`}
-        </option>
+        <option value={DEFAULT}>{thinkingDefaultLabel(fallback)}</option>
         {levels.map((l) => (
           <option key={l} value={l}>
-            {LABELS[l]}
+            {THINKING_LABELS[l]}
           </option>
         ))}
       </select>

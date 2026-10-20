@@ -14,6 +14,7 @@ import { branchPointOfMeta, type KobeMessageMeta } from "../../lib/chat/tree";
 import type { MenuBinding, MenuBindings } from "../../lib/shell/menu";
 import { useBindCommands, useCommandsWanted } from "../shell/command-bindings";
 import { ForkDialog } from "./fork-dialog";
+import { SessionCommands } from "./session-info";
 import type { KobeThreadExtras } from "./kobe-runtime";
 import { RailAnnounce } from "./use-organize-menu";
 import { useThreadMenuBindings, type Notice } from "./use-thread-menu";
@@ -132,15 +133,18 @@ function Bindings({
         };
   useBindCommands(bindings);
   return (
-    forking && (
-      <ForkDialog
-        point={forking}
-        defaultTitle={state.summary?.title ?? ""}
-        onOpenChange={(open) => {
-          if (!open) setForking(null);
-        }}
-      />
-    )
+    <>
+      <SessionCommands extras={extras} threadId={threadId} />
+      {forking && (
+        <ForkDialog
+          point={forking}
+          defaultTitle={state.summary?.title ?? ""}
+          onOpenChange={(open) => {
+            if (!open) setForking(null);
+          }}
+        />
+      )}
+    </>
   );
 }
 
@@ -162,6 +166,8 @@ const DRAFT_IDS = [
   "stop",
   "fork-thread",
   "edit-last-message",
+  "thread-info",
+  "export-thread",
 ] as const;
 const DRAFT: MenuBindings = Object.fromEntries(
   DRAFT_IDS.map((id) => [id, { onSelect: () => {}, blocker: NO_THREAD }]),

@@ -31,6 +31,7 @@ import {
   FolderInputIcon,
   FolderKanbanIcon,
   GitForkIcon,
+  InfoIcon,
   GripVerticalIcon,
   KeyboardIcon,
   MessagesSquareIcon,
@@ -250,6 +251,31 @@ const LIST = [
     scope: "thread",
     slash: "model",
     arg: "model",
+  },
+  // KOBE-450 (Pi's /thinking, /session, /export): the thinking picker's levels, bound by
+  // `useModelPicker`; this conversation's details and usage; its Markdown download (the owner's).
+  {
+    id: "choose-thinking",
+    name: "Thinking level for this conversation",
+    icon: BrainIcon,
+    scope: "thread",
+    slash: "thinking",
+    arg: "level",
+  },
+  {
+    id: "thread-info",
+    name: "This conversation's details and usage",
+    icon: InfoIcon,
+    scope: "thread",
+    slash: "session",
+    readOnlySafe: true,
+  },
+  {
+    id: "export-thread",
+    name: "Download this conversation as Markdown",
+    icon: DownloadIcon,
+    scope: "thread",
+    slash: "export",
   },
   // Rail.
   {
@@ -493,6 +519,7 @@ const LIST = [
     icon: CommandIcon,
     scope: "app",
     shortcut: "Mod+K",
+    slash: "search",
     readOnlySafe: true,
   },
   {
@@ -501,6 +528,7 @@ const LIST = [
     icon: KeyboardIcon,
     scope: "app",
     shortcut: "?",
+    slash: "shortcuts",
     readOnlySafe: true,
   },
   {

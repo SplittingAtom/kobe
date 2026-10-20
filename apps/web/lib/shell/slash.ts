@@ -9,6 +9,7 @@
 import type { TriggerItem, TriggerMatcher } from "@assistant-ui/react";
 import { COMMANDS, isAvailable, type CommandContext, type RegisteredCommand } from "./commands";
 import type { MenuBinding, MenuBindings } from "./menu";
+import { notOfferedLabel, piCommand } from "./pi-commands";
 
 export const SLASH_TRIGGER = "/";
 /** `TriggerItem.type` of an action, and of one of its argument's choices. */
@@ -132,10 +133,15 @@ export function slashItems(
   entries: readonly SlashEntry[],
 ): readonly TriggerItem[] {
   const name = query.name.toLowerCase();
+  const pi = piWord(name, entries);
+  if (pi?.kind === "refused") return [pi.row];
   if (query.arg === undefined) {
-    return entries.filter((e) => e.slash.startsWith(name)).map(commandItem);
+    const found = entries.filter((e) => e.slash.startsWith(name));
+    const offered = pi?.kind === "alias" && !found.includes(pi.entry) ? [pi.entry] : [];
+    return [...found, ...offered].map(commandItem);
   }
-  const entry = entries.find((e) => e.slash === name);
+  const entry =
+    entries.find((e) => e.slash === name) ?? (pi?.kind === "alias" ? pi.entry : undefined);
   if (entry === undefined) return [];
   if (entry.blocker !== null) return [commandItem(entry)];
   const want = query.arg.trim().toLowerCase();
@@ -161,6 +167,32 @@ export function slashItems(
   }));
 }
 
+/**
+ * A Pi built-in command typed in full (KOBE-450) whose word no Kobe command has: Kobe's command
+ * for it (`/name` offers `/rename`), or one disabled row saying why it isn't offered, so the word
+ * is neither run by Pi nor sent to it as a message.
+ */
+function piWord(
+  name: string,
+  entries: readonly SlashEntry[],
+):
+  | { readonly kind: "alias"; readonly entry: SlashEntry }
+  | { readonly kind: "refused"; readonly row: TriggerItem }
+  | undefined {
+  const pi = piCommand(name);
+  if (pi === undefined || entries.some((e) => e.slash === name)) return undefined;
+  const m = pi.mapping;
+  if (m.kind === "not-offered") {
+    const label = notOfferedLabel(pi.word, m.reason);
+    return {
+      kind: "refused",
+      row: { id: `pi:${pi.word}`, type: SLASH_NO_MATCH, label, metadata: { blocker: label } },
+    };
+  }
+  const entry = entries.find((e) => e.command.id === m.command);
+  return entry === undefined ? undefined : { kind: "alias", entry };
+}
+
 /** What a pick does. */
 export type SlashOutcome =
   | { readonly kind: "run"; readonly run: () => void }
@@ -170,10 +202,10 @@ export type SlashOutcome =
   | { readonly kind: "blocked"; readonly reason: string };
 
 export function slashOutcome(item: TriggerItem, entries: readonly SlashEntry[]): SlashOutcome {
+  if (item.type === SLASH_NO_MATCH) return { kind: "blocked", reason: item.label };
   const id = item.type === SLASH_COMMAND ? item.id : item.metadata?.["command"];
   const entry = entries.find((e) => e.command.id === id);
   if (entry === undefined) return { kind: "blocked", reason: NOT_HERE };
-  if (item.type === SLASH_NO_MATCH) return { kind: "blocked", reason: item.label };
   if (entry.blocker !== null)
     return { kind: "blocked", reason: `${entry.label}: ${entry.blocker}` };
   const { binding } = entry;

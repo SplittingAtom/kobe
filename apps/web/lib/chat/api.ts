@@ -460,6 +460,14 @@ export function threadExportUrl(teamId: string): string {
   return `/v1/threads/export${query({ team: teamId })}`;
 }
 
+/**
+ * The download URL of one conversation as Markdown (`/export`, KOBE-450): the owner's only; the
+ * team goes in the query as for `threadExportUrl`.
+ */
+export function threadExportOneUrl(threadId: string, teamId: string): string {
+  return `/v1/threads/${enc(threadId)}/export${query({ team: teamId })}`;
+}
+
 /** The SSE URL of a run's events after `seq` (KOBE-31; the session cookie authenticates it). */
 export function runEventsUrl(runId: string, startingAfter: number): string {
   return `/v1/runs/${enc(runId)}/events${query({ starting_after: startingAfter })}`;

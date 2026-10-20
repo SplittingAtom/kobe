@@ -7,6 +7,7 @@
  */
 import { COMMANDS, type CommandId, type RegisteredCommand } from "./commands";
 import type { MenuBinding, MenuBindings, MenuChoice } from "./menu";
+import { piAliasesOf } from "./pi-commands";
 import { commandBlocker, type SlashContext } from "./slash";
 
 export interface PaletteAction {
@@ -54,13 +55,16 @@ export function matchesQuery(text: string, query: string): boolean {
   return words(query).every((w) => hay.includes(w));
 }
 
-/** The actions matching `query` by label, registry name or `/` word. */
+/** The actions matching `query` by label, registry name, `/` word or Pi's word for it (KOBE-450). */
 export function filterActions(
   actions: readonly PaletteAction[],
   query: string,
 ): readonly PaletteAction[] {
   return actions.filter((a) =>
-    matchesQuery([a.label, a.command.name, a.command.slash ?? ""].join(" "), query),
+    matchesQuery(
+      [a.label, a.command.name, a.command.slash ?? "", ...piAliasesOf(a.command.id)].join(" "),
+      query,
+    ),
   );
 }
 
