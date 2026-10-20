@@ -6,7 +6,7 @@
  * (the same word, or Kobe's own word for it) or not offered, with the reason. The `/` menu shows
  * a not-offered word as one disabled row with its reason, so it is never sent as a message either.
  */
-import type { CommandId } from "./commands";
+import { COMMANDS, type CommandId } from "./commands";
 
 export const PI_VERSION = "1.0.0";
 
@@ -148,4 +148,19 @@ export function piAliasesOf(id: CommandId): readonly string[] {
 /** The `/` menu's row for a word Kobe doesn't offer. */
 export function notOfferedLabel(word: string, reason: string): string {
   return `/${word} isn't offered in Kobe: ${reason}`;
+}
+
+const FIRST_WORD = /^\/([^\s/]+)(?:\s|$)/u;
+
+/**
+ * Why `text` can't be sent (KOBE-450 review LOW-5): it starts with a Pi command Kobe doesn't
+ * offer (`/login …`), so sending it would look like running that command. Null otherwise. A
+ * member who means the text deliberately escapes it: a leading space (or any edit of the word).
+ */
+export function refusedPiCommand(text: string): string | null {
+  const word = FIRST_WORD.exec(text)?.[1]?.toLowerCase();
+  if (word === undefined || COMMANDS.some((c) => c.slash === word)) return null;
+  const pi = piCommand(word);
+  if (pi?.mapping.kind !== "not-offered") return null;
+  return `${notOfferedLabel(pi.word, pi.mapping.reason)} Start with a space to send it as text.`;
 }

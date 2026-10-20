@@ -516,6 +516,8 @@ export class FakeKobe {
 
   /** Offloaded entry bodies (KOBE-208), by entry id. */
   readonly entryBodies = new Map<string, Json>();
+  /** `GET /v1/threads/{id}/export` answers this error instead of the Markdown (KOBE-450). */
+  exportRefusal: { status: number; code: string; message: string } | null = null;
   /** `GET /v1/threads/{id}/usage` runs (KOBE-43/208), by thread id. */
   readonly threadUsage = new Map<string, Json[]>();
   /** Its `latest_call` (KOBE-211, wire casing), by thread id; absent: null. */
@@ -1497,6 +1499,18 @@ export class FakeKobe {
       return this.#toolOutput(thread, sub);
     }
     if (action === "entries") return json(200, this.#entryPage(thread, url));
+    // `/export` (KOBE-450): the owner's conversation as Markdown, or the refusal set here.
+    if (action === "export" && method === "GET") {
+      const refusal = this.exportRefusal;
+      if (refusal) return error(refusal.status, refusal.code, refusal.message);
+      return new Response(`# ${thread.title ?? "Untitled"}\n`, {
+        status: 200,
+        headers: {
+          "content-type": "text/markdown; charset=utf-8",
+          "content-disposition": `attachment; filename="2026-10-20-export-${thread.thread_id.slice(0, 8)}.md"`,
+        },
+      });
+    }
     if (action === "usage" && method === "GET") {
       const runs = this.threadUsage.get(thread.thread_id) ?? [];
       const latest = this.threadLatestCall.get(thread.thread_id) ?? null;

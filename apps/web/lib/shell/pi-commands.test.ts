@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { COMMANDS, command } from "./commands";
 import type { MenuBindings } from "./menu";
 import { filterActions, paletteActions } from "./palette";
-import { PI_BUILTIN_COMMANDS, PI_VERSION, piCommand } from "./pi-commands";
-import { SLASH_NO_MATCH, slashEntries, slashItems, slashOutcome } from "./slash";
+import { PI_BUILTIN_COMMANDS, PI_VERSION, piCommand, refusedPiCommand } from "./pi-commands";
+import { NOT_HERE, SLASH_NO_MATCH, slashEntries, slashItems, slashOutcome } from "./slash";
 
 /**
  * KOBE-450: Pi's built-in commands (the sandbox pins Pi 1.0.0; `BUILTIN_SLASH_COMMANDS` in its
@@ -125,6 +125,13 @@ describe("the / menu knows Pi's words (ac-3, ac-6)", () => {
     }
   });
 
+  it("where Kobe's command isn't bound, the Pi word still shows it, blocked (review LOW-6)", () => {
+    const unbound = slashEntries({}, { readOnly: false });
+    const rows = slashItems({ offset: 0, name: "name", arg: undefined }, unbound);
+    expect(rows.map((r) => [r.label, r.metadata?.["blocker"]])).toEqual([["/rename", NOT_HERE]]);
+    expect(slashOutcome(must(rows[0]), unbound).kind).toBe("blocked");
+  });
+
   it("a prefix still lists Kobe's own commands only", () => {
     expect(items("log").map((i) => i.label)).toEqual([]);
     expect(items("se").map((i) => i.label)).toEqual(["/session", "/search"]);
@@ -143,3 +150,28 @@ function must<T>(v: T | undefined): T {
   if (v === undefined) throw new Error("missing");
   return v;
 }
+
+describe("refusedPiCommand: a message starting with a not-offered Pi word (review LOW-5)", () => {
+  it("refuses /login and /login with text, with the reason and the way to send it anyway", () => {
+    expect(refusedPiCommand("/login")).toMatch(
+      /^\/login isn't offered in Kobe: .*Start with a space/,
+    );
+    expect(refusedPiCommand("/LOGIN anthropic")).toMatch(/^\/login isn't offered/);
+    expect(refusedPiCommand("/trust\nplease")).toMatch(/^\/trust isn't offered/);
+  });
+
+  it("lets through a leading space, Kobe's words, mapped Pi words, unknown words and paths", () => {
+    for (const text of [
+      " /login",
+      "/loginx",
+      "/model",
+      "/name x",
+      "/hello",
+      "/usr/bin/login",
+      "hi /login",
+      "",
+    ]) {
+      expect(refusedPiCommand(text), text).toBeNull();
+    }
+  });
+});

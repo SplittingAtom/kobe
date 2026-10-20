@@ -80,6 +80,22 @@ in `apps/web/lib/shell/pi-commands.ts` (tested against that list).
   `command-palette` (`search`) and `keyboard-shortcuts` (`shortcuts`). Nothing in the rail scopes.
 - `lib/shell/slash.ts`, `lib/shell/palette.ts`: small Pi-word hooks.
 
+## Review fixes (Opus review: 0 CRITICAL/HIGH, 1 MEDIUM, 7 LOW)
+
+- MEDIUM-1: `/:id/export` takes the full export's per-user slot (`claimExport`), 429
+  `export_in_progress`; released when the stream ends, fails or is cancelled. DB test.
+- LOW-2/3: both exports through `trackedDownload` (`retention/export-stream.ts`, unit-tested):
+  failures logged; the Markdown ends with an "Export incomplete" line. `nosniff` on both.
+- LOW-4: `/export` fetches (`apiTextFile`) and saves through an object URL; a refusal shows the
+  server's message in the thread's error banner. The rail's full zip export stays a link (a
+  blob would hold the whole zip in memory).
+- LOW-5: a message starting with a not-offered Pi word (`/login …`) is never sent: Enter and
+  Send/Queue refuse, the hint shows the reason; a leading space sends it as text
+  (`refusedPiCommand`).
+- LOW-6: an unbound alias target is still listed, blocked (test). LOW-7: shared-reader 404, Trash,
+  other branch, offloaded body (DB); Tab order (component); 768/1024 px (browser spec).
+- LOW-8: confirmed by the coordinator as Chris's decision: today's rules, position only.
+
 ## Evidence
 
 - ac-1/ac-5: `components/chat/composer-selectors.test.tsx` ("after the first prompt…", 4 tests);

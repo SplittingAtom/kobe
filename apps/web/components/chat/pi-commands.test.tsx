@@ -138,23 +138,51 @@ describe("/session (Pi's /session)", { timeout: 30_000 }, () => {
 });
 
 describe("/export (Pi's /export)", { timeout: 30_000 }, () => {
-  it("downloads this conversation as Markdown from the server, the team in the link", async () => {
-    const t = conversation();
-    const input = await opened(t);
-    const clicked: string[] = [];
+  function catchSaves(): string[] {
+    const saved: string[] = [];
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:kobe/1");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
       this: HTMLAnchorElement,
     ) {
-      clicked.push(`${this.getAttribute("href")} ${this.hasAttribute("download")}`);
+      saved.push(`${this.getAttribute("href")} ${this.download}`);
     });
+    return saved;
+  }
+
+  it("downloads this conversation as Markdown from the server, the team in the request", async () => {
+    const t = conversation();
+    const input = await opened(t);
+    const saved = catchSaves();
     const user = userEvent.setup();
     await user.type(input, "/export");
     await menu();
     await user.keyboard("{Enter}");
     await waitFor(() =>
-      expect(clicked).toEqual([`/v1/threads/${t}/export?team=${fake.teamId} true`]),
+      expect(saved).toEqual([`blob:kobe/1 2026-10-20-export-${t.slice(0, 8)}.md`]),
     );
+    const req = fake.requests.find((r) => r.path.includes("/export"));
+    expect(req).toMatchObject({
+      path: `/v1/threads/${t}/export?team=${fake.teamId}`,
+      team: fake.teamId,
+    });
     expect(messagePosts()).toEqual([]);
+  });
+
+  it("a refused download shows the server's reason, and saves nothing (review LOW-4)", async () => {
+    fake.exportRefusal = {
+      status: 429,
+      code: "export_in_progress",
+      message: "An export is already running. Try again when it has finished.",
+    };
+    const input = await opened(conversation());
+    const saved = catchSaves();
+    const user = userEvent.setup();
+    await user.type(input, "/export");
+    await menu();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByText(/An export is already running/, {}, WAIT)).toBeTruthy();
+    expect(saved).toEqual([]);
   });
 });
 
@@ -177,5 +205,29 @@ describe("Pi's words in the / menu", { timeout: 30_000 }, () => {
     await user.keyboard("{Enter}");
     expect(input).toHaveProperty("value", "/login");
     expect(messagePosts()).toEqual([]);
+  });
+
+  it("after Escape, Enter still doesn't send /login; a leading space sends it as text (review LOW-5)", async () => {
+    const input = await opened(conversation());
+    const user = userEvent.setup();
+    await user.type(input, "/login anthropic");
+    await menu();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+    await user.keyboard("{Enter}");
+    expect(input).toHaveProperty("value", "/login anthropic");
+    expect(
+      (await screen.findByText(/^\/login isn't offered in Kobe: .*Start with a space/)).closest(
+        "[role=status]",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send" }).getAttribute("aria-disabled")).toBe("true");
+    expect(messagePosts()).toEqual([]);
+
+    await user.clear(input);
+    await user.type(input, " /login anthropic");
+    if (screen.queryByRole("listbox")) await user.keyboard("{Escape}");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(messagePosts()).toHaveLength(1));
   });
 });

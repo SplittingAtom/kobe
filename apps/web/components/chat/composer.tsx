@@ -30,6 +30,7 @@ import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { IconAction } from "../shell/icon-action";
 import { Button } from "../ui/button";
 import { ariaKeyShortcuts } from "../../lib/shell/commands";
+import { refusedPiCommand } from "../../lib/shell/pi-commands";
 import { IN_TRASH, READ_ONLY } from "../../lib/chat/thread-commands";
 import type { MenuBindings } from "../../lib/shell/menu";
 import { shortcutOf } from "../../lib/shell/shortcuts";
@@ -108,6 +109,8 @@ export function Composer({
   const running = isThreadRunning(state);
   const inTrash = state.summary?.deletedAt != null;
   const empty = text.trim() === "";
+  // A message starting with a Pi command Kobe doesn't offer is never sent (KOBE-450, LOW-5).
+  const piRefusal = refusedPiCommand(text);
   const dictation = useComposerDictation();
   const { steer, unavailable } = useSteer(extras);
   const draft = remoteId ?? NEW_DRAFT;
@@ -157,7 +160,7 @@ export function Composer({
   };
 
   const queue = async () => {
-    if (!controller || empty || blocker !== undefined) return;
+    if (!controller || empty || blocker !== undefined || piRefusal !== null) return;
     dictation.stop();
     const mentions = session.mentions.forText(draft, text);
     const attach = session.attachments.ready(draft);
@@ -190,6 +193,17 @@ export function Composer({
     // (MEDIUM-2, LOW-L): only a plain Shift+Enter (a new line) gets through.
     const newLine = e.shiftKey && !e.ctrlKey && !e.metaKey;
     if (e.key === "Enter" && !newLine && appInsert.pending !== null) {
+      e.preventDefault();
+      return;
+    }
+    // An open trigger popover (the / menu) takes Enter itself; otherwise a refused Pi word stays.
+    if (
+      e.key === "Enter" &&
+      !newLine &&
+      !e.nativeEvent.isComposing &&
+      piRefusal !== null &&
+      e.currentTarget.getAttribute("aria-expanded") !== "true"
+    ) {
       e.preventDefault();
       return;
     }
@@ -356,7 +370,9 @@ export function Composer({
                 size="sm"
                 className="h-8 shrink-0 rounded-full px-3"
                 onClick={() => void queue()}
-                disabled={empty || blocker !== undefined || appInsert.pending !== null}
+                disabled={
+                  empty || blocker !== undefined || appInsert.pending !== null || piRefusal !== null
+                }
               >
                 Queue
               </Button>
@@ -367,7 +383,9 @@ export function Composer({
                   type="button"
                   variant="default"
                   className="size-7 shrink-0 rounded-full"
-                  disabled={blocker !== undefined || appInsert.pending !== null}
+                  disabled={
+                    blocker !== undefined || appInsert.pending !== null || piRefusal !== null
+                  }
                 />
               </ComposerPrimitive.Send>
             )}
@@ -387,6 +405,10 @@ export function Composer({
               <span role="status">{rowDrop.notice}</span>
             ) : blocker !== undefined ? (
               <span role="status">{blocker}</span>
+            ) : piRefusal !== null ? (
+              <span role="status" data-kobe-pi-refusal>
+                {piRefusal}
+              </span>
             ) : dictation.error ? (
               <span role="alert">{dictation.error}</span>
             ) : dictation.listening ? (

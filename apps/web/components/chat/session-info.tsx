@@ -6,6 +6,7 @@ import { useState } from "react";
 import type { TeamModels } from "../../lib/admin/api/team/models";
 import type { UsageTotals } from "../../lib/admin/api/usage";
 import { formatTokens, formatUsd } from "../../lib/admin/usage-format";
+import { apiTextFile } from "../../lib/api/client";
 import { threadExportOneUrl } from "../../lib/chat/api";
 import { aliasName, modelChoices, teamDefaultLabel } from "../../lib/chat/model-choices";
 import { NO_THREAD } from "../../lib/chat/thread-commands";
@@ -149,17 +150,19 @@ function SessionInfoDialog({
   );
 }
 
-/** Starts the browser's download of `href` (a same-origin link: the session cookie goes with it). */
-function download(href: string) {
+/** Saves `text` as `filename` through a short-lived object URL. */
+function save(text: string, filename: string) {
+  const url = URL.createObjectURL(new Blob([text], { type: "text/markdown" }));
   const a = document.createElement("a");
-  a.href = href;
-  a.setAttribute("download", "");
+  a.href = url;
+  a.download = filename;
   a.rel = "noopener";
   document.body.append(a);
   try {
     a.click();
   } finally {
     a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 }
 
@@ -183,7 +186,16 @@ export function SessionCommands({
   useBindCommands({
     "thread-info": { onSelect: () => setOpen(true) },
     "export-thread": {
-      onSelect: () => download(threadExportOneUrl(threadId, session.teamId)),
+      onSelect: () => {
+        // Fetched rather than linked (review LOW-4): a refusal (busy, stale tab, gone) shows the
+        // server's message in the thread's error banner instead of saving it as a file.
+        void apiTextFile(threadExportOneUrl(threadId, session.teamId), {
+          teamId: session.teamId,
+        }).then((res) => {
+          if (res.ok) save(res.data.text, res.data.filename ?? "conversation.md");
+          else extras.controller?.reportError(res.error);
+        });
+      },
       blocker: notOwner ?? (summary === null ? NO_THREAD : null),
     },
   });

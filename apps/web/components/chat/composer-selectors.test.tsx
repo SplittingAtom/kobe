@@ -230,6 +230,9 @@ describe("narrow composers fold the selectors into one menu (ac-2)", { timeout: 
   });
 });
 
+const MODEL = { name: "Model for this conversation" } as const;
+const THINKING = { name: "Thinking level for this conversation" } as const;
+
 /** A started conversation: agent Ledger Bot on GLM, which offers thinking levels. */
 function startedThread(): string {
   const t = fake.addThread("Books");
@@ -304,6 +307,20 @@ describe(
       ).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Agent and model" })).toBeNull();
       expect(controlNames(bar)).toEqual(["Attach files", "Send"]);
+    });
+
+    it("ac-1: Tab goes Attach, Send, then Model and Thinking below (review LOW-7)", async () => {
+      openApp(fake, startedThread());
+      const bar = await toolbar();
+      const below = await footer();
+      const model = await within(below).findByRole("combobox", MODEL, WAIT);
+      const thinking = within(below).getByRole("combobox", THINKING);
+      const user = userEvent.setup();
+      within(bar).getByRole("button", { name: "Send" }).focus();
+      await user.tab();
+      expect(document.activeElement).toBe(model);
+      await user.tab();
+      expect(document.activeElement).toBe(thinking);
     });
 
     it("ac-5: the agent keeps today's rules after the first prompt: a fixed chip, never a picker", async () => {

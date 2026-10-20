@@ -100,3 +100,24 @@ test("a phone: after the first prompt the selectors wrap below, nothing off the 
   if (box) expect(box.x + box.width).toBeLessThanOrEqual(PHONE.width);
   await shoot(page, "composer-controls-phone", page.locator("[data-kobe-composer]"));
 });
+
+for (const width of [768, 1024] as const) {
+  test(`at ${width} px: the selectors move below and the line fits the column (review LOW-7)`, async ({
+    chat,
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await chat.open();
+    await chat.ask(PROMPT);
+    await chat.waitForIdle();
+    const below = page.locator('[data-composer-selectors="below"]');
+    await expect(below.getByRole("combobox", MODEL)).toBeVisible();
+    await expect(chat.toolbar.getByRole("combobox", MODEL)).toHaveCount(0);
+    const line = await page.locator("[data-composer-footer]").boundingBox();
+    const panel = await page.locator("[data-kobe-composer-panel]").boundingBox();
+    if (line && panel) expect(line.x + line.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
+    const scroll = await page.evaluate(() => document.scrollingElement?.scrollWidth ?? 0);
+    expect(scroll).toBeLessThanOrEqual(width);
+    await shoot(page, `composer-controls-${width}`, page.locator("[data-kobe-composer]"));
+  });
+}
