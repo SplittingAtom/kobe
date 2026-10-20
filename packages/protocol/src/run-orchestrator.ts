@@ -1,3 +1,4 @@
+import { skillRequestFieldSchema } from "./skill-request.js";
 import { appContextFieldSchema } from "./app-context.js";
 import { z } from "zod";
 import {
@@ -57,6 +58,11 @@ export const submitMessageBodySchema = z.strictObject({
    * most one per app, each at most 8 KiB, handed to Pi fenced as untrusted data.
    */
   app_context: appContextFieldSchema.optional(),
+  /**
+   * A skill the member picked from the composer's + menu (KOBE-451, skill-request.ts): it must be
+   * in the run's effective skill set, checked at submit and again at run start.
+   */
+  skill: skillRequestFieldSchema.optional(),
 });
 export type SubmitMessageBody = z.infer<typeof submitMessageBodySchema>;
 
