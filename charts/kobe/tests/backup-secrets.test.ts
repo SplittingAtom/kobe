@@ -45,7 +45,18 @@ function documented(): Map<string, string> {
   return rows;
 }
 
+/** The chart's Secrets with the row's values key given a Secret of one's own. */
+function generatedWithOwn(name: string, key: string): string[] {
+  return generatedSecrets({
+    "postgres.external.existingSecret": "kobe-db",
+    [key]: `${name}-mine`,
+    ...(key.startsWith("postgres.cnpg.") ? { "postgres.mode": "cnpg" } : {}),
+  });
+}
+
 describe("the Secrets a restore needs are all documented (KOBE-425)", () => {
+  // Every `helm template` runs while the suite is collected, which has no per-test timeout: one
+  // render per table row took over 5 s inside a single test on a loaded runner (KOBE-415).
   const rows = documented();
   const generated = [
     ...new Set([
@@ -53,6 +64,11 @@ describe("the Secrets a restore needs are all documented (KOBE-425)", () => {
       ...generatedSecrets({ "postgres.mode": "cnpg" }),
     ]),
   ].sort();
+  const withOwn = [...rows].map(([name, key]) => ({
+    name,
+    key,
+    secrets: generatedWithOwn(name, key),
+  }));
 
   it("finds the chart's generated Secrets (the render works)", () => {
     expect(generated).toEqual(
@@ -66,14 +82,10 @@ describe("the Secrets a restore needs are all documented (KOBE-425)", () => {
   });
 
   it("names a values key that really replaces the generated Secret", () => {
-    for (const [name, key] of rows) {
-      // Giving the key a Secret of one's own: the chart generates no Secret of that name.
-      const values: Record<string, string> = {
-        "postgres.external.existingSecret": "kobe-db",
-        [key]: `${name}-mine`,
-        ...(key.startsWith("postgres.cnpg.") ? { "postgres.mode": "cnpg" } : {}),
-      };
-      expect(generatedSecrets(values), `${key} → ${name}`).not.toContain(name);
+    expect(withOwn.length).toBe(rows.size);
+    // Giving the key a Secret of one's own: the chart generates no Secret of that name.
+    for (const { name, key, secrets } of withOwn) {
+      expect(secrets, `${key} → ${name}`).not.toContain(name);
     }
   });
 });

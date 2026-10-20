@@ -91,6 +91,11 @@ async function world() {
     const entries = ws.reply(start, `re: ${text}`);
     await ws.acked(runId);
     await f.until(w.team, runId, "completed");
+    // The run's prompt entry is bound after the end commits (`onRunEnded` -> `bindUserEntry`, a
+    // transaction of its own), so "completed" alone can still list `user_entry_id: null`.
+    await expect
+      .poll(async () => (await f.run(w.team, runId)).user_entry_id, { interval: 25 })
+      .toBe(entries.user);
     return { runId, entries };
   };
   const first = await answer("hello");

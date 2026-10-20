@@ -15,8 +15,12 @@ import {
   loadPiIdentities,
   pairedUids,
   partnerOf,
+  runHelper,
   type HelperRunner,
 } from "./identities.js";
+
+/** Room for a real helper process to start and exit on a loaded CI runner. */
+const SLOW_START_MS = 10_000;
 
 /** Records helper invocations; answers with `code` (or per-call answers). */
 function fakeRunner(answer: (args: readonly string[]) => { code: number | null; stderr: string }) {
@@ -71,26 +75,31 @@ describe("PiIdentities (KOBE-71)", () => {
   it("gives a slow reclaim its own timeout and retries it (real process runner)", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "kobe-reclaim-"));
     try {
-      // A "helper" whose first run hangs (a huge workspace), the next finishes.
-      const helper = path.join(dir, "slow-helper");
-      const marker = path.join(dir, "ran-once");
-      await writeFile(
-        helper,
-        `#!/bin/sh\nif [ -e ${marker} ]; then exit 0; fi\n: > ${marker}\nexec sleep 30\n`,
-        { mode: 0o755 },
-      );
-      const ids = new PiIdentities(helper, [2000], undefined, "/reclaim");
+      // Real processes, killed at the real timeout: the first attempt runs a helper that hangs (a
+      // huge workspace), the next one that finishes. Chosen per attempt here, not by a marker the
+      // helper writes: under load a shell can be killed before it writes one (KOBE-415).
+      const hang = path.join(dir, "hang");
+      await writeFile(hang, "#!/bin/sh\nexec sleep 30\n", { mode: 0o755 });
+      const done = path.join(dir, "done");
+      await writeFile(done, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      const timeouts: (number | undefined)[] = [];
+      const attempts: HelperRunner = (_helper, args, timeoutMs) => {
+        timeouts.push(timeoutMs);
+        // The attempt that should finish gets room to start a shell on a loaded runner.
+        return timeouts.length === 1
+          ? runHelper(hang, args, timeoutMs)
+          : runHelper(done, args, SLOW_START_MS);
+      };
+      const ids = new PiIdentities("/helper", [2000], attempts, "/reclaim");
       const started = Date.now();
       await ids.reclaimFiles({ uid: 2000, gid: 2000 }, 1000, ["/w"], {
         timeoutMs: 300,
         delaysMs: [10],
       });
       expect(Date.now() - started).toBeGreaterThanOrEqual(300);
+      expect(timeouts).toEqual([300, 300]);
       // Every attempt times out: the identity is given up with a clear reason.
-      await rm(marker);
-      const hung = path.join(dir, "always-slow");
-      await writeFile(hung, "#!/bin/sh\nexec sleep 30\n", { mode: 0o755 });
-      const stuck = new PiIdentities(hung, [2000], undefined, "/reclaim");
+      const stuck = new PiIdentities(hang, [2000], undefined, "/reclaim");
       await expect(
         stuck.reclaimFiles({ uid: 2000, gid: 2000 }, 1000, ["/w"], {
           timeoutMs: 100,
