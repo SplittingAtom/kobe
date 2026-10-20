@@ -294,6 +294,9 @@ function applyOne(run: LiveRun, event: KobeEvent): LiveRun {
     case "memory.updated":
     case "context.omitted":
       return notice(next, event);
+    // KOBE-442: the save_skill_draft card reads the server's record of saves, not the stream.
+    case "skill.draft_saved":
+      return next;
     case "entry.committed":
       return commit(next, event.payload);
     case "run.completed":

@@ -36,7 +36,16 @@ import { clientMetadataDocument, kobeOrigin } from "./connectors/oauth/client.js
 import { siteConnectorsRoutes } from "./routes/site-connectors.js";
 import { siteSkillBlocklistRoutes } from "./routes/site-skill-blocklist.js";
 import { siteSkillRescanRoutes } from "./routes/site-skill-rescans.js";
+import { siteSkillRegistryRoutes } from "./routes/site-skill-registry.js";
+import { catalogMaintainerRoutes } from "./routes/catalog-maintainers.js";
+import { skillCatalogRoutes } from "./routes/skill-catalog.js";
+import {
+  skillPromotionRoutes,
+  teamSkillPromotionRoutes,
+  type ExternalScanStarter,
+} from "./routes/skill-promotions.js";
 import { siteSkillTagRoutes } from "./routes/site-skill-tags.js";
+import { siteSkillRetireRoutes } from "./routes/site-skill-retire.js";
 import { siteRolesRoutes } from "./routes/site-roles.js";
 import { siteSettingsRoutes } from "./routes/site-settings.js";
 import { siteWebSearchRoutes } from "./routes/site-web-search.js";
@@ -68,6 +77,8 @@ import { teamOffboardedRoutes } from "./routes/team-offboarded.js";
 import { teamRetentionRoutes } from "./routes/team-retention.js";
 import { teamSkillReviewRoutes } from "./routes/team-skill-review.js";
 import { teamSkillInstallRoutes } from "./routes/team-skill-installs.js";
+import { teamSkillBlockRoutes } from "./routes/team-skill-blocks.js";
+import { skillUsageRoutes, teamSkillUsageRoutes } from "./routes/skill-usage.js";
 import { teamRoutes } from "./routes/team.js";
 import { projectRoutes } from "./routes/projects.js";
 import { threadPendingRoutes } from "./routes/thread-pending.js";
@@ -97,6 +108,8 @@ export interface AppOptions {
   readonly workspaceFiles?: WorkspaceFilesOptions;
   /** Skill evals (KOBE-325): the event hub and the runner's kick. */
   readonly skillEvals?: SkillEvalRouteOptions;
+  /** The optional external skill scanner (KOBE-341): scans each new Registry submission. */
+  readonly externalScan?: ExternalScanStarter;
 }
 
 /** Health endpoints always; auth and the /v1 API when dependencies are provided. */
@@ -180,6 +193,8 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/settings", teamSettingsRoutes(deps));
   api.route("/team/skill-review", teamSkillReviewRoutes(deps));
   api.route("/team/skills", teamSkillInstallRoutes(deps));
+  api.route("/team/skills", teamSkillBlockRoutes(deps));
+  api.route("/team/skills", teamSkillUsageRoutes(deps));
   api.route("/team/offboarded", teamOffboardedRoutes(deps));
   api.route("/team", teamRoutes(deps));
   api.route("/runs", runEventsRoutes(deps));
@@ -214,6 +229,11 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/", skillEvalRoutes(deps, options.skillEvals));
   // Before /skills: its `/:id` would otherwise answer for `/skills/drafts`.
   api.route("/skills/drafts", skillDraftRoutes(deps, options.workspaceFiles?.sync));
+  api.route("/skills/catalog", catalogMaintainerRoutes(deps));
+  api.route("/skills/catalog", skillUsageRoutes(deps));
+  api.route("/skills/catalog", skillCatalogRoutes(deps));
+  api.route("/skills/promotions", skillPromotionRoutes(deps, options.externalScan));
+  api.route("/team/skill-promotions", teamSkillPromotionRoutes(deps, options.externalScan));
   api.route("/skills", skillRoutes(deps));
   api.route("/skills", skillReachRoutes(deps));
   api.route("/approvals", approvalRoutes(deps));
@@ -240,6 +260,9 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/site/connectors", siteConnectorsRoutes(deps));
   api.route("/site/skill-blocklist", siteSkillBlocklistRoutes(deps));
   api.route("/site/skill-rescans", siteSkillRescanRoutes(deps));
+  api.route("/site/skills/registry", siteSkillRegistryRoutes(deps));
+  // Before the tag routes: their Site-admin gate covers `/catalog/*`, and maintainers deprecate.
+  api.route("/site/skills", siteSkillRetireRoutes(deps));
   api.route("/site/skills", siteSkillTagRoutes(deps));
   if (isolation) api.route("/site/isolation", siteIsolationRoutes(isolation));
   app.route("/v1", api);

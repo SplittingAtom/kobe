@@ -99,7 +99,54 @@ describe("notification", () => {
       "schedule.run.interrupted",
       "schedule.run.skipped_actions",
       "schedule.paused",
+      "skill.member_add.blocked",
+      "skill.deprecated",
+      "skill.version.deprecated",
+      "skill.version.withdrawn",
+      "skill.version.revoked",
+      "skill.version.unrevoked",
     ]);
+  });
+  it("parses a retirement notification: a skill and, for a version, its semver (KOBE-340)", () => {
+    const revoked = {
+      ...notification,
+      kind: "skill.version.revoked",
+      schedule_id: null,
+      thread_id: null,
+      run_id: null,
+      skill_id: notification.schedule_id,
+      skill_name: "sales-report",
+      skill_semver: "1.2.0",
+    };
+    expect(notificationSchema.safeParse(revoked).success).toBe(true);
+    expect(notificationSchema.safeParse({ ...revoked, skill_semver: undefined }).success).toBe(
+      false,
+    );
+    const deprecated = { ...revoked, kind: "skill.deprecated", skill_semver: undefined };
+    expect(notificationSchema.safeParse(deprecated).success).toBe(true);
+    expect(notificationSchema.safeParse({ ...deprecated, skill_semver: "1.0.0" }).success).toBe(
+      false,
+    );
+  });
+  it("parses a skill notification: a skill, no schedule (KOBE-338)", () => {
+    const blocked = {
+      ...notification,
+      kind: "skill.member_add.blocked",
+      schedule_id: null,
+      thread_id: null,
+      run_id: null,
+      skill_id: notification.schedule_id,
+      skill_name: "sales-report",
+    };
+    expect(notificationSchema.safeParse(blocked).success).toBe(true);
+    expect(notificationSchema.safeParse({ ...blocked, skill_id: undefined }).success).toBe(false);
+    expect(
+      notificationSchema.safeParse({ ...blocked, schedule_id: notification.schedule_id }).success,
+    ).toBe(false);
+    expect(notificationSchema.safeParse({ ...notification, schedule_id: null }).success).toBe(
+      false,
+    );
+    expect(notificationSchema.safeParse({ ...notification, skill_name: "x" }).success).toBe(false);
   });
   it("parses a run notification and a pause notification", () => {
     expect(notificationSchema.safeParse(notification).success).toBe(true);

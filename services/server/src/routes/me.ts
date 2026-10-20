@@ -10,6 +10,9 @@ import {
 import { z } from "zod";
 import type { AuthVariables } from "../auth/session.js";
 import type { ServerDeps } from "../deps.js";
+import { grantsOf } from "../skills/registry/grants.js";
+import { retract } from "../skills/registry/review-decide.js";
+import { mySubmissions } from "../skills/registry/submissions.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 
 const INVALID = "Send known layout preferences within their bounds.";
@@ -23,7 +26,32 @@ function pgCode(err: unknown): string | undefined {
 export function meRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
-  app.get("/", (c) => c.json({ user: c.get("user"), siteRole: c.get("siteRole") }));
+  // `siteGrants` (KOBE-334): Skill reviewers see the Registry queue though they hold no site role.
+  app.get("/", async (c) =>
+    c.json({
+      user: c.get("user"),
+      siteRole: c.get("siteRole"),
+      siteGrants: await grantsOf(db, c.get("user").id),
+    }),
+  );
+
+  /** The caller's submissions to the Site Registry and reviewers' decisions (KOBE-334, SK23). */
+  app.get("/skill-submissions", async (c) =>
+    c.json({ submissions: await mySubmissions(db, c.get("user").id) }),
+  );
+
+  /** The submitter takes a submission back before a decision (KOBE-334 review M3). */
+  app.post("/skill-submissions/:id/retract", async (c) => {
+    const id = z.uuid().safeParse(c.req.param("id"));
+    const notFound = { code: "not_found", message: "No such submission of yours." };
+    if (!id.success) return c.json(notFound, 404);
+    const r = await retract(db, id.data, c.get("user").id);
+    if (!r.ok)
+      return r.problem.code === "not_found"
+        ? c.json(notFound, 404)
+        : c.json({ code: r.problem.code, message: "This submission was already decided." }, 409);
+    return c.json({ id: r.version.id, state: r.version.state });
+  });
 
   /**
    * `GET/PUT /v1/me/preferences` (KOBE-202, CE8): the caller's layout preferences, kept on their

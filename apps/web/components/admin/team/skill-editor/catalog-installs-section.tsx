@@ -3,6 +3,7 @@
 import {
   listTeamSkillInstalls,
   reinstallDefault,
+  retirementText,
   uninstallCatalogSkill,
   type CatalogInstall,
   type RemovedDefault,
@@ -11,6 +12,7 @@ import {
   Badge,
   Button,
   EmptyState,
+  Notice,
   Section,
   Table,
   TableBody,
@@ -24,6 +26,7 @@ import {
 } from "../../../ui/console";
 import { getCatalogSwitches } from "../../../../lib/admin/api/team/skill-review";
 import { useTeamAccess } from "../../console-context";
+import { SkillInstallUpdatesPanel } from "./skill-install-updates";
 import { SkillInstallChangeForm } from "./skill-install-change";
 import { MutationStatus } from "../../error-notice";
 import { DateTime, ResourceView } from "../../parts";
@@ -35,6 +38,12 @@ const ACCESS: Record<CatalogInstall["access"], string> = {
   required: "Required",
   hidden: "Hidden",
 };
+/** A move back pinned a tracking install (KOBE-337 review M1, coordinator's wording). */
+export const PINNED_BY = {
+  rollback: "Pinned by roll back; switch back to tracking to get updates again.",
+  move: "Pinned by moving the pin back; switch back to tracking to get updates again.",
+} as const;
+
 const PIN: Record<CatalogInstall["pinMode"], string> = {
   pinned: "Pinned",
   within_major: "Track within major",
@@ -135,6 +144,20 @@ export function CatalogInstallsSection() {
                       <TableCell>
                         {i.semver}
                         <div className="text-sm text-console-muted">{PIN[i.pinMode]}</div>
+                        {i.pinnedBy && (
+                          <Notice tone="warn" role="status" className="mt-1">
+                            {PINNED_BY[i.pinnedBy]}
+                          </Notice>
+                        )}
+                        {i.retirement && (
+                          <Notice
+                            tone={i.retirement.kind === "deprecated" ? "info" : "warn"}
+                            role="status"
+                            className="mt-1"
+                          >
+                            {retirementText(i.retirement)}
+                          </Notice>
+                        )}
                       </TableCell>
                       <TableCell>{ACCESS[i.access]}</TableCell>
                       <TableCell className="whitespace-nowrap">
@@ -155,6 +178,17 @@ export function CatalogInstallsSection() {
                               }}
                             />
                           )}
+                          <SkillInstallUpdatesPanel
+                            teamId={teamId}
+                            install={i}
+                            mayMove={mayChange(i)}
+                            pending={mutation.pending}
+                            run={async (action, notice) => {
+                              const done = await mutation.run(action, notice);
+                              if (done) reload();
+                              return done;
+                            }}
+                          />
                           {canManage && (
                             <Button
                               variant="danger"

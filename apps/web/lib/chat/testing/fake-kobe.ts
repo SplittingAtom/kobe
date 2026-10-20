@@ -221,6 +221,8 @@ export class FakeKobe {
 
   /** Shared files of `GET /v1/files/:id/content` (KOBE-150), by id; `status` makes the download fail. */
   readonly sharedFiles = new Map<string, { readonly bytes: Uint8Array; readonly status: number }>();
+  /** `GET /v1/skills/drafts/saves?threadId=` (KOBE-442): the server's record of save_skill_draft calls. */
+  readonly skillDraftSaves = new Map<string, readonly Record<string, unknown>[]>();
 
   // --- setup ----------------------------------------------------------------------------------
 
@@ -1102,6 +1104,7 @@ export class FakeKobe {
       url.pathname.startsWith("/v1/approvals") ||
       url.pathname === "/v1/team/retention" ||
       url.pathname === "/v1/projects" ||
+      url.pathname === "/v1/skills/drafts/saves" ||
       url.pathname.startsWith("/v1/egress/requests");
     if (!scoped) return error(404, "not_found");
     if (headers.get("x-kobe-team") !== this.teamId) return error(409, "team_mismatch");
@@ -1208,6 +1211,11 @@ export class FakeKobe {
   #route(method: string, url: URL, body: Json | undefined, headers: Headers): Response {
     if (url.pathname === "/v1/team/budgets/status" && method === "GET") {
       return json(200, this.budgetStatus);
+    }
+    if (url.pathname === "/v1/skills/drafts/saves" && method === "GET") {
+      return json(200, {
+        saves: this.skillDraftSaves.get(url.searchParams.get("threadId") ?? "") ?? [],
+      });
     }
     const parts = url.pathname.split("/").filter(Boolean); // v1, threads|runs, id, action
     const [, area, id, action, sub] = parts;

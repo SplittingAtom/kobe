@@ -31,6 +31,10 @@ import {
   evalSnapshotFrameSchema,
 } from "./eval-frames.js";
 import { runProjectContextSchema } from "../projects.js";
+import {
+  skillDraftSaveFrameSchema,
+  skillDraftSaveResultFrameSchema,
+} from "./skill-draft-frames.js";
 import { APP_CARDS_PER_RUN_MAX, appCardEntrySchema } from "../app-cards.js";
 import { runMemoryContextSchema } from "../memory.js";
 import { UPLOAD_MAX_FILES_PER_MESSAGE, uploadFileNameSchema } from "../uploads.js";
@@ -271,6 +275,7 @@ export const sandboxToServerFrameSchema = z.union([
   memoryPutFrameSchema,
   memoryReadFrameSchema,
   projectFileProposeFrameSchema,
+  skillDraftSaveFrameSchema,
   webSearchQueryFrameSchema,
   traceSpansFrameSchema,
   piExitedFrameSchema,
@@ -641,6 +646,7 @@ export const serverToSandboxFrameSchema = z.union([
   fileShareResultFrameSchema,
   memoryResultFrameSchema,
   projectFileProposeResultFrameSchema,
+  skillDraftSaveResultFrameSchema,
   webSearchResultFrameSchema,
   sessionRestoreFrameSchema,
   ackFrameSchema,

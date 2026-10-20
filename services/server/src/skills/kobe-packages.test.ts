@@ -62,6 +62,10 @@ const PUBLISHED: Record<string, Record<string, { runtime: string; package: strin
       runtime: "ecc8c31c7980eb49ccc1f74645feb358eeb67068eede450c672a05a25841bcd6",
       package: "1ff17aa2a178cf2c6ff3731e09951ca0d16e782a6c361e9ead949c7a380c6860",
     },
+    "1.2.0": {
+      runtime: "391af382e4841a621515dc3632d0151da15f4251c984b8950e7f535b77ba7e15",
+      package: "4e719e33003b019a95ff293c302fca3879b3599ca639d2615e8806dc025599d0",
+    },
   },
 };
 
@@ -98,6 +102,16 @@ describe("the Kobe package set (KOBE-317)", () => {
         { runtime: sha256Hex(p.bundle.zip), package: p.bundle.packageHash },
         `${p.name}@${p.semver} changed its bytes: raise its version instead`,
       ).toEqual(versions[p.semver]);
+    }
+  });
+
+  it("holds no local build litter (running a skill's scripts here leaves __pycache__)", async () => {
+    for (const p of await loadKobePackages()) {
+      const paths = Object.keys(unzipSync(p.bundle.packageZip ?? p.bundle.zip));
+      expect(
+        paths.filter((f) => /(^|\/)__pycache__\/|\.pyc$/.test(f)),
+        `${p.name}: delete it`,
+      ).toEqual([]);
     }
   });
 
@@ -143,3 +157,35 @@ function must<T>(x: T | undefined): T {
   if (x === undefined) throw new Error("missing");
   return x;
 }
+
+describe("skill-creator saves to the Workbench (KOBE-442 ac-4)", () => {
+  const files = async () => {
+    const creator = (await loadKobePackages()).find((p) => p.name === "skill-creator");
+    const all = unzipSync(must(creator).bundle.zip);
+    const text = (path: string) => new TextDecoder().decode(all[path] ?? new Uint8Array());
+    return { creator: must(creator), text, all };
+  };
+
+  it("calls save_skill_draft after validation and describes the Workbench flow", async () => {
+    const { creator, text } = await files();
+    expect(creator.semver).toBe("1.2.0");
+    const md = text("SKILL.md");
+    expect(md).toContain("save_skill_draft");
+    expect(md).toMatch(/after\s+`validate\.py`\s+passes/i);
+    expect(md).toMatch(/test pane/);
+    expect(md).toMatch(/Run evals/);
+    expect(md).toContain("evals/cases.yaml");
+    expect(md).toMatch(/Save version/);
+    expect(md).toMatch(/Save skill to\s+Workbench/); // the manual fallback (/saveskill)
+  });
+
+  it("names no removed screen: no My skills editor, no admin console Skills page", async () => {
+    const { all, text } = await files();
+    for (const path of Object.keys(all)) {
+      const body = text(path);
+      expect(body, path).not.toMatch(/My skills/);
+      expect(body, path).not.toMatch(/admin console/);
+      expect(body, path).not.toMatch(/New skill/);
+    }
+  });
+});

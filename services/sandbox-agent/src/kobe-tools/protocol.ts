@@ -7,6 +7,7 @@
  *   extension → agent   {"id","op":"artifact.put","tool_call_id","tool","input"}
  *                       {"id","op":"file.share","tool_call_id","tool":"share_file","input"}
  *                       {"id","op":"project.file_propose","tool_call_id","tool":"propose_project_file","input"}
+ *                       {"id","op":"skill.draft_save","tool_call_id","tool":"save_skill_draft","input"}
  *   agent → extension   {"id","ok":true,"artifact_id","version"}            (artifact.put)
  *                       {"id","ok":true,"file_id","name","mime_type","size_bytes","scan",
  *                        "created_at","sha256"}                              (file.share)
@@ -32,6 +33,7 @@ export const OP_PROJECT_FILE_PROPOSE = "project.file_propose";
 export const OP_WEB_SEARCH = "web_search";
 export const OP_MEMORY_PUT = "memory.put";
 export const OP_MEMORY_READ = "memory.read";
+export const OP_SKILL_DRAFT_SAVE = "skill.draft_save";
 export const OPS = [
   OP_ARTIFACT_PUT,
   OP_FILE_SHARE,
@@ -39,6 +41,7 @@ export const OPS = [
   OP_WEB_SEARCH,
   OP_MEMORY_PUT,
   OP_MEMORY_READ,
+  OP_SKILL_DRAFT_SAVE,
 ] as const;
 
 /** Env var set to `1` by an agent that announced the `memory` capability. Read once, removed. */
@@ -74,6 +77,15 @@ export const TOOLS_PROJECTS_ENV = "KOBE_TOOLS_PROJECTS";
 export const TOOL_PROPOSE_PROJECT_FILE = "propose_project_file";
 /** Mirrors packages/protocol `projects.ts` (pinned by a test). */
 export const PROJECT_PROPOSE_REASON_MAX = 500;
+
+/**
+ * Env var set to `1` by an agent that announced the `skill_drafts` capability (KOBE-442). Read
+ * once, removed. `save_skill_draft` is registered only then; the server also checks the capability.
+ */
+export const TOOLS_SKILL_DRAFTS_ENV = "KOBE_TOOLS_SKILL_DRAFTS";
+export const TOOL_SAVE_SKILL_DRAFT = "save_skill_draft";
+/** Mirrors packages/protocol `skill-package/layout.ts` SKILL_NAME_PATTERN (pinned by a test). */
+export const SKILL_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
 
 export const TOOL_CREATE_ARTIFACT = "create_artifact";
 export const TOOL_UPDATE_ARTIFACT = "update_artifact";
@@ -123,6 +135,19 @@ export interface ProjectProposeAnswer {
   readonly file?: Record<string, unknown>;
 }
 
+/** `save_skill_draft` answer: the member's private Workbench draft, made or updated. */
+export interface SkillDraftAnswer {
+  readonly ok: true;
+  readonly op: "skill_draft_save";
+  readonly draft_id: string;
+  readonly name: string;
+  readonly created: boolean;
+  readonly rev: number;
+  readonly file_count: number;
+  /** A new draft although the conversation had one: it was shared, or edited since. */
+  readonly new_because?: "shared" | "edited";
+}
+
 export interface WebSearchCitation {
   readonly title: string;
   readonly url: string;
@@ -169,6 +194,7 @@ export type ToolsResponse =
   | ({ readonly id: string } & MemoryPutAnswer)
   | ({ readonly id: string } & MemoryReadAnswer)
   | ({ readonly id: string } & ProjectProposeAnswer)
+  | ({ readonly id: string } & SkillDraftAnswer)
   | ({ readonly id: string } & WebSearchAnswer)
   | ({ readonly id: string } & WebSearchUnavailable)
   | {

@@ -18,6 +18,11 @@ export const ANNOTATION_USER_ID = LABEL_USER_ID;
 /** On the pods (and Job, ConfigMap) of an Orbit eval (KOBE-93); the value is the eval id. */
 export const LABEL_ORBIT_EVAL = `${DOMAIN}/orbit-eval`;
 /**
+ * On the pods (and Job, ConfigMap) of an external skill scan (KOBE-341); the value is the Registry
+ * version id. Their own NetworkPolicy allows nothing (`skillScanNetworkPolicyManifest`).
+ */
+export const LABEL_SKILL_SCAN = `${DOMAIN}/skill-scan`;
+/**
  * Skill eval sandboxes (KOBE-325): label `true` on their claims and pods (the reaper lists them by
  * it); the eval thread on the claim and pod (label for listing, annotation for identity).
  */
@@ -38,6 +43,11 @@ export const SANDBOX_WARM_POOL = "kobe-sandbox";
 export const NETWORK_POLICY = "kobe-sandbox-isolation";
 /** Egress policy for eval pods only (the namespace-wide policy leaves them out). */
 export const EVAL_NETWORK_POLICY = "kobe-orbit-eval-isolation";
+/**
+ * No traffic for external skill scan pods (KOBE-341; the namespace-wide policy leaves them out).
+ * Kept in every team namespace, so a pod with the scan label is never left without a policy.
+ */
+export const SKILL_SCAN_NETWORK_POLICY = "kobe-skill-scan";
 export const RESOURCE_QUOTA = "kobe-team-quota";
 /** Skill eval sandboxes (KOBE-325): their own template and (empty) warm pool per team. */
 export const EVAL_SANDBOX_TEMPLATE = "kobe-skill-eval";

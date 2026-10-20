@@ -1,4 +1,7 @@
 import { Hono } from "hono";
+import { z } from "zod";
+import { SITE_GRANTS } from "@kobe/protocol";
+import { giveGrant, listGrants, takeGrant } from "../skills/registry/grants.js";
 import { and, asc, eq, siteRoles, ne, users } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import { recordAudit } from "../audit/record.js";
@@ -11,6 +14,7 @@ import { idSchema, siteRoleChangeSchema, transferOwnershipSchema } from "../team
 /**
  * Site roles (spec D8): one Owner (transferable), Admins, everyone else a User. Site admins
  * see who holds which role; only the Owner grants or revokes Admin and transfers ownership.
+ * Site grants (KOBE-331): the Owner or a Site admin gives and takes the Skill reviewer grant.
  */
 export function siteRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
@@ -71,6 +75,48 @@ export function siteRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
       );
     }
     return c.json({ userId: userId.data, role: body.role });
+  });
+
+  // Site grants beside the ladder (KOBE-331, SK22): read like roles, changed by Site admins.
+  app.get("/grants", requireSitePermission("site.users.manage"), async (c) =>
+    c.json({ grants: await listGrants(db) }),
+  );
+
+  const grantParams = (c: { req: { param(name: string): string } }) => {
+    const userId = idSchema.safeParse(c.req.param("userId"));
+    const grant = z.enum(SITE_GRANTS).safeParse(c.req.param("grant"));
+    return userId.success && grant.success ? { userId: userId.data, grant: grant.data } : null;
+  };
+
+  app.put("/grants/:userId/:grant", requireSitePermission("site.grants.manage"), async (c) => {
+    const p = grantParams(c);
+    if (!p) return invalidRequest(c, "Name a user and the grant skill_reviewer.");
+    const r = await giveGrant(db, p.userId, p.grant, c.get("user").id);
+    if (r.ok) return c.json({ userId: p.userId, grant: p.grant, changed: r.changed });
+    if (r.code === "user_not_found") return c.json(userNotFound, 404);
+    if (r.code === "user_deactivated")
+      return c.json(
+        { code: "user_deactivated", message: "Reactivate the account before granting." },
+        409,
+      );
+    return c.json(
+      {
+        code: "self_grant",
+        message:
+          "Another Site admin gives you the grant; on a single-admin Site you may give it to yourself (flagged).",
+      },
+      403,
+    );
+  });
+
+  app.delete("/grants/:userId/:grant", requireSitePermission("site.grants.manage"), async (c) => {
+    const p = grantParams(c);
+    if (!p) return invalidRequest(c, "Name a user and the grant skill_reviewer.");
+    if (!(await findUserId(db, { id: p.userId }))) return c.json(userNotFound, 404);
+    const { changed } = await takeGrant(db, p.userId, p.grant);
+    if (!changed)
+      return c.json({ code: "not_found", message: "That user doesn't hold that grant." }, 404);
+    return new Response(null, { status: 204 });
   });
 
   /** The Owner hands ownership to another user and becomes an Admin, atomically. */

@@ -34,6 +34,7 @@ import { defaultSyncOnce, startDefaultSync } from "../skills/default-sync.js";
 import { recomputeOnce, startSkillHashRecompute } from "../skills/hash-checks.js";
 import { startKobeSeed } from "../skills/kobe-seed.js";
 import { rescanOnce, startSkillRescan } from "../skills/rescan.js";
+import { ensureUsageSnapshot, startUsageSnapshots } from "../skills/usage-snapshot.js";
 
 const OFFBOARDING_SWEEP_MS = 10 * 60_000;
 
@@ -341,6 +342,13 @@ function skillJobs(o: ServerJobsOptions): ServerJob[] {
       "skill-default-sync",
       () => startDefaultSync(sync),
       () => defaultSyncOnce(sync),
+    ),
+    // Catalog usage aggregates (KOBE-339, SK26): once per closed 30-day window, one replica
+    // under an advisory lock; checked at start and hourly.
+    job(
+      "skill-usage-snapshot",
+      () => startUsageSnapshots({ db: deps.database.db, pool: deps.database.pool, log }),
+      () => ensureUsageSnapshot({ db: deps.database.db, pool: deps.database.pool }),
     ),
   ];
   const blobs = deps.blobs;

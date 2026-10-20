@@ -11,6 +11,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
@@ -84,6 +85,12 @@ export const skillDrafts = pgTable(
     parentRef: jsonb().$type<Record<string, unknown>>(),
     fromThreadId: uuid(),
     coEdited: boolean().notNull().default(false),
+    /**
+     * The revision the last save from its conversation wrote (Save to Workbench, KOBE-322;
+     * `save_skill_draft`, KOBE-442); null once the conversation no longer saves into it. The
+     * agent's tool updates the draft only while `rev` still equals it and the draft is private.
+     */
+    syncedRev: integer(),
     ownerDepartedAt: ts(),
     rev: integer().notNull().default(1),
     sizeBytes: integer().notNull().default(0),
@@ -101,6 +108,11 @@ export const skillDrafts = pgTable(
     index("skill_drafts_owner_idx").on(t.teamId, t.ownerUserId, t.updatedAt),
     // The retention pass (drafts unchanged for longer than the team's window).
     index("skill_drafts_updated_idx").on(t.teamId, t.updatedAt),
+    // One draft per skill name that a conversation saves into (KOBE-442 review H1): concurrent
+    // saves from one conversation update one draft instead of making two.
+    uniqueIndex("skill_drafts_thread_sync_uq")
+      .on(t.teamId, t.ownerUserId, t.fromThreadId, t.name)
+      .where(sql`${t.fromThreadId} IS NOT NULL AND ${t.syncedRev} IS NOT NULL`),
     check("skill_drafts_name_format", sql`${t.name} ~ ${sql.raw(`'${NAME_FORMAT}'`)}`),
     check("skill_drafts_started_from", sql`${t.startedFrom} IN (${list(SKILL_DRAFT_STARTS)})`),
     check(

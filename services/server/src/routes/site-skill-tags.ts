@@ -61,7 +61,7 @@ export function siteSkillTagRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
     return r.ok ? c.json({ tag: tagJson(r.tag) }) : tagConflict(c, r.code);
   });
 
-  app.get("/catalog", async (c) => c.json({ skills: await listSiteCatalog(db) }));
+  app.get("/catalog", async (c) => c.json({ skills: await listSiteCatalog(db, c.get("user").id) }));
 
   app.put("/catalog/:skillId/tags", async (c) => {
     const id = idSchema.safeParse(c.req.param("skillId"));

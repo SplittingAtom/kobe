@@ -122,18 +122,24 @@ export function addBlocked(
   db: KobeDb,
   entry: { hash: string; reason: string; userId: string },
 ): Promise<BlockedEntry | null> {
-  return db.transaction(async (tx) => {
-    await lockBlocklist(tx);
-    if (await isBlocked(tx, entry.hash)) return null;
-    const [row] = await tx
-      .insert(skillBlocklist)
-      .values({ contentHash: entry.hash, reason: entry.reason, addedBy: entry.userId })
-      .onConflictDoNothing()
-      .returning();
-    if (!row) return null;
-    await recordAudit(tx, { action: "skill.blocklist.added", target: { bundleHash: entry.hash } });
-    return row;
-  });
+  return db.transaction((tx) => addBlockedInTx(tx, entry));
+}
+
+/** {@link addBlocked} inside the caller's transaction (Reject and block, KOBE-334). */
+export async function addBlockedInTx(
+  tx: KobeTx,
+  entry: { hash: string; reason: string; userId: string },
+): Promise<BlockedEntry | null> {
+  await lockBlocklist(tx);
+  if (await isBlocked(tx, entry.hash)) return null;
+  const [row] = await tx
+    .insert(skillBlocklist)
+    .values({ contentHash: entry.hash, reason: entry.reason, addedBy: entry.userId })
+    .onConflictDoNothing()
+    .returning();
+  if (!row) return null;
+  await recordAudit(tx, { action: "skill.blocklist.added", target: { bundleHash: entry.hash } });
+  return row;
 }
 
 /**
@@ -141,7 +147,12 @@ export function addBlocked(
  * only, in the same transaction); false when nothing in the group was listed.
  */
 export function removeBlocked(db: KobeDb, hash: string): Promise<boolean> {
-  return db.transaction(async (tx) => {
+  return db.transaction((tx) => removeBlockedInTx(tx, hash));
+}
+
+/** {@link removeBlocked} inside the caller's transaction (Unrevoke, KOBE-340). */
+export function removeBlockedInTx(tx: KobeTx, hash: string): Promise<boolean> {
+  return (async () => {
     await lockBlocklist(tx);
     const group = (await hashGroups(tx, [hash])).get(hash) ?? [hash];
     const rows = await tx
@@ -152,9 +163,34 @@ export function removeBlocked(db: KobeDb, hash: string): Promise<boolean> {
     for (const r of rows.sort((a, b) => a.hash.localeCompare(b.hash)))
       await recordAudit(tx, { action: "skill.blocklist.removed", target: { bundleHash: r.hash } });
     return true;
-  });
+  })();
 }
 
 /** Serializes blocklist writes, so two adds in one alias group can't both see it unblocked. */
 const lockBlocklist = (tx: KobeTx) =>
   tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('kobe.skill_blocklist', 0))`);
+
+/** The listed entry for exactly `hash` (its `added_at` as Postgres prints it), or null. */
+export async function blockEntryOf(tx: KobeTx, hash: string): Promise<string | null> {
+  const r = await tx.execute<{ at: string }>(sql`
+    SELECT added_at::text AS at FROM skill_blocklist WHERE content_hash = ${hash}`);
+  return r.rows[0]?.at ?? null;
+}
+
+/**
+ * Removes one entry, only while it is still the same row (same hash, same `added_at`): an entry
+ * removed and added again since (another reason) stays (Unrevoke, KOBE-340 review L2). Audited.
+ */
+export async function removeBlockEntryInTx(
+  tx: KobeTx,
+  entry: { readonly hash: string; readonly addedAt: string },
+): Promise<boolean> {
+  await lockBlocklist(tx);
+  const rows = await tx.execute<{ hash: string }>(sql`
+    DELETE FROM skill_blocklist
+     WHERE content_hash = ${entry.hash} AND added_at = ${entry.addedAt}::timestamptz
+    RETURNING content_hash AS hash`);
+  if (rows.rows.length === 0) return false;
+  await recordAudit(tx, { action: "skill.blocklist.removed", target: { bundleHash: entry.hash } });
+  return true;
+}

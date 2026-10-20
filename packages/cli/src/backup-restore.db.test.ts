@@ -124,7 +124,7 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
 
       const counts = Object.fromEntries(manifest.tables.map((t) => [t.name, t.rows]));
       expect(counts).toMatchObject({
-        teams: 2,
+        teams: 3,
         users: 3,
         team_members: 3,
         widgets: 3,
@@ -464,7 +464,7 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
         replacedAuditHeadHash: replaced?.hash,
         replacedAuditRows: 2,
       });
-      for (const t of ["site_agents", "site_agent_versions"]) {
+      for (const t of ["site_agents", "site_agent_versions", "skill_usage_snapshots"]) {
         expect(await rowsOf(dst.adminUrl, t), t).toEqual(await rowsOf(started.adminUrl, t));
       }
       expect(await sql(dst.adminUrl, `SELECT 1 FROM site_agents WHERE id = '${seeded}'`)).toEqual(

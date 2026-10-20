@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: "Create a new Kobe skill (a SKILL.md folder with optional scripts and references) or improve an existing one: interview the user, draft it in the workspace, test it on realistic prompts, check it against the Kobe upload rules and package it for My skills or the team. Use whenever the user wants to make, write, turn a workflow into, fix, test or tune a skill, even if they only say 'make this repeatable' or 'remember how to do this'."
+description: "Create a new Kobe skill (a SKILL.md folder with optional scripts and references) or improve an existing one: interview the user, draft it in the workspace, test it on realistic prompts, check it against the Kobe upload rules and save it to the user's Workbench as a private draft. Use whenever the user wants to make, write, turn a workflow into, fix, test or tune a skill, even if they only say 'make this repeatable' or 'remember how to do this'."
 ---
 
 # Skill creator
@@ -38,7 +38,7 @@ python scripts/init_skill.py NAME [--dir /workspace/skills] [--scripts] [--refer
 
 This creates `/workspace/skills/NAME/SKILL.md` with a template to replace, plus empty `scripts/` or
 `references/` folders when asked. NAME is lowercase letters, digits and hyphens (up to 64), and it
-is permanent once uploaded.
+becomes permanent once the user saves a version.
 
 Write the description first (it decides whether the skill is ever used), then the body. Put
 repeatable, deterministic work in a script instead of prose, and long reference material in
@@ -47,7 +47,8 @@ lines.
 
 ## 3. Test it
 
-Save the test prompts to `/workspace/skills/NAME/evals/evals.json`:
+Save the test prompts to `/workspace/skills/NAME-tests/prompts.json` (outside the skill, so they
+are never saved with it):
 
 ```json
 {
@@ -99,38 +100,45 @@ When improving:
 
 Stop when the user is happy or the changes stop helping.
 
-## 5. Validate and package
+## 5. Validate and save to the Workbench
 
 ```
 python scripts/validate.py /workspace/skills/NAME
-python scripts/package.py /workspace/skills/NAME [--out /workspace/NAME.zip]
 ```
 
 `validate.py` applies Kobe's upload rules (frontmatter, name, description length, file count and
-sizes, safe paths, no symlinks) and reports what Kobe's scanner will flag. Errors block the upload;
-fix them. Flags do not block, but a flagged skill waits for a team admin's review before anyone can
-use it, so remove anything the skill does not need (network calls, package installs, secrets: the
-sandbox has no internet access and no package installs anyway). `package.py` validates, writes a
-zip with SKILL.md at its root (leaving out `evals/`, caches and hidden files), and prints how to
-enter the skill in Kobe.
+sizes, safe paths, no symlinks) and reports what Kobe's scanner will flag. Errors block the save;
+fix them. Flags do not block, but a flagged skill waits for a team admin's review before the team
+can use it, so remove anything the skill does not need (network calls, package installs, secrets:
+the sandbox has no internet access and no package installs anyway).
 
-## 6. Add it to Kobe
+After `validate.py` passes, call the `save_skill_draft` tool with `folder` set to NAME. Kobe checks
+the folder as it checks an upload and saves it as the user's **private draft** in their Workbench;
+the answer shows an Open in Workbench card. Calling it again from this conversation updates the
+same draft, so save again after every round of changes. The tool never publishes, shares, tests or
+submits anything. If it is not available or is refused, tell the user to use **Save skill to
+Workbench** (`/saveskill`) in this conversation instead.
 
-Tell the user how, using `package.py`'s summary:
+## 6. Finish in the Workbench
 
-- **Just for them:** My skills → New skill. Paste the name, description and the SKILL.md body
-  (everything after the closing `---`); for each file under `scripts/` or `references/`, choose
-  Add file and paste its path and contents. Personal skills are only theirs and work in any of
-  their teams unless a team admin turns personal skills off.
-- **For the team:** a Builder or team admin creates it as a Team skill in the team's admin console
-  (Skills → New skill); it may need a team admin's review before the team can use it.
-- **To use it:** add the skill's name to an agent's `skills` list, or rely on the user's own
-  enabled skills.
+Tell the user what is next, in the Workbench (Skills → Workbench, or the card's link):
 
-The browser editor takes text files only. The zip is for the skills API or for keeping a copy.
+- **Try it:** the draft's test pane is a chat that runs only this draft; check that it triggers on
+  their real requests and that the results are right.
+- **Run evals:** Run evals runs `evals/cases.yaml` with and without the skill and scores the lift
+  and trigger precision and recall. Fix what fails, save the draft again, and rerun.
+- **Save version:** when it is ready, Save version makes it a personal skill (just for them) or a
+  team skill (it may need a team admin's review before the team can use it). Nothing is shared
+  until they do this.
+
+`python scripts/package.py /workspace/skills/NAME --out /workspace/NAME.zip` writes a zip of the
+skill (leaving out `evals/`, caches and hidden files) for keeping a copy or for the Workbench's
+upload start; it is not needed to save the draft.
 
 ## Improving an existing skill
 
-Ask the user to paste the current SKILL.md (and files) or put the bundle in the workspace, copy it to
-`/workspace/skills/<name>/`, keep the same `name`, and run steps 3 to 6. Saving in the editor
-creates a new version; agents pick it up on new runs.
+The easiest path starts in the Workbench: the user opens the skill and chooses Edit in Workbench,
+which makes a draft to change there. To improve it here instead, ask the user to put the skill's
+files in the workspace, copy them to `/workspace/skills/<name>/`, keep the same `name`, and run
+steps 3 to 6; `save_skill_draft` saves it as a new draft, and Save version in the Workbench makes
+the next version. Agents pick up a new version on new runs.

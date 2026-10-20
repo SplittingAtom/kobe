@@ -24,6 +24,8 @@ export interface TeamMember {
   readonly email: string;
   readonly role: TeamRole;
   readonly joinedAt: string;
+  /** Kobe added them for the Skill reviewer grant (KOBE-331); taking the grant removes them. */
+  readonly addedVia: "skill_reviewer_grant" | null;
 }
 
 export interface TeamSummary {
@@ -51,13 +53,18 @@ export async function listMembers(db: KobeDb, teamId: string): Promise<TeamMembe
         email: users.email,
         role: teamMembers.role,
         joinedAt: teamMembers.createdAt,
+        addedVia: teamMembers.addedVia,
       })
       .from(teamMembers)
       .innerJoin(users, eq(users.id, teamMembers.userId))
       .where(eq(teamMembers.teamId, teamId))
       .orderBy(asc(users.name), asc(users.email)),
   );
-  return rows.map((r) => ({ ...r, joinedAt: r.joinedAt.toISOString() }));
+  return rows.map((r) => ({
+    ...r,
+    joinedAt: r.joinedAt.toISOString(),
+    addedVia: r.addedVia === "skill_reviewer_grant" ? "skill_reviewer_grant" : null,
+  }));
 }
 
 export async function findTeam(db: KobeDb, teamId: string): Promise<TeamSummary | null> {
@@ -120,9 +127,10 @@ export async function setMemberRole(
     const lock = await lockForChange(tx, teamId, userId);
     if (lock.current === null) return fail("not_a_member");
     if (role !== "team_admin" && losesLastActiveAdmin(lock)) return fail("last_team_admin");
+    // A team admin's decision makes them the team's own member (KOBE-331 review).
     await tx
       .update(teamMembers)
-      .set({ role })
+      .set({ role, addedVia: null })
       .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
     // Below team admin they can no longer invite: their pending invitations go too.
     if (role !== "team_admin") await revokeInvitesSentBy(tx, teamId, userId);
@@ -148,27 +156,39 @@ export async function removeMember(
   teamId: string,
   userId: string,
 ): Promise<MembershipResult> {
-  return withTeam(db, teamId, async (tx) => {
-    const lock = await lockForChange(tx, teamId, userId);
-    if (lock.current === null) return fail("not_a_member");
-    if (losesLastActiveAdmin(lock)) return fail("last_team_admin");
-    await tx
-      .delete(teamMembers)
-      .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
-    await revokeInvitesSentBy(tx, teamId, userId);
-    // Their schedules here stop with the membership; other teams' keep running (KOBE-180).
-    await pauseOwnerSchedulesInTx(tx, teamId, userId, "member_removed");
-    // Egress proxies close the user's open tunnels in this team (KOBE-38).
-    await notifyEgressUserChanged(tx, userId);
-    // Their shared threads go private: nobody else could revoke them (KOBE-221).
-    await endSharesOf(tx, teamId, userId);
-    await recordAudit(tx, {
-      action: "identity.member.removed",
-      teamId,
-      target: { userId, role: lock.current },
-    });
-    return OK;
+  return withTeam(db, teamId, (tx) => removeMemberInTx(tx, teamId, userId));
+}
+
+/**
+ * {@link removeMember} inside the caller's team transaction (KOBE-331 review: taking the Skill
+ * reviewer grant removes the membership it made, with the same side effects). `via` names Kobe's
+ * reason in the audit event.
+ */
+export async function removeMemberInTx(
+  tx: KobeTx,
+  teamId: string,
+  userId: string,
+  via?: "skill_reviewer_grant",
+): Promise<MembershipResult> {
+  const lock = await lockForChange(tx, teamId, userId);
+  if (lock.current === null) return fail("not_a_member");
+  if (losesLastActiveAdmin(lock)) return fail("last_team_admin");
+  await tx
+    .delete(teamMembers)
+    .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
+  await revokeInvitesSentBy(tx, teamId, userId);
+  // Their schedules here stop with the membership; other teams' keep running (KOBE-180).
+  await pauseOwnerSchedulesInTx(tx, teamId, userId, "member_removed");
+  // Egress proxies close the user's open tunnels in this team (KOBE-38).
+  await notifyEgressUserChanged(tx, userId);
+  // Their shared threads go private: nobody else could revoke them (KOBE-221).
+  await endSharesOf(tx, teamId, userId);
+  await recordAudit(tx, {
+    action: "identity.member.removed",
+    teamId,
+    target: { userId, role: lock.current, ...(via ? { via } : {}) },
   });
+  return OK;
 }
 
 /**
@@ -178,13 +198,15 @@ export async function removeMember(
  */
 export async function createTeamWithAdmin(
   db: KobeDb,
-  input: { readonly slug: string; readonly name: string },
+  input: { readonly slug: string; readonly name: string; readonly registry?: boolean },
   adminUserId: string,
+  /** Runs in the new team's transaction (the Registry team's settings and reviewers, KOBE-330). */
+  then?: (tx: KobeTx, team: TeamSummary) => Promise<void>,
 ): Promise<TeamSummary> {
   return db.transaction(async (tx) => {
     const [team] = await tx
       .insert(teams)
-      .values({ slug: input.slug, name: input.name })
+      .values({ slug: input.slug, name: input.name, registry: input.registry === true })
       .returning({ id: teams.id, slug: teams.slug, name: teams.name });
     if (!team) throw new Error("team insert returned no row");
     await withTeam(tx, team.id, async (inner) => {
@@ -198,6 +220,7 @@ export async function createTeamWithAdmin(
         teamId: team.id,
         target: { slug: team.slug, name: team.name, adminUserId },
       });
+      if (then) await then(inner, team);
     });
     return team;
   });

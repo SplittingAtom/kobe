@@ -3,10 +3,14 @@ import { z } from "zod";
 import { eq, getMembership, sessionActiveTeams, teams, type TeamRole } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import type { ServerDeps } from "../deps.js";
+import { grantsOf } from "../skills/registry/grants.js";
 import {
   siteRoleAllows,
+  skillReviewAllows,
   teamRoleAllows,
   type SitePermission,
+  type SiteRole,
+  type SkillReviewAction,
   type TeamPermission,
 } from "./permissions.js";
 
@@ -110,4 +114,36 @@ export function requireTeamPermission(permission: TeamPermission) {
     }
     await next();
   });
+}
+
+/**
+ * Requires a Skill Registry action (KOBE-331, SK22): Site admins and the Owner, or a Skill
+ * reviewer for the reviewer's actions. The grant is read on every request, so taking it works at
+ * once.
+ */
+export function requireSkillReview(deps: ServerDeps, action: SkillReviewAction) {
+  return createMiddleware<{ Variables: AuthVariables }>(async (c, next) => {
+    if (!(await mayReviewSkills(deps, c.get("siteRole"), c.get("user").id, action))) {
+      return c.json(SKILL_REVIEW_FORBIDDEN, 403);
+    }
+    await next();
+  });
+}
+
+export const SKILL_REVIEW_FORBIDDEN = {
+  code: "forbidden",
+  message: "You don't have permission to do that.",
+} as const;
+
+/** {@link requireSkillReview}'s check, for a route whose action is in its body (KOBE-334). */
+export async function mayReviewSkills(
+  deps: ServerDeps,
+  siteRole: SiteRole,
+  userId: string,
+  action: SkillReviewAction,
+): Promise<boolean> {
+  const grants = siteRoleAllows(siteRole, "site.skills.review")
+    ? []
+    : await grantsOf(deps.database.db, userId);
+  return skillReviewAllows({ siteRole, grants }, action);
 }

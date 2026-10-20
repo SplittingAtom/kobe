@@ -30,6 +30,7 @@ import {
   limitRangeManifest,
   namespaceManifest,
   evalNetworkPolicyManifest,
+  skillScanNetworkPolicyManifest,
   networkPolicyManifest,
   pullSecretManifest,
   resourceQuotaManifest,
@@ -471,6 +472,9 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     // The NetworkPolicy goes first: no pod may ever run here without default deny.
     await applyWithRbacRetry(networkPolicyManifest(namespace, settings));
     await applyWithRbacRetry(evalNetworkPolicyManifest(namespace, settings));
+    // Scan pods are left out of the namespace-wide policy too (KOBE-341): theirs is in place
+    // before any could start, in every team namespace, not only the Registry team's.
+    await applyWithRbacRetry(skillScanNetworkPolicyManifest(namespace));
     await kube.apply(resourceQuotaManifest(namespace, settings));
     // The scoped quotas split the team quota between members and evals (KOBE-325). Neither may
     // stop member sandboxes: without the eval quota evals stay inside the team quota; without the

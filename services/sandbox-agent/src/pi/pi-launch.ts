@@ -115,6 +115,11 @@ export interface PiLaunchInput {
    */
   readonly toolsProjects?: boolean | undefined;
   /**
+   * The agent announced the `skill_drafts` capability (KOBE-442): the extension then registers
+   * `save_skill_draft`. Meaningful only with {@link toolsExtension}.
+   */
+  readonly toolsSkillDrafts?: boolean | undefined;
+  /**
    * The agent announced the `memory` capability (KOBE-157): the extension then registers `remember`
    * and `recall`. Meaningful only with {@link toolsExtension}.
    */
@@ -199,6 +204,8 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
   if (input.toolsExtension !== undefined && input.toolsFiles === true) env.KOBE_TOOLS_FILES = "1";
   if (input.toolsExtension !== undefined && input.toolsProjects === true)
     env.KOBE_TOOLS_PROJECTS = "1";
+  if (input.toolsExtension !== undefined && input.toolsSkillDrafts === true)
+    env.KOBE_TOOLS_SKILL_DRAFTS = "1";
   if (input.toolsExtension !== undefined && input.toolsMemory === true) env.KOBE_TOOLS_MEMORY = "1";
 
   // The model is deliberately not part of the key (see `modelsExtension`).

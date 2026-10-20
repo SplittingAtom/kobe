@@ -27,6 +27,8 @@ export const BREAK_GLASS_READABLE_TABLES = [
   // Skill eval runs and their executions (KOBE-325): team grants, user grants by the starter.
   "skill_eval_runs",
   "skill_eval_results",
+  // Builders' Promote to Site requests (KOBE-333): team grants, user grants by the requester.
+  "skill_promotion_requests",
 ] as const satisfies readonly TeamTable[];
 
 export type BreakGlassReadableTable = (typeof BREAK_GLASS_READABLE_TABLES)[number];

@@ -84,6 +84,8 @@ export const REGISTRY_VERSION_STATES = [
   "deprecated",
   "withdrawn",
   "revoked",
+  /** The submitter took the submission back before a decision (KOBE-334). */
+  "retracted",
 ] as const;
 export type RegistryVersionState = (typeof REGISTRY_VERSION_STATES)[number];
 /** States of a version that was approved (published) at some point. */
@@ -109,6 +111,11 @@ export const REGISTRY_REVIEW_ACTIONS = [
   "withdrawn",
   "revoked",
   "unrevoked",
+  /** A maintainer or Site admin undid a version's deprecation (KOBE-340). */
+  "undeprecated",
+  /** A reviewer acknowledged one Caution finding before approving (SK32). */
+  "finding_acknowledged",
+  "retracted",
 ] as const;
 export type RegistryReviewAction = (typeof REGISTRY_REVIEW_ACTIONS)[number];
 

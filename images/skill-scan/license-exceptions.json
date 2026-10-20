@@ -1,0 +1,38 @@
+{
+  "protobuf": {
+    "license": "3-Clause BSD License",
+    "versions": ["5.29.6"],
+    "reason": "BSD-3-Clause declared as a free-text label. Cisco skill-scanner dependency (KOBE-341).",
+    "pending": "gate review"
+  },
+  "multidict": {
+    "license": "Apache License 2.0",
+    "versions": ["6.7.1"],
+    "reason": "Apache-2.0 declared as a free-text label (approved for 6.7.1 in the Orbit eval image, KOBE-92). aiohttp dependency (KOBE-341).",
+    "pending": "gate review"
+  },
+  "regex": {
+    "license": "Apache-2.0 AND CNRI-Python",
+    "versions": ["2026.4.4"],
+    "reason": "Apache-2.0 with code under the CNRI Python license (BSD-like, permissive, not copyleft); the same licence was approved for another version in the Orbit eval image. tiktoken dependency (KOBE-341).",
+    "pending": "gate review"
+  },
+  "tiktoken": {
+    "license": "MIT License",
+    "versions": ["0.12.0"],
+    "reason": "MIT declared with the license text instead of an SPDX id (approved for 0.13.0 in the Orbit eval image). litellm dependency (KOBE-341).",
+    "pending": "gate review"
+  },
+  "typing_extensions": {
+    "license": "PSF-2.0",
+    "versions": ["4.15.0"],
+    "reason": "Python Software Foundation license: permissive, not copyleft (approved for 4.16.0 in the Orbit eval image) (KOBE-341).",
+    "pending": "gate review"
+  },
+  "aiohappyeyeballs": {
+    "license": "Python-2.0",
+    "versions": ["2.6.1"],
+    "reason": "PSF-2.0 (the PyPI classifier maps to Python-2.0): permissive, not copyleft (approved for 2.7.1 in the Orbit eval image). aiohttp dependency (KOBE-341).",
+    "pending": "gate review"
+  }
+}

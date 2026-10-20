@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { EmptyState, PageHeader, Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/console";
+import { PageHeader, Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/console";
 import { MySkillChoices } from "../admin/team/skill-editor/my-skill-choices";
 import { CatalogForks } from "./catalog-forks";
+import { CatalogTab } from "./catalog-tab";
 import { SkillList } from "./skill-list";
+import { MySubmissions } from "./my-submissions";
 import { WorkbenchList } from "./workbench-list";
 import { SKILL_TABS, skillTab, type SkillTab } from "../../lib/skills/tabs";
 
@@ -51,9 +53,7 @@ export function SkillsPage({ initialTab = "team" }: { readonly initialTab?: Skil
           ))}
         </TabsList>
         <TabsContent value="catalog">
-          <EmptyState title="The Site catalog comes with the Skills Registry.">
-            Kobe's own skills already load in your runs; Mine shows which ones are on.
-          </EmptyState>
+          <CatalogTab />
         </TabsContent>
         <TabsContent value="team">
           <SkillList scope="team" />
@@ -65,6 +65,7 @@ export function SkillsPage({ initialTab = "team" }: { readonly initialTab?: Skil
         </TabsContent>
         <TabsContent value="workbench">
           <WorkbenchList />
+          <MySubmissions />
         </TabsContent>
       </Tabs>
     </>

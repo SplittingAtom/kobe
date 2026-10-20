@@ -104,6 +104,11 @@ export interface NewSkillVersion {
 export interface UploadDraft {
   readonly id: string;
   readonly teamId: string;
+  /**
+   * The draft started from a conversation, or forks a version that did (KOBE-333 review C4-M3):
+   * stored on the version, which promotion reports (SK19).
+   */
+  readonly fromConversation: boolean;
   /** Set for a personal save: what the author confirmed, if anything. */
   readonly personal: { readonly fromConversation: boolean; readonly coEdited: boolean } | null;
 }
@@ -390,6 +395,7 @@ async function insertVersion(
     fileCount: input.fileCount,
     uncompressedBytes: input.uncompressedBytes,
     uploadedBy: input.uploadedBy,
+    fromConversation: input.draft?.fromConversation === true,
   };
   const [row] =
     location.scope === "team"

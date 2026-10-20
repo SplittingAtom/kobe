@@ -202,6 +202,22 @@ export const FILE_SHARE_REFUSALS = [
   "scan_rejected",
 ] as const;
 
+/** Why the server refused a `skill.draft_save` (audit `sandbox.skill_draft_refused`, KOBE-442). */
+export const SKILL_DRAFT_REFUSALS = [
+  "capability_missing",
+  "run_not_active",
+  "not_allowed",
+  "input_mismatch",
+  "path_mismatch",
+  "not_synced",
+  "not_found",
+  "invalid_skill",
+  "too_large",
+  "draft_limit",
+  "rate_limited",
+  "replayed",
+] as const;
+
 /** Why the server refused a `memory.put` / `memory.read` (audit `sandbox.memory_refused`, KOBE-156). */
 export const MEMORY_REFUSALS = [
   "capability_missing",
@@ -358,7 +374,29 @@ export const AUDIT_EVENTS = {
   /** Actor: the invitee. */
   "identity.team_invitation.declined": event("team", {}),
   "identity.member.role_changed": event("team", { userId: id, from: role, to: role }),
-  "identity.member.removed": event("team", { userId: id, role }),
+  /** `via`: Kobe removed a membership the Skill reviewer grant made when the grant was taken. */
+  "identity.member.removed": event("team", {
+    userId: id,
+    role,
+    via: z.enum(["skill_reviewer_grant"]).optional(),
+  }),
+  /**
+   * Kobe added someone to the team on its own (KOBE-331): a Skill reviewer joins the Registry
+   * team as a member when granted, or when the team becomes the Registry team (SK22).
+   */
+  "identity.member.added": event("team", {
+    userId: id,
+    role,
+    via: z.enum(["skill_reviewer_grant"]),
+  }),
+  /** The Owner or a Site admin gave or took a site grant beside the role ladder (KOBE-331, SK22). */
+  /** `selfGranted`: the Site's only admin gave it to themselves (flagged, KOBE-336 review). */
+  "identity.site_grant.granted": event("site", {
+    userId: id,
+    grant: z.enum(["skill_reviewer"]),
+    selfGranted: z.literal(true).optional(),
+  }),
+  "identity.site_grant.revoked": event("site", { userId: id, grant: z.enum(["skill_reviewer"]) }),
 
   // ── site: site-wide settings ──
   "site.settings.updated": event("site", {
@@ -1181,6 +1219,20 @@ export const AUDIT_EVENTS = {
   }),
 
   /**
+   * The server refused a `skill.draft_save` (KOBE-442): no `skill_drafts` capability, a run not
+   * active here, a `save_skill_draft` call it did not allow (or other input), a file outside the
+   * folder or not as pushed, or a draft refusal (validation, limits, rate). Never records names,
+   * paths or content (system; at most one per 5 minutes per reason and user).
+   */
+  "sandbox.skill_draft_refused": event("team", {
+    sandboxId: id,
+    userId: id,
+    reason: z.enum(SKILL_DRAFT_REFUSALS),
+    runId: id.optional(),
+    toolCallId: toolCallId.optional(),
+  }),
+
+  /**
    * The server refused a `project.file_propose` (KOBE-162): no `projects` capability, a run not
    * active here, a `propose_project_file` call it did not allow (or other input), a thread outside
    * a project, a user who is not a project member, a workspace entry that does not match the push,
@@ -1478,6 +1530,8 @@ export const AUDIT_EVENTS = {
   "skill.catalog_switches.changed": event("team", {
     membersMayAddCatalog: z.boolean().optional(),
     buildersMayInstallCatalog: z.boolean().optional(),
+    /** "Builders may promote without confirmation" (KOBE-333, SK19). */
+    buildersMayPromote: z.boolean().optional(),
   }),
   /**
    * A Team admin chose the team's eval judge (KOBE-326, SK17): one of its enabled models, or null
@@ -1499,6 +1553,183 @@ export const AUDIT_EVENTS = {
   "skill.blocklist.removed": event("site", { bundleHash: z.string().regex(/^[0-9a-f]{64}$/) }),
 
   // ── skill: catalog tags and the Default sync (KOBE-314, SK5–SK8); ids, names and counts ──
+  // ── promotion to the Site Registry (KOBE-333, SK19): ids, names and counts, never content ──
+  /** A Builder asked to promote a team version; it waits for a Team admin (team log). */
+  "skill.promotion.requested": event("team", {
+    requestId: id,
+    skillId: id,
+    version,
+    semver: z.string().max(32),
+  }),
+  /** A Team admin confirmed a Builder's request; Kobe submitted it (team log). */
+  "skill.promotion.confirmed": event("team", { requestId: id, registryVersionId: id }),
+  /** A Team admin declined a Builder's request (team log). */
+  "skill.promotion.declined": event("team", { requestId: id }),
+  /**
+   * A team or personal version left the team for the Site Registry (team log): what left is
+   * counted (payload files, eval fixtures) and whether it started from a conversation.
+   */
+  "skill.promoted": event("team", {
+    skillId: id,
+    scope: z.enum(["team", "personal"]),
+    version,
+    semver: z.string().max(32),
+    registryVersionId: id,
+    files: count,
+    fixtures: count,
+    fromConversation: z.boolean(),
+    requestId: id.optional(),
+  }),
+  /** A version was submitted to the Site Registry for review (site log). */
+  "registry.submitted": event("site", {
+    registryVersionId: id,
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    newSkill: z.boolean(),
+  }),
+  // ── the Registry review (KOBE-334, SK23): ids and outcomes; notes stay in the Registry ──
+  /** A reviewer claimed a submitted version: it is In review (site log). */
+  "registry.claimed": event("site", { registryVersionId: id }),
+  /** A reviewer let go of a claim; the version waits in the queue again. */
+  "registry.unclaimed": event("site", { registryVersionId: id }),
+  /** A reviewer commented on a version under review. */
+  "registry.commented": event("site", { registryVersionId: id }),
+  /**
+   * A reviewer approved a version into the Catalog, with its scan verdict. `selfApproved`: the single admin approved
+   * their own submission (SK22); `confirmerApproved`: the single admin approved a promotion they
+   * confirmed as Team admin.
+   */
+  "registry.approved": event("site", {
+    registryVersionId: id,
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    selfApproved: z.boolean(),
+    /** The scan verdict approved: `block` is a Site admin's override (SK32). */
+    verdict: z.enum(["pass", "caution", "block"]),
+    /** A Site admin approved over a Block verdict, with a note (SK32, review L3). */
+    scanOverride: z.literal(true).optional(),
+    /** Caution findings acknowledged before approving (review M1). */
+    acknowledgedFindings: count.optional(),
+    confirmerApproved: z.boolean().optional(),
+  }),
+  /** A reviewer acknowledged one Caution finding (`rule@file:line`), as Approve needs (SK32). */
+  "registry.finding_acknowledged": event("site", {
+    registryVersionId: id,
+    finding: z.string().min(1).max(700),
+  }),
+  /** The submitter took back their submission before a decision (KOBE-334 review M3). */
+  "registry.retracted": event("site", { registryVersionId: id }),
+  /** A reviewer started the Registry team's re-run of a version's evals (KOBE-335, SK23). */
+  "registry.evals_rerun": event("site", { registryVersionId: id, evalRunId: id, teamId: id }),
+  /** A reviewer cancelled a re-run; the version's history keeps it (KOBE-335 review M3). */
+  "registry.rerun_cancelled": event("site", { registryVersionId: id, evalRunId: id }),
+  /** A re-run completed: its card (numbers only) is the version's authoritative scorecard (system). */
+  "registry.authoritative_scorecard": event("site", { registryVersionId: id, evalRunId: id }),
+  /** A reviewer sent the version back to its author's Workbench with comments. */
+  "registry.changes_requested": event("site", { registryVersionId: id }),
+  /** A reviewer rejected the version; `blocked`: a Site admin also blocklisted its runtime hash. */
+  "registry.rejected": event("site", { registryVersionId: id, blocked: z.boolean() }),
+  /**
+   * A published version was retired (KOBE-340, SK31): deprecated (a maintainer or Site admin),
+   * withdrawn or revoked (Site admins); `from` is the state it left. Revoke puts the runtime hash on
+   * the blocklist (`blocklisted`: this revoke added it); unrevoke returns to `to` and lifts the
+   * entry its revoke added (`unblocked`).
+   */
+  "registry.deprecated": event("site", {
+    registryVersionId: id,
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    from: z.string().max(32),
+  }),
+  "registry.withdrawn": event("site", {
+    registryVersionId: id,
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    from: z.string().max(32),
+  }),
+  "registry.revoked": event("site", {
+    registryVersionId: id,
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    from: z.string().max(32),
+    blocklisted: z.boolean(),
+  }),
+  "registry.unrevoked": event("site", {
+    registryVersionId: id,
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    to: z.string().max(32),
+    unblocked: z.boolean(),
+    /** The revoke's entry was removed or replaced since: the block stays (review L2). */
+    blockReplaced: z.literal(true).optional(),
+  }),
+  /** A maintainer or Site admin undid a version's deprecation: it is approved again (KOBE-340). */
+  "registry.undeprecated": event("site", {
+    registryVersionId: id,
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    to: z.literal("approved"),
+  }),
+  /** A maintainer or Site admin undid a skill's deprecation; its replacement is cleared. */
+  "skill.catalog.undeprecated": event("site", {
+    skillId: id,
+    name: catalogName,
+    to: z.enum(["active", "unmaintained"]),
+  }),
+  /** A maintainer or Site admin deprecated a whole catalog skill, naming its replacement or not. */
+  "skill.catalog.deprecated": event("site", {
+    skillId: id,
+    name: catalogName,
+    replacementId: id.nullable(),
+    /** The status it left, where an undo returns it (review L1). */
+    from: z.enum(["active", "unmaintained"]).optional(),
+    /** A Site admin deprecated it: only a Site admin undoes it (review-341 L4). */
+    byAdmin: z.boolean().optional(),
+  }),
+
+  // ── catalog maintainers (KOBE-332, SK24): ids only ──
+  /** A maintainer (or a Site admin) added a maintainer to a catalog skill. */
+  "skill.maintainer.added": event("site", { skillId: id, userId: id }),
+  /** A maintainer (or a Site admin) removed a maintainer; the last one is never removed. */
+  "skill.maintainer.removed": event("site", { skillId: id, userId: id }),
+  /** A Site admin reassigned a catalog skill's maintainers (SK24). */
+  "skill.maintainers.reassigned": event("site", {
+    skillId: id,
+    userIds: z.array(id).min(1).max(20),
+  }),
+  /** The skill's last active maintainer was deactivated: it shows Unmaintained (system). */
+  "skill.catalog.unmaintained": event("site", { skillId: id, name: catalogName }),
+  /** An Unmaintained skill has an active maintainer again (added, reassigned or reactivated). */
+  "skill.catalog.maintained": event("site", { skillId: id, name: catalogName }),
+  /**
+   * A Site admin changed the Registry settings (KOBE-330, SK20, SK21): which settings, and the
+   * Registry team and judge alias when they changed (ids and aliases, never URLs or rules).
+   */
+  "skill.registry.settings_updated": event("site", {
+    changed: z
+      .array(
+        z.enum([
+          "registryTeamId",
+          "judgeAlias",
+          "submissionRules",
+          "evalLimits",
+          "importAllowlist",
+          "scanner",
+          "mirror",
+        ]),
+      )
+      .min(1)
+      .max(7),
+    registryTeamId: id.nullable().optional(),
+    judgeAlias: z.string().min(1).max(64).nullable().optional(),
+  }),
   /** A Site admin added a topic tag to the vocabulary. */
   "skill.tag.created": event("site", { tagId: id, name: catalogName }),
   /** A Site admin renamed, retired or restored a topic tag. */
@@ -1605,11 +1836,78 @@ export const AUDIT_EVENTS = {
       })
       .optional(),
   }),
+  /** Move pin (KOBE-337, SK25): the install now runs another version (`major`: across majors). */
+  "skill.catalog.pin_moved": event("team", {
+    skillId: id,
+    name: catalogName,
+    from: z.string().max(32),
+    to: z.string().max(32),
+    pinMode: z.enum(["pinned", "within_major", "latest"]),
+    /** The tracking mode a move back left for Pinned (review-337 M1). */
+    pinModeFrom: z.enum(["within_major", "latest"]).optional(),
+    /** The version runs loaded before and after (null: none could run). */
+    runningFrom: z.string().max(32).nullable().optional(),
+    runningTo: z.string().max(32).nullable().optional(),
+    deprecated: z.boolean(),
+  }),
+  /** Roll back (KOBE-337, SK25): the install returns to the version it ran before its last move. */
+  "skill.catalog.rolled_back": event("team", {
+    skillId: id,
+    name: catalogName,
+    from: z.string().max(32),
+    to: z.string().max(32),
+    pinMode: z.enum(["pinned", "within_major", "latest"]),
+    /** The tracking mode a move back left for Pinned (review-337 M1). */
+    pinModeFrom: z.enum(["within_major", "latest"]).optional(),
+    /** The version runs loaded before and after (null: none could run). */
+    runningFrom: z.string().max(32).nullable().optional(),
+    runningTo: z.string().max(32).nullable().optional(),
+    deprecated: z.boolean(),
+  }),
   /** A Team admin reinstalled a removed Default skill, clearing the team's opt-out (SK7). */
   "skill.default.restored": event("team", {
     skillId: id,
     name: catalogName,
     semver: z.string().max(32),
+  }),
+  /** A member added a catalog skill for themselves in the team (KOBE-338, SK25): Add for me. */
+  "skill.member_add.added": event("team", {
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    pinMode: z.enum(["pinned", "within_major", "latest"]),
+  }),
+  /** A member changed the version or pin mode of their own add (KOBE-338). */
+  "skill.member_add.changed": event("team", {
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    pinMode: z.enum(["pinned", "within_major", "latest"]),
+    previous: z.strictObject({
+      semver: z.string().max(32),
+      pinMode: z.enum(["pinned", "within_major", "latest"]),
+    }),
+  }),
+  /** A member removed their own add (KOBE-338). A block's removals are counted on the block. */
+  "skill.member_add.removed": event("team", { skillId: id, name: catalogName }),
+  /**
+   * A Team admin blocked a catalog skill in the team (KOBE-338, SK25): members' adds of it were
+   * removed (`addsRemoved`) and new ones are refused.
+   */
+  "skill.catalog.blocked": event("team", {
+    skillId: id,
+    name: catalogName,
+    addsRemoved: z.number().int().min(0),
+  }),
+  /** A Team admin lifted the team's block of a catalog skill (KOBE-338). */
+  "skill.catalog.unblocked": event("team", { skillId: id, name: catalogName }),
+  /** A member asked the Team admins to install a catalog skill: Request for team (KOBE-338). */
+  "skill.catalog.team_requested": event("team", { skillId: id, name: catalogName }),
+  /** A Team admin dismissed the open requests for a catalog skill (KOBE-338). */
+  "skill.catalog.team_request_dismissed": event("team", {
+    skillId: id,
+    name: catalogName,
+    requests: z.number().int().min(0),
   }),
 
   // ── skill drafts: the Workbench (KOBE-320, SK11); ids and names, never file contents ──
@@ -1628,6 +1926,22 @@ export const AUDIT_EVENTS = {
       .optional(),
     /** Save to Workbench: the conversation the files came from. */
     fromThreadId: id.optional(),
+    /** `tool`: the agent's `save_skill_draft` (KOBE-442); absent: the member in the web app. */
+    via: z.enum(["tool"]).optional(),
+    /** The agent's call behind a `via: tool` save (KOBE-442 review L3). */
+    runId: id.optional(),
+    toolCallId: toolCallId.optional(),
+  }),
+  /**
+   * Save to Workbench again from the same conversation (KOBE-322) or `save_skill_draft`
+   * (KOBE-442, `via: tool`): the draft's files were replaced by the folder's, one new revision.
+   */
+  "skill.draft.updated": event("team", {
+    draftId: id,
+    fromThreadId: id.optional(),
+    via: z.enum(["tool"]).optional(),
+    runId: id.optional(),
+    toolCallId: toolCallId.optional(),
   }),
   /** A draft's author shared it with the team's Builders and Team admins, or stopped sharing. */
   "skill.draft.shared": event("team", { draftId: id, shared: z.boolean() }),

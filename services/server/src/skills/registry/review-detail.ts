@@ -1,0 +1,203 @@
+import { sql, type KobeDb } from "@kobe/db";
+import { hostStandings } from "../../egress/host-standing.js";
+import { listMaintainers, type Maintainer } from "./maintainers.js";
+import { similarCatalogNames } from "./names-db.js";
+import { approveProblems, confirmerOf, type Problem } from "./review-approve.js";
+import { acknowledgements, findingKey, type Acknowledgement } from "./review-findings.js";
+import { externalFindings } from "./external-scan-result.js";
+import { rerunHistory, type RerunEntry } from "./rerun.js";
+import {
+  approvedVersion,
+  bumpOf,
+  personOf,
+  reviewEvents,
+  userNames,
+  versionRow,
+  type Bump,
+  type Person,
+  type ReviewEvent,
+} from "./review-queue.js";
+
+/**
+ * Everything the review screen shows beside the diff (KOBE-334, SK23): the scan verdict and
+ * findings, the submitted and authoritative scorecards (numbers only), capabilities against the
+ * site egress ceiling, provenance and its source team, similar-name hints, maintainers, the
+ * checklist and the history, and whether the caller may approve it now (and why not).
+ */
+
+/** SK23's checklist; a decision may record which items the reviewer ticked. */
+export const REVIEW_CHECKLIST = [
+  { id: "instructions_match", label: "The instructions match the description" },
+  { id: "no_prerequisites", label: "No “run this prerequisite” steps" },
+  { id: "scripts_explained", label: "Scripts are explained" },
+  { id: "no_secrets", label: "No secrets" },
+] as const;
+export type ChecklistId = (typeof REVIEW_CHECKLIST)[number]["id"];
+
+export interface EgressCapability {
+  readonly host: string;
+  /** In the site egress ceiling (D28): a team can enable it. */
+  readonly inCeiling: boolean;
+}
+
+/** A scan finding with its key and, for a Caution one, its acknowledgement (review M1). */
+export interface ReviewFinding {
+  readonly key: string;
+  readonly rule: string;
+  readonly file: string;
+  readonly line: number;
+  readonly severity: string;
+  readonly category: string | null;
+  readonly acknowledged: Acknowledgement | null;
+  /** `kobe` (Kobe's own scanner) or `external` (the optional external scanner, KOBE-341). */
+  readonly source: "kobe" | "external";
+  /** External findings: the scanner's title and own severity ("info" ones need no acknowledgement). */
+  readonly title?: string;
+  readonly externalSeverity?: string;
+}
+
+export interface ReviewDetail {
+  readonly id: string;
+  readonly skill: {
+    readonly id: string;
+    readonly name: string;
+    readonly status: string;
+    readonly maintainers: readonly Maintainer[];
+  };
+  readonly semver: string;
+  readonly state: string;
+  readonly previous: { readonly id: string; readonly semver: string } | null;
+  readonly bump: Bump;
+  readonly verdict: string;
+  readonly scan: Record<string, unknown>;
+  readonly findings: readonly ReviewFinding[];
+  readonly scorecard: Record<string, unknown> | null;
+  readonly authoritativeScorecard: Record<string, unknown> | null;
+  /** Every re-run in the Registry team, oldest first, with its starter and outcome (KOBE-335). */
+  readonly reruns: readonly RerunEntry[];
+  readonly manifest: Record<string, unknown>;
+  readonly capabilities: {
+    readonly egress: readonly EgressCapability[];
+    readonly packages: Record<string, unknown>;
+  };
+  readonly provenance: Record<string, unknown>;
+  readonly source: Record<string, unknown> & { readonly teamName: string | null };
+  readonly submittedBy: Person | null;
+  readonly confirmedBy: Person | null;
+  readonly submittedAt: string;
+  readonly claimedBy: Person | null;
+  readonly selfApproved: boolean;
+  readonly similarNames: readonly string[];
+  readonly checklist: typeof REVIEW_CHECKLIST;
+  readonly events: readonly ReviewEvent[];
+  /** Why the caller can't approve now (empty: Approve is open to them). */
+  readonly approveProblems: readonly Problem[];
+}
+
+function capabilitiesOf(manifest: Record<string, unknown>) {
+  const caps = (manifest.capabilities ?? {}) as { egress?: unknown; packages?: unknown };
+  const egress = Array.isArray(caps.egress)
+    ? caps.egress.filter((h): h is string => typeof h === "string")
+    : [];
+  const packages =
+    caps.packages && typeof caps.packages === "object"
+      ? (caps.packages as Record<string, unknown>)
+      : {};
+  return { egress, packages };
+}
+
+async function findingsOf(db: KobeDb, v: { id: string; scan: Record<string, unknown> }) {
+  const raw = Array.isArray(v.scan.findings) ? (v.scan.findings as Record<string, unknown>[]) : [];
+  const acks = await acknowledgements(db, v.id);
+  const own = raw.map((f): ReviewFinding => {
+    const key = findingKey(f);
+    const severity = f.severity === "block" ? "block" : "caution";
+    return {
+      key,
+      rule: String(f.rule ?? ""),
+      file: String(f.file ?? ""),
+      line: Number(f.line ?? 0),
+      severity,
+      category: typeof f.category === "string" ? f.category : null,
+      acknowledged: severity === "caution" ? (acks.get(key) ?? null) : null,
+      source: "kobe",
+    };
+  });
+  const external = externalFindings(v.scan);
+  return [
+    ...own,
+    ...external.map((f): ReviewFinding => {
+      const key = findingKey(f);
+      return {
+        key,
+        rule: f.rule,
+        file: f.file,
+        line: f.line,
+        severity: f.severity,
+        category: f.category,
+        acknowledged: f.severity === "caution" ? (acks.get(key) ?? null) : null,
+        source: "external",
+        title: f.title,
+        externalSeverity: f.externalSeverity,
+      };
+    }),
+  ];
+}
+
+async function teamName(db: KobeDb, teamId: unknown): Promise<string | null> {
+  if (typeof teamId !== "string") return null;
+  const res = await db.execute<{ name: string }>(sql`SELECT name FROM teams WHERE id = ${teamId}`);
+  return res.rows[0]?.name ?? null;
+}
+
+export async function reviewDetail(
+  db: KobeDb,
+  versionId: string,
+  callerId: string,
+): Promise<ReviewDetail | null> {
+  const v = await versionRow(db, versionId);
+  if (!v || v.publisher !== "maintainer") return null;
+  const approved = await approvedVersion(db, v.skillId, v.id);
+  const caps = capabilitiesOf(v.manifest);
+  const standing = await hostStandings(db, null, caps.egress);
+  const confirmer = confirmerOf(v);
+  const who = await userNames(db, [v.submittedBy, v.claimedBy, confirmer]);
+  // Read-only, in a transaction of its own: the separation-of-duties check takes the site
+  // admin-set lock for its answer, released at once.
+  const { problems } = await db.transaction((tx) => approveProblems(tx, v, callerId));
+  return {
+    id: v.id,
+    skill: {
+      id: v.skillId,
+      name: v.name,
+      status: v.skillStatus,
+      maintainers: await listMaintainers(db, v.skillId),
+    },
+    semver: v.semver,
+    state: v.state,
+    previous: approved ? { id: approved.id, semver: approved.semver } : null,
+    bump: bumpOf(approved?.semver ?? null, v.semver),
+    verdict: v.verdict,
+    scan: v.scan,
+    findings: await findingsOf(db, v),
+    scorecard: v.scorecard,
+    authoritativeScorecard: v.authoritativeScorecard,
+    reruns: await rerunHistory(db, v),
+    manifest: v.manifest,
+    capabilities: {
+      egress: standing.map((s) => ({ host: s.host, inCeiling: s.inCeiling })),
+      packages: caps.packages,
+    },
+    provenance: v.provenance,
+    source: { ...v.source, teamName: await teamName(db, v.source.teamId) },
+    submittedBy: personOf(who, v.submittedBy),
+    confirmedBy: personOf(who, confirmer),
+    submittedAt: new Date(v.submittedAt).toISOString(),
+    claimedBy: personOf(who, v.claimedBy),
+    selfApproved: v.selfApproved,
+    similarNames: await similarCatalogNames(db, v.name),
+    checklist: REVIEW_CHECKLIST,
+    events: await reviewEvents(db, v.id),
+    approveProblems: problems,
+  };
+}

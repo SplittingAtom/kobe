@@ -20,5 +20,12 @@ setup("sign in", async ({ page }) => {
   await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeVisible({
     timeout: SHELL_TIMEOUT_MS,
   });
+  // The specs send that team as x-kobe-team on changes: save only once it is stored (the chat
+  // stores it after activating, which can end after the composer shows).
+  await expect
+    .poll(() => page.evaluate(() => window.localStorage.getItem("kobe.lastTeamId")), {
+      timeout: SHELL_TIMEOUT_MS,
+    })
+    .toMatch(/^[0-9a-f-]{36}$/);
   await page.context().storageState({ path: STORAGE_STATE });
 });

@@ -17,6 +17,8 @@ import { useKobeExtras } from "./kobe-runtime";
 import { FullOutputStatus, Output, PRE, useFullOutput, type FullOutput } from "./tool-output";
 import { useSkillOfToolCall } from "./skill-badge";
 import { ApprovalSlot, ArtifactSlot, EgressBlocked, FileSlot } from "./slots";
+import { SkillDraftCard } from "./skill-draft-card";
+import { SAVE_SKILL_DRAFT_TOOL } from "../../lib/skills/draft-tool-result";
 import styles from "./chat.module.css";
 
 const NO_ACTIVITY: ToolActivity = { egressBlocked: [], artifacts: [], files: [] };
@@ -191,10 +193,12 @@ function ToolCardBody({
 function ToolCardSlots({
   activity,
   toolName,
+  toolCallId,
   result,
 }: {
   readonly activity: ToolActivity;
   readonly toolName: string;
+  readonly toolCallId?: string;
   readonly result: unknown;
 }) {
   return (
@@ -228,6 +232,9 @@ function ToolCardSlots({
       {activity.files.map((file) => (
         <FileSlot key={file.file_id} file={file} />
       ))}
+      {toolName === SAVE_SKILL_DRAFT_TOOL && toolCallId !== undefined && (
+        <SkillDraftCard toolCallId={toolCallId} done={result !== undefined} />
+      )}
     </div>
   );
 }
@@ -283,6 +290,7 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
       <ToolCardSlots
         activity={activity}
         toolName={props.toolName}
+        toolCallId={props.toolCallId}
         result={props.result ?? activity.result?.preview}
       />
       {props.toolName.startsWith("mcp__") && (

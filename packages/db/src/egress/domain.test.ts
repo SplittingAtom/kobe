@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DOMAIN_PATTERN_SQL } from "../schema/egress.js";
 import { isPublicSuffix, isSharedHosting } from "./public-suffix.js";
 import {
+  decideEgress,
   findMatchingPattern,
   normalizeHost,
   parseDomainPattern,
@@ -126,5 +127,29 @@ describe("matching", () => {
     expect(findMatchingPattern(set, "x.example.com")).toBe("*.example.com");
     expect(findMatchingPattern(set, "example.com")).toBeUndefined();
     expect(findMatchingPattern(set, "example.org")).toBeUndefined();
+  });
+});
+
+describe("decideEgress (the proxy's decision, shared with the catalog, KOBE-336)", () => {
+  const ceiling = new Set(["pypi.org", "*.pythonhosted.org", "example.com"]);
+  it("allows what a team pattern still in the ceiling covers, wildcards included", () => {
+    const team = new Set(["*.pythonhosted.org", "gone.test"]);
+    expect(decideEgress(ceiling, team, "files.pythonhosted.org")).toEqual({
+      allowed: true,
+      pattern: "*.pythonhosted.org",
+    });
+    expect(decideEgress(ceiling, team, "pythonhosted.org")).toEqual({
+      allowed: false,
+      reason: "not_in_ceiling",
+    });
+    expect(decideEgress(ceiling, team, "pypi.org")).toEqual({
+      allowed: false,
+      reason: "not_enabled",
+    });
+    // A team pattern the ceiling dropped allows nothing.
+    expect(decideEgress(ceiling, team, "gone.test")).toEqual({
+      allowed: false,
+      reason: "not_in_ceiling",
+    });
   });
 });

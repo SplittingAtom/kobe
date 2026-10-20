@@ -379,8 +379,14 @@ reconcile_line=$(wait_for 120 '"converged":[1-9]' reconcile_summary)
 contains "team-namespace reconcile converges the team namespace (KOBE-126)" '"converged":[1-9]' "$reconcile_line"
 contains "team-namespace reconcile reports failed=0 (KOBE-126)" '"failed":0,' "$reconcile_line"
 np_spec() { $KUBECTL -n "$TEAM_NS" get networkpolicy kobe-sandbox-isolation -o jsonpath="$1"; }
-contains "team NetworkPolicy selects every pod but Orbit eval pods (KOBE-93)" \
-  '^\{"matchExpressions":\[\{"key":"kobe\.splittingatom\.io/orbit-eval","operator":"DoesNotExist"\}\]\}$' "$(np_spec '{.spec.podSelector}')"
+# Every pod but Orbit eval pods (KOBE-93) and external skill scan pods (KOBE-341), each of which has
+# its own, narrower policy below: an excluded label is only safe while its policy is in place.
+contains "team NetworkPolicy selects every pod but Orbit eval and skill scan pods (KOBE-93, KOBE-341)" \
+  '^\{"matchExpressions":\[\{"key":"kobe\.splittingatom\.io/orbit-eval","operator":"DoesNotExist"\},\{"key":"kobe\.splittingatom\.io/skill-scan","operator":"DoesNotExist"\}\]\}$' "$(np_spec '{.spec.podSelector}')"
+# Egress is governed and its rule list empty (an empty array or none): scan pods reach nothing.
+contains "skill scan NetworkPolicy selects only skill scan pods and allows no ingress and no egress (KOBE-341)" \
+  '^\{"matchExpressions":\[\{"key":"kobe\.splittingatom\.io/skill-scan","operator":"Exists"\}\]\} \["Ingress","Egress"\] (\[\])? (\[\])?$' \
+  "$($KUBECTL -n "$TEAM_NS" get networkpolicy kobe-skill-scan -o jsonpath='{.spec.podSelector} {.spec.policyTypes} {.spec.ingress} {.spec.egress}')"
 contains "eval NetworkPolicy selects only Orbit eval pods and allows no ingress (KOBE-93)" \
   '^\{"matchExpressions":\[\{"key":"kobe\.splittingatom\.io/orbit-eval","operator":"Exists"\}\]\} (\[\])?$' \
   "$($KUBECTL -n "$TEAM_NS" get networkpolicy kobe-orbit-eval-isolation -o jsonpath='{.spec.podSelector} {.spec.ingress}')"
@@ -388,7 +394,7 @@ contains "eval NetworkPolicy allows egress to the model gateway only" '^model-ga
   "$($KUBECTL -n "$TEAM_NS" get networkpolicy kobe-orbit-eval-isolation -o jsonpath='{.spec.egress[*].to[*].podSelector.matchLabels.app\.kubernetes\.io/component}')"
 contains "team NetworkPolicy governs ingress and egress" '^\["Ingress","Egress"\]$' "$(np_spec '{.spec.policyTypes}')"
 contains "team NetworkPolicy allows no ingress at all" '^(\[\])?$' "$(np_spec '{.spec.ingress}')"
-contains "team namespace has only Kobe's two NetworkPolicies (controller policy unmanaged)" '^kobe-orbit-eval-isolation kobe-sandbox-isolation $' \
+contains "team namespace has only Kobe's three NetworkPolicies (controller policy unmanaged)" '^kobe-orbit-eval-isolation kobe-sandbox-isolation kobe-skill-scan $' \
   "$($KUBECTL -n "$TEAM_NS" get networkpolicy -o name | sed 's|.*/||' | sort | tr '\n' ' ')"
 # The team quota is the members' share plus the eval share (KOBE-325); members are held to theirs.
 contains "team ResourceQuota is in place (members' 20 CPU plus the eval share)" '^20[0-9]{3}m$' \

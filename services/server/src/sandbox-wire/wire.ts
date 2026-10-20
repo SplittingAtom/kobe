@@ -28,6 +28,7 @@ import { newMetrics, type LeaseViolation, type WireContext, type WireMetrics } f
 import { attachSandboxGateway } from "./gateway.js";
 import { DENY_APPROVALS } from "./policy-check.js";
 import { ConnectionRegistry } from "./registry.js";
+import type { SkillDraftTool } from "../skills/drafts/tool.js";
 import { CommandRouter } from "./router.js";
 import { RelayBudget } from "./trace-budget.js";
 import { TraceIntake } from "./trace-intake.js";
@@ -66,6 +67,8 @@ export interface SandboxWireOptions {
   readonly projectMounts?: ProjectMounts;
   /** Runs `web_search.query` (KOBE-114); unset: every search answers "not configured". */
   readonly webSearch?: WebSearchService;
+  /** `skill.draft_save` (KOBE-442); unset: refused as storage unavailable. */
+  readonly skillDrafts?: SkillDraftTool;
   readonly tuning?: Partial<WireTuning>;
   /** Key from `deriveRunTokenKey` (KOBE-118); unset: `run.start` carries no run token. */
   readonly runTokenKey?: Uint8Array;
@@ -312,6 +315,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       log,
     },
     webSearch: options.webSearch ?? NO_WEB_SEARCH,
+    ...(options.skillDrafts ? { skillDrafts: options.skillDrafts } : {}),
     ui: options.ui ?? CANCEL_DIALOGS,
     hooks,
     get liveness() {
@@ -360,6 +364,24 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
         target.teamId,
         {
           action: "sandbox.file_share_refused",
+          actor: SYSTEM_ACTOR,
+          teamId: target.teamId,
+          target: {
+            sandboxId,
+            userId: target.userId,
+            reason: refusal.reason,
+            runId: refusal.runId,
+            toolCallId: refusal.toolCallId,
+          },
+        },
+      );
+    },
+    auditSkillDraftRefused(target, sandboxId, refusal) {
+      throttledAudit(
+        `${target.teamId}:${target.userId}:skill_draft:${refusal.reason}`,
+        target.teamId,
+        {
+          action: "sandbox.skill_draft_refused",
           actor: SYSTEM_ACTOR,
           teamId: target.teamId,
           target: {

@@ -309,6 +309,13 @@ describe("role gating", () => {
     for (const s of SITE_SECTIONS) expect(canSee(s, teamAdmin)).toBe(false);
   });
 
+  it("opens the Registry queue, and only it, to Skill reviewers (KOBE-334)", () => {
+    const reviewer: ConsoleAccess = { ...site("user"), grants: ["skill_reviewer"] };
+    expect(canOpenConsole(reviewer)).toBe(true);
+    expect(visibleSections(reviewer).map((s) => s.id)).toEqual(["skill-review"]);
+    expect(visibleSections(site("admin")).map((s) => s.id)).toContain("skill-review");
+  });
+
   it("honours owner-only sections", () => {
     const ownerOnly = defineSiteSection({
       id: "x",

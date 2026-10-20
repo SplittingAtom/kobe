@@ -18,6 +18,9 @@ const THREAD_ITEMS = [
   "Move to project",
   "Archive",
   "Share",
+  // KOBE-322: start a skill from this conversation, or save a built one to the Workbench.
+  "Make a skill from this",
+  "Save skill to Workbench",
   "Delete",
 ];
 // KOBE-374 added Mention in message; KOBE-304 Rename and Move to….

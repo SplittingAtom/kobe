@@ -127,3 +127,87 @@ describe("Skill tags in the Site console (KOBE-314)", () => {
     expect(JSON.parse(String(put?.body))).toEqual({ system: [], topic: ["finance"] });
   });
 });
+
+describe("Catalog maintainers (KOBE-332)", () => {
+  const user = (id: string, name: string) => ({
+    id,
+    name,
+    email: `${id}@x.io`,
+    siteRole: "user",
+    deactivatedAt: null,
+    createdAt: "2026-10-01T10:00:00Z",
+  });
+  const maintainer = (userId: string, name: string) => ({
+    userId,
+    name,
+    email: `${userId}@x.io`,
+    deactivated: false,
+    addedAt: "2026-10-01T10:00:00Z",
+  });
+
+  it("marks an Unmaintained skill and lets a Site admin add and remove maintainers", async () => {
+    const calls = stubApi(
+      routes({
+        "GET /v1/site/skills/catalog": [200, { skills: [{ ...SKILL, status: "unmaintained" }] }],
+        "GET /v1/skills/catalog/s-1/maintainers": [
+          [200, { maintainers: [maintainer("u-ann", "Ann")] }],
+          [200, { maintainers: [maintainer("u-ann", "Ann"), maintainer("u-bob", "Bob")] }],
+          [200, { maintainers: [maintainer("u-bob", "Bob")] }],
+        ],
+        "GET /v1/site/users": [200, { users: [user("u-ann", "Ann"), user("u-bob", "Bob")] }],
+        "POST /v1/skills/catalog/s-1/maintainers": [200, { maintainers: [] }],
+        "DELETE /v1/skills/catalog/s-1/maintainers/u-ann": [200, { maintainers: [] }],
+      }) as never,
+    );
+    renderSite(<SkillTagsPage />);
+    expect(await screen.findByText("Unmaintained")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Maintainers of xlsx-pro" }));
+    const group = await screen.findByRole("group", { name: "Maintainers of xlsx-pro" });
+    await within(group).findByText("Ann (u-ann@x.io)");
+    fireEvent.change(within(group).getByLabelText("Add maintainer"), {
+      target: { value: "u-bob" },
+    });
+    fireEvent.click(within(group).getByRole("button", { name: "Add" }));
+    await screen.findByText("Bob now maintains xlsx-pro.");
+    fireEvent.click(await within(group).findByRole("button", { name: "Remove Ann" }));
+    await screen.findByText("Ann no longer maintains xlsx-pro.");
+    await waitFor(() =>
+      expect(summary(calls)).toEqual(
+        expect.arrayContaining([
+          "POST /v1/skills/catalog/s-1/maintainers",
+          "DELETE /v1/skills/catalog/s-1/maintainers/u-ann",
+        ]),
+      ),
+    );
+  });
+});
+
+describe("catalog usage in the Site console (KOBE-339)", () => {
+  it("opens a skill's site-wide usage per version", async () => {
+    stubApi(
+      routes({
+        "GET /v1/skills/catalog/s-1/usage": [
+          200,
+          {
+            totals: { teams_installed: 4, members: 5, runs: 23, thumbs_up: "few", opt_outs: "few" },
+            versions: ["2.0.0", "other"],
+            per_version: {
+              teams_running: [4, "few"],
+              members: [5, "few"],
+              runs: [23, "few"],
+              thumbs_up: null,
+            },
+            window: { from: "2026-09-19T00:00:00.000Z", to: "2026-10-19T00:00:00.000Z" },
+            refreshed_at: "2026-10-19T00:05:00.000Z",
+          },
+        ],
+      }) as never,
+    );
+    renderSite(<SkillTagsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Usage of xlsx-pro" }));
+    const totals = await screen.findByRole("table", { name: "Site-wide usage" });
+    expect(within(totals).getByText("23")).toBeTruthy();
+    const per = screen.getByRole("table", { name: "Usage by version" });
+    expect(within(per).getAllByText("Withheld")).toHaveLength(2);
+  });
+});

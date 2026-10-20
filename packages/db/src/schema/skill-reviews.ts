@@ -152,6 +152,8 @@ export const teamSkillSettings = pgTable(
     membersMayAddCatalog: boolean().notNull().default(true),
     /** "Builders may install catalog skills" (SK25, default on): Builders manage installs too. */
     buildersMayInstallCatalog: boolean().notNull().default(true),
+    /** "Builders may promote without confirmation" (SK19, KOBE-333, default off). */
+    buildersMayPromote: boolean().notNull().default(false),
     /**
      * The team's eval judge (KOBE-326, SK17): one of its enabled models, used when the Site's
      * `judge_alias` is not enabled in the team; null (or a model disabled since): the team default.

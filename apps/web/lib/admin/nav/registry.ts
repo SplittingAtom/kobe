@@ -72,7 +72,9 @@ const SITE_RANK: Readonly<Record<SiteRole, number>> = { user: 0, admin: 1, owner
 /** Whether `access` may open `section`. Presentation only: the section's API decides. */
 export function canSee(section: ConsoleSection, access: ConsoleAccess): boolean {
   if (section.console === "site") {
-    return access.console === "site" && SITE_RANK[access.siteRole] >= SITE_RANK[section.minRole];
+    if (access.console !== "site") return false;
+    if (SITE_RANK[access.siteRole] >= SITE_RANK[section.minRole]) return true;
+    return section.grant !== undefined && (access.grants ?? []).includes(section.grant);
   }
   return access.console === "team" && access.permissions.includes(section.permission);
 }

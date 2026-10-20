@@ -71,7 +71,11 @@ interface Stored {
 }
 
 /** Writes the object unless it is already there with these bytes (verified). */
-async function ensureObject(blobs: BlobStore, bytes: Uint8Array, hash: string): Promise<string> {
+export async function ensureObject(
+  blobs: BlobStore,
+  bytes: Uint8Array,
+  hash: string,
+): Promise<string> {
   const key = catalogObjectKey(blobs.prefix, hash);
   const intact = await readVerified(blobs, key, hash, bytes.length).catch(() => null);
   if (intact === null) await putSkillBundle(blobs, key, bytes);
@@ -88,7 +92,7 @@ async function storeBytes(blobs: BlobStore, p: KobePackage): Promise<Stored> {
 }
 
 /** The scan as a catalog version stores it (KOBE-313: `rulesVersion` names the rule set). */
-const scanDocument = (scan: ScanResult) => ({
+export const scanDocument = (scan: ScanResult) => ({
   verdict: scan.verdict,
   rulesVersion: scan.ruleSetVersion,
   ruleSet: RULE_SET,

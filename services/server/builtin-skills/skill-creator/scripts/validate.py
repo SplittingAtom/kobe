@@ -88,7 +88,7 @@ def check_files(root, files, errors, flags, warnings):
         try:
             text = path.read_text("utf-8")
         except UnicodeDecodeError:
-            warnings.append(f"{rel}: binary file; the browser editor keeps it but cannot edit it.")
+            warnings.append(f"{rel}: binary file; the Workbench editor keeps it but cannot edit it.")
             continue
         for n, line in enumerate(text.splitlines(), 1):
             for category in sorted(k.scan_line(line)):

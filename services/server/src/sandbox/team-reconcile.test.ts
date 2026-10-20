@@ -8,7 +8,12 @@ import {
   must,
   seedCluster,
 } from "../testing/sandbox-fixtures.js";
-import { EVAL_NETWORK_POLICY, NETWORK_POLICY } from "./constants.js";
+import {
+  EVAL_NETWORK_POLICY,
+  LABEL_SKILL_SCAN,
+  NETWORK_POLICY,
+  SKILL_SCAN_NETWORK_POLICY,
+} from "./constants.js";
 import { reconcileTeamNamespaces } from "./team-reconcile.js";
 import { createSandboxProvider } from "./provider.js";
 import { createPgReconcileLock } from "./reconcile-lock.js";
@@ -47,6 +52,23 @@ describe("reconcileTeams (KOBE-115)", () => {
     expect(kube.peek(policyRef(NETWORK_POLICY))).toBeUndefined();
     const summary = await provider.reconcileTeams();
     expect(kube.peek(policyRef(NETWORK_POLICY))).toBeDefined();
+    expect(summary.policyChanged).toEqual([NS]);
+  });
+
+  it("keeps the skill scan pods' deny-all policy in every team namespace (KOBE-341)", async () => {
+    const { kube, provider } = await setup();
+    for (const ns of [NS, "kobe-team-marketing"]) {
+      const scan = must(kube.peek(policyRef(SKILL_SCAN_NETWORK_POLICY, ns)));
+      expect(scan.spec).toEqual({
+        podSelector: { matchExpressions: [{ key: LABEL_SKILL_SCAN, operator: "Exists" }] },
+        policyTypes: ["Ingress", "Egress"],
+        ingress: [],
+        egress: [],
+      });
+    }
+    await kube.delete(policyRef(SKILL_SCAN_NETWORK_POLICY));
+    const summary = await provider.reconcileTeams();
+    expect(kube.peek(policyRef(SKILL_SCAN_NETWORK_POLICY))).toBeDefined();
     expect(summary.policyChanged).toEqual([NS]);
   });
 

@@ -152,12 +152,16 @@ export function skillEvalRoutes(
     const outcome = await withTeam(db, who.teamId, async (tx) => {
       const run = await readEvalRun(tx, who, id.data);
       if (!run) return "not_found" as const;
+      // A Registry re-run is cancelled on the review screen only (KOBE-335 review M3).
+      if (run.subject.kind === "registry") return "registry" as const;
       if (!mayCancel(who, run)) return "forbidden" as const;
       return (await cancelEvalRun(tx, who.teamId, id.data))
         ? ("cancelled" as const)
         : ("ended" as const);
     });
     if (outcome === "not_found") return error(c, 404, "not_found", "No such eval.");
+    if (outcome === "registry")
+      return error(c, 403, "forbidden", "Cancel a Registry re-run from its review screen.");
     if (outcome === "forbidden")
       return error(c, 403, "forbidden", "Only its starter or a team admin can cancel it.");
     if (outcome === "ended") return error(c, 409, "eval_ended", "The eval has already ended.");

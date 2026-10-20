@@ -40,6 +40,8 @@ const { session: SESSION_TOKEN, reset: RESET_TOKEN, jwks: JWKS_PRIVATE } = SECRE
 
 export const T1 = "00000000-0000-4000-8000-0000000000a1";
 export const T2 = "00000000-0000-4000-8000-0000000000a2";
+/** The dedicated Registry team (KOBE-330): only a `registry` team can be named the Registry team. */
+export const T_REGISTRY = "00000000-0000-4000-8000-0000000000a3";
 export const U1 = "00000000-0000-4000-8000-0000000000b1";
 export const U2 = "00000000-0000-4000-8000-0000000000b2";
 export const THREAD = "00000000-0000-4000-8000-0000000000c1";
@@ -106,6 +108,7 @@ export async function seed(db: TestDatabase): Promise<void> {
   await sql(
     db.adminUrl,
     `INSERT INTO teams (id, slug, name) VALUES ($1, 'alpha', 'Alpha'), ($2, 'beta', 'Beta');
+     INSERT INTO teams (id, slug, name, registry) VALUES ($6, 'registry', 'Registry', true);
      INSERT INTO users (id, name, email) VALUES ($3, 'Ann', 'ann@example.com'),
        ($4, 'Bob', 'bob@example.com'), ($5, 'Cy', 'cy@example.com');
      INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $3, 'team_admin'),
@@ -141,7 +144,7 @@ export async function seed(db: TestDatabase): Promise<void> {
        VALUES ('5e6f7a8b-0000-4000-8000-0000000000c1', 'tagged', 'Tagged.');
      INSERT INTO registry_skill_tags (skill_id, tag_id, added_by)
        SELECT '5e6f7a8b-0000-4000-8000-0000000000c1', id, $3 FROM registry_tags;
-     UPDATE site_skill_settings SET registry_team_id = $1, judge_alias = 'smart';
+     UPDATE site_skill_settings SET registry_team_id = $6, judge_alias = 'smart';
      -- Audit events (KOBE-15): the trigger chains them; the restore must keep the chain intact.
      -- Both carry a client address (salted commitment, KOBE-17); the first one's IP and user agent
      -- were erased since, as the retention sweep does (here directly, bypassing its age check).
@@ -153,7 +156,7 @@ export async function seed(db: TestDatabase): Promise<void> {
      UPDATE audit_log SET ip = NULL, user_agent = NULL, pii_salt = NULL WHERE seq = 1;
      SET session_replication_role = origin;`.replaceAll(
       /\$(\d)/g,
-      (_, n: string) => `'${[T1, T2, U1, U2, U3][Number(n) - 1]}'`,
+      (_, n: string) => `'${[T1, T2, U1, U2, U3, T_REGISTRY][Number(n) - 1]}'`,
     ),
   );
 }
@@ -161,9 +164,12 @@ export async function seed(db: TestDatabase): Promise<void> {
 /**
  * What the server's start writes into a site before anyone signs up (KOBE-422, the rows
  * `@kobe/db` STARTUP_SEEDED_ROWS covers): the gallery agent `kobe` and its published version,
- * the seed's two audit events, and the retention pass's, PII sweep's and SIEM forwarder's
- * bookkeeping.
+ * the seed's two audit events, the retention pass's, PII sweep's and SIEM forwarder's
+ * bookkeeping, and the catalog usage job's snapshot of the last closed window (KOBE-339; the
+ * same window on every site started that day, so a restore that kept it would collide).
  */
+const USAGE_WINDOW = "2026-10-17T00:00:00.000Z";
+
 export async function serverStarted(url: string, agentId = randomUUID()): Promise<string> {
   await sql(
     url,
@@ -179,7 +185,9 @@ export async function serverStarted(url: string, agentId = randomUUID()): Promis
        ('retention.pass_started_at', '2026-10-18T03:00:00.000Z'),
        ('retention.last_pass_at', '2026-10-18T03:00:00.000Z'), ('retention.cursor', ''),
        ('audit.pii_sweep_seq', '2'),
-       ('audit.forward.syslog', '{"seq":2,"failures":1}');`,
+       ('audit.forward.syslog', '{"seq":2,"failures":1}');
+     INSERT INTO skill_usage_snapshots (window_start, window_end, payload)
+       VALUES ('${USAGE_WINDOW}', '2026-10-18T00:00:00.000Z', '{"skills":{}}');`,
   );
   return agentId;
 }

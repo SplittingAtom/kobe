@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { canonicalZip } from "@kobe/protocol";
-import { and, eq, teamSkillVersions, withTeam } from "@kobe/db";
+import { and, eq, sql, teamSkillVersions, withTeam } from "@kobe/db";
 import { teamRoleAllows } from "../../authz/permissions.js";
 import { validateZipBundle, type BundleError } from "../bundle.js";
 import { SKILL_LIMITS } from "../limits.js";
@@ -85,7 +85,10 @@ export async function saveDraftVersion(
       ? null
       : refuse(403, "forbidden", "Your team role doesn't allow saving team skills.");
   if (refused) return refused;
-  const fromConversation = draft.startedFrom === "thread" || draft.fromThreadId !== null;
+  const fromConversation =
+    draft.startedFrom === "thread" ||
+    draft.fromThreadId !== null ||
+    (await parentFromConversation(ctx, draft.parentRef));
   if (!files.has(SKILL_MD_PATH))
     return refuse(400, "skill_md_missing", "The draft needs a SKILL.md at its root.");
   // The manifest takes the number and changelog the author chose (a fork's names its parent's).
@@ -107,9 +110,38 @@ export async function saveDraftVersion(
     draft: {
       id,
       teamId: ctx.teamId,
+      fromConversation,
       personal: personal ? { fromConversation, coEdited: draft.coEdited } : null,
     },
   });
+}
+
+/**
+ * Whether a fork's parent version came from a conversation (KOBE-333 review C4-M3): a team or
+ * personal version's own flag, or a catalog version's provenance. Read where the parent lives:
+ * the draft's team, the author's personal skills, the Site catalog. Unknown shapes: false.
+ */
+async function parentFromConversation(
+  ctx: DraftContext,
+  parentRef: Readonly<Record<string, unknown>> | null,
+): Promise<boolean> {
+  if (!parentRef || typeof parentRef.skillId !== "string" || typeof parentRef.semver !== "string")
+    return false;
+  const { skillId, semver } = parentRef;
+  const res = await withTeam(ctx.db, ctx.teamId, (tx) =>
+    parentRef.kind === "team"
+      ? tx.execute<{ flag: boolean }>(sql`
+          SELECT from_conversation AS flag FROM team_skill_versions
+           WHERE team_id = ${ctx.teamId} AND skill_id = ${skillId} AND semver = ${semver}`)
+      : parentRef.kind === "personal"
+        ? tx.execute<{ flag: boolean }>(sql`
+            SELECT from_conversation AS flag FROM personal_skill_versions
+             WHERE skill_id = ${skillId} AND semver = ${semver}`)
+        : tx.execute<{ flag: boolean }>(sql`
+            SELECT (provenance ->> 'fromConversation')::boolean IS TRUE AS flag
+              FROM registry_versions WHERE skill_id = ${skillId} AND semver = ${semver}`),
+  );
+  return res.rows[0]?.flag === true;
 }
 
 /**

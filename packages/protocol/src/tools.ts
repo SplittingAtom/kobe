@@ -126,6 +126,14 @@ export const BUILTIN_TOOLS: Readonly<Record<string, BuiltinTool>> = {
     open_world: false,
     primary_arg: "/path",
   },
+  /** KOBE-442: the member's private Workbench draft from `/workspace/skills/<folder>/`. */
+  save_skill_draft: {
+    source: "kobe",
+    risk: "write",
+    scope: "kobe",
+    open_world: false,
+    primary_arg: "/folder",
+  },
   web_search: { source: "kobe", risk: "read", scope: "external", open_world: true },
   remember: { source: "kobe", risk: "write", scope: "kobe", open_world: false },
   recall: { source: "kobe", risk: "read", scope: "kobe", open_world: false },

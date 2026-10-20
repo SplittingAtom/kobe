@@ -45,6 +45,9 @@ describe("startSkillFromConversation", () => {
     expect(prefill).toHaveBeenCalledWith("w-1", skillPrompt("Monthly close"));
     expect(api.sendMessage).not.toHaveBeenCalled();
     expect(skillPrompt("x")).toMatch(/skill-creator.*\/workspace\/skills\/<name>\//);
+    // KOBE-442: skill-creator saves the draft itself; the menu is the fallback.
+    expect(skillPrompt("x")).toMatch(/save it to my Workbench as a draft/);
+    expect(skillPrompt("x")).not.toMatch(/I will save it/);
   });
 
   it("refuses when the team has no Kobe agent", async () => {

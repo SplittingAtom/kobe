@@ -1,5 +1,6 @@
 import { createProxyAppCaller } from "./apps/app-caller.js";
 import type { Server } from "node:http";
+import { ExternalScanRunner } from "./skills/registry/external-scan.js";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { approvalKeyring } from "./approvals/index.js";
@@ -297,6 +298,8 @@ const workspaceSync =
 if (workspaceSync && deps) {
   // Project files are mounted into members' workspaces through the same store (KOBE-162).
   deps.projectMounts.use(workspaceSync);
+  // `save_skill_draft` reads the pushed skill folder from the same store (KOBE-442).
+  deps.skillDraftTool.use(workspaceSync);
   deps.runs.useAttachments(
     createAttachmentStager({ db: deps.database.db, sync: workspaceSync, settings: uploadSettings }),
   );
@@ -336,6 +339,28 @@ const evalRunner =
         limits: { maxVersions: deps.agentLimits.maxVersions },
       })
     : undefined;
+
+// The optional external skill scanner (KOBE-341): a Job per Registry submission while a Site
+// admin has it on; any replica finishes scans whose driver died with its server.
+const externalScan =
+  isServer && sandbox && deps?.blobs
+    ? new ExternalScanRunner({
+        db: deps.database.db,
+        blobs: deps.blobs,
+        kube: sandbox.kube,
+        provider: sandbox.provider,
+        isolation,
+        settings: sandbox.settings,
+      })
+    : undefined;
+const externalScanSweep = externalScan
+  ? setInterval(() => {
+      externalScan
+        .sweep()
+        .catch((err: unknown) => logger.warn({ err }, "external skill scan sweep failed"));
+    }, EVAL_SWEEP_MS)
+  : undefined;
+externalScanSweep?.unref();
 
 // Skill evals (KOBE-325): every server replica runs eval executions in ephemeral sandboxes (the
 // per-team cap is atomic across replicas), streams progress, and one replica at a time reaps what
@@ -395,6 +420,7 @@ const server = serve(
     fetch: createApp(isServer ? deps : undefined, {
       isolation,
       ...(evalRunner ? { evals: evalRunner } : {}),
+      ...(externalScan ? { externalScan } : {}),
       ...(workspaceSync ? { workspaceFiles: { sync: workspaceSync, waker } } : {}),
       skillEvals: {
         ...(skillEvalHub ? { hub: skillEvalHub } : {}),
@@ -592,6 +618,7 @@ function shutdown(signal: string): void {
   stopReconciler?.();
   stopTeamReconciler?.();
   if (evalSweep) clearInterval(evalSweep);
+  if (externalScanSweep) clearInterval(externalScanSweep);
   if (skillEvalSweep) clearInterval(skillEvalSweep);
   if (skillEvalReaper) clearInterval(skillEvalReaper);
   // Running eval executions go back to queued (another replica takes them), their runs stopped

@@ -14,6 +14,7 @@ import {
   type ReviewRecord,
 } from "../skills/review.js";
 import {
+  getBuildersMayPromote,
   getCatalogSwitches,
   getEvalCap,
   getEvalJudgeAlias,
@@ -46,6 +47,8 @@ const settingsSchema = z
     personalSkillsDisabled: z.boolean().optional(),
     membersMayAddCatalog: z.boolean().optional(),
     buildersMayInstallCatalog: z.boolean().optional(),
+    /** "Builders may promote without confirmation" (KOBE-333, SK19, default off). */
+    buildersMayPromote: z.boolean().optional(),
     /** The team's eval judge (KOBE-326): one of its enabled models, or null for the default. */
     evalJudgeAlias: z.string().regex(new RegExp(MODEL_ALIAS_PATTERN)).max(64).nullable().optional(),
   })
@@ -195,6 +198,7 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
       personalSkillsDisabled: await getPersonalSkillsDisabled(db, teamId),
       membersMayAddCatalog: catalog.membersMayAdd,
       buildersMayInstallCatalog: catalog.buildersMayInstall,
+      buildersMayPromote: await getBuildersMayPromote(db, teamId),
       // Null: the team default judges (also when the chosen model was disabled since).
       evalJudgeAlias: await getEvalJudgeAlias(db, teamId),
       evalCap: await getEvalCap(db, teamId),
@@ -228,6 +232,9 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
           : {}),
       },
       ...(body.evalJudgeAlias !== undefined ? { evalJudgeAlias: body.evalJudgeAlias } : {}),
+      ...(body.buildersMayPromote !== undefined
+        ? { buildersMayPromote: body.buildersMayPromote }
+        : {}),
     });
     if (!set.ok)
       return c.json(

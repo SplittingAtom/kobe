@@ -16,7 +16,7 @@ import { visibleDraft } from "../drafts/records.js";
 type RunRow = {
   id: string;
   started_by: string;
-  subject_kind: "draft" | "team" | "personal";
+  subject_kind: "draft" | "team" | "personal" | "registry";
   subject_id: string;
   subject_rev: number;
   package_hash: string;
@@ -36,6 +36,8 @@ const COLUMNS = sql.raw(`id, started_by, subject_kind, subject_id, subject_rev, 
 const iso = (d: Date | string) => new Date(d).toISOString();
 
 function subjectOf(r: RunRow): SkillEvalSubject {
+  if (r.subject_kind === "registry")
+    return { kind: "registry", versionId: r.subject_id, seq: r.subject_rev };
   return r.subject_kind === "draft"
     ? { kind: "draft", draftId: r.subject_id, rev: r.subject_rev }
     : { kind: "version", scope: r.subject_kind, skillId: r.subject_id, seq: r.subject_rev };

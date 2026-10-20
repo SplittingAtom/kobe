@@ -1,12 +1,15 @@
 /** Who the caller is to each console, as the server says (never cached client state). */
 import { apiRequest, type ApiResult } from "../../api/client";
 import type { TeamRole } from "../../teams";
-import type { CurrentUser, SiteAccess, SiteRole, TeamAccess } from "../nav/types";
+import type { CurrentUser, SiteAccess, SiteGrant, SiteRole, TeamAccess } from "../nav/types";
 
 interface MeBody {
   readonly user: CurrentUser;
   readonly siteRole: "owner" | "admin" | null;
+  readonly siteGrants?: readonly string[];
 }
+
+const SITE_GRANTS: readonly SiteGrant[] = ["skill_reviewer"];
 
 interface TeamBody {
   readonly team: TeamAccess["team"];
@@ -28,6 +31,9 @@ export async function fetchSiteAccess(fetchFn?: typeof fetch): Promise<ApiResult
       console: "site",
       user: { id, name, email },
       siteRole: siteRoleOf(me.data.siteRole),
+      grants: (me.data.siteGrants ?? []).filter((g): g is SiteGrant =>
+        (SITE_GRANTS as readonly string[]).includes(g),
+      ),
     },
   };
 }

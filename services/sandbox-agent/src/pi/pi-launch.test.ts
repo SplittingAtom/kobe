@@ -77,6 +77,19 @@ describe("buildPiLaunch kobe-tools (KOBE-128)", () => {
     ).toBeUndefined();
   });
 
+  it("tells the extension to register save_skill_draft only with the extension and the skill drafts flag (KOBE-442)", () => {
+    expect(
+      buildPiLaunch({ ...base, parentEnv, toolsExtension: TOOLS, toolsSkillDrafts: true }).env
+        .KOBE_TOOLS_SKILL_DRAFTS,
+    ).toBe("1");
+    expect(
+      buildPiLaunch({ ...base, parentEnv, toolsExtension: TOOLS }).env.KOBE_TOOLS_SKILL_DRAFTS,
+    ).toBeUndefined();
+    expect(
+      buildPiLaunch({ ...base, parentEnv, toolsSkillDrafts: true }).env.KOBE_TOOLS_SKILL_DRAFTS,
+    ).toBeUndefined();
+  });
+
   it("changes the launch key (a Pi without the tools restarts when they are added)", () => {
     const without = buildPiLaunch({ ...base, parentEnv }).key;
     expect(buildPiLaunch({ ...base, parentEnv, toolsExtension: TOOLS }).key).not.toBe(without);

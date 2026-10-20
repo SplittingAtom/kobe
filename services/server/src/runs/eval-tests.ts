@@ -43,7 +43,8 @@ export function withSkillEvals(base: RunAgentResolver): RunAgentResolver {
 
 interface EvalExecution {
   readonly withSkill: boolean;
-  readonly source: "draft" | "team" | "personal";
+  /** A Registry re-run's skill is a catalog version (KOBE-335). */
+  readonly source: "draft" | "team" | "personal" | "catalog";
   readonly skillName: string;
   readonly runtimeHash: string;
   readonly bundleSize: number;
@@ -61,7 +62,7 @@ async function evalExecutionOf(
     skill_name: string;
     runtime_hash: string;
     bundle_size: number;
-    subject_kind: "draft" | "team" | "personal";
+    subject_kind: "draft" | "team" | "personal" | "registry";
   }>(sql`
     SELECT x.with_skill, r.skill_name, r.runtime_hash, r.bundle_size, r.subject_kind
       FROM skill_eval_results x
@@ -73,7 +74,7 @@ async function evalExecutionOf(
   if (!row) return null;
   return {
     withSkill: row.with_skill,
-    source: row.subject_kind,
+    source: row.subject_kind === "registry" ? "catalog" : row.subject_kind,
     skillName: row.skill_name,
     runtimeHash: row.runtime_hash,
     bundleSize: Number(row.bundle_size),

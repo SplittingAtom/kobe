@@ -4,6 +4,7 @@ import type {
   FILE_SHARE_REFUSALS,
   MEMORY_REFUSALS,
   PROJECT_FILE_REFUSALS,
+  SKILL_DRAFT_REFUSALS,
   KobeDb,
   WEB_SEARCH_REFUSALS,
 } from "@kobe/db";
@@ -17,6 +18,7 @@ import type { FileShareDeps } from "../files/share.js";
 import type { MemoryAgentDeps } from "../memory/agent.js";
 import type { ProjectMounts } from "../projects/mounts.js";
 import type { ProposeDeps } from "../projects/proposals.js";
+import type { SkillDraftTool } from "../skills/drafts/tool.js";
 import type { PolicyCheckDeps } from "./policy-check.js";
 import type { RunLifecycleHooks, SandboxLiveness, SandboxTarget, UiBroker } from "./types.js";
 
@@ -106,6 +108,8 @@ export interface WireContext {
   readonly projectFiles: ProposeDeps;
   /** Runs `web_search.query` (KOBE-114). */
   readonly webSearch: WebSearchService;
+  /** `skill.draft_save` (KOBE-442); absent: refused as storage unavailable. */
+  readonly skillDrafts?: SkillDraftTool;
   readonly ui: UiBroker;
   readonly hooks: RunLifecycleHooks;
   readonly liveness: SandboxLiveness;
@@ -145,6 +149,16 @@ export interface WireContext {
     sandboxId: string,
     refusal: {
       reason: (typeof PROJECT_FILE_REFUSALS)[number];
+      runId: string;
+      toolCallId: string;
+    },
+  ): void;
+  /** Records `sandbox.skill_draft_refused` (throttled per user and reason); never carries names or content. */
+  auditSkillDraftRefused(
+    target: SandboxTarget,
+    sandboxId: string,
+    refusal: {
+      reason: (typeof SKILL_DRAFT_REFUSALS)[number];
       runId: string;
       toolCallId: string;
     },

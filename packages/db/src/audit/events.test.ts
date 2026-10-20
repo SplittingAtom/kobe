@@ -52,6 +52,7 @@ describe("audit event taxonomy", () => {
       "platform",
       "policy",
       "project",
+      "registry",
       "retention",
       "run",
       "sandbox",

@@ -2,7 +2,9 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
+import { putMemberSkillAddSchema } from "@kobe/protocol";
 import { listSkillChoices, setEnablement } from "../skills/enablements.js";
+import { addForMe, listMyAdds, removeMyAdd, type AddRefusal } from "../skills/member-adds.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 
 const enablementSchema = z.strictObject({
@@ -46,5 +48,69 @@ export function meSkillEnablementRoutes(deps: ServerDeps): Hono<{ Variables: Tea
         );
   });
 
+  // Add for me (KOBE-338, SK25): a catalog skill in this member's runs in this team only.
+  app.get("/adds", requireTeamPermission("team.read"), async (c) =>
+    c.json({ adds: await listMyAdds(db, c.get("team").id, c.get("user").id) }),
+  );
+
+  app.put("/adds/:skillId", requireTeamPermission("team.read"), async (c) => {
+    const id = z.uuid().safeParse(c.req.param("skillId"));
+    if (!id.success) return c.json(ADD_ERRORS.not_found.body, 404);
+    const body = await parseBody(c, putMemberSkillAddSchema);
+    if (!body) return invalidRequest(c, "Send a version (x.y.z) and a pin mode.");
+    const r = await addForMe(db, {
+      teamId: c.get("team").id,
+      userId: c.get("user").id,
+      skillId: id.data,
+      ...body,
+    });
+    if (r.ok) return c.json({ semver: r.semver, pinMode: r.pinMode, runs: r.runs });
+    const e = ADD_ERRORS[r.code];
+    return c.json(e.body, e.status);
+  });
+
+  app.delete("/adds/:skillId", requireTeamPermission("team.read"), async (c) => {
+    const id = z.uuid().safeParse(c.req.param("skillId"));
+    const done =
+      id.success &&
+      (await removeMyAdd(db, {
+        teamId: c.get("team").id,
+        userId: c.get("user").id,
+        skillId: id.data,
+      }));
+    return done
+      ? c.json({ removed: true })
+      : c.json({ code: "not_found", message: "You haven't added that skill here." }, 404);
+  });
+
   return app;
 }
+
+const refusal = <S extends 403 | 404 | 409>(code: AddRefusal, status: S, message: string) => ({
+  status,
+  body: { code, message },
+});
+
+/** Why an Add for me was refused. */
+const ADD_ERRORS = {
+  not_found: refusal("not_found", 404, "No catalog skill with that id."),
+  no_version: refusal("no_version", 404, "The skill has no version with that number."),
+  not_installable: refusal(
+    "not_installable",
+    409,
+    "That version was withdrawn, revoked or suspended, or is not approved.",
+  ),
+  deprecated: refusal(
+    "deprecated",
+    409,
+    "That version is deprecated: choose a current one, or ask a Team admin.",
+  ),
+  blocked: refusal("blocked", 409, "A Team admin blocked this skill in the team."),
+  adds_off: refusal("adds_off", 403, "This team doesn't let members add catalog skills."),
+  installed: refusal(
+    "installed",
+    409,
+    "The team has this skill installed: its install governs. Use Request for team to ask for another version.",
+  ),
+  name_clash: refusal("name_clash", 409, "One of this team's own skills has the same name."),
+} as const satisfies Record<AddRefusal, unknown>;

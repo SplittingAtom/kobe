@@ -1,5 +1,6 @@
 import { NO_APP_CALLER, type AppCaller } from "./apps/app-caller.js";
 import type { ForwardDestination } from "./audit/forward/types.js";
+import { configureUsageKey } from "./skills/usage-snapshot.js";
 import { DEFAULT_TIMEOUT_MS } from "./connectors/oauth/http.js";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
@@ -70,6 +71,12 @@ import { BudgetMonitor } from "./budgets/monitor.js";
 import { DB_RUN_BUDGET_GATE } from "./budgets/run-gate.js";
 import type { BlobStore } from "./retention/blobs.js";
 import { createProjectMounts, type ProjectMounts } from "./projects/mounts.js";
+import { createSkillDraftTool, type SkillDraftTool } from "./skills/drafts/tool.js";
+import {
+  markMaintainedAgain,
+  markUnmaintained,
+  notifyUnmaintained,
+} from "./skills/registry/maintainers.js";
 import { createServerCallClient } from "./models/gateway-client.js";
 import { NO_SERVER_CALLS, createServerCalls } from "./server-calls/service.js";
 import { createSkillEvalJudge, type SkillEvalJudge } from "./skills/evals/judge.js";
@@ -276,6 +283,8 @@ export interface ServerDeps {
   readonly modelTokenDefaults: ModelTokenDefaults;
   /** Keeps members' `projects/` workspace area equal to their projects' files (KOBE-162). */
   readonly projectMounts: ProjectMounts;
+  /** `save_skill_draft` (KOBE-442); `index.ts` binds the workspace store later. */
+  readonly skillDraftTool: SkillDraftTool;
   /** Exports answer ratings as Langfuse scores (KOBE-275); undefined when tracing has no scores. */
   readonly feedbackScores: FeedbackScores | undefined;
   /** Creates an email+password user (and optional site role) atomically, without sign-up. */
@@ -293,6 +302,8 @@ export interface ServerDeps {
 const digest = (value: string): Buffer => createHash("sha256").update(value).digest();
 
 export function createServerDeps(options: ServerDepsOptions): ServerDeps {
+  // Catalog usage member keys are an HMAC under this secret (KOBE-339, review-341 L1).
+  configureUsageKey(options.authSecret);
   const database = createDb(options.databaseUrl);
   const authAttempts = new AuthAttemptAudit(database.db);
   authAttempts.start();
@@ -374,6 +385,11 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     : undefined;
   // Project files in members' workspaces (KOBE-162); `index.ts` binds the workspace store later.
   const projectMounts = createProjectMounts(database.db, logger);
+  const skillDraftTool = createSkillDraftTool(database.db, {
+    ...(options.sandboxWire?.tuning?.runMaxEvents === undefined
+      ? {}
+      : { runMaxEvents: options.sandboxWire.tuning.runMaxEvents }),
+  });
   const sandboxWire = createSandboxWire({
     tools: toolRegistry,
     engine: policyEngine,
@@ -386,6 +402,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     ...(options.blobs ? { blobs: options.blobs } : {}),
     ...(options.uploads ? { uploads: options.uploads } : {}),
     projectMounts,
+    skillDrafts: skillDraftTool,
     webSearch:
       options.sandboxWire?.webSearch ??
       createWebSearchService({ db: database.db, envelope: options.envelope }),
@@ -459,6 +476,21 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     name: "sandbox-wire",
     run: (userId) => sandboxWire.revalidateUser(userId),
   });
+  // The last active maintainer of a catalog skill leaves: Unmaintained, Site admins emailed (KOBE-332).
+  lifecycle.on("deactivated", {
+    name: "catalog-maintainers",
+    run: async (userId) => {
+      const skills = await markUnmaintained(database.db, userId);
+      await notifyUnmaintained(
+        { db: database.db, mailer: options.mailer, publicUrl: new URL(options.publicUrl).origin },
+        skills,
+      );
+    },
+  });
+  lifecycle.on("reactivated", {
+    name: "catalog-maintainers",
+    run: (userId) => markMaintainedAgain(database.db, userId),
+  });
   const offboarding = createOffboarding({
     db: database.db,
     blobs: options.blobs,
@@ -520,6 +552,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     },
     modelTokenDefaults,
     projectMounts,
+    skillDraftTool,
     feedbackScores,
     async createUserWithPassword({ email, name, password }, { siteRole, recordSetup } = {}) {
       const ctx = await auth.$context;

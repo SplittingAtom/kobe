@@ -72,7 +72,15 @@ function setup(options: { sends?: boolean; push?: (rel: string) => Promise<Pushe
     order,
     replies,
     reply: (r: KobeToolsResponse) => replies.push(r),
-    settle: () => new Promise((r) => setTimeout(r, 20)),
+    settle: async () => {
+      // Every call ends in a frame or a reply; wait for one (file I/O is slow under load),
+      // then a little longer so a late frame would still show.
+      const deadline = Date.now() + 5000;
+      while (frames.length === 0 && replies.length === 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      await new Promise((r) => setTimeout(r, 30));
+    },
   };
 }
 

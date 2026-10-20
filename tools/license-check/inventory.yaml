@@ -108,6 +108,21 @@ imageReports:
     exceptions: images/orbit-eval/license-exceptions.json
     locations:
       python: Python site-packages
+  - id: skill-scan
+    title: "External skill scanner image: Python packages"
+    intro: >-
+      What the same script finds in the optional external skill scanner image (`kobe-skill-scan`,
+      KOBE-341): Cisco skill-scanner 2.2.1 (Apache-2.0) with the dependencies of its hashed lock
+      exported without extras and without pcodedmp (`images/skill-scan/requirements.txt`,
+      `scanner-requirements.txt`); its bundled CEL helper is the `skill-scan-cel-go` row. The image
+      runs only when a Site admin turns the external scanner on, as a Job with no network. The
+      committed report is `images/skill-scan/third-party-licenses.json`; CI `skill-scan-image`
+      compares it with the built image.
+    image: skill-scan
+    report: images/skill-scan/third-party-licenses.json
+    exceptions: images/skill-scan/license-exceptions.json
+    locations:
+      python: Python site-packages
 
 npmLockfiles:
   - id: e2e-browser
@@ -142,12 +157,25 @@ sections:
         version: 3.12-slim-trixie, digest-pinned
         license: Python-2.0
         use: bundled (base image; separate process)
-        where: images sandbox, orbit-eval
+        where: images sandbox, orbit-eval, skill-scan
         link: https://docs.python.org/3.12/license.html
         images: [python]
         reason: >-
-          The Python interpreter is a separate program that runs agents' code and the Orbit
-          runner; the PSF license is permissive (BSD-style), not copyleft.
+          The Python interpreter is a separate program that runs agents' code, the Orbit runner
+          and the external skill scanner; the PSF license is permissive (BSD-style), not copyleft.
+      - id: skill-scan-cel-go
+        component: "Cisco skill-scanner's CEL helper (skill-scanner-cel-go-linux-amd64)"
+        version: helper 2.2.1 (cel-go v0.32.0), inside the cisco-ai-skill-scanner wheel
+        license: Apache-2.0 AND BSD-3-Clause
+        use: bundled (separate process)
+        where: image skill-scan
+        link: https://github.com/cisco-ai-defense/skill-scanner/releases/download/2.2.1/cel-go-dependencies.json
+        images: []
+        reason: >-
+          A compiled Go program the scanner starts to evaluate its CEL policy rules: cel-go
+          (Apache-2.0) with the Go standard library, antlr4-go, protobuf-go and golang.org/x
+          (BSD-3-Clause), as the release's cel-go-dependencies.json lists. The Python report
+          records only the wheel (review-341 L8).
       - id: debian-base
         approval: { by: Chris, on: 2026-10-17, ref: KOBE-375 }
         component: Debian 13 (trixie) / 12 (bookworm) base system (libc6, bash, coreutils, perl-base, ...)

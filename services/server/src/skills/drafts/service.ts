@@ -5,6 +5,8 @@ import { DRAFT_LIMITS, SKILL_MD_PATH, draftPathProblem, skeletonSkillMd } from "
 import {
   bumpRevision,
   changedBy,
+  detachSynced,
+  markSynced,
   countOwnDrafts,
   deleteDraft,
   fileInfos,
@@ -38,6 +40,10 @@ export type DraftFailure =
       readonly changedBy: { readonly id: string; readonly name: string };
     }
   | { readonly error: "invalid_path"; readonly message: string }
+  /** Another draft its conversation saves into already has the name (KOBE-442). */
+  | { readonly error: "name_taken"; readonly message: string }
+  /** The tool may not write into it: shared, or edited since the conversation's last save. */
+  | { readonly error: "not_sync_target"; readonly because: "shared" | "edited" }
   | { readonly error: "too_many_files" | "draft_limit" }
   | { readonly error: "draft_too_large" | "file_too_large"; readonly message: string };
 
@@ -74,6 +80,18 @@ export interface DraftStartInput {
   readonly parentRef?: Record<string, unknown>;
   /** A start from a conversation: a thread of this team. */
   readonly fromThreadId?: string;
+  /** Made by the agent's `save_skill_draft` (KOBE-442), recorded in the audit event. */
+  readonly via?: "tool";
+  /** The tool call that made it, for the audit event (KOBE-442 review L3). */
+  readonly toolCall?: ToolCallRef;
+  /** The conversation's earlier draft of the name, no longer saved into (KOBE-442 review M2). */
+  readonly detach?: string;
+}
+
+/** The agent's call behind a save (audit only). */
+export interface ToolCallRef {
+  readonly runId: string;
+  readonly toolCallId: string;
 }
 
 /** Why the files can't start a draft (the draft's own limits and path rules), or null. */
@@ -120,6 +138,7 @@ export async function createDraft(
       (await countOwnDrafts(tx, ctx.teamId, ctx.viewer.userId)) >= DRAFT_LIMITS.maxDraftsPerAuthor
     )
       return fail({ error: "draft_limit" });
+    if (start.detach) await detachSynced(tx, ctx.teamId, start.detach);
     const draft = await insertDraft(
       tx,
       {
@@ -142,6 +161,8 @@ export async function createDraft(
         // What was copied (review N3): the fork's parent version, or the conversation.
         ...(draft.parentRef ? auditParent(draft.parentRef) : {}),
         ...(draft.fromThreadId ? { fromThreadId: draft.fromThreadId } : {}),
+        ...(start.via ? { via: start.via } : {}),
+        ...(start.toolCall ?? {}),
       },
     });
     return { ok: true, draft };
@@ -191,6 +212,36 @@ export async function writeRoom(
 
 /** Writes one file at `rev`; a SKILL.md whose frontmatter parses renames the draft. */
 export async function writeDraftFile(
+  ctx: DraftContext,
+  id: string,
+  rev: number,
+  path: string,
+  bytes: Uint8Array,
+): Promise<DraftOutcome<{ draft: DraftRecord }>> {
+  try {
+    return await writeFileInTx(ctx, id, rev, path, bytes);
+  } catch (err) {
+    if (!isSyncNameClash(err)) throw err;
+    return fail({
+      error: "name_taken",
+      message: "Another draft saved from the same conversation has that name. Choose another.",
+    });
+  }
+}
+
+/** The unique save target per (author, conversation, name) refused a rename (KOBE-442 H1). */
+export function isSyncNameClash(err: unknown): boolean {
+  const e = err as {
+    code?: unknown;
+    constraint?: unknown;
+    cause?: { code?: unknown; constraint?: unknown };
+  };
+  const code = e.cause?.code ?? e.code;
+  const constraint = e.cause?.constraint ?? e.constraint;
+  return code === "23505" && constraint === "skill_drafts_thread_sync_uq";
+}
+
+function writeFileInTx(
   ctx: DraftContext,
   id: string,
   rev: number,
@@ -291,13 +342,18 @@ export async function removeDraft(
 
 /**
  * Replaces every file of the author's draft with `files` (Save to Workbench, KOBE-322): files no
- * longer there are deleted, the rest written, one new revision. Author only; the draft's own
- * limits were checked on `files` already (`startFilesProblem`).
+ * longer there are deleted, the rest written, one new revision, `skill.draft.updated`. Author
+ * only; the draft's own limits are checked on `files` first (`startFilesProblem`).
  */
 export async function replaceDraftFiles(
   ctx: DraftContext,
   id: string,
   files: ReadonlyMap<string, Uint8Array>,
+  source: {
+    readonly fromThreadId?: string;
+    readonly via?: "tool";
+    readonly toolCall?: ToolCallRef;
+  } = {},
 ): Promise<DraftOutcome<{ draft: DraftRecord }>> {
   const problem = startFilesProblem(files);
   if (problem) return fail(problem);
@@ -306,15 +362,35 @@ export async function replaceDraftFiles(
     if (!draft) return fail({ error: "not_found" });
     if (draft.ownerUserId !== ctx.viewer.userId)
       return fail({ error: "forbidden", message: "Only the draft's author can sync into it." });
+    // The agent writes only into a private draft nobody changed since its last save (M2).
+    if (source.via === "tool" && draft.shared)
+      return fail({ error: "not_sync_target", because: "shared" });
+    if (source.via === "tool" && draft.rev !== draft.syncedRev)
+      return fail({ error: "not_sync_target", because: "edited" });
     for (const f of await fileInfos(tx, ctx.teamId, id))
       if (!files.has(f.path)) await removeFile(tx, ctx.teamId, id, f.path);
     for (const [path, bytes] of files)
       await putFile(tx, ctx.teamId, id, path, bytes, ctx.viewer.userId);
     const name = files.get(SKILL_MD_PATH);
     const renamed = name ? nameOf(name) : undefined;
-    return {
-      ok: true,
-      draft: await bumpRevision(tx, draft, ctx.viewer.userId, renamed ? { name: renamed } : {}),
-    };
+    const bumped = await bumpRevision(
+      tx,
+      draft,
+      ctx.viewer.userId,
+      renamed ? { name: renamed } : {},
+    );
+    await markSynced(tx, ctx.teamId, id);
+    const next = { ...bumped, syncedRev: bumped.rev };
+    await recordAudit(tx, {
+      action: "skill.draft.updated",
+      teamId: ctx.teamId,
+      target: {
+        draftId: id,
+        ...(source.fromThreadId ? { fromThreadId: source.fromThreadId } : {}),
+        ...(source.via ? { via: source.via } : {}),
+        ...(source.toolCall ?? {}),
+      },
+    });
+    return { ok: true, draft: next };
   });
 }

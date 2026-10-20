@@ -17,6 +17,7 @@ setup:
         - read
         - recall
         - remember
+        - save_skill_draft
         - share_file
         - tool_search
         - update_artifact

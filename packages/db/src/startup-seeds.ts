@@ -89,6 +89,10 @@ export const STARTUP_SEEDED_ROWS: Readonly<Record<string, StartupSeed>> = {
     why: "the rescan job's pass per scanner rule set (KOBE-313); one that suspended a version is real data",
     rows: "suspended = 0 AND jsonb_array_length(suspensions) = 0",
   },
+  skill_usage_snapshots: {
+    why: "catalog usage aggregates the usage job computes per closed window (KOBE-339); derived, recomputed",
+    rows: "true",
+  },
   audit_log: {
     why: "the system's audit events of the gallery and Kobe skills seeds, and of the Default sync of Kobe's skills",
     rows:

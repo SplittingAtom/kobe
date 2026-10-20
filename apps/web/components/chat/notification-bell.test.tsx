@@ -307,3 +307,50 @@ describe("notification bell (KOBE-181, ac-1)", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("Unknown cursor.");
   });
 });
+
+describe("a skill notification (KOBE-338)", () => {
+  it("names the catalog skill and links to it, not to a conversation", async () => {
+    stubApi({
+      [COUNT]: [200, page([], 1)],
+      [ALL]: [
+        200,
+        page(
+          [
+            note(N1, {
+              kind: "skill.member_add.blocked",
+              schedule_id: null,
+              thread_id: null,
+              run_id: null,
+              skill_id: "00000000-0000-4000-8000-00000000c001",
+              skill_name: "sales-report",
+            }),
+          ],
+          1,
+        ),
+      ],
+      [MINE]: [200, schedules],
+      [READ]: [200, { updated: 1, unread_count: 0 }],
+    });
+    const onOpenSkill = vi.fn();
+    render(
+      <IconActionProvider>
+        <NotificationBell teamId="t-1" onOpenThread={vi.fn()} onOpenSkill={onOpenSkill} />
+      </IconActionProvider>,
+    );
+    await userEvent.click(await bell());
+    const panel = await screen.findByRole("region", { name: "Notifications" });
+    expect(
+      await within(panel).findByText(
+        "A Team admin blocked sales-report in this team; your Add for me was removed",
+      ),
+    ).toBeTruthy();
+    expect(within(panel).getByText(/Catalog skill sales-report/)).toBeTruthy();
+    expect(within(panel).queryByRole("button", { name: /Open conversation/ })).toBeNull();
+    await userEvent.click(within(panel).getByRole("button", { name: /Open in the catalog/ }));
+    await waitFor(() =>
+      expect(onOpenSkill).toHaveBeenCalledWith(
+        "/me/skills/catalog/00000000-0000-4000-8000-00000000c001",
+      ),
+    );
+  });
+});

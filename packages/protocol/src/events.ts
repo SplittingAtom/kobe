@@ -11,7 +11,10 @@ import {
   uuidSchema,
 } from "./common.js";
 import { skippedActionsSchema } from "./notifications.js";
-import { SEMVER_PATTERN as SKILL_SEMVER_PATTERN } from "./skill-package/layout.js";
+import {
+  SEMVER_PATTERN as SKILL_SEMVER_PATTERN,
+  SKILL_NAME_PATTERN,
+} from "./skill-package/layout.js";
 import { approvalResolutionCauseSchema, policyReasonSchema } from "./policy.js";
 import { rememberScopeSchema } from "./remember.js";
 import { thinkingLevelSchema } from "./thinking.js";
@@ -44,6 +47,8 @@ export const KOBE_EVENT_TYPES = [
   "artifact.created",
   "artifact.updated",
   "file.shared",
+  // KOBE-442: the member's private Workbench draft `save_skill_draft` made or updated.
+  "skill.draft_saved",
   "entry.committed",
   "run.completed",
   "run.failed",
@@ -297,6 +302,15 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     mime_type: z.string().max(255).optional(),
     /** `share_file` description (KOBE-147); absent in older events. */
     description: z.string().min(1).max(500).optional(),
+  }),
+  "skill.draft_saved": z.strictObject({
+    tool_call_id: idSchema,
+    draft_id: uuidSchema,
+    name: z.string().regex(SKILL_NAME_PATTERN),
+    /** False: the conversation's draft was updated (a new revision). */
+    created: z.boolean(),
+    /** A new draft although the conversation had one: it was shared, or edited since. */
+    new_because: z.enum(["shared", "edited"]).optional(),
   }),
   "entry.committed": z.strictObject({
     entry_id: idSchema,

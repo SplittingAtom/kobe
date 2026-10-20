@@ -158,6 +158,8 @@ export interface ThreadEnv {
   readonly shareFiles?: boolean | undefined;
   /** The agent announced `projects` (KOBE-162): kobe-tools registers `propose_project_file`. */
   readonly projectTools?: boolean | undefined;
+  /** The agent announced `skill_drafts` (KOBE-442): kobe-tools registers `save_skill_draft`. */
+  readonly skillDraftTools?: boolean | undefined;
   /** The agent announced `memory` (KOBE-157): kobe-tools registers remember/recall. */
   readonly memoryTools?: boolean | undefined;
   /** Other root-owned extension paths loaded with `-e`, before kobe-policy. */

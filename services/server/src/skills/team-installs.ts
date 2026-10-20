@@ -1,8 +1,12 @@
 import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { addInTeam } from "./default-sync-team.js";
+import { skillInstallAnswers } from "./skill-install-answers.js";
 import { readCatalogSwitches } from "./settings.js";
 import { requiredCount } from "./access.js";
+import { publishedVersions, runningVersion } from "./skill-install-versions.js";
+import { compareSemver } from "./semver.js";
+import { retirementOf, skillStanding, type Retirement } from "./retirement-state.js";
 import {
   defaultTargets,
   defaultVersion,
@@ -30,6 +34,13 @@ export interface SkillInstallRow {
   readonly updatedAt: string;
   /** The skill carries the Default tag (the "Site default" badge). */
   readonly isDefault: boolean;
+  /**
+   * A Roll back or a Move pin to an older version switched this tracking install to Pinned
+   * (review-337 M1), and nothing changed it since: the console says so until tracking is back.
+   */
+  readonly pinnedBy: "rollback" | "move" | null;
+  /** A retirement the install shows (KOBE-340, SK31): "Revoked — choose a version" and so on. */
+  readonly retirement: Retirement | null;
 }
 
 export interface RemovedDefault {
@@ -78,7 +89,19 @@ export async function listTeamSkillInstalls(
       SELECT i.skill_id, s.name, i.version_id, v.semver, i.pin_mode, i.access, i.origin,
         i.installed_by, i.updated_at,
         EXISTS (SELECT 1 FROM registry_skill_tags st JOIN registry_tags t ON t.id = st.tag_id
-          WHERE st.skill_id = i.skill_id AND t.kind = 'system' AND t.name = 'default') AS is_default
+          WHERE st.skill_id = i.skill_id AND t.kind = 'system' AND t.name = 'default') AS is_default,
+        (SELECT CASE WHEN a.action = 'skill.catalog.rolled_back' THEN 'rollback' ELSE 'move' END
+           FROM audit_log a
+          WHERE a.team_id = i.team_id AND a.target ->> 'skillId' = i.skill_id::text
+            AND a.action IN ('skill.catalog.configured', 'skill.catalog.pin_moved',
+                             'skill.catalog.rolled_back')
+          ORDER BY a.seq DESC LIMIT 1
+          ) AS last_act,
+        (SELECT a.target ? 'pinModeFrom' FROM audit_log a
+          WHERE a.team_id = i.team_id AND a.target ->> 'skillId' = i.skill_id::text
+            AND a.action IN ('skill.catalog.configured', 'skill.catalog.pin_moved',
+                             'skill.catalog.rolled_back')
+          ORDER BY a.seq DESC LIMIT 1) AS pinned_by_act
       FROM team_skill_installs i
       JOIN registry_skills s ON s.id = i.skill_id
       JOIN registry_versions v ON v.id = i.version_id
@@ -89,6 +112,19 @@ export async function listTeamSkillInstalls(
       FROM team_skill_optouts o JOIN registry_skills s ON s.id = o.skill_id
       WHERE o.team_id = ${teamId}
       ORDER BY s.name`);
+    const retirements = new Map<string, Retirement | null>();
+    for (const r of installs.rows) {
+      const skillId = String(r.skill_id);
+      const versions = await publishedVersions(tx, skillId);
+      retirements.set(
+        skillId,
+        retirementOf(
+          versions,
+          { pinMode: r.pin_mode as SkillInstallRow["pinMode"], versionId: String(r.version_id) },
+          await skillStanding(tx, skillId),
+        ),
+      );
+    }
     return {
       installs: installs.rows.map((r) => ({
         skillId: String(r.skill_id),
@@ -101,6 +137,11 @@ export async function listTeamSkillInstalls(
         installedBy: r.installed_by === null ? null : String(r.installed_by),
         updatedAt: iso(r.updated_at),
         isDefault: Boolean(r.is_default),
+        pinnedBy:
+          r.pin_mode === "pinned" && r.pinned_by_act === true
+            ? (r.last_act as "rollback" | "move")
+            : null,
+        retirement: retirements.get(String(r.skill_id)) ?? null,
       })),
       removedDefaults: removed.rows.map((r) => ({
         skillId: String(r.skill_id),
@@ -193,7 +234,7 @@ export async function reinstallDefault(
     await tx.execute(sql`
       DELETE FROM team_skill_optouts WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
     // The install names the Team admin who brought it back.
-    await addInTeam(tx, teamId, skillId, version, input.userId);
+    await addInTeam(tx, teamId, skillId, version, input.userId, true);
     await recordAudit(tx, {
       action: "skill.default.restored",
       teamId,
@@ -240,6 +281,8 @@ export type SkillInstallResult =
   | {
       readonly ok: true;
       readonly semver: string;
+      /** The install's pin mode after the change (Pinned after a move back, review-337 M1). */
+      readonly pinMode: SkillInstallRow["pinMode"];
       readonly deprecated: boolean;
       /** Required team skills and installs after this change (the console warns from 5). */
       readonly requiredCount: number;
@@ -266,14 +309,22 @@ export async function installCatalogSkill(
     readonly skillId: string;
     readonly userId: string;
     readonly version: string;
-    readonly pinMode: SkillInstallRow["pinMode"];
-    readonly access: SkillInstallRow["access"];
+    /** Required unless `act` is set: Move pin and Roll back keep the install's own. */
+    readonly pinMode?: SkillInstallRow["pinMode"];
+    readonly access?: SkillInstallRow["access"];
     /**
      * The caller is a Builder, not a Team admin (SK25): allowed only while the team's switch
      * "Builders may install catalog skills" is on, and never for Required (set or changed) or a
      * deprecated version (the override is the Team admin's, SK31).
      */
     readonly asBuilder?: boolean;
+    /**
+     * Move pin or Roll back (KOBE-337, SK25): the install's pin mode and access are kept, read
+     * under the install's lock (review-337 L4); a move to a version older than what runs switches a
+     * tracking install to Pinned, or tracking would run the newer one again (coordinator decision,
+     * review-337 M1). Audited with both versions and the mode change, instead of `configured`.
+     */
+    readonly act?: "move" | "rollback";
   },
 ): Promise<SkillInstallResult> {
   const { teamId, skillId } = input;
@@ -283,11 +334,13 @@ export async function installCatalogSkill(
     // The team's skill-name lock (store.ts uploads take it too): the name-clash checks on both
     // sides see each other's commits (review R-N1).
     await lockTeamSkillNames(tx, teamId);
-    const skill = await tx.execute<{ name: string }>(
-      sql`SELECT name FROM registry_skills WHERE id = ${skillId}`,
+    const skill = await tx.execute<{ name: string; status: string }>(
+      sql`SELECT name, status::text AS status FROM registry_skills WHERE id = ${skillId}`,
     );
     const name = skill.rows[0]?.name;
     if (!name) return { ok: false, code: "not_found" };
+    // A deprecated skill (SK31, KOBE-340): every version installs only with a Team admin's warning.
+    const skillDeprecated = skill.rows[0]?.status === "deprecated";
     if (await hasOwnSkillNamed(tx, teamId, name)) return { ok: false, code: "name_clash" };
     const blocked = await tx.execute(sql`
       SELECT 1 FROM team_skill_blocks WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
@@ -298,6 +351,10 @@ export async function installCatalogSkill(
     const v = version.rows[0];
     if (!v) return { ok: false, code: "no_version" };
     if ((v.state !== "approved" && v.state !== "deprecated") || v.suspended)
+      return { ok: false, code: "not_installable" };
+    // A version on the site blocklist never loads, so it is never installed (review-337 L3).
+    const versions = await publishedVersions(tx, skillId);
+    if (versions.find((x) => x.id === v.id)?.blocklisted)
       return { ok: false, code: "not_installable" };
     const before = await tx.execute<{
       semver: string;
@@ -313,7 +370,29 @@ export async function installCatalogSkill(
       FROM team_skill_installs i JOIN registry_versions rv ON rv.id = i.version_id
       WHERE i.team_id = ${teamId} AND i.skill_id = ${skillId}`);
     const previous = before.rows[0];
-    if (input.asBuilder && !(await builderMay(tx, teamId, input.access, v.state, previous)))
+    if (input.act && !previous) return { ok: false, code: "not_found" };
+    const prevPin = previous?.pin_mode as SkillInstallRow["pinMode"] | undefined;
+    const access = input.act ? (previous?.access as SkillInstallRow["access"]) : input.access;
+    let pinMode = input.act ? prevPin : input.pinMode;
+    if (!pinMode || !access) return { ok: false, code: "no_version" };
+    // What runs now, and whether the move goes back past it (review-337 M1).
+    const prevVersion = previous ? versions.find((x) => x.semver === previous.semver) : undefined;
+    const runningFrom =
+      previous && prevPin && prevVersion
+        ? runningVersion(versions, { pinMode: prevPin, versionId: prevVersion.id })
+        : null;
+    if (
+      input.act &&
+      pinMode !== "pinned" &&
+      runningFrom &&
+      compareSemver(input.version, runningFrom.semver) < 0
+    )
+      pinMode = "pinned";
+    const deprecated = v.state === "deprecated" || skillDeprecated;
+    if (
+      input.asBuilder &&
+      !(await builderMay(tx, teamId, access, deprecated ? "deprecated" : v.state, previous))
+    )
       return { ok: false, code: "forbidden" };
     const changed = sql`(team_skill_installs.version_id <> EXCLUDED.version_id
       OR team_skill_installs.pin_mode <> EXCLUDED.pin_mode
@@ -321,8 +400,8 @@ export async function installCatalogSkill(
     await tx.execute(sql`
       INSERT INTO team_skill_installs
         (team_id, skill_id, version_id, pin_mode, access, origin, installed_by)
-      VALUES (${teamId}, ${skillId}, ${v.id}, ${input.pinMode}::skill_pin_mode,
-        ${input.access}::skill_access, 'team', ${input.userId})
+      VALUES (${teamId}, ${skillId}, ${v.id}, ${pinMode}::skill_pin_mode,
+        ${access}::skill_access, 'team', ${input.userId})
       ON CONFLICT (team_id, skill_id) DO UPDATE SET
         version_id = EXCLUDED.version_id, updated_at = now(),
         pin_mode = EXCLUDED.pin_mode, access = EXCLUDED.access,
@@ -331,31 +410,52 @@ export async function installCatalogSkill(
           ELSE team_skill_installs.team_changed_at END`);
     await tx.execute(sql`
       DELETE FROM team_skill_optouts WHERE team_id = ${teamId} AND skill_id = ${skillId}`);
-    await recordAudit(tx, {
-      action: "skill.catalog.configured",
-      teamId,
-      target: {
-        skillId,
-        name,
-        semver: input.version,
-        pinMode: input.pinMode,
-        access: input.access,
-        deprecated: v.state === "deprecated",
-        ...(previous
-          ? {
-              previous: {
-                semver: previous.semver,
-                pinMode: previous.pin_mode as SkillInstallRow["pinMode"],
-                access: previous.access as SkillInstallRow["access"],
-              },
-            }
-          : {}),
-      },
-    });
+    if (!previous) await skillInstallAnswers(tx, teamId, skillId);
+    if (input.act && previous)
+      await recordAudit(tx, {
+        action: input.act === "move" ? "skill.catalog.pin_moved" : "skill.catalog.rolled_back",
+        teamId,
+        target: {
+          skillId,
+          name,
+          from: previous.semver,
+          to: input.version,
+          pinMode,
+          ...(prevPin && prevPin !== "pinned" && pinMode === "pinned"
+            ? { pinModeFrom: prevPin }
+            : {}),
+          runningFrom: runningFrom?.semver ?? null,
+          runningTo: runningVersion(versions, { pinMode, versionId: v.id })?.semver ?? null,
+          deprecated,
+        },
+      });
+    else
+      await recordAudit(tx, {
+        action: "skill.catalog.configured",
+        teamId,
+        target: {
+          skillId,
+          name,
+          semver: input.version,
+          pinMode,
+          access,
+          deprecated,
+          ...(previous
+            ? {
+                previous: {
+                  semver: previous.semver,
+                  pinMode: previous.pin_mode as SkillInstallRow["pinMode"],
+                  access: previous.access as SkillInstallRow["access"],
+                },
+              }
+            : {}),
+        },
+      });
     return {
       ok: true,
+      pinMode,
       semver: input.version,
-      deprecated: v.state === "deprecated",
+      deprecated,
       requiredCount: await requiredCount(tx, teamId),
     };
   });

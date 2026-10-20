@@ -54,27 +54,72 @@ export const NOTIFICATION_KINDS = [
   "schedule.run.interrupted",
   "schedule.run.skipped_actions",
   "schedule.paused",
+  /** A Team admin blocked a catalog skill the member had added for themselves (KOBE-338). */
+  "skill.member_add.blocked",
+  /**
+   * A catalog skill or version the team installed (or the member added) was retired (KOBE-340,
+   * SK31): deprecated, withdrawn, revoked, or a revoke undone. The version ones name `skill_semver`.
+   */
+  "skill.deprecated",
+  "skill.version.deprecated",
+  "skill.version.withdrawn",
+  "skill.version.revoked",
+  "skill.version.unrevoked",
 ] as const;
+/** Kinds about a catalog skill: they name it (`skill_id`, `skill_name`), not a schedule. */
+export const SKILL_NOTIFICATION_KINDS = NOTIFICATION_KINDS.filter((k) => k.startsWith("skill."));
+/** Skill kinds about one version: they also name it (`skill_semver`). */
+export const SKILL_VERSION_NOTIFICATION_KINDS = NOTIFICATION_KINDS.filter((k) =>
+  k.startsWith("skill.version."),
+);
+/** Kinds about a schedule: they name it (`schedule_id`). */
+export const SCHEDULE_NOTIFICATION_KINDS = NOTIFICATION_KINDS.filter((k) =>
+  k.startsWith("schedule."),
+);
 export const notificationKindSchema = z.enum(NOTIFICATION_KINDS);
 export type NotificationKind = z.infer<typeof notificationKindSchema>;
 
 /**
- * One in-app notification of the caller. `thread_id`/`run_id` are null for `schedule.paused`.
+ * One in-app notification of the caller. `thread_id`/`run_id` are null for `schedule.paused` and
+ * `skill.member_add.blocked` (which names a catalog skill instead of a schedule).
  * `skipped_count` is set on `schedule.run.skipped_actions` (the full count, even above
  * {@link SKIPPED_ACTIONS_MAX}). `paused_by` is set on `schedule.paused`. Email (opt-in per schedule
  * via `notify_email`) sends the same facts and links, never content.
  */
-export const notificationSchema = z.strictObject({
-  notification_id: uuidSchema,
-  kind: notificationKindSchema,
-  schedule_id: uuidSchema,
-  thread_id: uuidSchema.nullable(),
-  run_id: uuidSchema.nullable(),
-  skipped_count: z.number().int().positive().optional(),
-  paused_by: schedulePausedBySchema.optional(),
-  read_at: timestampSchema.nullable(),
-  created_at: timestampSchema,
-});
+export const notificationSchema = z
+  .strictObject({
+    notification_id: uuidSchema,
+    kind: notificationKindSchema,
+    /** Set on the schedule kinds; null on `skill.member_add.blocked`. */
+    schedule_id: uuidSchema.nullable(),
+    thread_id: uuidSchema.nullable(),
+    run_id: uuidSchema.nullable(),
+    skipped_count: z.number().int().positive().optional(),
+    paused_by: schedulePausedBySchema.optional(),
+    /** The skill kinds: the catalog skill and its name (KOBE-338, KOBE-340). */
+    skill_id: uuidSchema.optional(),
+    skill_name: z.string().min(1).max(64).optional(),
+    /** `skill.version.*`: the version (KOBE-340). */
+    skill_semver: z.string().min(5).max(32).optional(),
+    read_at: timestampSchema.nullable(),
+    created_at: timestampSchema,
+  })
+  .refine(
+    (n) => {
+      const skill = (SKILL_NOTIFICATION_KINDS as readonly string[]).includes(n.kind);
+      const version = (SKILL_VERSION_NOTIFICATION_KINDS as readonly string[]).includes(n.kind);
+      return (
+        (skill
+          ? n.schedule_id === null && n.skill_id !== undefined && n.skill_name !== undefined
+          : n.schedule_id !== null && n.skill_id === undefined && n.skill_name === undefined) &&
+        version === (n.skill_semver !== undefined)
+      );
+    },
+    {
+      message:
+        "a schedule notification names its schedule; a skill notification its skill (and version)",
+    },
+  );
 export type Notification = z.infer<typeof notificationSchema>;
 
 export const NOTIFICATIONS_PAGE_MAX = 100;

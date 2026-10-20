@@ -10,8 +10,10 @@ import {
   BOOTSTRAP_TOKEN_SECONDS,
   KOBE_ENDPOINTS,
   EVAL_NETWORK_POLICY,
+  SKILL_SCAN_NETWORK_POLICY,
   LABEL_MANAGED_BY,
   LABEL_ORBIT_EVAL,
+  LABEL_SKILL_SCAN,
   LABEL_TEAM_ID,
   LABEL_TEAM_NAMESPACE,
   LABEL_USER_ID,
@@ -164,8 +166,14 @@ export function networkPolicyManifest(namespace: string, s: SandboxSettings): Ku
     kind: "NetworkPolicy",
     metadata: { name: NETWORK_POLICY, namespace, labels: managedLabels },
     spec: {
-      // Not eval pods (KOBE-93): policies are additive, so they get their own, narrower one.
-      podSelector: { matchExpressions: [{ key: LABEL_ORBIT_EVAL, operator: "DoesNotExist" }] },
+      // Not eval pods (KOBE-93) or external skill scans (KOBE-341): policies are additive, so
+      // they get their own, narrower ones.
+      podSelector: {
+        matchExpressions: [
+          { key: LABEL_ORBIT_EVAL, operator: "DoesNotExist" },
+          { key: LABEL_SKILL_SCAN, operator: "DoesNotExist" },
+        ],
+      },
       policyTypes: ["Ingress", "Egress"],
       ingress: [],
       egress: sandboxEgressEndpoints(s).map((e) => ({
@@ -211,6 +219,24 @@ export function evalNetworkPolicyManifest(namespace: string, s: SandboxSettings)
           ports: [{ protocol: "TCP", port: gateway.targetPort }],
         },
       ],
+    },
+  };
+}
+
+/**
+ * External skill scans (KOBE-341): no ingress and no egress at all. The scan reads its package
+ * from a ConfigMap and writes its result to its log; it needs nothing on the network.
+ */
+export function skillScanNetworkPolicyManifest(namespace: string): KubeObject {
+  return {
+    apiVersion: "networking.k8s.io/v1",
+    kind: "NetworkPolicy",
+    metadata: { name: SKILL_SCAN_NETWORK_POLICY, namespace, labels: managedLabels },
+    spec: {
+      podSelector: { matchExpressions: [{ key: LABEL_SKILL_SCAN, operator: "Exists" }] },
+      policyTypes: ["Ingress", "Egress"],
+      ingress: [],
+      egress: [],
     },
   };
 }

@@ -1,4 +1,5 @@
 import type { TeamRole } from "@kobe/db";
+import type { SiteGrant } from "@kobe/protocol";
 
 /**
  * The fixed role model (spec D8) as one permission matrix. Each permission names the least
@@ -29,6 +30,10 @@ export const SITE_PERMISSIONS = {
   "site.skills.override_scan": "admin",
   /** Catalog tags: the topic vocabulary, the Default system tag and Default moves (KOBE-314). */
   "site.skills.catalog.manage": "admin",
+  /** The Skill Registry queue and every review action (KOBE-331, SK22); see skillReviewAllows. */
+  "site.skills.review": "admin",
+  /** Give and take site grants such as Skill reviewer (KOBE-331, SK22). */
+  "site.grants.manage": "admin",
   "site.egress.manage": "admin",
   "site.retention.manage": "admin",
   "site.legal_hold.manage": "admin",
@@ -105,4 +110,45 @@ export function teamPermissionsFor(role: TeamRole | null): TeamPermission[] {
   return (Object.keys(TEAM_PERMISSIONS) as TeamPermission[])
     .filter((p) => teamRoleAllows(role, p))
     .sort();
+}
+
+/**
+ * Actions on the Skill Registry (KOBE-331, SK22). Site admins and the Owner (`site.skills.review`)
+ * may do all of them; the **Skill reviewer** grant, checked beside the role ladder, allows only
+ * {@link SKILL_REVIEWER_ACTIONS}: never block, withdraw, revoke, tag Default or change settings.
+ */
+export const SKILL_REVIEW_ACTIONS = [
+  "queue.read",
+  "claim",
+  "comment",
+  "rerun",
+  "approve",
+  "request_changes",
+  "reject",
+  "reject_and_block",
+  "withdraw",
+  "revoke",
+  "tag_default",
+  "settings",
+] as const;
+export type SkillReviewAction = (typeof SKILL_REVIEW_ACTIONS)[number];
+
+const SKILL_REVIEWER_ACTIONS: ReadonlySet<SkillReviewAction> = new Set([
+  "queue.read",
+  "claim",
+  "comment",
+  "rerun",
+  "approve",
+  "request_changes",
+  "reject",
+]);
+
+export interface SkillReviewWho {
+  readonly siteRole: SiteRole;
+  readonly grants: readonly SiteGrant[];
+}
+
+export function skillReviewAllows(who: SkillReviewWho, action: SkillReviewAction): boolean {
+  if (siteRoleAllows(who.siteRole, "site.skills.review")) return true;
+  return who.grants.includes("skill_reviewer") && SKILL_REVIEWER_ACTIONS.has(action);
 }

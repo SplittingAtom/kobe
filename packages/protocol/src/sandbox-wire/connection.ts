@@ -39,6 +39,8 @@
  *   `run.start.memory`; same refusal rule.
  *   `projects` ({@link CAPABILITY_PROJECTS}, projects.ts, KOBE-159): `project.file_propose` /
  *   `project.file_propose_result` and `run.start.project`; same refusal rule.
+ *   `skill_drafts` (`CAPABILITY_SKILL_DRAFTS`, skill-draft-tool.ts, KOBE-442): `skill.draft_save` /
+ *   `skill.draft_save_result` (push-then-save, as `file.share`); same refusal rule.
  *   `web_search` ({@link CAPABILITY_WEB_SEARCH}, web-search.ts, KOBE-114): `web_search.query` /
  *   `web_search.result`; same refusal rule.
  *   `mcp` ({@link CAPABILITY_MCP}, mcp-config.ts, KOBE-111): `run.start.mcp`, the run's effective

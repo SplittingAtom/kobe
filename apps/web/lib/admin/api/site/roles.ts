@@ -22,3 +22,29 @@ export function setSiteRole(userId: string, role: "admin" | "user"): Promise<Api
 export function transferOwnership(userId: string): Promise<ApiResult<unknown>> {
   return apiRequest("/v1/site/roles/transfer-ownership", { method: "POST", json: { userId } });
 }
+
+/** A site grant beside the ladder (KOBE-331, SK22): today only the Skill reviewer. */
+export interface SiteGrantHolder {
+  readonly userId: string;
+  readonly name: string;
+  readonly email: string;
+  readonly grant: "skill_reviewer";
+  readonly grantedBy: string;
+  readonly grantedAt: string;
+}
+
+export async function listSiteGrants(): Promise<ApiResult<readonly SiteGrantHolder[]>> {
+  const res = await apiRequest<{ grants: SiteGrantHolder[] }>("/v1/site/roles/grants");
+  return res.ok ? { ...res, data: res.data.grants } : res;
+}
+
+export function giveSkillReviewer(userId: string): Promise<ApiResult<unknown>> {
+  return apiRequest(`/v1/site/roles/grants/${enc(userId)}/skill_reviewer`, {
+    method: "PUT",
+    json: {},
+  });
+}
+
+export function takeSkillReviewer(userId: string): Promise<ApiResult<unknown>> {
+  return apiRequest(`/v1/site/roles/grants/${enc(userId)}/skill_reviewer`, { method: "DELETE" });
+}

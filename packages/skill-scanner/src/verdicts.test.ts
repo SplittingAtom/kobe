@@ -27,6 +27,15 @@ describe("verdicts", () => {
     ).toBe("block");
   });
 
+  it("flags a script with bytes that aren't UTF-8 as Caution (KOBE-336 review M1)", () => {
+    const bad = bin("scripts/run.sh", [...enc.encode("echo h"), 0xe9, 0x0a]);
+    expect(hits(bad)).toContainEqual(["invalid-utf8-script", "caution", "scripts/run.sh"]);
+    // A prose file with the same byte is no script: not this rule.
+    expect(
+      hits(bin("notes.md", [...enc.encode("caf"), 0xe9, 0x0a])).map((h) => h[0]),
+    ).not.toContain("invalid-utf8-script");
+  });
+
   it("reads stored findings: no severity (rows before KOBE-312) is Caution", () => {
     const stored = (f: { rule: string; severity?: string }) => f;
     expect(verdictOf([])).toBe("pass");

@@ -138,4 +138,22 @@ describe("Changing installs (KOBE-316)", () => {
       expect(screen.queryByRole("combobox", { name: "Access of pdf-kit" })).toBeNull(),
     );
   });
+
+  it("says when a roll back pinned a tracking install (KOBE-337 review M1)", async () => {
+    stubApi({
+      "GET /v1/team/skills/installs": [
+        200,
+        {
+          installs: [
+            { ...INSTALLS.installs[0], pinMode: "pinned", origin: "team", pinnedBy: "rollback" },
+          ],
+          removedDefaults: [],
+        },
+      ],
+    });
+    renderTeam(<CatalogInstallsSection />, { permissions: [] });
+    expect(
+      await screen.findByText("Pinned by roll back; switch back to tracking to get updates again."),
+    ).toBeTruthy();
+  });
 });

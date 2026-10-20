@@ -20,8 +20,9 @@ import { readCatalogSwitches } from "../skills/settings.js";
  * - a catalog skill the team blocked loads neither as an install nor as a member add, whatever
  *   rows other writers left behind (an agent naming it gets `not_installed`);
  * - a member add loads only while the team setting "Members may add catalog skills for
- *   themselves" is on, and never for a skill the team installed Hidden (Hidden means "only for
- *   agents that name it"). An add that doesn't load is ignored as if it weren't there.
+ *   themselves" is on, and never for a skill the team installed: the install governs, and an add
+ *   left from before it counts as the member's "on" choice at the install's pin (KOBE-338 review
+ *   M3). An add that doesn't load is ignored as if it weren't there.
  *
  * Kobe's own skills (KOBE-317, the former built-ins) never pause on an upgrade: an agent naming one
  * in a team the Default sync has not reached yet (or that it skipped for a name conflict) gets it
@@ -117,7 +118,7 @@ async function pendingKobeDefaults(
   if (names.length === 0) return out;
   const { rows } = await tx.execute<{ id: string; name: string }>(sql`
     SELECT s.id, s.name FROM registry_skills s
-    WHERE s.publisher = 'kobe' AND s.name IN (${sql.join(
+    WHERE s.publisher = 'kobe' AND s.status IN ('active', 'unmaintained') AND s.name IN (${sql.join(
       names.map((n) => sql`${n}`),
       sql`, `,
     )})
@@ -152,7 +153,7 @@ export async function loadCatalogFacts(
       WHERE i.team_id = ${args.teamId} AND ${notBlocked(sql`i.skill_id`)}`)
   ).rows;
   const { membersMayAdd } = await readCatalogSwitches(tx, args.teamId);
-  const hidden = new Set(installs.filter((i) => i.access === "hidden").map((i) => i.skill_id));
+  const installedIds = new Set(installs.map((i) => i.skill_id));
   const enablements = (
     await tx.execute<EnablementRow>(sql`
       SELECT e.catalog_skill_id AS skill_id, s.name, e.enabled, e.version_id,
@@ -160,7 +161,7 @@ export async function loadCatalogFacts(
       FROM member_skill_enablements e JOIN registry_skills s ON s.id = e.catalog_skill_id
       WHERE e.team_id = ${args.teamId} AND e.user_id = ${args.userId}
         AND e.catalog_skill_id IS NOT NULL AND ${notBlocked(sql`e.catalog_skill_id`)}`)
-  ).rows.filter((e) => e.version_id === null || (membersMayAdd && !hidden.has(e.skill_id)));
+  ).rows.filter((e) => e.version_id === null || membersMayAdd || installedIds.has(e.skill_id));
   const installedNames = new Set(installs.map((i) => i.name));
   const pending = await pendingKobeDefaults(
     tx,
@@ -237,8 +238,8 @@ export async function loadCatalogFacts(
       into(out.required, out.requiredOmissions, resolve(i.skill_id, i.name, pinOf(i)));
       continue;
     }
-    // A member add (own version and pin) of an installed skill is handled with the adds below.
-    if (mine?.version_id) continue;
+    // The team's install governs (KOBE-338 review M3): a member's add of an installed skill (left
+    // from before the install) counts as their "on" choice at the install's pin, never its own.
     const on =
       (i.access === "default_on" && mine?.enabled !== false) ||
       (i.access === "available" && mine?.enabled === true);
@@ -247,7 +248,7 @@ export async function loadCatalogFacts(
   }
   for (const e of [...enablements].sort(byName)) {
     if (!e.enabled || !e.version_id || !e.pin_mode) continue;
-    if (installed.get(e.name)?.access === "required" || named.has(e.name)) continue;
+    if (installed.has(e.name) || named.has(e.name)) continue;
     into(
       out.offered,
       out.offeredOmissions,

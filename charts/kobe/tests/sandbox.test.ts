@@ -108,6 +108,24 @@ describe("server sandbox configuration", () => {
     });
   });
 
+  it("configures the external skill scanner Job: the chart's skill-scan image, a deadline and limits (KOBE-341)", () => {
+    // Off by default: no image for the server (review-341 L10).
+    expect(sandboxConfig(ms)).not.toHaveProperty("skillScan");
+    const on = sandboxConfig(render({ "sandbox.skillScan.enabled": "true" }));
+    expect(on.skillScan).toEqual({
+      image: "ghcr.io/splittingatom/kobe-skill-scan:0.1.0",
+      deadlineSeconds: 300,
+      resources: {
+        requests: { cpu: "250m", memory: "512Mi" },
+        limits: { cpu: "1", memory: "2Gi" },
+      },
+    });
+    const tuned = sandboxConfig(
+      render({ "sandbox.skillScan.enabled": "true", "sandbox.skillScan.deadlineSeconds": "600" }),
+    );
+    expect(tuned.skillScan).toMatchObject({ deadlineSeconds: 600 });
+  });
+
   it("points sandboxes at the release's server, model-gateway shim, MCP proxy and egress proxy", () => {
     const { endpoints } = sandboxConfig(ms);
     for (const [key, component] of [

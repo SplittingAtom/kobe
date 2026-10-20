@@ -16,7 +16,9 @@ const ALLOWED = new Set(["installMemoryHooks"]);
  * Team or Default before it (teamSkillInstalls, lockSkillInstall, seedDefaultSkillInstalls),
  * SKILL_INSTALL constants, a catalog install (CatalogInstall*), installCatalogSkill, and the team's
  * catalog switch buildersMayInstall(Catalog). A bare Install*, installSettings or installId still
- * fails.
+ * fails. KOBE-330..341 add the member's mayInstall (may install this catalog skill) and the
+ * catalog's teamsInstalled count (an API field: how many teams installed the skill); their other
+ * names say SkillInstall (skillInstallAnswers, SkillInstallUpdate, listSkillInstallRequests).
  */
 const SKILL_INSTALL = new RegExp(
   [
@@ -24,7 +26,8 @@ const SKILL_INSTALL = new RegExp(
     /^(?:TEAM_)?SKILL_INSTALL(?:_\w+)?$/,
     /^Catalog(?:Skill)?Install\w*$/,
     /^installCatalogSkill$/,
-    /^buildersMayInstall(?:Catalog)?$/,
+    /^(?:buildersM|m)ayInstall(?:Catalog)?$/,
+    /^teamsInstalled$/,
   ]
     .map((re) => re.source)
     .join("|"),
@@ -41,7 +44,8 @@ const PATTERNS = [
   { what: "permission", re: /\binstall\.[a-z_]+\.[a-z_]+\b/g, keep: () => true },
   {
     what: "module path",
-    re: /\binstall-(?!gvisor|agent-sandbox)[\w-]+\.(?:js|ts|tsx)\b/g,
+    // A skill install's modules say so (skill-install-updates.js); a bare install-*.js still fails.
+    re: /(?<!skill-)\binstall-(?!gvisor|agent-sandbox)[\w-]+\.(?:js|ts|tsx)\b/g,
     keep: () => true,
   },
   {
@@ -92,7 +96,8 @@ export function identifierFindings(source) {
 
 /** A file or directory named after the scope (install-*.ts, …/install/…). */
 export function isInstallPath(path) {
-  return /(?:^|\/)install(?:\/|$|-(?!gvisor|agent-sandbox))|-install\.\w/.test(path);
+  // A catalog install's component (catalog-install.tsx) is excepted like CatalogInstall*.
+  return /(?:^|\/)install(?:\/|$|-(?!gvisor|agent-sandbox))|(?<!\/catalog)-install\.\w/.test(path);
 }
 
 export function selfTestIdentifiers() {
@@ -122,6 +127,13 @@ export function selfTestIdentifiers() {
     "installSkillBlocklist(db)",
     "buildersMayInstallSettings",
     "skillCatalogFor(InstallScope)",
+    // KOBE-330..341: the phase C names do not cover the old scope either.
+    "const mayInstallSettings = true",
+    "export function teamsInstalledSettings() {}",
+    "type InstallUpdate = {}",
+    "listInstallRequests(db, teamId)",
+    "const installAnswers = []",
+    'import { x } from "./install-updates.js"',
   ];
   const good = [
     "db.select().from(siteRoles).where(eq(siteSettings.key, k))",
@@ -136,6 +148,8 @@ export function selfTestIdentifiers() {
     "listTeamSkillInstalls(); TeamSkillInstalls; const TEAM_SKILL_INSTALL = {}; SKILL_INSTALL_MISSING",
     "<CatalogInstallsSection />; CatalogInstall['access']; installCatalogSkill(tx, teamId, skill)",
     "{ buildersMayInstall: s.buildersMayInstallCatalog }; seedDefaultSkillInstalls(tx, team.id)",
+    "const mayInstall = p; { teamsInstalled: 4 }; skillInstallAnswers(tx); type SkillInstallUpdate = {}",
+    'listSkillInstallRequests(db); import { y } from "./skill-install-versions.js"',
   ];
   const missed = bad.filter((s) => identifierFindings(s).length === 0);
   const flagged = good.filter((s) => identifierFindings(s).length > 0);
@@ -147,6 +161,10 @@ export function selfTestIdentifiers() {
     isInstallPath("apps/web/components/admin/team/skill-editor/install-change.tsx"),
     !isInstallPath("apps/web/components/admin/team/skill-editor/skill-install-change.tsx"),
     !isInstallPath("services/server/src/routes/team-skill-installs.ts"),
+    !isInstallPath("services/server/src/skills/skill-install-answers.ts"),
+    !isInstallPath("apps/web/components/skills/catalog-install.tsx"),
+    isInstallPath("apps/web/components/admin/site-install.tsx"),
+    isInstallPath("services/server/src/skills/install-updates.ts"),
   ];
   if (missed.length || flagged.length || paths.includes(false)) {
     console.error("site identifiers: self-test failed", { missed, flagged, paths });

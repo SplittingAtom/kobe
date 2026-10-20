@@ -9,8 +9,10 @@ import {
   skillDrafts,
   skillEvalResults,
   skillEvalRuns,
+  skillPromotionRequests,
   teamMembers,
   teamSkillBlocks,
+  teamSkillRequests,
   teamSkillInstalls,
   teamSkillOptouts,
   agentEvalCaseHistory,
@@ -190,6 +192,12 @@ export const agentsFixtures: Record<(typeof agents.team)[number], ProbeFixture> 
     const { userId, skillId } = await probeCatalogSkill(tx);
     await tx.insert(teamSkillBlocks).values({ teamId, skillId, blockedBy: userId });
   },
+  team_skill_requests: async (tx, teamId) => {
+    // A member's Request for team (KOBE-338).
+    const { userId, skillId } = await probeCatalogSkill(tx);
+    await tx.insert(teamMembers).values({ teamId, userId, role: "member" });
+    await tx.insert(teamSkillRequests).values({ teamId, skillId, userId });
+  },
   member_skill_enablements: async (tx, teamId) => {
     const { userId, skillId, versionId } = await probeCatalogSkill(tx);
     await tx.insert(teamMembers).values({ teamId, userId, role: "member" });
@@ -305,6 +313,18 @@ export const agentsFixtures: Record<(typeof agents.team)[number], ProbeFixture> 
       size: 10,
       change: "overwritten",
       writtenAt: new Date(),
+    });
+  },
+  skill_promotion_requests: async (tx, teamId) => {
+    // A Builder's pending Promote to Site (KOBE-333).
+    const { userId, skillId } = await probeSkill(tx, teamId);
+    await tx.insert(skillPromotionRequests).values({
+      teamId,
+      skillId,
+      version: 1,
+      semver: "0.1.0",
+      packageHash: "0".repeat(64),
+      requestedBy: userId,
     });
   },
   skill_eval_runs: async (tx, teamId) => {
