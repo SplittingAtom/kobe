@@ -26,9 +26,12 @@ export { PICKER_RAIL_PX } from "../../lib/shell/rail-width";
  * calls name the thread on screen, which the server checks like a card's thread (readable, the
  * connector not off there). It opens with its opening tool's result, called for it when shown
  * (`OpenedPicker`), as a card opens with its stored one. Nothing is written to a thread. It runs only while the Apps tab is
- * on screen in an expanded rail; elsewhere the frame is removed and reloads when shown again. A picker that is no longer live
- * (drift, connector off for the team, key gone) falls back to None with a note; one whose
- * connector is off in this conversation says so.
+ * on screen in an expanded rail; elsewhere the frame is removed and reloads when shown again.
+ *
+ * It opens on the member's last pick while that is live, else on the first live picker; a chosen
+ * None stays None (KOBE-461). A remembered picker that is no longer live (drift, connector off for
+ * the team, key gone) gives way to the first live one with a note, and stays remembered until the
+ * member chooses again; one whose connector is off in this conversation says so.
  */
 const GONE =
   "Your picker is no longer available: it changed, or its connector or your key is gone.";
@@ -39,19 +42,18 @@ const OPENING_INPUT: Record<string, unknown> = Object.freeze({});
 const offNote = (app: RailApp) =>
   `${app.connectorName} is off in this conversation. Turn it on from the + menu to use ${app.title}.`;
 
-/** The picker chosen and live, or the reason there is none. */
+/**
+ * The picker on screen (KOBE-461): the member's remembered pick while it is live; a remembered
+ * None stays None; otherwise (never chose, or the pick is gone) the first live picker. Nothing is
+ * chosen before the member's preferences load, so the opening is called once, for the right one.
+ * Only a list read successfully says the remembered pick is gone (a failed read shows no apps).
+ */
 function useChosenPicker(rail: RailApi, pickers: readonly RailApp[], settled: boolean) {
-  const chosen = pickers.find((p) => p.appId === rail.picker) ?? null;
-  const [gone, setGone] = useState(false);
-  const { picker, setPicker } = rail;
-  // Only a list read successfully says the picker is gone (a failed read shows no apps).
-  const lost = settled && picker !== null && chosen === null;
-  useEffect(() => {
-    if (!lost) return;
-    setGone(true);
-    setPicker(null);
-  }, [lost, setPicker]);
-  return { chosen, gone, clearGone: () => setGone(false) };
+  const { picker } = rail;
+  const remembered = pickers.find((p) => p.appId === picker) ?? null;
+  const gone = settled && typeof picker === "string" && remembered === null;
+  if (!rail.settled || picker === null) return { chosen: null, gone: false };
+  return { chosen: remembered ?? pickers[0] ?? null, gone };
 }
 
 /** Whether the picker's connector is off for the draft or thread on screen. */
@@ -159,7 +161,7 @@ export function RailPickers({
   onUnavailable(): void;
 }) {
   const pickers = apps.filter(isPicker);
-  const { chosen, gone, clearGone } = useChosenPicker(rail, pickers, settled);
+  const { chosen, gone } = useChosenPicker(rail, pickers, settled);
   const threadId = useKobeExtras()?.state.threadId ?? null;
   const selectId = useId();
   const { setPickerShown } = rail;
@@ -183,7 +185,6 @@ export function RailPickers({
           className={styles.pickerSelect}
           value={chosen?.appId ?? ""}
           onChange={(e) => {
-            clearGone();
             rail.setPicker(e.target.value === "" ? null : e.target.value);
           }}
         >
@@ -195,7 +196,7 @@ export function RailPickers({
           ))}
         </select>
       </div>
-      {gone && chosen === null && (
+      {gone && (
         <p role="status" className={styles.pickerNote}>
           {GONE}
         </p>

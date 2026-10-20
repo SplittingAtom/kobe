@@ -148,6 +148,9 @@ async function mount() {
   );
   const rail = await screen.findByRole("complementary", { name: "Workspace" });
   await screen.findByRole("heading", { name: "Finance" });
+  // Files on screen lists them and wakes once (KOBE-461); the counts below start after that.
+  await waitFor(() => expect(wakes).toBe(1));
+  wakes = 0;
   return rail;
 }
 
@@ -204,7 +207,7 @@ describe("rail drop zone: overlay (ac-1)", () => {
 });
 
 describe("rail drop zone: upload (ac-1)", () => {
-  it("uploads into uploads/, wakes and lists Files as its first use, and sends no message", async () => {
+  it("uploads into uploads/, wakes and lists Files again, and sends no message", async () => {
     const rail = await mount();
     expect(wakes).toBe(0);
     fireEvent.dragEnter(rail, files(fileOf("brief.pdf")));
@@ -281,8 +284,6 @@ describe("rail drop zone: onto a folder of the Files tree (KOBE-304, ac-7)", () 
   it("uploads into that folder, without the overlay; elsewhere on the rail it is still uploads/", async () => {
     extraRoot = ["notes"];
     const rail = await mount();
-    const user = userEvent.setup();
-    await user.click(within(filesRegion()).getByRole("button", { name: "Open files" }));
     const notes = await within(filesRegion()).findByRole("treeitem", { name: "notes" });
     fireEvent.dragEnter(notes, files(fileOf("brief.pdf")));
     fireEvent.dragOver(notes, files(fileOf("brief.pdf")));

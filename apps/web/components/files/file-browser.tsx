@@ -10,6 +10,7 @@ import { describeFileError, isReadOnlyPath, parentPath } from "../../lib/files/f
 import { folderError, type DroppedItems } from "../../lib/files/drop";
 import { baseName, expandedKey, joinPath } from "../../lib/files/tree";
 import { ErrorNotice } from "../admin/error-notice";
+import { IconAction } from "../shell/icon-action";
 import { copyText } from "../../lib/clipboard";
 import type { MenuBindings } from "../../lib/shell/menu";
 import { cn } from "../../lib/utils";
@@ -96,17 +97,22 @@ function rowBindings(
   };
 }
 
-/** The top-level row: the workspace's name, a drop target for the top level, and Upload. */
+/**
+ * The top-level row: the workspace's name, a drop target for the top level, Upload, and Refresh
+ * files (KOBE-461; it was in the rail section's header).
+ */
 function RootHeader({
   drag,
   folder,
   busy,
   onUpload,
+  onRefresh,
 }: {
   readonly drag: Parameters<Parameters<typeof FileTreeView>[0]["header"]>[0];
   readonly folder: string;
   readonly busy: boolean;
   onUpload(files: FileList | null): void;
+  readonly onRefresh: (() => void) | undefined;
 }) {
   const label = `Upload a file to ${where(folder)}`;
   return (
@@ -143,6 +149,16 @@ function RootHeader({
             }}
           />
         </label>
+      )}
+      {onRefresh && (
+        <IconAction
+          command="refresh-files"
+          size="sm"
+          side="right"
+          variant="ghost"
+          className="text-foreground shrink-0"
+          onClick={onRefresh}
+        />
       )}
     </div>
   );
@@ -208,8 +224,11 @@ export function FileBrowser({
   onOpenFile,
   onMoved,
   onMention,
+  onRefresh,
 }: {
   readonly api: FilesApi;
+  /** Refresh files in the top row (KOBE-461): wakes and lists again (a new `wakeKey`). Absent: none. */
+  readonly onRefresh?: (() => void) | undefined;
   /**
    * "Mention in message" (KOBE-374): the file goes into the composer as an @file mention; the
    * answer is why it could not, or undefined once it did. Absent: no such item.
@@ -392,6 +411,7 @@ export function FileBrowser({
             onUpload={(files) =>
               void uploadInto(focus.folder, { files: Array.from(files ?? []), folders: [] })
             }
+            onRefresh={onRefresh}
           />
         )}
       />

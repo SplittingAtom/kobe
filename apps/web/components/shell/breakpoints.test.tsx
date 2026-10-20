@@ -193,6 +193,23 @@ describe("the CE7 table, per band (ac-1)", () => {
     expect(menuPanel().querySelector('summary[aria-label="Profile"]')).not.toBeNull();
   });
 
+  it("390: the closed drawer lists nothing; opening it on Files lists them once (KOBE-461 ac-2)", async () => {
+    resizeWindow(390);
+    openApp(fake);
+    await composer();
+    const wakes = () =>
+      fake.requests.filter((r) => r.method === "POST" && r.path === "/v1/workspace/wake").length;
+    await new Promise((r) => setTimeout(r, 50));
+    expect(wakes()).toBe(0);
+    expect(fake.workspaceListings).toEqual([]);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Show the workspace" }));
+    const files = await screen.findByRole("region", { name: "Files" });
+    await within(files).findByRole("button", { name: "Refresh files" });
+    await waitFor(() => expect(wakes()).toBe(1));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(wakes()).toBe(1);
+  });
+
   it("390: the Menu stays open through a press inside it; Escape and a press outside close it", async () => {
     resizeWindow(390);
     openApp(fake);

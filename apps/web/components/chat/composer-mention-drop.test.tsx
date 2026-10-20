@@ -101,7 +101,6 @@ async function openFiles(threadId: string) {
   const user = userEvent.setup();
   mount(threadId);
   const files = await screen.findByRole("region", { name: "Files" });
-  await user.click(await within(files).findByRole("button", { name: "Open files" }));
   await within(files).findByText("report.csv");
   return { user, files };
 }

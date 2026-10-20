@@ -112,8 +112,6 @@ test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a fil
 
   // Screenshots with the Files tree, light and dark.
   const files = filesSection(page);
-  const openFiles = files.getByRole("button", { name: "Open files" });
-  if (await openFiles.isVisible()) await openFiles.click();
   // Attached, not visible: an empty workspace's tree has no rows, so no height.
   await expect(files.getByRole("tree", { name: "Files in your workspace" })).toBeAttached();
   for (const theme of ["light", "dark"] as const) {
@@ -190,7 +188,6 @@ test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a fil
   const dir = `kobe-305-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   expect(await api(page, "POST", `${dir}/notes.md`)).toBe(201);
   try {
-    if (await openFiles.isVisible()) await openFiles.click();
     await files.getByRole("button", { name: "Refresh files" }).click();
     const tree = files.getByRole("tree", { name: "Files in your workspace" });
     await tree.getByRole("treeitem", { name: dir, exact: true }).click();

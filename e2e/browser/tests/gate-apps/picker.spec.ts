@@ -8,7 +8,9 @@ import { pageApi } from "../support/gate5.js";
  * Chromium against a deployment. The member picks it from the Pickers dropdown, chooses a table
  * in it, and the composer shows the text; nothing is sent and nothing is written to a thread. The
  * rail widens to at least 400 px while the picker shows and comes back to the member's width on
- * None; a collapsed rail and a phone's drawer still work.
+ * None; a collapsed rail and a phone's drawer still work. The dropdown opens on the member's last
+ * pick while live, else on the first live picker; a remembered None stays None (KOBE-461; the
+ * "never chose" default cannot be set up here, the API stores None, so it is a component test).
  *
  * On the gate install the picker is the Catalyst connector's "Lakehouse Picker". The app and its
  * path come from the environment (the repository is public; nothing here names a host):
@@ -190,4 +192,15 @@ test("a phone: the picker runs in the drawer and fills the draft; no page scroll
   await page.keyboard.press("Escape");
   await expect(drawer).toHaveCount(0);
   await expect(chat.composer).toHaveValue(new RegExp(TEXT.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("a remembered None stays None on load (KOBE-461)", async ({ chat, page }) => {
+  await page.setViewportSize(WIDE);
+  await openWithPicker(chat, page);
+  await pickNone(page);
+  await page.reload();
+  await expect(chat.composer).toBeVisible({ timeout: RUN_TIMEOUT_MS });
+  await showApps(page, chat);
+  await expect(pickerSelect(page)).toHaveValue("");
+  await expect(appsPanel(page).locator("iframe")).toHaveCount(0);
 });

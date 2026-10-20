@@ -61,7 +61,10 @@ export interface RailApi {
   toggle(collapsed: boolean): void;
   /** True once the member's stored layout has been applied (or failed to load). */
   readonly settled: boolean;
-  /** Times the member asked for Files: 0 = not yet (nothing listed or woken); each ask re-wakes. */
+  /**
+   * Times Files was asked for: 0 = not yet (nothing listed or woken). The Files tab coming on
+   * screen asks (KOBE-461), as do Show files, Mod+Shift+F and Refresh files; each ask re-wakes.
+   */
   readonly filesRequests: number;
   /**
    * Expands the rail and moves focus to a section (the collapsed icons, Mod+Shift+F).
@@ -75,7 +78,7 @@ export interface RailApi {
   readonly tab: RailTab;
   /** The member chose a tab: shown and saved. */
   setTab(tab: RailTab): void;
-  /** Lists the workspace and wakes the sandbox (first use, Show files, refresh). */
+  /** Lists the workspace and wakes the sandbox (the tab shown, Show files, refresh). */
   requestFiles(): void;
   /** The expanded rail's dragged width in px (KOBE-305); null is the default, 280 px. */
   readonly width: number | null;
@@ -92,8 +95,11 @@ export interface RailApi {
   readonly pickerShown: boolean;
   /** The Apps tab shows a live picker (or no longer does): widens the rail, unsaved. */
   setPickerShown(on: boolean): void;
-  /** The Apps tab's picker (KOBE-460): its app id, or null for None; saved per member. */
-  readonly picker: string | null;
+  /**
+   * The Apps tab's remembered picker (KOBE-460, KOBE-461): its app id, null for a chosen None, or
+   * undefined while the member never chose (the section then opens on the first live picker).
+   */
+  readonly picker: string | null | undefined;
   /** The member chose a picker (or None): shown and saved. */
   setPicker(appId: string | null): void;
   /** Which panels show (KOBE-419): Threads, Files or both. */
@@ -183,18 +189,32 @@ function useRailTab(
   return { tab: stored.value, setTab: stored.commit };
 }
 
-/** The Apps tab's picker (KOBE-460): stored per member, None until the member picks one. */
+/** A remembered None (`rail_picker: null`), kept apart from "never chose" (absent). */
+const NONE = Symbol("none");
+type StoredPicker = string | typeof NONE | undefined;
+
+/**
+ * The Apps tab's picker (KOBE-460, KOBE-461): stored per member. `undefined` until the member
+ * chooses (absent from their preferences), `null` once they chose None, else the app id.
+ */
 function useRailPicker(
   preferences: LayoutPreferences | null,
   onSave: ((change: LayoutPreferences) => void) | undefined,
 ) {
-  const stored = useStoredPreference<string | null>({
-    initial: null,
+  const stored = useStoredPreference<StoredPicker>({
+    initial: undefined,
     ready: preferences !== null,
-    resolve: () => preferences?.railPicker ?? null,
-    save: onSave && ((railPicker) => onSave({ railPicker })),
+    resolve: () => {
+      const remembered = preferences?.railPicker;
+      if (remembered === undefined) return null;
+      return remembered === null ? NONE : remembered;
+    },
+    save: onSave && ((value) => onSave({ railPicker: value === NONE ? null : (value ?? null) })),
   });
-  return { picker: stored.value, setPicker: stored.commit };
+  const { commit } = stored;
+  const setPicker = useCallback((appId: string | null) => commit(appId ?? NONE), [commit]);
+  const picker = stored.value === NONE ? null : stored.value;
+  return { picker, setPicker };
 }
 
 const RailContext = createContext<RailApi | null>(null);
@@ -362,7 +382,7 @@ export function RailDrawerButton({ teamName = "" }: { readonly teamName?: string
         aria-haspopup="dialog"
         aria-expanded={rail.drawer}
         onClick={() => {
-          // The drawer opens on Files without listing them (that waits for Open files).
+          // The drawer opens on Files, which lists them once on screen (KOBE-461).
           rail.showPanel("files");
           rail.toggle(false);
         }}

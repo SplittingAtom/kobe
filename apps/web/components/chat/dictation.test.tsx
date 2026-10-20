@@ -81,7 +81,10 @@ describe("composer dictation", () => {
     expect(r.started).toBe(false);
     expect(screen.getByRole("button", { name: "Dictate" })).toBeTruthy();
     expect(input.value).toBe("Summarise the sales report");
-    expect(fake.requests.filter((q) => q.method === "POST")).toEqual([]);
+    // Nothing sent (the rail's Files waking the sandbox is not a message, KOBE-461).
+    expect(
+      fake.requests.filter((q) => q.method === "POST" && q.path !== "/v1/workspace/wake"),
+    ).toEqual([]);
   });
 
   it("uses the unprefixed SpeechRecognition when the browser has it", async () => {

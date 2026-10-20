@@ -241,8 +241,31 @@ function RailHeader({
 }
 
 /**
- * The Files section: nothing is listed or woken until the member asks (Open files, Show files,
- * Mod+Shift+F, `/files`); each ask, and Refresh, wakes the sandbox and lists again.
+ * Lists the files each time the Files tab comes on screen (KOBE-461): a tab click, a page load on
+ * Files, the drawer opening on Files. Once per showing, after the member's layout has loaded (so a
+ * member last on Apps, or with the rail collapsed, wakes nothing). An ask that itself brings Files
+ * on screen (Show files, Mod+Shift+F) is that showing's listing, not a second one.
+ */
+function useListWhenShown(rail: RailApi, showing: boolean) {
+  const { filesRequests, requestFiles } = rail;
+  const listed = useRef(false);
+  const requestsWhileHidden = useRef(filesRequests);
+  useEffect(() => {
+    if (!showing) {
+      listed.current = false;
+      requestsWhileHidden.current = filesRequests;
+      return;
+    }
+    if (listed.current) return;
+    listed.current = true;
+    if (filesRequests === requestsWhileHidden.current) requestFiles();
+  }, [showing, filesRequests, requestFiles]);
+}
+
+/**
+ * The Files section: listed (and the sandbox woken) whenever its tab is on screen in an expanded
+ * rail (KOBE-461), never while Apps is, or the rail is collapsed. Each ask (Show files,
+ * Mod+Shift+F, `/files`) and Refresh files, in the file browser's top row, wakes and lists again.
  */
 function RailFiles({
   rail,
@@ -264,7 +287,8 @@ function RailFiles({
   /** A tab beside Apps (KOBE-448): its tab names it, so its own title is for screen readers. */
   tabbed: boolean;
 }) {
-  const request = () => {
+  useListWhenShown(rail, rail.settled && !hidden && !rail.collapsed);
+  const refresh = () => {
     clearDrop();
     rail.requestFiles();
   };
@@ -295,28 +319,14 @@ function RailFiles({
         >
           Files
         </h3>
-        {rail.filesRequests > 0 && (
-          <IconAction
-            command="refresh-files"
-            size="sm"
-            side="right"
-            variant={RAIL_ACTION_VARIANT}
-            className={RAIL_ACTION}
-            onClick={request}
-          />
-        )}
       </div>
       <RailDropNotice status={drop} />
-      {rail.filesRequests === 0 ? (
-        <div className={styles.scroll}>
-          <button type="button" className={styles.loadMore} onClick={request}>
-            Open files
-          </button>
-        </div>
-      ) : (
+      {/* Nothing until its first showing lists it (KOBE-461): the tab on screen asks at once. */}
+      {rail.filesRequests > 0 && (
         <FileBrowser
           api={api}
           wakeKey={rail.filesRequests}
+          onRefresh={refresh}
           showFolder={showFolder}
           onOpenFile={openFile}
           onMoved={panel?.moveFiles}
@@ -359,7 +369,7 @@ function RailFiles({
  * conversation, Threads, the Files toggle, Team console, collapse), then Apps (when the member has
  * any) over Files. The threads are a panel over the workspace since KOBE-453
  * (`threads-panel.tsx`). 280 px, or 48 px collapsed to the team's initials and icons. The sections
- * stay mounted (hidden) while collapsed, so their state survives and nothing re-wakes.
+ * stay mounted (hidden) while collapsed, so their state survives; collapsed, nothing wakes.
  * The whole rail is the drop zone for files (A3, KOBE-199, `rail-drop-zone.tsx`).
  *
  * Below 1100 px an expanded rail is a modal drawer (CE7, CE8, KOBE-201): focus moves in, the rest

@@ -96,8 +96,6 @@ test("thread and file row menus in light and dark; header rename; Copy as Markdo
 
   // A file of our own in the workspace root, for its row's menu.
   const files = filesSection(page);
-  const openFiles = files.getByRole("button", { name: "Open files" });
-  if (await openFiles.isVisible()) await openFiles.click();
   await files.getByLabel("Upload a file to the workspace root").setInputFiles({
     name: fileName,
     mimeType: "text/plain",

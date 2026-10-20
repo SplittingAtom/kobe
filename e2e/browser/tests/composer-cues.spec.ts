@@ -135,8 +135,8 @@ test("drag a workspace file onto the composer: an @file chip (ac-4)", async ({ c
   expect(await workspace(page, "POST", `${dir}/notes.txt`)).toBe(201);
   try {
     const files = filesSection(page);
-    const openFiles = files.getByRole("button", { name: "Open files" });
-    if (await openFiles.isVisible()) await openFiles.click();
+    // Listed when Files came on screen (KOBE-461); list again for the files just written.
+    await files.getByRole("button", { name: "Refresh files" }).click();
     const tree = files.getByRole("tree", { name: "Files in your workspace" });
     const row = (name: string) => tree.getByRole("treeitem", { name, exact: true });
     await row(dir).click();
