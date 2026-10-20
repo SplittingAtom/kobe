@@ -216,11 +216,16 @@ export interface LayoutPreferencesApi {
  * Loads the preferences once when the shell starts and saves changes, debounced. What is queued
  * is sent at once (keepalive) when the page is hidden or left, and when the shell unmounts.
  */
-export function useLayoutPreferences(fetchFn?: typeof fetch): LayoutPreferencesApi {
+export function useLayoutPreferences(
+  fetchFn?: typeof fetch,
+  /** False until there is a member to load them for (signed in, a team chosen). */
+  enabled = true,
+): LayoutPreferencesApi {
   const [preferences, setPreferences] = useState<LayoutPreferences | null>(null);
   const saver = useRef<PreferencesSaver | null>(null);
   const fetchRef = useRef(fetchFn);
   useEffect(() => {
+    if (!enabled) return;
     let current = true;
     void loadPreferences(fetchRef.current).then((p) => {
       if (current) setPreferences(p);
@@ -240,14 +245,15 @@ export function useLayoutPreferences(fetchFn?: typeof fetch): LayoutPreferencesA
       own.flush();
       if (saver.current === own) saver.current = null;
     };
-  }, []);
+  }, [enabled]);
   const save = useCallback((change: LayoutPreferences) => saver.current?.save(change), []);
   return useMemo(() => ({ preferences, save }), [preferences, save]);
 }
 
 /**
  * The shell's preferences for pages inside it (KOBE-459: the Workbench editor rail's width): the
- * console and My area pages open as panels inside the chat shell, which loads and saves them.
+ * console and My area pages open as panels beside the workspace, so `ChatApp` provides them to
+ * both (one instance: two would load twice and race their debounced PUTs).
  * Outside the shell (tests, a page rendered on its own) it is null: defaults, nothing saved.
  */
 export const LayoutPreferencesContext = createContext<LayoutPreferencesApi | null>(null);
