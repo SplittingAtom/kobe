@@ -1,6 +1,9 @@
 import { withTeam, type AppCallReason, type KobeDb } from "@kobe/db";
 import { toolInputSchema, type JsonObject } from "@kobe/protocol";
 import { recordAudit } from "../audit/record.js";
+import { connectorsOffIn } from "../connectors/thread-connectors.js";
+import { viewerProjectIds } from "../threads/references.js";
+import { findThread } from "../threads/repository.js";
 import { logger } from "../logger.js";
 import type { McpService } from "../mcp/service.js";
 import type { PolicyRuleSource } from "../policy/engine.js";
@@ -19,6 +22,8 @@ import { appBridgeDecision, checkAppTool, validateArguments } from "./decide.js"
  * 0. a per-member rate limit (burst 30, then 5 per second), taken by the route before the
  *    body is read ({@link takeRateToken});
  * 1. the app is live for the member (MA8) and the tool is of the app's connector;
+ *    a call naming the thread on screen (a rail picker, KOBE-460: it has no card) also needs
+ *    that thread to be one the member may read, with the app's connector not off in it;
  * 2. the tool is pinned, read-only, app-visible and in the team's exposure;
  * 3. the arguments are a JSON object of at most 64 KiB valid against the pinned schema (one
  *    validation per member at a time; a full validator answers `validation_busy`, 503);
@@ -63,6 +68,8 @@ export type AppCallOutcome =
 const MESSAGES: Readonly<Record<AppCallReason, string>> = {
   allowed: "",
   app_not_available: "This app is not available to you in this team.",
+  thread_not_found: "No thread with that id.",
+  connector_off: "This app's connector is off in this conversation. Turn it on from the + menu.",
   tool_not_in_app: "This app cannot call that tool.",
   tool_drifted: "That tool changed and is waiting for a site admin's review.",
   tool_not_read_only: "Apps may call only read-only tools.",
@@ -83,6 +90,8 @@ const MESSAGES: Readonly<Record<AppCallReason, string>> = {
 const STATUS: Readonly<Record<AppCallReason, Status>> = {
   allowed: 403,
   app_not_available: 404,
+  thread_not_found: 404,
+  connector_off: 403,
   tool_not_in_app: 403,
   tool_drifted: 403,
   tool_not_read_only: 403,
@@ -153,6 +162,29 @@ async function deny(
   return refused(reason);
 }
 
+/**
+ * Step 1, for a call naming the thread on screen (KOBE-460): the member may read it (their own,
+ * or shared with them; never another team's, RLS and `team_id` both), and the app's connector is
+ * not off there. Undefined when the call may go on.
+ */
+async function threadRefusal(
+  db: KobeDb,
+  p: BrowserPrincipal,
+  threadId: string,
+  connectorId: string,
+): Promise<AppCallReason | undefined> {
+  return withTeam(db, p.teamId, async (tx) => {
+    const viewer = {
+      teamId: p.teamId,
+      userId: p.userId,
+      projectIds: await viewerProjectIds(tx, p.teamId, p.userId),
+    };
+    if (!(await findThread(tx, viewer, threadId))) return "thread_not_found";
+    const off = await connectorsOffIn(tx, p.teamId, threadId);
+    return off.has(connectorId) ? "connector_off" : undefined;
+  });
+}
+
 /** Steps 1-4: the decision, without any credential. */
 async function decide(
   deps: AppCallDeps,
@@ -197,7 +229,12 @@ export async function callApp(
   deps: AppCallDeps,
   p: BrowserPrincipal,
   appId: string,
-  request: { readonly tool: string; readonly arguments?: unknown },
+  request: {
+    readonly tool: string;
+    readonly arguments?: unknown;
+    /** The thread on screen, sent by a rail picker (KOBE-460); a card's call names none. */
+    readonly threadId?: string | undefined;
+  },
 ): Promise<AppCallOutcome> {
   const now = deps.now?.() ?? new Date();
   const app = await memberApp(deps.db, p.teamId, p.userId, appId);
@@ -209,6 +246,10 @@ export async function callApp(
     return refused("app_not_available");
   }
   const what = { connectorId: app.connector.id, tool: request.tool, templateSha256: app.sha256 };
+  if (request.threadId !== undefined) {
+    const refusal = await threadRefusal(deps.db, p, request.threadId, app.connector.id);
+    if (refusal) return deny(deps, p, what, refusal);
+  }
   const decided = await decide(deps, p, app, request.tool, request.arguments, now);
   if (!decided.ok) return deny(deps, p, what, decided.reason);
 
