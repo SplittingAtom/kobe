@@ -29,15 +29,17 @@ export default function PythonRunPane({
   return (
     <section aria-label="Run output" className="flex flex-col gap-2 border-t pt-2">
       <div role="toolbar" aria-label="Run" className="flex flex-wrap items-center gap-1">
-        <button
-          type="button"
-          className={BUTTON}
-          disabled={threadId === null || dirty}
-          title={dirty ? "Save your changes first: Run uses the saved file." : undefined}
-          onClick={() => void k.run({ path })}
-        >
-          Run
-        </button>
+        {kernel?.readOnly !== true && (
+          <button
+            type="button"
+            className={BUTTON}
+            disabled={threadId === null || dirty}
+            title={dirty ? "Save your changes first: Run uses the saved file." : undefined}
+            onClick={() => void k.run({ path })}
+          >
+            Run
+          </button>
+        )}
         <KernelControls wiring={kernel} busy={k.busy} onKernel={(op) => void k.kernel(op)} />
       </div>
       {dirty && (

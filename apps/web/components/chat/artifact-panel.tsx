@@ -40,6 +40,7 @@ import { useModalLayer } from "../shell/use-modal-layer";
 import { ArtifactTabStrip, artifactTabId, artifactTabpanelId } from "./artifact-tab-strip";
 import { ArtifactPanelRequest, useArtifactEventCount, useArtifactPanel } from "./artifact-state";
 import { ArtifactBody } from "./artifact-views";
+import { useThreadReadOnly } from "./use-thread-read-only";
 import { kobeExtrasOf, useChatSession, useKobeExtras } from "./kobe-runtime";
 
 interface Detail {
@@ -243,15 +244,17 @@ function FileTab({
   const onGone = useCallback((gone: string) => dropFile?.(gone), [dropFile]);
   // The kernel of the conversation on screen (KOBE-465): notebooks and `.py` files run there.
   const threadId = useAuiState((s) => kobeExtrasOf(s)?.state.threadId ?? null);
+  const readOnly = useThreadReadOnly();
   const kernel = useMemo(
     () => ({
       threadId,
+      readOnly,
       api: session.notebooks,
       runs: session.notebookRuns,
       teamId: session.teamId,
       egressApi: session.api,
     }),
-    [threadId, session],
+    [threadId, readOnly, session],
   );
   if (!seen) return null;
   return (

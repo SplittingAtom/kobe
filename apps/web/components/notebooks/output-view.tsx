@@ -13,6 +13,7 @@ import {
   type HtmlParser,
   type OutputView,
 } from "../../lib/notebooks/outputs";
+import { formatBytes } from "../../lib/files/format";
 import { Markdown } from "../chat/markdown";
 import { OutputFrame } from "./output-frame";
 
@@ -74,6 +75,12 @@ function OneView({ view, teamId }: { readonly view: OutputView; readonly teamId:
       );
     case "image":
       return <img src={view.src} alt={view.alt} data-kobe-output="image" className="max-w-full" />;
+    case "image_too_large":
+      return (
+        <p className="text-muted-foreground text-xs" data-kobe-output="image_too_large">
+          {`Image too large to show (${formatBytes(view.bytes)}).`}
+        </p>
+      );
     case "table":
       return <TableOutput view={view} />;
     case "html":

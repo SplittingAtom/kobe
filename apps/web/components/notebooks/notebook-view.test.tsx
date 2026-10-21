@@ -7,7 +7,8 @@ import { sha256Hex } from "../../lib/files/editor";
 import { EditDraftStore, FileReviewStore } from "../../lib/files/editor-state";
 import { must } from "../../lib/testing/must";
 import { TooltipProvider } from "../ui/tooltip";
-import { NO_THREAD_NOTE, RESTART_PROMPT } from "./kernel-bar";
+import { NO_THREAD_NOTE, READ_ONLY_NOTE, RESTART_PROMPT } from "./kernel-bar";
+import { OutputFrame } from "./output-frame";
 import { ev, execId, Harness, Kernel, notebookJson, runId, THREAD, Workspace } from "./testing";
 
 /**
@@ -70,7 +71,11 @@ function answerConfirm(answer: boolean) {
   return confirm;
 }
 
-async function setup(text = notebookJson(CELLS), threadId: string | null = THREAD) {
+async function setup(
+  text = notebookJson(CELLS),
+  threadId: string | null = THREAD,
+  readOnly = false,
+) {
   const workspace = new Workspace("a.ipynb", text);
   const kernel = new Kernel();
   const drafts = new EditDraftStore();
@@ -80,7 +85,7 @@ async function setup(text = notebookJson(CELLS), threadId: string | null = THREA
     <TooltipProvider>
       <Harness
         workspace={workspace}
-        kernel={kernel.wiring(threadId)}
+        kernel={kernel.wiring(threadId, readOnly)}
         sha={sha}
         drafts={drafts}
         reviews={reviews}
@@ -158,6 +163,20 @@ describe("rendering cells and saved outputs (ac-1, ac-2)", () => {
       },
       "*",
     );
+  });
+
+  it("remounts the frame when the HTML changes, and posts the new HTML", () => {
+    const { rerender } = render(<OutputFrame html="<p>one</p>" teamId="t" />);
+    const first = screen.getByTitle("HTML output") as HTMLIFrameElement;
+    rerender(<OutputFrame html="<p>two</p>" teamId="t" />);
+    const second = screen.getByTitle("HTML output") as HTMLIFrameElement;
+    expect(second).not.toBe(first);
+    const post = vi.fn();
+    Object.defineProperty(second, "contentWindow", { value: { postMessage: post } });
+    act(() => second.dispatchEvent(new Event("load")));
+    expect(post).toHaveBeenCalledWith({ type: "kobe.notebook.html", html: "<p>two</p>" }, "*");
+    rerender(<OutputFrame html="<p>two</p>" teamId="t" />);
+    expect(screen.getByTitle("HTML output")).toBe(second); // same HTML: same frame
   });
 
   it("opens a file that is not nbformat 4 as text", async () => {
@@ -403,6 +422,18 @@ describe("running (ac-1)", () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Run cell 2" }));
     expect(await screen.findByText("Only the owner can run code.")).toBeTruthy();
+  });
+
+  it("shows a shared reader no run or kernel controls", async () => {
+    const { kernel } = await setup(undefined, THREAD, true);
+    expect(await screen.findByText(READ_ONLY_NOTE)).toBeTruthy();
+    for (const name of ["Run all", "Interrupt", "Restart", "Run cell 2", "Run cell 3"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+    expect(screen.getByText("Kernel idle")).toBeTruthy();
+    // Outputs still show.
+    expect(within(cell(2)).getByRole("table")).toBeTruthy();
+    expect(kernel.runs).toEqual([]);
   });
 
   it("cannot run before the conversation exists", async () => {

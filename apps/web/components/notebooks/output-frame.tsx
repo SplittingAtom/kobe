@@ -11,7 +11,22 @@ import { useRef } from "react";
 import { ARTIFACT_FRAME_SANDBOX } from "../../lib/chat/artifacts";
 import { OUTPUT_FRAME_MESSAGE, outputFrameUrl } from "../../lib/notebooks/api";
 
+/** A short hash of the HTML (FNV-1a) with its length: new HTML gets a new frame. */
+export function contentKey(html: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < html.length; i++) {
+    h ^= html.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return `${html.length}:${(h >>> 0).toString(16)}`;
+}
+
+/** Changed HTML remounts the frame: a fresh shell, posted to once, shows it. */
 export function OutputFrame({ html, teamId }: { readonly html: string; readonly teamId: string }) {
+  return <FrameDocument key={contentKey(html)} html={html} teamId={teamId} />;
+}
+
+function FrameDocument({ html, teamId }: { readonly html: string; readonly teamId: string }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const posted = useRef(false);
   const onLoad = () => {

@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { NotebookOutput } from "@kobe/protocol";
 import { must } from "../testing/must";
-import { outputView, stripAnsi, terminalText } from "./outputs";
+import { IMAGE_MAX_BYTES, outputView, stripAnsi, terminalText } from "./outputs";
 
 const display = (data: Record<string, unknown>): NotebookOutput =>
   ({ output_type: "display_data", data, metadata: {} }) as NotebookOutput;
@@ -62,6 +62,18 @@ describe("outputView", () => {
       Uint8Array.from(atob(must(svg.src.split(",")[1])), (c) => c.charCodeAt(0)),
     );
     expect(decoded).toBe('<svg><script>alert("é")</script></svg>');
+  });
+
+  it("does not show images over the size cap", () => {
+    const big = "A".repeat(Math.ceil(((IMAGE_MAX_BYTES + 3) * 4) / 3));
+    const png = outputView(display({ "image/png": big }));
+    expect(png.kind).toBe("image_too_large");
+    expect(png.kind === "image_too_large" && png.bytes).toBeGreaterThan(IMAGE_MAX_BYTES);
+    const svg = outputView(
+      display({ "image/svg+xml": `<svg>${"x".repeat(IMAGE_MAX_BYTES)}</svg>` }),
+    );
+    expect(svg).toEqual({ kind: "image_too_large", bytes: IMAGE_MAX_BYTES + 11 });
+    expect(outputView(display({ "image/png": "QUJD" }))).toMatchObject({ kind: "image" });
   });
 
   it("turns a DataFrame's HTML into a table of plain text, never markup", () => {

@@ -106,9 +106,10 @@ export class Kernel {
       };
     },
   };
-  wiring(threadId: string | null = THREAD): KernelWiring {
+  wiring(threadId: string | null = THREAD, readOnly = false): KernelWiring {
     return {
       threadId,
+      readOnly,
       api: this.api,
       runs: this.store,
       teamId: TEAM,

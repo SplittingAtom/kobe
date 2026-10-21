@@ -24,6 +24,8 @@ export interface CellProps {
   readonly last: boolean;
   readonly editable: boolean;
   readonly canRun: boolean;
+  /** False for a shared reader: no Run button at all. */
+  readonly showRun?: boolean | undefined;
   /** `[n]`, `[*]` while running, `[ ]` never run. */
   readonly count: string;
   readonly outputs: readonly (NotebookOutput | null | undefined)[];
@@ -100,15 +102,17 @@ function CodeCell(props: CellProps) {
           <span className="text-muted-foreground font-mono text-xs" data-kobe-exec-count="">
             {count}
           </span>
-          <button
-            type="button"
-            className={BUTTON}
-            disabled={!canRun}
-            aria-label={`Run cell ${number}`}
-            onClick={props.onRun}
-          >
-            Run
-          </button>
+          {props.showRun !== false && (
+            <button
+              type="button"
+              className={BUTTON}
+              disabled={!canRun}
+              aria-label={`Run cell ${number}`}
+              onClick={props.onRun}
+            >
+              Run
+            </button>
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <Suspense fallback={<EditorFallback />}>

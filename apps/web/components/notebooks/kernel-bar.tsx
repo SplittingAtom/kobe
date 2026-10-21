@@ -13,6 +13,8 @@ import { egressNotices, type Execution } from "../../lib/notebooks/executions";
 import type { KernelNote, KernelWiring } from "./use-kernel";
 
 export const RESTART_PROMPT = "Restart the kernel? Its variables and imports are lost.";
+export const READ_ONLY_NOTE =
+  "You are viewing a shared conversation: only its owner can run code in its kernel.";
 export const NO_THREAD_NOTE =
   "Send a message first: code runs in this conversation's kernel, in your sandbox.";
 
@@ -26,6 +28,17 @@ export function KernelControls({
   onKernel(op: "interrupt" | "restart"): void;
 }) {
   const ready = wiring !== undefined && wiring.threadId !== null;
+  if (wiring?.readOnly) {
+    return (
+      <span
+        role="status"
+        className="text-muted-foreground text-xs"
+        data-kobe-kernel={busy ? "busy" : "idle"}
+      >
+        {busy ? "Kernel busy" : "Kernel idle"}
+      </span>
+    );
+  }
   return (
     <>
       <button
@@ -80,6 +93,11 @@ export function KernelNotices({
   const blocked = threadId === null ? [] : egressNotices(execs, egress, threadId, path);
   return (
     <>
+      {wiring?.readOnly === true && (
+        <p role="note" className="text-muted-foreground text-xs">
+          {READ_ONLY_NOTE}
+        </p>
+      )}
       {threadId === null && (
         <p role="note" className="text-muted-foreground text-xs">
           {NO_THREAD_NOTE}

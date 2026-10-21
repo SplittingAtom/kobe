@@ -21,6 +21,8 @@ export interface KernelWiring {
   readonly api: NotebookApi;
   readonly runs: NotebookExecStore;
   readonly teamId: string;
+  /** A shared reader's view (not the thread's owner): no run or kernel controls (NB6). */
+  readonly readOnly?: boolean | undefined;
   /** Request access on an egress notice (NB17). */
   readonly egressApi?: Pick<ChatApi, "requestEgressAccess" | "egressRequests"> | undefined;
   /** Tests drive the run streams without a browser. */

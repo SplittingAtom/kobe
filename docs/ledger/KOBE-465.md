@@ -31,7 +31,7 @@
   with `DOMParser` (inert document: no scripts run, nothing loads) only when it holds
   `<table class="dataframe">`, and renders `textContent` of th/td cells as React text (capped
   500 rows / 100 columns). A Table Schema in `application/json` renders the same way. Otherwise
-  HTML goes to the frame. Coordinator: please confirm this reading of "safe representation".
+  HTML goes to the frame. Confirmed by the coordinator (2026-10-21), recorded in NB4.
 - **Other kinds:** stream/traceback text with ANSI stripped (regex, never mapped to markup) and
   carriage-return overwrites applied; PNG/JPEG `data:` URLs; SVG re-encoded to a base64 `data:`
   URL for `<img>`; Markdown via the chat's `Markdown`; JSON pretty text; saved outputs pass the
@@ -59,12 +59,21 @@ dependencies (`@codemirror/lang-python` was present).
 
 ## Open questions
 
-- DataFrame-from-HTML via `DOMParser` (above): acceptable, or should the kernel bridge set
-  pandas `display.html.table_schema` and NB4 allow `application/vnd.dataresource+json`?
-- No owner/read-only check in the web: a shared viewer's Run shows the server's 403 message.
+- None.
+
+## Security review follow-ups (Opus, 2026-10-21; no blocking issues)
+
+- Shared readers (`useThreadReadOnly`, wiring `readOnly`) get no Run, Run all, Interrupt,
+  Restart or `.py` Run; a note says only the owner runs code. Outputs still show.
+- The output frame is keyed by a hash of its HTML (FNV-1a + length): changed HTML remounts a
+  fresh shell, which is posted to once.
+- Images over 10 MiB decoded (PNG/JPEG from base64 length, SVG UTF-8 bytes) show "Image too
+  large to show (size)" instead.
 
 ## Evidence (acceptance criteria → test or command output)
 
+- **review** `notebook-view.test.tsx` (shared reader, frame remount), `python-run.test.tsx`
+  (shared reader), `outputs.test.ts` (image cap).
 - **ac-1** `components/notebooks/notebook-view.test.tsx` (editing: edit/add/move/delete,
   Markdown edit, save at version, conflict notice; running: ids saved first, live outputs,
   `[*]`→`[n]`, read-back after save, edits kept during a run, Run all order and stop, Interrupt,

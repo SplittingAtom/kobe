@@ -176,7 +176,8 @@ function NotebookBody(
     (sha256 === undefined ? "This file's version is unknown, so it opens read-only." : undefined);
   const editable = blocked === undefined && base !== undefined;
   const threadId = k.threadId;
-  const canRun = threadId !== null && (editable || (draft === undefined && !idsAdded));
+  const reader = props.kernel?.readOnly === true;
+  const canRun = !reader && threadId !== null && (editable || (draft === undefined && !idsAdded));
 
   const edit = (next: Notebook) => {
     if (!editable || base === undefined) return;
@@ -219,9 +220,11 @@ function NotebookBody(
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2" data-kobe-notebook={path}>
       <div role="toolbar" aria-label="Notebook" className="flex flex-wrap items-center gap-1">
-        <button type="button" className={BUTTON} disabled={!canRun} onClick={() => void runAll()}>
-          Run all
-        </button>
+        {!reader && (
+          <button type="button" className={BUTTON} disabled={!canRun} onClick={() => void runAll()}>
+            Run all
+          </button>
+        )}
         <KernelControls wiring={props.kernel} busy={k.busy} onKernel={(op) => void k.kernel(op)} />
         <button
           type="button"
@@ -270,6 +273,7 @@ function NotebookBody(
             last={i === notebook.cells.length - 1}
             editable={editable}
             canRun={canRun}
+            showRun={!reader}
             count={count}
             outputs={fromRun ? live.outputs : savedOutputs(cell)}
             live={fromRun ? live : undefined}

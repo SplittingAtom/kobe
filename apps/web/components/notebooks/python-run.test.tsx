@@ -10,11 +10,11 @@ import { ev, execId, Kernel, runId, THREAD } from "./testing";
 /** KOBE-465 ac-3: a `.py` file's Run button and output pane. */
 afterEach(cleanup);
 
-function setup(drafts = new EditDraftStore(), threadId: string | null = THREAD) {
+function setup(drafts = new EditDraftStore(), threadId: string | null = THREAD, readOnly = false) {
   const kernel = new Kernel();
   render(
     <TooltipProvider>
-      <PythonRunPane path="src/job.py" drafts={drafts} kernel={kernel.wiring(threadId)} />
+      <PythonRunPane path="src/job.py" drafts={drafts} kernel={kernel.wiring(threadId, readOnly)} />
     </TooltipProvider>,
   );
   return kernel;
@@ -55,6 +55,13 @@ describe("Run for .py files (ac-3)", () => {
     expect(within(pane).queryByText("Running…")).toBeNull();
     // A .py run is never saved anywhere: no "not saved" note.
     expect(within(pane).queryByText(/not saved/u)).toBeNull();
+  });
+
+  it("has no Run or kernel controls for a shared reader", () => {
+    setup(undefined, THREAD, true);
+    for (const name of ["Run", "Interrupt", "Restart"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
   });
 
   it("does not run unsaved changes", () => {

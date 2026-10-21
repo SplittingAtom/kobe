@@ -15,6 +15,7 @@ export type OutputView =
   | { readonly kind: "stream"; readonly name: "stdout" | "stderr"; readonly text: string }
   | { readonly kind: "error"; readonly title: string; readonly traceback: string }
   | { readonly kind: "image"; readonly src: string; readonly alt: string }
+  | { readonly kind: "image_too_large"; readonly bytes: number }
   | {
       readonly kind: "table";
       readonly header: readonly (readonly string[])[];
@@ -29,6 +30,8 @@ export type OutputView =
 export type HtmlParser = (html: string) => Document;
 
 export const TABLE_MAX_ROWS = 500;
+/** Images (decoded bytes) larger than this are not shown (a note with the size instead). */
+export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 export const TABLE_MAX_COLUMNS = 100;
 
 // CSI (colours, cursor moves), OSC (titles) and other two-byte escapes.
@@ -117,13 +120,18 @@ function bundleView(data: Readonly<Record<string, unknown>>, parse?: HtmlParser)
   if (schema) return schema;
   const alt = str("text/plain")?.trim() || "Output image";
   for (const mime of ["image/png", "image/jpeg"] as const) {
-    const b64 = str(mime);
-    if (b64 !== null)
-      return { kind: "image", src: `data:${mime};base64,${b64.replace(/\s/gu, "")}`, alt };
+    const b64 = str(mime)?.replace(/\s/gu, "");
+    if (b64 === undefined) continue;
+    const bytes = Math.floor((b64.length * 3) / 4) - (/=+$/u.exec(b64)?.[0].length ?? 0);
+    if (bytes > IMAGE_MAX_BYTES) return { kind: "image_too_large", bytes };
+    return { kind: "image", src: `data:${mime};base64,${b64}`, alt };
   }
   const svg = str("image/svg+xml");
-  if (svg !== null)
+  if (svg !== null) {
+    const bytes = new TextEncoder().encode(svg).length;
+    if (bytes > IMAGE_MAX_BYTES) return { kind: "image_too_large", bytes };
     return { kind: "image", src: `data:image/svg+xml;base64,${base64Utf8(svg)}`, alt };
+  }
   if (html !== null) return { kind: "html", html };
   const markdown = str("text/markdown");
   if (markdown !== null) return { kind: "markdown", text: markdown };
