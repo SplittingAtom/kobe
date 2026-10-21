@@ -303,6 +303,11 @@ function applyOne(run: LiveRun, event: KobeEvent): LiveRun {
     // reload the card reads the same record from the thread's proposal list.
     case "file.edit_proposed":
       return withTool(next, event.payload.tool_call_id, (t) => ({ ...t, fileEdit: event.payload }));
+    // KOBE-464: notebook executions; the web shows them in KOBE-465 and ignores them until then.
+    case "notebook.started":
+    case "notebook.output":
+    case "notebook.finished":
+      return next;
     case "entry.committed":
       return commit(next, event.payload);
     case "run.completed":
