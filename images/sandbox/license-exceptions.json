@@ -15,14 +15,14 @@
   },
   "pillow": {
     "license": "MIT-CMU",
-    "versions": ["12.3.0"],
+    "versions": ["13.0.0"],
     "reason": "HPND/MIT-CMU: permissive, MIT-like. matplotlib dependency (KOBE-21).",
     "approvedBy": "Chris",
     "approvedOn": "2026-10-17"
   },
   "npm": {
     "license": "Artistic-2.0",
-    "versions": ["12.2.0"],
+    "versions": ["12.2.1"],
     "reason": "The npm CLI, shipped unmodified as a separate program so agents can install packages through the egress proxy. Artistic-2.0 is OSI-approved and not copyleft for unmodified redistribution (KOBE-21).",
     "approvedBy": "Chris",
     "approvedOn": "2026-10-17"

@@ -972,7 +972,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | @isaacs/fs-minipass | 4.0.1 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@isaacs/fs-minipass/v/4.0.1) |
 | @isaacs/string-locale-compare | 1.1.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@isaacs/string-locale-compare/v/1.1.0) |
 | @npmcli/agent | 5.0.2 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@npmcli/agent/v/5.0.2) |
-| @npmcli/arborist | 10.0.3 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@npmcli/arborist/v/10.0.3) |
+| @npmcli/arborist | 10.0.4 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@npmcli/arborist/v/10.0.4) |
 | @npmcli/config | 11.2.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@npmcli/config/v/11.2.0) |
 | @npmcli/fs | 6.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@npmcli/fs/v/6.0.0) |
 | @npmcli/git | 8.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@npmcli/git/v/8.0.0) |
@@ -1026,7 +1026,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | bin-links | 7.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/bin-links/v/7.0.0) |
 | binary-extensions | 3.1.0 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/binary-extensions/v/3.1.0) |
 | bowser | 2.14.1 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/bowser/v/2.14.1) |
-| brace-expansion | 5.0.9 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi), npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/brace-expansion/v/5.0.9) |
+| brace-expansion | 5.0.12 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi), npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/brace-expansion/v/5.0.12) |
 | buffer-equal-constant-time | 1.0.1 | BSD-3-Clause | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/buffer-equal-constant-time/v/1.0.1) |
 | cacache | 21.0.1 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/cacache/v/21.0.1) |
 | chalk | 5.6.2 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/chalk/v/5.6.2) |
@@ -1072,7 +1072,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | highlight.js | 10.7.3 | BSD-3-Clause | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/highlight.js/v/10.7.3) |
 | hosted-git-info | 10.1.1 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/hosted-git-info/v/10.1.1) |
 | hosted-git-info | 9.0.3 | ISC | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/hosted-git-info/v/9.0.3) |
-| http-cache-semantics | 4.2.0 | BSD-2-Clause | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/http-cache-semantics/v/4.2.0) |
+| http-cache-semantics | 4.3.0 | BSD-2-Clause | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/http-cache-semantics/v/4.3.0) |
 | http-proxy-agent | 9.1.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi), npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/http-proxy-agent/v/9.1.0) |
 | https-proxy-agent | 7.0.6 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/https-proxy-agent/v/7.0.6) |
 | https-proxy-agent | 9.1.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi), npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/https-proxy-agent/v/9.1.0) |
@@ -1081,7 +1081,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | ignore | 7.0.8 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/ignore/v/7.0.8) |
 | ini | 7.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/ini/v/7.0.0) |
 | init-package-json | 9.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/init-package-json/v/9.0.0) |
-| ip-address | 10.5.0 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/ip-address/v/10.5.0) |
+| ip-address | 10.7.2 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/ip-address/v/10.7.2) |
 | ipykernel | 7.4.0 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/ipykernel/7.4.0/) |
 | ipython_pygments_lexers | 1.1.1 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/ipython_pygments_lexers/1.1.1/) |
 | ipython | 9.17.1 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/ipython/9.17.1/) |
@@ -1105,11 +1105,11 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | jws | 4.0.1 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/jws/v/4.0.1) |
 | kiwisolver | 1.5.1 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/kiwisolver/1.5.1/) |
 | libnpmaccess | 11.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmaccess/v/11.0.0) |
-| libnpmdiff | 9.0.3 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmdiff/v/9.0.3) |
-| libnpmexec | 11.0.3 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmexec/v/11.0.3) |
-| libnpmfund | 8.0.3 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmfund/v/8.0.3) |
+| libnpmdiff | 9.0.4 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmdiff/v/9.0.4) |
+| libnpmexec | 11.0.4 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmexec/v/11.0.4) |
+| libnpmfund | 8.0.4 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmfund/v/8.0.4) |
 | libnpmorg | 9.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmorg/v/9.0.0) |
-| libnpmpack | 10.0.3 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmpack/v/10.0.3) |
+| libnpmpack | 10.0.4 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmpack/v/10.0.4) |
 | libnpmpublish | 12.0.1 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmpublish/v/12.0.1) |
 | libnpmsearch | 10.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmsearch/v/10.0.0) |
 | libnpmteam | 9.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmteam/v/9.0.0) |
@@ -1151,7 +1151,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | npm-profile | 13.0.1 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/npm-profile/v/13.0.1) |
 | npm-registry-fetch | 20.0.1 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/npm-registry-fetch/v/20.0.1) |
 | npm-user-validate | 5.0.0 | BSD-2-Clause | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/npm-user-validate/v/5.0.0) |
-| npm | 12.2.0 | Artistic-2.0 (exception) | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/npm/v/12.2.0) |
+| npm | 12.2.1 | Artistic-2.0 (exception) | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/npm/v/12.2.1) |
 | numpy | 2.5.3 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/numpy/2.5.3/) |
 | openai | 7.19.0 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/openai/v/7.19.0) |
 | openpyxl | 3.1.5 | MIT | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/openpyxl/3.1.5/) |
@@ -1167,11 +1167,11 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | path-scurry | 2.0.2 | BlueOak-1.0.0 | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/path-scurry/v/2.0.2) |
 | pexpect | 4.9.0 | ISC | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/pexpect/4.9.0/) |
 | picomatch | 4.0.5 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/picomatch/v/4.0.5) |
-| pillow | 12.3.0 | MIT-CMU (exception) | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/pillow/12.3.0/) |
+| pillow | 13.0.0 | MIT-CMU (exception) | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/pillow/13.0.0/) |
 | pino | 10.4.0 | MIT | bundled (npm package) | sandbox: kobe-sandbox-agent | [license](https://www.npmjs.com/package/pino/v/10.4.0) |
 | pip | 25.0.1 | MIT | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/pip/25.0.1/) |
 | platformdirs | 4.13.5 | MIT | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/platformdirs/4.13.5/) |
-| postcss-selector-parser | 7.1.4 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/postcss-selector-parser/v/7.1.4) |
+| postcss-selector-parser | 7.1.6 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/postcss-selector-parser/v/7.1.6) |
 | proc-log | 7.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/proc-log/v/7.0.0) |
 | proggy | 4.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/proggy/v/4.0.0) |
 | promise-all-reject-late | 1.0.1 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/promise-all-reject-late/v/1.0.1) |
@@ -1232,7 +1232,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | typebox | 1.3.27 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/typebox/v/1.3.27) |
 | typing_extensions | 4.16.0 | PSF-2.0 (exception) | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/typing_extensions/4.16.0/) |
 | undici-types | 6.21.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/undici-types/v/6.21.0) |
-| undici | 6.28.0 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/undici/v/6.28.0) |
+| undici | 6.29.0 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/undici/v/6.29.0) |
 | undici | 8.10.2 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/undici/v/8.10.2) |
 | util-deprecate | 1.0.2 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/util-deprecate/v/1.0.2) |
 | validate-npm-package-name | 8.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/validate-npm-package-name/v/8.0.0) |
@@ -1253,8 +1253,8 @@ Documented exceptions (`images/sandbox/license-exceptions.json`):
 
 - `asttokens` 3.0.2 (Apache 2.0): Apache-2.0 declared with a non-SPDX label (the package's own LICENSE is Apache-2.0); a dependency of IPython for the notebook kernel (KOBE-464). Pending gate review.
 - `matplotlib` 3.11.2 (Python-2.0): matplotlib's PSF-based license: permissive, not copyleft. Required for chart artifacts (the charts skill, spec D21) (KOBE-21). Approved by Chris on 2026-10-17.
-- `npm` 12.2.0 (Artistic-2.0): The npm CLI, shipped unmodified as a separate program so agents can install packages through the egress proxy. Artistic-2.0 is OSI-approved and not copyleft for unmodified redistribution (KOBE-21). Approved by Chris on 2026-10-17.
-- `pillow` 12.3.0 (MIT-CMU): HPND/MIT-CMU: permissive, MIT-like. matplotlib dependency (KOBE-21). Approved by Chris on 2026-10-17.
+- `npm` 12.2.1 (Artistic-2.0): The npm CLI, shipped unmodified as a separate program so agents can install packages through the egress proxy. Artistic-2.0 is OSI-approved and not copyleft for unmodified redistribution (KOBE-21). Approved by Chris on 2026-10-17.
+- `pillow` 13.0.0 (MIT-CMU): HPND/MIT-CMU: permissive, MIT-like. matplotlib dependency (KOBE-21). Approved by Chris on 2026-10-17.
 - `qrcode-terminal` 0.12.0 (Apache 2.0): Apache-2.0 declared with a non-SPDX label (npm dependency) (KOBE-21). Approved by Chris on 2026-10-17.
 - `spdx-exceptions` 2.5.0 (CC-BY-3.0): SPDX exception-list data used by npm; attribution-only data license, not copyleft (KOBE-21). Approved by Chris on 2026-10-17.
 - `typing_extensions` 4.16.0 (PSF-2.0): Python Software Foundation license: permissive (BSD-style), not copyleft. Transitive dependency of the data stack (KOBE-21). Approved by Chris on 2026-10-17.

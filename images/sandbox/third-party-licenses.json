@@ -534,7 +534,7 @@
     {
       "name": "npm",
       "versions": [
-        "12.2.0"
+        "12.2.1"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -556,7 +556,7 @@
     {
       "name": "http-cache-semantics",
       "versions": [
-        "4.2.0"
+        "4.3.0"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1149,7 +1149,7 @@
     {
       "name": "@npmcli/arborist",
       "versions": [
-        "10.0.3"
+        "10.0.4"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1440,7 +1440,7 @@
     {
       "name": "libnpmdiff",
       "versions": [
-        "9.0.3"
+        "9.0.4"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1450,7 +1450,7 @@
     {
       "name": "libnpmexec",
       "versions": [
-        "11.0.3"
+        "11.0.4"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1460,7 +1460,7 @@
     {
       "name": "libnpmfund",
       "versions": [
-        "8.0.3"
+        "8.0.4"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1480,7 +1480,7 @@
     {
       "name": "libnpmpack",
       "versions": [
-        "10.0.3"
+        "10.0.4"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -2165,7 +2165,7 @@
     {
       "name": "brace-expansion",
       "versions": [
-        "5.0.9"
+        "5.0.12"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -2379,7 +2379,7 @@
     {
       "name": "ip-address",
       "versions": [
-        "10.5.0"
+        "10.7.2"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -2620,7 +2620,7 @@
     {
       "name": "postcss-selector-parser",
       "versions": [
-        "7.1.4"
+        "7.1.6"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -2841,7 +2841,7 @@
     {
       "name": "undici",
       "versions": [
-        "6.28.0"
+        "6.29.0"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -3133,7 +3133,7 @@
     {
       "name": "pillow",
       "versions": [
-        "12.3.0"
+        "13.0.0"
       ],
       "ecosystem": "pypi",
       "locations": [
