@@ -20,6 +20,8 @@ export interface FileEntry {
   readonly mtime: string;
   readonly source: "synced" | "live";
   readonly area: WorkspaceArea;
+  /** The synced copy's version (KOBE-462); absent for folders and live-only files. */
+  readonly sha256?: string | undefined;
 }
 
 export interface FolderListing {
@@ -67,6 +69,12 @@ export interface FilesApi {
    * whether it exists). 404 `not_found`: the file is gone.
    */
   read(path: string, maxBytes: number, wholeOnly?: boolean): Promise<ApiResult<CappedBytes>>;
+  /**
+   * The file editor's save (KOBE-463, spec FE4): replaces an existing file of the member's own
+   * workspace with `text` when its synced copy still has `baseSha256` (the version the editor
+   * loaded). 409 `version_conflict`: it changed or was deleted meanwhile; read-only areas 403.
+   */
+  save(path: string, baseSha256: string, text: string): Promise<ApiResult<FileEntry>>;
   /** The panel opened: start the sandbox so the next sync catches up (202, fire and forget). */
   wake(): Promise<ApiResult<{ readonly status: string }>>;
 }
@@ -103,6 +111,12 @@ export function createFilesApi(teamId: string, fetchFn?: typeof fetch): FilesApi
       apiRequest(`/v1/workspace/files${query({ path })}`, { ...opts, method: "DELETE" }),
     move: (from, to) =>
       apiRequest(`/v1/workspace/files/move`, { ...opts, method: "POST", json: { from, to } }),
+    save: (path, baseSha256, text) =>
+      apiRequest(`/v1/workspace/file${query({ path, base_sha256: baseSha256 })}`, {
+        ...opts,
+        method: "PUT",
+        raw: { body: new TextEncoder().encode(text), contentType: "text/plain; charset=utf-8" },
+      }),
     wake: () => apiRequest(`/v1/workspace/wake`, { ...opts, method: "POST" }),
   };
 }

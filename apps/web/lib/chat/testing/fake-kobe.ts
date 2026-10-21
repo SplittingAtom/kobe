@@ -8,6 +8,7 @@
  */
 import { COMPACT_THREAD_ERROR_MESSAGES, EVENT_ENTRY_PAYLOAD_MAX_BYTES } from "@kobe/protocol";
 import type { KobeEvent, KobeEventPayload, KobeEventType } from "@kobe/protocol";
+import { sha256Hex } from "../../files/editor";
 import type { EventSourceFactory, EventSourceLike } from "../stream";
 
 type Json = Record<string, unknown>;
@@ -225,6 +226,12 @@ export class FakeKobe {
   readonly sharedFiles = new Map<string, { readonly bytes: Uint8Array; readonly status: number }>();
   /** `GET /v1/skills/drafts/saves?threadId=` (KOBE-442): the server's record of save_skill_draft calls. */
   readonly skillDraftSaves = new Map<string, readonly Record<string, unknown>[]>();
+  /** `GET /v1/threads/{id}/file-edit-proposals` (KOBE-462): the thread's proposals, wire casing. */
+  readonly fileEditProposals = new Map<string, readonly Record<string, unknown>[]>();
+  /** Message bodies as `POST /v1/threads/{id}/messages` received them (KOBE-463: `viewing`). */
+  readonly submittedBodies: Json[] = [];
+  /** `PUT /v1/workspace/file` saves (KOBE-463): path, base version and the saved text. */
+  readonly workspaceSaves: { path: string; base: string; text: string }[] = [];
 
   // --- setup ----------------------------------------------------------------------------------
 
@@ -1107,6 +1114,9 @@ export class FakeKobe {
         }));
       return json(200, { path: dir, entries });
     }
+    if (url.pathname === "/v1/workspace/file" && method === "PUT") {
+      return this.#saveWorkspaceFile(url, init.body);
+    }
     if (url.pathname === "/v1/workspace/file" && method === "GET") {
       const bytes = this.workspaceFiles.get(url.searchParams.get("path") ?? "");
       if (!bytes) return error(404, "not_found");
@@ -1675,6 +1685,9 @@ export class FakeKobe {
       return new Response(null, { status: 204 });
     }
     if (action === "card" && method === "GET") return json(200, this.#card(thread));
+    if (action === "file-edit-proposals" && method === "GET") {
+      return json(200, { proposals: this.fileEditProposals.get(thread.thread_id) ?? [] });
+    }
     if (action === "messages") return this.#submit(thread, body, headers.get("idempotency-key"));
     if (action === "runs") return json(200, this.#threadRuns(thread.thread_id));
     if (action === "pending-messages") return json(200, this.#pending(thread.thread_id));
@@ -1912,7 +1925,40 @@ export class FakeKobe {
     };
   }
 
+  /** The editor's save (FE4): replaces the file when it still has `base_sha256`, else 409. */
+  async #saveWorkspaceFile(url: URL, raw: unknown): Promise<Response> {
+    const path = url.searchParams.get("path") ?? "";
+    const base = url.searchParams.get("base_sha256") ?? "";
+    const current = this.workspaceFiles.get(path);
+    const currentSha = current === undefined ? undefined : await sha256Hex(current);
+    if (currentSha !== base) {
+      return json(409, {
+        code: "version_conflict",
+        message: "The file changed since you opened it.",
+        current:
+          current === undefined
+            ? null
+            : { sha256: currentSha, size_bytes: current.length, mtime: "2026-10-21T00:00:00.000Z" },
+      });
+    }
+    const bytes = raw instanceof Uint8Array ? raw : new TextEncoder().encode(String(raw ?? ""));
+    this.workspaceFiles.set(path, new Uint8Array(bytes));
+    this.workspaceSaves.push({ path, base, text: new TextDecoder().decode(bytes) });
+    return json(200, {
+      name: path.slice(path.lastIndexOf("/") + 1),
+      path,
+      type: "file",
+      size_bytes: bytes.length,
+      mtime: "2026-10-21T00:00:00.000Z",
+      source: "synced",
+      owner: "server",
+      area: "workspace",
+      sha256: await sha256Hex(bytes),
+    });
+  }
+
   #submit(thread: FakeThread, body: Json | undefined, key: string | null): Response {
+    this.submittedBodies.push(body ?? {});
     if (thread.deleted_at !== null) return error(409, "thread_in_trash");
     const repeat = [...this.runs.values()].find((r) => key !== null && r.client_key === key);
     if (repeat) return json(201, { run_id: repeat.run_id, queued: repeat.status === "queued" });

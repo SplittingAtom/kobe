@@ -120,4 +120,26 @@ describe("files api", () => {
     expect(res.ok && res.data).toEqual({ bytes: new Uint8Array(0), size: 8, truncated: true });
     expect(pulled).toBeLessThanOrEqual(1); // at most the stream's own first pull
   });
+
+  it("saves text at the version it was loaded at (KOBE-463, FE4) and reports a conflict", async () => {
+    const base = "b".repeat(64);
+    const ok = stub(200, {
+      name: "n.md",
+      path: "d/n.md",
+      type: "file",
+      size_bytes: 3,
+      sha256: "c".repeat(64),
+    });
+    const res = await createFilesApi("t1", ok.fetchFn).save("d/n.md", base, "héllo");
+    const call = must(ok.calls[0]);
+    expect(call.url).toBe(`/v1/workspace/file?path=d%2Fn.md&base_sha256=${base}`);
+    expect(call.init.method).toBe("PUT");
+    expect(new Headers(call.init.headers).get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(new TextDecoder().decode(call.init.body as Uint8Array)).toBe("héllo");
+    expect(res.ok && res.data.sha256).toBe("c".repeat(64));
+
+    const conflict = stub(409, { code: "version_conflict", message: "Changed.", current: null });
+    const failed = await createFilesApi("t1", conflict.fetchFn).save("d/n.md", base, "x");
+    expect(!failed.ok && failed.error).toMatchObject({ status: 409, code: "version_conflict" });
+  });
 });

@@ -33,6 +33,8 @@ export interface ToolActivity {
   readonly approvalResolved?: Payload<"approval.resolved"> | undefined;
   readonly artifacts: readonly (Payload<"artifact.created"> | Payload<"artifact.updated">)[];
   readonly files: readonly Payload<"file.shared">[];
+  /** A `propose_file_edit` proposal the server recorded (KOBE-463): the card's Review. */
+  readonly fileEdit?: Payload<"file.edit_proposed"> | undefined;
 }
 
 /** Run-level happenings shown beside the conversation (not tied to a tool call). */
@@ -297,9 +299,10 @@ function applyOne(run: LiveRun, event: KobeEvent): LiveRun {
     // KOBE-442: the save_skill_draft card reads the server's record of saves, not the stream.
     case "skill.draft_saved":
       return next;
-    // KOBE-462: proposals are read from the server's record by the file editor (KOBE-463).
+    // KOBE-463: the server's record of a proposal, on its tool call (the card's Review); after a
+    // reload the card reads the same record from the thread's proposal list.
     case "file.edit_proposed":
-      return next;
+      return withTool(next, event.payload.tool_call_id, (t) => ({ ...t, fileEdit: event.payload }));
     case "entry.committed":
       return commit(next, event.payload);
     case "run.completed":

@@ -7,7 +7,8 @@ import type { appContextBody } from "../apps/app-context";
 
 /** One `app_context` part as sent (KOBE-439). */
 export type AppContextWire = ReturnType<typeof appContextBody>[number];
-import type { ThinkingLevel } from "@kobe/protocol";
+import type { MessageViewing, ThinkingLevel } from "@kobe/protocol";
+import type { ProposalView } from "../files/editor-state";
 import { apiDownload, apiRequest, apiTextFile, type ApiResult, type TextFile } from "../api/client";
 import type { ArtifactDetailView, ArtifactSummaryView } from "./artifacts";
 import type { BudgetStatus } from "../admin/api/budgets";
@@ -201,6 +202,8 @@ export interface ChatApi {
       readonly appContext?: readonly AppContextWire[] | undefined;
       /** A skill picked from the composer's + menu (KOBE-451). */
       readonly skill?: string | undefined;
+      /** The workspace file open in the artifact column (KOBE-463, FE7). */
+      readonly viewing?: MessageViewing | undefined;
     },
     idempotencyKey: string,
   ): Promise<ApiResult<SubmitResult>>;
@@ -273,6 +276,11 @@ export interface ChatApi {
   getArtifact(artifactId: string): Promise<ApiResult<ArtifactDetailView>>;
   /** The bytes of one version as text, for the panel's renderers. */
   artifactContent(artifactId: string, version: number): Promise<ApiResult<TextFile>>;
+  /**
+   * The thread's `propose_file_edit` proposals as the server recorded them (KOBE-462, FE9; the
+   * owner only), oldest first: the proposal cards after a reload.
+   */
+  fileEditProposals(threadId: string): Promise<ApiResult<readonly ProposalView[]>>;
   /** The bytes of a file the agent shared (`GET /v1/files/:id/content`, KOBE-150). */
   downloadSharedFile(fileId: string): Promise<ApiResult<Uint8Array>>;
   /**
@@ -395,6 +403,7 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
             ? {}
             : { app_context: body.appContext }),
           ...(body.skill === undefined ? {} : { skill: body.skill }),
+          ...(body.viewing === undefined ? {} : { viewing: body.viewing }),
         },
         teamId,
         idempotencyKey,
@@ -440,6 +449,22 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     getArtifact: (id) => get(`/v1/artifacts/${enc(id)}`),
     artifactContent: (id, version) =>
       apiTextFile(`/v1/artifacts/${enc(id)}/versions/${version}/content`, { teamId, fetchFn }),
+    fileEditProposals: async (id) => {
+      const res = await get<{ proposals: readonly (ProposalView & Record<string, unknown>)[] }>(
+        `/v1/threads/${enc(id)}/file-edit-proposals`,
+      );
+      if (!res.ok) return res;
+      const proposals = res.data.proposals.map(
+        ({ toolCallId, path, baseSha256, content, summary }) => ({
+          toolCallId,
+          path,
+          baseSha256,
+          content,
+          summary,
+        }),
+      );
+      return { ...res, data: proposals };
+    },
     downloadSharedFile: (id) => apiDownload(`/v1/files/${enc(id)}/content`, { teamId, fetchFn }),
     undoMemory: (docId, action) =>
       action.action === "restore" ? memory.restore(docId, action.version) : memory.remove(docId),
