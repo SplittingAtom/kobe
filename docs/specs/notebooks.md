@@ -45,7 +45,8 @@ deny rules on code do not see a file's contents, the same as `bash` running a sc
 `application/json`. Anything else is dropped by the agent and refused by the server. The web shows
 HTML and SVG only in the existing sandboxed, network-less artifact frame, never in the page
 (KOBE-465). Accepted (coordinator, 2026-10-21): a pandas DataFrame's `text/html` table is read
-with `DOMParser` (an inert document) and only its cells' text is rendered, as a table; any other
+with `DOMParser` (an inert document; its `<style>` elements are stripped first, since Chrome
+checks them against the page CSP) and only its cells' text is rendered, as a table; any other
 HTML goes to the frame. Matplotlib uses the inline backend (`MPLBACKEND`), which emits PNG display data.
 
 **NB5. Code runs only in the sandbox.** (Chris) Never on the server or in the browser. The server

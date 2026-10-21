@@ -65,10 +65,20 @@ function base64Utf8(text: string): string {
 
 const cellText = (el: Element) => (el.textContent ?? "").trim();
 
-/** A pandas DataFrame's `<table class="dataframe">` as rows of text; null for any other HTML. */
+/** Whole `<style>…</style>` elements (pandas emits `<style scoped>` before its table). */
+const STYLE_ELEMENT = /<style\b[^>]*>[\s\S]*?<\/style\s*>/giu;
+
+/**
+ * A pandas DataFrame's `<table class="dataframe">` as rows of text; null for any other HTML.
+ * `<style>` never reaches the parser: Chrome checks a DOMParser document's inline `<style>`
+ * against the page's CSP and reports a style-src-elem violation for each (KOBE-465 on gate1).
+ * HTML with a `<style>` left after stripping whole elements is not parsed at all (the frame).
+ */
 function dataFrameTable(html: string, parse: HtmlParser): OutputView | null {
   if (!/class="dataframe"/u.test(html)) return null;
-  const table = parse(html).querySelector("table.dataframe");
+  const stripped = html.replace(STYLE_ELEMENT, "");
+  if (/<style/iu.test(stripped)) return null;
+  const table = parse(stripped).querySelector("table.dataframe");
   if (!table) return null;
   const row = (tr: Element) =>
     Array.from(tr.querySelectorAll("th, td"), cellText).slice(0, TABLE_MAX_COLUMNS);
