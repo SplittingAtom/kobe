@@ -57,18 +57,44 @@ describe("Files | Apps (ac-1, ac-3)", () => {
     const files = screen.getByRole("tabpanel", { name: "Files" });
     expect(files.hidden).toBe(false);
     const user = userEvent.setup();
-    // Files' own state: the member asked to list them.
-    await user.click(within(files).getByRole("button", { name: "Open files" }));
+    // Files' own state: listed because its tab is on screen (KOBE-461).
     await within(files).findByRole("button", { name: "Refresh files" }, WAIT);
+    expect(within(files).queryByRole("button", { name: "Open files" })).toBeNull();
     await user.click(tab("Apps"));
     const apps = screen.getByRole("tabpanel", { name: "Apps" });
     expect(apps.hidden).toBe(false);
     expect(files.hidden).toBe(true);
     expect(within(apps).getByRole("button", { name: /^Open Lakehouse Explorer/ })).toBeTruthy();
     await user.click(tab("Files"));
-    // Kept mounted: still listed, not asked to open again.
+    // Kept mounted: still listed.
     expect(within(files).getByRole("button", { name: "Refresh files" })).toBeTruthy();
-    expect(within(files).queryByRole("button", { name: "Open files" })).toBeNull();
+  });
+
+  it("lists nothing on a load on Apps; the Files tab lists the first time, then reuses it (KOBE-461 ac-2)", async () => {
+    fake.preferences = { rail_tab: "apps" };
+    const wakes = () =>
+      fake.requests.filter((r) => r.method === "POST" && r.path === "/v1/workspace/wake").length;
+    const listings = () => fake.workspaceListings.length;
+    await withApps();
+    await waitFor(() => expect(tab("Apps").getAttribute("aria-selected")).toBe("true"));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(wakes()).toBe(0);
+    expect(listings()).toBe(0);
+    const user = userEvent.setup();
+    await user.click(tab("Files"));
+    await waitFor(() => expect(wakes()).toBe(1), WAIT);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(wakes()).toBe(1);
+    await user.click(tab("Apps"));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(wakes()).toBe(1);
+    await user.click(tab("Files"));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(wakes()).toBe(1);
+    expect(listings()).toBe(1);
+    // Mod+Shift+F still lists again.
+    act(() => void pressModShift("F"));
+    await waitFor(() => expect(wakes()).toBe(2), WAIT);
   });
 
   it("remembers the member's tab across loads (another device too)", async () => {

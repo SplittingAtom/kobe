@@ -112,6 +112,7 @@ describe("the Pickers section (KOBE-460 ac-1, ac-2)", () => {
 
   it("sits above the list, offers None and the apps named Picker (any case); the list keeps every app", async () => {
     fake.teamApps = [EXPLORER, PICKER, QUERY_PICKER];
+    fake.preferences = { rail_picker: null };
     openApp(fake, answered());
     const section = await appsTab();
     const select = pickerSelect(section);
@@ -133,6 +134,7 @@ describe("the Pickers section (KOBE-460 ac-1, ac-2)", () => {
 
   it("remembers the choice per member (server-side) and renders it live; None removes it", async () => {
     fake.teamApps = [EXPLORER, PICKER];
+    fake.preferences = { rail_picker: null };
     openApp(fake, answered());
     const section = await appsTab();
     await userEvent.setup().selectOptions(pickerSelect(section), PICKER.appId);
@@ -163,15 +165,55 @@ describe("the Pickers section (KOBE-460 ac-1, ac-2)", () => {
     );
   });
 
-  it("falls back to None with a note when the stored picker is no longer live", async () => {
+  it("opens on the first live picker when the member never chose, saving nothing (KOBE-461 ac-1)", async () => {
+    fake.teamApps = [EXPLORER, PICKER, QUERY_PICKER];
+    fake.preferences = { rail_tab: "apps" };
+    openApp(fake, answered());
+    expect(await screen.findByTitle(PICKER_FRAME, undefined, { timeout: 4_000 })).toBeTruthy();
+    const section = await screen.findByRole("tabpanel", { name: "Apps" });
+    expect(pickerSelect(section).value).toBe(PICKER.appId);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(openings()).toHaveLength(1);
+    expect(fake.preferences["rail_picker"]).toBeUndefined();
+  });
+
+  it("keeps a remembered None: no picker runs (KOBE-461 ac-1)", async () => {
+    fake.teamApps = [PICKER, QUERY_PICKER];
+    fake.preferences = { rail_picker: null, rail_tab: "apps" };
+    openApp(fake, answered());
+    const section = await screen.findByRole("tabpanel", { name: "Apps" });
+    await within(section).findByRole("combobox", { name: "Picker" });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(pickerSelect(section).value).toBe("");
+    expect(screen.queryByTitle(PICKER_FRAME)).toBeNull();
+    expect(appCalls()).toEqual([]);
+  });
+
+  it("opens the remembered pick, not the first, with one opening call (KOBE-461 ac-1)", async () => {
+    const OTHER_FRAME = "query picker (app from Catalyst)";
+    fake.teamApps = [PICKER, QUERY_PICKER];
+    fake.preferences = { rail_picker: QUERY_PICKER.appId, rail_tab: "apps" };
+    openApp(fake, answered());
+    expect(await screen.findByTitle(OTHER_FRAME, undefined, { timeout: 4_000 })).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 50));
+    const tools = appCalls().map((r) => (r.body as { tool: string }).tool);
+    expect(tools).toEqual([QUERY_PICKER.tool]);
+  });
+
+  it("opens on the first live picker with a note when the stored one is no longer live", async () => {
+    const OTHER_FRAME = "query picker (app from Catalyst)";
     fake.teamApps = [EXPLORER, QUERY_PICKER];
     fake.preferences = { rail_picker: PICKER.appId, rail_tab: "apps" };
     openApp(fake, answered());
     const section = await screen.findByRole("tabpanel", { name: "Apps" });
-    await waitFor(() => expect(pickerSelect(section).value).toBe(""));
+    await waitFor(() => expect(pickerSelect(section).value).toBe(QUERY_PICKER.appId));
     expect(within(section).getByText(/Your picker is no longer available/)).toBeTruthy();
-    expect(screen.queryByTitle(PICKER_FRAME)).toBeNull();
+    expect(await screen.findByTitle(OTHER_FRAME, undefined, { timeout: 4_000 })).toBeTruthy();
+    // Not the member's choice: the remembered pick stays until they choose again.
+    expect(fake.preferences["rail_picker"]).toBe(PICKER.appId);
+    await userEvent.setup().selectOptions(pickerSelect(section), "");
     await waitFor(() => expect(fake.preferences["rail_picker"]).toBeNull(), { timeout: 3_000 });
+    expect(within(section).queryByText(/Your picker is no longer available/)).toBeNull();
   });
 });
 
@@ -323,6 +365,7 @@ describe("the picker's opening tool result (KOBE-460 fix: Loading catalogs…)",
 
   it("calls once per selection, and again when the picker comes back on screen", async () => {
     fake.teamApps = [PICKER];
+    fake.preferences = { rail_picker: null };
     openApp(fake, answered());
     const section = await appsTab();
     await userEvent.setup().selectOptions(pickerSelect(section), PICKER.appId);
@@ -415,6 +458,7 @@ describe("the picker's opening, more cases (review LOW-2)", () => {
   it("switching pickers fast opens the last one with its own result, once each", async () => {
     const OTHER_FRAME = "query picker (app from Catalyst)";
     fake.teamApps = [PICKER, QUERY_PICKER];
+    fake.preferences = { rail_picker: null };
     openApp(fake, answered());
     const section = await appsTab();
     const user = userEvent.setup();
@@ -432,6 +476,7 @@ describe("the picker's opening, more cases (review LOW-2)", () => {
 describe("the rail's width with a picker (KOBE-460 ac-5)", () => {
   it("widens to at least 400 px while a picker shows, and None restores the member's width", async () => {
     fake.teamApps = [PICKER];
+    fake.preferences = { rail_picker: null };
     openApp(fake, answered());
     const section = await appsTab();
     expect(railVar()).toBe("");
@@ -445,7 +490,7 @@ describe("the rail's width with a picker (KOBE-460 ac-5)", () => {
 
   it("keeps a member's wider width, and comes back to their own after None", async () => {
     fake.teamApps = [PICKER];
-    fake.preferences = { rail_width: 480, rail_tab: "apps" };
+    fake.preferences = { rail_width: 480, rail_tab: "apps", rail_picker: null };
     openApp(fake, answered());
     const section = await screen.findByRole("tabpanel", { name: "Apps" });
     await waitFor(() => expect(railVar()).toBe("480px"));

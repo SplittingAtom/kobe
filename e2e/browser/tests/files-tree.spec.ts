@@ -53,8 +53,8 @@ test("Files tree: open, keys, icons, light and dark, rename, drag to move, Move 
   }
   try {
     const files = filesSection(page);
-    const openFiles = files.getByRole("button", { name: "Open files" });
-    if (await openFiles.isVisible()) await openFiles.click();
+    // Listed when Files came on screen (KOBE-461); list again for the files just written.
+    await files.getByRole("button", { name: "Refresh files" }).click();
     const tree = files.getByRole("tree", { name: "Files in your workspace" });
     const row = (name: string) => tree.getByRole("treeitem", { name, exact: true });
     await expect(row(dir)).toBeVisible();
@@ -76,6 +76,12 @@ test("Files tree: open, keys, icons, light and dark, rename, drag to move, Move 
     await expect(row("script.py")).toBeFocused();
     await expect(row("sales.csv")).toHaveAttribute("aria-level", "2");
 
+    // Refresh files sits in the tree's top row beside Upload (KOBE-461), the one in the section.
+    const top = files.locator('[data-kobe-drop-folder=""]');
+    await expect(top.getByRole("button", { name: "Refresh files" })).toBeVisible();
+    await expect(top.getByLabel("Upload a file to the workspace root")).toBeAttached();
+    await expect(files.getByRole("button", { name: "Refresh files" })).toHaveCount(1);
+
     // Compact rows with type icons; colour never carries the kind (it is in the description).
     expect((await row("sales.csv").boundingBox())?.height ?? 0).toBeLessThanOrEqual(26);
     await expect(row("sales.csv").locator("svg.lucide-file-spreadsheet")).toHaveCount(1);
@@ -84,11 +90,9 @@ test("Files tree: open, keys, icons, light and dark, rename, drag to move, Move 
     for (const theme of ["light", "dark"] as const) {
       await context.addCookies([{ name: THEME_COOKIE, value: theme, url: baseURL ?? "" }]);
       await page.reload();
-      // A load never lists Files on its own (listing wakes the sandbox): ask, as a member does,
-      // once the rail has rendered.
-      await expect(openFiles.or(row("sales.csv"))).toBeVisible();
-      if (await openFiles.isVisible()) await openFiles.click();
+      // A load on the Files tab lists them on its own (KOBE-461): no Open files to press.
       await expect(row("sales.csv")).toBeVisible(); // expansion is remembered
+      await expect(files.getByRole("button", { name: "Open files" })).toHaveCount(0);
       await files.screenshot({ path: testInfo.outputPath(`files-tree-${theme}.png`) });
     }
     await context.clearCookies({ name: THEME_COOKIE });

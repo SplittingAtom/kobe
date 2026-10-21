@@ -36,8 +36,6 @@ test("U18: an artifact and a workspace file open beside the thread", async ({ ch
 
     expect(await workspaceFile(page, `${dir}/notes.txt`, "notes beside the thread\n")).toBe(201);
     const files = filesSection(page);
-    const openFiles = files.getByRole("button", { name: "Open files" });
-    if (await openFiles.isVisible()) await openFiles.click();
     await files.getByRole("button", { name: "Refresh files" }).click();
     const tree = files.getByRole("tree", { name: "Files in your workspace" });
     await tree.getByRole("treeitem", { name: dir, exact: true }).click();

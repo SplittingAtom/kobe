@@ -104,10 +104,9 @@ function mount(threadId?: string) {
   return render(<ChatApp fetchFn={fetchFn} eventSource={fake.eventSource} />);
 }
 
-/** Opens the rail's Files section and lists the root. */
-async function openFiles(user: ReturnType<typeof userEvent.setup>) {
+/** The rail's Files section, listed once on screen (KOBE-461). */
+async function openFiles() {
   const section = await screen.findByRole("region", { name: "Files" });
-  await user.click(await within(section).findByRole("button", { name: "Open files" }));
   return section;
 }
 
@@ -152,7 +151,7 @@ describe("opening files (ac-1)", () => {
     files.set("report.csv", enc("a,b\n1,2"));
     mount(thread("Work"));
     const user = userEvent.setup();
-    const section = await openFiles(user);
+    const section = await openFiles();
     await user.click(await within(section).findByRole("treeitem", { name: "notes" }));
     const panel = await view(user, section, "todo.md");
     expect(await within(panel).findByRole("heading", { name: "Todo" })).toBeTruthy();
@@ -187,7 +186,7 @@ describe("opening again (ac-1, ac-3)", () => {
     files.set("a.md", enc("# One"));
     mount(thread("Work"));
     const user = userEvent.setup();
-    const section = await openFiles(user);
+    const section = await openFiles();
     const panel = await view(user, section, "a.md");
     expect(await within(panel).findByRole("heading", { name: "One" })).toBeTruthy();
 
@@ -207,7 +206,7 @@ describe("opening again (ac-1, ac-3)", () => {
     files.set("brief.md", enc("# Brief"));
     mount();
     const user = userEvent.setup();
-    await view(user, await openFiles(user), "brief.md");
+    await view(user, await openFiles(), "brief.md");
     await user.type(await composer(), "summarise it{Enter}");
     await waitFor(() => expect(fake.threads.size).toBe(1));
     const id = must([...fake.threads.values()][0]).thread_id;
@@ -225,7 +224,7 @@ describe("moved files (KOBE-304, ac-9)", () => {
     const threadId = thread("Work");
     mount(threadId);
     const user = userEvent.setup();
-    const section = await openFiles(user);
+    const section = await openFiles();
     await user.click(await within(section).findByRole("treeitem", { name: "notes" }));
     const panel = await view(user, section, "a.md");
     expect(await within(panel).findByRole("heading", { name: "Kept" })).toBeTruthy();
@@ -269,7 +268,6 @@ describe("narrow screens (KOBE-201)", () => {
     await user.click(await screen.findByRole("button", { name: "Show the workspace" }));
     const drawer = await screen.findByRole("dialog", { name: "Workspace" });
     const section = within(drawer).getByRole("region", { name: "Files" });
-    await user.click(await within(section).findByRole("button", { name: "Open files" }));
     await user.click(await within(section).findByRole("treeitem", { name: "a.md" }));
     const sheet = await screen.findByRole("dialog", { name: "a.md" });
     expect(sheet.getAttribute("aria-modal")).toBe("true");
@@ -286,7 +284,7 @@ describe("renderers (ac-2)", () => {
     files.set(name, typeof content === "string" ? enc(content) : content);
     mount(thread("Work"));
     const user = userEvent.setup();
-    return view(user, await openFiles(user), name);
+    return view(user, await openFiles(), name);
   }
 
   it("Markdown", async () => {
@@ -364,7 +362,7 @@ describe("memory, deleted files and caps (ac-3)", () => {
     const user = userEvent.setup();
     const list = await screen.findByRole("navigation", { name: "Artifacts in this conversation" });
     await user.click(within(list).getByRole("button", { name: "Plan" }));
-    await view(user, await openFiles(user), "a.md");
+    await view(user, await openFiles(), "a.md");
     expect(tabNames()).toEqual(["Plan", "a.md*"]);
     const stored = JSON.parse(must(localStorage.getItem(tabsKey(fake.teamId, t)))) as {
       open: string[];
@@ -426,7 +424,7 @@ describe("memory, deleted files and caps (ac-3)", () => {
     files.set("huge.png", new Uint8Array(10 * 1024 * 1024 + 1));
     mount(thread("Work"));
     const user = userEvent.setup();
-    const section = await openFiles(user);
+    const section = await openFiles();
     const big = await view(user, section, "big.txt");
     expect(await within(big).findByText(/Showing the first 1 MB of 1\.0 MB/)).toBeTruthy();
     const shownText = must(big.querySelector("pre")).textContent;
