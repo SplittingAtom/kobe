@@ -1366,6 +1366,11 @@ export const AUDIT_EVENTS = {
     bytes: count,
     area: z.enum(["drop"]).optional(),
   }),
+  /**
+   * The user saved an edited file of their own workspace from the file editor (KOBE-462): the new
+   * size only, never a name or content.
+   */
+  "workspace.file_saved": event("team", { userId: id, bytes: count }),
   /** The user deleted a file or folder of their own workspace in the file browser (KOBE-148). */
   "workspace.file_deleted": event("team", { userId: id, files: count, bytes: count }),
   /**

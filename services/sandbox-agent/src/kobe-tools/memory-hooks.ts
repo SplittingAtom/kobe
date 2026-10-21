@@ -8,7 +8,9 @@ import { TOOL_RECALL, TOOL_REMEMBER } from "./protocol.js";
  * to memory never restarts Pi:
  *  - `tools`: whether memory is on for this run; `remember` / `recall` are active only then;
  *  - `text`: the run's memory section (already sanitised, capped and fenced by the agent), added
- *    to that run's system prompt only: not part of the launch, not stored in the session.
+ *    to that run's system prompt only: not part of the launch, not stored in the session;
+ *  - `project` and `viewing` (KOBE-245, KOBE-462): the project instructions and the fenced file
+ *    the user has open, added the same way.
  * An unreadable or malformed file means no tools and no text (fail closed).
  */
 export interface MemoryRunFile {
@@ -16,8 +18,10 @@ export interface MemoryRunFile {
   readonly text: string;
   /** The project-instructions block (KOBE-245); independent of whether memory is on. */
   readonly project: string;
+  /** The viewed-file section (KOBE-462); independent of whether memory is on. */
+  readonly viewing: string;
 }
-const OFF: MemoryRunFile = { tools: false, text: "", project: "" };
+const OFF: MemoryRunFile = { tools: false, text: "", project: "", viewing: "" };
 
 export function readMemoryRunFile(
   file: string | undefined,
@@ -27,11 +31,12 @@ export function readMemoryRunFile(
   try {
     const value: unknown = JSON.parse(read(file));
     if (typeof value !== "object" || value === null) return OFF;
-    const { tools, text, project } = value as Record<string, unknown>;
+    const { tools, text, project, viewing } = value as Record<string, unknown>;
     if (typeof tools !== "boolean" || typeof text !== "string") return OFF;
-    // `project` is absent in files from an older agent: no project block.
+    // `project` and `viewing` are absent in files from an older agent: no such block.
     if (project !== undefined && typeof project !== "string") return OFF;
-    return { tools, text: tools ? text : "", project: project ?? "" };
+    if (viewing !== undefined && typeof viewing !== "string") return OFF;
+    return { tools, text: tools ? text : "", project: project ?? "", viewing: viewing ?? "" };
   } catch {
     return OFF;
   }
@@ -65,8 +70,8 @@ export function installMemoryHooks(
   };
   pi.on("input", syncTools as never);
   pi.on("before_agent_start", ((event: { systemPrompt: string }) => {
-    const { text, project } = state();
-    const parts = [text, project].filter((part) => part !== "");
+    const { text, project, viewing } = state();
+    const parts = [text, project, viewing].filter((part) => part !== "");
     return parts.length === 0
       ? undefined
       : { systemPrompt: `${event.systemPrompt}\n\n${parts.join("\n\n")}` };

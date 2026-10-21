@@ -8,6 +8,7 @@ import {
   type PiThreadConfig,
   type RunProjectContext,
   type RunMcpContext,
+  type RunViewingContext,
   type SandboxAttachment,
   type ThinkingLevel,
 } from "@kobe/protocol";
@@ -26,6 +27,7 @@ import {
   isQueuePaused,
   lockThreadRow,
   principalActive,
+  runViewing,
   threadRunRows,
   type AppliedTransition,
   type RunRow,
@@ -77,6 +79,8 @@ export interface StartPlan {
   readonly modelLimits?: CatalogTokenLimits;
   /** App cards Pi may not have yet, ending at the branch point (KOBE-440); absent = none. */
   readonly appCards?: readonly AppCardEntry[];
+  /** The workspace file the member had open when sending (KOBE-462); absent = none. */
+  readonly viewing?: RunViewingContext;
 }
 
 export interface Promotion {
@@ -257,28 +261,31 @@ export async function promoteInTx(
     }
     return {
       transitions,
-      plan: withAppCards(
-        withProject(
-          withAttachments(
-            planOf(
-              thread,
-              { ...next, parentEntryId, approvalMode },
-              resolved,
-              model,
-              resolution.limits,
-              thinkingLevel,
+      plan: withViewing(
+        withAppCards(
+          withProject(
+            withAttachments(
+              planOf(
+                thread,
+                { ...next, parentEntryId, approvalMode },
+                resolved,
+                model,
+                resolution.limits,
+                thinkingLevel,
+              ),
+              await listRunAttachments(
+                tx,
+                teamId,
+                threadId,
+                next.id,
+                await modelAcceptsImages(tx, model?.alias),
+              ),
             ),
-            await listRunAttachments(
-              tx,
-              teamId,
-              threadId,
-              next.id,
-              await modelAcceptsImages(tx, model?.alias),
-            ),
+            await projectRunContext(tx, { teamId, userId: thread.ownerUserId }, thread.projectId),
           ),
-          await projectRunContext(tx, { teamId, userId: thread.ownerUserId }, thread.projectId),
+          await appCardChain(tx, teamId, threadId, parentEntryId),
         ),
-        await appCardChain(tx, teamId, threadId, parentEntryId),
+        await runViewing(tx, teamId, next.id),
       ),
     };
   }
@@ -445,26 +452,33 @@ export async function restartPlanInTx(
   const recorded = await recordedThinkingLevel(tx, run.teamId, run.id);
   const thinkingLevel =
     recorded === undefined ? undefined : startThinkingLevel(resolution, recorded);
-  return withAppCards(
-    withProject(
-      withAttachments(
-        planOf(thread, run, resolved, resolution.model, resolution.limits, thinkingLevel),
-        await listRunAttachments(
+  return withViewing(
+    withAppCards(
+      withProject(
+        withAttachments(
+          planOf(thread, run, resolved, resolution.model, resolution.limits, thinkingLevel),
+          await listRunAttachments(
+            tx,
+            run.teamId,
+            thread.id,
+            run.id,
+            await modelAcceptsImages(tx, resolution.model?.alias),
+          ),
+        ),
+        await projectRunContext(
           tx,
-          run.teamId,
-          thread.id,
-          run.id,
-          await modelAcceptsImages(tx, resolution.model?.alias),
+          { teamId: run.teamId, userId: thread.ownerUserId },
+          thread.projectId,
         ),
       ),
-      await projectRunContext(
-        tx,
-        { teamId: run.teamId, userId: thread.ownerUserId },
-        thread.projectId,
-      ),
+      await appCardChain(tx, run.teamId, thread.id, run.parentEntryId),
     ),
-    await appCardChain(tx, run.teamId, thread.id, run.parentEntryId),
+    await runViewing(tx, run.teamId, run.id),
   );
+}
+
+function withViewing(plan: StartPlan, viewing: RunViewingContext | null): StartPlan {
+  return viewing === null ? plan : { ...plan, viewing };
 }
 
 function withAppCards(plan: StartPlan, appCards: readonly AppCardEntry[]): StartPlan {

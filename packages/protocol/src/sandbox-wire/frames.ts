@@ -37,6 +37,11 @@ import {
 } from "./skill-draft-frames.js";
 import { APP_CARDS_PER_RUN_MAX, appCardEntrySchema } from "../app-cards.js";
 import { runMemoryContextSchema } from "../memory.js";
+import { runViewingContextSchema } from "../file-editor.js";
+import {
+  fileEditProposeFrameSchema,
+  fileEditProposeResultFrameSchema,
+} from "./file-edit-frames.js";
 import { UPLOAD_MAX_FILES_PER_MESSAGE, uploadFileNameSchema } from "../uploads.js";
 import { fileShareCallShape, fileShareOkFields, shareFileWorkspaceRefSchema } from "../files.js";
 import { artifactCallShape, artifactFailFields, artifactOkFields } from "../artifacts.js";
@@ -276,6 +281,7 @@ export const sandboxToServerFrameSchema = z.union([
   memoryReadFrameSchema,
   projectFileProposeFrameSchema,
   skillDraftSaveFrameSchema,
+  fileEditProposeFrameSchema,
   webSearchQueryFrameSchema,
   traceSpansFrameSchema,
   piExitedFrameSchema,
@@ -454,6 +460,11 @@ export const runStartFrameSchema = frame("run.start", {
   project: runProjectContextSchema.optional(),
   /** The run's effective MCP connectors (KOBE-111, mcp-config.ts); only for agents with capability `mcp`. */
   mcp: runMcpContextSchema.optional(),
+  /**
+   * The workspace file the member had open when sending (KOBE-462, file-editor.ts): fenced as
+   * untrusted data in this run's system prompt only. Only for agents with capability `file_edits`.
+   */
+  viewing: runViewingContextSchema.optional(),
   /**
    * The run's trace context (KOBE-274, trace-frames.ts): only for agents with capability
    * `trace_spans`, and only when the server traces this run. Absent = record and send no spans.
@@ -647,6 +658,7 @@ export const serverToSandboxFrameSchema = z.union([
   memoryResultFrameSchema,
   projectFileProposeResultFrameSchema,
   skillDraftSaveResultFrameSchema,
+  fileEditProposeResultFrameSchema,
   webSearchResultFrameSchema,
   sessionRestoreFrameSchema,
   ackFrameSchema,

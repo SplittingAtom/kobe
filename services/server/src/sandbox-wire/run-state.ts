@@ -6,6 +6,7 @@ import {
   type ServerCallPurpose,
   type ThreadStatus,
 } from "@kobe/protocol";
+import { VIEWING_RECORD_ONLY } from "../runs/store.js";
 import { SYSTEM_ACTOR, readBudgetStopScope, sql, type KobeTx, type RunKind } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { auditExpiredApprovals, expireRunApprovalsInTx } from "../approvals/run-end.js";
@@ -160,7 +161,7 @@ export async function endRunInTx(
   }
   const expired = await expireRunApprovalsInTx(tx, teamId, runId, expiryCauseOfEnd(to));
   await tx.execute(sql`
-    UPDATE runs SET status = ${to}, ended_at = now()
+    UPDATE runs SET status = ${to}, ended_at = now(), viewing = ${VIEWING_RECORD_ONLY}
      WHERE team_id = ${teamId} AND id = ${runId}`);
   // The run's gateway tokens are revoked by the `runs_revoke_run_tokens` trigger (KOBE-118).
   const nextStatus = nextThreadStatus(threadRow.status, {

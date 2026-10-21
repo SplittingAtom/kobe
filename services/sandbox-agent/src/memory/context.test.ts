@@ -97,6 +97,7 @@ describe("memoryRunFileContent", () => {
       tools: true,
       text: "",
       project: "",
+      viewing: "",
     });
   });
   it("memory off, absent or unreadable: no tools and no text", () => {
@@ -104,7 +105,13 @@ describe("memoryRunFileContent", () => {
       tools: false,
       text: "",
       project: "",
+      viewing: "",
     });
-    expect(memoryRunFileContent(undefined)).toEqual({ tools: false, text: "", project: "" });
+    expect(memoryRunFileContent(undefined)).toEqual({
+      tools: false,
+      text: "",
+      project: "",
+      viewing: "",
+    });
   });
 });

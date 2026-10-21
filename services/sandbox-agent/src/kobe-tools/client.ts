@@ -3,6 +3,7 @@ import { LineReader } from "./lines.js";
 import { parseMemoryReply } from "./memory-reply.js";
 import { parseProjectReply } from "./project-reply.js";
 import { parseSkillDraftReply } from "./skill-draft-tool.js";
+import { parseFileEditReply } from "./file-edit-tool.js";
 import {
   MAX_PENDING_REQUESTS,
   MAX_REPLY_LINE_BYTES,
@@ -16,6 +17,7 @@ import {
   type WebSearchAnswer,
   type ProjectProposeAnswer,
   type SkillDraftAnswer,
+  type FileEditAnswer,
   type WebSearchUnavailable,
 } from "./protocol.js";
 
@@ -26,6 +28,7 @@ export type ToolsOutcome =
   | MemoryReadAnswer
   | ProjectProposeAnswer
   | SkillDraftAnswer
+  | FileEditAnswer
   | { readonly ok: true; readonly artifact_id: string; readonly version: number }
   | ({ readonly ok: true } & SharedFileFields)
   | { readonly ok: false; readonly error: ToolsError };
@@ -133,6 +136,7 @@ function parseResponse(line: string): ToolsResponse | undefined {
   if (value.ok === true && "file_id" in value) return parseFileReply(value);
   if (value.ok === true && value.op === "project_file_propose") return parseProjectReply(value);
   if (value.ok === true && value.op === "skill_draft_save") return parseSkillDraftReply(value);
+  if (value.ok === true && value.op === "file_edit_propose") return parseFileEditReply(value);
   if (value.ok === true && "op" in value) return parseMemoryReply(value);
   if (value.ok === true && "available" in value) return parseWebSearchReply(value);
   if (value.ok === true) {

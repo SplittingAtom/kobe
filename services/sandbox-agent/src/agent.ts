@@ -6,6 +6,7 @@ import {
   CAPABILITY_FILES,
   CAPABILITY_PROJECTS,
   CAPABILITY_SKILL_DRAFTS,
+  CAPABILITY_FILE_EDITS,
   CAPABILITY_WEB_SEARCH,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
@@ -29,6 +30,7 @@ import { ArtifactBroker } from "./tools/broker.js";
 import { FileShareBroker } from "./tools/share-broker.js";
 import { ProjectFileBroker } from "./tools/project-broker.js";
 import { SkillDraftBroker } from "./tools/skill-draft-broker.js";
+import { FileEditBroker } from "./tools/file-edit-broker.js";
 import { MemoryBroker } from "./tools/memory-broker.js";
 import { WebSearchBroker } from "./tools/web-search-broker.js";
 import { toolsError } from "./tools/channel.js";
@@ -156,6 +158,7 @@ export class Agent {
   readonly #proposals: ProjectFileBroker;
   readonly #skillDrafts: SkillDraftBroker;
   readonly #searches: WebSearchBroker;
+  readonly #fileEdits: FileEditBroker;
   readonly #memory: MemoryBroker;
   /** Run spans relayed to the server (KOBE-274); records only runs started with a trace context. */
   readonly #traces: TraceRecorder;
@@ -175,6 +178,7 @@ export class Agent {
     this.#broker = new PolicyBroker({ send: (frame) => this.#wire.send(frame) });
     this.#artifacts = new ArtifactBroker({ send: (frame) => this.#wire.send(frame) });
     this.#searches = new WebSearchBroker({ send: (frame) => this.#wire.send(frame) });
+    this.#fileEdits = new FileEditBroker({ send: (frame) => this.#wire.send(frame) });
     this.#memory = new MemoryBroker({ send: (frame) => this.#wire.send(frame) });
     const pushPath = deps.workspace?.pushPath?.bind(deps.workspace);
     this.#shares = new FileShareBroker({
@@ -207,6 +211,7 @@ export class Agent {
       shareFiles: this.#filesEnabled(),
       projectTools: this.#projectsEnabled(),
       skillDraftTools: this.#skillDraftsEnabled(),
+      fileEditTools: this.#fileEditsEnabled(),
       memoryTools: this.#memoryEnabled(),
       traceparentOf: (runId) => this.#traces.modelParentOf(runId),
       ...(deps.extensions === undefined ? {} : { extensions: deps.extensions }),
@@ -242,6 +247,7 @@ export class Agent {
           this.#proposals.failRun(runId, "run ended");
           this.#skillDrafts.failRun(runId, "run ended");
           this.#searches.failRun(runId, "run ended");
+          this.#fileEdits.failRun(runId, "run ended");
           this.#memory.failRun(runId, "run ended");
           deps.workspace?.runEnded();
         },
@@ -283,6 +289,11 @@ export class Agent {
             } else reply(toolsError(request.id, "not_allowed", "projects are not available"));
             return;
           }
+          if (request.op === "file.edit_propose") {
+            if (this.#fileEditsEnabled()) this.#fileEdits.propose(threadId, runId, request, reply);
+            else reply(toolsError(request.id, "not_allowed", "file edits are not available"));
+            return;
+          }
           if (request.op === "skill.draft_save") {
             if (this.#skillDraftsEnabled()) this.#skillDrafts.save(threadId, runId, request, reply);
             else reply(toolsError(request.id, "not_allowed", "skill drafts are not available"));
@@ -302,6 +313,7 @@ export class Agent {
           this.#proposals.failThread(threadId, reason);
           this.#skillDrafts.failThread(threadId, reason);
           this.#searches.failThread(threadId, reason);
+          this.#fileEdits.failThread(threadId, reason);
           this.#memory.failThread(threadId, reason);
         },
         diagnostic: (threadId, message) => logger.debug({ thread_id: threadId }, message),
@@ -321,6 +333,7 @@ export class Agent {
         this.#proposals.failAll("connection to Kobe server lost");
         this.#skillDrafts.failAll("connection to Kobe server lost");
         this.#searches.failAll("connection to Kobe server lost");
+        this.#fileEdits.failAll("connection to Kobe server lost");
         this.#memory.failAll("connection to Kobe server lost");
         void this.#threads.abortRestores();
       },
@@ -421,6 +434,11 @@ export class Agent {
   }
 
   /** `save_skill_draft` (KOBE-442) pushes the folder first, so it needs what `share_file` needs. */
+  /** `propose_file_edit` (KOBE-462) needs only the tools channel: it pushes nothing. */
+  #fileEditsEnabled(): boolean {
+    return this.#deps.toolsExtension !== undefined;
+  }
+
   #skillDraftsEnabled(): boolean {
     return this.#filesEnabled();
   }
@@ -437,6 +455,7 @@ export class Agent {
       ...(this.#filesEnabled() ? [CAPABILITY_FILES] : []),
       ...(this.#projectsEnabled() ? [CAPABILITY_PROJECTS] : []),
       ...(this.#skillDraftsEnabled() ? [CAPABILITY_SKILL_DRAFTS] : []),
+      ...(this.#fileEditsEnabled() ? [CAPABILITY_FILE_EDITS] : []),
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_WEB_SEARCH]),
       ...(this.#memoryEnabled() ? [CAPABILITY_MEMORY] : []),
       // Per-session MCP config (KOBE-111) needs the proxy URL, a session to trade tokens with, and
@@ -537,6 +556,9 @@ export class Agent {
         return;
       case "skill.draft_save_result":
         this.#skillDrafts.onResult(frame);
+        return;
+      case "file.edit_propose_result":
+        this.#fileEdits.onResult(frame);
         return;
       case "web_search.result":
         this.#searches.onResult(frame);

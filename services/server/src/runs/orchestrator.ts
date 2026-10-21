@@ -4,6 +4,7 @@ import {
   splitAppContext,
   splitSkillRequest,
   withSkillRequest,
+  type RunViewingContext,
 } from "@kobe/protocol";
 import { effectiveSkillNames } from "./effective-skills.js";
 import { connectorsOffIn } from "../connectors/thread-connectors.js";
@@ -50,6 +51,7 @@ import type { SandboxRouter, SandboxTarget } from "../sandbox-wire/types.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread, isLockTimeout, type Viewer } from "../threads/repository.js";
 import type { AttachmentStager, StagedFile } from "../uploads/attach.js";
+import type { ViewingReader } from "../workspace-files/viewing.js";
 import { cancelScheduledRuns, type ScheduledCancelReason } from "./cancel-scheduled.js";
 import { RunError } from "./errors.js";
 import { checkMentionPaths, rewriteMentions } from "./mentions.js";
@@ -88,6 +90,7 @@ import {
   principalActive,
   queuedCount,
   retryCandidates,
+  runViewingPath,
   setThreadLockTimeout,
   setThreadStatus,
   threadRunRows,
@@ -200,6 +203,8 @@ export interface ServerRunOrchestrator extends RunOrchestrator {
   useIsolation(probe: IsolationProbe): void;
   /** Wire message attachments (KOBE-144); without it `file_ids` are refused `attachments_unavailable`. */
   useAttachments(stager: AttachmentStager): void;
+  /** Reads a message's viewed file (KOBE-462); without it `viewing` adds nothing to the run. */
+  useViewing(reader: ViewingReader): void;
   sweep(): Promise<RunSweepResult>;
   /** Resolves once every background task started so far has finished (tests). */
   idle(): Promise<void>;
@@ -248,6 +253,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   #listeners: readonly RunTransitionListener[] = [];
   #isolation: IsolationProbe = () => "available";
   #attachments: AttachmentStager | undefined;
+  #viewing: ViewingReader | undefined;
   #sweepTimer: NodeJS.Timeout | undefined;
   #closed = false;
   readonly #dispatch: RunDispatcher;
@@ -310,6 +316,8 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       command.trigger === "user" ? (command.app_context ?? []) : [],
     );
     if (appContext === undefined) throw new RunError("app_context_invalid");
+    const viewing = await this.#readViewing(actor, command);
+    const withViewing = viewing === undefined ? command : { ...command, resolvedViewing: viewing };
     const fileIds = command.file_ids ?? [];
     if (fileIds.length > 0 && this.#attachments === undefined) {
       throw new RunError("attachments_unavailable");
@@ -320,7 +328,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     if (attach === undefined) {
       return this.#submitInTx(
         actor,
-        command,
+        withViewing,
         clientKey,
         undefined,
         () => {},
@@ -334,7 +342,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     try {
       const result = await this.#submitInTx(
         actor,
-        command,
+        withViewing,
         clientKey,
         attach,
         () => {
@@ -378,9 +386,42 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     return { owner: found.owner, caller, staged };
   }
 
-  async #submitInTx(
+  /**
+   * The member's viewed file (KOBE-462, spec FE6), read from their own synced workspace before the
+   * transaction (object storage); only for their own messages. Missing or unreadable: none.
+   */
+  async #readViewing(
     actor: ActorContext,
     command: SubmitMessageCommand,
+  ): Promise<RunViewingContext | undefined> {
+    if (command.trigger !== "user" || command.viewing === undefined) return undefined;
+    // Only the thread's owner sends into it, from their own workspace (review: check first; the
+    // submit transaction refuses anyone else with its own error).
+    const owner = await this.#readTx(actor, async (tx, viewer) => {
+      const found = await findThread(tx, viewer, command.thread_id);
+      return found?.access === "owner" ? found.thread.ownerUserId : undefined;
+    });
+    if (owner === undefined || this.#viewing === undefined) return undefined;
+    return this.#viewing({ teamId: actor.team_id, userId: owner }, command.viewing.path);
+  }
+
+  /**
+   * A retry's viewed file (KOBE-462 FE7): the original's path (its text was cleared when it
+   * ended), read again from the owner's workspace once the run is known to be theirs.
+   */
+  async #retryViewing(actor: ActorContext, runId: string): Promise<RunViewingContext | undefined> {
+    const found = await this.#readTx(actor, async (tx, viewer) => {
+      const { thread } = await ownedRun(tx, viewer, runId, false);
+      const path = await runViewingPath(tx, actor.team_id, runId);
+      return path === undefined ? undefined : { owner: thread.ownerUserId, path };
+    });
+    if (found === undefined || this.#viewing === undefined) return undefined;
+    return this.#viewing({ teamId: actor.team_id, userId: found.owner }, found.path);
+  }
+
+  async #submitInTx(
+    actor: ActorContext,
+    command: SubmitMessageCommand & { readonly resolvedViewing?: RunViewingContext },
     clientKey: string | null,
     attach: StagedAttachments | undefined,
     onAttached: () => void,
@@ -460,6 +501,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         parentEntryId: parent,
         retryOfRunId: null,
         clientKey,
+        viewing: command.resolvedViewing ?? null,
       });
       if (attach) {
         await this.#attachments?.commit(
@@ -658,6 +700,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   async retry(actor: ActorContext, runId: string): Promise<SubmitMessageResult> {
     if (this.#isolation() === "missing") throw new RunError("isolation_unavailable");
     const teamId = actor.team_id;
+    const viewing = await this.#retryViewing(actor, runId);
     const out = await this.#threadTx(actor, async (tx, viewer) => {
       const { thread, run } = await ownedRun(tx, viewer, runId, true);
       if (thread.deletedAt !== null) throw new RunError("thread_in_trash");
@@ -690,6 +733,8 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         parentEntryId: await retryBranchPoint(tx, teamId, run),
         retryOfRunId: runId,
         clientKey: null,
+        // The file the member had open with the original, read again (KOBE-462 FE7).
+        viewing: viewing ?? null,
       });
       await touchThread(tx, teamId, thread.id);
       const { promotion, queued } = await this.#promoteOrQueue(tx, teamId, thread.id, id);
@@ -1017,6 +1062,10 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
 
   useIsolation(probe: IsolationProbe): void {
     this.#isolation = probe;
+  }
+
+  useViewing(reader: ViewingReader): void {
+    this.#viewing = reader;
   }
 
   useAttachments(stager: AttachmentStager): void {

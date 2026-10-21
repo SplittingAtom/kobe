@@ -101,6 +101,13 @@ export const EVENT_PAYLOAD_EXAMPLES: { readonly [T in KobeEventType]: KobeEventP
     name: "close-helper",
     created: true,
   },
+  "file.edit_proposed": {
+    tool_call_id: "call_8",
+    path: "notes/plan.md",
+    base_sha256: "a".repeat(64),
+    content: "# Plan\n\nShip it.\n",
+    summary: "Adds the plan's last step",
+  },
   "entry.committed": {
     entry_id: "b2c3d4e5",
     parent_id: "a1b2c3d4",

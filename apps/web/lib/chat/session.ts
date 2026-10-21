@@ -5,6 +5,8 @@
  */
 import { AppContextStore, ComposerInsertChannel } from "../apps/app-context";
 import { SkillPickStore } from "./skill-picks";
+import { ViewingStore } from "./viewing";
+import { EditDraftStore, FileReviewStore } from "../files/editor-state";
 import { DraftConnectorStore } from "./draft-connectors";
 import { AppCardSignal } from "../apps/app-cards";
 import type { ThinkingLevel } from "@kobe/protocol";
@@ -94,6 +96,12 @@ export class ChatSession {
   readonly appContexts = new AppContextStore();
   /** The skill picked from the composer's + menu per draft (KOBE-451). */
   readonly skillPicks = new SkillPickStore();
+  /** The workspace file open in the artifact column, sent as `viewing` (KOBE-463). */
+  readonly viewing = new ViewingStore();
+  /** The file editor's unsaved drafts per file (KOBE-463). */
+  readonly editDrafts = new EditDraftStore();
+  /** The agent's file edit proposals under review per file (KOBE-463). */
+  readonly fileReviews = new FileReviewStore();
   /** Connectors turned off before the first message (KOBE-451 review MEDIUM-3). */
   readonly draftConnectors = new DraftConnectorStore();
   /** MCP Apps `ui/message` text for the composer on screen (KOBE-439); never sent by itself. */

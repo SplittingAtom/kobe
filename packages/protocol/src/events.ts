@@ -17,6 +17,7 @@ import {
 } from "./skill-package/layout.js";
 import { approvalResolutionCauseSchema, policyReasonSchema } from "./policy.js";
 import { rememberScopeSchema } from "./remember.js";
+import { fileEditProposedPayloadSchema } from "./file-editor.js";
 import { thinkingLevelSchema } from "./thinking.js";
 import {
   SERVER_CALL_PURPOSES,
@@ -49,6 +50,8 @@ export const KOBE_EVENT_TYPES = [
   "file.shared",
   // KOBE-442: the member's private Workbench draft `save_skill_draft` made or updated.
   "skill.draft_saved",
+  // KOBE-462: a `propose_file_edit` proposal awaiting the member (file-editor.ts).
+  "file.edit_proposed",
   "entry.committed",
   "run.completed",
   "run.failed",
@@ -312,6 +315,11 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     /** A new draft although the conversation had one: it was shared, or edited since. */
     new_because: z.enum(["shared", "edited"]).optional(),
   }),
+  /**
+   * The server's record of a `propose_file_edit` proposal (KOBE-462): nothing was written; the
+   * member reviews `content` against the file at `base_sha256` and commits through the save route.
+   */
+  "file.edit_proposed": fileEditProposedPayloadSchema,
   "entry.committed": z.strictObject({
     entry_id: idSchema,
     parent_id: idSchema.nullable(),

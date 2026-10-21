@@ -2,6 +2,7 @@ import { posix } from "node:path";
 import { z } from "zod";
 import {
   artifactToolInputSchema,
+  fileEditToolInputSchema,
   projectToolInputSchema,
   skillDraftToolInputSchema,
   type JsonObject,
@@ -61,6 +62,7 @@ export const BUILTIN_INPUT_SCHEMAS: Readonly<Record<string, z.ZodType<unknown>>>
   update_artifact: artifactToolInputSchema.update_artifact,
   propose_project_file: projectToolInputSchema.propose_project_file,
   save_skill_draft: skillDraftToolInputSchema.save_skill_draft,
+  propose_file_edit: fileEditToolInputSchema.propose_file_edit,
 };
 
 /** Built-ins whose `path` is a filesystem path, and whether an omitted path means the cwd. */
@@ -73,6 +75,7 @@ const PATH_TOOLS: Readonly<Record<string, { readonly defaultsToCwd: boolean }>> 
   find: { defaultsToCwd: true },
   share_file: { defaultsToCwd: false },
   propose_project_file: { defaultsToCwd: false },
+  propose_file_edit: { defaultsToCwd: false },
 };
 
 // Characters Pi rewrites in paths (utils/paths.js UNICODE_SPACES).

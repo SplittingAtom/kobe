@@ -17,6 +17,7 @@ import {
 import { NEW_DRAFT } from "../../lib/chat/attachments";
 import { isThreadRunning } from "../../lib/chat/thread-state";
 import { ComposerAttachments } from "./attachment-chips";
+import { ViewingChip } from "./viewing-chip";
 import { MentionChips, MentionPicker } from "./mention-picker";
 import { useComposerMentionDrop } from "./composer-mention-drop";
 import { MENTION_FOLDER_REFUSED } from "../../lib/chat/mention-insert";
@@ -170,7 +171,8 @@ export function Composer({
     const attach = session.attachments.ready(draft);
     const contexts = appContextBody(session.appContexts.forDraft(draft));
     const skill = session.skillPicks.get(draft);
-    if (await controller.send(text.trim(), undefined, attach, mentions, contexts, skill)) {
+    const viewing = session.viewing.body();
+    if (await controller.send(text.trim(), undefined, attach, mentions, contexts, skill, viewing)) {
       session.attachments.sent(draft);
       session.mentions.clear(draft);
       session.appContexts.clear(draft);
@@ -297,6 +299,7 @@ export function Composer({
           <MentionChips draft={draft} />
           <AppContextChips draft={draft} />
           <SkillPickChip draft={draft} />
+          <ViewingChip />
           {appInsert.pending && (
             <p
               role="note"

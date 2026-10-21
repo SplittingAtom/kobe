@@ -52,6 +52,7 @@ import {
   loadEnvelope,
 } from "@kobe/db";
 import { quantityBytes } from "./sandbox/config.js";
+import { createViewingReader } from "./workspace-files/viewing.js";
 import { createAttachmentStager } from "./uploads/attach.js";
 import {
   createS3ObjectStore,
@@ -303,6 +304,8 @@ if (workspaceSync && deps) {
   deps.runs.useAttachments(
     createAttachmentStager({ db: deps.database.db, sync: workspaceSync, settings: uploadSettings }),
   );
+  // A message's viewed file (KOBE-462) is read from the member's synced workspace.
+  deps.runs.useViewing(createViewingReader(deps.database.db, workspaceSync));
 }
 if (sandbox && syncSettings?.enabled && !s3) {
   logger.warn("object storage is not configured (s3.bucket): workspace sync is off");

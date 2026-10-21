@@ -8,6 +8,7 @@
  *                       {"id","op":"file.share","tool_call_id","tool":"share_file","input"}
  *                       {"id","op":"project.file_propose","tool_call_id","tool":"propose_project_file","input"}
  *                       {"id","op":"skill.draft_save","tool_call_id","tool":"save_skill_draft","input"}
+ *                       {"id","op":"file.edit_propose","tool_call_id","tool":"propose_file_edit","input"}
  *   agent → extension   {"id","ok":true,"artifact_id","version"}            (artifact.put)
  *                       {"id","ok":true,"file_id","name","mime_type","size_bytes","scan",
  *                        "created_at","sha256"}                              (file.share)
@@ -34,6 +35,7 @@ export const OP_WEB_SEARCH = "web_search";
 export const OP_MEMORY_PUT = "memory.put";
 export const OP_MEMORY_READ = "memory.read";
 export const OP_SKILL_DRAFT_SAVE = "skill.draft_save";
+export const OP_FILE_EDIT_PROPOSE = "file.edit_propose";
 export const OPS = [
   OP_ARTIFACT_PUT,
   OP_FILE_SHARE,
@@ -42,6 +44,7 @@ export const OPS = [
   OP_MEMORY_PUT,
   OP_MEMORY_READ,
   OP_SKILL_DRAFT_SAVE,
+  OP_FILE_EDIT_PROPOSE,
 ] as const;
 
 /** Env var set to `1` by an agent that announced the `memory` capability. Read once, removed. */
@@ -86,6 +89,16 @@ export const TOOLS_SKILL_DRAFTS_ENV = "KOBE_TOOLS_SKILL_DRAFTS";
 export const TOOL_SAVE_SKILL_DRAFT = "save_skill_draft";
 /** Mirrors packages/protocol `skill-package/layout.ts` SKILL_NAME_PATTERN (pinned by a test). */
 export const SKILL_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
+
+/**
+ * Env var set to `1` by an agent that announced the `file_edits` capability (KOBE-462). Read once,
+ * removed. `propose_file_edit` is registered only then; the server also checks the capability.
+ */
+export const TOOLS_FILE_EDITS_ENV = "KOBE_TOOLS_FILE_EDITS";
+export const TOOL_PROPOSE_FILE_EDIT = "propose_file_edit";
+/** Mirror packages/protocol `file-editor.ts` (pinned by a test). */
+export const FILE_EDIT_CONTENT_MAX_BYTES = 128 * 1024;
+export const FILE_EDIT_SUMMARY_MAX = 500;
 
 export const TOOL_CREATE_ARTIFACT = "create_artifact";
 export const TOOL_UPDATE_ARTIFACT = "update_artifact";
@@ -148,6 +161,15 @@ export interface SkillDraftAnswer {
   readonly new_because?: "shared" | "edited";
 }
 
+/** `propose_file_edit` answer: nothing was written; the member reviews and commits it. */
+export interface FileEditAnswer {
+  readonly ok: true;
+  readonly op: "file_edit_propose";
+  readonly status: "awaiting_user";
+  readonly path: string;
+  readonly base_sha256: string;
+}
+
 export interface WebSearchCitation {
   readonly title: string;
   readonly url: string;
@@ -195,6 +217,7 @@ export type ToolsResponse =
   | ({ readonly id: string } & MemoryReadAnswer)
   | ({ readonly id: string } & ProjectProposeAnswer)
   | ({ readonly id: string } & SkillDraftAnswer)
+  | ({ readonly id: string } & FileEditAnswer)
   | ({ readonly id: string } & WebSearchAnswer)
   | ({ readonly id: string } & WebSearchUnavailable)
   | {

@@ -38,6 +38,7 @@ import {
 } from "../workspace-files/paths.js";
 import { registerWorkspaceFrame } from "./workspace-frame.js";
 import { registerWorkspaceMove } from "./workspace-move.js";
+import { registerWorkspaceSave } from "./workspace-save.js";
 import { searchFiles } from "../workspace-files/search.js";
 import { uploadToWorkspace } from "../workspace-files/upload.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
@@ -272,6 +273,7 @@ export function workspaceFileRoutes(
 
   registerWorkspaceFrame(app, deps, sync);
   registerWorkspaceMove(app, deps, sync, options.moveLockTimeoutMs);
+  registerWorkspaceSave(app, deps, sync);
 
   /** The panel opened: start the caller's sandbox so live files and the next sync are ready. */
   app.post("/wake", (c) => {

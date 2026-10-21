@@ -93,6 +93,14 @@
   --kobe-gauge-warn: var(--kobe-status-attention);
   --kobe-gauge-full: var(--kobe-status-failed);
 
+  /* The file editor's inline diff (KOBE-463, components/files/code-editor.tsx): added text on
+     green, deleted on red (struck through, so colour never carries it alone), from the status
+     colours so both themes follow; text and marks keep AA on the tints (app/theme-css.test.ts). */
+  --kobe-diff-added: var(--kobe-status-running);
+  --kobe-diff-added-bg: var(--kobe-status-running-bg);
+  --kobe-diff-deleted: var(--kobe-status-failed);
+  --kobe-diff-deleted-bg: var(--kobe-status-failed-bg);
+
   /* `display` for content shown in one theme only (the toggle's icon). */
   --kobe-when-light: block;
   --kobe-when-dark: none;

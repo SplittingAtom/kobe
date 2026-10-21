@@ -42,6 +42,7 @@ describe("Kobe Event Stream types", () => {
       "artifact.updated",
       "file.shared",
       "skill.draft_saved",
+      "file.edit_proposed",
       "entry.committed",
       "run.completed",
       "run.failed",

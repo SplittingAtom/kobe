@@ -13,6 +13,7 @@ import type {
   RunProjectContext,
   RunMcpContext,
   RunStatus,
+  RunViewingContext,
   SandboxAttachment,
   SessionTokenClaims,
 } from "@kobe/protocol";
@@ -111,6 +112,8 @@ export interface RunStartRequest {
    * `app_cards` capability gets none and starts below them instead.
    */
   readonly appCards?: readonly AppCardEntry[];
+  /** The member's viewed file (KOBE-462); dropped for agents without the `file_edits` capability. */
+  readonly viewing?: RunViewingContext;
 }
 
 export interface RunSteerRequest {

@@ -275,3 +275,29 @@ describe("context tokens (KOBE-211)", () => {
     expect(next.contextTokens).toBe(20_000);
   });
 });
+
+describe("file.edit_proposed (KOBE-463)", () => {
+  it("lands on its tool call, so the card can offer Review while the run streams", () => {
+    seq = 0;
+    const proposal = {
+      tool_call_id: "call-9",
+      path: "notes.md",
+      base_sha256: "a".repeat(64),
+      content: "new\n",
+      summary: "Tidies the note",
+    };
+    const events = [
+      ev("run.started", { thread_id: THREAD, agent_id: null, agent_version: null }),
+      ev("tool.call", {
+        tool_call_id: "call-9",
+        tool: "propose_file_edit",
+        input: {},
+        risk: "read",
+      }),
+      ev("file.edit_proposed", proposal),
+    ];
+    const run = applyRunEvents(newLiveRun(RUN), events).run;
+    expect(run.tools["call-9"]?.fileEdit).toEqual(proposal);
+    expect(run.notices).toEqual([]);
+  });
+});

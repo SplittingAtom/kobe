@@ -286,7 +286,16 @@ export function ArtifactPanelProvider({
   const createdTitles = useAgentCreated(threadId, t.autoOpen);
   const artifacts = useThreadArtifacts(threadId, t.prune);
   const sheet = useSheet(threadId, t.tabs.active !== null, artifactAsSheet(useShellBand()));
-  const { openArtifact: openTab, drop, retargetFiles: moveFiles } = t;
+  const { openArtifact: openTab, drop, retargetFiles } = t;
+  const editDrafts = useChatSession().editDrafts;
+  // Unsaved edits follow a moved file (KOBE-463).
+  const moveFiles = useCallback(
+    (from: string, to: string) => {
+      editDrafts.move(from, to);
+      retargetFiles(from, to);
+    },
+    [editDrafts, retargetFiles],
+  );
   const [hiddenIn, setHiddenIn] = useState<string | undefined | null>(null);
   // Hidden for the thread it was hidden on (`null`: shown); another thread shows its own tabs.
   const hidden = hiddenIn !== null && hiddenIn === threadId && !sheet.asSheet;
@@ -344,9 +353,10 @@ export function ArtifactPanelProvider({
   const dropFile = useCallback(
     (path: string) => {
       drop(fileTabId(path));
+      editDrafts.clear(path);
       setGone(threadId === undefined ? { path } : { path, threadId });
     },
-    [drop, threadId],
+    [drop, threadId, editDrafts],
   );
   const dismissGone = useCallback(() => setGone(null), []);
 
