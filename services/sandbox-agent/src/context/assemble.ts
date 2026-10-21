@@ -132,7 +132,10 @@ export function fromSession(
     {
       source: "session",
       exact: false,
-      missing: [...CONTEXT_MISSING_PARTS],
+      // The older history only when the session file was too long to read whole.
+      missing: CONTEXT_MISSING_PARTS.filter(
+        (p) => p !== "older_history" || call.historyCut === true,
+      ),
       capturedAt: answeredAt(answer),
       model: typeof answer.model === "string" ? answer.model.slice(0, 256) : null,
       contextWindow,

@@ -62,11 +62,15 @@ headers when they changed since, and splits Pi's part by its `<name>…</name>` 
   file: the path from the leaf, the context before the last answer, with the latest compaction
   before it applied (Pi's `buildSessionContext`). Exact for the conversation and for the prompt
   sections and tools Pi recorded; without the per-run memory, project instructions and viewed
-  file (never in the session), and without `context_edit` entries (Kobe writes none).
+  file (never in the session), and without `context_edit` entries (Kobe writes none). Only the
+  file's last 16 MiB is read (streamed; the agent's memory is shared by every thread): when the
+  call's context began before that and no compaction inside it replaced the older part, those
+  entries are left out and `missing` says `older_history`.
 - `none`: the thread has no model call yet.
 
 `exact` is true for `model_call` and `none`, false for `session`, whose `missing` lists what it may
-lack: `memory`, `project_instructions`, `viewing_file`, `context_window`. The web labels such an
+lack: `memory`, `project_instructions`, `viewing_file`, `context_window`, and `older_history`
+when the session file was too long to read whole. The web labels such an
 answer "Approximate — the sandbox restarted since the last model call".
 
 **CV5. Token counts.** No tokenizer runs in the sandbox. Each section is estimated as Pi estimates
@@ -93,10 +97,15 @@ member):
 - **200** `ThreadContext` (`ThreadContextResult` + `thread_id`, with `exact` and `missing`),
   `cache-control: private, no-store`.
 - **202** `{status: "waking", retry_after_ms: 2000}`: the member's sandbox was not connected; a
-  wake was started (as on send). The web shows "Waking your workspace…" and asks again.
+  wake was started (as on send). The web shows "Waking your workspace…" and asks again. The read
+  waits up to 1.5 s for the wake to be refused; a refusal (`SandboxWakeError`: no gVisor/Kata
+  runtime, the member may not have a sandbox, not Ready within the wake budget) is **409**
+  `sandbox_refused`, at once or on the next read within 2 min (the replica remembers it), so the
+  viewer stops asking. Transient wake errors keep 202.
+- A skill eval's thread (its own ephemeral sandbox, never the member's) is **409**
+  `context_unsupported` before anything is woken.
 - **403** `not_owner`, **404** `thread_not_found`, **409** `thread_busy` (the session is being
-  compacted or restored) or `context_unsupported` (an agent older than the capability), **429**
-  `rate_limited`, **502** `context_unavailable` (the sandbox failed, or its answer did not
+  compacted or restored) or `context_unsupported` (an agent older than the capability), **409** `sandbox_refused` (above), **429** `rate_limited`, **502** `context_unavailable` (the sandbox failed, or its answer did not
   validate, or was not sealed to the request's key), **503** `sandbox_unavailable` (timeout, wake failure, connection lost). One fixed
   message per code; the sandbox's text is logged by code only, never relayed.
 

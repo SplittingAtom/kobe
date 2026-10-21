@@ -88,13 +88,15 @@ export type ContextSource = z.infer<typeof contextSourceSchema>;
  */
 /**
  * What a `session` answer cannot hold (CV4): the per-run parts kobe-tools adds to the prompt never
- * reach the session, and the call's context window is not recorded there.
+ * reach the session, and the call's context window is not recorded there. `older_history`: the
+ * session file was longer than the agent reads (its tail), and the call's context began before it.
  */
 export const CONTEXT_MISSING_PARTS = [
   "memory",
   "project_instructions",
   "viewing_file",
   "context_window",
+  "older_history",
 ] as const;
 export const contextMissingPartSchema = z.enum(CONTEXT_MISSING_PARTS);
 
@@ -145,6 +147,9 @@ export type ThreadContextWaking = z.infer<typeof threadContextWakingSchema>;
  * session is being compacted or restored. `context_unsupported`: the sandbox's agent predates the
  * command (it is upgraded on its next start). `sandbox_unavailable`: retryable.
  * `context_unavailable`: the sandbox could not read it. `rate_limited`: too many reads in a minute.
+ * `sandbox_refused`: the workspace cannot be woken (no isolation runtime, not allowed, or not
+ * ready within the wake budget): terminal, the viewer stops asking. `context_unsupported` is also
+ * the answer for a skill eval's thread (it has no member sandbox to read).
  */
 export const THREAD_CONTEXT_ERROR_CODES = [
   "not_owner",
@@ -153,6 +158,7 @@ export const THREAD_CONTEXT_ERROR_CODES = [
   "sandbox_unavailable",
   "context_unavailable",
   "rate_limited",
+  "sandbox_refused",
 ] as const;
 export const threadContextErrorCodeSchema = z.enum(THREAD_CONTEXT_ERROR_CODES);
 export type ThreadContextErrorCode = z.infer<typeof threadContextErrorCodeSchema>;
@@ -164,6 +170,7 @@ export const THREAD_CONTEXT_ERROR_HTTP_STATUS = {
   sandbox_unavailable: 503,
   context_unavailable: 502,
   rate_limited: 429,
+  sandbox_refused: 409,
 } as const satisfies Record<ThreadContextErrorCode, number>;
 
 /** One fixed message per code: the sandbox's own error text is logged, never relayed. */
@@ -175,6 +182,8 @@ export const THREAD_CONTEXT_ERROR_MESSAGES = {
   sandbox_unavailable: "Your workspace is not available right now. Try again in a moment.",
   context_unavailable: "The context could not be read from your workspace. Try again.",
   rate_limited: "Too many context reads. Wait a moment and try again.",
+  sandbox_refused:
+    "Your workspace can't be started, so its context can't be read. Ask a site admin to check it.",
 } as const satisfies Record<ThreadContextErrorCode, string>;
 
 const contextError = <C extends ThreadContextErrorCode>(code: C) =>
@@ -190,6 +199,7 @@ export const threadContextErrorSchema = z.discriminatedUnion("code", [
   contextError("sandbox_unavailable"),
   contextError("context_unavailable"),
   contextError("rate_limited"),
+  contextError("sandbox_refused"),
 ]);
 export type ThreadContextError = z.infer<typeof threadContextErrorSchema>;
 

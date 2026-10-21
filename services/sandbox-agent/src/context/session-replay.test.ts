@@ -84,6 +84,44 @@ describe("session replay (KOBE-470)", () => {
     ]);
   });
 
+  it("reads only the file's tail and says when the call's history began before it", async () => {
+    const old = Array.from({ length: 50 }, (_, i) =>
+      msg(`o${i}`, i === 0 ? null : `o${i - 1}`, user(`old ${"x".repeat(200)} ${i}`)),
+    );
+    const file = await sessionFile([
+      ...old,
+      msg("q", "o49", user("question")),
+      msg("r", "q", answer("reply", 77)),
+    ]);
+    const call = await replaySession(file, 2_000);
+    expect(call?.historyCut).toBe(true);
+    expect(call?.answer).toMatchObject({ usage: { input: 77 } });
+    expect(call?.messages.length).toBeLessThan(10);
+    expect((call?.messages.at(-1) as { content: string }).content).toBe("question");
+    // Read whole, nothing is cut.
+    expect((await replaySession(file))?.historyCut).toBeUndefined();
+  });
+
+  it("needs no older history when a compaction inside the tail replaced it", async () => {
+    const old = Array.from({ length: 50 }, (_, i) =>
+      msg(`o${i}`, i === 0 ? null : `o${i - 1}`, user(`old ${"x".repeat(200)} ${i}`)),
+    );
+    const file = await sessionFile([
+      ...old,
+      msg("k", "o49", user("kept")),
+      { type: "compaction", id: "c", parentId: "k", summary: "S", firstKeptEntryId: "k" },
+      msg("q", "c", user("question")),
+      msg("r", "q", answer("reply", 77)),
+    ]);
+    const call = await replaySession(file, 1_000);
+    expect(call?.historyCut).toBe(false);
+    expect(call?.messages).toEqual([
+      { role: "compactionSummary", summary: "S" },
+      user("kept"),
+      user("question"),
+    ]);
+  });
+
   it("has no call before any answer, and no session without a regular file", async () => {
     const file = await sessionFile([msg("a", null, system), msg("b", "a", user("hi"))]);
     expect((await replaySession(file))?.answer).toBeNull();

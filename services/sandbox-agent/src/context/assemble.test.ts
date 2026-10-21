@@ -79,6 +79,18 @@ describe("thread.context answer (KOBE-470)", () => {
       total_tokens: 42,
       context_window: 200_000,
     });
+    expect(fromReplay.missing).not.toContain("older_history");
+    const cut = fromSession(
+      {
+        messages: [],
+        answer: { role: "assistant", usage: { input: 1 } },
+        historyCut: true,
+      },
+      null,
+      THREAD_CONTEXT_MAX_BYTES,
+    );
+    expect(cut).toMatchObject({ exact: false });
+    expect(cut.missing).toContain("older_history");
     expect(fromSession(undefined, null, THREAD_CONTEXT_MAX_BYTES)).toMatchObject({
       source: "none",
       sections: [],

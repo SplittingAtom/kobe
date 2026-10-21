@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import { withTeam } from "@kobe/db";
+import { sql, withTeam } from "@kobe/db";
 import {
   THREAD_CONTEXT_ERROR_HTTP_STATUS,
   THREAD_CONTEXT_MAX_BYTES,
@@ -15,6 +15,7 @@ import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz
 import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
 import { hitRateLimit } from "../rate-limit.js";
+import { SandboxWakeError } from "../sandbox-wire/types.js";
 import { invalidRequest } from "../teams/http.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread } from "../threads/repository.js";
@@ -23,6 +24,11 @@ import { uuidSchema } from "../threads/schemas.js";
 const NOT_FOUND = { code: "thread_not_found", message: "No thread with that id." };
 /** How soon the web asks again while the sandbox wakes. */
 export const CONTEXT_WAKE_RETRY_MS = 2_000;
+/** How long a read waits for the wake to be refused at once (isolation, membership checks). */
+export const CONTEXT_WAKE_REFUSAL_WAIT_MS = 1_500;
+/** A refused wake is reported to the member's next read within this long (a slow refusal). */
+export const CONTEXT_WAKE_REFUSAL_MEMORY_MS = 120_000;
+const MAX_REMEMBERED_REFUSALS = 10_000;
 /** Reads per member per minute: each one is a command to their sandbox. */
 export const CONTEXT_RATE_LIMIT = { windowMs: 60_000, max: 30 };
 
@@ -70,6 +76,17 @@ const fail = (c: Context, code: ThreadContextErrorCode) =>
  */
 export function threadContextRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
+  /**
+   * Wakes this replica saw refused (`SandboxWakeError`: no gVisor/Kata runtime, the member may not
+   * have a sandbox, not ready within the wake budget), by team and user: the next read reports it
+   * instead of answering 202 for ever. Per replica; a read on another one starts its own wake,
+   * which is refused the same way.
+   */
+  const refusals = new Map<string, number>();
+  const refuse = (key: string) => {
+    if (refusals.size >= MAX_REMEMBERED_REFUSALS) refusals.clear();
+    refusals.set(key, Date.now());
+  };
   app.use(requireTeam(deps));
   app.use(requireTeamPermission("team.chat"));
 
@@ -84,20 +101,50 @@ export function threadContextRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
     const access = await withTeam(db, teamId, async (tx) => {
       const viewer = { teamId, userId, projectIds: await viewerProjectIds(tx, teamId, userId) };
       const found = await findThread(tx, viewer, id.data);
-      return found?.access ?? null;
+      if (found === null) return null;
+      const res = await tx.execute<{ skill_eval: boolean }>(sql`
+        SELECT skill_eval FROM threads WHERE team_id = ${teamId} AND id = ${id.data}`);
+      return { owner: found.access === "owner", skillEval: res.rows[0]?.skill_eval === true };
     });
     if (access === null) return c.json(NOT_FOUND, 404);
-    if (access !== "owner") return fail(c, "not_owner");
+    if (!access.owner) return fail(c, "not_owner");
+    // A skill eval's thread runs in its own ephemeral sandbox, never the member's: nothing to wake.
+    if (access.skillEval) return fail(c, "context_unsupported");
     if (!(await hitRateLimit(db, `thread-context:${userId}`, CONTEXT_RATE_LIMIT))) {
       return fail(c, "rate_limited");
     }
     c.header("cache-control", "private, no-store");
     const target = { teamId, userId };
     if (!(await router.isConnected(target, id.data))) {
+      const key = `${teamId}:${userId}`;
+      const refusedAt = refusals.get(key);
+      refusals.delete(key);
+      if (refusedAt !== undefined && Date.now() - refusedAt < CONTEXT_WAKE_REFUSAL_MEMORY_MS) {
+        return fail(c, "sandbox_refused");
+      }
       // Like sending (D14): the sandbox wakes; the viewer shows progress and asks again.
-      router.wake(target).catch((err: unknown) => {
-        logger.warn({ err, team_id: teamId, thread_id: id.data }, "context viewer wake failed");
-      });
+      const waking = router.wake(target).then(
+        () => "woken" as const,
+        (err: unknown) => {
+          if (err instanceof SandboxWakeError) {
+            refuse(key);
+            logger.info({ team_id: teamId, code: err.code }, "context viewer wake refused");
+            return "refused" as const;
+          }
+          logger.warn({ err, team_id: teamId, thread_id: id.data }, "context viewer wake failed");
+          return "failed" as const;
+        },
+      );
+      const early = await Promise.race([
+        waking,
+        new Promise<"pending">((resolve) =>
+          setTimeout(() => resolve("pending"), CONTEXT_WAKE_REFUSAL_WAIT_MS).unref(),
+        ),
+      ]);
+      if (early === "refused") {
+        refusals.delete(key);
+        return fail(c, "sandbox_refused");
+      }
       const body: ThreadContextWaking = { status: "waking", retry_after_ms: CONTEXT_WAKE_RETRY_MS };
       return c.json(body, 202);
     }

@@ -32,6 +32,9 @@
 - Nothing stored: no audit, logs carry codes only, `no-store`. Review: the answer is sealed to a
   per-request X25519 key (HKDF-SHA256, AES-256-GCM; `@kobe/protocol/node` sealed-reply.ts), so
   the `sandbox_commands` row holds ciphertext only; unread context rows are swept after 60 s.
+- Review 2: skill-eval threads 409 `context_unsupported` before any wake; refused wakes are
+  409 `sandbox_refused` (at once, or on the next read within 2 min); the session fallback reads
+  only the file's last 16 MiB (streamed) and adds `older_history` to `missing` when cut.
 - Review: `exact`/`missing` on the answer (false + memory/project/viewed file/window for
   `session`); route in the OpenAPI document (`openapi/context.ts`).
 - Rate limit 30/min per member (each read is a sandbox command).

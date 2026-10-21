@@ -16,12 +16,19 @@ import { PI_MAX_LINE_BYTES } from "../pi/pi-process.js";
  * instructions and viewed file never reach the session. The file is on the workspace volume,
  * which the thread's tools can write: what it holds is data, like the rest of the context.
  */
-export const SESSION_READ_MAX_BYTES = 256 * 1024 * 1024;
+/**
+ * Most bytes of a session file read (its tail): the latest call's context is near the end, and the
+ * agent's memory is shared by every thread. Past it, the older history is left out and the answer
+ * says so (`historyCut`), unless a compaction inside the tail already replaced it.
+ */
+export const SESSION_TAIL_MAX_BYTES = 16 * 1024 * 1024;
 
 type Rec = Record<string, unknown>;
 const isRecord = (v: unknown): v is Rec => typeof v === "object" && v !== null && !Array.isArray(v);
 
 export interface ReplayedCall {
+  /** The file was longer than the tail read and the context needed what came before it. */
+  readonly historyCut?: boolean;
   /** The messages the latest call was sent (no call yet: the whole context, `answer` null). */
   readonly messages: readonly unknown[];
   /** That call's answer (Pi's assistant message), or null when there was none. */
@@ -34,8 +41,14 @@ export interface Entry extends Rec {
   readonly type: string;
 }
 
-/** Every entry of a session file, in append order (the header and torn lines skipped). */
-export async function readSessionEntries(file: string): Promise<Entry[] | undefined> {
+/**
+ * The entries of a session file's last `maxBytes`, in append order (the header, torn lines and a
+ * line cut by the tail's start skipped); `cut` says the file was longer.
+ */
+export async function readSessionEntries(
+  file: string,
+  maxBytes = SESSION_TAIL_MAX_BYTES,
+): Promise<{ readonly entries: Entry[]; readonly cut: boolean } | undefined> {
   let handle;
   try {
     handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -43,13 +56,21 @@ export async function readSessionEntries(file: string): Promise<Entry[] | undefi
     return undefined;
   }
   const entries: Entry[] = [];
+  let cut: boolean;
   try {
     const info = await handle.stat();
     if (!info.isFile()) return undefined;
-    if (info.size > SESSION_READ_MAX_BYTES) throw new Error("the session file is too large");
+    const start = Math.max(0, info.size - maxBytes);
+    cut = start > 0;
+    // From mid-file, the first (partial) line is not an entry.
+    let skipFirst = cut;
     const splitter = new LineSplitter({
       maxLineBytes: PI_MAX_LINE_BYTES,
       onLine: (line) => {
+        if (skipFirst) {
+          skipFirst = false;
+          return;
+        }
         try {
           const record: unknown = JSON.parse(line);
           if (
@@ -65,14 +86,13 @@ export async function readSessionEntries(file: string): Promise<Entry[] | undefi
         }
       },
     });
-    for await (const chunk of handle.createReadStream({ autoClose: false })) {
-      splitter.push(chunk as Buffer);
-    }
+    const stream = handle.createReadStream({ autoClose: false, start, end: info.size - 1 });
+    for await (const chunk of stream) splitter.push(chunk as Buffer);
     splitter.end();
   } finally {
     await handle.close();
   }
-  return entries;
+  return { entries, cut };
 }
 
 /** The active path, root first. */
@@ -144,9 +164,31 @@ export function latestCallOfPath(path: readonly Entry[]): ReplayedCall {
   return { messages: contextOfPath(path), answer: null };
 }
 
+/**
+ * Whether the context of `path` needed entries before it: the path does not reach the root, and
+ * no compaction on it replaced what came before (its kept range starts inside the path).
+ */
+function needsOlder(path: readonly Entry[]): boolean {
+  if (path.length === 0 || path[0]?.parentId === null) return false;
+  for (let i = path.length - 1; i >= 0; i -= 1) {
+    const e = path[i] as Entry;
+    if (e.type !== "compaction") continue;
+    return !path.slice(0, i + 1).some((k) => k.id === e.firstKeptEntryId);
+  }
+  return true;
+}
+
 /** The latest call from a session file, or undefined when there is no (readable) session. */
-export async function replaySession(file: string): Promise<ReplayedCall | undefined> {
-  const entries = await readSessionEntries(file);
-  if (entries === undefined) return undefined;
-  return latestCallOfPath(pathToLeaf(entries));
+export async function replaySession(
+  file: string,
+  maxBytes = SESSION_TAIL_MAX_BYTES,
+): Promise<ReplayedCall | undefined> {
+  const read = await readSessionEntries(file, maxBytes);
+  if (read === undefined) return undefined;
+  const path = pathToLeaf(read.entries);
+  const call = latestCallOfPath(path);
+  if (!read.cut) return call;
+  const answerAt =
+    call.answer === null ? path.length : path.findIndex((e) => e.message === call.answer);
+  return { ...call, historyCut: needsOlder(path.slice(0, Math.max(answerAt, 0))) };
 }

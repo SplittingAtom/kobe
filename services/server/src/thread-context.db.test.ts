@@ -11,6 +11,7 @@ import {
 import { sealReply } from "@kobe/protocol/node";
 import { RunFixture, type FakeWorkspace, type RunWorld } from "./testing/run-fixture.js";
 import type { TestResponse } from "./testing/browser.js";
+import { SandboxWakeError, type SandboxRouter } from "./sandbox-wire/types.js";
 
 /**
  * The context viewer's route (KOBE-470, docs/specs/context-viewer.md): `GET /v1/threads/{id}/context`
@@ -142,6 +143,56 @@ describe("GET /v1/threads/{id}/context (KOBE-470)", () => {
     expect(res.status, JSON.stringify(res.json)).toBe(202);
     expect(res.json).toEqual({ status: "waking", retry_after_ms: 2000 });
     expect(await commandRows(w.team)).toBe("0");
+  });
+
+  it("refuses a skill eval's thread without waking anything", async () => {
+    const w = await f.world(0);
+    // skill_eval never changes on a thread: an eval thread is made as one.
+    const { rows } = await f.fx.admin.query<{ id: string }>(
+      `INSERT INTO threads (team_id, owner_user_id, title, skill_eval) VALUES ($1, $2, 'eval', true)
+       RETURNING id`,
+      [w.team, w.owner.id],
+    );
+    const threadId = rows[0]?.id ?? "";
+    const router = f.fx.replica(1).deps.sandboxWire.router as SandboxRouter & { wake: unknown };
+    let wakes = 0;
+    router.wake = () => {
+      wakes += 1;
+      return Promise.resolve();
+    };
+    try {
+      expectError(await read(w, threadId), "context_unsupported", 409);
+      expect(wakes).toBe(0);
+    } finally {
+      delete (router as { wake?: unknown }).wake;
+    }
+  });
+
+  it("reports a refused wake as terminal, at once or on the next read", async () => {
+    const w = await f.world(0);
+    const threadId = await f.thread(w.owner);
+    const router = f.fx.replica(1).deps.sandboxWire.router as SandboxRouter & { wake: unknown };
+    const refused = () => new SandboxWakeError("isolation_runtime_missing", "no runtime class");
+    try {
+      router.wake = () => Promise.reject(refused());
+      expectError(await read(w, threadId), "sandbox_refused", 409);
+      // A refusal that comes after the read answered 202 (a pod not ready in time).
+      let rejectLater: (err: Error) => void = () => undefined;
+      const late = new Promise<void>((_resolve, reject) => {
+        rejectLater = reject;
+      });
+      router.wake = () => late;
+      expect((await read(w, threadId)).status).toBe(202);
+      rejectLater(new SandboxWakeError("workspace_unavailable", "not ready"));
+      await late.catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 10));
+      expectError(await read(w, threadId), "sandbox_refused", 409);
+      // Transient failures keep the viewer waiting.
+      router.wake = () => Promise.reject(new Error("api server hiccup"));
+      expect((await read(w, threadId)).status).toBe(202);
+    } finally {
+      delete (router as { wake?: unknown }).wake;
+    }
   });
 
   it("answers fixed errors: an older agent, a busy session, a failed or invalid read", async () => {

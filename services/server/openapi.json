@@ -8632,11 +8632,17 @@
             "type": "boolean"
           },
           "missing": {
-            "maxItems": 4,
+            "maxItems": 5,
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["memory", "project_instructions", "viewing_file", "context_window"]
+              "enum": [
+                "memory",
+                "project_instructions",
+                "viewing_file",
+                "context_window",
+                "older_history"
+              ]
             }
           },
           "captured_at": {
@@ -8871,6 +8877,21 @@
               "message": {
                 "type": "string",
                 "const": "Too many context reads. Wait a moment and try again."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "sandbox_refused"
+              },
+              "message": {
+                "type": "string",
+                "const": "Your workspace can't be started, so its context can't be read. Ask a site admin to check it."
               }
             },
             "required": ["code", "message"],
