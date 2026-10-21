@@ -89,6 +89,23 @@ describe("outputView", () => {
     });
   });
 
+  it("never hands the parser a <style> element (Chrome checks it against the page CSP)", () => {
+    const seen: string[] = [];
+    const spy = (html: string) => {
+      seen.push(html);
+      return parse(html);
+    };
+    const view = outputView(display({ "text/html": DATAFRAME }), spy);
+    expect(view.kind).toBe("table");
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).not.toMatch(/<style/iu);
+    // A <style> the stripping cannot remove cleanly is never parsed: the frame shows it.
+    const odd = '<style>.a{}</style><table class="dataframe"><tr><td>1</td></tr></table><STYLE x';
+    seen.length = 0;
+    expect(outputView(display({ "text/html": odd }), spy)).toEqual({ kind: "html", html: odd });
+    expect(seen).toEqual([]);
+  });
+
   it("caps very large tables", () => {
     const rows = Array.from({ length: 600 }, (_, i) => `<tr><td>${i}</td></tr>`).join("");
     const html = `<table class="dataframe"><tbody>${rows}</tbody></table>`;

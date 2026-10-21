@@ -89,3 +89,14 @@ dependencies (`@codemirror/lang-python` was present).
   `e2e/browser/tests/notebook.spec.ts` (gate1, KOBE_TEAM=team1; not run here).
 - **verify:** `npx pnpm@12.8.1 verify` passes (one web flake, connectors-page, passed on rerun);
   db test run directly against the dev Postgres.
+
+## Gate1 follow-up (2026-10-21, branch `group-22-notebook-csp`)
+
+- gate1 spec reported 12 `style-src-elem inline` violations. Cause: the DataFrame table reader
+  passed pandas' `<style scoped>` to `DOMParser`; Chrome checks inline `<style>` in a DOMParser
+  document against the page CSP and reports to the page (happy-dom does not, so a unit test
+  can only assert the parser input). Fix: whole `<style>` elements are stripped before parsing,
+  and HTML with any `<style>` left is not parsed (frame). CSP unchanged.
+- `e2e/browser/tests/support/csp.ts` now reports sample, source location and the latest
+  un-nonced `<style>` added to the document.
+- Evidence: `lib/notebooks/outputs.test.ts` "never hands the parser a <style> element".
