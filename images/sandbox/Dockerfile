@@ -7,7 +7,7 @@
 ARG NODE_IMAGE=node:22-trixie-slim@sha256:b26b04c123d9ff8ab646ceb18b9d75a1173acf64b9a401094b906d27b29338d4
 ARG PYTHON_IMAGE=python:3.12-slim-trixie@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
 ARG PNPM_VERSION=12.8.1
-ARG NPM_VERSION=12.2.0
+ARG NPM_VERSION=12.2.1
 # Init for PID 1 (reaps orphaned tool processes, forwards signals). MIT ("Expat").
 ARG TINI_VERSION=0.19.0-3+b8
 
@@ -64,9 +64,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
     MPLCONFIGDIR=/tmp/matplotlib \
     HOME=/home/kobe
 
+# libpcre2-8-0 is already in the base image; naming it pulls the security fix (KOBE-474).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates git curl jq ripgrep unzip zip file less procps libcap2-bin "tini=${TINI_VERSION}" \
+      libpcre2-8-0 \
  && rm -rf /var/lib/apt/lists/*
 
 # Fully locked with hashes (pip-compile --generate-hashes from requirements.in).
