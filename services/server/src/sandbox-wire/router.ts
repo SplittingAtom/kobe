@@ -181,6 +181,17 @@ export class CommandRouter implements SandboxRouter {
     });
   }
 
+  threadContext(
+    target: SandboxTarget,
+    request: Parameters<SandboxRouter["threadContext"]>[1],
+    options?: SendOptions,
+  ) {
+    return this.#send(target, "thread.context", request.threadId, undefined, options, {
+      thread_id: request.threadId,
+      max_bytes: request.maxBytes,
+    });
+  }
+
   compactThread(
     target: SandboxTarget,
     request: Parameters<SandboxRouter["compactThread"]>[1],
@@ -218,6 +229,10 @@ export class CommandRouter implements SandboxRouter {
     return this.#send(target, kind, request.threadId, undefined, options, {
       thread_id: request.threadId,
     });
+  }
+
+  wake(target: SandboxTarget): Promise<void> {
+    return this.#waker.wake(target);
   }
 
   /**
