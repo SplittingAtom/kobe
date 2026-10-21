@@ -1,4 +1,5 @@
 import { NO_APP_CALLER, type AppCaller } from "./apps/app-caller.js";
+import { createNotebookFiles, type NotebookFiles } from "./notebooks/files.js";
 import type { ForwardDestination } from "./audit/forward/types.js";
 import { configureUsageKey } from "./skills/usage-snapshot.js";
 import { DEFAULT_TIMEOUT_MS } from "./connectors/oauth/http.js";
@@ -285,6 +286,8 @@ export interface ServerDeps {
   readonly projectMounts: ProjectMounts;
   /** `save_skill_draft` (KOBE-442); `index.ts` binds the workspace store later. */
   readonly skillDraftTool: SkillDraftTool;
+  /** Notebook cells and outputs in members' workspaces (KOBE-464); bound like `skillDraftTool`. */
+  readonly notebookFiles: NotebookFiles;
   /** Exports answer ratings as Langfuse scores (KOBE-275); undefined when tracing has no scores. */
   readonly feedbackScores: FeedbackScores | undefined;
   /** Creates an email+password user (and optional site role) atomically, without sign-up. */
@@ -390,6 +393,10 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       ? {}
       : { runMaxEvents: options.sandboxWire.tuning.runMaxEvents }),
   });
+  // Notebooks (KOBE-464): `run_python` and the member's runs read cells and save outputs here.
+  const notebookFiles = createNotebookFiles(database.db, {
+    teamQuotaDefaultBytes: (options.uploads ?? DEFAULT_UPLOAD_SETTINGS).defaultQuotaBytes,
+  });
   const sandboxWire = createSandboxWire({
     tools: toolRegistry,
     engine: policyEngine,
@@ -403,6 +410,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     ...(options.uploads ? { uploads: options.uploads } : {}),
     projectMounts,
     skillDrafts: skillDraftTool,
+    notebooks: notebookFiles,
     webSearch:
       options.sandboxWire?.webSearch ??
       createWebSearchService({ db: database.db, envelope: options.envelope }),
@@ -429,6 +437,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     router: sandboxWire.router,
   });
   late.runs = runs;
+  runs.useNotebooks(notebookFiles);
   approvals.bind({
     router: sandboxWire.router,
     onRunEnded: (event) => runs.onRunEnded(event),
@@ -553,6 +562,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     modelTokenDefaults,
     projectMounts,
     skillDraftTool,
+    notebookFiles,
     feedbackScores,
     async createUserWithPassword({ email, name, password }, { siteRole, recordSetup } = {}) {
       const ctx = await auth.$context;

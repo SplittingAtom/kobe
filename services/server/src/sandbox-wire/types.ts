@@ -223,8 +223,31 @@ export interface SandboxRouter {
     request: ThreadCompactRequest,
     options?: SendOptions,
   ): Promise<CommandOutcome>;
+  /**
+   * KOBE-464, the thread's kernel (docs/specs/notebooks.md): run code (`data` untrusted: a
+   * `notebookExecuteResultSchema` to validate; the outputs arrive as run events meanwhile),
+   * interrupt or restart. Only to agents with capability `notebooks`.
+   */
+  notebookExecute(
+    target: SandboxTarget,
+    request: NotebookExecuteRequest,
+    options?: SendOptions,
+  ): Promise<CommandOutcome>;
+  notebookKernel(
+    target: SandboxTarget,
+    request: { readonly threadId: string; readonly op: "interrupt" | "restart" },
+    options?: SendOptions,
+  ): Promise<CommandOutcome>;
   /** True while some replica holds a live (heartbeating) connection of this sandbox. */
   isConnected(target: SandboxTarget, threadId?: string): Promise<boolean>;
+}
+
+export interface NotebookExecuteRequest {
+  readonly threadId: string;
+  readonly runId: string;
+  readonly execId: string;
+  readonly code: string;
+  readonly timeoutMs: number;
 }
 
 /** How a run ended, as the wire observed it. */

@@ -6,6 +6,8 @@ import {
   withSkillRequest,
   type RunViewingContext,
 } from "@kobe/protocol";
+import type { NotebookFiles } from "../notebooks/files.js";
+import { notebookKernel, startNotebookRun, type NotebookRunHost } from "../notebooks/user-run.js";
 import { effectiveSkillNames } from "./effective-skills.js";
 import { connectorsOffIn } from "../connectors/thread-connectors.js";
 import { RUN_INPUT_MAX_CHARS } from "@kobe/db";
@@ -23,6 +25,9 @@ import {
   type ApprovalMode,
   type BudgetStopCommand,
   type CompactThreadResponse,
+  type NotebookKernelResponse,
+  type NotebookRunBody,
+  type NotebookRunResponse,
   type RunOrchestrator,
   type RunSnapshot,
   type RunTransition,
@@ -191,6 +196,23 @@ export interface ServerRunOrchestrator extends RunOrchestrator {
    * Throws `CompactionError` (a code of the compact contract) or `RunError` (404/403/trash).
    */
   compact(actor: ActorContext, threadId: string, focus?: string): Promise<CompactThreadResponse>;
+  /**
+   * The owner runs a notebook cell or a `.py` file (KOBE-464, docs/specs/notebooks.md NB6): a
+   * `notebook` run on their idle thread, answered at once. Throws `NotebookRunError` or `RunError`.
+   */
+  notebookRun(
+    actor: ActorContext,
+    threadId: string,
+    body: NotebookRunBody,
+  ): Promise<NotebookRunResponse>;
+  /** Interrupt or restart the thread's kernel (NB7); never wakes the sandbox. */
+  notebookKernel(
+    actor: ActorContext,
+    threadId: string,
+    op: "interrupt" | "restart",
+  ): Promise<NotebookKernelResponse>;
+  /** Notebook files (KOBE-464); without them notebook runs are refused `sandbox_unavailable`. */
+  useNotebooks(files: NotebookFiles): void;
   /** KOBE-24 `RunLifecycleHooks.onRunEnded`: the wire ended a run; advance its thread's queue. */
   onRunEnded(event: { teamId: string; runId: string; threadId: string }): Promise<void>;
   /** KOBE-180: the system cancels a deactivated or removed owner's in-flight scheduled runs. */
@@ -254,6 +276,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   #isolation: IsolationProbe = () => "available";
   #attachments: AttachmentStager | undefined;
   #viewing: ViewingReader | undefined;
+  #notebooks: NotebookFiles | undefined;
   #sweepTimer: NodeJS.Timeout | undefined;
   #closed = false;
   readonly #dispatch: RunDispatcher;
@@ -1066,6 +1089,40 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
 
   useViewing(reader: ViewingReader): void {
     this.#viewing = reader;
+  }
+
+  useNotebooks(files: NotebookFiles): void {
+    this.#notebooks = files;
+  }
+
+  notebookRun(
+    actor: ActorContext,
+    threadId: string,
+    body: NotebookRunBody,
+  ): Promise<NotebookRunResponse> {
+    return startNotebookRun(this.#notebookHost(), actor, threadId, body);
+  }
+
+  notebookKernel(
+    actor: ActorContext,
+    threadId: string,
+    op: "interrupt" | "restart",
+  ): Promise<NotebookKernelResponse> {
+    return notebookKernel(this.#notebookHost(), actor, threadId, op);
+  }
+
+  #notebookHost(): NotebookRunHost {
+    return {
+      db: this.#db,
+      router: this.#router,
+      files: this.#notebooks,
+      log: this.#log,
+      isolationMissing: () => this.#isolation() === "missing",
+      threadTx: (a, fn) => this.#threadTx(a, fn),
+      assertMayRun: (tx, a) => this.#assertMayRun(tx, a, false),
+      ended: (teamId, runId, id) => this.onRunEnded({ teamId, runId, threadId: id }),
+      track: (task) => this.#track(task),
+    };
   }
 
   useAttachments(stager: AttachmentStager): void {

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   CAPABILITY_ARTIFACTS,
   CAPABILITY_FILE_EDITS,
+  CAPABILITY_NOTEBOOKS,
   CAPABILITY_FILES,
   CAPABILITY_MEMORY,
   CAPABILITY_PROJECTS,
@@ -24,6 +25,8 @@ import {
   type SandboxErrorCode,
   type SandboxToServerFrame,
   type FileEditProposeFrame,
+  type NotebookOutputFrame,
+  type NotebookRunFrame,
   type SkillDraftSaveFrame,
   type TraceSpansFrame,
   type WebSearchQueryFrame,
@@ -55,6 +58,8 @@ import {
   type InterruptCause,
 } from "./run-state.js";
 import { onFileEditPropose } from "./file-edit-propose.js";
+import { NotebookIntake } from "./notebook-intake.js";
+import { onNotebookRun } from "./notebook-run.js";
 import { onSkillDraftSave } from "./skill-draft-save.js";
 import { createRunTranslator } from "./translate.js";
 import { TraceFrameRate, type RunOwner, type TraceIntake } from "./trace-intake.js";
@@ -132,6 +137,8 @@ export class SandboxConnection implements RegisteredConnection {
   readonly #memoryAbort = new AbortController();
   readonly #deniedBuckets = new Map<string, { tokens: number; at: number }>();
   readonly #delivery: CommandDelivery;
+  /** `notebook.output` frames of this connection's running executions (KOBE-464). */
+  readonly #notebookOutputs: NotebookIntake;
   #state: State = "hello";
   #lastInbound = Date.now();
   #tokens: number;
@@ -166,6 +173,15 @@ export class SandboxConnection implements RegisteredConnection {
     this.#tokens = ctx.tuning.frameBurst;
     this.#byteTokens = ctx.tuning.byteBurst;
     this.#delivery = new CommandDelivery(ctx, this);
+    this.#notebookOutputs = new NotebookIntake({
+      db: ctx.db,
+      teamId: claims.teamId,
+      runMaxEvents: ctx.tuning.runMaxEvents,
+      log: ctx.log,
+      dropped: () => {
+        ctx.metrics.notebookOutputsDropped += 1;
+      },
+    });
     this.#owner = { teamId: claims.teamId, userId: claims.userId, sandboxId: claims.sandboxId };
     this.#traces = ctx.traceRelay?.runs;
     this.#traceRate = this.#traces
@@ -369,6 +385,7 @@ export class SandboxConnection implements RegisteredConnection {
     if (type === "policy.check") return raw.length <= max.policyCheck;
     if (type === "artifact.put") return raw.length <= max.artifactPut;
     if (type === "thread.compact_result") return raw.length <= max.compactResult;
+    if (type === "notebook.run") return raw.length <= max.notebookRun;
     return false;
   }
 
@@ -454,6 +471,12 @@ export class SandboxConnection implements RegisteredConnection {
         return;
       case "file.edit_propose":
         this.#onFileEditPropose(frame);
+        return;
+      case "notebook.output":
+        this.#onNotebookOutput(frame, bytes);
+        return;
+      case "notebook.run":
+        this.#onNotebookRun(frame);
         return;
       case "memory.put":
         this.#onMemoryPut(frame);
@@ -868,6 +891,44 @@ export class SandboxConnection implements RegisteredConnection {
     );
   }
 
+  /**
+   * `notebook.output` (KOBE-464, NB14): only for a `notebook.execute` this connection delivered and
+   * has not had answered, for the same thread; the run and exec ids come from that command. Late
+   * outputs of an answered command are dropped; anything else is a lease violation.
+   */
+  #onNotebookOutput(frame: NotebookOutputFrame, bytes: number): void {
+    const issued = this.#delivery.peekIssued(frame.command_id);
+    if (issued === "answered") {
+      this.#ctx.metrics.notebookOutputsDropped += 1;
+      return;
+    }
+    const exec = issued?.notebook;
+    if (exec === undefined || exec.threadId !== frame.thread_id) {
+      this.#violate("unknown_command", "notebook.output");
+      return;
+    }
+    this.#notebookOutputs.accept(frame.command_id, exec, frame, bytes);
+  }
+
+  /** `notebook.run` (KOBE-464, `run_python`): checks and execution in `notebook-run.ts`. */
+  #onNotebookRun(frame: NotebookRunFrame): void {
+    onNotebookRun(
+      {
+        db: this.#ctx.db,
+        target: this.target,
+        files: this.#ctx.notebooks,
+        log: this.log,
+        hasCapability: this.hasCapability(CAPABILITY_NOTEBOOKS),
+        runCheck: () => this.#checkToolRun(frame.run_id, frame.thread_id, "notebook.run"),
+        verdict: () =>
+          this.#allowedArtifacts.consume(frame.run_id, frame.tool_call_id, frame.tool, frame.input),
+        execute: (execute, timeoutMs) => this.#delivery.notebookExecute(execute, timeoutMs),
+        send: (out) => this.send(out),
+      },
+      frame,
+    );
+  }
+
   /** `skill.draft_save` (KOBE-442): checks and save in `skill-draft-save.ts`. */
   #onSkillDraftSave(frame: SkillDraftSaveFrame): void {
     onSkillDraftSave(
@@ -1254,6 +1315,13 @@ export class SandboxConnection implements RegisteredConnection {
         ? { ok: true }
         : { ok: true, data: frame.data }
       : { ok: false, error: frame.error };
+    if (issued.notebook !== undefined) {
+      // NB14: the outputs this execution sent are stored before its answer is recorded.
+      void this.#notebookOutputs
+        .drain(frame.command_id)
+        .finally(() => this.#delivery.settle(issued, outcome));
+      return;
+    }
     this.#delivery.settle(issued, outcome);
   }
 

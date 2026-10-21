@@ -60,7 +60,7 @@ async function lostStarts(tx: KobeTx, teamId: string, deadlineMs: number): Promi
                         WHERE l.team_id = r.team_id AND l.run_id = r.id)
        AND NOT EXISTS (SELECT 1 FROM sandbox_commands c
                         WHERE c.team_id = r.team_id AND c.run_id = r.id
-                          AND c.kind IN ('run.start', 'thread.compact')
+                          AND c.kind IN ('run.start', 'thread.compact', 'notebook.execute')
                           AND c.status IN ('pending', 'delivered'))`);
   return res.rows.map((r) => ({
     teamId,
