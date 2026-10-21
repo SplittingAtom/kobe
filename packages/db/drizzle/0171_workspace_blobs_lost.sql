@@ -1,0 +1,2 @@
+ALTER TABLE "workspace_blobs" ADD COLUMN "lost_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "workspace_blobs_lost_idx" ON "workspace_blobs" USING btree ("team_id","user_id") WHERE "workspace_blobs"."lost_at" IS NOT NULL;

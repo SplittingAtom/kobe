@@ -127,9 +127,19 @@ export const workspaceBlobs = pgTable(
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     /** Last time a manifest row stopped pointing at this content: collection grace runs from it. */
     releasedAt: timestamp({ withTimezone: true }),
+    /**
+     * KOBE-475: the object store was found without this content (a read, or the repair sweep):
+     * a sandbox holding the bytes re-uploads them (`GET blobs/lost`), verified against `sha256`
+     * and `size`, and the mark is cleared. Already counted in the workspace's blob totals.
+     */
+    lostAt: timestamp({ withTimezone: true }),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.userId, t.sha256] }),
+    // The heal list a sandbox asks for on every push: only the (rare) lost rows are indexed.
+    index("workspace_blobs_lost_idx")
+      .on(t.teamId, t.userId)
+      .where(sql`${t.lostAt} IS NOT NULL`),
     check("workspace_blobs_sha", sql`${t.sha256} ~ '^[0-9a-f]{64}$'`),
     check("workspace_blobs_size", sql`${t.size} >= 0`),
   ],
