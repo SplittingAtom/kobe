@@ -15,6 +15,8 @@ export interface MemoryFileContent {
   readonly text: string;
   /** Project instructions block (KOBE-245); empty for a non-project run. */
   readonly project: string;
+  /** The viewed-file section (KOBE-462); empty when the run has none. */
+  readonly viewing?: string;
 }
 
 export const isMemoryTemp = (name: string): boolean =>
@@ -36,6 +38,7 @@ export class MemoryContextFile {
       tools: content.tools,
       text: content.text,
       project: content.project,
+      viewing: content.viewing ?? "",
     });
     const next = this.#chain.then(async () => {
       await writeFileAtomic(this.path, text, this.#mode);

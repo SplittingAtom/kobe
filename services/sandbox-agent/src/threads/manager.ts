@@ -197,9 +197,11 @@ export class ThreadManager {
         );
         // The run's memory (KOBE-157): its own file, so a changed index never restarts Pi.
         // Project instructions (KOBE-245) only for an agent that announced `projects`.
+        // The viewed file (KOBE-462) only for an agent that announced `file_edits`.
         await thread.attachMemory(
           frame.memory,
           this.#options.projectTools ? frame.project : undefined,
+          this.#options.fileEditTools ? frame.viewing : undefined,
         );
       } catch (error) {
         endOwn();
@@ -716,6 +718,7 @@ export class ThreadManager {
       toolsFiles: this.#options.shareFiles,
       toolsProjects: this.#options.projectTools,
       toolsSkillDrafts: this.#options.skillDraftTools,
+      toolsFileEdits: this.#options.fileEditTools,
       toolsMemory: this.#options.memoryTools,
       ...(this.#options.extensions === undefined ? {} : { extensions: this.#options.extensions }),
       parentEnv: this.#options.parentEnv,

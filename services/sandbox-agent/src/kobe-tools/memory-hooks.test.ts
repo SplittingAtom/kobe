@@ -19,21 +19,28 @@ const file = (content: unknown) => () => JSON.stringify(content);
 
 describe("readMemoryRunFile", () => {
   it("fails closed: missing, unreadable or malformed means off", () => {
-    expect(readMemoryRunFile(undefined)).toEqual({ tools: false, text: "", project: "" });
+    expect(readMemoryRunFile(undefined)).toEqual({
+      tools: false,
+      text: "",
+      project: "",
+      viewing: "",
+    });
     expect(
       readMemoryRunFile("/x", () => {
         throw new Error("ENOENT");
       }),
-    ).toEqual({ tools: false, text: "", project: "" });
+    ).toEqual({ tools: false, text: "", project: "", viewing: "" });
     expect(readMemoryRunFile("/x", () => "not json")).toEqual({
       tools: false,
       text: "",
       project: "",
+      viewing: "",
     });
     expect(readMemoryRunFile("/x", file({ tools: "yes", text: 1 }))).toEqual({
       tools: false,
       text: "",
       project: "",
+      viewing: "",
     });
   });
   it("gives no text when tools are off", () => {
@@ -41,17 +48,20 @@ describe("readMemoryRunFile", () => {
       tools: false,
       text: "",
       project: "",
+      viewing: "",
     });
     expect(readMemoryRunFile("/x", file({ tools: true, text: "idx" }))).toEqual({
       tools: true,
       text: "idx",
       project: "",
+      viewing: "",
     });
     // Project instructions do not depend on memory being on.
     expect(readMemoryRunFile("/x", file({ tools: false, text: "", project: "P" }))).toEqual({
       tools: false,
       text: "",
       project: "P",
+      viewing: "",
     });
   });
 });
@@ -63,7 +73,7 @@ describe("installMemoryHooks", () => {
     installMemoryHooks(pi.api, "/f", () => JSON.stringify(content));
     pi.fire("input");
     expect(pi.active()).toEqual(["bash", "remember", "recall"]);
-    content = { tools: false, text: "", project: "" };
+    content = { tools: false, text: "", project: "", viewing: "" };
     pi.fire("input");
     expect(pi.active()).toEqual(["bash"]);
     content = { tools: true, text: "" };
@@ -108,5 +118,24 @@ describe("installMemoryHooks", () => {
     const other = { content: "a​b" };
     pi.fire("tool_call", { toolName: "write", input: other });
     expect(other.content).toBe("a​b");
+  });
+});
+
+describe("viewed file in the run's prompt (KOBE-462)", () => {
+  it("appends the viewing section to this run's system prompt only, memory or not", () => {
+    const pi = fakePi([]);
+    let content: unknown = { tools: false, text: "", project: "", viewing: "## Viewed" };
+    installMemoryHooks(pi.api, "/x", () => JSON.stringify(content));
+    expect(pi.fire("before_agent_start", { systemPrompt: "BASE" })).toEqual({
+      systemPrompt: "BASE\n\n## Viewed",
+    });
+    content = { tools: false, text: "", project: "" };
+    expect(pi.fire("before_agent_start", { systemPrompt: "BASE" })).toBeUndefined();
+    expect(readMemoryRunFile("/x", file({ tools: false, text: "", viewing: 3 }))).toEqual({
+      tools: false,
+      text: "",
+      project: "",
+      viewing: "",
+    });
   });
 });

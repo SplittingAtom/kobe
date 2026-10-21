@@ -5,6 +5,7 @@ import {
   type MemoryScope,
   type RunProjectContext,
   type RunMemoryContext,
+  type RunViewingContext,
 } from "@kobe/protocol";
 import {
   beginMarker,
@@ -15,6 +16,7 @@ import {
 } from "../kobe-tools/memory-fence.js";
 import type { MemoryFileContent } from "./context-file.js";
 import { projectContextText } from "./project-context.js";
+import { viewingContextText } from "./viewing-context.js";
 
 /**
  * The memory index in the model's context (KOBE-157, memory.ts `run.start.memory`). Indexes are
@@ -76,12 +78,14 @@ export function memoryRunFileContent(
   memory: RunMemoryContext | undefined,
   nonce?: string,
   project?: RunProjectContext,
+  viewing?: RunViewingContext,
 ): MemoryFileContent {
   const tools = memory !== undefined && memory.scopes.length > 0;
   return {
     tools,
     text: tools ? (memoryContextText(memory, nonce) ?? "") : "",
     project: projectContextText(project) ?? "",
+    viewing: viewingContextText(viewing) ?? "",
   };
 }
 

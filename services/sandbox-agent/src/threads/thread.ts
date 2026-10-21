@@ -18,6 +18,7 @@ import type {
   RunMcpContext,
   RunMemoryContext,
   RunProjectContext,
+  RunViewingContext,
 } from "@kobe/protocol";
 import { MEMORY_FILE_ENV, MEMORY_FILE_NAME, MemoryContextFile } from "../memory/context-file.js";
 import { memoryRunFileContent } from "../memory/context.js";
@@ -160,6 +161,8 @@ export interface ThreadEnv {
   readonly projectTools?: boolean | undefined;
   /** The agent announced `skill_drafts` (KOBE-442): kobe-tools registers `save_skill_draft`. */
   readonly skillDraftTools?: boolean | undefined;
+  /** The agent announced `file_edits` (KOBE-462): kobe-tools registers `propose_file_edit`. */
+  readonly fileEditTools?: boolean | undefined;
   /** The agent announced `memory` (KOBE-157): kobe-tools registers remember/recall. */
   readonly memoryTools?: boolean | undefined;
   /** Other root-owned extension paths loaded with `-e`, before kobe-policy. */
@@ -695,8 +698,9 @@ export class Thread {
   async attachMemory(
     memory: RunMemoryContext | undefined,
     project?: RunProjectContext,
+    viewing?: RunViewingContext,
   ): Promise<void> {
-    await this.#memoryFile?.write(memoryRunFileContent(memory, undefined, project));
+    await this.#memoryFile?.write(memoryRunFileContent(memory, undefined, project, viewing));
   }
 
   /** A rotated model-gateway token: the next model request uses it (the current one is not cut). */
