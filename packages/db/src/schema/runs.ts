@@ -18,6 +18,16 @@ import { teams } from "./teams.js";
 import type { ThinkingLevelValue } from "./models.js";
 import { threads } from "./threads.js";
 
+/** `runs.viewing` (KOBE-462): `@kobe/protocol` `RunViewingContext` (file-editor.ts) as stored. */
+export interface StoredRunViewing {
+  readonly path: string;
+  readonly sha256: string;
+  readonly size: number;
+  /** The file's first bytes as text; absent when it is not text. */
+  readonly content?: string;
+  readonly truncated: boolean;
+}
+
 export const runTrigger = pgEnum("run_trigger", ["user", "schedule"]);
 export type RunTrigger = (typeof runTrigger.enumValues)[number];
 
@@ -224,6 +234,13 @@ export const runs = pgTable(
      * reads it for every call the run makes. Null: the model has no thinking control.
      */
     thinkingLevel: text().$type<ThinkingLevelValue>(),
+    /**
+     * The workspace file the member had open when sending (KOBE-462, `@kobe/protocol`
+     * file-editor.ts): path, version and a bounded copy of its text, read by
+     * the server at submit and sent as `run.start.viewing`. Server-written, never shown in the
+     * thread or its events; null for runs without one. Purged with the run.
+     */
+    viewing: jsonb().$type<StoredRunViewing>(),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.id] }),
