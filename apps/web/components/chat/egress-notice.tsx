@@ -5,6 +5,7 @@ import type { KobeEventPayload } from "@kobe/protocol";
 import type { ApiError } from "../../lib/api/client";
 import type { ChatApi } from "../../lib/chat/api";
 import type { EgressRequest } from "../../lib/chat/types";
+import { CloseNoticeButton, useClosedNotice } from "./closable-notice";
 import { ChatSessionContext, useKobeExtras } from "./kobe-runtime";
 import styles from "./chat.module.css";
 
@@ -43,18 +44,33 @@ function statusText(view: View, domain: string): string | null {
  * member can **Request access**, which notifies the team's admins (domain + this thread's id). No
  * self-allow: the button only asks. The notice shows the request's state (read back on mount, so a
  * reload keeps it, and re-read while pending).
+ *
+ * With `closeId` (the event's id) the viewer can close it (KOBE-468): it stays closed in this
+ * browser. A closed notice stops polling; a pending request stays pending.
  */
 export function EgressNotice({
-  payload,
-  api,
-  threadId,
-  pollMs = PENDING_POLL_MS,
-}: {
+  closeId,
+  ...props
+}: NoticeProps & { readonly closeId?: string | undefined }) {
+  const [closed, close] = useClosedNotice(closeId);
+  if (closed) return null;
+  return <EgressNoticeBody {...props} onClose={closeId === undefined ? undefined : close} />;
+}
+
+interface NoticeProps {
   readonly payload: KobeEventPayload<"egress.blocked">;
   readonly api: Api | undefined;
   readonly threadId: string | undefined;
   readonly pollMs?: number;
-}) {
+}
+
+function EgressNoticeBody({
+  payload,
+  api,
+  threadId,
+  pollMs = PENDING_POLL_MS,
+  onClose,
+}: NoticeProps & { readonly onClose: (() => void) | undefined }) {
   const [view, setView] = useState<View>({ kind: "idle" });
   const domain = payload.domain;
   const canRequest = payload.request_access && api !== undefined;
@@ -96,22 +112,28 @@ export function EgressNotice({
   const showButton =
     canRequest && (view.kind === "idle" || view.kind === "sending" || view.kind === "error");
   return (
-    <div className={styles.denied} role="note">
-      <p>
-        Internet access to <strong>{domain}</strong> was blocked by your team&apos;s egress policy.
-        {payload.request_access
-          ? " A team admin can allow it."
-          : " It is outside what this site allows."}
-      </p>
-      {showButton ? (
-        <button type="button" onClick={() => void request()} disabled={view.kind === "sending"}>
-          Request access<span className={styles.visuallyHidden}> to {domain}</span>
-        </button>
-      ) : null}
-      {text ? (
-        <p role="status" className={view.kind === "error" ? styles.errorText : undefined}>
-          {text}
+    <div className={onClose ? `${styles.denied} ${styles.closable}` : styles.denied} role="note">
+      <div className={styles.closableBody}>
+        <p>
+          Internet access to <strong>{domain}</strong> was blocked by your team&apos;s egress
+          policy.
+          {payload.request_access
+            ? " A team admin can allow it."
+            : " It is outside what this site allows."}
         </p>
+        {showButton ? (
+          <button type="button" onClick={() => void request()} disabled={view.kind === "sending"}>
+            Request access<span className={styles.visuallyHidden}> to {domain}</span>
+          </button>
+        ) : null}
+        {text ? (
+          <p role="status" className={view.kind === "error" ? styles.errorText : undefined}>
+            {text}
+          </p>
+        ) : null}
+      </div>
+      {onClose ? (
+        <CloseNoticeButton label={`Close notice about ${domain}`} onClose={onClose} />
       ) : null}
     </div>
   );
@@ -120,10 +142,14 @@ export function EgressNotice({
 /** The notice with the chat's API and the thread on screen. */
 export function ConnectedEgressNotice({
   payload,
+  closeId,
 }: {
   readonly payload: KobeEventPayload<"egress.blocked">;
+  readonly closeId?: string | undefined;
 }) {
   const session = useContext(ChatSessionContext);
   const threadId = useKobeExtras()?.state.threadId ?? undefined;
-  return <EgressNotice payload={payload} api={session?.api} threadId={threadId} />;
+  return (
+    <EgressNotice payload={payload} api={session?.api} threadId={threadId} closeId={closeId} />
+  );
 }

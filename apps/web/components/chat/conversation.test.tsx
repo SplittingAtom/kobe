@@ -693,3 +693,52 @@ describe("root branches: the first message is editable like any other (KOBE-214,
     expect(screen.queryByText(/coming soon/)).toBeNull();
   });
 });
+
+describe("closing notices (KOBE-468)", () => {
+  afterEach(() => localStorage.clear());
+
+  it("closes egress and run notices for this viewer, also after a refresh; denials stay", async () => {
+    const { t } = threadWithHistory();
+    const first = openApp(fake, t);
+    const { user, runId } = await sendAndStart("install pandas", t);
+    fake.agent.toolCall(runId, "tc1", "bash", { cmd: "rm -rf /" }, "m1");
+    fake.emit(runId, "policy.denied", {
+      tool_call_id: "tc1",
+      tool: "bash",
+      reasons: [{ code: "team_deny_rule", stage: "team_deny", message: "No." }],
+    });
+    fake.emit(runId, "egress.blocked", { domain: "pypi.org", request_access: false });
+    fake.emit(runId, "steer.applied", { content: "use a bar chart" });
+
+    await user.click(await screen.findByRole("button", { name: "Close notice about pypi.org" }));
+    expect(screen.queryByText(/pypi.org.*was blocked/)).toBeNull();
+    const steered = await screen.findByText("Steered: “use a bar chart”");
+    await user.click(
+      within(must(steered.parentElement?.parentElement ?? undefined)).getByRole("button", {
+        name: "Close notice",
+      }),
+    );
+    expect(screen.queryByText("Steered: “use a bar chart”")).toBeNull();
+    // The record of what the agent did keeps no close button.
+    const denial = must(screen.getByText("Denied by policy.").closest('[role="note"]'));
+    expect(within(denial as HTMLElement).queryByRole("button")).toBeNull();
+
+    first.unmount();
+    openApp(fake, t);
+    fake.emit(runId, "egress.blocked", { domain: "example.com", request_access: false });
+    expect(await screen.findByText(/example.com/)).toBeTruthy();
+    expect(screen.queryByText(/pypi.org.*was blocked/)).toBeNull();
+    expect(screen.queryByText("Steered: “use a bar chart”")).toBeNull();
+  });
+
+  it("closes a failed run's notice", async () => {
+    const { t } = threadWithHistory();
+    openApp(fake, t);
+    const { user, runId } = await sendAndStart("go", t);
+    fake.agent.fail(runId, "start_failed", "No sandbox.");
+    expect(await screen.findByText(/The run failed: No sandbox./)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Close notice about the failed run" }));
+    const alerts = screen.queryAllByRole("alert").map((a) => a.textContent);
+    expect(alerts.filter((a) => a?.includes("The run failed"))).toEqual([]);
+  });
+});

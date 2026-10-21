@@ -470,3 +470,15 @@
   flex: 1;
   margin: 0;
 }
+
+/* KOBE-468: a notice with its close button at the end. */
+.closable {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.closableBody {
+  flex: 1;
+  min-width: 0;
+}

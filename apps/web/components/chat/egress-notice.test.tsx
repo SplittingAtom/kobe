@@ -1,11 +1,20 @@
 // @vitest-environment happy-dom
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EgressRequest } from "../../lib/chat/types";
+import { IconActionProvider } from "../shell/icon-action";
 import { EgressNotice } from "./egress-notice";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
+
+const wrapper = ({ children }: { readonly children: ReactNode }) => (
+  <IconActionProvider>{children}</IconActionProvider>
+);
 
 const THREAD = "9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
 const request = (status: EgressRequest["status"]): EgressRequest => ({
@@ -43,7 +52,7 @@ describe("EgressNotice (KOBE-39)", () => {
       />,
     );
     expect(screen.getByText(/outside what this site allows/)).toBeTruthy();
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Request access/ })).toBeNull();
   });
 
   it("shows a decision read back on mount instead of the button", async () => {
@@ -55,7 +64,7 @@ describe("EgressNotice (KOBE-39)", () => {
       />,
     );
     expect(await screen.findByText(/A team admin enabled pypi.org/)).toBeTruthy();
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Request access/ })).toBeNull();
   });
 
   it("says a denial plainly", async () => {
@@ -120,5 +129,42 @@ describe("EgressNotice (KOBE-39)", () => {
     await userEvent.setup().click(await screen.findByRole("button", { name: /Request access/ }));
     expect(await screen.findByText("Wait for your team admins.")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Request access/ })).toBeTruthy();
+  });
+
+  it("closes for this viewer by the event's id, stops polling, and stays closed (KOBE-468)", async () => {
+    const fake = api([request("pending")]);
+    const notice = (
+      <EgressNotice
+        payload={{ domain: "pypi.org", request_access: true }}
+        api={fake}
+        threadId={THREAD}
+        pollMs={20}
+        closeId="run-1:egress:pypi.org"
+      />
+    );
+    const { unmount } = render(notice, { wrapper });
+    expect(await screen.findByText(/your team admins were notified/)).toBeTruthy();
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Close notice about pypi.org" }));
+    expect(screen.queryByText(/was blocked/)).toBeNull();
+    const calls = fake.egressRequests.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(fake.egressRequests.mock.calls.length).toBe(calls);
+    expect(fake.requestEgressAccess).not.toHaveBeenCalled();
+    unmount();
+    render(notice, { wrapper });
+    expect(screen.queryByText(/was blocked/)).toBeNull();
+  });
+
+  it("has no close button without an event id", () => {
+    render(
+      <EgressNotice
+        payload={{ domain: "example.com", request_access: false }}
+        api={api()}
+        threadId={THREAD}
+      />,
+    );
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });
