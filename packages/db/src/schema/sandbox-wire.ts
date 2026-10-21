@@ -84,6 +84,10 @@ export const SANDBOX_COMMAND_KINDS = [
   "eval.prepare",
   "eval.snapshot",
   "eval.read",
+  // The thread's notebook kernel (KOBE-464, docs/specs/notebooks.md): run code, interrupt, restart.
+  "notebook.execute",
+  "notebook.interrupt",
+  "notebook.restart",
 ] as const;
 export type SandboxCommandKind = (typeof SANDBOX_COMMAND_KINDS)[number];
 
