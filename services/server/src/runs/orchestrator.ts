@@ -658,6 +658,16 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       // (KOBE-464) has no Pi: its kernel is interrupted instead, below.
       const notebook = run.kind === "notebook";
       if (wasActive && !notebook) await requestStop(tx, teamId, runId, "abort");
+      // A notebook run's cell not yet delivered (the sandbox still waking) is never sent; its
+      // requester reads the failure on its next poll.
+      if (notebook) {
+        await tx.execute(sql`
+          UPDATE sandbox_commands
+             SET status = 'failed', completed_at = now(),
+                 result = ${JSON.stringify({ ok: false, error: { code: "run_not_active", message: "the run was stopped" } })}::jsonb
+           WHERE team_id = ${teamId} AND run_id = ${runId} AND kind = 'notebook.execute'
+             AND status = 'pending'`);
+      }
       // Stop pauses the queue behind the run (KOBE-26); deleting a queued message does not, nor
       // does stopping a compaction (KOBE-213): messages sent meanwhile were not stopped.
       const left = await queuedCount(tx, teamId, thread.id);

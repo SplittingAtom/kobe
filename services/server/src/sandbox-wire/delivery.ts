@@ -553,6 +553,17 @@ export class CommandDelivery {
       if (current.rowCount !== 1) return "replaced" as const;
       // An eval sandbox (KOBE-325) takes only its own thread's commands (the slot already says so).
       if (evalThreadId !== undefined && row.threadId !== evalThreadId) return "gone" as const;
+      if (row.kind === "notebook.execute") {
+        // KOBE-464: never run a cell for a run that ended meanwhile (Stop while the sandbox woke).
+        // FOR SHARE holds off a concurrent Stop until this delivery is recorded.
+        const res = await tx.execute<{ status: string }>(sql`
+          SELECT status FROM runs WHERE team_id = ${teamId} AND id = ${row.runId ?? null}
+             FOR SHARE`);
+        const status = res.rows[0]?.status;
+        if (status !== "running" && status !== "waiting_approval") {
+          return "run_not_active" as const;
+        }
+      }
       if (starts) {
         // Holds off a concurrent Stop (KOBE-30) until the lease is recorded: a Stop that commits
         // first is seen here (not active → refused); one that commits later finds the lease and

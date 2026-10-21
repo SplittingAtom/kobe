@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   CAPABILITY_NOTEBOOKS,
   notebookRunResponseSchema,
@@ -413,6 +413,66 @@ describe("Stop on a notebook run (NB7, KOBE-464 review)", () => {
       [runId],
     );
     expect(stops.rows[0]?.stop_mode).toBeNull();
+  });
+});
+
+describe("Stop while the sandbox wakes (KOBE-464 re-review)", () => {
+  it("never delivers the cell of a stopped run once the sandbox connects", async () => {
+    const w = await world();
+    await seed(w, "w.ipynb", notebook([code("c1", "print('late')")]));
+    const res = await run(w, { path: "w.ipynb", cell_id: "c1" });
+    expect(res.status).toBe(202);
+    const { run_id: runId } = notebookRunResponseSchema.parse(res.json);
+    await vi.waitFor(async () => {
+      const pending = await fx.admin.query<{ status: string }>(
+        `SELECT status FROM sandbox_commands WHERE team_id = $1 AND run_id = $2`,
+        [w.team, runId],
+      );
+      expect(pending.rows).toEqual([{ status: "pending" }]);
+    });
+    const stop = await w.owner.browser.post(`/v1/runs/${runId}/cancel`, {});
+    expect(stop.status, JSON.stringify(stop.json)).toBe(200);
+    const sb = await connected(w, () => [stdout("late\n")]);
+    await fx.replica(0).deps.runs.idle();
+    expect(sb.frames("notebook.execute")).toEqual([]);
+    expect((await runStatus(w.team, runId)).status).toBe("cancelled");
+  });
+
+  it("delivery refuses a pending cell whose run already ended", async () => {
+    const w = await world();
+    const runId = randomUUID();
+    await fx.admin.query(
+      `INSERT INTO runs (id, team_id, thread_id, trigger, kind, status, started_at, ended_at)
+       VALUES ($1, $2, $3, 'user', 'notebook', 'cancelled', now(), now())`,
+      [runId, w.team, w.threadId],
+    );
+    const frame = {
+      thread_id: w.threadId,
+      run_id: runId,
+      exec_id: randomUUID(),
+      code: "print('orphan')",
+      timeout_ms: 60_000,
+    };
+    const { rows } = await fx.admin.query<{ id: string }>(
+      `INSERT INTO sandbox_commands
+         (team_id, user_id, thread_id, run_id, kind, frame, requester_replica, expires_at)
+       VALUES ($1, $2, $3, $4, 'notebook.execute', $5::jsonb, 'gone-replica', now() + interval '5 minutes')
+       RETURNING id`,
+      [w.team, w.owner.id, w.threadId, runId, JSON.stringify(frame)],
+    );
+    const sb = await connected(w, () => [stdout("orphan\n")]);
+    const commandId = must(rows[0], "command").id;
+    await vi.waitFor(async () => {
+      const after = await fx.admin.query<{ status: string; result: unknown }>(
+        `SELECT status, result FROM sandbox_commands WHERE id = $1`,
+        [commandId],
+      );
+      expect(after.rows[0]).toMatchObject({
+        status: "failed",
+        result: { error: { code: "run_not_active" } },
+      });
+    }, 5000);
+    expect(sb.frames("notebook.execute")).toEqual([]);
   });
 });
 
