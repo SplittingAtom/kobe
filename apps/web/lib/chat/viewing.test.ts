@@ -22,6 +22,21 @@ describe("the viewed file (KOBE-463, FE7)", () => {
     expect(listener).toHaveBeenCalled();
   });
 
+  it("a closed tab forgets the removal: opening the file again shows the chip", () => {
+    const store = new ViewingStore();
+    store.show("notes.md");
+    store.dismiss();
+    store.closed("notes.md");
+    expect(store.current()).toBeUndefined();
+    store.show("notes.md");
+    expect(store.current()).toBe("notes.md");
+    // Only a switch away (not a close) keeps it removed.
+    store.dismiss();
+    store.hide("notes.md");
+    store.show("notes.md");
+    expect(store.current()).toBeUndefined();
+  });
+
   it("is sent as `viewing: {path}`, or not at all", () => {
     const store = new ViewingStore();
     expect(store.body()).toBeUndefined();

@@ -304,7 +304,7 @@ export function ArtifactPanel({
   const { sheet, modal } = useSheetLayer(ref);
   const { tabs, onTitle } = useTabTitles(panel?.tabs.open ?? []);
   const active = panel?.openId ?? null;
-  const drafts = useChatSession().editDrafts;
+  const { editDrafts: drafts, viewing } = useChatSession();
   useUnsavedGuard(drafts);
   // No tabs: no column (CE6). Hidden by the member (CE23), it stays mounted (the grid hides it),
   // so every preview keeps its state.
@@ -320,6 +320,7 @@ export function ArtifactPanel({
     }
     const activePath = filePathOfTab(active);
     if (activePath !== null && !confirmDiscard(drafts, activePath)) return;
+    if (activePath !== null) viewing.closed(activePath);
     const last = panel.tabs.open.length === 1;
     panel.close();
     if (!last) ref.current?.focus();
@@ -347,7 +348,9 @@ export function ArtifactPanel({
             onClose={(id) => {
               // A file with unsaved changes asks first (KOBE-463).
               const path = filePathOfTab(id);
-              if (path === null || confirmDiscard(drafts, path)) panel.closeTab(id);
+              if (path !== null && !confirmDiscard(drafts, path)) return;
+              if (path !== null) viewing.closed(path);
+              panel.closeTab(id);
             }}
           />
         </div>

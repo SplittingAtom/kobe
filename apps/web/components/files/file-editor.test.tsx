@@ -94,6 +94,33 @@ describe("Rendered and Raw (ac-1)", () => {
     expect(fake.workspaceSaves[1]?.base).toBe(await sha("# Plan\n\nShip it.\n"));
   });
 
+  it("keystrokes typed while a save is in flight stay unsaved, based on the saved version", async () => {
+    const thread = threadWithFile("notes.md", "one\n");
+    openApp(fake, thread);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Raw" }));
+    const view = await editorView("Edit notes.md");
+    replaceText(view, "two\n");
+    let release = () => {};
+    fake.saveGate = new Promise<void>((resolve) => (release = resolve));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByRole("button", { name: "Saving…" });
+    replaceText(view, "two\nthree\n"); // typed during the save
+    act(() => release());
+    await waitFor(() => expect(fake.workspaceSaves).toHaveLength(1));
+    expect(fake.workspaceSaves[0]?.text).toBe("two\n");
+    expect(await screen.findByText("Unsaved changes.")).toBeTruthy();
+    expect(view.state.doc.toString()).toBe("two\nthree\n");
+    fake.saveGate = undefined;
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(fake.workspaceSaves).toHaveLength(2));
+    expect(fake.workspaceSaves[1]).toEqual({
+      path: "notes.md",
+      base: await sha("two\n"),
+      text: "two\nthree\n",
+    });
+  });
+
   it("a file changed meanwhile is not overwritten: the conflict notice offers a reload", async () => {
     const thread = threadWithFile("data.json", '{"a":1}');
     openApp(fake, thread);
@@ -261,6 +288,30 @@ describe("reviewing a proposal (ac-3)", () => {
     await user.click(screen.getByRole("button", { name: "Commit all" }));
     await waitFor(() => expect(fake.workspaceSaves).toHaveLength(1));
     expect(fake.workspaceSaves[0]?.text).toBe(PROPOSED);
+  });
+
+  it("re-reading the file keeps the review's decisions; a file that moved on ends it with a notice", async () => {
+    const { user, view } = await reviewProposal();
+    await waitFor(() => expect(getChunks(view.state)?.chunks).toHaveLength(2));
+    await user.click(must(screen.getAllByRole("button", { name: "Accept this change" })[0]));
+    await waitFor(() => expect(getChunks(view.state)?.chunks).toHaveLength(1));
+    const reviewButton = screen.getByRole("button", {
+      name: "Review the proposed edit to notes.txt",
+    });
+    const reads = () =>
+      fake.requests.filter((r) => r.method === "GET" && r.path.startsWith("/v1/workspace/file?"))
+        .length;
+    const before = reads();
+    await user.click(reviewButton); // opens the file again: it is read again
+    await waitFor(() => expect(reads()).toBe(before + 1));
+    const same = await editorView("Proposed content of notes.txt");
+    expect(same).toBe(view);
+    expect(getChunks(view.state)?.chunks).toHaveLength(1);
+
+    fake.workspaceFiles.set("notes.txt", enc("moved on\n"));
+    await user.click(reviewButton);
+    expect(await screen.findByText(/changed since the agent proposed this edit/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Commit all" })).toBeNull();
   });
 
   it("Discard all writes nothing; a file changed since the proposal cannot be committed", async () => {

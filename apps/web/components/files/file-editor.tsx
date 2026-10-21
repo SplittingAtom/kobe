@@ -135,7 +135,10 @@ export function FileEditor(props: FileEditorProps) {
   const review = useReview(reviews, path);
   const [mode, setMode] = useState<Mode>(draft === undefined ? "rendered" : "raw");
   const { state, save, reset } = useSave(props.api, path, (saved, version) => {
-    drafts.clear(path);
+    // Keystrokes typed while the save was in flight stay unsaved, now based on the new version.
+    const latest = drafts.get(path);
+    if (latest === undefined || latest.text === saved) drafts.clear(path);
+    else drafts.set(path, { text: latest.text, baseSha256: version });
     props.onSaved(saved, version);
   });
   const blocked =
@@ -231,6 +234,9 @@ function ProposalReview({
   dirty,
 }: FileEditorProps & { readonly review: ProposalView; readonly dirty: boolean }) {
   const [proposed, setProposed] = useState(review.content);
+  // The file as the review started: a re-read never rebuilds the diff (and its accept/reject);
+  // a file that moved on ends the review with the notice below instead.
+  const [original] = useState(text);
   const [open, setOpen] = useState<number | null>(null);
   const { state, save } = useSave(api, path, (saved, version) => {
     reviews.finish(path, "committed");
@@ -272,7 +278,7 @@ function ProposalReview({
             <button
               type="button"
               className={BUTTON}
-              disabled={state.status === "saving" || proposed === text}
+              disabled={state.status === "saving" || proposed === original}
               onClick={() => void save(review.baseSha256, proposed)}
             >
               {state.status === "saving" ? "Committing…" : "Commit all"}
@@ -285,7 +291,7 @@ function ProposalReview({
           <Suspense fallback={<EditorFallback />}>
             <CodeEditor
               value={review.content}
-              original={text}
+              original={original}
               language={editorLanguage(previewOf(path))}
               label={`Proposed content of ${name}`}
               onChange={setProposed}

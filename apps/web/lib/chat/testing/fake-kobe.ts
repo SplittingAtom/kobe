@@ -232,6 +232,8 @@ export class FakeKobe {
   readonly submittedBodies: Json[] = [];
   /** `PUT /v1/workspace/file` saves (KOBE-463): path, base version and the saved text. */
   readonly workspaceSaves: { path: string; base: string; text: string }[] = [];
+  /** When set, a save answers only once it resolves (a save in flight, KOBE-463 review). */
+  saveGate: Promise<void> | undefined;
 
   // --- setup ----------------------------------------------------------------------------------
 
@@ -1927,6 +1929,7 @@ export class FakeKobe {
 
   /** The editor's save (FE4): replaces the file when it still has `base_sha256`, else 409. */
   async #saveWorkspaceFile(url: URL, raw: unknown): Promise<Response> {
+    await this.saveGate;
     const path = url.searchParams.get("path") ?? "";
     const base = url.searchParams.get("base_sha256") ?? "";
     const current = this.workspaceFiles.get(path);

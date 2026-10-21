@@ -40,6 +40,12 @@ export class ViewingStore {
     if (this.#path === path) this.#set(undefined, this.#dismissed);
   }
 
+  /** `path`'s tab closed: opening it again shows its chip again. */
+  closed(path: string): void {
+    this.hide(path);
+    if (this.#dismissed === path) this.#set(this.#path, undefined);
+  }
+
   /** The member removed the chip. */
   dismiss(): void {
     if (this.#path !== undefined) this.#set(this.#path, this.#path);
