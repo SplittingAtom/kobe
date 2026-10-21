@@ -112,6 +112,7 @@ export const SANDBOX_FRAME_MAX_BYTES_BY_TYPE = {
   "policy.check": 1024 * 1024,
   "artifact.put": 1024 * 1024, // KOBE-127: up to 512 KiB of content plus JSON escaping
   "thread.compact_result": 1024 * 1024, // KOBE-212: up to 256 KiB of summary plus JSON escaping
+  "notebook.run": 1024 * 1024, // KOBE-464: up to 256 KiB of code plus JSON escaping
 } as const;
 export const SANDBOX_HELLO_TIMEOUT_MS = 10_000;
 export const SANDBOX_HEARTBEAT_INTERVAL_MS = 15_000;
