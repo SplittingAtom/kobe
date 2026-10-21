@@ -13,7 +13,8 @@ import { ThreadRowMenu } from "./thread-row-menu";
 
 /**
  * One thread in the rail (D16): open it; its ⋯ menu copies, regenerates, pins, moves, archives or
- * moves it to Trash (KOBE-292, KOBE-220; rename is the conversation header's pencil). In Trash:
+ * moves it to Trash (KOBE-292, KOBE-220; rename is the conversation header's pencil), and a trash
+ * icon on hover or focus moves it there too (KOBE-466). In Trash:
  * restore or delete forever. Hovering or focusing the row shows its card (CE18, KOBE-219). The
  * member's own rows can be dragged onto a project header to move there (CE19).
  */

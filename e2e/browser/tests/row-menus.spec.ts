@@ -92,6 +92,10 @@ test("thread and file row menus in light and dark; header rename; Copy as Markdo
   const threadRow = threads.getByRole("listitem").filter({ hasText: title });
   await chat.openThreads();
   await expect(threadRow).toHaveCount(1);
+  // KOBE-466: hovering the row reveals its trash icon beside the ⋯ button.
+  const trashIcon = threadRow.getByRole("button", { name: `Move ${title} to Trash`, exact: true });
+  await threadRow.hover();
+  await expect(trashIcon).toHaveCSS("opacity", "1");
   await chat.closeThreads();
 
   // A file of our own in the workspace root, for its row's menu.

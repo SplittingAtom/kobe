@@ -7,7 +7,8 @@ import { must } from "../../lib/testing/must";
 import { chatRequests, composer, openApp, openRowMenu, threadGroup } from "./testing";
 
 /**
- * KOBE-292 (ac-1): a thread row has no rename or Trash icons; its ⋯ button opens Copy,
+ * KOBE-292 (ac-1): a thread row has no rename icon (its hover trash icon is KOBE-466's,
+ * `thread-row-trash.test.tsx`); its ⋯ button opens Copy,
  * Regenerate, Regenerate with (the models, as on answers) and Delete. Regenerate acts on the
  * thread's last answer through the same paths as the answer's own buttons, opening the thread.
  */
@@ -48,14 +49,13 @@ function answered(title: string) {
 }
 
 describe("thread row menu (KOBE-292)", () => {
-  it("replaces the row's rename and Trash icons with one menu button", async () => {
+  it("replaces the row's rename icon with one menu button", async () => {
     answered("Budget");
     openApp(fake);
     const items = within(await list());
     const button = await items.findByRole("button", { name: "Actions for Budget" });
     expect(button.getAttribute("aria-haspopup")).toBe("menu");
     expect(items.queryByRole("button", { name: "Rename Budget" })).toBeNull();
-    expect(items.queryByRole("button", { name: "Move Budget to Trash" })).toBeNull();
     const menu = await openRowMenu("Actions for Budget");
     expect(
       within(menu)
