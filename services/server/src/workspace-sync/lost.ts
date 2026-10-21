@@ -1,6 +1,14 @@
-import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import {
+  isUnderLegalHold,
+  lockLegalHolds,
+  sql,
+  withTeam,
+  type KobeDb,
+  type KobeTx,
+} from "@kobe/db";
 import type { Logger } from "pino";
 import { workspaceBlobKey, type WorkspaceOwner } from "./keys.js";
+import type { ObjectStore } from "./object-store.js";
 import type { StoredEntry } from "./store.js";
 
 /**
@@ -17,6 +25,16 @@ import type { StoredEntry } from "./store.js";
 /** What a member is told when a file's saved copy is missing (the web words it per file). */
 export const CONTENT_MISSING =
   "The saved copy of this file is missing; it will be restored from your sandbox at its next sync.";
+
+/**
+ * A `workspace_blobs` row that is lost **and still referenced by a live file**: only those are
+ * listed, accepted as resends and treated as absent. Unreferenced lost content behaves like any
+ * held blob and collection frees it as usual (no resend can race a collection of it).
+ */
+export const LIVE_LOST = sql.raw(`(workspace_blobs.lost_at IS NOT NULL AND EXISTS (
+  SELECT 1 FROM workspace_files lf
+   WHERE lf.team_id = workspace_blobs.team_id AND lf.user_id = workspace_blobs.user_id
+     AND lf.sha256 = workspace_blobs.sha256 AND NOT lf.deleted))`);
 
 /** Lost hashes listed to a sandbox at once (the contract's batch). */
 export const LOST_LIST_MAX = 1000;
@@ -57,7 +75,7 @@ export async function lostBlobs(
   const res = await tx.execute<{ sha256: string }>(sql`
     SELECT sha256 FROM workspace_blobs
      WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}
-       AND lost_at IS NOT NULL AND NOT deleting
+       AND ${LIVE_LOST} AND NOT deleting
      ORDER BY lost_at, sha256 LIMIT ${limit}`);
   return res.rows.map((r) => r.sha256);
 }
@@ -71,7 +89,7 @@ export async function lostBlobSize(
   const res = await tx.execute<{ size: string }>(sql`
     SELECT size FROM workspace_blobs
      WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND sha256 = ${sha256}
-       AND lost_at IS NOT NULL AND NOT deleting`);
+       AND ${LIVE_LOST} AND NOT deleting`);
   const row = res.rows[0];
   return row ? Number(row.size) : undefined;
 }
@@ -133,4 +151,65 @@ export async function reportMissingContent(
     log.error({ err, team_id: owner.teamId }, "could not mark workspace content lost");
     return false;
   }
+}
+
+/**
+ * A resend whose row was collected while its bytes were being stored (`healBlob` said `deleting`
+ * or `gone`): the object just written belongs to no row and nobody pays for it. Removed with
+ * collection's own protocol so a concurrent upload of the same content is never hurt: the row is
+ * claimed `deleting` first (committed: uploads then wait and retry), then the object goes, then
+ * the claim. Under a legal hold nothing is deleted: the content is recorded and counted instead.
+ */
+export async function discardOrphanedResend(
+  db: KobeDb,
+  objects: ObjectStore,
+  owner: WorkspaceOwner,
+  prefix: string,
+  sha256: string,
+  size: number,
+): Promise<"discarded" | "kept"> {
+  const claim = await withTeam(db, owner.teamId, async (tx) => {
+    const ours = await tx.execute(sql`
+      INSERT INTO workspace_blobs (team_id, user_id, sha256, size, deleting)
+      VALUES (${owner.teamId}, ${owner.userId}, ${sha256}, ${size}, true)
+      ON CONFLICT (team_id, user_id, sha256) DO NOTHING
+      RETURNING 1`);
+    if (ours.rows.length > 0) return "ours" as const;
+    const row = await tx.execute<{ deleting: boolean }>(sql`
+      SELECT deleting FROM workspace_blobs
+       WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND sha256 = ${sha256}`);
+    return row.rows[0]?.deleting === true ? ("collecting" as const) : ("recorded" as const);
+  });
+  // Recorded meanwhile by another upload of this content: its row owns the object now.
+  if (claim === "recorded") return "kept";
+  return withTeam(db, owner.teamId, async (tx) => {
+    await tx.execute(sql.raw(`SET LOCAL lock_timeout = '5s'`));
+    await lockLegalHolds(tx);
+    const held = await isUnderLegalHold(tx, owner.teamId, owner.userId);
+    if (claim === "collecting") {
+      // Collection's row: it is deleting this content (under a hold it unmarks and keeps it).
+      if (held) return "kept" as const;
+      await objects.delete([workspaceBlobKey(prefix, owner, sha256)]);
+      return "discarded" as const;
+    }
+    if (held) {
+      const kept = await tx.execute(sql`
+        UPDATE workspace_blobs SET deleting = false, released_at = now()
+         WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND sha256 = ${sha256}
+           AND deleting
+        RETURNING 1`);
+      if (kept.rows.length > 0) {
+        await tx.execute(sql`
+          UPDATE workspace_sync SET blob_count = blob_count + 1, blob_bytes = blob_bytes + ${size}
+           WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}`);
+      }
+      return "kept" as const;
+    }
+    await objects.delete([workspaceBlobKey(prefix, owner, sha256)]);
+    await tx.execute(sql`
+      DELETE FROM workspace_blobs
+       WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND sha256 = ${sha256}
+         AND deleting`);
+    return "discarded" as const;
+  });
 }

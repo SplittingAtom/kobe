@@ -1,32 +1,23 @@
-import { parseArgs } from "node:util";
 import { createDb } from "@kobe/db";
 import { logger } from "../logger.js";
 import { createS3ObjectStore, loadS3Settings, repairWorkspaces } from "../workspace-sync/index.js";
 import { exitSoon } from "./replica.js";
+import { parseRepairArgs } from "./workspace-repair-args.js";
 
 // Operator tool (KOBE-475), run inside a server pod (its env: database and object storage):
 //   node dist/cli/workspace-repair.js [--dry-run] [--team-id <uuid> [--user-id <uuid>]]
+//     [--max <workspaces>] [--pace-ms <ms>]
+// One storage call at a time, `--pace-ms` (default 20) apart; `--max` stops after that many
+// workspaces (run again for the rest).
 // Checks every live workspace file against object storage and marks content that is missing
 // "lost": each member's sandbox uploads it again at its next sync (push), verified against the
 // recorded SHA-256 and size. Prints the counts as one JSON line; never paths or content.
 // Exit 0 when nothing is missing (or everything missing is now marked), 1 on a dry run that found
 // missing content, 2 on a usage or configuration error.
-const USAGE = "usage: workspace-repair.js [--dry-run] [--team-id <uuid> [--user-id <uuid>]]";
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
 async function main(): Promise<number> {
-  const { values } = parseArgs({
-    options: {
-      "dry-run": { type: "boolean" },
-      "team-id": { type: "string" },
-      "user-id": { type: "string" },
-    },
-  });
-  const teamId = values["team-id"];
-  const userId = values["user-id"];
-  const badId = [teamId, userId].some((id) => id !== undefined && !UUID.test(id));
-  if (badId || (userId !== undefined && teamId === undefined)) {
-    console.error(USAGE);
+  const args = parseRepairArgs(process.argv.slice(2));
+  if (typeof args === "string") {
+    console.error(args);
     return 2;
   }
   const databaseUrl = process.env.KOBE_DATABASE_URL;
@@ -41,16 +32,11 @@ async function main(): Promise<number> {
   }
   const database = createDb(databaseUrl, { max: 2 });
   try {
-    const dryRun = values["dry-run"] === true;
+    const { dryRun } = args;
     const result = await repairWorkspaces(
       database.db,
       createS3ObjectStore(s3),
-      {
-        prefix: s3.prefix,
-        dryRun,
-        ...(teamId ? { teamId } : {}),
-        ...(userId ? { userId } : {}),
-      },
+      { ...args, prefix: s3.prefix },
       logger,
     );
     console.log(JSON.stringify({ ...result, dry_run: dryRun }));

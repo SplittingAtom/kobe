@@ -17,7 +17,13 @@ import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
 import type { SandboxAuthenticator, SandboxCaller } from "./auth.js";
 import { workspaceBlobKey } from "./keys.js";
 import { movesSince } from "./move-journal.js";
-import { healBlob, lostBlobSize, lostBlobs, reportMissingContent } from "./lost.js";
+import {
+  discardOrphanedResend,
+  healBlob,
+  lostBlobSize,
+  lostBlobs,
+  reportMissingContent,
+} from "./lost.js";
 import { IntegrityError, verifyingStream, type ObjectStore } from "./object-store.js";
 import { resolveLimits, type QuotaCheck, type WorkspaceLimits } from "./quota.js";
 import {
@@ -404,6 +410,10 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
     if (failed) return failed;
     const outcome = await finishTx(caller, (t) => healBlob(t, caller, sha256, size));
     if (outcome === "deleting" || outcome === "gone") {
+      // Collected while the bytes were stored: never leave an object no row accounts for.
+      await discardOrphanedResend(db, objects, caller, prefix, sha256, size).catch((err: unknown) =>
+        log.error({ err, sandbox_id: caller.sandboxId }, "could not discard a resend"),
+      );
       c.header("Retry-After", "5");
       return error(c, 409, "retry_later", "This content is being collected; upload it again.");
     }

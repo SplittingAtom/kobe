@@ -31,11 +31,18 @@ Content-addressed sync never re-uploads an unchanged hash, so they could never h
   errors 503 `sandbox_unavailable`; `not_found` stays for missing files. Web: the tab stays open and
   shows "The saved copy of X is missing; it will be restored from your sandbox at its next sync."
 - **Logs:** ids and counts only (no paths, names or content).
+- **Review fixes:** the S3 store treats only `NoSuchKey` as a missing object (a wrong bucket, a bare
+  404 or any other error is an error, never "lost"). Lost content is listed, accepted as a resend
+  and treated as absent only while a live file references it; a resend whose row was collected
+  meanwhile is discarded with collection's own claim-then-delete protocol (kept and counted under
+  a legal hold), so no unbilled object is left. The sweep makes one storage call at a time,
+  `--pace-ms` apart (default 20), and `--max <workspaces>` bounds a run.
 
 ## gate1 repair (after deploy; not done by this ticket)
 
 1. In a server pod: `node dist/cli/workspace-repair.js --dry-run` (counts, exit 1 if missing),
-   then `node dist/cli/workspace-repair.js` (optionally `--team-id <uuid> [--user-id <uuid>]`).
+   then `node dist/cli/workspace-repair.js` (optionally `--team-id <uuid> [--user-id <uuid>]`,
+   `--max <workspaces>`, `--pace-ms <ms>`).
    Expect `missing: 5, marked: 5` for the owner's workspace. Opening any of the 5 files also
    marks it.
 2. The owner's sandbox (new image) resends them at its next push (interval, or after a run; it

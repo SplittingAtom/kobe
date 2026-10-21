@@ -218,6 +218,54 @@ describe("a blob missing from object storage (ac-1)", () => {
     expect(rows).toEqual([]);
   });
 
+  it("is listed and accepted only while a live file references it", async () => {
+    const b = await box();
+    const hash = await push(b, "draft.md", "draft");
+    objects.objects.delete(keyOf(b, hash));
+    await call(b, "GET", "/file?path=draft.md");
+    expect(await lost(b)).toEqual([hash]);
+    await call(b, "POST", "/commit", {
+      changes: [{ op: "delete", path: "draft.md", base_rev: 1 }],
+    });
+    expect(await lost(b)).toEqual([]);
+    // Not a resend any more: like any held content, the upload stores nothing.
+    expect((await call(b, "PUT", `/blobs/${hash}`, undefined, Buffer.from("draft"))).status).toBe(
+      200,
+    );
+    expect(objects.objects.has(keyOf(b, hash))).toBe(false);
+  });
+
+  it("a resend racing collection leaves no orphaned object", async () => {
+    const b = await box();
+    const hash = await push(b, "race.txt", "racing bytes");
+    const key = keyOf(b, hash);
+    objects.objects.delete(key);
+    await call(b, "GET", "/file?path=race.txt");
+    const put = objects.put.bind(objects);
+    objects.put = async (k, body, size) => {
+      if (k === key) {
+        // The file is deleted and its content collected while the bytes are on their way.
+        await call(b, "POST", "/commit", {
+          changes: [{ op: "delete", path: "race.txt", base_rev: 1 }],
+        });
+        await sync.collect();
+      }
+      return put(k, body, size);
+    };
+    try {
+      const res = await call(b, "PUT", `/blobs/${hash}`, undefined, Buffer.from("racing bytes"));
+      expect(res.status).toBe(409);
+    } finally {
+      objects.put = put;
+    }
+    expect(objects.objects.has(key)).toBe(false);
+    const { rows } = await fx.admin.query(
+      `SELECT 1 FROM workspace_blobs WHERE team_id = $1 AND sha256 = $2`,
+      [b.teamId, hash],
+    );
+    expect(rows).toEqual([]);
+  });
+
   it("is invisible to other workspaces", async () => {
     const b = await box();
     const other = await box();
@@ -274,8 +322,15 @@ describe("repair sweep (ac-3)", () => {
     const hc = await push(c, "c.txt", `c-${randomUUID()}`);
     objects.objects.delete(keyOf(b, hb));
     objects.objects.delete(keyOf(c, hc));
+    const first = await repairWorkspaces(
+      fx.db,
+      objects,
+      { prefix: "", teamId: b.teamId, maxWorkspaces: 1, paceMs: 1 },
+      silent,
+    );
+    expect(first).toMatchObject({ workspaces: 1, checked: 1, missing: 1, marked: 1 });
     const run = await repairWorkspaces(fx.db, objects, { prefix: "", teamId: b.teamId }, silent);
-    expect(run).toMatchObject({ workspaces: 2, checked: 2, missing: 2, marked: 2 });
+    expect(run).toMatchObject({ workspaces: 2, checked: 2, missing: 2, marked: 1 });
     expect(await lost(b)).toEqual([hb]);
     expect(await lost(c)).toEqual([hc]);
   });

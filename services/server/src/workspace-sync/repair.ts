@@ -18,7 +18,17 @@ export interface RepairOptions {
   /** Only this team (all its workspaces, or `userId`'s). */
   readonly teamId?: string;
   readonly userId?: string;
+  /** Stop after this many workspaces (the next run covers the rest; default: all). */
+  readonly maxWorkspaces?: number;
+  /** Pause after each storage listing page and confirming read, so a sweep never floods it. */
+  readonly paceMs?: number;
 }
+
+/** Default pause between storage calls (one call at a time). */
+export const REPAIR_PACE_MS = 20;
+
+const pause = (ms: number) =>
+  ms > 0 ? new Promise<void>((r) => setTimeout(r, ms)) : Promise.resolve();
 
 export interface RepairResult {
   readonly workspaces: number;
@@ -32,7 +42,11 @@ export interface RepairResult {
 const LIST_PAGE = 1000;
 
 /** Every key under the workspace's prefix. */
-async function storedKeys(objects: ObjectStore, prefix: string): Promise<Set<string>> {
+async function storedKeys(
+  objects: ObjectStore,
+  prefix: string,
+  paceMs: number,
+): Promise<Set<string>> {
   const keys = new Set<string>();
   let cursor: string | undefined;
   do {
@@ -42,6 +56,7 @@ async function storedKeys(objects: ObjectStore, prefix: string): Promise<Set<str
     });
     for (const o of page.objects) keys.add(o.key);
     cursor = page.next;
+    await pause(paceMs);
   } while (cursor !== undefined);
   return keys;
 }
@@ -72,11 +87,14 @@ async function repairWorkspace(
     }
   }
   if (contents.size === 0) return { checked: 0, missing: 0, marked: 0 };
-  const stored = await storedKeys(objects, workspacePrefix(options.prefix, owner));
+  const paceMs = options.paceMs ?? REPAIR_PACE_MS;
+  const stored = await storedKeys(objects, workspacePrefix(options.prefix, owner), paceMs);
   const missing: [string, number][] = [];
   for (const [sha256, size] of contents) {
     const key = workspaceBlobKey(options.prefix, owner, sha256);
-    if (!stored.has(key) && (await confirmedMissing(objects, key))) missing.push([sha256, size]);
+    if (stored.has(key)) continue;
+    if (await confirmedMissing(objects, key)) missing.push([sha256, size]);
+    await pause(paceMs);
   }
   let marked = 0;
   if (!options.dryRun && missing.length > 0) {
@@ -114,7 +132,8 @@ export async function repairWorkspaces(
   log: Pick<Logger, "error" | "info">,
 ): Promise<RepairResult> {
   let total: RepairResult = { workspaces: 0, checked: 0, missing: 0, marked: 0 };
-  for (const owner of await ownersOf(db, options)) {
+  const owners = await ownersOf(db, options);
+  for (const owner of owners.slice(0, options.maxWorkspaces ?? owners.length)) {
     try {
       const r = await repairWorkspace(db, objects, owner, options);
       total = {

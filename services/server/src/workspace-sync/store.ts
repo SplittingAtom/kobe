@@ -8,6 +8,7 @@ import {
 } from "@kobe/protocol";
 import { sql, type KobeTx } from "@kobe/db";
 import { workspaceBlobKey, type WorkspaceOwner } from "./keys.js";
+import { LIVE_LOST } from "./lost.js";
 import type { QuotaCheck } from "./quota.js";
 
 /**
@@ -175,7 +176,7 @@ export async function missingBlobs(
   const res = await tx.execute<{ sha256: string }>(sql`
     SELECT sha256 FROM workspace_blobs
      WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND NOT deleting
-       AND lost_at IS NULL AND sha256 IN ${[...new Set(hashes)]}`);
+       AND NOT ${LIVE_LOST} AND sha256 IN ${[...new Set(hashes)]}`);
   const held = new Set(res.rows.map((r) => r.sha256));
   return [...new Set(hashes)].filter((h) => !held.has(h));
 }
@@ -271,7 +272,7 @@ async function blobSize(tx: KobeTx, owner: WorkspaceOwner, sha256: string) {
   const res = await tx.execute<{ size: string }>(sql`
     SELECT size FROM workspace_blobs
      WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND sha256 = ${sha256}
-       AND NOT deleting AND lost_at IS NULL`);
+       AND NOT deleting AND NOT ${LIVE_LOST}`);
   const row = res.rows[0];
   return row ? Number(row.size) : undefined;
 }
