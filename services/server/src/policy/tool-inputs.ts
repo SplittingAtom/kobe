@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   artifactToolInputSchema,
   fileEditToolInputSchema,
+  notebookToolInputSchema,
   projectToolInputSchema,
   skillDraftToolInputSchema,
   type JsonObject,
@@ -63,6 +64,7 @@ export const BUILTIN_INPUT_SCHEMAS: Readonly<Record<string, z.ZodType<unknown>>>
   propose_project_file: projectToolInputSchema.propose_project_file,
   save_skill_draft: skillDraftToolInputSchema.save_skill_draft,
   propose_file_edit: fileEditToolInputSchema.propose_file_edit,
+  run_python: notebookToolInputSchema.run_python,
 };
 
 /** Built-ins whose `path` is a filesystem path, and whether an omitted path means the cwd. */
@@ -76,6 +78,7 @@ const PATH_TOOLS: Readonly<Record<string, { readonly defaultsToCwd: boolean }>> 
   share_file: { defaultsToCwd: false },
   propose_project_file: { defaultsToCwd: false },
   propose_file_edit: { defaultsToCwd: false },
+  run_python: { defaultsToCwd: false },
 };
 
 // Characters Pi rewrites in paths (utils/paths.js UNICODE_SPACES).

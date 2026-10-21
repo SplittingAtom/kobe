@@ -602,6 +602,7 @@ describe("contracts cleanup (agent-reported gaps)", () => {
       "policy.check": 1024 * 1024,
       "artifact.put": 1024 * 1024,
       "thread.compact_result": 1024 * 1024,
+      "notebook.run": 1024 * 1024,
     });
   });
 });

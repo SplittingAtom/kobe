@@ -301,3 +301,31 @@ describe("file.edit_proposed (KOBE-463)", () => {
     expect(run.notices).toEqual([]);
   });
 });
+
+describe("notebook events (KOBE-464)", () => {
+  it("are ignored by the chat stream until the notebook view (KOBE-465)", () => {
+    seq = 0;
+    const exec_id = "9b2f6a1e-3c4d-4e5f-8a6b-7c8d9e0f1a2b";
+    const before = applyRunEvents(newLiveRun(RUN), [
+      ev("run.started", { thread_id: THREAD, agent_id: null, agent_version: null }),
+    ]).run;
+    const after = applyRunEvents(before, [
+      ev("notebook.started", { exec_id, origin: "user", path: "a.ipynb", cell_id: "c1" }),
+      ev("notebook.output", {
+        exec_id,
+        index: 0,
+        output: { output_type: "stream", name: "stdout", text: "2\n" },
+      }),
+      ev("notebook.finished", {
+        exec_id,
+        status: "ok",
+        execution_count: 1,
+        outputs: 1,
+        truncated: false,
+        saved: null,
+      }),
+    ]).run;
+    expect(after.notices).toEqual(before.notices);
+    expect(after.tools).toEqual(before.tools);
+  });
+});

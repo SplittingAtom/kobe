@@ -189,9 +189,32 @@ const EVAL_NO_PROMPT: PolicyReason = {
 const EVAL_ISOLATED: PolicyReason = {
   code: "eval_run_isolated",
   stage: "prompt",
-  message: "Skill evals never use your memory or projects; this call was denied.",
+  message:
+    "Skill evals never use your memory, projects or synced workspace files; this call was denied.",
 };
-const EVAL_ISOLATED_TOOLS: ReadonlySet<string> = new Set([...MEMORY_TOOLS, ...PROJECT_TOOLS]);
+/**
+ * Never in an eval run: memory, projects, and `propose_file_edit` (KOBE-462), which reads and
+ * targets the member's synced workspace, not the eval sandbox's own files.
+ */
+const EVAL_ISOLATED_TOOLS: ReadonlySet<string> = new Set([
+  ...MEMORY_TOOLS,
+  ...PROJECT_TOOLS,
+  "propose_file_edit",
+]);
+
+/**
+ * `run_python` with a `path` (KOBE-464) runs the member's synced copy and saves into it: in an eval
+ * run only `code` is allowed, which runs in the eval sandbox's own kernel like bash.
+ */
+function evalIsolatedCall(tool: string, input: unknown): boolean {
+  if (EVAL_ISOLATED_TOOLS.has(tool)) return true;
+  return (
+    tool === "run_python" &&
+    typeof input === "object" &&
+    input !== null &&
+    (input as { path?: unknown }).path !== undefined
+  );
+}
 
 async function isEvalThread(db: KobeDb, teamId: string, threadId: string): Promise<boolean> {
   const res = await withTeam(db, teamId, (tx) =>
@@ -377,7 +400,7 @@ export async function decidePolicyCheck(
     // A skill eval's run (KOBE-325) never reads or writes the member's memory or projects: an eval
     // measures the skill alone and leaves nothing behind in the member's own state.
     const evalRun = await isEvalThread(deps.db, target.teamId, frame.thread_id);
-    if (evalRun && EVAL_ISOLATED_TOOLS.has(frame.tool)) {
+    if (evalRun && evalIsolatedCall(frame.tool, frame.input)) {
       const reasons = [EVAL_ISOLATED];
       await recordDenied(deps, target.teamId, frame, reasons, mayRecordDenied);
       await recordSkipped(deps, target.teamId, frame, decision.risk, reasons);

@@ -268,3 +268,40 @@ describe("propose_file_edit (KOBE-462, ac-4)", () => {
     expect(await proposalEvents(w2.team, w2.runId)).toHaveLength(1);
   });
 });
+
+describe("propose_file_edit in a skill eval (KOBE-325, KOBE-464 review)", () => {
+  it("is denied by policy and refused on the wire: an eval never reaches the member's files", async () => {
+    const owner = await fx.person(`e${randomBytes(2).toString("hex")}`);
+    const team = await fx.team(`fe-${randomBytes(3).toString("hex")}`, owner);
+    const threadId = randomUUID();
+    await fx.admin.query(
+      `INSERT INTO threads (team_id, id, owner_user_id, title, status, skill_eval)
+       VALUES ($1, $2, $3, 't', 'running', true)`,
+      [team, threadId, owner.id],
+    );
+    const { rows } = await fx.admin.query<{ id: string }>(
+      `INSERT INTO runs (team_id, thread_id, trigger, status, started_at)
+       VALUES ($1, $2, 'user', 'running', now()) RETURNING id`,
+      [team, threadId],
+    );
+    const runId = must(rows[0], "run").id;
+    const sandboxId = randomUUID();
+    const w: World = {
+      team,
+      owner,
+      reader: owner,
+      runId,
+      threadId,
+      sandboxId,
+      token: auth.issue({ sandboxId, teamId: team, userId: owner.id, evalThreadId: threadId }),
+    };
+    const sb = await started(w);
+    await seed(w, "private.md", "secret\n");
+    const input = { path: "private.md", content: "x\n", summary: "x" };
+    const decided = await check(sb, w, "call-1", input);
+    expect(decided.decision).toBe("deny");
+    expect(JSON.stringify(decided)).toContain("eval_run_isolated");
+    expect(errorCode(await propose(sb, w, "call-1", input))).toBe("not_allowed");
+    expect(await proposalEvents(team, runId)).toEqual([]);
+  });
+});

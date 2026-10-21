@@ -6,6 +6,8 @@ import {
   withSkillRequest,
   type RunViewingContext,
 } from "@kobe/protocol";
+import type { NotebookFiles } from "../notebooks/files.js";
+import { notebookKernel, startNotebookRun, type NotebookRunHost } from "../notebooks/user-run.js";
 import { effectiveSkillNames } from "./effective-skills.js";
 import { connectorsOffIn } from "../connectors/thread-connectors.js";
 import { RUN_INPUT_MAX_CHARS } from "@kobe/db";
@@ -23,6 +25,9 @@ import {
   type ApprovalMode,
   type BudgetStopCommand,
   type CompactThreadResponse,
+  type NotebookKernelResponse,
+  type NotebookRunBody,
+  type NotebookRunResponse,
   type RunOrchestrator,
   type RunSnapshot,
   type RunTransition,
@@ -191,6 +196,23 @@ export interface ServerRunOrchestrator extends RunOrchestrator {
    * Throws `CompactionError` (a code of the compact contract) or `RunError` (404/403/trash).
    */
   compact(actor: ActorContext, threadId: string, focus?: string): Promise<CompactThreadResponse>;
+  /**
+   * The owner runs a notebook cell or a `.py` file (KOBE-464, docs/specs/notebooks.md NB6): a
+   * `notebook` run on their idle thread, answered at once. Throws `NotebookRunError` or `RunError`.
+   */
+  notebookRun(
+    actor: ActorContext,
+    threadId: string,
+    body: NotebookRunBody,
+  ): Promise<NotebookRunResponse>;
+  /** Interrupt or restart the thread's kernel (NB7); never wakes the sandbox. */
+  notebookKernel(
+    actor: ActorContext,
+    threadId: string,
+    op: "interrupt" | "restart",
+  ): Promise<NotebookKernelResponse>;
+  /** Notebook files (KOBE-464); without them notebook runs are refused `sandbox_unavailable`. */
+  useNotebooks(files: NotebookFiles): void;
   /** KOBE-24 `RunLifecycleHooks.onRunEnded`: the wire ended a run; advance its thread's queue. */
   onRunEnded(event: { teamId: string; runId: string; threadId: string }): Promise<void>;
   /** KOBE-180: the system cancels a deactivated or removed owner's in-flight scheduled runs. */
@@ -254,6 +276,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   #isolation: IsolationProbe = () => "available";
   #attachments: AttachmentStager | undefined;
   #viewing: ViewingReader | undefined;
+  #notebooks: NotebookFiles | undefined;
   #sweepTimer: NodeJS.Timeout | undefined;
   #closed = false;
   readonly #dispatch: RunDispatcher;
@@ -616,7 +639,9 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     const teamId = actor.team_id;
     const result = await this.#threadTx(actor, async (tx, viewer) => {
       const { thread, run } = await ownedRun(tx, viewer, runId, true);
-      if (run.status === "cancelled") return { wasActive: false, transition: undefined };
+      if (run.status === "cancelled") {
+        return { wasActive: false, transition: undefined, notebook: false };
+      }
       if (isTerminalRunStatus(run.status)) {
         throw new RunError("invalid_transition", `The run has already ended (${run.status}).`);
       }
@@ -629,8 +654,20 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         "user_cancelled",
         cancelledEvent(thread),
       );
-      // Durable: if this replica dies before Pi is told, the sweep sends the abort.
-      if (wasActive) await requestStop(tx, teamId, runId, "abort");
+      // Durable: if this replica dies before Pi is told, the sweep sends the abort. A notebook run
+      // (KOBE-464) has no Pi: its kernel is interrupted instead, below.
+      const notebook = run.kind === "notebook";
+      if (wasActive && !notebook) await requestStop(tx, teamId, runId, "abort");
+      // A notebook run's cell not yet delivered (the sandbox still waking) is never sent; its
+      // requester reads the failure on its next poll.
+      if (notebook) {
+        await tx.execute(sql`
+          UPDATE sandbox_commands
+             SET status = 'failed', completed_at = now(),
+                 result = ${JSON.stringify({ ok: false, error: { code: "run_not_active", message: "the run was stopped" } })}::jsonb
+           WHERE team_id = ${teamId} AND run_id = ${runId} AND kind = 'notebook.execute'
+             AND status = 'pending'`);
+      }
       // Stop pauses the queue behind the run (KOBE-26); deleting a queued message does not, nor
       // does stopping a compaction (KOBE-213): messages sent meanwhile were not stopped.
       const left = await queuedCount(tx, teamId, thread.id);
@@ -644,10 +681,34 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         teamId,
         target: { runId, threadId: thread.id, wasActive, ...(queuePaused ? { queuePaused } : {}) },
       });
-      return { wasActive, transition: applied.transition, threadId: thread.id };
+      return { wasActive, transition: applied.transition, threadId: thread.id, notebook };
     });
     if (result.transition) this.#emit(teamId, [result.transition]);
-    if (result.wasActive && result.threadId !== undefined) {
+    if (result.wasActive && result.threadId !== undefined && result.notebook) {
+      // NB7: Stop interrupts the running cell (and drops what waits); the thread is free now.
+      const threadId = result.threadId;
+      this.#track(
+        this.#router
+          .isConnected({ teamId, userId: actor.user_id }, threadId)
+          .then((connected) =>
+            connected
+              ? this.#router.notebookKernel(
+                  { teamId, userId: actor.user_id },
+                  { threadId, op: "interrupt" },
+                )
+              : { ok: true as const },
+          )
+          .then((outcome) => {
+            if (!outcome.ok) {
+              this.#log.warn(
+                { run_id: runId, code: outcome.error.code },
+                "notebook stop not delivered",
+              );
+            }
+          })
+          .finally(() => this.#advance(teamId, threadId)),
+      );
+    } else if (result.wasActive && result.threadId !== undefined) {
       // Only the owner can Stop, and the sandbox is the owner's (D11).
       this.#track(
         this.#dispatch.stopThenAdvance({
@@ -1066,6 +1127,40 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
 
   useViewing(reader: ViewingReader): void {
     this.#viewing = reader;
+  }
+
+  useNotebooks(files: NotebookFiles): void {
+    this.#notebooks = files;
+  }
+
+  notebookRun(
+    actor: ActorContext,
+    threadId: string,
+    body: NotebookRunBody,
+  ): Promise<NotebookRunResponse> {
+    return startNotebookRun(this.#notebookHost(), actor, threadId, body);
+  }
+
+  notebookKernel(
+    actor: ActorContext,
+    threadId: string,
+    op: "interrupt" | "restart",
+  ): Promise<NotebookKernelResponse> {
+    return notebookKernel(this.#notebookHost(), actor, threadId, op);
+  }
+
+  #notebookHost(): NotebookRunHost {
+    return {
+      db: this.#db,
+      router: this.#router,
+      files: this.#notebooks,
+      log: this.#log,
+      isolationMissing: () => this.#isolation() === "missing",
+      threadTx: (a, fn) => this.#threadTx(a, fn),
+      assertMayRun: (tx, a) => this.#assertMayRun(tx, a, false),
+      ended: (teamId, runId, id) => this.onRunEnded({ teamId, runId, threadId: id }),
+      track: (task) => this.#track(task),
+    };
   }
 
   useAttachments(stager: AttachmentStager): void {

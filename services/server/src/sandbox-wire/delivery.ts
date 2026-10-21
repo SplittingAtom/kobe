@@ -12,6 +12,7 @@ import {
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
   CAPABILITY_SKILL_EVAL,
+  CAPABILITY_NOTEBOOKS,
   CAPABILITY_THREAD_COMPACT,
   serverToSandboxFrameSchema,
   threadCompactFrameSchema,
@@ -86,6 +87,13 @@ export interface DeliveryHost {
   replaced(): void;
 }
 
+/** A `notebook.execute` in flight (KOBE-464): whose outputs its `notebook.output` frames are. */
+export interface NotebookExec {
+  readonly runId: string;
+  readonly threadId: string;
+  readonly execId: string;
+}
+
 export type IssuedCommand =
   | {
       readonly kind: "row";
@@ -94,8 +102,19 @@ export type IssuedCommand =
       readonly runId: string | null;
       readonly threadId: string;
       readonly requesterReplica: string;
+      readonly notebook?: NotebookExec;
     }
-  | { readonly kind: "internal"; readonly resolve: (outcome: CommandOutcome) => void };
+  | {
+      readonly kind: "internal";
+      readonly resolve: (outcome: CommandOutcome) => void;
+      readonly notebook?: NotebookExec;
+    };
+
+const NOTEBOOK_COMMANDS: ReadonlySet<SandboxCommandKind> = new Set([
+  "notebook.execute",
+  "notebook.interrupt",
+  "notebook.restart",
+]);
 
 const ANSWERED_MAX = 4_096;
 const DRAIN_BATCH = 20;
@@ -149,6 +168,28 @@ export class CommandDelivery {
           this.poke();
         }
       });
+  }
+
+  /** The issued command without taking it (a `notebook.output` names its running command). */
+  peekIssued(commandId: string): IssuedCommand | "answered" | undefined {
+    const issued = this.#issued.get(commandId);
+    if (issued === undefined) return this.#answered.has(commandId) ? "answered" : undefined;
+    return issued;
+  }
+
+  /**
+   * A `notebook.execute` for a run leased on this connection (the agent's `run_python`, KOBE-464):
+   * sent on this connection only, no command row. Resolves with the sandbox's answer.
+   */
+  notebookExecute(
+    frame: Extract<ServerToSandboxFrame, { type: "notebook.execute" }>,
+    timeoutMs: number,
+  ): Promise<CommandOutcome> {
+    return this.#internal(frame, timeoutMs, {
+      runId: frame.run_id,
+      threadId: frame.thread_id,
+      execId: frame.exec_id,
+    });
   }
 
   /** The issued command a `command.result` answers; "answered" for a duplicate result. */
@@ -211,6 +252,7 @@ export class CommandDelivery {
   #internal(
     frame: ServerToSandboxFrame,
     timeoutMs = this.#ctx.tuning.internalCommandTimeoutMs,
+    notebook?: NotebookExec,
   ): Promise<CommandOutcome> {
     if (this.#closed) return Promise.resolve(failure(COMMAND_FAILURES.connectionLost, "closed"));
     const commandId = "command_id" in frame ? frame.command_id : randomUUID();
@@ -227,6 +269,7 @@ export class CommandDelivery {
           clearTimeout(timer);
           resolve(outcome);
         },
+        ...(notebook === undefined ? {} : { notebook }),
       });
       if (!this.#host.send(frame)) {
         this.#issued.delete(commandId);
@@ -417,6 +460,16 @@ export class CommandDelivery {
       );
       return;
     }
+    // The thread kernel's commands (KOBE-464) only to an agent that runs kernels, never to an eval
+    // sandbox.
+    if (
+      NOTEBOOK_COMMANDS.has(row.kind) &&
+      (this.#host.target.evalThreadId !== undefined ||
+        !this.#host.hasCapability(CAPABILITY_NOTEBOOKS))
+    ) {
+      await this.#fail(row, failure("notebooks_unsupported", "this sandbox runs no notebooks"));
+      return;
+    }
     // A stop still reaches a run the server already ended (Stop, budget, failed start): ending
     // it in Postgres first is what refuses its late frames, and Pi must still be told to abort.
     if (
@@ -500,6 +553,17 @@ export class CommandDelivery {
       if (current.rowCount !== 1) return "replaced" as const;
       // An eval sandbox (KOBE-325) takes only its own thread's commands (the slot already says so).
       if (evalThreadId !== undefined && row.threadId !== evalThreadId) return "gone" as const;
+      if (row.kind === "notebook.execute") {
+        // KOBE-464: never run a cell for a run that ended meanwhile (Stop while the sandbox woke).
+        // FOR SHARE holds off a concurrent Stop until this delivery is recorded.
+        const res = await tx.execute<{ status: string }>(sql`
+          SELECT status FROM runs WHERE team_id = ${teamId} AND id = ${row.runId ?? null}
+             FOR SHARE`);
+        const status = res.rows[0]?.status;
+        if (status !== "running" && status !== "waiting_approval") {
+          return "run_not_active" as const;
+        }
+      }
       if (starts) {
         // Holds off a concurrent Stop (KOBE-30) until the lease is recorded: a Stop that commits
         // first is seen here (not active → refused); one that commits later finds the lease and
@@ -566,6 +630,7 @@ export class CommandDelivery {
     }
     const traced = starts ? this.#traceContext(row, frame) : undefined;
     this.#host.leaseThread(row.threadId);
+    const execId = (frame as { exec_id?: unknown }).exec_id;
     this.#issued.set(commandId, {
       kind: "row",
       rowId: row.id,
@@ -573,6 +638,9 @@ export class CommandDelivery {
       runId: row.runId,
       threadId: row.threadId,
       requesterReplica: row.requesterReplica,
+      ...(row.kind === "notebook.execute" && row.runId !== null && typeof execId === "string"
+        ? { notebook: { runId: row.runId, threadId: row.threadId, execId } }
+        : {}),
     });
     ctx.metrics.commandsDelivered += 1;
     // Not sent (closed meanwhile): the row stays delivered; the next hello reconciles it.

@@ -224,7 +224,8 @@ export class RunDispatcher {
         UNION ALL
         SELECT 1 FROM sandbox_commands
          WHERE team_id = ${lost.teamId} AND run_id = ${lost.runId}
-           AND kind IN ('run.start', 'thread.compact') AND status IN ('pending', 'delivered')`);
+           AND kind IN ('run.start', 'thread.compact', 'notebook.execute')
+           AND status IN ('pending', 'delivered')`);
       if (inFlight.rows.length > 0) return undefined;
       // A compaction (KOBE-213) is never re-sent: its requester has given up; it fails.
       if (recent && run.kind === "message") {

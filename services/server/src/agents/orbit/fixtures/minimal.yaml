@@ -18,6 +18,7 @@ setup:
         - read
         - recall
         - remember
+        - run_python
         - save_skill_draft
         - share_file
         - tool_search

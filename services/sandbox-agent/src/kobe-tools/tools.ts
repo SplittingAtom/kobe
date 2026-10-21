@@ -20,7 +20,10 @@ import {
 
 /** What a tool needs of the channel (the real one is {@link ToolsClient}). */
 export interface ToolsTransport {
-  request(call: Omit<ToolsRequest, "id">): Promise<ToolsOutcome>;
+  request(
+    call: Omit<ToolsRequest, "id">,
+    options?: { readonly timeoutMs?: number },
+  ): Promise<ToolsOutcome>;
 }
 
 export interface ToolResultLike {

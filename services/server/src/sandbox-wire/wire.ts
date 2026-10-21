@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { NotebookFiles } from "../notebooks/files.js";
 import type { Server } from "node:http";
 import {
   MAX_RUN_TOKEN_TTL_SECONDS,
@@ -69,6 +70,8 @@ export interface SandboxWireOptions {
   readonly webSearch?: WebSearchService;
   /** `skill.draft_save` (KOBE-442); unset: refused as storage unavailable. */
   readonly skillDrafts?: SkillDraftTool;
+  /** Notebook files (KOBE-464): `run_python` reads cells and saves outputs through them. */
+  readonly notebooks?: NotebookFiles;
   readonly tuning?: Partial<WireTuning>;
   /** Key from `deriveRunTokenKey` (KOBE-118); unset: `run.start` carries no run token. */
   readonly runTokenKey?: Uint8Array;
@@ -316,6 +319,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
     },
     webSearch: options.webSearch ?? NO_WEB_SEARCH,
     ...(options.skillDrafts ? { skillDrafts: options.skillDrafts } : {}),
+    ...(options.notebooks ? { notebooks: options.notebooks } : {}),
     ui: options.ui ?? CANCEL_DIALOGS,
     hooks,
     get liveness() {

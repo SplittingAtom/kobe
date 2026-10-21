@@ -110,6 +110,21 @@ describe("sandbox-agent loadConfig", () => {
     });
   });
 
+  it("takes the kernel bridge (KOBE-464) as an absolute path, off by default", () => {
+    const url = { ...base, KOBE_SERVER_URL: "ws://kobe-server:8080" };
+    expect(loadConfig(url)).toMatchObject({
+      kernelPython: "/usr/local/bin/python3",
+      maxKernels: 4,
+      kernelIdleMs: 30 * 60_000,
+    });
+    expect(loadConfig(url).kernelBridge).toBeUndefined();
+    const bridge = "/opt/kobe/kernel/kobe-kernel-bridge.py";
+    expect(loadConfig({ ...url, KOBE_KERNEL_BRIDGE: bridge }).kernelBridge).toBe(bridge);
+    expect(() => loadConfig({ ...url, KOBE_KERNEL_BRIDGE: "bridge.py" })).toThrow(
+      /KOBE_KERNEL_BRIDGE/,
+    );
+  });
+
   it("rejects relative directories", () => {
     expect(() =>
       loadConfig({ ...base, KOBE_SERVER_URL: "wss://kobe", KOBE_SESSION_DIR: "sessions" }),

@@ -13,9 +13,11 @@ import {
   TOOLS_PROJECTS_ENV,
   TOOLS_SKILL_DRAFTS_ENV,
   TOOLS_FILE_EDITS_ENV,
+  TOOLS_NOTEBOOKS_ENV,
 } from "./protocol.js";
 import { saveSkillDraftTool } from "./skill-draft-tool.js";
 import { proposeFileEditTool } from "./file-edit-tool.js";
+import { runPythonTool } from "./notebook-tool.js";
 import {
   artifactTools,
   shareFileTool,
@@ -92,6 +94,13 @@ export function fileEditsEnabled(env: Record<string, string | undefined>): boole
   return raw === "1";
 }
 
+/** Whether the agent announced `notebooks` (KOBE_TOOLS_NOTEBOOKS=1, KOBE-464); read once, removed. */
+export function notebooksEnabled(env: Record<string, string | undefined>): boolean {
+  const raw = env[TOOLS_NOTEBOOKS_ENV];
+  Reflect.deleteProperty(env, TOOLS_NOTEBOOKS_ENV);
+  return raw === "1";
+}
+
 /** Whether the agent announced the `memory` capability (KOBE_TOOLS_MEMORY=1); read once, removed. */
 export function memoryEnabled(env: Record<string, string | undefined>): boolean {
   const raw = env[TOOLS_MEMORY_ENV];
@@ -114,6 +123,7 @@ export function registerKobeTools(
     readonly projects?: boolean;
     readonly skillDrafts?: boolean;
     readonly fileEdits?: boolean;
+    readonly notebooks?: boolean;
     readonly memory?: boolean;
     readonly memoryFile?: string | undefined;
   } = {},
@@ -126,6 +136,7 @@ export function registerKobeTools(
   if (options.projects === true) pi.registerTool(proposeProjectFileTool(transport));
   if (options.skillDrafts === true) pi.registerTool(saveSkillDraftTool(transport));
   if (options.fileEdits === true) pi.registerTool(proposeFileEditTool(transport));
+  if (options.notebooks === true) pi.registerTool(runPythonTool(transport));
   if (options.memory === true) {
     pi.registerTool(rememberTool(transport));
     pi.registerTool(recallTool(transport));

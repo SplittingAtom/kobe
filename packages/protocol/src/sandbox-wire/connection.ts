@@ -43,6 +43,9 @@
  *   `skill.draft_save_result` (push-then-save, as `file.share`); same refusal rule.
  *   `file_edits` (`CAPABILITY_FILE_EDITS`, file-editor.ts, KOBE-462): `file.edit_propose` /
  *   `file.edit_propose_result` and `run.start.viewing`.
+ *   `notebooks` (`CAPABILITY_NOTEBOOKS`, notebooks.ts, KOBE-464): the commands `notebook.execute`,
+ *   `notebook.interrupt`, `notebook.restart` (never sent to agents without it), the agent's
+ *   `notebook.output` frames and `notebook.run` / `notebook.run_result` (`run_python`).
  *   `web_search` ({@link CAPABILITY_WEB_SEARCH}, web-search.ts, KOBE-114): `web_search.query` /
  *   `web_search.result`; same refusal rule.
  *   `mcp` ({@link CAPABILITY_MCP}, mcp-config.ts, KOBE-111): `run.start.mcp`, the run's effective
@@ -109,6 +112,7 @@ export const SANDBOX_FRAME_MAX_BYTES_BY_TYPE = {
   "policy.check": 1024 * 1024,
   "artifact.put": 1024 * 1024, // KOBE-127: up to 512 KiB of content plus JSON escaping
   "thread.compact_result": 1024 * 1024, // KOBE-212: up to 256 KiB of summary plus JSON escaping
+  "notebook.run": 1024 * 1024, // KOBE-464: up to 256 KiB of code plus JSON escaping
 } as const;
 export const SANDBOX_HELLO_TIMEOUT_MS = 10_000;
 export const SANDBOX_HEARTBEAT_INTERVAL_MS = 15_000;
@@ -140,6 +144,7 @@ export const SANDBOX_ERROR_CODES = [
   "model_not_configured", // run.start named no gateway model for a sandbox with model access (KOBE-41)
   "runtime_tampered", // another process changed a Pi's private runtime dir; that Pi was stopped (KOBE-41)
   "frame_too_large",
+  "kernel_unavailable", // no notebook kernel could be started for the thread (KOBE-464)
   "internal",
 ] as const;
 export type SandboxErrorCode = (typeof SANDBOX_ERROR_CODES)[number];

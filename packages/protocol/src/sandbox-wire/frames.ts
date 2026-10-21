@@ -42,6 +42,14 @@ import {
   fileEditProposeFrameSchema,
   fileEditProposeResultFrameSchema,
 } from "./file-edit-frames.js";
+import {
+  notebookExecuteFrameSchema,
+  notebookInterruptFrameSchema,
+  notebookOutputFrameSchema,
+  notebookRestartFrameSchema,
+  notebookRunFrameSchema,
+  notebookRunResultFrameSchema,
+} from "./notebook-frames.js";
 import { UPLOAD_MAX_FILES_PER_MESSAGE, uploadFileNameSchema } from "../uploads.js";
 import { fileShareCallShape, fileShareOkFields, shareFileWorkspaceRefSchema } from "../files.js";
 import { artifactCallShape, artifactFailFields, artifactOkFields } from "../artifacts.js";
@@ -282,6 +290,8 @@ export const sandboxToServerFrameSchema = z.union([
   projectFileProposeFrameSchema,
   skillDraftSaveFrameSchema,
   fileEditProposeFrameSchema,
+  notebookOutputFrameSchema,
+  notebookRunFrameSchema,
   webSearchQueryFrameSchema,
   traceSpansFrameSchema,
   piExitedFrameSchema,
@@ -659,6 +669,10 @@ export const serverToSandboxFrameSchema = z.union([
   projectFileProposeResultFrameSchema,
   skillDraftSaveResultFrameSchema,
   fileEditProposeResultFrameSchema,
+  notebookRunResultFrameSchema,
+  notebookExecuteFrameSchema,
+  notebookInterruptFrameSchema,
+  notebookRestartFrameSchema,
   webSearchResultFrameSchema,
   sessionRestoreFrameSchema,
   ackFrameSchema,

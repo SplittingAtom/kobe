@@ -151,6 +151,7 @@ describe("server-side tool registry", () => {
         "propose_project_file",
         "read",
         "propose_file_edit",
+        "run_python",
         "read_mcp_resource",
         "recall",
         "remember",

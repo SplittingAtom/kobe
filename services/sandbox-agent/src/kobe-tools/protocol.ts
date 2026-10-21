@@ -36,6 +36,7 @@ export const OP_MEMORY_PUT = "memory.put";
 export const OP_MEMORY_READ = "memory.read";
 export const OP_SKILL_DRAFT_SAVE = "skill.draft_save";
 export const OP_FILE_EDIT_PROPOSE = "file.edit_propose";
+export const OP_NOTEBOOK_RUN = "notebook.run";
 export const OPS = [
   OP_ARTIFACT_PUT,
   OP_FILE_SHARE,
@@ -45,6 +46,7 @@ export const OPS = [
   OP_MEMORY_READ,
   OP_SKILL_DRAFT_SAVE,
   OP_FILE_EDIT_PROPOSE,
+  OP_NOTEBOOK_RUN,
 ] as const;
 
 /** Env var set to `1` by an agent that announced the `memory` capability. Read once, removed. */
@@ -99,6 +101,19 @@ export const TOOL_PROPOSE_FILE_EDIT = "propose_file_edit";
 /** Mirror packages/protocol `file-editor.ts` (pinned by a test). */
 export const FILE_EDIT_CONTENT_MAX_BYTES = 128 * 1024;
 export const FILE_EDIT_SUMMARY_MAX = 500;
+
+/**
+ * Env var set to `1` by an agent that announced the `notebooks` capability (KOBE-464). Read once,
+ * removed. `run_python` is registered only then; the server also checks the capability.
+ */
+export const TOOLS_NOTEBOOKS_ENV = "KOBE_TOOLS_NOTEBOOKS";
+export const TOOL_RUN_PYTHON = "run_python";
+/** Mirror packages/protocol `notebooks.ts` (pinned by a test). */
+export const NOTEBOOK_CODE_MAX_BYTES = 256 * 1024;
+export const NOTEBOOK_TIMEOUT_DEFAULT_S = 600;
+export const NOTEBOOK_TIMEOUT_MAX_S = 3600;
+/** How long past the cell's own timeout the tool waits for the server (delivery, saving). */
+export const NOTEBOOK_ANSWER_MARGIN_MS = 120_000;
 
 export const TOOL_CREATE_ARTIFACT = "create_artifact";
 export const TOOL_UPDATE_ARTIFACT = "update_artifact";
@@ -170,6 +185,17 @@ export interface FileEditAnswer {
   readonly base_sha256: string;
 }
 
+/** `run_python` answer: how the execution ended, its outputs as text for the model. */
+export interface NotebookRunAnswer {
+  readonly ok: true;
+  readonly op: "notebook_run";
+  readonly status: string;
+  readonly execution_count: number | null;
+  readonly text: string;
+  readonly truncated: boolean;
+  readonly saved: { readonly path: string; readonly sha256: string } | null;
+}
+
 export interface WebSearchCitation {
   readonly title: string;
   readonly url: string;
@@ -218,6 +244,7 @@ export type ToolsResponse =
   | ({ readonly id: string } & ProjectProposeAnswer)
   | ({ readonly id: string } & SkillDraftAnswer)
   | ({ readonly id: string } & FileEditAnswer)
+  | ({ readonly id: string } & NotebookRunAnswer)
   | ({ readonly id: string } & WebSearchAnswer)
   | ({ readonly id: string } & WebSearchUnavailable)
   | {

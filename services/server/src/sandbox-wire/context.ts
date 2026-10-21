@@ -1,4 +1,5 @@
 import type { ServerCallPurpose, ToolRegistry } from "@kobe/protocol";
+import type { NotebookFiles } from "../notebooks/files.js";
 import type {
   ARTIFACT_PUT_REFUSALS,
   FILE_SHARE_REFUSALS,
@@ -45,6 +46,8 @@ export interface WireMetrics {
   traceSpansRelayed: number;
   traceSpansDropped: number;
   traceFramesDropped: number;
+  /** `notebook.output` frames not stored (late, out of order, over a cap; KOBE-464). */
+  notebookOutputsDropped: number;
 }
 
 export function newMetrics(): WireMetrics {
@@ -68,6 +71,7 @@ export function newMetrics(): WireMetrics {
     traceSpansRelayed: 0,
     traceSpansDropped: 0,
     traceFramesDropped: 0,
+    notebookOutputsDropped: 0,
   };
 }
 
@@ -110,6 +114,8 @@ export interface WireContext {
   readonly webSearch: WebSearchService;
   /** `skill.draft_save` (KOBE-442); absent: refused as storage unavailable. */
   readonly skillDrafts?: SkillDraftTool;
+  /** Notebook files (KOBE-464, `run_python`); absent: `notebook.run` is refused. */
+  readonly notebooks?: NotebookFiles;
   readonly ui: UiBroker;
   readonly hooks: RunLifecycleHooks;
   readonly liveness: SandboxLiveness;

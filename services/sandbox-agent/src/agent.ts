@@ -7,6 +7,7 @@ import {
   CAPABILITY_PROJECTS,
   CAPABILITY_SKILL_DRAFTS,
   CAPABILITY_FILE_EDITS,
+  CAPABILITY_NOTEBOOKS,
   CAPABILITY_WEB_SEARCH,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
@@ -31,6 +32,8 @@ import { FileShareBroker } from "./tools/share-broker.js";
 import { ProjectFileBroker } from "./tools/project-broker.js";
 import { SkillDraftBroker } from "./tools/skill-draft-broker.js";
 import { FileEditBroker } from "./tools/file-edit-broker.js";
+import { NotebookBroker } from "./tools/notebook-broker.js";
+import type { KernelManager } from "./notebook/manager.js";
 import { MemoryBroker } from "./tools/memory-broker.js";
 import { WebSearchBroker } from "./tools/web-search-broker.js";
 import { toolsError } from "./tools/channel.js";
@@ -101,6 +104,8 @@ export interface AgentDeps {
   readonly skills?: SkillStore;
   /** Skill eval fixtures and snapshots (KOBE-325); present: the agent announces `skill_eval`. */
   readonly skillEval?: SkillEvalHooks;
+  /** Thread kernels (KOBE-464); present: the agent announces `notebooks`. */
+  readonly kernels?: KernelManager | undefined;
 }
 
 /** What the agent needs of workspace sync (`workspace/sync.ts`). */
@@ -142,6 +147,9 @@ const COMMAND_FRAMES = new Set([
   "eval.prepare",
   "eval.snapshot",
   "eval.read",
+  "notebook.execute",
+  "notebook.interrupt",
+  "notebook.restart",
 ]);
 const DRAIN_ON_FATAL_MS = 5000;
 
@@ -159,6 +167,7 @@ export class Agent {
   readonly #skillDrafts: SkillDraftBroker;
   readonly #searches: WebSearchBroker;
   readonly #fileEdits: FileEditBroker;
+  readonly #notebooks: NotebookBroker;
   readonly #memory: MemoryBroker;
   /** Run spans relayed to the server (KOBE-274); records only runs started with a trace context. */
   readonly #traces: TraceRecorder;
@@ -191,6 +200,11 @@ export class Agent {
       send: (frame) => this.#wire.send(frame),
       pushPath: pushPath ?? (() => Promise.reject(new Error("workspace sync is not available"))),
     });
+    this.#notebooks = new NotebookBroker({
+      root: config.workspaceDir,
+      send: (frame) => this.#wire.send(frame),
+      pushPath,
+    });
     this.#skillDrafts = new SkillDraftBroker({
       root: config.workspaceDir,
       send: (frame) => this.#wire.send(frame),
@@ -212,6 +226,7 @@ export class Agent {
       projectTools: this.#projectsEnabled(),
       skillDraftTools: this.#skillDraftsEnabled(),
       fileEditTools: this.#fileEditsEnabled(),
+      notebookTools: this.#notebookToolsEnabled(),
       memoryTools: this.#memoryEnabled(),
       traceparentOf: (runId) => this.#traces.modelParentOf(runId),
       ...(deps.extensions === undefined ? {} : { extensions: deps.extensions }),
@@ -248,6 +263,8 @@ export class Agent {
           this.#skillDrafts.failRun(runId, "run ended");
           this.#searches.failRun(runId, "run ended");
           this.#fileEdits.failRun(runId, "run ended");
+          this.#notebooks.failRun(runId, "run ended");
+          deps.kernels?.runEnded(runId);
           this.#memory.failRun(runId, "run ended");
           deps.workspace?.runEnded();
         },
@@ -289,6 +306,11 @@ export class Agent {
             } else reply(toolsError(request.id, "not_allowed", "projects are not available"));
             return;
           }
+          if (request.op === "notebook.run") {
+            if (this.#notebookToolsEnabled()) this.#notebooks.run(threadId, runId, request, reply);
+            else reply(toolsError(request.id, "not_allowed", "notebooks are not available"));
+            return;
+          }
           if (request.op === "file.edit_propose") {
             if (this.#fileEditsEnabled()) this.#fileEdits.propose(threadId, runId, request, reply);
             else reply(toolsError(request.id, "not_allowed", "file edits are not available"));
@@ -314,6 +336,7 @@ export class Agent {
           this.#skillDrafts.failThread(threadId, reason);
           this.#searches.failThread(threadId, reason);
           this.#fileEdits.failThread(threadId, reason);
+          this.#notebooks.failThread(threadId, reason);
           this.#memory.failThread(threadId, reason);
         },
         diagnostic: (threadId, message) => logger.debug({ thread_id: threadId }, message),
@@ -334,6 +357,7 @@ export class Agent {
         this.#skillDrafts.failAll("connection to Kobe server lost");
         this.#searches.failAll("connection to Kobe server lost");
         this.#fileEdits.failAll("connection to Kobe server lost");
+        this.#notebooks.failAll("connection to Kobe server lost");
         this.#memory.failAll("connection to Kobe server lost");
         void this.#threads.abortRestores();
       },
@@ -399,6 +423,8 @@ export class Agent {
   }
 
   async #finishStop(code: number): Promise<void> {
+    // Kernels never outlive the agent (NB2): they stop before the last workspace push.
+    await this.#deps.kernels?.stopAll();
     // Pi is gone, so the workspace is settled: push what changed since the last sync.
     await this.#deps.workspace?.flush(WORKSPACE_FLUSH_MS);
     this.#traces.flush();
@@ -439,6 +465,11 @@ export class Agent {
     return this.#deps.toolsExtension !== undefined;
   }
 
+  /** `run_python` (KOBE-464) needs a kernel and the tools channel. */
+  #notebookToolsEnabled(): boolean {
+    return this.#deps.kernels !== undefined && this.#deps.toolsExtension !== undefined;
+  }
+
   #skillDraftsEnabled(): boolean {
     return this.#filesEnabled();
   }
@@ -456,6 +487,8 @@ export class Agent {
       ...(this.#projectsEnabled() ? [CAPABILITY_PROJECTS] : []),
       ...(this.#skillDraftsEnabled() ? [CAPABILITY_SKILL_DRAFTS] : []),
       ...(this.#fileEditsEnabled() ? [CAPABILITY_FILE_EDITS] : []),
+      // Thread kernels (KOBE-464): the kernel commands, and `run_python` with the tools channel.
+      ...(this.#deps.kernels === undefined ? [] : [CAPABILITY_NOTEBOOKS]),
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_WEB_SEARCH]),
       ...(this.#memoryEnabled() ? [CAPABILITY_MEMORY] : []),
       // Per-session MCP config (KOBE-111) needs the proxy URL, a session to trade tokens with, and
@@ -560,6 +593,9 @@ export class Agent {
       case "file.edit_propose_result":
         this.#fileEdits.onResult(frame);
         return;
+      case "notebook.run_result":
+        this.#notebooks.onResult(frame);
+        return;
       case "web_search.result":
         this.#searches.onResult(frame);
         return;
@@ -636,6 +672,10 @@ export class Agent {
       case "eval.snapshot":
       case "eval.read":
         return this.#skillEval(frame);
+      case "notebook.execute":
+      case "notebook.interrupt":
+      case "notebook.restart":
+        return this.#kernelCommand(frame);
       default:
         return Promise.resolve(fail("internal", "not a command"));
     }
@@ -664,6 +704,34 @@ export class Agent {
       );
       return fail("internal", `${frame.type} failed: ${(error as Error).message}`);
     }
+  }
+
+  /**
+   * The thread kernel's commands (KOBE-464). Outputs go out as `notebook.output` frames naming the
+   * command, on the connection it arrived on only (a later connection never knew that id).
+   */
+  async #kernelCommand(
+    frame: Extract<
+      ServerToSandboxFrame,
+      { type: "notebook.execute" | "notebook.interrupt" | "notebook.restart" }
+    >,
+  ): Promise<CommandOutcome> {
+    const kernels = this.#deps.kernels;
+    if (kernels === undefined) return fail("unknown_type", "this agent runs no kernels");
+    if (frame.type === "notebook.interrupt") return kernels.interrupt(frame.thread_id);
+    if (frame.type === "notebook.restart") return kernels.restart(frame.thread_id);
+    const epoch = this.#wire.epoch;
+    return kernels.execute(frame, (index, output) => {
+      if (this.#wire.epoch !== epoch) return;
+      this.#wire.send({
+        v: 1,
+        type: "notebook.output",
+        command_id: frame.command_id,
+        thread_id: frame.thread_id,
+        index,
+        output,
+      });
+    });
   }
 
   /**

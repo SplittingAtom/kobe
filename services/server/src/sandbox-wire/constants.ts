@@ -75,6 +75,8 @@ export interface WireTuning {
     readonly artifactPut: number;
     /** `thread.compact_result` (KOBE-213): a summary of at most 256 KiB UTF-8, escaped. */
     readonly compactResult: number;
+    /** `notebook.run` (KOBE-464): `run_python` code of at most 256 KiB, escaped. */
+    readonly notebookRun: number;
     /** Everything else (`hello`, `ping`, `pi.ui_request`, …). */
     readonly small: number;
   };
@@ -144,6 +146,7 @@ export const WIRE_DEFAULTS: WireTuning = {
     policyCheck: SANDBOX_FRAME_MAX_BYTES_BY_TYPE["policy.check"],
     artifactPut: SANDBOX_FRAME_MAX_BYTES_BY_TYPE["artifact.put"],
     compactResult: SANDBOX_FRAME_MAX_BYTES_BY_TYPE["thread.compact_result"],
+    notebookRun: SANDBOX_FRAME_MAX_BYTES_BY_TYPE["notebook.run"],
     small: SANDBOX_SMALL_FRAME_MAX_BYTES,
   },
   maxPendingPolicyChecks: 16,

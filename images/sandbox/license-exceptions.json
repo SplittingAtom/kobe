@@ -40,5 +40,11 @@
     "reason": "SPDX exception-list data used by npm; attribution-only data license, not copyleft (KOBE-21).",
     "approvedBy": "Chris",
     "approvedOn": "2026-10-17"
+  },
+  "asttokens": {
+    "license": "Apache 2.0",
+    "versions": ["3.0.2"],
+    "reason": "Apache-2.0 declared with a non-SPDX label (the package's own LICENSE is Apache-2.0); a dependency of IPython for the notebook kernel (KOBE-464).",
+    "pending": "gate review"
   }
 }

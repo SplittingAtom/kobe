@@ -719,6 +719,7 @@ export class ThreadManager {
       toolsProjects: this.#options.projectTools,
       toolsSkillDrafts: this.#options.skillDraftTools,
       toolsFileEdits: this.#options.fileEditTools,
+      toolsNotebooks: this.#options.notebookTools,
       toolsMemory: this.#options.memoryTools,
       ...(this.#options.extensions === undefined ? {} : { extensions: this.#options.extensions }),
       parentEnv: this.#options.parentEnv,

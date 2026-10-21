@@ -195,6 +195,31 @@ export class CommandRouter implements SandboxRouter {
     });
   }
 
+  notebookExecute(
+    target: SandboxTarget,
+    request: Parameters<SandboxRouter["notebookExecute"]>[1],
+    options?: SendOptions,
+  ) {
+    return this.#send(target, "notebook.execute", request.threadId, request.runId, options, {
+      thread_id: request.threadId,
+      run_id: request.runId,
+      exec_id: request.execId,
+      code: request.code,
+      timeout_ms: request.timeoutMs,
+    });
+  }
+
+  notebookKernel(
+    target: SandboxTarget,
+    request: Parameters<SandboxRouter["notebookKernel"]>[1],
+    options?: SendOptions,
+  ) {
+    const kind = request.op === "interrupt" ? "notebook.interrupt" : "notebook.restart";
+    return this.#send(target, kind, request.threadId, undefined, options, {
+      thread_id: request.threadId,
+    });
+  }
+
   /**
    * Whether the sandbox is connected. With `threadId`, the sandbox that serves that thread
    * (KOBE-325: an eval thread's own sandbox, else the member's).

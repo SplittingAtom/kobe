@@ -145,6 +145,17 @@ export const BUILTIN_TOOLS: Readonly<Record<string, BuiltinTool>> = {
     open_world: false,
     primary_arg: "/path",
   },
+  /**
+   * KOBE-464: runs Python in the thread's kernel in the sandbox, so it is treated like `bash`
+   * (risk destructive, scope sandbox): the team's tool policy applies unchanged (NB3).
+   */
+  run_python: {
+    source: "kobe",
+    risk: "destructive",
+    scope: "sandbox",
+    open_world: false,
+    primary_arg: "/code",
+  },
   web_search: { source: "kobe", risk: "read", scope: "external", open_world: true },
   remember: { source: "kobe", risk: "write", scope: "kobe", open_world: false },
   recall: { source: "kobe", risk: "read", scope: "kobe", open_world: false },

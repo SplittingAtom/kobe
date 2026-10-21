@@ -63,6 +63,7 @@ import { setupRoutes } from "./routes/setup.js";
 import { skillRoutes } from "./routes/skills.js";
 import { skillDraftRoutes } from "./routes/skill-drafts.js";
 import { threadFileEditRoutes } from "./routes/thread-file-edits.js";
+import { threadNotebookRoutes } from "./routes/thread-notebooks.js";
 import { skillEvalRoutes, type SkillEvalRouteOptions } from "./routes/skill-evals.js";
 import { skillReachRoutes } from "./routes/skill-reach.js";
 import { meSkillEnablementRoutes } from "./routes/me-skill-enablements.js";
@@ -216,6 +217,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/threads", threadUsageRoutes(deps));
   api.route("/threads", threadFeedbackRoutes(deps));
   api.route("/threads", threadFileEditRoutes(deps));
+  api.route("/threads", threadNotebookRoutes(deps));
   api.route("/threads", threadRetentionRoutes(deps));
   api.route("/threads", threadConnectorRoutes(deps));
   api.route("/threads", threadSkillRoutes(deps));

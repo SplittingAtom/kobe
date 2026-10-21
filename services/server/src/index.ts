@@ -301,6 +301,8 @@ if (workspaceSync && deps) {
   deps.projectMounts.use(workspaceSync);
   // `save_skill_draft` reads the pushed skill folder from the same store (KOBE-442).
   deps.skillDraftTool.use(workspaceSync);
+  // Notebook cells and their outputs (KOBE-464) live in the same store.
+  deps.notebookFiles.use(workspaceSync);
   deps.runs.useAttachments(
     createAttachmentStager({ db: deps.database.db, sync: workspaceSync, settings: uploadSettings }),
   );

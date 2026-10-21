@@ -355,6 +355,27 @@ describe("egress.blocked relay", () => {
     expect(await blockedRunEvents(finance, unleased.runId)).toEqual([]);
   });
 
+  it("shows a notebook kernel's attempt on the member's notebook run in that thread (KOBE-464)", async () => {
+    const nb = await runFor(finance, ids.alice, false);
+    await h.admin.query(`UPDATE runs SET kind = 'notebook' WHERE id = $1`, [nb.runId]);
+    const bobs = await runFor(finance, ids.bob, false);
+    await h.admin.query(`UPDATE runs SET kind = 'notebook' WHERE id = $1`, [bobs.runId]);
+    for (const threadId of [nb.threadId, bobs.threadId]) {
+      await blockedEvent(finance, {
+        sandbox_id: sandboxOf(finance, ids.alice),
+        user_id: ids.alice,
+        domain: "files.pythonhosted.org",
+        request_access: true,
+        thread_id: threadId,
+      });
+    }
+    await relayBlockedEvents(h.deps.database.db, finance);
+    expect(await blockedRunEvents(finance, nb.runId)).toEqual([
+      { domain: "files.pythonhosted.org", request_access: true },
+    ]);
+    expect(await blockedRunEvents(finance, bobs.runId)).toEqual([]);
+  });
+
   it("only reaches runs leased to the sandbox that made the attempt", async () => {
     const run = await runFor(finance, ids.alice);
     await blockedEvent(finance, {

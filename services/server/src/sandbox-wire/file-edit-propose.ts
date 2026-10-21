@@ -66,6 +66,11 @@ export function onFileEditPropose(c: FileEditProposeConnection, frame: FileEditP
     answer(refused("not_allowed", "This sandbox did not announce file edits."));
     return;
   }
+  // A skill eval's sandbox (KOBE-325) never reaches the member's workspace (also denied by policy).
+  if (c.target.evalThreadId !== undefined) {
+    answer(refused("not_allowed", "Skill evals never propose edits to the member's files."));
+    return;
+  }
   const check = c.runCheck();
   if (check === "violation") return;
   if (check === "ended") {
