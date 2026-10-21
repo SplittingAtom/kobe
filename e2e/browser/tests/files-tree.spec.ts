@@ -79,7 +79,8 @@ test("Files tree: open, keys, icons, light and dark, rename, drag to move, Move 
     // Refresh files sits in the tree's top row beside Upload (KOBE-461), the one in the section.
     const top = files.locator('[data-kobe-drop-folder=""]');
     await expect(top.getByRole("button", { name: "Refresh files" })).toBeVisible();
-    await expect(top.getByLabel("Upload a file to the workspace root")).toBeAttached();
+    // Upload names the focused row's folder (script.py's, the test folder), not always the root.
+    await expect(top.getByLabel(`Upload a file to ${dir}`, { exact: true })).toBeAttached();
     await expect(files.getByRole("button", { name: "Refresh files" })).toHaveCount(1);
 
     // Compact rows with type icons; colour never carries the kind (it is in the description).
