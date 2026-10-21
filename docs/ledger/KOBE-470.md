@@ -45,9 +45,9 @@
 
 ## Migration
 
-- `0169_thread_context_command.sql` (generated). PR #341 also uses 0169 and widens the same
-  CHECK: once it merges, `pnpm --filter @kobe/db db:rebase` so this becomes 0170 and lists the
-  notebook kinds too (the upgrade test's marker `'thread.context'` stays valid).
+- `0170_thread_context_command.sql` (generated), rebased onto main after PR #341 (0169 notebook
+  kinds): its CHECK lists the notebook kinds and `thread.context`; `commandTimeoutMs` lists every
+  kind (the upgrade test's marker `'thread.context'` stays valid).
 
 ## Evidence (acceptance criteria → test or command output)
 
