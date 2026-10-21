@@ -20,7 +20,7 @@ import {
 import { pathIsTaken } from "./browse.js";
 import { ancestorsOf, copyPath } from "./paths.js";
 
-type Failure = {
+export type Failure = {
   readonly ok: false;
   readonly status: 409 | 413 | 502 | 503 | 507;
   readonly code: WorkspaceFileError["code"];
@@ -28,14 +28,18 @@ type Failure = {
 };
 export type UploadResult = { readonly ok: true; readonly entry: StoredEntry } | Failure;
 
-const fail = (status: Failure["status"], code: Failure["code"], message: string): Failure => ({
+export const fail = (
+  status: Failure["status"],
+  code: Failure["code"],
+  message: string,
+): Failure => ({
   ok: false,
   status,
   code,
   message,
 });
 const TAKEN = fail(409, "already_exists", "A file or folder with that name already exists.");
-const QUOTA = fail(507, "quota_exceeded", "Your workspace has no room for this file.");
+export const QUOTA = fail(507, "quota_exceeded", "Your workspace has no room for this file.");
 
 /** The upload being received: its bytes arrive as a stream, size and hash are known at the end. */
 export interface IncomingFile {
@@ -166,7 +170,9 @@ async function commitUpload(
     return fail(503, "sandbox_unavailable", "That content is being cleaned up; try again shortly.");
   }
   if (reserved === "reserved") {
-    const stored = await storeBlob(db, sync, owner, sha256, blobKey, staging, size);
+    const stored = await storeBlob(db, sync, owner, { sha256, blobKey, size }, () =>
+      sync.objects.copy(staging, blobKey),
+    );
     if (stored) return stored;
   }
 
@@ -202,20 +208,22 @@ async function commitUpload(
   });
 }
 
-/** Copies the staged bytes to the content key and records the blob; always ends the reservation. */
-async function storeBlob(
+/**
+ * Writes the content to its key (`write`: the upload's staging copy, a save's put) and records the
+ * blob; always ends the reservation `reserveUpload` made for it.
+ */
+export async function storeBlob(
   db: KobeDb,
   sync: WorkspaceSync,
   owner: WorkspaceOwner,
-  sha256: string,
-  blobKey: string,
-  staging: string,
-  size: number,
+  blob: { readonly sha256: string; readonly blobKey: string; readonly size: number },
+  write: () => Promise<void>,
 ): Promise<Failure | undefined> {
+  const { sha256, size } = blob;
   let added = false;
   let finished = false;
   try {
-    await sync.objects.copy(staging, blobKey);
+    await write();
     const recorded = await withTeam(db, owner.teamId, async (tx) => {
       const outcome = await recordBlob(tx, owner, sha256, size);
       await finishUpload(tx, owner, size, outcome === "added");
