@@ -16,9 +16,9 @@
   unmounts it, so polling a pending request stops; the request itself is not cancelled.
 - Unchanged: policy denials, approval cards, connection banners, budget banner, action errors.
 
-## Open questions
-
-- The egress notice on a tool card is closable too (same notice); say if it should stay fixed there.
+- Review fixes: closed state is read in an effect (server and first client render match; a closed
+  notice hides right after mount); closing moves focus to the thread's composer.
+- Coordinator: the egress notice on tool cards stays closable; the 200-entry cap is fine.
 
 ## Evidence
 

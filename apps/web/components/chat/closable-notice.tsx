@@ -1,14 +1,20 @@
 "use client";
 
-import { useState, type AriaRole, type ReactNode } from "react";
+import { useEffect, useState, type AriaRole, type MouseEvent, type ReactNode } from "react";
 import { closeNotice, isNoticeClosed } from "../../lib/chat/closed-notices";
 import { cn } from "../../lib/utils";
 import { IconAction } from "../shell/icon-action";
 import styles from "./chat.module.css";
 
-/** Whether the notice `id` is closed for this viewer, and how to close it (KOBE-468). */
+/**
+ * Whether the notice `id` is closed for this viewer, and how to close it (KOBE-468). Storage is
+ * read after mount, so the server and the first client render agree (both show the notice).
+ */
 export function useClosedNotice(id: string | undefined): readonly [boolean, () => void] {
-  const [closed, setClosed] = useState(() => id !== undefined && isNoticeClosed(id));
+  const [closed, setClosed] = useState(false);
+  useEffect(() => {
+    setClosed(id !== undefined && isNoticeClosed(id));
+  }, [id]);
   const close = () => {
     if (id === undefined) return;
     closeNotice(id);
@@ -17,7 +23,12 @@ export function useClosedNotice(id: string | undefined): readonly [boolean, () =
   return [closed, close];
 }
 
-/** The close (×) button of a notice. */
+/** The member goes on in the composer once the notice (and its focused ×) is gone. */
+function focusComposer(root: ParentNode): void {
+  root.querySelector<HTMLTextAreaElement>("[data-kobe-composer] textarea")?.focus();
+}
+
+/** The close (×) button of a notice; closing moves focus to the thread's composer. */
 export function CloseNoticeButton({
   label,
   onClose,
@@ -32,7 +43,12 @@ export function CloseNoticeButton({
       size="sm"
       shortcut={null}
       className="shrink-0"
-      onClick={onClose}
+      onClick={(event: MouseEvent<HTMLButtonElement>) => {
+        // Found before closing: the button is detached once the notice is gone.
+        const root = event.currentTarget.closest("[data-kobe-thread-root]") ?? document;
+        onClose();
+        focusComposer(root);
+      }}
     />
   );
 }

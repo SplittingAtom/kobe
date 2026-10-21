@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -154,7 +154,7 @@ describe("EgressNotice (KOBE-39)", () => {
     expect(fake.requestEgressAccess).not.toHaveBeenCalled();
     unmount();
     render(notice, { wrapper });
-    expect(screen.queryByText(/was blocked/)).toBeNull();
+    await waitFor(() => expect(screen.queryByText(/was blocked/)).toBeNull());
   });
 
   it("has no close button without an event id", () => {

@@ -719,6 +719,7 @@ describe("closing notices (KOBE-468)", () => {
       }),
     );
     expect(screen.queryByText("Steered: “use a bar chart”")).toBeNull();
+    expect(document.activeElement).toBe(await composer());
     // The record of what the agent did keeps no close button.
     const denial = must(screen.getByText("Denied by policy.").closest('[role="note"]'));
     expect(within(denial as HTMLElement).queryByRole("button")).toBeNull();
