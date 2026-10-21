@@ -114,6 +114,12 @@ export interface WireTuning {
   readonly commandTimeoutMs: Readonly<Record<SandboxCommandKind, number>>;
 }
 
+/**
+ * How much longer than its own timeout a `notebook.execute` may take (KOBE-464, NB8): waking the
+ * sandbox, starting a kernel (up to 60 s), the timeout's grace and the answer.
+ */
+export const NOTEBOOK_COMMAND_MARGIN_MS = 180_000;
+
 export const WIRE_DEFAULTS: WireTuning = {
   helloTimeoutMs: SANDBOX_HELLO_TIMEOUT_MS,
   heartbeatIntervalMs: SANDBOX_HEARTBEAT_INTERVAL_MS,
@@ -170,6 +176,11 @@ export const WIRE_DEFAULTS: WireTuning = {
     "eval.snapshot": 120_000,
     // KOBE-326: the matched outputs for the judge (≤ 100 files, ≤ 1 MiB).
     "eval.read": 60_000,
+    // KOBE-464: a cell's longest timeout plus waking the sandbox and starting a kernel; callers
+    // pass the execution's own timeout plus that margin.
+    "notebook.execute": 3_600_000 + NOTEBOOK_COMMAND_MARGIN_MS,
+    "notebook.interrupt": 30_000,
+    "notebook.restart": 60_000,
   } satisfies Record<SandboxCommandKind, number>,
 };
 
