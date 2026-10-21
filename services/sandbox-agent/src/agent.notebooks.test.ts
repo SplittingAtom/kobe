@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { NotebookExecuteFrame } from "@kobe/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { KernelManager } from "./notebook/manager.js";
 import { fakeLauncher } from "./notebook/testing/fake-bridge.js";
@@ -21,7 +22,7 @@ function kernels() {
   return { manager, control };
 }
 
-const execute = (code: string, commandId = randomUUID()) => ({
+const execute = (code: string, commandId: string = randomUUID()): NotebookExecuteFrame => ({
   v: 1,
   type: "notebook.execute",
   command_id: commandId,
