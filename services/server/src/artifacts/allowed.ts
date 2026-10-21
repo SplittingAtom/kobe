@@ -21,6 +21,7 @@ export const BOUND_TOOLS = [
   "recall",
   "propose_project_file",
   "save_skill_draft",
+  "propose_file_edit",
 ] as const;
 export type BoundToolName = (typeof BOUND_TOOLS)[number];
 

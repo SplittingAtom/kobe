@@ -435,6 +435,40 @@ const CASES: readonly Case[] = [
     effect: "deny",
     codes: ["invalid_input"],
   },
+  {
+    name: "propose_file_edit is not prompted in ask-on-write: it writes nothing (KOBE-462)",
+    tool: builtin("propose_file_edit"),
+    input: { path: "notes.md", content: "# Notes\n", summary: "Tidy" },
+    effect: "allow",
+    codes: ["risk_read"],
+  },
+  {
+    name: "a team deny rule on a path refuses propose_file_edit (KOBE-462)",
+    tool: builtin("propose_file_edit"),
+    input: { path: "/workspace/secret/plan.md", content: "x", summary: "Tidy" },
+    rules: [
+      rule("team", "deny", "propose_file_edit", {
+        arg_pattern: { "/path": "/workspace/secret/*" },
+      }),
+    ],
+    effect: "deny",
+    codes: ["team_deny_rule"],
+  },
+  {
+    name: "ask-all prompts for propose_file_edit (KOBE-462)",
+    tool: builtin("propose_file_edit"),
+    input: { path: "notes.md", content: "x", summary: "Tidy" },
+    options: { mode: "ask-all" },
+    effect: "require_approval",
+    codes: ["mode_ask_all"],
+  },
+  {
+    name: "propose_file_edit needs path, content and summary (KOBE-462)",
+    tool: builtin("propose_file_edit"),
+    input: { path: "notes.md", content: "x" },
+    effect: "deny",
+    codes: ["invalid_input"],
+  },
   // 5. thread approval mode.
   {
     name: "ask-all prompts even for a read-only tool",

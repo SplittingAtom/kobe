@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   CAPABILITY_ARTIFACTS,
+  CAPABILITY_FILE_EDITS,
   CAPABILITY_FILES,
   CAPABILITY_MEMORY,
   CAPABILITY_PROJECTS,
@@ -22,6 +23,7 @@ import {
   type SandboxCloseReason,
   type SandboxErrorCode,
   type SandboxToServerFrame,
+  type FileEditProposeFrame,
   type SkillDraftSaveFrame,
   type TraceSpansFrame,
   type WebSearchQueryFrame,
@@ -52,6 +54,7 @@ import {
   isActiveMessageRun,
   type InterruptCause,
 } from "./run-state.js";
+import { onFileEditPropose } from "./file-edit-propose.js";
 import { onSkillDraftSave } from "./skill-draft-save.js";
 import { createRunTranslator } from "./translate.js";
 import { TraceFrameRate, type RunOwner, type TraceIntake } from "./trace-intake.js";
@@ -449,6 +452,9 @@ export class SandboxConnection implements RegisteredConnection {
       case "skill.draft_save":
         this.#onSkillDraftSave(frame);
         return;
+      case "file.edit_propose":
+        this.#onFileEditPropose(frame);
+        return;
       case "memory.put":
         this.#onMemoryPut(frame);
         return;
@@ -842,6 +848,24 @@ export class SandboxConnection implements RegisteredConnection {
         }
         fail(result.code, result.message);
       });
+  }
+
+  /** `file.edit_propose` (KOBE-462): checks and record in `file-edit-propose.ts`. */
+  #onFileEditPropose(frame: FileEditProposeFrame): void {
+    onFileEditPropose(
+      {
+        db: this.#ctx.db,
+        target: this.target,
+        runMaxEvents: this.#ctx.tuning.runMaxEvents,
+        log: this.log,
+        hasCapability: this.hasCapability(CAPABILITY_FILE_EDITS),
+        runCheck: () => this.#checkToolRun(frame.run_id, frame.thread_id, "file.edit_propose"),
+        verdict: () =>
+          this.#allowedArtifacts.consume(frame.run_id, frame.tool_call_id, frame.tool, frame.input),
+        send: (out) => this.send(out),
+      },
+      frame,
+    );
   }
 
   /** `skill.draft_save` (KOBE-442): checks and save in `skill-draft-save.ts`. */
