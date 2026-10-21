@@ -181,6 +181,9 @@ export const WIRE_DEFAULTS: WireTuning = {
     "notebook.execute": 3_600_000 + NOTEBOOK_COMMAND_MARGIN_MS,
     "notebook.interrupt": 30_000,
     "notebook.restart": 60_000,
+    // KOBE-470: the latest model call's context; the session may need restoring and the agent
+    // reads at most a few MiB (the sandbox is already connected: the route wakes it first).
+    "thread.context": 120_000,
   } satisfies Record<SandboxCommandKind, number>,
 };
 
