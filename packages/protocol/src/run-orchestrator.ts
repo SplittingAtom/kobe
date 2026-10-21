@@ -1,5 +1,6 @@
 import { skillRequestFieldSchema } from "./skill-request.js";
 import { appContextFieldSchema } from "./app-context.js";
+import { messageViewingSchema } from "./file-editor.js";
 import { z } from "zod";
 import {
   approvalModeSchema,
@@ -63,6 +64,11 @@ export const submitMessageBodySchema = z.strictObject({
    * in the run's effective skill set, checked at submit and again at run start.
    */
   skill: skillRequestFieldSchema.optional(),
+  /**
+   * The workspace file the member has open in the artifact column (KOBE-462, file-editor.ts):
+   * the server adds a bounded, fenced copy of it to this run's context, not to the message text.
+   */
+  viewing: messageViewingSchema.optional(),
 });
 export type SubmitMessageBody = z.infer<typeof submitMessageBodySchema>;
 

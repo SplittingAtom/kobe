@@ -12,3 +12,4 @@ export * from "./trace-frames.js";
 export * from "./mcp-config.js";
 export * from "./eval-frames.js";
 export * from "./skill-draft-frames.js";
+export * from "./file-edit-frames.js";

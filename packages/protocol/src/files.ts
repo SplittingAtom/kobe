@@ -203,6 +203,8 @@ export const WORKSPACE_FILE_ERROR_CODES = [
   "file_too_large",
   "quota_exceeded",
   "sandbox_unavailable",
+  /** A save based on a version the file no longer has (KOBE-462, file-editor.ts). */
+  "version_conflict",
 ] as const;
 export const workspaceFileErrorSchema = z.strictObject({
   code: z.enum(WORKSPACE_FILE_ERROR_CODES),
