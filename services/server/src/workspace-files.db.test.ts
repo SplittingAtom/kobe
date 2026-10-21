@@ -383,13 +383,35 @@ describe("GET /v1/workspace/file (download)", () => {
     expect(await auditRows(w.team, "workspace.file_downloaded")).toEqual([]);
   });
 
-  it("a missing object is a 404, not a crash", async () => {
+  it("a missing object is content_missing (not not_found), and marked for the sandbox to resend (KOBE-475)", async () => {
     const w = await world();
     await seed(w, w.alice, "lost.txt", "poof");
-    objects.lost.add(
-      workspaceBlobKey("", { teamId: w.team, userId: w.alice.id }, sha(Buffer.from("poof"))),
+    const hash = sha(Buffer.from("poof"));
+    objects.lost.add(workspaceBlobKey("", { teamId: w.team, userId: w.alice.id }, hash));
+    const res = await w.a.get("/v1/workspace/file?path=lost.txt");
+    expect(res.status).toBe(503);
+    expect(workspaceFileErrorSchema.parse(res.json).code).toBe("content_missing");
+    const { rows } = await fx.admin.query<{ lost: boolean }>(
+      `SELECT lost_at IS NOT NULL AS lost FROM workspace_blobs
+        WHERE team_id = $1 AND user_id = $2 AND sha256 = $3`,
+      [w.team, w.alice.id, hash],
     );
-    expect((await w.a.get("/v1/workspace/file?path=lost.txt")).status).toBe(404);
+    expect(rows).toEqual([{ lost: true }]);
+  });
+
+  it("a missing project object is content_missing but not marked (no sandbox can resend it)", async () => {
+    const w = await world();
+    await seed(w, w.alice, "projects/p/spec.md", "spec", "projects");
+    for (const key of objects.objects.keys()) {
+      if (key.startsWith(`teams/${w.team}/projects/`)) objects.lost.add(key);
+    }
+    const res = await w.a.get("/v1/workspace/file?path=projects/p/spec.md");
+    expect(res.status).toBe(503);
+    expect(workspaceFileErrorSchema.parse(res.json).code).toBe("content_missing");
+    const { rows } = await fx.admin.query(`SELECT 1 FROM workspace_blobs WHERE team_id = $1`, [
+      w.team,
+    ]);
+    expect(rows).toEqual([]);
   });
 });
 

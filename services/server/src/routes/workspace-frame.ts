@@ -10,6 +10,7 @@ import { logger } from "../logger.js";
 import { uuidSchema } from "../threads/schemas.js";
 import { isInternalPath } from "../workspace-files/paths.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
+import { CONTENT_MISSING, reportMissingContent } from "../workspace-sync/lost.js";
 import { currentEntry } from "../workspace-sync/store.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
@@ -74,13 +75,17 @@ export function registerWorkspaceFrame(
         teamId: owner.teamId,
         target: { userId: owner.userId, bytes: entry.size },
       });
-      return entry.blobKey;
+      return entry;
     });
     if (found === undefined) return notFound(c);
     if (found === "too_large") return tooLarge(c);
     try {
-      const object = await sync.objects.get(found);
-      if (!object) return notFound(c);
+      const object = await sync.objects.get(found.blobKey ?? "");
+      if (!object) {
+        // The file is there; its saved copy is not: the sandbox resends it (KOBE-475).
+        await reportMissingContent(db, owner, found, sync.prefix, logger);
+        return c.json({ code: "content_missing", message: CONTENT_MISSING }, 503);
+      }
       if (object.size > WORKSPACE_FRAME_MAX_BYTES) {
         object.body.destroy();
         return tooLarge(c);

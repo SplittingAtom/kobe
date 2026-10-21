@@ -179,6 +179,19 @@ export const workspaceBlobsMissingResponseSchema = z.strictObject({
 });
 
 /**
+ * `GET blobs/lost` (KOBE-475): content the server's record says it holds but object storage was
+ * found without (a read failed, or the operator's repair sweep). A sandbox that still has a file
+ * with one of these hashes, unchanged since it synced, uploads it again with `PUT blobs/<sha256>`
+ * (no commit: the rows already point at it). The server verifies the bytes against the hash and
+ * the recorded size; the re-upload is not counted against the workspace's limits a second time.
+ * A server without this endpoint answers 404: nothing to resend.
+ */
+export const workspaceBlobsLostResponseSchema = z.strictObject({
+  lost: z.array(sha256HexSchema).max(WORKSPACE_MAX_BATCH),
+});
+export type WorkspaceBlobsLostResponse = z.infer<typeof workspaceBlobsLostResponseSchema>;
+
+/**
  * `PUT blobs/<sha256>` with the raw bytes and an exact `Content-Length`. 201 stored, 200 already
  * held. 413 `file_too_large`, 507 `quota_exceeded`, 422 `hash_mismatch` (the bytes did not hash to
  * the name: nothing is stored).
@@ -242,7 +255,8 @@ export const workspaceCommitResponseSchema = z.strictObject({
 /**
  * `GET file?path=<path>`: the current content of a live path, `Content-Length` = size, header
  * {@link WORKSPACE_ENTRY_HEADER} = base64url(JSON of its {@link WorkspaceEntry}) (paths are UTF-8,
- * headers are not). 404 `not_found` when the path has no live row.
+ * headers are not). 404 `not_found` when the path has no live row; 502 `content_missing` when
+ * storage lacks its content (now listed by `blobs/lost` until a sandbox uploads it again).
  */
 export const WORKSPACE_ENTRY_HEADER = "x-kobe-workspace-entry";
 

@@ -205,6 +205,11 @@ export const WORKSPACE_FILE_ERROR_CODES = [
   "sandbox_unavailable",
   /** A save based on a version the file no longer has (KOBE-462, file-editor.ts). */
   "version_conflict",
+  /**
+   * The file exists but its saved copy is missing from object storage (KOBE-475): 503 until the
+   * member's sandbox uploads it again at its next sync. Not `not_found`: the file is still there.
+   */
+  "content_missing",
 ] as const;
 export const workspaceFileErrorSchema = z.strictObject({
   code: z.enum(WORKSPACE_FILE_ERROR_CODES),

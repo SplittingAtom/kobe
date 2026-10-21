@@ -162,7 +162,10 @@ export async function currentEntry(
   return row ? toEntry(row) : undefined;
 }
 
-/** Of these hashes, the ones this workspace does not hold (or is collecting). */
+/**
+ * Of these hashes, the ones this workspace does not hold (or is collecting, or lost from storage:
+ * KOBE-475, so a push that names lost content uploads it again).
+ */
 export async function missingBlobs(
   tx: KobeTx,
   owner: WorkspaceOwner,
@@ -172,7 +175,7 @@ export async function missingBlobs(
   const res = await tx.execute<{ sha256: string }>(sql`
     SELECT sha256 FROM workspace_blobs
      WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND NOT deleting
-       AND sha256 IN ${[...new Set(hashes)]}`);
+       AND lost_at IS NULL AND sha256 IN ${[...new Set(hashes)]}`);
   const held = new Set(res.rows.map((r) => r.sha256));
   return [...new Set(hashes)].filter((h) => !held.has(h));
 }
@@ -263,11 +266,12 @@ export async function recordBlob(
   return (await blobState(tx, owner, sha256)) === "deleting" ? "deleting" : "exists";
 }
 
+/** A commit may point a path only at content that is stored (not collected, not lost). */
 async function blobSize(tx: KobeTx, owner: WorkspaceOwner, sha256: string) {
   const res = await tx.execute<{ size: string }>(sql`
     SELECT size FROM workspace_blobs
      WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND sha256 = ${sha256}
-       AND NOT deleting`);
+       AND NOT deleting AND lost_at IS NULL`);
   const row = res.rows[0];
   return row ? Number(row.size) : undefined;
 }

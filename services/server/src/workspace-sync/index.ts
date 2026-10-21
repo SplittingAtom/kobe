@@ -6,6 +6,7 @@ export {
 } from "./auth.js";
 export { collectWorkspace, type CollectResult } from "./gc.js";
 export { sharedKey, workspaceBlobKey, workspacePrefix, type WorkspaceOwner } from "./keys.js";
+export { CONTENT_MISSING, lostBlobs, markBlobLost, reportMissingContent } from "./lost.js";
 export { IntegrityError, verifyingStream, type ObjectStore } from "./object-store.js";
 export {
   limitsQuota,
@@ -14,6 +15,7 @@ export {
   type QuotaDecision,
   type WorkspaceLimits,
 } from "./quota.js";
+export { repairWorkspaces, type RepairOptions, type RepairResult } from "./repair.js";
 export { createS3ObjectStore, loadS3Settings, type S3Settings } from "./s3.js";
 export {
   COLLECT_DEFAULTS,
