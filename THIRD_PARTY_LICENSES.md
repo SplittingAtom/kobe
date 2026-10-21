@@ -23,7 +23,7 @@ Nothing is pending: every component outside the allowed family has Chris's appro
 
 Every package in pnpm-lock.yaml (production and development, all platforms). "linked, bundled" packages are in the production dependencies of a deployable and ship in its image (the services via `pnpm deploy --prod`, web via the Next.js standalone output, kobe-sandbox-agent in the sandbox image); "dev-only" packages build, lint and test Kobe and are never shipped. Checked by `pnpm license:check` (CI `checks`).
 
-862 packages, 574 of them shipped in an image.
+891 packages, 603 of them shipped in an image.
 
 | Component | Version | License (SPDX) | How used | Where | License text |
 | --- | --- | --- | --- | --- | --- |
@@ -71,6 +71,21 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @cacheable/utils | 2.5.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@cacheable/utils@2.5.0/LICENSE) |
 | @cfworker/json-schema | 4.1.1 | MIT | linked, bundled | server | [license](https://www.npmjs.com/package/@cfworker/json-schema/v/4.1.1) |
 | @chevrotain/types | 11.1.2 | Apache-2.0 | linked, bundled | web | [license](https://unpkg.com/@chevrotain/types@11.1.2/LICENSE.txt) |
+| @codemirror/autocomplete | 6.20.4 | MIT | linked, bundled | web | [license](https://unpkg.com/@codemirror/autocomplete@6.20.4/LICENSE) |
+| @codemirror/commands | 6.11.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@codemirror/commands@6.11.1/LICENSE) |
+| @codemirror/lang-css | 6.3.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@codemirror/lang-css@6.3.1/LICENSE) |
+| @codemirror/lang-html | 6.4.12 | MIT | linked, bundled | web | [license](https://unpkg.com/@codemirror/lang-html@6.4.12/LICENSE) |
+| @codemirror/lang-javascript | 6.2.5 | MIT | linked, bundled | web | [license](https://unpkg.com/@codemirror/lang-javascript@6.2.5/LICENSE) |
+| @codemirror/lang-json | 6.0.2 | MIT | linked, bundled | web | [license](https://unpkg.com/@codemirror/lang-json@6.0.2/LICENSE) |
+| @codemirror/lang-markdown | 6.5.2 | MIT | linked, bundled | web | [license](https://unpkg.com/@codemirror/lang-markdown@6.5.2/LICENSE) |
+| @codemirror/lang-python | 6.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@codemirror/lang-python@6.2.1/LICENSE) |
+| @codemirror/lang-yaml | 6.1.3 | MIT | linked, bundled | web | [license](https://unpkg.com/@codemirror/lang-yaml@6.1.3/LICENSE) |
+| @codemirror/language | 6.13.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@codemirror/language@6.13.1/LICENSE) |
+| @codemirror/lint | 6.9.7 | MIT | linked, bundled | web | [license](https://unpkg.com/@codemirror/lint@6.9.7/LICENSE) |
+| @codemirror/merge | 6.12.3 | MIT | linked, bundled | web | [license](https://unpkg.com/@codemirror/merge@6.12.3/LICENSE) |
+| @codemirror/state | 6.7.6 | MIT | linked, bundled | web | [license](https://unpkg.com/@codemirror/state@6.7.6/LICENSE) |
+| @codemirror/streamparser | 6.0.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@codemirror/streamparser@6.0.0/LICENSE) |
+| @codemirror/view | 6.43.15 | MIT | linked, bundled | web | [license](https://unpkg.com/@codemirror/view@6.43.15/LICENSE) |
 | @drizzle-team/brocli | 0.10.2 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://www.npmjs.com/package/@drizzle-team/brocli/v/0.10.2) |
 | @esbuild-kit/core-utils | 3.3.2 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@esbuild-kit/core-utils@3.3.2/LICENSE) |
 | @esbuild-kit/esm-loader | 2.6.5 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@esbuild-kit/esm-loader@2.6.5/LICENSE) |
@@ -181,6 +196,17 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @kubernetes/client-node | 2.0.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@kubernetes/client-node@2.0.0/LICENSE) |
 | @levischuck/tiny-cbor | 0.2.11 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@levischuck/tiny-cbor@0.2.11/LICENSE) |
 | @levischuck/tiny-cbor | 0.3.6 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@levischuck/tiny-cbor@0.3.6/LICENSE) |
+| @lezer/common | 1.5.3 | MIT | linked, bundled | web | [license](https://unpkg.com/@lezer/common@1.5.3/LICENSE) |
+| @lezer/css | 1.3.9 | MIT | linked, bundled | web | [license](https://unpkg.com/@lezer/css@1.3.9/LICENSE) |
+| @lezer/highlight | 1.2.5 | MIT | linked, bundled | web | [license](https://unpkg.com/@lezer/highlight@1.2.5/LICENSE) |
+| @lezer/html | 1.3.13 | MIT | linked, bundled | web | [license](https://unpkg.com/@lezer/html@1.3.13/LICENSE) |
+| @lezer/javascript | 1.5.6 | MIT | linked, bundled | web | [license](https://unpkg.com/@lezer/javascript@1.5.6/LICENSE) |
+| @lezer/json | 1.0.3 | MIT | linked, bundled | web | [license](https://unpkg.com/@lezer/json@1.0.3/LICENSE) |
+| @lezer/lr | 1.4.11 | MIT | linked, bundled | web | [license](https://unpkg.com/@lezer/lr@1.4.11/LICENSE) |
+| @lezer/markdown | 1.8.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@lezer/markdown@1.8.1/LICENSE) |
+| @lezer/python | 1.1.19 | MIT | linked, bundled | web | [license](https://unpkg.com/@lezer/python@1.1.19/LICENSE) |
+| @lezer/yaml | 1.0.4 | MIT | linked, bundled | web | [license](https://unpkg.com/@lezer/yaml@1.0.4/LICENSE) |
+| @marijn/find-cluster-break | 1.0.4 | MIT | linked, bundled | web | [license](https://unpkg.com/@marijn/find-cluster-break@1.0.4/LICENSE) |
 | @mermaid-js/parser | 1.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@mermaid-js/parser@1.2.1/LICENSE) |
 | @modelcontextprotocol/client | 2.3.1 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@modelcontextprotocol/client@2.3.1/LICENSE) |
 | @modelcontextprotocol/core | 2.3.1 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@modelcontextprotocol/core@2.3.1/LICENSE) |
@@ -479,6 +505,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | commander | 8.3.0 | MIT | linked, bundled | web | [license](https://unpkg.com/commander@8.3.0/LICENSE) |
 | cose-base | 1.0.3 | MIT | linked, bundled | web | [license](https://unpkg.com/cose-base@1.0.3/LICENSE) |
 | cose-base | 2.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/cose-base@2.2.0/LICENSE) |
+| crelt | 1.0.7 | MIT | linked, bundled | web | [license](https://unpkg.com/crelt@1.0.7/LICENSE) |
 | cross-spawn | 7.0.6 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/cross-spawn@7.0.6/LICENSE) |
 | csstype | 3.2.3 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/csstype@3.2.3/LICENSE) |
 | cytoscape-cose-bilkent | 4.1.0 | MIT | linked, bundled | web | [license](https://unpkg.com/cytoscape-cose-bilkent@4.1.0/LICENSE) |
@@ -826,6 +853,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | strictdom | 1.0.1 | MIT | linked, bundled | web | [license](https://www.npmjs.com/package/strictdom/v/1.0.1) |
 | string_decoder | 1.3.0 | MIT | linked, bundled | server | [license](https://unpkg.com/string_decoder@1.3.0/LICENSE) |
 | stringify-entities | 4.0.4 | MIT | linked, bundled | web | [license](https://unpkg.com/stringify-entities@4.0.4/license) |
+| style-mod | 4.1.4 | MIT | linked, bundled | web | [license](https://unpkg.com/style-mod@4.1.4/LICENSE) |
 | style-to-js | 1.1.21 | MIT | linked, bundled | web | [license](https://unpkg.com/style-to-js@1.1.21/LICENSE) |
 | style-to-object | 1.0.14 | MIT | linked, bundled | web | [license](https://unpkg.com/style-to-object@1.0.14/LICENSE) |
 | styled-jsx | 5.1.6 | MIT | linked, bundled | web | [license](https://unpkg.com/styled-jsx@5.1.6/license.md) |
@@ -877,6 +905,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | vfile | 6.0.3 | MIT | linked, bundled | web | [license](https://unpkg.com/vfile@6.0.3/license) |
 | vite | 8.3.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/vite@8.3.1/LICENSE.md) |
 | vitest | 5.0.3 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/vitest@5.0.3/LICENSE.md) |
+| w3c-keyname | 2.2.8 | MIT | linked, bundled | web | [license](https://unpkg.com/w3c-keyname@2.2.8/LICENSE) |
 | whatwg-mimetype | 3.0.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/whatwg-mimetype@3.0.0/LICENSE.txt) |
 | which | 2.0.2 | ISC | dev-only | build, lint and test tooling | [license](https://unpkg.com/which@2.0.2/LICENSE) |
 | why-is-node-running | 3.2.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/why-is-node-running@3.2.1/LICENSE) |
