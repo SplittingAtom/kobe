@@ -18,6 +18,11 @@ import {
 import { approvalResolutionCauseSchema, policyReasonSchema } from "./policy.js";
 import { rememberScopeSchema } from "./remember.js";
 import { fileEditProposedPayloadSchema } from "./file-editor.js";
+import {
+  notebookFinishedPayloadSchema,
+  notebookOutputPayloadSchema,
+  notebookStartedPayloadSchema,
+} from "./notebooks.js";
 import { thinkingLevelSchema } from "./thinking.js";
 import {
   SERVER_CALL_PURPOSES,
@@ -52,6 +57,10 @@ export const KOBE_EVENT_TYPES = [
   "skill.draft_saved",
   // KOBE-462: a `propose_file_edit` proposal awaiting the member (file-editor.ts).
   "file.edit_proposed",
+  // KOBE-464: a kernel execution (the member's `notebook` run or a `run_python` call; notebooks.ts).
+  "notebook.started",
+  "notebook.output",
+  "notebook.finished",
   "entry.committed",
   "run.completed",
   "run.failed",
@@ -320,6 +329,10 @@ export const EVENT_PAYLOAD_SCHEMAS = {
    * member reviews `content` against the file at `base_sha256` and commits through the save route.
    */
   "file.edit_proposed": fileEditProposedPayloadSchema,
+  /** KOBE-464 (notebooks.ts, docs/specs/notebooks.md NB15). */
+  "notebook.started": notebookStartedPayloadSchema,
+  "notebook.output": notebookOutputPayloadSchema,
+  "notebook.finished": notebookFinishedPayloadSchema,
   "entry.committed": z.strictObject({
     entry_id: idSchema,
     parent_id: idSchema.nullable(),

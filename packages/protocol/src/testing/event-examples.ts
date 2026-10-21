@@ -108,6 +108,25 @@ export const EVENT_PAYLOAD_EXAMPLES: { readonly [T in KobeEventType]: KobeEventP
     content: "# Plan\n\nShip it.\n",
     summary: "Adds the plan's last step",
   },
+  "notebook.started": {
+    exec_id: "9b2f6a1e-3c4d-4e5f-8a6b-7c8d9e0f1a2b",
+    origin: "user",
+    path: "analysis.ipynb",
+    cell_id: "cell-1",
+  },
+  "notebook.output": {
+    exec_id: "9b2f6a1e-3c4d-4e5f-8a6b-7c8d9e0f1a2b",
+    index: 0,
+    output: { output_type: "stream", name: "stdout", text: "2\n" },
+  },
+  "notebook.finished": {
+    exec_id: "9b2f6a1e-3c4d-4e5f-8a6b-7c8d9e0f1a2b",
+    status: "ok",
+    execution_count: 1,
+    outputs: 1,
+    truncated: false,
+    saved: { path: "analysis.ipynb", sha256: "b".repeat(64) },
+  },
   "entry.committed": {
     entry_id: "b2c3d4e5",
     parent_id: "a1b2c3d4",

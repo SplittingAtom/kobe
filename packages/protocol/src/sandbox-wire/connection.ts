@@ -43,6 +43,9 @@
  *   `skill.draft_save_result` (push-then-save, as `file.share`); same refusal rule.
  *   `file_edits` (`CAPABILITY_FILE_EDITS`, file-editor.ts, KOBE-462): `file.edit_propose` /
  *   `file.edit_propose_result` and `run.start.viewing`.
+ *   `notebooks` (`CAPABILITY_NOTEBOOKS`, notebooks.ts, KOBE-464): the commands `notebook.execute`,
+ *   `notebook.interrupt`, `notebook.restart` (never sent to agents without it), the agent's
+ *   `notebook.output` frames and `notebook.run` / `notebook.run_result` (`run_python`).
  *   `web_search` ({@link CAPABILITY_WEB_SEARCH}, web-search.ts, KOBE-114): `web_search.query` /
  *   `web_search.result`; same refusal rule.
  *   `mcp` ({@link CAPABILITY_MCP}, mcp-config.ts, KOBE-111): `run.start.mcp`, the run's effective
