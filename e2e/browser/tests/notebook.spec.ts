@@ -70,7 +70,9 @@ async function openNotebook(page: Page, dir: string): Promise<Locator> {
   const files = filesSection(page);
   await files.getByRole("button", { name: "Refresh files" }).click();
   const tree = files.getByRole("tree", { name: "Files in your workspace" });
-  await tree.getByRole("treeitem", { name: dir, exact: true }).click();
+  // The tree remembers an expanded folder across a reload: open it only when it is closed.
+  const folder = tree.getByRole("treeitem", { name: dir, exact: true });
+  if ((await folder.getAttribute("aria-expanded")) !== "true") await folder.click();
   await tree.getByRole("treeitem", { name: "check.ipynb", exact: true }).click();
   const notebook = page.locator("[data-kobe-notebook]");
   await expect(notebook.getByRole("heading", { name: "KOBE-465 check" })).toBeVisible();
