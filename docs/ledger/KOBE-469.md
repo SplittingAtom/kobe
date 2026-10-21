@@ -21,13 +21,17 @@ the plain editor and the unified merge view). No CSP change.
 ## Other style injectors in apps/web
 
 - **Radix (`react-remove-scroll` -> `react-style-singleton`)** adds a `<style>` for the scroll
-  lock when a modal Dialog opens, nonced only via `get-nonce`/`__webpack_nonce__`, which Next does
-  not set: likely blocked too (scroll lock only). Not fixed here; follow-up.
+  lock when a modal overlay opens, nonced only via `get-nonce`/`__webpack_nonce__`, which Next
+  does not set. Fixed: `components/security/style-nonce.tsx` (first in the root layout's body)
+  calls `setNonce` with the document nonce. `get-nonce` is a direct dependency pinned to 1.0.1,
+  the only version in the lockfile (`pnpm why`), so it is the copy react-style-singleton uses.
 - **mermaid** puts `<style>` in its scratch SVG during `render`; the result is shown as an
   `<img>` data URL (own document, outside the page CSP), so only measurement may differ.
 
 ## Verification
 
-- Unit: `components/files/code-editor.test.tsx` (nonce read; facet on both views).
+- Unit: `components/files/code-editor.test.tsx` (nonce read; facet on both views);
+  `components/security/style-nonce.test.tsx` (a modal Radix dialog's injected style is nonced).
+- Browser: `command-palette.spec.ts` asserts no style-src violation around the modal palette.
 - Browser: `e2e/browser/tests/file-editor.spec.ts` checks gutter beside text, coloured
   added/deleted lines, no style-src violation (not run on gate1 by this ticket).

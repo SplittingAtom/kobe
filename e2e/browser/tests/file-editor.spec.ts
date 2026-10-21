@@ -1,6 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import { expect, filesSection, test } from "./support/chat.js";
 import { RUN_TIMEOUT_MS } from "./support/constants.js";
+import { styleViolations, watchStyleViolations } from "./support/csp.js";
 import { toolTurn } from "./support/gate5.js";
 
 /**
@@ -17,25 +18,6 @@ const TEAM_KEY = "kobe.lastTeamId";
 
 const BASE = "alpha\nbeta\ngamma\n";
 const PROPOSED = "alpha\nBETA\ngamma\ndelta\n";
-
-/** Collects the page's style-src CSP violations from now on (client-side navigation keeps it). */
-async function watchStyleViolations(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const seen: string[] = [];
-    (window as unknown as { kobeStyleViolations: string[] }).kobeStyleViolations = seen;
-    document.addEventListener("securitypolicyviolation", (e) => {
-      if (e.effectiveDirective.startsWith("style-src")) {
-        seen.push(`${e.effectiveDirective} ${e.blockedURI} ${e.sample}`);
-      }
-    });
-  });
-}
-
-async function styleViolations(page: Page): Promise<string[]> {
-  return page.evaluate(
-    () => (window as unknown as { kobeStyleViolations: string[] }).kobeStyleViolations,
-  );
-}
 
 /** The editor's line-number gutter is beside its first line of text, not stacked above it. */
 async function expectGutterBeside(scope: Locator): Promise<void> {
