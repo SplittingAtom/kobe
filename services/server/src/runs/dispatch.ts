@@ -83,6 +83,7 @@ export class RunDispatcher {
         ...(plan.mcp === undefined ? {} : { mcp: plan.mcp }),
         ...(plan.parentEntryId !== null ? { parentEntryId: plan.parentEntryId } : {}),
         ...(plan.appCards === undefined ? {} : { appCards: plan.appCards }),
+        ...(plan.viewing === undefined ? {} : { viewing: plan.viewing }),
         config: {
           ...plan.config,
           ...(plan.modelLimits === undefined

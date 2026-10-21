@@ -7,6 +7,7 @@ import {
   CAPABILITY_APP_CARDS,
   CAPABILITY_MCP,
   CAPABILITY_MEMORY,
+  CAPABILITY_FILE_EDITS,
   CAPABILITY_PROJECTS,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
@@ -617,6 +618,11 @@ export class CommandDelivery {
     // them), so its model does not see them, and the run does not fail on an unknown parent.
     if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_APP_CARDS)) {
       out = withoutAppCards(out as RunStartFrame) as ServerToSandboxFrame;
+    }
+    // The viewed file (KOBE-462) only reaches agents that fence it; an older one runs without it.
+    if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_FILE_EDITS)) {
+      const { viewing: _viewing, ...rest } = out as RunStartFrame;
+      out = rest as ServerToSandboxFrame;
     }
     // Same for the per-session MCP config (KOBE-111): an agent without it has no connector tools.
     if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_MCP)) {

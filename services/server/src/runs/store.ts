@@ -3,11 +3,13 @@ import {
   isActiveRunStatus,
   isTerminalRunStatus,
   nextThreadStatus,
+  runViewingContextSchema,
   type ApprovalMode,
   type RunSnapshot,
   type RunStatus,
   type RunTransitionCause,
   type RunTrigger,
+  type RunViewingContext,
   type ThinkingLevel,
   type ThreadStatus,
 } from "@kobe/protocol";
@@ -383,22 +385,40 @@ export interface NewRun {
   readonly parentEntryId: string | null;
   readonly retryOfRunId: string | null;
   readonly clientKey: string | null;
+  /** The message's viewed file (KOBE-462); null for none. */
+  readonly viewing?: RunViewingContext | null;
 }
 
 /** Inserts a queued run at the end of the thread's queue (thread lock held). */
 export async function insertQueuedRun(tx: KobeTx, run: NewRun): Promise<string> {
   const res = await tx.execute<{ id: string }>(sql`
     INSERT INTO runs (team_id, thread_id, trigger, status, queue_pos, approval_mode, input,
-                      parent_entry_id, retry_of_run_id, client_key)
+                      parent_entry_id, retry_of_run_id, client_key, viewing)
     VALUES (${run.teamId}, ${run.threadId}, ${run.trigger}, 'queued',
             (SELECT coalesce(max(queue_pos), 0) + 1 FROM runs
               WHERE team_id = ${run.teamId} AND thread_id = ${run.threadId} AND status = 'queued'),
             ${run.approvalMode}, ${run.input}, ${run.parentEntryId}, ${run.retryOfRunId},
-            ${run.clientKey})
+            ${run.clientKey},
+            ${run.viewing == null ? null : JSON.stringify(run.viewing)}::jsonb)
     RETURNING id`);
   const id = res.rows[0]?.id;
   if (id === undefined) throw new Error("run insert returned no row");
   return id;
+}
+
+/**
+ * The run's viewed file (KOBE-462, `runs.viewing`), checked again on the way out: a row that does
+ * not parse sends no note.
+ */
+export async function runViewing(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+): Promise<RunViewingContext | null> {
+  const res = await tx.execute<{ viewing: unknown }>(sql`
+    SELECT viewing FROM runs WHERE team_id = ${teamId} AND id = ${runId}`);
+  const parsed = runViewingContextSchema.safeParse(res.rows[0]?.viewing);
+  return parsed.success ? parsed.data : null;
 }
 
 // ------------------------------------------------------------------------------ transitions
