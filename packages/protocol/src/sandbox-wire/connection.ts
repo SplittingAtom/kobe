@@ -143,6 +143,7 @@ export const SANDBOX_ERROR_CODES = [
   "model_not_configured", // run.start named no gateway model for a sandbox with model access (KOBE-41)
   "runtime_tampered", // another process changed a Pi's private runtime dir; that Pi was stopped (KOBE-41)
   "frame_too_large",
+  "kernel_unavailable", // no notebook kernel could be started for the thread (KOBE-464)
   "internal",
 ] as const;
 export type SandboxErrorCode = (typeof SANDBOX_ERROR_CODES)[number];
