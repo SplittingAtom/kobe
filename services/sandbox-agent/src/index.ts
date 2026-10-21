@@ -53,8 +53,6 @@ async function main(): Promise<void> {
   const identities = await piIdentities(checked);
   // The tool executor (KOBE-167) needs the pairs from the pod spec: decided right after.
   const exec = await toolExecutor(checked, identities);
-  // Thread kernels (KOBE-464): each takes an identity of its own from the same pool.
-  const kernels = await kernelManager(checked, identities, home);
   // Pi's private runtime directories live here: leftovers of an earlier agent (a pod restart)
   // are swept first, so no stale token outlives its process; the version probe gets its own dir.
   const swept = await sweepRuntimeDir(checked.piRuntimeDir, { identities });
@@ -94,6 +92,9 @@ async function main(): Promise<void> {
     mcpWiring(checked, session),
   ]);
   const config = grant ? { ...checked, sandboxId: grant.sandboxId } : checked;
+  // Thread kernels (KOBE-464): each takes an identity of its own from the same pool, and reaches
+  // the internet through egress-proxy as the shell tool does.
+  const kernels = await kernelManager(checked, identities, home, egress);
   logger.info(
     {
       server: config.connectUrl,
@@ -229,6 +230,7 @@ async function kernelManager(
   config: Config,
   identities: PiIdentities | undefined,
   home: string,
+  egress: EgressWiring | undefined,
 ): Promise<KernelManager | undefined> {
   if (config.kernelBridge === undefined) return undefined;
   const bridge = await checkExtensionFile(config.kernelBridge, "kernel-bridge");
@@ -241,6 +243,9 @@ async function kernelManager(
       home,
       parentEnv: process.env,
       identities,
+      ...(egress === undefined
+        ? {}
+        : { egress: { wiring: egress, runtimeRoot: config.piRuntimeDir } }),
       onDiagnostic: (message) => logger.warn(message),
     }),
     maxKernels: config.maxKernels,

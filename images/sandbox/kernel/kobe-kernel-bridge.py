@@ -21,6 +21,11 @@ the launcher below, so a forked child's Python-level prints are not shown. The k
 stdin/stdout/stderr are /dev/null, so nothing it writes can reach this protocol. IPython and Jupyter
 read their configuration and startup files from that directory only (never the shared $HOME).
 Outputs are passed on as the kernel sends them; the agent applies Kobe's caps and MIME allow-list.
+
+Internet (NB17): like the shell tool, through egress-proxy. The agent passes the token *file*
+(KOBE_EGRESS_TOKEN_FILE), the proxy URL and the thread id, never the token; before each cell the
+bridge runs a silent snippet in the kernel that reads the current token and sets HTTPS_PROXY and
+friends (as the shell tool's BASH_ENV script does per command), so a rotated token is picked up.
 One execution runs at a time; `interrupt` sends SIGINT to the kernel.
 """
 
@@ -38,6 +43,29 @@ READY_TIMEOUT_S = 60
 MAX_LINE_BYTES = 1024 * 1024
 OUTPUT_TYPES = ("stream", "display_data", "execute_result", "error")
 KERNEL_NAME = "kobe-python"
+# Run silently before each cell when egress is wired: the same rules as egress-env.sh (only
+# [A-Za-z0-9._:-] in the parts; anything else exports nothing).
+EGRESS_REFRESH = """
+def __kobe_egress():
+    import os, re
+    f, p = os.environ.get("KOBE_EGRESS_TOKEN_FILE"), os.environ.get("KOBE_EGRESS_PROXY")
+    if not f or not p:
+        return
+    try:
+        with open(f, encoding="ascii") as fh:
+            token = fh.readline().strip()
+    except (OSError, ValueError):
+        return
+    user = os.environ.get("KOBE_THREAD_ID", "kobe")
+    host = (p[len("http://"):] if p.startswith("http://") else p).rstrip("/")
+    if not token or not re.fullmatch(r"[A-Za-z0-9._:-]+", token + user + host):
+        return
+    url = "http://%s:%s@%s" % (user, token, host)
+    for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+        os.environ[name] = url
+__kobe_egress()
+del __kobe_egress
+"""
 # ipykernel_launcher, with the IOPub pipe off (no loopback TCP listener in the kernel).
 LAUNCHER = """import sys
 del sys.path[0]
@@ -173,6 +201,12 @@ class Bridge:
         self.commands.put({"op": "shutdown"})
 
     def execute(self, exec_id, code):
+        if os.environ.get("KOBE_EGRESS_TOKEN_FILE") and os.environ.get("KOBE_EGRESS_PROXY"):
+            # Silent and before the cell on the same shell channel, so it runs first; its own
+            # messages carry another parent id and are not forwarded.
+            self.kc.execute(
+                EGRESS_REFRESH, silent=True, store_history=False, allow_stdin=False, stop_on_error=False
+            )
         msg_id = self.kc.execute(code, store_history=True, allow_stdin=False, stop_on_error=True)
         interrupted = False
         while True:

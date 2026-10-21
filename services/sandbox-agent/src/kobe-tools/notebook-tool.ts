@@ -67,7 +67,7 @@ export function runPythonTool(transport: ToolsTransport): ToolDefinitionLike {
     promptGuidelines: [
       "Use run_python for data analysis and charts: the kernel keeps state between calls, so load data once and reuse it. Plots made with matplotlib are shown to the user.",
       "To run a cell of a notebook the user has open, pass its path and cell_id; the outputs are saved into the notebook. To change a cell's code, propose the edit with propose_file_edit instead of rewriting the notebook.",
-      "The kernel has no internet access; install packages with the shell tool if you must (pip install --user), then import them in run_python.",
+      "The kernel reaches the internet like the shell, through the team's egress allowlist; a blocked domain lets the user request access. Install packages with the shell tool (pip install --user), then import them in run_python.",
     ],
     parameters: PARAMETERS,
     execute: (toolCallId, params) => run(transport, toolCallId, params),

@@ -86,7 +86,10 @@ async function appendToActiveRuns(
     .orderBy(runs.startedAt)
     .limit(MAX_RUNS_PER_EVENT);
   const hinted = active.filter((r) => r.threadId === ref.thread_id);
-  const targets = hinted.length > 0 ? hinted : active;
+  // A member's notebook run (KOBE-464, NB17) has no lease: its kernel's attempts name its thread,
+  // and they are shown on that run (the member's own, in their own thread).
+  const notebook = hinted.length > 0 ? [] : await activeNotebookRun(tx, teamId, ref);
+  const targets = hinted.length > 0 ? hinted : notebook.length > 0 ? notebook : active;
   for (const { runId } of targets) {
     await appendRunEventsInTx(tx, teamId, runId, [
       {
@@ -96,6 +99,21 @@ async function appendToActiveRuns(
     ]);
   }
   return targets.map((t) => t.runId);
+}
+
+async function activeNotebookRun(
+  tx: KobeTx,
+  teamId: string,
+  ref: z.infer<typeof refSchema>,
+): Promise<{ runId: string; threadId: string }[]> {
+  if (ref.thread_id === undefined) return [];
+  const res = await tx.execute<{ id: string; thread_id: string }>(sql`
+    SELECT r.id, r.thread_id FROM runs r
+      JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
+     WHERE r.team_id = ${teamId} AND t.team_id = ${teamId} AND r.thread_id = ${ref.thread_id}
+       AND t.owner_user_id = ${ref.user_id} AND r.kind = 'notebook' AND r.status = 'running'
+     LIMIT 1`);
+  return res.rows.map((r) => ({ runId: r.id, threadId: r.thread_id }));
 }
 
 export interface BlockedRelayOptions {

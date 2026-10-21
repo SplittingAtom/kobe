@@ -266,6 +266,40 @@ PY
 )
 check "a kernel runs 1+1 over the bridge, keeps state, draws PNG, opens no TCP port (KOBE-464)" '^ok 2 3 listeners=0 png=1$' \
   run_ws python3 -c "$KERNEL_PROBE" /usr/local/bin/python3 /opt/kobe/kernel/kobe-kernel-bridge.py
+run_ws_line() { run_ws "$@" | tr '\n' ' ' | sed 's/ $//'; }
+# NB17: a kernel reaches the internet like the shell tool: before each cell the bridge turns the
+# token file (never the token) into proxy variables, so a rotated token is used by the next cell.
+KERNEL_EGRESS_PROBE=$(cat <<'PY'
+import json, os, subprocess, sys
+open("/tmp/egress-token", "w").write("image.token-1\n")
+env = dict(os.environ, KOBE_EGRESS_TOKEN_FILE="/tmp/egress-token", KOBE_EGRESS_PROXY="http://egress-proxy.kobe.internal:80",
+           KOBE_THREAD_ID="9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d")
+p = subprocess.Popen(sys.argv[1:], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, cwd="/workspace", env=env)
+read = lambda: json.loads(p.stdout.readline())
+assert read()["ev"] == "ready"
+def run(i):
+    p.stdin.write(json.dumps({"op": "execute", "id": i, "code": "import os; print(os.environ.get('HTTPS_PROXY'))"}) + "\n")
+    p.stdin.flush()
+    out = ""
+    while True:
+        m = read()
+        if m["ev"] == "output":
+            out += m["output"].get("text", "")
+        elif m["ev"] == "done":
+            return out.strip()
+first = run("a")
+open("/tmp/egress-token", "w").write("image.token-2\n")
+second = run("b")
+p.stdin.write('{"op": "shutdown"}\n')
+p.stdin.flush()
+p.wait(timeout=30)
+print(first)
+print(second)
+PY
+)
+check "a kernel gets HTTPS_PROXY from the rotating token file before each cell (NB17)" \
+  '^http://9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d:image.token-1@egress-proxy.kobe.internal:80 http://9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d:image.token-2@egress-proxy.kobe.internal:80$' \
+  run_ws_line python3 -c "$KERNEL_EGRESS_PROBE" /usr/local/bin/python3 /opt/kobe/kernel/kobe-kernel-bridge.py
 # KOBE-317: the former built-in skills are catalog skills the server ships; the image bakes none.
 check "no skills baked into the image (they arrive as bundles)" '^none$' run sh -c \
   '[ -e /opt/kobe/skills ] && echo baked || echo none'

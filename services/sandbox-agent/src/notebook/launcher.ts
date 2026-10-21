@@ -1,6 +1,15 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { stat } from "node:fs/promises";
-import type { PiIdentities, PiIdentity } from "../pi/identities.js";
+import { randomBytes } from "node:crypto";
+import { chmod, chown, mkdir, stat } from "node:fs/promises";
+import path from "node:path";
+import {
+  EGRESS_TOKEN_FILE_NAME,
+  EgressTokenFile,
+  egressEnv,
+  type EgressWiring,
+} from "../egress/egress-wiring.js";
+import { removeRuntimeDir } from "../models/runtime-dir.js";
+import { partnerOf, type PiIdentities, type PiIdentity } from "../pi/identities.js";
 import { SHARED_SCRATCH_DIRS } from "../threads/thread.js";
 import type { BridgeLauncher, BridgeProcess } from "./session.js";
 
@@ -25,6 +34,12 @@ export interface KernelLauncherOptions {
   readonly onDiagnostic?: (message: string) => void;
   /** How long a plain child gets between end of input and SIGKILL. */
   readonly graceMs?: number;
+  /**
+   * Egress (NB17): the kernel reaches the internet as the shell tool does, through egress-proxy
+   * with the team's allowlist. `runtimeRoot` is the agent's private runtime directory; each
+   * kernel's rotating token file lives in a directory there only the kernel's uid may read.
+   */
+  readonly egress?: { readonly wiring: EgressWiring; readonly runtimeRoot: string } | undefined;
 }
 
 /** What the kernel inherits: the tools' allow-list, never a token, a channel fd or a proxy. */
@@ -45,12 +60,61 @@ export function kernelEnv(
   return env;
 }
 
+/**
+ * The kernel's egress token: a file the agent rewrites on every rotation, in a fresh directory
+ * agent-owned with the kernel uid's group (2750): the kernel reads it, nothing else of the sandbox
+ * can. The variables name the file, never the token; the bridge turns them into proxy variables
+ * before each cell (as the shell tool's BASH_ENV script does per command).
+ */
+interface KernelEgress {
+  readonly env: Record<string, string>;
+  close(): Promise<void>;
+}
+
+async function kernelEgress(
+  options: KernelLauncherOptions,
+  threadId: string,
+  identity: PiIdentity | undefined,
+): Promise<KernelEgress | undefined> {
+  const egress = options.egress;
+  if (egress === undefined) return undefined;
+  const dir = path.join(egress.runtimeRoot, `kernel-${randomBytes(16).toString("hex")}`);
+  await mkdir(egress.runtimeRoot, { recursive: true, mode: 0o700 });
+  await mkdir(dir, { mode: 0o700 });
+  if (identity !== undefined && options.identities !== undefined) {
+    const gid = options.identities.paired ? partnerOf(identity).gid : identity.gid;
+    await chown(dir, -1, gid);
+    await chmod(dir, 0o2750);
+  }
+  const file = new EgressTokenFile(
+    path.join(dir, EGRESS_TOKEN_FILE_NAME),
+    identity === undefined ? 0o600 : 0o640,
+  );
+  await file.write(await egress.wiring.tokens.current());
+  const unsubscribe = egress.wiring.tokens.onChange((token) => {
+    file.write(token).catch((error: unknown) => {
+      options.onDiagnostic?.(`kernel egress token not written: ${(error as Error).message}`);
+    });
+  });
+  return {
+    env: egressEnv(egress.wiring, file.path, threadId),
+    async close() {
+      unsubscribe();
+      await removeRuntimeDir(dir, options.identities).catch((error: unknown) => {
+        options.onDiagnostic?.(`kernel egress dir not removed: ${(error as Error).message}`);
+      });
+    },
+  };
+}
+
 export function createKernelLauncher(options: KernelLauncherOptions): BridgeLauncher {
-  return async () => {
+  return async (threadId) => {
     const identities = options.identities;
     const identity = identities === undefined ? undefined : await identities.acquire();
+    let egress: KernelEgress | undefined;
     try {
-      const env = kernelEnv(options.parentEnv, options.home);
+      egress = await kernelEgress(options, threadId, identity);
+      const env = { ...kernelEnv(options.parentEnv, options.home), ...egress?.env };
       let file = options.python;
       let args: readonly string[] = [options.bridge];
       if (identities !== undefined && identity !== undefined) {
@@ -66,8 +130,9 @@ export function createKernelLauncher(options: KernelLauncherOptions): BridgeLaun
         detached: true,
         windowsHide: true,
       });
-      return bridgeOf(child, options, identity);
+      return bridgeOf(child, options, identity, egress);
     } catch (error) {
+      await egress?.close();
       if (identity !== undefined) await reclaim(options, identity);
       throw error;
     }
@@ -78,6 +143,7 @@ function bridgeOf(
   child: ChildProcess,
   options: KernelLauncherOptions,
   identity: PiIdentity | undefined,
+  egress: KernelEgress | undefined,
 ): BridgeProcess {
   const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
     child.on("error", (error) => {
@@ -99,6 +165,7 @@ function bridgeOf(
         child.stdin?.end();
         if (identity !== undefined) {
           await reclaim(options, identity);
+          await egress?.close();
           return;
         }
         // The bridge shuts its kernel down when its input ends; the group kill is the backstop.
@@ -110,6 +177,7 @@ function bridgeOf(
             // already gone
           }
         }
+        await egress?.close();
       })();
       return killed;
     },
