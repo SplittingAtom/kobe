@@ -35,7 +35,7 @@
   `/dev/null`, so nothing it writes can corrupt the bridge protocol.
 - **Kernel identity:** each kernel takes its own Pi identity (pool of 16; Pi uses ≤ 8; kernels ≤ 4)
   and runs as its partner uid via `kobe-runas`; killed, reclaimed and released like a Pi identity.
-  Its env is the tools' allow-list only (no proxy, no token): kernels have no internet in v1.
+  Its env is the tools' allow-list plus the egress variables (token file path, never the token).
 - **No debugger:** debugpy excluded from the lock (`--unsafe-package debugpy`); ipykernel runs
   without it.
 - **Caps:** 192 KiB per output, 200 outputs / 2 MiB per execution, stream text coalesced (100 ms,
@@ -44,15 +44,20 @@
 - No new openapi entries (the file-edit routes set the precedent); the web chat stream ignores
   `notebook.*` until KOBE-465.
 
+## Review fixes (Opus review, 2026-10-21)
+
+- Eval isolation: `propose_file_edit` is eval-isolated; `run_python` with a path is denied in eval
+  runs (code still runs in the eval sandbox's kernel); both wire handlers refuse eval connections.
+- Stop on a notebook run sends `notebook.interrupt` (no `run.stop`); the kernel manager drops
+  waiting executions on interrupt, run end, or a deadline counted from arrival.
+- Kernel internet (Chris): through egress-proxy like the shell (NB17); blocked attempts of a
+  member's notebook run land on that run.
+- Accepted and recorded: `/code` rules don't see a file's code (as bash); user-site `.pth` files
+  run at kernel start; forked children's prints not shown.
+
 ## Open questions (for Chris or the coordinator)
 
-- Kernel internet: v1 has none (packages via the shell tool, `pip install --user`). Wire the
-  egress proxy into kernels later? (Token rotation makes a long-lived kernel's proxy env stale.)
-- Licence: `asttokens` 3.0.2 declares "Apache 2.0" (non-SPDX label): pending gate review in
-  `images/sandbox/license-exceptions.json`.
-- Stop on a `notebook` run ends the run but does not interrupt the cell; the web should call
-  interrupt (spec NB7). Make Stop send `notebook.interrupt` too?
-- Forked children's Python-level prints are not shown (pipe off). Acceptable?
+- Licence: `asttokens` 3.0.2 declares "Apache 2.0" (non-SPDX label): pending gate review.
 
 ## Evidence (acceptance criteria → test or command output)
 

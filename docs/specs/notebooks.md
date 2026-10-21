@@ -1,7 +1,7 @@
 # Kobe — Notebooks (KOBE-464 server, sandbox and protocol; KOBE-465 web)
 
-Status: **decisions by Chris, 2026-10-21** (NB1–NB5 binding; NB6–NB16 settled in KOBE-464 within
-them). Contract: `packages/protocol/src/notebooks.ts` and
+Status: **decisions by Chris, 2026-10-21** (NB1–NB5 and NB17 binding; NB6–NB16 and NB18 settled
+in KOBE-464 within them). Contract: `packages/protocol/src/notebooks.ts` and
 `packages/protocol/src/sandbox-wire/notebook-frames.ts`. Ledger: `docs/ledger/KOBE-464.md`. Builds
 on the file editor (`docs/specs/file-editor.md`, FE1–FE12).
 
@@ -35,7 +35,9 @@ it; one runs at a time (NB6).
 risk `destructive`, scope `sandbox`, primary argument `/code`. Site and team deny/ask rules,
 `ask-all` and the agent's tool list apply; no new approval path and no bypass. The server decides
 every call (`policy.check`), and the `notebook.run` frame is served only for a call the connection
-allowed with the same canonical input, taken once (as `propose_file_edit`).
+allowed with the same canonical input, taken once (as `propose_file_edit`). Accepted (review,
+2026-10-21): a `path`/`cell_id` call is matched by `/code` rules only on its (absent) `code`, so
+deny rules on code do not see a file's contents, the same as `bash` running a script.
 
 **NB4. Outputs.** (Chris) `stream` text, `error` (name, value, traceback), `execute_result` and
 `display_data` with an allow-listed MIME bundle: `text/plain`, `text/markdown`, `text/latex`,
@@ -62,14 +64,19 @@ viewers watch the events.
 kernel (the running cell ends `interrupted`, state kept). `POST .../restart` kills the kernel and
 starts none (the next execution starts a fresh one; state lost; a running cell ends
 `restarted`). Owner only. Neither wakes a sandbox: a sandbox that is not connected has no kernel
-(`no_kernel`). Stop on a `notebook` run is not the way to stop a cell: the web calls interrupt.
+(`no_kernel`). An interrupt also drops every execution still waiting for that kernel (they end
+`interrupted` without running). Stop on a `notebook` run (`POST /v1/runs/{id}/cancel`) ends the
+run `cancelled`, frees the thread at once and sends `notebook.interrupt` (no `run.stop`: there is
+no Pi); the cell's late answer saves its outputs but adds nothing to the ended run.
 
 **NB8. Hung cells cannot wedge a run.** Every execution has a timeout (member: 10 min default,
 `timeout_s` up to 60 min; agent: `timeout_s`, same bounds). At the timeout the agent interrupts;
 if the kernel has not finished 5 s later it kills the kernel (state lost) and answers `timeout`.
-An agent run that ends (Stop, failure, its Pi exiting) interrupts its own execution. The server
-command deadline is the timeout plus a margin (and the wake budget), so the requester always
-gets an answer.
+The timeout counts from the command's arrival in the sandbox, waiting for the kernel included,
+and an execution whose deadline passed while it waited is not run (`timeout`). An agent run that
+ends (Stop, failure, its Pi exiting) interrupts its own execution and drops its waiting ones. So
+no execution runs after the server stopped waiting for it. The server command deadline is the
+timeout plus a margin (and the wake budget), so the requester always gets an answer.
 
 **NB9. Caps.** Per output at most `NOTEBOOK_OUTPUT_MAX_BYTES` (192 KiB as JSON: one run event,
 one small wire frame); a larger text is cut, a larger image or HTML is replaced by a note. Per
@@ -83,8 +90,9 @@ on what it accepts (a frame over them is dropped and counted, not stored) and th
 `kobe-kernel-bridge.py` (root-owned, in the image) over stdio (JSON lines), and the bridge starts
 `ipykernel` through `jupyter_client` with the ZeroMQ `ipc` transport: unix sockets in a fresh
 0700 directory of the bridge's uid, with the connection file and an HMAC key there. Nothing listens
-on TCP; the bridge and kernel reach nothing but the agent (no egress variables: v1 kernels have
-no internet; `pip install` goes through the shell tool, NB16). Under Pi identities (KOBE-71) each
+on TCP, and nothing reaches the kernel from outside it; its way out is egress-proxy (NB17).
+ipykernel's IOPub "pipe" (a 127.0.0.1 listener forwarding forked children's output) is switched
+off, so a forked child's Python-level prints are not shown (accepted). Under Pi identities (KOBE-71) each
 kernel takes an identity of its own from the pool and runs as that identity's partner (tool)
 uid through `kobe-runas` (groups: its own and the workspace group; no capabilities;
 `no_new_privs`), like the tool executor: it reads and writes `/workspace` as the tools do, and
@@ -92,8 +100,11 @@ cannot signal or read the agent, Pi, or another thread's tools or kernel. On sto
 killed, reclaimed and released like a Pi identity. At most `KOBE_MAX_KERNELS` (4) kernels per
 sandbox (the pool has 16 identities, Pi takes at most 8); a ninth thread waits for the
 least-recently-used idle kernel to be stopped, or gets `kernel_unavailable`. The bridge sets
-`IPYTHONDIR`, `JUPYTER_*` dirs to its private directory, so no startup file from the shared
-`$HOME` runs. ipykernel's debugger is absent (debugpy is not installed).
+`IPYTHONDIR`, `JUPYTER_*` dirs to its private directory, so no IPython or Jupyter profile or
+startup script from the shared `$HOME` runs. Python's user site stays on (so `pip install --user`
+packages import): `.pth` files under the shared `~/.local` run at kernel start, which is the same
+trust domain as the member's own workspace and tools (accepted, review 2026-10-21). ipykernel's
+debugger is absent (debugpy is not installed).
 
 **NB11. Outputs into the `.ipynb` through the save path.** When an execution of an `.ipynb` cell
 ends, the requesting replica reads its outputs back from the run's `notebook.output` events (the
@@ -115,7 +126,10 @@ file tools on its local copy (FE6 conflict rules). `run_python` never changes ce
 pushes the notebook, the server runs that code cell's source and saves the outputs (NB11). The
 outputs stream as the agent run's `notebook.*` events; the model gets a text summary (stdout and
 stderr, results as `text/plain`, the error and traceback without ANSI codes; images and HTML as a
-one-line note), at most 16 KiB. Behind capability `notebooks`.
+one-line note), at most 16 KiB. Behind capability `notebooks`. In a skill eval's run (KOBE-325)
+only `code` is allowed, in the eval sandbox's own kernel like `bash`: a `path` call is denied by
+policy (`eval_run_isolated`) and refused on the wire, so an eval never reads or writes the
+member's synced files (`propose_file_edit` is eval-isolated for the same reason).
 
 **NB14. Where outputs are accepted.** A `notebook.output` frame names the wire `command_id` of a
 `notebook.execute` this connection delivered and has not answered; the run, thread and exec id
@@ -131,9 +145,22 @@ the run's events after 7 days (D18); the `.ipynb` keeps the saved outputs.
 
 **NB16. Compatibility and what v1 leaves out.** Additive: an agent without `notebooks` never
 registers `run_python`, and the server refuses kernel commands to it (`notebooks_unsupported`).
-No migration beyond the run kind and command kinds (`0169_notebook_kinds`). Left out: kernel
-internet access, `input()` (stdin is refused), widgets (`application/vnd.jupyter.widget-*` is
-dropped), other kernels than Python, and persisting kernel state across hibernation.
+No migration beyond the run kind and command kinds (`0169_notebook_kinds`). Left out: `input()`
+(stdin is refused), widgets (`application/vnd.jupyter.widget-*` is dropped), other kernels than
+Python, and persisting kernel state across hibernation.
+
+**NB17. Network: as the sandbox shell.** (Chris, 2026-10-21) A kernel reaches the internet the
+same way the agent's shell tool does: through egress-proxy, under the team's allowlist, and a
+blocked domain gives the same `egress.blocked` notice with Request access. The agent keeps the
+kernel's rotating egress token in a file only the kernel's uid may read (a fresh 2750 directory in
+the agent's runtime directory) and passes the kernel the file's path, the proxy URL and the
+thread id, never the token. Before each cell the bridge runs a silent snippet that reads the token
+and sets `HTTPS_PROXY` and friends (the shell's `BASH_ENV` rules), so a rotated token is used from
+the next cell on (one cell longer than the token's life needs a re-run, as a long shell command
+does). The proxy names the thread, so a member's `notebook` run (which has no lease) gets its
+kernel's blocked attempts. No secrets enter the kernel; nothing inbound.
+
+**NB18. Eval isolation.** See NB13: skill evals run code only, never the member's files.
 
 ## 3. Shapes the web needs (KOBE-465)
 
