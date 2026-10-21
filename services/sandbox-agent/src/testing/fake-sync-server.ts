@@ -35,6 +35,10 @@ export class FakeSyncServer {
   failWith: number | undefined;
   /** The next this many file downloads answer 500 (a transient server error). */
   failDownloads = 0;
+  /** Content lost from storage (KOBE-475): listed by `GET blobs/lost`, missing until resent. */
+  readonly lost = new Set<string>();
+  /** Answer `GET blobs/lost` with 404, like a server from before KOBE-475. */
+  noLostEndpoint = false;
   #server: Server | undefined;
 
   async start(): Promise<string> {
@@ -185,11 +189,20 @@ export class FakeSyncServer {
       const { sha256 } = JSON.parse(body.toString()) as { sha256: string[] };
       return json(200, { missing: [...new Set(sha256)].filter((h) => !this.blobs.has(h)) });
     }
+    if (req.method === "GET" && route === "/blobs/lost") {
+      if (this.noLostEndpoint) {
+        res.writeHead(404, { "content-type": "text/plain" });
+        res.end("404 Not Found");
+        return;
+      }
+      return json(200, { lost: [...this.lost] });
+    }
     const blob = /^\/blobs\/([0-9a-f]{64})$/.exec(route);
     if (req.method === "PUT" && blob?.[1]) {
       const hash = createHash("sha256").update(body).digest("hex");
       if (hash !== blob[1]) return json(422, { code: "hash_mismatch", message: "" });
       this.blobs.set(hash, body);
+      this.lost.delete(hash);
       return json(201, { sha256: hash, size: body.length });
     }
     if (req.method === "POST" && route === "/commit") {

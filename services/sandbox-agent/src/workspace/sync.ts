@@ -174,6 +174,11 @@ interface PushPlan {
   readonly changes: PlannedChange[];
   /** Content to upload (one change per hash). */
   readonly uploads: PlannedChange[];
+  /**
+   * Unchanged files whose content the server lost from storage (KOBE-475): uploaded again, never
+   * committed (their rows already point at that content).
+   */
+  readonly resends: PlannedChange[];
 }
 
 export class WorkspaceSync {
@@ -781,9 +786,14 @@ export class WorkspaceSync {
     const stats = { changes: 0, uploaded: 0, bytes: 0, conflicts: 0, rejected: 0 };
     const plan = await this.#serial(() => this.#plan());
     stats.changes = plan.changes.length;
-    if (plan.changes.length === 0) return stats;
+    if (plan.changes.length === 0 && plan.resends.length === 0) return stats;
     const failed = new Set<string>();
-    await parallel(plan.uploads, Math.min(4, this.#o.concurrency), async (c) => {
+    const queued = new Set(plan.uploads.map((c) => (c.op === "put" ? c.sha256 : "")));
+    const uploads = [
+      ...plan.uploads,
+      ...plan.resends.filter((c) => c.op === "put" && !queued.has(c.sha256)),
+    ];
+    await parallel(uploads, Math.min(4, this.#o.concurrency), async (c) => {
       if (c.op !== "put") return;
       try {
         await this.#o.client.upload(c.sha256, await openForUpload(this.#o.root, c.path), c.size);
@@ -804,6 +814,7 @@ export class WorkspaceSync {
       }
     });
     const ready = plan.changes.filter((c) => c.op === "delete" || !failed.has(c.sha256));
+    if (ready.length === 0) return stats;
     const committed = await this.#serial(() => this.#commit(ready));
     return {
       ...stats,
@@ -879,7 +890,54 @@ export class WorkspaceSync {
       seen.add(c.sha256);
       return true;
     });
-    return { changes, uploads };
+    return { changes, uploads, resends: await this.#resends(scan.files, changes) };
+  }
+
+  /**
+   * Lost content this volume still holds (KOBE-475): for each hash the server lists, one known
+   * path whose file is unchanged since it synced (size + mtime) and still hashes to it. Files
+   * with local changes are in `changes` already (a push names their content and uploads it).
+   */
+  async #resends(
+    files: ReadonlyMap<string, LocalFile>,
+    changes: readonly PlannedChange[],
+  ): Promise<PlannedChange[]> {
+    let lost: string[];
+    try {
+      lost = await this.#o.client.lost();
+    } catch (error) {
+      // Never holds up the push: asked again next time.
+      this.#warn("could not ask which workspace content to resend", error);
+      return [];
+    }
+    if (lost.length === 0) return [];
+    const wanted = new Set(lost);
+    const changing = new Set(changes.map((c) => c.path));
+    const resends: PlannedChange[] = [];
+    for (const [path, k] of this.#known) {
+      if (k.deleted || k.sha256 === undefined || !wanted.has(k.sha256) || changing.has(path)) {
+        continue;
+      }
+      const file = files.get(path);
+      if (!file || !sameAs(file, k)) continue;
+      const hashed = await hashFile(this.#o.root, path);
+      if (hashed?.sha256 !== k.sha256 || hashed.size !== file.size) continue;
+      wanted.delete(k.sha256);
+      resends.push({
+        op: "put",
+        path,
+        base_rev: k.rev,
+        sha256: k.sha256,
+        size: hashed.size,
+        mtime_ms: file.mtimeMs,
+        executable: file.executable,
+        local: file,
+      });
+    }
+    if (resends.length > 0) {
+      this.#o.logger.info({ files: resends.length }, "resending workspace content the server lost");
+    }
+    return resends;
   }
 
   async #commit(

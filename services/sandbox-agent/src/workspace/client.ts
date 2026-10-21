@@ -3,6 +3,7 @@ import {
   WORKSPACE_ENTRY_HEADER,
   WORKSPACE_SYNC_PATH,
   decodeWorkspaceEntryHeader,
+  workspaceBlobsLostResponseSchema,
   workspaceBlobsMissingResponseSchema,
   workspaceCommitResponseSchema,
   workspaceManifestPageSchema,
@@ -90,6 +91,25 @@ export class SyncClient {
       sha256,
     });
     return out.missing;
+  }
+
+  /**
+   * Content the server lost from storage and wants resent (KOBE-475). A server without the
+   * endpoint answers 404: nothing to resend.
+   */
+  async lost(): Promise<string[]> {
+    const res = await this.#retrying("GET", "/blobs/lost", {});
+    if (res.status === 404) {
+      await res.body?.cancel();
+      return [];
+    }
+    await this.#check(res);
+    const parsed = workspaceBlobsLostResponseSchema.safeParse(
+      JSON.parse(await readText(res, MAX_JSON_RESPONSE)),
+    );
+    if (!parsed.success)
+      throw new SyncHttpError(502, "bad_response", "invalid /blobs/lost response");
+    return parsed.data.lost;
   }
 
   /** Streams a blob (exact Content-Length); 200/201 → stored. */
