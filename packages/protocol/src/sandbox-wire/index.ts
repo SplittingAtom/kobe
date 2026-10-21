@@ -14,3 +14,4 @@ export * from "./eval-frames.js";
 export * from "./skill-draft-frames.js";
 export * from "./file-edit-frames.js";
 export * from "./notebook-frames.js";
+export * from "./context-frames.js";

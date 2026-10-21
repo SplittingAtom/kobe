@@ -30,6 +30,7 @@ import {
   evalReadFrameSchema,
   evalSnapshotFrameSchema,
 } from "./eval-frames.js";
+import { threadContextFrameSchema } from "./context-frames.js";
 import { runProjectContextSchema } from "../projects.js";
 import {
   skillDraftSaveFrameSchema,
@@ -660,6 +661,7 @@ export const serverToSandboxFrameSchema = z.union([
   evalPrepareFrameSchema,
   evalSnapshotFrameSchema,
   evalReadFrameSchema,
+  threadContextFrameSchema,
   piUiResponseFrameSchema,
   policyPendingFrameSchema,
   policyResultFrameSchema,

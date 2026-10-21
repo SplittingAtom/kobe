@@ -40,3 +40,4 @@ export * from "./skill-evals/index.js";
 export * from "./app-context.js";
 export * from "./skill-request.js";
 export * from "./app-cards.js";
+export * from "./context-viewer.js";
