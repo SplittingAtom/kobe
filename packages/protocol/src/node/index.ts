@@ -25,3 +25,4 @@ export {
   skillPackageHashes,
   type SkillPackageHashes,
 } from "./skill-package-hash.js";
+export { sealReply, sealedReplyKeyPair } from "./sealed-reply.js";

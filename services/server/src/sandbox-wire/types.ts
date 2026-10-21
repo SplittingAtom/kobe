@@ -15,6 +15,7 @@ import type {
   RunStatus,
   RunViewingContext,
   SandboxAttachment,
+  SealedReplyKey,
   SessionTokenClaims,
 } from "@kobe/protocol";
 import type { KobeTx } from "@kobe/db";
@@ -220,12 +221,17 @@ export interface SandboxRouter {
   ): Promise<CommandOutcome>;
   /**
    * KOBE-470, to the member's own sandbox only: the context of the thread's latest model call
-   * (`thread.context`; on success `data` is a `ThreadContextResult`, untrusted: validate it). The
-   * thread's session is brought in line first (entry sync, or a restore after a wake).
+   * (`thread.context`; on success `data` is `{sealed}`, the `ThreadContextResult` sealed to
+   * `replyKey`: open it with the caller's private key, then validate it). The thread's session is
+   * brought in line first (entry sync, or a restore after a wake).
    */
   threadContext(
     target: SandboxTarget,
-    request: { readonly threadId: string; readonly maxBytes: number },
+    request: {
+      readonly threadId: string;
+      readonly maxBytes: number;
+      readonly replyKey: SealedReplyKey;
+    },
     options?: SendOptions,
   ): Promise<CommandOutcome>;
   /** `thread.compact`; on success `data` is the result in wire casing (untrusted: validate it). */

@@ -30,6 +30,8 @@ const section = (over: Record<string, unknown> = {}) => ({
 
 const result = (over: Record<string, unknown> = {}) => ({
   source: "model_call",
+  exact: true,
+  missing: [],
   captured_at: "2026-10-21T10:00:00.000Z",
   model: "glm-5",
   context_window: 200_000,
@@ -101,6 +103,7 @@ describe("context viewer shapes (KOBE-470)", () => {
       command_id: "c1",
       thread_id: THREAD,
       max_bytes: THREAD_CONTEXT_MAX_BYTES,
+      reply_key: { alg: "x25519-hkdf-sha256-aes256gcm", public_key: "A".repeat(43) },
     };
     expect(threadContextFrameSchema.safeParse(frame).success).toBe(true);
     expect(serverToSandboxFrameSchema.safeParse(frame).success).toBe(true);
@@ -108,5 +111,7 @@ describe("context viewer shapes (KOBE-470)", () => {
       threadContextFrameSchema.safeParse({ ...frame, max_bytes: THREAD_CONTEXT_MAX_BYTES + 1 })
         .success,
     ).toBe(false);
+    const { reply_key: _key, ...unsealed } = frame;
+    expect(threadContextFrameSchema.safeParse(unsealed).success).toBe(false);
   });
 });

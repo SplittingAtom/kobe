@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
-import type { ThreadContextResult } from "@kobe/protocol";
+import { CONTEXT_MISSING_PARTS, type ThreadContextResult } from "@kobe/protocol";
 import {
   CONTEXT_CAPTURE_MAX_BYTES,
   CONTEXT_CAPTURE_VERSION,
@@ -84,6 +84,8 @@ export function fromCapture(
     sectionsOf(contextMessages(capture.context), parts),
     {
       source: "model_call",
+      exact: true,
+      missing: [],
       capturedAt: capture.capturedAt,
       model: capture.model === "" ? null : capture.model,
       contextWindow: capture.contextWindow,
@@ -111,7 +113,15 @@ export function fromSession(
   if (call === undefined || answer === null) {
     return finalizeContext(
       [],
-      { source: "none", capturedAt: null, model: null, contextWindow, promptTokens: null },
+      {
+        source: "none",
+        exact: true,
+        missing: [],
+        capturedAt: null,
+        model: null,
+        contextWindow,
+        promptTokens: null,
+      },
       maxBytes,
     );
   }
@@ -121,6 +131,8 @@ export function fromSession(
     sectionsOf(call.messages),
     {
       source: "session",
+      exact: false,
+      missing: [...CONTEXT_MISSING_PARTS],
       capturedAt: answeredAt(answer),
       model: typeof answer.model === "string" ? answer.model.slice(0, 256) : null,
       contextWindow,

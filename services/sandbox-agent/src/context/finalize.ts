@@ -2,9 +2,10 @@ import {
   CONTEXT_LABEL_MAX_CHARS,
   CONTEXT_MAX_SECTIONS,
   CONTEXT_SECTION_MAX_CHARS,
-  THREAD_CONTEXT_FRAME_MAX_BYTES,
+  THREAD_CONTEXT_PLAINTEXT_MAX_BYTES,
   contextTruncationMarker,
   type ContextSection,
+  type ThreadContextResult as Result,
   type ContextSource,
   type ThreadContextResult,
 } from "@kobe/protocol";
@@ -29,6 +30,9 @@ const MIN_CUT = 256;
 
 export interface ContextFacts {
   readonly source: ContextSource;
+  /** False for an answer rebuilt from the session (CV4), with what it may lack. */
+  readonly exact: boolean;
+  readonly missing: Result["missing"];
   readonly capturedAt: string | null;
   readonly model: string | null;
   readonly contextWindow: number | null;
@@ -132,6 +136,8 @@ export function finalizeContext(
   const { kept, omitted } = capCount(raw.map((r, i) => ({ raw: r, tokens: tokens[i] ?? 0 })));
   const base = {
     source: facts.source,
+    exact: facts.exact,
+    missing: [...facts.missing],
     captured_at: facts.capturedAt,
     model: facts.model,
     context_window: facts.contextWindow,
@@ -149,7 +155,7 @@ export function finalizeContext(
     };
     const fits =
       textBytes(sections) <= maxBytes &&
-      Buffer.byteLength(JSON.stringify(result)) <= THREAD_CONTEXT_FRAME_MAX_BYTES;
+      Buffer.byteLength(JSON.stringify(result)) <= THREAD_CONTEXT_PLAINTEXT_MAX_BYTES;
     if (fits || max <= MIN_CUT) return fits ? result : { ...result, sections: [], truncated: true };
     max = Math.max(MIN_CUT, Math.floor(max / 2));
   }

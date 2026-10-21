@@ -189,6 +189,7 @@ export class CommandRouter implements SandboxRouter {
     return this.#send(target, "thread.context", request.threadId, undefined, options, {
       thread_id: request.threadId,
       max_bytes: request.maxBytes,
+      reply_key: request.replyKey,
     });
   }
 

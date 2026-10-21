@@ -10,6 +10,8 @@ import type { RawSection } from "./system-prompt.js";
 
 const facts = (promptTokens: number | null): ContextFacts => ({
   source: "model_call",
+  exact: true,
+  missing: [],
   capturedAt: "2026-10-21T10:00:00.000Z",
   model: "glm-5",
   contextWindow: 200_000,

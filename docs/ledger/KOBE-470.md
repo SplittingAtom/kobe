@@ -29,14 +29,15 @@
 - Wake: the route answers 202 `waking` (and starts a wake via the new `router.wake`) when the
   sandbox is not connected, instead of holding the request through a wake; the web polls.
 - Owner only: shared readers 403 `not_owner` (they can see the thread exists), others 404.
-- Nothing stored: no audit, logs carry codes only, `no-store`. The result transits the
-  `sandbox_commands` row (deleted on read) like every command result — the one Postgres touch.
+- Nothing stored: no audit, logs carry codes only, `no-store`. Review: the answer is sealed to a
+  per-request X25519 key (HKDF-SHA256, AES-256-GCM; `@kobe/protocol/node` sealed-reply.ts), so
+  the `sandbox_commands` row holds ciphertext only; unread context rows are swept after 60 s.
+- Review: `exact`/`missing` on the answer (false + memory/project/viewed file/window for
+  `session`); route in the OpenAPI document (`openapi/context.ts`).
 - Rate limit 30/min per member (each read is a sandbox command).
 
 ## Open questions (for Chris or the coordinator)
 
-- The transient `sandbox_commands` row (CV8) holds the content for the command's lifetime; a
-  direct same-replica path would avoid it but changes the wire. Acceptable?
 - `session` source has no context window; the web can use the gauge's.
 
 ## Migration
@@ -52,11 +53,17 @@
   total, caps), `kobe-models/context-capture.test.ts`, `kobe-models/provider.test.ts`
   (onCallEnded), `agent.context.test.ts` (none / session / capture through the agent),
   `context-viewer.real-pi.test.ts` (real Pi 1.0.0 + real gateway shim: sections, sum = total).
-- ac-3: `services/server/src/thread-context.db.test.ts` (owner 200 + no-store + no rows left;
+- ac-3: `services/server/src/thread-context.db.test.ts` (row holds no plaintext marker, via a
+  test trigger; unread row purged; owner 200 + no-store + no rows left;
   shared reader 403, others 404; 202 waking; older agent 409; busy 409; failure/invalid 502;
   session sync before the command).
 - ac-4: `packages/protocol/src/context-viewer.ts`, `context-viewer.test.ts`.
 - Migration: `packages/db/src/thread-context-command-upgrade.db.test.ts`.
+- Sealing: `packages/protocol/src/node/sealed-reply.test.ts` (round trip, other key/thread,
+  tamper, one use).
+- Full-run failures are not caused by this change: `tools.pi-parity` reads a fake-tool log shared
+  between its grep and find cases (runs locally only now that Pi is installed; passes alone);
+  model-gateway is untouched and its virtual-key sync test is timing-bound (passes alone).
 - `pnpm verify` (2026-10-21): format, lint, typecheck green; `test` green except, under full-run
   load with Pi installed locally, `kobe-exec/tools.pi-parity` (passes alone) and one flaky
   model-gateway test (passes alone); `test:db` green except the known cli backup tests (no local

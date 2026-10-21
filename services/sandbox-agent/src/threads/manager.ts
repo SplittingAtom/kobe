@@ -5,6 +5,7 @@ import type {
   RunStartFrame,
   RunStopFrame,
   ServerToSandboxFrame,
+  ThreadContextResult,
 } from "@kobe/protocol";
 import { PiProcessError } from "../pi/pi-process.js";
 import { buildPiLaunch } from "../pi/pi-launch.js";
@@ -39,6 +40,7 @@ import { Thread, type ThreadEnv, type ThreadHooks } from "./thread.js";
 import type { RunModel } from "../models/types.js";
 import { fromCapture, fromSession, readCapture } from "../context/assemble.js";
 import { replaySession } from "../context/session-replay.js";
+import { sealReply } from "@kobe/protocol/node";
 
 type Frame<T extends ServerToSandboxFrame["type"]> = Extract<ServerToSandboxFrame, { type: T }>;
 
@@ -478,15 +480,20 @@ export class ThreadManager {
     if (thread.compacting) return fail("pi_rejected", "the thread is compacting");
     const file = thread.contextFile;
     const capture = file === undefined ? undefined : await readCapture(file);
+    // Sealed to the requesting server process (CV8): the command row only ever holds ciphertext.
+    const sealed = (result: ThreadContextResult) =>
+      ok({ sealed: sealReply(frame.reply_key, JSON.stringify(result), frame.thread_id) });
     if (capture !== undefined) {
-      return ok(fromCapture(capture, thread.promptParts, frame.max_bytes));
+      return sealed(fromCapture(capture, thread.promptParts, frame.max_bytes));
     }
+    let call;
     try {
-      const call = await replaySession(this.#sessionFile(thread.id));
-      return ok(fromSession(call, null, frame.max_bytes));
-    } catch (error) {
-      return fail("internal", `the session could not be read: ${(error as Error).message}`);
+      call = await replaySession(this.#sessionFile(thread.id));
+    } catch {
+      // Fixed text: nothing of the file (or its path) reaches the server or its logs.
+      return fail("internal", "the session could not be read");
     }
+    return sealed(fromSession(call, null, frame.max_bytes));
   }
 
   restore(frame: Frame<"session.restore">): Promise<CommandOutcome> {

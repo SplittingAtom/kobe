@@ -4,11 +4,13 @@ import {
   THREAD_CONTEXT_ERROR_HTTP_STATUS,
   THREAD_CONTEXT_MAX_BYTES,
   threadContextError,
+  threadContextCommandResultSchema,
   threadContextResultSchema,
   type ThreadContext,
   type ThreadContextErrorCode,
   type ThreadContextWaking,
 } from "@kobe/protocol";
+import { sealedReplyKeyPair } from "@kobe/protocol/node";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
@@ -42,6 +44,16 @@ export function contextErrorFor(code: string): ThreadContextErrorCode {
       return "sandbox_unavailable";
     default:
       return "context_unavailable";
+  }
+}
+
+/** The opened answer, validated; undefined when it is not JSON or not a context. */
+function parseContext(text: string) {
+  try {
+    const parsed = threadContextResultSchema.safeParse(JSON.parse(text));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -89,9 +101,13 @@ export function threadContextRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
       const body: ThreadContextWaking = { status: "waking", retry_after_ms: CONTEXT_WAKE_RETRY_MS };
       return c.json(body, 202);
     }
+    // A one-use key pair per request (CV8): the sandbox seals its answer to it, so the command row
+    // that carries it between replicas never holds plaintext; the private key stays in `pair`.
+    const pair = sealedReplyKeyPair();
     const outcome = await router.threadContext(target, {
       threadId: id.data,
       maxBytes: THREAD_CONTEXT_MAX_BYTES,
+      replyKey: pair.key,
     });
     if (!outcome.ok) {
       logger.info(
@@ -100,15 +116,18 @@ export function threadContextRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
       );
       return fail(c, contextErrorFor(outcome.error.code));
     }
-    const parsed = threadContextResultSchema.safeParse(outcome.data);
-    const bytes = parsed.success
-      ? parsed.data.sections.reduce((sum, s) => sum + Buffer.byteLength(s.text), 0)
-      : 0;
-    if (!parsed.success || bytes > THREAD_CONTEXT_MAX_BYTES) {
+    const envelope = threadContextCommandResultSchema.safeParse(outcome.data);
+    const opened = envelope.success ? pair.open(envelope.data.sealed, id.data) : undefined;
+    const parsed = opened === undefined ? undefined : parseContext(opened);
+    const bytes =
+      parsed === undefined
+        ? 0
+        : parsed.sections.reduce((sum, s) => sum + Buffer.byteLength(s.text), 0);
+    if (parsed === undefined || bytes > THREAD_CONTEXT_MAX_BYTES) {
       logger.warn({ team_id: teamId, thread_id: id.data }, "invalid thread context from sandbox");
       return fail(c, "context_unavailable");
     }
-    const body: ThreadContext = { ...parsed.data, thread_id: id.data };
+    const body: ThreadContext = { ...parsed, thread_id: id.data };
     return c.json(body);
   });
 

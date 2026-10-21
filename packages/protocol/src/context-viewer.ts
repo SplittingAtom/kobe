@@ -86,12 +86,31 @@ export type ContextSource = z.infer<typeof contextSourceSchema>;
  * tokens (input + cache read + cache write, the gauge's number); `estimate`: no usage was reported
  * (the call failed, or nothing was called), so the sum is the estimate itself.
  */
+/**
+ * What a `session` answer cannot hold (CV4): the per-run parts kobe-tools adds to the prompt never
+ * reach the session, and the call's context window is not recorded there.
+ */
+export const CONTEXT_MISSING_PARTS = [
+  "memory",
+  "project_instructions",
+  "viewing_file",
+  "context_window",
+] as const;
+export const contextMissingPartSchema = z.enum(CONTEXT_MISSING_PARTS);
+
 export const CONTEXT_TOKENS_BASES = ["usage", "estimate"] as const;
 export const contextTokensBasisSchema = z.enum(CONTEXT_TOKENS_BASES);
 
 /** What the sandbox answers (`thread.context` command result data), and the route's body less the thread. */
 export const threadContextResultSchema = z.strictObject({
   source: contextSourceSchema,
+  /**
+   * The sections are what the call sent (`model_call`, or `none`). False for `session`: the web
+   * labels it "Approximate — the sandbox restarted since the last model call".
+   */
+  exact: z.boolean(),
+  /** What an approximate answer may lack (empty when exact). */
+  missing: z.array(contextMissingPartSchema).max(CONTEXT_MISSING_PARTS.length),
   /** When the call was sent (`model_call`) or answered (`session`); null for `none`. */
   captured_at: timestampSchema.nullable(),
   /** The gateway model the call went to; null when unknown. */

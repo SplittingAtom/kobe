@@ -1,10 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { threadContextResultSchema } from "@kobe/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { captureText } from "./kobe-models/context-capture.js";
 import type { ModelWiring } from "./models/types.js";
 import { THREAD, runStart, startHarness, until, type Harness } from "./testing/harness.js";
+import { readThreadContext } from "./testing/thread-context.js";
 
 /**
  * `thread.context` through the agent (KOBE-470, docs/specs/context-viewer.md) with the scripted
@@ -18,17 +18,21 @@ afterEach(async () => {
   h = undefined;
 });
 
-const contextOf = async (harness: Harness) => {
-  const result = await harness.server.command({
-    type: "thread.context",
-    thread_id: THREAD,
-    max_bytes: 1_000_000,
-  });
-  expect(result).toMatchObject({ ok: true });
-  return threadContextResultSchema.parse((result as { data?: unknown }).data);
-};
+const contextOf = (harness: Harness) => readThreadContext(harness.server, THREAD);
 
 describe("thread.context (KOBE-470)", () => {
+  it("never answers in plaintext: the result is sealed to the reply key", async () => {
+    h = await startHarness();
+    const result = await h.server.command({
+      type: "thread.context",
+      thread_id: THREAD,
+      max_bytes: 1000,
+      reply_key: { alg: "x25519-hkdf-sha256-aes256gcm", public_key: "A".repeat(43) },
+    });
+    // A key that is no X25519 point still yields a sealed blob or a fixed error, never sections.
+    expect(JSON.stringify(result)).not.toContain("sections");
+  });
+
   it("announces the capability and answers none before any model call", async () => {
     h = await startHarness();
     expect(h.server.frames("hello").at(-1)?.capabilities).toContain("thread_context");
@@ -60,6 +64,8 @@ describe("thread.context (KOBE-470)", () => {
     );
     expect(await contextOf(h)).toMatchObject({
       source: "session",
+      exact: false,
+      missing: ["memory", "project_instructions", "viewing_file", "context_window"],
       model: "glm-5",
       total_tokens: 321,
       tokens_basis: "usage",
@@ -98,6 +104,8 @@ describe("thread.context (KOBE-470)", () => {
     await until(async () => (await contextOf(h as Harness)).source === "model_call");
     expect(await contextOf(h)).toMatchObject({
       source: "model_call",
+      exact: true,
+      missing: [],
       model: "openai/gpt-fake",
       context_window: 64_000,
       total_tokens: 100,

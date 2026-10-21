@@ -2,10 +2,11 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startLocalGateway, type LocalGateway } from "@kobe/model-gateway/testing";
-import { threadContextResultSchema, type SandboxToServerFrame } from "@kobe/protocol";
+import type { SandboxToServerFrame } from "@kobe/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ModelWiring } from "./models/types.js";
 import { RUN, THREAD, runStart, startHarness, until, type Harness } from "./testing/harness.js";
+import { readThreadContext } from "./testing/thread-context.js";
 import { PI_AVAILABLE, PI_BIN, REAL_POLICY_EXTENSION } from "./testing/real-pi.js";
 
 /**
@@ -64,14 +65,8 @@ describe.skipIf(!PI_AVAILABLE)("the context viewer's capture in real Pi (KOBE-47
       60_000,
     );
     // The capture is written just after the call ends; until then the session answers.
-    const read = async (harness: Harness) => {
-      const answer = await harness.server.command(
-        { type: "thread.context", thread_id: THREAD, max_bytes: 3 * 1024 * 1024 },
-        30_000,
-      );
-      expect(answer, JSON.stringify(answer)).toMatchObject({ ok: true });
-      return threadContextResultSchema.parse((answer as { data?: unknown }).data);
-    };
+    const read = (harness: Harness) =>
+      readThreadContext(harness.server, THREAD, 2 * 1024 * 1024, 30_000);
     await until(async () => (await read(h as Harness)).source === "model_call", 10_000);
     const context = await read(h);
     expect(context).toMatchObject({

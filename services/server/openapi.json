@@ -3682,6 +3682,126 @@
         }
       }
     },
+    "/v1/threads/{id}/context": {
+      "get": {
+        "operationId": "getThreadContext",
+        "summary": "What the thread's latest model call sent the model",
+        "description": "The owner reads the context of the thread's latest model call, live from their workspace, as ordered sections with text and token counts (scaled to the call's reported prompt tokens) and the context window. `exact` is false when it was rebuilt from the session because the workspace restarted since that call (`missing` lists what it may lack). Nothing is stored; section text is untrusted, show it as plain text. A sleeping workspace is woken: 202, ask again after `retry_after_ms`.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The sections, in the order the model saw them.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadContext"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The workspace is waking; ask again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadContextWaking"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: bad id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_owner` (a reader the thread is shared with); also `forbidden`, `not_a_team_member` (as `Error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadContextError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`thread_not_found`: unknown id, or another user's or team's.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`thread_busy`, `context_unsupported`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadContextError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadContextError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`context_unavailable`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadContextError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`sandbox_unavailable`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadContextError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/approvals": {
       "get": {
         "operationId": "listApprovals",
@@ -8494,6 +8614,263 @@
               "message": {
                 "type": "string",
                 "const": "The conversation could not be compacted. Try again in a moment."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "ThreadContext": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": ["model_call", "session", "none"]
+          },
+          "exact": {
+            "type": "boolean"
+          },
+          "missing": {
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["memory", "project_instructions", "viewing_file", "context_window"]
+            }
+          },
+          "captured_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total_tokens": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "tokens_basis": {
+            "type": "string",
+            "enum": ["usage", "estimate"]
+          },
+          "sections": {
+            "maxItems": 4000,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "system_prompt",
+                    "agent_instructions",
+                    "skills",
+                    "memory",
+                    "viewing_file",
+                    "tool_definitions",
+                    "user_message",
+                    "assistant_message",
+                    "tool_call",
+                    "tool_result",
+                    "compaction_summary",
+                    "other"
+                  ]
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                "text": {
+                  "type": "string",
+                  "maxLength": 131172
+                },
+                "tokens": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "chars": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["kind", "label", "text", "tokens", "chars", "truncated"],
+              "additionalProperties": false
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "omitted_sections": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "thread_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          }
+        },
+        "required": [
+          "source",
+          "exact",
+          "missing",
+          "captured_at",
+          "model",
+          "context_window",
+          "total_tokens",
+          "tokens_basis",
+          "sections",
+          "truncated",
+          "omitted_sections",
+          "thread_id"
+        ],
+        "additionalProperties": false
+      },
+      "ThreadContextWaking": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "waking"
+          },
+          "retry_after_ms": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": ["status", "retry_after_ms"],
+        "additionalProperties": false
+      },
+      "ThreadContextError": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "not_owner"
+              },
+              "message": {
+                "type": "string",
+                "const": "Only the person who owns this conversation can see its context."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "thread_busy"
+              },
+              "message": {
+                "type": "string",
+                "const": "This conversation is being compacted or restored. Try again in a moment."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "context_unsupported"
+              },
+              "message": {
+                "type": "string",
+                "const": "Your workspace runs an older agent that can't show the context yet. It is updated the next time it starts."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "sandbox_unavailable"
+              },
+              "message": {
+                "type": "string",
+                "const": "Your workspace is not available right now. Try again in a moment."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "context_unavailable"
+              },
+              "message": {
+                "type": "string",
+                "const": "The context could not be read from your workspace. Try again."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "rate_limited"
+              },
+              "message": {
+                "type": "string",
+                "const": "Too many context reads. Wait a moment and try again."
               }
             },
             "required": ["code", "message"],
