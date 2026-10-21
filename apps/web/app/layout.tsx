@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
 import { connection } from "next/server";
 import type { ReactNode } from "react";
+import { StyleNonce } from "../components/security/style-nonce";
 import { WorkspaceHost } from "../components/shell/workspace-host";
 import { themeFromCookies } from "../lib/theme/theme";
 import "./theme.css";
@@ -23,7 +24,8 @@ export const viewport: Viewport = {
  * on its scripts while rendering. Pages hold no user data on the server either way. The saved
  * theme (KOBE-282) is read here so the first paint is already in it; without one, app/theme.css
  * follows the OS. The workspace (the chat and the panels over it, KOBE-452) lives here, so it stays
- * mounted while a console or a My area page opens over it.
+ * mounted while a console or a My area page opens over it. StyleNonce gives Radix's injected
+ * scroll-lock style the nonce (KOBE-469).
  */
 export default async function RootLayout({ children }: { readonly children: ReactNode }) {
   await connection();
@@ -31,6 +33,7 @@ export default async function RootLayout({ children }: { readonly children: Reac
   return (
     <html lang="en" data-theme={theme ?? undefined}>
       <body>
+        <StyleNonce />
         <WorkspaceHost>{children}</WorkspaceHost>
       </body>
     </html>

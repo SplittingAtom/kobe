@@ -1,15 +1,17 @@
 import { expect, test } from "./support/chat.js";
+import { styleViolations, watchStyleViolations } from "./support/csp.js";
 
 /**
  * KOBE-225 (CE23): Ctrl/Cmd+K opens the palette; an action runs from it (New conversation), a
  * thread opens by a word of it, chords run from the message box, and `?` opens the sheet with the
- * twelve shortcuts.
+ * twelve shortcuts. KOBE-469: the modal's scroll-lock style is nonced (no style-src violation).
  */
 test("the palette runs an action and opens a thread; ? lists twelve shortcuts", async ({
   chat,
   page,
 }) => {
   await chat.open();
+  await watchStyleViolations(page);
   const word = `zebra${Date.now()}`;
   const first = await chat.ask(`No tools. Reply with the single word ALPHA. (${word})`);
 
@@ -60,4 +62,5 @@ test("the palette runs an action and opens a thread; ? lists twelve shortcuts", 
   await expect(sheet.locator("[data-kobe-shortcut]")).toHaveCount(12);
   await page.keyboard.press("Escape");
   await expect(sheet).toBeHidden();
+  expect(await styleViolations(page)).toEqual([]);
 });

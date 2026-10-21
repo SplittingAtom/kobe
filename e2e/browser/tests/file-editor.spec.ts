@@ -1,6 +1,7 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { expect, filesSection, test } from "./support/chat.js";
 import { RUN_TIMEOUT_MS } from "./support/constants.js";
+import { styleViolations, watchStyleViolations } from "./support/csp.js";
 import { toolTurn } from "./support/gate5.js";
 
 /**
@@ -10,11 +11,37 @@ import { toolTurn } from "./support/gate5.js";
  * overwritten; the composer shows the Viewing chip; the agent's `propose_file_edit` shows as a
  * card whose Review opens the inline diff, where one change is accepted, the other rejected, and
  * Commit all saves the result. The folder is deleted at the end. One short model turn.
+ * KOBE-469: CodeMirror's styles apply under the nonce CSP (the gutter sits beside the text, the
+ * diff is coloured) and no style-src violation is reported.
  */
 const TEAM_KEY = "kobe.lastTeamId";
 
 const BASE = "alpha\nbeta\ngamma\n";
 const PROPOSED = "alpha\nBETA\ngamma\ndelta\n";
+
+/** The editor's line-number gutter is beside its first line of text, not stacked above it. */
+async function expectGutterBeside(scope: Locator): Promise<void> {
+  const host = scope.locator("[data-kobe-code-editor]");
+  const gutter = await host.locator(".cm-gutters").boundingBox();
+  const line = await host.locator(".cm-content .cm-line").first().boundingBox();
+  expect(gutter).not.toBeNull();
+  expect(line).not.toBeNull();
+  if (!gutter || !line) return;
+  expect(gutter.x + gutter.width).toBeLessThanOrEqual(line.x + 1);
+  expect(gutter.y).toBeLessThan(line.y + line.height); // the gutter's top is not above the line
+  expect(gutter.y + gutter.height).toBeGreaterThan(line.y);
+}
+
+/** The computed background of the first element matching `selector` in the editor. */
+async function backgroundOf(scope: Locator, selector: string): Promise<string> {
+  return scope
+    .locator("[data-kobe-code-editor]")
+    .locator(selector)
+    .first()
+    .evaluate((el) => getComputedStyle(el).backgroundColor);
+}
+
+const TRANSPARENT = ["transparent", "rgba(0, 0, 0, 0)"];
 
 /** The member's own workspace API from the page: upload, delete, read, and save at a version. */
 async function workspace(
@@ -64,6 +91,7 @@ test("file editor: raw edit and save, conflict notice, viewing chip, proposal co
   const dir = `kobe-463-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   const path = `${dir}/notes.md`;
   await chat.open();
+  await watchStyleViolations(page);
   expect((await workspace(page, "upload", path, BASE)).status).toBe(201);
   try {
     // Open the file from the rail's Files tree: Rendered first.
@@ -80,6 +108,8 @@ test("file editor: raw edit and save, conflict notice, viewing chip, proposal co
     // Raw: edit and save at the loaded version.
     await tab.getByRole("button", { name: "Raw", exact: true }).click();
     const editor = page.getByLabel("Edit notes.md");
+    await expect(editor).toBeVisible();
+    await expectGutterBeside(tab);
     await editor.click();
     await page.keyboard.press("ControlOrMeta+End");
     await page.keyboard.type("edited in raw\n");
@@ -123,6 +153,9 @@ test("file editor: raw edit and save, conflict notice, viewing chip, proposal co
     await expect(
       review.getByText("2 changes to accept or reject.", { exact: false }),
     ).toBeVisible();
+    await expectGutterBeside(review);
+    expect(TRANSPARENT).not.toContain(await backgroundOf(review, ".cm-changedLine"));
+    expect(TRANSPARENT).not.toContain(await backgroundOf(review, ".cm-deletedChunk"));
     await review.getByRole("button", { name: "Accept this change" }).first().click();
     await expect(review.getByText("1 change to accept or reject.", { exact: false })).toBeVisible();
     await review.getByRole("button", { name: "Reject this change" }).click();
@@ -132,6 +165,7 @@ test("file editor: raw edit and save, conflict notice, viewing chip, proposal co
     await review.getByRole("button", { name: "Commit all", exact: true }).click();
     await expect(card).toContainText("Committed");
     expect((await workspace(page, "read", path)).text).toBe("alpha\nBETA\ngamma\n");
+    expect(await styleViolations(page)).toEqual([]);
   } finally {
     expect((await workspace(page, "delete", dir)).status).toBe(204);
   }

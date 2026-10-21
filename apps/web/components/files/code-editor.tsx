@@ -29,6 +29,7 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import type { EditorLanguage } from "../../lib/files/editor";
+import { documentCspNonce } from "../../lib/security/csp-nonce";
 import { languageExtension } from "./editor-languages";
 
 export interface CodeEditorProps {
@@ -134,6 +135,9 @@ function baseExtensions(label: string): Extension[] {
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     EditorView.lineWrapping,
     EditorView.contentAttributes.of({ "aria-label": label }),
+    // CodeMirror (and @codemirror/merge) inject their styles as <style>; the nonce CSP drops
+    // un-nonced ones, leaving the gutter above the text and the diff uncoloured (KOBE-469).
+    EditorView.cspNonce.of(documentCspNonce()),
     theme,
   ];
 }
