@@ -7,6 +7,8 @@ import { AppContextStore, ComposerInsertChannel } from "../apps/app-context";
 import { SkillPickStore } from "./skill-picks";
 import { ViewingStore } from "./viewing";
 import { EditDraftStore, FileReviewStore } from "../files/editor-state";
+import { NotebookExecStore } from "../notebooks/executions";
+import { createNotebookApi, type NotebookApi } from "../notebooks/api";
 import { DraftConnectorStore } from "./draft-connectors";
 import { AppCardSignal } from "../apps/app-cards";
 import type { ThinkingLevel } from "@kobe/protocol";
@@ -88,6 +90,8 @@ export class ChatSession {
   readonly attachments: AttachmentStore;
   /** The caller's workspace files: the composer's `@` picker (KOBE-223) and sent chips. */
   readonly files: FilesApi;
+  /** The conversation's kernel: run, interrupt, restart (KOBE-465). */
+  readonly notebooks: NotebookApi;
   /** Files picked with `@` per composer draft (KOBE-223). */
   readonly mentions = new MentionStore();
   /** Mentions asked from the Files rail (drag, row menu) for the composer on screen (KOBE-374). */
@@ -102,6 +106,8 @@ export class ChatSession {
   readonly editDrafts = new EditDraftStore();
   /** The agent's file edit proposals under review per file (KOBE-463). */
   readonly fileReviews = new FileReviewStore();
+  /** Kernel executions seen in this tab's run streams (KOBE-465: the notebook panel). */
+  readonly notebookRuns = new NotebookExecStore();
   /** Connectors turned off before the first message (KOBE-451 review MEDIUM-3). */
   readonly draftConnectors = new DraftConnectorStore();
   /** MCP Apps `ui/message` text for the composer on screen (KOBE-439); never sent by itself. */
@@ -169,6 +175,7 @@ export class ChatSession {
       transport: options.uploadTransport ?? xhrUploadTransport,
     });
     this.files = createFilesApi(options.teamId, options.fetchFn);
+    this.notebooks = createNotebookApi(options.teamId, options.fetchFn);
     this.sentFiles = new SentFileCache(this.files);
     this.#options = options;
     options.listSync?.subscribe((threadId) => this.#listChanged(threadId));
@@ -183,6 +190,7 @@ export class ChatSession {
       onRetitled: (id, title) => {
         for (const listener of this.#retitledListeners) listener(id, title);
       },
+      onRunEvents: (id, events) => this.notebookRuns.apply(id, events),
     });
   }
 

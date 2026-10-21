@@ -265,3 +265,30 @@ describe("Stop (KOBE-269)", () => {
     expect(state.stopRequested).toBeUndefined();
   });
 });
+
+describe("run events for the notebook panel (KOBE-465)", () => {
+  it("hands every streamed batch of the thread's runs to onRunEvents", async () => {
+    const seen: [string, string[]][] = [];
+    const t = fake.addThread(null);
+    const c = new ThreadController(t, {
+      api: createChatApi(fake.teamId, fake.fetch),
+      eventSource: fake.eventSource,
+      newKey: () => "k1",
+      reopenDelayMs: () => 0,
+      onRunEvents: (id, events) => seen.push([id, events.map((e) => e.type)]),
+    });
+    controllers.push(c);
+    await c.load();
+    expect(await c.send("run some code")).toBe(true);
+    const runId = fake.latestRun(t).run_id;
+    await until(c, (s) => s.connection === "open");
+    fake.emit(runId, "notebook.started", {
+      exec_id: "00000000-0000-4000-8000-000000000301",
+      origin: "agent",
+      tool_call_id: "call-1",
+    });
+    await vi.waitFor(() =>
+      expect(seen.some(([id, types]) => id === t && types.includes("notebook.started"))).toBe(true),
+    );
+  });
+});

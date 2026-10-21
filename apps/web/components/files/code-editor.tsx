@@ -20,7 +20,7 @@ import {
   rejectChunk,
   unifiedMergeView,
 } from "@codemirror/merge";
-import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, Prec, type Extension } from "@codemirror/state";
 import {
   drawSelection,
   EditorView,
@@ -43,6 +43,10 @@ export interface CodeEditorProps {
   onChange?(text: string): void;
   /** Review mode: how many changes are still open (neither accepted nor rejected). */
   onChunks?(count: number): void;
+  /** A notebook cell (KOBE-465): as tall as its text, not the file editor's full column. */
+  readonly compact?: boolean | undefined;
+  /** Shift+Enter runs (a notebook cell, KOBE-465) instead of inserting a line. */
+  readonly onRun?: (() => void) | undefined;
 }
 
 /** Colours only from the theme tokens (app/theme.css), so light and dark both hold. */
@@ -178,11 +182,13 @@ export default function CodeEditor({
   original,
   onChange,
   onChunks,
+  compact = false,
+  onRun,
 }: CodeEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<EditorView | null>(null);
-  const callbacks = useRef({ onChange, onChunks });
-  callbacks.current = { onChange, onChunks };
+  const callbacks = useRef({ onChange, onChunks, onRun });
+  callbacks.current = { onChange, onChunks, onRun };
   const valueRef = useRef(value);
   valueRef.current = value;
   /** The last value the document was set from. */
@@ -206,6 +212,19 @@ export default function CodeEditor({
         doc: valueRef.current,
         extensions: [
           ...baseExtensions(label),
+          Prec.highest(
+            keymap.of([
+              {
+                key: "Shift-Enter",
+                run: () => {
+                  const run = callbacks.current.onRun;
+                  if (!run) return false;
+                  run();
+                  return true;
+                },
+              },
+            ]),
+          ),
           compartments.current.language.of([]),
           compartments.current.readOnly.of([]),
           original === undefined
@@ -261,12 +280,16 @@ export default function CodeEditor({
   }, [view, value]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className={compact ? "flex flex-col" : "flex min-h-0 flex-1 flex-col"}>
       {original !== undefined && <ReviewToolbar view={view} />}
       <div
         ref={host}
         data-kobe-code-editor
-        className="min-h-80 flex-1 overflow-hidden rounded-md border"
+        className={
+          compact
+            ? "min-h-10 overflow-hidden rounded-md border"
+            : "min-h-80 flex-1 overflow-hidden rounded-md border"
+        }
       />
     </div>
   );

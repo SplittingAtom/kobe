@@ -10,10 +10,12 @@
  * (`artifact-views.tsx`). Workspace files open here as tabs too (KOBE-268, `files/file-tab.tsx`).
  * State: `artifact-state.tsx`.
  */
+import { useAuiState } from "@assistant-ui/react";
 import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -38,7 +40,7 @@ import { useModalLayer } from "../shell/use-modal-layer";
 import { ArtifactTabStrip, artifactTabId, artifactTabpanelId } from "./artifact-tab-strip";
 import { ArtifactPanelRequest, useArtifactEventCount, useArtifactPanel } from "./artifact-state";
 import { ArtifactBody } from "./artifact-views";
-import { useChatSession, useKobeExtras } from "./kobe-runtime";
+import { kobeExtrasOf, useChatSession, useKobeExtras } from "./kobe-runtime";
 
 interface Detail {
   readonly artifact: ArtifactDetailView | null;
@@ -239,6 +241,18 @@ function FileTab({
   if (openSeq !== null && openSeq !== reload.seq)
     setReload({ seq: openSeq, count: reload.count + 1 });
   const onGone = useCallback((gone: string) => dropFile?.(gone), [dropFile]);
+  // The kernel of the conversation on screen (KOBE-465): notebooks and `.py` files run there.
+  const threadId = useAuiState((s) => kobeExtrasOf(s)?.state.threadId ?? null);
+  const kernel = useMemo(
+    () => ({
+      threadId,
+      api: session.notebooks,
+      runs: session.notebookRuns,
+      teamId: session.teamId,
+      egressApi: session.api,
+    }),
+    [threadId, session],
+  );
   if (!seen) return null;
   return (
     <FileTabContent
@@ -250,6 +264,7 @@ function FileTab({
       onGone={onGone}
       drafts={session.editDrafts}
       reviews={session.fileReviews}
+      kernel={kernel}
     />
   );
 }

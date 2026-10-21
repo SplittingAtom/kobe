@@ -63,6 +63,8 @@ export interface ControllerOptions {
   readonly resumeStore?: ResumeStore | null | undefined;
   /** The server titled the thread after a run (KOBE-219 `thread.updated`): the rail reads it. */
   readonly onRetitled?: ((threadId: string, title: string) => void) | undefined;
+  /** Every streamed batch of the thread's runs (KOBE-465: the notebook panel's executions). */
+  readonly onRunEvents?: ((threadId: string, events: readonly KobeEvent[]) => void) | undefined;
 }
 
 const MAX_REOPEN_ATTEMPTS = 5;
@@ -94,6 +96,7 @@ export class ThreadController {
   /** A completed run's stream kept open for its announced epilogue (KOBE-234/219). */
   #epilogue: RunStream | undefined;
   readonly #onRetitled: ((threadId: string, title: string) => void) | undefined;
+  readonly #onRunEvents: ((threadId: string, events: readonly KobeEvent[]) => void) | undefined;
   #reopenAttempts = 0;
   #reopenTimer: ReturnType<typeof setTimeout> | undefined;
   #refreshing: Promise<void> | undefined;
@@ -112,6 +115,7 @@ export class ThreadController {
     this.#resume =
       options.resumeStore === null ? undefined : (options.resumeStore ?? browserResumeStore());
     this.#onRetitled = options.onRetitled;
+    this.#onRunEvents = options.onRunEvents;
   }
 
   // --- store ----------------------------------------------------------------------------------
@@ -439,6 +443,8 @@ export class ThreadController {
   }
 
   #onEvents(runId: string, events: readonly KobeEvent[]): void {
+    const threadId = this.#state.threadId;
+    if (threadId !== null) this.#onRunEvents?.(threadId, events);
     for (const event of events) {
       if (event.type === "thread.updated") this.#retitled(event.payload);
       if (event.type === "thread.suggestions") this.#suggested(runId, event.payload);
