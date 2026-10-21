@@ -116,6 +116,15 @@ const configSchema = z.object({
    */
   KOBE_PI_RUNAS: z.string().startsWith("/").optional(),
   KOBE_MAX_PI_PROCESSES: positiveInt(8),
+  /**
+   * Notebooks (KOBE-464, docs/specs/notebooks.md NB10): the root-owned kernel bridge (the image sets
+   * it). Unset: no kernels, no `notebooks` capability, no `run_python`.
+   */
+  KOBE_KERNEL_BRIDGE: z.string().startsWith("/").optional(),
+  KOBE_KERNEL_PYTHON: z.string().startsWith("/").default("/usr/local/bin/python3"),
+  /** Kernels per sandbox; each takes a Pi identity of its own (the pod has 16, Pi uses up to 8). */
+  KOBE_MAX_KERNELS: positiveInt(4),
+  KOBE_KERNEL_IDLE_MS: positiveInt(30 * 60_000),
   KOBE_PI_IDLE_MS: positiveInt(10 * 60_000),
   /** Un-acked outbound pi.event bytes across all runs before the agent gives up on a run. */
   KOBE_OUTBOX_MAX_BYTES: positiveInt(64 * 1024 * 1024),
@@ -162,6 +171,11 @@ export interface Config {
   /** KOBE-71: the Pi identity helper; undefined = Pi runs as the agent's uid. */
   readonly piRunAs?: string;
   readonly maxPiProcesses: number;
+  /** Notebooks (KOBE-464): the kernel bridge; undefined = no kernels. */
+  readonly kernelBridge?: string;
+  readonly kernelPython: string;
+  readonly maxKernels: number;
+  readonly kernelIdleMs: number;
   readonly piIdleMs: number;
   readonly outboxMaxBytes: number;
   readonly restoreMaxBytes: number;
@@ -217,6 +231,10 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
         : c.KOBE_TOOL_EXECUTOR === "true" || c.KOBE_TOOL_EXECUTOR === "1",
     ...(c.KOBE_PI_RUNAS === undefined ? {} : { piRunAs: c.KOBE_PI_RUNAS }),
     maxPiProcesses: c.KOBE_MAX_PI_PROCESSES,
+    ...(c.KOBE_KERNEL_BRIDGE === undefined ? {} : { kernelBridge: c.KOBE_KERNEL_BRIDGE }),
+    kernelPython: c.KOBE_KERNEL_PYTHON,
+    maxKernels: c.KOBE_MAX_KERNELS,
+    kernelIdleMs: c.KOBE_KERNEL_IDLE_MS,
     piIdleMs: c.KOBE_PI_IDLE_MS,
     outboxMaxBytes: c.KOBE_OUTBOX_MAX_BYTES,
     restoreMaxBytes: c.KOBE_RESTORE_MAX_BYTES,

@@ -1,4 +1,5 @@
 import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import type { KernelManager } from "../notebook/manager.js";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,6 +77,8 @@ export interface HarnessOptions {
   readonly exec?: { readonly extension: string; readonly wiring: ExecWiring };
   /** Skill eval hooks (KOBE-325); absent = no `skill_eval` capability. */
   readonly skillEval?: (workspaceDir: string) => SkillEvalHooks;
+  /** Thread kernels (KOBE-464); absent = no `notebooks` capability. */
+  readonly kernels?: KernelManager;
 }
 
 /** The fake Pi ignores the file; it plays kobe-policy's handshake itself (see fake-pi.mjs). */
@@ -134,6 +137,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     ...(options.skills === undefined ? {} : { skills: options.skills }),
     ...(options.exec === undefined ? {} : { exec: options.exec }),
     ...(options.skillEval === undefined ? {} : { skillEval: options.skillEval(workspace) }),
+    ...(options.kernels === undefined ? {} : { kernels: options.kernels }),
     ...(options.workspace === undefined ? {} : { workspace: options.workspace(workspace) }),
     ...(options.policyReadyTimeoutMs === undefined
       ? {}

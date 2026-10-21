@@ -13,6 +13,8 @@ import type { McpWiring } from "./mcp/pi-mcp-config.js";
 import type { ModelWiring } from "./models/types.js";
 import { loadPiIdentities, type PiIdentities } from "./pi/identities.js";
 import { buildPiLaunch } from "./pi/pi-launch.js";
+import { createKernelLauncher } from "./notebook/launcher.js";
+import { KernelManager } from "./notebook/manager.js";
 import { checkExtensionFile, checkPolicyExtensionFile } from "./policy/extension-file.js";
 import { sweepPiPrivateDirs } from "./threads/exec-wiring.js";
 import { SessionClient } from "./session/exchange.js";
@@ -51,6 +53,8 @@ async function main(): Promise<void> {
   const identities = await piIdentities(checked);
   // The tool executor (KOBE-167) needs the pairs from the pod spec: decided right after.
   const exec = await toolExecutor(checked, identities);
+  // Thread kernels (KOBE-464): each takes an identity of its own from the same pool.
+  const kernels = await kernelManager(checked, identities, home);
   // Pi's private runtime directories live here: leftovers of an earlier agent (a pod restart)
   // are swept first, so no stale token outlives its process; the version probe gets its own dir.
   const swept = await sweepRuntimeDir(checked.piRuntimeDir, { identities });
@@ -157,6 +161,7 @@ async function main(): Promise<void> {
     mcp,
     toolsExtension: checked.toolsExtension,
     exec,
+    kernels,
     onExit: (code) => process.exit(code),
   });
   process.on("exit", () => agent.killAll());
@@ -213,6 +218,35 @@ async function toolExecutor(
     "Pi's tools run in an executor under the partner uid",
   );
   return { extension, wiring: { executorEntry, nodeBin: process.execPath } };
+}
+
+/**
+ * Thread kernels (KOBE-464, docs/specs/notebooks.md NB10), when the image has the bridge
+ * (`KOBE_KERNEL_BRIDGE`). The bridge gets the same root-owned check as the extensions: kernels run
+ * it under their own uid, so sandbox code must not be able to change it.
+ */
+async function kernelManager(
+  config: Config,
+  identities: PiIdentities | undefined,
+  home: string,
+): Promise<KernelManager | undefined> {
+  if (config.kernelBridge === undefined) return undefined;
+  const bridge = await checkExtensionFile(config.kernelBridge, "kernel-bridge");
+  logger.info({ maxKernels: config.maxKernels }, "notebook kernels available");
+  return new KernelManager({
+    launch: createKernelLauncher({
+      python: config.kernelPython,
+      bridge,
+      workspaceDir: config.workspaceDir,
+      home,
+      parentEnv: process.env,
+      identities,
+      onDiagnostic: (message) => logger.warn(message),
+    }),
+    maxKernels: config.maxKernels,
+    idleMs: config.kernelIdleMs,
+    log: (message, threadId) => logger.info({ thread_id: threadId }, message),
+  });
 }
 
 /**

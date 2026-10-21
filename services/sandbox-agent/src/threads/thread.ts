@@ -163,6 +163,8 @@ export interface ThreadEnv {
   readonly skillDraftTools?: boolean | undefined;
   /** The agent announced `file_edits` (KOBE-462): kobe-tools registers `propose_file_edit`. */
   readonly fileEditTools?: boolean | undefined;
+  /** The agent announced `notebooks` (KOBE-464): kobe-tools registers `run_python`. */
+  readonly notebookTools?: boolean | undefined;
   /** The agent announced `memory` (KOBE-157): kobe-tools registers remember/recall. */
   readonly memoryTools?: boolean | undefined;
   /** Other root-owned extension paths loaded with `-e`, before kobe-policy. */

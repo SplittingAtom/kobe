@@ -103,6 +103,19 @@ describe("buildPiLaunch kobe-tools (KOBE-128)", () => {
     ).toBeUndefined();
   });
 
+  it("tells the extension to register run_python only with the extension and the notebooks flag (KOBE-464)", () => {
+    expect(
+      buildPiLaunch({ ...base, parentEnv, toolsExtension: TOOLS, toolsNotebooks: true }).env
+        .KOBE_TOOLS_NOTEBOOKS,
+    ).toBe("1");
+    expect(
+      buildPiLaunch({ ...base, parentEnv, toolsExtension: TOOLS }).env.KOBE_TOOLS_NOTEBOOKS,
+    ).toBeUndefined();
+    expect(
+      buildPiLaunch({ ...base, parentEnv, toolsNotebooks: true }).env.KOBE_TOOLS_NOTEBOOKS,
+    ).toBeUndefined();
+  });
+
   it("changes the launch key (a Pi without the tools restarts when they are added)", () => {
     const without = buildPiLaunch({ ...base, parentEnv }).key;
     expect(buildPiLaunch({ ...base, parentEnv, toolsExtension: TOOLS }).key).not.toBe(without);

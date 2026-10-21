@@ -124,6 +124,8 @@ export interface PiLaunchInput {
    * `propose_file_edit`. Meaningful only with {@link toolsExtension}.
    */
   readonly toolsFileEdits?: boolean | undefined;
+  /** The agent announced `notebooks` (KOBE-464): kobe-tools registers `run_python`. */
+  readonly toolsNotebooks?: boolean | undefined;
   /**
    * The agent announced the `memory` capability (KOBE-157): the extension then registers `remember`
    * and `recall`. Meaningful only with {@link toolsExtension}.
@@ -213,6 +215,8 @@ export function buildPiLaunch(input: PiLaunchInput): PiLaunch {
     env.KOBE_TOOLS_SKILL_DRAFTS = "1";
   if (input.toolsExtension !== undefined && input.toolsFileEdits === true)
     env.KOBE_TOOLS_FILE_EDITS = "1";
+  if (input.toolsExtension !== undefined && input.toolsNotebooks === true)
+    env.KOBE_TOOLS_NOTEBOOKS = "1";
   if (input.toolsExtension !== undefined && input.toolsMemory === true) env.KOBE_TOOLS_MEMORY = "1";
 
   // The model is deliberately not part of the key (see `modelsExtension`).
