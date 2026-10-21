@@ -90,7 +90,7 @@ import {
   principalActive,
   queuedCount,
   retryCandidates,
-  runViewing,
+  runViewingPath,
   setThreadLockTimeout,
   setThreadStatus,
   threadRunRows,
@@ -395,7 +395,28 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     command: SubmitMessageCommand,
   ): Promise<RunViewingContext | undefined> {
     if (command.trigger !== "user" || command.viewing === undefined) return undefined;
-    return this.#viewing?.({ teamId: actor.team_id, userId: actor.user_id }, command.viewing.path);
+    // Only the thread's owner sends into it, from their own workspace (review: check first; the
+    // submit transaction refuses anyone else with its own error).
+    const owner = await this.#readTx(actor, async (tx, viewer) => {
+      const found = await findThread(tx, viewer, command.thread_id);
+      return found?.access === "owner" ? found.thread.ownerUserId : undefined;
+    });
+    if (owner === undefined || this.#viewing === undefined) return undefined;
+    return this.#viewing({ teamId: actor.team_id, userId: owner }, command.viewing.path);
+  }
+
+  /**
+   * A retry's viewed file (KOBE-462 FE7): the original's path (its text was cleared when it
+   * ended), read again from the owner's workspace once the run is known to be theirs.
+   */
+  async #retryViewing(actor: ActorContext, runId: string): Promise<RunViewingContext | undefined> {
+    const found = await this.#readTx(actor, async (tx, viewer) => {
+      const { thread } = await ownedRun(tx, viewer, runId, false);
+      const path = await runViewingPath(tx, actor.team_id, runId);
+      return path === undefined ? undefined : { owner: thread.ownerUserId, path };
+    });
+    if (found === undefined || this.#viewing === undefined) return undefined;
+    return this.#viewing({ teamId: actor.team_id, userId: found.owner }, found.path);
   }
 
   async #submitInTx(
@@ -679,6 +700,7 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   async retry(actor: ActorContext, runId: string): Promise<SubmitMessageResult> {
     if (this.#isolation() === "missing") throw new RunError("isolation_unavailable");
     const teamId = actor.team_id;
+    const viewing = await this.#retryViewing(actor, runId);
     const out = await this.#threadTx(actor, async (tx, viewer) => {
       const { thread, run } = await ownedRun(tx, viewer, runId, true);
       if (thread.deletedAt !== null) throw new RunError("thread_in_trash");
@@ -711,8 +733,8 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         parentEntryId: await retryBranchPoint(tx, teamId, run),
         retryOfRunId: runId,
         clientKey: null,
-        // The retry sends what the member had open when they sent the original (KOBE-462 FE7).
-        viewing: await runViewing(tx, teamId, runId),
+        // The file the member had open with the original, read again (KOBE-462 FE7).
+        viewing: viewing ?? null,
       });
       await touchThread(tx, teamId, thread.id);
       const { promotion, queued } = await this.#promoteOrQueue(tx, teamId, thread.id, id);

@@ -4,6 +4,7 @@ import { CAPABILITY_FILE_EDITS, VIEWING_CONTENT_MAX_BYTES } from "@kobe/protocol
 import { withTeam } from "@kobe/db";
 import { MemoryObjects } from "./testing/memory-objects.js";
 import { RunFixture, type RunWorld } from "./testing/run-fixture.js";
+import { must } from "./testing/event-stream-fixture.js";
 import { createViewingReader } from "./workspace-files/viewing.js";
 import {
   createWorkspaceSync,
@@ -21,11 +22,16 @@ const objects = new MemoryObjects();
 const silent = { error: () => {}, warn: () => {}, info: () => {} };
 const LIMITS = { maxFileBytes: 1024 * 1024, maxWorkspaceBytes: 4 * 1024 * 1024, maxFiles: 50 };
 let sync: WorkspaceSync;
+let reads = 0;
 
 beforeAll(async () => {
   await f.setup();
   sync = createWorkspaceSync({ db: f.fx.db, objects, prefix: "", limits: LIMITS, log: silent });
-  f.fx.replica(0).deps.runs.useViewing(createViewingReader(f.fx.db, sync));
+  const reader = createViewingReader(f.fx.db, sync);
+  f.fx.replica(0).deps.runs.useViewing((owner, path) => {
+    reads += 1;
+    return reader(owner, path);
+  });
 });
 afterAll(() => f.teardown());
 
@@ -49,8 +55,12 @@ async function sendViewing(w: RunWorld, path: string, capabilities = CAPS) {
   const res = await f.send(w.owner, threadId, "Tighten this", 0, { viewing: { path } });
   expect(res.status, JSON.stringify(res.json)).toBe(201);
   const runId = res.json.run_id as string;
-  return { runId, start: await ws.started(runId) };
+  return { runId, start: await ws.started(runId), ws, threadId };
 }
+
+const viewingRow = async (runId: string) =>
+  (await f.fx.admin.query<{ viewing: unknown }>(`SELECT viewing FROM runs WHERE id = $1`, [runId]))
+    .rows[0]?.viewing;
 
 describe("viewed-file context (KOBE-462)", () => {
   it("reaches run.start with the file's version and text, not the message (ac-3)", async () => {
@@ -110,7 +120,17 @@ describe("viewed-file context (KOBE-462)", () => {
     expect(rows[0]?.viewing).toMatchObject({ path: "a.md" });
   });
 
-  it("goes again with a retry of the run (FE7)", async () => {
+  it("keeps only the path and version once the run ends (review)", async () => {
+    const w = await f.world();
+    const hash = await seed(w, w.owner.id, "done.md", Buffer.from("secret text\n"));
+    const { runId, start, ws } = await sendViewing(w, "done.md");
+    expect(await viewingRow(runId)).toMatchObject({ content: "secret text\n" });
+    ws.reply(start, "Done.");
+    await f.until(w.team, runId, "completed");
+    expect(await viewingRow(runId)).toEqual({ path: "done.md", sha256: hash });
+  });
+
+  it("is read again for a retry of the run (FE7)", async () => {
     const w = await f.world();
     await seed(w, w.owner.id, "a.md", Buffer.from("a\n"));
     const { runId } = await sendViewing(w, "a.md");
@@ -123,13 +143,25 @@ describe("viewed-file context (KOBE-462)", () => {
         WHERE id = (SELECT thread_id FROM runs WHERE id = $1)`,
       [runId],
     );
+    await seed(w, w.owner.id, "a.md", Buffer.from("b\n"));
     const retry = await w.owner.browser.post(`/v1/runs/${runId}/retry`);
     expect(retry.status, JSON.stringify(retry.json)).toBe(201);
-    const { rows } = await f.fx.admin.query<{ viewing: unknown }>(
-      `SELECT viewing FROM runs WHERE id = $1`,
-      [retry.json.run_id],
-    );
-    expect(rows[0]?.viewing).toMatchObject({ path: "a.md", content: "a\n" });
+    // Read again from the workspace: the original's text was not kept.
+    expect(await viewingRow(retry.json.run_id as string)).toMatchObject({
+      path: "a.md",
+      content: "b\n",
+    });
+  });
+
+  it("reads nothing for someone who is not the thread's owner (review)", async () => {
+    const w = await f.world(1);
+    const other = must(w.others[0], "member");
+    await seed(w, other.id, "theirs.md", Buffer.from("x\n"));
+    const threadId = await f.thread(w.owner);
+    const before = reads;
+    const res = await f.send(other, threadId, "x", 0, { viewing: { path: "theirs.md" } });
+    expect(res.status).toBe(404);
+    expect(reads).toBe(before);
   });
 
   it("refuses a path that is not a workspace path", async () => {

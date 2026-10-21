@@ -407,6 +407,23 @@ export async function insertQueuedRun(tx: KobeTx, run: NewRun): Promise<string> 
 }
 
 /**
+ * What an ended run keeps of its viewed file (KOBE-462 review): the path and version for the
+ * record, never the text, which would otherwise outlive the file and the run's compaction.
+ */
+export const VIEWING_RECORD_ONLY = sql`(viewing - 'content' - 'size' - 'truncated')`;
+
+/** The path of the run's viewed file, also after the run ended (Retry reads it again). */
+export async function runViewingPath(
+  tx: KobeTx,
+  teamId: string,
+  runId: string,
+): Promise<string | undefined> {
+  const res = await tx.execute<{ path: string | null }>(sql`
+    SELECT viewing ->> 'path' AS path FROM runs WHERE team_id = ${teamId} AND id = ${runId}`);
+  return res.rows[0]?.path ?? undefined;
+}
+
+/**
  * The run's viewed file (KOBE-462, `runs.viewing`), checked again on the way out: a row that does
  * not parse sends no note.
  */
@@ -462,6 +479,7 @@ export async function applyTransition(
            queue_pos = NULL,
            started_at = ${active ? sql`coalesce(started_at, now())` : sql`started_at`},
            ended_at = ${terminal ? sql`now()` : sql`NULL`},
+           viewing = ${terminal ? VIEWING_RECORD_ONLY : sql`viewing`},
            parent_entry_id = ${extra.parentEntryId === undefined ? sql`parent_entry_id` : extra.parentEntryId},
            approval_mode = ${extra.approvalMode === undefined ? sql`approval_mode` : extra.approvalMode}
      WHERE team_id = ${run.teamId} AND id = ${run.id}`);
