@@ -110,6 +110,28 @@ describe("viewed-file context (KOBE-462)", () => {
     expect(rows[0]?.viewing).toMatchObject({ path: "a.md" });
   });
 
+  it("goes again with a retry of the run (FE7)", async () => {
+    const w = await f.world();
+    await seed(w, w.owner.id, "a.md", Buffer.from("a\n"));
+    const { runId } = await sendViewing(w, "a.md");
+    await f.fx.admin.query(
+      `UPDATE runs SET status = 'interrupted', ended_at = now() WHERE id = $1;`,
+      [runId],
+    );
+    await f.fx.admin.query(
+      `UPDATE threads SET status = 'interrupted'
+        WHERE id = (SELECT thread_id FROM runs WHERE id = $1)`,
+      [runId],
+    );
+    const retry = await w.owner.browser.post(`/v1/runs/${runId}/retry`);
+    expect(retry.status, JSON.stringify(retry.json)).toBe(201);
+    const { rows } = await f.fx.admin.query<{ viewing: unknown }>(
+      `SELECT viewing FROM runs WHERE id = $1`,
+      [retry.json.run_id],
+    );
+    expect(rows[0]?.viewing).toMatchObject({ path: "a.md", content: "a\n" });
+  });
+
   it("refuses a path that is not a workspace path", async () => {
     const w = await f.world();
     const threadId = await f.thread(w.owner);

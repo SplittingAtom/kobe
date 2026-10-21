@@ -297,6 +297,9 @@ function applyOne(run: LiveRun, event: KobeEvent): LiveRun {
     // KOBE-442: the save_skill_draft card reads the server's record of saves, not the stream.
     case "skill.draft_saved":
       return next;
+    // KOBE-462: proposals are read from the server's record by the file editor (KOBE-463).
+    case "file.edit_proposed":
+      return next;
     case "entry.committed":
       return commit(next, event.payload);
     case "run.completed":
