@@ -34,7 +34,15 @@ const LEGAL_HOLD = "Your workspace is under a legal hold, so nothing can be dele
  * The words for a file API error. `legal_hold` is the code KOBE-184 introduces; until it lands the
  * server answers a held delete as 409 `read_only`, which the 403 `read_only` of the areas is not.
  */
+/** A file whose saved copy is missing from storage (KOBE-475): it comes back from the sandbox. */
+export function contentMissingMessage(name: string): string {
+  return `The saved copy of ${name} is missing; it will be restored from your sandbox at its next sync.`;
+}
+
 export function describeFileError(error: ApiError): ApiError {
+  if (error.code === "content_missing") {
+    return { ...error, message: contentMissingMessage("this file") };
+  }
   if (error.code === "legal_hold" || (error.code === "read_only" && error.status === 409)) {
     return { ...error, message: LEGAL_HOLD };
   }

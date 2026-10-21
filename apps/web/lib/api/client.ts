@@ -57,6 +57,8 @@ const SHOWN_5XX_CODES: ReadonlySet<string> = new Set([
   // Run orchestrator (KOBE-30) and search (KOBE-33): fixed server messages written for people.
   "isolation_unavailable",
   "sandbox_unavailable",
+  // KOBE-475: a file's saved copy is missing until the sandbox resends it (fixed message).
+  "content_missing",
   "search_timeout",
   // KOBE-39: the site has no header-injection secret.
   "header_injection_unavailable",
