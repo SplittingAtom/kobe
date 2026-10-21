@@ -188,6 +188,49 @@ describe("KernelManager (NB2, NB7, NB8)", () => {
     await manager.stopAll();
   });
 
+  it("an interrupt also drops executions still waiting, which never run", async () => {
+    const { manager } = setup();
+    const running = run(manager, frame(T1, "sleep"));
+    const queued = run(manager, frame(T1, "print:never"));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(manager.interrupt(T1)).toEqual({ ok: true, data: { status: "interrupted" } });
+    expect((await running).outcome).toMatchObject({ ok: true, data: { status: "interrupted" } });
+    const skipped = await queued;
+    expect(skipped.outcome).toMatchObject({
+      ok: true,
+      data: { status: "interrupted", execution_count: null },
+    });
+    expect(JSON.stringify(skipped.outputs)).not.toContain("never");
+    await manager.stopAll();
+  });
+
+  it("drops the waiting executions of a run that ended, and only those", async () => {
+    const { manager } = setup();
+    const firstRun = randomUUID();
+    const running = run(manager, { ...frame(T1, "sleep"), run_id: firstRun });
+    const mine = run(manager, frame(T1, "print:mine"));
+    const other = run(manager, { ...frame(T1, "print:other"), run_id: randomUUID() });
+    await new Promise((r) => setTimeout(r, 20));
+    manager.runEnded(RUN);
+    manager.runEnded(firstRun);
+    expect((await running).outcome).toMatchObject({ data: { status: "interrupted" } });
+    expect((await mine).outcome).toMatchObject({ data: { status: "interrupted" } });
+    const ran = await other;
+    expect(ran.outcome).toMatchObject({ data: { status: "ok" } });
+    expect(ran.outputs[0]?.output).toMatchObject({ text: "other" });
+    await manager.stopAll();
+  });
+
+  it("never runs an execution whose deadline passed while it waited", async () => {
+    const { manager } = setup();
+    const hung = run(manager, frame(T1, "hang", 1000));
+    const late = run(manager, frame(T1, "print:late", 1000));
+    expect((await hung).outcome).toMatchObject({ data: { status: "timeout" } });
+    const skipped = await late;
+    expect(skipped.outcome).toMatchObject({ data: { status: "timeout", execution_count: null } });
+    expect(JSON.stringify(skipped.outputs)).not.toContain('late"');
+  });
+
   it("refuses new work once stopping", async () => {
     const { manager } = setup();
     await manager.stopAll();

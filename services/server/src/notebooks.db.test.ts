@@ -369,6 +369,53 @@ describe("interrupt and restart (NB7)", () => {
   });
 });
 
+describe("Stop on a notebook run (NB7, KOBE-464 review)", () => {
+  it("interrupts the kernel instead of sending run.stop, and frees the thread at once", async () => {
+    const w = await world();
+    const sb = await connected(w, () => []);
+    const answer = must(sb.respond, "respond");
+    let held: Extract<ServerToSandboxFrame, { type: "notebook.execute" }> | undefined;
+    sb.respond = (frame) => {
+      if (frame.type === "notebook.execute") {
+        held = frame;
+        return null;
+      }
+      return answer(frame);
+    };
+    await seed(w, "s.ipynb", notebook([code("c1", "while True: pass")]));
+    const res = await run(w, { path: "s.ipynb", cell_id: "c1" });
+    expect(res.status).toBe(202);
+    const { run_id: runId } = notebookRunResponseSchema.parse(res.json);
+    await sb.until(() => held, 5000);
+    const stop = await w.owner.browser.post(`/v1/runs/${runId}/cancel`, {});
+    expect(stop.status, JSON.stringify(stop.json)).toBe(200);
+    await sb.until(() => sb.frames("notebook.interrupt").length > 0, 5000);
+    expect(sb.frames("notebook.interrupt")).toMatchObject([{ thread_id: w.threadId }]);
+    expect(sb.frames("run.stop")).toEqual([]);
+    expect((await runStatus(w.team, runId)).status).toBe("cancelled");
+    // The interrupted cell's late answer ends nothing more and records nothing on the ended run.
+    sb.sendRaw({
+      v: 1,
+      type: "command.result",
+      command_id: must(held, "execute").command_id,
+      ok: true,
+      data: { status: "interrupted", execution_count: 1, outputs: 0, truncated: false },
+    });
+    await fx.replica(0).deps.runs.idle();
+    expect((await runStatus(w.team, runId)).status).toBe("cancelled");
+    const thread = await fx.admin.query<{ status: string }>(
+      `SELECT status FROM threads WHERE id = $1`,
+      [w.threadId],
+    );
+    expect(thread.rows[0]?.status).toBe("idle");
+    const stops = await fx.admin.query<{ stop_mode: string | null }>(
+      `SELECT stop_mode FROM runs WHERE id = $1`,
+      [runId],
+    );
+    expect(stops.rows[0]?.stop_mode).toBeNull();
+  });
+});
+
 describe("output intake (NB9, NB14)", () => {
   it("drops outputs out of order and refuses outputs for a command it did not deliver", async () => {
     const w = await world();

@@ -13,8 +13,10 @@ import { KernelSession, type BridgeLauncher } from "./session.js";
  * kernel starts on its thread's first `notebook.execute`, runs one execution at a time (the rest
  * wait in order), stops after `idleMs` without use, on `notebook.restart` and when the agent stops.
  * At most `maxKernels` live at once: a new one first stops the least recently used idle kernel,
- * and is refused (`kernel_unavailable`) when every kernel is busy. Each execution has a deadline:
- * at `timeout_ms` the kernel is interrupted, `graceMs` later it is stopped (state lost).
+ * and is refused (`kernel_unavailable`) when every kernel is busy. Each execution has a deadline
+ * counted from its arrival (waiting included): at `timeout_ms` the kernel is interrupted, `graceMs`
+ * later it is stopped (state lost). An execution still waiting is never run once its deadline
+ * passed, its run ended, or the thread was interrupted: the server has given up on it (NB8).
  */
 export interface KernelManagerOptions {
   readonly launch: BridgeLauncher;
@@ -31,6 +33,13 @@ export const KERNEL_GRACE_MS = 5_000;
 
 type ExecStatus = NotebookExecuteResult["status"];
 
+/** An execution waiting for its kernel: cancelled by an interrupt or the end of its run. */
+interface Waiting {
+  readonly runId: string;
+  readonly deadlineAt: number;
+  cancelled: boolean;
+}
+
 interface Kernel {
   readonly threadId: string;
   readonly session: KernelSession;
@@ -42,6 +51,7 @@ interface Kernel {
   /** Why the kernel is being stopped while an execution runs (decides that execution's status). */
   stopping: ExecStatus | undefined;
   current: { readonly runId: string; readonly execId: string } | undefined;
+  readonly waiting: Set<Waiting>;
 }
 
 export type OutputSink = (index: number, output: NotebookOutput) => void;
@@ -63,6 +73,11 @@ export class KernelManager {
   /** `notebook.execute`: runs the code, streams outputs to `sink`, answers how it ended. */
   async execute(frame: NotebookExecuteFrame, sink: OutputSink): Promise<CommandOutcome> {
     if (this.#closed) return fail("kernel_unavailable", "the sandbox is stopping");
+    const waiting: Waiting = {
+      runId: frame.run_id,
+      deadlineAt: Date.now() + frame.timeout_ms,
+      cancelled: false,
+    };
     let kernel: Kernel;
     try {
       kernel = await this.#kernelFor(frame.thread_id);
@@ -71,7 +86,8 @@ export class KernelManager {
       return fail("kernel_unavailable", (error as Error).message);
     }
     kernel.queued += 1;
-    const run = kernel.tail.then(() => this.#run(kernel, frame, sink));
+    kernel.waiting.add(waiting);
+    const run = kernel.tail.then(() => this.#run(kernel, frame, sink, waiting));
     kernel.tail = run.catch(() => undefined);
     try {
       return ok(await run);
@@ -79,15 +95,21 @@ export class KernelManager {
       return fail("internal", (error as Error).message);
     } finally {
       kernel.queued -= 1;
+      kernel.waiting.delete(waiting);
       this.#touch(kernel);
     }
   }
 
-  /** `notebook.interrupt`: SIGINT to the running cell (state kept). */
+  /**
+   * `notebook.interrupt` (also the member's Stop): SIGINT to the running cell (state kept), and
+   * every execution still waiting is dropped.
+   */
   interrupt(threadId: string): CommandOutcome {
     const kernel = this.#kernels.get(threadId);
     if (kernel === undefined) return ok(this.#status("no_kernel"));
-    if (!kernel.session.busy) return ok(this.#status("idle"));
+    for (const w of kernel.waiting) w.cancelled = true;
+    const dropped = kernel.waiting.size > 0;
+    if (!kernel.session.busy) return ok(this.#status(dropped ? "interrupted" : "idle"));
     kernel.session.interrupt();
     return ok(this.#status("interrupted"));
   }
@@ -100,9 +122,10 @@ export class KernelManager {
     return ok(this.#status("restarted"));
   }
 
-  /** A run ended (Stop, failure, Pi gone): its running cell is interrupted. */
+  /** A run ended (Stop, failure, Pi gone): its running cell is interrupted, its waiting ones dropped. */
   runEnded(runId: string): void {
     for (const kernel of this.#kernels.values()) {
+      for (const w of kernel.waiting) if (w.runId === runId) w.cancelled = true;
       if (kernel.current?.runId === runId && kernel.session.busy) kernel.session.interrupt();
     }
   }
@@ -121,8 +144,19 @@ export class KernelManager {
     kernel: Kernel,
     frame: NotebookExecuteFrame,
     sink: OutputSink,
+    waiting: Waiting,
   ): Promise<NotebookExecuteResult> {
     const limiter = new OutputLimiter(sink, this.#o.limits ?? OUTPUT_LIMITS);
+    kernel.waiting.delete(waiting);
+    if (waiting.cancelled) {
+      limiter.note("[Kobe: not run: interrupted, or its run ended, before it started]\n");
+      return { status: "interrupted", execution_count: null, ...limiter.finish() };
+    }
+    const remaining = waiting.deadlineAt - Date.now();
+    if (remaining <= 0) {
+      limiter.note("[Kobe: not run: its time ran out while it waited for the kernel]\n");
+      return { status: "timeout", execution_count: null, ...limiter.finish() };
+    }
     if (!kernel.session.alive) {
       limiter.note("[Kobe: the kernel stopped before this cell ran; run it again]\n");
       return { status: "restarted", execution_count: null, ...limiter.finish() };
@@ -135,14 +169,14 @@ export class KernelManager {
       timedOut = true;
       kernel.session.interrupt();
       kill = setTimeout(() => void this.#stop(kernel, "timeout", "the cell timed out"), grace);
-    }, frame.timeout_ms);
+    }, remaining);
     try {
       const result = await kernel.session.execute(frame.exec_id, frame.code, (o) =>
         limiter.push(o),
       );
       if (result.kind === "done") {
         const status: ExecStatus = timedOut ? "timeout" : result.status;
-        if (timedOut) limiter.note(`[Kobe: the cell ran past ${frame.timeout_ms / 1000} s]\n`);
+        if (timedOut) limiter.note(`[Kobe: the cell ran past its ${frame.timeout_ms / 1000} s]\n`);
         return { status, execution_count: result.executionCount, ...limiter.finish() };
       }
       // The bridge or the kernel went away.
@@ -191,6 +225,7 @@ export class KernelManager {
       idle: undefined,
       stopping: undefined,
       current: undefined,
+      waiting: new Set(),
     };
     this.#kernels.set(threadId, kernel);
     this.#o.log("kernel started", threadId);

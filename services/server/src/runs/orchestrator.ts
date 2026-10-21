@@ -639,7 +639,9 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     const teamId = actor.team_id;
     const result = await this.#threadTx(actor, async (tx, viewer) => {
       const { thread, run } = await ownedRun(tx, viewer, runId, true);
-      if (run.status === "cancelled") return { wasActive: false, transition: undefined };
+      if (run.status === "cancelled") {
+        return { wasActive: false, transition: undefined, notebook: false };
+      }
       if (isTerminalRunStatus(run.status)) {
         throw new RunError("invalid_transition", `The run has already ended (${run.status}).`);
       }
@@ -652,8 +654,10 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         "user_cancelled",
         cancelledEvent(thread),
       );
-      // Durable: if this replica dies before Pi is told, the sweep sends the abort.
-      if (wasActive) await requestStop(tx, teamId, runId, "abort");
+      // Durable: if this replica dies before Pi is told, the sweep sends the abort. A notebook run
+      // (KOBE-464) has no Pi: its kernel is interrupted instead, below.
+      const notebook = run.kind === "notebook";
+      if (wasActive && !notebook) await requestStop(tx, teamId, runId, "abort");
       // Stop pauses the queue behind the run (KOBE-26); deleting a queued message does not, nor
       // does stopping a compaction (KOBE-213): messages sent meanwhile were not stopped.
       const left = await queuedCount(tx, teamId, thread.id);
@@ -667,10 +671,34 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         teamId,
         target: { runId, threadId: thread.id, wasActive, ...(queuePaused ? { queuePaused } : {}) },
       });
-      return { wasActive, transition: applied.transition, threadId: thread.id };
+      return { wasActive, transition: applied.transition, threadId: thread.id, notebook };
     });
     if (result.transition) this.#emit(teamId, [result.transition]);
-    if (result.wasActive && result.threadId !== undefined) {
+    if (result.wasActive && result.threadId !== undefined && result.notebook) {
+      // NB7: Stop interrupts the running cell (and drops what waits); the thread is free now.
+      const threadId = result.threadId;
+      this.#track(
+        this.#router
+          .isConnected({ teamId, userId: actor.user_id }, threadId)
+          .then((connected) =>
+            connected
+              ? this.#router.notebookKernel(
+                  { teamId, userId: actor.user_id },
+                  { threadId, op: "interrupt" },
+                )
+              : { ok: true as const },
+          )
+          .then((outcome) => {
+            if (!outcome.ok) {
+              this.#log.warn(
+                { run_id: runId, code: outcome.error.code },
+                "notebook stop not delivered",
+              );
+            }
+          })
+          .finally(() => this.#advance(teamId, threadId)),
+      );
+    } else if (result.wasActive && result.threadId !== undefined) {
       // Only the owner can Stop, and the sandbox is the owner's (D11).
       this.#track(
         this.#dispatch.stopThenAdvance({
