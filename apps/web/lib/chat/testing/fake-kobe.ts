@@ -6,7 +6,11 @@
  * rules) so the chat is tested over its real API client, casing layer and stream code.
  * `agent` scripts what Pi would do in a run.
  */
-import { COMPACT_THREAD_ERROR_MESSAGES, EVENT_ENTRY_PAYLOAD_MAX_BYTES } from "@kobe/protocol";
+import {
+  COMPACT_THREAD_ERROR_MESSAGES,
+  EVENT_ENTRY_PAYLOAD_MAX_BYTES,
+  THREAD_CONTEXT_ERROR_MESSAGES,
+} from "@kobe/protocol";
 import type { KobeEvent, KobeEventPayload, KobeEventType } from "@kobe/protocol";
 import { sha256Hex } from "../../files/editor";
 import type { EventSourceFactory, EventSourceLike } from "../stream";
@@ -544,6 +548,23 @@ export class FakeKobe {
   readonly threadUsage = new Map<string, Json[]>();
   /** Its `latest_call` (KOBE-211, wire casing), by thread id; absent: null. */
   readonly threadLatestCall = new Map<string, Json>();
+  /**
+   * `GET /v1/threads/{id}/context` answers (KOBE-471), by thread id, in order; the last repeats.
+   * Absent: a 409 `context_unsupported`. A read-only thread is a 403 `not_owner`.
+   */
+  readonly threadContext = new Map<string, { status: number; body: unknown }[]>();
+
+  #threadContext(thread: FakeThread): Response {
+    if (thread.read_only === true) {
+      return error(403, "not_owner", THREAD_CONTEXT_ERROR_MESSAGES.not_owner);
+    }
+    const queue = this.threadContext.get(thread.thread_id);
+    const next = queue && (queue.length > 1 ? queue.shift() : queue[0]);
+    if (next === undefined) {
+      return error(409, "context_unsupported", THREAD_CONTEXT_ERROR_MESSAGES.context_unsupported);
+    }
+    return json(next.status, next.body);
+  }
 
   #chatConnectors(threadId: string | null): Response {
     const off =
@@ -1589,6 +1610,7 @@ export class FakeKobe {
         },
       });
     }
+    if (action === "context" && method === "GET") return this.#threadContext(thread);
     if (action === "usage" && method === "GET") {
       const runs = this.threadUsage.get(thread.thread_id) ?? [];
       const latest = this.threadLatestCall.get(thread.thread_id) ?? null;

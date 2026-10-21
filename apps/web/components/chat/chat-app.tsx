@@ -42,6 +42,7 @@ import { TeamModelsProvider } from "./use-team-models";
 import { ThreadMarkersProvider } from "./markers";
 import { ThreadAppsProvider } from "../apps/thread-apps";
 import { OpenPanelContext } from "../shell/panel-close";
+import { ContextViewerHost } from "../shell/context-viewer";
 import { WorkspacePanel } from "../shell/workspace-panel";
 import { ThreadsPanelContent } from "../shell/threads-panel";
 import { WorkspaceRail } from "../shell/workspace-rail";
@@ -366,21 +367,23 @@ function ChatWorkspace({
                             <ShellSlot name="nav">
                               <RailDrawerButton teamName={teamName} />
                             </ShellSlot>
-                            <WorkspaceGrid
-                              rail={
-                                <WorkspaceRail
-                                  teamName={teamName || "Workspace"}
-                                  listError={listError}
-                                  filesApi={filesApi}
-                                />
-                              }
-                              artifact={<ArtifactPanel filesApi={filesApi} />}
-                              conversation={
-                                <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
-                                  <ThreadView onOpenThread={setThreadId} inShell />
-                                </main>
-                              }
-                            />
+                            <ContextViewerHost>
+                              <WorkspaceGrid
+                                rail={
+                                  <WorkspaceRail
+                                    teamName={teamName || "Workspace"}
+                                    listError={listError}
+                                    filesApi={filesApi}
+                                  />
+                                }
+                                artifact={<ArtifactPanel filesApi={filesApi} />}
+                                conversation={
+                                  <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
+                                    <ThreadView onOpenThread={setThreadId} inShell />
+                                  </main>
+                                }
+                              />
+                            </ContextViewerHost>
                             {/* The Threads panel (KOBE-453) needs the thread list: it renders in here. */}
                             {threadsPanel !== undefined && (
                               <WorkspacePanel

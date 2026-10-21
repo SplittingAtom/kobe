@@ -101,6 +101,21 @@
   --kobe-diff-deleted: var(--kobe-status-failed);
   --kobe-diff-deleted-bg: var(--kobe-status-failed-bg);
 
+  /* The context viewer's kinds (KOBE-471, components/shell/context-viewer.module.css): Okabe-Ito
+     and Tol hues, distinguishable with the common colour-vision deficiencies; each kind also has
+     a pattern and a legend label, so colour never carries it alone. */
+  --kobe-ctx-system-prompt: #332288;
+  --kobe-ctx-agent-instructions: #882255;
+  --kobe-ctx-skills: #cc79a7;
+  --kobe-ctx-memory: #56b4e9;
+  --kobe-ctx-viewing-file: #44aa99;
+  --kobe-ctx-tool-definitions: #999933;
+  --kobe-ctx-user: #0072b2;
+  --kobe-ctx-assistant: #009e73;
+  --kobe-ctx-tools: #e69f00;
+  --kobe-ctx-compaction: #d55e00;
+  --kobe-ctx-other: #7a7a7a;
+
   /* `display` for content shown in one theme only (the toggle's icon). */
   --kobe-when-light: block;
   --kobe-when-dark: none;
@@ -155,6 +170,17 @@
   --kobe-tool-badge-bg: #3b2f08;
   --kobe-tool-badge-border: #c9a227;
   --kobe-composer-focus: #a1a1aa;
+  --kobe-ctx-system-prompt: #8c7ff0;
+  --kobe-ctx-agent-instructions: #d9739f;
+  --kobe-ctx-skills: #e0a3c8;
+  --kobe-ctx-memory: #7cc8f2;
+  --kobe-ctx-viewing-file: #5fc7b5;
+  --kobe-ctx-tool-definitions: #c4c45a;
+  --kobe-ctx-user: #3d9be0;
+  --kobe-ctx-assistant: #2fc495;
+  --kobe-ctx-tools: #f0b429;
+  --kobe-ctx-compaction: #f07a3a;
+  --kobe-ctx-other: #a3a3a3;
   --kobe-when-light: none;
   --kobe-when-dark: block;
 }
@@ -205,6 +231,17 @@
     --kobe-tool-badge-bg: #3b2f08;
     --kobe-tool-badge-border: #c9a227;
     --kobe-composer-focus: #a1a1aa;
+    --kobe-ctx-system-prompt: #8c7ff0;
+    --kobe-ctx-agent-instructions: #d9739f;
+    --kobe-ctx-skills: #e0a3c8;
+    --kobe-ctx-memory: #7cc8f2;
+    --kobe-ctx-viewing-file: #5fc7b5;
+    --kobe-ctx-tool-definitions: #c4c45a;
+    --kobe-ctx-user: #3d9be0;
+    --kobe-ctx-assistant: #2fc495;
+    --kobe-ctx-tools: #f0b429;
+    --kobe-ctx-compaction: #f07a3a;
+    --kobe-ctx-other: #a3a3a3;
     --kobe-when-light: none;
     --kobe-when-dark: block;
   }

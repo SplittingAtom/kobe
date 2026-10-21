@@ -1,5 +1,6 @@
 "use client";
 
+import type { KeyboardEvent } from "react";
 import { modelName, type TeamModel } from "../../lib/admin/api/team/models";
 import { formatTokens } from "../../lib/admin/usage-format";
 import {
@@ -16,6 +17,7 @@ import { useKobeExtras } from "../chat/kobe-runtime";
 import { useThreadUsageRead } from "../chat/message-footer";
 import { useThreadTeamModels } from "../chat/use-team-models";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
+import { useOpenContextViewer } from "./context-viewer";
 import { IconAction } from "./icon-action";
 import styles from "./context-gauge.module.css";
 
@@ -27,6 +29,23 @@ export interface ContextGaugeProps extends GaugeReading {
   readonly onCompact?: (() => void) | undefined;
   /** Why Compact now is unavailable right now (a run is on): offered, but disabled. */
   readonly compactBlocker?: string | null | undefined;
+  /** Opens the context viewer (KOBE-471); absent: not offered (a reader's thread). */
+  readonly onOpenContext?: (() => void) | undefined;
+}
+
+/** Enter or Space on the gauge opens the viewer, as a click does. */
+function openProps(open: (() => void) | undefined) {
+  if (open === undefined) return {};
+  return {
+    "aria-haspopup": "dialog" as const,
+    "data-context-open": "",
+    onClick: open,
+    onKeyDown: (e: KeyboardEvent<HTMLElement>) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      open();
+    },
+  };
 }
 
 /**
@@ -43,15 +62,17 @@ export function ContextGauge({
   countedBy,
   onCompact,
   compactBlocker,
+  onOpenContext,
 }: ContextGaugeProps) {
   const label = gaugeLabel({ tokens, window, model, countedBy });
   const used = tokens;
   const percent = window === null ? 0 : contextPercent(used, window);
   const level = gaugeLevel(percent);
   const offerCompact = window !== null && level === "full" && onCompact !== undefined;
+  const open = openProps(onOpenContext);
   const face =
     window === null ? (
-      <span className={styles.tokens} tabIndex={0} data-context-gauge>
+      <span className={styles.tokens} tabIndex={0} data-context-gauge {...open}>
         <span className="sr-only">{NAME}: </span>
         {formatTokens(used)} tokens
       </span>
@@ -67,6 +88,7 @@ export function ContextGauge({
         data-context-gauge
         tabIndex={0}
         className={styles.meter}
+        {...open}
       >
         <span className={styles.fill} style={{ width: `${Math.min(percent, 100)}%` }} />
       </div>
@@ -77,6 +99,9 @@ export function ContextGauge({
         <TooltipTrigger asChild>{face}</TooltipTrigger>
         <TooltipContent side="top">
           {label}
+          {onOpenContext !== undefined && (
+            <span className={styles.tooltipLine}>Click to see the context</span>
+          )}
           {offerCompact && <span className={styles.tooltipLine}>Compact this thread</span>}
         </TooltipContent>
       </Tooltip>
@@ -120,17 +145,21 @@ export function ThreadContextGauge({
   const state = extras?.state ?? DRAFT;
   const loaded = useThreadTeamModels();
   const read = useThreadUsageRead();
+  const openViewer = useOpenContextViewer();
   if (!extras || state.threadId === null || state.phase !== "ready") return null;
   const size = newestContextSize(
     state.live,
     read && { afterRun: read.afterRun, latestCall: read.usage.latestCall },
     compactedSinceLastCall(state.entries),
   );
-  if (size === null) return null;
   const models = loaded.status === "ready" ? loaded.data.models : [];
   const teamDefault = loaded.status === "ready" ? loaded.data.default : null;
   const alias = state.agentModel ?? state.summary?.model ?? teamDefault;
   const scale = models.find((m) => m.alias === alias);
+  const window = scale?.contextWindow ?? null;
+  if (size === null) return null;
+  // Owner only (CV2, KOBE-471): a shared reader's gauge offers nothing.
+  const owner = openViewer !== null && state.summary?.readOnly !== true;
   const counter = counterOf(models, size);
   const counterIsScale =
     counter === null || (typeof counter === "string" ? counter === alias : counter === scale);
@@ -138,11 +167,12 @@ export function ThreadContextGauge({
   return (
     <ContextGauge
       tokens={size.tokens}
-      window={scale?.contextWindow ?? null}
+      window={window}
       model={scale ? modelName(scale) : alias}
       countedBy={counterIsScale ? null : name(counter)}
       onCompact={onCompact}
       compactBlocker={compactBlocker}
+      onOpenContext={owner ? () => openViewer(window) : undefined}
     />
   );
 }
