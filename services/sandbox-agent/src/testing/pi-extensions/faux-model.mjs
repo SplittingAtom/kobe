@@ -4,7 +4,9 @@
 // `{ "text" }`, `{ "thinking", "stopReason" }` (reasoning only, e.g. cut off at the output limit,
 // KOBE-258), `{ "echoUsers": true }` (replies with every user message the model was given) or
 // `{ "waitForAbort": true }` (no first token until the run is aborted: Stop before the answer,
-// KOBE-290).
+// KOBE-290) or `{ "countInSystem": [base64...] }` (replies `COUNTS:[n, ...]`, how often each
+// decoded needle occurs in the system prompt, so neither the needle nor the prompt lands in the
+// session, KOBE-473).
 // The n-th assistant message after the prompt plays step n (then "done").
 // It selects its model on every prompt (an `input` handler runs before Pi checks the model, while
 // `session_start` may still be pending when the first prompt arrives) and activates `codemode` when the built-in is loaded (it
@@ -61,6 +63,17 @@ async function step(context, options) {
     const system = messages.filter((m) => m.role === "system" || m.role === "developer");
     const rendered = system.map((m) => [textOf(m), ...Object.values(m.sections ?? {})].join("\n"));
     return fauxAssistantMessage(`SYSTEM:${rendered.join("\n")}`);
+  }
+  if (next.countInSystem !== undefined) {
+    const system = messages.filter((m) => m.role === "system" || m.role === "developer");
+    const text = system
+      .map((m) => [textOf(m), ...Object.values(m.sections ?? {})].join("\n"))
+      .join("\n");
+    const counts = next.countInSystem.map((b64) => {
+      const needle = Buffer.from(b64, "base64").toString("utf8");
+      return text.split(needle).length - 1;
+    });
+    return fauxAssistantMessage(`COUNTS:${JSON.stringify(counts)}`);
   }
   if (next.thinking !== undefined) {
     return fauxAssistantMessage([fauxThinking(next.thinking)], {

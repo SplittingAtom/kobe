@@ -69,7 +69,12 @@ file is gone). `run.start.viewing` carries it only to agents with the `file_edit
 capability; the agent puts it in **that run's system prompt only**, through the per-run memory
 file (never the launch or the session), fenced between `<<<BEGIN VIEWED FILE nonce>>>` markers
 with a random per-run nonce, verbatim inside (so proposals are not built on sanitised text), and
-labelled as data, not instructions.
+labelled as data, not instructions. **The context holds at most one viewed file, the current
+run's** (KOBE-473): the per-run file is rewritten before every run (empty when the run views
+nothing), Pi forces it into that run's requests only and never records it in the session, so a
+later run carries its own file or none, a restarted Pi rebuilt from the session brings no older
+one back, and the context viewer shows at most one `viewing_file` section. Steers and Pi's own
+retries within a run see that run's file; a compaction's summary call gets none.
 
 **FE8. `propose_file_edit {path, content, summary}`.** A Kobe built-in (`BUILTIN_TOOLS`): risk
 `read`, scope `kobe`, primary argument `/path`. It writes nothing, so ask-on-write does not
