@@ -29,6 +29,8 @@ import { piCommand } from "../pi/pi-command.js";
 import { shareOnVolume } from "../workspace/volume.js";
 import { ensureSessionDir } from "../pi/session-files.js";
 import { MODEL_FILE_ENV, RUN_TOKEN_UI_TITLE } from "../kobe-models/protocol.js";
+import { CONTEXT_FILE_ENV, CONTEXT_FILE_NAME } from "../kobe-models/context-capture.js";
+import type { KobePromptParts } from "../context/system-prompt.js";
 import {
   SYSTEM_PROMPT_FILE_NAME,
   SystemPromptFile,
@@ -234,6 +236,8 @@ export class Thread {
   #egressFile: EgressTokenFile | undefined;
   #promptFile: SystemPromptFile | undefined;
   #memoryFile: MemoryContextFile | undefined;
+  /** Where the current Pi's kobe-models records its latest model call (KOBE-470). */
+  #contextFile: string | undefined;
   /** Each process's private runtime directory (and identity), removed once it has exited. */
   readonly #runtimeDirs = new Map<PiProcess, RuntimeOf>();
   /** Removal of a runtime directory in progress (awaited by `stopProcess`). */
@@ -346,6 +350,7 @@ export class Thread {
     let egressFile: EgressTokenFile | undefined;
     let promptFile: SystemPromptFile | undefined;
     let memoryFile: MemoryContextFile | undefined;
+    let contextFile: string | undefined;
     try {
       runtimeDir = await mkdtemp(path.join(this.#env.runtimeDir, RUNTIME_DIR_PREFIX));
       const env: Record<string, string> = { ...launch.env };
@@ -420,6 +425,9 @@ export class Thread {
         );
         await modelFile.create();
         env[MODEL_FILE_ENV] = modelFile.path;
+        // The context viewer's capture (KOBE-470): written by kobe-models in the dir Pi writes.
+        contextFile = path.join(agentDir, CONTEXT_FILE_NAME);
+        env[CONTEXT_FILE_ENV] = contextFile;
       }
       const command = await piCommand(this.#env.bin, launch.env.PATH);
       const egress = this.#env.egress;
@@ -539,6 +547,7 @@ export class Thread {
     this.#egressFile = egressFile;
     this.#promptFile = promptFile;
     this.#memoryFile = memoryFile;
+    this.#contextFile = contextFile;
     this.lastUsed = Date.now();
     // A token rotated while this spawn was in progress reached no file (the listener runs only
     // against `#modelFile`): take the current token again now that the file is attached.
@@ -703,6 +712,22 @@ export class Thread {
     viewing?: RunViewingContext,
   ): Promise<void> {
     await this.#memoryFile?.write(memoryRunFileContent(memory, undefined, project, viewing));
+  }
+
+  /**
+   * The context viewer (KOBE-470): where the running Pi's kobe-models records its latest model
+   * call (undefined without a Pi or without model wiring), and the memory, project and viewed-file
+   * parts the agent last wrote for its prompt (to split a forced prompt exactly).
+   */
+  get contextFile(): string | undefined {
+    return this.#contextFile;
+  }
+
+  get promptParts(): KobePromptParts | undefined {
+    const written = this.#memoryFile?.written;
+    return written === undefined
+      ? undefined
+      : { memory: written.text, project: written.project, viewing: written.viewing ?? "" };
   }
 
   /** A rotated model-gateway token: the next model request uses it (the current one is not cut). */
@@ -984,6 +1009,7 @@ export class Thread {
     this.#egressFile = undefined;
     this.#promptFile = undefined;
     this.#memoryFile = undefined;
+    this.#contextFile = undefined;
     this.#streaming = false;
     this.#dialogs.clear();
     if (!keepRun) this.endRun();

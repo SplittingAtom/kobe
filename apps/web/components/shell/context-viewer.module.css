@@ -1,0 +1,394 @@
+/* The context viewer (KOBE-471) inside its WorkspacePanel. Chat CSS has no preflight: sizes are
+   set here. The text column takes two thirds, the gauge the rest; under 640 px the gauge is a
+   horizontal bar above the text. Kind colours are the --kobe-ctx-* tokens (app/theme.css); each
+   kind also has a pattern, so colour never tells two kinds apart alone. */
+
+.viewer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
+  padding: 0.5rem 0.75rem 0.75rem;
+}
+
+.toolbar {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.summary {
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status,
+.notice,
+.error {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.notice {
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  color: var(--kobe-status-attention);
+  background: var(--kobe-status-attention-bg);
+}
+
+.error {
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  color: var(--kobe-status-failed);
+  background: var(--kobe-status-failed-bg);
+}
+
+.spinner {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 0.875rem;
+  height: 0.875rem;
+  border: 2px solid var(--border);
+  border-top-color: var(--foreground);
+  border-radius: 999px;
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.smallButton {
+  box-sizing: border-box;
+  padding: 0.125rem 0.5rem;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--foreground);
+  background: var(--background);
+  border: 1px solid var(--kobe-console-control-border);
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+
+.smallButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.columns {
+  display: flex;
+  flex: 1;
+  gap: 1rem;
+  min-height: 0;
+}
+
+.textColumn {
+  display: flex;
+  flex: 0 0 66%;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+  min-height: 0;
+}
+
+.search {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  align-items: center;
+}
+
+.searchInput {
+  box-sizing: border-box;
+  flex: 1 1 12rem;
+  min-width: 0;
+  padding: 0.25rem 0.5rem;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--foreground);
+  background: var(--background);
+  border: 1px solid var(--kobe-console-control-border);
+  border-radius: 0.375rem;
+}
+
+.matches {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.pane {
+  position: relative;
+  overflow: auto;
+  flex: 1;
+  min-height: 8rem;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  overscroll-behavior: contain;
+}
+
+.spacer {
+  position: relative;
+  min-width: 100%;
+}
+
+/* One fixed height: ROW_PX in context-text.tsx. */
+.row {
+  position: absolute;
+  left: 0;
+  box-sizing: border-box;
+  min-width: 100%;
+  height: 20px;
+  padding-inline: 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 20px;
+  white-space: pre;
+}
+
+.label {
+  font-weight: 600;
+  color: var(--foreground);
+  background: var(--background);
+  border-left: 4px solid var(--kind, var(--border));
+}
+
+.label[data-active] {
+  outline: 2px solid var(--kobe-composer-focus);
+  outline-offset: -2px;
+}
+
+.line {
+  color: var(--foreground);
+}
+
+.line[data-current] {
+  background: var(--admin-warn-bg);
+}
+
+.line mark {
+  color: inherit;
+  background: var(--admin-warn-bg);
+  outline: 1px solid var(--kobe-status-attention);
+}
+
+.stack {
+  display: flex;
+  flex: 1;
+  gap: 1rem;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Filled from the bottom: the first kind the model saw lies lowest, free space on top. */
+.bar {
+  display: flex;
+  flex: 0 0 2.5rem;
+  flex-direction: column-reverse;
+  overflow: hidden;
+  box-sizing: border-box;
+  min-height: 12rem;
+  border: 1px solid var(--kobe-console-control-border);
+  border-radius: 0.375rem;
+  background: var(--background);
+}
+
+.segment {
+  display: block;
+  flex: 0 0 var(--share);
+  min-height: 2px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid var(--background);
+  cursor: pointer;
+}
+
+.free {
+  display: block;
+  flex: 1 1 auto;
+}
+
+.segment,
+.swatch {
+  background-color: var(--kind);
+}
+
+/* Patterns over the colours: every other kind striped, every third dotted. */
+.segment[data-kind="agent_instructions"],
+.segment[data-kind="viewing_file"],
+.segment[data-kind="assistant_message"],
+.segment[data-kind="other"],
+.swatch[data-kind="agent_instructions"],
+.swatch[data-kind="viewing_file"],
+.swatch[data-kind="assistant_message"],
+.swatch[data-kind="other"] {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgb(255 255 255 / 45%) 0 2px,
+    transparent 2px 6px
+  );
+}
+
+.segment[data-kind="skills"],
+.segment[data-kind="tool_definitions"],
+.segment[data-kind="tools"],
+.swatch[data-kind="skills"],
+.swatch[data-kind="tool_definitions"],
+.swatch[data-kind="tools"] {
+  background-image: radial-gradient(rgb(255 255 255 / 55%) 1px, transparent 1.5px);
+  background-size: 5px 5px;
+}
+
+.viewer [data-kind="system_prompt"] {
+  --kind: var(--kobe-ctx-system-prompt);
+}
+.viewer [data-kind="agent_instructions"] {
+  --kind: var(--kobe-ctx-agent-instructions);
+}
+.viewer [data-kind="skills"] {
+  --kind: var(--kobe-ctx-skills);
+}
+.viewer [data-kind="memory"] {
+  --kind: var(--kobe-ctx-memory);
+}
+.viewer [data-kind="viewing_file"] {
+  --kind: var(--kobe-ctx-viewing-file);
+}
+.viewer [data-kind="tool_definitions"] {
+  --kind: var(--kobe-ctx-tool-definitions);
+}
+.viewer [data-kind="user_message"] {
+  --kind: var(--kobe-ctx-user);
+}
+.viewer [data-kind="assistant_message"] {
+  --kind: var(--kobe-ctx-assistant);
+}
+.viewer [data-kind="tools"],
+.viewer [data-kind="tool_call"],
+.viewer [data-kind="tool_result"] {
+  --kind: var(--kobe-ctx-tools);
+}
+.viewer [data-kind="compaction_summary"] {
+  --kind: var(--kobe-ctx-compaction);
+}
+.viewer [data-kind="other"] {
+  --kind: var(--kobe-ctx-other);
+}
+.swatch[data-kind="free"] {
+  --kind: transparent;
+  border: 1px solid var(--kobe-console-control-border);
+}
+
+.legend {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.legendRow {
+  display: grid;
+  grid-template-columns: 0.875rem minmax(0, 1fr) auto 3.25rem;
+  gap: 0.5rem;
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.25rem 0.375rem;
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: start;
+  color: var(--foreground);
+  background: none;
+  border: 0;
+  border-radius: 0.375rem;
+}
+
+button.legendRow {
+  cursor: pointer;
+}
+
+button.legendRow:hover {
+  background: var(--muted);
+}
+
+.swatch {
+  display: block;
+  box-sizing: border-box;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 0.1875rem;
+}
+
+.legendName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legendTokens,
+.legendShare {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+  white-space: nowrap;
+}
+
+@media (width < 640px) {
+  .columns {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .textColumn {
+    flex: 1 1 auto;
+    min-height: 16rem;
+  }
+
+  .stack {
+    flex: 0 0 auto;
+    flex-direction: column;
+    order: -1;
+    gap: 0.5rem;
+  }
+
+  .bar {
+    flex: 0 0 1.25rem;
+    flex-direction: row;
+    min-height: 0;
+  }
+
+  .segment {
+    min-width: 2px;
+    min-height: 0;
+    border-top: 0;
+    border-right: 1px solid var(--background);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}

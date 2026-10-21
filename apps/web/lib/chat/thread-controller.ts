@@ -136,6 +136,12 @@ export class ThreadController {
     return id === null ? null : this.#api.threadUsage(id);
   };
 
+  /** The context of this thread's latest model call (KOBE-471); null for a draft. */
+  readonly threadContext = () => {
+    const id = this.#state.threadId;
+    return id === null ? null : this.#api.threadContext(id);
+  };
+
   /** How this thread's runs ended and its approvals were decided (KOBE-209); null for a draft. */
   readonly threadMarkers = () => {
     const id = this.#state.threadId;

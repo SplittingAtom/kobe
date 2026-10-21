@@ -7,6 +7,7 @@ import { endRunInTx } from "./run-state.js";
 
 /** Completed command rows are kept this long for a requester that polls late, then deleted. */
 const RESULT_RETENTION_SECONDS = 600;
+const CONTEXT_RESULT_RETENTION_SECONDS = 60;
 
 export interface SweepResult {
   readonly interrupted: { teamId: string; runId: string; threadId: string }[];
@@ -117,6 +118,12 @@ async function expireCommands(tx: KobeTx, bus: SandboxBus, teamId: string): Prom
     DELETE FROM sandbox_commands
      WHERE team_id = ${teamId} AND status IN ('done', 'failed')
        AND completed_at < now() - make_interval(secs => ${RESULT_RETENTION_SECONDS})`);
+  // A context answer (KOBE-470) is sealed to a key only its requester held; one nobody read within
+  // a minute (the requester died) is useless and goes at once.
+  await tx.execute(sql`
+    DELETE FROM sandbox_commands
+     WHERE team_id = ${teamId} AND kind = 'thread.context' AND status IN ('done', 'failed')
+       AND completed_at < now() - make_interval(secs => ${CONTEXT_RESULT_RETENTION_SECONDS})`);
   return timedOut.rows.length;
 }
 

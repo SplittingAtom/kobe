@@ -56,6 +56,17 @@ describe("runtime directory tripwire", () => {
     expect(await unexpectedEntries(runtime)).toEqual(["egress-token (dir)"]);
   });
 
+  it("accepts kobe-models' context capture and its temp file in agent/ (KOBE-470), as files only", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "kobe-runtime-"));
+    const runtime = await processDir(dir);
+    await writeFile(path.join(runtime, "agent", "kobe-context.json"), "{}");
+    await writeFile(path.join(runtime, "agent", `kobe-context.json.${"c".repeat(16)}.tmp`), "{}");
+    expect(await unexpectedEntries(runtime)).toEqual([]);
+    await rm(path.join(runtime, "agent", "kobe-context.json"));
+    await mkdir(path.join(runtime, "agent", "kobe-context.json"));
+    expect(await unexpectedEntries(runtime)).toEqual(["agent/kobe-context.json (dir)"]);
+  });
+
   it("reports anything else: Pi config a sibling could plant, or a stray top-level file", async () => {
     dir = await mkdtemp(path.join(tmpdir(), "kobe-runtime-"));
     const runtime = await processDir(dir, ["auth.json"]);

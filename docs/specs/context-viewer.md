@@ -1,0 +1,146 @@
+# Kobe — Context Viewer (KOBE-470 server, sandbox and protocol)
+
+Status: **decisions by Chris, 2026-10-21** (CV1–CV2 binding; CV3–CV9 settled in KOBE-470 within
+them). Contracts: `packages/protocol/src/context-viewer.ts` (route) and
+`packages/protocol/src/sandbox-wire/context-frames.ts` (wire). Ledger: `docs/ledger/KOBE-470.md`.
+
+## 1. Summary
+
+The context gauge opens a viewer that shows what the thread's **latest model call** sent the
+model, as ordered sections (system prompt, agent instructions, skills, memory, viewed file, tool
+definitions, messages, tool calls and results, compaction summary), each with its text and token
+count, plus the model's context window. It is read live from the owner's sandbox when the viewer
+opens (and on Refresh) and is never stored.
+
+## 2. Decisions
+
+**CV1. The latest model call, live, nothing stored.** (Chris) The viewer shows the context as of
+the thread's latest model call: what the model saw, not a reconstruction of what it would see
+next. It is fetched from the sandbox on open and on Refresh. A hibernated sandbox is woken, with
+progress, like sending. Nothing is stored: no plaintext in Postgres (the wire's transient command
+row carries only a sealed answer, CV8), no content in logs or errors, no audit entry (the route
+audits nothing at all).
+
+**CV2. Thread owner only.** (Chris) Only the owner sees the context. A teammate or project member
+the thread is shared with gets 403 `not_owner`; anyone else the usual 404 `thread_not_found`. The
+context can hold the owner's memory, viewed files and tool output, which sharing never exposed.
+
+**CV3. Section kinds.** `system_prompt`, `agent_instructions`, `skills`, `memory`, `viewing_file`,
+`tool_definitions`, `user_message`, `assistant_message`, `tool_call`, `tool_result`,
+`compaction_summary`, `other`, in the order the model saw them. Where each comes from (Pi 1.0.0):
+
+| Kind                 | Source                                                                                                                                                                                       |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `system_prompt`      | Pi's prompt sections `preamble`, `tools` (tool guidance), `rules`, `docs`, `cwd` (`core/system-prompt.js`); a later system message's text ("Prompt update")                                  |
+| `agent_instructions` | Pi section `addendum`: Kobe's `--append-system-prompt` file (agent/system prompt, KOBE-123); `project_context` (context files); the project instructions block kobe-tools appends (KOBE-245) |
+| `skills`             | Pi section `skills` (the skills index)                                                                                                                                                       |
+| `memory`             | The fenced memory index kobe-tools appends for the run (KOBE-157)                                                                                                                            |
+| `viewing_file`       | The fenced viewed file kobe-tools appends for the run (KOBE-462)                                                                                                                             |
+| `tool_definitions`   | One per tool the call declared (`toolsAdded` of the system messages, or the context's `tools`): name, description, JSON schema                                                               |
+| `user_message`       | User messages (images as `[image <type>]`, counted as Pi's 1200-token image estimate)                                                                                                        |
+| `assistant_message`  | An earlier answer's text, or its thinking (label "Thinking")                                                                                                                                 |
+| `tool_call`          | One per tool call of an earlier answer: label = tool name, text = arguments as JSON                                                                                                          |
+| `tool_result`        | Tool results (label = tool name, "(error)" when it failed)                                                                                                                                   |
+| `compaction_summary` | The user message Pi builds from a compaction (`The conversation history before this point was compacted…`)                                                                                   |
+| `other`              | Branch summaries, custom messages (label = custom type), removed prompt sections or tools, the "N sections not shown" placeholder (CV6)                                                      |
+
+When kobe-tools adds memory, project instructions or the viewed file, Pi sends the whole prompt as
+one forced text; the agent splits it back exactly by the parts it wrote for the run, or by their
+headers when they changed since, and splits Pi's part by its `<name>…</name>` sections.
+
+**CV4. Where the sections come from (exactness).** Three sources, named in `source`:
+
+- `model_call` (exact): kobe-models, the Pi provider every model call goes through, records the
+  context Pi handed it (the leading system message with prompt sections and tool declarations, and
+  the conversation, after Pi's own conversions) together with the answer's usage, in
+  `kobe-context.json` in the Pi process's private `agent/` dir (env `KOBE_CONTEXT_FILE`; atomic
+  replace after every call; mode 0640 so the agent, in Pi's group, reads it and the tool
+  executor's partner uid cannot). Summaries (compaction, branch summary: `cacheRetention: "none"`) are skipped. Image
+  data is never recorded. The file goes with the Pi process (its runtime dir is removed on exit).
+- `session`: no call was recorded since the thread's Pi started (after a wake, an idle reap or a
+  relaunch for a new config). The agent rebuilds the latest call from the thread's Pi session
+  file: the path from the leaf, the context before the last answer, with the latest compaction
+  before it applied (Pi's `buildSessionContext`). Exact for the conversation and for the prompt
+  sections and tools Pi recorded; without the per-run memory, project instructions and viewed
+  file (never in the session), and without `context_edit` entries (Kobe writes none). Only the
+  file's last 16 MiB is read (streamed; the agent's memory is shared by every thread): when the
+  call's context began before that and no compaction inside it replaced the older part, those
+  entries are left out and `missing` says `older_history`.
+- `none`: the thread has no model call yet.
+
+`exact` is true for `model_call` and `none`, false for `session`, whose `missing` lists what it may
+lack: `memory`, `project_instructions`, `viewing_file`, `context_window`, and `older_history`
+when the session file was too long to read whole. The web labels such an
+answer "Approximate — the sandbox restarted since the last model call".
+
+**CV5. Token counts.** No tokenizer runs in the sandbox. Each section is estimated as Pi estimates
+(characters / 4, an image 1200), then scaled with the largest-remainder method so the sections
+add up exactly to the call's reported prompt tokens, input + cache read + cache write: the number
+the context gauge shows for that call (`messageContextTokens`, `latest_call`). `tokens_basis`:
+`usage` when scaled, `estimate` when the call reported nothing (failed early) or there was no
+call. `context_window` is the window kobe-models gave Pi for that call (the catalog limit, or the
+site default, KOBE-259); null for `session` and `none` (the web uses the gauge's window). A
+compaction after the latest call is not reflected (the gauge shows "unknown" then; the viewer
+still shows the call).
+
+**CV6. Size caps.** Section text is at most 128 Ki UTF-16 units; a longer one is cut and ends with
+`[… N more characters not shown]` (`truncated`, `chars` = the whole length, `tokens` = the whole
+section). All texts together are at most 2 MiB UTF-8 (the agent lowers the per-section cut until
+they fit, and the sealed `command.result` frame stays under the 4 MiB wire cap, CV8). Past 4000 sections
+the middle of the conversation is left out (`omitted_sections`) behind one `other` placeholder that
+carries their tokens, so the prompt and the newest messages stay. `truncated` says any of this
+happened. The capture itself is capped at 32 MiB (a larger call falls back to `session`).
+
+**CV7. Route.** `GET /v1/threads/{id}/context` (`team.chat`, owner only, 30 reads a minute per
+member):
+
+- **200** `ThreadContext` (`ThreadContextResult` + `thread_id`, with `exact` and `missing`),
+  `cache-control: private, no-store`.
+- **202** `{status: "waking", retry_after_ms: 2000}`: the member's sandbox was not connected; a
+  wake was started (as on send). The web shows "Waking your workspace…" and asks again. The read
+  waits up to 1.5 s for the wake to be refused; a refusal (`SandboxWakeError`: no gVisor/Kata
+  runtime, the member may not have a sandbox, not Ready within the wake budget) is **409**
+  `sandbox_refused`, at once or on the next read within 2 min (the replica remembers it), so the
+  viewer stops asking. Transient wake errors keep 202.
+- A skill eval's thread (its own ephemeral sandbox, never the member's) is **409**
+  `context_unsupported` before anything is woken.
+- **403** `not_owner`, **404** `thread_not_found`, **409** `thread_busy` (the session is being
+  compacted or restored) or `context_unsupported` (an agent older than the capability), **409** `sandbox_refused` (above), **429** `rate_limited`, **502** `context_unavailable` (the sandbox failed, or its answer did not
+  validate, or was not sealed to the request's key), **503** `sandbox_unavailable` (timeout, wake failure, connection lost). One fixed
+  message per code; the sandbox's text is logged by code only, never relayed.
+
+**CV8. Wire command `thread.context`, sealed.** Server → the member's own sandbox only (never a
+skill eval's), behind hello capability `thread_context`, `{command_id, thread_id, max_bytes,
+reply_key}`, deadline 120 s. Before delivering it the server brings the thread's session in line
+(entry sync, or a session restore after a wake), as for a run start. The command starts no Pi and
+writes nothing in the sandbox.
+
+Like every command result, the answer travels through the `sandbox_commands` row (any replica may
+hold the socket), so it is sealed: the requesting server process makes an ephemeral X25519 key
+pair per request and sends only the public key (`reply_key`, alg `x25519-hkdf-sha256-aes256gcm`).
+The agent seals the `ThreadContextResult` JSON to it with its own ephemeral X25519 key: ECDH, then
+HKDF-SHA256 (salt = sender public ‖ recipient public, info = `kobe.sealed-reply.v1` ‖ 0 ‖ thread
+id), then AES-256-GCM with a random 96-bit nonce and the thread id as AAD
+(`@kobe/protocol/node` `sealReply`). `command.result.data` is `{sealed: {v, epk, nonce,
+ciphertext, tag}}`. Only the requesting process can open it: the private key lives in that
+request's memory, opens one answer and is dropped. The opened JSON is validated again; an
+unsealed, foreign or tampered answer is `context_unavailable`. The row is deleted when the
+requester reads it or gives up at the deadline; a done row nobody read (the requester died) is
+purged by the next sweep after 60 s (other kinds keep 10 min), and it could not be opened anyway.
+Sandbox errors carry fixed text (never a path or content); the server logs codes only. The sealed
+plaintext is at most 2 MiB of section text and about 2.95 MiB of JSON, so the sealed frame fits the
+4 MiB wire cap.
+
+**CV9. Text is untrusted.** Every section text came from the model, tools, web pages, files or
+teammates. The web renders it as plain text only (never Markdown or HTML). Without Pi identities
+(development) the thread's own tools could rewrite the capture or the session file; the viewer
+shows what the files hold; so can they when the tools run as Pi's own uid (no tool executor). With
+the executor (KOBE-167) the capture is out of the tools' reach; the session file is on the
+workspace volume, which the tools can write (as for every session).
+
+## 3. Known gaps
+
+- `session` source: no memory, project instructions or viewed file; no context window.
+- Later system messages are shown as their sections; providers render them as "Updated system
+  prompt section" text (wording differs, tokens are scaled anyway).
+- Per-section tokens are estimates scaled to the reported total; only the total is exact.

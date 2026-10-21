@@ -173,10 +173,15 @@ describe("skills at run start", () => {
       "skill_bundles",
       "app_cards",
       "trace_spans",
+      "thread_context",
     ]);
     await h.close();
     h = await startHarness();
-    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual(["app_cards", "trace_spans"]);
+    expect(h.server.frames("hello").at(-1)?.capabilities).toEqual([
+      "app_cards",
+      "trace_spans",
+      "thread_context",
+    ]);
   });
 
   it("ignores config fields it does not know instead of failing the run", async () => {
@@ -198,6 +203,7 @@ describe("former built-in skills", () => {
       "skill_bundles",
       "app_cards",
       "trace_spans",
+      "thread_context",
     ]);
     await h.close();
     await rm(dir, { recursive: true, force: true });

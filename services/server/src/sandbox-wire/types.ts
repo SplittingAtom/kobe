@@ -15,6 +15,7 @@ import type {
   RunStatus,
   RunViewingContext,
   SandboxAttachment,
+  SealedReplyKey,
   SessionTokenClaims,
 } from "@kobe/protocol";
 import type { KobeTx } from "@kobe/db";
@@ -94,6 +95,7 @@ export const COMMAND_FAILURES = {
   skillsUnsupported: "skills_unsupported", // run.start lists skills, the agent can't load them
   queuedBeforeUpgrade: "queued_before_upgrade", // run.start queued before KOBE-317 lists built-ins
   compactUnsupported: "compact_unsupported", // thread.compact to an agent without it or run tokens
+  contextUnsupported: "context_unsupported", // thread.context to an agent without it (KOBE-470)
 } as const;
 
 export interface RunStartRequest {
@@ -217,6 +219,21 @@ export interface SandboxRouter {
     },
     options?: SendOptions,
   ): Promise<CommandOutcome>;
+  /**
+   * KOBE-470, to the member's own sandbox only: the context of the thread's latest model call
+   * (`thread.context`; on success `data` is `{sealed}`, the `ThreadContextResult` sealed to
+   * `replyKey`: open it with the caller's private key, then validate it). The thread's session is
+   * brought in line first (entry sync, or a restore after a wake).
+   */
+  threadContext(
+    target: SandboxTarget,
+    request: {
+      readonly threadId: string;
+      readonly maxBytes: number;
+      readonly replyKey: SealedReplyKey;
+    },
+    options?: SendOptions,
+  ): Promise<CommandOutcome>;
   /** `thread.compact`; on success `data` is the result in wire casing (untrusted: validate it). */
   compactThread(
     target: SandboxTarget,
@@ -238,6 +255,11 @@ export interface SandboxRouter {
     request: { readonly threadId: string; readonly op: "interrupt" | "restart" },
     options?: SendOptions,
   ): Promise<CommandOutcome>;
+  /**
+   * Start waking the member's sandbox without sending it anything (KOBE-470: the context viewer
+   * answers 202 while it wakes, then asks again). Rejects with the wake's error.
+   */
+  wake(target: SandboxTarget): Promise<void>;
   /** True while some replica holds a live (heartbeating) connection of this sandbox. */
   isConnected(target: SandboxTarget, threadId?: string): Promise<boolean>;
 }

@@ -147,6 +147,7 @@ function setup(
   script: Step[],
   states: ModelFileState[] = [state()],
   runToken?: (runId: string) => string | undefined,
+  onCallEnded?: Parameters<typeof createKobeProvider>[0]["onCallEnded"],
 ) {
   const calls: StreamOptions[] = [];
   const sleeps: number[] = [];
@@ -155,6 +156,7 @@ function setup(
     pi,
     initial: states[0] as ModelFileState,
     ...(runToken ? { runToken } : {}),
+    ...(onCallEnded ? { onCallEnded } : {}),
     readState: async () =>
       states.length > 1 ? (states.shift() as ModelFileState) : (states[0] as ModelFileState),
     apis: {
@@ -173,6 +175,23 @@ function setup(
 }
 
 describe("kobe provider", () => {
+  it("tells the context capture once per call, after it ended, with the context it was given (KOBE-470)", async () => {
+    const ended: { context: unknown; result: AssistantMessage; options: unknown }[] = [];
+    const { provider, model } = setup(
+      [{ status: 503 }, { text: "hi" }],
+      [state()],
+      undefined,
+      (_model, context, options, result) => ended.push({ context, result, options }),
+    );
+    const context = { messages: [{ role: "user", content: "hello" }] };
+    const { result } = await collect(provider.streamSimple(model, context, { maxTokens: 9 }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(ended).toHaveLength(1);
+    expect(ended[0]?.context).toBe(context);
+    expect(ended[0]?.result).toBe(result);
+    expect(ended[0]?.options).toMatchObject({ maxTokens: 9 });
+  });
+
   it("describes the run's model under the kobe provider with the gateway base URL", () => {
     const model = kobeModel("http://gw", state().model as ModelFileModel);
     expect(model).toMatchObject({

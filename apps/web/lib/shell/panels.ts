@@ -17,7 +17,9 @@ export type PanelId =
   | "my-connectors"
   | "projects"
   | "my-shared-cases"
-  | "my-area";
+  | "my-area"
+  /** The context viewer (KOBE-471): opened from the context gauge, no address of its own. */
+  | "context-viewer";
 
 export interface Panel {
   readonly id: PanelId;

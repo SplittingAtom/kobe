@@ -14,6 +14,7 @@ import {
   CAPABILITY_SKILL_EVAL,
   CAPABILITY_NOTEBOOKS,
   CAPABILITY_THREAD_COMPACT,
+  CAPABILITY_THREAD_CONTEXT,
   serverToSandboxFrameSchema,
   threadCompactFrameSchema,
   type PiGetEntriesData,
@@ -469,6 +470,29 @@ export class CommandDelivery {
     ) {
       await this.#fail(row, failure("notebooks_unsupported", "this sandbox runs no notebooks"));
       return;
+    }
+
+    // The context viewer (KOBE-470): the member's own sandbox only, and only an agent that knows it.
+    // After a wake the thread's session may be missing: restore it first, as for a run start.
+    if (row.kind === "thread.context") {
+      if (
+        this.#host.target.evalThreadId !== undefined ||
+        !this.#host.hasCapability(CAPABILITY_THREAD_CONTEXT)
+      ) {
+        await this.#fail(
+          row,
+          failure(
+            COMMAND_FAILURES.contextUnsupported,
+            "this sandbox can't read a thread's context",
+          ),
+        );
+        return;
+      }
+      const session = await this.#ensureSession(row.threadId);
+      if (!session.ok) {
+        await this.#fail(row, failure(COMMAND_FAILURES.sessionUnavailable, session.error.message));
+        return;
+      }
     }
     // A stop still reaches a run the server already ended (Stop, budget, failed start): ending
     // it in Postgres first is what refuses its late frames, and Pi must still be told to abort.
