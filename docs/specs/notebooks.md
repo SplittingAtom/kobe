@@ -44,7 +44,9 @@ deny rules on code do not see a file's contents, the same as `bash` running a sc
 `text/html` (DataFrames render as HTML tables), `image/png`, `image/jpeg`, `image/svg+xml`,
 `application/json`. Anything else is dropped by the agent and refused by the server. The web shows
 HTML and SVG only in the existing sandboxed, network-less artifact frame, never in the page
-(KOBE-465). Matplotlib uses the inline backend (`MPLBACKEND`), which emits PNG display data.
+(KOBE-465). Accepted (coordinator, 2026-10-21): a pandas DataFrame's `text/html` table is read
+with `DOMParser` (an inert document) and only its cells' text is rendered, as a table; any other
+HTML goes to the frame. Matplotlib uses the inline backend (`MPLBACKEND`), which emits PNG display data.
 
 **NB5. Code runs only in the sandbox.** (Chris) Never on the server or in the browser. The server
 reads and writes notebook JSON; it never evaluates it.
@@ -172,3 +174,31 @@ kernel's blocked attempts. No secrets enter the kernel; nothing inbound.
   (`notebookOutputSchema`, nbformat 4 output), `notebook.finished`; the agent's tool card is the
   `run_python` call (`RUN_PYTHON_TOOL`), matched by `tool_call_id`.
 - After `notebook.finished.saved`, reload the file (its `sha256` is the new version).
+- HTML outputs: `GET /v1/workspace/output-frame?team=` (KOBE-465), a fixed shell document with the
+  artifact frame's headers (`FRAME_HEADERS`) and the WebRTC guard; the page posts the HTML to it
+  once (`{type: "kobe.notebook.html", html}`) and it writes it into itself. Frame loads from Kobe's
+  page only, for the active team; never `srcdoc`, never kernel HTML in the page.
+
+## 4. The web (KOBE-465)
+
+- `.ipynb` opens as a notebook in the artifact column (`components/notebooks/`, loaded lazily):
+  code cells in CodeMirror (Shift+Enter runs), Markdown through the chat's safe Markdown
+  component, add/move/delete, Run cell, Run all (in order, stops at the first cell not `ok`),
+  Interrupt, Restart (asks first), kernel busy/idle, execution counts. Edits are file editor
+  drafts (the notebook serialized) saved through FE4 with the conflict notice; a run saves unsaved
+  edits and missing cell ids first (NB1), since the server reads the saved notebook. After
+  `notebook.finished.saved` the view reads the new version and keeps edits typed meanwhile
+  (sources stay the member's, outputs and counts come from the server).
+- Outputs: stream text and tracebacks as text with ANSI codes stripped; PNG/JPEG and SVG as
+  `<img>` from `data:` URLs (SVG re-encoded, never inline markup); a DataFrame's `text/html`
+  table read into rows of plain text with `DOMParser` (an inert document: no script, no loads;
+  only `textContent` is used) and a Table Schema in `application/json` likewise; Markdown as
+  above; every other `text/html` only in the output frame. A saved output that fails the
+  protocol's output schema (after dropping MIME types outside NB4) is "cannot be shown".
+- `.py`: the file editor plus a Run pane (the saved file; unsaved changes block Run).
+- Live: the member's runs follow their own event stream; the agent's `run_python` events arrive on
+  the thread's stream; both feed one per-tab execution store. A cell's latest execution shows in
+  that cell until its saved version is read back; the agent's `code` runs show below the cells.
+  `egress.blocked` on the member's own runs shows the shell's egress notice.
+- Agent edits: `propose_file_edit` on an `.ipynb` opens the file editor's inline diff (FE10) in
+  place of the notebook until committed or discarded.

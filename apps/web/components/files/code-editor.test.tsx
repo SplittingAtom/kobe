@@ -59,3 +59,22 @@ describe("CodeEditor CSP nonce", () => {
     expect(viewIn(container).state.facet(EditorView.cspNonce)).toBe(NONCE);
   });
 });
+
+describe("CodeEditor notebook cell mode (KOBE-465)", () => {
+  it("gives a compact cell the nonce, and Shift+Enter runs instead of inserting a line", () => {
+    addNoncedScript(NONCE);
+    let runs = 0;
+    const { container } = render(
+      <CodeEditor value="x = 1" language="python" label="Cell 1" compact onRun={() => runs++} />,
+    );
+    const view = viewIn(container);
+    expect(view.state.facet(EditorView.cspNonce)).toBe(NONCE);
+    const host = must(container.querySelector("[data-kobe-code-editor]"));
+    expect(host.className).not.toContain("min-h-80");
+    view.contentDOM.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }),
+    );
+    expect(runs).toBe(1);
+    expect(view.state.doc.toString()).toBe("x = 1");
+  });
+});

@@ -12,7 +12,8 @@
  * open in the file editor (KOBE-463, `file-editor.tsx`): Rendered and Raw modes, Save, and the
  * review of the agent's proposals; the version a save names is the SHA-256 of the bytes read.
  */
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { NOTEBOOK_FILE_MAX_BYTES } from "@kobe/protocol";
 import type { ApiError } from "../../lib/api/client";
 import type { FilesApi } from "../../lib/files/api";
 import { isTextPreview, sha256Hex } from "../../lib/files/editor";
@@ -33,10 +34,18 @@ import { saveBytes } from "../../lib/files/save";
 import { ARTIFACT_FRAME_SANDBOX } from "../../lib/chat/artifacts";
 import { ErrorNotice } from "../admin/error-notice";
 import { useArtifactPanel } from "../chat/artifact-state";
-import { FileEditor } from "./file-editor";
+import { EditorFallback, FileEditor } from "./file-editor";
+import type { KernelWiring } from "../notebooks/use-kernel";
 import { TextView } from "./text-view";
 import { IconAction } from "../shell/icon-action";
 import styles from "../chat/chat.module.css";
+
+// Notebooks and the `.py` Run pane load only when such a file opens (KOBE-465).
+const NotebookView = lazy(() => import("../notebooks/notebook-view"));
+const PythonRunPane = lazy(() => import("../notebooks/python-run"));
+
+const isNotebook = (path: string) => path.toLowerCase().endsWith(".ipynb");
+const isPython = (path: string) => path.toLowerCase().endsWith(".py");
 
 type Loaded =
   | { readonly status: "loading" }
@@ -56,7 +65,12 @@ type Loaded =
 const GONE = "gone";
 
 /** The bytes to read for a preview, and whether only the whole file will do. */
-function readPlan(preview: FilePreview): { readonly max: number; readonly wholeOnly: boolean } {
+function readPlan(
+  preview: FilePreview,
+  path: string,
+): { readonly max: number; readonly wholeOnly: boolean } {
+  // A notebook opens whole up to the server's notebook limit (outputs with images are large).
+  if (isNotebook(path)) return { max: NOTEBOOK_FILE_MAX_BYTES, wholeOnly: false };
   switch (preview.kind) {
     case "none":
     case "html":
@@ -71,7 +85,7 @@ function readPlan(preview: FilePreview): { readonly max: number; readonly wholeO
 
 /** What the tab shows for `path`, or GONE when the read says the file no longer exists. */
 async function load(api: FilesApi, path: string, preview: FilePreview): Promise<Loaded | "gone"> {
-  const plan = readPlan(preview);
+  const plan = readPlan(preview, path);
   const read = await api.read(path, plan.max, plan.wholeOnly);
   if (!read.ok) {
     return read.error.status === 404
@@ -147,6 +161,8 @@ interface EditorWiring {
   readonly reviews: FileReviewStore;
   saved(text: string, sha256: string): void;
   reread(): void;
+  /** The conversation's kernel (KOBE-465): notebooks and `.py` files run in it. */
+  readonly kernel?: KernelWiring | undefined;
 }
 
 function FileBody({
@@ -200,18 +216,40 @@ function FileBody({
               }. Download the file for all of it.`}
             </p>
           )}
-          {editor && isTextPreview(previewOf(path)) ? (
-            <FileEditor
-              path={path}
-              text={loaded.text}
-              sha256={loaded.sha256}
-              truncated={loaded.truncated}
-              api={editor.api}
-              drafts={editor.drafts}
-              reviews={editor.reviews}
-              onSaved={editor.saved}
-              onReload={editor.reread}
-            />
+          {editor && isNotebook(path) ? (
+            <Suspense fallback={<EditorFallback />}>
+              <NotebookView
+                path={path}
+                text={loaded.text}
+                sha256={loaded.sha256}
+                truncated={loaded.truncated}
+                files={editor.api}
+                drafts={editor.drafts}
+                reviews={editor.reviews}
+                kernel={editor.kernel}
+                onSaved={editor.saved}
+                onReload={editor.reread}
+              />
+            </Suspense>
+          ) : editor && isTextPreview(previewOf(path)) ? (
+            <>
+              <FileEditor
+                path={path}
+                text={loaded.text}
+                sha256={loaded.sha256}
+                truncated={loaded.truncated}
+                api={editor.api}
+                drafts={editor.drafts}
+                reviews={editor.reviews}
+                onSaved={editor.saved}
+                onReload={editor.reread}
+              />
+              {isPython(path) && editor.kernel && (
+                <Suspense fallback={null}>
+                  <PythonRunPane path={path} drafts={editor.drafts} kernel={editor.kernel} />
+                </Suspense>
+              )}
+            </>
           ) : (
             <TextView text={loaded.text} preview={previewOf(path)} />
           )}
@@ -230,6 +268,7 @@ export function FileTabContent({
   onGone,
   drafts,
   reviews,
+  kernel,
 }: {
   readonly path: string;
   readonly api: FilesApi;
@@ -241,9 +280,11 @@ export function FileTabContent({
   /** The file editor's state (KOBE-463); without it, text is shown read-only. */
   readonly drafts?: EditDraftStore | undefined;
   readonly reviews?: FileReviewStore | undefined;
+  /** The conversation's kernel (KOBE-465); without it, notebooks and `.py` files do not run. */
+  readonly kernel?: KernelWiring | undefined;
 }) {
   const { loaded, reread, saved } = useFilePreview(api, path, reload, onGone);
-  const editor = drafts && reviews ? { api, drafts, reviews, saved, reread } : undefined;
+  const editor = drafts && reviews ? { api, drafts, reviews, saved, reread, kernel } : undefined;
   const [downloadError, setDownloadError] = useState<ApiError | null>(null);
   const name = fileName(path);
   const download = async () => {

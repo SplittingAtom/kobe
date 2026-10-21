@@ -27,14 +27,14 @@ const DISCARD_PROMPT = (name: string) => `Discard your unsaved changes to ${name
 
 type Mode = "rendered" | "raw";
 
-const BUTTON = "hover:bg-muted rounded-md border px-2 py-0.5 text-xs disabled:opacity-50";
+export const BUTTON = "hover:bg-muted rounded-md border px-2 py-0.5 text-xs disabled:opacity-50";
 
 /** The editor's saved version: the server's, else computed from what was saved. */
 async function savedVersion(text: string, sha256: string | undefined): Promise<string> {
   return sha256 ?? sha256Hex(new TextEncoder().encode(text));
 }
 
-function useDraft(drafts: EditDraftStore, path: string) {
+export function useDraft(drafts: EditDraftStore, path: string) {
   return useSyncExternalStore(
     drafts.subscribe,
     () => drafts.get(path),
@@ -42,7 +42,7 @@ function useDraft(drafts: EditDraftStore, path: string) {
   );
 }
 
-function useReview(reviews: FileReviewStore, path: string) {
+export function useReview(reviews: FileReviewStore, path: string) {
   return useSyncExternalStore(
     reviews.subscribe,
     () => reviews.reviewOf(path),
@@ -87,12 +87,16 @@ export interface FileEditorProps {
   onReload(): void;
 }
 
-type SaveState =
+export type SaveState =
   | { readonly status: "idle" | "saving" | "saved" | "conflict" }
   | { readonly status: "error"; readonly error: ApiError };
 
 /** One save at a version; reports conflicts and errors, and the new version on success. */
-function useSave(api: FilesApi, path: string, onSaved: (text: string, sha256: string) => void) {
+export function useSave(
+  api: FilesApi,
+  path: string,
+  onSaved: (text: string, sha256: string) => void,
+) {
   const [state, setState] = useState<SaveState>({ status: "idle" });
   const save = async (base: string, text: string): Promise<boolean> => {
     setState({ status: "saving" });
@@ -112,7 +116,7 @@ function useSave(api: FilesApi, path: string, onSaved: (text: string, sha256: st
   return { state, save, reset: () => setState({ status: "idle" }) };
 }
 
-function SaveNotices({ state, onReload }: { readonly state: SaveState; onReload(): void }) {
+export function SaveNotices({ state, onReload }: { readonly state: SaveState; onReload(): void }) {
   if (state.status === "error") return <ErrorNotice error={state.error} />;
   if (state.status !== "conflict") return null;
   return (
@@ -125,7 +129,7 @@ function SaveNotices({ state, onReload }: { readonly state: SaveState; onReload(
   );
 }
 
-function EditorFallback() {
+export function EditorFallback() {
   return <p role="status">Loading the editor…</p>;
 }
 
