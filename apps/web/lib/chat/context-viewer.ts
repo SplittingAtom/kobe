@@ -262,16 +262,54 @@ export function buildRows(sections: readonly ContextSection[]): {
 /** At most this many matches are listed. */
 export const MAX_MATCHES = 10_000;
 
+/** `query` as a case-insensitive literal pattern (matched on the original text); null when blank. */
+export function searchPattern(query: string): RegExp | null {
+  const q = query.trim();
+  if (q === "") return null;
+  return new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+}
+
 /** The text rows that contain `query`, ignoring case (a match across a wrap is not found). */
 export function findMatches(rows: readonly TextRow[], query: string): number[] {
-  const q = query.trim().toLowerCase();
-  if (q === "") return [];
+  const pattern = searchPattern(query);
+  if (pattern === null) return [];
   const found: number[] = [];
   for (let i = 0; i < rows.length && found.length < MAX_MATCHES; i++) {
     const row = rows[i];
-    if (row?.type === "line" && row.text.toLowerCase().includes(q)) found.push(i);
+    pattern.lastIndex = 0;
+    if (row?.type === "line" && pattern.test(row.text)) found.push(i);
   }
   return found;
+}
+
+export interface TextPart {
+  readonly text: string;
+  readonly hit: boolean;
+}
+
+/**
+ * `text` cut into its matches of `query` and the rest, on the original string (lower-casing can
+ * change a string's length, e.g. "İ", so offsets from a lower-cased copy would misalign).
+ */
+export function splitMatches(text: string, query: string): TextPart[] {
+  const pattern = searchPattern(query);
+  if (pattern === null) return [{ text, hit: false }];
+  const parts: TextPart[] = [];
+  let at = 0;
+  for (const m of text.matchAll(pattern)) {
+    if (m.index > at) parts.push({ text: text.slice(at, m.index), hit: false });
+    parts.push({ text: m[0], hit: true });
+    at = m.index + m[0].length;
+  }
+  if (at < text.length || parts.length === 0) parts.push({ text: text.slice(at), hit: false });
+  return parts;
+}
+
+/** Only the thread's owner may open the viewer (CV2): unknown until its summary has loaded. */
+export function mayOpenContext(
+  summary: { readonly readOnly?: boolean } | null | undefined,
+): boolean {
+  return summary != null && summary.readOnly !== true;
 }
 
 /** Rows rendered above and below the viewport. */

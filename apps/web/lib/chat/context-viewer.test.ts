@@ -4,6 +4,8 @@ import {
   buildRows,
   findMatches,
   formatShare,
+  mayOpenContext,
+  splitMatches,
   gaugeModel,
   nextWakeDelay,
   readThreadContext,
@@ -198,5 +200,38 @@ describe("formatShare and approximateNotice", () => {
     ).toBe(
       "Approximate — the sandbox restarted since the last model call. May lack: memory, older history.",
     );
+  });
+});
+
+describe("splitMatches", () => {
+  it("marks matches on the original text, also where lower-casing changes the length", () => {
+    // "İ".toLowerCase() is two code units: offsets from a lower-cased copy would shift.
+    expect(splitMatches("İİ abc ABC", "abc")).toEqual([
+      { text: "İİ ", hit: false },
+      { text: "abc", hit: true },
+      { text: " ", hit: false },
+      { text: "ABC", hit: true },
+    ]);
+    expect(splitMatches("a.b axb", ".")).toEqual([
+      { text: "a", hit: false },
+      { text: ".", hit: true },
+      { text: "b axb", hit: false },
+    ]);
+    expect(splitMatches("plain", "  ")).toEqual([{ text: "plain", hit: false }]);
+  });
+
+  it("finds regex characters literally", () => {
+    const { rows } = buildRows([section("user_message", 1, "a(b\nab")]);
+    expect(findMatches(rows, "a(b")).toEqual([1]);
+  });
+});
+
+describe("mayOpenContext", () => {
+  it("is false until the summary has loaded and for a shared reader", () => {
+    expect(mayOpenContext(null)).toBe(false);
+    expect(mayOpenContext(undefined)).toBe(false);
+    expect(mayOpenContext({ readOnly: true })).toBe(false);
+    expect(mayOpenContext({ readOnly: false })).toBe(true);
+    expect(mayOpenContext({})).toBe(true);
   });
 });

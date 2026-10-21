@@ -248,6 +248,8 @@ export function ContextViewerHost({ children }: { readonly children: ReactNode }
     [threadId],
   );
   const close = useCallback(() => setOpen(null), []);
+  // Another thread on screen closes it: coming back does not reopen it.
+  if (open !== null && open.threadId !== threadId) setOpen(null);
   return (
     <OpenViewerContext.Provider value={threadId === null ? null : show}>
       {children}

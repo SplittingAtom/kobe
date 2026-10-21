@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { contextOf, section } from "../../lib/chat/testing/context-fixtures";
@@ -130,6 +130,44 @@ describe("context viewer", () => {
     await user.clear(within(dialog).getByRole("searchbox", { name: "Search the context" }));
     await user.type(within(dialog).getByRole("searchbox", { name: "Search the context" }), "zzz");
     await within(dialog).findByText("No matches");
+  });
+
+  it("scrolls back to a lone match on Next after the reader scrolled away", async () => {
+    const t = thread();
+    const filler = Array.from({ length: 300 }, (_, i) => section("user_message", 1, `line ${i}`));
+    const sections = [...SECTIONS, ...filler, section("tool_result", 1, "the needle")];
+    fake.threadContext.set(t, [{ status: 200, body: contextOf(sections, { thread_id: t }) }]);
+    const { dialog } = await openViewer(t);
+    const user = userEvent.setup();
+    await user.type(
+      within(dialog).getByRole("searchbox", { name: "Search the context" }),
+      "needle",
+    );
+    await within(dialog).findByText("1 of 1");
+    const text = within(dialog).getByRole("region", { name: "Context text" });
+    await waitFor(() => expect(text.scrollTop).toBeGreaterThan(0));
+    text.scrollTop = 0;
+    fireEvent.scroll(text);
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(text.scrollTop).toBeGreaterThan(0));
+    await within(text).findByText("needle");
+  });
+
+  it("starts the matches over when a Refresh brings fewer (never past the last)", async () => {
+    const t = thread();
+    const three = [...SECTIONS, section("other", 1, "hello again")];
+    fake.threadContext.set(t, [
+      { status: 200, body: contextOf(three, { thread_id: t }) },
+      { status: 200, body: contextOf([section("user_message", 5, "hello")], { thread_id: t }) },
+    ]);
+    const { dialog } = await openViewer(t);
+    const user = userEvent.setup();
+    await user.type(within(dialog).getByRole("searchbox", { name: "Search the context" }), "hello");
+    await within(dialog).findByText("1 of 3");
+    await user.keyboard("{Enter}{Enter}");
+    await within(dialog).findByText("3 of 3");
+    await user.click(within(dialog).getByRole("button", { name: "Refresh the context" }));
+    await within(dialog).findByText("1 of 1");
   });
 
   it("shows waking progress, asks again after the server's hint, then shows the context", async () => {

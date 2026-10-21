@@ -12,6 +12,7 @@ import {
   type ContextSize,
   type GaugeReading,
 } from "../../lib/chat/context-usage";
+import { mayOpenContext } from "../../lib/chat/context-viewer";
 import { initialThreadState } from "../../lib/chat/thread-state";
 import { useKobeExtras } from "../chat/kobe-runtime";
 import { useThreadUsageRead } from "../chat/message-footer";
@@ -159,7 +160,7 @@ export function ThreadContextGauge({
   const window = scale?.contextWindow ?? null;
   if (size === null) return null;
   // Owner only (CV2, KOBE-471): a shared reader's gauge offers nothing.
-  const owner = openViewer !== null && state.summary?.readOnly !== true;
+  const owner = openViewer !== null && mayOpenContext(state.summary);
   const counter = counterOf(models, size);
   const counterIsScale =
     counter === null || (typeof counter === "string" ? counter === alias : counter === scale);

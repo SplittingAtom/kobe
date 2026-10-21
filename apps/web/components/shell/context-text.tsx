@@ -17,6 +17,7 @@ import {
   SECTION_LABELS,
   buildRows,
   findMatches,
+  splitMatches,
   visibleRange,
 } from "../../lib/chat/context-viewer";
 import styles from "./context-viewer.module.css";
@@ -39,19 +40,11 @@ function labelOf(s: ContextSection): string {
   return parts.join(" · ");
 }
 
-/** The line with each match of `q` (lower case) marked; plain text only. */
-function highlighted(text: string, q: string): ReactNode {
-  if (q === "") return text;
-  const lower = text.toLowerCase();
-  const out: ReactNode[] = [];
-  let at = 0;
-  for (let hit = lower.indexOf(q); hit !== -1; hit = lower.indexOf(q, at)) {
-    if (hit > at) out.push(text.slice(at, hit));
-    out.push(<mark key={hit}>{text.slice(hit, hit + q.length)}</mark>);
-    at = hit + q.length;
-  }
-  if (at < text.length) out.push(text.slice(at));
-  return out;
+/** The line with each match of `query` marked; plain text only. */
+function highlighted(text: string, query: string): ReactNode {
+  return splitMatches(text, query).map((part, i) =>
+    part.hit ? <mark key={i}>{part.text}</mark> : part.text,
+  );
 }
 
 /**
@@ -75,7 +68,16 @@ export function ContextText({
   const [active, setActive] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const [current, setCurrent] = useState(0);
+  // Each step bumps it, so stepping to the same match (the only one) scrolls to it again.
+  const [stepSeq, setStepSeq] = useState(0);
   const matches = useMemo(() => findMatches(rows, query), [rows, query]);
+  // New matches (another query, or a Refresh's text) start again at the first.
+  const [seenMatches, setSeenMatches] = useState(matches);
+  if (seenMatches !== matches) {
+    setSeenMatches(matches);
+    setCurrent(0);
+  }
+  const at = matches.length === 0 ? 0 : Math.min(current, matches.length - 1);
 
   useEffect(() => {
     const el = pane.current;
@@ -111,13 +113,15 @@ export function ContextText({
   );
 
   // The current match is brought into view, a third down from the top.
-  const currentRow = matches[current];
+  const currentRow = matches[at];
   useEffect(() => {
     if (currentRow !== undefined) scrollToRow(currentRow, viewportRef.current / 3);
-  }, [currentRow, scrollToRow]);
+  }, [currentRow, stepSeq, scrollToRow]);
 
   const step = (by: number) => {
-    if (matches.length > 0) setCurrent((c) => (c + by + matches.length) % matches.length);
+    if (matches.length === 0) return;
+    setCurrent((at + by + matches.length) % matches.length);
+    setStepSeq((n) => n + 1);
   };
   const onSearchKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== "Enter") return;
@@ -126,7 +130,7 @@ export function ContextText({
   };
 
   const [start, end] = visibleRange({ scrollTop, viewport, rowPx: ROW_PX, count: rows.length });
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
   return (
     <div className={styles.textColumn}>
       <div className={styles.search} role="search">
@@ -145,7 +149,7 @@ export function ContextText({
         {q !== "" && (
           <>
             <span className={styles.matches} role="status">
-              {matches.length === 0 ? "No matches" : `${current + 1} of ${matches.length}`}
+              {matches.length === 0 ? "No matches" : `${at + 1} of ${matches.length}`}
             </span>
             <button
               type="button"
@@ -199,7 +203,7 @@ export function ContextText({
                 data-current={i === currentRow || undefined}
                 style={{ top: i * ROW_PX }}
               >
-                {highlighted(row.text, q)}
+                {highlighted(row.text, query)}
               </div>
             );
           })}
