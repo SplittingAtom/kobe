@@ -60,8 +60,12 @@ reads the sender's own synced copy (the sender is the thread's owner, whose sand
 keeps `{path, sha256, size, content?, truncated}` on the run (`runs.viewing`, server-written,
 never in the message text, events or history). `content` is the first 32 KiB as text (valid
 UTF-8 without NUL, a character split by the cut is dropped); a binary file has no content. An
-agent-internal, missing or unreadable file adds nothing and the message still goes. A retry
-sends what the original had. `run.start.viewing` carries it only to agents with the `file_edits`
+agent-internal, missing or unreadable file adds nothing and the message still goes. The file is
+read only after the server has checked the sender owns the thread. When the run ends (any
+terminal state) the server clears the text and keeps only `{path, sha256}` for the record, so a
+copy of the file never outlives the run, its event compaction or the file's deletion. A retry
+reads the original's path again from the owner's workspace (current content, or nothing if the
+file is gone). `run.start.viewing` carries it only to agents with the `file_edits`
 capability; the agent puts it in **that run's system prompt only**, through the per-run memory
 file (never the launch or the session), fenced between `<<<BEGIN VIEWED FILE nonce>>>` markers
 with a random per-run nonce, verbatim inside (so proposals are not built on sanitised text), and
@@ -84,7 +88,15 @@ to the viewed file rather than change it with write, edit or bash, and that noth
 reload with `GET /v1/threads/{id}/file-edit-proposals` (the thread owner only; others 404),
 oldest first, newest 200. The web builds the diff from this, never from the tool result the
 sandbox relays. Run events are compacted 7 days after a run ended (D18), and its proposals with
-them: the card then says the proposal expired; the tool call input stays in the history.
+them (Chris, 2026-10-21: accepted): the card then says the proposal expired; the tool call input
+stays in the history.
+
+Who sees a proposal's content: everyone who may stream the thread's run events
+(`GET /v1/runs/{id}/events`, `canWatchThread`): the owner, and once the owner shares the thread,
+the team (shared to the team) or the project's members (shared to its project). They see the same
+content in the `propose_file_edit` tool call's input and in the thread's history, so the event
+discloses nothing more; this is intended (a shared thread is shared whole). The list route is
+owner-only because only the owner can commit a proposal to their workspace.
 
 **FE10. Committing a proposal.** The web applies the accepted changes to the base content and
 saves with `base_sha256` = the proposal's base. A 409 means the file moved on since the proposal:

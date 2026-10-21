@@ -22,7 +22,8 @@
   `workspace-files/upload.ts` (now takes a write function: copy for uploads, put for saves).
 - Team quota judged on the size change (`teamStorageAllows`, shrinking always passes).
 - Viewing is read **at submit** (what the member saw), kept on the run (`runs.viewing`, never in
-  the message text or events), re-sent by a retry. 32 KiB, text only. Missing/internal: no note.
+  the message text or events). 32 KiB, text only. Missing/internal: no note. Read only after
+  the ownership check; text cleared at run end (path + sha256 kept); a retry reads the path again.
 - In the prompt: verbatim text between nonce markers (`<<<BEGIN VIEWED FILE n>>>`), not the memory
   sanitiser (it would make proposals rewrite characters). Rides the per-run memory file.
 - `propose_file_edit` is risk `read` (writes nothing): no ask-on-write prompt; deny/ask rules and
