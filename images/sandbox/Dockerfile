@@ -110,6 +110,11 @@ ENV KOBE_EXEC_EXTENSION=/opt/kobe/pi-extensions/kobe-exec/index.js
 # token file into HTTPS_PROXY for each bash tool call. Root-owned and read-only: it runs in every
 # tool's shell, so sandbox code must not be able to change it.
 COPY images/sandbox/egress-env.sh /opt/kobe/egress-env.sh
+# Notebooks (KOBE-464, docs/specs/notebooks.md NB10): the bridge the agent starts per thread kernel,
+# under the kernel's own uid, over stdio. Root-owned and read-only like the extensions; it starts
+# ipykernel with the ZeroMQ ipc transport (unix sockets in a private directory, no TCP port).
+COPY images/sandbox/kernel/kobe-kernel-bridge.py /opt/kobe/kernel/kobe-kernel-bridge.py
+ENV KOBE_KERNEL_BRIDGE=/opt/kobe/kernel/kobe-kernel-bridge.py
 # The former built-in gallery skills (KOBE-88) are Kobe-published catalog skills (KOBE-317): the
 # server ships them (services/server/builtin-skills) and each run fetches them as skill bundles,
 # so the image carries none. Their helper scripts run on the Python stack above.
@@ -145,6 +150,8 @@ RUN groupadd --gid 1000 kobe \
  && chown 1000:1001 /run/kobe-agent && chmod 0700 /run/kobe-agent \
  && chmod 0555 /opt/kobe/entrypoint.sh \
  && chown 0:0 /opt/kobe/egress-env.sh && chmod 0444 /opt/kobe/egress-env.sh \
+ && chown -R 0:0 /opt/kobe/kernel && chmod 0444 /opt/kobe/kernel/kobe-kernel-bridge.py \
+ && chmod 0555 /opt/kobe/kernel \
  && chown -R 0:0 /opt/kobe/pi-extensions \
  && chmod 0444 /opt/kobe/pi-extensions/kobe-policy/*.js /opt/kobe/pi-extensions/kobe-models/*.js /opt/kobe/pi-extensions/kobe-tools/*.js /opt/kobe/pi-extensions/kobe-exec/*.js \
  && chmod 0555 /opt/kobe/pi-extensions /opt/kobe/pi-extensions/kobe-policy /opt/kobe/pi-extensions/kobe-models /opt/kobe/pi-extensions/kobe-tools /opt/kobe/pi-extensions/kobe-exec \

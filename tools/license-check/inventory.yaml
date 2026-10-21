@@ -249,6 +249,18 @@ sections:
           FreeType (FTL, BSD-style), libjpeg-turbo (IJG), libpng, libtiff, libwebp, lcms2,
           harfbuzz, zstd, brotli, libavif, openjpeg, xz and libxcb (permissive); pyarrow bundles
           Apache Arrow's C++ libraries (Apache-2.0, NOTICE included in NOTICE).
+      - id: pyzmq-native-libs
+        component: Native libraries bundled in the pyzmq wheel (pyzmq.libs)
+        version: libzmq 4.3.5 and libsodium (libsodium.so.26), as shipped in pyzmq 27.2.0
+        license: MPL-2.0 AND ISC
+        use: linked (by pyzmq, the notebook kernel's transport)
+        where: sandbox image
+        link: https://github.com/zeromq/pyzmq/blob/main/LICENSE.md
+        images: []
+        reason: >-
+          KOBE-464 notebooks: jupyter_client and ipykernel talk over ZeroMQ (ipc transport, unix
+          sockets only). pyzmq bundles libzmq (MPL-2.0) and libsodium (ISC); both are in the
+          allowed family.
 
   - id: chart
     title: Chart and cluster components

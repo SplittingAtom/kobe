@@ -224,6 +224,48 @@ check "agent accepts the baked egress script" '^ok$' run node --input-type=modul
 check "a tool shell gets HTTPS_PROXY from the token file through BASH_ENV (KOBE-39)" \
   '^http://9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d:image.token-1@egress-proxy.kobe.internal:80$' run sh -c \
   'printf "image.token-1\n" > /tmp/egress-token && env -i PATH=/usr/bin:/bin BASH_ENV=/opt/kobe/egress-env.sh KOBE_EGRESS_TOKEN_FILE=/tmp/egress-token KOBE_EGRESS_PROXY=http://egress-proxy.kobe.internal:80 KOBE_THREAD_ID=9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d bash -c '"'"'printf "%s\n" "$HTTPS_PROXY"'"'"' < /dev/null'
+# Notebooks (KOBE-464, docs/specs/notebooks.md NB10): the per-thread kernel and its bridge.
+check "notebook stack imports; no debugger in the image (debugpy absent)" '^ok$' run python3 -c \
+  'import ipykernel, jupyter_client, nbformat, zmq, importlib.util as u; print("ok" if u.find_spec("debugpy") is None else "debugpy present")'
+check "kernel bridge: root-owned, read-only (KOBE-464)" '^0:0 444 0:0 555$' run sh -c \
+  'echo $(stat -c "%u:%g %a" /opt/kobe/kernel/kobe-kernel-bridge.py /opt/kobe/kernel)'
+check "the image turns kernels on (KOBE_KERNEL_BRIDGE names the baked bridge)" '^/opt/kobe/kernel/kobe-kernel-bridge.py$' run sh -c 'echo $KOBE_KERNEL_BRIDGE'
+check "agent accepts the baked kernel bridge" '^ok$' run node --input-type=module -e \
+  'import { checkExtensionFile as c } from "/opt/kobe/sandbox-agent/dist/policy/extension-file.js"; await c(process.env.KOBE_KERNEL_BRIDGE, "kernel-bridge"); console.log("ok")'
+# Drives the bridge like the agent does (stdio JSON lines): 1+1, state kept, a matplotlib PNG, and
+# no TCP listener in the container while the kernel runs. Args: the command that starts the bridge.
+KERNEL_PROBE=$(cat <<'PY'
+import json, subprocess, sys
+p = subprocess.Popen(sys.argv[1:], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, cwd="/workspace")
+def read():
+    line = p.stdout.readline()
+    return json.loads(line) if line else {"ev": "eof"}
+first = read()
+if first["ev"] != "ready":
+    sys.exit("bridge: %s" % first)
+def run(code, i):
+    p.stdin.write(json.dumps({"op": "execute", "id": i, "code": code}) + "\n")
+    p.stdin.flush()
+    outs = []
+    while True:
+        m = read()
+        if m["ev"] == "output":
+            outs.append(m["output"])
+        elif m["ev"] in ("done", "died", "fatal", "eof"):
+            return m, outs
+_, o1 = run("x = 1\n1+1", "a")
+_, o2 = run("x + 2", "b")
+listeners = sum(1 for f in ("/proc/net/tcp", "/proc/net/tcp6") for l in open(f).read().splitlines()[1:] if l.split()[3] == "0A")
+_, o3 = run("import matplotlib.pyplot as plt\nplt.plot([1, 2])\nplt.show()", "c")
+png = sum(1 for o in o3 if "image/png" in o.get("data", {}))
+p.stdin.write('{"op": "shutdown"}\n')
+p.stdin.flush()
+p.wait(timeout=30)
+print("ok", o1[-1]["data"]["text/plain"], o2[-1]["data"]["text/plain"], "listeners=%d" % listeners, "png=%d" % png)
+PY
+)
+check "a kernel runs 1+1 over the bridge, keeps state, draws PNG, opens no TCP port (KOBE-464)" '^ok 2 3 listeners=0 png=1$' \
+  run_ws python3 -c "$KERNEL_PROBE" /usr/local/bin/python3 /opt/kobe/kernel/kobe-kernel-bridge.py
 # KOBE-317: the former built-in skills are catalog skills the server ships; the image bakes none.
 check "no skills baked into the image (they arrive as bundles)" '^none$' run sh -c \
   '[ -e /opt/kobe/skills ] && echo baked || echo none'
@@ -339,6 +381,8 @@ check "git trusts repositories owned by another uid under /workspace only (syste
    $R 3000 git -C /workspace/a/b status >/dev/null 2>&1 && printf 'trusted ' || printf 'bad-workspace ';
    $R 3000 git -C /tmp/r status >/dev/null 2>&1 && printf 'bad-tmp ' || printf 'untrusted ';
    stat -c '%U:%G' /etc/gitconfig"
+check "a kernel runs as a partner uid through kobe-runas (KOBE-464)" '^ok 2 3 listeners=0 png=1$' run_pair_ws \
+  python3 -c "$KERNEL_PROBE" $R 3000 /usr/local/bin/python3 /opt/kobe/kernel/kobe-kernel-bridge.py
 # Fail closed: an agent asked for Pi identities (KOBE_PI_RUNAS) that cannot switch uids (here: no
 # capabilities, no_new_privs) refuses to start rather than run Pi as itself.
 check "the agent refuses to start when it cannot run Pi under its own uid" 'cannot start processes as a Pi identity' host sh -c \
