@@ -74,17 +74,17 @@ test("file editor: raw edit and save, conflict notice, viewing chip, proposal co
     await tree.getByRole("treeitem", { name: "notes.md", exact: true }).click();
     const tab = page
       .getByRole("tabpanel")
-      .filter({ has: page.getByRole("button", { name: "Raw" }) });
+      .filter({ has: page.getByRole("button", { name: "Raw", exact: true }) });
     await expect(tab.getByText("beta")).toBeVisible();
 
     // Raw: edit and save at the loaded version.
-    await tab.getByRole("button", { name: "Raw" }).click();
+    await tab.getByRole("button", { name: "Raw", exact: true }).click();
     const editor = page.getByLabel("Edit notes.md");
     await editor.click();
     await page.keyboard.press("ControlOrMeta+End");
     await page.keyboard.type("edited in raw\n");
     await expect(tab.getByText("Unsaved changes.")).toBeVisible();
-    await tab.getByRole("button", { name: "Save" }).click();
+    await tab.getByRole("button", { name: "Save", exact: true }).click();
     await expect(tab.getByText("Saved.")).toBeVisible();
     expect((await workspace(page, "read", path)).text).toBe(`${BASE}edited in raw\n`);
 
@@ -93,7 +93,7 @@ test("file editor: raw edit and save, conflict notice, viewing chip, proposal co
     await page.keyboard.press("ControlOrMeta+End");
     await page.keyboard.type("never saved\n");
     expect((await workspace(page, "overwrite", path, BASE)).status).toBe(200);
-    await tab.getByRole("button", { name: "Save" }).click();
+    await tab.getByRole("button", { name: "Save", exact: true }).click();
     const conflict = tab.getByRole("alert").filter({ hasText: "changed since it was opened" });
     await expect(conflict).toBeVisible();
     expect((await workspace(page, "read", path)).text).toBe(BASE);
@@ -129,7 +129,7 @@ test("file editor: raw edit and save, conflict notice, viewing chip, proposal co
     await expect(
       review.getByText("0 changes to accept or reject.", { exact: false }),
     ).toBeVisible();
-    await review.getByRole("button", { name: "Commit all" }).click();
+    await review.getByRole("button", { name: "Commit all", exact: true }).click();
     await expect(card).toContainText("Committed");
     expect((await workspace(page, "read", path)).text).toBe("alpha\nBETA\ngamma\n");
   } finally {
