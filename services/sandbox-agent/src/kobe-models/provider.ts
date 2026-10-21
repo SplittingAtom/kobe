@@ -74,6 +74,16 @@ export interface KobeProviderDeps {
   readonly sleep?: (ms: number, signal: AbortSignal | undefined) => Promise<void>;
   readonly now?: () => number;
   readonly warn?: (message: string) => void;
+  /**
+   * Told once per call after it ended (answered, failed or aborted), with the context Pi handed the
+   * provider: the context viewer's capture (KOBE-470, context-capture.ts).
+   */
+  readonly onCallEnded?: (
+    model: Model,
+    context: unknown,
+    options: StreamOptions | undefined,
+    result: AssistantMessage,
+  ) => void;
 }
 
 function defaultSleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
@@ -201,10 +211,18 @@ export function createKobeProvider(deps: KobeProviderDeps): Provider {
     ): AssistantMessageEventStream => {
       const out = deps.pi.createAssistantMessageEventStream();
       // Whatever happens, the stream ends: a hung stream would stall the run for good.
-      pump(run, model, context, options, out).catch((error: unknown) => {
-        deps.warn?.(`kobe-models: model request failed: ${(error as Error).message}`);
-        fail(out, model, kobeErrorMessage("model_error", NO_FAILURE, 1));
-      });
+      pump(run, model, context, options, out)
+        .catch((error: unknown) => {
+          deps.warn?.(`kobe-models: model request failed: ${(error as Error).message}`);
+          fail(out, model, kobeErrorMessage("model_error", NO_FAILURE, 1));
+        })
+        .then(async () => {
+          if (deps.onCallEnded === undefined) return;
+          deps.onCallEnded(model, context, options, await out.result());
+        })
+        .catch((error: unknown) => {
+          deps.warn?.(`kobe-models: context not recorded: ${(error as Error).message}`);
+        });
       return out;
     };
   }

@@ -7,6 +7,7 @@ import { EGRESS_TOKEN_FILE_NAME, isEgressTemp } from "../egress/egress-wiring.js
 import { MEMORY_FILE_NAME, isMemoryTemp } from "../memory/context-file.js";
 import { SYSTEM_PROMPT_FILE_NAME } from "../pi/system-prompt-file.js";
 import type { PiIdentities } from "../pi/identities.js";
+import { CONTEXT_FILE_NAME, isContextTemp } from "../kobe-models/context-capture.js";
 
 /**
  * The per-process runtime directories (threads/thread.ts): `<runtimeDir>/pi-XXXXXX/` with `agent/`
@@ -92,6 +93,9 @@ export async function unexpectedEntries(
       ? "dir"
       : PI_OWN_FILES.has(name) ||
           name in GUARDED_CONFIG ||
+          // kobe-models' record of the latest model call (KOBE-470), written by Pi itself.
+          name === CONTEXT_FILE_NAME ||
+          isContextTemp(name) ||
           extraAgentFiles.has(name) ||
           [...extraAgentFiles].some((base) => isTempOf(base, name))
         ? "file"

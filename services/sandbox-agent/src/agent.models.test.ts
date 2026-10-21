@@ -80,6 +80,8 @@ describe("model wiring (KOBE-41)", () => {
       launch.argv.slice(launch.argv.indexOf("--model"), launch.argv.indexOf("--model") + 2),
     ).toEqual(["--model", "kobe/openai/gpt-fake"]);
     expect(launch.env.filter((k) => k.startsWith("KOBE_"))).toEqual([
+      // The context viewer's capture (KOBE-470), in the dir Pi writes.
+      "KOBE_CONTEXT_FILE",
       "KOBE_MODEL_FILE",
       "KOBE_POLICY_FD",
       "KOBE_TOOL_HOME",

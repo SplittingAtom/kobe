@@ -37,6 +37,8 @@ import {
 } from "./compact.js";
 import { Thread, type ThreadEnv, type ThreadHooks } from "./thread.js";
 import type { RunModel } from "../models/types.js";
+import { fromCapture, fromSession, readCapture } from "../context/assemble.js";
+import { replaySession } from "../context/session-replay.js";
 
 type Frame<T extends ServerToSandboxFrame["type"]> = Extract<ServerToSandboxFrame, { type: T }>;
 
@@ -459,6 +461,31 @@ export class ThreadManager {
       return response.success ? ok(response.data) : fail("pi_rejected", response.error);
     } catch (error) {
       return piFailure(error);
+    }
+  }
+
+  /**
+   * `thread.context` (KOBE-470, docs/specs/context-viewer.md): the latest model call's context,
+   * from what this thread's Pi recorded, else rebuilt from its session file. Read only: no Pi is
+   * started and nothing is written. Refused while the session is being restored or compacted.
+   */
+  context(frame: Frame<"thread.context">): Promise<CommandOutcome> {
+    return this.#claimed(frame.thread_id, (thread) => this.#context(thread, frame));
+  }
+
+  async #context(thread: Thread, frame: Frame<"thread.context">): Promise<CommandOutcome> {
+    if (thread.restoring) return fail("pi_rejected", "session restore in progress");
+    if (thread.compacting) return fail("pi_rejected", "the thread is compacting");
+    const file = thread.contextFile;
+    const capture = file === undefined ? undefined : await readCapture(file);
+    if (capture !== undefined) {
+      return ok(fromCapture(capture, thread.promptParts, frame.max_bytes));
+    }
+    try {
+      const call = await replaySession(this.#sessionFile(thread.id));
+      return ok(fromSession(call, null, frame.max_bytes));
+    } catch (error) {
+      return fail("internal", `the session could not be read: ${(error as Error).message}`);
     }
   }
 

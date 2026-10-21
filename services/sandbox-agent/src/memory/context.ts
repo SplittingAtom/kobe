@@ -29,7 +29,9 @@ import { viewingContextText } from "./viewing-context.js";
 export const INDEX_MAX_BYTES = 12 * 1024;
 const SCOPE_ORDER: readonly MemoryScope[] = ["user", "project"];
 
-const HEADER = "## Saved memory";
+/** The memory section's first line (the context viewer finds the section by it, KOBE-470). */
+export const MEMORY_HEADER = "## Saved memory";
+const HEADER = MEMORY_HEADER;
 const USAGE =
   "Use the recall tool to read a topic file or search memory, and the remember tool to save something worth keeping.";
 

@@ -26,6 +26,7 @@ export class MemoryContextFile {
   readonly path: string;
   readonly #mode: number;
   #writtenText: string | undefined;
+  #written: MemoryFileContent | undefined;
   #chain: Promise<unknown> = Promise.resolve();
 
   constructor(path: string, mode = 0o600) {
@@ -43,9 +44,15 @@ export class MemoryContextFile {
     const next = this.#chain.then(async () => {
       await writeFileAtomic(this.path, text, this.#mode);
       this.#writtenText = text;
+      this.#written = content;
     });
     this.#chain = next.catch(() => undefined);
     return next;
+  }
+
+  /** What the agent last wrote (the context viewer splits the prompt by it, KOBE-470). */
+  get written(): MemoryFileContent | undefined {
+    return this.#written;
   }
 
   async verify(): Promise<boolean> {

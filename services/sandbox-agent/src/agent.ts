@@ -15,6 +15,7 @@ import {
   CAPABILITY_TRACE_SPANS,
   CAPABILITY_SKILL_EVAL,
   CAPABILITY_WORKSPACE_MOVES,
+  CAPABILITY_THREAD_CONTEXT,
   KOBE_EVENT_DROPPED_TYPE,
   type HelloAckFrame,
   type HelloFrame,
@@ -150,6 +151,7 @@ const COMMAND_FRAMES = new Set([
   "notebook.execute",
   "notebook.interrupt",
   "notebook.restart",
+  "thread.context",
 ]);
 const DRAIN_ON_FATAL_MS = 5000;
 
@@ -504,6 +506,9 @@ export class Agent {
       CAPABILITY_TRACE_SPANS,
       // Server moves replayed as local renames (KOBE-304).
       ...(this.#deps.workspace?.movedOnServer === undefined ? [] : [CAPABILITY_WORKSPACE_MOVES]),
+      // The latest model call's context for its owner (KOBE-470): read from Pi's capture or the
+      // session file, so it needs nothing but the thread's files.
+      CAPABILITY_THREAD_CONTEXT,
       // Skill eval fixtures in, workspace snapshot out (KOBE-325; sent only to eval sandboxes).
       ...(this.#deps.skillEval === undefined ? [] : [CAPABILITY_SKILL_EVAL]),
     ];
@@ -676,6 +681,8 @@ export class Agent {
       case "notebook.interrupt":
       case "notebook.restart":
         return this.#kernelCommand(frame);
+      case "thread.context":
+        return this.#threads.context(frame);
       default:
         return Promise.resolve(fail("internal", "not a command"));
     }

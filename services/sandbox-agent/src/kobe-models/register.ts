@@ -7,6 +7,7 @@ import {
 } from "./protocol.js";
 import { createKobeProvider, kobeModel, type KobeProviderDeps, type PiAiLike } from "./provider.js";
 import { takeModelFilePath } from "./state-file.js";
+import { ContextRecorder, takeContextFilePath } from "./context-capture.js";
 
 const RUN_TOKEN_WAIT_MS = 5_000;
 
@@ -111,6 +112,8 @@ export interface KobeModelsDeps {
  */
 /** Taken from the environment once per Pi process; a reload registers the same file again. */
 let modelFile: string | undefined;
+/** The context viewer's capture (KOBE-470); one recorder per Pi process, like the model file. */
+let contextRecorder: ContextRecorder | null | undefined;
 
 export async function registerKobeModels(
   api: ExtensionApiLike,
@@ -122,6 +125,12 @@ export async function registerKobeModels(
     deps.warn("kobe-models: no model file (KOBE_MODEL_FILE); no model registered");
     return;
   }
+  if (contextRecorder === undefined) {
+    const contextFile = takeContextFilePath(deps.env);
+    contextRecorder =
+      contextFile === undefined ? null : new ContextRecorder(contextFile, { warn: deps.warn });
+  }
+  const recorder = contextRecorder;
   const build = (initial: ModelFileState) =>
     createKobeProvider({
       pi: deps.pi,
@@ -130,6 +139,12 @@ export async function registerKobeModels(
       runToken: (runId) => (held?.runId === runId ? held.token : undefined),
       apis: deps.apis,
       warn: deps.warn,
+      ...(recorder === null
+        ? {}
+        : {
+            onCallEnded: (model, context, options, result) =>
+              recorder.record(model, context, options, result),
+          }),
     });
   /** The active run's gateway token, fetched once per run over Pi's RPC channel; memory only. */
   let held: { readonly runId: string; readonly token: string } | undefined;
