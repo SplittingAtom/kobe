@@ -59,6 +59,17 @@ rows, saves screenshots of the tree in light and dark (`test-results/.../files-t
 renames a file with F2, moves it by drag and drop and with Move to…, checks that a name clash is
 refused, and deletes the folder at the end. No tokens: `npx playwright test files-tree`.
 
+## File editor (KOBE-463)
+
+`file-editor.spec.ts` uploads `kobe-463-*/notes.md` into the member's workspace, opens it from the
+Files tree, edits it in Raw and saves, saves over a version that changed meanwhile (the conflict
+notice; nothing is overwritten) and reloads, checks the composer's Viewing chip, then asks the agent
+for one `propose_file_edit` call (one short turn; with `KOBE_FAKE_MODEL=1` the fake's `tool:` line),
+accepts one change and rejects the other in the inline diff and commits. It deletes the folder at
+the end. Needs the deployment's sandbox agent with `file_edits` (KOBE-462) and no `ask-all` approval
+mode for the team; run it pinned to the member's team: `KOBE_TEAM=team1 npx playwright test
+file-editor`.
+
 ## Resizable rail (KOBE-305)
 
 `rail-resize.spec.ts` drags the handle on the rail's right edge to 400 px, checks the width is
