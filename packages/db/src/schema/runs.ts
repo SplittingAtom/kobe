@@ -84,9 +84,11 @@ export function readBudgetStopScope(stored: string | null): BudgetStopScope | nu
  * What a run does (KOBE-213, CE15): answer a `message` (every run before KOBE-213), or compact the
  * thread's Pi session (`compaction`). A compaction is a run so it shares the one-active-run lock,
  * the lease, the run token, budget and usage attribution; it is never queued, retried or shown as
- * a chat turn, carries no input, and is server-only (not in `RunSnapshot`).
+ * a chat turn, carries no input, and is server-only (not in `RunSnapshot`). A `notebook` run
+ * (KOBE-464, docs/specs/notebooks.md) is the member running a notebook cell or a `.py` file in the
+ * thread's kernel: same shape as a compaction (no input, never queued), and no model.
  */
-export const RUN_KINDS = ["message", "compaction"] as const;
+export const RUN_KINDS = ["message", "compaction", "notebook"] as const;
 export type RunKind = (typeof RUN_KINDS)[number];
 
 /** Longest message a run carries (`@kobe/protocol` `submitMessageBodySchema.content`). */
@@ -137,7 +139,7 @@ export const runs = pgTable(
     id: uuid().notNull().defaultRandom(),
     threadId: uuid().notNull(),
     trigger: runTrigger().notNull(),
-    /** `message` or `compaction` (KOBE-213; `RUN_KINDS`). Rows from before it are messages. */
+    /** `message`, `compaction` (KOBE-213) or `notebook` (KOBE-464; `RUN_KINDS`). Rows from before it are messages. */
     kind: text().$type<RunKind>().notNull().default("message"),
     status: runStatus().notNull().default("queued"),
     queuePos: integer(),
