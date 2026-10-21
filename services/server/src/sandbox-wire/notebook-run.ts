@@ -101,6 +101,11 @@ async function runForAgent(
   frame: NotebookRunFrame,
 ): Promise<Answer> {
   const input = frame.input;
+  // A skill eval's sandbox (KOBE-325) never reaches the member's synced workspace (also denied
+  // by policy): only code runs there, in the eval sandbox's own kernel.
+  if (input.path !== undefined && c.target.evalThreadId !== undefined) {
+    return refused("not_allowed", "Skill evals run code only, never the member's files.");
+  }
   const path = input.path === undefined ? undefined : workspaceToolPath(input.path);
   if (input.path !== undefined && path === undefined) {
     return refused("invalid_path", "Name a file under /workspace.");

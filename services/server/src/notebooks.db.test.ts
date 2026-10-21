@@ -63,14 +63,15 @@ interface World {
   readonly token: string;
 }
 
-async function world(): Promise<World> {
+async function world(evalThread = false): Promise<World> {
   const owner = await fx.person(`u${randomBytes(2).toString("hex")}`);
   const reader = await fx.person(`r${randomBytes(2).toString("hex")}`);
   const team = await fx.team(`nb-${randomBytes(3).toString("hex")}`, owner, [reader]);
   const threadId = randomUUID();
   await fx.admin.query(
-    `INSERT INTO threads (id, team_id, owner_user_id, title) VALUES ($1, $2, $3, 'nb')`,
-    [threadId, team, owner.id],
+    `INSERT INTO threads (id, team_id, owner_user_id, title, skill_eval)
+     VALUES ($1, $2, $3, 'nb', $4)`,
+    [threadId, team, owner.id, evalThread],
   );
   const sandboxId = randomUUID();
   return {
@@ -510,6 +511,46 @@ describe("run_python (NB3, NB13)", () => {
     expect(answer).toMatchObject({ ok: true, saved: { path: "f.ipynb", sha256: saved.sha } });
     expect(sb.frames("notebook.execute")).toMatchObject([{ code: "1 + 2", run_id: runId }]);
     expect(saved.json.cells[0]).toMatchObject({ execution_count: 7 });
+  });
+
+  it("in a skill eval runs code in the eval sandbox only, never the member's files (KOBE-325)", async () => {
+    const base = await world(true);
+    const w: World = {
+      ...base,
+      token: auth.issue({
+        sandboxId: base.sandboxId,
+        teamId: base.team,
+        userId: base.owner.id,
+        evalThreadId: base.threadId,
+      }),
+    };
+    const before = await seed(w, "private.ipynb", notebook([code("c1", "secret = 1")]));
+    const sb = await connected(w, () => [result("2", 1)]);
+    const runId = await agentRun(w);
+    const request_id = `e${seq++}`;
+    const input = { path: "private.ipynb", cell_id: "c1" };
+    sb.send({
+      v: 1,
+      type: "policy.check",
+      request_id,
+      run_id: runId,
+      thread_id: w.threadId,
+      tool_call_id: "call-p",
+      tool: "run_python",
+      input,
+    });
+    const decided = await sb.until(
+      () => sb.frames("policy.result").find((r) => r.request_id === request_id),
+      3000,
+    );
+    expect(decided).toMatchObject({ decision: "deny" });
+    expect(JSON.stringify(decided)).toContain("eval_run_isolated");
+    const direct = await call(sb, w, runId, "call-p", input, false);
+    expect((direct as { error?: { code: string } }).error?.code).toBe("not_allowed");
+    expect(sb.frames("notebook.execute")).toEqual([]);
+    expect((await liveFile(w, "private.ipynb")).sha).toBe(before);
+    const ran = await call(sb, w, runId, "call-c", { code: "1 + 1" });
+    expect(ran).toMatchObject({ ok: true, status: "ok", saved: null });
   });
 
   it("needs the capability and an allowed call with the same input, taken once", async () => {
