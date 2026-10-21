@@ -25,6 +25,7 @@ import { artifactAsSheet } from "../../lib/shell/layout";
 import { cn } from "../../lib/utils";
 import type { FilesApi } from "../../lib/files/api";
 import { fileName, filePathOfTab, tabDomId } from "../../lib/files/preview";
+import { confirmDiscard, useUnsavedGuard } from "../files/file-editor";
 import { FileTabContent } from "../files/file-tab";
 import { AppFrame } from "../apps/app-frame";
 import { useAppComposer } from "../apps/use-app-composer";
@@ -212,17 +213,26 @@ function FileTab({
   path,
   id,
   shown,
+  onScreen,
   openSeq,
   filesApi,
 }: {
   readonly path: string;
   readonly id: string;
   readonly shown: boolean;
+  /** Active and visible (not hidden, not a closed sheet): the file the member is viewing. */
+  readonly onScreen: boolean;
   readonly openSeq: number | null;
   readonly filesApi: FilesApi;
 }) {
   const dropFile = useArtifactPanel()?.dropFile; // stable: the file is not read again
   const session = useChatSession();
+  // The composer's Viewing chip and the message's `viewing` (KOBE-463, FE7).
+  useEffect(() => {
+    if (!onScreen) return;
+    session.viewing.show(path);
+    return () => session.viewing.hide(path);
+  }, [onScreen, path, session]);
   const [seen, setSeen] = useState(shown);
   if (shown && !seen) setSeen(true);
   const [reload, setReload] = useState({ seq: openSeq, count: 0 });
@@ -238,6 +248,8 @@ function FileTab({
       titleId={artifactTitleId(id)}
       reload={reload.count}
       onGone={onGone}
+      drafts={session.editDrafts}
+      reviews={session.fileReviews}
     />
   );
 }
@@ -292,16 +304,22 @@ export function ArtifactPanel({
   const { sheet, modal } = useSheetLayer(ref);
   const { tabs, onTitle } = useTabTitles(panel?.tabs.open ?? []);
   const active = panel?.openId ?? null;
+  const drafts = useChatSession().editDrafts;
+  useUnsavedGuard(drafts);
   // No tabs: no column (CE6). Hidden by the member (CE23), it stays mounted (the grid hides it),
   // so every preview keeps its state.
   if (!panel || active === null) return null;
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== "Escape" || event.defaultPrevented) return;
+    // Escape in the file editor stays there: it never closes the tab being edited (KOBE-463).
+    if ((event.target as Element | null)?.closest?.("[data-kobe-code-editor]")) return;
     event.stopPropagation();
     if (sheet) {
       panel.hideSheet();
       return;
     }
+    const activePath = filePathOfTab(active);
+    if (activePath !== null && !confirmDiscard(drafts, activePath)) return;
     const last = panel.tabs.open.length === 1;
     panel.close();
     if (!last) ref.current?.focus();
@@ -326,7 +344,11 @@ export function ArtifactPanel({
             tabs={tabs}
             active={active}
             onSelect={panel.activate}
-            onClose={panel.closeTab}
+            onClose={(id) => {
+              // A file with unsaved changes asks first (KOBE-463).
+              const path = filePathOfTab(id);
+              if (path === null || confirmDiscard(drafts, path)) panel.closeTab(id);
+            }}
           />
         </div>
       </div>
@@ -356,6 +378,7 @@ export function ArtifactPanel({
                 path={path}
                 id={id}
                 shown={id === active}
+                onScreen={id === active && !panel.hidden && (!sheet || panel.sheetOpen)}
                 openSeq={request?.id === id ? request.seq : null}
                 filesApi={filesApi}
               />

@@ -223,6 +223,26 @@ describe("status tokens (KOBE-301)", () => {
     });
   }
 
+  for (const [name, theme] of [
+    ["light", light],
+    ["dark", dark],
+  ] as const) {
+    it(`the file editor's diff keeps text readable on green and red, and its marks AA (${name}, KOBE-463)`, () => {
+      for (const kind of ["added", "deleted"] as const) {
+        const tint = resolve(theme, `--kobe-diff-${kind}-bg`);
+        expect(contrast(resolve(theme, "--foreground"), tint), `text on ${kind}`).toBeGreaterThan(
+          4.5,
+        );
+        expect(
+          contrast(resolve(theme, `--kobe-diff-${kind}`), tint),
+          `${kind} mark`,
+        ).toBeGreaterThan(4.5);
+      }
+      expect(resolve(theme, "--kobe-diff-added")).toBe(resolve(theme, "--kobe-status-running"));
+      expect(resolve(theme, "--kobe-diff-deleted")).toBe(resolve(theme, "--kobe-status-failed"));
+    });
+  }
+
   it("the gauges read the status colours, and both dark blocks set the same ones", () => {
     expect(light.get("--kobe-gauge-warn")).toBe("var(--kobe-status-attention)");
     expect(light.get("--kobe-gauge-full")).toBe("var(--kobe-status-failed)");

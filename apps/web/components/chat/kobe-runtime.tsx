@@ -183,6 +183,8 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
     const contexts = appContextBody(session.appContexts.forDraft(draft));
     // A skill picked from the + menu (KOBE-451): the server checks it is one a run here loads.
     const skill = session.skillPicks.get(draft);
+    // The file open in the artifact column, unless its chip was removed (KOBE-463, FE7).
+    const viewing = session.viewing.body();
     const created = threadId === undefined;
     if (threadId === undefined) {
       try {
@@ -195,7 +197,8 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
     const target = session.peek(threadId) ?? controller;
     // The controller reports its own failures; a throw must never leave the composer stuck.
     const sent = await (
-      target?.send(text, parentEntryId, attach, mentions, contexts, skill) ?? Promise.resolve(false)
+      target?.send(text, parentEntryId, attach, mentions, contexts, skill, viewing) ??
+      Promise.resolve(false)
     ).catch(() => false);
     if (sent) {
       session.attachments.sent(draft);

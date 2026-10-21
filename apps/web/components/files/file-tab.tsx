@@ -1,18 +1,22 @@
 "use client";
 
 /**
- * A workspace file as a tab of the artifact column (KOBE-268): view-only, from the synced
+ * A workspace file as a tab of the artifact column (KOBE-268), from the synced
  * workspace (so it works while the sandbox hibernates and shows the last-synced version). The read
  * itself tells whether the file still exists (404: `onGone`, its tab closes) and its size
  * (Content-Length); files that aren't shown inline (HTML, PDF, unknown) are read headers only. Renderers reuse the artifact views:
  * Markdown, CSV/TSV tables, code and text as fenced blocks, JSON pretty-printed, images and SVG
  * as `<img>` from a `data:` URL (never inline SVG markup), HTML in the sandboxed frame served by
  * `/v1/workspace/frame` (same sandbox and CSP as artifact frames). PDFs and anything else:
- * Cannot preview, with Download. Text is read up to 1 MB; large images are not fetched.
+ * Cannot preview, with Download. Text is read up to 1 MB; large images are not fetched. Text files
+ * open in the file editor (KOBE-463, `file-editor.tsx`): Rendered and Raw modes, Save, and the
+ * review of the agent's proposals; the version a save names is the SHA-256 of the bytes read.
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ApiError } from "../../lib/api/client";
 import type { FilesApi } from "../../lib/files/api";
+import { isTextPreview, sha256Hex } from "../../lib/files/editor";
+import type { EditDraftStore, FileReviewStore } from "../../lib/files/editor-state";
 import { describeFileError, formatBytes } from "../../lib/files/format";
 import {
   decodePreviewText,
@@ -26,11 +30,11 @@ import {
   type FilePreview,
 } from "../../lib/files/preview";
 import { saveBytes } from "../../lib/files/save";
-import { ARTIFACT_FRAME_SANDBOX, fenced } from "../../lib/chat/artifacts";
+import { ARTIFACT_FRAME_SANDBOX } from "../../lib/chat/artifacts";
 import { ErrorNotice } from "../admin/error-notice";
 import { useArtifactPanel } from "../chat/artifact-state";
-import { CsvTable } from "../chat/artifact-views";
-import { Markdown } from "../chat/markdown";
+import { FileEditor } from "./file-editor";
+import { TextView } from "./text-view";
 import { IconAction } from "../shell/icon-action";
 import styles from "../chat/chat.module.css";
 
@@ -45,6 +49,8 @@ type Loaded =
       readonly text: string;
       readonly truncated: boolean;
       readonly size: number | null;
+      /** The version read (SHA-256); absent for a cut read. */
+      readonly sha256?: string | undefined;
     };
 
 const GONE = "gone";
@@ -87,19 +93,31 @@ async function load(api: FilesApi, path: string, preview: FilePreview): Promise<
         : { status: "image", src: imageDataUrl(bytes, preview.mime) };
     default: {
       const text = decodePreviewText(bytes, truncated);
-      return text === null ? { status: "none" } : { status: "text", text, truncated, size };
+      if (text === null) return { status: "none" };
+      const sha256 = truncated ? undefined : await sha256Hex(bytes);
+      return { status: "text", text, truncated, size, sha256 };
     }
   }
 }
 
-/** The file's preview, read again on each new `reload` (the member opened it again). */
+/**
+ * The file's preview, read again on each new `reload` (the member opened it again) and on
+ * `reread()`; `saved` shows what the editor just saved without reading it back.
+ */
 function useFilePreview(
   api: FilesApi,
   path: string,
   reload: number,
   onGone: (path: string) => void,
-): Loaded {
+) {
   const [state, setState] = useState<Loaded>({ status: "loading" });
+  const [reads, setReads] = useState(0);
+  const reread = useCallback(() => setReads((n) => n + 1), []);
+  const saved = useCallback(
+    (text: string, sha256: string) =>
+      setState({ status: "text", text, truncated: false, size: null, sha256 }),
+    [],
+  );
   useEffect(() => {
     let current = true;
     void load(api, path, previewOf(path)).then((loaded) => {
@@ -110,33 +128,8 @@ function useFilePreview(
     return () => {
       current = false;
     };
-  }, [api, path, reload, onGone]);
-  return state;
-}
-
-/** JSON pretty-printed; a cut or invalid file as it is. */
-function prettyJson(text: string): string {
-  try {
-    return JSON.stringify(JSON.parse(text) as unknown, null, 2);
-  } catch {
-    return text;
-  }
-}
-
-function TextView({ text, preview }: { readonly text: string; readonly preview: FilePreview }) {
-  switch (preview.kind) {
-    case "markdown":
-      return <Markdown text={text} />;
-    case "csv":
-    case "tsv":
-      return <CsvTable text={text} delimiter={preview.kind === "tsv" ? "\t" : ","} />;
-    case "json":
-      return <Markdown text={fenced(prettyJson(text), "json")} />;
-    case "code":
-      return <Markdown text={fenced(text, preview.language)} />;
-    default:
-      return <Markdown text={fenced(text, null)} />;
-  }
+  }, [api, path, reload, onGone, reads]);
+  return { loaded: state, reread, saved };
 }
 
 function CannotPreview({ reason }: { readonly reason: string }) {
@@ -147,14 +140,25 @@ function CannotPreview({ reason }: { readonly reason: string }) {
   );
 }
 
+/** What the editor needs beyond the read: the stores and what to do after a save or conflict. */
+interface EditorWiring {
+  readonly api: FilesApi;
+  readonly drafts: EditDraftStore;
+  readonly reviews: FileReviewStore;
+  saved(text: string, sha256: string): void;
+  reread(): void;
+}
+
 function FileBody({
   loaded,
   path,
   teamId,
+  editor,
 }: {
   readonly loaded: Loaded;
   readonly path: string;
   readonly teamId: string;
+  readonly editor?: EditorWiring | undefined;
 }) {
   const name = fileName(path);
   switch (loaded.status) {
@@ -196,7 +200,21 @@ function FileBody({
               }. Download the file for all of it.`}
             </p>
           )}
-          <TextView text={loaded.text} preview={previewOf(path)} />
+          {editor && isTextPreview(previewOf(path)) ? (
+            <FileEditor
+              path={path}
+              text={loaded.text}
+              sha256={loaded.sha256}
+              truncated={loaded.truncated}
+              api={editor.api}
+              drafts={editor.drafts}
+              reviews={editor.reviews}
+              onSaved={editor.saved}
+              onReload={editor.reread}
+            />
+          ) : (
+            <TextView text={loaded.text} preview={previewOf(path)} />
+          )}
         </>
       );
   }
@@ -210,6 +228,8 @@ export function FileTabContent({
   titleId,
   reload,
   onGone,
+  drafts,
+  reviews,
 }: {
   readonly path: string;
   readonly api: FilesApi;
@@ -218,8 +238,12 @@ export function FileTabContent({
   /** A new value reads the file again (it was opened again from Files). */
   readonly reload: number;
   onGone(path: string): void;
+  /** The file editor's state (KOBE-463); without it, text is shown read-only. */
+  readonly drafts?: EditDraftStore | undefined;
+  readonly reviews?: FileReviewStore | undefined;
 }) {
-  const loaded = useFilePreview(api, path, reload, onGone);
+  const { loaded, reread, saved } = useFilePreview(api, path, reload, onGone);
+  const editor = drafts && reviews ? { api, drafts, reviews, saved, reread } : undefined;
   const [downloadError, setDownloadError] = useState<ApiError | null>(null);
   const name = fileName(path);
   const download = async () => {
@@ -242,7 +266,7 @@ export function FileTabContent({
       </header>
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {downloadError && <ErrorNotice error={downloadError} />}
-        <FileBody loaded={loaded} path={path} teamId={teamId} />
+        <FileBody loaded={loaded} path={path} teamId={teamId} editor={editor} />
       </div>
     </>
   );
