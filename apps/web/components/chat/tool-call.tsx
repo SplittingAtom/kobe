@@ -220,7 +220,13 @@ function ToolCardSlots({
         </p>
       )}
       {activity.egressBlocked.map((blocked) => (
-        <EgressBlocked key={blocked.domain} payload={blocked} />
+        <EgressBlocked
+          key={blocked.domain}
+          payload={blocked}
+          closeId={
+            toolCallId === undefined ? undefined : `tool:${toolCallId}:egress:${blocked.domain}`
+          }
+        />
       ))}
       <ApprovalSlot tool={activity} />
       {activity.artifacts.map((artifact) => (

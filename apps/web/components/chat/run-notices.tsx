@@ -5,10 +5,12 @@ import { useEffect, useState } from "react";
 import type { BudgetStatus } from "../../lib/admin/api/budgets";
 import type { RunUsage } from "../../lib/admin/api/usage";
 import { formatTokens, formatUsd } from "../../lib/admin/usage-format";
+import type { TerminalEvent } from "../../lib/chat/live";
 import type { ThreadState } from "../../lib/chat/thread-state";
 import type { ThreadController } from "../../lib/chat/thread-controller";
 import { ErrorNotice } from "../admin/error-notice";
 import type { KobeThreadExtras } from "./kobe-runtime";
+import { ClosableNotice } from "./closable-notice";
 import { NoticeSlot } from "./slots";
 import styles from "./chat.module.css";
 
@@ -42,21 +44,38 @@ function RunStatus({
       {live?.notices.map((notice, i) => (
         <NoticeSlot key={`${live.runId}:${i}`} notice={notice} />
       ))}
-      {terminal?.type === "run.failed" && (
-        <p className={styles.denied} role="alert">
-          The run failed: {terminal.payload.error.message}
-        </p>
-      )}
-      {terminal?.type === "run.budget_stopped" && (
-        <p className={styles.notice} role="alert">
-          The run stopped after its last step: {terminal.payload.message}
-        </p>
-      )}
-      {terminal?.type === "run.interrupted" && terminal.payload.reason === "cancelled" && (
-        <p className={styles.notice}>Stopped.</p>
-      )}
+      {terminal && <TerminalNotice terminal={terminal} />}
     </>
   );
+}
+
+/** How the last run ended, when it says more than "done" (closable, KOBE-468). */
+function TerminalNotice({ terminal }: { readonly terminal: TerminalEvent }) {
+  const id = `${terminal.run_id}:${terminal.seq}`;
+  switch (terminal.type) {
+    case "run.failed":
+      return (
+        <ClosableNotice id={id} label="Close notice about the failed run" role="alert">
+          <p className={styles.denied}>The run failed: {terminal.payload.error.message}</p>
+        </ClosableNotice>
+      );
+    case "run.budget_stopped":
+      return (
+        <ClosableNotice id={id} label="Close notice about the stopped run" role="alert">
+          <p className={styles.notice}>
+            The run stopped after its last step: {terminal.payload.message}
+          </p>
+        </ClosableNotice>
+      );
+    case "run.interrupted":
+      return terminal.payload.reason === "cancelled" ? (
+        <ClosableNotice id={id} label="Close notice about the stopped run">
+          <p className={styles.notice}>Stopped.</p>
+        </ClosableNotice>
+      ) : null;
+    default:
+      return null;
+  }
 }
 
 function ActionError({

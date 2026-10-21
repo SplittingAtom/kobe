@@ -12,12 +12,14 @@
  * - `FileCard` (KOBE-152, `file-card.tsx`): `file.shared`, a download card.
  * - `NoticeSlot`: run-level notices not tied to a tool call (`egress.blocked`, `steer.applied`,
  *   `memory.updated` (KOBE-158: the chip with Undo), `context.omitted` (KOBE-77), artifacts and files shared outside a tool call).
+ *   Each one can be closed by the viewer (KOBE-468, `closable-notice.tsx`).
  */
 import { useContext } from "react";
 import type { KobeEventPayload } from "@kobe/protocol";
 import type { RunNotice, ToolActivity } from "../../lib/chat/live";
 import { ApprovalCard } from "./approval-card";
 import { OpenArtifactButton } from "./artifact-panel";
+import { ClosableNotice } from "./closable-notice";
 import { FileCard } from "./file-card";
 import { ConnectedEgressNotice } from "./egress-notice";
 import { MemoryNotice } from "./memory-notice";
@@ -56,10 +58,33 @@ export function ArtifactSlot({ artifact }: { readonly artifact: ArtifactPayload 
   );
 }
 
+/**
+ * Identifies a notice's event for closing it (KOBE-468): run id and seq, or for a blocked domain
+ * (one notice per domain and run, `live.ts`) the domain.
+ */
+export function noticeCloseId(notice: RunNotice): string {
+  return notice.type === "egress.blocked"
+    ? `${notice.run_id}:egress:${notice.payload.domain}`
+    : `${notice.run_id}:${notice.seq}`;
+}
+
 export function NoticeSlot({ notice }: { readonly notice: RunNotice }) {
+  if (notice.type === "egress.blocked") {
+    return <EgressBlocked payload={notice.payload} closeId={noticeCloseId(notice)} />;
+  }
+  return (
+    <ClosableNotice id={noticeCloseId(notice)}>
+      <NoticeBody notice={notice} />
+    </ClosableNotice>
+  );
+}
+
+function NoticeBody({
+  notice,
+}: {
+  readonly notice: Exclude<RunNotice, { type: "egress.blocked" }>;
+}) {
   switch (notice.type) {
-    case "egress.blocked":
-      return <EgressBlocked payload={notice.payload} />;
     case "context.omitted":
       return <OmissionNotice payload={notice.payload} />;
     case "steer.applied":
@@ -77,10 +102,13 @@ export function NoticeSlot({ notice }: { readonly notice: RunNotice }) {
 /** U12: a blocked domain is a clear notice with Request access (KOBE-39, egress-notice.tsx). */
 export function EgressBlocked({
   payload,
+  closeId,
 }: {
   readonly payload: KobeEventPayload<"egress.blocked">;
+  /** The event's id: the viewer can close the notice (KOBE-468). */
+  readonly closeId?: string | undefined;
 }) {
-  return <ConnectedEgressNotice payload={payload} />;
+  return <ConnectedEgressNotice payload={payload} closeId={closeId} />;
 }
 
 export { FileCard as FileSlot };
