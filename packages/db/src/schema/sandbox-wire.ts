@@ -88,6 +88,9 @@ export const SANDBOX_COMMAND_KINDS = [
   "notebook.execute",
   "notebook.interrupt",
   "notebook.restart",
+  // The context of a thread's latest model call, read live from the member's sandbox (KOBE-470,
+  // docs/specs/context-viewer.md): held only for the owner's response, never stored.
+  "thread.context",
 ] as const;
 export type SandboxCommandKind = (typeof SANDBOX_COMMAND_KINDS)[number];
 
