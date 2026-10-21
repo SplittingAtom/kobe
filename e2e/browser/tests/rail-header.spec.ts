@@ -37,7 +37,9 @@ test("the top line: team, Threads, Files, Team console (admins), collapse (ac-1,
   await chat.open();
   const line = chat.railHeader;
   const bar = page.locator('[data-bar-row="1"]');
-  await expect(line.getByRole("button", { name: "Threads panel", exact: true })).toBeVisible();
+  // Its name carries the overall activity when there is any ("Threads panel, a conversation has
+  // new activity"): another spec's thread may still be unread.
+  await expect(line.getByRole("button", { name: /^Threads panel(, .+)?$/ })).toBeVisible();
   await expect(line.getByRole("button", { name: FILES_TOGGLE })).toBeVisible();
   await expect(line.getByRole("button", { name: "Collapse the rail" })).toBeVisible();
   // The selector (a menu with several teams, the name with one) is here, not in the bar.

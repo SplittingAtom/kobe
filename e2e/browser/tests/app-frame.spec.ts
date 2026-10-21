@@ -99,6 +99,8 @@ async function fetchReal(
   });
 }
 
+const PROBE_FRAME_IDS = ["app-frame", "app-frame-header-only"] as const;
+
 async function runProbe(page: Page, src: string, sandboxed: boolean): Promise<Report> {
   return (await page.evaluate(
     ({ src, probe, sandboxed }) =>
@@ -240,12 +242,13 @@ test("an app frame cannot reach the network, Kobe or the page around it (KOBE-43
   // The form post and the top navigation went nowhere.
   await expect(page.locator("[data-kobe-test=app-frame]")).toBeAttached();
   await expect(page.locator("[data-kobe-test=app-frame-header-only]")).toBeAttached();
-  await expect
-    .poll(() => page.frames().filter((f) => /\/frame\?/.test(f.url())), {
-      timeout: 10_000,
-    })
-    .toHaveLength(2);
-  for (const frame of page.frames().filter((f) => /\/frame\?/.test(f.url()))) {
+  // Only the test's own two frames: the rail may show a live picker frame of its own (KOBE-461).
+  for (const id of PROBE_FRAME_IDS) {
+    const handle = await page.locator(`[data-kobe-test=${id}]`).elementHandle();
+    const frame = await handle?.contentFrame();
+    expect(frame, id).toBeTruthy();
+    if (!frame) continue;
+    await expect.poll(() => frame.url(), { timeout: 10_000 }).toMatch(/\/frame\?/);
     await expect(frame.locator("#state")).toHaveText("probe done", { timeout: 10_000 });
   }
   await page.waitForTimeout(1_500);

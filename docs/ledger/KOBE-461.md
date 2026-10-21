@@ -41,3 +41,21 @@
   `files-tree.spec.ts` checks the same.
 - ac-4: specs updated: files-tree, composer-cues, row-menus, rail-resize, gate5/u18-never-lose
   (no "Open files"; files written after load are listed with Refresh). Gate1 runs: coordinator.
+
+## Fix 2026-10-20: gate1 browser specs after KOBE-461 (branch group-14b-rail-specs)
+
+All four were spec issues; no product change.
+
+- `app-frame.spec.ts` (Firefox, WebKit): counted every `/frame?` frame on the page, so the rail's
+  default live picker (KOBE-461) made 3. Now checks only its own two probe frames (by
+  `data-kobe-test`) for the URL and "probe done".
+- `gate5/u17-workspace.spec.ts`: the second browser opens on Apps, where the live picker widens
+  the shown rail to 400 px (unsaved, KOBE-460). The stored width is still 200; the spec checks
+  Apps is selected, then switches to Files and asserts the member's 200 px there (tab restored
+  in `finally`).
+- `rail-header.spec.ts:33`: matched "Threads panel" exactly, but the button's name carries the
+  overall activity ("Threads panel, a conversation is running") when an earlier spec (here the
+  interrupted U18 run) leaves a conversation running or unread. Now `^Threads panel(, .+)?$`.
+- `files-tree.spec.ts`: Upload's label names the focused row's folder (`focus.folder`), and the
+  spec had just focused `script.py` in its test folder, so the label is "Upload a file to <dir>",
+  not "the workspace root". The spec asserts that label.

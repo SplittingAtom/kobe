@@ -140,14 +140,17 @@ test("U17: rail state (width, tab, section) and artifact width persist across tw
     await expect.poll(() => widthOf(r2.rail)).toBeLessThanOrEqual(48 + SLACK_PX);
     await second.locator("body").press("ControlOrMeta+b");
     await expect.poll(() => widthOf(r2.rail)).toBeGreaterThan(200 - SLACK_PX);
-    await expect.poll(() => widthOf(r2.rail)).toBeLessThanOrEqual(200 + SLACK_PX);
     if (tabs) {
-      await expect(
-        second
-          .getByRole("tablist", { name: "Files and apps" })
-          .getByRole("tab", { name: "Apps", exact: true }),
-      ).toHaveAttribute("aria-selected", "true");
+      const tabs2 = second.getByRole("tablist", { name: "Files and apps" });
+      await expect(tabs2.getByRole("tab", { name: "Apps", exact: true })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      // A live picker on the Apps tab widens the shown rail to 400 px, unsaved (KOBE-460/461):
+      // the member's own 200 px shows on Files (the tab is restored below).
+      await tabs2.getByRole("tab", { name: "Files", exact: true }).click();
     }
+    await expect.poll(() => widthOf(r2.rail)).toBeLessThanOrEqual(200 + SLACK_PX);
 
     // The section's visibility: hidden here, the rail is its strip there too.
     await page.locator("body").press("ControlOrMeta+b");
