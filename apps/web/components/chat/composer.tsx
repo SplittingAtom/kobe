@@ -1,6 +1,7 @@
 "use client";
 
 import { AppContextChips } from "../apps/app-context-chips";
+import { textAfterSend } from "../../lib/chat/after-send";
 import { appContextBody, insertAt } from "../../lib/apps/app-context";
 import { ComposerPrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import { MicIcon } from "lucide-react";
@@ -169,16 +170,18 @@ export function Composer({
     dictation.stop();
     const mentions = session.mentions.forText(draft, text);
     const attach = session.attachments.ready(draft);
-    const contexts = appContextBody(session.appContexts.forDraft(draft));
+    const chips = session.appContexts.forDraft(draft);
     const skill = session.skillPicks.get(draft);
     const viewing = session.viewing.body();
+    const contexts = appContextBody(chips);
     if (await controller.send(text.trim(), undefined, attach, mentions, contexts, skill, viewing)) {
+      // Only what went: text, mentions, chips and a skill added during the send stay (KOBE-415).
+      const remaining = textAfterSend(aui.composer.getState().text, text);
       session.attachments.sent(draft);
-      session.mentions.clear(draft);
-      session.appContexts.clear(draft);
-      session.skillPicks.clear(draft);
-      // Only the text that went: what the member typed while it was being sent stays (KOBE-415).
-      if (aui.composer.getState().text === text) aui.composer.setText("");
+      session.mentions.settleSent(draft, mentions, remaining);
+      session.appContexts.removeSent(draft, chips);
+      session.skillPicks.clearSent(draft, skill);
+      aui.composer.setText(remaining);
     }
   };
   useBindCommands(

@@ -4,6 +4,7 @@ import { useAui, useAuiState } from "@assistant-ui/react";
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import { NEW_DRAFT } from "../../lib/chat/attachments";
 import { useDictation, type Dictation } from "../../lib/chat/dictation";
+import { textAfterSend } from "../../lib/chat/after-send";
 import { isBusy } from "../../lib/chat/thread-state";
 import { useDraftFiles } from "./attachment-chips";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
@@ -99,10 +100,12 @@ export function useSteer(extras: KobeThreadExtras): Steer {
     if (!controller || unavailable !== undefined) return;
     dictation.stop();
     const draft = remoteId ?? NEW_DRAFT;
-    if (await controller.steer(content, session.mentions.forText(draft, content))) {
-      session.mentions.clear(draft);
-      // Only the text that went: what the member typed while it was being sent stays (KOBE-415).
-      if (aui.composer.getState().text === text) aui.composer.setText("");
+    const mentions = session.mentions.forText(draft, content);
+    if (await controller.steer(content, mentions)) {
+      // Only what went: text and mentions added during the send stay (KOBE-415).
+      const remaining = textAfterSend(aui.composer.getState().text, text);
+      session.mentions.settleSent(draft, mentions, remaining);
+      aui.composer.setText(remaining);
     }
   };
   return { steer, unavailable };

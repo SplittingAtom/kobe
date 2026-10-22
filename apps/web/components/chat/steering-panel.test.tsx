@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
@@ -279,7 +279,7 @@ describe("composer and controls (ac-3)", () => {
     expect(box.value).toBe("");
   });
 
-  it("keeps what the member typed while a queued message was still being sent (KOBE-415)", async () => {
+  it("keeps what the member typed while a queued message was still being sent, not the sent text (KOBE-415)", async () => {
     // The queue read that ends a send can be held, so the member types on while it is in flight.
     let holds = false;
     let release = () => {};
@@ -300,13 +300,11 @@ describe("composer and controls (ac-3)", () => {
       expect(chatRequests(fake, "POST").at(-1)).toMatchObject({ body: { content: "ALPHA" } }),
     );
     expect(box.value).toBe("ALPHA"); // still being sent: the queue read is held
-    await user.clear(box);
-    await user.type(box, "BRAVO");
+    await user.type(box, " BRAVO");
     release();
-    await waitFor(() => expect(queuedTexts()).toEqual(["ALPHA"]));
-    // The send ends once the queue read is in: let its last steps run.
-    await act(() => new Promise((r) => setTimeout(r, 0)));
-    expect(box.value).toBe("BRAVO");
+    // The send ends: the sent text and its joining space go, what was typed after it stays.
+    await waitFor(() => expect(box.value).toBe("BRAVO"));
+    expect(queuedTexts()).toEqual(["ALPHA"]);
     await user.type(box, "{Enter}");
     await waitFor(() => expect(queuedTexts()).toEqual(["ALPHA", "BRAVO"]));
     expect(box.value).toBe("");
