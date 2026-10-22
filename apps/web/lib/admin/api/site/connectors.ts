@@ -84,6 +84,27 @@ export const updateConnector = (
 export const removeConnector = (id: string): Promise<ApiResult<Removal>> =>
   apiRequest(`${BASE}/${encodeURIComponent(id)}`, { method: "DELETE" });
 
+/** What a Re-probe found (KOBE-430); `message` is the server's sentence for people. */
+export type ReprobeOutcome =
+  | { readonly status: "unchanged"; readonly message: string }
+  | {
+      readonly status: "drifted";
+      readonly changed: number;
+      readonly added: number;
+      readonly removed: number;
+      readonly message: string;
+    }
+  | { readonly status: "pinned"; readonly tools: number; readonly message: string };
+
+export interface Reprobe {
+  readonly connector: Connector;
+  readonly refresh: ReprobeOutcome;
+}
+
+/** Probes the server now and applies drift (changed and new tools wait for approval). */
+export const reprobeConnector = (id: string): Promise<ApiResult<Reprobe>> =>
+  apiRequest(`${BASE}/${encodeURIComponent(id)}/refresh`, { method: "POST" });
+
 export interface ToolDefinition {
   readonly title?: string;
   readonly description: string;

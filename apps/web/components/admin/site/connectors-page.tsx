@@ -40,6 +40,7 @@ import { useFocusAfterRemoval } from "../use-focus-after-removal";
 import { useMutation, useResource, type Mutation } from "../use-resource";
 import { SiteKeyPanel } from "./connector-site-key";
 import { RefreshSkipped } from "./connector-refresh-skipped";
+import { ReprobeButton, needsReview } from "./connector-reprobe";
 import { ToolReviewPanel } from "./connector-tool-review";
 
 /** The list's heading: focus lands here when a removal empties the list. */
@@ -64,6 +65,8 @@ export function ConnectorsPage() {
   const [editing, setEditing] = useState<Connector | null>(null);
   const [reviewing, setReviewing] = useState<Connector | null>(null);
   const [keyFor, setKeyFor] = useState<string | null>(null);
+  // Bumped by a Re-probe so an open review loads the tools again (KOBE-430).
+  const [reviewRound, setReviewRound] = useState(0);
   // Looked up in the latest list, so the panel shows the hint the last save returned.
   const keyConnector =
     keyFor !== null && state.status === "ready"
@@ -97,13 +100,18 @@ export function ConnectorsPage() {
               onReview={setReviewing}
               onSiteKey={(c) => setKeyFor(c.id)}
               onChanged={reload}
+              onReprobed={(c, outcome) => {
+                reload();
+                setReviewRound((n) => n + 1);
+                if (needsReview(outcome)) setReviewing(c);
+              }}
             />
           )}
         </ResourceView>
       </Section>
       {reviewing ? (
         <ToolReviewPanel
-          key={reviewing.id}
+          key={`${reviewing.id}:${reviewRound}`}
           connector={reviewing}
           mutation={mutation}
           onChanged={reload}
@@ -255,6 +263,7 @@ function ConnectorTable({
   onReview,
   onSiteKey,
   onChanged,
+  onReprobed,
 }: {
   readonly connectors: readonly Connector[];
   readonly mutation: Mutation;
@@ -262,6 +271,7 @@ function ConnectorTable({
   readonly onReview: (c: Connector) => void;
   readonly onSiteKey: (c: Connector) => void;
   readonly onChanged: () => void;
+  readonly onReprobed: Parameters<typeof ReprobeButton>[0]["onDone"];
 }) {
   async function toggle(c: Connector) {
     const status = c.status === "active" ? "disabled" : "active";
@@ -393,6 +403,7 @@ function ConnectorTable({
                   <Button size="sm" disabled={mutation.pending} onClick={() => onEdit(c)}>
                     Edit<span className="sr-only"> {c.name}</span>
                   </Button>
+                  <ReprobeButton connector={c} mutation={mutation} onDone={onReprobed} />
                   <Button
                     size="sm"
                     variant={c.status === "active" ? "danger" : "secondary"}

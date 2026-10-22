@@ -71,6 +71,8 @@ const SHOWN_5XX_CODES: ReadonlySet<string> = new Set([
   "quota_exceeded",
   // Compact now (KOBE-213): the contract's fixed message (502); never the sandbox's text.
   "compaction_failed",
+  // Connector Re-probe (KOBE-430): Kobe's fixed sentence per failure code, never the remote's text.
+  "reprobe_failed",
   // Workbench scan preview (KOBE-321): the scan couldn't finish; the page retries.
   "scan_unavailable",
 ]);
