@@ -11,6 +11,10 @@ import {
 import { invalidRequest, parseBody } from "../teams/http.js";
 import { similarCatalogNames } from "../skills/registry/names-db.js";
 import { registryReviewRoutes } from "./site-skill-registry-review.js";
+import { z } from "zod";
+import { exportCatalogVersion } from "../skills/catalog-export.js";
+import { exportResponse } from "../skills/export.js";
+import { catalogExportRefusal } from "./skill-catalog.js";
 import { siteSkillMirrorRoutes, type SkillMirrorHandle } from "./site-skill-mirror.js";
 
 /**
@@ -62,6 +66,31 @@ export function siteSkillRegistryRoutes(
 
   // The review console (KOBE-334): the queue at `/` and each version at `/:id`, after the fixed
   // paths above.
+  // A catalog version's export (KOBE-345): the full package (kobe.skill.yaml, provenance.json)
+  // or a portable zip, for Site catalog managers only.
+  app.get(
+    "/versions/:id/export",
+    requireSitePermission("site.skills.catalog.manage"),
+    async (c) => {
+      const id = z.uuid().safeParse(c.req.param("id"));
+      const format = z
+        .enum(["package", "portable", "portable_evals"])
+        .safeParse(c.req.query("format") ?? "package");
+      if (!id.success)
+        return c.json({ code: "not_found", message: "No such catalog version." }, 404);
+      if (!format.success)
+        return invalidRequest(c, "Give format=package, portable or portable_evals.");
+      const r = await exportCatalogVersion(
+        db,
+        deps.blobs ?? null,
+        { id: id.data },
+        format.data,
+        null,
+      );
+      return r.ok ? exportResponse(r.exported) : catalogExportRefusal(c, r.code);
+    },
+  );
+
   // The git mirror's status and Retry (KOBE-343), before the review console's `/:id`.
   app.route("/mirror", siteSkillMirrorRoutes(deps, mirror));
   app.route("/", registryReviewRoutes(deps, mirror));

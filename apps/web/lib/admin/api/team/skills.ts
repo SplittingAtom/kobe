@@ -77,6 +77,22 @@ export function downloadSkillBundle(
   return apiDownload(`/v1/skills/${enc(id)}/versions/${version}/bundle`, { teamId });
 }
 
+/**
+ * A version's portable export (KOBE-345): its SKILL.md and files under one `<name>/` folder,
+ * with `evals/` when asked; for `.agents/skills/` or a Pi `--skill` folder.
+ */
+export function exportSkillVersion(
+  teamId: string,
+  id: string,
+  version: number,
+  evals: boolean,
+): Promise<ApiResult<Uint8Array>> {
+  return apiDownload(
+    `/v1/skills/${enc(id)}/versions/${version}/export?format=${evals ? "portable_evals" : "portable"}`,
+    { teamId },
+  );
+}
+
 /** Uploads a zip as the next version of the skill its SKILL.md names. */
 export function uploadSkillZip(
   teamId: string,

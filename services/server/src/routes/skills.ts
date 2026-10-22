@@ -13,7 +13,15 @@ import {
 } from "../skills/bundle.js";
 import { hitRateLimit } from "../rate-limit.js";
 import { SKILL_LIMITS, SKILL_UPLOAD_RATE } from "../skills/limits.js";
-import { isBlocked } from "../skills/blocklist.js";
+import { blockedAmong, isBlocked } from "../skills/blocklist.js";
+import { recordAuditAfter } from "../audit/record.js";
+import {
+  ExportTooLargeError,
+  exportResponse,
+  exportZip,
+  filesOfPackage,
+  type Exported,
+} from "../skills/export.js";
 import { reviewsOfSkill } from "../skills/review.js";
 import { numberingFrom, publishBundle } from "../skills/publish.js";
 import { parseSemver } from "../skills/semver.js";
@@ -220,6 +228,70 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
         "cache-control": "private, no-store",
       },
     });
+  });
+
+  /**
+   * A portable export (KOBE-345, SK30): `?format=portable` (the payload, SKILL.md and its files)
+   * or `portable_evals` (with `evals/`), under one `<name>/` folder, deterministic bytes. Who sees
+   * the skill may export it; a team version only once its team review approved it, and never a
+   * blocklisted one. The full package (kobe.skill.yaml, provenance.json) is the catalog's.
+   */
+  app.get("/:id/versions/:version/export", async (c) => {
+    const format = z.enum(["portable", "portable_evals"]).safeParse(c.req.query("format"));
+    if (!format.success)
+      return error(c, 400, "invalid_request", "Give format=portable or format=portable_evals.");
+    const found = await visible(c);
+    const ref = versionRef(c.req.param("version"));
+    if (!found || ref === null) return error(c, 404, "not_found", "No such skill version.");
+    const version = await getSkillVersion(db, found.location, found.skill.id, ref);
+    if (!version) return error(c, 404, "not_found", "No such skill version.");
+    const hashes = [version.contentHash, ...(version.packageHash ? [version.packageHash] : [])];
+    if ((await db.transaction((tx) => blockedAmong(tx, hashes))).length > 0)
+      return error(c, 422, "skill_blocklisted", BLOCKLISTED_DOWNLOAD);
+    if (found.skill.scope === "team") {
+      const review = (await reviewsFor(c, found))?.get(version.version);
+      if (review?.status !== "approved")
+        return error(
+          c,
+          409,
+          "not_approved",
+          "Only versions the team's review approved can be exported.",
+        );
+    }
+    const store = skillStore();
+    if (!store) return error(c, 503, "skills_unavailable", "Skill storage is not configured.");
+    const [out] = await store.export(found.location, found.skill.id, {
+      fromSeq: version.seq,
+      toSeq: version.seq,
+    });
+    if (!out || !("bytes" in out))
+      return error(c, 409, "legacy_version", "Save this version again to export it.");
+    let exported: Exported;
+    try {
+      exported = exportZip(
+        found.skill.slug,
+        version.semver,
+        filesOfPackage(out.bytes),
+        format.data,
+        null,
+      );
+    } catch (err) {
+      if (err instanceof ExportTooLargeError) return error(c, 413, "too_large", err.message);
+      throw err;
+    }
+    await recordAuditAfter(db, {
+      action: "skill.exported",
+      teamId: found.skill.scope === "team" ? c.get("team").id : null,
+      target: {
+        scope: found.skill.scope,
+        skillId: found.skill.id,
+        name: found.skill.slug,
+        semver: version.semver,
+        format: format.data,
+        sha256: exported.sha256,
+      },
+    });
+    return exportResponse(exported);
   });
 
   return app;

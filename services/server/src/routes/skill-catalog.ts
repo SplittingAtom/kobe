@@ -4,6 +4,8 @@ import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz
 import type { ServerDeps } from "../deps.js";
 import { CATALOG_SORTS, browseCatalog, catalogDetail } from "../skills/catalog-browse.js";
 import { invalidRequest } from "../teams/http.js";
+import { exportCatalogVersion, type CatalogExportResult } from "../skills/catalog-export.js";
+import { exportResponse } from "../skills/export.js";
 import {
   REQUESTS_PER_DAY,
   notifyTeamAdmins,
@@ -57,6 +59,28 @@ export function skillCatalogRoutes(deps: ServerDeps): Hono<{ Variables: TeamVari
     return detail ? c.json(detail) : c.json(notFound, 404);
   });
 
+  // A catalog version's portable export (KOBE-345): members of a team that hasn't blocked it.
+  app.get("/:skillId/versions/:semver/export", requireTeamPermission("team.read"), async (c) => {
+    const id = idSchema.safeParse(c.req.param("skillId"));
+    const semver = c.req.param("semver");
+    const format = z.enum(["portable", "portable_evals"]).safeParse(c.req.query("format"));
+    if (!format.success)
+      return c.json(
+        { code: "invalid_request", message: "Give format=portable or format=portable_evals." },
+        400,
+      );
+    if (!id.success || !/^[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}$/.test(semver))
+      return c.json({ code: "not_found", message: "No such catalog version." }, 404);
+    const r = await exportCatalogVersion(
+      db,
+      deps.blobs ?? null,
+      { skillId: id.data, semver },
+      format.data,
+      c.get("team").id,
+    );
+    return r.ok ? exportResponse(r.exported) : catalogExportRefusal(c, r.code);
+  });
+
   // Request for team (KOBE-338, SK25): asks this team's admins to install the skill.
   app.post("/:skillId/request", requireTeamPermission("team.read"), async (c) => {
     const id = idSchema.safeParse(c.req.param("skillId"));
@@ -87,4 +111,19 @@ export function skillCatalogRoutes(deps: ServerDeps): Hono<{ Variables: TeamVari
   });
 
   return app;
+}
+
+/** The answer for a refused catalog export. */
+export function catalogExportRefusal(
+  c: { json: (body: unknown, status: 404 | 409 | 413 | 422 | 503) => Response },
+  code: Extract<CatalogExportResult, { ok: false }>["code"],
+): Response {
+  const answers = {
+    not_found: [404, "No such catalog version (only published ones export)."],
+    blocked: [422, "This version is blocked here or on the site's blocklist."],
+    unavailable: [503, "This version's package is not available."],
+    too_large: [413, "The export is larger than a skill may be."],
+  } as const;
+  const [status, message] = answers[code];
+  return c.json({ code, message }, status);
 }

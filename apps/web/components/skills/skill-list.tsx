@@ -3,6 +3,18 @@
 import { useState } from "react";
 import { listSkills, type SkillScope } from "../../lib/admin/api/team/skills";
 import { forkToDraft } from "../../lib/skills/drafts-api";
+import { exportSkillVersion } from "../../lib/admin/api/team/skills";
+
+/** Hands the browser a downloaded file (KOBE-345 exports). */
+function saveFile(bytes: Uint8Array, name: string): void {
+  if (typeof URL.createObjectURL !== "function") return;
+  const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "application/zip" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 import { MutationStatus } from "../admin/error-notice";
 import { useMutation } from "../admin/use-resource";
 import { draftHref } from "./draft-href";
@@ -49,6 +61,15 @@ export function SkillList({ scope }: { readonly scope: SkillScope }) {
   const { state } = useResource(() => listSkills(teamId, scope));
   const mutation = useMutation();
   const navigate = useNavigate();
+  const download = (
+    s: { id: string; slug: string; latestVersion: number; latestSemver: string },
+    evals: boolean,
+  ) =>
+    mutation.run(async () => {
+      const res = await exportSkillVersion(teamId, s.id, s.latestVersion, evals);
+      if (res.ok) saveFile(res.data, `${s.slug}-v${s.latestSemver}${evals ? "-evals" : ""}.zip`);
+      return res;
+    });
   const edit = (skillId: string) =>
     mutation.run(async () => {
       const res = await forkToDraft(teamId, { kind: scope, skillId });
@@ -99,6 +120,24 @@ export function SkillList({ scope }: { readonly scope: SkillScope }) {
                           onClick={() => void edit(s.id)}
                         >
                           Edit in Workbench
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={mutation.pending}
+                          aria-label={`Download ${s.slug} v${s.latestSemver}`}
+                          onClick={() => void download(s, false)}
+                        >
+                          Download
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={mutation.pending}
+                          aria-label={`Download ${s.slug} v${s.latestSemver} with evals`}
+                          onClick={() => void download(s, true)}
+                        >
+                          Download with evals
                         </Button>
                         {canPromote && (
                           <Button
