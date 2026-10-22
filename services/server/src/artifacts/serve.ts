@@ -1,51 +1,11 @@
 import type { Readable } from "node:stream";
-import { ARTIFACT_CONTENT_MAX_BYTES, type ArtifactKind } from "@kobe/protocol";
+import { ARTIFACT_CONTENT_MAX_BYTES, artifactFileExtension } from "@kobe/protocol";
 import { threadKey, type BlobStore } from "../retention/blobs.js";
 
 /** Pure helpers of the artifact routes: file names, the iframe document and its headers. */
 
-/** File extension of an artifact's kind (export names, download names). */
-const LANGUAGE_EXTENSIONS: Readonly<Record<string, string>> = {
-  python: "py",
-  javascript: "js",
-  typescript: "ts",
-  tsx: "tsx",
-  jsx: "jsx",
-  json: "json",
-  yaml: "yaml",
-  bash: "sh",
-  shell: "sh",
-  sh: "sh",
-  sql: "sql",
-  css: "css",
-  html: "html",
-  rust: "rs",
-  go: "go",
-  java: "java",
-  c: "c",
-  "c++": "cpp",
-  "c#": "cs",
-  ruby: "rb",
-  php: "php",
-  r: "r",
-};
-
-export function artifactExtension(kind: ArtifactKind | string, language: string | null): string {
-  switch (kind) {
-    case "html":
-      return "html";
-    case "svg":
-      return "svg";
-    case "markdown":
-      return "md";
-    case "mermaid":
-      return "mmd";
-    case "csv":
-      return "csv";
-    default:
-      return (language !== null && LANGUAGE_EXTENSIONS[language]) || "txt";
-  }
-}
+/** File extension of an artifact (export names, download names, Edit as file): shared with the web. */
+export const artifactExtension = artifactFileExtension;
 
 /** `title` as a safe ASCII file stem (the download name and the export's names). */
 export function fileStem(title: string): string {

@@ -1,6 +1,6 @@
 import type { ArtifactDetail, ArtifactKind, ArtifactSummary } from "@kobe/protocol";
 import { and, artifactVersions, artifacts, asc, eq, type KobeTx } from "@kobe/db";
-import { findThread, type Viewer } from "../threads/repository.js";
+import { findThread, type ThreadAccess, type Viewer } from "../threads/repository.js";
 
 /**
  * Reads behind `GET /v1/artifacts` (D-6 of KOBE-55). An artifact is readable exactly when its
@@ -58,18 +58,28 @@ export async function listArtifacts(
   return rows.map(summary);
 }
 
+/** The artifact and the viewer's access to its thread, if the thread is readable by the viewer. */
+async function findReadable(
+  tx: KobeTx,
+  viewer: Viewer,
+  id: string,
+): Promise<{ artifact: ArtifactSummary; access: ThreadAccess } | null> {
+  const [row] = await tx
+    .select(COLUMNS)
+    .from(artifacts)
+    .where(and(eq(artifacts.teamId, viewer.teamId), eq(artifacts.id, id)));
+  if (!row) return null;
+  const thread = await findThread(tx, viewer, row.threadId);
+  return thread ? { artifact: summary(row), access: thread.access } : null;
+}
+
 /** The artifact, if its thread is readable by the viewer. */
 export async function findArtifact(
   tx: KobeTx,
   viewer: Viewer,
   id: string,
 ): Promise<ArtifactSummary | null> {
-  const [row] = await tx
-    .select(COLUMNS)
-    .from(artifacts)
-    .where(and(eq(artifacts.teamId, viewer.teamId), eq(artifacts.id, id)));
-  if (!row || !(await findThread(tx, viewer, row.threadId))) return null;
-  return summary(row);
+  return (await findReadable(tx, viewer, id))?.artifact ?? null;
 }
 
 export async function artifactDetail(
@@ -98,15 +108,24 @@ export async function artifactDetail(
   };
 }
 
-/** One version's object key, for an artifact the viewer may read. */
+/**
+ * One version's object key, for an artifact the viewer may read; `access` says whether the viewer
+ * owns its thread (Edit as file, KOBE-485) or only reads it.
+ */
 export async function findVersionBlob(
   tx: KobeTx,
   viewer: Viewer,
   id: string,
   version: number,
-): Promise<{ artifact: ArtifactSummary; blobRef: string; sizeBytes: number } | null> {
-  const artifact = await findArtifact(tx, viewer, id);
-  if (!artifact) return null;
+): Promise<{
+  artifact: ArtifactSummary;
+  access: ThreadAccess;
+  blobRef: string;
+  sizeBytes: number;
+} | null> {
+  const found = await findReadable(tx, viewer, id);
+  if (!found) return null;
+  const { artifact, access } = found;
   const [row] = await tx
     .select({ blobRef: artifactVersions.blobRef, sizeBytes: artifactVersions.sizeBytes })
     .from(artifactVersions)
@@ -117,5 +136,5 @@ export async function findVersionBlob(
         eq(artifactVersions.version, version),
       ),
     );
-  return row ? { artifact, ...row } : null;
+  return row ? { artifact, access, ...row } : null;
 }

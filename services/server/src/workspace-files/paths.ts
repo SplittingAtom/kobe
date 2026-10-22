@@ -93,6 +93,24 @@ export function copyPath(path: string, n: number): string {
   return `${dir}${stem.join("")}${suffix}${ext}`;
 }
 
+/**
+ * The `n`th numbered name after a clash (Edit as file, KOBE-485; `n` from 2): `dir/plan-2.md`. A
+ * name over the segment limit loses characters from its stem, never its extension.
+ */
+export function numberedPath(path: string, n: number): string {
+  const slash = path.lastIndexOf("/");
+  const dir = path.slice(0, slash + 1);
+  const name = path.slice(slash + 1);
+  const suffix = `-${n}`;
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot) : "";
+  const stem = [...name.slice(0, name.length - ext.length)];
+  while (stem.length > 1 && bytes(stem.join("") + suffix + ext) > WORKSPACE_SEGMENT_MAX_BYTES) {
+    stem.pop();
+  }
+  return `${dir}${stem.join("")}${suffix}${ext}`;
+}
+
 export interface MoveRefusal {
   readonly status: 400 | 403 | 404;
   readonly code: "invalid_path" | "read_only" | "not_found";

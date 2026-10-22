@@ -18,7 +18,7 @@ import {
   type StoredEntry,
 } from "../workspace-sync/store.js";
 import { pathIsTaken } from "./browse.js";
-import { ancestorsOf, copyPath } from "./paths.js";
+import { ancestorsOf, copyPath, numberedPath } from "./paths.js";
 
 export type Failure = {
   readonly ok: false;
@@ -53,25 +53,49 @@ export interface IncomingFile {
    * `name (n).ext`, chosen under the workspace lock; the audit event records `area: "drop"`.
    */
   readonly drop?: boolean;
+  /**
+   * Edit as file (KOBE-485): the bytes are this artifact version's, copied by the server. A clash
+   * never fails nor overwrites: the file takes the first free `name-2.ext`, `name-3.ext` …, chosen
+   * under the workspace lock; the audit event records `area: "artifact"` with the ids.
+   */
+  readonly artifact?: { readonly artifactId: string; readonly version: number };
 }
 
 /** Copies tried after a drop's name clash before giving up (already_exists). */
 const MAX_COPIES = 100;
 
-/** The path to write: `path`, or for a drop the first free copy of it; undefined when none is. */
+type CopyName = (path: string, n: number) => string;
+
+/** How a clash is named: a drop's `name (n).ext`, an artifact copy's `name-n.ext` (from 2). */
+function copyNaming(incoming: IncomingFile): { name: CopyName; first: number } | undefined {
+  if (incoming.artifact) return { name: numberedPath, first: 2 };
+  if (incoming.drop === true) return { name: copyPath, first: 1 };
+  return undefined;
+}
+
+/** The path to write: `path`, or the first free copy of it; undefined when none is. */
 async function freePath(
   tx: KobeTx,
   owner: WorkspaceOwner,
   path: string,
   ancestors: readonly string[],
-  copy: boolean,
+  copy: { name: CopyName; first: number } | undefined,
 ): Promise<string | undefined> {
   if (!(await pathIsTaken(tx, owner, path, ancestors))) return path;
-  for (let n = 1; copy && n <= MAX_COPIES; n += 1) {
-    const candidate = copyPath(path, n);
+  if (!copy) return undefined;
+  for (let n = copy.first; n < copy.first + MAX_COPIES; n += 1) {
+    const candidate = copy.name(path, n);
     if (!(await pathIsTaken(tx, owner, candidate, ancestors))) return candidate;
   }
   return undefined;
+}
+
+/** The audit target of an upload: ids and counts only, never a name, path or content. */
+function uploadAudit(owner: WorkspaceOwner, size: number, incoming: IncomingFile) {
+  if (incoming.artifact) {
+    return { userId: owner.userId, bytes: size, area: "artifact" as const, ...incoming.artifact };
+  }
+  return { userId: owner.userId, bytes: size, ...(incoming.drop ? { area: "drop" as const } : {}) };
 }
 
 /**
@@ -95,7 +119,7 @@ export async function uploadToWorkspace(
   incoming: IncomingFile,
 ): Promise<UploadResult> {
   const ancestors = ancestorsOf(path);
-  const copy = incoming.drop === true;
+  const copy = copyNaming(incoming) !== undefined;
   const pre = await withTeam(db, owner.teamId, async (tx) => {
     if (!copy && (await pathIsTaken(tx, owner, path, ancestors))) return "taken" as const;
     const limit = await storageLimit(tx, owner.teamId, incoming.teamQuotaDefaultBytes);
@@ -158,7 +182,8 @@ async function commitUpload(
   }
   const blobKey = workspaceBlobKey(sync.prefix, owner, sha256);
   const reserved = await withTeam(db, owner.teamId, async (tx) => {
-    if (!incoming.drop && (await pathIsTaken(tx, owner, path, ancestors))) return "taken" as const;
+    const copies = copyNaming(incoming) !== undefined;
+    if (!copies && (await pathIsTaken(tx, owner, path, ancestors))) return "taken" as const;
     const held = await blobState(tx, owner, sha256);
     if (held !== "absent") return held;
     const ok = await reserveUpload(tx, owner, size, resolveLimits(limits));
@@ -179,7 +204,7 @@ async function commitUpload(
   return withTeam(db, owner.teamId, async (tx): Promise<UploadResult> => {
     const state = await lockWorkspace(tx, owner);
     // Under the workspace lock: the clash check (and a drop's free name) is atomic with the write.
-    const target = await freePath(tx, owner, path, ancestors, incoming.drop === true);
+    const target = await freePath(tx, owner, path, ancestors, copyNaming(incoming));
     if (target === undefined) return TAKEN;
     const decision = await sync.quota(tx, {
       owner,
@@ -202,7 +227,7 @@ async function commitUpload(
     await recordAudit(tx, {
       action: "workspace.file_uploaded",
       teamId: owner.teamId,
-      target: { userId: owner.userId, bytes: size, ...(incoming.drop ? { area: "drop" } : {}) },
+      target: uploadAudit(owner, size, incoming),
     });
     return { ok: true, entry };
   });

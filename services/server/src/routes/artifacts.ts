@@ -17,8 +17,11 @@ import { invalidRequest } from "../teams/http.js";
 import { uuidSchema } from "../threads/schemas.js";
 import { viewerProjectIds } from "../threads/references.js";
 import type { Viewer } from "../threads/repository.js";
+import type { WorkspaceSync } from "../workspace-sync/service.js";
+import { registerEditAsFile } from "./artifact-edit-as-file.js";
 
 type ArtifactContext = Context<{ Variables: TeamVariables }>;
+type FoundVersion = NonNullable<Awaited<ReturnType<typeof findVersionBlob>>>;
 
 const NOT_FOUND = { code: "artifact_not_found", message: "No artifact with that id." } as const;
 
@@ -34,7 +37,10 @@ const versionParam = (raw: string): number | undefined => {
  * exactly when its thread is, and anything else is a 404. Content comes from S3 under the
  * thread's own key tree; the database holds only references.
  */
-export function artifactRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
+export function artifactRoutes(
+  deps: ServerDeps,
+  sync?: WorkspaceSync,
+): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
   const db = deps.database.db;
   app.use(requireTeam(deps));
@@ -48,8 +54,14 @@ export function artifactRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
     );
   };
 
-  /** The version's bytes and metadata, or the error response. */
-  const loadVersion = async (c: ArtifactContext) => {
+  /**
+   * The version's bytes and metadata, or the error response. `check` refuses a found version
+   * before its content is read (Edit as file: the owner only, text kinds only).
+   */
+  const loadVersion = async (
+    c: ArtifactContext,
+    check?: (found: FoundVersion) => Response | undefined,
+  ) => {
     const id = uuidSchema.safeParse(c.req.param("id"));
     const n = versionParam(c.req.param("n") ?? "");
     if (!id.success || n === undefined) return { response: invalidRequest(c) };
@@ -59,6 +71,8 @@ export function artifactRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
         response: c.json({ code: "version_not_found", message: "No such artifact version." }, 404),
       };
     }
+    const refused = check?.(found);
+    if (refused) return { response: refused };
     const blobs = deps.blobs;
     const bytes = blobs
       ? await readArtifactBytes(
@@ -149,5 +163,11 @@ export function artifactRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
     return new Response(kind === "svg" ? svgDocument(text) : text, { headers: FRAME_HEADERS });
   });
 
+  if (sync) registerEditAsFile(app, deps, sync, loadVersion);
+  else {
+    app.post("/:id/versions/:n/edit-as-file", (c) =>
+      c.json({ code: "sandbox_unavailable", message: "Workspace storage is not configured." }, 503),
+    );
+  }
   return app;
 }
