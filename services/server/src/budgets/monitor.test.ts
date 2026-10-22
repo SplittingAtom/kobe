@@ -47,4 +47,16 @@ describe("BudgetMonitor.evaluate (KOBE-415)", () => {
     started[2]?.finish(none);
     expect(await fourth).toEqual(none);
   });
+
+  it("skips a follow-up asked for before close() once the running one ends", async () => {
+    const { monitor, started } = scripted();
+    const first = monitor.evaluate(TEAM);
+    const second = monitor.evaluate(TEAM);
+    const closing = monitor.close();
+    started[0]?.finish(bob);
+    await closing;
+    expect(await first).toEqual(bob);
+    expect(await second).toEqual({ alerts: 0, stopped: [] });
+    expect(started).toHaveLength(1);
+  });
 });

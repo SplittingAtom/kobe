@@ -44,3 +44,13 @@ run 39534590168) was a different cause, below.
   and `e2e.yml` (BuildKit fallback step; Playwright cache).
 - The run hang after a tool (memory remember; KOBE-39 under the executor) is open: the next
   occurrence prints the run's events and the server's warnings.
+
+## Review fixes (Opus)
+
+- The composer keeps only what was typed after the sent text (`textAfterSend`: the sent part and
+  one joining space or line break go; an edited sent part keeps everything). Mentions, app context
+  chips and the skill pick that went are dropped; ones added during the send stay.
+- `purgeThreads` answers `busy`, not `done`, when it passed over a locked thread (counted after a
+  batch that was not full), so offboarding is not complete while one is left.
+- A budget follow-up evaluation asked for before `close()` is skipped.
+- The composer race test waits on the composer's value, not one tick.

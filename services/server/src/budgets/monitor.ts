@@ -48,6 +48,9 @@ export interface BudgetMonitorOptions {
   readonly now?: () => Date;
 }
 
+/** What a follow-up evaluation skipped after `close()` reports. */
+const NOTHING: Evaluation = Object.freeze({ alerts: 0, stopped: [] });
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface Evaluation {
@@ -175,7 +178,8 @@ export class BudgetMonitor {
       )
       .then(() => {
         this.following.delete(teamId);
-        return this.startEvaluation(teamId);
+        // Closed meanwhile: nothing more is evaluated (the database may be going away).
+        return this.closed ? NOTHING : this.startEvaluation(teamId);
       });
     this.following.set(teamId, after);
     return after;
