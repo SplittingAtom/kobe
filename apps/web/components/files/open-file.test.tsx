@@ -28,6 +28,12 @@ afterEach(() => {
 
 const editorToolbar = () => screen.queryByRole("toolbar", { name: "notes.md view" });
 
+/** No tab for notes.md was opened (effects included: let them run first). */
+async function expectNoNotesTab() {
+  await act(() => new Promise((r) => setTimeout(r, 150)));
+  expect(screen.queryByRole("tab", { name: /notes\.md/ })).toBeNull();
+}
+
 /** A thread whose history holds an `open_file` call for `notes.md` (tool call `of1`). */
 function threadWithOpenCall() {
   fake.workspaceFiles.set("notes.md", enc("# Notes\n"));
@@ -95,7 +101,54 @@ describe("open_file in the web (KOBE-484, ac-2)", () => {
     fake.emit(runId, "file.opened", { tool_call_id: "of2", path: "notes.md" });
     openApp(fake, thread);
     expect(await screen.findByText("Opened notes.md")).toBeTruthy();
-    expect(editorToolbar()).toBeNull();
+    await expectNoNotesTab();
+  });
+
+  it("resuming another tab's run mid-way: only events after the resume point open, also after a reconnect", async () => {
+    fake.workspaceFiles.set("notes.md", enc("# Notes\n"));
+    fake.workspaceFiles.set("later.md", enc("# Later\n"));
+    fake.workspaceFiles.set("after-drop.md", enc("# After\n"));
+    const thread = fake.addThread("Notes");
+    const runId = fake.queueRetry(thread, "Open notes.md");
+    Object.assign(fake.run(runId), { status: "running", retry_of_run_id: undefined });
+    fake.emit(runId, "run.started", { thread_id: thread, agent_id: null, agent_version: null });
+    fake.agent.toolCall(runId, "of2", "open_file", { path: "notes.md" });
+    fake.emit(runId, "file.opened", { tool_call_id: "of2", path: "notes.md" });
+    openApp(fake, thread);
+    expect(await screen.findByText("Opened notes.md")).toBeTruthy();
+    await expectNoNotesTab();
+    // A new call while this page watches: it opens.
+    act(() => {
+      fake.agent.toolCall(runId, "of5", "open_file", { path: "later.md" });
+      fake.emit(runId, "file.opened", { tool_call_id: "of5", path: "later.md" });
+    });
+    expect(await screen.findByRole("toolbar", { name: "later.md view" })).toBeTruthy();
+    // The connection drops; what happened meanwhile arrives on reconnect and still opens.
+    act(() => fake.dropConnections());
+    act(() => {
+      fake.agent.toolCall(runId, "of6", "open_file", { path: "after-drop.md" });
+      fake.emit(runId, "file.opened", { tool_call_id: "of6", path: "after-drop.md" });
+    });
+    expect(
+      await screen.findByRole("toolbar", { name: "after-drop.md view" }, { timeout: 10_000 }),
+    ).toBeTruthy();
+    await expectNoNotesTab();
+  });
+
+  it("reloading a finished run opens nothing, even with its events replayed", async () => {
+    fake.workspaceFiles.set("notes.md", enc("# Notes\n"));
+    const thread = fake.addThread("Notes");
+    const runId = fake.queueRetry(thread, "Open notes.md");
+    Object.assign(fake.run(runId), { status: "running", retry_of_run_id: undefined });
+    fake.emit(runId, "run.started", { thread_id: thread, agent_id: null, agent_version: null });
+    fake.agent.toolCall(runId, "of7", "open_file", { path: "notes.md" });
+    fake.emit(runId, "file.opened", { tool_call_id: "of7", path: "notes.md" });
+    fake.agent.toolResult(runId, "of7", "open_file", '{"status":"opened","path":"notes.md"}');
+    openApp(fake, thread);
+    expect(await screen.findByText("Opened notes.md")).toBeTruthy();
+    act(() => fake.agent.complete(runId));
+    await waitFor(() => expect(fake.openStreams).toHaveLength(0));
+    await expectNoNotesTab();
   });
 
   it("a shared reader sees the card without Open again", async () => {

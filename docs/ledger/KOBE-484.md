@@ -26,12 +26,14 @@
 - Risk `read`, bound to its allowed check and consumed once (as `propose_file_edit`); denied in
   skill evals (`eval_run_isolated`) and refused on an eval connection.
 - Event `file.opened {tool_call_id, path}` only, never content; not audited (no read or write).
-- Web: the controller turns a `file.opened` into `fileOpenRequest` only when it is live: the run
-  was started by this tab, or the batch arrived more than 1.5 s after the stream opened (a
-  reload's replayed backlog arrives at once). The card opens that tab once per page
-  (`<run>:<tool call>`); `openFile` focuses an already open tab. After a reload the card is built
-  from the call's own path and offers Open again; a shared reader gets no Open again (the file tab
-  reads the viewer's own workspace anyway).
+- Web (Opus review): live vs history by the stream's seq, no timing. Run snapshots carry
+  `last_seq` (`runs.last_seq`). When the controller first opens a run's stream, history ends at 0
+  for a run this tab started, else at max(resume point, the run's `last_seq` from the run list;
+  unknown = everything sent so far). Only a `file.opened` above that, and new to this client,
+  becomes `fileOpenRequest`; a reconnect (Last-Event-ID) keeps the bound, so events that arrive
+  after it still open. The card opens that tab once per page (`<run>:<tool call>`); after a
+  reload it is built from the call's own path and offers Open again; a shared reader gets no
+  Open again (the file tab reads the viewer's own workspace anyway).
 - Guidance lives in the tools' `promptGuidelines` (Pi's system prompt for built-ins): `open_file`
   "when the user asks to open, show or view a workspace file ... not share_file, create_artifact
   or pasted text"; `share_file` "only when the user wants to download a file or keep a copy".
@@ -51,7 +53,8 @@
   protocol `file-open.test.ts`; sandbox-agent `tools/file-open-broker.test.ts`,
   `kobe-tools/open-file-tool.test.ts`.
 - ac-2: `apps/web/components/files/open-file.test.tsx` (live open in the editor with Rendered/Raw,
-  reload opens nothing and Open again works, replayed backlog does not open, shared reader has no
-  Open again, failed call has no card); `lib/chat/live.test.ts`.
+  reload opens nothing and Open again works, replayed backlog does not open, resume mid-run opens
+  only later events, also after a reconnect, a finished run's replay opens nothing, shared reader
+  has no Open again, failed call has no card); `lib/chat/live.test.ts`.
 - ac-3: guidance asserted in `open-file-tool.test.ts`; `e2e/browser/tests/open-file.spec.ts`.
 - verify: all steps green; `@kobe/server test:db` 186 files / 2244 tests; sandbox-agent 1000 tests; web 271 files / 2463 tests.

@@ -53,6 +53,8 @@ export interface RunRow {
   readonly budgetStopScope: "site" | "team" | "user" | null;
   readonly startedAt: Date | null;
   readonly endedAt: Date | null;
+  /** `runs.last_seq` when read (KOBE-484). */
+  readonly lastSeq: number;
   /** 1-based position among the thread's queued runs (retries first); null unless queued. */
   readonly queueRank: number | null;
 }
@@ -74,6 +76,7 @@ type RawRun = {
   budget_stop_scope: string | null;
   started_at: Date | string | null;
   ended_at: Date | string | null;
+  last_seq: number | string;
   queue_rank: string | number | null;
 };
 
@@ -97,6 +100,7 @@ function fromRaw(r: RawRun): RunRow {
     budgetStopScope: readBudgetStopScope(r.budget_stop_scope),
     startedAt: asDate(r.started_at),
     endedAt: asDate(r.ended_at),
+    lastSeq: Number(r.last_seq),
     queueRank: r.queue_rank === null ? null : Number(r.queue_rank),
   };
 }
@@ -109,7 +113,7 @@ function fromRaw(r: RawRun): RunRow {
 const RUN_SELECT = sql`
   SELECT r.id, r.team_id, r.thread_id, r.status, r.trigger, r.kind, r.queue_pos, r.retry_of_run_id,
          r.user_entry_id, r.approval_mode, r.input, r.parent_entry_id, r.budget_stop_scope,
-         r.started_at, r.ended_at,
+         r.started_at, r.ended_at, r.last_seq,
          CASE WHEN r.status = 'queued' THEN (
            SELECT count(*) FROM runs q
             WHERE q.team_id = r.team_id AND q.thread_id = r.thread_id AND q.status = 'queued'
@@ -133,6 +137,7 @@ export function toSnapshot(run: RunRow): RunSnapshot {
     ...(run.userEntryId !== null ? { user_entry_id: run.userEntryId } : {}),
     ...(run.startedAt !== null ? { started_at: run.startedAt.toISOString() } : {}),
     ...(run.endedAt !== null ? { ended_at: run.endedAt.toISOString() } : {}),
+    last_seq: run.lastSeq,
   };
 }
 
