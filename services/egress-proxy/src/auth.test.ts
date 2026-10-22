@@ -1,6 +1,6 @@
-import { signSessionToken } from "@kobe/session-token";
+import { signSessionToken, signSiteEgressToken } from "@kobe/session-token";
 import { describe, expect, it } from "vitest";
-import { authenticate, egressTokenVerifier } from "./auth.js";
+import { authenticate, egressTokenVerifier, siteTokenVerifier } from "./auth.js";
 
 const KEY = "e".repeat(40);
 const now = Math.floor(Date.now() / 1000);
@@ -65,5 +65,28 @@ describe("authenticate", () => {
     for (const token of [mcp, otherKey, expired, "not.a.token"]) {
       expect(authenticate(`Bearer ${token}`, verify)).toEqual({ ok: false, reason: "invalid" });
     }
+  });
+
+  it("accepts a site egress token as Bearer only, and only with the site verifier (KOBE-343)", () => {
+    const site = signSiteEgressToken("skill-mirror", KEY);
+    const verifySite = siteTokenVerifier(KEY);
+    const r = authenticate(`Bearer ${site}`, verify, verifySite);
+    expect(r).toMatchObject({
+      ok: true,
+      identity: { site: "skill-mirror", sandboxId: "site:skill-mirror", teamId: "", userId: "" },
+    });
+    // Plain HTTP (no site verifier), Basic, another key: refused.
+    expect(authenticate(`Bearer ${site}`, verify)).toEqual({ ok: false, reason: "invalid" });
+    expect(authenticate(basic("x", site), verify, verifySite)).toEqual({
+      ok: false,
+      reason: "invalid",
+    });
+    expect(authenticate(`Bearer ${site}`, verify, siteTokenVerifier("o".repeat(40)))).toEqual({
+      ok: false,
+      reason: "invalid",
+    });
+    // A sandbox token still reads as the sandbox, never as a site job.
+    const sandbox = authenticate(`Bearer ${egressToken}`, verify, verifySite);
+    expect(sandbox.ok && sandbox.identity.site).toBe(undefined);
   });
 });

@@ -5,7 +5,12 @@ import { normalizeHost } from "@kobe/db";
 import type { Logger } from "pino";
 import type { AddressPolicy } from "./address-policy.js";
 import type { EgressDecision } from "./allowlist.js";
-import { authenticate, type SandboxIdentity, type TokenVerifier } from "./auth.js";
+import {
+  authenticate,
+  type SandboxIdentity,
+  type SiteTokenVerifier,
+  type TokenVerifier,
+} from "./auth.js";
 import type { BlockedAttempt } from "./blocked-reporter.js";
 import { MAX_CLIENT_HELLO_BYTES, parseClientHello } from "./client-hello.js";
 import type { ConnectionReason, ConnectionRecord } from "./connection-audit.js";
@@ -37,6 +42,10 @@ import {
  *    another name or another protocol tears the tunnel down);
  * 6. relays bytes without decrypting them, under per-sandbox connection, bandwidth and idle limits.
  *
+ * The server's own site jobs (KOBE-343, the catalog's git mirror) CONNECT with a site egress token:
+ * no membership, team allowlist, header injection or run report; only the site ceiling decides,
+ * and the connection is logged here (the server audits the job itself).
+ *
  * Plain-HTTP proxy requests are refused, except for domains whose team configured injected headers
  * (KOBE-39): those are upgraded to verified HTTPS by the proxy itself (upgrade.ts), and a CONNECT
  * to such a domain is refused with a pointer to `http://` (a tunnel could not carry the headers).
@@ -58,6 +67,8 @@ export interface ProxySettings {
 
 export interface ProxyPolicy {
   decide(teamId: string, host: string): Promise<EgressDecision>;
+  /** A site job's decision (KOBE-343): the site egress ceiling alone. */
+  decideSite(host: string): Promise<EgressDecision>;
   isActiveMember(teamId: string, userId: string): Promise<boolean>;
   /** The team's sealed injected headers for an enabled pattern (KOBE-39), if any. */
   sealedHeaders?(teamId: string, pattern: string): Promise<string | undefined>;
@@ -67,6 +78,8 @@ export type ConnectUpstream = (address: string, port: number, timeoutMs: number)
 
 export interface ProxyDeps {
   readonly verify: TokenVerifier;
+  /** Site egress tokens (KOBE-343); absent: only sandboxes may connect. */
+  readonly verifySite?: SiteTokenVerifier;
   readonly policy: ProxyPolicy;
   readonly resolve: ResolveHost;
   readonly addresses: AddressPolicy;
@@ -182,28 +195,32 @@ export function createEgressProxy(deps: ProxyDeps): Server {
     upgraded = false,
   ) => {
     const { identity } = a;
-    deps.audit.record({
-      ...(upgraded ? { upgraded: true } : {}),
-      teamId: identity.teamId,
-      userId: identity.userId,
-      sandboxId: identity.sandboxId,
-      domain: a.host,
-      port: a.port,
-      outcome,
-      reason,
-      ...bytes,
-    });
+    // A site job has no team to audit under: the server audits the job (KOBE-343).
+    if (!identity.site)
+      deps.audit.record({
+        ...(upgraded ? { upgraded: true } : {}),
+        teamId: identity.teamId,
+        userId: identity.userId,
+        sandboxId: identity.sandboxId,
+        domain: a.host,
+        port: a.port,
+        outcome,
+        reason,
+        ...bytes,
+      });
     // Metadata only: the destination host and port (audited anyway), never a path or query.
     recordSpan("egress.connection", {
       startTime: a.started,
       kind: SpanKind.SERVER,
       error: outcome === "failed",
       attributes: {
-        ...idAttributes({
-          teamId: identity.teamId,
-          userId: identity.userId,
-          sandboxId: identity.sandboxId,
-        }),
+        ...(identity.site
+          ? { "kobe.site_job": identity.site }
+          : idAttributes({
+              teamId: identity.teamId,
+              userId: identity.userId,
+              sandboxId: identity.sandboxId,
+            })),
         ...(a.host === undefined ? {} : { "server.address": a.host }),
         ...(a.port === undefined ? {} : { "server.port": a.port }),
         "kobe.outcome": outcome,
@@ -215,9 +232,9 @@ export function createEgressProxy(deps: ProxyDeps): Server {
     });
     logger.info(
       {
-        team: identity.teamId,
-        user: identity.userId,
-        sandbox: identity.sandboxId,
+        ...(identity.site
+          ? { site: identity.site }
+          : { team: identity.teamId, user: identity.userId, sandbox: identity.sandboxId }),
         host: a.host,
         port: a.port,
         outcome,
@@ -241,7 +258,7 @@ export function createEgressProxy(deps: ProxyDeps): Server {
     requestAccess = false,
   ) => {
     finish(a, "blocked", reason);
-    if (a.host !== undefined && a.port !== undefined) {
+    if (a.host !== undefined && a.port !== undefined && !a.identity.site) {
       deps.blocked.report({
         teamId: a.identity.teamId,
         userId: a.identity.userId,
@@ -267,7 +284,7 @@ export function createEgressProxy(deps: ProxyDeps): Server {
     );
     socket.pause();
 
-    const auth = authenticate(req.headers["proxy-authorization"], deps.verify);
+    const auth = authenticate(req.headers["proxy-authorization"], deps.verify, deps.verifySite);
     if (!auth.ok) {
       const source = socket.remoteAddress ?? "unknown";
       if (authLogs.take(source)) {
@@ -341,7 +358,8 @@ export function createEgressProxy(deps: ProxyDeps): Server {
 
     let decision: EgressDecision;
     try {
-      if (!(await deps.policy.isActiveMember(identity.teamId, identity.userId))) {
+      if (identity.site) decision = await deps.policy.decideSite(host);
+      else if (!(await deps.policy.isActiveMember(identity.teamId, identity.userId))) {
         finish(attempt, "blocked", "inactive_member");
         reply(
           socket,
@@ -350,8 +368,7 @@ export function createEgressProxy(deps: ProxyDeps): Server {
           "Kobe egress: this sandbox's user is not an active member of its team.",
         );
         return;
-      }
-      decision = await deps.policy.decide(identity.teamId, host);
+      } else decision = await deps.policy.decide(identity.teamId, host);
     } catch (err) {
       logger.error({ err, team: identity.teamId }, "egress allowlist unavailable");
       finish(attempt, "failed", "policy_unavailable");
@@ -390,9 +407,10 @@ export function createEgressProxy(deps: ProxyDeps): Server {
     // Header injection (KOBE-39): a tunnel can't carry the team's headers; say how to get them.
     let injected: string | undefined;
     try {
-      injected = deps.headers
-        ? await deps.policy.sealedHeaders?.(identity.teamId, decision.pattern)
-        : undefined;
+      injected =
+        deps.headers && !identity.site
+          ? await deps.policy.sealedHeaders?.(identity.teamId, decision.pattern)
+          : undefined;
     } catch (err) {
       logger.error({ err, team: identity.teamId }, "egress header rules unavailable");
       finish(attempt, "failed", "policy_unavailable");
@@ -466,16 +484,17 @@ export function createEgressProxy(deps: ProxyDeps): Server {
       if (!sniMatches(hello.serverName, host)) {
         // The tunnel is open: no HTTP status can be sent any more, so the connection is cut.
         finish(attempt, "blocked", "sni_mismatch");
-        deps.blocked.report({
-          teamId: identity.teamId,
-          userId: identity.userId,
-          sandboxId: identity.sandboxId,
-          domain: host,
-          port: target.port,
-          reason: "sni_mismatch",
-          requestAccess: false,
-          threadHint: identity.threadHint,
-        });
+        if (!identity.site)
+          deps.blocked.report({
+            teamId: identity.teamId,
+            userId: identity.userId,
+            sandboxId: identity.sandboxId,
+            domain: host,
+            port: target.port,
+            reason: "sni_mismatch",
+            requestAccess: false,
+            threadHint: identity.threadHint,
+          });
         logger.info(
           { team: identity.teamId, host, why: hello.why },
           "egress tunnel refused: TLS server name does not match",
@@ -491,6 +510,7 @@ export function createEgressProxy(deps: ProxyDeps): Server {
         {
           teamId: identity.teamId,
           userId: identity.userId,
+          ...(identity.site ? { site: true } : {}),
           host,
           close: (reason) => {
             logger.info({ team: identity.teamId, host, reason }, "egress tunnel closed by policy");

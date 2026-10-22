@@ -181,6 +181,10 @@ async function start(
         ? { allowed: true, pattern }
         : { allowed: false, reason: host === "pypi.org" ? "not_enabled" : "not_in_ceiling" };
     },
+    decideSite: async (): Promise<EgressDecision> => ({
+      allowed: false,
+      reason: "not_in_ceiling",
+    }),
     isActiveMember: async () => true,
     sealedHeaders: async (_team: string, pattern: string) => HEADERS[pattern],
   };

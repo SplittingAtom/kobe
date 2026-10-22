@@ -10,7 +10,7 @@ import {
 import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
 import { AddressPolicy } from "./address-policy.js";
 import { AllowlistCache } from "./allowlist.js";
-import { egressTokenVerifier } from "./auth.js";
+import { egressTokenVerifier, siteTokenVerifier } from "./auth.js";
 import { BlockedReporter, dbBlockedSink } from "./blocked-reporter.js";
 import { ChangeListener } from "./change-listener.js";
 import { loadConfig } from "./config.js";
@@ -68,6 +68,8 @@ setInterval(() => {
 }, 60_000).unref();
 const server = createEgressProxy({
   verify: egressTokenVerifier(config.sessionKey),
+  // The server's site jobs (KOBE-343: the catalog's git mirror), with the same key.
+  verifySite: siteTokenVerifier(config.sessionKey),
   policy: cache,
   resolve: dnsResolver({ timeoutMs: config.dnsTimeoutMs }),
   addresses: new AddressPolicy({

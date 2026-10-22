@@ -91,6 +91,12 @@ export class AllowlistCache {
     return decideEgress(ceiling, team, host);
   }
 
+  /** A site job's decision (KOBE-343): the ceiling alone, by the same matching rules. */
+  async decideSite(host: string): Promise<EgressDecision> {
+    const ceiling = await this.getCeiling();
+    return decideEgress(ceiling, ceiling, host);
+  }
+
   /**
    * The sealed header list the team set for an enabled pattern (KOBE-39), or undefined. Cached
    * with the team's allowlist and invalidated by the same team hint.
