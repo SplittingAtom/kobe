@@ -1,16 +1,15 @@
 "use client";
 
-import { useAui, useAuiState } from "@assistant-ui/react";
 import { AppWindowIcon } from "lucide-react";
 import { useCallback, useContext, useEffect, useState } from "react";
 import {
   MY_CONNECTOR_KEYS,
-  launchAppCard,
   listRailApps,
   type RailApp,
   type RailApps,
 } from "../../lib/apps/app-cards";
-import { ChatSessionContext, useKobeExtras } from "../chat/kobe-runtime";
+import { useAppLaunch } from "../apps/use-app-launch";
+import { ChatSessionContext } from "../chat/kobe-runtime";
 import type { RailApi } from "./rail-state";
 import { RAIL_TAB_IDS } from "./rail-tabs";
 import { RailPickers } from "./rail-pickers";
@@ -84,42 +83,13 @@ export function RailApps({
   /** Files is the tab on screen: kept mounted (its launch state, the picker), not shown. */
   readonly hidden: boolean;
 }) {
-  const aui = useAui();
-  const session = useContext(ChatSessionContext);
-  const remoteId = useAuiState((s) => s.threadListItem.remoteId);
-  const summary = useKobeExtras()?.state.summary;
-  // The member's own, live thread takes the card; anything else starts a new thread.
-  const own = summary?.readOnly !== true && (summary?.deletedAt ?? null) === null;
-  const target = remoteId !== undefined && own ? remoteId : null;
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // The one launch rule (KOBE-440, KOBE-455): this thread, a new one, or a chip during a run.
+  const { busy, error, intoNewThread, launch: launchApp } = useAppLaunch();
+  const launch = async (app: RailApp) => {
+    if ((await launchApp(app)) && rail.drawer) rail.closeDrawer();
+  };
 
-  const launch = useCallback(
-    async (app: RailApp) => {
-      if (!session || busy !== null) return;
-      setBusy(app.appId);
-      setError(null);
-      // From the new-conversation view the thread starts with its choices (KOBE-458).
-      const draft = target === null && remoteId === undefined ? session.launchDraft() : undefined;
-      const res = await launchAppCard(target, app.appId, session.teamId, undefined, draft);
-      setBusy(null);
-      if (!res.ok) {
-        setError(res.error.message);
-        return;
-      }
-      if (rail.drawer) rail.closeDrawer();
-      if (target === null) {
-        if (draft) session.launchDraftTaken();
-        session.threadCreated();
-        aui.threads.switchToThread(res.data.threadId);
-      } else {
-        session.appCards.changed(target);
-      }
-    },
-    [session, busy, target, remoteId, rail, aui],
-  );
-
-  const where = target === null ? "in a new conversation" : "in this conversation";
+  const where = intoNewThread ? "in a new conversation" : "in this conversation";
   return (
     <section
       id={APPS_SECTION_ID}
