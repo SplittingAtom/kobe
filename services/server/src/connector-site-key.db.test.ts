@@ -622,6 +622,53 @@ describe("removal races and team scoping (KOBE-454 review)", () => {
     expect(left.rows).toHaveLength(0);
   });
 
+  it("refuses a key saved after the grant deletes but before the removal commits (real removal)", async () => {
+    const created = await root.post(BASE, {
+      name: "member-window",
+      url: "https://member-window.example/mcp",
+      authKind: "api_key",
+    });
+    const id = created.json.connector.id as string;
+    await enable(teamOn, id);
+    await enable(teamOff, id);
+    const carol = await h.signIn("carol@sitekey.test");
+    await carol.put("/v1/me/teams/active", { teamId: teamOff });
+    carol.team = teamOff;
+    expect((await carol.put(`/v1/connector-grants/${id}`, { api_key: MEMBER_KEY })).status).toBe(
+      201,
+    );
+    const blocker = new pg.Client({ connectionString: h.adminUrl });
+    await blocker.connect();
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    try {
+      // Stall the removal inside its grant cleanup (on carol's row), with its row lock held.
+      await blocker.query("BEGIN");
+      await blocker.query(
+        `SELECT 1 FROM connector_grants WHERE connector_id = $1 AND team_id = $2 FOR UPDATE`,
+        [id, teamOff],
+      );
+      const settled = { removal: false, put: false };
+      const removal = root.delete(`${BASE}/${id}`).finally(() => {
+        settled.removal = true;
+      });
+      await wait(300);
+      const put = alice.put(`/v1/connector-grants/${id}`, { api_key: MEMBER_KEY }).finally(() => {
+        settled.put = true;
+      });
+      await wait(300);
+      expect(settled).toEqual({ removal: false, put: false });
+      await blocker.query("COMMIT");
+      expect((await removal).status).toBe(200);
+      expect((await put).status).toBeGreaterThanOrEqual(400);
+    } finally {
+      await blocker.end();
+    }
+    const left = await h.admin.query(`SELECT 1 FROM connector_grants WHERE connector_id = $1`, [
+      id,
+    ]);
+    expect(left.rows).toHaveLength(0);
+  });
+
   it("a URL change drops grants in every team, each in its own team's transaction", async () => {
     const created = await root.post(BASE, {
       name: "member-move",

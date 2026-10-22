@@ -45,6 +45,13 @@ transaction, under the row lock. Already removed connectors are cleaned by a cus
   transactions). So "same transaction" (ac-1) becomes "under the removal's row lock, committed just
   before it": if the removal then fails, the grants stay deleted, the safe direction.
 
+- **Ordering (coordinator follow-up):** a key saved after the per-team deletes but before the
+  removal commits cannot land: the removal holds the connector row `FOR UPDATE` throughout, and
+  storing a grant waits on its `FOR SHARE`, then sees it removed and is refused. Pinned by a DB
+  test that stalls the real removal inside its cleanup (fails without the share lock). Kept this
+  order instead of commit-then-clean: it leaves no window and no removed connector with grants; a
+  failed cleanup rolls the removal back and a retry repeats it.
+
 ## Open questions (for Chris or the coordinator)
 
 - Revoke OAuth tokens at the provider on removal (RFC 7009) as a follow-up ticket?
