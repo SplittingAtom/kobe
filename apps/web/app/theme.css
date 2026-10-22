@@ -64,7 +64,8 @@
      (4.5:1) on the page, the rail panel, cards and its own `-bg` tint in both themes
      (app/theme-css.test.ts); colour never carries meaning alone (a label or icon stays). CSS
      modules read them as var(--kobe-status-*), Tailwind as text-status-* / bg-status-*-bg
-     (app/tailwind.css). */
+     (app/tailwind.css). The accent is the one blue fill (console primary buttons, accent badges,
+     count pills): its -fg is white in both themes with AA on it and on its hover (KOBE-479). */
   --kobe-status-running: #166534;
   --kobe-status-running-bg: #dcfce7;
   --kobe-status-attention: #a14b05;
@@ -164,8 +165,8 @@
   --kobe-status-failed-bg: #450a0a;
   --kobe-status-done: #8fbf9f;
   --kobe-status-idle: #a3a3a3;
-  --kobe-status-accent: #8fa8ff;
-  --kobe-status-accent-fg: #0a0a0a;
+  --kobe-status-accent: #4263eb;
+  --kobe-status-accent-fg: #ffffff;
   --kobe-tool-badge: #f5cd5b;
   --kobe-tool-badge-bg: #3b2f08;
   --kobe-tool-badge-border: #c9a227;
@@ -225,8 +226,8 @@
     --kobe-status-failed-bg: #450a0a;
     --kobe-status-done: #8fbf9f;
     --kobe-status-idle: #a3a3a3;
-    --kobe-status-accent: #8fa8ff;
-    --kobe-status-accent-fg: #0a0a0a;
+    --kobe-status-accent: #4263eb;
+    --kobe-status-accent-fg: #ffffff;
     --kobe-tool-badge: #f5cd5b;
     --kobe-tool-badge-bg: #3b2f08;
     --kobe-tool-badge-border: #c9a227;

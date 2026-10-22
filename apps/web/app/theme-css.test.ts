@@ -223,6 +223,39 @@ describe("status tokens (KOBE-301)", () => {
     });
   }
 
+  /** `fg` at `alpha` over `bg` (both #rrggbb), as #rrggbb: a `bg-x/90` hover over the page. */
+  const over = (fg: string, alpha: number, bg: string): string => {
+    // An achromatic oklch(L 0 0) is grey with linear channel L³ (see luminance()).
+    const grey = /^oklch\(([\d.]+) 0 0\)$/.exec(bg);
+    const lin = grey ? Number(grey[1]) ** 3 : 0;
+    const srgb = lin <= 0.0031308 ? 12.92 * lin : 1.055 * lin ** (1 / 2.4) - 0.055;
+    const ch = (hex: string, i: number) =>
+      hex.startsWith("#")
+        ? Number.parseInt(hex.slice(1 + 2 * i, 3 + 2 * i), 16)
+        : Math.round(255 * srgb);
+    const mix = [0, 1, 2].map((i) => Math.round(alpha * ch(fg, i) + (1 - alpha) * ch(bg, i)));
+    return `#${mix.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+  };
+
+  for (const [name, theme] of [
+    ["light", light],
+    ["dark", dark],
+  ] as const) {
+    it(`blue fills carry white text with AA, at rest and on hover (${name}, KOBE-479)`, () => {
+      // The accent is the one blue fill (console primary button, accent badge, count pill).
+      expect(resolve(theme, "--kobe-status-accent-fg")).toBe("#ffffff");
+      const fill = resolve(theme, "--kobe-status-accent");
+      const page = ["--kobe-console-bg", "--kobe-console-panel", "--background", "--card"];
+      for (const fillOn of [fill, ...page.map((s) => over(fill, 0.9, resolve(theme, s)))]) {
+        expect(contrast("#ffffff", fillOn), `white on ${fillOn}`).toBeGreaterThanOrEqual(4.5);
+      }
+      // The info notice's icon reads the same token: 3:1 (WCAG 1.4.11) on the page and panels.
+      for (const surface of page) {
+        expect(contrast(fill, resolve(theme, surface)), surface).toBeGreaterThanOrEqual(3);
+      }
+    });
+  }
+
   for (const [name, theme] of [
     ["light", light],
     ["dark", dark],

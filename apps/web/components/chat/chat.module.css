@@ -28,7 +28,9 @@
   line-height: 1.5;
 }
 
-.app a {
+/* Links styled as buttons keep their variant's colours (KOBE-479): this rule is unlayered, so it
+   would beat their utilities and put blue text on a blue fill. */
+.app a:not([data-slot="button"], [data-slot="console-button"]) {
   color: var(--admin-accent);
 }
 
