@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
 import { INSERT_SETTLE_MS, settlesInsert } from "../chat/composer";
+import { BRIDGE_ATTACHED_ATTR } from "./app-frame";
 import { chatRequests, composer, openApp, streaming } from "../chat/testing";
 
 /**
@@ -81,8 +82,13 @@ function thread() {
 
 /** The card's frame, with a stand-in window to talk as the app. */
 async function appWindow() {
+  // Once Kobe's bridge listens: a message posted before is lost (KOBE-415).
   const frame = await waitFor(
-    () => must(screen.queryByTitle("Lakehouse Explorer (app from Catalyst)")) as HTMLIFrameElement,
+    () => {
+      const f = must(screen.queryByTitle("Lakehouse Explorer (app from Catalyst)"));
+      expect(f.hasAttribute(BRIDGE_ATTACHED_ATTR)).toBe(true);
+      return f as HTMLIFrameElement;
+    },
     { timeout: 4_000 },
   );
   const child = { postMessage: vi.fn() } as unknown as Window;
@@ -114,10 +120,6 @@ describe("ui/message and model context (KOBE-439)", () => {
     const t = thread();
     openApp(fake, t);
     const app = await appWindow();
-    // Let the chat finish opening first, as the next test does: a message sent before the card's
-    // host listens is dropped (the merge-queue run of #331 lost it once).
-    await composer();
-    await act(() => new Promise((r) => setTimeout(r, 300)));
     await app.send({
       jsonrpc: "2.0",
       id: 3,
