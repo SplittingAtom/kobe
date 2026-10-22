@@ -341,6 +341,20 @@ Pushes run after every approval and every five minutes for retries; a failing ve
 remote URL pushes the whole published catalog (Approved and Deprecated versions) to the new
 remote; Withdrawn, Revoked and suspended versions are never pushed.
 
+### Governed skill import (optional)
+
+Builders can import a skill into a new Workbench draft (KOBE-344, spec SK30) from a git
+repository at a **full commit SHA** (and a folder in it), or from a zip URL with its **SHA-256**.
+Only from the Site's **import allowlist** (Site console → Skill Registry; empty by default): an
+entry `github.com` allows any repository there, `github.com/acme` only that owner's. Add each
+host to the **egress ceiling** too: the server fetches once, through the egress proxy with a
+short-lived site token, and never again (not at run time). A branch or tag is never used; a
+commit no branch or tag reaches is refused. What it got is re-hashed and checked like an upload
+(path rules, no symlinks or submodules, no `.git*` names, 5 MiB and 200 files), and the draft
+records its origin (URL, commit, Kobe's SHA-256, importer). The draft is private and goes through
+evals, a version and review like any other: an import is never a catalog entry. Public hubs are
+places to find skills, not sources.
+
 ## Models
 
 Sandboxes reach models only through **Bifrost** (Apache-2.0, `bifrost.image`, pinned by digest) and
