@@ -93,6 +93,8 @@ const POLICY_ANSWERED_MAX = 4_096;
 const FRAME_PREFIX = /^\s*\{\s*"v"\s*:\s*1\s*,\s*"type"\s*:\s*"([a-z._]{1,32})"/;
 /** Ended leases kept to answer late frames with `run_not_active`; older ones are forgotten. */
 const ENDED_LEASES_MAX = 256;
+/** `session.renew` frames with an invalid token a connection may send before it is closed. */
+const INVALID_RENEWALS_MAX = 3;
 
 function remember(set: Set<string>, value: string, max: number): void {
   set.add(value);
@@ -158,6 +160,7 @@ export class SandboxConnection implements RegisteredConnection {
   readonly #owner: RunOwner;
   #tokenExpiresAt: number;
   #expiryTimer: NodeJS.Timeout | undefined;
+  #invalidRenewals = 0;
 
   constructor(
     ctx: WireContext,
@@ -1652,7 +1655,10 @@ export class SandboxConnection implements RegisteredConnection {
     try {
       claims = this.#ctx.verifyToken(token);
     } catch {
+      this.#invalidRenewals += 1;
       this.log.warn({ sandbox_id: this.sandboxId }, "session.renew with an invalid token ignored");
+      if (this.#invalidRenewals >= INVALID_RENEWALS_MAX)
+        this.close("unauthorized", "too many invalid session renewals");
       return;
     }
     const sameIdentity =
@@ -1672,6 +1678,8 @@ export class SandboxConnection implements RegisteredConnection {
     if (expiresAt <= Date.now() || expiresAt <= this.#tokenExpiresAt) return;
     this.#tokenExpiresAt = expiresAt;
     this.#armExpiry();
+    // A renewal never outlives offboarding: re-check liveness, account and membership now.
+    this.revalidate();
     this.log.debug({ sandbox_id: this.sandboxId, expires_at: expiresAt }, "session renewed");
   }
 

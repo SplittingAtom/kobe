@@ -150,6 +150,29 @@ describe("heartbeats and revalidation", () => {
     expect((await sb.waitClosed()).code).toBe(SANDBOX_CLOSE_CODES.unauthorized);
   });
 
+  it("closes after three invalid renewals (KOBE-483 review)", async () => {
+    const { sb } = await shortLived();
+    sb.send({ v: 1, type: "ping", nonce: "k" });
+    for (let i = 0; i < 2; i++)
+      sb.send({ v: 1, type: "session.renew", token: `tok-not-issued-by-the-server-000${i}` });
+    await sleep(200);
+    expect(sb.closed).toBeUndefined();
+    sb.send({ v: 1, type: "session.renew", token: "tok-not-issued-by-the-server-0002" });
+    expect((await sb.waitClosed(1_000)).code).toBe(SANDBOX_CLOSE_CODES.unauthorized);
+  });
+
+  it("revalidates on renewal: a removed member's renewal closes the connection (KOBE-483 review)", async () => {
+    const { sb, claims } = await shortLived();
+    sb.send({ v: 1, type: "ping", nonce: "k" });
+    await fx.admin.query(`DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`, [
+      claims.teamId,
+      claims.userId,
+    ]);
+    sb.send({ v: 1, type: "session.renew", token: auth.issue(claims, 900) });
+    // Well before the 300 ms periodic revalidation and the 2 s token's expiry.
+    expect((await sb.waitClosed(250)).code).toBe(SANDBOX_CLOSE_CODES.unauthorized);
+  });
+
   it("does not renew for an agent that did not announce session_renew (KOBE-483)", async () => {
     const { sb, claims } = await shortLived([]);
     const renew = setInterval(() => {

@@ -41,8 +41,10 @@
   `session_renew` (protocol `session-renew-frames.ts`). The agent's `WireClient` reads its token
   every 30 s (which also makes the session client trade near expiry) and hands each new one to the
   live connection once. The server verifies it like an upgrade token. The same (sandbox, team,
-  user, eval thread) moves the expiry timer to the new `exp`. Another identity closes
-  `unauthorized`. An invalid, expired or older token is ignored. Without the capability nothing
+  user, eval thread) moves the expiry timer to the new `exp` and revalidates at once (liveness,
+  account, membership: a renewal never outlives offboarding). Another identity closes
+  `unauthorized`. An invalid, expired or older token is ignored; the third invalid one closes
+  `unauthorized`. Without the capability nothing
   changes. Revocation (`access revoked`, `sandbox_destroyed`) still closes at once: not deferred
   to a run boundary, since it is a security close.
 
