@@ -15,6 +15,7 @@ export * from "./uploads.js";
 export * from "./files.js";
 export * from "./skill-draft-tool.js";
 export * from "./file-editor.js";
+export * from "./file-open.js";
 export * from "./notebooks.js";
 export * from "./mentions.js";
 export * from "./schedules.js";

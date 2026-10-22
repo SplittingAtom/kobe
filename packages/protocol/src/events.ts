@@ -18,6 +18,7 @@ import {
 import { approvalResolutionCauseSchema, policyReasonSchema } from "./policy.js";
 import { rememberScopeSchema } from "./remember.js";
 import { fileEditProposedPayloadSchema } from "./file-editor.js";
+import { fileOpenedPayloadSchema } from "./file-open.js";
 import {
   notebookFinishedPayloadSchema,
   notebookOutputPayloadSchema,
@@ -57,6 +58,8 @@ export const KOBE_EVENT_TYPES = [
   "skill.draft_saved",
   // KOBE-462: a `propose_file_edit` proposal awaiting the member (file-editor.ts).
   "file.edit_proposed",
+  // KOBE-484: `open_file` asked the owner's client to open a workspace file (file-open.ts).
+  "file.opened",
   // KOBE-464: a kernel execution (the member's `notebook` run or a `run_python` call; notebooks.ts).
   "notebook.started",
   "notebook.output",
@@ -329,6 +332,8 @@ export const EVENT_PAYLOAD_SCHEMAS = {
    * member reviews `content` against the file at `base_sha256` and commits through the save route.
    */
   "file.edit_proposed": fileEditProposedPayloadSchema,
+  /** KOBE-484: `open_file` opened this workspace file for the run owner; never any content. */
+  "file.opened": fileOpenedPayloadSchema,
   /** KOBE-464 (notebooks.ts, docs/specs/notebooks.md NB15). */
   "notebook.started": notebookStartedPayloadSchema,
   "notebook.output": notebookOutputPayloadSchema,

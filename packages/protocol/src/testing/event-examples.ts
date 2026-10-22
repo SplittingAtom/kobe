@@ -108,6 +108,7 @@ export const EVENT_PAYLOAD_EXAMPLES: { readonly [T in KobeEventType]: KobeEventP
     content: "# Plan\n\nShip it.\n",
     summary: "Adds the plan's last step",
   },
+  "file.opened": { tool_call_id: "call_9", path: "notes/plan.md" },
   "notebook.started": {
     exec_id: "9b2f6a1e-3c4d-4e5f-8a6b-7c8d9e0f1a2b",
     origin: "user",
