@@ -2348,6 +2348,22 @@ JS
     contains "memory: the team switch is on" '^status=200$' "$(mem_settings '{"memory_enabled":true,"project_memory_enabled":true}')"
     mem1=$(mem_put "notes/e2e-$mem_id.md" "v1 $mem_id")
     printf '     memory remember 1: %s\n' "$(printf '%s' "$mem1" | grep -E '^(terminal|memory_events|text)=' | tr '\n' ' ' | cut -c1-400)"
+    if ! grep -q '^terminal=run.completed$' <<<"$mem1"; then
+      # KOBE-415: once the run hung after memory.updated until the 5-minute stream timeout. Say
+      # where it stopped: its events, its status, and the server's and sandbox's warnings.
+      mem1_run=$(printf '%s\n' "$mem1" | sed -n 's/^run=//p')
+      echo "     memory remember 1: run ${mem1_run:-?} did not complete (events, status):"
+      psql_kobe "SELECT * FROM (
+          SELECT 'event ' || seq || ' ' || type || ' ' || left(payload::text, 300) FROM run_events
+           WHERE team_id = '$E2E_TEAM_ID' AND run_id = '${mem1_run:-00000000-0000-4000-8000-000000000000}'
+             AND type NOT LIKE '%.delta' ORDER BY seq) e
+        UNION ALL SELECT 'run ' || status FROM runs
+           WHERE team_id = '$E2E_TEAM_ID' AND id = '${mem1_run:-00000000-0000-4000-8000-000000000000}'" \
+        | sed 's/^/       /' || true
+      $KUBECTL -n "$NS" logs -l app.kubernetes.io/component=server -c server --since=7m --tail=-1 2>&1 \
+        | grep -E '"level":(40|50)|memory|sandbox-wire' | tail -n 30 | cut -c1-600 \
+        | sed 's/^/     server: /' || true
+    fi
     contains "memory: remember completed" '^terminal=run.completed$' "$mem1"
     contains "memory: memory.updated for the created doc has no previous version" \
       "^memory_events=[0-9a-f-]{36}:notes/e2e-$mem_id.md:v1:none\$" "$mem1"
