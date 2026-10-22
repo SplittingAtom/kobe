@@ -97,6 +97,12 @@ export const provenanceSchema = z.strictObject({
         .regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/)
         .optional(),
       fetchedSha256: sha256,
+      /** The folder of the repository the skill was imported from (KOBE-344). */
+      path: z
+        .string()
+        .max(200)
+        .regex(/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/)
+        .optional(),
     })
     .optional(),
   scan: z.strictObject({

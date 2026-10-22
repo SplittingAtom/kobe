@@ -7,6 +7,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { strToU8, zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { provenanceSchema } from "@kobe/protocol";
 import { mirrorHttpClient } from "./skills/mirror/http-client.js";
 import type { TestBrowser } from "./testing/browser.js";
 import {
@@ -17,6 +18,7 @@ import {
 } from "./testing/git-http-server.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
+import { CASES, GOLDEN, manifest, promoteTeamVersion } from "./testing/registry-fixtures.js";
 
 /**
  * KOBE-344 (SK30, U37): governed import. Only the Site's allowlist (default none, hosts or
@@ -30,6 +32,7 @@ let git: GitServer;
 let zipServer: Server;
 let builder: TestBrowser;
 let member: TestBrowser;
+let lead: TestBrowser;
 let admin: TestBrowser;
 let builderId = "";
 let gitProxy: Awaited<ReturnType<typeof startConnectProxy>>;
@@ -107,18 +110,22 @@ beforeAll(async () => {
         }),
     },
   }));
-  const ids = await Promise.all(["builder", "member"].map((n) => h.createUser(`${n}@import.test`)));
+  const ids = await Promise.all(
+    ["builder", "member", "lead"].map((n) => h.createUser(`${n}@import.test`)),
+  );
   builderId = ids[0] ?? "";
   await h.createUser("admin@import.test", "admin");
   await h.admin.query(`INSERT INTO teams (id, slug, name) VALUES ($1, 'imp', 'Imp')`, [team]);
   await h.admin.query(
-    `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'builder'), ($1, $3, 'member')`,
-    [team, ids[0], ids[1]],
+    `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'builder'), ($1, $3, 'member'),
+       ($1, $4, 'team_admin')`,
+    [team, ids[0], ids[1], ids[2]],
   );
   builder = await h.signIn("builder@import.test");
   member = await h.signIn("member@import.test");
+  lead = await h.signIn("lead@import.test");
   admin = await h.signIn("admin@import.test");
-  for (const who of [builder, member]) {
+  for (const who of [builder, member, lead]) {
     expect((await who.put("/v1/me/teams/active", { teamId: team })).status).toBe(200);
     who.team = team;
   }
@@ -241,5 +248,72 @@ describe("governed import (KOBE-344)", () => {
     });
     expect(moved.json.code).toBe("fetch_failed");
     expect(String(moved.json.message)).toMatch(/redirect/);
+  });
+
+  it("carries the origin into the saved version and the promoted catalog provenance (review)", async () => {
+    const sha = commit({
+      "skills/ledger/SKILL.md": skillMd("ledger", "keeps books"),
+      "skills/ledger/kobe.skill.yaml": manifest("ledger", "1.0.0"),
+      "skills/ledger/evals/cases.yaml": CASES,
+    });
+    const made = await importGit(builder, sha, { path: "skills/ledger" });
+    expect(made.status, JSON.stringify(made.json)).toBe(201);
+    const draft = made.json.draft as { id: string; rev: number };
+    const saved = await builder.request(
+      "POST",
+      `/v1/skills/drafts/${draft.id}/versions`,
+      { destination: "team", semver: "1.0.0", changelog: "Imported." },
+      { "if-match": String(draft.rev) },
+    );
+    expect(saved.status, JSON.stringify(saved.json)).toBe(201);
+    const skillId = saved.json.skill.id as string;
+    const version = saved.json.version.version as number;
+    const row = await h.admin.query<{ origin: Record<string, unknown>; package_hash: string }>(
+      `SELECT origin, package_hash FROM team_skill_versions WHERE skill_id = $1 AND version = $2`,
+      [skillId, version],
+    );
+    expect(row.rows[0]?.origin).toMatchObject({
+      kind: "git",
+      url: GIT_URL,
+      commit: sha,
+      path: "skills/ledger",
+      importedBy: builderId,
+    });
+    // Versions are immutable: the origin too.
+    const upd = await h.admin
+      .query(`UPDATE team_skill_versions SET origin = NULL WHERE skill_id = $1`, [skillId])
+      .catch((e: { message?: string }) => e.message);
+    expect(String(upd)).toMatch(/immutable/);
+    // Promotion: the team review and a fresh full eval, as the registry fixtures leave them.
+    const hash = row.rows[0]?.package_hash;
+    await h.admin.query(
+      `INSERT INTO skill_eval_runs (team_id, started_by, subject_kind, subject_id, subject_rev,
+         skill_name, package_hash, runtime_hash, bundle_key, bundle_size, mode, status, suite, limits,
+         progress_total, progress_done, scorecard, finished_at)
+       VALUES ($1, $2, 'team', $3, $4, 'x', $5, repeat('b', 64), 'k', 1, 'full', 'completed', '{}',
+         '{}', 5, 5, $6, now())`,
+      [team, builderId, skillId, version, hash, JSON.stringify({ ...GOLDEN, packageHash: hash })],
+    );
+    await h.admin.query(
+      `UPDATE team_skill_reviews SET status = 'approved', reviewed_by = $3, reviewed_at = now()
+        WHERE team_id = $1 AND skill_id = $2 AND version = $4`,
+      [team, skillId, builderId, version],
+    );
+    // A Team admin submits directly (a Builder's request would wait for their confirmation).
+    const registryVersionId = await promoteTeamVersion(lead, skillId, version);
+    const prov = await h.admin.query<{ provenance: Record<string, unknown> }>(
+      `SELECT provenance FROM registry_versions WHERE id = $1`,
+      [registryVersionId],
+    );
+    // What the mirror writes as provenance.json (and export reads): it parses, origin included.
+    expect(provenanceSchema.safeParse(prov.rows[0]?.provenance).success).toBe(true);
+    expect(prov.rows[0]?.provenance.origin).toEqual({
+      kind: "git",
+      url: GIT_URL,
+      commit: sha,
+      path: "skills/ledger",
+      fetchedSha256: (made.json.draft as { origin: { fetchedSha256: string } }).origin
+        .fetchedSha256,
+    });
   });
 });

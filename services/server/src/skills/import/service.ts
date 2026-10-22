@@ -122,7 +122,8 @@ function origin(
 ): SkillImportOrigin {
   return {
     kind: request.kind,
-    url: request.url,
+    // As the URL parser writes it: provenance keeps exactly this form (`href`).
+    url: new URL(request.url).href,
     ...(request.kind === "git" ? { commit: request.commit } : {}),
     ...(request.kind === "git" && request.path ? { path: request.path } : {}),
     fetchedSha256,

@@ -1,4 +1,9 @@
-import { PROVENANCE_API_VERSION, provenanceSchema, type SkillProvenance } from "@kobe/protocol";
+import {
+  PROVENANCE_API_VERSION,
+  provenanceSchema,
+  skillImportOriginSchema,
+  type SkillProvenance,
+} from "@kobe/protocol";
 import { externalScannerOn, queuedScan } from "./external-scan-result.js";
 import {
   and,
@@ -70,6 +75,24 @@ async function buildersMayPromote(tx: KobeTx, teamId: string): Promise<boolean> 
   return row?.on === true;
 }
 
+/**
+ * A governed import's origin for provenance (KOBE-344, SK30): URL (with its host), commit or the
+ * zip, Kobe's hash of what it fetched, and the folder. Only a stored origin that still parses.
+ */
+function originOf(origin: Record<string, unknown> | null): { origin?: SkillProvenance["origin"] } {
+  const o = skillImportOriginSchema.safeParse(origin);
+  if (!o.success) return {};
+  return {
+    origin: {
+      kind: o.data.kind,
+      url: o.data.url,
+      ...(o.data.commit ? { commit: o.data.commit } : {}),
+      ...(o.data.path ? { path: o.data.path } : {}),
+      fetchedSha256: o.data.fetchedSha256,
+    },
+  };
+}
+
 function provenanceOf(
   plan: PromotionPlan,
   source: PromoteSource,
@@ -93,6 +116,7 @@ function provenanceOf(
       ? { confirmedBy: { userId: confirmedBy.userId, at: confirmedBy.at.toISOString() } }
       : {}),
     fromConversation: plan.fromConversation,
+    ...originOf(plan.origin),
     scan: {
       scanner: {
         name: "kobe-skill-scanner",

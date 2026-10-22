@@ -55,6 +55,8 @@ export interface PromotionPlan {
   /** `evals/`: cases and fixtures, which leave the team too. */
   readonly fixtures: readonly PackageFile[];
   readonly fromConversation: boolean;
+  /** The version's governed-import origin (KOBE-344), as saved from its draft. */
+  readonly origin: Record<string, unknown> | null;
   /** The catalog skill it would be a version of; null for a new name. */
   readonly catalogSkillId: string | null;
   readonly refusals: readonly Refusal[];
@@ -157,13 +159,22 @@ export async function lockedTeamReview(
 async function versionFacts(db: KobeDb, source: PromoteSource) {
   return withTeam(db, source.teamId, async (tx: KobeTx) => {
     if (source.scope === "personal") {
-      const res = await tx.execute<{ flag: boolean }>(sql`
-        SELECT from_conversation AS flag FROM personal_skill_versions
+      const res = await tx.execute<{ flag: boolean; origin: Record<string, unknown> | null }>(sql`
+        SELECT from_conversation AS flag, origin FROM personal_skill_versions
          WHERE skill_id = ${source.skillId} AND version = ${source.version}`);
-      return { fromConversation: res.rows[0]?.flag === true, review: null };
+      return {
+        fromConversation: res.rows[0]?.flag === true,
+        origin: res.rows[0]?.origin ?? null,
+        review: null,
+      };
     }
-    const res = await tx.execute<{ flag: boolean; status: string | null; suspended: boolean }>(sql`
-      SELECT v.from_conversation AS flag, r.status, r.suspended_at IS NOT NULL AS suspended
+    const res = await tx.execute<{
+      flag: boolean;
+      origin: Record<string, unknown> | null;
+      status: string | null;
+      suspended: boolean;
+    }>(sql`
+      SELECT v.from_conversation AS flag, v.origin, r.status, r.suspended_at IS NOT NULL AS suspended
         FROM team_skill_versions v
         LEFT JOIN team_skill_reviews r
           ON r.team_id = v.team_id AND r.skill_id = v.skill_id AND r.version = v.version
@@ -171,7 +182,11 @@ async function versionFacts(db: KobeDb, source: PromoteSource) {
        WHERE v.team_id = ${source.teamId} AND v.skill_id = ${source.skillId}
          AND v.version = ${source.version}`);
     const row = res.rows[0];
-    return { fromConversation: row?.flag === true, review: teamReviewRefusal(row) };
+    return {
+      fromConversation: row?.flag === true,
+      origin: row?.origin ?? null,
+      review: teamReviewRefusal(row),
+    };
   });
 }
 
@@ -269,6 +284,7 @@ export async function preparePromotion(
     ),
     ...filesOf(bundle),
     fromConversation: facts.fromConversation,
+    origin: facts.origin,
   };
   const { refusals, catalogSkillId } = await refusalsOf(
     db,

@@ -111,6 +111,8 @@ export async function saveDraftVersion(
       id,
       teamId: ctx.teamId,
       fromConversation,
+      // An imported draft's origin goes with the version (KOBE-344).
+      origin: draft.origin,
       personal: personal ? { fromConversation, coEdited: draft.coEdited } : null,
     },
   });

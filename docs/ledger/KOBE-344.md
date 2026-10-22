@@ -33,10 +33,17 @@
   never a catalog entry. `skill.draft.created` audit carries the origin. Nothing is fetched
   after creation (ac-4): the draft holds the files.
 
+- **Origin carried on (review):** the same migration commit adds `origin` to
+  `team_skill_versions` and `personal_skill_versions` (immutable, as every version column); a
+  version saved from an imported draft keeps the draft's origin, and promotion writes it into
+  `provenance.origin` (kind, url with its host, commit or the zip's hash, folder, Kobe's
+  SHA-256; the protocol's provenance origin gained an optional `path`). The mirror's
+  `provenance.json` and exports read that provenance, so they carry it too. A fork of an imported
+  version does not inherit the origin (it is a new draft). The import URL is stored as the URL
+  parser writes it (`href`), as provenance requires.
+
 ## Open questions (for Chris or the coordinator)
 
-- The origin lives on the draft only; it does not yet flow into a saved version or into
-  `provenance.json`'s `origin` at promotion (needs version columns: a later migration).
 - Public hubs as "discovery links": no links are shown in the UI yet.
 - Live check against GitHub/Forgejo (fetch through the egress proxy) still to do on gate1.
 
