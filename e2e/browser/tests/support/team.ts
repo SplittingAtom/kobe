@@ -3,8 +3,8 @@ import { SHELL_TIMEOUT_MS } from "./constants.js";
 
 /**
  * KOBE_TEAM (a team slug) pins the team a signed-in page runs in. The active team belongs to the
- * session: a fresh sign-in lands in the first of the user's teams by name (or the browser's last
- * one), which need not be the team the specs use. Call it after the chat's first load (the
+ * session: a fresh sign-in lands in the user's last active team (else the first working team with
+ * a model, KOBE-456), which need not be the team the specs use; pinning also makes it the last. Call it after the chat's first load (the
  * switcher's own activation would otherwise overwrite it); without KOBE_TEAM it does nothing.
  * Every page that signs in on its own (the setup, a second browser) calls it (KOBE-457).
  */

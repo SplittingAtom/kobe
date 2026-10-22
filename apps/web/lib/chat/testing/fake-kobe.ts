@@ -195,6 +195,8 @@ export class FakeKobe {
   readonly otherTeams: { id: string; slug: string; name: string; role: string }[] = [];
   /** The session's active team (`GET /v1/me/teams`); null: none yet, the client activates one. */
   activeTeamId: string | null = this.teamId;
+  /** The user's last active team in any session (KOBE-456); PUTs to the active team set it. */
+  lastTeamId: string | null = null;
   /** `GET /v1/agents/runnable` (KOBE-122), in this order; `runnablePageSize` pages it. */
   readonly runnableAgents: FakeRunnableAgent[] = [];
   runnablePageSize = 200;
@@ -1039,6 +1041,7 @@ export class FakeKobe {
     if (url.pathname === "/v1/me/teams") {
       return json(200, {
         activeTeamId: this.activeTeamId,
+        lastTeamId: this.lastTeamId,
         teams: [
           { id: this.teamId, slug: "fin", name: "Finance", role: this.teamRole },
           ...this.otherTeams,
@@ -1048,6 +1051,7 @@ export class FakeKobe {
     if (url.pathname === "/v1/me/teams/active" && method === "PUT") {
       this.activeTeamId = ((body as { teamId?: string } | undefined)?.teamId ?? null) as
         string | null;
+      this.lastTeamId = this.activeTeamId;
       return json(200, {});
     }
     if (url.pathname === "/v1/me/invites") return json(200, { invitations: [] });

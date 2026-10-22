@@ -266,14 +266,20 @@ describe("teams (ac-1)", () => {
 describe("active team and switcher API (ac-5)", () => {
   it("lists only the caller's teams with their role, and no active team at first", async () => {
     const res = await as.bob.get("/v1/me/teams");
+    const hints = { registry: false, chatReady: false };
     expect(res.json).toEqual({
       activeTeamId: null,
+      lastTeamId: null,
       teams: [
-        { id: finance, slug: "finance", name: "Finance & Ops", role: "member" },
-        { id: marketing, slug: "marketing", name: "Marketing", role: "team_admin" },
+        { id: finance, slug: "finance", name: "Finance & Ops", role: "member", ...hints },
+        { id: marketing, slug: "marketing", name: "Marketing", role: "team_admin", ...hints },
       ],
     });
-    expect((await as.dave.get("/v1/me/teams")).json).toEqual({ activeTeamId: null, teams: [] });
+    expect((await as.dave.get("/v1/me/teams")).json).toEqual({
+      activeTeamId: null,
+      lastTeamId: null,
+      teams: [],
+    });
   });
 
   it("requires an active team for team-scoped routes", async () => {
@@ -461,7 +467,11 @@ describe("team membership via /v1/team (ac-2, ac-4)", () => {
       status: 403,
       json: { code: "not_a_team_member" },
     });
-    expect((await as.carol.get("/v1/me/teams")).json).toEqual({ activeTeamId: null, teams: [] });
+    expect((await as.carol.get("/v1/me/teams")).json).toEqual({
+      activeTeamId: null,
+      lastTeamId: null,
+      teams: [],
+    });
     expect((await as.alice.delete(`/v1/team/members/${ids.carol}`)).status).toBe(404);
   });
 

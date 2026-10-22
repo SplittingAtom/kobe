@@ -353,7 +353,14 @@ describe("team invitations (ac-2)", () => {
     ]);
     expect((await b.post(`/v1/me/invites/${finance}/accept`)).status).toBe(200);
     expect((await b.get("/v1/me/teams")).json.teams).toEqual([
-      { id: finance, slug: "finance", name: "Finance", role: "builder" },
+      {
+        id: finance,
+        slug: "finance",
+        name: "Finance",
+        role: "builder",
+        registry: false,
+        chatReady: false,
+      },
     ]);
   });
 

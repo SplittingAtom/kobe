@@ -18,7 +18,7 @@ export interface TeamMembership {
 
 const userIdSchema = z.uuid({ error: "user id must be a UUID" });
 
-function parseUserId(fn: string, userId: string): string {
+export function parseUserId(fn: string, userId: string): string {
   const parsed = userIdSchema.safeParse(userId);
   if (!parsed.success) {
     throw new Error(
