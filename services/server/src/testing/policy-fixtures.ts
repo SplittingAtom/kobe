@@ -135,6 +135,7 @@ export const SAMPLE_INPUTS: Readonly<Record<string, JsonObject>> = {
   propose_project_file: { path: "notes.md", folder: "docs", reason: "keep it" },
   save_skill_draft: { folder: "weekly-report" },
   propose_file_edit: { path: "notes.md", content: "# Notes\n", summary: "Tidy the notes" },
+  open_file: { path: "notes.md" },
   run_python: { code: "print(1 + 1)" },
 };
 

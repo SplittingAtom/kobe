@@ -25,6 +25,7 @@ import {
   type SandboxErrorCode,
   type SandboxToServerFrame,
   type FileEditProposeFrame,
+  type FileOpenFrame,
   type NotebookOutputFrame,
   type NotebookRunFrame,
   type SkillDraftSaveFrame,
@@ -58,6 +59,7 @@ import {
   type InterruptCause,
 } from "./run-state.js";
 import { onFileEditPropose } from "./file-edit-propose.js";
+import { onFileOpen } from "./file-open.js";
 import { NotebookIntake } from "./notebook-intake.js";
 import { onNotebookRun } from "./notebook-run.js";
 import { onSkillDraftSave } from "./skill-draft-save.js";
@@ -472,6 +474,9 @@ export class SandboxConnection implements RegisteredConnection {
       case "file.edit_propose":
         this.#onFileEditPropose(frame);
         return;
+      case "file.open":
+        this.#onFileOpen(frame);
+        return;
       case "notebook.output":
         this.#onNotebookOutput(frame, bytes);
         return;
@@ -883,6 +888,24 @@ export class SandboxConnection implements RegisteredConnection {
         log: this.log,
         hasCapability: this.hasCapability(CAPABILITY_FILE_EDITS),
         runCheck: () => this.#checkToolRun(frame.run_id, frame.thread_id, "file.edit_propose"),
+        verdict: () =>
+          this.#allowedArtifacts.consume(frame.run_id, frame.tool_call_id, frame.tool, frame.input),
+        send: (out) => this.send(out),
+      },
+      frame,
+    );
+  }
+
+  /** `file.open` (KOBE-484): checks and record in `file-open.ts`; rides `file_edits`. */
+  #onFileOpen(frame: FileOpenFrame): void {
+    onFileOpen(
+      {
+        db: this.#ctx.db,
+        target: this.target,
+        runMaxEvents: this.#ctx.tuning.runMaxEvents,
+        log: this.log,
+        hasCapability: this.hasCapability(CAPABILITY_FILE_EDITS),
+        runCheck: () => this.#checkToolRun(frame.run_id, frame.thread_id, "file.open"),
         verdict: () =>
           this.#allowedArtifacts.consume(frame.run_id, frame.tool_call_id, frame.tool, frame.input),
         send: (out) => this.send(out),
