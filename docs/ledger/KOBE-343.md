@@ -61,6 +61,27 @@ values for the token Secret and identity; no migration (`registry_versions.mirro
 - **New dependency:** `isomorphic-git` 1.44.2 (MIT; deps MIT/Apache/BSD/Zlib), pure JS, so no git
   binary in the server image. `THIRD_PARTY_LICENSES.md` regenerated.
 
+## Review fixes (Opus review)
+
+- **Blocklist (M):** each run first withdraws published versions whose runtime or package hash
+  (or hash group, `blockedAmong`) is on the site skill blocklist: status `withdrawn` (pushed
+  commit/tag kept in the record), never pushed again (also not to a new remote), left out of
+  `catalog.json` from the next commit on; history is never rewritten. Off the blocklist: pending
+  again (an existing tag with the same tree counts as pushed; `catalog.json` relists it on the
+  next commit). Console shows a withdrawn count. Not separately audited: the blocklist change is.
+- **Egress audit (L):** site-job connections are written durably as `egress.site_connection`
+  (site scope; job, host, port, outcome, reason, bytes; never a token), aggregated like
+  `egress.connection`.
+- **Git-reserved paths (L):** `packagePathProblem` refuses `.git`, `.gitattributes` and
+  `.gitmodules` segments in any case at any depth (`git_reserved`, for every package, not only
+  the mirror); case-folded collisions were already `duplicate`. The mirror's per-version error
+  names the paths and problems.
+- **provenance.json IDs (L):** checked against spec line 251 (source scope and version,
+  submitter, scan, scorecard numbers, both hashes). The ids (`source.teamId`, `source.skillId`,
+  `submitter.userId`, `confirmedBy.userId`) are Kobe's lowercase UUIDs (`UUID_PATTERN`); the
+  mirror writes the stored provenance only when it parses with `provenanceSchema`, as canonical
+  JSON. The spec doesn't specify an id format; ids, no names or emails, reach the mirror.
+
 ## Open questions (for Chris or the coordinator)
 
 - "Tested against Forgejo and GitHub": covered here by a local `git http-backend` (smart HTTP,

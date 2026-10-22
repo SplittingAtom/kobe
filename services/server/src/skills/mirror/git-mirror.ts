@@ -1,7 +1,12 @@
 import * as fs from "node:fs";
 import git, { Errors, type HttpClient, type TreeEntry } from "isomorphic-git";
 import { mirrorTagName, type PackageFiles } from "@kobe/protocol";
-import { CATALOG_JSON_PATH, readCatalogJson, writeCatalogJson } from "./catalog-json.js";
+import {
+  CATALOG_JSON_PATH,
+  readCatalogJson,
+  withoutVersions,
+  writeCatalogJson,
+} from "./catalog-json.js";
 
 /**
  * The git side of the catalog mirror (KOBE-343, SK29), independent of the database. A session
@@ -56,6 +61,8 @@ export interface MirrorRemote {
   readonly http: HttpClient;
   readonly author: MirrorAuthor;
   readonly now?: () => Date;
+  /** `name@semver` versions to leave out of `catalog.json` (withdrawn: blocklisted). */
+  readonly withdrawn?: ReadonlySet<string>;
 }
 
 interface RemoteRef {
@@ -265,7 +272,11 @@ export class MirrorSession {
       type: "blob",
       oid: await git.writeBlob({ fs, dir: this.dir, blob: GITATTRIBUTES }),
     });
-    const catalog = writeCatalogJson(readCatalogJson(await this.readCatalog(baseTree)), {
+    const previous = withoutVersions(
+      readCatalogJson(await this.readCatalog(baseTree)),
+      this.remote.withdrawn ?? new Set(),
+    );
+    const catalog = writeCatalogJson(previous, {
       name: v.name,
       semver: v.semver,
       tag: tagName,

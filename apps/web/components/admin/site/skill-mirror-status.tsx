@@ -66,8 +66,8 @@ export function SkillMirrorStatusPanel() {
               </Notice>
             )}
             <p className="text-sm" aria-label="Mirror summary">
-              {s.pushed} pushed · {s.pending} pending · {s.failed} failing · last push{" "}
-              {when(s.lastPushedAt)} · branch {s.branch}
+              {s.pushed} pushed · {s.pending} pending · {s.failed} failing · {s.withdrawn} withdrawn
+              (blocklisted) · last push {when(s.lastPushedAt)} · branch {s.branch}
             </p>
             {s.failures.length > 0 && (
               <>

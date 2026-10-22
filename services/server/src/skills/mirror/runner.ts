@@ -19,6 +19,7 @@ import {
   pendingMirrorVersions,
   recordMirrorFailure,
   recordMirrorSuccess,
+  withdrawBlocked,
   type PendingVersion,
 } from "./mirror-store.js";
 
@@ -142,6 +143,8 @@ export class SkillMirror {
   }
 
   private async run(url: string, branch: string): Promise<SweepResult> {
+    // Blocklisted versions are withdrawn first: never pushed, dropped from catalog.json.
+    const withdrawn = await withdrawBlocked(this.deps.db, url, this.now());
     const pending = await pendingMirrorVersions(this.deps.db, url, this.now(), SKILL_MIRROR_BATCH);
     if (pending.length === 0) return { ran: true, pushed: 0, failed: 0 };
     const dir = await mkdtemp(path.join(tmpdir(), "kobe-skill-mirror-"));
@@ -151,7 +154,14 @@ export class SkillMirror {
       let session: MirrorSession;
       try {
         session = await MirrorSession.open(
-          { url, branch, http: this.http(url), author: this.deps.author, now: () => this.now() },
+          {
+            url,
+            branch,
+            http: this.http(url),
+            author: this.deps.author,
+            now: () => this.now(),
+            withdrawn,
+          },
           dir,
         );
       } catch (err) {
@@ -211,8 +221,11 @@ export class SkillMirror {
     let hashes: { runtimeHash: string; packageHash: string };
     try {
       hashes = skillPackageHashes(files);
-    } catch {
-      throw new MirrorVersionError("the version's files are not a valid package");
+    } catch (err) {
+      // Names the paths and why (git-reserved names, case collisions, …).
+      throw new MirrorVersionError(
+        `the version's files are not a valid package: ${(err as Error).message}`,
+      );
     }
     if (hashes.runtimeHash !== v.runtimeHash || hashes.packageHash !== v.packageHash)
       throw new MirrorVersionError(

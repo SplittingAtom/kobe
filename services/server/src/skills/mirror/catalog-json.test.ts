@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readCatalogJson, writeCatalogJson } from "./catalog-json.js";
+import { readCatalogJson, withoutVersions, writeCatalogJson } from "./catalog-json.js";
 
 const h = (c: string) => c.repeat(64);
 
@@ -59,5 +59,18 @@ describe("mirror catalog.json (KOBE-343)", () => {
     expect(readCatalogJson(junk)).toEqual({});
     expect(readCatalogJson(new TextEncoder().encode("not json"))).toEqual({});
     expect(readCatalogJson(null)).toEqual({});
+  });
+
+  it("leaves withdrawn versions out, and a skill with none left", () => {
+    const index = {
+      a: { "1.0.0": { tag: "a/v1.0.0", runtimeHash: h("a"), packageHash: h("a") } },
+      b: {
+        "1.0.0": { tag: "b/v1.0.0", runtimeHash: h("b"), packageHash: h("b") },
+        "1.1.0": { tag: "b/v1.1.0", runtimeHash: h("c"), packageHash: h("c") },
+      },
+    };
+    expect(withoutVersions(index, new Set(["a@1.0.0", "b@1.0.0"]))).toEqual({
+      b: { "1.1.0": index.b["1.1.0"] },
+    });
   });
 });

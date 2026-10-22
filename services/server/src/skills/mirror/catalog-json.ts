@@ -58,6 +58,19 @@ export function readCatalogJson(bytes: Uint8Array | null): Index {
   return out;
 }
 
+/** The index without the `name@semver` versions in `drop` (withdrawn: blocklisted). */
+export function withoutVersions(index: Index, drop: ReadonlySet<string>): Index {
+  if (drop.size === 0) return index;
+  return Object.fromEntries(
+    Object.entries(index).flatMap(([name, versions]) => {
+      const kept = Object.fromEntries(
+        Object.entries(versions).filter(([semver]) => !drop.has(`${name}@${semver}`)),
+      );
+      return Object.keys(kept).length > 0 ? [[name, kept]] : [];
+    }),
+  );
+}
+
 /** The index with `entry` added (or replaced), as stable, pretty-printed UTF-8 JSON. */
 export function writeCatalogJson(previous: Index, entry: CatalogEntry): Uint8Array {
   const next: Index = {

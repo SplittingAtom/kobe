@@ -4,6 +4,7 @@ import {
   type SkillMirrorFailure,
 } from "@kobe/protocol";
 import { SYSTEM_ACTOR, sql, type KobeDb } from "@kobe/db";
+import { blockedAmong } from "../blocklist.js";
 import { recordAudit } from "../../audit/record.js";
 
 /**
@@ -175,6 +176,7 @@ export async function retryMirrorNow(db: KobeDb, url: string): Promise<number> {
 
 export interface MirrorCounts {
   readonly pushed: number;
+  readonly withdrawn: number;
   readonly pending: number;
   readonly failed: number;
   readonly lastPushedAt: string | null;
@@ -189,6 +191,7 @@ export async function mirrorCounts(db: KobeDb, url: string | null): Promise<Mirr
     published: number;
     pushed: number;
     failed: number;
+    withdrawn: number;
     last: string | null;
   }>(sql`
     SELECT count(*)::int AS published,
@@ -196,9 +199,11 @@ export async function mirrorCounts(db: KobeDb, url: string | null): Promise<Mirr
              AS pushed,
            count(*) FILTER (WHERE v.mirror->>'url' = ${url} AND v.mirror->>'status' = 'failed')::int
              AS failed,
+           count(*) FILTER (WHERE v.mirror->>'url' = ${url} AND v.mirror->>'status' = 'withdrawn')::int
+             AS withdrawn,
            max(v.mirror->>'pushedAt') FILTER (WHERE v.mirror->>'url' = ${url}) AS last
       FROM registry_versions v WHERE ${PUBLISHED}`);
-  const c = counts.rows[0] ?? { published: 0, pushed: 0, failed: 0, last: null };
+  const c = counts.rows[0] ?? { published: 0, pushed: 0, failed: 0, withdrawn: 0, last: null };
   const failed = url
     ? await db.execute<{ id: string; name: string; semver: string; mirror: unknown }>(sql`
         SELECT v.id, s.name, v.semver, v.mirror
@@ -225,8 +230,58 @@ export async function mirrorCounts(db: KobeDb, url: string | null): Promise<Mirr
   return {
     pushed: url ? c.pushed : 0,
     failed: url ? c.failed : 0,
-    pending: url ? c.published - c.pushed - c.failed : c.published,
+    withdrawn: url ? c.withdrawn : 0,
+    pending: url ? c.published - c.pushed - c.failed - c.withdrawn : c.published,
     lastPushedAt: url ? c.last : null,
     failures,
   };
+}
+
+/**
+ * Withdraws blocklisted versions from the mirror (KOBE-343 review): every published version whose
+ * runtime or package hash (or a hash of its group) is on the site skill blocklist gets status
+ * `withdrawn` for `url` (a pushed commit and tag are kept in the record: they stay on the remote,
+ * Kobe never rewrites history); one taken off the blocklist is pending again. Returns the
+ * withdrawn versions as `name@semver`, to leave out of the next `catalog.json`.
+ */
+export async function withdrawBlocked(db: KobeDb, url: string, now: Date): Promise<Set<string>> {
+  const res = await db.execute<{
+    id: string;
+    name: string;
+    semver: string;
+    runtime_hash: string;
+    package_hash: string;
+    mirror: unknown;
+  }>(sql`
+    SELECT v.id, s.name, v.semver, v.runtime_hash, v.package_hash, v.mirror
+      FROM registry_versions v JOIN registry_skills s ON s.id = v.skill_id
+     WHERE ${PUBLISHED}`);
+  const hashes = [...new Set(res.rows.flatMap((r) => [r.runtime_hash, r.package_hash]))];
+  const blocked = new Set(await db.transaction((tx) => blockedAmong(tx, hashes)));
+  const withdrawn = new Set<string>();
+  for (const r of res.rows) {
+    const m = parseMirror(r.mirror);
+    const here = m?.url === url ? m : null;
+    if (blocked.has(r.runtime_hash) || blocked.has(r.package_hash)) {
+      withdrawn.add(`${r.name}@${r.semver}`);
+      if (here?.status === "withdrawn") continue;
+      const doc: RegistryVersionMirror = {
+        url,
+        status: "withdrawn",
+        ...(here?.commit ? { commit: here.commit } : {}),
+        ...(here?.tag ? { tag: here.tag } : {}),
+        ...(here?.tree ? { tree: here.tree } : {}),
+        ...(here?.pushedAt ? { pushedAt: here.pushedAt } : {}),
+        attempts: 0,
+        lastAttemptAt: now.toISOString(),
+      };
+      await db.execute(sql`
+        UPDATE registry_versions SET mirror = ${JSON.stringify(doc)}::jsonb, updated_at = now()
+         WHERE id = ${r.id}`);
+    } else if (here?.status === "withdrawn") {
+      await db.execute(sql`
+        UPDATE registry_versions SET mirror = NULL, updated_at = now() WHERE id = ${r.id}`);
+    }
+  }
+  return withdrawn;
 }

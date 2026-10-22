@@ -20,7 +20,11 @@ const sha1 = z.string().regex(/^[0-9a-f]{40}$/);
  */
 export const registryVersionMirrorSchema = z.strictObject({
   url: z.string().max(512),
-  status: z.enum(["pushed", "failed"]),
+  /**
+   * `withdrawn`: on the site skill blocklist. Never pushed (again), and left out of `catalog.json`
+   * from the next commit on; a commit or tag already pushed stays (Kobe never rewrites history).
+   */
+  status: z.enum(["pushed", "failed", "withdrawn"]),
   /** The commit whose `skills/<name>/` tree is this version, and the tag object naming it. */
   commit: sha1.optional(),
   tag: z.string().max(200).optional(),
@@ -60,6 +64,8 @@ export interface SkillMirrorStatus {
   /** The remote's host is in the site egress ceiling (pushes go through the egress proxy). */
   readonly hostInCeiling: boolean | null;
   readonly pushed: number;
+  /** Published versions on the site skill blocklist: not mirrored, not listed in catalog.json. */
+  readonly withdrawn: number;
   readonly pending: number;
   readonly failed: number;
   readonly lastPushedAt: string | null;

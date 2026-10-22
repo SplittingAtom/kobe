@@ -119,6 +119,7 @@ describe("Skill Registry settings (KOBE-330)", () => {
       pushed: 4,
       pending: 1,
       failed: 1,
+      withdrawn: 2,
       lastPushedAt: "2026-10-22T10:00:00.000Z",
       failures: [
         {

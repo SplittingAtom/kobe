@@ -304,6 +304,80 @@ describe("the catalog's git mirror (KOBE-343)", () => {
     expect(after).toContain(head.trim());
   });
 
+  it("withdraws a blocklisted version: never pushed again, out of catalog.json, history kept (review)", async () => {
+    const url = `${git.origin}/catalog.git`;
+    await setMirror(url);
+    const qr = versionIds["quarterly-report@1.0.0"] as string;
+    const hash = (
+      await h.admin.query<{ runtime_hash: string }>(
+        `SELECT runtime_hash FROM registry_versions WHERE id = $1`,
+        [qr],
+      )
+    ).rows[0]?.runtime_hash;
+    await h.admin.query(
+      `INSERT INTO skill_blocklist (content_hash, reason, added_by) VALUES ($1, 'malware', $2)`,
+      [hash, adminId],
+    );
+    const tagged = git.git("catalog", ["rev-parse", "quarterly-report/v1.0.0^{commit}"], {
+      bare: true,
+    });
+    await publish("weekly-digest", "0.3.0");
+    expect(await mirror.sweep()).toMatchObject({ ran: true, pushed: 1, failed: 0 });
+    expect(await mirrorDoc(qr)).toMatchObject({
+      status: "withdrawn",
+      tag: "quarterly-report/v1.0.0",
+    });
+    // The tag and its commit stay (no rewrite); the new catalog.json no longer lists it.
+    expect(
+      git.git("catalog", ["rev-parse", "quarterly-report/v1.0.0^{commit}"], { bare: true }),
+    ).toBe(tagged);
+    const catalog = JSON.parse(git.git("catalog", ["show", "main:catalog.json"], { bare: true }));
+    expect(Object.keys(catalog.skills["quarterly-report"].versions)).toEqual(["1.1.0"]);
+    expect(catalog.skills["weekly-digest"].versions["0.3.0"]).toBeTruthy();
+    expect((await admin.get("/v1/site/skills/registry/mirror")).json).toMatchObject({
+      withdrawn: 1,
+    });
+    // A new remote never gets it.
+    const fresh = git.repo("fresh");
+    await setMirror(fresh);
+    expect(await mirror.sweep()).toMatchObject({ ran: true, failed: 0 });
+    expect(git.git("fresh", ["tag", "-l"], { bare: true })).not.toContain(
+      "quarterly-report/v1.0.0",
+    );
+    // Off the blocklist: pending again, then pushed.
+    await h.admin.query(`DELETE FROM skill_blocklist WHERE content_hash = $1`, [hash]);
+    expect(await mirror.sweep()).toMatchObject({ ran: true, pushed: 1 });
+    expect(await mirrorDoc(qr)).toMatchObject({ status: "pushed", url: fresh });
+  });
+
+  it("refuses a version whose paths git reserves, naming the problem, and goes on (review)", async () => {
+    const bad = zipSync({
+      "SKILL.md": strToU8("---\nname: gitty\ndescription: d\n---\n"),
+      "scripts/.gitattributes": strToU8("* text\n"),
+    });
+    const hash = sha256Hex(bad);
+    const key = await ensureObject(blobs, bad, hash);
+    const skill = await h.admin.query<{ id: string }>(
+      `INSERT INTO registry_skills (name, summary) VALUES ('gitty', 'S.') RETURNING id`,
+    );
+    const r = await h.admin.query<{ id: string }>(
+      `INSERT INTO registry_versions (skill_id, semver, seq, runtime_hash, package_hash,
+         runtime_storage_key, runtime_size_bytes, manifest, provenance, source, scan, verdict,
+         submitted_by, state, reviewed_by, approved_at)
+       VALUES ($1, '1.0.0', 1, $2, $2, $3, $4, '{}', '{}', '{}', '{"findings": []}', 'pass', $5,
+         'approved', $5, now()) RETURNING id`,
+      [skill.rows[0]?.id, hash, key, bad.length, adminId],
+    );
+    await publish("weekly-digest", "0.4.0");
+    expect(await mirror.sweep()).toMatchObject({ ran: true, pushed: 1, failed: 1 });
+    expect(String((await mirrorDoc(r.rows[0]?.id as string))?.lastError)).toMatch(
+      /not a valid package: .*\.gitattributes.*git_reserved/,
+    );
+    await h.admin.query(`UPDATE registry_versions SET suspended_at = now() WHERE id = $1`, [
+      r.rows[0]?.id,
+    ]);
+  });
+
   it("is for Site admins only", async () => {
     expect((await member.get("/v1/site/skills/registry/mirror")).status).toBe(403);
     expect((await member.post("/v1/site/skills/registry/mirror/retry", {})).status).toBe(403);
