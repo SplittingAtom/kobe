@@ -201,14 +201,20 @@ describe("model wiring (KOBE-41)", () => {
     const runtime = path.join(h.dir, "pi-runtime");
     await mkdir(runtime, { recursive: true });
     // A sibling thread's tool polling /tmp/kobe-pi: it writes SYSTEM.md the moment the
-    // directory appears, between mkdtemp and Pi's start.
+    // directory's agent/ appears, between mkdtemp and Pi's start. It keeps trying until the write
+    // lands: the directory shows before its agent/ does, and under load that gap is wide enough
+    // for a single early attempt to fail and the plant never to happen (KOBE-415).
     let planted: string | undefined;
     const poll = setInterval(() => {
+      if (planted !== undefined) return;
       void readdir(runtime).then(async (names) => {
-        const fresh = names.find((n) => n.startsWith("pi-") && path.join(runtime, n) !== planted);
-        if (fresh === undefined) return;
-        planted = path.join(runtime, fresh);
-        await writeFile(path.join(planted, "agent", "SYSTEM.md"), "evil").catch(() => undefined);
+        const fresh = names.find((n) => n.startsWith("pi-"));
+        if (fresh === undefined || planted !== undefined) return;
+        const dir = path.join(runtime, fresh);
+        await writeFile(path.join(dir, "agent", "SYSTEM.md"), "evil").then(
+          () => (planted ??= dir),
+          () => undefined,
+        );
       });
     }, 1);
     try {
