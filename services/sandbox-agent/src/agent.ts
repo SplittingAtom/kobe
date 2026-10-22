@@ -34,6 +34,7 @@ import { FileShareBroker } from "./tools/share-broker.js";
 import { ProjectFileBroker } from "./tools/project-broker.js";
 import { SkillDraftBroker } from "./tools/skill-draft-broker.js";
 import { FileEditBroker } from "./tools/file-edit-broker.js";
+import { FileOpenBroker } from "./tools/file-open-broker.js";
 import { NotebookBroker } from "./tools/notebook-broker.js";
 import type { KernelManager } from "./notebook/manager.js";
 import { MemoryBroker } from "./tools/memory-broker.js";
@@ -173,6 +174,7 @@ export class Agent {
   readonly #skillDrafts: SkillDraftBroker;
   readonly #searches: WebSearchBroker;
   readonly #fileEdits: FileEditBroker;
+  readonly #fileOpens: FileOpenBroker;
   readonly #notebooks: NotebookBroker;
   readonly #memory: MemoryBroker;
   /** Run spans relayed to the server (KOBE-274); records only runs started with a trace context. */
@@ -205,6 +207,11 @@ export class Agent {
       root: config.workspaceDir,
       send: (frame) => this.#wire.send(frame),
       pushPath: pushPath ?? (() => Promise.reject(new Error("workspace sync is not available"))),
+    });
+    this.#fileOpens = new FileOpenBroker({
+      root: config.workspaceDir,
+      send: (frame) => this.#wire.send(frame),
+      pushPath,
     });
     this.#notebooks = new NotebookBroker({
       root: config.workspaceDir,
@@ -269,6 +276,7 @@ export class Agent {
           this.#skillDrafts.failRun(runId, "run ended");
           this.#searches.failRun(runId, "run ended");
           this.#fileEdits.failRun(runId, "run ended");
+          this.#fileOpens.failRun(runId, "run ended");
           this.#notebooks.failRun(runId, "run ended");
           deps.kernels?.runEnded(runId);
           this.#memory.failRun(runId, "run ended");
@@ -322,6 +330,11 @@ export class Agent {
             else reply(toolsError(request.id, "not_allowed", "file edits are not available"));
             return;
           }
+          if (request.op === "file.open") {
+            if (this.#fileEditsEnabled()) this.#fileOpens.open(threadId, runId, request, reply);
+            else reply(toolsError(request.id, "not_allowed", "opening files is not available"));
+            return;
+          }
           if (request.op === "skill.draft_save") {
             if (this.#skillDraftsEnabled()) this.#skillDrafts.save(threadId, runId, request, reply);
             else reply(toolsError(request.id, "not_allowed", "skill drafts are not available"));
@@ -342,6 +355,7 @@ export class Agent {
           this.#skillDrafts.failThread(threadId, reason);
           this.#searches.failThread(threadId, reason);
           this.#fileEdits.failThread(threadId, reason);
+          this.#fileOpens.failThread(threadId, reason);
           this.#notebooks.failThread(threadId, reason);
           this.#memory.failThread(threadId, reason);
         },
@@ -363,6 +377,7 @@ export class Agent {
         this.#skillDrafts.failAll("connection to Kobe server lost");
         this.#searches.failAll("connection to Kobe server lost");
         this.#fileEdits.failAll("connection to Kobe server lost");
+        this.#fileOpens.failAll("connection to Kobe server lost");
         this.#notebooks.failAll("connection to Kobe server lost");
         this.#memory.failAll("connection to Kobe server lost");
         void this.#threads.abortRestores();
@@ -467,7 +482,10 @@ export class Agent {
   }
 
   /** `save_skill_draft` (KOBE-442) pushes the folder first, so it needs what `share_file` needs. */
-  /** `propose_file_edit` (KOBE-462) needs only the tools channel: it pushes nothing. */
+  /**
+   * `propose_file_edit` (KOBE-462) needs only the tools channel: it pushes nothing. `open_file`
+   * (KOBE-484) rides the same capability; it pushes when sync is on, else opens the synced copy.
+   */
   #fileEditsEnabled(): boolean {
     return this.#deps.toolsExtension !== undefined;
   }
@@ -604,6 +622,9 @@ export class Agent {
         return;
       case "file.edit_propose_result":
         this.#fileEdits.onResult(frame);
+        return;
+      case "file.open_result":
+        this.#fileOpens.onResult(frame);
         return;
       case "notebook.run_result":
         this.#notebooks.onResult(frame);

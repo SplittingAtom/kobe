@@ -15,7 +15,7 @@ import type { ToolsTransport } from "./tools.js";
 /**
  * kobe-tools: the Pi 1.0.x extension that gives the model Kobe's own tools (spec D13; KOBE-128):
  * `create_artifact` and `update_artifact`, `share_file` (only when the agent announced the `files`
- * capability: KOBE_TOOLS_FILES=1), `propose_project_file` (only with `projects`: KOBE_TOOLS_PROJECTS=1), `save_skill_draft` (only with `skill_drafts`: KOBE_TOOLS_SKILL_DRAFTS=1), `propose_file_edit` (only with `file_edits`: KOBE_TOOLS_FILE_EDITS=1), `run_python` (only with `notebooks`: KOBE_TOOLS_NOTEBOOKS=1) and `remember` / `recall` (only when the agent announced `memory`: KOBE_TOOLS_MEMORY=1). Each call goes
+ * capability: KOBE_TOOLS_FILES=1), `propose_project_file` (only with `projects`: KOBE_TOOLS_PROJECTS=1), `save_skill_draft` (only with `skill_drafts`: KOBE_TOOLS_SKILL_DRAFTS=1), `propose_file_edit` and `open_file` (only with `file_edits`: KOBE_TOOLS_FILE_EDITS=1), `run_python` (only with `notebooks`: KOBE_TOOLS_NOTEBOOKS=1) and `remember` / `recall` (only when the agent announced `memory`: KOBE_TOOLS_MEMORY=1). Each call goes
  * through kobe-policy first (it is the last extension, so it checks the tool call before this
  * extension's `execute` runs), then to kobe-sandbox-agent on fd 4 (`KOBE_TOOLS_FD`), which forwards
  * it to the Kobe server; the server's answer is the tool result.

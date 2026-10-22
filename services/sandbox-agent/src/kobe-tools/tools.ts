@@ -144,7 +144,8 @@ export function shareFileTool(transport: ToolsTransport): ToolDefinitionLike {
       "Share a file from /workspace with the user as a download card. The file is saved first, so later edits do not change what the user gets. Returns the file record.",
     promptSnippet: "Give the user a file from the workspace to download",
     promptGuidelines: [
-      "Use share_file for a finished file the user asked for or will keep (a report, a spreadsheet, an archive); anything in /workspace can be shared, but not files over 100 MiB.",
+      "Use share_file only when the user wants to download a file or keep a copy of it (a finished report, a spreadsheet, an archive); anything in /workspace can be shared, but not files over 100 MiB.",
+      "To open, show or view a workspace file, use open_file instead of share_file when it is available.",
     ],
     parameters: SHARE_PARAMETERS,
     execute: (toolCallId, params) => share(transport, toolCallId, params),
