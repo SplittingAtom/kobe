@@ -1664,6 +1664,30 @@ export const AUDIT_EVENTS = {
   }),
   /** The submitter took back their submission before a decision (KOBE-334 review M3). */
   "registry.retracted": event("site", { registryVersionId: id }),
+  /**
+   * The git mirror pushed an approved version (KOBE-343, SK29): its commit and annotated tag are on
+   * the remote (system actor). `existing`: the remote already had exactly this tag and tree.
+   */
+  "registry.mirror.pushed": event("site", {
+    registryVersionId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    commit: z.string().regex(/^[0-9a-f]{40}$/),
+    tag: z.string().max(200),
+    existing: z.literal(true).optional(),
+  }),
+  /**
+   * The git mirror could not push a version (system actor): recorded on the first failure of a
+   * streak only (retries back off silently); `error` is redacted and never holds the token.
+   */
+  "registry.mirror.failed": event("site", {
+    registryVersionId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    error: z.string().max(500),
+  }),
+  /** A Site admin asked the mirror to retry its failed versions now (KOBE-343). */
+  "registry.mirror.retried": event("site", { versions: count }),
   /** A reviewer started the Registry team's re-run of a version's evals (KOBE-335, SK23). */
   "registry.evals_rerun": event("site", { registryVersionId: id, evalRunId: id, teamId: id }),
   /** A reviewer cancelled a re-run; the version's history keeps it (KOBE-335 review M3). */
