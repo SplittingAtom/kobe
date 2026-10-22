@@ -1212,6 +1212,13 @@
       "when": 1792644721205,
       "tag": "0172_user_last_teams",
       "breakpoints": true
+    },
+    {
+      "idx": 173,
+      "version": "7",
+      "when": 1792654957717,
+      "tag": "0173_removed_connector_credentials",
+      "breakpoints": true
     }
   ]
 }
