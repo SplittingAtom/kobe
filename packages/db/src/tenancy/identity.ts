@@ -26,6 +26,8 @@ export const identity = defineDomain({
     "site_settings",
     // Active team per session (KOBE-14)
     "session_active_teams",
+    // Last active team per user, a new session's default (KOBE-456)
+    "user_last_teams",
     "break_glass_grants",
     "break_glass_notifications",
     "legal_holds",
@@ -48,6 +50,8 @@ export const identity = defineDomain({
     site_settings: ["SELECT", "INSERT", "UPDATE"],
     // A pointer only; rows also go away with their session (cascade from `sessions`).
     session_active_teams: ALL_PRIVILEGES,
+    // A pointer only, replaced on every team switch; rows go away with their user.
+    user_last_teams: ALL_PRIVILEGES,
     // Kept as the record of who invited whom: revoked or accepted, never deleted (KOBE-13).
     invitations: ["SELECT", "INSERT", "UPDATE"],
     // Append-only (KOBE-15): never DELETE or TRUNCATE; triggers refuse them for the owner too. The
@@ -69,6 +73,9 @@ export const identity = defineDomain({
     audit_log: { UPDATE: ["ip", "user_agent", "pii_salt"] },
   },
   teamReferencing: {
+    user_last_teams:
+      "The team a user last made active (KOBE-456): a pointer to `teams`, no team content; " +
+      "a new session uses it only while the user is still a member (checked under team RLS).",
     session_active_teams:
       "Which team a sign-in session has active (D9): a pointer to `teams`, no team content; " +
       "membership is re-verified under team RLS on every request.",
