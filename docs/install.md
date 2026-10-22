@@ -314,6 +314,33 @@ the domain is still verified HTTPS. Put these in the agent's instructions or the
 upstream sees the headers and its responses reach the sandbox, so configure headers only for
 domains you trust with that credential; a body that echoes the credential is not filtered.
 
+### The catalog's git mirror (optional)
+
+A Site admin can mirror the skill catalog one way to any HTTPS git remote (KOBE-343, spec SK29):
+Site console → Skill Registry → "Mirror the catalog to git", with the remote URL (no credentials
+in it) and a branch (default `main`). Each approved catalog version becomes a commit under
+`skills/<name>/` (the package files and Kobe's `provenance.json`) and an annotated tag
+`<name>/v<semver>`, and `catalog.json` at the root is regenerated. Kobe only appends: commits go
+on top of the remote branch, nothing is ever force-pushed, an existing tag is never moved (a tag
+with other content is reported as a conflict), and Kobe never reads the repository back.
+
+1. Create a token that can push to the repository (GitHub: a fine-grained token with Contents
+   read/write on that repository only; Forgejo/Gitea: an access token with repository write) and
+   put it in a Secret in the release namespace:
+   `kubectl -n <ns> create secret generic kobe-skill-mirror --from-literal=token=<token>`.
+2. Set `server.skillMirror.tokenSecret.name: kobe-skill-mirror` (and `username` for Forgejo:
+   the token owner's user name). The token reaches the server only; never the database, a log
+   or a sandbox.
+3. Add the remote's host to the **egress ceiling**: the server pushes through the egress proxy
+   with a short-lived site token that the proxy allows ceiling hosts only (no team needs to
+   enable it).
+
+Pushes run after every approval and every five minutes for retries; a failing version backs off
+(1 minute doubling to 6 hours) and its last error shows under "Git mirror status" with a
+**Retry now** button. Pushes and first failures are audited (`registry.mirror.*`). Changing the
+remote URL pushes the whole published catalog (Approved and Deprecated versions) to the new
+remote; Withdrawn, Revoked and suspended versions are never pushed.
+
 ## Models
 
 Sandboxes reach models only through **Bifrost** (Apache-2.0, `bifrost.image`, pinned by digest) and
