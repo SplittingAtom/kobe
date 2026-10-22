@@ -1205,6 +1205,13 @@
       "when": 1792621728051,
       "tag": "0171_workspace_blobs_lost",
       "breakpoints": true
+    },
+    {
+      "idx": 172,
+      "version": "7",
+      "when": 1792644721205,
+      "tag": "0172_user_last_teams",
+      "breakpoints": true
     }
   ]
 }

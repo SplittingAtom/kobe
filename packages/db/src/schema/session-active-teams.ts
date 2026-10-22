@@ -1,5 +1,5 @@
 import { pgTable, timestamp, uuid } from "drizzle-orm/pg-core";
-import { sessions } from "./auth.js";
+import { sessions, users } from "./auth.js";
 import { teams } from "./teams.js";
 
 /**
@@ -11,6 +11,21 @@ export const sessionActiveTeams = pgTable("session_active_teams", {
   sessionId: uuid()
     .primaryKey()
     .references(() => sessions.id, { onDelete: "cascade" }),
+  teamId: uuid()
+    .notNull()
+    .references(() => teams.id),
+  updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Site-wide. The team each user last made active (KOBE-456): a pointer, no team content. A new
+ * sign-in session starts in it while the user is still a member (checked on read), so it follows
+ * the user across browsers. Written whenever a session's active team is set.
+ */
+export const userLastTeams = pgTable("user_last_teams", {
+  userId: uuid()
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
   teamId: uuid()
     .notNull()
     .references(() => teams.id),
