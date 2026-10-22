@@ -50,6 +50,7 @@ import { encodeOutbound } from "./wire/encode.js";
 import { Outbox } from "./wire/outbox.js";
 import { TraceRecorder } from "./trace/recorder.js";
 import type { BackoffPolicy } from "./wire/backoff.js";
+import type { PaceLimits } from "./wire/pacer.js";
 import type { EgressWiring } from "./egress/egress-wiring.js";
 import type { McpWiring } from "./mcp/pi-mcp-config.js";
 import type { ModelWiring } from "./models/types.js";
@@ -72,6 +73,8 @@ export interface AgentDeps {
   readonly onExit: (code: number) => void;
   readonly backoff?: BackoffPolicy;
   readonly heartbeatTimeoutMs?: number;
+  /** Outbound send pace (KOBE-429); default `SANDBOX_SEND_PACE`. Tests only. */
+  readonly pace?: PaceLimits;
   readonly policyReadyTimeoutMs?: number;
   /** SIGTERM: how long a lost run's report waits for its frames to be acked (KOBE-444). */
   readonly lostAckTimeoutMs?: number;
@@ -370,6 +373,7 @@ export class Agent {
       ...(deps.heartbeatTimeoutMs === undefined
         ? {}
         : { heartbeatTimeoutMs: deps.heartbeatTimeoutMs }),
+      ...(deps.pace === undefined ? {} : { pace: deps.pace }),
     });
   }
 

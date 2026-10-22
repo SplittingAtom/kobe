@@ -4,6 +4,7 @@ import {
   SANDBOX_HEARTBEAT_TIMEOUT_MS,
   SANDBOX_HELLO_TIMEOUT_MS,
   SANDBOX_MAX_FRAME_BYTES,
+  SANDBOX_SEND_PACE,
   SANDBOX_WS_SUBPROTOCOL,
   decodeServerFrame,
   type HelloAckFrame,
@@ -13,6 +14,7 @@ import {
 import WebSocket from "ws";
 import { DEFAULT_BACKOFF, backoffDelay, type BackoffPolicy } from "./backoff.js";
 import { encodeOutbound, type OutboundFrame } from "./encode.js";
+import { SendPacer, type PaceLimits } from "./pacer.js";
 
 /**
  * The agent's single outbound WebSocket (D13, connection.ts). Dials `wss://…/v1/sandbox/connect`
@@ -48,6 +50,8 @@ export interface WireClientOptions {
   readonly backoff?: BackoffPolicy;
   readonly helloTimeoutMs?: number;
   readonly heartbeatTimeoutMs?: number;
+  /** Outbound pace per connection (default {@link SANDBOX_SEND_PACE}, under the server's limit). */
+  readonly pace?: PaceLimits;
 }
 
 export class WireClient {
@@ -61,9 +65,16 @@ export class WireClient {
   #heartbeat: NodeJS.Timeout | undefined;
   #lastInbound = 0;
   #epoch = 0;
+  /**
+   * Every outbound frame (hello, pings, pongs, replays, live frames) goes through one FIFO pacer,
+   * so a reconnect replaying a long backlog never exceeds the server's frame or byte rate and
+   * gets closed for it (KOBE-429). Reset on each new socket, like the server's buckets.
+   */
+  readonly #pacer: SendPacer;
 
   constructor(options: WireClientOptions) {
     this.#options = options;
+    this.#pacer = new SendPacer(options.pace ?? SANDBOX_SEND_PACE, (text) => this.#write(text));
   }
 
   get ready(): boolean {
@@ -94,8 +105,15 @@ export class WireClient {
   sendText(text: string): boolean {
     const socket = this.#socket;
     if (!this.#ready || socket === undefined || socket.readyState !== WebSocket.OPEN) return false;
-    socket.send(text);
+    this.#pacer.send(text);
     return true;
+  }
+
+  /** Paced write to the current socket; frames queued for a socket that closed are dropped. */
+  #write(text: string): void {
+    const socket = this.#socket;
+    if (socket === undefined || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(text);
   }
 
   /** Drop the current connection and dial again (normal backoff). */
@@ -134,6 +152,7 @@ export class WireClient {
       handshakeTimeout: SANDBOX_HELLO_TIMEOUT_MS,
     });
     this.#socket = socket;
+    this.#pacer.reset();
     socket.on("open", () => this.#onOpen(socket));
     socket.on("message", (data, isBinary) => this.#onMessage(socket, data, isBinary));
     socket.on("close", (code, reason) => this.#onClose(socket, code, reason.toString()));
@@ -157,7 +176,7 @@ export class WireClient {
       socket.close(1011, "invalid hello");
       return;
     }
-    socket.send(encoded.text);
+    this.#pacer.send(encoded.text);
   }
 
   #onMessage(socket: WebSocket, data: WebSocket.RawData, isBinary: boolean): void {
@@ -174,7 +193,7 @@ export class WireClient {
     }
     const frame = decoded.frame;
     if (frame.type === "ping") {
-      socket.send(JSON.stringify({ v: 1, type: "pong", nonce: frame.nonce }));
+      this.#pacer.send(JSON.stringify({ v: 1, type: "pong", nonce: frame.nonce }));
       return;
     }
     if (frame.type === "pong") return;
@@ -206,7 +225,7 @@ export class WireClient {
         socket.terminate();
         return;
       }
-      socket.send(JSON.stringify({ v: 1, type: "ping", nonce: randomUUID() }));
+      this.#pacer.send(JSON.stringify({ v: 1, type: "ping", nonce: randomUUID() }));
     }, interval);
     this.#options.logger.info({ connection_id: ack.connection_id }, "sandbox wire ready");
     this.#options.onReady(ack);
@@ -219,6 +238,7 @@ export class WireClient {
     const wasReady = this.#ready;
     this.#ready = false;
     this.#socket = undefined;
+    this.#pacer.reset();
     this.#options.logger.info({ code, reason }, "sandbox wire closed");
     if (wasReady) this.#options.onDisconnected();
     const fatal = FATAL_CODES.get(code);
@@ -238,7 +258,10 @@ export class WireClient {
   }
 
   #sendError(socket: WebSocket, code: string, message: string): void {
-    socket.send(JSON.stringify({ v: 1, type: "error", code, message: message.slice(0, 2000) }));
+    if (socket !== this.#socket) return;
+    this.#pacer.send(
+      JSON.stringify({ v: 1, type: "error", code, message: message.slice(0, 2000) }),
+    );
   }
 }
 

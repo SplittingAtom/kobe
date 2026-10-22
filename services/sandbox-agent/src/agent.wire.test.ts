@@ -218,7 +218,8 @@ describe("delivery and resume", () => {
     h.server.terminate();
     await until(helloOn(3));
     expect(h.server.frames("hello")[2]?.runs).toEqual([]);
-    expect((await h.commandsLog()).map((c) => c.type)).toContain("abort");
+    // Fake Pi logs the abort asynchronously; under load it may land after the third hello.
+    await until(async () => (await h.commandsLog()).some((c) => c.type === "abort"));
   });
 
   it("aborts runs the server no longer lists after a reconnect", async () => {
