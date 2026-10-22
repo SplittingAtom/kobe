@@ -255,7 +255,10 @@ export class Agent {
             beforeRun: (frame: RunStartFrame) => this.#pullWorkspace(frame),
           }),
       hooks: {
-        runStarted: (runId, threadId) => this.#outbox.open(runId, threadId),
+        runStarted: (runId, threadId) => {
+          this.#wire.startRun(runId);
+          this.#outbox.open(runId, threadId);
+        },
         piEvent: (runId, threadId, event) => {
           this.#traces.onPiEvent(runId, event);
           this.#emitPiEvent(runId, threadId, event);

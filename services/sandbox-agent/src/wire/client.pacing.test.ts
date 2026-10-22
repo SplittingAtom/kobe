@@ -177,6 +177,46 @@ describe("WireClient ended runs (KOBE-483)", () => {
     });
     expect(ids).toEqual(["b0", "b1", "b2", "b3", "pi.event"]);
   }, 10_000);
+
+  it("sends frames of a run again once it starts again under the same id", async () => {
+    const server = rateLimitedServer();
+    const ready = new Promise<void>((resolve) => {
+      client = new WireClient({
+        url: server.url,
+        readToken: () => Promise.resolve("t"),
+        hello: () =>
+          ({
+            v: 1,
+            type: "hello",
+            sandbox_id: "6f1c2b9e-3a4d-4e5f-8a7b-1c2d3e4f5a6b",
+            agent_version: "0.0.0-test",
+            pi_version: "1.0.0",
+            runs: [],
+          }) as never,
+        onReady: () => resolve(),
+        onFrame: () => undefined,
+        onDisconnected: () => undefined,
+        onFatal: () => undefined,
+        logger: { info: () => undefined, warn: () => undefined, debug: () => undefined },
+        pace: AGENT,
+      });
+      client.start();
+    });
+    await ready;
+    const c = client as WireClient;
+    c.endRun(RUN_A);
+    expect(c.send(ui(RUN_A, "ended"))).toBe(false);
+    c.startRun(RUN_A);
+    expect(c.send(ui(RUN_A, "again"))).toBe(true);
+    const deadline = Date.now() + 3_000;
+    while (server.received.length < 1 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    const ids = server.received.map(
+      (t) => (JSON.parse(t) as { request?: { id: string } }).request?.id,
+    );
+    expect(ids).toEqual(["again"]);
+  }, 10_000);
 });
 
 describe("WireClient session renewal (KOBE-483)", () => {

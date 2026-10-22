@@ -168,6 +168,11 @@ export class WireClient {
     }
   }
 
+  /** The run (re)started here: its frames go out again (a run id is only "ended" until then). */
+  startRun(runId: string): void {
+    this.#endedRuns.delete(runId);
+  }
+
   #enqueue(text: string, tag: string | undefined): boolean {
     const socket = this.#socket;
     if (!this.#ready || socket === undefined || socket.readyState !== WebSocket.OPEN) return false;

@@ -64,3 +64,6 @@
   closes once renewals stop; invalid renewal ignored; another identity closes; no capability, no
   renewal), `wire/client.pacing.test.ts` (each fresh token sent once, never the dialled one),
   `session-renew-frames.test.ts`.
+- CI (PR #373): `kobe-exec.real-pi.test.ts` reuses one run id for two runs; `endRun` kept the id
+  "ended", so the second run's `policy.check` was dropped and its tool failed. `WireClient.startRun`
+  clears it when a run starts (`agent.runs.test.ts` "relays the checks of a run started again…").

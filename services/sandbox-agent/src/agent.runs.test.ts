@@ -533,6 +533,15 @@ describe("Pi process lifecycle", () => {
 });
 
 describe("kobe-policy channel (fd 3)", () => {
+  it("relays the checks of a run started again under an ended run's id (KOBE-483)", async () => {
+    h = await startHarness();
+    await h.server.command(runStart("say:hi"));
+    await h.server.waitFor((f) => f.type === "pi.event" && f.event.type === "agent_settled");
+    await h.server.command(runStart("tool:bash"));
+    const check = await h.server.waitFor((f) => f.type === "policy.check");
+    expect(check).toMatchObject({ run_id: RUN, tool: "bash" });
+  });
+
   it("relays a check to the server with run/thread ids and the decision back to Pi", async () => {
     h = await startHarness();
     await h.server.command(runStart("tool:bash"));
