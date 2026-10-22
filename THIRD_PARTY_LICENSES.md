@@ -1305,7 +1305,7 @@ What the same script finds in the Orbit eval image (`kobe-orbit-eval`, KOBE-92):
 | aiobotocore | 2.25.1 | Apache-2.0 | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/aiobotocore/2.25.1/) |
 | aiofiles | 25.1.0 | Apache-2.0 | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/aiofiles/25.1.0/) |
 | aiohappyeyeballs | 2.7.1 | Python-2.0 (exception) | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/aiohappyeyeballs/2.7.1/) |
-| aiohttp | 3.14.1 | Apache-2.0 AND MIT | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/aiohttp/3.14.1/) |
+| aiohttp | 3.14.4 | Apache-2.0 AND MIT | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/aiohttp/3.14.4/) |
 | aioitertools | 0.13.0 | MIT | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/aioitertools/0.13.0/) |
 | aiosignal | 1.4.0 | Apache-2.0 | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/aiosignal/1.4.0/) |
 | annotated-doc | 0.0.4 | MIT | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/annotated-doc/0.0.4/) |
@@ -1315,7 +1315,7 @@ What the same script finds in the Orbit eval image (`kobe-orbit-eval`, KOBE-92):
 | beautifulsoup4 | 4.15.0 | MIT | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/beautifulsoup4/4.15.0/) |
 | boto3 | 1.40.61 | Apache-2.0 | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/boto3/1.40.61/) |
 | botocore | 1.40.61 | Apache-2.0 | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/botocore/1.40.61/) |
-| certifi | 2026.6.17 | MPL-2.0 | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/certifi/2026.6.17/) |
+| certifi | 2026.10.19 | MPL-2.0 | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/certifi/2026.10.19/) |
 | charset-normalizer | 3.4.9 | MIT | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/charset-normalizer/3.4.9/) |
 | click | 8.2.1 | BSD-3-Clause | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/click/8.2.1/) |
 | debugpy | 1.8.21 | MIT | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/debugpy/1.8.21/) |
@@ -1384,7 +1384,7 @@ What the same script finds in the Orbit eval image (`kobe-orbit-eval`, KOBE-92):
 | urllib3 | 2.7.0 | MIT | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/urllib3/2.7.0/) |
 | uvicorn | 0.51.0 | BSD-3-Clause | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/uvicorn/0.51.0/) |
 | wrapt | 1.17.3 | BSD-3-Clause | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/wrapt/1.17.3/) |
-| yarl | 1.24.2 | Apache-2.0 | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/yarl/1.24.2/) |
+| yarl | 1.25.1 | Apache-2.0 | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/yarl/1.25.1/) |
 | zipfile-zstd | 0.0.4 | MIT | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/zipfile-zstd/0.0.4/) |
 | zipp | 4.1.0 | MIT | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/zipp/4.1.0/) |
 | zstandard | 0.25.0 | BSD-3-Clause | bundled (Python package) | orbit-eval: Python site-packages | [license](https://pypi.org/project/zstandard/0.25.0/) |
@@ -1408,14 +1408,14 @@ What the same script finds in the optional external skill scanner image (`kobe-s
 | Component | Version | License (SPDX) | How used | Where | License text |
 | --- | --- | --- | --- | --- | --- |
 | aiohappyeyeballs | 2.6.1 | Python-2.0 (exception) | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/aiohappyeyeballs/2.6.1/) |
-| aiohttp | 3.14.3 | Apache-2.0 AND MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/aiohttp/3.14.3/) |
+| aiohttp | 3.14.4 | Apache-2.0 AND MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/aiohttp/3.14.4/) |
 | aiosignal | 1.4.0 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/aiosignal/1.4.0/) |
 | annotated-doc | 0.0.4 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/annotated-doc/0.0.4/) |
 | annotated-types | 0.7.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/annotated-types/0.7.0/) |
 | anthropic | 0.97.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/anthropic/0.97.0/) |
 | anyio | 4.14.2 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/anyio/4.14.2/) |
 | attrs | 26.1.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/attrs/26.1.0/) |
-| certifi | 2026.4.22 | MPL-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/certifi/2026.4.22/) |
+| certifi | 2026.10.19 | MPL-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/certifi/2026.10.19/) |
 | cffi | 2.0.0 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/cffi/2.0.0/) |
 | charset-normalizer | 3.4.7 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/charset-normalizer/3.4.7/) |
 | cisco-ai-skill-scanner | 2.2.1 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/cisco-ai-skill-scanner/2.2.1/) |
@@ -1496,7 +1496,7 @@ What the same script finds in the optional external skill scanner image (`kobe-s
 | watchfiles | 1.1.1 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/watchfiles/1.1.1/) |
 | websockets | 16.0 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/websockets/16.0/) |
 | yara-x | 1.20.0 | BSD-3-Clause | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/yara-x/1.20.0/) |
-| yarl | 1.23.0 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/yarl/1.23.0/) |
+| yarl | 1.25.1 | Apache-2.0 | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/yarl/1.25.1/) |
 | zipp | 3.23.1 | MIT | bundled (Python package) | skill-scan: Python site-packages | [license](https://pypi.org/project/zipp/3.23.1/) |
 
 Documented exceptions (`images/skill-scan/license-exceptions.json`):

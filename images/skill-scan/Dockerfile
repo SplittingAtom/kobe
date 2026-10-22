@@ -38,7 +38,12 @@ COPY images/skill-scan/kobe_skill_scan /opt/kobe/skill-scan/kobe_skill_scan
 
 # User 1000:1000 (numeric, for runAsNonRoot). /input holds the package parts (ConfigMaps). No setuid
 # or setgid bits; the package managers are removed (/var/lib/dpkg/status stays for Trivy).
-RUN groupadd --gid 1000 kobe \
+# ca-certificates from trixie's updates: the base's 20250419 still trusts emSign ECC Root CA - G3
+# (compromised intermediates, KOBE-486); Python's ssl and aiohttp read this store.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd --gid 1000 kobe \
  && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /tmp/home --shell /usr/sbin/nologin kobe \
  && mkdir -p /input \
  && chown -R 0:0 /opt/kobe \

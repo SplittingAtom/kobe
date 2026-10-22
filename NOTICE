@@ -398,7 +398,7 @@ s3transfer
 Copyright 2016 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 --------------------------------------------------------------------------------
-yarl 1.24.2 (orbit-eval image)
+yarl 1.25.1 (orbit-eval image)
 --------------------------------------------------------------------------------
 
 Copyright 2016-2021, Andrew Svetlov and aio-libs team
@@ -441,7 +441,7 @@ Requests
 Copyright 2019 Kenneth Reitz
 
 --------------------------------------------------------------------------------
-yarl 1.23.0 (skill-scan image)
+yarl 1.25.1 (skill-scan image)
 --------------------------------------------------------------------------------
 
 Copyright 2016-2021, Andrew Svetlov and aio-libs team
