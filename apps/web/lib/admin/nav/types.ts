@@ -136,6 +136,8 @@ export interface TeamAccess {
   readonly team: { readonly id: string; readonly slug: string; readonly name: string };
   readonly role: TeamRole;
   readonly permissions: readonly string[];
+  /** The caller is a site Owner or Admin (KOBE-476: they may set an agent's Dangerous mode). */
+  readonly siteAdmin?: boolean;
 }
 
 export type ConsoleAccess = SiteAccess | TeamAccess;

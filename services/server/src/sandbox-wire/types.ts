@@ -303,10 +303,18 @@ export interface RunPolicyContext {
    * it cannot be determined the call is denied.
    */
   readonly floor: ApprovalMode;
-  /** Agent frontmatter `tools.allow` / `tools.deny` (KOBE-46/47 resolve the pinned version). */
+  /**
+   * Agent frontmatter `tools.allow` / `tools.deny`. The DB source loads `tools.deny` from the
+   * run's version (KOBE-481, `loadRunAgentTools`); `tools.allow` is not enforced per call yet.
+   */
   readonly toolsAllow?: readonly string[];
   readonly toolsDeny?: readonly string[];
   readonly projectId?: string;
+  /**
+   * The tools the run's Dangerous agent names one by one (AC1, `loadRunAgentTools`); the policy
+   * input carries them only when the floor is also `auto`. Absent or empty: Dangerous is off.
+   */
+  readonly dangerousTools?: readonly string[];
 }
 
 /** KOBE-30/46/47 seam: run-specific policy inputs, read inside the team's transaction. */

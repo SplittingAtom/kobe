@@ -6716,6 +6716,9 @@
               }
             ]
           },
+          "agent_dangerous": {
+            "type": "boolean"
+          },
           "agent_current_version": {
             "anyOf": [
               {
@@ -6834,6 +6837,7 @@
           "archived_at",
           "agent_name",
           "agent_status",
+          "agent_dangerous",
           "agent_current_version",
           "agent_model",
           "entries",
@@ -8997,6 +9001,7 @@
                     "policy_error",
                     "run_not_active",
                     "connector_not_in_run",
+                    "dangerous_mode",
                     "not_a_member",
                     "sandbox_policy_unavailable",
                     "install_deny_rule",
@@ -9218,6 +9223,7 @@
                           "policy_error",
                           "run_not_active",
                           "connector_not_in_run",
+                          "dangerous_mode",
                           "not_a_member",
                           "sandbox_policy_unavailable",
                           "install_deny_rule",

@@ -326,6 +326,11 @@ export const threadDetailSchema = threadSummarySchema.extend({
   /** True for a reader of a shared thread (project or team): no messages, runs or changes (D23). */
   read_only: z.boolean(),
   agent_status: z.enum(["active", "suspended", "archived"]).nullable(),
+  /**
+   * The pinned version is an admin's Dangerous agent (KOBE-476 AC1): its allowed tools run without
+   * asking. The chat shows a badge; the policy check decides each call on its own.
+   */
+  agent_dangerous: z.boolean(),
   agent_current_version: z.number().int().nullable(),
   /**
    * The model alias the thread's agent pins (KOBE-44; resolved by the run's agent resolver,

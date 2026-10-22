@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import { slugFromName } from "@kobe/agent-file";
+import { isDangerousMode, slugFromName, type AgentDefinition } from "@kobe/agent-file";
 import {
   agentAccess,
   canCreateAgent,
@@ -50,6 +50,7 @@ import { listRunnableAgents, runnableQuerySchema } from "../agents/runnable.js";
 import { mountVersionRoutes } from "../agents/version-routes.js";
 import { deleteOrArchiveAgent, getVersion } from "../agents/versions.js";
 import { recordAuditAfter } from "../audit/record.js";
+import { DANGEROUS_FORBIDDEN, mayUseDangerousMode } from "../policy/dangerous-mode.js";
 import { teamRoleAllows } from "../authz/permissions.js";
 import { requireTeam, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
@@ -58,6 +59,23 @@ import { parseBody } from "../teams/http.js";
 type Ctx = Context<{ Variables: TeamVariables }>;
 
 const actorOf = (c: Ctx): AgentActor => ({ userId: c.get("user").id, role: c.get("team").role });
+
+/** AC1: site admins (and the Owner) and the active team's admins may use Dangerous mode. */
+const mayDangerous = (c: Ctx): boolean =>
+  mayUseDangerousMode(c.get("team").role, c.get("siteRole"));
+
+/** A definition in Dangerous mode from someone who may not set it (403), else null. */
+const refuseDangerous = (c: Ctx, definition: AgentDefinition): Response | null =>
+  isDangerousMode(definition.frontmatter) && !mayDangerous(c)
+    ? c.json(DANGEROUS_FORBIDDEN, 403)
+    : null;
+
+/** A fork by someone who may not use Dangerous mode drops it: the copy uses the team default. */
+function forkable(c: Ctx, definition: AgentDefinition): AgentDefinition {
+  if (!isDangerousMode(definition.frontmatter) || mayDangerous(c)) return definition;
+  const { approval_mode: _dropped, ...frontmatter } = definition.frontmatter;
+  return { ...definition, frontmatter };
+}
 
 /** Where a new or existing agent of `scope` lives for this caller. */
 function locationFor(c: Ctx, scope: AgentScope): AgentLocation {
@@ -173,6 +191,8 @@ export function agentRoutes(
     if (!canCreateAgent(c.get("team").role, meta.data.scope)) {
       return forbidden(c, "Your team role doesn't allow creating team agents.");
     }
+    const dangerous = refuseDangerous(c, input.definition);
+    if (dangerous) return dangerous;
     const result = await createAgent(db, locationFor(c, meta.data.scope), {
       definition: input.definition,
       slug: meta.data.slug,
@@ -218,6 +238,8 @@ export function agentRoutes(
     if (!updateMetaSchema.safeParse(input.meta).success) {
       return invalidRequest(c, "Send only frontmatter and prompt; slugs can't change.");
     }
+    const dangerous = refuseDangerous(c, input.definition);
+    if (dangerous) return dangerous;
     const result = await updateAgent(
       db,
       locationFor(c, agent.scope),
@@ -258,7 +280,7 @@ export function agentRoutes(
         ? await getVersion(db, { scope: "gallery" }, source.id, source.currentVersion)
         : null;
     const result = await createAgent(db, locationFor(c, body.scope), {
-      definition: published?.definition ?? agentDefinitionOf(source),
+      definition: forkable(c, published?.definition ?? agentDefinitionOf(source)),
       slug: body.slug,
       baseSlug: source.slug,
       ownerUserId: c.get("user").id,
@@ -297,6 +319,7 @@ export function agentRoutes(
     limits: deps.agentLimits,
     resolve: resolveVersioned,
     userId: (c) => (c as Ctx).get("user").id,
+    mayUseDangerousMode: (c) => mayDangerous(c as Ctx),
     evals: {
       runner: evalOptions.runner,
       // A getter: read-only requests never touch deps.background (threads.db.test.ts checks).

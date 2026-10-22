@@ -3,6 +3,7 @@ import { bodyLimit } from "hono/body-limit";
 import {
   AGENT_FILE_LIMITS,
   agentWarnings,
+  isDangerousMode,
   parseAgentFile,
   serializeAgentFile,
   validateAgentDefinition,
@@ -128,6 +129,8 @@ export function agentSummary(agent: AgentRecord, access: AgentAccess) {
     ...(description !== undefined ? { description } : {}),
     ...(icon !== undefined ? { icon } : {}),
     starters: starters ?? [],
+    /** The draft is in the admin-only Dangerous approval mode (AC1): badged in My Agents. */
+    dangerous: isDangerousMode(agent.frontmatter),
     status: agent.status,
     ownerUserId: agent.ownerUserId,
     currentVersion: agent.currentVersion,

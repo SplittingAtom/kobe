@@ -92,8 +92,10 @@ describe("Agent builder: create", () => {
     const calls = stubApi({ "POST /v1/agents": [201, { agent: { ...AGENT, id: "a-9" } }] });
     renderTeam(<AgentBuilderPage />);
     await userEvent.type(screen.getByLabelText("Name"), "Triage");
-    await userEvent.type(screen.getByLabelText("Skills"), "sql");
     await userEvent.type(screen.getByLabelText("System prompt"), "Be helpful.");
+    await userEvent.click(screen.getByRole("tab", { name: "Behaviour" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Skill name" }), "sql");
+    await userEvent.click(screen.getByRole("button", { name: "Add skill" }));
     await userEvent.click(screen.getByRole("button", { name: "Create agent" }));
     await waitFor(() => expect(assign).toHaveBeenCalledWith("/admin/team/agents/a-9"));
     const post = must(calls.find((c) => c.method === "POST"));

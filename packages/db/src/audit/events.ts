@@ -460,6 +460,18 @@ export const AUDIT_EVENTS = {
     rememberScope: z.enum(["thread", "today", "run", "day", "month", "forever"]),
     enforcementPoint: z.enum(["sandbox", "mcp_proxy"]),
   }),
+  /**
+   * An admin's Dangerous agent (AC1, KOBE-476) let a call run without asking, at the sandbox's
+   * policy check or the MCP proxy's: one row per call and enforcement point. Never the input.
+   */
+  "policy.dangerous_mode.applied": event("team", {
+    runId: id,
+    toolCallId,
+    tool: toolName,
+    agentId: id.optional(),
+    agentVersion: version.optional(),
+    enforcementPoint: z.enum(["sandbox", "mcp_proxy"]),
+  }),
   /** The site floor's or a team's limits on remembered approvals were saved (KOBE-289). */
   "policy.remember_limits.updated": event("any", rememberLimits),
   "policy.settings.updated": event("site", {
@@ -1427,6 +1439,8 @@ export const AUDIT_EVENTS = {
     source: z.enum(["json", "import", "seed"]),
   }),
   "agent.deleted": event("any", agentRef),
+  /** A create, import, draft update or fork turned Dangerous mode (AC1, KOBE-476) on or off. */
+  "agent.dangerous_mode.changed": event("any", { ...agentRef, enabled: z.boolean() }),
   "agent.status_changed": event("any", { ...agentRef, status: z.enum(["active", "suspended"]) }),
   "agent.exported": event("any", agentRef),
   /** A published version exported as Orbit YAML (KOBE-91). */

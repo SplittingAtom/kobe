@@ -55,6 +55,8 @@ describe("policy contract", () => {
 
   it("fills defaults and accepts the site default agent", () => {
     expect(input.agent.tools_allow).toEqual([]);
+    // Dangerous mode (AC1) is off unless the server sets it from the run's agent version.
+    expect(input.agent.dangerous_tools).toEqual([]);
     const defaultAgent = { ...input, agent: { ...input.agent, agent_id: null, version: null } };
     expect(policyInputSchema.safeParse(defaultAgent).success).toBe(true);
   });
@@ -293,6 +295,7 @@ describe("contracts cleanup: reason codes and primary args", () => {
       "run_not_active",
       "not_a_member",
       "sandbox_policy_unavailable",
+      "dangerous_mode",
     ]) {
       expect(POLICY_REASON_CODES).toContain(code);
     }

@@ -3,6 +3,7 @@ import { BUILTIN_TOOLS, builtinToolDescriptor, type ToolDescriptor } from "@kobe
 import type { AgentFrontmatter } from "@kobe/agent-file";
 import type { PolicyRule } from "../policy/rules.js";
 import {
+  manifestIsDangerous,
   computeToolManifest,
   effectiveApprovalMode,
   manifestAllowsTool,
@@ -202,6 +203,28 @@ describe("computeToolManifest (D19 frozen tool manifest)", () => {
       floor: approvalFloor,
       effective,
     });
+  });
+});
+
+describe("Dangerous mode in the manifest (AC1)", () => {
+  it("freezes `dangerous` beside the default mode; the run mode stays a D29 mode", () => {
+    const m = computeToolManifest(fm({ approval_mode: "dangerous" }), floor(), NOW);
+    expect(m.approval_mode).toEqual({
+      requested: null,
+      floor: "auto",
+      effective: "ask-on-write",
+      dangerous: true,
+    });
+    expect(toolManifestSchema.parse(JSON.parse(JSON.stringify(m)))).toEqual(m);
+    expect(manifestIsDangerous(m)).toBe(true);
+  });
+
+  it("leaves other modes and stored manifests without the key", () => {
+    const m = computeToolManifest(fm({ approval_mode: "auto" }), floor(), NOW);
+    expect(m.approval_mode).not.toHaveProperty("dangerous");
+    expect(manifestIsDangerous(m)).toBe(false);
+    expect(manifestIsDangerous(undefined)).toBe(false);
+    expect(manifestIsDangerous({ approval_mode: { dangerous: "yes" } })).toBe(false);
   });
 });
 

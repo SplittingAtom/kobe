@@ -2,7 +2,9 @@
 
 How Kobe asks a person before a tool call runs (spec D29; built in KOBE-37). The server decides
 every tool call. An approval is signed so that exactly the approved input runs, once. There is no
-bypass mode.
+bypass mode: the one exception, an admin-only agent mode **Dangerous** (decision AC1 in
+[`specs/agent-creator.md`](specs/agent-creator.md), approved by Chris 2026-10-22), is itself a
+server-side policy outcome (below).
 
 ## When a call asks
 
@@ -17,6 +19,14 @@ when:
 
 A user's remember-rule removes a risk-class or mode prompt. It never removes an ask rule. In `auto`
 mode and in scheduled runs nothing asks: a call that would ask is denied instead.
+
+**Dangerous agents** (AC1). When the run's published agent version is in Dangerous mode (published
+by a site or team admin who still is one), the site floor is `auto` and the run is interactive
+(`ask-on-write` or `ask-all`), a tool the agent's `tools.allow` names one by one is allowed without
+a card where its risk class or mode would ask (reason `dangerous_mode`; audit
+`policy.dangerous_mode.applied`). Deny rules, the agent's `tools.deny` (refused in every mode),
+connector exposure, ask rules, Kobe-scoped write prompts and `auto`/scheduled refusals still win,
+at the sandbox check and again at the MCP proxy.
 
 **Sandbox tools ask only when a policy rule says so** (user decision, 2026-10-03). `bash`, `write`,
 `edit` and the other sandbox built-ins have no default prompt. The sandbox, its egress policy and

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  AGENT_APPROVAL_MODES,
   AGENT_FILE_LIMITS,
   agentConnectors,
+  explicitToolNames,
+  isDangerousMode,
   agentSkills,
   agentWarnings,
   parseAgentFile,
@@ -342,6 +345,16 @@ describe("agentWarnings (non-blocking; policy is enforced at run time, KOBE-35/4
     expect(agentWarnings({ name: "A", tools: { allow: ["**"] } })).toHaveLength(1);
   });
 
+  it("warns that dangerous runs allowed tools without asking (AC1)", () => {
+    const warnings = agentWarnings({ name: "A", approval_mode: "dangerous" });
+    expect(warnings).toEqual([
+      {
+        path: "frontmatter.approval_mode",
+        message: expect.stringMatching(/without asking/),
+      },
+    ]);
+  });
+
   it("is quiet for narrow allows and stricter modes", () => {
     expect(
       agentWarnings({
@@ -350,5 +363,42 @@ describe("agentWarnings (non-blocking; policy is enforced at run time, KOBE-35/4
         approval_mode: "ask-all",
       }),
     ).toEqual([]);
+  });
+});
+
+describe("Dangerous mode (AC1)", () => {
+  it("is an agent mode only: the wire's approval modes stay the three D29 modes", () => {
+    expect(AGENT_APPROVAL_MODES).toEqual(["ask-on-write", "ask-all", "auto", "dangerous"]);
+    expect(isDangerousMode({ approval_mode: "dangerous" })).toBe(true);
+    expect(isDangerousMode({ approval_mode: "auto" })).toBe(false);
+    expect(isDangerousMode({})).toBe(false);
+  });
+});
+
+describe("Dangerous mode needs an explicit allow list (AC1)", () => {
+  const dangerous = (allow?: string[]) =>
+    validateAgentDefinition({
+      frontmatter: {
+        name: "A",
+        approval_mode: "dangerous",
+        ...(allow ? { tools: { allow } } : {}),
+      },
+      prompt: "",
+    });
+
+  it("refuses an empty or wildcard-only allow list", () => {
+    for (const allow of [undefined, [], ["*"], ["mcp__jira__*"], ["bash:ls *"]]) {
+      const res = dangerous(allow);
+      expect(res.ok, JSON.stringify(allow)).toBe(false);
+      if (!res.ok) expect(res.issues[0]?.path).toBe("frontmatter.tools.allow");
+    }
+  });
+
+  it("accepts tools named one by one", () => {
+    expect(dangerous(["mcp__jira__search", "mcp__jira__*"]).ok).toBe(true);
+    expect(explicitToolNames(["read", "mcp__x__*", "bash:ls *", "mcp__x__y"])).toEqual([
+      "read",
+      "mcp__x__y",
+    ]);
   });
 });

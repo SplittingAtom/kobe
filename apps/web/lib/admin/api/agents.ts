@@ -21,6 +21,8 @@ export interface AgentSummary {
   readonly canExport?: boolean;
   /** Where a fork was copied from (KOBE-87); null for agents written from scratch. */
   readonly forkedFrom?: { readonly agentId: string; readonly version: number | null } | null;
+  /** The draft is in the admin-only Dangerous approval mode (KOBE-476 AC1). */
+  readonly dangerous?: boolean;
 }
 
 export interface AgentSaved {

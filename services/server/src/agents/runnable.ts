@@ -17,6 +17,7 @@ import { z } from "zod";
 import { canPinAgent, siteVisibleTo } from "./versions.js";
 import { isDefaultNewThreadAgent } from "./default-agent.js";
 import { SITE, TEAM, toRecord, type AgentRecord } from "./store.js";
+import { manifestIsDangerous } from "./manifest.js";
 
 /**
  * Agents the caller can start a chat with from the active team (KOBE-122): the same set a new
@@ -62,6 +63,11 @@ export interface RunnableAgent {
   /** The current version's conversation starters (D19; KOBE-222: the welcome screen's chips). */
   readonly starters: readonly string[];
   readonly currentVersion: number;
+  /**
+   * The current version is an admin's Dangerous agent (AC1): its allowed tools run without asking.
+   * Shown as a badge in the picker and composer; whether it applies is decided per call.
+   */
+  readonly dangerous?: true;
 }
 
 export interface RunnablePage {
@@ -145,6 +151,7 @@ type Tx = Parameters<Parameters<typeof withTeam>[2]>[0];
 interface VersionDetails {
   readonly model: string | null;
   readonly starters: readonly string[];
+  readonly dangerous: boolean;
 }
 
 /** The `model` and `starters` of each agent's current version (one query per table). */
@@ -159,7 +166,7 @@ async function versionDetails(
   ] as const) {
     if (inTable.length === 0) continue;
     const rows = await tx
-      .select({ agentId: t.agentId, frontmatter: t.frontmatter })
+      .select({ agentId: t.agentId, frontmatter: t.frontmatter, toolManifest: t.toolManifest })
       .from(t)
       .where(
         and(
@@ -177,6 +184,7 @@ async function versionDetails(
         starters: Array.isArray(starters)
           ? starters.filter((s): s is string => typeof s === "string")
           : [],
+        dangerous: manifestIsDangerous(r.toolManifest),
       });
     }
   }
@@ -199,4 +207,5 @@ const toRunnable = (
   model: details?.model ?? null,
   starters: details?.starters ?? [],
   currentVersion: version,
+  ...(details?.dangerous ? { dangerous: true as const } : {}),
 });

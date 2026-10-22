@@ -2,6 +2,7 @@
 // builder alike.
 export { parseAgentFile, validateAgentDefinition } from "./parse.js";
 export {
+  AGENT_APPROVAL_MODES,
   AGENT_FILE_LIMITS,
   ALL_CONNECTORS,
   APPROVAL_MODES,
@@ -10,10 +11,15 @@ export {
   agentFrontmatterSchema,
   agentSkills,
   agentWarnings,
+  agentApprovalModeSchema,
+  DANGEROUS_APPROVAL_MODE,
+  explicitToolNames,
+  isDangerousMode,
   skillSlugSchema,
   type AgentDefinition,
   type AgentFileIssue,
   type AgentFileResult,
+  type AgentApprovalMode,
   type AgentFrontmatter,
   type ApprovalMode,
 } from "./schema.js";

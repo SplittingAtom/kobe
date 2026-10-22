@@ -18,6 +18,8 @@ import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { readApprovalFloor, strictestApprovalMode } from "../policy/approval-floor.js";
 import { neverPromptReason } from "../policy/evaluate.js";
 import { appliedUserRule, recordRuleApplied } from "../policy/rule-applied.js";
+import { appliedDangerousMode, recordDangerousApplied } from "../policy/dangerous-mode.js";
+import { loadRunAgentTools } from "../policy/run-agent-tools.js";
 import { recordSkippedActionInTx } from "../policy/skipped-actions.js";
 import type {
   ApprovalBroker,
@@ -39,6 +41,17 @@ import type {
 /** The stricter of `mode` and `floor` (a run is never looser than the floor). */
 export function clampApprovalMode(mode: ApprovalMode, floor: ApprovalMode): ApprovalMode {
   return strictestApprovalMode(mode, floor);
+}
+
+/**
+ * The tools a call may run without asking under Dangerous mode (AC1): the run's agent's explicit
+ * list when the site floor sets no minimum (`auto`); any stricter site floor turns it off.
+ */
+export function dangerousToolsFor(context: {
+  readonly dangerousTools?: readonly string[];
+  readonly floor: ApprovalMode;
+}): string[] {
+  return context.floor === "auto" ? [...(context.dangerousTools ?? [])] : [];
 }
 
 /** Server-side denials decided before the engine runs (protocol policy.ts: stage `site_deny`). */
@@ -95,7 +108,14 @@ export function createDbRunContextSource(): RunPolicyContextSource {
       const res = await tx.execute<{ approval_mode: string }>(sql`
         SELECT approval_mode FROM runs WHERE team_id = ${run.teamId} AND id = ${run.runId}`);
       const mode = approvalModeSchema.safeParse(res.rows[0]?.approval_mode);
-      return mode.success ? { floor, approvalMode: mode.data } : { floor };
+      // KOBE-481: the agent's own tools.deny in every mode; AC1: its Dangerous tools.
+      const agent = await loadRunAgentTools(tx, run);
+      return {
+        floor,
+        ...(mode.success ? { approvalMode: mode.data } : {}),
+        toolsDeny: agent.toolsDeny,
+        ...(agent.dangerousTools.length > 0 ? { dangerousTools: agent.dangerousTools } : {}),
+      };
     },
   };
 }
@@ -294,6 +314,7 @@ async function buildInput(
       version: row.agent_version,
       tools_allow: [...(context.toolsAllow ?? [])],
       tools_deny: [...(context.toolsDeny ?? [])],
+      dangerous_tools: dangerousToolsFor(context),
     },
     run: { run_id: frame.run_id, thread_id: row.thread_id, approval_mode: mode },
     tool,
@@ -420,6 +441,33 @@ export async function decidePolicyCheck(
         await recordDenied(deps, target.teamId, frame, reasons, mayRecordDenied);
         await recordSkipped(deps, target.teamId, frame, decision.risk, reasons);
         return denyFrame(frame, reasons, EVAL_NO_PROMPT.message);
+      }
+      // An admin's Dangerous agent allowed it (AC1): audited before the call runs; a skill eval
+      // never runs on it (defence in depth: the context source never sets it there), and a failed
+      // audit write denies the call.
+      if (appliedDangerousMode(decision) !== undefined) {
+        if (evalRun) {
+          const reasons = [EVAL_NO_PROMPT];
+          await recordDenied(deps, target.teamId, frame, reasons, mayRecordDenied);
+          await recordSkipped(deps, target.teamId, frame, decision.risk, reasons);
+          return denyFrame(frame, reasons, EVAL_NO_PROMPT.message);
+        }
+        try {
+          await recordDangerousApplied(deps.db, {
+            teamId: target.teamId,
+            userId: target.userId,
+            runId: frame.run_id,
+            agentId: evaluated.input.agent.agent_id,
+            agentVersion: evaluated.input.agent.version,
+            toolCallId: frame.tool_call_id,
+            tool: frame.tool,
+            enforcementPoint: "sandbox",
+          });
+        } catch (err) {
+          logger.error({ err, runId: frame.run_id }, "dangerous mode audit failed; call denied");
+          const message = "The call could not be audited, so it was denied.";
+          return denyFrame(frame, [denyReason("policy_error", message)], message);
+        }
       }
       if (rule?.rule_id !== undefined) {
         const recorded = await recordRuleApplied(deps.db, {

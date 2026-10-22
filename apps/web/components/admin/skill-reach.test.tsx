@@ -242,15 +242,27 @@ describe("agent builder with ?addSkill (KOBE-297)", () => {
   it("adds the skill to the draft's skills, unsaved, and says so", async () => {
     stubApi(READ);
     renderTeam(<AgentBuilderPage agentId="a-plain" addSkill="report-writer" />, ADMIN);
-    const skills = (await screen.findByLabelText("Skills")) as HTMLTextAreaElement;
-    expect(skills.value).toBe("other\nreport-writer");
+    // The builder opens on the Behaviour tab, which holds the Skills picker (KOBE-476).
+    const skills = await screen.findByRole("list", { name: "Skills" });
+    expect(
+      within(skills)
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-label")),
+    ).toEqual(["Remove other", "Remove report-writer"]);
+    expect(screen.getByRole("tab", { name: "Behaviour" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
     expect(screen.getByText(/Added report-writer to this agent's skills/)).toBeTruthy();
   });
 
   it("ignores a malformed name", async () => {
     stubApi(READ);
     renderTeam(<AgentBuilderPage agentId="a-plain" addSkill="../Bad Name" />, ADMIN);
-    const skills = (await screen.findByLabelText("Skills")) as HTMLTextAreaElement;
-    expect(skills.value).toBe("other");
+    const skills = await screen.findByRole("list", { name: "Skills" });
+    expect(
+      within(skills)
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-label")),
+    ).toEqual(["Remove other"]);
   });
 });

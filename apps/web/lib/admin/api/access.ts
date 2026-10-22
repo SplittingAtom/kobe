@@ -55,6 +55,7 @@ export async function fetchTeamAccess(fetchFn?: typeof fetch): Promise<ApiResult
       team: team.data.team,
       role: team.data.role,
       permissions: team.data.permissions,
+      siteAdmin: siteRoleOf(me.data.siteRole) !== "user",
     },
   };
 }

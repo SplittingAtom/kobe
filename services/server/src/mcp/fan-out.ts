@@ -74,6 +74,7 @@ export function policyContextKey(run: ActiveRunContext): string {
     [...run.toolsAllow].sort(),
     [...run.toolsDeny].sort(),
     run.projectId ?? null,
+    [...(run.dangerousTools ?? [])].sort(),
   ]);
 }
 

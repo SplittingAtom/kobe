@@ -1,5 +1,5 @@
 import {
-  approvalModeSchema,
+  APPROVAL_MODES,
   connectorNameSchema,
   globSchema,
   SYSTEM_PROMPT_MAX_BYTES,
@@ -7,6 +7,20 @@ import {
 import { z } from "zod";
 
 export { APPROVAL_MODES, type ApprovalMode } from "@kobe/protocol";
+
+/**
+ * Admin-only agent mode (spec docs/specs/agent-creator.md AC1, approved by Chris 2026-10-22): the
+ * agent's allowed tools run without an approval card. It is an agent setting only, never a thread
+ * or run mode (`APPROVAL_MODES` stays the three D29 modes), and only the server decides whether it
+ * applies: who may set it (site and team admins) is enforced at save, publish and fork, and the
+ * policy engine still decides every call.
+ */
+export const DANGEROUS_APPROVAL_MODE = "dangerous";
+
+/** The modes an agent file may name: the D29 thread modes plus {@link DANGEROUS_APPROVAL_MODE}. */
+export const AGENT_APPROVAL_MODES = [...APPROVAL_MODES, DANGEROUS_APPROVAL_MODE] as const;
+export const agentApprovalModeSchema = z.enum(AGENT_APPROVAL_MODES);
+export type AgentApprovalMode = z.infer<typeof agentApprovalModeSchema>;
 
 /**
  * Limits for an agent file (spec D19, §6.3). Agent files are untrusted input (imports, API), so
@@ -155,7 +169,9 @@ const toolsSchema = z
  *     list with what the team and install expose. It never adds a tool or removes a prompt.
  *   - `tools.deny`, site/team deny rules and ask rules always win over `tools.allow`.
  *   - `approval_mode` is clamped to the team/site floor: it can only make a run stricter (D19,
- *     D29); `auto` below an `ask-on-write` floor runs as `ask-on-write`.
+ *     D29); `auto` below an `ask-on-write` floor runs as `ask-on-write`. The one exception is
+ *     `dangerous` (AC1): the server refuses it from anyone but a site or team admin, and honours
+ *     it only under an `auto` site floor, as a policy-engine outcome.
  *   - `model`, `skills`, `connectors` are opaque names intersected with the team's settings;
  *     `connectors: all` is the team's enabled list itself, still under exposure, drift and grants.
  * `agentWarnings` flags the broad values at save time, but enforcement is the policy engine's.
@@ -171,10 +187,36 @@ export const agentFrontmatterSchema = z
     /** Connector registry names (D27; @kobe/protocol `connectorNameSchema`) or `all`. */
     connectors: connectorsSchema.optional(),
     tools: toolsSchema.optional(),
-    approval_mode: approvalModeSchema.optional(),
+    approval_mode: agentApprovalModeSchema.optional(),
     starters: uniqueList(text(AGENT_FILE_LIMITS.starter), AGENT_FILE_LIMITS.starters).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((fm, ctx) => {
+    // AC1: Dangerous auto-allows only tools the agent names one by one, so it needs some.
+    if (
+      fm.approval_mode === DANGEROUS_APPROVAL_MODE &&
+      explicitToolNames(fm.tools?.allow).length === 0
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["tools", "allow"],
+        message:
+          "must name at least one tool (no wildcards) in Dangerous mode: only the tools listed one by one run without asking",
+      });
+    }
+  });
+
+/** A plain tool name (built-in or `mcp__<server>__<tool>`): no glob, escape or argument part. */
+const EXPLICIT_TOOL_NAME = /^[A-Za-z0-9_-]{1,256}$/;
+
+/**
+ * The allow-list entries that name one tool exactly (AC1): the only tools a Dangerous agent may
+ * run without asking. Globs (`mcp__jira__*`, `*`) and argument shorthands (`bash:ls *`) never
+ * count.
+ */
+export function explicitToolNames(allow: readonly string[] | undefined): string[] {
+  return (allow ?? []).filter((entry) => EXPLICIT_TOOL_NAME.test(entry));
+}
 
 export type AgentFrontmatter = z.output<typeof agentFrontmatterSchema>;
 
@@ -218,6 +260,11 @@ export function agentConnectors(frontmatter: AgentFrontmatter): {
   return { all: false, names: connectors ?? [] };
 }
 
+/** Whether the agent asks for Dangerous mode (AC1); whether it applies is the server's call. */
+export function isDangerousMode(frontmatter: Pick<AgentFrontmatter, "approval_mode">): boolean {
+  return frontmatter.approval_mode === DANGEROUS_APPROVAL_MODE;
+}
+
 /** A glob that matches every tool name (only `*` wildcards). */
 const MATCHES_EVERYTHING = /^\*+$/;
 
@@ -236,6 +283,13 @@ export function agentWarnings(frontmatter: AgentFrontmatter): AgentFileIssue[] {
       });
     }
   });
+  if (frontmatter.approval_mode === DANGEROUS_APPROVAL_MODE) {
+    warnings.push({
+      path: "frontmatter.approval_mode",
+      message:
+        "dangerous runs the agent's allowed tools without asking for approval; only site and team admins may set it",
+    });
+  }
   if (frontmatter.approval_mode === "auto") {
     warnings.push({
       path: "frontmatter.approval_mode",
