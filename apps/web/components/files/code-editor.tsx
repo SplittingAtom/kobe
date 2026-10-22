@@ -146,6 +146,10 @@ function baseExtensions(label: string): Extension[] {
   ];
 }
 
+function readOnlyExtensions(readOnly: boolean): Extension[] {
+  return readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [];
+}
+
 function ReviewToolbar({ view }: { readonly view: EditorView | null }) {
   const act = (run: (view: EditorView, pos: number) => boolean) => {
     if (!view) return;
@@ -191,6 +195,8 @@ export default function CodeEditor({
   callbacks.current = { onChange, onChunks, onRun };
   const valueRef = useRef(value);
   valueRef.current = value;
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
   /** The last value the document was set from. */
   const synced = useRef(value);
   const compartments = useRef({ language: new Compartment(), readOnly: new Compartment() });
@@ -226,7 +232,8 @@ export default function CodeEditor({
             ]),
           ),
           compartments.current.language.of([]),
-          compartments.current.readOnly.of([]),
+          // Read-only from the start (a read-only view is never briefly editable, KOBE-485).
+          compartments.current.readOnly.of(readOnlyExtensions(readOnlyRef.current)),
           original === undefined
             ? []
             : unifiedMergeView({
@@ -264,9 +271,7 @@ export default function CodeEditor({
 
   useEffect(() => {
     view?.dispatch({
-      effects: compartments.current.readOnly.reconfigure(
-        readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [],
-      ),
+      effects: compartments.current.readOnly.reconfigure(readOnlyExtensions(readOnly)),
     });
   }, [view, readOnly]);
 
