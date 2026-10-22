@@ -229,6 +229,8 @@ export class CommandRouter implements SandboxRouter {
     const kind = request.op === "interrupt" ? "notebook.interrupt" : "notebook.restart";
     return this.#send(target, kind, request.threadId, undefined, options, {
       thread_id: request.threadId,
+      // KOBE-477: starting the kernel is an op of `notebook.restart` (no new command kind).
+      ...(request.op === "start" ? { op: "start" } : {}),
     });
   }
 

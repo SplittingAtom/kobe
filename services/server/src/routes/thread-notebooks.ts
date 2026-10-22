@@ -14,7 +14,9 @@ type Ctx = Context<{ Variables: TeamVariables }>;
  * The thread's notebook kernel (KOBE-464, contract `notebooks.ts`, docs/specs/notebooks.md):
  * - `POST /v1/threads/{id}/notebook/run` {path, cell_id?, timeout_s?}: 202 {run_id, exec_id}; the
  *   outputs stream on `GET /v1/runs/{run_id}/events` and a cell's are saved into its notebook;
- * - `POST /v1/threads/{id}/notebook/interrupt` and `.../restart`: 200 {status}.
+ * - `POST /v1/threads/{id}/notebook/interrupt` and `.../restart`: 200 {status};
+ * - `POST /v1/threads/{id}/notebook/start` (KOBE-477): 202 {status: "waking", retry_after_ms} while
+ *   the sandbox wakes, then 200 {status: "idle" | "busy"} once the kernel is up (no code runs).
  * The thread's owner only (the kernel is in their sandbox); a shared reader is 403 `read_only`,
  * another member's or team's thread 404. Eval threads are refused like every other write.
  */
@@ -33,6 +35,16 @@ export function threadNotebookRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
     return answer(c, async () =>
       c.json(await deps.runs.notebookRun(actorOf(c), id.data, body), 202),
     );
+  });
+
+  // KOBE-477: start the kernel, running nothing; 202 `waking` while the sandbox wakes.
+  app.post("/:id/notebook/start", async (c) => {
+    const id = uuidSchema.safeParse(c.req.param("id"));
+    if (!id.success) return invalidRequest(c, "Unknown conversation.");
+    return answer(c, async () => {
+      const started = await deps.runs.notebookStart(actorOf(c), id.data);
+      return c.json(started, started.status === "waking" ? 202 : 200);
+    });
   });
 
   for (const op of ["interrupt", "restart"] as const) {
