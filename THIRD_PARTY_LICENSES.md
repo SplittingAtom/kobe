@@ -26,7 +26,7 @@ Chris (`pnpm license:gate` fails while it is not empty):
 
 Every package in pnpm-lock.yaml (production and development, all platforms). "linked, bundled" packages are in the production dependencies of a deployable and ship in its image (the services via `pnpm deploy --prod`, web via the Next.js standalone output, kobe-sandbox-agent in the sandbox image); "dev-only" packages build, lint and test Kobe and are never shipped. Checked by `pnpm license:check` (CI `checks`).
 
-891 packages, 603 of them shipped in an image.
+924 packages, 637 of them shipped in an image.
 
 | Component | Version | License (SPDX) | How used | Where | License text |
 | --- | --- | --- | --- | --- | --- |
@@ -457,6 +457,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @upsetjs/venn.js | 2.0.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@upsetjs/venn.js@2.0.0/LICENSE) |
 | @vitest/mocker | 5.0.3 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@vitest/mocker@5.0.3/LICENSE) |
 | @vitest/spy | 5.0.3 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@vitest/spy@5.0.3/LICENSE) |
+| abort-controller | 3.0.0 | MIT | linked, bundled | server | [license](https://unpkg.com/abort-controller@3.0.0/LICENSE) |
 | acorn-jsx | 5.3.2 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/acorn-jsx@5.3.2/LICENSE) |
 | acorn | 8.18.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/acorn@8.18.0/LICENSE) |
 | agent-base | 9.0.0 | MIT | linked, bundled | server | [license](https://unpkg.com/agent-base@9.0.0/LICENSE) |
@@ -470,8 +471,10 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | assertion-error | 2.0.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/assertion-error@2.0.1/LICENSE) |
 | assistant-cloud | 0.2.6 | MIT | linked, bundled | web | [license](https://unpkg.com/assistant-cloud@0.2.6/LICENSE) |
 | assistant-stream | 0.3.49 | MIT | linked, bundled | web | [license](https://unpkg.com/assistant-stream@0.3.49/LICENSE) |
+| async-lock | 1.4.1 | MIT | linked, bundled | server | [license](https://unpkg.com/async-lock@1.4.1/LICENSE) |
 | asynckit | 0.4.0 | MIT | linked, bundled | server | [license](https://unpkg.com/asynckit@0.4.0/LICENSE) |
 | atomic-sleep | 1.0.0 | MIT | linked, bundled | egress-proxy, mcp-proxy, model-gateway, sandbox, server | [license](https://unpkg.com/atomic-sleep@1.0.0/LICENSE) |
+| available-typed-arrays | 1.0.7 | MIT | linked, bundled | server | [license](https://unpkg.com/available-typed-arrays@1.0.7/LICENSE) |
 | b4a | 1.9.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/b4a@1.9.0/LICENSE) |
 | bail | 2.0.2 | MIT | linked, bundled | web | [license](https://unpkg.com/bail@2.0.2/license) |
 | balanced-match | 4.0.4 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/balanced-match@4.0.4/LICENSE.md) |
@@ -489,9 +492,12 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | buffer-from | 1.1.2 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/buffer-from@1.1.2/LICENSE) |
 | buffer-image-size | 0.6.4 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/buffer-image-size@0.6.4/LICENSE) |
 | buffer | 5.6.0 | MIT | linked, bundled | server | [license](https://unpkg.com/buffer@5.6.0/LICENSE) |
+| buffer | 6.0.3 | MIT | linked, bundled | server | [license](https://unpkg.com/buffer@6.0.3/LICENSE) |
 | busboy | 1.6.0 | MIT | linked, bundled | server | [license](https://unpkg.com/busboy@1.6.0/LICENSE) |
 | cacheable | 2.5.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/cacheable@2.5.0/LICENSE) |
 | call-bind-apply-helpers | 1.0.2 | MIT | linked, bundled | server | [license](https://unpkg.com/call-bind-apply-helpers@1.0.2/LICENSE) |
+| call-bind | 1.0.9 | MIT | linked, bundled | server | [license](https://unpkg.com/call-bind@1.0.9/LICENSE) |
+| call-bound | 1.0.4 | MIT | linked, bundled | server | [license](https://unpkg.com/call-bound@1.0.4/LICENSE) |
 | caniuse-lite | 1.0.30001814 | CC-BY-4.0 (exception) | linked, bundled | web | [license](https://unpkg.com/caniuse-lite@1.0.30001814/LICENSE) |
 | ccount | 2.0.1 | MIT | linked, bundled | web | [license](https://unpkg.com/ccount@2.0.1/license) |
 | chai | 6.3.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/chai@6.3.0/LICENSE) |
@@ -500,6 +506,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | character-entities | 2.0.2 | MIT | linked, bundled | web | [license](https://unpkg.com/character-entities@2.0.2/license) |
 | character-reference-invalid | 2.0.1 | MIT | linked, bundled | web | [license](https://unpkg.com/character-reference-invalid@2.0.1/license) |
 | class-variance-authority | 0.7.1 | Apache-2.0 | linked, bundled | web | [license](https://unpkg.com/class-variance-authority@0.7.1/LICENSE) |
+| clean-git-ref | 2.0.1 | Apache-2.0 | linked, bundled | server | [license](https://www.npmjs.com/package/clean-git-ref/v/2.0.1) |
 | client-only | 0.0.1 | MIT | linked, bundled | web | [license](https://www.npmjs.com/package/client-only/v/0.0.1) |
 | clsx | 2.1.1 | MIT | linked, bundled | web | [license](https://unpkg.com/clsx@2.1.1/license) |
 | combined-stream | 1.0.8 | MIT | linked, bundled | server | [license](https://unpkg.com/combined-stream@1.0.8/License) |
@@ -508,6 +515,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | commander | 8.3.0 | MIT | linked, bundled | web | [license](https://unpkg.com/commander@8.3.0/LICENSE) |
 | cose-base | 1.0.3 | MIT | linked, bundled | web | [license](https://unpkg.com/cose-base@1.0.3/LICENSE) |
 | cose-base | 2.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/cose-base@2.2.0/LICENSE) |
+| crc-32 | 1.2.2 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/crc-32@1.2.2/LICENSE) |
 | crelt | 1.0.7 | MIT | linked, bundled | web | [license](https://unpkg.com/crelt@1.0.7/LICENSE) |
 | cross-spawn | 7.0.6 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/cross-spawn@7.0.6/LICENSE) |
 | csstype | 3.2.3 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/csstype@3.2.3/LICENSE) |
@@ -553,7 +561,9 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | dayjs | 1.11.23 | MIT | linked, bundled | web | [license](https://unpkg.com/dayjs@1.11.23/LICENSE) |
 | debug | 4.4.3 | MIT | linked, bundled | server, web | [license](https://unpkg.com/debug@4.4.3/LICENSE) |
 | decode-named-character-reference | 1.3.0 | MIT | linked, bundled | web | [license](https://unpkg.com/decode-named-character-reference@1.3.0/license) |
+| decompress-response | 6.0.0 | MIT | linked, bundled | server | [license](https://unpkg.com/decompress-response@6.0.0/license) |
 | deep-is | 0.1.4 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/deep-is@0.1.4/LICENSE) |
+| define-data-property | 1.1.4 | MIT | linked, bundled | server | [license](https://unpkg.com/define-data-property@1.1.4/LICENSE) |
 | defu | 6.1.7 | MIT | linked, bundled | server, web | [license](https://unpkg.com/defu@6.1.7/LICENSE) |
 | delaunator | 5.1.0 | ISC | linked, bundled | web | [license](https://unpkg.com/delaunator@5.1.0/LICENSE) |
 | delayed-stream | 1.0.0 | MIT | linked, bundled | server | [license](https://unpkg.com/delayed-stream@1.0.0/License) |
@@ -561,6 +571,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | detect-libc | 2.1.2 | Apache-2.0 | linked, bundled | web | [license](https://unpkg.com/detect-libc@2.1.2/LICENSE) |
 | detect-node-es | 1.1.0 | MIT | linked, bundled | web | [license](https://unpkg.com/detect-node-es@1.1.0/LICENSE) |
 | devlop | 1.1.0 | MIT | linked, bundled | web | [license](https://unpkg.com/devlop@1.1.0/license) |
+| diff3 | 0.0.3 | MIT | linked, bundled | server | [license](https://www.npmjs.com/package/diff3/v/0.0.3) |
 | diff | 9.0.0 | BSD-3-Clause | linked, bundled | server | [license](https://unpkg.com/diff@9.0.0/LICENSE) |
 | dom-accessibility-api | 0.5.16 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/dom-accessibility-api@0.5.16/LICENSE.md) |
 | dompurify | 3.4.16 | (MPL-2.0 OR Apache-2.0) | linked, bundled | web | [license](https://unpkg.com/dompurify@3.4.16/LICENSE) |
@@ -593,6 +604,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | estree-util-is-identifier-name | 3.0.0 | MIT | linked, bundled | web | [license](https://unpkg.com/estree-util-is-identifier-name@3.0.0/license) |
 | estree-walker | 3.0.3 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/estree-walker@3.0.3/LICENSE) |
 | esutils | 2.0.3 | BSD-2-Clause | dev-only | build, lint and test tooling | [license](https://unpkg.com/esutils@2.0.3/LICENSE.BSD) |
+| event-target-shim | 5.0.1 | MIT | linked, bundled | server | [license](https://unpkg.com/event-target-shim@5.0.1/LICENSE) |
 | events-universal | 1.0.1 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/events-universal@1.0.1/LICENSE) |
 | events | 3.3.0 | MIT | linked, bundled | server | [license](https://unpkg.com/events@3.3.0/LICENSE) |
 | eventsource-parser | 3.1.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/eventsource-parser@3.1.1/LICENSE) |
@@ -610,6 +622,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | find-up | 5.0.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/find-up@5.0.0/license) |
 | flat-cache | 6.1.23 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/flat-cache@6.1.23/LICENSE) |
 | flatted | 3.4.4 | ISC | dev-only | build, lint and test tooling | [license](https://unpkg.com/flatted@3.4.4/LICENSE) |
+| for-each | 0.3.5 | MIT | linked, bundled | server | [license](https://unpkg.com/for-each@0.3.5/LICENSE) |
 | form-data | 4.0.6 | MIT | linked, bundled | server | [license](https://unpkg.com/form-data@4.0.6/License) |
 | fsevents | 2.3.3 | MIT | dev-only (platform build) | build, lint and test tooling | [license](https://github.com/fsevents/fsevents/blob/master/LICENSE) |
 | function-bind | 1.1.2 | MIT | linked, bundled | server | [license](https://unpkg.com/function-bind@1.1.2/LICENSE) |
@@ -623,6 +636,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | graceful-fs | 4.2.11 | ISC | linked, bundled | web | [license](https://unpkg.com/graceful-fs@4.2.11/LICENSE) |
 | hachure-fill | 0.5.2 | MIT | linked, bundled | web | [license](https://unpkg.com/hachure-fill@0.5.2/LICENSE) |
 | happy-dom | 20.14.5 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/happy-dom@20.14.5/LICENSE) |
+| has-property-descriptors | 1.0.2 | MIT | linked, bundled | server | [license](https://unpkg.com/has-property-descriptors@1.0.2/LICENSE) |
 | has-symbols | 1.1.0 | MIT | linked, bundled | server | [license](https://unpkg.com/has-symbols@1.1.0/LICENSE) |
 | has-tostringtag | 1.0.2 | MIT | linked, bundled | server | [license](https://unpkg.com/has-tostringtag@1.0.2/LICENSE) |
 | hashery | 1.5.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/hashery@1.5.1/LICENSE) |
@@ -636,7 +650,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | html-url-attributes | 3.0.1 | MIT | linked, bundled | web | [license](https://unpkg.com/html-url-attributes@3.0.1/license) |
 | iconv-lite | 0.6.3 | MIT | linked, bundled | web | [license](https://unpkg.com/iconv-lite@0.6.3/LICENSE) |
 | ieee754 | 1.2.1 | BSD-3-Clause | linked, bundled | server | [license](https://unpkg.com/ieee754@1.2.1/LICENSE) |
-| ignore | 5.3.2 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/ignore@5.3.2/LICENSE-MIT) |
+| ignore | 5.3.2 | MIT | linked, bundled | server | [license](https://unpkg.com/ignore@5.3.2/LICENSE-MIT) |
 | ignore | 7.0.11 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/ignore@7.0.11/LICENSE-MIT) |
 | import-meta-resolve | 4.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/import-meta-resolve@4.2.0/license) |
 | imurmurhash | 0.1.4 | MIT | dev-only | build, lint and test tooling | [license](https://www.npmjs.com/package/imurmurhash/v/0.1.4) |
@@ -647,12 +661,16 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | ip-address | 10.7.2 | MIT | linked, bundled | server | [license](https://unpkg.com/ip-address@10.7.2/LICENSE) |
 | is-alphabetical | 2.0.1 | MIT | linked, bundled | web | [license](https://unpkg.com/is-alphabetical@2.0.1/license) |
 | is-alphanumerical | 2.0.1 | MIT | linked, bundled | web | [license](https://unpkg.com/is-alphanumerical@2.0.1/license) |
+| is-callable | 1.2.7 | MIT | linked, bundled | server | [license](https://unpkg.com/is-callable@1.2.7/LICENSE) |
 | is-decimal | 2.0.1 | MIT | linked, bundled | web | [license](https://unpkg.com/is-decimal@2.0.1/license) |
 | is-extglob | 2.1.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/is-extglob@2.1.1/LICENSE) |
 | is-glob | 4.0.3 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/is-glob@4.0.3/LICENSE) |
 | is-hexadecimal | 2.0.1 | MIT | linked, bundled | web | [license](https://unpkg.com/is-hexadecimal@2.0.1/license) |
 | is-plain-obj | 4.1.0 | MIT | linked, bundled | web | [license](https://unpkg.com/is-plain-obj@4.1.0/license) |
+| is-typed-array | 1.1.15 | MIT | linked, bundled | server | [license](https://unpkg.com/is-typed-array@1.1.15/LICENSE) |
+| isarray | 2.0.5 | MIT | linked, bundled | server | [license](https://unpkg.com/isarray@2.0.5/LICENSE) |
 | isexe | 2.0.0 | ISC | dev-only | build, lint and test tooling | [license](https://unpkg.com/isexe@2.0.0/LICENSE) |
+| isomorphic-git | 1.44.2 | MIT | linked, bundled | server | [license](https://unpkg.com/isomorphic-git@1.44.2/LICENSE.md) |
 | isomorphic-ws | 5.0.0 | MIT | linked, bundled | server | [license](https://unpkg.com/isomorphic-ws@5.0.0/LICENSE) |
 | jiti | 2.7.0 | MIT | linked, bundled | web | [license](https://unpkg.com/jiti@2.7.0/LICENSE) |
 | jose | 6.2.12 | MIT | linked, bundled | server, web | [license](https://unpkg.com/jose@6.2.12/LICENSE.md) |
@@ -751,7 +769,10 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | micromark | 4.0.3 | MIT | linked, bundled | web | [license](https://unpkg.com/micromark@4.0.3/license) |
 | mime-db | 1.52.0 | MIT | linked, bundled | server | [license](https://unpkg.com/mime-db@1.52.0/LICENSE) |
 | mime-types | 2.1.35 | MIT | linked, bundled | server | [license](https://unpkg.com/mime-types@2.1.35/LICENSE) |
+| mimic-response | 3.1.0 | MIT | linked, bundled | server | [license](https://unpkg.com/mimic-response@3.1.0/license) |
 | minimatch | 10.2.6 | BlueOak-1.0.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/minimatch@10.2.6/LICENSE.md) |
+| minimist | 1.2.8 | MIT | linked, bundled | server | [license](https://unpkg.com/minimist@1.2.8/LICENSE) |
+| minimisted | 2.0.1 | MIT | linked, bundled | server | [license](https://www.npmjs.com/package/minimisted/v/2.0.1) |
 | ms | 2.1.3 | MIT | linked, bundled | server, web | [license](https://unpkg.com/ms@2.1.3/license.md) |
 | nanoid | 3.3.19 | MIT | linked, bundled | web | [license](https://unpkg.com/nanoid@3.3.19/LICENSE) |
 | nanoid | 6.0.2 | MIT | linked, bundled | web | [license](https://unpkg.com/nanoid@6.0.2/LICENSE) |
@@ -768,6 +789,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | p-limit | 3.1.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/p-limit@3.1.0/license) |
 | p-locate | 5.0.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/p-locate@5.0.0/license) |
 | package-manager-detector | 1.8.0 | MIT | linked, bundled | web | [license](https://unpkg.com/package-manager-detector@1.8.0/LICENSE) |
+| pako | 1.0.11 | (MIT AND Zlib) | linked, bundled | server | [license](https://unpkg.com/pako@1.0.11/LICENSE) |
 | parse-entities | 4.0.2 | MIT | linked, bundled | web | [license](https://unpkg.com/parse-entities@4.0.2/license) |
 | path-data-parser | 0.1.0 | MIT | linked, bundled | web | [license](https://unpkg.com/path-data-parser@0.1.0/LICENSE) |
 | path-exists | 4.0.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/path-exists@4.0.0/license) |
@@ -782,12 +804,14 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | pgpass | 1.0.5 | MIT | linked, bundled | egress-proxy, model-gateway, server | [license](https://www.npmjs.com/package/pgpass/v/1.0.5) |
 | picocolors | 1.1.1 | ISC | linked, bundled | web | [license](https://unpkg.com/picocolors@1.1.1/LICENSE) |
 | picomatch | 4.0.7 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/picomatch@4.0.7/LICENSE) |
+| pify | 4.0.1 | MIT | linked, bundled | server | [license](https://unpkg.com/pify@4.0.1/license) |
 | pino-abstract-transport | 3.0.0 | MIT | linked, bundled | egress-proxy, mcp-proxy, model-gateway, sandbox, server | [license](https://unpkg.com/pino-abstract-transport@3.0.0/LICENSE) |
 | pino-std-serializers | 7.1.0 | MIT | linked, bundled | egress-proxy, mcp-proxy, model-gateway, sandbox, server | [license](https://unpkg.com/pino-std-serializers@7.1.0/LICENSE) |
 | pino | 10.4.0 | MIT | linked, bundled | egress-proxy, mcp-proxy, model-gateway, sandbox, server | [license](https://unpkg.com/pino@10.4.0/LICENSE) |
 | pkce-challenge | 5.0.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/pkce-challenge@5.0.1/LICENSE) |
 | points-on-curve | 0.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/points-on-curve@0.2.0/LICENSE) |
 | points-on-path | 0.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/points-on-path@0.2.1/LICENSE) |
+| possible-typed-array-names | 1.1.0 | MIT | linked, bundled | server | [license](https://unpkg.com/possible-typed-array-names@1.1.0/LICENSE) |
 | postcss | 8.5.23 | MIT | linked, bundled | web | [license](https://unpkg.com/postcss@8.5.23/LICENSE) |
 | postcss | 8.5.29 | MIT | linked, bundled | web | [license](https://unpkg.com/postcss@8.5.29/LICENSE) |
 | postgres-array | 2.0.0 | MIT | linked, bundled | egress-proxy, model-gateway, server | [license](https://unpkg.com/postgres-array@2.0.0/license) |
@@ -798,6 +822,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | prettier | 3.9.9 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/prettier@3.9.9/LICENSE) |
 | pretty-format | 27.5.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/pretty-format@27.5.1/LICENSE) |
 | process-warning | 5.1.0 | MIT | linked, bundled | egress-proxy, mcp-proxy, model-gateway, sandbox, server | [license](https://unpkg.com/process-warning@5.1.0/LICENSE) |
+| process | 0.11.10 | MIT | linked, bundled | server | [license](https://unpkg.com/process@0.11.10/LICENSE) |
 | property-information | 7.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/property-information@7.2.0/license) |
 | protobufjs | 7.6.6 | BSD-3-Clause | dev-only | build, lint and test tooling | [license](https://unpkg.com/protobufjs@7.6.6/LICENSE) |
 | pump | 3.0.4 | MIT | linked, bundled | server | [license](https://unpkg.com/pump@3.0.4/LICENSE) |
@@ -816,6 +841,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | react-textarea-autosize | 8.5.9 | MIT | linked, bundled | web | [license](https://unpkg.com/react-textarea-autosize@8.5.9/LICENSE) |
 | react | 19.3.0 | MIT | linked, bundled | web | [license](https://unpkg.com/react@19.3.0/LICENSE) |
 | readable-stream | 3.6.2 | MIT | linked, bundled | server | [license](https://unpkg.com/readable-stream@3.6.2/LICENSE) |
+| readable-stream | 4.8.0 | MIT | linked, bundled | server | [license](https://unpkg.com/readable-stream@4.8.0/LICENSE) |
 | real-require | 1.0.0 | MIT | linked, bundled | egress-proxy, mcp-proxy, model-gateway, sandbox, server | [license](https://unpkg.com/real-require@1.0.0/LICENSE.md) |
 | reflect-metadata | 0.2.2 | Apache-2.0 | linked, bundled | server, web | [license](https://unpkg.com/reflect-metadata@0.2.2/LICENSE) |
 | remark-gfm | 4.0.1 | MIT | linked, bundled | web | [license](https://unpkg.com/remark-gfm@4.0.1/license) |
@@ -837,8 +863,12 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | secure-json-parse | 4.1.0 | BSD-3-Clause | linked, bundled | web | [license](https://unpkg.com/secure-json-parse@4.1.0/LICENSE) |
 | semver | 7.8.5 | ISC | dev-only | build, lint and test tooling | [license](https://unpkg.com/semver@7.8.5/LICENSE) |
 | set-cookie-parser | 3.1.2 | MIT | linked, bundled | server, web | [license](https://unpkg.com/set-cookie-parser@3.1.2/LICENSE) |
+| set-function-length | 1.2.2 | MIT | linked, bundled | server | [license](https://unpkg.com/set-function-length@1.2.2/LICENSE) |
+| sha.js | 2.4.12 | (MIT AND BSD-3-Clause) | linked, bundled | server | [license](https://unpkg.com/sha.js@2.4.12/LICENSE) |
 | shebang-command | 2.0.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/shebang-command@2.0.0/license) |
 | shebang-regex | 3.0.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/shebang-regex@3.0.0/license) |
+| simple-concat | 1.0.1 | MIT | linked, bundled | server | [license](https://unpkg.com/simple-concat@1.0.1/LICENSE) |
+| simple-get | 4.0.1 | MIT | linked, bundled | server | [license](https://unpkg.com/simple-get@4.0.1/LICENSE) |
 | smart-buffer | 4.2.0 | MIT | linked, bundled | server | [license](https://unpkg.com/smart-buffer@4.2.0/LICENSE) |
 | socks-proxy-agent | 10.1.0 | MIT | linked, bundled | server | [license](https://unpkg.com/socks-proxy-agent@10.1.0/LICENSE) |
 | socks | 2.8.10 | MIT | linked, bundled | server | [license](https://unpkg.com/socks@2.8.10/LICENSE) |
@@ -874,6 +904,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | tinyglobby | 0.2.17 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/tinyglobby@0.2.17/LICENSE) |
 | tldts-core | 7.4.16 | MIT | linked, bundled | egress-proxy, model-gateway, server | [license](https://unpkg.com/tldts-core@7.4.16/LICENSE) |
 | tldts | 7.4.16 | MIT | linked, bundled | egress-proxy, model-gateway, server | [license](https://unpkg.com/tldts@7.4.16/LICENSE) |
+| to-buffer | 1.2.2 | MIT | linked, bundled | server | [license](https://unpkg.com/to-buffer@1.2.2/LICENSE) |
 | trim-lines | 3.0.1 | MIT | linked, bundled | web | [license](https://unpkg.com/trim-lines@3.0.1/license) |
 | trough | 2.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/trough@2.2.0/license) |
 | ts-api-utils | 2.5.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/ts-api-utils@2.5.0/LICENSE.md) |
@@ -885,6 +916,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | turbo | 2.11.7 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/turbo@2.11.7/LICENSE) |
 | tw-animate-css | 1.4.0 | MIT | linked, bundled | web | [license](https://unpkg.com/tw-animate-css@1.4.0/LICENSE) |
 | type-check | 0.4.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/type-check@0.4.0/LICENSE) |
+| typed-array-buffer | 1.0.3 | MIT | linked, bundled | server | [license](https://unpkg.com/typed-array-buffer@1.0.3/LICENSE) |
 | typescript-eslint | 8.71.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/typescript-eslint@8.71.1/LICENSE) |
 | typescript | 6.0.3 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/typescript@6.0.3/LICENSE.txt) |
 | undici-types | 7.24.6 | MIT | linked, bundled | server | [license](https://unpkg.com/undici-types@7.24.6/LICENSE) |
@@ -910,6 +942,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | vitest | 5.0.3 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/vitest@5.0.3/LICENSE.md) |
 | w3c-keyname | 2.2.8 | MIT | linked, bundled | web | [license](https://unpkg.com/w3c-keyname@2.2.8/LICENSE) |
 | whatwg-mimetype | 3.0.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/whatwg-mimetype@3.0.0/LICENSE.txt) |
+| which-typed-array | 1.1.24 | MIT | linked, bundled | server | [license](https://unpkg.com/which-typed-array@1.1.24/LICENSE) |
 | which | 2.0.2 | ISC | dev-only | build, lint and test tooling | [license](https://unpkg.com/which@2.0.2/LICENSE) |
 | why-is-node-running | 3.2.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/why-is-node-running@3.2.1/LICENSE) |
 | word-wrap | 1.2.5 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/word-wrap@1.2.5/LICENSE) |

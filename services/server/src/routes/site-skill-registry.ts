@@ -11,12 +11,16 @@ import {
 import { invalidRequest, parseBody } from "../teams/http.js";
 import { similarCatalogNames } from "../skills/registry/names-db.js";
 import { registryReviewRoutes } from "./site-skill-registry-review.js";
+import { siteSkillMirrorRoutes, type SkillMirrorHandle } from "./site-skill-mirror.js";
 
 /**
  * Registry settings (`/v1/site/skills/registry/settings`, KOBE-330, SK20, SK21): Site Owner and
  * Admins read and change them; Skill reviewers can't (SK22). Each change is audited.
  */
-export function siteSkillRegistryRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+export function siteSkillRegistryRoutes(
+  deps: ServerDeps,
+  mirror?: SkillMirrorHandle,
+): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
   app.use("/settings", requireSitePermission("site.skills.catalog.manage"));
@@ -51,13 +55,16 @@ export function siteSkillRegistryRoutes(deps: ServerDeps): Hono<{ Variables: Aut
     const body = await parseBody(c, registrySettingsUpdateSchema);
     if (!body) return invalidRequest(c, "Send at least one valid Registry setting.");
     const r = await updateRegistrySettings(db, body, c.get("user").id);
+    if (r.ok && body.mirror) mirror?.kick();
     if (r.ok) return c.json(r.settings);
     return c.json({ code: r.code, message: r.message }, 400);
   });
 
   // The review console (KOBE-334): the queue at `/` and each version at `/:id`, after the fixed
   // paths above.
-  app.route("/", registryReviewRoutes(deps));
+  // The git mirror's status and Retry (KOBE-343), before the review console's `/:id`.
+  app.route("/mirror", siteSkillMirrorRoutes(deps, mirror));
+  app.route("/", registryReviewRoutes(deps, mirror));
 
   return app;
 }

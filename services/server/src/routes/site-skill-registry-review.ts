@@ -9,6 +9,7 @@ import {
 import { siteRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
 import { approve, type Problem } from "../skills/registry/review-approve.js";
+import type { MirrorKick } from "./site-skill-mirror.js";
 import {
   claim,
   comment,
@@ -76,7 +77,10 @@ const UNAVAILABLE = { code: "storage_unavailable", message: "Skill storage is no
  * Every route is behind `requireSkillReview` with its own action, so Skill reviewers do exactly
  * what SK22 lets them (never Reject and block). Each state change emails the submitter.
  */
-export function registryReviewRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+export function registryReviewRoutes(
+  deps: ServerDeps,
+  mirror?: MirrorKick,
+): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
 
@@ -222,6 +226,8 @@ export function registryReviewRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
       const r = await approve(db, id, userId, input);
       if (!r.ok) return refuse(c, r.problem);
       tell(r.version, input.note);
+      // The optional git mirror (KOBE-343) pushes the new catalog version.
+      mirror?.kick();
       return c.json({ id: r.version.id, state: r.version.state, selfApproved: r.selfApproved });
     }
     return answer(c, await decide(db, id, userId, body.action, input), input.note);
