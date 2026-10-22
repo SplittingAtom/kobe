@@ -36,6 +36,7 @@ import {
 } from "./fan-out.js";
 import { loadActiveRuns, runHasConnector, type ActiveRunContext } from "./run-context.js";
 import { appliedUserRule, recordRuleApplied } from "../policy/rule-applied.js";
+import { appliedDangerousMode, recordDangerousApplied } from "../policy/dangerous-mode.js";
 import { recordSkippedActionInTx } from "../policy/skipped-actions.js";
 
 /**
@@ -224,6 +225,7 @@ function policyInputFor(
       version: run.agentVersion,
       tools_allow: run.toolsAllow,
       tools_deny: run.toolsDeny,
+      dangerous_mode: run.dangerous === true,
     },
     run: { run_id: run.runId, thread_id: run.threadId, approval_mode: run.mode },
     tool,
@@ -506,6 +508,27 @@ export async function decideMcpCall(
           "The remembered approval for this call was revoked, so it was denied.",
         );
       }
+    }
+
+    // An admin's Dangerous agent allowed it (AC1): its own audit row at this enforcement point
+    // too, before the call runs (a failed write throws: the call is denied).
+    if (combined.effect === "allow" && appliedDangerousMode(namedDecision) !== undefined) {
+      if (named.skillEval) {
+        return await skip(
+          "eval_run_no_prompt",
+          "Skill eval runs never ask for approval; this call was denied.",
+        );
+      }
+      await recordDangerousApplied(deps.db, {
+        teamId: principal.teamId,
+        userId: principal.userId,
+        runId: named.runId,
+        agentId: named.agentId,
+        agentVersion: named.agentVersion,
+        toolCallId,
+        tool: pinned.pi_name,
+        enforcementPoint: "mcp_proxy",
+      });
     }
 
     const capture = await captureFor(deps, principal, {

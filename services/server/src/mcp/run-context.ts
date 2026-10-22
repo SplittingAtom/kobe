@@ -1,6 +1,6 @@
 import { APPROVAL_MODES, type ApprovalMode } from "@kobe/protocol";
 import { sql, withTeam, type KobeDb } from "@kobe/db";
-import { clampApprovalMode } from "../sandbox-wire/policy-check.js";
+import { clampApprovalMode, dangerousModeApplies } from "../sandbox-wire/policy-check.js";
 import type { RunPolicyContextSource } from "../sandbox-wire/types.js";
 import type { McpPrincipal } from "./decide.js";
 
@@ -30,6 +30,8 @@ export interface ActiveRunContext {
   readonly mode: ApprovalMode;
   readonly toolsAllow: string[];
   readonly toolsDeny: string[];
+  /** An admin's Dangerous agent under an `auto` site floor (AC1, `dangerousModeApplies`). */
+  readonly dangerous?: boolean;
   readonly projectId?: string;
   /**
    * The connectors of the run's `run.start.mcp` (KOBE-451 review HIGH-1); null for a run started
@@ -114,6 +116,7 @@ export async function loadActiveRuns(
         ),
         toolsAllow: [...(context.toolsAllow ?? [])],
         toolsDeny: [...(context.toolsDeny ?? [])],
+        ...(dangerousModeApplies(context) ? { dangerous: true } : {}),
         ...(projectId === undefined ? {} : { projectId }),
         mcpConnectorIds: row.mcp_connector_ids,
         connectorsOff: row.connectors_off,

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  AGENT_APPROVAL_MODES,
   AGENT_FILE_LIMITS,
   agentConnectors,
+  isDangerousMode,
   agentSkills,
   agentWarnings,
   parseAgentFile,
@@ -80,7 +82,7 @@ describe("parseAgentFile: the spec §6.3 example", () => {
   });
 
   it("accepts every approval mode (D29) and the icon forms", () => {
-    for (const mode of ["ask-on-write", "ask-all", "auto"]) {
+    for (const mode of ["ask-on-write", "ask-all", "auto", "dangerous"]) {
       expect(parsed(file(`name: A\napproval_mode: ${mode}`)).frontmatter.approval_mode).toBe(mode);
     }
     expect(parsed(file("name: A\nicon: bar-chart")).frontmatter.icon).toBe("bar-chart");
@@ -342,6 +344,16 @@ describe("agentWarnings (non-blocking; policy is enforced at run time, KOBE-35/4
     expect(agentWarnings({ name: "A", tools: { allow: ["**"] } })).toHaveLength(1);
   });
 
+  it("warns that dangerous runs allowed tools without asking (AC1)", () => {
+    const warnings = agentWarnings({ name: "A", approval_mode: "dangerous" });
+    expect(warnings).toEqual([
+      {
+        path: "frontmatter.approval_mode",
+        message: expect.stringMatching(/without asking/),
+      },
+    ]);
+  });
+
   it("is quiet for narrow allows and stricter modes", () => {
     expect(
       agentWarnings({
@@ -350,5 +362,14 @@ describe("agentWarnings (non-blocking; policy is enforced at run time, KOBE-35/4
         approval_mode: "ask-all",
       }),
     ).toEqual([]);
+  });
+});
+
+describe("Dangerous mode (AC1)", () => {
+  it("is an agent mode only: the wire's approval modes stay the three D29 modes", () => {
+    expect(AGENT_APPROVAL_MODES).toEqual(["ask-on-write", "ask-all", "auto", "dangerous"]);
+    expect(isDangerousMode({ approval_mode: "dangerous" })).toBe(true);
+    expect(isDangerousMode({ approval_mode: "auto" })).toBe(false);
+    expect(isDangerousMode({})).toBe(false);
   });
 });

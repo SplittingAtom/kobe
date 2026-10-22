@@ -43,6 +43,12 @@ import { prepareInput } from "./tool-inputs.js";
  *   unattended run, so only the team's own allow list does. The ask-on-write sandbox switch plays
  *   no part here.
  *
+ * - **Dangerous mode** (AC1, docs/specs/agent-creator.md, approved by Chris 2026-10-22): when the
+ *   server set `agent.dangerous_mode` (an admin's published Dangerous agent under an `auto` site
+ *   floor), an interactive call that passed every deny stage and matched no ask rule is allowed
+ *   (reason `dangerous_mode`) instead of going on to risk class, mode and prompt. Scheduled runs
+ *   are unchanged (D32).
+ *
  * `tool` is the server's own descriptor (registry), never one built from what the sandbox sent.
  */
 export interface EvaluationContext {
@@ -206,6 +212,16 @@ function allow(ctx: Prepared, reasons: PolicyReason[]): PolicyDecision {
   return { effect: "allow", risk: ctx.tool.risk, reasons };
 }
 
+/** An admin's Dangerous agent (AC1) in an interactive run: allowed without asking. */
+function dangerousAllow(ctx: Prepared): PolicyReason | undefined {
+  if (ctx.input.agent.dangerous_mode !== true || ctx.input.actor.kind !== "user") return undefined;
+  return {
+    code: "dangerous_mode",
+    stage: "approval_mode",
+    message: `${ctx.tool.name} ran without asking: this agent is in Dangerous mode, set by an admin.`,
+  };
+}
+
 /** `auto` / scheduled: never prompt; read-only or allow-listed, else deny. */
 function decideUnattended(ctx: Prepared, never: PolicyReason): PolicyDecision {
   if (ctx.tool.risk === "read") return allow(ctx, [noPromptReason(ctx)]);
@@ -231,10 +247,17 @@ export function evaluatePolicy(ctx: EvaluationContext): PolicyDecision {
   const never = neverPromptReason(p.input);
   const asks = askReasons(p);
   if (asks.length > 0) return never ? deny(p, [never, ...asks]) : ask(p, asks);
-  if (never) return decideUnattended(p, never);
+  // Only where the call would otherwise ask (or, in auto mode, be refused for not being
+  // allow-listed): calls that run anyway keep their own reason and need no Dangerous audit row.
+  const dangerous = dangerousAllow(p);
+  if (never) {
+    const unattended = decideUnattended(p, never);
+    return dangerous && unattended.effect === "deny" ? allow(p, [dangerous]) : unattended;
+  }
 
   const prompts = promptReasons(p);
   if (prompts.length === 0) return allow(p, [noPromptReason(p)]);
   const own = userAllow(p);
-  return own ? allow(p, [own, ...prompts]) : ask(p, prompts);
+  if (own) return allow(p, [own, ...prompts]);
+  return dangerous ? allow(p, [dangerous, ...prompts]) : ask(p, prompts);
 }

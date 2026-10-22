@@ -12,6 +12,7 @@ import {
   encodeActivityCursor,
   type ActivityCursor,
 } from "../threads/cursor.js";
+import { pinnedVersionIsDangerous } from "../policy/dangerous-mode.js";
 import {
   agentStatusOf,
   findPinnableAgent,
@@ -357,6 +358,12 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
         read_only: found.access !== "owner",
         agent_name: pinned?.frontmatter.name ?? null,
         agent_status: pinned === null ? null : agentStatusOf(pinned),
+        agent_dangerous: await pinnedVersionIsDangerous(tx, {
+          teamId: viewer.teamId,
+          scope: found.thread.agentScope,
+          agentId: found.thread.agentId,
+          version: found.thread.agentVersion,
+        }),
         agent_current_version: latest,
         agent_model: agentModel ?? null,
         entries: page.entries,

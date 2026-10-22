@@ -672,7 +672,13 @@ describe("Gate 2: a tampered kobe-policy cannot run an MCP write without a signe
   ): PolicyInput => ({
     actor: { user_id: w.owner.id, kind: "user" },
     team_id: w.team,
-    agent: { agent_id: null, version: null, tools_allow: [], tools_deny: [] },
+    agent: {
+      agent_id: null,
+      version: null,
+      tools_allow: [],
+      tools_deny: [],
+      dangerous_mode: false,
+    },
     run: { run_id: w.runId, thread_id: w.threadId, approval_mode: "ask-on-write" },
     tool: mcpTool(TOOL, "write"),
     tool_call_id: toolCallId,

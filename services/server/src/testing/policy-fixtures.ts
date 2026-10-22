@@ -44,6 +44,8 @@ export interface InputOptions {
   readonly toolsDeny?: string[];
   readonly exposure?: "read_only" | "all" | "custom";
   readonly enforcement?: "sandbox" | "mcp_proxy";
+  /** The server found the run's agent in Dangerous mode (AC1). */
+  readonly dangerous?: boolean;
 }
 
 export function policyInput(
@@ -59,6 +61,7 @@ export function policyInput(
       version: null,
       tools_allow: options.toolsAllow ?? [],
       tools_deny: options.toolsDeny ?? [],
+      dangerous_mode: options.dangerous ?? false,
     },
     run: { run_id: IDS.run, thread_id: IDS.thread, approval_mode: options.mode ?? "ask-on-write" },
     tool,

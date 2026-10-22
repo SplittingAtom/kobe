@@ -25,7 +25,9 @@ import { rememberRuleSchema } from "./remember.js";
  * `deny`; a matching ask rule decides `require_approval` (user allow rules cannot remove it); risk
  * class and mode decide whether the call needs asking; a user allow rule can only remove a prompt
  * that comes from risk class or mode; whatever remains is prompted. There is no bypass: no mode,
- * flag, or role skips this pipeline. Unknown tools are denied before any of it (tools.ts).
+ * flag, or role skips this pipeline. An admin's Dangerous agent (AC1) is an outcome of it, at the
+ * approval-mode stage after every deny and ask rule (`agent.dangerous_mode`, reason
+ * `dangerous_mode`). Unknown tools are denied before any of it (tools.ts).
  *
  * Patterns in rules use the glob grammar in glob.ts — never regular expressions.
  */
@@ -69,6 +71,13 @@ export const policyInputSchema = z
       /** Agent frontmatter `tools.allow` / `tools.deny` (D19), glob grammar. */
       tools_allow: z.array(z.string()).default([]),
       tools_deny: z.array(z.string()).default([]),
+      /**
+       * Dangerous mode applies to this call (AC1, docs/specs/agent-creator.md): set only by the
+       * server, from the run's published agent version (set by a site or team admin), under an
+       * `auto` site floor and, for a personal agent, while its user is still an admin. The engine
+       * then allows a call that no deny stage and no ask rule stopped (reason `dangerous_mode`).
+       */
+      dangerous_mode: z.boolean().default(false),
     }),
     run: z.strictObject({
       run_id: uuidSchema,
@@ -145,6 +154,7 @@ export const POLICY_REASON_CODES = [
   "policy_error", // the decision could not be made (internal error, unreadable state) → deny
   "run_not_active", // the run ended (or is not this sandbox's) before the call was decided → deny
   "connector_not_in_run", // KOBE-451: not in the named run's run.start.mcp (off, or not the agent's) → deny
+  "dangerous_mode", // AC1 (KOBE-476): an admin's Dangerous agent; allowed without asking (stage approval_mode)
   "not_a_member", // the run's user is deactivated or no longer in the team → deny
   // Sandbox-side deny (kobe-policy / kobe-sandbox-agent): no server decision could be obtained
   // (policy channel closed, timed out, extension refused). Never produced by the server.

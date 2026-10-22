@@ -1,5 +1,5 @@
 import type { AgentDefinition, AgentFrontmatter } from "@kobe/agent-file";
-import { AGENT_SLUG_MAX } from "@kobe/agent-file";
+import { AGENT_SLUG_MAX, isDangerousMode } from "@kobe/agent-file";
 import {
   and,
   eq,
@@ -229,6 +229,7 @@ export async function createAgent(
               })
               .returning(SITE);
       if (!row) throw new Error("agent insert returned no row");
+      await auditDangerousChange(tx, location, row, false, input.definition);
       await recordAudit(tx, {
         action: "agent.created",
         teamId: auditTeam(location),
@@ -248,6 +249,23 @@ export async function createAgent(
     if (pgCode(err) === "23505") return { ok: false, error: "slug_taken" };
     throw err;
   }
+}
+
+/** `agent.dangerous_mode.changed` (AC1) when a write turns Dangerous mode on or off. */
+async function auditDangerousChange(
+  tx: KobeTx,
+  location: AgentLocation,
+  row: { readonly id: string; readonly slug: string },
+  wasDangerous: boolean,
+  definition: AgentDefinition,
+): Promise<void> {
+  const enabled = isDangerousMode(definition.frontmatter);
+  if (enabled === wasDangerous) return;
+  await recordAudit(tx, {
+    action: "agent.dangerous_mode.changed",
+    teamId: auditTeam(location),
+    target: { agentId: row.id, scope: location.scope, slug: row.slug, enabled },
+  });
 }
 
 function lockKey(location: AgentLocation): string {
@@ -291,6 +309,8 @@ export async function updateAgent(
     updatedAt: new Date(),
   };
   return inLocation(db, location, async (tx) => {
+    // Dangerous mode (AC1) is audited when it turns on or off: read the draft it replaces.
+    const before = await lockAgent(tx, location, id);
     const [row] =
       location.scope === "team"
         ? await tx
@@ -321,6 +341,13 @@ export async function updateAgent(
             )
             .returning(SITE);
     if (row) {
+      await auditDangerousChange(
+        tx,
+        location,
+        row,
+        before !== null && isDangerousMode(before.frontmatter),
+        definition,
+      );
       await recordAudit(tx, {
         action: "agent.updated",
         teamId: auditTeam(location),

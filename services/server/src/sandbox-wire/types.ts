@@ -307,6 +307,11 @@ export interface RunPolicyContext {
   readonly toolsAllow?: readonly string[];
   readonly toolsDeny?: readonly string[];
   readonly projectId?: string;
+  /**
+   * The run's published agent version is an admin's Dangerous agent (AC1, `loadRunDangerousMode`).
+   * The policy input sets `agent.dangerous_mode` only when the floor is also `auto`.
+   */
+  readonly dangerous?: boolean;
 }
 
 /** KOBE-30/46/47 seam: run-specific policy inputs, read inside the team's transaction. */

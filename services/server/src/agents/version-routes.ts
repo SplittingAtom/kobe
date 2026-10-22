@@ -39,7 +39,8 @@ import { versionScores } from "./eval/store.js";
 import { logger } from "../logger.js";
 import { hitRateLimit } from "../rate-limit.js";
 import { parseBody } from "../teams/http.js";
-import { agentSkills, agentWarnings } from "@kobe/agent-file";
+import { agentSkills, agentWarnings, isDangerousMode } from "@kobe/agent-file";
+import { DANGEROUS_FORBIDDEN } from "../policy/dangerous-mode.js";
 import { EMPTY_SKILL_MANIFEST } from "../skills/frozen.js";
 import { skillUpdates } from "./skill-freeze.js";
 
@@ -74,6 +75,11 @@ export interface VersionRouteOptions {
   readonly resolve: (c: Context) => Promise<ResolvedAgent | null>;
   /** The signed-in user publishing (recorded on the version). */
   readonly userId: (c: Context) => string;
+  /**
+   * Whether the caller may publish a definition in Dangerous mode (AC1: site and team admins). A
+   * publish or rollback of such a definition by anyone else is refused (403).
+   */
+  readonly mayUseDangerousMode: (c: Context) => boolean;
   /**
    * The pre-publish eval gate (KOBE-93), on the team router only: Publish asks it first, and
    * version summaries carry the score each version earned. Unset (the gallery): never gated.
@@ -242,10 +248,15 @@ export function mountVersionRoutes<E extends { Variables: object }>(
     return undefined;
   }
 
+  const dangerousForbidden = (c: Context) => c.json(DANGEROUS_FORBIDDEN, 403);
+
   app.post("/:id/publish", async (c) => {
     const found = await resolve(c);
     if (!found) return notFound(c);
     if (!found.access.publish) return forbidden(c, "Your team role doesn't allow publishing it.");
+    if (isDangerousMode(found.agent.frontmatter) && !options.mayUseDangerousMode(c)) {
+      return dangerousForbidden(c);
+    }
     const ifMatch = ifMatchRevision(c);
     if (!ifMatch.ok) return ifMatch.response;
     if (!(await withinRate(c))) return rateLimited(c);
@@ -269,6 +280,10 @@ export function mountVersionRoutes<E extends { Variables: object }>(
     if (!found.access.publish) return forbidden(c, "Your team role doesn't allow publishing it.");
     if (!(await withinRate(c))) return rateLimited(c);
     return guardUnreadable(c, async () => {
+      const source = await getVersion(db, found.location, found.agent.id, body.version);
+      if (source && isDangerousMode(source.definition.frontmatter)) {
+        if (!options.mayUseDangerousMode(c)) return dangerousForbidden(c);
+      }
       const started = await gateIfEnabled(c, found, undefined, body.version);
       if (started) return started;
       const result = await rollbackAgent(db, found.location, found.agent.id, {

@@ -1031,3 +1031,62 @@ describe("evaluatePolicy: invariants over every combination", () => {
     // The budget above allows up to 10 s; vitest's default 5 s timeout would cut it short.
   }, 30_000);
 });
+
+describe("evaluatePolicy: Dangerous mode (AC1, KOBE-476)", () => {
+  const dangerous = { dangerous: true } as const;
+
+  it("allows a call that would ask, with reason dangerous_mode at the approval-mode stage", () => {
+    for (const mode of APPROVAL_MODES) {
+      const decision = run({ tool: jiraCreate, options: { ...dangerous, mode } });
+      expect(decision.effect, mode).toBe("allow");
+      expect(decision.reasons[0]).toMatchObject({ code: "dangerous_mode", stage: "approval_mode" });
+    }
+    expect(run({ tool: kobeWrite, options: { mode: "ask-all", ...dangerous } }).effect).toBe(
+      "allow",
+    );
+  });
+
+  it("never lifts a deny: site and team deny rules, the agent's tool lists, connector gates", () => {
+    const cases: Omit<Case, "name" | "effect" | "codes">[] = [
+      { tool: bash, rules: [rule("site", "deny", "bash")] },
+      { tool: bash, rules: [rule("team", "deny", "bash")] },
+      { tool: jiraCreate, options: { toolsDeny: ["mcp__jira__create_issue"] } },
+      { tool: jiraCreate, options: { toolsAllow: ["read"] } },
+      { tool: jiraCreate, connector: { ...ENABLED_ALL, exposure: "read_only" } },
+      { tool: jiraCreate, connector: { ...ENABLED_ALL, enabled: false } },
+      { tool: jiraCreate, connector: { ...ENABLED_ALL, drifted_tools: [jiraCreate.name] } },
+    ];
+    for (const c of cases) {
+      const decision = run({ ...c, options: { ...c.options, ...dangerous } });
+      expect(decision.effect, JSON.stringify(c)).toBe("deny");
+      expect(decision.reasons.map((r) => r.code)).not.toContain("dangerous_mode");
+    }
+  });
+
+  it("never lifts a site or team ask rule", () => {
+    for (const scope of ["site", "team"] as const) {
+      const decision = run({
+        tool: jiraCreate,
+        rules: [rule(scope, "ask", "mcp__jira__*")],
+        options: dangerous,
+      });
+      expect(decision.effect).toBe("require_approval");
+    }
+  });
+
+  it("leaves scheduled runs as they were (D32): no allow without an allow-list", () => {
+    const decision = run({ tool: jiraCreate, options: { ...dangerous, kind: "schedule" } });
+    expect(decision.effect).toBe("deny");
+    expect(decision.reasons[0]?.code).toBe("scheduled_run_no_prompt");
+  });
+
+  it("leaves calls that run anyway with their own reason (no Dangerous audit row for them)", () => {
+    const decision = run({ tool: read, options: dangerous });
+    expect(decision.effect).toBe("allow");
+    expect(decision.reasons[0]?.code).toBe("risk_read");
+  });
+
+  it("changes nothing when the server did not set it", () => {
+    expect(run({ tool: jiraCreate }).effect).toBe("require_approval");
+  });
+});

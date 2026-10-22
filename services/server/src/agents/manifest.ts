@@ -12,7 +12,12 @@ import {
   type JsonObject,
   type ToolDescriptor,
 } from "@kobe/protocol";
-import { ALL_CONNECTORS, agentConnectors, type AgentFrontmatter } from "@kobe/agent-file";
+import {
+  ALL_CONNECTORS,
+  agentConnectors,
+  isDangerousMode,
+  type AgentFrontmatter,
+} from "@kobe/agent-file";
 import { strictestApprovalMode } from "../policy/approval-floor.js";
 import { checkAvailable } from "../policy/gates.js";
 import { matchAgentToolEntry, matchSubject, splitAgentToolEntry } from "../policy/patterns.js";
@@ -89,6 +94,13 @@ export const toolManifestSchema = z.strictObject({
     floor: approvalModeSchema,
     /** The stricter of the two; never looser than the floor. */
     effective: approvalModeSchema,
+    /**
+     * The agent file asked for Dangerous mode (AC1, docs/specs/agent-creator.md): `requested` is
+     * then null and `effective` the default, since Dangerous is no run mode. Only a site or team
+     * admin can publish such a version (routes); whether it applies is decided per call
+     * (`manifestIsDangerous` + site floor + run kind), never by the sandbox.
+     */
+    dangerous: z.literal(true).optional(),
   }),
 });
 export type ToolManifest = z.infer<typeof toolManifestSchema>;
@@ -211,7 +223,9 @@ export function computeToolManifest(
       tools.push({ name, source, risk, scope, open_world });
     }
   }
-  const requested = frontmatter.approval_mode ?? null;
+  const dangerous = isDangerousMode(frontmatter);
+  const mode = frontmatter.approval_mode;
+  const requested: ApprovalMode | null = mode === undefined || mode === "dangerous" ? null : mode;
   return {
     format: TOOL_MANIFEST_FORMAT,
     floor: floor.scope,
@@ -224,8 +238,15 @@ export function computeToolManifest(
       requested,
       floor: floor.approvalFloor,
       effective: strictestApprovalMode(requested ?? DEFAULT_APPROVAL_MODE, floor.approvalFloor),
+      ...(dangerous ? { dangerous: true as const } : {}),
     },
   };
+}
+
+/** Whether a stored manifest (any shape: it is read raw by the policy check) is in Dangerous mode. */
+export function manifestIsDangerous(stored: unknown): boolean {
+  if (!isRecord(stored) || !isRecord(stored.approval_mode)) return false;
+  return stored.approval_mode.dangerous === true;
 }
 
 /**
