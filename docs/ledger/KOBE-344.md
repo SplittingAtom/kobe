@@ -42,6 +42,24 @@
   version does not inherit the origin (it is a new draft). The import URL is stored as the URL
   parser writes it (`href`), as provenance requires.
 
+## Review fixes (Opus review of KOBE-344)
+
+- **Pack expansion (M):** every upload-pack answer is walked before isomorphic-git indexes it
+  (`skills/import/pack-guard.ts`): each object's inflated size, and a delta's result size from
+  its header, at most the upload's per-file limit (10 MiB, `SKILL_LIMITS.maxFileBytes`; the
+  review suggested 5 MiB, but that is the draft total, and a repository's other files may be
+  bigger), all objects together at most 64 MiB; inflation is capped at each object's declared
+  size. Chosen over a child process because a heap limit doesn't bound Buffers (isomorphic-git
+  holds objects outside the V8 heap). Also: the commit is now fetched alone first (depth 1, by
+  SHA; GitHub and stateless smart HTTP serve a reachable SHA), so large files elsewhere in a
+  repository don't count; only where a host refuses that are all branches and tags fetched.
+- **Deadline (L):** the whole import has 2 minutes (`IMPORT_DEADLINE_MS`): the HTTP client cuts
+  any request or trickling answer at the deadline and starts nothing after it (`timed_out`).
+- **Edited imports (L):** the draft's origin records `filesSha256` (the canonical zip of the
+  files it started with); at save, if the draft's files differ, the version's origin gets
+  `modified: true` (an origin without the hash counts as modified), and promotion carries it
+  into `provenance.origin.modified`; `fetchedSha256` still names what was fetched.
+
 ## Open questions (for Chris or the coordinator)
 
 - Public hubs as "discovery links": no links are shown in the UI yet.

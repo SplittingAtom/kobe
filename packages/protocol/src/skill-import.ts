@@ -66,6 +66,13 @@ export const skillImportOriginSchema = z.strictObject({
   commit: importCommitSchema.optional(),
   path: importPathSchema.optional(),
   fetchedSha256: sha256Schema,
+  /** SHA-256 of the canonical zip of the files the draft started with (to tell later edits). */
+  filesSha256: sha256Schema.optional(),
+  /**
+   * On a version: its files are not the ones imported (the draft was edited after the import), so
+   * it does not claim to be the origin's content; `fetchedSha256` still names what was fetched.
+   */
+  modified: z.literal(true).optional(),
   importedBy: z.uuid(),
   importedAt: z.iso.datetime(),
 });

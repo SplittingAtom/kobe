@@ -6,10 +6,11 @@ import { createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { strToU8, zipSync } from "fflate";
+import type { HttpClient } from "isomorphic-git";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { provenanceSchema } from "@kobe/protocol";
 import { mirrorHttpClient } from "./skills/mirror/http-client.js";
-import type { TestBrowser } from "./testing/browser.js";
+import { RawBody, type TestBrowser } from "./testing/browser.js";
 import {
   selfSignedCert,
   startConnectProxy,
@@ -46,8 +47,34 @@ const skillMd = (name: string, body: string) =>
   `---\nname: ${name}\ndescription: Does ${name} things. Use when asked about ${name}.\n---\n# ${name}\n${body}\n`;
 const fetches = () => gitProxy.connects.length + zipProxy.connects.length;
 
+/**
+ * A host that refuses a bare SHA in a want, like servers without allowReachableSHA1InWant over
+ * a stateful protocol: this test's "nosha" repositories answer any shallow fetch with an error.
+ */
+function refuseShaFor(url: string, http: HttpClient): HttpClient {
+  if (!url.includes("/nosha")) return http;
+  return {
+    async request(req) {
+      const chunks: Uint8Array[] = [];
+      for await (const c of req.body ?? []) chunks.push(c);
+      const body = Buffer.concat(chunks);
+      if (body.includes("deepen "))
+        return { url: req.url, statusCode: 500, statusMessage: "no", headers: {} };
+      return http.request({
+        ...req,
+        body: (async function* () {
+          yield new Uint8Array(body);
+        })(),
+      });
+    },
+  };
+}
+
 /** Commits files into the served `acme/skills` repository; returns the commit SHA. */
-function commit(files: Record<string, string>, opts: { symlink?: [string, string] } = {}): string {
+function commit(
+  files: Record<string, string>,
+  opts: { symlink?: [string, string]; repo?: string } = {},
+): string {
   const work = mkdtempSync(path.join(git.root, "work-"));
   const run = (args: string[]) =>
     execFileSync("git", args, {
@@ -55,7 +82,7 @@ function commit(files: Record<string, string>, opts: { symlink?: [string, string
       encoding: "utf8",
       env: { PATH: process.env.PATH ?? "", HOME: git.root, GIT_CONFIG_NOSYSTEM: "1" },
     }).trim();
-  run(["clone", "--quiet", path.join(git.root, "acme/skills.git"), "."]);
+  run(["clone", "--quiet", path.join(git.root, `${opts.repo ?? "acme/skills"}.git`), "."]);
   for (const [p, text] of Object.entries(files)) {
     mkdirSync(path.dirname(path.join(work, p)), { recursive: true });
     writeFileSync(path.join(work, p), text);
@@ -84,7 +111,12 @@ beforeAll(async () => {
   zipBytes = zipSync({ "SKILL.md": strToU8(skillMd("pdf", "From a zip.")) });
   zipServer = createServer({ key: zipCert.key, cert: zipCert.cert }, (req, res) => {
     if (req.url === "/acme/pdf.zip") res.writeHead(200).end(zipBytes);
-    else if (req.url === "/acme/moved.zip")
+    else if (req.url === "/acme/slow.zip") {
+      // Trickles: never idle long enough for a timeout, but never done before the deadline.
+      res.writeHead(200);
+      const t = setInterval(() => res.write(Buffer.alloc(16)), 200);
+      res.on("close", () => clearInterval(t));
+    } else if (req.url === "/acme/moved.zip")
       res.writeHead(302, { location: "https://evil.example.org/x.zip" }).end();
     else res.writeHead(404).end();
   });
@@ -98,16 +130,21 @@ beforeAll(async () => {
   });
   h = await openHarness({ blobs: { objects: new MemoryObjects(), prefix: "kobe/" } }, () => ({
     skillImport: {
-      http: (url: string) =>
-        mirrorHttpClient({
-          remote: url,
-          credentials: null,
-          proxy: {
-            url: new URL(url).hostname === "files.test" ? zipProxy.url : gitProxy.url,
-            token: () => "site-import",
-          },
-          ca: [cert.cert, zipCert.cert],
-        }),
+      deadlineMs: 3_000,
+      http: (url: string, deadlineAt: number) =>
+        refuseShaFor(
+          url,
+          mirrorHttpClient({
+            deadlineAt,
+            remote: url,
+            credentials: null,
+            proxy: {
+              url: new URL(url).hostname === "files.test" ? zipProxy.url : gitProxy.url,
+              token: () => "site-import",
+            },
+            ca: [cert.cert, zipCert.cert],
+          }),
+        ),
     },
   }));
   const ids = await Promise.all(
@@ -279,6 +316,7 @@ describe("governed import (KOBE-344)", () => {
       path: "skills/ledger",
       importedBy: builderId,
     });
+    expect(row.rows[0]?.origin).not.toHaveProperty("modified");
     // Versions are immutable: the origin too.
     const upd = await h.admin
       .query(`UPDATE team_skill_versions SET origin = NULL WHERE skill_id = $1`, [skillId])
@@ -315,5 +353,68 @@ describe("governed import (KOBE-344)", () => {
       fetchedSha256: (made.json.draft as { origin: { fetchedSha256: string } }).origin
         .fetchedSha256,
     });
+  });
+
+  it("bounds what a pack expands to, fetches the commit alone where the host allows it, and stops past the deadline (review)", async () => {
+    // The commit alone (as GitHub serves a reachable SHA): its 40 MiB blob is refused before
+    // isomorphic-git inflates it.
+    git.repo("acme/big");
+    const big = commit(
+      { "SKILL.md": skillMd("big", "x"), "zeros.bin": "\0".repeat(40 * 1024 * 1024) },
+      { repo: "acme/big" },
+    );
+    const bomb = await builder.post("/v1/skills/drafts/import", {
+      kind: "git",
+      url: "https://git.test/acme/big.git",
+      commit: big,
+    });
+    expect(bomb.status).toBe(413);
+    expect(bomb.json.code).toBe("too_large");
+    // A host that refuses a bare SHA (this test's "nosha" repositories): every branch is fetched
+    // and the commit read among them; a big blob anywhere on them is refused too.
+    git.repo("acme/nosha");
+    const url = "https://git.test/acme/nosha.git";
+    const small = commit({ "SKILL.md": skillMd("small", "x") }, { repo: "acme/nosha" });
+    const ok = await builder.post("/v1/skills/drafts/import", { kind: "git", url, commit: small });
+    expect(ok.status, JSON.stringify(ok.json)).toBe(201);
+    expect(ok.json.draft).toMatchObject({ name: "small", origin: { commit: small } });
+    commit({ "zeros.bin": "\0".repeat(40 * 1024 * 1024) }, { repo: "acme/nosha" });
+    const all = await builder.post("/v1/skills/drafts/import", { kind: "git", url, commit: small });
+    expect(all.json.code).toBe("too_large");
+    const started = Date.now();
+    const slow = await builder.post("/v1/skills/drafts/import", {
+      kind: "zip",
+      url: "https://files.test/acme/slow.zip",
+      sha256: "a".repeat(64),
+    });
+    expect(slow.json.code).toBe("timed_out");
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  it("marks a version modified when the imported draft was edited before saving (review)", async () => {
+    const sha = commit({ "skills/edited/SKILL.md": skillMd("edited", "original") });
+    const made = await importGit(builder, sha, { path: "skills/edited" });
+    expect(made.status, JSON.stringify(made.json)).toBe(201);
+    const draft = made.json.draft as { id: string; rev: number };
+    const put = await builder.request(
+      "PUT",
+      `/v1/skills/drafts/${draft.id}/files/notes.md`,
+      new RawBody(new TextEncoder().encode("my own notes\n"), "text/markdown"),
+      { "if-match": String(draft.rev) },
+    );
+    expect(put.status, JSON.stringify(put.json)).toBeLessThan(300);
+    const rev = (await builder.get(`/v1/skills/drafts/${draft.id}`)).json.draft.rev as number;
+    const saved = await builder.request(
+      "POST",
+      `/v1/skills/drafts/${draft.id}/versions`,
+      { destination: "team", semver: "1.0.0", changelog: "Edited." },
+      { "if-match": String(rev) },
+    );
+    expect(saved.status, JSON.stringify(saved.json)).toBe(201);
+    const row = await h.admin.query<{ origin: Record<string, unknown> }>(
+      `SELECT origin FROM team_skill_versions WHERE skill_id = $1`,
+      [saved.json.skill.id],
+    );
+    expect(row.rows[0]?.origin).toMatchObject({ commit: sha, modified: true });
   });
 });

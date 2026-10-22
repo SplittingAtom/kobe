@@ -462,8 +462,9 @@ const server = serve(
       ...(sandbox
         ? {
             skillImport: {
-              http: (url: string) =>
+              http: (url: string, deadlineAt: number) =>
                 mirrorHttpClient({
+                  deadlineAt,
                   remote: url,
                   credentials: null,
                   proxy: {

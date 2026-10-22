@@ -88,6 +88,7 @@ function originOf(origin: Record<string, unknown> | null): { origin?: SkillProve
       url: o.data.url,
       ...(o.data.commit ? { commit: o.data.commit } : {}),
       ...(o.data.path ? { path: o.data.path } : {}),
+      ...(o.data.modified ? { modified: true as const } : {}),
       fetchedSha256: o.data.fetchedSha256,
     },
   };

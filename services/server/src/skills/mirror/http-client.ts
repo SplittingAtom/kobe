@@ -22,6 +22,11 @@ export interface MirrorHttpOptions {
   /** Plain-HTTP remotes are for tests only. */
   readonly allowInsecureHttp?: boolean;
   readonly timeoutMs?: number;
+  /**
+   * An overall deadline (ms since the epoch) for every request and answer through this client:
+   * past it, nothing new starts and what runs is cut (imports, KOBE-344 review).
+   */
+  readonly deadlineAt?: number;
   readonly maxResponseBytes?: number;
 }
 
@@ -58,7 +63,19 @@ function flatHeaders(res: IncomingMessage): Record<string, string> {
   return out;
 }
 
-async function* capped(res: IncomingMessage, max: number): AsyncIterableIterator<Uint8Array> {
+async function* capped(
+  res: IncomingMessage,
+  max: number,
+  stop?: () => void,
+): AsyncIterableIterator<Uint8Array> {
+  try {
+    yield* chunksOf(res, max);
+  } finally {
+    stop?.();
+  }
+}
+
+async function* chunksOf(res: IncomingMessage, max: number): AsyncIterableIterator<Uint8Array> {
   let size = 0;
   for await (const chunk of res) {
     const c = chunk as Buffer;
@@ -139,7 +156,12 @@ export function mirrorHttpClient(options: MirrorHttpOptions): HttpClient {
     ? `Basic ${Buffer.from(`${options.credentials.username}:${options.credentials.token}`).toString("base64")}`
     : undefined;
 
+  const remaining = () =>
+    options.deadlineAt === undefined ? Infinity : options.deadlineAt - Date.now();
+  const late = () => new MirrorHttpError(`${remote.hostname}: the import took too long`);
+
   async function send(req: GitHttpRequest): Promise<GitHttpResponse> {
+    if (remaining() <= 0) throw late();
     const url = new URL(req.url);
     if (url.origin !== remote.origin)
       throw new MirrorHttpError("the mirror only talks to its own remote");
@@ -187,14 +209,22 @@ export function mirrorHttpClient(options: MirrorHttpOptions): HttpClient {
 
     return new Promise((resolve, reject) => {
       const r = send();
+      // The overall deadline cuts the request and its answer, however slowly bytes trickle in.
+      const left = remaining();
+      const timer = Number.isFinite(left)
+        ? setTimeout(() => r.destroy(late()), Math.max(0, left))
+        : undefined;
+      timer?.unref();
+      const stop = () => clearTimeout(timer);
       r.once("timeout", () => r.destroy(new MirrorHttpError(`${url.hostname} timed out`)));
-      r.once("error", (err) =>
+      r.once("error", (err) => {
+        stop();
         reject(
           err instanceof MirrorHttpError
             ? err
             : new MirrorHttpError(`${url.hostname} is unreachable (${err.message})`),
-        ),
-      );
+        );
+      });
       r.once("response", (res) => {
         resolve({
           url: req.url,
@@ -202,7 +232,7 @@ export function mirrorHttpClient(options: MirrorHttpOptions): HttpClient {
           statusCode: res.statusCode ?? 0,
           statusMessage: res.statusMessage ?? "",
           headers: flatHeaders(res),
-          body: capped(res, maxResponse),
+          body: capped(res, maxResponse, stop),
         });
       });
       r.end(body);

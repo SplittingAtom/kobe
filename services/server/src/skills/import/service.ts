@@ -17,6 +17,7 @@ import { DRAFT_LIMITS } from "../drafts/files.js";
 import { createDraft, type DraftContext } from "../drafts/service.js";
 import { packageFiles, type StartResult } from "../drafts/starts.js";
 import { fetchGitFiles, fetchZip, ImportError, type ImportErrorCode } from "./fetch.js";
+import { guardPacks } from "./pack-guard.js";
 
 /**
  * Governed import (KOBE-344, spec SK30): only from the Site's import allowlist (hosts, or hosts and
@@ -29,6 +30,16 @@ import { fetchGitFiles, fetchZip, ImportError, type ImportErrorCode } from "./fe
 
 /** A git fetch downloads every branch and tag (the commit must be reachable): bounded here. */
 export const IMPORT_FETCH_MAX_BYTES = 64 * 1024 * 1024;
+/**
+ * What a fetched pack may expand to while isomorphic-git indexes it (review M1): each object at
+ * most the upload's per-file limit, all of them together at most 64 MiB.
+ */
+export const IMPORT_PACK_CAPS = {
+  maxObjectBytes: SKILL_LIMITS.maxFileBytes,
+  maxTotalBytes: 64 * 1024 * 1024,
+};
+/** The whole import, fetch and indexing included (review L2). */
+export const IMPORT_DEADLINE_MS = 2 * 60_000;
 const CAPS = { maxFiles: DRAFT_LIMITS.maxFiles, maxBytes: DRAFT_LIMITS.maxDraftBytes };
 /** The draft's own zip is stored, not deflated (as Save version and Save to Workbench). */
 const BUNDLE_LIMITS = {
@@ -37,8 +48,13 @@ const BUNDLE_LIMITS = {
 };
 
 export interface ImportDeps {
-  /** An HTTP client for one URL's origin, through the egress proxy; null: imports unavailable. */
-  readonly http: ((url: string) => HttpClient) | null;
+  /**
+   * An HTTP client for one URL's origin, through the egress proxy, that stops at `deadlineAt`
+   * (ms since the epoch); null: imports unavailable.
+   */
+  readonly http: ((url: string, deadlineAt: number) => HttpClient) | null;
+  /** Tests: a shorter overall deadline. */
+  readonly deadlineMs?: number;
 }
 
 export type ImportResult =
@@ -66,17 +82,19 @@ export async function importSkill(
   const { importAllowlist } = await readRegistrySettings(ctx.db);
   if (!importAllowed(importAllowlist, request.url)) return { ok: false, error: "not_allowlisted" };
   if (!deps.http) return { ok: false, error: "unavailable" };
-  const http = deps.http(request.url);
+  const deadlineAt = Date.now() + (deps.deadlineMs ?? IMPORT_DEADLINE_MS);
+  const http = guardPacks(deps.http(request.url, deadlineAt), IMPORT_PACK_CAPS);
   try {
     if (request.kind === "zip") {
       const bytes = await fetchZip(http, request.url, request.sha256, SKILL_LIMITS.maxBundleBytes);
       const valid = validateZipBundle(bytes);
       if (!valid.ok) return invalid(valid.error);
+      const files = packageFiles(valid.value);
       return createDraft(ctx, {
         name: valid.value.name,
         startedFrom: "upload",
-        files: packageFiles(valid.value),
-        origin: origin(ctx, request, sha256(bytes), now),
+        files,
+        origin: origin(ctx, request, sha256(bytes), sha256(canonicalZip(files)), now),
       });
     }
     const dir = await mkdtemp(path.join(tmpdir(), "kobe-skill-import-"));
@@ -101,11 +119,12 @@ export async function importSkill(
     const zip = canonicalZip(files);
     const valid = validateZipBundle(zip, BUNDLE_LIMITS);
     if (!valid.ok) return invalid(valid.error);
+    const draftFiles = packageFiles(valid.value);
     return createDraft(ctx, {
       name: valid.value.name,
       startedFrom: "git",
-      files: packageFiles(valid.value),
-      origin: origin(ctx, request, sha256(zip), now),
+      files: draftFiles,
+      origin: origin(ctx, request, sha256(zip), sha256(canonicalZip(draftFiles)), now),
     });
   } catch (err) {
     if (err instanceof ImportError)
@@ -118,6 +137,7 @@ function origin(
   ctx: DraftContext,
   request: SkillImportRequest,
   fetchedSha256: string,
+  filesSha256: string,
   now: Date,
 ): SkillImportOrigin {
   return {
@@ -127,6 +147,7 @@ function origin(
     ...(request.kind === "git" ? { commit: request.commit } : {}),
     ...(request.kind === "git" && request.path ? { path: request.path } : {}),
     fetchedSha256,
+    filesSha256,
     importedBy: ctx.viewer.userId,
     importedAt: now.toISOString(),
   };

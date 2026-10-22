@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
+import path_ from "node:path";
 import git, { Errors, type HttpClient } from "isomorphic-git";
 
 /**
  * Fetching an import (KOBE-344, SK30), server-side, once, through the caller's HTTP client (the
- * egress proxy in a cluster). Git: every branch and tag of the repository, then the exact commit
- * by its SHA (a ref name is never taken; a commit no branch or tag reaches is refused), and the
- * files of its tree, or of one folder in it. Zip: one GET, no redirects, its SHA-256 checked
+ * egress proxy in a cluster). Git: the exact commit by its SHA (a ref name is never taken), alone
+ * where the host serves that, else among every branch and tag (a commit none reaches is
+ * refused), and the files of its tree, or of one folder in it. Zip: one GET, no redirects, its SHA-256 checked
  * against the request. Both stop at the import caps; isomorphic-git runs no hooks, checks out
  * nothing and follows no submodule; symlinks and submodules are refused.
  */
@@ -22,7 +23,8 @@ export type ImportErrorCode =
   | "path_not_found"
   | "unsupported_entry"
   | "too_large"
-  | "hash_mismatch";
+  | "hash_mismatch"
+  | "timed_out";
 
 /** An import refused; `message` is safe to show (no credentials ever exist on this path). */
 export class ImportError extends Error {
@@ -45,17 +47,52 @@ export async function fetchGitFiles(
   dir: string,
   caps: ImportCaps,
 ): Promise<Map<string, Uint8Array>> {
+  // First the commit alone (depth 1, by its SHA): what GitHub and other hosts that allow a
+  // reachable SHA in a want serve, and the smallest fetch. Where a host refuses that, every
+  // branch and tag, then the commit among them (a commit none reaches is refused).
+  const byCommit = path_.join(dir, "commit");
+  const everything = path_.join(dir, "all");
+  let repo = byCommit;
   try {
-    await git.init({ fs, dir });
-    await git.addRemote({ fs, dir, remote: "origin", url });
-    await git.fetch({ fs, http, dir, remote: "origin", singleBranch: false, tags: true });
+    await initRepo(byCommit, url);
+    await git.fetch({
+      fs,
+      http,
+      dir: byCommit,
+      remote: "origin",
+      ref: commit,
+      remoteRef: commit,
+      singleBranch: true,
+      depth: 1,
+      tags: false,
+    });
+    await git.readCommit({ fs, dir: byCommit, oid: commit });
   } catch (err) {
     if (err instanceof ImportError) throw err;
-    throw new ImportError("fetch_failed", `The repository could not be fetched (${message(err)}).`);
+    if (tookTooLong(err)) throw timedOut();
+    repo = everything;
+    try {
+      await initRepo(everything, url);
+      await git.fetch({
+        fs,
+        http,
+        dir: everything,
+        remote: "origin",
+        singleBranch: false,
+        tags: true,
+      });
+    } catch (err2) {
+      if (err2 instanceof ImportError) throw err2;
+      if (tookTooLong(err2)) throw timedOut();
+      throw new ImportError(
+        "fetch_failed",
+        `The repository could not be fetched (${message(err2)}).`,
+      );
+    }
   }
   let tree: string;
   try {
-    tree = (await git.readCommit({ fs, dir, oid: commit })).commit.tree;
+    tree = (await git.readCommit({ fs, dir: repo, oid: commit })).commit.tree;
   } catch {
     throw new ImportError(
       "commit_not_found",
@@ -63,7 +100,9 @@ export async function fetchGitFiles(
     );
   }
   for (const segment of path ? path.split("/") : []) {
-    const entry = (await git.readTree({ fs, dir, oid: tree })).tree.find((e) => e.path === segment);
+    const entry = (await git.readTree({ fs, dir: repo, oid: tree })).tree.find(
+      (e) => e.path === segment,
+    );
     if (entry?.type !== "tree")
       throw new ImportError("path_not_found", `The commit has no folder ${path}.`);
     tree = entry.oid;
@@ -71,7 +110,7 @@ export async function fetchGitFiles(
   const files = new Map<string, Uint8Array>();
   let bytes = 0;
   const walk = async (oid: string, prefix: string): Promise<void> => {
-    for (const e of (await git.readTree({ fs, dir, oid })).tree) {
+    for (const e of (await git.readTree({ fs, dir: repo, oid })).tree) {
       const p = `${prefix}${e.path}`;
       if (e.type === "tree") {
         await walk(e.oid, `${p}/`);
@@ -84,7 +123,7 @@ export async function fetchGitFiles(
         );
       if (files.size + 1 > caps.maxFiles)
         throw new ImportError("too_large", `The skill has more than ${caps.maxFiles} files.`);
-      const { blob } = await git.readBlob({ fs, dir, oid: e.oid });
+      const { blob } = await git.readBlob({ fs, dir: repo, oid: e.oid });
       bytes += blob.length;
       if (bytes > caps.maxBytes)
         throw new ImportError("too_large", `The skill is larger than ${caps.maxBytes} bytes.`);
@@ -93,6 +132,19 @@ export async function fetchGitFiles(
   };
   await walk(tree, "");
   return files;
+}
+
+const tookTooLong = (err: unknown) => err instanceof Error && /took too long/.test(err.message);
+const timedOut = () =>
+  new ImportError(
+    "timed_out",
+    "The import took too long; try again, or import a smaller repository.",
+  );
+
+async function initRepo(dir: string, url: string): Promise<void> {
+  await fs.promises.mkdir(dir, { recursive: true });
+  await git.init({ fs, dir });
+  await git.addRemote({ fs, dir, remote: "origin", url });
 }
 
 function message(err: unknown): string {
@@ -110,6 +162,7 @@ export async function fetchZip(
   try {
     res = await http.request({ url, method: "GET" });
   } catch (err) {
+    if (tookTooLong(err)) throw timedOut();
     throw new ImportError("fetch_failed", `The zip could not be fetched (${message(err)}).`);
   }
   if (res.statusCode !== 200)
@@ -121,11 +174,17 @@ export async function fetchZip(
     );
   const chunks: Uint8Array[] = [];
   let size = 0;
-  for await (const c of res.body ?? []) {
-    size += c.length;
-    if (size > maxBytes)
-      throw new ImportError("too_large", `The zip is larger than ${maxBytes} bytes.`);
-    chunks.push(c);
+  try {
+    for await (const c of res.body ?? []) {
+      size += c.length;
+      if (size > maxBytes)
+        throw new ImportError("too_large", `The zip is larger than ${maxBytes} bytes.`);
+      chunks.push(c);
+    }
+  } catch (err) {
+    if (err instanceof ImportError) throw err;
+    if (tookTooLong(err) || /aborted/.test(String(err))) throw timedOut();
+    throw err;
   }
   const bytes = new Uint8Array(Buffer.concat(chunks));
   if (sha256(bytes) !== expectedSha256)

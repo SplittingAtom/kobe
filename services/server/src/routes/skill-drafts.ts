@@ -306,7 +306,14 @@ export function skillDraftRoutes(
       );
     if (!(await hitRateLimit(db, `skill-upload:${c.get("user").id}`, SKILL_UPLOAD_RATE)))
       return error(c, 429, "rate_limited", "Too many imports. Wait a few minutes and try again.");
-    const result = await importSkill(ctxOf(c), { http: imports?.http ?? null }, body.data);
+    const result = await importSkill(
+      ctxOf(c),
+      {
+        http: imports?.http ?? null,
+        ...(imports?.deadlineMs ? { deadlineMs: imports.deadlineMs } : {}),
+      },
+      body.data,
+    );
     if (result.ok) return started(c, result as StartResult);
     if (result.error === "not_allowlisted")
       return error(
