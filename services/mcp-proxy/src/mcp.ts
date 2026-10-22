@@ -374,13 +374,14 @@ async function decideAndForward(
             );
       log({
         outcome: "ok",
+        credential: credentials.credential,
         approvalId: decision.approval_id,
         reason: decision.reason,
         ...(reported === undefined ? {} : { appResultStored: reported }),
       });
       return [rpcResult(id, result.result)];
     }
-    log({ outcome: "upstream_failed", reason: result.failure });
+    log({ outcome: "upstream_failed", reason: result.failure, credential: credentials.credential });
     if (result.failure === "rpc_error") return [rpcError(id, result.code, result.message)];
     return [toolError(id, UPSTREAM_MESSAGES[result.failure])];
   } finally {

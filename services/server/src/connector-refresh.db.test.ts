@@ -131,7 +131,11 @@ const auditText = async () =>
 describe("refreshing an expired access token", () => {
   it("uses the refresh token, rotates it and serves the new access token", async () => {
     const first = await connect();
-    expect((await grantFor()).body).toEqual({ kind: "oauth", access_token: first.accessToken });
+    expect((await grantFor()).body).toEqual({
+      kind: "oauth",
+      access_token: first.accessToken,
+      source: "member",
+    });
     expect(fake.refreshRequests).toHaveLength(0);
 
     await expire();
@@ -139,7 +143,11 @@ describe("refreshing an expired access token", () => {
     expect(served.status).toBe(200);
     const second = must(fake.issued.at(-1));
     expect(second.accessToken).not.toBe(first.accessToken);
-    expect(served.body).toEqual({ kind: "oauth", access_token: second.accessToken });
+    expect(served.body).toEqual({
+      kind: "oauth",
+      access_token: second.accessToken,
+      source: "member",
+    });
     const req = must(fake.refreshRequests[0]);
     expect(req.get("refresh_token")).toBe(first.refreshToken);
     expect(req.get("resource")).toBe(fake.mcpUrl);
@@ -243,7 +251,11 @@ describe("refresh does not hold the database (compare-and-set)", () => {
     fake.options = { ...fake.options, refreshDelayMs: 0 };
     const winner = must(fake.issued.at(-1)).accessToken;
     for (const r of [a, b]) {
-      expect(r).toEqual({ ok: true, credential: { kind: "oauth", accessToken: winner } });
+      expect(r).toEqual({
+        ok: true,
+        credential: { kind: "oauth", accessToken: winner },
+        source: "member",
+      });
     }
     expect((await alice.get(BASE)).json).toMatchObject({ grants: [{ connector_id: connectorId }] });
   });
@@ -283,6 +295,7 @@ describe("refresh does not hold the database (compare-and-set)", () => {
     expect(result).toEqual({
       ok: true,
       credential: { kind: "oauth", accessToken: "rotated-by-other-replica" },
+      source: "member",
     });
     expect((await h.admin.query(`SELECT 1 FROM connector_grants`)).rows).toHaveLength(1);
     await disconnect();

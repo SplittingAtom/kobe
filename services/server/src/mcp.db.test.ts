@@ -248,6 +248,8 @@ describe("tools/call: the server decides every call", () => {
       decision: "allowed",
       reason: "risk_read",
       risk: "read",
+      // KOBE-449: which key the proxy will use: none, the member's own, or the site key.
+      credential: "none",
     });
     expect(JSON.stringify(row?.target)).not.toContain('"q"');
   });

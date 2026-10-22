@@ -228,11 +228,12 @@ describe("members use it (ac-3, ac-5)", () => {
     const id = await siteConnector("site-c");
     expect(await grantFor(teamOn, aliceId, id)).toEqual({
       status: 200,
-      body: { kind: "api_key", api_key: SITE_KEY },
+      body: { kind: "api_key", api_key: SITE_KEY, source: "site" },
     });
     expect((await grantFor(teamOn, bobId, id)).body).toEqual({
       kind: "api_key",
       api_key: SITE_KEY,
+      source: "site",
     });
     expect((await grantFor(teamOff, carolId, id)).status).toBe(404);
 
@@ -444,7 +445,7 @@ describe("review follow-ups", () => {
       method: "POST",
       headers: { authorization: `Bearer ${INTERNAL_KEY}`, "kobe-sandbox-token": token },
     });
-    expect(await grant.json()).toEqual({ kind: "api_key", api_key: SITE_KEY });
+    expect(await grant.json()).toEqual({ kind: "api_key", api_key: SITE_KEY, source: "site" });
     const audited = await h.admin.query(
       `SELECT actor_id, target FROM audit_log WHERE action = 'mcp.tool_call'
         AND target->>'connectorId' = $1`,
@@ -453,7 +454,8 @@ describe("review follow-ups", () => {
     expect(audited.rows).toHaveLength(1);
     expect(audited.rows[0]).toMatchObject({
       actor_id: aliceId,
-      target: { userId: aliceId, decision: "allowed", runId },
+      // KOBE-449: the audit says which key the call used (never the key).
+      target: { userId: aliceId, decision: "allowed", runId, credential: "site" },
     });
   });
 

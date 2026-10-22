@@ -181,7 +181,11 @@ describe("connecting an OAuth connector", () => {
 
     const served = await grantFor(teamT, aliceId, oauthConnector);
     expect(served.status).toBe(200);
-    expect(JSON.parse(served.text)).toEqual({ kind: "oauth", access_token: tokens.accessToken });
+    expect(JSON.parse(served.text)).toEqual({
+      kind: "oauth",
+      access_token: tokens.accessToken,
+      source: "member",
+    });
   });
 
   it("never returns or logs tokens, state secrets or the verifier", async () => {

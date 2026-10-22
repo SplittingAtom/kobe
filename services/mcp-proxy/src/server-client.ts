@@ -81,9 +81,12 @@ export type ServerAnswer<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly failure: ServerFailure };
 
+// `source` (KOBE-449): whose key it is, for the call log. A server older than KOBE-449 does not
+// say; it only ever served the member's own grants through this path before KOBE-303.
+const grantSource = z.enum(["member", "site"]).default("member");
 const grantSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("api_key"), api_key: z.string().min(1) }),
-  z.object({ kind: z.literal("oauth"), access_token: z.string().min(1) }),
+  z.object({ kind: z.literal("api_key"), api_key: z.string().min(1), source: grantSource }),
+  z.object({ kind: z.literal("oauth"), access_token: z.string().min(1), source: grantSource }),
 ]);
 
 export interface PolicyServer {
@@ -190,8 +193,8 @@ export function createPolicyServer(options: PolicyServerOptions): PolicyServer {
         ok: true,
         value:
           parsed.data.kind === "oauth"
-            ? { kind: "oauth", accessToken: parsed.data.access_token }
-            : { kind: "api_key", apiKey: parsed.data.api_key },
+            ? { kind: "oauth", accessToken: parsed.data.access_token, source: parsed.data.source }
+            : { kind: "api_key", apiKey: parsed.data.api_key, source: parsed.data.source },
       };
     } catch (error) {
       options.onError?.(error);

@@ -684,7 +684,12 @@ describe("tools/call", () => {
 
   it("attaches the resolved credential upstream, never anything from the sandbox", async () => {
     credentials = {
-      headersFor: () => Promise.resolve({ ok: true, headers: { authorization: "Bearer grant" } }),
+      headersFor: () =>
+        Promise.resolve({
+          ok: true,
+          headers: { authorization: "Bearer grant" },
+          credential: "member",
+        }),
     };
     await rpc(
       "tools/call",
@@ -699,7 +704,8 @@ describe("tools/call", () => {
 
   it("uses the server's per-user API key upstream and never shows it to the sandbox (KOBE-108)", async () => {
     const apiKey = "sk-live-secret-0123456789";
-    server.fetchGrant = () => Promise.resolve({ ok: true, value: { kind: "api_key", apiKey } });
+    server.fetchGrant = () =>
+      Promise.resolve({ ok: true, value: { kind: "api_key", apiKey, source: "member" } });
     credentials = createServerCredentials(server);
     server.next = (q) => ({
       ok: true,
@@ -735,9 +741,41 @@ describe("tools/call", () => {
     expect(JSON.stringify(server.asked)).not.toContain(apiKey);
   });
 
+  it("KOBE-449: calls with the site key and logs which key was used, never the key", async () => {
+    const apiKey = "sk-site-secret-0123456789";
+    server.fetchGrant = () =>
+      Promise.resolve({ ok: true, value: { kind: "api_key", apiKey, source: "site" } });
+    credentials = createServerCredentials(server);
+    server.next = (q) => ({
+      ok: true,
+      value: {
+        decision: "allow",
+        connector: { id: q.connectorId, name: "catalyst", url: fake.url, auth_kind: "api_key" },
+        tool: { name: q.tool, pi_name: "mcp__catalyst__get_issue", model_visible: true },
+        input_sha256: sha(q.arguments),
+        reason: "risk_read",
+      },
+    });
+    const lines: string[] = [];
+    const log = pino({ level: "info" }, { write: (line: string) => void lines.push(line) });
+    const res = await rpc(
+      "tools/call",
+      { name: "get_issue", arguments: {} },
+      { app: app({ log }) },
+    );
+    expect(JSON.stringify(res.json)).not.toContain(apiKey);
+    expect(fake.received.at(-1)?.headers.authorization).toBe(`Bearer ${apiKey}`);
+    const call = lines
+      .map((l) => JSON.parse(l) as { msg?: string; outcome?: string; credential?: string })
+      .find((l) => l.msg === "mcp tools/call");
+    expect(call).toMatchObject({ outcome: "ok", credential: "site" });
+    expect(lines.join("")).not.toContain(apiKey);
+  });
+
   it("uses the server's per-user OAuth access token upstream and never shows it to the sandbox (KOBE-109)", async () => {
     const accessToken = "at-secret-0123456789";
-    server.fetchGrant = () => Promise.resolve({ ok: true, value: { kind: "oauth", accessToken } });
+    server.fetchGrant = () =>
+      Promise.resolve({ ok: true, value: { kind: "oauth", accessToken, source: "member" } });
     credentials = createServerCredentials(server);
     server.next = (q) => ({
       ok: true,
