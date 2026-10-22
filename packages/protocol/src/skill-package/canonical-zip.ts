@@ -90,6 +90,15 @@ interface Entry {
  */
 export function canonicalZip(files: ReadonlyMap<string, Uint8Array>): Uint8Array {
   assertPackagePaths(files.keys());
+  return deterministicZip(files);
+}
+
+/**
+ * The same byte layout for any file set the caller has checked itself (KOBE-345 exports: a
+ * package under a `<name>/` folder, with Kobe's `provenance.json`): reproducible bytes, so an
+ * export's SHA-256 is stable. Only `canonicalZip` makes the zips that skill hashes name.
+ */
+export function deterministicZip(files: ReadonlyMap<string, Uint8Array>): Uint8Array {
   const entries: Entry[] = [];
   let offset = 0;
   for (const path of canonicalOrder(files.keys())) {

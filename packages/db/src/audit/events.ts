@@ -1506,6 +1506,21 @@ export const AUDIT_EVENTS = {
 
   // ── skill: uploaded bundles (KOBE-78); team skills in the team view, personal site-only ──
   /** A skill bundle was uploaded as a new immutable version (never the bundle's contents). */
+  /**
+   * A version was downloaded as an export (KOBE-345, SK30): a portable zip (with or without
+   * `evals/`) of a team or personal version, or a catalog version's portable zip or full package;
+   * `sha256` names the exact bytes. Team versions in the team view, the rest site-only.
+   */
+  "skill.exported": event("any", {
+    scope: z.enum(["team", "personal", "catalog"]),
+    skillId: id,
+    /** The catalog version (scope catalog). */
+    registryVersionId: id.optional(),
+    name: catalogName,
+    semver: z.string().max(32),
+    format: z.enum(["portable", "portable_evals", "package"]),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  }),
   "skill.uploaded": event("any", {
     skillId: id,
     scope: z.enum(["team", "personal"]),
