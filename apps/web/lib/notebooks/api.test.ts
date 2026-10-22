@@ -35,6 +35,22 @@ describe("notebook api (KOBE-465)", () => {
     ]);
   });
 
+  it("starts the kernel: waking (202) with its retry, then the kernel's state (KOBE-477)", async () => {
+    const waking = stub(202, { status: "waking", retry_after_ms: 2000 });
+    const res = await createNotebookApi("t1", waking.fetchFn).start("th");
+    expect(res).toMatchObject({
+      ok: true,
+      status: 202,
+      data: { status: "waking", retryAfterMs: 2000 },
+    });
+    expect(must(waking.calls[0]).url).toBe("/v1/threads/th/notebook/start");
+    expect(must(waking.calls[0]).init.method).toBe("POST");
+    const idle = stub(200, { status: "idle" });
+    expect(await createNotebookApi("t1", idle.fetchFn).start("th")).toMatchObject({
+      data: { status: "idle" },
+    });
+  });
+
   it("passes server errors through", async () => {
     const { fetchFn } = stub(409, { code: "thread_busy", message: "busy" });
     const res = await createNotebookApi("t1", fetchFn).run("th", { path: "a.py" });

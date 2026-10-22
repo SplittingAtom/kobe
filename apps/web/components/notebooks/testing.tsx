@@ -10,7 +10,7 @@ import type { EventSourceLike } from "../../lib/chat/stream";
 import type { FilesApi } from "../../lib/files/api";
 import { sha256Hex } from "../../lib/files/editor";
 import { EditDraftStore, FileReviewStore } from "../../lib/files/editor-state";
-import type { NotebookApi, NotebookRunStarted } from "../../lib/notebooks/api";
+import type { KernelStart, NotebookApi, NotebookRunStarted } from "../../lib/notebooks/api";
 import { NotebookExecStore } from "../../lib/notebooks/executions";
 import NotebookView from "./notebook-view";
 import type { KernelWiring } from "./use-kernel";
@@ -83,6 +83,8 @@ export class Kernel {
   runs: NotebookRunBody[] = [];
   ops: string[] = [];
   next: ApiResult<NotebookRunStarted>[] = [];
+  /** `start` answers in order (then idle); a pending promise holds one. */
+  starts: (ApiResult<KernelStart> | Promise<ApiResult<KernelStart>>)[] = [];
   sources: StubSource[] = [];
   readonly store = new NotebookExecStore();
   readonly api: NotebookApi = {
@@ -96,6 +98,10 @@ export class Kernel {
           data: { runId: runId(n), execId: execId(n) },
         }
       );
+    },
+    start: async () => {
+      this.ops.push("start");
+      return this.starts.shift() ?? { ok: true, status: 200, data: { status: "idle" } };
     },
     kernel: async (_thread, op) => {
       this.ops.push(op);

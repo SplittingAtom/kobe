@@ -96,6 +96,7 @@ export const COMMAND_FAILURES = {
   queuedBeforeUpgrade: "queued_before_upgrade", // run.start queued before KOBE-317 lists built-ins
   compactUnsupported: "compact_unsupported", // thread.compact to an agent without it or run tokens
   contextUnsupported: "context_unsupported", // thread.context to an agent without it (KOBE-470)
+  kernelStartUnsupported: "kernel_start_unsupported", // notebook.restart op start, no notebook_start
 } as const;
 
 export interface RunStartRequest {
@@ -243,7 +244,8 @@ export interface SandboxRouter {
   /**
    * KOBE-464, the thread's kernel (docs/specs/notebooks.md): run code (`data` untrusted: a
    * `notebookExecuteResultSchema` to validate; the outputs arrive as run events meanwhile),
-   * interrupt or restart. Only to agents with capability `notebooks`.
+   * interrupt or restart, or start the kernel (KOBE-477: `notebook.restart` with `op: "start"`, only
+   * to agents with `notebook_start`). Only to agents with capability `notebooks`.
    */
   notebookExecute(
     target: SandboxTarget,
@@ -252,7 +254,7 @@ export interface SandboxRouter {
   ): Promise<CommandOutcome>;
   notebookKernel(
     target: SandboxTarget,
-    request: { readonly threadId: string; readonly op: "interrupt" | "restart" },
+    request: { readonly threadId: string; readonly op: "interrupt" | "restart" | "start" },
     options?: SendOptions,
   ): Promise<CommandOutcome>;
   /**

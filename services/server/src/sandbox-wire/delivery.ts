@@ -13,6 +13,7 @@ import {
   CAPABILITY_SKILL_BUNDLES,
   CAPABILITY_SKILL_EVAL,
   CAPABILITY_NOTEBOOKS,
+  CAPABILITY_NOTEBOOK_START,
   CAPABILITY_THREAD_COMPACT,
   CAPABILITY_THREAD_CONTEXT,
   serverToSandboxFrameSchema,
@@ -469,6 +470,18 @@ export class CommandDelivery {
         !this.#host.hasCapability(CAPABILITY_NOTEBOOKS))
     ) {
       await this.#fail(row, failure("notebooks_unsupported", "this sandbox runs no notebooks"));
+      return;
+    }
+    // Starting a kernel (KOBE-477) only to an agent that knows the op: an older one can't read it.
+    if (
+      row.kind === "notebook.restart" &&
+      row.frame.op === "start" &&
+      !this.#host.hasCapability(CAPABILITY_NOTEBOOK_START)
+    ) {
+      await this.#fail(
+        row,
+        failure(COMMAND_FAILURES.kernelStartUnsupported, "this sandbox can't start a kernel alone"),
+      );
       return;
     }
 

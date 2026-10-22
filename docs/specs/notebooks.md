@@ -26,7 +26,7 @@ synced copy is the record). Cells keep their ids (nbformat 4.5 `id`); a cell wit
 run by id (the web adds ids when it saves; KOBE-465).
 
 **NB2. One live kernel per thread.** (Chris) State carries between cells of the same thread. The
-kernel starts on the thread's first execution and stops after 30 idle minutes
+kernel starts on the thread's first execution (or on Start, NB19) and stops after 30 idle minutes
 (`KOBE_KERNEL_IDLE_MS`), on restart, and when the sandbox stops or hibernates (it is never
 persisted: a woken sandbox starts a fresh kernel). The member's and the agent's executions share
 it; one runs at a time (NB6).
@@ -165,12 +165,28 @@ kernel's blocked attempts. No secrets enter the kernel; nothing inbound.
 
 **NB18. Eval isolation.** See NB13: skill evals run code only, never the member's files.
 
+**NB19. Start (KOBE-477).** `POST /v1/threads/{id}/notebook/start` starts the thread's kernel
+without running code. Owner only (shared reader 403 `read_only`, others 404, eval threads refused).
+A sandbox that is not connected is woken and the answer is 202 `{status: "waking",
+retry_after_ms}` (the web asks again, as the context viewer does); a wake refused (no runtime, not
+ready in time) is 409 `sandbox_refused`, at once or on the next ask. A connected sandbox gets
+`notebook.restart` with `op: "start"` (no new command kind, no migration): the agent starts the
+kernel if the thread has none and keeps a live one (no state lost), and answers 200 `idle` or
+`busy`. No run and no event: starting is not a turn and never busies the thread. Only agents
+announcing `notebook_start` get the op (an older agent could not read it): otherwise 409
+`notebooks_unsupported` (Run still starts the kernel). The started kernel idles out like any other
+(NB2). Run's rules apply (account active, still a member); at most 30 starts a minute per member
+(429 `rate_limited`; the web asks every 5 s while waking). Accepted (review, 2026-10-22): at
+`KOBE_MAX_KERNELS` a start, like a first execution, stops another thread's least recently used
+idle kernel (its state is lost).
+
 ## 3. Shapes the web needs (KOBE-465)
 
 - Run: `POST /v1/threads/{id}/notebook/run` body `notebookRunBodySchema`, 202
   `notebookRunResponseSchema`; errors `notebookErrorSchema` (`NOTEBOOK_ERROR_CODES`).
 - Interrupt / restart: `POST /v1/threads/{id}/notebook/interrupt|restart`, 200
   `notebookKernelResponseSchema`.
+- Start (NB19): `POST /v1/threads/{id}/notebook/start`, 202/200 `notebookStartResponseSchema`.
 - Events on `GET /v1/runs/{id}/events`: `notebook.started`, `notebook.output`
   (`notebookOutputSchema`, nbformat 4 output), `notebook.finished`; the agent's tool card is the
   `run_python` call (`RUN_PYTHON_TOOL`), matched by `tool_call_id`.
@@ -185,7 +201,9 @@ kernel's blocked attempts. No secrets enter the kernel; nothing inbound.
 - `.ipynb` opens as a notebook in the artifact column (`components/notebooks/`, loaded lazily):
   code cells in CodeMirror (Shift+Enter runs), Markdown through the chat's safe Markdown
   component, add/move/delete, Run cell, Run all (in order, stops at the first cell not `ok`),
-  Interrupt, Restart (asks first), kernel busy/idle, execution counts. Edits are file editor
+  Interrupt, Start (NB19: "Waking sandbox…", "Starting kernel…", then "Kernel idle"; disabled
+  while it works; shown until a kernel is known to be up, then Restart (asks first) takes its
+  place; hidden for shared readers), kernel busy/idle, execution counts. Edits are file editor
   drafts (the notebook serialized) saved through FE4 with the conflict notice; a run saves unsaved
   edits and missing cell ids first (NB1), since the server reads the saved notebook. After
   `notebook.finished.saved` the view reads the new version and keeps edits typed meanwhile

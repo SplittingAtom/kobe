@@ -3,6 +3,7 @@ import type {
   NotebookExecuteResult,
   NotebookKernelResponse,
   NotebookOutput,
+  NotebookStartResult,
 } from "@kobe/protocol";
 import { fail, ok, type CommandOutcome } from "../threads/outcome.js";
 import { OUTPUT_LIMITS, OutputLimiter, type OutputLimits } from "./outputs.js";
@@ -10,7 +11,8 @@ import { KernelSession, type BridgeLauncher } from "./session.js";
 
 /**
  * The thread kernels of one sandbox (KOBE-464; docs/specs/notebooks.md NB2, NB7, NB8, NB10). A
- * kernel starts on its thread's first `notebook.execute`, runs one execution at a time (the rest
+ * kernel starts on its thread's first `notebook.execute` (or a `notebook.restart` with `op: "start"`,
+ * KOBE-477), runs one execution at a time (the rest
  * wait in order), stops after `idleMs` without use, on `notebook.restart` and when the agent stops.
  * At most `maxKernels` live at once: a new one first stops the least recently used idle kernel,
  * and is refused (`kernel_unavailable`) when every kernel is busy. Each execution has a deadline
@@ -78,13 +80,9 @@ export class KernelManager {
       deadlineAt: Date.now() + frame.timeout_ms,
       cancelled: false,
     };
-    let kernel: Kernel;
-    try {
-      kernel = await this.#kernelFor(frame.thread_id);
-    } catch (error) {
-      this.#o.log(`kernel start failed: ${(error as Error).message}`, frame.thread_id);
-      return fail("kernel_unavailable", (error as Error).message);
-    }
+    const got = await this.#acquire(frame.thread_id);
+    if (!got.ok) return got.outcome;
+    const kernel = got.kernel;
     kernel.queued += 1;
     kernel.waiting.add(waiting);
     const run = kernel.tail.then(() => this.#run(kernel, frame, sink, waiting));
@@ -98,6 +96,19 @@ export class KernelManager {
       kernel.waiting.delete(waiting);
       this.#touch(kernel);
     }
+  }
+
+  /**
+   * `notebook.restart` with `op: "start"` (KOBE-477): the thread's kernel is started if it has none
+   * (a live one is kept) and runs nothing; it idles out like any other. Answers `idle` or `busy`.
+   */
+  async start(threadId: string): Promise<CommandOutcome> {
+    if (this.#closed) return fail("kernel_unavailable", "the sandbox is stopping");
+    const got = await this.#acquire(threadId);
+    if (!got.ok) return got.outcome;
+    const busy = got.kernel.queued > 0 || got.kernel.session.busy;
+    this.#touch(got.kernel);
+    return ok(this.#status(busy ? "busy" : "idle"));
   }
 
   /**
@@ -136,8 +147,21 @@ export class KernelManager {
     await Promise.allSettled([...this.#kernels.values()].map((k) => this.#stop(k, "restarted")));
   }
 
-  #status(status: NotebookKernelResponse["status"]): NotebookKernelResponse {
+  #status<S extends NotebookKernelResponse["status"] | NotebookStartResult["status"]>(
+    status: S,
+  ): { status: S } {
     return { status };
+  }
+
+  async #acquire(
+    threadId: string,
+  ): Promise<{ ok: true; kernel: Kernel } | { ok: false; outcome: CommandOutcome }> {
+    try {
+      return { ok: true, kernel: await this.#kernelFor(threadId) };
+    } catch (error) {
+      this.#o.log(`kernel start failed: ${(error as Error).message}`, threadId);
+      return { ok: false, outcome: fail("kernel_unavailable", (error as Error).message) };
+    }
   }
 
   async #run(

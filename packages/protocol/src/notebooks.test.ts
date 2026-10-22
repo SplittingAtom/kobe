@@ -7,11 +7,14 @@ import {
   notebookOutputSchema,
   notebookRunBodySchema,
   notebookRunOkFields,
+  notebookStartResponseSchema,
+  notebookStartResultSchema,
   runPythonInputSchema,
 } from "./notebooks.js";
 import {
   notebookExecuteFrameSchema,
   notebookOutputFrameSchema,
+  notebookRestartFrameSchema,
   notebookRunFrameSchema,
   notebookRunResultFrameSchema,
 } from "./sandbox-wire/notebook-frames.js";
@@ -224,6 +227,26 @@ describe("notebook wire frames", () => {
       false,
     );
     expect(notebookExecuteFrameSchema.safeParse({ ...base, code: "" }).success).toBe(false);
+  });
+});
+
+describe("starting the kernel (KOBE-477)", () => {
+  it("is an op of notebook.restart, and only start", () => {
+    const f = { v: 1, type: "notebook.restart", command_id: "c3", thread_id: THREAD };
+    expect(notebookRestartFrameSchema.safeParse({ ...f, op: "start" }).success).toBe(true);
+    expect(serverToSandboxFrameSchema.safeParse({ ...f, op: "start" }).success).toBe(true);
+    expect(notebookRestartFrameSchema.safeParse({ ...f, op: "stop" }).success).toBe(false);
+  });
+
+  it("answers idle or busy from the sandbox, and waking from the route", () => {
+    expect(notebookStartResultSchema.safeParse({ status: "idle" }).success).toBe(true);
+    expect(notebookStartResultSchema.safeParse({ status: "busy" }).success).toBe(true);
+    expect(notebookStartResultSchema.safeParse({ status: "restarted" }).success).toBe(false);
+    expect(notebookStartResponseSchema.safeParse({ status: "busy" }).success).toBe(true);
+    expect(
+      notebookStartResponseSchema.safeParse({ status: "waking", retry_after_ms: 2000 }).success,
+    ).toBe(true);
+    expect(notebookStartResponseSchema.safeParse({ status: "waking" }).success).toBe(false);
   });
 });
 

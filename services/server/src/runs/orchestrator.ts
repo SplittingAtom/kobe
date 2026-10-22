@@ -8,6 +8,7 @@ import {
 } from "@kobe/protocol";
 import type { NotebookFiles } from "../notebooks/files.js";
 import { notebookKernel, startNotebookRun, type NotebookRunHost } from "../notebooks/user-run.js";
+import { startKernel, WakeRefusals } from "../notebooks/kernel-start.js";
 import { effectiveSkillNames } from "./effective-skills.js";
 import { connectorsOffIn } from "../connectors/thread-connectors.js";
 import { RUN_INPUT_MAX_CHARS } from "@kobe/db";
@@ -26,6 +27,7 @@ import {
   type BudgetStopCommand,
   type CompactThreadResponse,
   type NotebookKernelResponse,
+  type NotebookStartResponse,
   type NotebookRunBody,
   type NotebookRunResponse,
   type RunOrchestrator,
@@ -211,6 +213,11 @@ export interface ServerRunOrchestrator extends RunOrchestrator {
     threadId: string,
     op: "interrupt" | "restart",
   ): Promise<NotebookKernelResponse>;
+  /**
+   * Start the thread's kernel without running code (KOBE-477): wakes the sandbox (`waking`) or
+   * answers the kernel's state. Throws `NotebookRunError` or `RunError`.
+   */
+  notebookStart(actor: ActorContext, threadId: string): Promise<NotebookStartResponse>;
   /** Notebook files (KOBE-464); without them notebook runs are refused `sandbox_unavailable`. */
   useNotebooks(files: NotebookFiles): void;
   /** KOBE-24 `RunLifecycleHooks.onRunEnded`: the wire ended a run; advance its thread's queue. */
@@ -277,6 +284,8 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
   #attachments: AttachmentStager | undefined;
   #viewing: ViewingReader | undefined;
   #notebooks: NotebookFiles | undefined;
+  /** Wakes refused for a kernel start (KOBE-477), reported to the member's next start. */
+  readonly #kernelWakeRefusals = new WakeRefusals();
   #sweepTimer: NodeJS.Timeout | undefined;
   #closed = false;
   readonly #dispatch: RunDispatcher;
@@ -1147,6 +1156,10 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     op: "interrupt" | "restart",
   ): Promise<NotebookKernelResponse> {
     return notebookKernel(this.#notebookHost(), actor, threadId, op);
+  }
+
+  notebookStart(actor: ActorContext, threadId: string): Promise<NotebookStartResponse> {
+    return startKernel(this.#notebookHost(), this.#kernelWakeRefusals, actor, threadId);
   }
 
   #notebookHost(): NotebookRunHost {

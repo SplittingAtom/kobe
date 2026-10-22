@@ -57,6 +57,8 @@ export const NOTEBOOK_ERROR_STATUS: Readonly<Record<NotebookError["code"], numbe
   sandbox_unavailable: 503,
   notebooks_unsupported: 409,
   isolation_unavailable: 503,
+  sandbox_refused: 409,
+  rate_limited: 429,
 };
 
 /** What the orchestrator lends a notebook run. */

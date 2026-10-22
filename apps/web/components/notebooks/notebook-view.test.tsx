@@ -5,6 +5,8 @@ import { EditorView } from "@codemirror/view";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256Hex } from "../../lib/files/editor";
 import { EditDraftStore, FileReviewStore } from "../../lib/files/editor-state";
+import type { ApiResult } from "../../lib/api/client";
+import type { KernelStart } from "../../lib/notebooks/api";
 import { must } from "../../lib/testing/must";
 import { TooltipProvider } from "../ui/tooltip";
 import { NO_THREAD_NOTE, READ_ONLY_NOTE, RESTART_PROMPT } from "./kernel-bar";
@@ -403,14 +405,68 @@ describe("running (ac-1)", () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Interrupt" }));
     expect(await screen.findByText("Interrupted the running code.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Start" }));
     const confirm = answerConfirm(false);
-    await user.click(screen.getByRole("button", { name: "Restart" }));
+    await user.click(await screen.findByRole("button", { name: "Restart" }));
     expect(confirm).toHaveBeenCalledWith(RESTART_PROMPT);
-    expect(kernel.ops).toEqual(["interrupt"]);
+    expect(kernel.ops).toEqual(["interrupt", "start"]);
     answerConfirm(true);
     await user.click(screen.getByRole("button", { name: "Restart" }));
     expect(await screen.findByText(/Kernel restarted/u)).toBeTruthy();
-    expect(kernel.ops).toEqual(["interrupt", "restart"]);
+    expect(kernel.ops).toEqual(["interrupt", "start", "restart"]);
+    // No kernel any more: Start comes back in Restart's place.
+    expect(await screen.findByRole("button", { name: "Start" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Restart" })).toBeNull();
+  });
+
+  it("Start wakes the sandbox and starts the kernel, showing each step (KOBE-477)", async () => {
+    const { kernel } = await setup();
+    const answers: ((r: ApiResult<KernelStart>) => void)[] = [];
+    const pending = () =>
+      new Promise<ApiResult<KernelStart>>((resolve) => {
+        answers.push(resolve);
+      });
+    kernel.starts.push(pending(), pending());
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Start" }));
+    const status = () => must(document.querySelector("[data-kobe-kernel]"));
+    await waitFor(() => expect(status().textContent).toBe("Starting kernel…"));
+    expect(screen.getByRole("button", { name: "Start" }).hasAttribute("disabled")).toBe(true);
+    act(() =>
+      must(answers[0])({ ok: true, status: 202, data: { status: "waking", retryAfterMs: 100 } }),
+    );
+    await waitFor(() => expect(status().textContent).toBe("Waking sandbox…"));
+    expect(status().getAttribute("data-kobe-kernel")).toBe("waking");
+    // The sandbox woke: the next ask starts the kernel.
+    await waitFor(() => expect(kernel.ops).toEqual(["start", "start"]));
+    act(() => must(answers[1])({ ok: true, status: 200, data: { status: "idle" } }));
+    await waitFor(() => expect(status().textContent).toBe("Kernel idle"));
+    expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Restart" })).toBeTruthy();
+  });
+
+  it("shows why Start failed and lets the member try again", async () => {
+    const { kernel } = await setup();
+    kernel.starts.push({
+      ok: false,
+      error: {
+        status: 409,
+        code: "sandbox_refused",
+        message: "Your sandbox could not be started.",
+      },
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Start" }));
+    expect(await screen.findByText("Your sandbox could not be started.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Start" }).hasAttribute("disabled")).toBe(false);
+  });
+
+  it("offers Restart, not Start, once a cell ran in the kernel", async () => {
+    await setup();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Run cell 2" }));
+    expect(await screen.findByRole("button", { name: "Restart" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Start" })).toBeNull();
   });
 
   it("shows why a run was refused", async () => {
@@ -427,7 +483,7 @@ describe("running (ac-1)", () => {
   it("shows a shared reader no run or kernel controls", async () => {
     const { kernel } = await setup(undefined, THREAD, true);
     expect(await screen.findByText(READ_ONLY_NOTE)).toBeTruthy();
-    for (const name of ["Run all", "Interrupt", "Restart", "Run cell 2", "Run cell 3"]) {
+    for (const name of ["Run all", "Start", "Interrupt", "Restart", "Run cell 2", "Run cell 3"]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
     expect(screen.getByText("Kernel idle")).toBeTruthy();

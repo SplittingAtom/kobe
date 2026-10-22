@@ -47,10 +47,15 @@ export const notebookInterruptFrameSchema = frame("notebook.interrupt", {
   thread_id: uuidSchema,
 });
 
-/** Server -> sandbox: kill the thread's kernel (the next execution starts a fresh one). */
+/**
+ * Server -> sandbox: kill the thread's kernel (the next execution starts a fresh one). With
+ * `op: "start"` (KOBE-477, capability `notebook_start`) instead start it if it has none, keeping a
+ * live one; `command.result.data`: `notebookStartResultSchema`.
+ */
 export const notebookRestartFrameSchema = frame("notebook.restart", {
   command_id: idSchema,
   thread_id: uuidSchema,
+  op: z.literal("start").optional(),
 });
 
 /** Sandbox -> server: the `index`-th output of the `notebook.execute` this `command_id` names. */
