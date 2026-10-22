@@ -377,6 +377,29 @@ spec:
   read-only at one fixed path, named by NODE_EXTRA_CA_CERTS. Empty when not configured. */}}
 {{- define "kobe.extraCaPath" -}}/etc/kobe/extra-ca{{- end -}}
 
+{{/*
+The catalog git mirror (KOBE-343): the remote's token from an existing Secret (optional, so a
+missing Secret leaves the mirror unable to push rather than the server down), and the identity.
+*/}}
+{{- define "kobe.skillMirrorEnv" -}}
+{{- $m := .Values.server.skillMirror | default dict -}}
+{{- $t := $m.tokenSecret | default dict -}}
+- name: KOBE_SKILL_MIRROR_USERNAME
+  value: {{ $m.username | default "x-access-token" | quote }}
+- name: KOBE_SKILL_MIRROR_AUTHOR_NAME
+  value: {{ $m.authorName | default "Kobe Registry" | quote }}
+- name: KOBE_SKILL_MIRROR_AUTHOR_EMAIL
+  value: {{ $m.authorEmail | default "registry@kobe.invalid" | quote }}
+{{- if $t.name }}
+- name: KOBE_SKILL_MIRROR_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ $t.name }}
+      key: {{ $t.key | default "token" }}
+      optional: true
+{{- end }}
+{{- end -}}
+
 {{- define "kobe.extraCaEnv" -}}
 {{- $b := .Values.server.extraCaBundle | default dict -}}
 {{- if or $b.secretName $b.configMapName -}}

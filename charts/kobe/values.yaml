@@ -216,6 +216,21 @@ server:
     secretName: ""
     configMapName: ""
     key: ca.crt
+  # The catalog's optional one-way git mirror (KOBE-343, spec SK29). A Site admin turns it on and
+  # names the https remote in the Site console (Skills > Registry); this holds what stays out of
+  # the database: the remote's token, read from an existing Secret (never a value here), and the
+  # commit identity. Pushes go through the egress proxy: add the remote's host to the site egress
+  # ceiling. Without a token Secret the console shows the mirror as unable to push.
+  skillMirror:
+    tokenSecret:
+      # Secret name in the release namespace; empty = no token (mirror can't push).
+      name: ""
+      key: token
+    # Basic-auth user name sent with the token. GitHub: any (x-access-token for App tokens);
+    # Forgejo/Gitea: the token owner's user name.
+    username: x-access-token
+    authorName: Kobe Registry
+    authorEmail: registry@kobe.invalid
 
 scheduler:
   # Replicas > 1 are safe: each due occurrence is claimed under a row lease and a unique index
