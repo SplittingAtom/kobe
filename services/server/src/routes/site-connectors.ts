@@ -168,16 +168,17 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
   });
 
   // Re-probe now (KOBE-430): the refresh's probe and drift for this connector, under its lock.
-  const reprobeDeps = {
+  // Read per request: building the app must not touch the probe (threads.db.test ac-2).
+  const reprobeDeps = () => ({
     db,
     prober: deps.connectorProbe,
     envelope: deps.envelope,
     lockFor: connectorRefreshLocks(deps.database.pool),
-  };
+  });
   app.post("/:id/refresh", async (c) => {
     const id = idSchema.safeParse(c.req.param("id"));
     if (!id.success) return notFound(c);
-    const result = await reprobeConnector(reprobeDeps, id.data, c.get("user").id);
+    const result = await reprobeConnector(reprobeDeps(), id.data, c.get("user").id);
     if (result.kind === "not_found") return notFound(c);
     const connector = await getConnector(db, id.data);
     const reply = reprobeReply(result, connector?.credentialSource);
