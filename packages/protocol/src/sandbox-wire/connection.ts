@@ -116,6 +116,19 @@ export const SANDBOX_FRAME_MAX_BYTES_BY_TYPE = {
   "thread.compact_result": 1024 * 1024, // KOBE-212: up to 256 KiB of summary plus JSON escaping
   "notebook.run": 1024 * 1024, // KOBE-464: up to 256 KiB of code plus JSON escaping
 } as const;
+/**
+ * The agent's outbound send pace per connection (KOBE-429): a frame and a byte token bucket the
+ * agent holds every frame to, replays after a reconnect included. Kept below the server's
+ * per-connection limits (server `WIRE_DEFAULTS` frame/byte rate and burst, which close the
+ * connection when exceeded), with headroom for frames that arrive bunched. The byte burst fits one
+ * largest frame. Not a wire break to change, as long as it stays under the server's limits.
+ */
+export const SANDBOX_SEND_PACE = {
+  framesPerSec: 400,
+  frameBurst: 1_000,
+  bytesPerSec: 3 * 1024 * 1024,
+  byteBurst: SANDBOX_MAX_FRAME_BYTES,
+} as const;
 export const SANDBOX_HELLO_TIMEOUT_MS = 10_000;
 export const SANDBOX_HEARTBEAT_INTERVAL_MS = 15_000;
 export const SANDBOX_HEARTBEAT_TIMEOUT_MS = 45_000;
