@@ -37,6 +37,7 @@ export * from "./skill-package/index.js";
 export * from "./skill-catalog.js";
 export * from "./skill-registry-settings.js";
 export * from "./skill-mirror.js";
+export * from "./skill-import.js";
 export * from "./skill-evals/index.js";
 export * from "./app-context.js";
 export * from "./skill-request.js";

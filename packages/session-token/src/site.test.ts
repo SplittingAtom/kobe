@@ -24,6 +24,10 @@ describe("site egress tokens (KOBE-343)", () => {
       exp: NOW + SITE_EGRESS_TOKEN_TTL_SECONDS,
     });
     expect(SITE_EGRESS_TOKEN_TTL_SECONDS).toBeLessThanOrEqual(300);
+    // Governed imports (KOBE-344) go out as their own job.
+    expect(verifySiteEgressToken(signSiteEgressToken("skill-import", KEY, NOW), KEY, NOW).sub).toBe(
+      "skill-import",
+    );
   });
 
   it("refuses expiry, another key and unknown purposes", () => {

@@ -581,7 +581,7 @@ export const AUDIT_EVENTS = {
    * mirror; actor: system), aggregated like `egress.connection`: the job, never a token.
    */
   "egress.site_connection": event("site", {
-    job: z.enum(["skill-mirror"]),
+    job: z.enum(["skill-mirror", "skill-import"]),
     domain: egressDomain.optional(),
     port: z.number().int().min(1).max(65535).optional(),
     outcome: z.enum(["allowed", "blocked", "failed"]),
@@ -2022,6 +2022,19 @@ export const AUDIT_EVENTS = {
       .optional(),
     /** Save to Workbench: the conversation the files came from. */
     fromThreadId: id.optional(),
+    /** A governed import (KOBE-344, SK30): where it came from and Kobe's hash of what it got. */
+    origin: z
+      .strictObject({
+        kind: z.enum(["git", "zip"]),
+        url: z.string().max(2048),
+        commit: z
+          .string()
+          .regex(/^([0-9a-f]{40}|[0-9a-f]{64})$/)
+          .optional(),
+        path: z.string().max(200).optional(),
+        fetchedSha256: z.string().regex(/^[0-9a-f]{64}$/),
+      })
+      .optional(),
     /** `tool`: the agent's `save_skill_draft` (KOBE-442); absent: the member in the web app. */
     via: z.enum(["tool"]).optional(),
     /** The agent's call behind a `via: tool` save (KOBE-442 review L3). */

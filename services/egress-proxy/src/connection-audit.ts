@@ -43,7 +43,7 @@ export interface ConnectionRecord {
   /** A plain-HTTP request the proxy upgraded to HTTPS with injected headers (KOBE-39). */
   readonly upgraded?: boolean;
   /** A server site job's connection (KOBE-343): audited site-wide, with no team or user. */
-  readonly site?: "skill-mirror";
+  readonly site?: "skill-mirror" | "skill-import";
 }
 
 interface Aggregate {
@@ -203,7 +203,7 @@ export class ConnectionAudit {
   }
 }
 
-function siteEvent(agg: Aggregate, job: "skill-mirror"): AuditEvent {
+function siteEvent(agg: Aggregate, job: "skill-mirror" | "skill-import"): AuditEvent {
   const r = agg.record;
   return {
     action: "egress.site_connection",

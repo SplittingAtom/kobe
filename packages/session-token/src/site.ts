@@ -3,14 +3,14 @@ import { SessionTokenError, signJws, verifyJws } from "./jws.js";
 
 /**
  * Site egress tokens (KOBE-343): how the **server itself** goes out through the egress proxy for
- * a site-level job (the catalog's git mirror), never a sandbox. Signed with the egress proxy's
+ * a site-level job (the catalog's git mirror, governed skill imports), never a sandbox. Signed with the egress proxy's
  * key like sandbox tokens, but a different audience (`kobe.egress-proxy.site`) and exact claims,
  * so neither kind ever verifies as the other. The proxy allows a site token only hosts in the
  * site egress ceiling: there is no team, user or sandbox. Only the server holds the key; the
  * token is minted per job and lives five minutes.
  */
 export const SITE_EGRESS_AUDIENCE = "kobe.egress-proxy.site";
-export const SITE_EGRESS_PURPOSES = ["skill-mirror"] as const;
+export const SITE_EGRESS_PURPOSES = ["skill-mirror", "skill-import"] as const;
 export type SiteEgressPurpose = (typeof SITE_EGRESS_PURPOSES)[number];
 export const SITE_EGRESS_TOKEN_TTL_SECONDS = 5 * 60;
 
