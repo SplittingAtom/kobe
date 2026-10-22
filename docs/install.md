@@ -489,7 +489,11 @@ for the rollout and is to be removed in the next release.
 
 **Probing and drift.** Kobe pins a connector's tools from its `tools/list`, and re-checks every
 pinned connector each `KOBE_CONNECTOR_REFRESH_SECONDS` (default 3600) for changed tools, which stay
-disabled until a site admin approves them. For a connector that asks for a credential, both probes
+disabled until a site admin approves them. **Re-probe** on a connector's row in Site console >
+Connectors (site admins only; KOBE-430) runs that check now for one connector and says what it
+found: no changes, N changed / added / removed (changed and new tools wait in the review), or why it
+failed. It never overlaps the periodic check of the same connector, is limited to 5 per connector
+per 10 minutes, and is audited with counts only (`mcp.connector.refreshed`). For a connector that asks for a credential, both probes
 use the connector's site-wide key if it has one, else the own key of a site admin (KOBE-431): for a
 pin the admin doing it, for the refresh the admin who last pinned or approved its tools, while they
 are active and still a site admin. A member's key is never used. Which credential was used is
