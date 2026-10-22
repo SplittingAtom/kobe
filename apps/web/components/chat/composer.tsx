@@ -177,7 +177,8 @@ export function Composer({
       session.mentions.clear(draft);
       session.appContexts.clear(draft);
       session.skillPicks.clear(draft);
-      aui.composer.setText("");
+      // Only the text that went: what the member typed while it was being sent stays (KOBE-415).
+      if (aui.composer.getState().text === text) aui.composer.setText("");
     }
   };
   useBindCommands(

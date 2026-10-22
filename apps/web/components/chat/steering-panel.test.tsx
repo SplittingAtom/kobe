@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
@@ -276,6 +276,39 @@ describe("composer and controls (ac-3)", () => {
         body: { content: "use a bar chart" },
       }),
     );
+    expect(box.value).toBe("");
+  });
+
+  it("keeps what the member typed while a queued message was still being sent (KOBE-415)", async () => {
+    // The queue read that ends a send can be held, so the member types on while it is in flight.
+    let holds = false;
+    let release = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    const plain = fake.fetch;
+    const holding: typeof fetch = async (input, init) => {
+      if (holds && String(input).endsWith("/pending-messages")) await held;
+      return plain(input, init);
+    };
+    Object.defineProperty(fake, "fetch", { value: holding });
+    const t = thread();
+    openApp(fake, t);
+    const { user } = await startRun(t);
+    holds = true;
+    const box = await composer();
+    await user.type(box, "ALPHA{Enter}");
+    await waitFor(() =>
+      expect(chatRequests(fake, "POST").at(-1)).toMatchObject({ body: { content: "ALPHA" } }),
+    );
+    expect(box.value).toBe("ALPHA"); // still being sent: the queue read is held
+    await user.clear(box);
+    await user.type(box, "BRAVO");
+    release();
+    await waitFor(() => expect(queuedTexts()).toEqual(["ALPHA"]));
+    // The send ends once the queue read is in: let its last steps run.
+    await act(() => new Promise((r) => setTimeout(r, 0)));
+    expect(box.value).toBe("BRAVO");
+    await user.type(box, "{Enter}");
+    await waitFor(() => expect(queuedTexts()).toEqual(["ALPHA", "BRAVO"]));
     expect(box.value).toBe("");
   });
 

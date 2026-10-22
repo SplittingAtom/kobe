@@ -159,6 +159,16 @@ export class Chat {
     await this.composer.press("Enter");
   }
 
+  /**
+   * Queues a message behind the run and waits until it went: the composer empties once the
+   * server took it. An Enter while the previous message is still being sent is not taken
+   * (one message at a time), so back-to-back queued sends wait on this (KOBE-415).
+   */
+  async queue(text: string): Promise<void> {
+    await this.send(text);
+    await expect(this.composer).toHaveValue("");
+  }
+
   /** Sends a message and waits for its answer to finish; returns the thread's id. */
   async ask(text: string): Promise<string> {
     const before = await this.answers.count();

@@ -42,9 +42,9 @@ test("steering panel: queue, keyboard reorder, pause and resume, delete, stop", 
   await expect(button("Stop")).toBeVisible();
 
   // Messages sent while the run holds the thread queue as chips, in send order.
-  await chat.send(ALPHA);
+  await chat.queue(ALPHA);
   await expect(chips).toHaveCount(1);
-  await chat.send(BRAVO);
+  await chat.queue(BRAVO);
   await expect(chips).toHaveCount(2);
   await expect(queuedAt(1)).toHaveAccessibleName(/ALPHA/);
   await expect(queuedAt(2)).toHaveAccessibleName(/BRAVO/);
