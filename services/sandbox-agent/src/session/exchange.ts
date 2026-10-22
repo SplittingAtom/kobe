@@ -16,6 +16,12 @@ import type { WireLogger } from "../wire/client.js";
  * succeeds: right after a pod starts, the CNI may not yet admit its traffic (kube-router installs
  * a new pod's policy on its next sync, docs/ledger/KOBE-22.md). So the first attempts are short
  * (per-attempt timeout) and retried quickly for `fastRetryForMs`, then back off with jitter.
+ *
+ * Warm-pool pods (KOBE-417): a pod nobody has claimed yet gets 409 `sandbox_unassigned`. From then
+ * on the agent asks with `Prefer: wait=<s>`: the server holds the request until the claim lands
+ * (answering within its recheck interval) or the wait runs out (409 + `Preference-Applied`), and
+ * the agent asks again at once. A server that does not hold the request gets exponential,
+ * jittered backoff up to `unassignedBackoff.maxMs` instead of a poll every 2 s.
  */
 
 const grantSchema = z.object({
@@ -57,13 +63,34 @@ export interface SessionClientOptions {
   readonly backoff?: BackoffPolicy;
   /** Trade again when the tokens expire within this margin. */
   readonly refreshMarginMs?: number;
+  /** Long-poll length asked of the server while unassigned (`Prefer: wait=<s>`). */
+  readonly unassignedWaitSeconds?: number;
+  /** Delays while unassigned and the server answers without holding the request. */
+  readonly unassignedBackoff?: { readonly baseMs: number; readonly maxMs: number };
 }
+
+export const UNASSIGNED_WAIT_SECONDS = 20;
+export const UNASSIGNED_BACKOFF = { baseMs: 2_000, maxMs: 60_000 } as const;
+
+/** Exponential with "equal jitter": [ceiling/2, ceiling), ceiling doubling from `baseMs` to `maxMs`. */
+export function unassignedDelay(
+  n: number,
+  policy: { readonly baseMs: number; readonly maxMs: number },
+  random: () => number,
+): number {
+  const ceiling = Math.min(policy.maxMs, policy.baseMs * 2 ** Math.min(n, 30));
+  return Math.round(ceiling * (0.5 + 0.5 * random()));
+}
+
+/** How the server answered a refused attempt (absent: it did not answer at all). */
+type Refusal = "unassigned" | "unassigned-held" | "other";
 
 /** Thrown by a single attempt; `retryAfterMs` when the server named a delay. */
 class AttemptError extends Error {
   constructor(
     message: string,
     readonly retryAfterMs?: number,
+    readonly refusal?: Refusal,
   ) {
     super(message);
   }
@@ -81,11 +108,14 @@ export function sessionUrl(serverUrl: string): string {
 }
 
 export class SessionClient {
-  readonly #o: Required<Omit<SessionClientOptions, "fetch" | "readFile" | "backoff" | "logger">> & {
+  readonly #o: Required<
+    Omit<SessionClientOptions, "fetch" | "readFile" | "backoff" | "logger" | "unassignedBackoff">
+  > & {
     fetch: typeof fetch;
     readFile: (path: string) => Promise<string>;
     backoff: BackoffPolicy;
     logger: WireLogger;
+    unassignedBackoff: { readonly baseMs: number; readonly maxMs: number };
   };
   readonly #url: string;
   #grant: SessionGrant | undefined;
@@ -106,6 +136,8 @@ export class SessionClient {
       fastRetryMs: options.fastRetryMs ?? 200,
       backoff: options.backoff ?? DEFAULT_BACKOFF,
       refreshMarginMs: options.refreshMarginMs ?? 120_000,
+      unassignedWaitSeconds: options.unassignedWaitSeconds ?? UNASSIGNED_WAIT_SECONDS,
+      unassignedBackoff: options.unassignedBackoff ?? UNASSIGNED_BACKOFF,
     };
     this.#url = sessionUrl(options.serverUrl);
   }
@@ -149,9 +181,14 @@ export class SessionClient {
 
   async #tradeUntilGranted(): Promise<SessionGrant> {
     const started = this.#o.now();
+    // Long-poll once the server has said the pod is unassigned (KOBE-417).
+    let longPoll = false;
+    // Unassigned answers the server did not hold; transport/other failures since the last answer.
+    let unheld = 0;
+    let failures = 0;
     for (let attempt = 0; ; attempt++) {
       try {
-        const grant = await this.#tradeOnce();
+        const grant = await this.#tradeOnce(longPoll ? this.#o.unassignedWaitSeconds : 0);
         if (this.#grant?.sandboxId !== undefined && this.#grant.sandboxId !== grant.sandboxId) {
           // The pod belongs to one sandbox for its whole life; another id means a server bug.
           throw new Error("the server assigned a different sandbox id");
@@ -164,13 +201,31 @@ export class SessionClient {
         return grant;
       } catch (error) {
         if (!(error instanceof AttemptError)) throw error;
-        const elapsed = this.#o.now() - started;
-        const delay =
-          error.retryAfterMs ??
-          (elapsed < this.#o.fastRetryForMs
-            ? // Jittered: many sandboxes woken together (a server restart) don't retry in step.
-              Math.round(this.#o.fastRetryMs * (0.5 + this.#o.random()))
-            : backoffDelay(attempt, this.#o.backoff, this.#o.random));
+        let delay: number;
+        if (error.refusal === "unassigned" || error.refusal === "unassigned-held") {
+          failures = 0;
+          if (!longPoll || error.refusal === "unassigned-held") {
+            // Into the long-poll, or straight back after a held answer: claim → ready stays
+            // bounded by the server's recheck, not by our sleep.
+            delay =
+              error.refusal === "unassigned-held" && error.retryAfterMs !== undefined
+                ? error.retryAfterMs
+                : this.#fastRetry();
+            longPoll = true;
+          } else {
+            delay = Math.max(
+              error.retryAfterMs ?? 0,
+              unassignedDelay(unheld++, this.#o.unassignedBackoff, this.#o.random),
+            );
+          }
+        } else {
+          delay =
+            error.retryAfterMs ??
+            (this.#o.now() - started < this.#o.fastRetryForMs
+              ? this.#fastRetry()
+              : backoffDelay(failures, this.#o.backoff, this.#o.random));
+          failures = error.refusal === undefined ? failures + 1 : 0;
+        }
         if (attempt === 0 || attempt % 20 === 0) {
           this.#o.logger.info({ reason: error.message, attempt, delay }, "sandbox session retry");
         }
@@ -179,7 +234,13 @@ export class SessionClient {
     }
   }
 
-  async #tradeOnce(): Promise<SessionGrant> {
+  /** Jittered: many sandboxes woken together (a server restart) don't retry in step. */
+  #fastRetry(): number {
+    return Math.round(this.#o.fastRetryMs * (0.5 + this.#o.random()));
+  }
+
+  /** One trade; `waitSeconds` > 0 asks the server to hold the request while unassigned. */
+  async #tradeOnce(waitSeconds: number): Promise<SessionGrant> {
     let bootstrap: string;
     try {
       // Re-read every time: the kubelet rotates the projected token.
@@ -192,8 +253,11 @@ export class SessionClient {
     try {
       res = await this.#o.fetch(this.#url, {
         method: "POST",
-        headers: { Authorization: `Bearer ${bootstrap}` },
-        signal: AbortSignal.timeout(this.#o.attemptTimeoutMs),
+        headers: {
+          Authorization: `Bearer ${bootstrap}`,
+          ...(waitSeconds > 0 ? { Prefer: `wait=${waitSeconds}` } : {}),
+        },
+        signal: AbortSignal.timeout(this.#o.attemptTimeoutMs + waitSeconds * 1000),
         redirect: "error",
       });
     } catch (error) {
@@ -223,9 +287,12 @@ export class SessionClient {
           : undefined;
     // 409 sandbox_unassigned (warm-pool pod not claimed yet), 429, 401 (pod not verifiable yet),
     // 503 (isolation missing / unavailable): all retried; the server decides when it is ready.
+    const unassigned = res.status === 409 && body?.code === "sandbox_unassigned";
+    const held = unassigned && /\bwait=\d/.test(res.headers.get("preference-applied") ?? "");
     throw new AttemptError(
       `session refused: HTTP ${res.status} ${typeof body?.code === "string" ? body.code : ""}`.trim(),
       retryAfter,
+      held ? "unassigned-held" : unassigned ? "unassigned" : "other",
     );
   }
 }

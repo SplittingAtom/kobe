@@ -30,6 +30,7 @@ function harness(steps: Step[], opts: { file?: () => string; random?: () => numb
   let clock = 1_000_000;
   const sleeps: number[] = [];
   const requests: { url: string; auth: string | null; timeout: boolean }[] = [];
+  const prefers: (string | null)[] = [];
   const logs: unknown[] = [];
   const client = new SessionClient({
     serverUrl: "ws://server.kobe.internal:8081",
@@ -41,9 +42,14 @@ function harness(steps: Step[], opts: { file?: () => string; random?: () => numb
         auth: new Headers(init.headers).get("authorization"),
         timeout: init.signal instanceof AbortSignal,
       });
+      const prefer = new Headers(init.headers).get("prefer");
+      prefers.push(prefer);
       const step = steps.shift();
       if (!step) throw new Error("no more steps");
       if (step instanceof Error) throw step;
+      // A server holding the request (long-poll) answers after the wait it applied.
+      const applied = /wait=(\d+)/.exec(step.headers.get("preference-applied") ?? "");
+      if (applied?.[1]) clock += Number(applied[1]) * 1000;
       return step;
     }) as typeof fetch,
     now: () => clock,
@@ -63,6 +69,7 @@ function harness(steps: Step[], opts: { file?: () => string; random?: () => numb
     client,
     sleeps,
     requests,
+    prefers,
     logs,
     advance: (ms: number) => (clock += ms),
     now: () => clock,
@@ -124,14 +131,13 @@ describe("SessionClient (bootstrap → session tokens)", () => {
     expect(Math.max(...h.sleeps)).toBeLessThanOrEqual(30_000);
   });
 
-  it("waits as told while a warm-pool pod is unassigned (409) or rate limited (429)", async () => {
+  it("waits as told while rate limited (429)", async () => {
     const h = harness([
-      json(409, { code: "sandbox_unassigned", retry_after_ms: 2000 }),
       json(429, { code: "rate_limited" }, { "retry-after": "3" }),
       json(200, grantBody(1_000_000 + 900_000)),
     ]);
     await h.client.wireToken();
-    expect(h.sleeps).toEqual([2000, 3000]);
+    expect(h.sleeps).toEqual([3000]);
   });
 
   it("re-reads the rotated bootstrap token on every attempt", async () => {
@@ -165,5 +171,70 @@ describe("SessionClient (bootstrap → session tokens)", () => {
     ]);
     await h.client.wireToken();
     expect(JSON.stringify(h.logs)).not.toMatch(/bootstrap-token-value|x{30}/);
+  });
+});
+
+const unassigned = (applied?: number) =>
+  json(
+    409,
+    { code: "sandbox_unassigned", retry_after_ms: applied === undefined ? 2000 : 250 },
+    applied === undefined ? {} : { "preference-applied": `wait=${applied}` },
+  );
+
+describe("SessionClient while its warm-pool pod is unassigned (KOBE-417)", () => {
+  it("switches to a long-poll (Prefer: wait) after the first unassigned answer", async () => {
+    const h = harness([
+      unassigned(),
+      unassigned(20),
+      unassigned(20),
+      json(200, grantBody(1_000_000 + 10_000_000)),
+    ]);
+    await h.client.wireToken();
+    expect(h.prefers).toEqual([null, "wait=20", "wait=20", "wait=20"]);
+    // Straight into the long-poll, then right back after each held answer.
+    expect(h.sleeps).toEqual([200, 250, 250]);
+  });
+
+  it("asks again within ~0.3 s of a held answer, so claim → ready is bounded by the server's recheck", async () => {
+    const steps: Step[] = [unassigned()];
+    for (let i = 0; i < 30; i++) steps.push(unassigned(20));
+    steps.push(json(200, grantBody(1_000_000 + 10_000_000)));
+    const h = harness(steps, { random: () => 0.999 });
+    await h.client.wireToken();
+    expect(Math.max(...h.sleeps)).toBeLessThanOrEqual(300);
+    // ~10 min idle → 31 requests (was ~300 at one per 2 s).
+    expect(h.requests).toHaveLength(32);
+  });
+
+  it("backs off exponentially, with jitter, to a cap when the server does not hold the request", async () => {
+    const steps: Step[] = Array.from({ length: 12 }, () => unassigned());
+    steps.push(json(200, grantBody(1_000_000 + 10_000_000)));
+    const h = harness(steps);
+    await h.client.wireToken();
+    expect(h.sleeps).toEqual([
+      200, 2000, 3000, 6000, 12_000, 24_000, 45_000, 45_000, 45_000, 45_000, 45_000, 45_000,
+    ]);
+    const capped = harness(
+      [
+        unassigned(),
+        ...Array.from({ length: 9 }, () => unassigned()),
+        json(200, grantBody(1_000_000 + 10_000_000)),
+      ],
+      {
+        random: () => 0.999,
+      },
+    );
+    await capped.client.wireToken();
+    expect(Math.max(...capped.sleeps)).toBeLessThanOrEqual(60_000);
+    expect(Math.max(...capped.sleeps)).toBeGreaterThan(55_000);
+  });
+
+  it("retries promptly after a network error even after a long unassigned wait", async () => {
+    const steps: Step[] = [unassigned()];
+    for (let i = 0; i < 10; i++) steps.push(unassigned(20));
+    steps.push(new TypeError("fetch failed"), json(200, grantBody(1_000_000 + 10_000_000)));
+    const h = harness(steps);
+    await h.client.wireToken();
+    expect(h.sleeps.at(-1)).toBeLessThanOrEqual(500);
   });
 });

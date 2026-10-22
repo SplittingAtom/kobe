@@ -568,6 +568,49 @@ describe("identifyBootstrapToken", () => {
     });
   });
 
+  describe("recheckAssignment (KOBE-417 long-poll)", () => {
+    async function unassignedPod() {
+      const ctx = await withSandbox();
+      const labels = ctx.pod.metadata.labels ?? {};
+      const without = Object.fromEntries(
+        Object.entries(labels).filter(([k]) => k !== LABEL_CLAIM_UID),
+      );
+      ctx.kube.seed({ ...ctx.pod, metadata: { ...ctx.pod.metadata, labels: without } });
+      const identity = await ctx.provider.identifyBootstrapToken(TOKEN);
+      if (identity.state !== "unassigned") throw new Error("expected unassigned");
+      ctx.kube.calls.length = 0;
+      return { ...ctx, identity, labels };
+    }
+
+    it("costs one pod GET while the pod stays unclaimed (no TokenReview, no namespace)", async () => {
+      const { kube, provider, identity } = await unassignedPod();
+      const review = vi.spyOn(kube, "reviewToken");
+      await expect(provider.recheckAssignment(identity)).resolves.toEqual(identity);
+      expect(kube.calls.map((c) => `${c.verb} ${c.kind}`)).toEqual(["get Pod"]);
+      expect(review).not.toHaveBeenCalled();
+    });
+
+    it("resolves the principal once the claim label lands", async () => {
+      const { kube, provider, identity, pod, handle, labels } = await unassignedPod();
+      kube.seed({ ...pod, metadata: { ...pod.metadata, labels } });
+      await expect(provider.recheckAssignment(identity)).resolves.toEqual({
+        state: "assigned",
+        principal: { sandboxId: handle.sandboxId, teamId: TEAM.id, userId: USER },
+        namespace: NS,
+        podName: handle.podName,
+      });
+    });
+
+    it("refuses once the pod is gone or replaced", async () => {
+      const { kube, provider, identity, pod } = await unassignedPod();
+      kube.seed({
+        ...pod,
+        metadata: { ...pod.metadata, uid: "00000000-0000-4000-8000-000000000000" },
+      });
+      await expect(provider.recheckAssignment(identity)).rejects.toThrow(SandboxAuthError);
+    });
+  });
+
   it("does not trust a pod's claim label that does not match the claim", async () => {
     const { kube, provider, pod } = await withSandbox();
     kube.seed({
