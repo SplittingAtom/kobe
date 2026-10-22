@@ -253,6 +253,7 @@ export const NOTEBOOK_ERROR_CODES = [
   "notebooks_unsupported", // the sandbox's agent has no kernel
   "isolation_unavailable",
   "sandbox_refused", // the sandbox could not be woken (KOBE-477): no runtime, not ready in time
+  "rate_limited", // too many kernel starts (KOBE-477)
 ] as const;
 export const notebookErrorSchema = z.strictObject({
   code: z.enum(NOTEBOOK_ERROR_CODES),

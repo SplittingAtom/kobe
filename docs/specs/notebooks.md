@@ -175,7 +175,10 @@ kernel if the thread has none and keeps a live one (no state lost), and answers 
 `busy`. No run and no event: starting is not a turn and never busies the thread. Only agents
 announcing `notebook_start` get the op (an older agent could not read it): otherwise 409
 `notebooks_unsupported` (Run still starts the kernel). The started kernel idles out like any other
-(NB2).
+(NB2). Run's rules apply (account active, still a member); at most 30 starts a minute per member
+(429 `rate_limited`; the web asks every 5 s while waking). Accepted (review, 2026-10-22): at
+`KOBE_MAX_KERNELS` a start, like a first execution, stops another thread's least recently used
+idle kernel (its state is lost).
 
 ## 3. Shapes the web needs (KOBE-465)
 

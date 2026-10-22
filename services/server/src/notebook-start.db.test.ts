@@ -11,6 +11,8 @@ import {
 import { EventStreamFixture, type Person } from "./testing/event-stream-fixture.js";
 import { FakeSandbox, FakeSandboxAuth, isFake, sandboxListener } from "./testing/fake-sandbox.js";
 import { SandboxWakeError, type SandboxRouter } from "./sandbox-wire/types.js";
+import { KERNEL_START_RATE_LIMIT } from "./notebooks/kernel-start.js";
+import { hitRateLimit } from "./rate-limit.js";
 
 /**
  * KOBE-477 (docs/specs/notebooks.md NB19): `POST /v1/threads/{id}/notebook/start` wakes the
@@ -158,7 +160,7 @@ describe("POST /v1/threads/{id}/notebook/start (KOBE-477)", () => {
       async (wakes) => {
         const res = await start(w);
         expect(res.status, JSON.stringify(res.json)).toBe(202);
-        expect(res.json).toEqual({ status: "waking", retry_after_ms: 2000 });
+        expect(res.json).toEqual({ status: "waking", retry_after_ms: 5000 });
         expect(wakes()).toBe(1);
       },
     );
@@ -212,6 +214,16 @@ describe("POST /v1/threads/{id}/notebook/start (KOBE-477)", () => {
     expect([shared.status, (shared.json as { code?: string }).code]).toEqual([403, "read_only"]);
     expect((await start(w, w.owner, randomUUID())).status).toBe(404);
     expect(sb.frames("notebook.restart")).toEqual([]);
+  });
+
+  it("limits starts to 30 a minute per member (429)", async () => {
+    const w = await world();
+    await connected(w);
+    for (let i = 0; i < KERNEL_START_RATE_LIMIT.max; i++) {
+      await hitRateLimit(fx.db, `notebook-start:${w.owner.id}`, KERNEL_START_RATE_LIMIT);
+    }
+    const res = await start(w);
+    expect([res.status, (res.json as { code?: string }).code]).toEqual([429, "rate_limited"]);
   });
 
   it("refuses an eval thread, an agent without notebook_start and an invalid answer", async () => {

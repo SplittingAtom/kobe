@@ -6,8 +6,8 @@
 ## Design
 
 - **Route:** `POST /v1/threads/{id}/notebook/start` (owner only; `notebooks/kernel-start.ts`). Not
-  connected: wake, 202 `{status: "waking", retry_after_ms: 2000}` (the context viewer's pattern,
-  with its per-replica memory of refused wakes → 409 `sandbox_refused`). Connected: 200
+  connected: wake, 202 `{status: "waking", retry_after_ms: 5000}` (the context viewer's pattern,
+  with its per-replica memory of refused wakes → 409 `sandbox_refused`); Run's `assertMayRun`; 30 starts/min per member (429). Connected: 200
   `{status: "idle" | "busy"}`. No run, no event, thread never busied.
 - **Command:** `notebook.restart` with `op: "start"` (no new kind, **no migration**). Agent
   `KernelManager.start`: starts the kernel if none, keeps a live one, arms the idle timer. New hello

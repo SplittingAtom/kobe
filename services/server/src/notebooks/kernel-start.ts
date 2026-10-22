@@ -3,6 +3,7 @@ import {
   type ActorContext,
   type NotebookStartResponse,
 } from "@kobe/protocol";
+import { hitRateLimit } from "../rate-limit.js";
 import { lockOwnedThread } from "../runs/access.js";
 import { COMMAND_FAILURES, SandboxWakeError } from "../sandbox-wire/types.js";
 import { NotebookRunError, type NotebookRunHost } from "./user-run.js";
@@ -15,7 +16,10 @@ import { NotebookRunError, type NotebookRunHost } from "./user-run.js";
  * run, no event. A wake refused (no gVisor/Kata runtime, not ready in time) is reported to the
  * next start instead of answering 202 for ever.
  */
-export const KERNEL_START_RETRY_MS = 2_000;
+/** How soon the web asks again while the sandbox wakes: 12 asks a minute, well under the limit. */
+export const KERNEL_START_RETRY_MS = 5_000;
+/** Starts per member per minute (as the context viewer's reads): each may wake or command. */
+export const KERNEL_START_RATE_LIMIT = { windowMs: 60_000, max: 30 };
 /** How long a start waits for the wake to be refused at once (isolation, membership checks). */
 export const KERNEL_START_REFUSAL_WAIT_MS = 1_500;
 /** A refused wake is reported to the member's next start within this long. */
@@ -24,7 +28,10 @@ export const KERNEL_START_REFUSAL_MEMORY_MS = 120_000;
 export const KERNEL_START_COMMAND_MS = 90_000;
 const MAX_REMEMBERED_REFUSALS = 10_000;
 
-type Host = Pick<NotebookRunHost, "router" | "log" | "isolationMissing" | "threadTx">;
+type Host = Pick<
+  NotebookRunHost,
+  "db" | "router" | "log" | "isolationMissing" | "threadTx" | "assertMayRun"
+>;
 
 /** Wakes this replica saw refused, by team and user (per replica, like the context viewer's). */
 export class WakeRefusals {
@@ -55,9 +62,14 @@ export async function startKernel(
   if (host.isolationMissing()) {
     throw new NotebookRunError("isolation_unavailable", "Sandboxes are unavailable right now.");
   }
-  await host.threadTx(actor, (tx, viewer) =>
-    lockOwnedThread(tx, viewer, threadId, "thread_not_found"),
-  );
+  // The owner, still allowed to run (account active, still a member), as for Run.
+  await host.threadTx(actor, async (tx, viewer) => {
+    await lockOwnedThread(tx, viewer, threadId, "thread_not_found");
+    await host.assertMayRun(tx, actor);
+  });
+  if (!(await hitRateLimit(host.db, `notebook-start:${actor.user_id}`, KERNEL_START_RATE_LIMIT))) {
+    throw new NotebookRunError("rate_limited", "Too many kernel starts; wait a minute.");
+  }
   const target = { teamId: actor.team_id, userId: actor.user_id };
   if (!(await host.router.isConnected(target, threadId))) {
     return wake(host, refusals, target);
