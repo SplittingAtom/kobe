@@ -198,6 +198,26 @@ describe("purging a source whose fork is busy (KOBE-216 ac-4)", () => {
     expect(await threadIds()).toEqual([fork]);
   });
 
+  it("offboarding is not complete while a departed member's thread is itself locked (KOBE-415)", async () => {
+    const departed = await h.createUser(`held-${randomUUID().slice(0, 8)}@forks.test`);
+    const mine = await thread({ owner: departed });
+    const held = await holdRow(mine);
+    try {
+      // SKIP LOCKED passes over it: busy (a later call takes it), never done.
+      const result = await purgeDepartedMember(h.deps.database.db, {
+        teamId: team,
+        userId: departed,
+      });
+      expect(result.threads).toMatchObject({ status: "busy", counts: { threads: 0 } });
+      expect(await threadIds()).toContain(mine);
+    } finally {
+      await held.release();
+    }
+    const again = await purgeDepartedMember(h.deps.database.db, { teamId: team, userId: departed });
+    expect(again.threads).toMatchObject({ status: "done", counts: { threads: 1 } });
+    expect(await threadIds()).not.toContain(mine);
+  });
+
   it("Delete forever answers 204 while a fork is busy; the source leaves Trash and goes later", async () => {
     const source = await thread({ deletedAt: new Date() });
     const fork = await thread({ forkOf: source });

@@ -78,6 +78,16 @@ export class AppContextStore {
     this.#emit();
   }
 
+  /** After a send (KOBE-415): drops the chips that went; a chip an app set meanwhile stays. */
+  removeSent(draft: string, sent: readonly AppContextChip[]): void {
+    const current = this.#byDraft.get(draft);
+    if (!current) return;
+    const next = new Map([...current].filter(([, chip]) => !sent.includes(chip)));
+    if (next.size === current.size) return;
+    this.#byDraft = new Map(this.#byDraft).set(draft, next);
+    this.#emit();
+  }
+
   clear(draft: string): void {
     if (!this.#byDraft.has(draft)) return;
     const next = new Map(this.#byDraft);

@@ -20,3 +20,16 @@ describe("SkillPickStore (KOBE-451)", () => {
     expect(heard).toHaveBeenCalledTimes(4);
   });
 });
+
+describe("SkillPickStore.clearSent (KOBE-415)", () => {
+  it("drops the pick that went; one picked during the send stays", () => {
+    const store = new SkillPickStore();
+    store.set("t", "charts");
+    store.clearSent("t", "charts");
+    expect(store.get("t")).toBeUndefined();
+    store.set("t", "pdf-report");
+    store.clearSent("t", "charts");
+    store.clearSent("t", undefined);
+    expect(store.get("t")).toBe("pdf-report");
+  });
+});

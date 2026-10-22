@@ -105,6 +105,18 @@ export class MentionStore {
     if (this.#picked.has(draft)) this.#set(draft, undefined);
   }
 
+  /**
+   * After a send (KOBE-415): drops the picks that went with it, unless the text left in the
+   * composer still mentions them; picks added meanwhile stay.
+   */
+  settleSent(draft: string, sent: readonly string[], remaining: string): void {
+    const picks = this.get(draft);
+    const still = new Set(mentionsIn(remaining, picks).map((m) => m.path));
+    const next = new Set([...picks].filter((p) => !sent.includes(p) || still.has(p)));
+    if (next.size === picks.size) return;
+    this.#set(draft, next.size === 0 ? undefined : next);
+  }
+
   /** A new thread was created by a send that failed: the picks follow the draft to it. */
   move(from: string, to: string): void {
     const picks = this.#picked.get(from);

@@ -31,6 +31,11 @@ export class SkillPickStore {
     this.#replace(new Map(this.#byDraft).set(draft, skill));
   }
 
+  /** After a send (KOBE-415): drops the pick that went; one picked meanwhile stays. */
+  clearSent(draft: string, sent: string | undefined): void {
+    if (sent !== undefined && this.#byDraft.get(draft) === sent) this.clear(draft);
+  }
+
   clear(draft: string): void {
     if (!this.#byDraft.has(draft)) return;
     const next = new Map(this.#byDraft);

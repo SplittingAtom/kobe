@@ -180,6 +180,20 @@ $HELM upgrade --install kobe charts/kobe -n "$NS" -f dev/values.yaml \
 
 echo "==> checks"
 psql_kobe() { $KUBECTL -n kobe-deps exec deploy/pg -- psql -U postgres -d kobe -tAc "$1" 2>&1; }
+# KOBE-415: a run whose event stream ended without a terminal event (the 5-minute stream timeout).
+# Says where it stopped: its events and status, and the server's warnings and sandbox-wire lines.
+hung_run_report() { # label run-id team-id
+  echo "     $1: run ${2:-?} did not end (events, status):"
+  psql_kobe "SELECT * FROM (
+      SELECT 'event ' || seq || ' ' || type || ' ' || left(payload::text, 300) FROM run_events
+       WHERE team_id = '$3' AND run_id = '${2:-00000000-0000-4000-8000-000000000000}'
+         AND type NOT LIKE '%.delta' ORDER BY seq) e
+    UNION ALL SELECT 'run ' || status FROM runs
+       WHERE team_id = '$3' AND id = '${2:-00000000-0000-4000-8000-000000000000}'" \
+    | sed 's/^/       /' || true
+  $KUBECTL -n "$NS" logs -l app.kubernetes.io/component=server -c server --since=7m --tail=-1 2>&1 \
+    | grep -E '"level":(40|50)|sandbox-wire' | tail -n 30 | cut -c1-600 | sed 's/^/     server: /' || true
+}
 
 for d in web server scheduler mcp-proxy egress-proxy model-gateway bifrost; do
   if $KUBECTL -n "$NS" rollout status "deploy/kobe-$d" --timeout=60s >/dev/null 2>&1; then ok "deployment kobe-$d is available"
@@ -774,8 +788,11 @@ else
   fail "the file is back after the volume was lost: got [$(in_sync_sandbox 'cat /workspace/reports/q3.md' | tail -1)]"
   $KUBECTL -n "$TEAM_NS" logs "$(sync_pod)" -c agent --tail=30 2>&1 | sed 's/^/     agent: /' || true
 fi
+# The file shows in the sandbox before the agent's restore report is stored: wait for the row
+# (KOBE-415: once read as 0 right after the file was back).
+restored_audits() { psql_kobe "SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'workspace.restored' AND target->>'userId' = '$SYNC_USER_ID'"; }
 contains "a full restore onto an empty volume is audited" '^[1-9][0-9]*$' \
-  "$(psql_kobe "SELECT count(*) FROM audit_log WHERE team_id = '$E2E_TEAM_ID' AND action = 'workspace.restored' AND target->>'userId' = '$SYNC_USER_ID'")"
+  "$(wait_for 60 '^[1-9][0-9]*$' restored_audits)"
 # Restore timing as the agent measured it (scan + manifest + downloads), for the ledger.
 $KUBECTL -n "$TEAM_NS" logs "$(sync_pod)" -c agent 2>/dev/null | grep -E '"msg":"workspace restored"' | head -2 | sed 's/^/     agent: /' || true
 # And on a plain wake (volume kept): the cold-start user's last pod (incremental check only).
@@ -2348,6 +2365,10 @@ JS
     contains "memory: the team switch is on" '^status=200$' "$(mem_settings '{"memory_enabled":true,"project_memory_enabled":true}')"
     mem1=$(mem_put "notes/e2e-$mem_id.md" "v1 $mem_id")
     printf '     memory remember 1: %s\n' "$(printf '%s' "$mem1" | grep -E '^(terminal|memory_events|text)=' | tr '\n' ' ' | cut -c1-400)"
+    if ! grep -q '^terminal=run.completed$' <<<"$mem1"; then
+      # KOBE-415: once this run hung after memory.updated until the 5-minute stream timeout.
+      hung_run_report "memory remember 1" "$(printf '%s\n' "$mem1" | sed -n 's/^run=//p')" "$E2E_TEAM_ID"
+    fi
     contains "memory: remember completed" '^terminal=run.completed$' "$mem1"
     contains "memory: memory.updated for the created doc has no previous version" \
       "^memory_events=[0-9a-f-]{36}:notes/e2e-$mem_id.md:v1:none\$" "$mem1"
@@ -3075,6 +3096,7 @@ out("thread", threadId);
 const sent = await call("POST", "/v1/threads/" + threadId + "/messages", { content });
 out("message", sent.status);
 const runId = sent.json.run_id;
+out("run", runId);
 const controller = new AbortController();
 const timer = setTimeout(() => controller.abort(), Number(timeoutMs));
 let text = "", terminal = "none";
@@ -3127,6 +3149,11 @@ JS
   tool="bash: curl -sSk -m 20 https://$UPSTREAM_HOST/ 2>&1 | head -c 300"
   first=$(egress_chat "$tool" - ask)
   printf '     blocked run: %s\n' "$(printf '%s' "$first" | tr '\n' ' ' | cut -c1-400)"
+  if ! grep -q '^terminal=run.completed$' <<<"$first"; then
+    # KOBE-415: this run (and the next on its thread) once hung until the stream timeout, which
+    # pushed the executor shard past its 45-minute limit.
+    hung_run_report "blocked run" "$(printf '%s\n' "$first" | sed -n 's/^run=//p')" "$E2E_TEAM_ID"
+  fi
   e_thread=$(printf '%s\n' "$first" | sed -n 's/^thread=//p')
   contains "the tool's run completed (Pi ran curl through its bash tool)" '^terminal=run.completed$' "$first"
   contains "the tool was blocked by the egress proxy (no team enablement yet)" '^text=.*(403|Kobe egress)' "$first"
@@ -3144,6 +3171,13 @@ JS
     "$(as_owner "POST /v1/team/egress/requests/${e_request:-none} {\"decision\":\"approve\"}")"
   contains "the approval enabled the domain for the team" '^1$' \
     "$(psql_kobe "SELECT count(*) FROM team_egress WHERE team_id = '$E2E_TEAM_ID' AND domain = '$UPSTREAM_HOST'")"
+  # A first run that never ended still holds the thread: the second would only queue behind it
+  # and wait out another stream timeout (KOBE-415). Stop it so the second runs.
+  e_first_run=$(printf '%s\n' "$first" | sed -n 's/^run=//p')
+  if ! grep -q '^terminal=run.completed$' <<<"$first" && [[ -n "$e_first_run" ]]; then
+    printf '     blocked run: cancelled before the retry: %s\n' \
+      "$(as_owner "POST /v1/runs/$e_first_run/cancel" | cut -c1-120)"
+  fi
   second=$(egress_chat "$tool" "${e_thread:-}")
   printf '     after approval: %s\n' "$(printf '%s' "$second" | tr '\n' ' ' | cut -c1-400)"
   contains "the same tool succeeds after the approval (Gate 2)" '^text=.*s_server' "$second"

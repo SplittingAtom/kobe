@@ -48,6 +48,9 @@ export interface BudgetMonitorOptions {
   readonly now?: () => Date;
 }
 
+/** What a follow-up evaluation skipped after `close()` reports. */
+const NOTHING: Evaluation = Object.freeze({ alerts: 0, stopped: [] });
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface Evaluation {
@@ -62,6 +65,8 @@ export class BudgetMonitor {
   private timer: NodeJS.Timeout | undefined;
   private readonly pending = new Map<string, NodeJS.Timeout>();
   private readonly running = new Map<string, Promise<Evaluation>>();
+  /** The evaluation each team gets once its running one ends (see `evaluate`). */
+  private readonly following = new Map<string, Promise<Evaluation>>();
   private closed = false;
   private sweeping: Promise<void> | undefined;
 
@@ -83,7 +88,7 @@ export class BudgetMonitor {
     for (const t of this.pending.values()) clearTimeout(t);
     this.pending.clear();
     await this.client?.end().catch(() => undefined);
-    await Promise.allSettled(this.running.values());
+    await Promise.allSettled([...this.running.values(), ...this.following.values()]);
   }
 
   private async listen(): Promise<void> {
@@ -155,11 +160,35 @@ export class BudgetMonitor {
     return deliverBudgetEmails(this.options);
   }
 
-  /** One team's budgets now (concurrent calls for a team share one evaluation). */
+  /**
+   * One team's budgets now. An evaluation already under way may have read the budgets before the
+   * spend or change that prompted this call (KOBE-415: a budget change's evaluation swallowed the
+   * usage hint that followed it), so a call during one gets the next evaluation, started when it
+   * ends; calls meanwhile share that one.
+   */
   evaluate(teamId: string): Promise<Evaluation> {
+    const next = this.following.get(teamId);
+    if (next) return next;
     const current = this.running.get(teamId);
-    if (current) return current;
-    const run = this.evaluateOnce(teamId).finally(() => this.running.delete(teamId));
+    if (!current) return this.startEvaluation(teamId);
+    const after = current
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .then(() => {
+        this.following.delete(teamId);
+        // Closed meanwhile: nothing more is evaluated (the database may be going away).
+        return this.closed ? NOTHING : this.startEvaluation(teamId);
+      });
+    this.following.set(teamId, after);
+    return after;
+  }
+
+  private startEvaluation(teamId: string): Promise<Evaluation> {
+    const run = this.evaluateOnce(teamId).finally(() => {
+      if (this.running.get(teamId) === run) this.running.delete(teamId);
+    });
     this.running.set(teamId, run);
     return run;
   }

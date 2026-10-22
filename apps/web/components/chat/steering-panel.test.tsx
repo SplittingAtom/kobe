@@ -279,6 +279,37 @@ describe("composer and controls (ac-3)", () => {
     expect(box.value).toBe("");
   });
 
+  it("keeps what the member typed while a queued message was still being sent, not the sent text (KOBE-415)", async () => {
+    // The queue read that ends a send can be held, so the member types on while it is in flight.
+    let holds = false;
+    let release = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    const plain = fake.fetch;
+    const holding: typeof fetch = async (input, init) => {
+      if (holds && String(input).endsWith("/pending-messages")) await held;
+      return plain(input, init);
+    };
+    Object.defineProperty(fake, "fetch", { value: holding });
+    const t = thread();
+    openApp(fake, t);
+    const { user } = await startRun(t);
+    holds = true;
+    const box = await composer();
+    await user.type(box, "ALPHA{Enter}");
+    await waitFor(() =>
+      expect(chatRequests(fake, "POST").at(-1)).toMatchObject({ body: { content: "ALPHA" } }),
+    );
+    expect(box.value).toBe("ALPHA"); // still being sent: the queue read is held
+    await user.type(box, " BRAVO");
+    release();
+    // The send ends: the sent text and its joining space go, what was typed after it stays.
+    await waitFor(() => expect(box.value).toBe("BRAVO"));
+    expect(queuedTexts()).toEqual(["ALPHA"]);
+    await user.type(box, "{Enter}");
+    await waitFor(() => expect(queuedTexts()).toEqual(["ALPHA", "BRAVO"]));
+    expect(box.value).toBe("");
+  });
+
   it("Ctrl/Cmd+Shift+Enter steers from the composer", async () => {
     const t = thread();
     openApp(fake, t);

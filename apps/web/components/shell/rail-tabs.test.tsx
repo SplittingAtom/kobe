@@ -109,6 +109,25 @@ describe("Files | Apps (ac-1, ac-3)", () => {
     expect(screen.getByRole("tabpanel", { name: "Apps" }).hidden).toBe(false);
   });
 
+  it("marks the rail settled once the stored tab is applied, not before (KOBE-415)", async () => {
+    fake.preferences = { rail_tab: "apps" };
+    let release = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    const plain = fake.fetch;
+    const holding: typeof fetch = async (input, init) => {
+      if (String(input).endsWith(PREFERENCES_PATH)) await held;
+      return plain(input, init);
+    };
+    Object.defineProperty(fake, "fetch", { value: holding });
+    await withApps();
+    // The apps are listed, the preferences not yet: Files for now, and not settled.
+    expect(tab("Files").getAttribute("aria-selected")).toBe("true");
+    expect(rail().hasAttribute("data-settled")).toBe(false);
+    release();
+    await waitFor(() => expect(rail().hasAttribute("data-settled")).toBe(true), WAIT);
+    expect(tab("Apps").getAttribute("aria-selected")).toBe("true");
+  });
+
   it("moves between the tabs with the arrow keys, Home and End; one tab stop", async () => {
     await withApps();
     const files = tab("Files");

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { UPLOAD_ATTACHMENT_ROOT } from "@kobe/protocol";
 import { withTeam } from "@kobe/db";
 import { storageUsed } from "./uploads/quota.js";
@@ -273,13 +273,25 @@ describe("message with file_ids", () => {
     expect(run.status).toBe(201);
     const runId = run.json.run_id as string;
     await f.fx.complete(w.team, runId);
-    const outcome = await purgeThreads(
-      f.fx.db,
-      w.team,
-      { kind: "user", userId: w.owner.id },
-      async () => {},
+    // A purge skips a thread whose row is locked (the server may still be at its run-end work)
+    // and leaves it to the next pass, so purge until the thread is gone (KOBE-415).
+    await vi.waitFor(
+      async () => {
+        const outcome = await purgeThreads(
+          f.fx.db,
+          w.team,
+          { kind: "user", userId: w.owner.id },
+          async () => {},
+        );
+        expect(outcome).toMatchObject({ status: "done" });
+        const left = await f.fx.admin.query(
+          `SELECT 1 FROM threads WHERE team_id = $1 AND id = $2`,
+          [w.team, threadId],
+        );
+        expect(left.rows).toEqual([]);
+      },
+      { timeout: 10_000, interval: 200 },
     );
-    expect(outcome).toMatchObject({ status: "done" });
     await deleteReleasedBlobs(f.fx.db, w.team, blobs, blobRecorder(w.team), { maxBatches: 5 });
     expect(objects.keys(`${PREFIX}teams/${w.team}/threads/`)).toEqual([]);
     expect(objects.keys(`${PREFIX}teams/${w.team}/users/${w.owner.id}/uploads/`)).toEqual([]);

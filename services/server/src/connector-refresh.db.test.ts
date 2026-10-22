@@ -210,16 +210,25 @@ describe("refresh does not hold the database (compare-and-set)", () => {
   it("8 concurrent reveals against a hanging token endpoint: one HTTP call, no connection held", async () => {
     await connect();
     await expire();
-    fake.options = { ...fake.options, refreshDelayMs: 600 };
+    // The token endpoint hangs until released: wait on that state, not on time (KOBE-415: after a
+    // fixed 300 ms, two of the eight were still reading the grant on a loaded runner).
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    fake.options = { ...fake.options, refreshGate: gate };
     const before = fake.refreshRequests.length;
     const calls = Array.from({ length: 8 }, () => grantFor());
-    await new Promise((r) => setTimeout(r, 300));
-    expect(fake.refreshRequests.length).toBe(before + 1);
-    expect(busy()).toBe(0);
+    await vi.waitFor(() => expect(fake.refreshRequests.length).toBe(before + 1), {
+      timeout: 10_000,
+    });
+    // While it hangs every caller lets its connection go (one held through the wait never would).
+    await vi.waitFor(() => expect(busy()).toBe(0), { timeout: 10_000 });
     // The pool is free for other work while the authorization server hangs.
     expect((await alice.get(BASE)).status).toBe(200);
+    expect(fake.refreshRequests.length).toBe(before + 1);
+    release();
     const results = await Promise.all(calls);
-    fake.options = { ...fake.options, refreshDelayMs: 0 };
+    const { refreshGate: _released, ...rest } = fake.options;
+    fake.options = rest;
     expect(results.every((r) => r.status === 200)).toBe(true);
     expect(new Set(results.map((r) => r.body.access_token)).size).toBe(1);
   });

@@ -111,3 +111,19 @@ describe("sent context in history (ac-3)", () => {
     expect(splitAppContext(`${APP_CONTEXT_PREAMBLE}\nno block`).contexts).toEqual([]);
   });
 });
+
+describe("AppContextStore.removeSent (KOBE-415)", () => {
+  it("drops the chips that went with a message; one an app set during the send stays", () => {
+    const store = new AppContextStore();
+    store.set("t", chip("a", { structuredContent: { v: 1 } }));
+    store.set("t", chip("b", { structuredContent: { v: 1 } }));
+    const sent = store.forDraft("t");
+    store.set("t", chip("b", { structuredContent: { v: 2 } })); // updated while sending
+    store.set("t", chip("c", { structuredContent: { v: 1 } })); // new while sending
+    store.removeSent("t", sent);
+    expect(store.forDraft("t").map((c) => [c.appId, c.data])).toEqual([
+      ["b", { structuredContent: { v: 2 } }],
+      ["c", { structuredContent: { v: 1 } }],
+    ]);
+  });
+});

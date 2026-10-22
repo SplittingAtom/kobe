@@ -34,6 +34,8 @@ export interface FakeOauthOptions {
   readonly refreshUnavailable?: boolean;
   /** Delay before answering a refresh request, to overlap concurrent callers. */
   readonly refreshDelayMs?: number;
+  /** Holds every refresh until this settles (a token endpoint that hangs until the test says). */
+  readonly refreshGate?: Promise<void>;
 }
 
 export interface IssuedTokens {
@@ -96,6 +98,7 @@ export class FakeOauthServer {
     this.refreshRequests.push(form);
     const o = this.options;
     if (o.refreshDelayMs) await new Promise((r) => setTimeout(r, o.refreshDelayMs));
+    if (o.refreshGate) await o.refreshGate;
     if (o.refreshUnavailable) return this.json(res, { error: "temporarily_unavailable" }, 503);
     const presented = form.get("refresh_token") ?? "";
     if (

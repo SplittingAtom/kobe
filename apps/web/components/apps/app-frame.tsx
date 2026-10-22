@@ -71,6 +71,9 @@ export interface AppFrameProps {
 const maxHeight = (placement: Placement) =>
   placement === "inline" ? INLINE_MAX_HEIGHT : EXPANDED_MAX_HEIGHT;
 
+/** Set on the iframe while Kobe's host bridge listens for it. */
+export const BRIDGE_ATTACHED_ATTR = "data-kobe-app-bridge";
+
 /** What an owner may do with a live frame (review LOW-4, coordinator decision 2). */
 export interface AppFrameHandle {
   /**
@@ -184,7 +187,12 @@ function FrameInstance(
     });
     bridge.current = attached;
     bridgeRef.current = attached;
+    // The frame says when its bridge listens (KOBE-415): a message the app posts earlier is lost,
+    // so tests wait on this rather than on time.
+    const element = frame.current;
+    element?.setAttribute(BRIDGE_ATTACHED_ATTR, "");
     return () => {
+      element?.removeAttribute(BRIDGE_ATTACHED_ATTR);
       if (bridgeRef.current === attached) bridgeRef.current = null;
       bridge.current = null;
       attached.detach();

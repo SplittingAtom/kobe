@@ -8,6 +8,7 @@ import { PREFERENCES_PATH } from "../../lib/shell/preferences";
 import { RAIL_WIDTH_VAR } from "../../lib/shell/rail-width";
 import { must } from "../../lib/testing/must";
 import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
+import { BRIDGE_ATTACHED_ATTR } from "../apps/app-frame";
 import { chatRequests, composer, openApp } from "../chat/testing";
 import { PICKER_RAIL_PX } from "./rail-pickers";
 
@@ -78,9 +79,15 @@ const railVar = () =>
 
 /** The picker's frame, with a stand-in window to talk as the app. */
 async function pickerWindow() {
-  const frame = await waitFor(() => must(screen.queryByTitle(PICKER_FRAME)) as HTMLIFrameElement, {
-    timeout: 4_000,
-  });
+  // Once Kobe's bridge listens: a message posted before is lost (KOBE-415).
+  const frame = await waitFor(
+    () => {
+      const f = must(screen.queryByTitle(PICKER_FRAME));
+      expect(f.hasAttribute(BRIDGE_ATTACHED_ATTR)).toBe(true);
+      return f as HTMLIFrameElement;
+    },
+    { timeout: 4_000 },
+  );
   const child = { postMessage: vi.fn() } as unknown as Window;
   Object.defineProperty(frame, "contentWindow", { value: child, configurable: true });
   const send = (data: unknown) =>
