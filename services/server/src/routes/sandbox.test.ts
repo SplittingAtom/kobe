@@ -6,7 +6,8 @@ import { IsolationRuntimeMissingError } from "../isolation/gate.js";
 import type { BootstrapIdentity } from "../sandbox/provider.js";
 import { SandboxAuthError } from "../sandbox/provider.js";
 import { verifySessionToken } from "../sandbox/session-token.js";
-import { SESSION_WAIT, createSandboxApp } from "./sandbox.js";
+import { SESSION_WAIT } from "../sandbox/session-hold.js";
+import { createSandboxApp } from "./sandbox.js";
 import { KEYS, TEAM, USER, must } from "../testing/sandbox-fixtures.js";
 
 const SANDBOX_ID = "4f9c2d5a-6b7e-4f90-8bc2-4d5e6f708192";
@@ -15,6 +16,14 @@ const ASSIGNED: BootstrapIdentity = {
   principal: { sandboxId: SANDBOX_ID, teamId: TEAM.id, userId: USER },
   namespace: "kobe-team-finance",
   podName: "u-x",
+};
+
+const UNASSIGNED: BootstrapIdentity = {
+  state: "unassigned",
+  namespace: "kobe-team-finance",
+  podName: "w",
+  podUid: "7d1e2f3a-4b5c-4d6e-8f70-8192a3b4c5d6",
+  teamId: TEAM.id,
 };
 
 function app(identify: (token: string) => Promise<BootstrapIdentity>) {
@@ -54,9 +63,7 @@ describe("POST /v1/sandbox/session", () => {
   });
 
   it("asks an unclaimed warm-pool pod to retry", async () => {
-    const res = await post(
-      app(async () => ({ state: "unassigned", namespace: "kobe-team-finance", podName: "w" })),
-    );
+    const res = await post(app(async () => UNASSIGNED));
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ code: "sandbox_unassigned", retry_after_ms: 2000 });
   });
@@ -139,41 +146,68 @@ describe("POST /v1/sandbox/session", () => {
   });
 });
 
-const UNASSIGNED: BootstrapIdentity = {
-  state: "unassigned",
-  namespace: "kobe-team-finance",
-  podName: "w",
-};
+const T0 = Date.parse("2026-10-22T00:00:00Z");
 
-/** A server whose warm-pool pod is claimed after `claimAfterMs` of (fake) time. */
-function waiting(claimAfterMs: number, opts: { maxWaitMs?: number; recheckMs?: number } = {}) {
+/**
+ * A server whose warm-pool pod is claimed after `claimAfterMs` of (fake) time; counts apiserver
+ * calls as the real provider makes them (identify: TokenReview, RuntimeClass, Pod, Namespace;
+ * recheck while unclaimed: Pod).
+ */
+function waiting(
+  claimAfterMs: number,
+  opts: { maxWaitMs?: number; recheckMs?: number; maxHoldsPerPod?: number } = {},
+) {
   let clock = 0;
-  const calls: number[] = [];
+  const identifies: number[] = [];
+  const rechecks: number[] = [];
+  const state = (): BootstrapIdentity => (clock >= claimAfterMs ? ASSIGNED : UNASSIGNED);
+  const closing = new AbortController();
   const a = createSandboxApp({
     provider: {
       identifyBootstrapToken: async () => {
-        calls.push(clock);
-        return clock >= claimAfterMs ? ASSIGNED : UNASSIGNED;
+        identifies.push(clock);
+        return state();
+      },
+      recheckAssignment: async () => {
+        rechecks.push(clock);
+        return state();
       },
     },
     sessionKeys: KEYS,
-    unassignedWait: { maxWaitMs: opts.maxWaitMs ?? 20_000, recheckMs: opts.recheckMs ?? 1_000 },
+    now: () => new Date(T0 + clock),
+    unassignedWait: {
+      maxWaitMs: opts.maxWaitMs ?? 20_000,
+      recheckMs: opts.recheckMs ?? SESSION_WAIT.recheckMs,
+      maxHoldsPerPod: opts.maxHoldsPerPod ?? SESSION_WAIT.maxHoldsPerPod,
+    },
     sleep: async (ms) => {
       clock += ms;
     },
+    closing: closing.signal,
   });
-  return { app: a, calls, clock: () => clock };
+  return {
+    app: a,
+    identifies,
+    rechecks,
+    clock: () => clock,
+    closing,
+    apiCalls: () => identifies.length * 4 + rechecks.length,
+  };
 }
 
+/** An unsigned JWT-shaped token expiring at `expMs` (epoch). */
+const jwt = (expMs: number) =>
+  `eyJhbGciOiJSUzI1NiJ9.${Buffer.from(JSON.stringify({ exp: Math.floor(expMs / 1000) })).toString("base64url")}.c2lnbmF0dXJlLXZhbHVl`;
+
 describe("POST /v1/sandbox/session long-poll while unassigned (KOBE-417)", () => {
-  it("holds the request (Prefer: wait) and answers as soon as a recheck sees the claim", async () => {
+  it("reviews the token once, then rechecks only the pod until the claim lands", async () => {
     const w = waiting(4_500);
     const res = await post(w.app, { prefer: "wait=20" });
     expect(res.status).toBe(200);
-    // Claimed at 4.5 s, answered at the next recheck: claim → grant ≤ one recheck (1 s).
-    expect(w.clock()).toBe(5_000);
+    expect(w.identifies).toEqual([0]);
+    // Claimed at 4.5 s, answered at the next recheck (6 s): claim → grant ≤ one recheck.
+    expect(w.rechecks).toEqual([2_000, 4_000, 6_000]);
     expect(w.clock() - 4_500).toBeLessThanOrEqual(SESSION_WAIT.recheckMs);
-    expect(w.calls).toEqual([0, 1_000, 2_000, 3_000, 4_000, 5_000]);
   });
 
   it("answers 409 with Preference-Applied once the wait runs out", async () => {
@@ -181,9 +215,17 @@ describe("POST /v1/sandbox/session long-poll while unassigned (KOBE-417)", () =>
     const res = await post(w.app, { prefer: "wait=20" });
     expect(res.status).toBe(409);
     expect(res.headers.get("preference-applied")).toBe("wait=5");
-    expect(await res.json()).toMatchObject({ code: "sandbox_unassigned" });
+    expect(await res.json()).toMatchObject({ code: "sandbox_unassigned", retry_after_ms: 250 });
     expect(w.clock()).toBe(5_000);
-    expect(w.calls).toHaveLength(6);
+    expect(w.rechecks).toEqual([2_000, 4_000, 5_000]);
+  });
+
+  it("costs ~42 apiserver calls per idle pod per minute (was 120 at one identify per 2 s)", async () => {
+    const w = waiting(Infinity);
+    while (w.clock() < 60_000) await post(w.app, { prefer: "wait=20" });
+    expect(w.clock()).toBe(60_000);
+    expect(w.identifies).toHaveLength(3);
+    expect(w.apiCalls()).toBe(3 * 4 + 30);
   });
 
   it("caps the wait the client asks for at the server's maximum", async () => {
@@ -200,20 +242,83 @@ describe("POST /v1/sandbox/session long-poll while unassigned (KOBE-417)", () =>
     expect(w.clock()).toBe(2_000);
   });
 
+  it("ends the hold when the reviewed token expires (the next request re-reviews it)", async () => {
+    const w = waiting(Infinity);
+    const res = await w.app.request("/v1/sandbox/session", {
+      method: "POST",
+      headers: { authorization: `Bearer ${jwt(T0 + 7_000)}`, prefer: "wait=20" },
+    });
+    expect(res.status).toBe(409);
+    expect(w.clock()).toBe(7_000);
+    expect(w.rechecks).toEqual([2_000, 4_000, 6_000, 7_000]);
+  });
+
   it("answers at once without Prefer: wait (older agents)", async () => {
     const w = waiting(Infinity);
     const res = await post(w.app, { prefer: "wait=nope" });
     expect(res.status).toBe(409);
     expect(res.headers.get("preference-applied")).toBeNull();
-    expect(w.calls).toEqual([0]);
+    expect(await res.json()).toMatchObject({ retry_after_ms: 2000 });
+    expect(w.rechecks).toEqual([]);
+  });
+
+  it("holds at most maxHoldsPerPod requests per pod; extras are answered at once, unheld", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    let rechecks = 0;
+    const a = createSandboxApp({
+      provider: {
+        identifyBootstrapToken: async () => UNASSIGNED,
+        recheckAssignment: async () => {
+          rechecks++;
+          await gate;
+          return ASSIGNED;
+        },
+      },
+      sessionKeys: KEYS,
+      sleep: async () => {},
+    });
+    const held = [post(a, { prefer: "wait=20" }), post(a, { prefer: "wait=20" })];
+    await new Promise((r) => setTimeout(r, 10));
+    const extra = await post(a, { prefer: "wait=20" });
+    expect(extra.status).toBe(409);
+    expect(extra.headers.get("preference-applied")).toBeNull();
+    expect(rechecks).toBe(2);
+    release();
+    expect((await Promise.all(held)).map((r) => r.status)).toEqual([200, 200]);
+    // Released: the pod can be held again.
+    expect((await post(a, { prefer: "wait=20" })).status).toBe(200);
+  });
+
+  it("answers held requests at once on shutdown and holds no new ones", async () => {
+    const w = waiting(Infinity);
+    const a = createSandboxApp({
+      provider: {
+        identifyBootstrapToken: async () => UNASSIGNED,
+        recheckAssignment: async () => {
+          w.closing.abort();
+          return UNASSIGNED;
+        },
+      },
+      sessionKeys: KEYS,
+      sleep: async () => {},
+      closing: w.closing.signal,
+    });
+    const res = await post(a, { prefer: "wait=20" });
+    expect(res.status).toBe(409);
+    expect(res.headers.get("preference-applied")).toBe("wait=20");
+    const after = await post(a, { prefer: "wait=20" });
+    expect(after.status).toBe(409);
+    expect(after.headers.get("preference-applied")).toBeNull();
   });
 
   it("stops waiting and refuses when the pod goes away mid-wait", async () => {
     let n = 0;
     const a = createSandboxApp({
       provider: {
-        identifyBootstrapToken: async () => {
-          if (n++ < 2) return UNASSIGNED;
+        identifyBootstrapToken: async () => UNASSIGNED,
+        recheckAssignment: async () => {
+          if (++n < 2) return UNASSIGNED;
           throw new SandboxAuthError("pod gone");
         },
       },
@@ -222,7 +327,7 @@ describe("POST /v1/sandbox/session long-poll while unassigned (KOBE-417)", () =>
     });
     const res = await post(a, { prefer: "wait=20" });
     expect(res.status).toBe(401);
-    expect(n).toBe(3);
+    expect(n).toBe(2);
   });
 
   it("stops rechecking once the client has gone", async () => {
@@ -230,7 +335,8 @@ describe("POST /v1/sandbox/session long-poll while unassigned (KOBE-417)", () =>
     let n = 0;
     const a = createSandboxApp({
       provider: {
-        identifyBootstrapToken: async () => {
+        identifyBootstrapToken: async () => UNASSIGNED,
+        recheckAssignment: async () => {
           if (++n === 2) controller.abort();
           return UNASSIGNED;
         },

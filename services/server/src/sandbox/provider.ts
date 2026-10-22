@@ -167,7 +167,16 @@ export type BootstrapIdentity =
       readonly podName: string;
     }
   /** A warm-pool pod not claimed yet (or its claim metadata is still propagating): retry. */
-  | { readonly state: "unassigned"; readonly namespace: string; readonly podName: string };
+  | UnassignedIdentity;
+
+/** A reviewed bootstrap token's pod that nobody has claimed yet; see `recheckAssignment`. */
+export interface UnassignedIdentity {
+  readonly state: "unassigned";
+  readonly namespace: string;
+  readonly podName: string;
+  readonly podUid: string;
+  readonly teamId: string;
+}
 
 export interface SandboxProviderOptions {
   readonly kube: KubeClient;
@@ -286,6 +295,13 @@ export interface SandboxProvider {
   deleteVolume(team: TeamRef, pvcName: string): Promise<void>;
   /** Verifies a sandbox pod's bootstrap token (TokenReview) and resolves who it is. */
   identifyBootstrapToken(token: string): Promise<BootstrapIdentity>;
+  /**
+   * KOBE-417: re-resolves an already reviewed, unassigned pod while its session request is held.
+   * One pod GET while it stays unclaimed (no TokenReview, isolation or namespace read); the full
+   * claim and isolation checks once it carries a claim label. Throws SandboxAuthError when the
+   * pod is gone or replaced.
+   */
+  recheckAssignment(identity: UnassignedIdentity): Promise<BootstrapIdentity>;
   /**
    * KOBE-325: creates a skill eval execution's ephemeral sandbox (claim `e-<thread>`, the eval
    * template, its own quota) after a fresh isolation check, and waits up to `podWaitMs` for its
@@ -919,13 +935,30 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     const ns = await kube.get(ref("v1", "Namespace", namespace));
     const teamId = ns?.metadata.labels?.[LABEL_TEAM_ID];
     if (!teamId) throw new SandboxAuthError(`namespace ${namespace} is not a team namespace`);
+    return resolvePod(pod, { state: "unassigned", namespace, podName, podUid, teamId }, verified);
+  };
 
+  const recheckAssignment = async (u: UnassignedIdentity): Promise<BootstrapIdentity> => {
+    const pod = await kube.get(POD(u.namespace, u.podName));
+    if (!pod || pod.metadata.uid !== u.podUid || pod.metadata.deletionTimestamp) {
+      throw new SandboxAuthError(`pod ${u.namespace}/${u.podName} is gone`);
+    }
+    if (!pod.metadata.labels?.[LABEL_CLAIM_UID]) return u;
+    return resolvePod(pod, u, await isolation.require());
+  };
+
+  /** The pod's claim, checked against the claim object and the verified runtime. */
+  const resolvePod = async (
+    pod: KubeObject,
+    unassigned: UnassignedIdentity,
+    verified: VerifiedIsolation,
+  ): Promise<BootstrapIdentity> => {
+    const { namespace, podName, teamId } = unassigned;
     const claimUid = pod.metadata.labels?.[LABEL_CLAIM_UID];
     const userId = pod.metadata.annotations?.[ANNOTATION_USER_ID];
     // KOBE-325: an eval sandbox's pod names its eval thread; its claim is `e-<thread>`, never the
     // member's, and the claim (found by name, matched by UID below) must name the same thread.
     const evalThreadId = pod.metadata.annotations?.[ANNOTATION_EVAL_THREAD];
-    const unassigned = { state: "unassigned", namespace, podName } as const;
     if (!claimUid || !userId) return unassigned;
     if (!isUuid(userId) || (evalThreadId !== undefined && !isUuid(evalThreadId)))
       throw new SandboxAuthError(`pod ${namespace}/${podName} has a malformed identity`);
@@ -1152,6 +1185,7 @@ export function createSandboxProvider(options: SandboxProviderOptions): SandboxP
     destroySandbox,
     deleteVolume,
     identifyBootstrapToken,
+    recheckAssignment,
     reconcileIsolation,
     isLive,
     createEvalSandbox,

@@ -440,6 +440,8 @@ const server = serve(
 );
 
 // Sandbox-facing listener: the only server port the sandbox NetworkPolicy allows (no user API).
+// Aborted at shutdown so held session long-polls (KOBE-417) answer at once.
+const sandboxClosing = new AbortController();
 const sandboxServer =
   isServer && sandbox
     ? serve(
@@ -447,6 +449,7 @@ const sandboxServer =
           fetch: createSandboxApp({
             ...sandbox,
             sessionTokenTtlSeconds: config.sessionTokenTtlSeconds,
+            closing: sandboxClosing.signal,
             ...(workspaceSync && sandboxAuth
               ? { workspace: workspaceSync.routes(sandboxAuth) }
               : {}),
@@ -632,6 +635,7 @@ function shutdown(signal: string): void {
   void skillEvalHub?.close();
   stopHibernation?.();
   stopCollector?.();
+  sandboxClosing.abort();
   sandboxServer?.close();
   internalServer?.close();
   // End event streams first so browsers reconnect (with Last-Event-ID) to another replica.
