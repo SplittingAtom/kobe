@@ -44,8 +44,8 @@ export interface DraftEditor {
   readonly edit: (path: string, text: string) => void;
   /** Loads a file's text to open it. */
   readonly open: (path: string) => Promise<ApiError | null>;
-  /** Adds an empty text file. */
-  readonly addFile: (path: string) => Promise<ApiError | null>;
+  /** Adds a text file (empty unless `text` is given), by the same write as an autosave. */
+  readonly addFile: (path: string, text?: string) => Promise<ApiError | null>;
   readonly removeFile: (path: string) => Promise<ApiError | null>;
   /** Shares the draft with the team's Builders and Team admins, or stops (author only). */
   readonly share: (shared: boolean) => Promise<ApiError | null>;
@@ -254,19 +254,19 @@ function useEditorState(teamId: string, id: string, loaded: Loaded | null): Draf
   );
 
   const addFile = useCallback(
-    (path: string) =>
+    (path: string, text = "") =>
       change(
-        (r) => putDraftFile(teamId, id, path, r, ""),
+        (r) => putDraftFile(teamId, id, path, r, text),
         (data) => {
           changed(data);
           const info: DraftFileInfo = {
             path,
-            size: 0,
+            size: byteLength(text),
             kind: "text",
             updatedAt: data.draft.updatedAt,
           };
           setFiles((fs) => [...fs, info].sort((a, b) => a.path.localeCompare(b.path)));
-          setTexts((t) => ({ ...t, [path]: "" }));
+          setTexts((t) => ({ ...t, [path]: text }));
         },
       ),
     [teamId, id, change, changed],

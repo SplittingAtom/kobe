@@ -24,6 +24,7 @@ import { ErrorNotice, MutationStatus } from "../admin/error-notice";
 import { useMutation } from "../admin/use-resource";
 import { LintPanel, ScanPanel } from "./feedback";
 import { FileTree } from "./file-tree";
+import { NewFileEditor } from "./new-file-editor";
 import { SaveVersionDialog } from "./save-version-dialog";
 import { SkillMdEditor } from "./skill-md-editor";
 import { EvalsPanel } from "./evals-panel";
@@ -89,6 +90,9 @@ function Editor({ editor, tab }: { readonly editor: DraftEditor; readonly tab: D
   const [confirm, confirmDialog] = useConfirm();
   // Each saved version re-reads the saved skill's eval runs (KOBE-459).
   const [savedSeq, setSavedSeq] = useState(0);
+  // Create file's starting path while it is open (KOBE-478), and folders added in the tree.
+  const [creating, setCreating] = useState<string | null>(null);
+  const [folders, setFolders] = useState<readonly string[]>([]);
 
   const scripts =
     scan.status === "ready"
@@ -97,14 +101,23 @@ function Editor({ editor, tab }: { readonly editor: DraftEditor; readonly tab: D
         ? NO_SCRIPTS
         : (scan.last?.scripts ?? NO_SCRIPTS);
   const paths = useMemo(() => files.map((f) => f.path), [files]);
+  // Folders aren't stored: one shows here until a file is saved in it.
+  const emptyFolders = useMemo(
+    () => folders.filter((f) => !paths.some((p) => p.startsWith(`${f}/`))),
+    [folders, paths],
+  );
   const skillMd = texts[SKILL_MD] ?? "";
   const lint = useMemo(() => lintSkill({ skillMd, paths, scripts }), [skillMd, paths, scripts]);
   const canTeam = access.permissions.includes("team.skills.publish");
   const canPersonal = draft.mine && access.permissions.includes("team.personal.create");
 
-  const select = (path: string) => {
+  const show = (path: string) => {
+    setCreating(null);
     setSelected(path);
     setProblem(null);
+  };
+  const select = (path: string) => {
+    show(path);
     void editor.open(path).then(setProblem);
   };
 
@@ -172,13 +185,27 @@ function Editor({ editor, tab }: { readonly editor: DraftEditor; readonly tab: D
               tree={
                 <FileTree
                   files={files}
+                  folders={emptyFolders}
                   selected={selected}
                   onSelect={select}
                   onAdd={editor.addFile}
+                  onCreate={(folder) => setCreating(folder ? `${folder}/` : "")}
+                  onAddFolder={(folder) => setFolders((fs) => [...fs, folder])}
                 />
               }
             >
-              <FilePane editor={editor} path={selected} onRemove={remove} />
+              {creating === null ? (
+                <FilePane editor={editor} path={selected} onRemove={remove} />
+              ) : (
+                <NewFileEditor
+                  key={creating}
+                  initialPath={creating}
+                  paths={paths}
+                  onSave={editor.addFile}
+                  onSaved={show}
+                  onCancel={() => setCreating(null)}
+                />
+              )}
               <LintPanel items={lint} />
               <ScanPanel state={scan} />
             </DefineLayout>

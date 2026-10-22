@@ -74,3 +74,53 @@ test("a draft autosaves, lints and scans, and keeps an edit made just before lea
   await expect(page).toHaveURL(/\/me\/skills\?tab=workbench$/);
   await expect(panelOf(page).getByRole("link", { name: NAME })).toHaveCount(0);
 });
+
+test("Create file and New folder save a draft file that stays after a reload (KOBE-478)", async ({
+  page,
+}) => {
+  const name = `${NAME}-files`;
+  await page.goto("/me/skills?tab=workbench");
+  await panelOf(page).getByLabel("Skill name").fill(name);
+  await panelOf(page).getByRole("button", { name: "Start a draft" }).click();
+  await expect(panelOf(page).getByRole("heading", { level: 1, name })).toBeVisible({
+    timeout: SHELL_TIMEOUT_MS,
+  });
+  const tree = panelOf(page).getByRole("navigation", { name: "Files" });
+
+  // A folder name is checked before it is shown; a valid one waits in the tree for a file.
+  await tree.getByRole("button", { name: "New folder" }).click();
+  await tree.getByLabel("Folder name").fill("../up");
+  await tree.getByRole("button", { name: "Add folder" }).click();
+  await expect(tree.getByText(/\.\. folder name/)).toBeVisible();
+  await tree.getByLabel("Folder name").fill("templates/forms");
+  await tree.getByRole("button", { name: "Add folder" }).click();
+  await expect(tree.getByText("Empty until a file is saved in it.")).toBeVisible();
+
+  await tree.getByRole("button", { name: "Create file in templates/forms" }).click();
+  await expect(panelOf(page).getByLabel("New file path")).toHaveValue("templates/forms/");
+  await panelOf(page).getByLabel("New file path").fill("templates/forms/intake.md");
+  await panelOf(page).getByLabel("New file contents").fill("# Intake\nAsk for the client name.");
+  await panelOf(page).getByRole("button", { name: "Save file" }).click();
+  await expect(panelOf(page).getByLabel("Contents of templates/forms/intake.md")).toHaveValue(
+    /Ask for the client name\./,
+  );
+  await expect(panelOf(page).getByText(/^Scanned as saved \(revision \d+\)\.$/)).toBeVisible({
+    timeout: 2_000,
+  });
+
+  await page.reload();
+  await panelOf(page)
+    .getByRole("navigation", { name: "Files" })
+    .getByRole("button", { name: "templates/forms/intake.md" })
+    .click({ timeout: SHELL_TIMEOUT_MS });
+  await expect(panelOf(page).getByLabel("Contents of templates/forms/intake.md")).toHaveValue(
+    /Ask for the client name\./,
+  );
+
+  await panelOf(page).getByRole("button", { name: "Delete draft" }).click();
+  await page
+    .getByRole("alertdialog", { name: `Delete the draft ${name}?` })
+    .getByRole("button", { name: "Delete draft" })
+    .click();
+  await expect(page).toHaveURL(/\/me\/skills\?tab=workbench$/);
+});
