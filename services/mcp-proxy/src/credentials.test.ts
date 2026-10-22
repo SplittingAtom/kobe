@@ -80,7 +80,7 @@ describe("createServerCredentials", () => {
   });
 
   it("caches nothing: a credential destroyed on the server is refused on the next call (KOBE-454)", async () => {
-    let answer: GrantAnswer = { ok: true, value: { kind: "api_key", apiKey: KEY } };
+    let answer: GrantAnswer = { ok: true, value: { kind: "api_key", apiKey: KEY, source: "site" } };
     const resolver = createServerCredentials({ fetchGrant: () => Promise.resolve(answer) });
     const req = request("api_key");
     expect(await resolver.headersFor(req)).toMatchObject({ ok: true });
