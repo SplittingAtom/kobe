@@ -183,7 +183,12 @@ describe("the palette (ac-1)", { timeout: 30_000 }, () => {
     await user.keyboard("regenerate with{Enter}glm{Enter}");
     await waitFor(() => expect(messagePosts()).toHaveLength(1));
     expect(fake.threads.get(t)?.model).toBe("glm");
-    expect(messagePosts()[0]?.body).toEqual({ content: "Sum the numbers", parent_entry_id: root });
+    // Regenerating also names the prompt whose viewed file it reuses (KOBE-467).
+    expect(messagePosts()[0]?.body).toEqual({
+      content: "Sum the numbers",
+      parent_entry_id: root,
+      viewing_from_entry: expect.any(String),
+    });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
