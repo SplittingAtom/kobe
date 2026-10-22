@@ -491,10 +491,102 @@ describe("review follow-ups", () => {
   });
 });
 
+describe("removing the connector destroys its credentials (KOBE-454)", () => {
+  const grantRows = async (id: string) =>
+    (await h.admin.query(`SELECT team_id FROM connector_grants WHERE connector_id = $1`, [id]))
+      .rows;
+  const removal = async (id: string) =>
+    (
+      await h.admin.query(
+        `SELECT target FROM audit_log WHERE action = 'mcp.connector.removed'
+          AND target->>'connectorId' = $1`,
+        [id],
+      )
+    ).rows.map((r) => r.target as Record<string, unknown>);
+
+  it("deletes the sealed site key in the removal's transaction and audits it without the key (ac-1)", async () => {
+    const id = await siteConnector("site-gone");
+    expect((await grantFor(teamOn, aliceId, id)).status).toBe(200);
+    expect((await root.delete(`${BASE}/${id}`)).status).toBe(200);
+    expect(await siteKeyRow(id)).toBeUndefined();
+    expect(await removal(id)).toEqual([
+      expect.objectContaining({ soft: true, teams: 1, siteKeyDropped: true, grants: 0 }),
+    ]);
+    const reasons = await h.admin.query(
+      `SELECT target->>'reason' AS reason FROM audit_log
+        WHERE action = 'mcp.connector.site_key_removed' AND target->>'connectorId' = $1`,
+      [id],
+    );
+    expect(reasons.rows).toEqual([{ reason: "connector_removed" }]);
+  });
+
+  it("deletes every member's grant in every team (ac-1)", async () => {
+    const created = await root.post(BASE, {
+      name: "member-gone",
+      url: "https://member-gone.example/mcp",
+      authKind: "api_key",
+    });
+    const id = created.json.connector.id as string;
+    await enable(teamOn, id);
+    await enable(teamOff, id);
+    expect((await alice.put(`/v1/connector-grants/${id}`, { api_key: MEMBER_KEY })).status).toBe(
+      201,
+    );
+    const carol = await h.signIn("carol@sitekey.test");
+    await carol.put("/v1/me/teams/active", { teamId: teamOff });
+    carol.team = teamOff;
+    expect((await carol.put(`/v1/connector-grants/${id}`, { api_key: MEMBER_KEY })).status).toBe(
+      201,
+    );
+    expect(await grantRows(id)).toHaveLength(2);
+
+    expect((await root.delete(`${BASE}/${id}`)).status).toBe(200);
+    expect(await grantRows(id)).toHaveLength(0);
+    expect(await removal(id)).toEqual([
+      expect.objectContaining({ teams: 2, siteKeyDropped: false, grants: 2 }),
+    ]);
+    const perGrant = await h.admin.query(
+      `SELECT team_id FROM audit_log WHERE action = 'mcp.grant.removed'
+        AND target->>'connectorId' = $1 ORDER BY team_id`,
+      [id],
+    );
+    expect(perGrant.rows.map((r) => r.team_id).sort()).toEqual([teamOn, teamOff].sort());
+  });
+
+  it("never revives old credentials on restore or re-registration (ac-3)", async () => {
+    const id = await siteConnector("site-revive");
+    expect((await root.delete(`${BASE}/${id}`)).status).toBe(200);
+    // Restored by hand (there is no restore API): nothing to serve.
+    await h.admin.query(
+      `UPDATE connectors SET deleted_at = NULL, status = 'active' WHERE id = $1`,
+      [id],
+    );
+    expect(await siteKeyRow(id)).toBeUndefined();
+    expect((await grantFor(teamOn, aliceId, id)).status).toBe(404);
+    expect((await root.get(`${BASE}/${id}`)).json.connector.siteKeyHint).toBeNull();
+    await h.admin.query(
+      `UPDATE connectors SET deleted_at = now(), status = 'disabled' WHERE id = $1`,
+      [id],
+    );
+    // Re-registered under a similar name: a new row with no key of its own.
+    const again = await root.post(BASE, {
+      name: "site-revive-2",
+      url: "https://site-revive.example/mcp",
+      authKind: "api_key",
+      credentialSource: "site",
+    });
+    expect(again.status, again.text).toBe(201);
+    const fresh = again.json.connector.id as string;
+    await enable(teamOn, fresh);
+    expect(await siteKeyRow(fresh)).toBeUndefined();
+    expect((await grantFor(teamOn, aliceId, fresh)).status).toBe(404);
+  });
+});
+
 describe("the key goes nowhere else (ac-4)", () => {
   it("is in no audit row, no log line and no response", async () => {
     const text = await auditText();
-    for (const secret of [SITE_KEY, SITE_KEY2]) {
+    for (const secret of [SITE_KEY, SITE_KEY2, MEMBER_KEY]) {
       expect(text).not.toContain(secret);
       expect(text).not.toContain(secret.slice(-4));
       expect(logged.join("\n")).not.toContain(secret);

@@ -323,6 +323,12 @@ export interface RemovalResult {
  * Removes a connector from the registry by soft delete only: `status=disabled` + `deleted_at`. A
  * hard delete would cascade into `team_connectors`, and a team enabling the connector concurrently
  * (KOBE-104) could lose its row. The row is locked, so concurrent removals serialize.
+ *
+ * Its secrets do not outlive it (KOBE-454): the sealed site key and every member's grant (API keys
+ * and OAuth tokens, in every team) are deleted in the same transaction, so restoring the row by
+ * hand or registering the server again never revives them. OAuth tokens are only deleted, not
+ * revoked at the provider (Kobe has no revocation client). The MCP proxy caches no credential
+ * (it asks the server per call), so the next call is refused. Audited with counts, never values.
  */
 export async function removeConnector(db: KobeDb, id: string): Promise<RemovalResult | undefined> {
   const usedBy = await countTeamsUsing(db, id);
@@ -337,9 +343,18 @@ export async function removeConnector(db: KobeDb, id: string): Promise<RemovalRe
       .update(connectors)
       .set({ status: "disabled", deletedAt: sql`now()`, updatedAt: sql`now()` })
       .where(eq(connectors.id, id));
+    const siteKeyDropped = await dropSiteKey(tx, { id, name: row.name }, "connector_removed");
+    const grants = await dropConnectorGrants(tx, id, row.name);
     await recordAudit(tx, {
       action: "mcp.connector.removed",
-      target: { connectorId: id, name: row.name, soft: true, teams: usedBy },
+      target: {
+        connectorId: id,
+        name: row.name,
+        soft: true,
+        teams: usedBy,
+        siteKeyDropped,
+        grants,
+      },
     });
     return { removed: true as const, soft: true as const, teams: usedBy };
   });

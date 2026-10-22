@@ -162,7 +162,7 @@ export async function setSiteKey(
   });
 }
 
-export type SiteKeyRemoval = "removed" | "url_changed" | "mode_changed";
+export type SiteKeyRemoval = "removed" | "url_changed" | "mode_changed" | "connector_removed";
 
 /** Deletes the key inside the caller's transaction (audited); false when there was none. */
 export async function dropSiteKey(
