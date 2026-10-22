@@ -9,12 +9,15 @@ import { ChatSessionContext, useKobeExtras } from "../chat/kobe-runtime";
  * Launches an app into the conversation on screen exactly as the rail's Apps section does
  * (KOBE-440, spec MA3, MA11): the member's own live thread takes the card (queued as a chip
  * during a run); a new-thread view, a thread shared read-only or one in Trash gets a new thread.
- * The server calls the app's opening tool as the member and re-checks the app on insert. Used by
- * the composer's + menu (KOBE-451); the rail keeps its own copy (it also closes its drawer).
+ * The server calls the app's opening tool as the member and re-checks the app on insert. The one
+ * launch rule (KOBE-455): the rail's Apps tab (which then closes its drawer) and the composer's
+ * + menu (KOBE-451) both launch through it.
  */
 export function useAppLaunch(): {
   readonly busy: string | null;
   readonly error: string | null;
+  /** Whether a launch starts a new thread (the conversation on screen is not the member's own). */
+  readonly intoNewThread: boolean;
   launch(app: RailApp): Promise<boolean>;
 } {
   const aui = useAui();
@@ -49,5 +52,5 @@ export function useAppLaunch(): {
     },
     [session, busy, target, remoteId, aui],
   );
-  return { busy, error, launch };
+  return { busy, error, intoNewThread: target === null, launch };
 }

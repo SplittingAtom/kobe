@@ -5,7 +5,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
-import { chatRequests, composer, openApp, streaming } from "../chat/testing";
+import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
+import { agentChoices, chatRequests, composer, openApp, streaming } from "../chat/testing";
 
 /**
  * KOBE-440 (MA-6, spec MA3, MA8, MA11): the rail's Apps section lists the member's apps and
@@ -17,6 +18,7 @@ let fake: FakeKobe;
 
 afterEach(() => {
   cleanup();
+  resizeWindow(DESKTOP_WIDTH);
   vi.unstubAllGlobals();
 });
 
@@ -222,5 +224,72 @@ describe("the rail's Apps section (KOBE-440)", () => {
     expect(link.getAttribute("href")).toBe("/me/connectors");
     expect(section.textContent).toContain("Catalyst");
     expect(within(section).queryByRole("button", { name: /Open Lakehouse Explorer/ })).toBeNull();
+  });
+});
+
+/** KOBE-455: the rail launches through useAppLaunch, as the + menu does; its behaviour stays. */
+describe("the rail's launch rule (KOBE-455)", () => {
+  it("from the new-thread view the launch carries the agent chosen there (KOBE-458)", async () => {
+    fake.teamApps = [APP];
+    fake.runnableAgents.push({
+      id: "a-kobe",
+      scope: "gallery",
+      galleryKey: "kobe",
+      default: true,
+      name: "Kobe",
+      model: null,
+    });
+    openApp(fake);
+    const user = userEvent.setup();
+    await waitFor(async () =>
+      expect(
+        (within(await agentChoices()).getByRole("radio", { name: /Kobe/ }) as HTMLInputElement)
+          .checked,
+      ).toBe(true),
+    );
+    await user.click(within(await agentChoices()).getByRole("radio", { name: /No agent/ }));
+    await user.keyboard("{Escape}");
+    await user.click(
+      within(await appsSection()).getByRole("button", {
+        name: "Open Lakehouse Explorer in a new conversation",
+      }),
+    );
+    await waitFor(() => expect(launches()).toHaveLength(1));
+    expect(must(launches()[0]).body).toEqual({ app_id: APP.appId, agent_id: null });
+    await waitFor(() => expect(screen.getByTitle(FRAME)).toBeTruthy(), { timeout: 4_000 });
+  });
+
+  it("shows the server's refusal and stays usable", async () => {
+    fake.teamApps = [APP];
+    openApp(fake, answered());
+    const section = await appsSection();
+    const open = within(section).getByRole("button", { name: /Open Lakehouse Explorer/ });
+    fake.teamApps = [];
+    await userEvent.setup().click(open);
+    expect((await within(section).findByRole("alert")).textContent).toBe(
+      "This app is not available to you.",
+    );
+    expect((open as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("closes the rail's drawer after a launch on a narrow screen", async () => {
+    fake.teamApps = [APP];
+    const t = answered();
+    resizeWindow(960);
+    openApp(fake, t);
+    await composer();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Show files" }));
+    const drawer = await screen.findByRole("dialog", { name: "Workspace" });
+    fireEvent.click(await within(drawer).findByRole("tab", { name: "Apps" }));
+    await user.click(
+      await within(drawer).findByRole("button", {
+        name: "Open Lakehouse Explorer in this conversation",
+      }),
+    );
+    await waitFor(() =>
+      expect(launches().map((r) => r.path)).toEqual([`/v1/threads/${t}/app-cards`]),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Workspace" })).toBeNull());
   });
 });
