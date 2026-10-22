@@ -138,6 +138,14 @@ describe("viewed-file context (KOBE-462)", () => {
     ).toBe(false);
   });
 
+  it("a regenerate names the prompt entry instead, never both (KOBE-467)", () => {
+    const body = { content: "Again", viewing_from_entry: "e1" };
+    expect(submitMessageBodySchema.safeParse(body).success).toBe(true);
+    expect(submitMessageBodySchema.safeParse({ ...body, viewing: { path: "a.md" } }).success).toBe(
+      false,
+    );
+  });
+
   it("reaches run.start bounded, content absent for a non-text file", () => {
     const base = { path: "notes.md", sha256: SHA, size: 4, truncated: false };
     expect(runViewingContextSchema.safeParse({ ...base, content: "new\n" }).success).toBe(true);

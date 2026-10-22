@@ -153,6 +153,51 @@ describe("viewed-file context (KOBE-462)", () => {
     });
   });
 
+  it("regenerate reuses the original run's path and reads the file again (KOBE-467)", async () => {
+    const w = await f.world();
+    await seed(w, w.owner.id, "r.md", Buffer.from("old\n"));
+    const { runId, start, ws, threadId } = await sendViewing(w, "r.md");
+    const { user } = ws.reply(start, "Done.");
+    await f.until(w.team, runId, "completed");
+    await seed(w, w.owner.id, "r.md", Buffer.from("new\n"));
+    const res = await f.send(w.owner, threadId, "Tighten this", 0, {
+      parent_entry_id: start.parent_entry_id ?? undefined,
+      viewing_from_entry: user,
+    });
+    expect(res.status, JSON.stringify(res.json)).toBe(201);
+    const again = await ws.started(res.json.run_id as string);
+    expect(again.viewing).toMatchObject({ path: "r.md", content: "new\n" });
+  });
+
+  it("regenerate adds nothing when the file is gone or the prompt viewed none", async () => {
+    const w = await f.world();
+    await seed(w, w.owner.id, "gone.md", Buffer.from("x\n"));
+    const { runId, start, ws, threadId } = await sendViewing(w, "gone.md");
+    const { user } = ws.reply(start, "Done.");
+    await f.until(w.team, runId, "completed");
+    await withTeam(f.fx.db, w.team, (tx) =>
+      sync.deleteServerFile(tx, { teamId: w.team, userId: w.owner.id }, "gone.md"),
+    );
+    const res = await f.send(w.owner, threadId, "Again", 0, { viewing_from_entry: user });
+    expect(res.status, JSON.stringify(res.json)).toBe(201);
+    expect((await ws.started(res.json.run_id as string)).viewing).toBeUndefined();
+    const unknown = await f.send(w.owner, threadId, "Again", 0, {
+      viewing_from_entry: "no-such-entry",
+    });
+    expect(unknown.status, JSON.stringify(unknown.json)).toBe(201);
+    expect(await viewingRow(unknown.json.run_id as string)).toBeNull();
+  });
+
+  it("refuses viewing and viewing_from_entry together", async () => {
+    const w = await f.world();
+    const threadId = await f.thread(w.owner);
+    const res = await f.send(w.owner, threadId, "x", 0, {
+      viewing: { path: "a.md" },
+      viewing_from_entry: "e1",
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("reads nothing for someone who is not the thread's owner (review)", async () => {
     const w = await f.world(1);
     const other = must(w.others[0], "member");
