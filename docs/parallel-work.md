@@ -100,8 +100,28 @@ step 3.
 ## Shared environments
 
 - **Postgres for tests:** `KOBE_TEST_DATABASE_URL` points at a server, not a database. Each test
-  run creates its own throwaway `kobe_test_<random>` database and roles, so agents can share one
-  server (the dev Postgres; URL in `CLAUDE.local.md`) safely.
+  file or suite creates its own throwaway database and roles, so agents can share one server (the
+  dev Postgres; URL in `CLAUDE.local.md`). Each worktree is a **test lane** (KOBE-482):
+  - **Picking the lane:** `KOBE_TEST_DB_LANE` (1-20 of `[a-z0-9]`; empty means no lane), else the
+    worktree directory name lowercased to `[a-z0-9]` without the leading `kobe` (`Kobe-wt482` →
+    `wt482`, `Kobe` → `kobe`). CI sets `CI`, so it has no lane unless `KOBE_TEST_DB_LANE` is set:
+    one database per job, as before.
+  - **What a lane changes:** every DB suite's global setup creates `kobe_lane_<lane>` if missing
+    (`prepareTestLane`), tests reach the server through that database instead of `postgres`, and
+    every throwaway database and role is named `kobe_<kind>_<hex>_<lane>` (`testNameSuffix()` in
+    `@kobe/db/testing`; use it for any database or role a test creates). Roles are cluster-wide but
+    random per suite, and setup never drops a role it did not create, so lanes never touch each
+    other's objects.
+  - **Connections:** lanes share the server's `max_connections` (100 on the dev Postgres) and a
+    server DB file peaks at about 12. Two lanes running the full server suite at once with the
+    default `KOBE_DB_TEST_WORKERS=4` passed (2026-10-22, 10 min each); with three or more lanes on
+    the server suite at once, set `KOBE_DB_TEST_WORKERS=2` per lane.
+  - **Cleaning up:** a crashed run leaves its lane's databases behind. With the lane idle,
+    `pnpm --filter @kobe/db build` then `pnpm --filter @kobe/db test:lanes` lists lanes with their
+    database and role counts and `pnpm --filter @kobe/db test:lanes drop <lane>` drops one (its
+    `kobe_lane_<lane>` database, its throwaway databases and roles). Drop a worktree's lane when you
+    remove the worktree. Leftovers named without a lane (`kobe_test_<hex>`) predate lanes or come
+    from runs with `KOBE_TEST_DB_LANE=""`.
 - **Tilt against the real cluster:** each agent uses its own namespace and port-forward:
 
   ```bash

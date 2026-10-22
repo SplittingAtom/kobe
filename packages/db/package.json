@@ -23,7 +23,8 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit generate && if [ -n \"$(git status --porcelain -- drizzle)\" ]; then git status --porcelain -- drizzle; echo \"Schema changed without a committed migration: run pnpm --filter @kobe/db db:generate\" >&2; exit 1; fi",
-    "db:rebase": "node scripts/rebase-migrations.mjs"
+    "db:rebase": "node scripts/rebase-migrations.mjs",
+    "test:lanes": "node scripts/test-lanes.mjs"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.3",

@@ -1,9 +1,16 @@
 import { randomBytes } from "node:crypto";
 import pg from "pg";
 import { DEFAULT_MIGRATIONS_FOLDER, runMigrations } from "../migrate.js";
+import { laneServerUrl, laneSuffix, resolveTestLane } from "./lane.js";
 import { assertAllMigrationsApplied, assertJournalExtendsBase } from "./upgrade.js";
 
 export { migrationsBefore } from "./upgrade.js";
+export { dropTestLane, listTestLanes, prepareTestLane, resolveTestLane } from "./lane.js";
+
+/** Random suffix for throwaway database and role names, ending in this run's lane if any. */
+export function testNameSuffix(): string {
+  return laneSuffix(randomBytes(4).toString("hex"), resolveTestLane());
+}
 
 export interface TestDatabase {
   /** Superuser URL to the throwaway database (tests only). */
@@ -33,7 +40,7 @@ export async function createTestDatabase(
   serverUrl: string,
   options: TestDatabaseOptions = {},
 ): Promise<TestDatabase> {
-  const suffix = randomBytes(4).toString("hex");
+  const suffix = testNameSuffix();
   const dbName = `kobe_test_${suffix}`;
   const ownerRole = `kobe_owner_${suffix}`;
   const appRole = `kobe_app_${suffix}`;
@@ -101,7 +108,11 @@ export async function createTestDatabase(
   };
 }
 
-/** Reads KOBE_TEST_DATABASE_URL or fails with an explanation (db tests never silently skip). */
+/**
+ * Reads KOBE_TEST_DATABASE_URL or fails with an explanation (db tests never silently skip). With a
+ * test lane (KOBE-482) the URL points at the lane's maintenance database, which the suite's global
+ * setup created (`prepareTestLane`).
+ */
 export function testServerUrl(): string {
   const url = process.env.KOBE_TEST_DATABASE_URL;
   if (!url) {
@@ -110,7 +121,7 @@ export function testServerUrl(): string {
         "(used only to create and drop a throwaway database and roles).",
     );
   }
-  return url;
+  return laneServerUrl(url, resolveTestLane());
 }
 
 export interface BackdatedAuditRow {

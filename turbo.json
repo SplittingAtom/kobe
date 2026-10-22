@@ -27,7 +27,8 @@
     },
     "test:db": {
       "dependsOn": ["^build"],
-      "env": ["KOBE_TEST_DATABASE_URL", "KOBE_DB_TEST_WORKERS"],
+      "env": ["KOBE_TEST_DATABASE_URL", "KOBE_DB_TEST_WORKERS", "KOBE_TEST_DB_LANE"],
+      "passThroughEnv": ["CI"],
       "cache": false
     }
   }
