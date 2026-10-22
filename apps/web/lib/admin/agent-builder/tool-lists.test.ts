@@ -6,45 +6,35 @@ const JIRA = ["mcp__jira__search", "mcp__jira__create_issue"];
 const form = (over: Partial<FormState> = {}): FormState => ({ ...EMPTY_FORM, name: "A", ...over });
 
 describe("connector tools: Allowed and Denied (KOBE-476 AC4)", () => {
-  it("lists the chosen connectors' tools as allowed, typed allow entries too, minus denied", () => {
-    const f = form({ toolsAllow: "", toolsDeny: "mcp__jira__create_issue" });
-    expect(allowedTools(f, JIRA)).toEqual(["mcp__jira__search"]);
-    expect(deniedTools(f)).toEqual(["mcp__jira__create_issue"]);
-    expect(allowedTools(form({ toolsAllow: "read\nmcp__jira__search" }), JIRA)).toEqual([
-      "read",
-      "mcp__jira__search",
-      "mcp__jira__create_issue",
-    ]);
+  it("writes a chosen connector's tools into the allow list one by one", () => {
+    const f = withConnectorTools(form(), JIRA);
+    expect(f.toolsAllow).toBe("mcp__jira__search\nmcp__jira__create_issue");
+    expect(allowedTools(f)).toEqual(JIRA);
   });
 
-  it("denying a tool moves it out of the allow list into the deny list", () => {
-    const f = denyTool(form({ toolsAllow: "read\nmcp__jira__search" }), "mcp__jira__search");
-    expect(f.toolsAllow).toBe("read");
-    expect(f.toolsDeny).toBe("mcp__jira__search");
-    // Twice is the same.
-    expect(denyTool(f, "mcp__jira__search")).toEqual(f);
-  });
-
-  it("allowing a connector tool back leaves an empty allow list empty (built-ins stay usable)", () => {
-    const f = allowTool(form({ toolsDeny: "mcp__jira__search" }), "mcp__jira__search", JIRA);
-    expect(f.toolsDeny).toBe("");
-    expect(f.toolsAllow).toBe("");
-  });
-
-  it("allowing back into a restricting allow list, or a typed entry, writes it to the list", () => {
-    const restricted = form({ toolsAllow: "read", toolsDeny: "mcp__jira__search" });
-    expect(allowTool(restricted, "mcp__jira__search", JIRA).toolsAllow).toBe(
-      "read\nmcp__jira__search",
-    );
-    expect(allowTool(form({ toolsDeny: "bash" }), "bash", JIRA).toolsAllow).toBe("bash");
-  });
-
-  it("adds newly chosen connectors' tools to a restricting allow list only", () => {
-    expect(withConnectorTools(form(), JIRA).toolsAllow).toBe("");
+  it("never re-allows a denied tool, and a removed connector's tools leave both lists", () => {
     const f = withConnectorTools(
       form({ toolsAllow: "read", toolsDeny: "mcp__jira__create_issue" }),
       JIRA,
     );
     expect(f.toolsAllow).toBe("read\nmcp__jira__search");
+    const removed = withConnectorTools(f, [], JIRA);
+    expect(removed.toolsAllow).toBe("read");
+    expect(removed.toolsDeny).toBe("");
+  });
+
+  it("denying moves a tool from the allow list to the deny list, and back", () => {
+    const denied = denyTool(withConnectorTools(form(), JIRA), "mcp__jira__search");
+    expect(allowedTools(denied)).toEqual(["mcp__jira__create_issue"]);
+    expect(deniedTools(denied)).toEqual(["mcp__jira__search"]);
+    expect(denyTool(denied, "mcp__jira__search")).toEqual(denied);
+    const back = allowTool(denied, "mcp__jira__search");
+    expect(back.toolsDeny).toBe("");
+    expect(back.toolsAllow).toBe("mcp__jira__create_issue\nmcp__jira__search");
+  });
+
+  it("writes a typed entry to the list it is added to", () => {
+    expect(allowTool(form(), "bash").toolsAllow).toBe("bash");
+    expect(denyTool(form(), "bash:rm *").toolsDeny).toBe("bash:rm *");
   });
 });

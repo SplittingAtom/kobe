@@ -53,16 +53,34 @@ export function ConnectorTools({
   const team =
     state.status === "ready" ? state.data.filter((c) => c.enabled && c.status === "active") : [];
   const chosen = splitLines(form.connectors);
-  const connectorTools = toolsOf(team, form.connectorsAll ? ALL_CONNECTORS : chosen);
   const replaced = form.connectorsAll ? chosen : [];
 
+  // Each chosen connector's tools are written into tools.allow one by one (AC1, AC4); a
+  // connector taken away takes its tools with it.
   const setConnectors = (next: readonly string[]) => {
-    const updated = { ...form, connectors: next.join("\n") };
-    onChange(withConnectorTools(updated, toolsOf(team, next)));
+    const added = next.filter((n) => !chosen.includes(n));
+    const removed = chosen.filter((n) => !next.includes(n));
+    onChange(
+      withConnectorTools(
+        { ...form, connectors: next.join("\n") },
+        toolsOf(team, added),
+        toolsOf(team, removed),
+      ),
+    );
   };
   const setAll = (all: boolean) => {
+    const every = toolsOf(team, ALL_CONNECTORS);
+    const current = toolsOf(team, chosen);
     const updated = { ...form, connectorsAll: all };
-    onChange(all ? withConnectorTools(updated, toolsOf(team, ALL_CONNECTORS)) : updated);
+    onChange(
+      all
+        ? withConnectorTools(updated, every)
+        : withConnectorTools(
+            updated,
+            [],
+            every.filter((t) => !current.includes(t)),
+          ),
+    );
   };
 
   return (
@@ -94,13 +112,7 @@ export function ConnectorTools({
           are not saved.
         </Notice>
       )}
-      <ToolBoxes
-        form={form}
-        errors={errors}
-        readOnly={readOnly}
-        connectorTools={connectorTools}
-        onChange={onChange}
-      />
+      <ToolBoxes form={form} errors={errors} readOnly={readOnly} onChange={onChange} />
     </>
   );
 }
@@ -109,16 +121,14 @@ function ToolBoxes({
   form,
   errors,
   readOnly,
-  connectorTools,
   onChange,
 }: {
   readonly form: FormState;
   readonly errors: FieldErrors;
   readonly readOnly: boolean;
-  readonly connectorTools: readonly string[];
   readonly onChange: (next: FormState) => void;
 }) {
-  const allowed = allowedTools(form, connectorTools);
+  const allowed = allowedTools(form);
   const denied = deniedTools(form);
   const restricted = splitLines(form.toolsAllow).length > 0;
   return (
@@ -127,8 +137,8 @@ function ToolBoxes({
         title="Allowed tools"
         hint={
           restricted
-            ? "This agent may use only the tools listed here."
-            : "The chosen connectors' tools. Adding a tool or glob here limits the agent to the tools listed."
+            ? "Only the tools listed here are allowed. In Dangerous mode, those named one by one run without asking."
+            : "Choosing a connector lists its tools here. While this list is empty, nothing is narrowed."
         }
         tools={allowed}
         action="Deny"
@@ -136,7 +146,7 @@ function ToolBoxes({
         error={fieldError(errors.toolsAllow)}
         readOnly={readOnly}
         onMove={(tool) => onChange(denyTool(form, tool))}
-        onAdd={(tool) => onChange(allowTool(form, tool, []))}
+        onAdd={(tool) => onChange(allowTool(form, tool))}
       />
       <ToolBox
         title="Denied tools"
@@ -146,7 +156,7 @@ function ToolBoxes({
         addLabel="Add a denied tool or glob"
         error={fieldError(errors.toolsDeny)}
         readOnly={readOnly}
-        onMove={(tool) => onChange(allowTool(form, tool, connectorTools))}
+        onMove={(tool) => onChange(allowTool(form, tool))}
         onAdd={(tool) => onChange(denyTool(form, tool))}
       />
     </div>

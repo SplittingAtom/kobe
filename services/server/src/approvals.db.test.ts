@@ -677,7 +677,7 @@ describe("Gate 2: a tampered kobe-policy cannot run an MCP write without a signe
       version: null,
       tools_allow: [],
       tools_deny: [],
-      dangerous_mode: false,
+      dangerous_tools: [],
     },
     run: { run_id: w.runId, thread_id: w.threadId, approval_mode: "ask-on-write" },
     tool: mcpTool(TOOL, "write"),

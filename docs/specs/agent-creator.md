@@ -25,18 +25,29 @@ bypass mode" and the 2026-10-03 rule "approvals only by policy rule".)
   publish and rollback whenever the resulting definition is in Dangerous mode, so a non-admin can
   neither set it nor keep it nor publish a version that has it. A **fork** by a non-admin drops it
   (the copy uses the team default mode). Gallery agents are site-admin curated.
+- **Allow-list only.** Dangerous needs `tools.allow` entries that name tools one by one (a
+  built-in like `bash`, or a connector tool like `mcp__jira__search`); saving it without one is
+  refused (`400 invalid_agent`, `frontmatter.tools.allow`). Only those named tools may run without
+  asking: never a glob, never an empty list, never a tool in `tools.deny`. Every other tool keeps
+  its usual decision (a connector-only agent's `bash`, `write`, `edit`, `propose_file_edit` still
+  ask or are refused).
 - **When it applies (per call, at both enforcement points: `policy.check` and the MCP proxy).**
-  The run's agent version (`runs.agent_version`, a published version: a draft's test chat asks as
-  usual) has `approval_mode.dangerous` in its tool manifest, **and** the site approval floor is
-  `auto` (no minimum: any stricter site floor turns Dangerous off), **and** for a personal agent the
-  run's user is still a site admin or a team admin of the run's team (checked live), **and** the
-  run is interactive (scheduled runs keep D32; skill evals never use it).
-- **What it decides.** In the D29 order: site deny → team deny (including the agent's
-  `tools.deny`, a non-empty `tools.allow`, connector enablement, exposure and drift) → site/team
-  ask rules → **Dangerous: allow** (reason `dangerous_mode`, stage `approval_mode`) → risk class,
-  mode, user rules, prompt. Denied tools are still refused and site/team ask rules still ask.
-  Egress, MCP proxy credentials, sandbox isolation and budgets are unchanged. HMAC approvals for
-  every other mode are unchanged. It applies whatever the thread's own mode.
+  The run's agent version is published (`runs.agent_version`; a draft's test chat asks as usual)
+  and its tool manifest says `approval_mode.dangerous`; **whoever published that version** is still
+  active and still a site admin or an admin of the run's team (checked per call; the publisher is
+  `published_by`, and only an admin can publish it); the site approval floor is `auto` (any
+  stricter floor turns it off); the run is interactive (not scheduled, not a skill eval).
+  Otherwise the agent behaves as in its default mode.
+- **Floors win.** In the D29 order: site deny → team deny (including the agent's `tools.deny`,
+  connector enablement, exposure and drift) → site/team ask rules → risk class and mode → user
+  rules → **Dangerous** → prompt. Dangerous only replaces a risk-class or mode prompt in an
+  interactive (`ask-on-write`, `ask-all`) run: it never lifts a deny, an ask rule, a Kobe-scoped
+  write's prompt (project memory, shared project files; U10, D23, D24) or an `auto`/scheduled
+  refusal (D29, D32). Egress, MCP proxy credentials, sandbox isolation and budgets are unchanged;
+  HMAC approvals for every other case are unchanged. The engine records reason `dangerous_mode`.
+- **The agent's `tools.deny` in every mode (KOBE-481).** The server's per-call check loads the
+  run's version's `tools.deny` (a draft's for a test chat) and refuses a matching call, built-in or
+  MCP, whatever the mode.
 - **Audit.** `agent.dangerous_mode.changed` (`enabled` true/false) whenever a create, import,
   update or fork turns it on or off; `policy.dangerous_mode.applied` for every call it allowed,
   per enforcement point (no input recorded).
@@ -55,7 +66,6 @@ and shown as text.
 
 **AC4. Connector tools Allowed / Denied.** Choosing connectors lists each one's pinned tools
 (`/v1/team/connectors`) in **Allowed**; a tool moves to **Denied** and back with buttons (keyboard
-accessible, not drag-only). Saved as the existing fields: Denied tools are `tools.deny` entries.
-Allowed connector tools are written into `tools.allow` only when the agent already restricts its
-tools (a non-empty `tools.allow`); otherwise the allow list stays empty, because a non-empty allow
-list would also cut off the built-in tools. Typed globs still work in both boxes.
+accessible, not drag-only). Saved as the existing fields: Allowed is `tools.allow`, Denied is
+`tools.deny`. Choosing a connector writes each of its tools into `tools.allow` one by one (AC1);
+removing it takes them out of both lists. Typed tools and globs still work in both boxes.

@@ -19,32 +19,41 @@
   the default). Per call, `createDbRunContextSource` → `loadRunDangerousMode` reads the run's
   **published** version (`runs.agent_version`; test chats of drafts ask as usual), requires an
   interactive non-eval run, and for personal agents re-checks the user is still an admin in the run's
-  team. `dangerousModeApplies` adds the `auto` site-floor condition; the input carries
-  `agent.dangerous_mode` (protocol, default false). `evaluatePolicy` allows with reason
-  `dangerous_mode` only where the call would otherwise ask (or, in auto mode, be refused as not
-  allow-listed) — after every deny stage and every site/team ask rule. Scheduled runs unchanged.
-- **Tool lists:** a Dangerous run's policy input carries the version's frozen `tools.allow` /
-  `tools.deny`, so denied tools stay denied (see open question 1).
+  team (superseded by the review fixes below: `loadRunAgentTools`, `dangerousToolsFor`,
+  `agent.dangerous_tools`).
 - **Audit:** `agent.dangerous_mode.changed` (store, on create/update when it flips) and
   `policy.dangerous_mode.applied` per allowed call at the sandbox check and at the MCP proxy (a
   failed write denies the call). MCP sibling-run dedupe key includes the flag.
 - **Badges:** My Agents row, builder header, chat agent picker (option + chip), composer agent chip
   (thread read gains `agent_dangerous` from the pinned version).
 - **System prompt** is on the Identity tab only (Chris listed it on both).
-- **Connector tools:** Allowed = typed allow entries + chosen connectors' pinned tools − denied.
-  Moving to Denied writes `tools.deny`; connector tools are written to `tools.allow` only when the
-  allow list is already non-empty (a non-empty allow list would cut off built-ins).
+- **Connector tools:** Allowed is `tools.allow`, Denied is `tools.deny`; connector tools are written
+  one by one (review fix below).
 - **Icons:** curated lucide subset (68 names) in `agent-icons.ts`, searchable dropdown; unknown
   stored values (emoji) kept as text.
 - The team builder shares the component, so it gets the same two tabs.
 
+## Review fixes (Opus review, 2026-10-22)
+
+- **HIGH 1, allow-list only:** Dangerous needs `tools.allow` entries naming tools one by one
+  (`explicitToolNames`, agent-file schema → 400 `invalid_agent` at `frontmatter.tools.allow`).
+  The policy input carries `agent.dangerous_tools` (replaces the boolean); the engine allows only a
+  tool in that list. `tools.allow` is still not enforced per call otherwise.
+- **KOBE-481 (closes with this PR):** `policy/run-agent-tools.ts` loads the run's version's
+  `tools.deny` (the draft's for a test chat) for every run, at `policy.check` and the MCP proxy;
+  `checkAgentTools` refuses matching calls, built-in or MCP, in every mode
+  (`evaluate.test.ts` "tools.deny in every mode", `dangerous-mode.db.test.ts`).
+- **HIGH 2, floors win:** Dangerous never lifts a Kobe-scoped write's prompt or an auto/scheduled
+  refusal; it only replaces a risk-class/mode prompt in ask-on-write/ask-all.
+- **MEDIUM 3:** per call, the version's `published_by` (only an admin can publish Dangerous) must be
+  active and still a site admin or this team's admin, for every scope; no column needed. Gallery
+  versions seeded without a publisher never run in Dangerous mode.
+- Creator writes chosen connectors' tools into `tools.allow` one by one; removing a connector
+  removes them.
+
 ## Open questions (for Chris or the coordinator)
 
-1. Pre-existing gap: for **non-Dangerous** agents the server's policy check still gets empty agent
-   tool lists (`createDbRunContextSource`: "Agent tool lists arrive with KOBE-47"), so built-in
-   `tools.deny` is not enforced per call (MCP tools are filtered at run start). Dangerous runs load
-   them; enforcing them for every agent is a behaviour change worth its own ticket.
-2. The gate1 browser spec was written and typechecks but was not run: gate1 runs main; it needs a
+1. The gate1 browser spec was written and typechecks but was not run: gate1 runs main; it needs a
    deploy of this branch.
 
 ## Evidence

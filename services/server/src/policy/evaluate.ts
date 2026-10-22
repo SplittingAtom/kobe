@@ -43,11 +43,13 @@ import { prepareInput } from "./tool-inputs.js";
  *   unattended run, so only the team's own allow list does. The ask-on-write sandbox switch plays
  *   no part here.
  *
- * - **Dangerous mode** (AC1, docs/specs/agent-creator.md, approved by Chris 2026-10-22): when the
- *   server set `agent.dangerous_mode` (an admin's published Dangerous agent under an `auto` site
- *   floor), an interactive call that passed every deny stage and matched no ask rule is allowed
- *   (reason `dangerous_mode`) instead of going on to risk class, mode and prompt. Scheduled runs
- *   are unchanged (D32).
+ * - **Dangerous mode** (AC1, docs/specs/agent-creator.md, approved by Chris 2026-10-22): the
+ *   server lists in `agent.dangerous_tools` the tools an admin's published Dangerous agent names
+ *   one by one (never a glob or an empty list). Only such a tool, in an interactive (not `auto`)
+ *   run, that passed every deny stage, matched no ask rule and would otherwise ask by risk class
+ *   or mode, is allowed (reason `dangerous_mode`). Floors win: Kobe-scoped writes (project memory,
+ *   shared project files; U10, D23, D24) keep their prompt, `auto` and scheduled runs keep
+ *   their refusals (D29, D32), and the agent's own `tools.deny` is a deny like any other.
  *
  * `tool` is the server's own descriptor (registry), never one built from what the sandbox sent.
  */
@@ -212,9 +214,13 @@ function allow(ctx: Prepared, reasons: PolicyReason[]): PolicyDecision {
   return { effect: "allow", risk: ctx.tool.risk, reasons };
 }
 
-/** An admin's Dangerous agent (AC1) in an interactive run: allowed without asking. */
+/**
+ * An admin's Dangerous agent (AC1): the tool is one the agent names explicitly, in an interactive
+ * run, and not Kobe-scoped (those prompts are floors). Undefined otherwise.
+ */
 function dangerousAllow(ctx: Prepared): PolicyReason | undefined {
-  if (ctx.input.agent.dangerous_mode !== true || ctx.input.actor.kind !== "user") return undefined;
+  if (ctx.input.actor.kind !== "user" || ctx.tool.scope === "kobe") return undefined;
+  if (!ctx.input.agent.dangerous_tools.includes(ctx.tool.name)) return undefined;
   return {
     code: "dangerous_mode",
     stage: "approval_mode",
@@ -247,17 +253,14 @@ export function evaluatePolicy(ctx: EvaluationContext): PolicyDecision {
   const never = neverPromptReason(p.input);
   const asks = askReasons(p);
   if (asks.length > 0) return never ? deny(p, [never, ...asks]) : ask(p, asks);
-  // Only where the call would otherwise ask (or, in auto mode, be refused for not being
-  // allow-listed): calls that run anyway keep their own reason and need no Dangerous audit row.
-  const dangerous = dangerousAllow(p);
-  if (never) {
-    const unattended = decideUnattended(p, never);
-    return dangerous && unattended.effect === "deny" ? allow(p, [dangerous]) : unattended;
-  }
+  // Unattended refusals are floors: Dangerous never turns them into allow (AC1).
+  if (never) return decideUnattended(p, never);
 
   const prompts = promptReasons(p);
   if (prompts.length === 0) return allow(p, [noPromptReason(p)]);
   const own = userAllow(p);
   if (own) return allow(p, [own, ...prompts]);
+  // Only where the call would otherwise ask: calls that run anyway keep their own reason.
+  const dangerous = dangerousAllow(p);
   return dangerous ? allow(p, [dangerous, ...prompts]) : ask(p, prompts);
 }

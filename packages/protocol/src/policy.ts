@@ -26,7 +26,7 @@ import { rememberRuleSchema } from "./remember.js";
  * class and mode decide whether the call needs asking; a user allow rule can only remove a prompt
  * that comes from risk class or mode; whatever remains is prompted. There is no bypass: no mode,
  * flag, or role skips this pipeline. An admin's Dangerous agent (AC1) is an outcome of it, at the
- * approval-mode stage after every deny and ask rule (`agent.dangerous_mode`, reason
+ * approval-mode stage after every deny and ask rule (`agent.dangerous_tools`, reason
  * `dangerous_mode`). Unknown tools are denied before any of it (tools.ts).
  *
  * Patterns in rules use the glob grammar in glob.ts — never regular expressions.
@@ -72,12 +72,14 @@ export const policyInputSchema = z
       tools_allow: z.array(z.string()).default([]),
       tools_deny: z.array(z.string()).default([]),
       /**
-       * Dangerous mode applies to this call (AC1, docs/specs/agent-creator.md): set only by the
-       * server, from the run's published agent version (set by a site or team admin), under an
-       * `auto` site floor and, for a personal agent, while its user is still an admin. The engine
-       * then allows a call that no deny stage and no ask rule stopped (reason `dangerous_mode`).
+       * Dangerous mode (AC1, docs/specs/agent-creator.md): the tools the agent names one by one in
+       * its `tools.allow` (never a glob), which may run without asking. Empty (the default):
+       * Dangerous is off. Set only by the server, from the run's published agent version, under an
+       * `auto` site floor, while whoever published it is still an admin. The engine allows such a
+       * tool only where an interactive run would otherwise ask by risk class or mode, after every
+       * deny stage and every ask rule, and never for a Kobe-scoped write (reason `dangerous_mode`).
        */
-      dangerous_mode: z.boolean().default(false),
+      dangerous_tools: z.array(z.string()).default([]),
     }),
     run: z.strictObject({
       run_id: uuidSchema,

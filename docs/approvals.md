@@ -20,11 +20,13 @@ when:
 A user's remember-rule removes a risk-class or mode prompt. It never removes an ask rule. In `auto`
 mode and in scheduled runs nothing asks: a call that would ask is denied instead.
 
-**Dangerous agents** (AC1). When the run's published agent version is in Dangerous mode (set only
-by a site or team admin), the site floor is `auto` and the run is interactive, a call that passes
-every deny stage and matches no site/team ask rule is allowed without a card (reason
-`dangerous_mode`; audit `policy.dangerous_mode.applied`). Deny rules, the agent's tool lists,
-connector exposure and ask rules still apply, at the sandbox check and again at the MCP proxy.
+**Dangerous agents** (AC1). When the run's published agent version is in Dangerous mode (published
+by a site or team admin who still is one), the site floor is `auto` and the run is interactive
+(`ask-on-write` or `ask-all`), a tool the agent's `tools.allow` names one by one is allowed without
+a card where its risk class or mode would ask (reason `dangerous_mode`; audit
+`policy.dangerous_mode.applied`). Deny rules, the agent's `tools.deny` (refused in every mode),
+connector exposure, ask rules, Kobe-scoped write prompts and `auto`/scheduled refusals still win,
+at the sandbox check and again at the MCP proxy.
 
 **Sandbox tools ask only when a policy rule says so** (user decision, 2026-10-03). `bash`, `write`,
 `edit` and the other sandbox built-ins have no default prompt. The sandbox, its egress policy and

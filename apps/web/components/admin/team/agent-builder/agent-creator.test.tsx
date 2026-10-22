@@ -195,7 +195,8 @@ describe("connector tools: Allowed and Denied (ac-2)", () => {
       expect(postedBody(calls).frontmatter).toEqual({
         name: "Triage",
         connectors: ["jira"],
-        tools: { deny: ["mcp__jira__search"] },
+        // Allowed connector tools are written one by one (AC1, AC4).
+        tools: { allow: ["mcp__jira__create_issue"], deny: ["mcp__jira__search"] },
       }),
     );
   });
@@ -255,10 +256,31 @@ describe("Dangerous approval mode (ac-3)", () => {
     await userEvent.click(tab("Behaviour"));
     await userEvent.selectOptions(screen.getByLabelText("Approval mode"), "dangerous");
     expect(screen.getByText(/runs its allowed tools without asking for approval/)).toBeTruthy();
+    await userEvent.selectOptions(
+      await screen.findByRole("combobox", { name: "Add a connector" }),
+      "jira",
+    );
     await userEvent.click(tab("Identity"));
     await userEvent.click(screen.getByRole("button", { name: "Create agent" }));
     await screen.findByText("Only site and team admins can use it.");
     expect(selected("Behaviour")).toBe("true");
     expect(postedBody(calls).frontmatter.approval_mode).toBe("dangerous");
+  });
+
+  it("refuses Dangerous with no tool named one by one, on the Behaviour tab", async () => {
+    const calls = stubApi(READ);
+    renderTeam(<AgentBuilderPage scope="personal" />, { role: "team_admin" });
+    await fillIdentity();
+    await userEvent.click(tab("Behaviour"));
+    await userEvent.selectOptions(screen.getByLabelText("Approval mode"), "dangerous");
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "Add an allowed tool or glob" }),
+      "mcp__jira__*{Enter}",
+    );
+    await userEvent.click(tab("Identity"));
+    await userEvent.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() => expect(selected("Behaviour")).toBe("true"));
+    expect(screen.getByText(/must name at least one tool \(no wildcards\)/)).toBeTruthy();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
   });
 });

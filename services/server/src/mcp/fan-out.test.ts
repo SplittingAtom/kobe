@@ -29,7 +29,7 @@ describe("distinctSiblings", () => {
       run("f", { toolsAllow: ["y", "x"] }),
       run("g", { trigger: "schedule", mode: "auto" }),
       // A Dangerous run (AC1) is its own policy context: decided on its own.
-      run("h", { dangerous: true }),
+      run("h", { dangerousTools: ["mcp__jira__search"] }),
     ];
     expect(distinctSiblings(named, runs).map((r) => r.runId)).toEqual(["c", "e", "g", "h"]);
   });

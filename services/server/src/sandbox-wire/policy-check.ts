@@ -18,11 +18,8 @@ import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { readApprovalFloor, strictestApprovalMode } from "../policy/approval-floor.js";
 import { neverPromptReason } from "../policy/evaluate.js";
 import { appliedUserRule, recordRuleApplied } from "../policy/rule-applied.js";
-import {
-  appliedDangerousMode,
-  loadRunDangerousMode,
-  recordDangerousApplied,
-} from "../policy/dangerous-mode.js";
+import { appliedDangerousMode, recordDangerousApplied } from "../policy/dangerous-mode.js";
+import { loadRunAgentTools } from "../policy/run-agent-tools.js";
 import { recordSkippedActionInTx } from "../policy/skipped-actions.js";
 import type {
   ApprovalBroker,
@@ -47,14 +44,14 @@ export function clampApprovalMode(mode: ApprovalMode, floor: ApprovalMode): Appr
 }
 
 /**
- * Whether a call runs under Dangerous mode (AC1): the run's agent is an admin's Dangerous agent and
- * the site floor sets no minimum (`auto`); any stricter site floor turns it off.
+ * The tools a call may run without asking under Dangerous mode (AC1): the run's agent's explicit
+ * list when the site floor sets no minimum (`auto`); any stricter site floor turns it off.
  */
-export function dangerousModeApplies(context: {
-  readonly dangerous?: boolean;
+export function dangerousToolsFor(context: {
+  readonly dangerousTools?: readonly string[];
   readonly floor: ApprovalMode;
-}): boolean {
-  return context.dangerous === true && context.floor === "auto";
+}): string[] {
+  return context.floor === "auto" ? [...(context.dangerousTools ?? [])] : [];
 }
 
 /** Server-side denials decided before the engine runs (protocol policy.ts: stage `site_deny`). */
@@ -111,14 +108,13 @@ export function createDbRunContextSource(): RunPolicyContextSource {
       const res = await tx.execute<{ approval_mode: string }>(sql`
         SELECT approval_mode FROM runs WHERE team_id = ${run.teamId} AND id = ${run.runId}`);
       const mode = approvalModeSchema.safeParse(res.rows[0]?.approval_mode);
-      // AC1: a Dangerous run carries its agent's frozen tool lists, so denied tools stay denied.
-      const dangerous = await loadRunDangerousMode(tx, run);
+      // KOBE-481: the agent's own tools.deny in every mode; AC1: its Dangerous tools.
+      const agent = await loadRunAgentTools(tx, run);
       return {
         floor,
         ...(mode.success ? { approvalMode: mode.data } : {}),
-        ...(dangerous
-          ? { dangerous: true, toolsAllow: dangerous.toolsAllow, toolsDeny: dangerous.toolsDeny }
-          : {}),
+        toolsDeny: agent.toolsDeny,
+        ...(agent.dangerousTools.length > 0 ? { dangerousTools: agent.dangerousTools } : {}),
       };
     },
   };
@@ -318,7 +314,7 @@ async function buildInput(
       version: row.agent_version,
       tools_allow: [...(context.toolsAllow ?? [])],
       tools_deny: [...(context.toolsDeny ?? [])],
-      dangerous_mode: dangerousModeApplies(context),
+      dangerous_tools: dangerousToolsFor(context),
     },
     run: { run_id: frame.run_id, thread_id: row.thread_id, approval_mode: mode },
     tool,

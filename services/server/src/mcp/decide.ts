@@ -225,7 +225,7 @@ function policyInputFor(
       version: run.agentVersion,
       tools_allow: run.toolsAllow,
       tools_deny: run.toolsDeny,
-      dangerous_mode: run.dangerous === true,
+      dangerous_tools: [...(run.dangerousTools ?? [])],
     },
     run: { run_id: run.runId, thread_id: run.threadId, approval_mode: run.mode },
     tool,

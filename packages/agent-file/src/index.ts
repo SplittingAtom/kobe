@@ -13,6 +13,7 @@ export {
   agentWarnings,
   agentApprovalModeSchema,
   DANGEROUS_APPROVAL_MODE,
+  explicitToolNames,
   isDangerousMode,
   skillSlugSchema,
   type AgentDefinition,

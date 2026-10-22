@@ -20,6 +20,8 @@ const sandboxes: FakeSandbox[] = [];
 const extraDbs: KobeDatabase[] = [];
 const KEY = approvalKeyring("approval-key-for-tests-".padEnd(48, "d"));
 const FLOOR_KEY = "policy.approval_floor";
+/** A Dangerous agent naming `bash` (AC1: only tools named one by one run without asking). */
+const DANGEROUS = { approval_mode: "dangerous", tools: { allow: ["bash"] } };
 
 beforeAll(async () => {
   await fx.setup([{}], () => {
@@ -158,7 +160,7 @@ const approvalsOf = async (w: World) => {
 describe("a Dangerous agent's calls (AC1)", () => {
   it("allows a call that would ask, without an approval, and audits it", async () => {
     const w = await world();
-    const agentId = await pin(w, "team", { approval_mode: "dangerous" });
+    const agentId = await pin(w, "team", DANGEROUS);
     const call = check(w, "bash", { command: "ls" });
     const result = await call.result();
     expect(result.decision).toBe("allow");
@@ -183,7 +185,7 @@ describe("a Dangerous agent's calls (AC1)", () => {
 
   it("still refuses the agent's denied tools and still asks for an ask rule", async () => {
     const w = await world();
-    await pin(w, "team", { approval_mode: "dangerous", tools: { deny: ["bash"] } });
+    await pin(w, "team", { approval_mode: "dangerous", tools: { allow: ["ls"], deny: ["bash"] } });
     const plain = await world();
     const calm = await plain.owner.browser.get(`/v1/threads/${plain.threadId}`);
     expect(calm.json.agent_dangerous).toBe(false);
@@ -201,7 +203,7 @@ describe("a Dangerous agent's calls (AC1)", () => {
 
   it("is off under a site floor stricter than auto", async () => {
     const w = await world();
-    await pin(w, "team", { approval_mode: "dangerous" });
+    await pin(w, "team", DANGEROUS);
     await fx.admin.query(
       `INSERT INTO site_settings (key, value) VALUES ($1, 'ask-on-write')
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
@@ -217,20 +219,31 @@ describe("a Dangerous agent's calls (AC1)", () => {
 
   it("is off for a draft's test chat and for a scheduled run", async () => {
     const draft = await world();
-    await pin(draft, "team", { approval_mode: "dangerous" }, { draft: true });
+    await pin(draft, "team", DANGEROUS, { draft: true });
     await check(draft, "bash", { command: "ls" }).pending();
 
     const scheduled = await world();
-    await pin(scheduled, "team", { approval_mode: "dangerous" });
+    await pin(scheduled, "team", DANGEROUS);
     await fx.admin.query(`UPDATE runs SET trigger = 'schedule' WHERE id = $1`, [scheduled.runId]);
     const result = await check(scheduled, "bash", { command: "ls" }).result();
     expect(result.decision).toBe("deny");
     expect(result.reasons[0]?.code).toBe("scheduled_run_no_prompt");
   });
 
-  it("is off for a personal agent once its user is no longer an admin here", async () => {
+  it("leaves tools it doesn't name as they were: a connector-only agent's built-ins still ask", async () => {
     const w = await world();
-    await pin(w, "personal", { approval_mode: "dangerous" });
+    await pin(w, "team", {
+      approval_mode: "dangerous",
+      tools: { allow: ["mcp__catalyst__search"] },
+    });
+    await check(w, "bash", { command: "ls" }).pending();
+    await check(w, "write", { path: "a.txt", content: "x" }).pending();
+    expect(await appliedRows(w)).toEqual([]);
+  });
+
+  it("is off for a team agent once whoever published it is no longer an admin here", async () => {
+    const w = await world();
+    await pin(w, "team", DANGEROUS);
     expect((await check(w, "bash", { command: "ls" }).result()).decision).toBe("allow");
     await fx.admin.query(
       `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
@@ -238,5 +251,42 @@ describe("a Dangerous agent's calls (AC1)", () => {
     );
     await check(w, "bash", { command: "pwd" }).pending();
     expect(await appliedRows(w)).toHaveLength(1);
+  });
+
+  it("is off for a personal agent once its user is no longer an admin here", async () => {
+    const w = await world();
+    await pin(w, "personal", DANGEROUS);
+    expect((await check(w, "bash", { command: "ls" }).result()).decision).toBe("allow");
+    await fx.admin.query(
+      `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+      [w.team, w.owner.id],
+    );
+    await check(w, "bash", { command: "pwd" }).pending();
+    expect(await appliedRows(w)).toHaveLength(1);
+  });
+});
+
+describe("the agent's tools.deny in every mode (KOBE-481)", () => {
+  it("refuses a denied built-in in ask-on-write, auto, scheduled runs and a draft's test chat", async () => {
+    const w = await world();
+    await pin(w, "team", { tools: { deny: ["bash"] } });
+    for (const sqlText of [
+      `UPDATE runs SET approval_mode = 'ask-on-write' WHERE id = $1`,
+      `UPDATE runs SET approval_mode = 'auto' WHERE id = $1`,
+      `UPDATE runs SET trigger = 'schedule' WHERE id = $1`,
+    ]) {
+      await fx.admin.query(sqlText, [w.runId]);
+      const result = await check(w, "bash", { command: "ls" }).result();
+      expect(result.decision, sqlText).toBe("deny");
+      expect(result.reasons[0]?.code).toBe("agent_tool_deny");
+    }
+    // Without the deny, the same call runs in ask-on-write (sandbox tools don't ask by default).
+    expect((await check(w, "ls", {}).result()).decision).toBe("allow");
+
+    const draft = await world();
+    await pin(draft, "team", { tools: { deny: ["bash"] } }, { draft: true });
+    const result = await check(draft, "bash", { command: "ls" }).result();
+    expect(result.decision).toBe("deny");
+    expect(result.reasons[0]?.code).toBe("agent_tool_deny");
   });
 });

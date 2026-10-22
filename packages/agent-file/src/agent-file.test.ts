@@ -3,6 +3,7 @@ import {
   AGENT_APPROVAL_MODES,
   AGENT_FILE_LIMITS,
   agentConnectors,
+  explicitToolNames,
   isDangerousMode,
   agentSkills,
   agentWarnings,
@@ -82,7 +83,7 @@ describe("parseAgentFile: the spec §6.3 example", () => {
   });
 
   it("accepts every approval mode (D29) and the icon forms", () => {
-    for (const mode of ["ask-on-write", "ask-all", "auto", "dangerous"]) {
+    for (const mode of ["ask-on-write", "ask-all", "auto"]) {
       expect(parsed(file(`name: A\napproval_mode: ${mode}`)).frontmatter.approval_mode).toBe(mode);
     }
     expect(parsed(file("name: A\nicon: bar-chart")).frontmatter.icon).toBe("bar-chart");
@@ -371,5 +372,33 @@ describe("Dangerous mode (AC1)", () => {
     expect(isDangerousMode({ approval_mode: "dangerous" })).toBe(true);
     expect(isDangerousMode({ approval_mode: "auto" })).toBe(false);
     expect(isDangerousMode({})).toBe(false);
+  });
+});
+
+describe("Dangerous mode needs an explicit allow list (AC1)", () => {
+  const dangerous = (allow?: string[]) =>
+    validateAgentDefinition({
+      frontmatter: {
+        name: "A",
+        approval_mode: "dangerous",
+        ...(allow ? { tools: { allow } } : {}),
+      },
+      prompt: "",
+    });
+
+  it("refuses an empty or wildcard-only allow list", () => {
+    for (const allow of [undefined, [], ["*"], ["mcp__jira__*"], ["bash:ls *"]]) {
+      const res = dangerous(allow);
+      expect(res.ok, JSON.stringify(allow)).toBe(false);
+      if (!res.ok) expect(res.issues[0]?.path).toBe("frontmatter.tools.allow");
+    }
+  });
+
+  it("accepts tools named one by one", () => {
+    expect(dangerous(["mcp__jira__search", "mcp__jira__*"]).ok).toBe(true);
+    expect(explicitToolNames(["read", "mcp__x__*", "bash:ls *", "mcp__x__y"])).toEqual([
+      "read",
+      "mcp__x__y",
+    ]);
   });
 });

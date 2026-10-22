@@ -29,8 +29,10 @@ let deps: ServerDeps;
 let admin: pg.Client;
 
 const json = (res: TestResponse) => JSON.stringify(res.json);
+/** Dangerous needs tools named one by one (AC1): a connector's tool here. */
+const ALLOW = { tools: { allow: ["mcp__jira__search"] } };
 const dangerous = (name: string, extra: object = {}) => ({
-  frontmatter: { name, approval_mode: "dangerous", ...extra },
+  frontmatter: { name, approval_mode: "dangerous", ...ALLOW, ...extra },
   prompt: `You are ${name}.`,
 });
 const plain = (name: string) => ({ frontmatter: { name }, prompt: `You are ${name}.` });
@@ -137,6 +139,21 @@ describe("who may set Dangerous mode (AC1)", () => {
     ]);
   });
 
+  it("refuses Dangerous without tools named one by one, even from an admin (400)", async () => {
+    for (const allow of [undefined, ["*"], ["mcp__jira__*"]]) {
+      const res = await create("alice", "team", {
+        frontmatter: {
+          name: "Wide",
+          approval_mode: "dangerous",
+          ...(allow ? { tools: { allow } } : {}),
+        },
+        prompt: "x",
+      });
+      expect(res.status, JSON.stringify(allow)).toBe(400);
+      expect(res.json.issues[0].path).toBe("frontmatter.tools.allow");
+    }
+  });
+
   it("refuses a builder's and a member's Dangerous agent, as JSON and as an imported file", async () => {
     for (const [who, scope] of [
       ["bob", "team"],
@@ -147,7 +164,8 @@ describe("who may set Dangerous mode (AC1)", () => {
       expect(res.status, `${who}/${scope}`).toBe(403);
       expect(res.json.code).toBe("dangerous_mode_forbidden");
     }
-    const file = "---\nname: Imported\napproval_mode: dangerous\n---\nHi.\n";
+    const file =
+      "---\nname: Imported\ntools: { allow: [read] }\napproval_mode: dangerous\n---\nHi.\n";
     const res = await as.carol.request(
       "POST",
       "/v1/agents?scope=personal",
@@ -195,7 +213,7 @@ describe("who may set Dangerous mode (AC1)", () => {
     const id = await created("alice", "team", dangerous("Forkable", { starters: ["Go"] }));
     const fork = await as.bob.post(`/v1/agents/${id}/fork`, { scope: "team" });
     expect(fork.status, json(fork)).toBe(201);
-    expect(fork.json.agent.frontmatter).toEqual({ name: "Forkable", starters: ["Go"] });
+    expect(fork.json.agent.frontmatter).toEqual({ name: "Forkable", starters: ["Go"], ...ALLOW });
     expect(fork.json.agent.dangerous).toBe(false);
     expect(await changes(fork.json.agent.id as string)).toEqual([]);
     const own = await as.alice.post(`/v1/agents/${id}/fork`, { scope: "team" });

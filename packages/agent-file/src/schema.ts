@@ -190,7 +190,33 @@ export const agentFrontmatterSchema = z
     approval_mode: agentApprovalModeSchema.optional(),
     starters: uniqueList(text(AGENT_FILE_LIMITS.starter), AGENT_FILE_LIMITS.starters).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((fm, ctx) => {
+    // AC1: Dangerous auto-allows only tools the agent names one by one, so it needs some.
+    if (
+      fm.approval_mode === DANGEROUS_APPROVAL_MODE &&
+      explicitToolNames(fm.tools?.allow).length === 0
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["tools", "allow"],
+        message:
+          "must name at least one tool (no wildcards) in Dangerous mode: only the tools listed one by one run without asking",
+      });
+    }
+  });
+
+/** A plain tool name (built-in or `mcp__<server>__<tool>`): no glob, escape or argument part. */
+const EXPLICIT_TOOL_NAME = /^[A-Za-z0-9_-]{1,256}$/;
+
+/**
+ * The allow-list entries that name one tool exactly (AC1): the only tools a Dangerous agent may
+ * run without asking. Globs (`mcp__jira__*`, `*`) and argument shorthands (`bash:ls *`) never
+ * count.
+ */
+export function explicitToolNames(allow: readonly string[] | undefined): string[] {
+  return (allow ?? []).filter((entry) => EXPLICIT_TOOL_NAME.test(entry));
+}
 
 export type AgentFrontmatter = z.output<typeof agentFrontmatterSchema>;
 
