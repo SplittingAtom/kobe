@@ -65,7 +65,12 @@ read only after the server has checked the sender owns the thread. When the run 
 terminal state) the server clears the text and keeps only `{path, sha256}` for the record, so a
 copy of the file never outlives the run, its event compaction or the file's deletion. A retry
 reads the original's path again from the owner's workspace (current content, or nothing if the
-file is gone). `run.start.viewing` carries it only to agents with the `file_edits`
+file is gone). Edit and regenerate (KOBE-467, coordinator 2026-10-22): an edit sends the file
+viewed now, like a new message (none once its chip was removed); a regenerate sends
+`viewing_from_entry` (the prompt's entry id, never with `viewing`) and the server reuses the
+path of the run that sent that prompt (`runs.viewing` keeps it after the run ends), reading the
+file's current content at submit; nothing is added when that run viewed none or the file is
+gone, and the run still goes. `run.start.viewing` carries it only to agents with the `file_edits`
 capability; the agent puts it in **that run's system prompt only**, through the per-run memory
 file (never the launch or the session), fenced between `<<<BEGIN VIEWED FILE nonce>>>` markers
 with a random per-run nonce, verbatim inside (so proposals are not built on sanitised text), and

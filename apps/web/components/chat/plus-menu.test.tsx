@@ -189,6 +189,7 @@ describe("a message sent with a skill (review MEDIUM-2)", { timeout: 30_000 }, (
         content: "Q3 report",
         parent_entry_id: root,
         skill: "pdf-report",
+        viewing_from_entry: expect.any(String),
       }),
     );
   });

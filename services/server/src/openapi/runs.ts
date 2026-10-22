@@ -91,7 +91,11 @@ export function runsOpenApiPaths(): Record<string, Record<string, unknown>> {
           "a live file of the owner's synced workspace with no invisible, format or shell " +
           "characters, and only its `@file(<path>)` marker in `content` is replaced by the " +
           "absolute `/workspace/...` path before the run is stored; any other `@file(...)` text " +
-          "stays as written. Steering and editing a queued message take `mentions` the same way.",
+          "stays as written. Steering and editing a queued message take `mentions` the same way. " +
+          "`viewing_from_entry` (KOBE-467, a regenerate) names the prompt entry sent again: the " +
+          "server reuses the viewed-file path of the run that sent it and reads the file's " +
+          "current content (nothing when that run viewed none or the file is gone); not with " +
+          "`viewing` (400).",
         parameters: [
           ...change,
           {

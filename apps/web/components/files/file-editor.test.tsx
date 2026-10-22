@@ -190,6 +190,58 @@ describe("the Viewing chip (ac-2)", () => {
   });
 });
 
+describe("edit and regenerate carry the viewed file (KOBE-467)", () => {
+  /** A root settings entry (like Pi 1.0), so the prompt can be edited and regenerated. */
+  function branchable(path: string) {
+    let prompt = "";
+    const thread = threadWithFile(path, "# Plan\n", (t) => {
+      const root = fake.addSystemEntry(t, null, "thinking_level_change", { thinkingLevel: "off" });
+      prompt = fake.addEntry(t, root, { role: "user", content: "Tidy notes" });
+      fake.addEntry(t, prompt, { role: "assistant", content: [{ type: "text", text: "done" }] });
+    });
+    return { thread, prompt: () => prompt };
+  }
+
+  it("an edit sends the file open now, like a new message", async () => {
+    const { thread } = branchable("notes.md");
+    openApp(fake, thread);
+    const user = userEvent.setup();
+    await screen.findByText("Viewing notes.md");
+    await user.click(must(screen.getAllByRole("button", { name: "Edit" })[0]));
+    const editor = await screen.findByLabelText("Edit your message");
+    await user.clear(editor);
+    await user.type(editor, "Tidy it more");
+    await user.click(within(must(editor.closest("form"))).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(fake.submittedBodies).toHaveLength(1));
+    expect(fake.submittedBodies[0]?.viewing).toEqual({ path: "notes.md" });
+    expect(fake.submittedBodies[0]?.viewing_from_entry).toBeUndefined();
+  });
+
+  it("an edit sends no file once its chip was removed", async () => {
+    const { thread } = branchable("notes.md");
+    openApp(fake, thread);
+    const user = userEvent.setup();
+    await screen.findByText("Viewing notes.md");
+    await user.click(screen.getByRole("button", { name: "Don't send notes.md with the message" }));
+    await user.click(must(screen.getAllByRole("button", { name: "Edit" })[0]));
+    const editor = await screen.findByLabelText("Edit your message");
+    await user.type(editor, "!");
+    await user.click(within(must(editor.closest("form"))).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(fake.submittedBodies).toHaveLength(1));
+    expect(fake.submittedBodies[0]?.viewing).toBeUndefined();
+  });
+
+  it("a regenerate names the prompt, so the server reuses its run's file", async () => {
+    const { thread, prompt } = branchable("other.md");
+    openApp(fake, thread);
+    await screen.findByText("Viewing other.md");
+    await userEvent.setup().click(must(screen.getAllByRole("button", { name: "Regenerate" })[0]));
+    await waitFor(() => expect(fake.submittedBodies).toHaveLength(1));
+    expect(fake.submittedBodies[0]?.viewing_from_entry).toBe(prompt());
+    expect(fake.submittedBodies[0]?.viewing).toBeUndefined();
+  });
+});
+
 /** A recorded `propose_file_edit` call (tool call id `pe1`) for `path`. */
 function proposalEntries(path: string) {
   return (thread: string) => {

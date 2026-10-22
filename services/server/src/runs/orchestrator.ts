@@ -98,6 +98,7 @@ import {
   queuedCount,
   retryCandidates,
   runViewingPath,
+  promptViewingPath,
   setThreadLockTimeout,
   setThreadStatus,
   threadRunRows,
@@ -426,15 +427,23 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     actor: ActorContext,
     command: SubmitMessageCommand,
   ): Promise<RunViewingContext | undefined> {
-    if (command.trigger !== "user" || command.viewing === undefined) return undefined;
+    if (command.trigger !== "user") return undefined;
+    const fromEntry = command.viewing_from_entry;
+    if (command.viewing === undefined && fromEntry === undefined) return undefined;
     // Only the thread's owner sends into it, from their own workspace (review: check first; the
     // submit transaction refuses anyone else with its own error).
-    const owner = await this.#readTx(actor, async (tx, viewer) => {
-      const found = await findThread(tx, viewer, command.thread_id);
-      return found?.access === "owner" ? found.thread.ownerUserId : undefined;
+    const found = await this.#readTx(actor, async (tx, viewer) => {
+      const thread = await findThread(tx, viewer, command.thread_id);
+      if (thread?.access !== "owner") return undefined;
+      // A regenerate (KOBE-467): the path the prompt's run viewed, read again below.
+      const path =
+        fromEntry === undefined
+          ? command.viewing?.path
+          : await promptViewingPath(tx, actor.team_id, thread.thread.id, fromEntry);
+      return path === undefined ? undefined : { owner: thread.thread.ownerUserId, path };
     });
-    if (owner === undefined || this.#viewing === undefined) return undefined;
-    return this.#viewing({ teamId: actor.team_id, userId: owner }, command.viewing.path);
+    if (found === undefined || this.#viewing === undefined) return undefined;
+    return this.#viewing({ teamId: actor.team_id, userId: found.owner }, found.path);
   }
 
   /**

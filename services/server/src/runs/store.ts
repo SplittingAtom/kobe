@@ -424,6 +424,23 @@ export async function runViewingPath(
 }
 
 /**
+ * The viewed-file path of the newest run of the thread that sent the prompt entry `entryId`
+ * (regenerate, KOBE-467); undefined when none did or it viewed nothing.
+ */
+export async function promptViewingPath(
+  tx: KobeTx,
+  teamId: string,
+  threadId: string,
+  entryId: string,
+): Promise<string | undefined> {
+  const res = await tx.execute<{ path: string | null }>(sql`
+    SELECT viewing ->> 'path' AS path FROM runs
+     WHERE team_id = ${teamId} AND thread_id = ${threadId} AND user_entry_id = ${entryId}
+     ORDER BY created_at DESC LIMIT 1`);
+  return res.rows[0]?.path ?? undefined;
+}
+
+/**
  * The run's viewed file (KOBE-462, `runs.viewing`), checked again on the way out: a row that does
  * not parse sends no note.
  */

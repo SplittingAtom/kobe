@@ -32,44 +32,55 @@ import { runStatusSchema, type RunStatus, type RunTransitionCause } from "./runs
  */
 
 /** Message content as submitted (§6.1 `POST /v1/threads/{id}/messages`). */
-export const submitMessageBodySchema = z.strictObject({
-  /** Pi entry id to branch from (edit-and-regenerate); absent = the thread's leaf. */
-  parent_entry_id: idSchema.optional(),
-  content: z
-    .string()
-    .min(1)
-    .max(200_000)
-    .refine((s) => !s.includes("\u0000"), "U+0000"),
-  /**
-   * Ids from `POST /v1/uploads` (uploads.ts): unique, at most {@link UPLOAD_MAX_FILES_PER_MESSAGE}.
-   * Absent = no files. Limits on their total size are checked at submit (`message_too_large`).
-   */
-  file_ids: z
-    .array(uuidSchema)
-    .max(UPLOAD_MAX_FILES_PER_MESSAGE)
-    .refine((ids) => new Set(ids).size === ids.length, "duplicate file_ids")
-    .optional(),
-  /**
-   * `@file` mentions (KOBE-223, mentions.ts): the workspace paths the member picked. Only the
-   * `@file(...)` markers of these paths in `content` are rewritten to `/workspace/...`.
-   */
-  mentions: mentionsFieldSchema.optional(),
-  /**
-   * MCP Apps context chips the member sends with this message (KOBE-439, app-context.ts): at
-   * most one per app, each at most 8 KiB, handed to Pi fenced as untrusted data.
-   */
-  app_context: appContextFieldSchema.optional(),
-  /**
-   * A skill the member picked from the composer's + menu (KOBE-451, skill-request.ts): it must be
-   * in the run's effective skill set, checked at submit and again at run start.
-   */
-  skill: skillRequestFieldSchema.optional(),
-  /**
-   * The workspace file the member has open in the artifact column (KOBE-462, file-editor.ts):
-   * the server adds a bounded, fenced copy of it to this run's context, not to the message text.
-   */
-  viewing: messageViewingSchema.optional(),
-});
+export const submitMessageBodySchema = z
+  .strictObject({
+    /** Pi entry id to branch from (edit-and-regenerate); absent = the thread's leaf. */
+    parent_entry_id: idSchema.optional(),
+    content: z
+      .string()
+      .min(1)
+      .max(200_000)
+      .refine((s) => !s.includes("\u0000"), "U+0000"),
+    /**
+     * Ids from `POST /v1/uploads` (uploads.ts): unique, at most {@link UPLOAD_MAX_FILES_PER_MESSAGE}.
+     * Absent = no files. Limits on their total size are checked at submit (`message_too_large`).
+     */
+    file_ids: z
+      .array(uuidSchema)
+      .max(UPLOAD_MAX_FILES_PER_MESSAGE)
+      .refine((ids) => new Set(ids).size === ids.length, "duplicate file_ids")
+      .optional(),
+    /**
+     * `@file` mentions (KOBE-223, mentions.ts): the workspace paths the member picked. Only the
+     * `@file(...)` markers of these paths in `content` are rewritten to `/workspace/...`.
+     */
+    mentions: mentionsFieldSchema.optional(),
+    /**
+     * MCP Apps context chips the member sends with this message (KOBE-439, app-context.ts): at
+     * most one per app, each at most 8 KiB, handed to Pi fenced as untrusted data.
+     */
+    app_context: appContextFieldSchema.optional(),
+    /**
+     * A skill the member picked from the composer's + menu (KOBE-451, skill-request.ts): it must be
+     * in the run's effective skill set, checked at submit and again at run start.
+     */
+    skill: skillRequestFieldSchema.optional(),
+    /**
+     * The workspace file the member has open in the artifact column (KOBE-462, file-editor.ts):
+     * the server adds a bounded, fenced copy of it to this run's context, not to the message text.
+     */
+    viewing: messageViewingSchema.optional(),
+    /**
+     * Regenerate (KOBE-467, spec FE7): the prompt entry this message sends again. The server reuses
+     * the viewed-file path of the run that sent that prompt and reads the file's current content;
+     * nothing is added when that run viewed none or the file is gone. Not with `viewing`.
+     */
+    viewing_from_entry: idSchema.optional(),
+  })
+  .refine((b) => b.viewing === undefined || b.viewing_from_entry === undefined, {
+    message: "send viewing or viewing_from_entry, not both",
+    path: ["viewing_from_entry"],
+  });
 export type SubmitMessageBody = z.infer<typeof submitMessageBodySchema>;
 
 /** §6.1 response: `queued` is true when another run was active and this one waits. */

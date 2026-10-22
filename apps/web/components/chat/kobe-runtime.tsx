@@ -32,6 +32,7 @@ import type { ApiError } from "../../lib/api/client";
 import { NEW_DRAFT } from "../../lib/chat/attachments";
 import type { ChatSession } from "../../lib/chat/session";
 import type { ThreadController } from "../../lib/chat/thread-controller";
+import type { ViewingChoice } from "../../lib/chat/viewing";
 import {
   initialThreadState,
   isThreadRunning,
@@ -218,19 +219,38 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
     return sent;
   };
 
-  /** Edit and Regenerate: a new version beside the prompt, from its parent entry (`branchPoint`). */
+  /**
+   * Edit and Regenerate: a new version beside the prompt, from its parent entry (`branchPoint`).
+   * The viewed file (KOBE-467, FE7): an edit sends the file open now (none once its chip was
+   * removed), like a new message; a regenerate names the prompt, so the server reads the file
+   * that prompt's run viewed again.
+   */
   const branchAndSend = async (
     text: string,
     userMessageId: string | null | undefined,
     skill: string | undefined,
+    regenerate: boolean,
   ) => {
     const point = branchPoint(projectionRef.current, userMessageId);
     if (!point) {
       controller?.reportError(CANNOT_BRANCH, text);
       return;
     }
+    const viewing: ViewingChoice | undefined = regenerate
+      ? point.promptEntryId === undefined
+        ? undefined
+        : { fromEntry: point.promptEntryId }
+      : session.viewing.body();
     // KOBE-451 review MEDIUM-2: the skill goes again by name; the server re-checks it.
-    await controller?.send(text, point.parentEntryId, undefined, undefined, undefined, skill);
+    await controller?.send(
+      text,
+      point.parentEntryId,
+      undefined,
+      undefined,
+      undefined,
+      skill,
+      viewing,
+    );
   };
 
   const inTrash = state.summary?.deletedAt != null;
@@ -254,12 +274,12 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
       const key = editSkillKey(message.sourceId ?? "");
       const skill = session.skillPicks.get(key);
       session.skillPicks.clear(key);
-      await branchAndSend(textOf(message), message.sourceId, skill);
+      await branchAndSend(textOf(message), message.sourceId, skill, false);
     },
     // A regenerate sends the same text with the same skill.
     onReload: async (parentId) => {
       const point = branchPoint(projectionRef.current, parentId);
-      await branchAndSend(point?.text ?? "", parentId, point?.skill);
+      await branchAndSend(point?.text ?? "", parentId, point?.skill, true);
     },
     onCancel: async () => controller?.stop(),
     setMessages: () => {
