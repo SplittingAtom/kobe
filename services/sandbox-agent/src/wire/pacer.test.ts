@@ -91,4 +91,18 @@ describe("SendPacer", () => {
     for (let i = 0; i < 10; i++) p.send(`n${i}`);
     expect(out).toHaveLength(20);
   });
+
+  it("drops the queued frames of one tag (an ended run) and keeps the rest in order (KOBE-483)", () => {
+    const { p, out } = pacer();
+    for (let i = 0; i < 10; i++) p.send(`b${i}`); // the burst
+    p.send("a1", "run-a");
+    p.send("x1");
+    p.send("a2", "run-a");
+    p.send("b-run", "run-b");
+    expect(p.dropTagged("run-a")).toBe(2);
+    expect(p.queued).toBe(2);
+    vi.advanceTimersByTime(100);
+    expect(out.slice(10)).toEqual(["x1", "b-run"]);
+    expect(p.dropTagged("run-a")).toBe(0);
+  });
 });

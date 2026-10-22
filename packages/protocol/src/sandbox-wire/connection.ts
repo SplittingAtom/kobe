@@ -11,6 +11,9 @@
  *   Tokens are audience-bound: the Bifrost / MCP-proxy / egress tokens are different tokens and are
  *   rejected here. The server derives (team_id, user_id, sandbox_id) from the token;
  *   `hello.sandbox_id` must equal `sub` or the server closes with `unauthorized`.
+ * - Expiry: the server closes a connection with `unauthorized` once its token has expired (plus a
+ *   grace), unless the agent renewed it in band first: with hello capability `session_renew` it
+ *   sends `session.renew` carrying its fresh token (session-renew-frames.ts, KOBE-483).
  * - Subprotocol: `Sec-WebSocket-Protocol: kobe.sandbox.v1`. Text frames only, one JSON object per
  *   frame, at most {@link SANDBOX_MAX_FRAME_BYTES} UTF-8 bytes. Every frame has `v` and `type`.
  *   The cap is enforced at the WebSocket layer too (e.g. `ws` `maxPayload`, KOBE-23/24) so an

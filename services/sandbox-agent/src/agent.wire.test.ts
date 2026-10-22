@@ -36,7 +36,7 @@ describe("dial-out connection", () => {
       agent_version: "0.0.0-test",
       pi_version: "1.0.0",
       runs: [],
-      capabilities: ["app_cards", "trace_spans", "thread_context"],
+      capabilities: ["app_cards", "trace_spans", "session_renew", "thread_context"],
     });
   });
 
@@ -231,6 +231,19 @@ describe("delivery and resume", () => {
     h.server.terminate();
     await until(helloOn(3));
     expect(h.server.frames("hello")[2]?.runs).toEqual([]);
+  });
+
+  it("never names a run the server no longer lists, even when Pi emits for it while aborting (KOBE-483)", async () => {
+    h = await startHarness({ server: { ackRuns: () => [] } });
+    await h.server.command(runStart("status-hang"));
+    h.server.terminate();
+    await until(helloOn(2));
+    await until(async () => (await h.commandsLog()).some((c) => c.type === "abort"));
+    await new Promise((r) => setTimeout(r, 300)); // Pi's setStatus and settle have come and gone
+    const late = h.server.received.filter(
+      (r) => r.connection >= 2 && "run_id" in r.frame && r.frame.run_id === RUN,
+    );
+    expect(late.map((r) => r.frame.type)).toEqual([]);
   });
 
   it("gives up a run whose un-acked events exceed the outbox limit", async () => {

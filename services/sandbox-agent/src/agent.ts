@@ -14,6 +14,7 @@ import {
   CAPABILITY_SKILL_BUNDLES,
   CAPABILITY_THREAD_COMPACT,
   CAPABILITY_TRACE_SPANS,
+  CAPABILITY_SESSION_RENEW,
   CAPABILITY_SKILL_EVAL,
   CAPABILITY_WORKSPACE_MOVES,
   CAPABILITY_THREAD_CONTEXT,
@@ -254,12 +255,16 @@ export class Agent {
             beforeRun: (frame: RunStartFrame) => this.#pullWorkspace(frame),
           }),
       hooks: {
-        runStarted: (runId, threadId) => this.#outbox.open(runId, threadId),
+        runStarted: (runId, threadId) => {
+          this.#wire.startRun(runId);
+          this.#outbox.open(runId, threadId);
+        },
         piEvent: (runId, threadId, event) => {
           this.#traces.onPiEvent(runId, event);
           this.#emitPiEvent(runId, threadId, event);
         },
         runEnded: (runId) => {
+          this.#wire.endRun(runId); // frames of it still queued or yet to come are dropped (KOBE-483)
           this.#traces.runEnded(runId);
           this.#outbox.finish(runId);
           this.#broker.failRun(runId, "run ended");
@@ -511,6 +516,8 @@ export class Agent {
       ...(this.#deps.models === undefined ? [] : [CAPABILITY_THREAD_COMPACT]),
       // Run spans over this wire (KOBE-274); sent only for runs the server gave a trace context.
       CAPABILITY_TRACE_SPANS,
+      // Fresh session tokens handed to the live connection, so expiry never drops it (KOBE-483).
+      CAPABILITY_SESSION_RENEW,
       // Server moves replayed as local renames (KOBE-304).
       ...(this.#deps.workspace?.movedOnServer === undefined ? [] : [CAPABILITY_WORKSPACE_MOVES]),
       // The latest model call's context for its owner (KOBE-470): read from Pi's capture or the
@@ -540,7 +547,9 @@ export class Agent {
     for (const runId of this.#outbox.runIds()) {
       const run = listed.get(runId);
       if (run === undefined) {
-        // The server no longer leases this run to us (connection.ts): abort and forget it.
+        // The server no longer leases this run to us (connection.ts): abort and forget it. Nothing
+        // of it may go out on this connection, not even what Pi emits while aborting (KOBE-483).
+        this.#wire.endRun(runId);
         this.#threads.abortRun(runId);
         this.#outbox.drop(runId);
         continue;
@@ -852,6 +861,7 @@ export class Agent {
    */
   #abandonRun(runId: string): void {
     this.#deps.logger.warn({ run_id: runId }, "run cannot be delivered; abandoning it");
+    this.#wire.endRun(runId);
     this.#threads.abortRun(runId);
     this.#outbox.drop(runId);
     this.#wire.reconnect();

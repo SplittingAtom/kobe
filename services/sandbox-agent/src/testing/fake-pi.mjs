@@ -3,6 +3,7 @@
 // text, because the agent gives Pi an allow-listed environment only:
 //   "say:<text>"   stream <text> as two text_delta updates, then settle
 //   "hang"         start a run and wait for abort
+//   "status-hang"  as "hang", but on abort first emits a setStatus UI request (a late frame, KOBE-483)
 //   "steps"        emit turn_end every 50 ms until aborted
 //   "late-steps"   answer the prompt, emit agent_start only 200 ms later, then as "steps"
 //   "tool:<name>"  ask kobe-policy over fd 3 and report the decision as a custom event
@@ -86,6 +87,7 @@ appendFileSync(
 
 let streaming = false;
 let aborted = false;
+let statusOnAbort = false;
 let compacting;
 const BASE_PATHS = {
   "openai-completions": "/v1",
@@ -191,7 +193,8 @@ function runPrompt(message) {
       out({ type: "turn_end", message: { role: "assistant" } });
       settle();
     }, 10);
-  } else if (message === "hang") {
+  } else if (message === "hang" || message === "status-hang") {
+    statusOnAbort = message === "status-hang";
     start();
   } else if (message === "steps" || message === "late-steps") {
     const steps = () => {
@@ -405,6 +408,13 @@ function handle(cmd) {
       }
       if (streaming && !aborted) {
         aborted = true;
+        if (statusOnAbort) {
+          statusOnAbort = false;
+          out({ type: "extension_ui_request", id: "st-1", method: "setStatus", statusKey: "k" });
+          // Pi settles a moment later: the agent still has the run when the request arrives.
+          setTimeout(settle, 100);
+          return respond(cmd, { success: true });
+        }
         settle();
       }
       return respond(cmd, { success: true });

@@ -21,7 +21,13 @@ import type { ProjectMounts } from "../projects/mounts.js";
 import type { ProposeDeps } from "../projects/proposals.js";
 import type { SkillDraftTool } from "../skills/drafts/tool.js";
 import type { PolicyCheckDeps } from "./policy-check.js";
-import type { RunLifecycleHooks, SandboxLiveness, SandboxTarget, UiBroker } from "./types.js";
+import type {
+  RunLifecycleHooks,
+  SandboxLiveness,
+  SandboxTarget,
+  SessionTokenVerifier,
+  UiBroker,
+} from "./types.js";
 
 /** In-process counters (no metrics backend yet); logged and exposed by `SandboxWire.metrics()`. */
 export interface WireMetrics {
@@ -119,6 +125,8 @@ export interface WireContext {
   readonly ui: UiBroker;
   readonly hooks: RunLifecycleHooks;
   readonly liveness: SandboxLiveness;
+  /** Verifies a `session.renew` token like an upgrade token (KOBE-483). */
+  readonly verifyToken: SessionTokenVerifier;
   readonly metrics: WireMetrics;
   readonly log: Logger;
   /** Records `sandbox.lease_violation` (throttled per sandbox and violation). */
