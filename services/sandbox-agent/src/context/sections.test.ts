@@ -6,7 +6,7 @@ import {
   sectionsOf,
 } from "./sections.js";
 import { splitForcedPrompt, splitRenderedPrompt } from "./system-prompt.js";
-import { viewingContextText } from "../memory/viewing-context.js";
+import { VIEWING_HEADER, viewingContextText } from "../memory/viewing-context.js";
 import { memoryContextText } from "../memory/context.js";
 
 /** Pi 1.0.0's rendered prompt: preamble, then tagged sections joined by blank lines. */
@@ -72,6 +72,44 @@ describe("system prompt sections (KOBE-470)", () => {
     const sections = splitForcedPrompt(forced, { memory: "other", project: "", viewing: "" });
     expect(kinds(sections).slice(-2)).toEqual(["memory:Saved memory", "viewing_file:Viewed file"]);
     expect(sections.at(-2)?.text).toBe(memory);
+  });
+
+  describe("at most one viewed-file section (KOBE-473)", () => {
+    const viewingOf = (file: string, content: string) =>
+      viewingContextText(
+        { path: file, sha256: "b".repeat(64), size: content.length, content, truncated: false },
+        "0011223344556677",
+      ) as string;
+    const viewings = <T extends { kind: string }>(sections: T[]) =>
+      sections.filter((s) => s.kind === "viewing_file");
+    // A file that quotes the section's own header, as a doc about Kobe might.
+    const quoting = viewingOf("a.md", `# Notes\n\n${VIEWING_HEADER}\nquoted\n`);
+
+    it("splits a file that quotes the viewed-file header into one section", () => {
+      const forced = `${RENDERED}\n\n${quoting}`;
+      for (const parts of [{ memory: "", project: "", viewing: quoting }, undefined]) {
+        const sections = splitForcedPrompt(forced, parts);
+        expect(viewings(sections)).toEqual([
+          { kind: "viewing_file", label: "Viewed file", text: quoting },
+        ]);
+      }
+    });
+
+    it("splits an older call by its own file when the next run's parts are already written", () => {
+      const next = viewingOf("b.md", "beta");
+      const sections = splitForcedPrompt(`${RENDERED}\n\n${quoting}`, {
+        memory: "",
+        project: "",
+        viewing: next,
+      });
+      expect(viewings(sections).map((s) => s.text)).toEqual([quoting]);
+    });
+
+    it("has none for a call without a viewed file", () => {
+      const parts = { memory: "", project: "", viewing: quoting };
+      expect(viewings(splitForcedPrompt(`${RENDERED}\n\n${memory}`, parts))).toEqual([]);
+      expect(viewings(splitRenderedPrompt(RENDERED))).toEqual([]);
+    });
   });
 });
 

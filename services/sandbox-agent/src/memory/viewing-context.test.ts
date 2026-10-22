@@ -1,6 +1,10 @@
 import type { RunViewingContext } from "@kobe/protocol";
 import { describe, expect, it } from "vitest";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { memoryRunFileContent } from "./context.js";
+import { MemoryContextFile } from "./context-file.js";
 import { VIEWING_HEADER, viewingBegin, viewingContextText, viewingEnd } from "./viewing-context.js";
 
 const viewing = (over: Partial<RunViewingContext> = {}): RunViewingContext => ({
@@ -47,5 +51,26 @@ describe("viewingContextText (KOBE-462)", () => {
     const content = memoryRunFileContent(undefined, undefined, undefined, viewing());
     expect(content.tools).toBe(false);
     expect(content.viewing).toContain(VIEWING_HEADER);
+  });
+
+  it("each run's file holds only that run's viewed file, or none (KOBE-473)", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "kobe-viewing-"));
+    try {
+      const file = new MemoryContextFile(path.join(dir, "memory-context.json"));
+      const runFile = async (v?: RunViewingContext) => {
+        await file.write(memoryRunFileContent(undefined, undefined, undefined, v));
+        return (JSON.parse(await readFile(file.path, "utf8")) as { viewing: string }).viewing;
+      };
+      const a = await runFile(viewing({ path: "a.md", content: "alpha text" }));
+      expect(a).toContain("alpha text");
+      const b = await runFile(viewing({ path: "b.md", content: "beta text" }));
+      expect(b.split(VIEWING_HEADER)).toHaveLength(2);
+      expect(b).toContain("beta text");
+      expect(b).not.toMatch(/alpha|a\.md/);
+      expect(await runFile(undefined)).toBe("");
+      expect(file.written?.viewing).toBe("");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
