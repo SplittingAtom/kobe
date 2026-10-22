@@ -67,6 +67,12 @@ export {
 export { quoteIdent } from "./roles.js";
 export { listTeamInvitationsFor, type PendingTeamInvitation } from "./team-invitations.js";
 export { scanTeams, type ScannedTeam } from "./team-scan.js";
+export {
+  listTeamChoices,
+  readLastTeam,
+  rememberLastTeam,
+  type TeamChoice,
+} from "./team-choices.js";
 export * from "./schema/index.js";
 export {
   BREAK_GLASS_ACTOR_SETTING,

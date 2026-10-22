@@ -7,6 +7,8 @@ export interface ScannedTeam {
   readonly id: string;
   readonly slug: string;
   readonly name: string;
+  /** The Site's Registry team (KOBE-330): a dedicated team, not a working team. */
+  readonly registry: boolean;
 }
 
 /**
@@ -28,7 +30,7 @@ export async function scanTeams<T>(
       throw new Error(`${caller}: cannot run inside a team transaction`);
     }
     const all = await tx
-      .select({ id: teams.id, slug: teams.slug, name: teams.name })
+      .select({ id: teams.id, slug: teams.slug, name: teams.name, registry: teams.registry })
       .from(teams)
       .orderBy(asc(teams.name), asc(teams.slug));
     const results: T[] = [];
