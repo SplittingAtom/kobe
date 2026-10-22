@@ -20,10 +20,15 @@
   `/` dropped, not an existing file or folder (also not one differing only in case), and the
   package path rules for a file inside it (no `..`, empty or `.` segments, absolute paths, `\`,
   control/bidi characters, reserved names spelled exactly). Nested names (`a/b`) allowed.
-- No server, route or migration change.
+- **Unsaved new file:** once a path or contents is typed, Cancel, another tree entry or another
+  folder's "Create a file here" ask "Discard the new file?" first; closing the Skills panel and
+  the browser tab ask too. Switching Define/Test/Eval keeps it (tabs stay mounted).
+- No server, route or migration change; a DB test pins the server's own refusal of absolute,
+  empty-segment, backslash and smuggled `..%2F` paths (URL dot segments resolve out of `/files/`: 404).
 
 ## Verification
 
 - Unit: `apps/web/lib/skills/paths.test.ts` (folder rules), `draft-editor.test.tsx` (create,
-  cancel, path refusal, server size refusal, folder validation, file in a new folder).
+  cancel, path refusal, server size refusal, folder validation, file in a new folder, discard
+  guard); `services/server/src/skill-drafts.db.test.ts` (KOBE-478 path refusals).
 - Browser: `e2e/browser/tests/skills-workbench.spec.ts` "Create file and New folder ..." (gate1).

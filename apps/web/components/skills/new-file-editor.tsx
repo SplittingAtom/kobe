@@ -1,16 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import type { ApiError } from "../../lib/api/client";
 import { newPathProblem } from "../../lib/skills/paths";
-import { Button, Field, Textarea, TextInput } from "../ui/console";
+import { Button, Field, Textarea, TextInput, useUnsavedChanges } from "../ui/console";
 import { ErrorNotice } from "../admin/error-notice";
 
 /**
  * Create file (KOBE-478): a new text file's path (folders included) and contents in the editor
  * rail, like a file's own edit view. Save checks the path with the package rules, then writes it
  * as a draft file the way Add file and autosave do, so the server's limits, lint and the scan
- * apply as to any other file. Nothing is written before Save; Cancel drops it.
+ * apply as to any other file. Nothing is written before Save. Once something is typed it reports
+ * itself dirty (`onDirtyChange`): the page asks before Cancel or another file drops it, the
+ * Skills panel asks before closing, and closing the browser tab asks too.
  */
 export function NewFileEditor({
   initialPath,
@@ -18,6 +20,7 @@ export function NewFileEditor({
   onSave,
   onSaved,
   onCancel,
+  onDirtyChange,
 }: {
   /** The path field's start: a folder's `name/`, or empty. */
   readonly initialPath: string;
@@ -25,13 +28,26 @@ export function NewFileEditor({
   readonly paths: readonly string[];
   readonly onSave: (path: string, text: string) => Promise<ApiError | null>;
   readonly onSaved: (path: string) => void;
-  readonly onCancel: () => void;
+  readonly onCancel: (e: MouseEvent<HTMLButtonElement>) => void;
+  readonly onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [path, setPath] = useState(initialPath);
   const [text, setText] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [failure, setFailure] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
+  const dirty = text !== "" || path !== initialPath;
+  useUnsavedChanges(dirty);
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
   return (
     <form
       noValidate

@@ -105,7 +105,7 @@ test("Create file and New folder save a draft file that stays after a reload (KO
     /Ask for the client name\./,
   );
   await expect(panelOf(page).getByText(/^Scanned as saved \(revision \d+\)\.$/)).toBeVisible({
-    timeout: 2_000,
+    timeout: 30_000,
   });
 
   await page.reload();

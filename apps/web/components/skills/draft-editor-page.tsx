@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { SkillSaved } from "../../lib/admin/api/team/skills";
 import type { ApiError } from "../../lib/api/client";
 import { deleteDraft, type Destination } from "../../lib/skills/drafts-api";
@@ -92,6 +92,10 @@ function Editor({ editor, tab }: { readonly editor: DraftEditor; readonly tab: D
   const [savedSeq, setSavedSeq] = useState(0);
   // Create file's starting path while it is open (KOBE-478), and folders added in the tree.
   const [creating, setCreating] = useState<string | null>(null);
+  const newFileDirty = useRef(false);
+  const onNewFileDirty = useCallback((dirty: boolean) => {
+    newFileDirty.current = dirty;
+  }, []);
   const [folders, setFolders] = useState<readonly string[]>([]);
 
   const scripts =
@@ -116,9 +120,27 @@ function Editor({ editor, tab }: { readonly editor: DraftEditor; readonly tab: D
     setSelected(path);
     setProblem(null);
   };
-  const select = (path: string) => {
+  /** True when nothing typed in Create file would be lost, or the author agrees to drop it. */
+  const mayLeaveNewFile = async (trigger?: EventTarget | null) =>
+    creating === null ||
+    !newFileDirty.current ||
+    confirm(
+      {
+        title: "Discard the new file?",
+        description: "It isn't saved: what you typed will be lost.",
+        confirmLabel: "Discard",
+        cancelLabel: "Keep editing",
+      },
+      trigger,
+    );
+  const select = async (path: string) => {
+    if (!(await mayLeaveNewFile())) return;
     show(path);
     void editor.open(path).then(setProblem);
+  };
+  const startNewFile = async (folder: string) => {
+    if (!(await mayLeaveNewFile())) return;
+    setCreating(folder ? `${folder}/` : "");
   };
 
   const saved = (data: SkillSaved, destination: Destination) => {
@@ -187,9 +209,9 @@ function Editor({ editor, tab }: { readonly editor: DraftEditor; readonly tab: D
                   files={files}
                   folders={emptyFolders}
                   selected={selected}
-                  onSelect={select}
+                  onSelect={(path) => void select(path)}
                   onAdd={editor.addFile}
-                  onCreate={(folder) => setCreating(folder ? `${folder}/` : "")}
+                  onCreate={(folder) => void startNewFile(folder)}
                   onAddFolder={(folder) => setFolders((fs) => [...fs, folder])}
                 />
               }
@@ -203,7 +225,10 @@ function Editor({ editor, tab }: { readonly editor: DraftEditor; readonly tab: D
                   paths={paths}
                   onSave={editor.addFile}
                   onSaved={show}
-                  onCancel={() => setCreating(null)}
+                  onDirtyChange={onNewFileDirty}
+                  onCancel={async (e) => {
+                    if (await mayLeaveNewFile(eventTrigger(e))) setCreating(null);
+                  }}
                 />
               )}
               <LintPanel items={lint} />

@@ -458,7 +458,8 @@ describe("Workbench editor: Create file and New folder (KOBE-478)", () => {
     await userEvent.click(tree.getByRole("button", { name: "Create file" }));
     await userEvent.type(screen.getByLabelText("New file path"), "notes.md");
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByLabelText("New file path")).toBeNull();
+    await answerConfirm("Discard the new file?", "Discard");
+    await waitFor(() => expect(screen.queryByLabelText("New file path")).toBeNull());
     expect(puts(calls)).toHaveLength(0);
 
     await userEvent.click(tree.getByRole("button", { name: "Create file" }));
@@ -537,5 +538,40 @@ describe("Workbench editor: Create file and New folder (KOBE-478)", () => {
     await screen.findByLabelText("Contents of templates/forms/a.md");
     expect(tree.getByRole("button", { name: "templates/forms/a.md" })).toBeDefined();
     expect(tree.queryByText("Empty until a file is saved in it.")).toBeNull();
+  });
+
+  it("asks before dropping typed content (Cancel, tree, closing the tab); an untouched one closes at once", async () => {
+    const calls = await opened();
+    const tree = within(screen.getByRole("navigation", { name: "Files" }));
+    // Untouched: Cancel closes without asking.
+    await userEvent.click(tree.getByRole("button", { name: "Create file" }));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByLabelText("New file path")).toBeNull();
+
+    await userEvent.click(tree.getByRole("button", { name: "Create file" }));
+    await userEvent.type(screen.getByLabelText("New file path"), "notes.md");
+    fireEvent.change(screen.getByLabelText("New file contents"), { target: { value: "Keep me." } });
+    // Closing the browser tab asks too.
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await answerConfirm("Discard the new file?", "Keep editing");
+    expect((screen.getByLabelText("New file contents") as HTMLTextAreaElement).value).toBe(
+      "Keep me.",
+    );
+    await userEvent.click(tree.getByRole("button", { name: "references/guide.md" }));
+    await answerConfirm("Discard the new file?", "Keep editing");
+    expect(screen.getByLabelText("New file contents")).toBeDefined();
+    await userEvent.click(tree.getByRole("button", { name: "references/guide.md" }));
+    await answerConfirm("Discard the new file?", "Discard");
+    await screen.findByLabelText("Contents of references/guide.md");
+    expect(screen.queryByLabelText("New file contents")).toBeNull();
+    expect(puts(calls)).toHaveLength(0);
+    const after = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
   });
 });
