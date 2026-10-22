@@ -3,6 +3,7 @@ import {
   connectorGrants,
   connectors,
   eq,
+  isNull,
   sql,
   teamConnectors,
   withTeam,
@@ -11,7 +12,6 @@ import {
   SYSTEM_ACTOR,
   teamMembers,
   teams,
-  TEAM_ID_SETTING,
   users,
   type ConnectorGrantKind,
   type KobeTx,
@@ -100,12 +100,18 @@ export interface Subject {
   readonly connectorId: string;
 }
 
-/** The connector, if the team enabled it and it is active. */
+/**
+ * The connector, if the team enabled it and it is active and not removed. `lock` takes a share lock
+ * on the connector row until the caller's transaction ends (storing a grant): a removal or URL
+ * change, which holds the row for update while it drops the grants, then either runs first (and
+ * this sees it removed) or waits until the grant is stored (and drops it) (KOBE-454).
+ */
 export async function enabledConnector(
   tx: Parameters<Parameters<typeof withTeam>[2]>[0],
   s: Subject,
+  lock = false,
 ) {
-  const [row] = await tx
+  const query = tx
     .select({
       name: connectors.name,
       url: connectors.url,
@@ -115,7 +121,14 @@ export async function enabledConnector(
     })
     .from(teamConnectors)
     .innerJoin(connectors, eq(connectors.id, teamConnectors.connectorId))
-    .where(and(eq(teamConnectors.teamId, s.teamId), eq(teamConnectors.connectorId, s.connectorId)));
+    .where(
+      and(
+        eq(teamConnectors.teamId, s.teamId),
+        eq(teamConnectors.connectorId, s.connectorId),
+        isNull(connectors.deletedAt),
+      ),
+    );
+  const [row] = lock ? await query.for("share", { of: connectors }) : await query;
   return row && row.status === "active" ? row : undefined;
 }
 
@@ -153,7 +166,7 @@ export async function storeGrant(
     expiresAt: material.expiresAt ?? null,
   };
   return withTeam(db, subject.teamId, async (tx): Promise<PutOutcome> => {
-    const connector = await enabledConnector(tx, subject);
+    const connector = await enabledConnector(tx, subject, true);
     if (!connector) return { ok: false, failure: "not_available" };
     if (connector.authKind !== material.kind) return { ok: false, failure: "not_api_key" };
     if (connector.credentialSource === "site") return { ok: false, failure: "provided_by_site" };
@@ -622,32 +635,41 @@ export async function adminProbeKey(
 }
 
 /**
- * Drops every user's grants for a connector, in every team, inside the caller's transaction. Used
- * when the connector's URL changes: a credential issued for one server must never reach another,
- * and users reconnect or re-enter their key. Audits one `mcp.grant.removed` per grant.
+ * Drops every user's grants for a connector, in every team, one `withTeam()` transaction per team
+ * (RLS: no query sees two teams). Used when the connector is removed (KOBE-454) or its URL or
+ * credential mode changes: a credential issued for one server must never reach another, and users
+ * reconnect or re-enter their key. Audits one `mcp.grant.removed` per grant, in its team.
+ *
+ * The caller holds the connector row `FOR UPDATE` in its own (still open) transaction, so no grant
+ * can be stored meanwhile ({@link storeGrant} takes a share lock), and must not have written an
+ * audit row yet: that transaction would hold the audit chain lock these team transactions need.
+ * Each team's delete commits on its own; if the caller then rolls back, the grants stay deleted
+ * (users re-enter them), never the other way round.
  */
 export async function dropConnectorGrants(
-  tx: KobeTx,
+  db: KobeDb,
   connectorId: string,
   name: string,
 ): Promise<number> {
-  const all = await tx.select({ id: teams.id }).from(teams);
+  const all = await db.select({ id: teams.id }).from(teams);
   let dropped = 0;
   for (const team of all) {
-    await tx.execute(sql`SELECT set_config(${TEAM_ID_SETTING}, ${team.id}, true)`);
-    const removed = await tx
-      .delete(connectorGrants)
-      .where(and(eq(connectorGrants.teamId, team.id), eq(connectorGrants.connectorId, connectorId)))
-      .returning({ userId: connectorGrants.userId });
-    for (const _ of removed) {
-      await recordAudit(tx, {
-        action: "mcp.grant.removed",
-        teamId: team.id,
-        target: { connectorId, name },
-      });
-    }
-    dropped += removed.length;
+    dropped += await withTeam(db, team.id, async (tx) => {
+      const removed = await tx
+        .delete(connectorGrants)
+        .where(
+          and(eq(connectorGrants.teamId, team.id), eq(connectorGrants.connectorId, connectorId)),
+        )
+        .returning({ userId: connectorGrants.userId });
+      for (const _ of removed) {
+        await recordAudit(tx, {
+          action: "mcp.grant.removed",
+          teamId: team.id,
+          target: { connectorId, name },
+        });
+      }
+      return removed.length;
+    });
   }
-  await tx.execute(sql`SELECT set_config(${TEAM_ID_SETTING}, '', true)`);
   return dropped;
 }

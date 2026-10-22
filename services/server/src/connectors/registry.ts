@@ -238,8 +238,9 @@ export async function updateConnector(
       changed.push("url");
       // Its MCP Apps templates too (KOBE-433): nothing of the old server is ever rendered.
       await dropTemplates(tx, id);
-      // Credentials were issued for the old server: drop them (users reconnect), same transaction.
-      await dropConnectorGrants(tx, id, current.name);
+      // Credentials were issued for the old server: drop them (users reconnect). Members' grants
+      // go first, before any audit row of this transaction (see dropConnectorGrants).
+      await dropConnectorGrants(db, id, current.name);
       await dropSiteKey(tx, { id, name: current.name }, "url_changed");
     }
     if (input.iconUrl !== undefined && input.iconUrl !== current.iconUrl) {
@@ -255,8 +256,10 @@ export async function updateConnector(
       set.credentialSource = source;
       changed.push("credentialSource");
       // Never both (KOBE-303): a connector uses members' own keys or the site key.
-      if (source === "site") await dropConnectorGrants(tx, id, current.name);
-      else await dropSiteKey(tx, { id, name: current.name }, "mode_changed");
+      // A URL change above already dropped the grants (and wrote an audit row since).
+      if (source === "site") {
+        if (!changed.includes("url")) await dropConnectorGrants(db, id, current.name);
+      } else await dropSiteKey(tx, { id, name: current.name }, "mode_changed");
     }
     if (input.status !== undefined && input.status !== current.status) {
       set.status = input.status;
@@ -343,8 +346,10 @@ export async function removeConnector(db: KobeDb, id: string): Promise<RemovalRe
       .update(connectors)
       .set({ status: "disabled", deletedAt: sql`now()`, updatedAt: sql`now()` })
       .where(eq(connectors.id, id));
+    // Grants first: they commit in their teams' own transactions while this one holds the row
+    // and has written no audit row yet (it would hold the audit chain lock they need).
+    const grants = await dropConnectorGrants(db, id, row.name);
     const siteKeyDropped = await dropSiteKey(tx, { id, name: row.name }, "connector_removed");
-    const grants = await dropConnectorGrants(tx, id, row.name);
     await recordAudit(tx, {
       action: "mcp.connector.removed",
       target: {

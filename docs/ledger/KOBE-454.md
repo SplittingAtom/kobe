@@ -36,6 +36,15 @@ transaction, under the row lock. Already removed connectors are cleaned by a cus
   Idempotent. Not audited row by row (a migration has no actor; the counts are visible in the
   database before the upgrade if needed).
 
+- **Review fixes (Opus review):** (1) storing a grant now takes `FOR SHARE` on the connector row
+  in its transaction and requires `status=active` and `deleted_at IS NULL`, so a key saved during
+  a removal is refused, not left behind (race test). (2) `dropConnectorGrants` no longer calls
+  `set_config` itself: it walks the teams with one `withTeam()` transaction each (removal, URL
+  and mode change). The caller still holds the connector row `FOR UPDATE` (no new grants), and
+  calls it before writing any audit row (the audit chain lock would block the team
+  transactions). So "same transaction" (ac-1) becomes "under the removal's row lock, committed just
+  before it": if the removal then fails, the grants stay deleted, the safe direction.
+
 ## Open questions (for Chris or the coordinator)
 
 - Revoke OAuth tokens at the provider on removal (RFC 7009) as a follow-up ticket?
