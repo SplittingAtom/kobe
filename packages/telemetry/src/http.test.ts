@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { Hono } from "hono";
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
 import { afterEach, describe, expect, it } from "vitest";
-import { honoTracing } from "./hono.js";
+import { honoTracing, skipRequestTrace } from "./hono.js";
 import { initTelemetry, type Telemetry } from "./init.js";
 import { traceNodeRequest } from "./node-http.js";
 import { runParentContext } from "./run-trace.js";
@@ -78,6 +78,45 @@ describe("honoTracing for sandbox-reachable listeners", () => {
     const [span] = exporter.getFinishedSpans();
     expect(span?.spanContext().traceId).not.toBe("0af7651916cd43dd8448eb211c80319c");
     expect(span?.parentSpanContext).toBeUndefined();
+  });
+});
+
+describe("skipRequestTrace (KOBE-417)", () => {
+  const app = new Hono();
+  app.use("*", honoTracing({ joinCallerTrace: false }));
+  app.post("/poll", (c) => {
+    if (c.req.query("routine") === "1") skipRequestTrace(c);
+    return c.json({ code: "not_yet" }, 409);
+  });
+  app.post("/poll-then-fail", (c) => {
+    skipRequestTrace(c);
+    throw new Error("x");
+  });
+
+  it("exports no span for a request the handler marked routine", async () => {
+    const exporter = start(false);
+    const res = await app.request("/poll?routine=1", { method: "POST" });
+    expect(res.status).toBe(409);
+    expect(exporter.getFinishedSpans()).toHaveLength(0);
+  });
+
+  it("keeps the span for the same route when not marked", async () => {
+    const exporter = start(false);
+    await app.request("/poll", { method: "POST" });
+    expect(exporter.getFinishedSpans().map((s) => s.name)).toEqual(["POST /poll"]);
+  });
+
+  it("keeps server errors traced even when marked", async () => {
+    const exporter = start(false);
+    await app.request("/poll-then-fail", { method: "POST" });
+    expect(exporter.getFinishedSpans()[0]?.status.code).toBe(2);
+  });
+
+  it("is a no-op with tracing off", async () => {
+    await telemetry?.shutdown();
+    telemetry = undefined;
+    const res = await app.request("/poll?routine=1", { method: "POST" });
+    expect(res.status).toBe(409);
   });
 });
 

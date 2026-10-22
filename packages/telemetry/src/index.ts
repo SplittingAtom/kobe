@@ -34,7 +34,7 @@ export {
   type SpanIds,
   type SpanOptions,
 } from "./spans.js";
-export { honoTracing, type HonoTracingOptions } from "./hono.js";
+export { honoTracing, skipRequestTrace, type HonoTracingOptions } from "./hono.js";
 export { traceNodeRequest, type RequestSpan } from "./node-http.js";
 export { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
 export type { Attributes, Context, Span } from "@opentelemetry/api";
