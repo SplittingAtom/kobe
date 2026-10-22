@@ -17,6 +17,13 @@ import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
 import type { SandboxAuthenticator, SandboxCaller } from "./auth.js";
 import { workspaceBlobKey } from "./keys.js";
 import { movesSince } from "./move-journal.js";
+import {
+  discardOrphanedResend,
+  healBlob,
+  lostBlobSize,
+  lostBlobs,
+  reportMissingContent,
+} from "./lost.js";
 import { IntegrityError, verifyingStream, type ObjectStore } from "./object-store.js";
 import { resolveLimits, type QuotaCheck, type WorkspaceLimits } from "./quota.js";
 import {
@@ -358,6 +365,64 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
     return c.json({ missing });
   });
 
+  app.get("/blobs/lost", async (c) => {
+    const caller = c.get("caller");
+    const limited = metaAllowed(caller, c);
+    if (limited) return limited;
+    const lost = await tx(caller, "other", (t) => lostBlobs(t, caller));
+    return c.json({ lost });
+  });
+
+  /**
+   * Streams the verified bytes into the content's key. Undefined when stored; otherwise the error
+   * response (a mismatch stores nothing).
+   */
+  const storeVerified = async (
+    c: Context,
+    caller: SandboxCaller,
+    sha256: string,
+    size: number,
+  ): Promise<Response | undefined> => {
+    const raw = c.req.raw.body;
+    const source = raw ? Readable.fromWeb(raw as never) : Readable.from([]);
+    const verified = source.pipe(verifyingStream(sha256, size));
+    source.once("error", (err) => verified.destroy(err));
+    try {
+      await objects.put(workspaceBlobKey(prefix, caller, sha256), verified, size);
+      return undefined;
+    } catch (err) {
+      if (err instanceof IntegrityError || verified.errored instanceof IntegrityError) {
+        auditIntegrity(caller);
+        return error(c, 422, "hash_mismatch", "The bytes did not match their SHA-256 and size.");
+      }
+      log.error({ err, sandbox_id: caller.sandboxId }, "workspace blob upload failed");
+      return error(c, 502, "storage_unavailable", "Object storage is unavailable; retry.");
+    }
+  };
+
+  /**
+   * KOBE-475: content the workspace already holds (and counts) whose object was lost. Its bytes
+   * are stored again — verified against the hash and the row's size — with no reservation (the
+   * blob totals already include it), and the mark is cleared.
+   */
+  const resend = async (c: Context, caller: SandboxCaller, sha256: string, size: number) => {
+    const failed = await storeVerified(c, caller, sha256, size);
+    if (failed) return failed;
+    const outcome = await finishTx(caller, (t) => healBlob(t, caller, sha256, size));
+    if (outcome === "deleting" || outcome === "gone") {
+      // Collected while the bytes were stored: never leave an object no row accounts for.
+      await discardOrphanedResend(db, objects, caller, prefix, sha256, size).catch((err: unknown) =>
+        log.error({ err, sandbox_id: caller.sandboxId }, "could not discard a resend"),
+      );
+      c.header("Retry-After", "5");
+      return error(c, 409, "retry_later", "This content is being collected; upload it again.");
+    }
+    if (outcome === "healed") {
+      log.info({ sandbox_id: caller.sandboxId }, "workspace content restored from the sandbox");
+    }
+    return c.json({ sha256, size }, outcome === "healed" ? 201 : 200);
+  };
+
   app.put("/blobs/:sha256", async (c) => {
     const caller = c.get("caller");
     const sha = sha256HexSchema.safeParse(c.req.param("sha256"));
@@ -376,10 +441,17 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
     try {
       // Reserve the bytes (and one blob) before accepting any: concurrent uploads can't overshoot.
       const state = await tx(caller, "other", async (t) => {
+        const lostSize = await lostBlobSize(t, caller, sha.data);
+        if (lostSize !== undefined) return lostSize === size ? "lost" : "lost_mismatch";
         const held = await blobState(t, caller, sha.data);
         if (held !== "absent") return held;
         return (await reserveUpload(t, caller, size, limits)) ? "reserved" : "over_quota";
       });
+      if (state === "lost") return await resend(c, caller, sha.data, size);
+      if (state === "lost_mismatch") {
+        auditIntegrity(caller);
+        return error(c, 422, "hash_mismatch", "The bytes did not match their SHA-256 and size.");
+      }
       if (state === "held") return c.json({ sha256: sha.data, size }, 200);
       if (state === "deleting") {
         c.header("Retry-After", "5");
@@ -395,28 +467,13 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
       let outcome: "added" | "exists" | "deleting" | "failed" = "failed";
       let finished = false;
       try {
-        const raw = c.req.raw.body;
-        const source = raw ? Readable.fromWeb(raw as never) : Readable.from([]);
-        const verified = source.pipe(verifyingStream(sha.data, size));
-        source.once("error", (err) => verified.destroy(err));
-        try {
-          await objects.put(workspaceBlobKey(prefix, caller, sha.data), verified, size);
-        } catch (err) {
-          if (err instanceof IntegrityError || verified.errored instanceof IntegrityError) {
-            auditIntegrity(caller);
-            return error(
-              c,
-              422,
-              "hash_mismatch",
-              "The bytes did not match their SHA-256 and size.",
-            );
-          }
-          log.error({ err, sandbox_id: caller.sandboxId }, "workspace blob upload failed");
-          return error(c, 502, "storage_unavailable", "Object storage is unavailable; retry.");
-        }
+        const failed = await storeVerified(c, caller, sha.data, size);
+        if (failed) return failed;
         outcome = await finishTx(caller, async (t) => {
           const recorded = await recordBlob(t, caller, sha.data, size);
           await finishUpload(t, caller, size, recorded === "added");
+          // Marked lost while this upload ran: these verified bytes are that content.
+          if (recorded === "exists") await healBlob(t, caller, sha.data, size);
           return recorded;
         });
         finished = true;
@@ -475,7 +532,9 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
     if (!object) {
       release();
       log.error({ sandbox_id: caller.sandboxId, rev: entry.rev }, "workspace object missing");
-      return error(c, 502, "storage_unavailable", "The file's content is missing in storage.");
+      // Listed for a sandbox that still holds it to upload again (KOBE-475).
+      await reportMissingContent(db, caller, entry, prefix, log);
+      return error(c, 502, "content_missing", "The file's content is missing in storage.");
     }
     // The slot is held until the body has been read out of storage (backpressure-bound).
     object.body.once("close", release);

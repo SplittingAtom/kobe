@@ -3,7 +3,8 @@
 /**
  * A workspace file as a tab of the artifact column (KOBE-268), from the synced
  * workspace (so it works while the sandbox hibernates and shows the last-synced version). The read
- * itself tells whether the file still exists (404: `onGone`, its tab closes) and its size
+ * itself tells whether the file still exists (404: `onGone`, its tab closes; `content_missing`:
+ * the file is there but its saved copy is not, so the tab stays and says so, KOBE-475) and its size
  * (Content-Length); files that aren't shown inline (HTML, PDF, unknown) are read headers only. Renderers reuse the artifact views:
  * Markdown, CSV/TSV tables, code and text as fenced blocks, JSON pretty-printed, images and SVG
  * as `<img>` from a `data:` URL (never inline SVG markup), HTML in the sandboxed frame served by
@@ -18,7 +19,7 @@ import type { ApiError } from "../../lib/api/client";
 import type { FilesApi } from "../../lib/files/api";
 import { isTextPreview, sha256Hex } from "../../lib/files/editor";
 import type { EditDraftStore, FileReviewStore } from "../../lib/files/editor-state";
-import { describeFileError, formatBytes } from "../../lib/files/format";
+import { contentMissingMessage, describeFileError, formatBytes } from "../../lib/files/format";
 import {
   decodePreviewText,
   fileName,
@@ -51,6 +52,8 @@ type Loaded =
   | { readonly status: "loading" }
   | { readonly status: "error"; readonly error: ApiError }
   | { readonly status: "none" | "frame" }
+  /** The file exists; its saved copy is missing until the sandbox resends it (KOBE-475). */
+  | { readonly status: "missing" }
   | { readonly status: "too_large"; readonly size: number | null }
   | { readonly status: "image"; readonly src: string }
   | {
@@ -88,6 +91,7 @@ async function load(api: FilesApi, path: string, preview: FilePreview): Promise<
   const plan = readPlan(preview, path);
   const read = await api.read(path, plan.max, plan.wholeOnly);
   if (!read.ok) {
+    if (read.error.code === "content_missing") return { status: "missing" };
     return read.error.status === 404
       ? GONE
       : { status: "error", error: describeFileError(read.error) };
@@ -182,6 +186,8 @@ function FileBody({
       return <p role="status">Loading the file…</p>;
     case "error":
       return <ErrorNotice error={loaded.error} />;
+    case "missing":
+      return <p role="status">{contentMissingMessage(name)}</p>;
     case "none":
       return <CannotPreview reason="Cannot preview this file." />;
     case "too_large":

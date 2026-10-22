@@ -18,6 +18,8 @@ let files: Map<string, Uint8Array>;
 /** Requests for a file's content, and the bytes of it the page actually pulled. */
 let reads: string[];
 let pulled: Map<string, number>;
+/** Files whose saved copy is missing from storage (KOBE-475): listed, but reads answer 503. */
+let contentMissing: Set<string>;
 const CHUNK = 64 * 1024;
 
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -75,6 +77,9 @@ const fetchFn: typeof fetch = async (input, init = {}) => {
     reads.push(path);
     const bytes = files.get(path);
     if (!bytes) return Response.json({ code: "not_found", message: "Gone." }, { status: 404 });
+    if (contentMissing.has(path)) {
+      return Response.json({ code: "content_missing", message: "Missing." }, { status: 503 });
+    }
     let at = 0;
     const body = new ReadableStream<Uint8Array>({
       pull(controller) {
@@ -122,6 +127,7 @@ const tabNames = () =>
     .map((t) => `${t.textContent}${t.getAttribute("aria-selected") === "true" ? "*" : ""}`);
 
 beforeEach(() => {
+  contentMissing = new Set();
   localStorage.clear();
   sessionStorage.clear();
   // The frame route is the server's: don't let happy-dom fetch it from localhost.
@@ -200,6 +206,21 @@ describe("opening again (ac-1, ac-3)", () => {
     expect(await screen.findByText(/a\.md is no longer in your workspace/)).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("tablist")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(opener));
+  });
+
+  it("a file whose saved copy is missing stays open and says it will be restored (KOBE-475)", async () => {
+    files.set("mortgage.py", enc("print(1)"));
+    contentMissing.add("mortgage.py");
+    mount(thread("Work"));
+    const user = userEvent.setup();
+    const panel = await view(user, await openFiles(), "mortgage.py");
+    expect(
+      await within(panel).findByText(
+        "The saved copy of mortgage.py is missing; it will be restored from your sandbox at its next sync.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/no longer in your workspace/)).toBeNull();
+    expect(tabNames()).toEqual(["mortgage.py*"]);
   });
 
   it("a file opened on a new conversation stays open once its first message makes the thread", async () => {

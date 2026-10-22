@@ -82,11 +82,14 @@ export function loadS3Settings(
   };
 }
 
+/**
+ * Only S3's `NoSuchKey` means "no such object". A bare 404, `NoSuchBucket` (a wrong or missing
+ * bucket) or anything else is an error: readers must never take it for missing content (KOBE-475
+ * marks missing content lost).
+ */
 function isNotFound(err: unknown): boolean {
   return (
-    err instanceof NoSuchKey ||
-    (err instanceof S3ServiceException &&
-      (err.name === "NoSuchKey" || err.name === "NotFound" || err.$metadata.httpStatusCode === 404))
+    err instanceof NoSuchKey || (err instanceof S3ServiceException && err.name === "NoSuchKey")
   );
 }
 

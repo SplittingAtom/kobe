@@ -43,6 +43,7 @@ import { registerWorkspaceSave } from "./workspace-save.js";
 import { searchFiles } from "../workspace-files/search.js";
 import { uploadToWorkspace } from "../workspace-files/upload.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
+import { CONTENT_MISSING, reportMissingContent } from "../workspace-sync/lost.js";
 import { currentEntry } from "../workspace-sync/store.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
@@ -161,9 +162,16 @@ export function workspaceFileRoutes(
     if (!entry?.blobKey) return notFound(c);
     const object = await sync.objects.get(entry.blobKey).catch((err: unknown) => {
       logger.error({ err, teamId: owner.teamId }, "workspace file unreadable");
-      return null;
+      return "unavailable" as const;
     });
-    if (!object) return fail(c, 404, "not_found", "The file's content is no longer available.");
+    if (object === "unavailable") {
+      return fail(c, 503, "sandbox_unavailable", "File storage is unavailable; try again.");
+    }
+    if (!object) {
+      // The file is there; its saved copy is not: the sandbox resends it (KOBE-475).
+      await reportMissingContent(db, owner, entry, sync.prefix, logger);
+      return fail(c, 503, "content_missing", CONTENT_MISSING);
+    }
     return new Response(Readable.toWeb(object.body) as ReadableStream, {
       headers: {
         "content-type": "application/octet-stream",

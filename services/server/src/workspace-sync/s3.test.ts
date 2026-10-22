@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
+import { S3ServiceException } from "@aws-sdk/client-s3";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FakeS3 } from "../testing/fake-s3.js";
 import { IntegrityError, verifyingStream } from "./object-store.js";
@@ -118,6 +119,58 @@ describe("S3 object store (fake S3 over HTTP)", () => {
     });
     await expect(store.putStream("teams/t/broken", failing)).rejects.toThrow();
     expect(fake.objects.has("teams/t/broken")).toBe(false);
+  });
+});
+
+describe("get: only NoSuchKey is a missing object (KOBE-475)", () => {
+  const fake = new FakeS3("kobe", "test-key");
+  let endpoint: string;
+  const storeFor = (bucket: string) =>
+    createS3ObjectStore({
+      bucket,
+      endpoint,
+      region: "us-east-1",
+      forcePathStyle: true,
+      prefix: "",
+      credentials: { accessKeyId: "test-key", secretAccessKey: "test-secret" },
+    });
+
+  beforeAll(async () => {
+    endpoint = await fake.start();
+  });
+  afterAll(() => fake.stop());
+
+  it("answers null for NoSuchKey and throws for a wrong bucket", async () => {
+    expect(await storeFor("kobe").get("teams/t/none")).toBeNull();
+    await expect(storeFor("not-there").get("teams/t/none")).rejects.toThrow();
+  });
+
+  it("throws for a bare 404 and other service errors", async () => {
+    const failing = (name: string, status: number) =>
+      createS3ObjectStore(
+        {
+          bucket: "b",
+          endpoint: undefined,
+          region: "r",
+          forcePathStyle: true,
+          prefix: "",
+          credentials: null,
+        },
+        {
+          send: () =>
+            Promise.reject(
+              new S3ServiceException({
+                name,
+                $fault: "client",
+                $metadata: { httpStatusCode: status },
+              }),
+            ),
+        } as never,
+      );
+    await expect(failing("NotFound", 404).get("k")).rejects.toThrow();
+    await expect(failing("NoSuchBucket", 404).get("k")).rejects.toThrow();
+    await expect(failing("AccessDenied", 403).get("k")).rejects.toThrow();
+    expect(await failing("NoSuchKey", 404).get("k")).toBeNull();
   });
 });
 

@@ -143,7 +143,7 @@ describe("GET /v1/workspace/frame", () => {
     expect(await downloads(w.team)).toEqual([]);
   });
 
-  it("answers 404 for unknown, deleted, internal and lost files; 400 for bad paths", async () => {
+  it("answers 404 for unknown, deleted and internal files, 503 for lost ones; 400 for bad paths", async () => {
     const w = await world();
     for (const bad of ["../x.html", "/x.html", "a/../x.html", ""]) {
       expect((await w.a.get(frame(bad, w.team))).status, bad).toBe(400);
@@ -159,7 +159,8 @@ describe("GET /v1/workspace/frame", () => {
     expect((await w.a.get(frame("gone.html", w.team))).status).toBe(404);
     const key = await seed(w.team, w.alice, "lost.html", "<p>lost</p>");
     objects.lost.add(key);
-    expect((await w.a.get(frame("lost.html", w.team))).status).toBe(404);
+    // KOBE-475: the file is there, its saved copy is not (resent by the sandbox).
+    expect((await w.a.get(frame("lost.html", w.team))).status).toBe(503);
   });
 
   it("refuses NUL, backslash and encoded traversal, before any lookup", async () => {
