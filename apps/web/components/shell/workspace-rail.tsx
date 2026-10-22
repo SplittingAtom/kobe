@@ -413,6 +413,8 @@ export function WorkspaceRail({
         className={styles.rail}
         {...(collapsed ? { "data-collapsed": "" } : {})}
         {...(rail.pickerShown ? { "data-picker": "" } : {})}
+        // The member's stored layout (tab, section, width) is applied (KOBE-415).
+        {...(rail.settled ? { "data-settled": "" } : {})}
         {...(drawer ? { "data-drawer": "", role: "dialog", "aria-modal": true, tabIndex: -1 } : {})}
         {...drop.handlers}
       >

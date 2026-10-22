@@ -22,6 +22,8 @@ export function filesSection(page: Page): Locator {
 
 /** The chat's address parameter for the open thread (`/?thread=<id>`). */
 const THREAD_PARAM = "thread";
+/** The workspace rail's element id (apps/web rail-resize.tsx). */
+const RAIL_ID = "kobe-workspace-rail";
 /** The active team, recorded by the chat in local storage; the API wants it as a header. */
 const TEAM_KEY = "kobe.lastTeamId";
 const TEAM_HEADER = "x-kobe-team";
@@ -79,6 +81,12 @@ export class Chat {
    * which is closed again.
    */
   async showBothPanels(tab: "files" | "apps" = "files"): Promise<void> {
+    // The member's stored layout arrives after the first paint and would switch the tab (or the
+    // section) back under this set-up: wait until the rail applied it (KOBE-415).
+    const rail = this.page.locator(`#${RAIL_ID}`);
+    if ((await rail.count()) > 0) {
+      await expect(rail).toHaveAttribute("data-settled", "", { timeout: SHELL_TIMEOUT_MS });
+    }
     const toggle = this.railHeader.getByRole("button", { name: FILES_TOGGLE });
     // Files hidden collapses the rail (KOBE-453 review): its strip's section icon shows it again.
     const strip = this.page.getByRole("button", { name: /^Show (files|apps)$/ });
@@ -91,7 +99,7 @@ export class Chat {
     }
     if (!(await toggle.isVisible())) return;
     await this.pickTab(tab);
-    const drawer = this.page.locator("#kobe-workspace-rail[data-drawer]");
+    const drawer = this.page.locator(`#${RAIL_ID}[data-drawer]`);
     if (opened && (await drawer.isVisible())) {
       await this.page.keyboard.press("Escape");
       await expect(drawer).toHaveCount(0);
