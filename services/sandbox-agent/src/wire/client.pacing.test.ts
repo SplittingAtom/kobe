@@ -178,3 +178,43 @@ describe("WireClient ended runs (KOBE-483)", () => {
     expect(ids).toEqual(["b0", "b1", "b2", "b3", "pi.event"]);
   }, 10_000);
 });
+
+describe("WireClient session renewal (KOBE-483)", () => {
+  it("hands the live connection each fresh token once, never the one it dialled with", async () => {
+    const server = rateLimitedServer();
+    let token = "token-one-aaaaaaaaaaaaaaaa";
+    const ready = new Promise<void>((resolve) => {
+      client = new WireClient({
+        url: server.url,
+        readToken: () => Promise.resolve(token),
+        hello: () =>
+          ({
+            v: 1,
+            type: "hello",
+            sandbox_id: "6f1c2b9e-3a4d-4e5f-8a7b-1c2d3e4f5a6b",
+            agent_version: "0.0.0-test",
+            pi_version: "1.0.0",
+            runs: [],
+          }) as never,
+        onReady: () => resolve(),
+        onFrame: () => undefined,
+        onDisconnected: () => undefined,
+        onFatal: () => undefined,
+        logger: { info: () => undefined, warn: () => undefined, debug: () => undefined },
+        pace: AGENT,
+        renewIntervalMs: 30,
+      });
+      client.start();
+    });
+    await ready;
+    await new Promise((r) => setTimeout(r, 150));
+    token = "token-two-bbbbbbbbbbbbbbbb";
+    await new Promise((r) => setTimeout(r, 200));
+    const renewals = server.received
+      .map((t) => JSON.parse(t) as { type: string; token?: string })
+      .filter((f) => f.type === "session.renew");
+    expect(renewals).toEqual([
+      { v: 1, type: "session.renew", token: "token-two-bbbbbbbbbbbbbbbb" },
+    ]);
+  }, 10_000);
+});

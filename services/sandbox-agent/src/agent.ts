@@ -14,6 +14,7 @@ import {
   CAPABILITY_SKILL_BUNDLES,
   CAPABILITY_THREAD_COMPACT,
   CAPABILITY_TRACE_SPANS,
+  CAPABILITY_SESSION_RENEW,
   CAPABILITY_SKILL_EVAL,
   CAPABILITY_WORKSPACE_MOVES,
   CAPABILITY_THREAD_CONTEXT,
@@ -512,6 +513,8 @@ export class Agent {
       ...(this.#deps.models === undefined ? [] : [CAPABILITY_THREAD_COMPACT]),
       // Run spans over this wire (KOBE-274); sent only for runs the server gave a trace context.
       CAPABILITY_TRACE_SPANS,
+      // Fresh session tokens handed to the live connection, so expiry never drops it (KOBE-483).
+      CAPABILITY_SESSION_RENEW,
       // Server moves replayed as local renames (KOBE-304).
       ...(this.#deps.workspace?.movedOnServer === undefined ? [] : [CAPABILITY_WORKSPACE_MOVES]),
       // The latest model call's context for its owner (KOBE-470): read from Pi's capture or the

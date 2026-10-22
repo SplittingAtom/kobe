@@ -66,7 +66,18 @@ export interface WireClientOptions {
   readonly heartbeatTimeoutMs?: number;
   /** Outbound pace per connection (default {@link SANDBOX_SEND_PACE}, under the server's limit). */
   readonly pace?: PaceLimits;
+  /**
+   * How often a live connection checks `readToken` for a fresh token to hand over with
+   * `session.renew` (KOBE-483; default {@link SESSION_RENEW_CHECK_MS}).
+   */
+  readonly renewIntervalMs?: number;
 }
+
+/**
+ * Well inside the session client's refresh margin (2 min before expiry) plus the server's grace
+ * (1 min after): a fresh token reaches the live connection before the old one's deadline.
+ */
+export const SESSION_RENEW_CHECK_MS = 30_000;
 
 export class WireClient {
   readonly #options: WireClientOptions;
@@ -77,6 +88,9 @@ export class WireClient {
   #reconnectTimer: NodeJS.Timeout | undefined;
   #helloTimer: NodeJS.Timeout | undefined;
   #heartbeat: NodeJS.Timeout | undefined;
+  #renewTimer: NodeJS.Timeout | undefined;
+  /** The token the current connection is authenticated with (dialled or last renewed). */
+  #connectionToken: string | undefined;
   #lastInbound = 0;
   #epoch = 0;
   /**
@@ -196,6 +210,7 @@ export class WireClient {
       return;
     }
     if (this.#stopped) return;
+    this.#connectionToken = token;
     const socket = new WebSocket(this.#options.url, [SANDBOX_WS_SUBPROTOCOL], {
       headers: { Authorization: `Bearer ${token}` },
       maxPayload: SANDBOX_MAX_FRAME_BYTES,
@@ -279,6 +294,10 @@ export class WireClient {
       }
       this.#pacer.send(JSON.stringify({ v: 1, type: "ping", nonce: randomUUID() }));
     }, interval);
+    this.#renewTimer = setInterval(
+      () => void this.#renew(socket),
+      this.#options.renewIntervalMs ?? SESSION_RENEW_CHECK_MS,
+    );
     this.#options.logger.info({ connection_id: ack.connection_id }, "sandbox wire ready");
     this.#options.onReady(ack);
   }
@@ -287,6 +306,7 @@ export class WireClient {
     if (socket !== this.#socket) return;
     clearTimeout(this.#helloTimer);
     clearInterval(this.#heartbeat);
+    clearInterval(this.#renewTimer);
     const wasReady = this.#ready;
     this.#ready = false;
     this.#socket = undefined;
@@ -300,6 +320,24 @@ export class WireClient {
       return;
     }
     this.#scheduleReconnect();
+  }
+
+  /**
+   * Session renewal in band (KOBE-483): the server closes a connection whose token expired, which
+   * would interrupt the runs on it. Reading the token also makes the session client trade for a
+   * fresh one near expiry; a token the connection does not have yet goes over as `session.renew`.
+   * The token is never logged.
+   */
+  async #renew(socket: WebSocket): Promise<void> {
+    let token: string;
+    try {
+      token = await this.#options.readToken();
+    } catch (error) {
+      this.#options.logger.warn({ err: (error as Error).message }, "cannot renew sandbox token");
+      return;
+    }
+    if (socket !== this.#socket || !this.#ready || token === this.#connectionToken) return;
+    if (this.send({ v: 1, type: "session.renew", token })) this.#connectionToken = token;
   }
 
   #scheduleReconnect(): void {

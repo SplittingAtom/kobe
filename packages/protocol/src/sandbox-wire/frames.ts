@@ -31,6 +31,7 @@ import {
   evalSnapshotFrameSchema,
 } from "./eval-frames.js";
 import { threadContextFrameSchema } from "./context-frames.js";
+import { sessionRenewFrameSchema } from "./session-renew-frames.js";
 import { runProjectContextSchema } from "../projects.js";
 import {
   skillDraftSaveFrameSchema,
@@ -295,6 +296,7 @@ export const sandboxToServerFrameSchema = z.union([
   notebookRunFrameSchema,
   webSearchQueryFrameSchema,
   traceSpansFrameSchema,
+  sessionRenewFrameSchema,
   piExitedFrameSchema,
   pingFrame,
   pongFrame,

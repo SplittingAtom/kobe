@@ -19,6 +19,12 @@
   lease evicted by the 256 cap). The KOBE-429 pacer widens the window: queued frames of a run go
   out after the run ended.
 
+- Trigger (coordinator, gate1): the server closes every sandbox connection `unauthorized`
+  ("session token expired") 13 min after it opened (token `exp` + 60 s grace), since KOBE-24
+  (2026-10-02), so it predates Wave 2. The agent traded for fresh tokens but only used them on the
+  next dial. The forced reconnect interrupts a run being started or stopped, and the late frame of
+  that run then closed the new connection too.
+
 ## Decisions
 
 - Server: `RecentlyEndedRuns` (`sandbox-wire/recently-ended.ts`), 30 s grace, at most 256 runs per
@@ -30,6 +36,15 @@
   list (before aborting them) and on abandon. It withdraws the run's frames still waiting in the
   pacer (`SendPacer.dropTagged`) and refuses later ones. `pi.event` (outbox-journaled, acked late
   by the server) and `trace.spans` (tolerated late) are kept.
+
+- In-band renewal: new sandbox → server frame `session.renew {token}` behind hello capability
+  `session_renew` (protocol `session-renew-frames.ts`). The agent's `WireClient` reads its token
+  every 30 s (which also makes the session client trade near expiry) and hands each new one to the
+  live connection once. The server verifies it like an upgrade token. The same (sandbox, team,
+  user, eval thread) moves the expiry timer to the new `exp`. Another identity closes
+  `unauthorized`. An invalid, expired or older token is ignored. Without the capability nothing
+  changes. Revocation (`access revoked`, `sandbox_destroyed`) still closes at once: not deferred
+  to a run boundary, since it is a security close.
 
 ## Evidence
 
@@ -43,3 +58,7 @@
 - ac-3: `wire/pacer.test.ts`, `wire/client.pacing.test.ts` (queued frames of an ended run dropped,
   later ones refused, events and other runs delivered). gate1 u21/status-cues rerun pending a
   deploy.
+- Renewal: `sandbox-wire-limits.db.test.ts` (2 s tokens renewed in band: open after 4.5 s, then
+  closes once renewals stop; invalid renewal ignored; another identity closes; no capability, no
+  renewal), `wire/client.pacing.test.ts` (each fresh token sent once, never the dialled one),
+  `session-renew-frames.test.ts`.

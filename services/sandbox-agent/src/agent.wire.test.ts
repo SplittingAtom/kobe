@@ -36,7 +36,7 @@ describe("dial-out connection", () => {
       agent_version: "0.0.0-test",
       pi_version: "1.0.0",
       runs: [],
-      capabilities: ["app_cards", "trace_spans", "thread_context"],
+      capabilities: ["app_cards", "trace_spans", "session_renew", "thread_context"],
     });
   });
 
