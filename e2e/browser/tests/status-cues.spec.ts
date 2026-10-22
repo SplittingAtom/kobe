@@ -57,9 +57,12 @@ test("status cues: a green Running badge and the rail's dot, also from another t
   expect(pulse).not.toBe("none");
 
   // With the rows in the Threads panel (KOBE-453), its button on the rail carries the activity.
-  await expect(
-    chat.railHeader.getByRole("button", { name: "Threads panel, a conversation is running" }),
-  ).toHaveAttribute("data-kobe-activity", "running");
+  // On a shared site another thread may be waiting for an approval, which outranks running (the
+  // rail shows the most urgent activity); either way the button carries the overall activity.
+  const threadsButton = chat.railHeader.getByRole("button", {
+    name: /^Threads panel, a conversation (is running|is waiting for your approval)$/,
+  });
+  await expect(threadsButton).toHaveAttribute("data-kobe-activity", /^(running|approval)$/);
 
   // The row in the Threads panel: a green dot, and "Running" for screen readers.
   await chat.openThreads();
