@@ -8,14 +8,21 @@ import { SKILL_MD } from "../../lib/skills/skill-md";
 import { cn } from "../../lib/utils";
 import { Button, Field, FOCUS_RING, TextInput } from "../ui/console";
 import { ErrorNotice } from "../admin/error-notice";
+import { NewFolder } from "./new-folder";
 
 /** The folder a path sits in ("" for the root). */
 const folderOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
 const nameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
-/** Root files first (SKILL.md on top), then each folder's files under its name. */
-function grouped(files: readonly DraftFileInfo[]): [string, DraftFileInfo[]][] {
-  const groups = new Map<string, DraftFileInfo[]>();
+/**
+ * Root files first (SKILL.md on top), then each folder's files under its name; an empty folder
+ * (KOBE-478: shown until a file is saved in it) has none.
+ */
+function grouped(
+  files: readonly DraftFileInfo[],
+  empty: readonly string[],
+): [string, DraftFileInfo[]][] {
+  const groups = new Map<string, DraftFileInfo[]>(empty.map((f) => [f, []]));
   const sorted = [...files].sort((a, b) =>
     a.path === SKILL_MD ? -1 : b.path === SKILL_MD ? 1 : a.path.localeCompare(b.path),
   );
@@ -29,29 +36,55 @@ function grouped(files: readonly DraftFileInfo[]): [string, DraftFileInfo[]][] {
 }
 
 /**
- * The draft's files (KOBE-321, SK12): pick one to edit; add a text file by its path (checked with
- * the package rules before it is sent).
+ * The draft's files (KOBE-321, SK12): pick one to edit; add an empty text file by its path
+ * (checked with the package rules before it is sent), or create one with its contents in the
+ * editor (KOBE-478, `onCreate` with the folder it starts in); add a folder (`onAddFolder`), shown
+ * with the empty `folders` until a file is saved in it.
  */
 export function FileTree({
   files,
+  folders = [],
   selected,
   onSelect,
   onAdd,
+  onCreate,
+  onAddFolder,
 }: {
   readonly files: readonly DraftFileInfo[];
+  /** Folders without files yet. */
+  readonly folders?: readonly string[];
   readonly selected: string;
   readonly onSelect: (path: string) => void;
   readonly onAdd: (path: string) => Promise<ApiError | null>;
+  readonly onCreate?: (folder: string) => void;
+  readonly onAddFolder?: (folder: string) => void;
 }) {
+  const paths = files.map((f) => f.path);
   const [path, setPath] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [failure, setFailure] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   return (
     <nav aria-label="Files" className="min-w-0">
-      {grouped(files).map(([folder, inFolder]) => (
+      {grouped(files, folders).map(([folder, inFolder]) => (
         <div key={folder || "/"} className="mb-2">
           {folder && <p className="m-0 mb-1 text-sm font-semibold text-console-muted">{folder}/</p>}
+          {inFolder.length === 0 && (
+            <div className="ps-4">
+              <p className="m-0 text-sm text-console-muted">Empty until a file is saved in it.</p>
+              {onCreate && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`Create file in ${folder}`}
+                  onClick={() => onCreate(folder)}
+                >
+                  Create a file here
+                </Button>
+              )}
+            </div>
+          )}
           <ul className="m-0 list-none p-0">
             {inFolder.map((f) => (
               <li key={f.path}>
@@ -80,10 +113,7 @@ export function FileTree({
         onSubmit={async (e) => {
           e.preventDefault();
           const trimmed = path.trim();
-          const why = newPathProblem(
-            trimmed,
-            files.map((f) => f.path),
-          );
+          const why = newPathProblem(trimmed, paths);
           setProblem(why);
           setFailure(null);
           if (why) return;
@@ -105,13 +135,23 @@ export function FileTree({
             onChange={(e) => setPath(e.target.value)}
           />
         </Field>
-        <div>
+        <div className="flex flex-wrap gap-2">
           <Button type="submit" size="sm" disabled={busy}>
             Add file
           </Button>
+          {onCreate && (
+            <Button type="button" size="sm" onClick={() => onCreate("")}>
+              Create file
+            </Button>
+          )}
         </div>
         {failure && <ErrorNotice error={failure} />}
       </form>
+      {onAddFolder && (
+        <div className="mt-3">
+          <NewFolder paths={paths} folders={folders} onAdd={onAddFolder} />
+        </div>
+      )}
     </nav>
   );
 }

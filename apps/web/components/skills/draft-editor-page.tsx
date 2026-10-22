@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { SkillSaved } from "../../lib/admin/api/team/skills";
 import type { ApiError } from "../../lib/api/client";
 import { deleteDraft, type Destination } from "../../lib/skills/drafts-api";
@@ -24,6 +24,7 @@ import { ErrorNotice, MutationStatus } from "../admin/error-notice";
 import { useMutation } from "../admin/use-resource";
 import { LintPanel, ScanPanel } from "./feedback";
 import { FileTree } from "./file-tree";
+import { NewFileEditor } from "./new-file-editor";
 import { SaveVersionDialog } from "./save-version-dialog";
 import { SkillMdEditor } from "./skill-md-editor";
 import { EvalsPanel } from "./evals-panel";
@@ -89,6 +90,13 @@ function Editor({ editor, tab }: { readonly editor: DraftEditor; readonly tab: D
   const [confirm, confirmDialog] = useConfirm();
   // Each saved version re-reads the saved skill's eval runs (KOBE-459).
   const [savedSeq, setSavedSeq] = useState(0);
+  // Create file's starting path while it is open (KOBE-478), and folders added in the tree.
+  const [creating, setCreating] = useState<string | null>(null);
+  const newFileDirty = useRef(false);
+  const onNewFileDirty = useCallback((dirty: boolean) => {
+    newFileDirty.current = dirty;
+  }, []);
+  const [folders, setFolders] = useState<readonly string[]>([]);
 
   const scripts =
     scan.status === "ready"
@@ -97,15 +105,42 @@ function Editor({ editor, tab }: { readonly editor: DraftEditor; readonly tab: D
         ? NO_SCRIPTS
         : (scan.last?.scripts ?? NO_SCRIPTS);
   const paths = useMemo(() => files.map((f) => f.path), [files]);
+  // Folders aren't stored: one shows here until a file is saved in it.
+  const emptyFolders = useMemo(
+    () => folders.filter((f) => !paths.some((p) => p.startsWith(`${f}/`))),
+    [folders, paths],
+  );
   const skillMd = texts[SKILL_MD] ?? "";
   const lint = useMemo(() => lintSkill({ skillMd, paths, scripts }), [skillMd, paths, scripts]);
   const canTeam = access.permissions.includes("team.skills.publish");
   const canPersonal = draft.mine && access.permissions.includes("team.personal.create");
 
-  const select = (path: string) => {
+  const show = (path: string) => {
+    setCreating(null);
     setSelected(path);
     setProblem(null);
+  };
+  /** True when nothing typed in Create file would be lost, or the author agrees to drop it. */
+  const mayLeaveNewFile = async (trigger?: EventTarget | null) =>
+    creating === null ||
+    !newFileDirty.current ||
+    confirm(
+      {
+        title: "Discard the new file?",
+        description: "It isn't saved: what you typed will be lost.",
+        confirmLabel: "Discard",
+        cancelLabel: "Keep editing",
+      },
+      trigger,
+    );
+  const select = async (path: string) => {
+    if (!(await mayLeaveNewFile())) return;
+    show(path);
     void editor.open(path).then(setProblem);
+  };
+  const startNewFile = async (folder: string) => {
+    if (!(await mayLeaveNewFile())) return;
+    setCreating(folder ? `${folder}/` : "");
   };
 
   const saved = (data: SkillSaved, destination: Destination) => {
@@ -172,13 +207,30 @@ function Editor({ editor, tab }: { readonly editor: DraftEditor; readonly tab: D
               tree={
                 <FileTree
                   files={files}
+                  folders={emptyFolders}
                   selected={selected}
-                  onSelect={select}
+                  onSelect={(path) => void select(path)}
                   onAdd={editor.addFile}
+                  onCreate={(folder) => void startNewFile(folder)}
+                  onAddFolder={(folder) => setFolders((fs) => [...fs, folder])}
                 />
               }
             >
-              <FilePane editor={editor} path={selected} onRemove={remove} />
+              {creating === null ? (
+                <FilePane editor={editor} path={selected} onRemove={remove} />
+              ) : (
+                <NewFileEditor
+                  key={creating}
+                  initialPath={creating}
+                  paths={paths}
+                  onSave={editor.addFile}
+                  onSaved={show}
+                  onDirtyChange={onNewFileDirty}
+                  onCancel={async (e) => {
+                    if (await mayLeaveNewFile(eventTrigger(e))) setCreating(null);
+                  }}
+                />
+              )}
               <LintPanel items={lint} />
               <ScanPanel state={scan} />
             </DefineLayout>

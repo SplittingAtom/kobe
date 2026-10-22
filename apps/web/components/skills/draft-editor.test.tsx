@@ -447,3 +447,131 @@ describe("Workbench editor: Save version (ac-3)", () => {
     expect(JSON.parse(post.body as string)).toMatchObject({ destination: "team", semver: "1.0.1" });
   });
 });
+
+describe("Workbench editor: Create file and New folder (KOBE-478)", () => {
+  it("creates a file with its contents through the draft file save, and Cancel leaves no file", async () => {
+    const calls = await opened({
+      ...BASE,
+      "PUT /v1/skills/drafts/d-1/files/references/extra.md": [200, { rev: 4, draft: DRAFT(4) }],
+    });
+    const tree = within(screen.getByRole("navigation", { name: "Files" }));
+    await userEvent.click(tree.getByRole("button", { name: "Create file" }));
+    await userEvent.type(screen.getByLabelText("New file path"), "notes.md");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await answerConfirm("Discard the new file?", "Discard");
+    await waitFor(() => expect(screen.queryByLabelText("New file path")).toBeNull());
+    expect(puts(calls)).toHaveLength(0);
+
+    await userEvent.click(tree.getByRole("button", { name: "Create file" }));
+    await userEvent.type(screen.getByLabelText("New file path"), "Evals/x.yaml");
+    await userEvent.click(screen.getByRole("button", { name: "Save file" }));
+    expect(screen.getByText(/spell them exactly so/)).toBeDefined();
+    expect(puts(calls)).toHaveLength(0);
+
+    await userEvent.clear(screen.getByLabelText("New file path"));
+    await userEvent.type(screen.getByLabelText("New file path"), "references/extra.md");
+    fireEvent.change(screen.getByLabelText("New file contents"), {
+      target: { value: "# Extra\nMore detail." },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Save file" }));
+    const shown = (await screen.findByLabelText(
+      "Contents of references/extra.md",
+    )) as HTMLTextAreaElement;
+    expect(shown.value).toBe("# Extra\nMore detail.");
+    const put = must(puts(calls)[0]);
+    expect([put.url, put.headers.get("if-match"), put.body]).toEqual([
+      "/v1/skills/drafts/d-1/files/references/extra.md",
+      '"3"',
+      "# Extra\nMore detail.",
+    ]);
+    expect(tree.getByRole("button", { name: "references/extra.md" })).toBeDefined();
+    // The saved file is scanned like any other write.
+    await screen.findByText("Scanned as saved (revision 4).");
+    // The new file's text is already in hand: it isn't read back.
+    expect(calls.some((c) => c.method === "GET" && c.url.endsWith("/extra.md"))).toBe(false);
+  });
+
+  it("shows the server's refusal (size, rules) and keeps the editor open", async () => {
+    await opened({
+      ...BASE,
+      "PUT /v1/skills/drafts/d-1/files/big.md": [
+        413,
+        { code: "draft_too_large", message: "The draft is over 5 MiB." },
+      ],
+    });
+    const tree = within(screen.getByRole("navigation", { name: "Files" }));
+    await userEvent.click(tree.getByRole("button", { name: "Create file" }));
+    await userEvent.type(screen.getByLabelText("New file path"), "big.md");
+    await userEvent.click(screen.getByRole("button", { name: "Save file" }));
+    await screen.findByText(/over 5 MiB/);
+    expect(screen.getByLabelText("New file path")).toBeDefined();
+    expect(tree.queryByRole("button", { name: "big.md" })).toBeNull();
+  });
+
+  it("adds a validated empty folder, nested ones too, and creates a file in it", async () => {
+    const calls = await opened({
+      ...BASE,
+      "PUT /v1/skills/drafts/d-1/files/templates/forms/a.md": [200, { rev: 4, draft: DRAFT(4) }],
+    });
+    const tree = within(screen.getByRole("navigation", { name: "Files" }));
+    await userEvent.click(tree.getByRole("button", { name: "New folder" }));
+    await userEvent.type(tree.getByLabelText("Folder name"), "references");
+    await userEvent.click(tree.getByRole("button", { name: "Add folder" }));
+    expect(tree.getByText(/A folder already has this name/)).toBeDefined();
+    await userEvent.clear(tree.getByLabelText("Folder name"));
+    await userEvent.type(tree.getByLabelText("Folder name"), "../up");
+    await userEvent.click(tree.getByRole("button", { name: "Add folder" }));
+    expect(tree.getByText(/\.\. folder name/)).toBeDefined();
+    await userEvent.clear(tree.getByLabelText("Folder name"));
+    await userEvent.type(tree.getByLabelText("Folder name"), "templates/forms");
+    await userEvent.click(tree.getByRole("button", { name: "Add folder" }));
+    expect(tree.getByText("templates/forms/")).toBeDefined();
+    expect(tree.getByText("Empty until a file is saved in it.")).toBeDefined();
+    // Nothing is stored for a folder: files carry their folder in their path.
+    expect(puts(calls)).toHaveLength(0);
+
+    await userEvent.click(tree.getByRole("button", { name: "Create file in templates/forms" }));
+    const path = screen.getByLabelText("New file path") as HTMLInputElement;
+    expect(path.value).toBe("templates/forms/");
+    await userEvent.type(path, "a.md");
+    await userEvent.click(screen.getByRole("button", { name: "Save file" }));
+    await screen.findByLabelText("Contents of templates/forms/a.md");
+    expect(tree.getByRole("button", { name: "templates/forms/a.md" })).toBeDefined();
+    expect(tree.queryByText("Empty until a file is saved in it.")).toBeNull();
+  });
+
+  it("asks before dropping typed content (Cancel, tree, closing the tab); an untouched one closes at once", async () => {
+    const calls = await opened();
+    const tree = within(screen.getByRole("navigation", { name: "Files" }));
+    // Untouched: Cancel closes without asking.
+    await userEvent.click(tree.getByRole("button", { name: "Create file" }));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByLabelText("New file path")).toBeNull();
+
+    await userEvent.click(tree.getByRole("button", { name: "Create file" }));
+    await userEvent.type(screen.getByLabelText("New file path"), "notes.md");
+    fireEvent.change(screen.getByLabelText("New file contents"), { target: { value: "Keep me." } });
+    // Closing the browser tab asks too.
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await answerConfirm("Discard the new file?", "Keep editing");
+    expect((screen.getByLabelText("New file contents") as HTMLTextAreaElement).value).toBe(
+      "Keep me.",
+    );
+    await userEvent.click(tree.getByRole("button", { name: "references/guide.md" }));
+    await answerConfirm("Discard the new file?", "Keep editing");
+    expect(screen.getByLabelText("New file contents")).toBeDefined();
+    await userEvent.click(tree.getByRole("button", { name: "references/guide.md" }));
+    await answerConfirm("Discard the new file?", "Discard");
+    await screen.findByLabelText("Contents of references/guide.md");
+    expect(screen.queryByLabelText("New file contents")).toBeNull();
+    expect(puts(calls)).toHaveLength(0);
+    const after = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
+  });
+});

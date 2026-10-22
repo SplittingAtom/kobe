@@ -172,6 +172,41 @@ describe("drafts: create, read, write (ac-1)", () => {
     expect(clash.status).toBe(400);
   });
 
+  it("refuses a created file's traversal, absolute or backslash path itself, not only the browser (KOBE-478)", async () => {
+    const draft = await create(author, "created-paths");
+    // As the Workbench's Create file sends a path (each segment percent-encoded), with the
+    // browser's own checks skipped.
+    const encoded = (path: string) => path.split("/").map(encodeURIComponent).join("/");
+    for (const path of [
+      "/etc/passwd",
+      "a//b.md",
+      "references\\guide.md",
+      "C:\\x.md",
+      "a/..%2Fb.md",
+    ]) {
+      const bad = await write(
+        author,
+        draft.id,
+        encoded(path).replace("..%252F", "..%2F"),
+        draft.rev,
+        text("x"),
+      );
+      expect(bad.status, path).toBe(400);
+      expect(bad.json.code, path).toBe("invalid_path");
+    }
+    // A URL's dot segments resolve before the request leaves: `..` can only climb out of
+    // `/files/`, where no route writes.
+    for (const path of ["../escape.md", "references/../../escape.md"]) {
+      const dots = encoded(path).replaceAll("..", "%2E%2E");
+      const bad = await write(author, draft.id, dots, draft.rev, text("x"));
+      expect(bad.status, path).toBe(404);
+    }
+    const files = await author.get(`/v1/skills/drafts/${draft.id}`);
+    expect((files.json.files as { path: string }[]).map((f) => f.path)).toEqual(["SKILL.md"]);
+    const ok = await write(author, draft.id, encoded("templates/forms/a.md"), draft.rev, text("A"));
+    expect(ok.status).toBe(200);
+  });
+
   it("caps a draft at 5 MiB in all and SKILL.md at its upload limit", async () => {
     const draft = await create(author, "big-draft");
     const big = new Uint8Array(3 * 1024 * 1024).fill(1);
