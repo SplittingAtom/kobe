@@ -314,6 +314,41 @@ describe("skill_drafts", () => {
     expect(await bad({ parentRef: { kind: "catalog" } })).toBe("23514");
     expect(await bad({ startedFrom: "thread", fromThreadId: randomUUID() })).toBeUndefined();
     expect(await bad({ startedFrom: "fork", parentRef: { kind: "catalog" } })).toBeUndefined();
+    // A governed import (KOBE-344): a git draft always has its origin; only git and upload may.
+    const origin = { kind: "git", url: "https://git.example.org/o/r" };
+    expect(await bad({ startedFrom: "git" })).toBe("23514");
+    expect(await bad({ startedFrom: "template", origin })).toBe("23514");
+    expect(await bad({ startedFrom: "git", origin: [] as never })).toBe("23514");
+    expect(await bad({ startedFrom: "git", origin })).toBeUndefined();
+    expect(
+      await bad({ startedFrom: "upload", origin: { ...origin, kind: "zip" } }),
+    ).toBeUndefined();
+  });
+
+  it("never changes an import's origin (KOBE-344)", async () => {
+    const [row] = await withTeam(app.db, teamA, (tx) =>
+      tx
+        .insert(skillDrafts)
+        .values({
+          teamId: teamA,
+          ownerUserId: alice,
+          updatedBy: alice,
+          name: "imported",
+          startedFrom: "git",
+          origin: { kind: "git", url: "https://git.example.org/o/r" },
+        })
+        .returning({ id: skillDrafts.id }),
+    );
+    expect(
+      await sqlState(
+        withTeam(app.db, teamA, (tx) =>
+          tx
+            .update(skillDrafts)
+            .set({ origin: { kind: "git", url: "https://evil.example.org/x" } })
+            .where(eq(skillDrafts.id, row?.id as string)),
+        ),
+      ),
+    ).toBe("55000");
   });
 });
 

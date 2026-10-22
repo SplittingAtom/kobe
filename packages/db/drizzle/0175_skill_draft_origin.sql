@@ -1,0 +1,7 @@
+ALTER TABLE "personal_skill_versions" ADD COLUMN "origin" jsonb;--> statement-breakpoint
+ALTER TABLE "team_skill_versions" ADD COLUMN "origin" jsonb;--> statement-breakpoint
+ALTER TABLE "skill_drafts" ADD COLUMN "origin" jsonb;--> statement-breakpoint
+ALTER TABLE "personal_skill_versions" ADD CONSTRAINT "personal_skill_versions_origin" CHECK ("personal_skill_versions"."origin" IS NULL OR (jsonb_typeof("personal_skill_versions"."origin") = 'object' AND octet_length("personal_skill_versions"."origin"::text) <= 4096));--> statement-breakpoint
+ALTER TABLE "team_skill_versions" ADD CONSTRAINT "team_skill_versions_origin" CHECK ("team_skill_versions"."origin" IS NULL OR (jsonb_typeof("team_skill_versions"."origin") = 'object' AND octet_length("team_skill_versions"."origin"::text) <= 4096));--> statement-breakpoint
+ALTER TABLE "skill_drafts" ADD CONSTRAINT "skill_drafts_origin" CHECK ("skill_drafts"."origin" IS NULL OR (jsonb_typeof("skill_drafts"."origin") = 'object' AND octet_length("skill_drafts"."origin"::text) <= 4096 AND "skill_drafts"."started_from" IN ('git', 'upload')));--> statement-breakpoint
+ALTER TABLE "skill_drafts" ADD CONSTRAINT "skill_drafts_git_origin" CHECK ("skill_drafts"."started_from" <> 'git' OR "skill_drafts"."origin" IS NOT NULL);

@@ -1226,6 +1226,20 @@
       "when": 1792664920786,
       "tag": "0174_skill_reviews_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 175,
+      "version": "7",
+      "when": 1792680450647,
+      "tag": "0175_skill_draft_origin",
+      "breakpoints": true
+    },
+    {
+      "idx": 176,
+      "version": "7",
+      "when": 1792680451835,
+      "tag": "0176_skill_draft_origin_frozen",
+      "breakpoints": true
     }
   ]
 }

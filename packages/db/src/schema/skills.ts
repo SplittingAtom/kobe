@@ -89,6 +89,12 @@ const versionColumns = () => ({
    * insert (versions are immutable); false for uploads.
    */
   fromConversation: boolean().notNull().default(false),
+  /**
+   * Saved from a draft imported from git or a zip URL (KOBE-344, SK30): that draft's origin
+   * (URL, commit or zip SHA-256, Kobe's hash, importer), carried into the version's provenance at
+   * promotion. Set at insert (versions are immutable); null otherwise.
+   */
+  origin: jsonb().$type<Record<string, unknown>>(),
   /** SKILL.md frontmatter as uploaded (name, description and any other keys). */
   frontmatter: jsonb().$type<Record<string, unknown>>().notNull(),
   source: skillSource().notNull(),
@@ -121,6 +127,7 @@ const versionChecks = (
   prefix: string,
   t: Record<
     | "version"
+    | "origin"
     | "frontmatter"
     | "contentHash"
     | "packageHash"
@@ -133,6 +140,10 @@ const versionChecks = (
   >,
 ) => [
   check(`${prefix}_version_positive`, sql`${t.version} > 0`),
+  check(
+    `${prefix}_origin`,
+    sql`${t.origin} IS NULL OR (jsonb_typeof(${t.origin}) = 'object' AND octet_length(${t.origin}::text) <= 4096)`,
+  ),
   check(
     `${prefix}_frontmatter_object`,
     sql`jsonb_typeof(${t.frontmatter}) = 'object' AND octet_length(${t.frontmatter}::text) <= ${sql.raw(String(FRONTMATTER_MAX_BYTES))}`,
