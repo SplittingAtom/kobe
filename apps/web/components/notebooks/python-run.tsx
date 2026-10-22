@@ -40,7 +40,14 @@ export default function PythonRunPane({
             Run
           </button>
         )}
-        <KernelControls wiring={kernel} busy={k.busy} onKernel={(op) => void k.kernel(op)} />
+        <KernelControls
+          wiring={kernel}
+          busy={k.busy}
+          live={k.live}
+          phase={k.phase}
+          onStart={() => void k.start()}
+          onKernel={(op) => void k.kernel(op)}
+        />
       </div>
       {dirty && (
         <p role="note" className="text-muted-foreground text-xs">

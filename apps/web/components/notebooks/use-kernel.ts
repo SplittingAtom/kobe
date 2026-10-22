@@ -3,7 +3,8 @@
 /**
  * The thread's kernel from the artifact column (KOBE-465): run a cell or a `.py` file (a
  * `notebook` run whose events this tab follows into the session's execution store, NB6),
- * interrupt and restart it (NB7), and what the kernel is doing. The agent's `run_python` calls
+ * start it without running code (KOBE-477, NB19), interrupt and restart it (NB7), and what the
+ * kernel is doing. The agent's `run_python` calls
  * reach the same store through the thread's own stream.
  */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -34,6 +35,21 @@ export type KernelNote =
   | { readonly kind: "working"; readonly text: string }
   | { readonly kind: "done"; readonly text: string }
   | { readonly kind: "error"; readonly error: ApiError };
+
+/**
+ * What this tab knows of the kernel (KOBE-477): `unknown` until something says (a kernel from
+ * before may be live), `waking` / `starting` while Start works, `running` once started or used,
+ * `stopped` after a restart or a `no_kernel` answer.
+ */
+export type KernelPhase = "unknown" | "waking" | "starting" | "running" | "stopped";
+
+/** Wakes take up to a few minutes (the server's wake budget); Start gives up after this. */
+export const START_GIVE_UP_MS = 5 * 60_000;
+export const START_TIMED_OUT: ApiError = {
+  status: 504,
+  code: "start_timeout",
+  message: "Your sandbox is taking too long to wake; try again.",
+};
 
 const BUSY_RETRIES = 12;
 const BUSY_RETRY_MS = 250;
@@ -66,14 +82,29 @@ export function whenFinished(runs: NotebookExecStore, execId: string): Promise<E
 
 export function useKernel(wiring: KernelWiring | undefined) {
   const [note, setNote] = useState<KernelNote>({ kind: "none" });
+  const [known, setKnown] = useState<{ thread: string | null; phase: KernelPhase }>({
+    thread: null,
+    phase: "unknown",
+  });
   const streams = useRef(new Set<RunStream>());
+  const mounted = useRef(true);
   const execs = useExecutions(wiring?.runs ?? EMPTY_STORE);
   const threadId = wiring?.threadId ?? null;
   const busy = threadId !== null && kernelBusy(execs, threadId);
+  // Another conversation's kernel is unknown again.
+  const phase = known.thread === threadId ? known.phase : "unknown";
+  const setPhase = useCallback(
+    (thread: string, next: KernelPhase) => setKnown({ thread, phase: next }),
+    [],
+  );
+  const ranHere = threadId !== null && execs.some((e) => e.threadId === threadId);
+  const live = busy || phase === "running" || (phase === "unknown" && ranHere);
 
   useEffect(() => {
+    mounted.current = true;
     const open = streams.current;
     return () => {
+      mounted.current = false;
       for (const s of open) s.close();
       open.clear();
     };
@@ -95,6 +126,7 @@ export function useKernel(wiring: KernelWiring | undefined) {
         setNote({ kind: "error", error: res.error });
         return null;
       }
+      setPhase(thread, "running");
       const { runId, execId } = res.data;
       // Shown as running at once; the run's own `notebook.started` then changes nothing.
       wiring.runs.apply(thread, [
@@ -129,8 +161,42 @@ export function useKernel(wiring: KernelWiring | undefined) {
       streams.current.add(stream);
       return execId;
     },
-    [wiring],
+    [wiring, setPhase],
   );
+
+  /**
+   * Start (KOBE-477): asks the server until the kernel is up. The first ask shows "Starting
+   * kernel…"; a 202 means the sandbox is waking, and later asks keep saying so until one answers.
+   */
+  const start = useCallback(async () => {
+    if (!wiring || wiring.threadId === null) return;
+    const thread = wiring.threadId;
+    setNote({ kind: "none" });
+    setPhase(thread, "starting");
+    const giveUpAt = Date.now() + START_GIVE_UP_MS;
+    for (;;) {
+      const res = await wiring.api.start(thread);
+      if (!mounted.current) return;
+      if (!res.ok) {
+        setPhase(thread, "unknown");
+        setNote({ kind: "error", error: res.error });
+        return;
+      }
+      if (res.data.status !== "waking") {
+        setPhase(thread, "running");
+        return;
+      }
+      const wait = res.data.retryAfterMs;
+      if (Date.now() + wait > giveUpAt) {
+        setPhase(thread, "unknown");
+        setNote({ kind: "error", error: START_TIMED_OUT });
+        return;
+      }
+      setPhase(thread, "waking");
+      await new Promise((r) => setTimeout(r, wait));
+      if (!mounted.current) return;
+    }
+  }, [wiring, setPhase]);
 
   const kernel = useCallback(
     async (op: "interrupt" | "restart") => {
@@ -139,17 +205,21 @@ export function useKernel(wiring: KernelWiring | undefined) {
         kind: "working",
         text: op === "interrupt" ? "Interrupting…" : "Restarting the kernel…",
       });
-      const res = await wiring.api.kernel(wiring.threadId, op);
+      const thread = wiring.threadId;
+      const res = await wiring.api.kernel(thread, op);
+      if (res.ok && (res.data.status === "restarted" || res.data.status === "no_kernel")) {
+        setPhase(thread, "stopped");
+      }
       setNote(
         res.ok
           ? { kind: "done", text: KERNEL_STATUS[res.data.status] ?? "" }
           : { kind: "error", error: res.error },
       );
     },
-    [wiring],
+    [wiring, setPhase],
   );
 
-  return { execs, busy, note, run, kernel, threadId };
+  return { execs, busy, live, phase, note, run, start, kernel, threadId };
 }
 
 /** For a view without a thread's kernel: never changes. */

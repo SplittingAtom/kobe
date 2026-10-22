@@ -225,7 +225,14 @@ function NotebookBody(
             Run all
           </button>
         )}
-        <KernelControls wiring={props.kernel} busy={k.busy} onKernel={(op) => void k.kernel(op)} />
+        <KernelControls
+          wiring={props.kernel}
+          busy={k.busy}
+          live={k.live}
+          phase={k.phase}
+          onStart={() => void k.start()}
+          onKernel={(op) => void k.kernel(op)}
+        />
         <button
           type="button"
           className={BUTTON}

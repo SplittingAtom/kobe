@@ -5,7 +5,8 @@ import { styleViolations, watchStyleViolations } from "./support/csp.js";
 
 /**
  * KOBE-465 (spec docs/specs/notebooks.md; run with KOBE_TEAM=team1): a notebook of the member's
- * workspace opens in the artifact column; a cell is added and typed, and runs in the
+ * workspace opens in the artifact column; Start wakes the sandbox and starts the conversation's
+ * kernel without running code (KOBE-477), then Restart takes its place; a cell is added and typed, and runs in the
  * conversation's kernel with state carried from the cell before (x = 1, then x + 1 gives 2); a
  * matplotlib figure shows as an image, a DataFrame as a table; a sleeping cell is interrupted
  * and the kernel restarted; after a reload the saved notebook still holds the outputs. CodeMirror
@@ -90,7 +91,7 @@ async function run(notebook: Locator, n: number): Promise<void> {
   });
 }
 
-test("notebook: cells run with state, image and table outputs, interrupt, restart, saved outputs", async ({
+test("notebook: start, cells run with state, image and table outputs, interrupt, restart, saved outputs", async ({
   chat,
   page,
 }) => {
@@ -105,8 +106,21 @@ test("notebook: cells run with state, image and table outputs, interrupt, restar
     await chat.ask("Reply with the single word OK.");
     let notebook = await openNotebook(page, dir);
 
+    // Start (KOBE-477): the kernel comes up with nothing run (the first cell is then [1]), shown
+    // step by step, and Restart takes Start's place.
+    const start = notebook.getByRole("button", { name: "Start", exact: true });
+    const kernelState = notebook.locator("[data-kobe-kernel]");
+    await start.click();
+    await expect(kernelState).toHaveText(/Waking sandbox…|Starting kernel…|Kernel idle/u);
+    await expect(notebook.locator('[data-kobe-kernel="idle"]')).toHaveText("Kernel idle", {
+      timeout: RUN_TIMEOUT_MS,
+    });
+    await expect(start).toHaveCount(0);
+    await expect(notebook.getByRole("button", { name: "Restart", exact: true })).toBeVisible();
+
     // x = 1, then a new cell typed below it: x + 1 is 2 (Shift+Enter runs it).
     await run(notebook, 2);
+    await expect(cell(notebook, 2).locator("[data-kobe-exec-count]")).toHaveText("[1]");
     await notebook.getByRole("button", { name: "Add a code cell below cell 2" }).click();
     const added = notebook.getByLabel("Code of cell 3");
     await added.click();
@@ -143,6 +157,7 @@ test("notebook: cells run with state, image and table outputs, interrupt, restar
     page.once("dialog", (dialog) => void dialog.accept());
     await notebook.getByRole("button", { name: "Restart", exact: true }).click();
     await expect(notebook.getByText(/Kernel restarted|No kernel is running/u)).toBeVisible();
+    await expect(notebook.getByRole("button", { name: "Start", exact: true })).toBeVisible();
 
     // The outputs were saved into the notebook: a reload shows them from the file.
     const saved = JSON.parse((await workspace(page, "read", path)).text) as {
