@@ -1,10 +1,10 @@
-import { randomBytes } from "node:crypto";
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import pg from "pg";
 import { afterAll, describe, expect, inject, it } from "vitest";
 import { DEFAULT_MIGRATIONS_FOLDER, runMigrations } from "./migrate.js";
+import { testNameSuffix } from "./test-support/database.js";
 
 const admin = new pg.Pool({ connectionString: inject("adminUrl") });
 afterAll(() => admin.end());
@@ -17,7 +17,7 @@ describe("runMigrations role checks", () => {
   });
 
   it("refuses an app role that is a member of the owner role", async () => {
-    const suffix = randomBytes(4).toString("hex");
+    const suffix = testNameSuffix();
     const sneaky = `kobe_sneaky_${suffix}`;
     await admin.query(
       `CREATE ROLE ${sneaky} LOGIN NOSUPERUSER NOBYPASSRLS IN ROLE ${inject("ownerRole")}`,

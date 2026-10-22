@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   createTestDatabase,
   migrationsBefore,
+  testNameSuffix,
   testServerUrl,
   type TestDatabase,
 } from "@kobe/db/testing";
@@ -26,7 +27,7 @@ const RENAME_MARKER = 'ALTER TABLE "install_settings" RENAME TO "site_settings"'
 
 describe("a backup taken before the site rename (KOBE-256)", () => {
   const server = testServerUrl();
-  const suffix = randomBytes(4).toString("hex");
+  const suffix = testNameSuffix();
   const backupRole = `kobe_backup_old_${suffix}`;
   const password = randomBytes(16).toString("hex");
   const created: TestDatabase[] = [];

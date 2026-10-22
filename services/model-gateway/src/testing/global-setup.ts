@@ -1,5 +1,5 @@
 import type { TestProject } from "vitest/node";
-import { createTestDatabase, testServerUrl } from "@kobe/db/testing";
+import { createTestDatabase, prepareTestLane, testServerUrl } from "@kobe/db/testing";
 
 declare module "vitest" {
   export interface ProvidedContext {
@@ -9,6 +9,7 @@ declare module "vitest" {
 }
 
 export default async function setup(project: TestProject): Promise<() => Promise<void>> {
+  await prepareTestLane();
   const db = await createTestDatabase(testServerUrl());
   project.provide("ownerUrl", db.ownerUrl);
   project.provide("appUrl", db.appUrl);

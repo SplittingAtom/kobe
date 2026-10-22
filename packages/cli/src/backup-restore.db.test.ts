@@ -3,7 +3,12 @@ import { cp, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MIGRATION_LOCK_KEY, createDb, verifyAuditChain } from "@kobe/db";
-import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/testing";
+import {
+  createTestDatabase,
+  testNameSuffix,
+  testServerUrl,
+  type TestDatabase,
+} from "@kobe/db/testing";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runBackup, type BackupOptions } from "./backup.js";
@@ -52,7 +57,7 @@ async function auditHashAt(url: string, seq: number): Promise<string | undefined
 
 describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql)", () => {
   const server = testServerUrl();
-  const suffix = randomBytes(4).toString("hex");
+  const suffix = testNameSuffix();
   const backupRole = `kobe_backup_${suffix}`;
   const password = randomBytes(16).toString("hex");
   const created: TestDatabase[] = [];

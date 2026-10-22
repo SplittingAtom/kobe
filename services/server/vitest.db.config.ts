@@ -15,6 +15,7 @@ if (!Number.isInteger(workers) || workers < 1) {
 export default defineConfig({
   test: {
     include: ["src/**/*.db.test.ts"],
+    globalSetup: ["src/testing/db-global-setup.ts"],
     testTimeout: 30_000,
     hookTimeout: 60_000,
     fileParallelism: true,

@@ -9,7 +9,7 @@ import { sealAuditV1, verifyAuditChain } from "./audit/index.js";
 import { createDb, type KobeDb } from "./client.js";
 import { DEFAULT_MIGRATIONS_FOLDER, runMigrations } from "./migrate.js";
 import * as schema from "./schema/index.js";
-import { testServerUrl } from "./test-support/database.js";
+import { testNameSuffix, testServerUrl } from "./test-support/database.js";
 
 /**
  * The audit chain v2 upgrade path (KOBE-17): an install whose log was chained by KOBE-15 (v1,
@@ -49,7 +49,7 @@ let oldMigrations = "";
 
 /** A throwaway database migrated with `folder` (owner and app roles as in production). */
 async function install(folder: string): Promise<Install> {
-  const suffix = randomBytes(4).toString("hex");
+  const suffix = testNameSuffix();
   const db = `kobe_up_${suffix}`;
   const ownerRole = `kobe_up_owner_${suffix}`;
   const appRole = `kobe_up_app_${suffix}`;
