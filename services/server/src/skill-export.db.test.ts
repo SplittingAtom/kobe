@@ -329,4 +329,25 @@ describe("exports (KOBE-345)", () => {
     await h.admin.query(`UPDATE registry_versions SET suspended_at = now() WHERE id = $1`, [v.id]);
     expect((await admin.get(site)).status).toBe(404);
   });
+
+  it("refuses archived catalog skills, keeps deprecated versions, and rate-limits (review)", async () => {
+    const v = await catalogVersion("archivable", "1.0.0");
+    const site = `/v1/site/skills/registry/versions/${v.id}/export?format=package`;
+    const member = `/v1/skills/catalog/${v.skillId}/versions/1.0.0/export?format=portable`;
+    await h.admin.query(`UPDATE registry_versions SET state = 'deprecated' WHERE id = $1`, [v.id]);
+    expect((await builder.get(member)).status).toBe(200);
+    await h.admin.query(`UPDATE registry_skills SET status = 'archived' WHERE id = $1`, [
+      v.skillId,
+    ]);
+    expect((await builder.get(member)).status).toBe(404);
+    expect((await admin.get(site)).status).toBe(404);
+    // The catalog package: at most 10 a minute per manager (404s count too).
+    const statuses: number[] = [];
+    for (let i = 0; i < 12; i++) statuses.push((await admin.get(site)).status);
+    expect(statuses).toContain(429);
+    // Member exports: 30 a minute.
+    const many: number[] = [];
+    for (let i = 0; i < 32; i++) many.push((await builder.get(member)).status);
+    expect(many).toContain(429);
+  });
 });

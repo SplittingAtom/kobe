@@ -13,7 +13,8 @@ import { similarCatalogNames } from "../skills/registry/names-db.js";
 import { registryReviewRoutes } from "./site-skill-registry-review.js";
 import { z } from "zod";
 import { exportCatalogVersion } from "../skills/catalog-export.js";
-import { exportResponse } from "../skills/export.js";
+import { CATALOG_PACKAGE_RATE, SKILL_EXPORT_RATE, exportResponse } from "../skills/export.js";
+import { hitRateLimit } from "../rate-limit.js";
 import { catalogExportRefusal } from "./skill-catalog.js";
 import { siteSkillMirrorRoutes, type SkillMirrorHandle } from "./site-skill-mirror.js";
 
@@ -80,6 +81,13 @@ export function siteSkillRegistryRoutes(
         return c.json({ code: "not_found", message: "No such catalog version." }, 404);
       if (!format.success)
         return invalidRequest(c, "Give format=package, portable or portable_evals.");
+      const rule = format.data === "package" ? CATALOG_PACKAGE_RATE : SKILL_EXPORT_RATE;
+      const bucket = format.data === "package" ? "skill-export-package" : "skill-export";
+      if (!(await hitRateLimit(db, `${bucket}:${c.get("user").id}`, rule)))
+        return c.json(
+          { code: "rate_limited", message: "Too many downloads. Wait a minute and try again." },
+          429,
+        );
       const r = await exportCatalogVersion(
         db,
         deps.blobs ?? null,

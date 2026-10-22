@@ -9,6 +9,11 @@ import {
   type SkillProvenance,
 } from "@kobe/protocol";
 import { SKILL_LIMITS } from "./limits.js";
+import { readZipEntries, type ZipEntry } from "./zip-entries.js";
+
+/** Exports per member (review L2): the catalog package, which carries provenance, lower. */
+export const SKILL_EXPORT_RATE = { windowMs: 60_000, max: 30 } as const;
+export const CATALOG_PACKAGE_RATE = { windowMs: 60_000, max: 10 } as const;
 
 /**
  * Exports (KOBE-345, spec SK30): any version as a portable SKILL.md zip (the runtime payload,
@@ -31,6 +36,19 @@ const sha256 = (b: Uint8Array) => createHash("sha256").update(b).digest("hex");
 
 /** The files of a stored package zip (the package hash covers exactly these). */
 export function filesOfPackage(zip: Uint8Array): Map<string, Uint8Array> {
+  // The declared sizes first (review L3): nothing is inflated past the upload's caps.
+  let declared = 0;
+  let entries: ZipEntry[];
+  try {
+    entries = readZipEntries(zip, SKILL_LIMITS.maxFiles * 2);
+  } catch {
+    throw new ExportTooLargeError();
+  }
+  for (const e of entries) {
+    declared += e.size;
+    if (e.size > SKILL_LIMITS.maxFileBytes || declared > SKILL_LIMITS.maxUncompressedBytes)
+      throw new ExportTooLargeError();
+  }
   const out = new Map<string, Uint8Array>();
   let total = 0;
   for (const [path, bytes] of Object.entries(unzipSync(zip))) {

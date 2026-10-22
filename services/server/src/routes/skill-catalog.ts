@@ -5,7 +5,8 @@ import type { ServerDeps } from "../deps.js";
 import { CATALOG_SORTS, browseCatalog, catalogDetail } from "../skills/catalog-browse.js";
 import { invalidRequest } from "../teams/http.js";
 import { exportCatalogVersion, type CatalogExportResult } from "../skills/catalog-export.js";
-import { exportResponse } from "../skills/export.js";
+import { SKILL_EXPORT_RATE, exportResponse } from "../skills/export.js";
+import { hitRateLimit } from "../rate-limit.js";
 import {
   REQUESTS_PER_DAY,
   notifyTeamAdmins,
@@ -71,6 +72,11 @@ export function skillCatalogRoutes(deps: ServerDeps): Hono<{ Variables: TeamVari
       );
     if (!id.success || !/^[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}$/.test(semver))
       return c.json({ code: "not_found", message: "No such catalog version." }, 404);
+    if (!(await hitRateLimit(db, `skill-export:${c.get("user").id}`, SKILL_EXPORT_RATE)))
+      return c.json(
+        { code: "rate_limited", message: "Too many downloads. Wait a minute and try again." },
+        429,
+      );
     const r = await exportCatalogVersion(
       db,
       deps.blobs ?? null,

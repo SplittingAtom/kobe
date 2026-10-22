@@ -17,6 +17,7 @@ import { blockedAmong, isBlocked } from "../skills/blocklist.js";
 import { recordAuditAfter } from "../audit/record.js";
 import {
   ExportTooLargeError,
+  SKILL_EXPORT_RATE,
   exportResponse,
   exportZip,
   filesOfPackage,
@@ -240,6 +241,8 @@ export function skillRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }
     const format = z.enum(["portable", "portable_evals"]).safeParse(c.req.query("format"));
     if (!format.success)
       return error(c, 400, "invalid_request", "Give format=portable or format=portable_evals.");
+    if (!(await hitRateLimit(db, `skill-export:${c.get("user").id}`, SKILL_EXPORT_RATE)))
+      return error(c, 429, "rate_limited", "Too many downloads. Wait a minute and try again.");
     const found = await visible(c);
     const ref = versionRef(c.req.param("version"));
     if (!found || ref === null) return error(c, 404, "not_found", "No such skill version.");

@@ -8,8 +8,9 @@ import { exportZip, filesOfPackage, type Exported, type ExportFormat } from "./e
 import { readPackage } from "./registry/review-diff.js";
 
 /**
- * A catalog version's export (KOBE-345): only a published one (Approved or Deprecated, not
- * suspended, not on the site blocklist), from its stored package, checked against both recorded
+ * A catalog version's export (KOBE-345): only a published one (Approved, or Deprecated, which
+ * SK31 keeps working for existing installs; not suspended, not on the site blocklist, not of an
+ * archived skill, as the catalog browse hides those), from its stored package, checked against both recorded
  * hashes before anything leaves. `package` (with kobe.skill.yaml and Kobe's provenance.json) is
  * for Site catalog managers; the portable zips for members of a team that hasn't blocked it.
  */
@@ -45,6 +46,7 @@ export async function exportCatalogVersion(
            v.runtime_storage_key, v.runtime_size_bytes, v.package_storage_key, v.provenance
       FROM registry_versions v JOIN registry_skills s ON s.id = v.skill_id
      WHERE v.state IN ('approved', 'deprecated') AND v.suspended_at IS NULL
+       AND s.status <> 'archived'
        AND ${"id" in which ? sql`v.id = ${which.id}` : sql`v.skill_id = ${which.skillId} AND v.semver = ${which.semver}`}`);
   const v = res.rows[0];
   if (!v) return { ok: false, code: "not_found" };

@@ -39,6 +39,17 @@
   ids only).
 - **Web:** Download / Download with evals on the Team and Mine skill lists (latest version).
 
+## Review fixes (Opus review of KOBE-345)
+
+- **Archived / deprecated:** a version of an archived catalog skill is refused (404, as the
+  browse hides it). Deprecated versions stay exportable: SK31 keeps them working for existing
+  installs (only new installs are blocked), and an export installs nothing.
+- **Rate limits:** 30 exports a minute per member across the team, personal and catalog portable
+  routes (`skill-export:<user>`); the catalog package 10 a minute per manager
+  (`skill-export-package:<user>`).
+- **Declared sizes first:** an export reads the stored zip's central directory and refuses any
+  entry over the per-file limit, or a declared total over the upload cap, before inflating.
+
 ## Open questions (for Chris or the coordinator)
 
 - Pi itself isn't run in tests (ac-1 checks the `<name>/SKILL.md` layout in `.agents/skills`).
