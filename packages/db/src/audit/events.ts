@@ -2110,6 +2110,25 @@ export const AUDIT_EVENTS = {
     reason: z.enum(["auth_required"]),
   }),
   /**
+   * A site admin re-probed a connector now (KOBE-430, the Re-probe button): the periodic
+   * refresh's probe and drift for one connector, or the pin path for one without pins. Counts,
+   * the outcome and the credential's kind only: never tool names, the URL or a key.
+   */
+  "mcp.connector.refreshed": event("site", {
+    connectorId: id,
+    name: z.string().max(64),
+    outcome: z.enum(["unchanged", "drifted", "pinned", "failed"]),
+    reason: z
+      .string()
+      .regex(/^[a-z_]{1,32}$/)
+      .optional(),
+    changed: z.number().int().nonnegative(),
+    added: z.number().int().nonnegative(),
+    removed: z.number().int().nonnegative(),
+    credential: z.enum(["site_key", "admin_key", "none"]).optional(),
+    adminId: id.optional(),
+  }),
+  /**
    * The refresh began not checking a connector's MCP Apps templates while its tools were checked
    * (KOBE-433 re-review NEW-2): `resources/list` failed, an outdated proxy, a failed write. Site
    * admins are told; only approved bytes are ever served meanwhile.

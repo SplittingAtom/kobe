@@ -20,6 +20,9 @@ import {
 import { pinConnector, type PinOutcome } from "../connectors/pinning.js";
 import { adminPinCredential, nextPinnedBy } from "../connectors/probe-credential.js";
 import { removeSiteKey, setSiteKey } from "../connectors/site-key.js";
+import { connectorRefreshLocks } from "../connectors/refresh.js";
+import { reprobeConnector } from "../connectors/reprobe.js";
+import { reprobeReply } from "./reprobe-reply.js";
 import { putGrantSchema } from "../connectors/grants.js";
 import { checkConnectorUrl } from "../connectors/url-policy.js";
 import { appFrameDocument, mayLoadAppFrame } from "../connectors/app-frame.js";
@@ -32,6 +35,7 @@ import {
 } from "../connectors/template-review.js";
 import type { ServerDeps } from "../deps.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
+import { PIN_MESSAGES } from "./connector-messages.js";
 
 const idSchema = z.uuid();
 
@@ -46,29 +50,6 @@ const CONFLICTS: Record<NameConflict, string> = {
 };
 const nameConflict = (c: Context, error: NameConflict) =>
   c.json({ code: error, message: CONFLICTS[error] }, 409);
-
-const PIN_MESSAGES: Record<Extract<PinOutcome, { ok: false }>["failure"], string> = {
-  url_not_allowed: "The address is not allowed by this site's connector policy.",
-  forbidden_address: "The server resolves to an address Kobe may not reach.",
-  unreachable: "The server could not be reached.",
-  timeout: "The server did not answer in time.",
-  auth_required:
-    "The server asked for credentials. Kobe probes with the connector's site-wide key, else your own key for it (add one at My connector keys in a team that enabled it); never a member's. Tools stay unpinned (none are offered).",
-  http_error: "The server answered with an error.",
-  protocol_error: "The server did not answer as an MCP server.",
-  too_large: "The server's tool list was too large.",
-  rpc_error: "The server refused the tools/list request.",
-  proxy_unavailable: "Kobe's MCP proxy could not be reached, so nothing was probed.",
-  invalid_tool: "The server listed a tool Kobe cannot pin (invalid name, description or schema).",
-  ambiguous_tool_names:
-    "The server lists tools whose names collide once - . and _ are treated alike, so none was pinned.",
-  ui_resource_invalid:
-    "An app template (ui://) of the server is not one UTF-8 HTML document of type text/html;profile=mcp-app of at most 512 KiB, so nothing was pinned.",
-  ui_resource_hash_mismatch:
-    "An app template's declared contentHash does not match its bytes, so nothing was pinned.",
-  already_pinned: "This connector already has pinned tools; changing them needs re-approval.",
-  changed: "The connector changed while it was being probed. Probe it again.",
-};
 
 /** The `pin` part of a response: what happened to the tool surface (never the server's own text). */
 /** A site-key connector is fixed by its key, not by anyone's own key (review L2). */
@@ -184,6 +165,23 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
       { connector, pin: pinBody(pin, connector) },
       pin.ok || pin.failure === "already_pinned" ? 200 : 502,
     );
+  });
+
+  // Re-probe now (KOBE-430): the refresh's probe and drift for this connector, under its lock.
+  const reprobeDeps = {
+    db,
+    prober: deps.connectorProbe,
+    envelope: deps.envelope,
+    lockFor: connectorRefreshLocks(deps.database.pool),
+  };
+  app.post("/:id/refresh", async (c) => {
+    const id = idSchema.safeParse(c.req.param("id"));
+    if (!id.success) return notFound(c);
+    const result = await reprobeConnector(reprobeDeps, id.data, c.get("user").id);
+    if (result.kind === "not_found") return notFound(c);
+    const connector = await getConnector(db, id.data);
+    const reply = reprobeReply(result, connector?.credentialSource);
+    return c.json({ ...reply.body, ...(reply.status === 200 ? { connector } : {}) }, reply.status);
   });
 
   // The connector's site-wide key (KOBE-303): set or replace, then pin with it if unpinned.

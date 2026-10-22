@@ -16,6 +16,7 @@ import { notifyDrift } from "../connectors/drift-notify.js";
 import {
   CONNECTOR_REFRESH_LOCK,
   refreshAllConnectors,
+  connectorRefreshLocks,
   startConnectorRefresh,
 } from "../connectors/refresh.js";
 import type { ServerDeps } from "../deps.js";
@@ -269,10 +270,14 @@ function siteJobs(o: ServerJobsOptions): ServerJob[] {
           intervalMs: o.connectorRefreshSeconds * 1000,
           logger: o.logger,
           envelope: deps.envelope,
+          connectorLock: connectorRefreshLocks(deps.database.pool),
           afterPass,
         }),
       async () => {
-        await refreshAllConnectors(db, deps.connectorProbe, o.logger, { envelope: deps.envelope });
+        await refreshAllConnectors(db, deps.connectorProbe, o.logger, {
+          envelope: deps.envelope,
+          connectorLock: connectorRefreshLocks(deps.database.pool),
+        });
         await afterPass();
       },
     ),

@@ -15,11 +15,15 @@ import { canonicalJson } from "@kobe/protocol";
 import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
-import type { ReconcileLock } from "../sandbox/reconcile-lock.js";
+import { createPgReconcileLock, type ReconcileLock } from "../sandbox/reconcile-lock.js";
 import { applyDrift, approvedHash } from "./drift.js";
 import { buildSnapshot } from "./pin.js";
 import type { ConnectorProbe } from "./probe.js";
-import { auditProbeCredential, chooseProbeCredential } from "./probe-credential.js";
+import {
+  auditProbeCredential,
+  chooseProbeCredential,
+  type ProbeCredential,
+} from "./probe-credential.js";
 import { loadTemplates, writeTemplateDrift } from "./template-store.js";
 import {
   applyTemplateDrift,
@@ -48,6 +52,23 @@ import {
  * fails (a savepoint), the tools still refresh and the outcome says `templatesSkipped`.
  */
 export const CONNECTOR_REFRESH_LOCK = "kobe.connector-refresh";
+
+/**
+ * The advisory lock of one connector's refresh (KOBE-430): held by the periodic pass while it
+ * checks that connector and by an admin's Re-probe, so the two never overlap.
+ */
+export const connectorRefreshLockName = (connectorId: string): string =>
+  `${CONNECTOR_REFRESH_LOCK}:${connectorId}`;
+
+/** Per-connector refresh locks on `pool` (session advisory locks, any replica). */
+export const connectorRefreshLocks =
+  (pool: Parameters<typeof createPgReconcileLock>[0]) =>
+  (connectorId: string): ReconcileLock =>
+    createPgReconcileLock(
+      pool,
+      (err) => logger.warn({ err, connectorId }, "connector refresh lock connection problem"),
+      connectorRefreshLockName(connectorId),
+    );
 
 /** Why the template part of a pass did not run (the tools still refreshed). */
 interface TemplatesSkipped {
@@ -90,6 +111,13 @@ const refreshable = (connectorId: string) =>
 export interface RefreshOptions {
   /** Opens the site key or the admin's key; without it only unauthenticated probes run. */
   readonly envelope?: Envelope | undefined;
+  /**
+   * The probe credential already chosen (and audited) by the caller: an admin's Re-probe
+   * (KOBE-430). Unset: the periodic choice (`pinned_by`), audited when it changes.
+   */
+  readonly credential?: ProbeCredential | undefined;
+  /** Per-connector lock (KOBE-430): a connector whose lock is held is skipped by the pass. */
+  readonly connectorLock?: ((connectorId: string) => ReconcileLock) | undefined;
 }
 
 /** Records a skipped pass on the row (if it still has the probed URL) and the start of a skip. */
@@ -162,8 +190,8 @@ export async function refreshConnector(
     .where(refreshable(connectorId));
   if (!row) return skipped("not_pinned");
 
-  const credential = await chooseProbeCredential(db, options.envelope, connectorId, "pinned_by");
-  await auditProbeCredential(db, { id: connectorId, name: row.name }, "refresh", credential);
+  const credential =
+    options.credential ?? (await periodicCredential(db, options.envelope, connectorId, row.name));
   const probed = await prober.probe(row.url, credential.apiKey);
   if (!probed.ok) return recordSkip(db, connectorId, row, probed.failure);
   const live = buildSnapshot(row.name, probed.tools);
@@ -250,6 +278,18 @@ export async function refreshConnector(
   });
 }
 
+/** The periodic refresh's credential (KOBE-431), audited only when the choice changes. */
+async function periodicCredential(
+  db: KobeDb,
+  envelope: Envelope | undefined,
+  connectorId: string,
+  name: string,
+): Promise<ProbeCredential> {
+  const credential = await chooseProbeCredential(db, envelope, connectorId, "pinned_by");
+  await auditProbeCredential(db, { id: connectorId, name }, "refresh", credential);
+  return credential;
+}
+
 /**
  * Template drift under the connector's row lock, in a savepoint: if writing them fails, the
  * templates stay as they were and the tools' refresh goes on (review MEDIUM-1).
@@ -270,6 +310,20 @@ async function driftTemplates(
     logger.warn({ err, connectorId }, "connector template refresh failed; tools still refreshed");
     return { ok: false };
   }
+}
+
+/** One connector under its own lock, if the pass has one: held elsewhere, it is skipped. */
+async function refreshLocked(
+  db: KobeDb,
+  prober: ConnectorProbe,
+  connectorId: string,
+  options: RefreshOptions,
+): Promise<RefreshOutcome> {
+  if (!options.connectorLock) return refreshConnector(db, prober, connectorId, options);
+  const locked = await options
+    .connectorLock(connectorId)
+    .runExclusive(() => refreshConnector(db, prober, connectorId, options));
+  return locked.ran ? locked.value : skipped("refresh_running");
 }
 
 export interface RefreshSummary {
@@ -301,7 +355,7 @@ export async function refreshAllConnectors(
   let failed = 0;
   for (const { id } of ids) {
     try {
-      const outcome = await refreshConnector(db, prober, id, options);
+      const outcome = await refreshLocked(db, prober, id, options);
       if (outcome.status === "drifted") drifted += 1;
       if (outcome.status === "skipped") {
         skippedCount += 1;
@@ -323,6 +377,8 @@ export interface ConnectorRefreshOptions {
   readonly logger: Logger;
   /** Opens probe credentials (KOBE-431); unset: auth-required connectors are skipped. */
   readonly envelope?: Envelope | undefined;
+  /** Per-connector lock shared with the Re-probe route (KOBE-430). */
+  readonly connectorLock?: ((connectorId: string) => ReconcileLock) | undefined;
   /** After each pass (KOBE-103): emails about drift. Must not throw. */
   readonly afterPass?: () => Promise<unknown>;
 }
@@ -338,6 +394,7 @@ export function startConnectorRefresh(options: ConnectorRefreshOptions): () => v
       .runExclusive(async () => {
         const summary = await refreshAllConnectors(options.db, options.prober, options.logger, {
           envelope: options.envelope,
+          connectorLock: options.connectorLock,
         });
         await options.afterPass?.();
         return summary;
