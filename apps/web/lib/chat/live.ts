@@ -35,6 +35,8 @@ export interface ToolActivity {
   readonly files: readonly Payload<"file.shared">[];
   /** A `propose_file_edit` proposal the server recorded (KOBE-463): the card's Review. */
   readonly fileEdit?: Payload<"file.edit_proposed"> | undefined;
+  /** `open_file` opened this workspace file for the run owner (KOBE-484): the card's Open again. */
+  readonly fileOpened?: Payload<"file.opened"> | undefined;
 }
 
 /** Run-level happenings shown beside the conversation (not tied to a tool call). */
@@ -303,6 +305,12 @@ function applyOne(run: LiveRun, event: KobeEvent): LiveRun {
     // reload the card reads the same record from the thread's proposal list.
     case "file.edit_proposed":
       return withTool(next, event.payload.tool_call_id, (t) => ({ ...t, fileEdit: event.payload }));
+    // KOBE-484: the file `open_file` opened, on its tool call (the controller opens the tab).
+    case "file.opened":
+      return withTool(next, event.payload.tool_call_id, (t) => ({
+        ...t,
+        fileOpened: event.payload,
+      }));
     // KOBE-464: notebook executions: the notebook panel shows them (KOBE-465, lib/notebooks/executions.ts).
     case "notebook.started":
     case "notebook.output":

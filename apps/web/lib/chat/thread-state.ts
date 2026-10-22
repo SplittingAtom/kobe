@@ -72,6 +72,12 @@ export interface ThreadState {
    */
   readonly followups?:
     { readonly runId: string; readonly suggestions: readonly string[] } | undefined;
+  /**
+   * The newest `open_file` request that arrived live (KOBE-484): the owner's client opens that
+   * file's tab once. Never set from a replayed backlog, so a reload does not reopen old files.
+   */
+  readonly fileOpenRequest?:
+    { readonly runId: string; readonly toolCallId: string; readonly path: string } | undefined;
   /** Polite status for screen readers ("Message queued", "Run stopped", …). */
   readonly announcement: string;
   /** Bumped per announcement, so the same text twice is announced twice. */

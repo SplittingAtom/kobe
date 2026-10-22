@@ -64,6 +64,11 @@ export interface ControllerOptions {
 }
 
 const MAX_REOPEN_ATTEMPTS = 5;
+/**
+ * Events that arrive this long after the stream opened are live, not the backlog a reload
+ * replays (KOBE-484: only live `file.opened` events open a tab). Runs this tab started are live.
+ */
+const REPLAY_WINDOW_MS = 1_500;
 const MAX_ENTRY_PAGES = 40;
 const REGENERATE_NOT_SENT: ApiError = {
   status: 0,
@@ -101,6 +106,9 @@ export class ThreadController {
   #loadStarted = false;
   #leafVersion = 0;
   #lastStreamedRun: string | undefined;
+  /** When the current stream opened (KOBE-484), and the runs this tab started. */
+  #streamOpenedAt = 0;
+  readonly #ownRuns = new Set<string>();
 
   constructor(threadId: string | null, options: ControllerOptions) {
     this.#state = initialThreadState(threadId);
@@ -432,6 +440,7 @@ export class ThreadController {
   #open(runId: string): void {
     if (this.#disposed) return;
     const after = this.#state.live?.runId === runId ? this.#state.live.lastSeq : 0;
+    this.#streamOpenedAt = Date.now();
     this.#set((s) => ({ ...s, connection: "connecting" }));
     this.#stream = openRunStream(
       runId,
@@ -456,11 +465,13 @@ export class ThreadController {
     const wasStarted = live.started;
     const applied = applyRunEvents(live, events);
     const now = new Date().toISOString();
+    const opened = this.#liveFileOpen(runId, live.lastSeq, events);
     this.#set((s) => ({
       ...s,
       live: applied.run,
       entries: mergeCommittedEntries(s.entries, applied.entries, now),
       connection: "open",
+      ...(opened === undefined ? {} : { fileOpenRequest: opened }),
     }));
     const terminal = applied.run.terminal;
     if (terminal !== undefined) clearResumePoint(this.#resume, runId);
@@ -555,6 +566,19 @@ export class ThreadController {
     }
     this.#stream = undefined;
     void this.refresh();
+  }
+
+  /** The newest new `file.opened` of a live batch (KOBE-484); undefined for a replayed backlog. */
+  #liveFileOpen(
+    runId: string,
+    afterSeq: number,
+    events: readonly KobeEvent[],
+  ): ThreadState["fileOpenRequest"] {
+    const live = this.#ownRuns.has(runId) || Date.now() - this.#streamOpenedAt > REPLAY_WINDOW_MS;
+    if (!live) return undefined;
+    const last = events.findLast((e) => e.type === "file.opened" && e.seq > afterSeq);
+    if (last?.type !== "file.opened") return undefined;
+    return { runId, toolCallId: last.payload.tool_call_id, path: last.payload.path };
   }
 
   #onSignal(runId: string, signal: StreamSignal): void {
@@ -684,6 +708,7 @@ export class ThreadController {
       return false;
     }
     const { runId, queued } = res.data;
+    this.#ownRuns.add(runId);
     this.#set((s) => ({
       ...s,
       // A queued message stays shown as "sending" until the queue read below lists it.
