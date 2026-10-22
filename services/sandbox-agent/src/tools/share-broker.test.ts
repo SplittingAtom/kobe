@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { FileShareResultFrame, KobeToolsRequest, KobeToolsResponse } from "@kobe/protocol";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PushPathError, type PushedFile } from "../workspace/sync.js";
 import { FileShareBroker, MAX_PENDING_SHARES_PER_THREAD } from "./share-broker.js";
 
@@ -10,6 +10,8 @@ const THREAD = "5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e";
 const RUN = "6c7d8e9f-0a1b-4c2d-9e3f-4a5b6c7d8e9f";
 const FILE_ID = "7d8e9f0a-1b2c-4d3e-8f4a-5b6c7d8e9f0a";
 const SHA = "a".repeat(64);
+/** Under CI load a realpath and a push can take seconds; the tests allow more than that. */
+const SETTLE_MS = 15_000;
 
 type ShareRequest = Extract<KobeToolsRequest, { op: "file.share" }>;
 const request = (input: Record<string, unknown>, id = "kt_1"): ShareRequest => ({
@@ -66,19 +68,19 @@ function setup(options: { sends?: boolean; push?: (rel: string) => Promise<Pushe
       }),
   });
   const reply = (r: KobeToolsResponse) => replies.push(r);
-  const settle = async () => {
-    // Every call ends in a frame or a reply; wait for one (file I/O is slow under load),
-    // then a little longer so a late frame would still show.
-    const deadline = Date.now() + 5000;
-    while (frames.length === 0 && replies.length === 0 && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 10));
-    }
-    await new Promise((r) => setTimeout(r, 30));
+  // Every request ends in exactly one frame sent or one reply: wait for that many (file I/O is
+  // slow under load), not for a fixed time (KOBE-415); then drain what is already queued, so a
+  // second frame or reply would still show.
+  const settle = async (outcomes = 1) => {
+    await vi.waitFor(() => expect(frames.length + replies.length).toBe(outcomes), {
+      timeout: SETTLE_MS,
+    });
+    await new Promise((r) => setImmediate(r));
   };
   return { broker, frames, pushed, order, replies, reply, settle };
 }
 
-describe("FileShareBroker", () => {
+describe("FileShareBroker", { timeout: SETTLE_MS + 5_000 }, () => {
   it("pushes first, then sends file.share with the pushed entry, and returns the result", async () => {
     const u = setup();
     u.broker.share(
@@ -195,7 +197,7 @@ describe("FileShareBroker", () => {
   it("reports an unreachable server and forgets the request", async () => {
     const t = setup({ sends: false });
     t.broker.share(THREAD, RUN, request({ path: "out/report.csv" }), t.reply);
-    await t.settle();
+    await t.settle(2); // the frame it could not send, and the reply
     expect(t.replies[0]).toMatchObject({ ok: false, error: { code: "unavailable" } });
     expect(t.broker.pendingCount).toBe(0);
   });
@@ -215,13 +217,14 @@ describe("FileShareBroker", () => {
   });
 
   it("answers a request once when the run ends during the push, and never sends afterwards", async () => {
-    let release: (f: PushedFile) => void = () => {};
+    let release: ((f: PushedFile) => void) | undefined;
     const t = setup({ push: () => new Promise((r) => (release = r)) });
     t.broker.share(THREAD, RUN, request({ path: "out/report.csv" }), t.reply);
-    // The push is gated, so no frame or reply can come yet; a short tick is all there is to wait for.
-    await new Promise((r) => setTimeout(r, 20));
+    // The run ends while the push is in flight (it is gated, so no frame or reply can come yet).
+    await vi.waitFor(() => expect(release).toBeDefined(), { timeout: SETTLE_MS });
+    expect(t.frames.length + t.replies.length).toBe(0);
     t.broker.failRun(RUN, "run ended");
-    release({ path: "out/report.csv", rev: 1, sha256: SHA, size: 8 });
+    release?.({ path: "out/report.csv", rev: 1, sha256: SHA, size: 8 });
     await t.settle();
     expect(t.frames).toEqual([]);
     expect(t.replies).toHaveLength(1);
