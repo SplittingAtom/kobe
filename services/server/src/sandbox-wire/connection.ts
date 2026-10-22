@@ -64,6 +64,7 @@ import { onSkillDraftSave } from "./skill-draft-save.js";
 import { createRunTranslator } from "./translate.js";
 import { TraceFrameRate, type RunOwner, type TraceIntake } from "./trace-intake.js";
 import type { CommandOutcome, SandboxTarget } from "./types.js";
+import { RecentlyEndedRuns } from "./recently-ended.js";
 
 export interface ConnectionClaims {
   readonly sandboxId: string;
@@ -121,6 +122,8 @@ export class SandboxConnection implements RegisteredConnection {
   readonly #socket: WebSocket;
   readonly #registry: ConnectionRegistry;
   readonly #leases = new Map<string, Lease>();
+  /** Runs this sandbox held that ended without a live lease here (KOBE-483): late frames dropped. */
+  readonly #recentlyEnded = new RecentlyEndedRuns();
   readonly #threads = new Set<string>();
   readonly #uiSeen = new Set<string>();
   readonly #policyPending = new Map<string, AbortController>();
@@ -306,6 +309,7 @@ export class SandboxConnection implements RegisteredConnection {
     const lease = this.#leases.get(runId);
     if (!lease) return;
     lease.ended = true;
+    this.#recentlyEnded.add(runId, lease.threadId);
     this.#traces?.ended(runId);
     lease.ingest.close();
     this.#deniedBuckets.delete(runId);
@@ -529,10 +533,7 @@ export class SandboxConnection implements RegisteredConnection {
 
   #checkRun(runId: string, threadId: string, frameType: string): "ok" | "ended" | "violation" {
     const lease = this.#leases.get(runId);
-    if (!lease) {
-      this.#violate("unknown_run", frameType);
-      return "violation";
-    }
+    if (!lease) return this.#checkRecentlyEnded(runId, threadId, frameType);
     if (lease.threadId !== threadId) {
       this.#violate("unknown_thread", frameType);
       return "violation";
@@ -543,6 +544,26 @@ export class SandboxConnection implements RegisteredConnection {
       return "ended";
     }
     return "ok";
+  }
+
+  /**
+   * No lease here: a run this sandbox held that just ended (interrupted by this connection's hello,
+   * or an ended lease the count cap evicted) gets its late frame dropped within the grace window
+   * (KOBE-483); anything else is a lease violation and closes the connection.
+   */
+  #checkRecentlyEnded(runId: string, threadId: string, frameType: string): "ended" | "violation" {
+    const recent = this.#recentlyEnded.match(runId, threadId);
+    if (recent === "match") {
+      this.#ctx.metrics.lateFrames += 1;
+      this.log.debug(
+        { run_id: runId, frame_type: frameType },
+        "late frame of an ended run dropped",
+      );
+      this.sendError("run_not_active", "the run has ended", frameType);
+      return "ended";
+    }
+    this.#violate(recent === "thread_mismatch" ? "unknown_thread" : "unknown_run", frameType);
+    return "violation";
   }
 
   #checkThread(threadId: string, frameType: string): boolean {
@@ -1512,7 +1533,11 @@ export class SandboxConnection implements RegisteredConnection {
     }
     // Runs the sandbox no longer has (Pi or agent restarted, volume lost): interrupted, never
     // resumed (D14). Runs it offers that we don't list are aborted by the agent.
-    for (const run of lost) await this.interrupt(run.runId, "not_resumed");
+    for (const run of lost) {
+      // The agent may still send a frame of it (an abort in flight): dropped, not a violation.
+      this.#recentlyEnded.add(run.runId, run.threadId);
+      await this.interrupt(run.runId, "not_resumed");
+    }
     await this.#reconcileOrphans(orphans, new Set(listed.map((r) => r.runId)));
     if ((this.#state as State) === "closed") return;
     this.#state = "ready";

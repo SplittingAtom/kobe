@@ -607,6 +607,66 @@ describe("late frames for ended runs", () => {
   });
 });
 
+describe("late frames after Stop or a reconnect (KOBE-483)", () => {
+  const uiRequest = (runId: string, threadId: string, id: string) => ({
+    v: 1 as const,
+    type: "pi.ui_request" as const,
+    thread_id: threadId,
+    run_id: runId,
+    request: { type: "extension_ui_request" as const, id, method: "setStatus" as const },
+  });
+
+  it("drops a late pi.ui_request of a run this connection held after Stop; the connection stays", async () => {
+    const w = await world();
+    const sb = await started(w);
+    sb.event(w.runId, w.threadId, 1, assistantStart);
+    await sb.until(() => sb.acked(w.runId) >= 1);
+    await withTeam(fx.db, w.team, async (tx) => {
+      await tx.execute(
+        sql`UPDATE runs SET status = 'cancelled', ended_at = now() WHERE id = ${w.runId}`,
+      );
+      await tx.execute(
+        sql`INSERT INTO run_events (team_id, run_id, type, payload) VALUES (${w.team}, ${w.runId}, 'run.interrupted', ${JSON.stringify({ reason: "cancelled", last_entry_id: null, retryable: false })}::jsonb)`,
+      );
+    });
+    // The late frame is only meaningful once the server has ended the lease (an ack of a late event).
+    sb.event(w.runId, w.threadId, 2, delta("late"));
+    await sb.until(() => sb.frames("error").find((e) => e.code === "run_not_active"));
+    sb.send(uiRequest(w.runId, w.threadId, "ui-late"));
+    await sb.until(() => sb.frames("error").filter((e) => e.code === "run_not_active").length >= 2);
+    await sleep(100);
+    expect(sb.closed).toBeUndefined();
+    expect(sb.frames("pi.ui_response")).toEqual([]);
+  });
+
+  it("drops a pi.ui_request of a run the reconnect just interrupted, and still closes for others", async () => {
+    const w = await world();
+    const first = await started(w);
+    first.close();
+    // The agent reconnects without offering the run (it stopped it locally): interrupted on hello.
+    const sb = await connect(1, w, []);
+    await expect.poll(async () => (await runRow(w.team, w.runId)).status).toBe("interrupted");
+    sb.send(uiRequest(w.runId, w.threadId, "ui-after-reconnect"));
+    await sb.until(() => sb.frames("error").find((e) => e.code === "run_not_active"));
+    await sleep(100);
+    expect(sb.closed).toBeUndefined();
+    // The grace covers only that run on that thread: anything else is still a lease violation.
+    const other = await newRun(w);
+    sb.send(uiRequest(other.runId, other.threadId, "ui-forged"));
+    expect((await sb.waitClosed()).code).toBe(SANDBOX_CLOSE_CODES.lease_violation);
+  });
+
+  it("closes when a reconnect-interrupted run is named with another thread", async () => {
+    const w = await world();
+    const first = await started(w);
+    first.close();
+    const sb = await connect(1, w, []);
+    await expect.poll(async () => (await runRow(w.team, w.runId)).status).toBe("interrupted");
+    sb.send(uiRequest(w.runId, randomUUID(), "ui-wrong-thread"));
+    expect((await sb.waitClosed()).code).toBe(SANDBOX_CLOSE_CODES.lease_violation);
+  });
+});
+
 describe("leasing and the compromised-sandbox suite", () => {
   it("closes with lease_violation for a run of another sandbox (forged run id) and audits it", async () => {
     const w = await world();
