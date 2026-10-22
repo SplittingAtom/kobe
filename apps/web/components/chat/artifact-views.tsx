@@ -1,8 +1,9 @@
 "use client";
 
 /**
- * Renderers of one artifact version (KOBE-130, D-7). Markdown and code use the chat's Markdown
- * component (no raw HTML, no images); CSV is a table of text cells; Mermaid renders with
+ * Renderers of one artifact version (KOBE-130, D-7). Text kinds (markdown, code, csv) open in the
+ * file editor's UI, read-only (`artifact-text-view.tsx`, KOBE-485): Rendered uses the chat's
+ * Markdown component (no raw HTML, no images) and CSV tables of text cells; Mermaid renders with
  * `securityLevel: "strict"` and is shown as an image (inert: no script, no network, and the page
  * CSP's `style-src` doesn't apply to it); HTML and SVG load in an iframe from the server's frame
  * route (own CSP, opaque origin). The iframe never gets `allow-same-origin` and never uses `srcdoc`
@@ -13,16 +14,16 @@ import {
   ARTIFACT_FRAME_SANDBOX,
   artifactFrameUrl,
   fenced,
+  isArtifactTextKind,
   isFrameKind,
-  parseCsv,
   type ArtifactDetailView,
 } from "../../lib/chat/artifacts";
 import type { ApiError } from "../../lib/api/client";
 import { ErrorNotice } from "../admin/error-notice";
+import type { TextMode } from "../files/text-modes";
+import { ArtifactTextView } from "./artifact-text-view";
 import { useChatSession } from "./kobe-runtime";
 import { Markdown } from "./markdown";
-
-const MAX_CSV_ROWS = 1000;
 
 type Content =
   | { readonly status: "loading" }
@@ -47,50 +48,6 @@ function useArtifactContent(id: string, version: number, enabled: boolean): Cont
     };
   }, [session, id, version, enabled]);
   return state;
-}
-
-export function CsvTable({
-  text,
-  delimiter = ",",
-}: {
-  readonly text: string;
-  readonly delimiter?: string;
-}) {
-  const rows = parseCsv(text, delimiter);
-  const [head, ...body] = rows;
-  if (!head) return <p>This artifact is empty.</p>;
-  const shown = body.slice(0, MAX_CSV_ROWS);
-  return (
-    <div className="overflow-auto">
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr>
-            {head.map((cell, i) => (
-              <th key={i} scope="col" className="bg-muted border px-2 py-1 text-start font-medium">
-                {cell}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {shown.map((row, r) => (
-            <tr key={r}>
-              {row.map((cell, c) => (
-                <td key={c} className="border px-2 py-1">
-                  {cell}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {body.length > shown.length && (
-        <p className="text-muted-foreground mt-2 text-xs">
-          Showing the first {MAX_CSV_ROWS} of {body.length} rows. Download the file for all of them.
-        </p>
-      )}
-    </div>
-  );
 }
 
 /** Mermaid, loaded on demand (it is large); `strict` stops it from running anything in a diagram. */
@@ -147,9 +104,17 @@ function MermaidView({ text, title }: { readonly text: string; readonly title: s
 export function ArtifactBody({
   artifact,
   version,
+  mode,
+  onMode,
+  canEdit,
 }: {
   readonly artifact: ArtifactDetailView;
   readonly version: number;
+  /** Text kinds (KOBE-485): Rendered or Raw, kept by the tab across versions. */
+  readonly mode: TextMode;
+  onMode(mode: TextMode): void;
+  /** The viewer owns the thread: text kinds offer Edit as file. */
+  readonly canEdit: boolean;
 }) {
   const session = useChatSession();
   const framed = isFrameKind(artifact.kind);
@@ -167,13 +132,19 @@ export function ArtifactBody({
   }
   if (content.status === "loading") return <p role="status">Loading the content…</p>;
   if (content.status === "error") return <ErrorNotice error={content.error} />;
+  if (isArtifactTextKind(artifact.kind)) {
+    return (
+      <ArtifactTextView
+        artifact={artifact}
+        version={version}
+        text={content.text}
+        canEdit={canEdit}
+        mode={mode}
+        onMode={onMode}
+      />
+    );
+  }
   switch (artifact.kind) {
-    case "markdown":
-      return <Markdown text={content.text} />;
-    case "code":
-      return <Markdown text={fenced(content.text, artifact.language)} />;
-    case "csv":
-      return <CsvTable text={content.text} />;
     case "mermaid":
       return <MermaidView text={content.text} title={artifact.title} />;
     default:

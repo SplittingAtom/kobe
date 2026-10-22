@@ -4,8 +4,9 @@
  * The artifact column (KOBE-130, D-6/D-7 of docs/ledger/KOBE-55.md; tabs KOBE-200, CE6),
  * assistant-ui's with-artifacts pattern: a tab per artifact opened in the thread, opened from the
  * run notice, the tool card or the thread's artifact list, or by the agent creating one. The
- * column is a labelled region; Escape closes the active tab, and with no tabs it is gone. It is
- * view-only (member editing is a later spec). What it shows comes from `/v1/artifacts` (team in
+ * column is a labelled region; Escape closes the active tab, and with no tabs it is gone. Artifacts
+ * are view-only: text kinds open read-only in the file editor's UI, and the thread's owner can Edit
+ * as file (KOBE-485), which copies a version into their workspace and opens that file. What it shows comes from `/v1/artifacts` (team in
  * `X-Kobe-Team`); HTML and SVG are shown in a sandboxed frame loaded from the server's frame route
  * (`artifact-views.tsx`). Workspace files open here as tabs too (KOBE-268, `files/file-tab.tsx`).
  * State: `artifact-state.tsx`.
@@ -29,6 +30,7 @@ import type { FilesApi } from "../../lib/files/api";
 import { fileName, filePathOfTab, tabDomId } from "../../lib/files/preview";
 import { confirmDiscard, useUnsavedGuard } from "../files/file-editor";
 import { FileTabContent } from "../files/file-tab";
+import type { TextMode } from "../files/text-modes";
 import { AppFrame } from "../apps/app-frame";
 import { useAppComposer } from "../apps/use-app-composer";
 import { isAppTab, type AppTabSpec } from "../../lib/apps/app-tabs";
@@ -118,6 +120,8 @@ function PanelContent({
   const session = useChatSession();
   const detail = useArtifactDetail(id);
   const [pinned, setPinned] = useState<number | null>(initialVersion ?? null);
+  const [mode, setMode] = useState<TextMode>("rendered");
+  const readOnly = useThreadReadOnly();
   const artifact = detail.artifact;
   const title = artifact?.title;
   useEffect(() => {
@@ -158,7 +162,14 @@ function PanelContent({
           </p>
         )}
         {artifact && (
-          <ArtifactBody key={`${artifact.id}:${version}`} artifact={artifact} version={version} />
+          <ArtifactBody
+            key={`${artifact.id}:${version}`}
+            artifact={artifact}
+            version={version}
+            mode={mode}
+            onMode={setMode}
+            canEdit={!readOnly}
+          />
         )}
       </div>
     </>

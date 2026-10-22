@@ -230,7 +230,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/threads", threadConnectorRoutes(deps));
   api.route("/threads", threadSkillRoutes(deps));
   api.route("/threads", threadRoutes(deps));
-  api.route("/artifacts", artifactRoutes(deps));
+  api.route("/artifacts", artifactRoutes(deps, options.workspaceFiles?.sync));
   api.route("/schedules", scheduleRoutes(deps));
   api.route("/notifications", notificationRoutes(deps));
   api.route("/memory/settings", memorySettingsRoutes(deps));

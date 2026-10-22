@@ -6,7 +6,7 @@
  */
 import { fenced } from "../../lib/chat/artifacts";
 import type { FilePreview } from "../../lib/files/preview";
-import { CsvTable } from "../chat/artifact-views";
+import { CsvTable } from "../chat/csv-table";
 import { Markdown } from "../chat/markdown";
 
 /** JSON pretty-printed; a cut or invalid file as it is. */

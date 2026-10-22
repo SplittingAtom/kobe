@@ -3,6 +3,7 @@ import {
   artifactContentUrl,
   artifactFrameUrl,
   artifactIdFromToolResult,
+  artifactPreview,
   fenced,
   isFrameKind,
   parseCsv,
@@ -60,5 +61,21 @@ describe("artifactIdFromToolResult", () => {
     expect(artifactIdFromToolResult({ artifact_id: "../x" })).toBeUndefined();
     expect(artifactIdFromToolResult("not json")).toBeUndefined();
     expect(artifactIdFromToolResult(undefined)).toBeUndefined();
+  });
+});
+
+describe("artifactPreview (KOBE-485)", () => {
+  it("shows a text artifact as a workspace file with its extension would be", () => {
+    expect(artifactPreview("markdown", null)).toEqual({ kind: "markdown" });
+    expect(artifactPreview("csv", null)).toEqual({ kind: "csv" });
+    expect(artifactPreview("code", "json")).toEqual({ kind: "json" });
+    expect(artifactPreview("code", "tsv")).toEqual({ kind: "tsv" });
+    expect(artifactPreview("code", "text")).toEqual({ kind: "text" });
+    expect(artifactPreview("code", "python")).toEqual({ kind: "code", language: "python" });
+  });
+
+  it("keeps the language of code without an extension of its own; plain text otherwise", () => {
+    expect(artifactPreview("code", "haskell")).toEqual({ kind: "code", language: "haskell" });
+    expect(artifactPreview("code", null)).toEqual({ kind: "text" });
   });
 });

@@ -7,6 +7,7 @@ import {
   isInternalPath,
   isReadOnlyPath,
   moveRefusal,
+  numberedPath,
   underPattern,
 } from "./paths.js";
 
@@ -27,6 +28,15 @@ describe("workspace file browser paths", () => {
     for (const path of ["uploads", "uploads/t/f", "uploads/0b7f3c1e-2d4a-4e5b-8c6d-7e8f9a0b1c2d"]) {
       expect(isReadOnlyPath(path), path).toBe(true);
     }
+  });
+
+  it("numbers Edit as file names before the extension (KOBE-485)", () => {
+    expect(numberedPath("artifacts/plan.md", 2)).toBe("artifacts/plan-2.md");
+    expect(numberedPath("artifacts/load-data.py", 3)).toBe("artifacts/load-data-3.py");
+    expect(numberedPath("artifacts/notes", 2)).toBe("artifacts/notes-2");
+    const long = numberedPath(`artifacts/${"a".repeat(252)}.md`, 10);
+    expect(new TextEncoder().encode(long.slice("artifacts/".length)).length).toBe(255);
+    expect(long.endsWith("-10.md")).toBe(true);
   });
 
   it("names copies before the extension, trimming the stem to the segment limit", () => {

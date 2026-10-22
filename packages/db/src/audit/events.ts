@@ -1406,11 +1406,14 @@ export const AUDIT_EVENTS = {
   /** The user downloaded a file of their own workspace in the file browser (KOBE-148; no names). */
   "workspace.file_downloaded": event("team", { userId: id, bytes: count }),
   /** The user uploaded a file into their own workspace in the file browser (KOBE-148; no names). */
-  // `area: "drop"`: a file dropped on the rail into uploads/ (KOBE-199).
+  // `area: "drop"`: a file dropped on the rail into uploads/ (KOBE-199). `area: "artifact"`: Edit as
+  // file copied an artifact version into artifacts/ (KOBE-485), named by its ids only.
   "workspace.file_uploaded": event("team", {
     userId: id,
     bytes: count,
-    area: z.enum(["drop"]).optional(),
+    area: z.enum(["drop", "artifact"]).optional(),
+    artifactId: id.optional(),
+    version: count.optional(),
   }),
   /**
    * The user saved an edited file of their own workspace from the file editor (KOBE-462): the new
