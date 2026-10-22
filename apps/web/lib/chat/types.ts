@@ -54,6 +54,8 @@ export interface ThreadSummary {
   /** The pinned agent's name and its state in this team (KOBE-122); null without an agent. */
   readonly agentName?: string | null;
   readonly agentStatus?: "active" | "suspended" | "archived" | null;
+  /** The pinned version is an admin's Dangerous agent (KOBE-476): its tools run without asking. */
+  readonly agentDangerous?: boolean;
   readonly sharedToProject: boolean;
   /**
    * `private`, `project` (KOBE-163) or `team` (KOBE-221); absent on older answers = see
@@ -122,6 +124,8 @@ export interface RunnableAgent {
   readonly model: string | null;
   /** The current version's conversation starters (D19): the welcome screen's chips (KOBE-222). */
   readonly starters?: readonly string[];
+  /** The current version is an admin's Dangerous agent (KOBE-476): badged in the picker. */
+  readonly dangerous?: true;
 }
 
 export interface ThreadPage {

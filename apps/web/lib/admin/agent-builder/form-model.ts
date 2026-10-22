@@ -1,10 +1,10 @@
 import {
+  AGENT_APPROVAL_MODES,
   ALL_CONNECTORS,
-  APPROVAL_MODES,
   agentWarnings,
   validateAgentDefinition,
+  type AgentApprovalMode,
   type AgentDefinition,
-  type ApprovalMode,
 } from "@kobe/agent-file";
 
 /** The builder's form state: plain strings (one entry per line for lists), never the wire shape. */
@@ -14,7 +14,8 @@ export interface FormState {
   readonly description: string;
   readonly icon: string;
   readonly model: string;
-  readonly approvalMode: "" | ApprovalMode;
+  /** `dangerous` (AC1) is offered to site and team admins only; the server enforces it. */
+  readonly approvalMode: "" | AgentApprovalMode;
   readonly skills: string;
   readonly skillsExclusive: boolean;
   readonly connectors: string;
@@ -43,6 +44,39 @@ export const EMPTY_FORM: FormState = {
 
 export type FieldKey = keyof FormState | "prompt" | "slug" | "form";
 export type FieldErrors = Readonly<Partial<Record<FieldKey, readonly string[]>>>;
+
+/** The creator's two tabs (KOBE-476 AC2). */
+export type BuilderTab = "identity" | "behaviour";
+
+/** Which tab holds each field; `form` (whole-definition errors) shows under both. */
+const TAB_OF: Readonly<Record<Exclude<FieldKey, "form">, BuilderTab>> = {
+  slug: "identity",
+  name: "identity",
+  icon: "identity",
+  role: "identity",
+  description: "identity",
+  prompt: "identity",
+  model: "behaviour",
+  approvalMode: "behaviour",
+  skills: "behaviour",
+  skillsExclusive: "behaviour",
+  connectors: "behaviour",
+  connectorsAll: "behaviour",
+  toolsAllow: "behaviour",
+  toolsDeny: "behaviour",
+  starters: "behaviour",
+};
+
+/** The first tab (Identity before Behaviour) with a field error, or null when none has one. */
+export function firstTabWithError(errors: FieldErrors): BuilderTab | null {
+  const tabs = new Set(
+    (Object.keys(errors) as FieldKey[])
+      .filter((k): k is Exclude<FieldKey, "form"> => k !== "form" && (errors[k]?.length ?? 0) > 0)
+      .map((k) => TAB_OF[k]),
+  );
+  if (tabs.has("identity")) return "identity";
+  return tabs.has("behaviour") ? "behaviour" : null;
+}
 
 export type Validation =
   | { readonly ok: true; readonly definition: AgentDefinition; readonly warnings: string[] }
@@ -113,7 +147,7 @@ export function fromFrontmatter(frontmatter: Record<string, unknown>): FormState
     description: str(frontmatter.description),
     icon: str(frontmatter.icon),
     model: str(frontmatter.model),
-    approvalMode: APPROVAL_MODES.find((m) => m === mode) ?? "",
+    approvalMode: AGENT_APPROVAL_MODES.find((m) => m === mode) ?? "",
     skills: joinLines(exclusive ?? skills),
     skillsExclusive: exclusive !== undefined,
     connectors: joinLines(frontmatter.connectors),

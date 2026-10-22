@@ -67,6 +67,8 @@ describe("console access", () => {
         team: { id: "t-1", slug: "fin", name: "Finance" },
         role: "team_admin",
         permissions: ["team.members.manage"],
+        // KOBE-476: site admins may set an agent's Dangerous mode.
+        siteAdmin: true,
       },
     });
   });

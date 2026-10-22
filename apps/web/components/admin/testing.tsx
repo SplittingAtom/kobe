@@ -83,9 +83,11 @@ export function renderTeam(
   {
     role = "team_admin",
     permissions = ADMIN_PERMISSIONS,
+    siteAdmin,
   }: {
     role?: TeamAccess["role"];
     permissions?: readonly string[];
+    siteAdmin?: boolean;
   } = {},
 ) {
   const access: TeamAccess = {
@@ -94,6 +96,7 @@ export function renderTeam(
     team: TEAM,
     role,
     permissions,
+    ...(siteAdmin === undefined ? {} : { siteAdmin }),
   };
   return render(<ConsoleAccessContext.Provider value={access}>{ui}</ConsoleAccessContext.Provider>);
 }

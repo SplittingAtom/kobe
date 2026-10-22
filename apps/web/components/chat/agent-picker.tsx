@@ -65,6 +65,17 @@ export function useDraftAgentName(): string | null {
   return draft?.name ?? null;
 }
 
+/** Whether the agent picked for a conversation not created yet is a Dangerous agent (KOBE-476). */
+export function useDraftAgentDangerous(): boolean {
+  const session = useChatSession();
+  const draft = useSyncExternalStore(
+    session.subscribeDraftAgent,
+    () => session.draftAgent,
+    () => null,
+  );
+  return draft?.dangerous === true;
+}
+
 const OPTION =
   "border-foreground/10 has-[:checked]:border-foreground/40 has-[:checked]:bg-muted/50 has-[:focus-visible]:ring-ring/50 hover:bg-muted/30 flex cursor-pointer flex-col gap-0.5 rounded-lg border px-3 py-2 text-start text-sm transition-colors has-[:focus-visible]:ring-2 motion-reduce:transition-none";
 
@@ -123,7 +134,7 @@ function AgentPicker({
                 type="radio"
                 name={`${id}-agent`}
                 className="sr-only"
-                aria-label={agentChoiceName(agent, label)}
+                aria-label={`${agentChoiceName(agent, label)}${agent.dangerous ? ", Dangerous" : ""}`}
                 checked={chosenId === agent.id}
                 onChange={() => choose(agent)}
               />
@@ -137,6 +148,11 @@ function AgentPicker({
                 {label?.slug !== undefined && (
                   <span className="text-muted-foreground font-mono text-[0.6875rem]">
                     {label.slug}
+                  </span>
+                )}
+                {agent.dangerous && (
+                  <span className="text-destructive border-destructive/40 rounded border px-1 text-[0.6875rem] leading-4 font-medium">
+                    Dangerous
                   </span>
                 )}
               </span>
@@ -215,6 +231,9 @@ function PickerPopover({
     <Popover.Root>
       <Popover.Trigger className="hover:bg-muted text-muted-foreground inline-flex h-7 max-w-48 min-w-0 shrink items-center gap-1 rounded-full border px-2.5 text-xs">
         <span className="min-w-0 truncate">{`Chat with: ${chosen ?? "No agent"}`}</span>
+        {chosen !== null && shown?.dangerous && (
+          <span className="text-destructive shrink-0 font-medium">Dangerous</span>
+        )}
         <ChevronDownIcon aria-hidden className="size-3.5 shrink-0" />
       </Popover.Trigger>
       <Popover.Content

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_FORM,
+  firstTabWithError,
   fromFrontmatter,
   replacedConnectorNames,
   splitLines,
@@ -90,5 +91,21 @@ describe("agent builder form model", () => {
 
   it("splits lines without blanks", () => {
     expect(splitLines("a\n\n b \n")).toEqual(["a", "b"]);
+  });
+});
+
+describe("Dangerous mode and tabs (KOBE-476)", () => {
+  it("keeps a stored Dangerous mode through the form (never dropped on open)", () => {
+    const f = fromFrontmatter({ name: "Ops", approval_mode: "dangerous" });
+    expect(f.approvalMode).toBe("dangerous");
+    expect(toFrontmatter(f)).toEqual({ name: "Ops", approval_mode: "dangerous" });
+  });
+
+  it("names the first tab holding an error", () => {
+    expect(firstTabWithError({})).toBeNull();
+    expect(firstTabWithError({ starters: ["x"] })).toBe("behaviour");
+    expect(firstTabWithError({ prompt: ["x"], starters: ["y"] })).toBe("identity");
+    expect(firstTabWithError({ slug: ["x"] })).toBe("identity");
+    expect(firstTabWithError({ toolsDeny: ["x"] })).toBe("behaviour");
   });
 });

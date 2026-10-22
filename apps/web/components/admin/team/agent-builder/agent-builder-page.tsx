@@ -13,8 +13,10 @@ import {
 } from "../../../../lib/admin/api/team/agent-builder";
 import {
   EMPTY_FORM,
+  firstTabWithError,
   fromFrontmatter,
   validateForm,
+  type BuilderTab,
   type FieldErrors,
   type FormState,
 } from "../../../../lib/admin/agent-builder/form-model";
@@ -25,7 +27,10 @@ import {
   Notice,
   PageHeader,
   Section,
-  Textarea,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
   TextInput,
   useConfirm,
   useUnsavedChanges,
@@ -38,7 +43,9 @@ import { SharedCasesSummary } from "../eval-cases/shared-cases-summary";
 import { AgentQuality } from "./agent-quality";
 import { EvalStatus } from "./eval-status";
 import { fieldError } from "./field-errors";
-import { FrontmatterForm } from "./frontmatter-form";
+import { BehaviourFields } from "./behaviour-fields";
+import { DangerousBadge } from "./dangerous-badge";
+import { IdentityFields } from "./identity-fields";
 import { OrbitExportButton } from "./orbit-export-button";
 import { PublishDialog } from "./publish-dialog";
 import { leftOutText, SkillUpdates } from "./skill-updates";
@@ -150,6 +157,8 @@ function Builder({
   const added = form.skills !== baseline.form.skills ? addSkill : undefined;
   const [prompt, setPrompt] = useState(baseline.prompt);
   const [slug, setSlug] = useState("");
+  // A skill page's "Add to agent…" opens where the skill was added (the Behaviour tab).
+  const [tab, setTab] = useState<BuilderTab>(added === undefined ? "identity" : "behaviour");
   const [attempted, setAttempted] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [published, setPublished] = useState<string | null>(null);
@@ -195,7 +204,15 @@ function Builder({
   async function save() {
     setAttempted(true);
     setPublished(null);
-    if (!validation.ok || slugErrors.length > 0) return;
+    if (!validation.ok || slugErrors.length > 0) {
+      // KOBE-476: the form opens the tab that holds the (first) field to fix.
+      const fix = firstTabWithError({
+        ...(validation.ok ? {} : validation.errors),
+        ...(slugErrors.length ? { slug: slugErrors } : {}),
+      });
+      if (fix) setTab(fix);
+      return;
+    }
     const body = {
       frontmatter: validation.definition.frontmatter as Record<string, unknown>,
       prompt: validation.definition.prompt,
@@ -207,6 +224,8 @@ function Builder({
           : await createTeamAgent(teamId, { ...body, slug: slug || undefined }, scope);
         if (res.ok && agent) apply(res.data.agent);
         if (res.ok && !agent) navigate(`${home.base}/${res.data.agent.id}`);
+        // Only an admin may use Dangerous mode (AC1): the refusal is about the Behaviour tab.
+        if (!res.ok && res.error.code === "dangerous_mode_forbidden") setTab("behaviour");
         return res;
       },
       () => (agent ? "Draft saved." : "Agent created."),
@@ -261,6 +280,7 @@ function Builder({
       <PageHeader
         title={agent ? agent.name : home.title}
         back={<Link href={home.base}>{home.back}</Link>}
+        {...(agent?.dangerous ? { actions: <DangerousBadge /> } : {})}
       />
       {agent?.archivedAt && (
         <Notice tone="warn">
@@ -295,29 +315,36 @@ function Builder({
         }}
         noValidate
       >
-        {!agent && (
-          <Field
-            label="Slug"
-            hint={`Optional and permanent. Defaults to ${slugFromName(form.name)}.`}
-            error={fieldError(errors.slug)}
-            className="my-4"
-          >
-            <TextInput type="text" value={slug} onChange={(e) => setSlug(e.target.value)} />
-          </Field>
-        )}
-        <FrontmatterForm form={form} errors={errors} readOnly={readOnly} onChange={setForm} />
-        <Field
-          label="System prompt"
-          hint="What the agent is told at the start of every conversation."
-          error={fieldError(errors.prompt)}
-        >
-          <Textarea
-            className="min-h-72 w-full resize-y font-mono read-only:bg-console-panel"
-            value={prompt}
-            readOnly={readOnly}
-            onChange={(e) => setPrompt(e.target.value)}
-          />
-        </Field>
+        <Tabs value={tab} onValueChange={(v) => setTab(v as BuilderTab)}>
+          <TabsList label="Agent settings">
+            <TabsTrigger value="identity">Identity</TabsTrigger>
+            <TabsTrigger value="behaviour">Behaviour</TabsTrigger>
+          </TabsList>
+          {/* Both panels stay mounted (state and errors survive a switch); the inactive one is hidden. */}
+          <TabsContent value="identity" forceMount className="data-[state=inactive]:hidden">
+            {!agent && (
+              <Field
+                label="Slug"
+                hint={`Optional and permanent. Defaults to ${slugFromName(form.name)}.`}
+                error={fieldError(errors.slug)}
+                className="my-4"
+              >
+                <TextInput type="text" value={slug} onChange={(e) => setSlug(e.target.value)} />
+              </Field>
+            )}
+            <IdentityFields
+              form={form}
+              prompt={prompt}
+              errors={errors}
+              readOnly={readOnly}
+              onChange={setForm}
+              onPromptChange={setPrompt}
+            />
+          </TabsContent>
+          <TabsContent value="behaviour" forceMount className="data-[state=inactive]:hidden">
+            <BehaviourFields form={form} errors={errors} readOnly={readOnly} onChange={setForm} />
+          </TabsContent>
+        </Tabs>
         {errors.form && (
           <p role="alert" className="m-0 mt-2 text-sm font-medium text-console-danger">
             {errors.form.join(" ")}

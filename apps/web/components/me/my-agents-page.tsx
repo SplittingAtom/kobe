@@ -6,6 +6,8 @@ import { listPersonalAgents } from "../../lib/admin/api/team/agents";
 import { useTeamAccess } from "../admin/console-context";
 import { DateTime, ResourceView } from "../admin/parts";
 import { useResource } from "../admin/use-resource";
+import { AgentIconGlyph } from "../admin/team/agent-builder/icon-picker";
+import { DangerousBadge } from "../admin/team/agent-builder/dangerous-badge";
 import {
   Button,
   EmptyState,
@@ -61,7 +63,11 @@ export function MyAgentsPage() {
                 {agents.map((a) => (
                   <TableRow key={a.id}>
                     <TableRowHeader>
-                      {a.name}
+                      <span className="inline-flex items-center gap-2">
+                        {a.icon && <AgentIconGlyph name={a.icon} />}
+                        {a.name}
+                        {a.dangerous && <DangerousBadge />}
+                      </span>
                       {a.description && (
                         <div className="text-sm font-normal text-console-muted">
                           {a.description}

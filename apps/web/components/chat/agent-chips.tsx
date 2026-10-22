@@ -1,7 +1,8 @@
 "use client";
 
 import { cn } from "../../lib/utils";
-import { useDraftAgentName } from "./agent-picker";
+import { useDraftAgentName, useDraftAgentDangerous } from "./agent-picker";
+import { DangerousChip } from "./dangerous-chip";
 import { useKobeExtras } from "./kobe-runtime";
 
 /**
@@ -12,11 +13,13 @@ import { useKobeExtras } from "./kobe-runtime";
 export function AgentChips({ compact = false }: { readonly compact?: boolean } = {}) {
   const summary = useKobeExtras()?.state.summary;
   const draftName = useDraftAgentName();
+  const draftDangerous = useDraftAgentDangerous();
   // The draft's choice only before the thread exists: a started agentless thread has no agent
   // (KOBE-458: it showed the draft's default as if the thread had it).
   const name = summary ? (summary.agentName ?? null) : draftName;
   if (!name) return null;
   const status = summary?.agentStatus;
+  const dangerous = summary ? summary.agentDangerous === true : draftDangerous;
   return (
     <>
       <span
@@ -26,6 +29,7 @@ export function AgentChips({ compact = false }: { readonly compact?: boolean } =
         )}
         title={name}
       >{`Agent: ${name}`}</span>
+      {dangerous && <DangerousChip compact={compact} />}
       {(status === "suspended" || status === "archived") && (
         <span
           className={cn(
