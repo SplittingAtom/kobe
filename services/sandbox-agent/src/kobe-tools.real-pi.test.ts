@@ -29,8 +29,16 @@ afterEach(async () => {
   h = undefined;
 });
 
+/**
+ * The faux model streams the 1 MiB call's arguments as ~67,000 `message_update` frames in a few
+ * seconds, far over the real server's 500 frames/s; the agent's default pace (KOBE-429) would take
+ * minutes to deliver them. The fake server has no limit, so these tests lift the pace.
+ */
+const UNPACED = { framesPerSec: 1e9, frameBurst: 1e9, bytesPerSec: 1e12, byteBurst: 1e12 };
+
 async function start(withTools = true): Promise<Harness> {
   h = await startHarness({
+    pace: UNPACED,
     piBin: PI_BIN,
     env: { KOBE_POLICY_EXTENSION: REAL_POLICY_EXTENSION },
     extensions: [FAUX_MODEL_EXTENSION],

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SANDBOX_MAX_FRAME_BYTES, SANDBOX_SEND_PACE } from "@kobe/protocol";
 import { SendPacer, type PaceLimits } from "./pacer.js";
 
 const LIMITS: PaceLimits = { framesPerSec: 100, frameBurst: 10, bytesPerSec: 1000, byteBurst: 100 };
@@ -57,6 +58,27 @@ describe("SendPacer", () => {
       frames -= 1;
       bytes -= s.bytes;
     }
+  });
+
+  it("is a no-op under budget: frames go out in the same tick, with no timer", () => {
+    const { p, out } = pacer(SANDBOX_SEND_PACE);
+    for (let i = 0; i < 200; i++) {
+      p.send(`f${i}`);
+      expect(out).toHaveLength(i + 1); // written synchronously, before send() returns
+    }
+    expect(p.queued).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("sends one largest frame at once on a fresh connection, and a second within a bounded wait", () => {
+    const { p, out } = pacer(SANDBOX_SEND_PACE);
+    const big = "x".repeat(SANDBOX_MAX_FRAME_BYTES);
+    p.send(big);
+    expect(out).toHaveLength(1);
+    p.send(big); // never deadlocks: waits for a full byte bucket (burst / rate), then goes
+    const waitMs = Math.ceil((SANDBOX_MAX_FRAME_BYTES / SANDBOX_SEND_PACE.bytesPerSec) * 1000);
+    vi.advanceTimersByTime(waitMs);
+    expect(out).toHaveLength(2);
   });
 
   it("reset drops the queue and refills the buckets (a new connection)", () => {

@@ -14,6 +14,7 @@ import type { PiIdentities } from "../pi/identities.js";
 import type { SkillEvalHooks } from "../skill-eval/hooks.js";
 import type { SkillStore } from "../skills/store.js";
 import type { ExecWiring } from "../threads/exec-wiring.js";
+import type { PaceLimits } from "../wire/pacer.js";
 
 export const FAKE_PI = fileURLToPath(new URL("./fake-pi.mjs", import.meta.url));
 export const TOKEN = "test-wire-token-0123456789";
@@ -47,6 +48,8 @@ export interface HarnessOptions {
   readonly env?: Record<string, string>;
   readonly piBin?: string;
   readonly heartbeatTimeoutMs?: number;
+  /** The agent's send pace (KOBE-429; default `SANDBOX_SEND_PACE`). The fake server has no limit. */
+  readonly pace?: PaceLimits;
   readonly policyReadyTimeoutMs?: number;
   /** How long SIGTERM waits for a lost run's frames to be acked (KOBE-444); default the agent's. */
   readonly lostAckTimeoutMs?: number;
@@ -127,6 +130,7 @@ export async function startHarness(options: HarnessOptions = {}): Promise<Harnes
     ...(options.heartbeatTimeoutMs === undefined
       ? {}
       : { heartbeatTimeoutMs: options.heartbeatTimeoutMs }),
+    ...(options.pace === undefined ? {} : { pace: options.pace }),
     ...(options.extensions === undefined ? {} : { extensions: options.extensions }),
     ...(options.models === undefined ? {} : { models: options.models }),
     ...(options.egress === undefined ? {} : { egress: options.egress }),

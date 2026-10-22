@@ -26,6 +26,18 @@ closed, the next reconnect replayed it again, and so on (KOBE-227: ~30 reconnect
   `WIRE_DEFAULTS`.
 - Also covers a model streaming faster than the limit (live frames are paced the same way).
 
+- CI follow-up (PR #364): `kobe-tools.real-pi.test.ts` "refuses a call whose frame would exceed
+  1 MiB" timed out. Not a stuck oversized frame: the faux model streams the call's arguments as
+  ~67,600 `message_update` frames (36 MB) in ~11 s, about 6,000 frames/s, so pacing them takes
+  minutes. The real server would close that connection at 500/s; the old test only passed because
+  the fake server has no limit. Those tests now set an unpaced `pace` (new test-only
+  `AgentDeps.pace` / harness option). Follow-up worth filing: coalesce `message_update` deltas
+  in the agent so a very fast model does not queue behind the pace.
+- Under budget the pacer adds no delay (written in the same tick, no timer); a largest (4 MiB)
+  frame goes out at once on a fresh bucket and never deadlocks (tests in `pacer.test.ts`).
+- PR #364 `e2e (gate1)` failed in k3d setup (Docker could not restart `k3d-kobe-server-0` while
+  installing gVisor), before any test ran: infrastructure, not this change.
+
 ## Evidence
 
 - `services/sandbox-agent/src/wire/client.pacing.test.ts`: a fake server enforcing the server's
