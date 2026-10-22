@@ -33,7 +33,14 @@ describe("site egress tokens (KOBE-343)", () => {
     );
     expect(() => verifySiteEgressToken(token, "x".repeat(40), NOW)).toThrow(/signature/);
     const other = signJws(
-      { iss: "kobe-server", aud: "kobe.egress-proxy.site", sub: "anything", iat: NOW, exp: NOW + 60, jti: "a".repeat(24) },
+      {
+        iss: "kobe-server",
+        aud: "kobe.egress-proxy.site",
+        sub: "anything",
+        iat: NOW,
+        exp: NOW + 60,
+        jti: "a".repeat(24),
+      },
       KEY,
     );
     expect(() => verifySiteEgressToken(other, KEY, NOW)).toThrow(SessionTokenError);
