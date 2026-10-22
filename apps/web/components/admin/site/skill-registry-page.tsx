@@ -220,7 +220,7 @@ function RegistryForm({
       <ChoiceGroup legend="Import, scanner and mirror" stacked className="my-4">
         <Field
           label="Import allowlist (one host per line)"
-          hint="Skills can be imported only from these hosts."
+          hint="Skills can be imported only from these: a host (github.com) or a host and an owner (github.com/acme). Add each host to the egress ceiling too: imports go through the egress proxy."
         >
           <Textarea rows={3} value={draft.importAllowlist} onChange={set("importAllowlist")} />
         </Field>

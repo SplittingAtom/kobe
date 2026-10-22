@@ -38,6 +38,7 @@ import { siteSkillBlocklistRoutes } from "./routes/site-skill-blocklist.js";
 import { siteSkillRescanRoutes } from "./routes/site-skill-rescans.js";
 import { siteSkillRegistryRoutes } from "./routes/site-skill-registry.js";
 import type { SkillMirrorHandle } from "./routes/site-skill-mirror.js";
+import type { ImportDeps } from "./skills/import/service.js";
 import { catalogMaintainerRoutes } from "./routes/catalog-maintainers.js";
 import { skillCatalogRoutes } from "./routes/skill-catalog.js";
 import {
@@ -118,6 +119,8 @@ export interface AppOptions {
   readonly externalScan?: ExternalScanStarter;
   /** The optional git mirror of the catalog (KOBE-343): kicked on approvals, status in the console. */
   readonly skillMirror?: SkillMirrorHandle;
+  /** Governed skill import's fetcher (KOBE-344): through the egress proxy. */
+  readonly skillImport?: ImportDeps;
 }
 
 /** Health endpoints always; auth and the /v1 API when dependencies are provided. */
@@ -241,7 +244,10 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   // Skill evals (KOBE-325): full paths under /skills and /skill-evals, before /skills' `/:id`.
   api.route("/", skillEvalRoutes(deps, options.skillEvals));
   // Before /skills: its `/:id` would otherwise answer for `/skills/drafts`.
-  api.route("/skills/drafts", skillDraftRoutes(deps, options.workspaceFiles?.sync));
+  api.route(
+    "/skills/drafts",
+    skillDraftRoutes(deps, options.workspaceFiles?.sync, options.skillImport),
+  );
   api.route("/skills/catalog", catalogMaintainerRoutes(deps));
   api.route("/skills/catalog", skillUsageRoutes(deps));
   api.route("/skills/catalog", skillCatalogRoutes(deps));

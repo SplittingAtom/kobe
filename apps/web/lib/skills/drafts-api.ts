@@ -3,6 +3,7 @@
  * change names the revision it was made against (`If-Match`), and a stale one comes back as 409
  * `stale_revision` whose message says who changed the draft.
  */
+import type { SkillImportOrigin, SkillImportRequest } from "@kobe/protocol";
 import { apiRequest, apiTextFile, type ApiResult } from "../api/client";
 import type { SkillSaved } from "../admin/api/team/skills";
 
@@ -20,6 +21,8 @@ export interface DraftSummary {
   readonly ownerUserId: string;
   readonly startedFrom: DraftStart;
   readonly parentRef: Readonly<Record<string, unknown>> | null;
+  /** A governed import's origin (KOBE-344): URL, commit, Kobe's hash, importer. */
+  readonly origin?: SkillImportOrigin | null;
   readonly fromConversation: boolean;
   readonly coEdited: boolean;
   readonly rev: number;
@@ -133,6 +136,17 @@ export async function uploadDraft(
       teamId,
     }),
   );
+}
+
+/**
+ * A governed import (KOBE-344): a git commit by its full SHA (and a folder), or a zip pinned by
+ * its SHA-256, from the Site's import allowlist; the server fetches it once into a new draft.
+ */
+export async function importDraft(
+  teamId: string,
+  request: SkillImportRequest,
+): Promise<ApiResult<DraftSummary>> {
+  return draftOf(await apiRequest(`${BASE}/import`, { method: "POST", json: request, teamId }));
 }
 
 export type ForkSource =

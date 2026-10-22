@@ -3,6 +3,9 @@ import type { Server } from "node:http";
 import { ExternalScanRunner } from "./skills/registry/external-scan.js";
 import { egressProxyUrl, loadSkillMirrorConfig } from "./skills/mirror/config.js";
 import { SKILL_MIRROR_SWEEP_MS, SkillMirror } from "./skills/mirror/runner.js";
+import { mirrorHttpClient } from "./skills/mirror/http-client.js";
+import { IMPORT_FETCH_MAX_BYTES } from "./skills/import/service.js";
+import { signSiteEgressToken } from "@kobe/session-token";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { approvalKeyring } from "./approvals/index.js";
@@ -455,6 +458,24 @@ const server = serve(
       ...(evalRunner ? { evals: evalRunner } : {}),
       ...(externalScan ? { externalScan } : {}),
       ...(skillMirror ? { skillMirror } : {}),
+      // Governed skill import (KOBE-344): fetched through the egress proxy with a site token.
+      ...(sandbox
+        ? {
+            skillImport: {
+              http: (url: string) =>
+                mirrorHttpClient({
+                  remote: url,
+                  credentials: null,
+                  proxy: {
+                    url: egressProxyUrl(sandbox.settings),
+                    token: () =>
+                      signSiteEgressToken("skill-import", sandbox.sessionKeys["kobe.egress-proxy"]),
+                  },
+                  maxResponseBytes: IMPORT_FETCH_MAX_BYTES,
+                }),
+            },
+          }
+        : {}),
       ...(workspaceSync ? { workspaceFiles: { sync: workspaceSync, waker } } : {}),
       skillEvals: {
         ...(skillEvalHub ? { hub: skillEvalHub } : {}),

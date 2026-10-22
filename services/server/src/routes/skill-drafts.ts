@@ -1,3 +1,5 @@
+import { skillImportRequestSchema } from "@kobe/protocol";
+import { importSkill, type ImportDeps } from "../skills/import/service.js";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { requireTeam, type TeamVariables } from "../authz/middleware.js";
@@ -92,6 +94,7 @@ const draftJson = (d: DraftRecord, viewerId: string) => ({
   ownerUserId: d.ownerUserId,
   startedFrom: d.startedFrom,
   parentRef: d.parentRef,
+  origin: d.origin,
   fromConversation: d.startedFrom === "thread",
   coEdited: d.coEdited,
   rev: d.rev,
@@ -139,6 +142,8 @@ export function skillDraftRoutes(
   deps: ServerDeps,
   /** The workspace store (Save to Workbench reads the caller's `/workspace/skills/<name>/`). */
   workspace?: WorkspaceSync,
+  /** Governed import's fetcher (KOBE-344): through the egress proxy; absent: 503. */
+  imports?: ImportDeps,
 ): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
   const db = deps.database.db;
@@ -283,6 +288,42 @@ export function skillDraftRoutes(
       return error(c, 409, "folder_changed", "The folder changed while saving. Save again.");
     if (result.ok && result.created === false)
       return c.json({ draft: draftJson(result.draft, c.get("user").id), created: false });
+    return started(c, result as StartResult);
+  });
+
+  // Governed import (KOBE-344, SK30): Builders, from the Site's import allowlist only, a git
+  // commit or a pinned zip, fetched once through the egress proxy into a new private draft.
+  app.post("/import", async (c) => {
+    if (!teamRoleAllows(c.get("team").role, "team.skills.publish"))
+      return error(c, 403, "forbidden", "Only Builders and Team admins can import skills.");
+    const body = skillImportRequestSchema.safeParse(await json(c));
+    if (!body.success)
+      return error(
+        c,
+        400,
+        "invalid_request",
+        "Give an https git URL with a full commit SHA (and an optional folder), or an https zip URL with its SHA-256.",
+      );
+    if (!(await hitRateLimit(db, `skill-upload:${c.get("user").id}`, SKILL_UPLOAD_RATE)))
+      return error(c, 429, "rate_limited", "Too many imports. Wait a few minutes and try again.");
+    const result = await importSkill(ctxOf(c), { http: imports?.http ?? null }, body.data);
+    if (result.ok) return started(c, result as StartResult);
+    if (result.error === "not_allowlisted")
+      return error(
+        c,
+        403,
+        "import_not_allowed",
+        "That host (or owner) is not on this site's import allowlist. A Site admin can add it.",
+      );
+    if (result.error === "unavailable")
+      return error(
+        c,
+        503,
+        "import_unavailable",
+        "Imports need the egress proxy (install with the Helm chart).",
+      );
+    if (result.error === "import_failed")
+      return error(c, result.code === "too_large" ? 413 : 422, result.code, result.message);
     return started(c, result as StartResult);
   });
 
