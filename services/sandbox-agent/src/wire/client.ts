@@ -32,6 +32,20 @@ const FATAL_CODES = new Map<number, FatalReason>([
   [SANDBOX_CLOSE_CODES.hibernating, "hibernating"],
 ]);
 
+/**
+ * Frames with a `run_id` that the agent drops once the run ended locally (KOBE-483): a UI request,
+ * a policy check or a tool call of an ended run would only reach a server that already released it.
+ * `pi.event` (journaled by the outbox, acked by the server even when late) and `trace.spans`
+ * (tolerated late by design) are kept.
+ */
+const KEPT_AFTER_END = new Set(["pi.event", "trace.spans"]);
+const ENDED_RUNS_MAX = 1024;
+
+function droppableRunId(frame: OutboundFrame): string | undefined {
+  if (KEPT_AFTER_END.has(frame.type) || !("run_id" in frame)) return undefined;
+  return typeof frame.run_id === "string" ? frame.run_id : undefined;
+}
+
 export interface WireLogger {
   info(obj: object, msg: string): void;
   warn(obj: object, msg: string): void;
@@ -71,6 +85,8 @@ export class WireClient {
    * gets closed for it (KOBE-429). Reset on each new socket, like the server's buckets.
    */
   readonly #pacer: SendPacer;
+  /** Runs that ended locally (Stop, abort, finish, no longer leased): their frames are dropped. */
+  readonly #endedRuns = new Set<string>();
 
   constructor(options: WireClientOptions) {
     this.#options = options;
@@ -91,21 +107,57 @@ export class WireClient {
     void this.#dial();
   }
 
-  /** Validate and send one frame; false when not connected or the frame is not sendable. */
+  /**
+   * Validate and send one frame; false when not connected, the frame is not sendable, or it names
+   * a run that already ended here (KOBE-483).
+   */
   send(frame: OutboundFrame): boolean {
+    const runId = droppableRunId(frame);
+    if (runId !== undefined && this.#endedRuns.has(runId)) {
+      this.#options.logger.debug(
+        { type: frame.type, run_id: runId },
+        "frame of an ended run dropped",
+      );
+      return false;
+    }
     const encoded = encodeOutbound(frame);
     if (!encoded.ok) {
       this.#options.logger.warn({ type: frame.type, code: encoded.code }, "unsendable frame");
       return false;
     }
-    return this.sendText(encoded.text);
+    return this.#enqueue(encoded.text, runId);
   }
 
   /** Send pre-encoded (already validated) text, e.g. buffered `pi.event` frames. */
   sendText(text: string): boolean {
+    return this.#enqueue(text, undefined);
+  }
+
+  /**
+   * The run ended locally (Stop, abort, finish, or the server no longer leases it): frames of it
+   * still waiting in the pacer are dropped and later ones refused, so none reaches a server that
+   * already released the run (KOBE-483). Durable `pi.event`s stay with the outbox.
+   */
+  endRun(runId: string): void {
+    this.#endedRuns.delete(runId);
+    this.#endedRuns.add(runId);
+    if (this.#endedRuns.size > ENDED_RUNS_MAX) {
+      const oldest = this.#endedRuns.values().next().value;
+      if (oldest !== undefined) this.#endedRuns.delete(oldest);
+    }
+    const dropped = this.#pacer.dropTagged(runId);
+    if (dropped > 0) {
+      this.#options.logger.debug(
+        { run_id: runId, dropped },
+        "queued frames of an ended run dropped",
+      );
+    }
+  }
+
+  #enqueue(text: string, tag: string | undefined): boolean {
     const socket = this.#socket;
     if (!this.#ready || socket === undefined || socket.readyState !== WebSocket.OPEN) return false;
-    this.#pacer.send(text);
+    this.#pacer.send(text, tag);
     return true;
   }
 

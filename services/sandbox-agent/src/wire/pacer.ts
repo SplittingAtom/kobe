@@ -4,7 +4,8 @@
  * `#rateOk`). A reconnect replays the whole un-acked backlog at once, which could exceed that and
  * get the connection closed again and again. The agent therefore runs the same kind of bucket,
  * set below the server's (`SANDBOX_SEND_PACE`), and holds frames in a FIFO queue until it
- * has the tokens: order is kept, nothing is dropped while the connection lives.
+ * has the tokens: order is kept, and nothing is dropped while the connection lives except the
+ * tagged frames of a run that ended meanwhile (`dropTagged`, KOBE-483).
  */
 export interface PaceLimits {
   readonly framesPerSec: number;
@@ -16,7 +17,7 @@ export interface PaceLimits {
 export class SendPacer {
   readonly #limits: PaceLimits;
   readonly #write: (text: string) => void;
-  readonly #queue: { text: string; bytes: number }[] = [];
+  #queue: { text: string; bytes: number; tag: string | undefined }[] = [];
   #head = 0;
   #frames: number;
   #bytes: number;
@@ -36,9 +37,20 @@ export class SendPacer {
     return this.#queue.length - this.#head;
   }
 
-  send(text: string): void {
-    this.#queue.push({ text, bytes: Buffer.byteLength(text) });
+  /** Queue a frame; `tag` (a run id) lets `dropTagged` withdraw it while it still waits. */
+  send(text: string, tag?: string): void {
+    this.#queue.push({ text, bytes: Buffer.byteLength(text), tag });
     if (this.#timer === undefined && !this.#draining) this.#drain();
+  }
+
+  /** Withdraw every waiting frame tagged `tag`; returns how many were dropped. */
+  dropTagged(tag: string): number {
+    const waiting = this.#queue.slice(this.#head);
+    const kept = waiting.filter((entry) => entry.tag !== tag);
+    if (kept.length === waiting.length) return 0;
+    this.#queue = kept;
+    this.#head = 0;
+    return waiting.length - kept.length;
   }
 
   /** A new connection: forget what was queued for the old one and start with full buckets. */

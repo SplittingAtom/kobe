@@ -260,6 +260,7 @@ export class Agent {
           this.#emitPiEvent(runId, threadId, event);
         },
         runEnded: (runId) => {
+          this.#wire.endRun(runId); // frames of it still queued or yet to come are dropped (KOBE-483)
           this.#traces.runEnded(runId);
           this.#outbox.finish(runId);
           this.#broker.failRun(runId, "run ended");
@@ -540,7 +541,9 @@ export class Agent {
     for (const runId of this.#outbox.runIds()) {
       const run = listed.get(runId);
       if (run === undefined) {
-        // The server no longer leases this run to us (connection.ts): abort and forget it.
+        // The server no longer leases this run to us (connection.ts): abort and forget it. Nothing
+        // of it may go out on this connection, not even what Pi emits while aborting (KOBE-483).
+        this.#wire.endRun(runId);
         this.#threads.abortRun(runId);
         this.#outbox.drop(runId);
         continue;
@@ -852,6 +855,7 @@ export class Agent {
    */
   #abandonRun(runId: string): void {
     this.#deps.logger.warn({ run_id: runId }, "run cannot be delivered; abandoning it");
+    this.#wire.endRun(runId);
     this.#threads.abortRun(runId);
     this.#outbox.drop(runId);
     this.#wire.reconnect();
