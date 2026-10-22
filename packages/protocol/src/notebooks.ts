@@ -13,6 +13,11 @@ import { sha256HexSchema, workspacePathSchema } from "./sandbox-wire/workspace-s
 
 /** `hello.capabilities` entry of an agent that runs a kernel and registers `run_python`. */
 export const CAPABILITY_NOTEBOOKS = "notebooks";
+/**
+ * `hello.capabilities` entry of an agent that takes `notebook.restart` with `op: "start"`
+ * (KOBE-477): start the thread's kernel without running code. Never sent to agents without it.
+ */
+export const CAPABILITY_NOTEBOOK_START = "notebook_start";
 export const RUN_PYTHON_TOOL = "run_python";
 
 /** Largest code one execution runs (UTF-8 bytes): a cell, a `.py` file or the tool's `code`. */
@@ -219,6 +224,22 @@ export const notebookKernelResponseSchema = z.strictObject({
 });
 export type NotebookKernelResponse = z.infer<typeof notebookKernelResponseSchema>;
 
+/** The kernel once started (KOBE-477): `busy` while it runs a cell. */
+const kernelLiveSchema = z.strictObject({ status: z.enum(["idle", "busy"]) });
+
+/**
+ * `POST /v1/threads/{id}/notebook/start` (owner only, KOBE-477): 202 `waking` while the sandbox
+ * wakes (ask again after `retry_after_ms`), then 200 `idle` / `busy` once the kernel is up.
+ */
+export const notebookStartResponseSchema = z.union([
+  z.strictObject({
+    status: z.literal("waking"),
+    retry_after_ms: z.number().int().min(100).max(60_000),
+  }),
+  kernelLiveSchema,
+]);
+export type NotebookStartResponse = z.infer<typeof notebookStartResponseSchema>;
+
 export const NOTEBOOK_ERROR_CODES = [
   "invalid_request",
   "thread_not_found",
@@ -231,6 +252,7 @@ export const NOTEBOOK_ERROR_CODES = [
   "sandbox_unavailable",
   "notebooks_unsupported", // the sandbox's agent has no kernel
   "isolation_unavailable",
+  "sandbox_refused", // the sandbox could not be woken (KOBE-477): no runtime, not ready in time
 ] as const;
 export const notebookErrorSchema = z.strictObject({
   code: z.enum(NOTEBOOK_ERROR_CODES),
@@ -341,3 +363,7 @@ export type NotebookExecuteResult = z.infer<typeof notebookExecuteResultSchema>;
 
 /** `command.result.data` of `notebook.interrupt` / `notebook.restart`. */
 export const notebookKernelResultSchema = notebookKernelResponseSchema;
+
+/** `command.result.data` of `notebook.restart` with `op: "start"` (KOBE-477). */
+export const notebookStartResultSchema = kernelLiveSchema;
+export type NotebookStartResult = z.infer<typeof notebookStartResultSchema>;

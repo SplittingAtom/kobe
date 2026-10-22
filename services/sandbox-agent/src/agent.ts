@@ -8,6 +8,7 @@ import {
   CAPABILITY_SKILL_DRAFTS,
   CAPABILITY_FILE_EDITS,
   CAPABILITY_NOTEBOOKS,
+  CAPABILITY_NOTEBOOK_START,
   CAPABILITY_WEB_SEARCH,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
@@ -490,7 +491,9 @@ export class Agent {
       ...(this.#skillDraftsEnabled() ? [CAPABILITY_SKILL_DRAFTS] : []),
       ...(this.#fileEditsEnabled() ? [CAPABILITY_FILE_EDITS] : []),
       // Thread kernels (KOBE-464): the kernel commands, and `run_python` with the tools channel.
-      ...(this.#deps.kernels === undefined ? [] : [CAPABILITY_NOTEBOOKS]),
+      ...(this.#deps.kernels === undefined
+        ? []
+        : [CAPABILITY_NOTEBOOKS, CAPABILITY_NOTEBOOK_START]),
       ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_WEB_SEARCH]),
       ...(this.#memoryEnabled() ? [CAPABILITY_MEMORY] : []),
       // Per-session MCP config (KOBE-111) needs the proxy URL, a session to trade tokens with, and
@@ -726,7 +729,12 @@ export class Agent {
     const kernels = this.#deps.kernels;
     if (kernels === undefined) return fail("unknown_type", "this agent runs no kernels");
     if (frame.type === "notebook.interrupt") return kernels.interrupt(frame.thread_id);
-    if (frame.type === "notebook.restart") return kernels.restart(frame.thread_id);
+    if (frame.type === "notebook.restart") {
+      // KOBE-477: `op: "start"` starts the kernel (nothing runs); otherwise it is a restart.
+      return frame.op === "start"
+        ? kernels.start(frame.thread_id)
+        : kernels.restart(frame.thread_id);
+    }
     const epoch = this.#wire.epoch;
     return kernels.execute(frame, (index, output) => {
       if (this.#wire.epoch !== epoch) return;

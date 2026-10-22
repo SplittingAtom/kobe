@@ -37,9 +37,11 @@ describe("thread kernels on the wire (KOBE-464)", () => {
   it("announces notebooks only with kernels", async () => {
     h = await startHarness();
     expect(h.server.frames("hello")[0]?.capabilities ?? []).not.toContain("notebooks");
+    expect(h.server.frames("hello")[0]?.capabilities ?? []).not.toContain("notebook_start");
     await h.close();
     h = await startHarness({ kernels: kernels().manager });
     expect(h.server.frames("hello")[0]?.capabilities).toContain("notebooks");
+    expect(h.server.frames("hello")[0]?.capabilities).toContain("notebook_start");
   });
 
   it("streams an execution's outputs naming its command, then answers it", async () => {
@@ -87,6 +89,25 @@ describe("thread kernels on the wire (KOBE-464)", () => {
     );
     expect(restarted).toMatchObject({ ok: true, data: { status: "restarted" } });
     expect(k.control.killed).toEqual([THREAD]);
+  });
+
+  it("starts the kernel on notebook.restart with op start, running nothing (KOBE-477)", async () => {
+    const k = kernels();
+    h = await startHarness({ kernels: k.manager });
+    h.server.send({
+      v: 1,
+      type: "notebook.restart",
+      command_id: "cmd-st",
+      thread_id: THREAD,
+      op: "start",
+    });
+    const started = await h.server.waitFor(
+      (f) => f.type === "command.result" && f.command_id === "cmd-st",
+    );
+    expect(started).toMatchObject({ ok: true, data: { status: "idle" } });
+    expect(k.control.launched).toEqual([THREAD]);
+    expect(k.control.killed).toEqual([]);
+    expect(h.server.frames("notebook.output")).toEqual([]);
   });
 
   it("refuses kernel commands without kernels", async () => {

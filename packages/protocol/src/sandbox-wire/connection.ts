@@ -46,6 +46,8 @@
  *   `notebooks` (`CAPABILITY_NOTEBOOKS`, notebooks.ts, KOBE-464): the commands `notebook.execute`,
  *   `notebook.interrupt`, `notebook.restart` (never sent to agents without it), the agent's
  *   `notebook.output` frames and `notebook.run` / `notebook.run_result` (`run_python`).
+ *   `notebook_start` (`CAPABILITY_NOTEBOOK_START`, KOBE-477): `notebook.restart` with `op: "start"`
+ *   (start the kernel, run nothing); never sent to agents without it.
  *   `web_search` ({@link CAPABILITY_WEB_SEARCH}, web-search.ts, KOBE-114): `web_search.query` /
  *   `web_search.result`; same refusal rule.
  *   `mcp` ({@link CAPABILITY_MCP}, mcp-config.ts, KOBE-111): `run.start.mcp`, the run's effective

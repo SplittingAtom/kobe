@@ -231,6 +231,37 @@ describe("KernelManager (NB2, NB7, NB8)", () => {
     expect(JSON.stringify(skipped.outputs)).not.toContain('late"');
   });
 
+  it("start launches the kernel without running code, keeps a live one, says busy (KOBE-477)", async () => {
+    const { manager, control } = setup();
+    expect(await manager.start(T1)).toEqual({ ok: true, data: { status: "idle" } });
+    expect(control.launched).toEqual([T1]);
+    expect(manager.size).toBe(1);
+    // The started kernel serves the first cell: state starts here, no second launch.
+    const first = await run(manager, frame(T1, "result:1"));
+    expect(first.outcome).toMatchObject({ ok: true, data: { status: "ok", execution_count: 1 } });
+    const running = run(manager, frame(T1, "hang"));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(await manager.start(T1)).toEqual({ ok: true, data: { status: "busy" } });
+    expect(control.launched).toEqual([T1]);
+    await manager.stopAll();
+    await running;
+  });
+
+  it("a started kernel nobody uses stops after idleMs; a failed start is kernel_unavailable", async () => {
+    const { manager, control } = setup({ idleMs: 30 });
+    await manager.start(T1);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(control.killed).toEqual([T1]);
+    expect(manager.size).toBe(0);
+    const fatal = setup({}, { fatal: "No module named ipykernel" });
+    expect(await fatal.manager.start(T1)).toMatchObject({
+      ok: false,
+      code: "kernel_unavailable",
+    });
+    await manager.stopAll();
+    expect(await manager.start(T1)).toMatchObject({ ok: false, code: "kernel_unavailable" });
+  });
+
   it("refuses new work once stopping", async () => {
     const { manager } = setup();
     await manager.stopAll();
