@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadEnvelope } from "@kobe/db";
 import type { ProbeResult } from "./connectors/probe.js";
@@ -491,10 +493,222 @@ describe("review follow-ups", () => {
   });
 });
 
+describe("removing the connector destroys its credentials (KOBE-454)", () => {
+  const grantRows = async (id: string) =>
+    (await h.admin.query(`SELECT team_id FROM connector_grants WHERE connector_id = $1`, [id]))
+      .rows;
+  const removal = async (id: string) =>
+    (
+      await h.admin.query(
+        `SELECT target FROM audit_log WHERE action = 'mcp.connector.removed'
+          AND target->>'connectorId' = $1`,
+        [id],
+      )
+    ).rows.map((r) => r.target as Record<string, unknown>);
+
+  it("deletes the sealed site key in the removal's transaction and audits it without the key (ac-1)", async () => {
+    const id = await siteConnector("site-gone");
+    expect((await grantFor(teamOn, aliceId, id)).status).toBe(200);
+    expect((await root.delete(`${BASE}/${id}`)).status).toBe(200);
+    expect(await siteKeyRow(id)).toBeUndefined();
+    expect(await removal(id)).toEqual([
+      expect.objectContaining({ soft: true, teams: 1, siteKeyDropped: true, grants: 0 }),
+    ]);
+    const reasons = await h.admin.query(
+      `SELECT target->>'reason' AS reason FROM audit_log
+        WHERE action = 'mcp.connector.site_key_removed' AND target->>'connectorId' = $1`,
+      [id],
+    );
+    expect(reasons.rows).toEqual([{ reason: "connector_removed" }]);
+  });
+
+  it("deletes every member's grant in every team (ac-1)", async () => {
+    const created = await root.post(BASE, {
+      name: "member-gone",
+      url: "https://member-gone.example/mcp",
+      authKind: "api_key",
+    });
+    const id = created.json.connector.id as string;
+    await enable(teamOn, id);
+    await enable(teamOff, id);
+    expect((await alice.put(`/v1/connector-grants/${id}`, { api_key: MEMBER_KEY })).status).toBe(
+      201,
+    );
+    const carol = await h.signIn("carol@sitekey.test");
+    await carol.put("/v1/me/teams/active", { teamId: teamOff });
+    carol.team = teamOff;
+    expect((await carol.put(`/v1/connector-grants/${id}`, { api_key: MEMBER_KEY })).status).toBe(
+      201,
+    );
+    expect(await grantRows(id)).toHaveLength(2);
+
+    expect((await root.delete(`${BASE}/${id}`)).status).toBe(200);
+    expect(await grantRows(id)).toHaveLength(0);
+    expect(await removal(id)).toEqual([
+      expect.objectContaining({ teams: 2, siteKeyDropped: false, grants: 2 }),
+    ]);
+    const perGrant = await h.admin.query(
+      `SELECT team_id FROM audit_log WHERE action = 'mcp.grant.removed'
+        AND target->>'connectorId' = $1 ORDER BY team_id`,
+      [id],
+    );
+    expect(perGrant.rows.map((r) => r.team_id).sort()).toEqual([teamOn, teamOff].sort());
+  });
+
+  it("never revives old credentials on restore or re-registration (ac-3)", async () => {
+    const id = await siteConnector("site-revive");
+    expect((await root.delete(`${BASE}/${id}`)).status).toBe(200);
+    // Restored by hand (there is no restore API): nothing to serve.
+    await h.admin.query(
+      `UPDATE connectors SET deleted_at = NULL, status = 'active' WHERE id = $1`,
+      [id],
+    );
+    expect(await siteKeyRow(id)).toBeUndefined();
+    expect((await grantFor(teamOn, aliceId, id)).status).toBe(404);
+    expect((await root.get(`${BASE}/${id}`)).json.connector.siteKeyHint).toBeNull();
+    await h.admin.query(
+      `UPDATE connectors SET deleted_at = now(), status = 'disabled' WHERE id = $1`,
+      [id],
+    );
+    // Re-registered under a similar name: a new row with no key of its own.
+    const again = await root.post(BASE, {
+      name: "site-revive-2",
+      url: "https://site-revive.example/mcp",
+      authKind: "api_key",
+      credentialSource: "site",
+    });
+    expect(again.status, again.text).toBe(201);
+    const fresh = again.json.connector.id as string;
+    await enable(teamOn, fresh);
+    expect(await siteKeyRow(fresh)).toBeUndefined();
+    expect((await grantFor(teamOn, aliceId, fresh)).status).toBe(404);
+  });
+});
+
+describe("removal races and team scoping (KOBE-454 review)", () => {
+  it("refuses a key saved while a removal is committing, and leaves no grant", async () => {
+    const created = await root.post(BASE, {
+      name: "member-race",
+      url: "https://member-race.example/mcp",
+      authKind: "api_key",
+    });
+    const id = created.json.connector.id as string;
+    await enable(teamOn, id);
+    const remover = new pg.Client({ connectionString: h.adminUrl });
+    await remover.connect();
+    try {
+      // A removal in flight: it holds the connector row and has marked it removed.
+      await remover.query("BEGIN");
+      await remover.query(`SELECT 1 FROM connectors WHERE id = $1 FOR UPDATE`, [id]);
+      await remover.query(
+        `UPDATE connectors SET status = 'disabled', deleted_at = now() WHERE id = $1`,
+        [id],
+      );
+      let settled = false;
+      const put = alice.put(`/v1/connector-grants/${id}`, { api_key: MEMBER_KEY }).finally(() => {
+        settled = true;
+      });
+      await new Promise((r) => setTimeout(r, 300));
+      expect(settled).toBe(false);
+      await remover.query("COMMIT");
+      const res = await put;
+      expect(res.status).toBeGreaterThanOrEqual(400);
+    } finally {
+      await remover.end();
+    }
+    const left = await h.admin.query(`SELECT 1 FROM connector_grants WHERE connector_id = $1`, [
+      id,
+    ]);
+    expect(left.rows).toHaveLength(0);
+  });
+
+  it("refuses a key saved after the grant deletes but before the removal commits (real removal)", async () => {
+    const created = await root.post(BASE, {
+      name: "member-window",
+      url: "https://member-window.example/mcp",
+      authKind: "api_key",
+    });
+    const id = created.json.connector.id as string;
+    await enable(teamOn, id);
+    await enable(teamOff, id);
+    const carol = await h.signIn("carol@sitekey.test");
+    await carol.put("/v1/me/teams/active", { teamId: teamOff });
+    carol.team = teamOff;
+    expect((await carol.put(`/v1/connector-grants/${id}`, { api_key: MEMBER_KEY })).status).toBe(
+      201,
+    );
+    const blocker = new pg.Client({ connectionString: h.adminUrl });
+    await blocker.connect();
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    try {
+      // Stall the removal inside its grant cleanup (on carol's row), with its row lock held.
+      await blocker.query("BEGIN");
+      await blocker.query(
+        `SELECT 1 FROM connector_grants WHERE connector_id = $1 AND team_id = $2 FOR UPDATE`,
+        [id, teamOff],
+      );
+      const settled = { removal: false, put: false };
+      const removal = root.delete(`${BASE}/${id}`).finally(() => {
+        settled.removal = true;
+      });
+      await wait(300);
+      const put = alice.put(`/v1/connector-grants/${id}`, { api_key: MEMBER_KEY }).finally(() => {
+        settled.put = true;
+      });
+      await wait(300);
+      expect(settled).toEqual({ removal: false, put: false });
+      await blocker.query("COMMIT");
+      expect((await removal).status).toBe(200);
+      expect((await put).status).toBeGreaterThanOrEqual(400);
+    } finally {
+      await blocker.end();
+    }
+    const left = await h.admin.query(`SELECT 1 FROM connector_grants WHERE connector_id = $1`, [
+      id,
+    ]);
+    expect(left.rows).toHaveLength(0);
+  });
+
+  it("a URL change drops grants in every team, each in its own team's transaction", async () => {
+    const created = await root.post(BASE, {
+      name: "member-move",
+      url: "https://member-move.example/mcp",
+      authKind: "api_key",
+    });
+    const id = created.json.connector.id as string;
+    await enable(teamOn, id);
+    await enable(teamOff, id);
+    expect((await alice.put(`/v1/connector-grants/${id}`, { api_key: MEMBER_KEY })).status).toBe(
+      201,
+    );
+    const carol = await h.signIn("carol@sitekey.test");
+    await carol.put("/v1/me/teams/active", { teamId: teamOff });
+    carol.team = teamOff;
+    expect((await carol.put(`/v1/connector-grants/${id}`, { api_key: MEMBER_KEY })).status).toBe(
+      201,
+    );
+    const moved = await root.patch(`${BASE}/${id}`, { url: "https://member-move-2.example/mcp" });
+    expect(moved.status, moved.text).toBe(200);
+    const left = await h.admin.query(`SELECT 1 FROM connector_grants WHERE connector_id = $1`, [
+      id,
+    ]);
+    expect(left.rows).toHaveLength(0);
+    const audited = await h.admin.query(
+      `SELECT team_id FROM audit_log WHERE action = 'mcp.grant.removed'
+        AND target->>'connectorId' = $1`,
+      [id],
+    );
+    expect(audited.rows.map((r) => r.team_id).sort()).toEqual([teamOn, teamOff].sort());
+    // CLAUDE.md: no code sets the team outside withTeam() (the budget functions excepted).
+    const source = readFileSync(new URL("./connectors/grants.ts", import.meta.url), "utf8");
+    expect(source).not.toMatch(/set_config/);
+  });
+});
+
 describe("the key goes nowhere else (ac-4)", () => {
   it("is in no audit row, no log line and no response", async () => {
     const text = await auditText();
-    for (const secret of [SITE_KEY, SITE_KEY2]) {
+    for (const secret of [SITE_KEY, SITE_KEY2, MEMBER_KEY]) {
       expect(text).not.toContain(secret);
       expect(text).not.toContain(secret.slice(-4));
       expect(logged.join("\n")).not.toContain(secret);

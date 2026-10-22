@@ -238,8 +238,9 @@ export async function updateConnector(
       changed.push("url");
       // Its MCP Apps templates too (KOBE-433): nothing of the old server is ever rendered.
       await dropTemplates(tx, id);
-      // Credentials were issued for the old server: drop them (users reconnect), same transaction.
-      await dropConnectorGrants(tx, id, current.name);
+      // Credentials were issued for the old server: drop them (users reconnect). Members' grants
+      // go first, before any audit row of this transaction (see dropConnectorGrants).
+      await dropConnectorGrants(db, id, current.name);
       await dropSiteKey(tx, { id, name: current.name }, "url_changed");
     }
     if (input.iconUrl !== undefined && input.iconUrl !== current.iconUrl) {
@@ -255,8 +256,10 @@ export async function updateConnector(
       set.credentialSource = source;
       changed.push("credentialSource");
       // Never both (KOBE-303): a connector uses members' own keys or the site key.
-      if (source === "site") await dropConnectorGrants(tx, id, current.name);
-      else await dropSiteKey(tx, { id, name: current.name }, "mode_changed");
+      // A URL change above already dropped the grants (and wrote an audit row since).
+      if (source === "site") {
+        if (!changed.includes("url")) await dropConnectorGrants(db, id, current.name);
+      } else await dropSiteKey(tx, { id, name: current.name }, "mode_changed");
     }
     if (input.status !== undefined && input.status !== current.status) {
       set.status = input.status;
@@ -323,6 +326,12 @@ export interface RemovalResult {
  * Removes a connector from the registry by soft delete only: `status=disabled` + `deleted_at`. A
  * hard delete would cascade into `team_connectors`, and a team enabling the connector concurrently
  * (KOBE-104) could lose its row. The row is locked, so concurrent removals serialize.
+ *
+ * Its secrets do not outlive it (KOBE-454): the sealed site key and every member's grant (API keys
+ * and OAuth tokens, in every team) are deleted in the same transaction, so restoring the row by
+ * hand or registering the server again never revives them. OAuth tokens are only deleted, not
+ * revoked at the provider (Kobe has no revocation client). The MCP proxy caches no credential
+ * (it asks the server per call), so the next call is refused. Audited with counts, never values.
  */
 export async function removeConnector(db: KobeDb, id: string): Promise<RemovalResult | undefined> {
   const usedBy = await countTeamsUsing(db, id);
@@ -337,9 +346,20 @@ export async function removeConnector(db: KobeDb, id: string): Promise<RemovalRe
       .update(connectors)
       .set({ status: "disabled", deletedAt: sql`now()`, updatedAt: sql`now()` })
       .where(eq(connectors.id, id));
+    // Grants first: they commit in their teams' own transactions while this one holds the row
+    // and has written no audit row yet (it would hold the audit chain lock they need).
+    const grants = await dropConnectorGrants(db, id, row.name);
+    const siteKeyDropped = await dropSiteKey(tx, { id, name: row.name }, "connector_removed");
     await recordAudit(tx, {
       action: "mcp.connector.removed",
-      target: { connectorId: id, name: row.name, soft: true, teams: usedBy },
+      target: {
+        connectorId: id,
+        name: row.name,
+        soft: true,
+        teams: usedBy,
+        siteKeyDropped,
+        grants,
+      },
     });
     return { removed: true as const, soft: true as const, teams: usedBy };
   });

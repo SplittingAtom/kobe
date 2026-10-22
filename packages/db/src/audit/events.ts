@@ -2011,6 +2011,9 @@ export const AUDIT_EVENTS = {
     name: z.string().max(64),
     soft: z.boolean(),
     teams: z.number().int().nonnegative(),
+    /** KOBE-454: whether a sealed site key was destroyed with it, and how many member grants. */
+    siteKeyDropped: z.boolean().optional(),
+    grants: z.number().int().nonnegative().optional(),
   }),
   /**
    * Kobe probed a connector and pinned its tools (KOBE-101); the hash covers all pinned tools.
@@ -2144,11 +2147,14 @@ export const AUDIT_EVENTS = {
     name: z.string().max(64),
     replaced: z.boolean(),
   }),
-  /** A connector's site-wide API key was removed (KOBE-303): by an admin, or by a change of URL or mode. */
+  /**
+   * A connector's site-wide API key was removed (KOBE-303): by an admin, by a change of URL or
+   * mode, or with the connector itself (KOBE-454).
+   */
   "mcp.connector.site_key_removed": event("site", {
     connectorId: id,
     name: z.string().max(64),
-    reason: z.enum(["removed", "url_changed", "mode_changed"]),
+    reason: z.enum(["removed", "url_changed", "mode_changed", "connector_removed"]),
   }),
 
   // ── memory: file memory (KOBE-155, D24); ids, versions and sizes, never paths or content ──

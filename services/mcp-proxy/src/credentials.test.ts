@@ -79,6 +79,15 @@ describe("createServerCredentials", () => {
     expect(s.asked).toEqual([{ token: "sandbox-token", connectorId: req.connector.id }]);
   });
 
+  it("caches nothing: a credential destroyed on the server is refused on the next call (KOBE-454)", async () => {
+    let answer: GrantAnswer = { ok: true, value: { kind: "api_key", apiKey: KEY, source: "site" } };
+    const resolver = createServerCredentials({ fetchGrant: () => Promise.resolve(answer) });
+    const req = request("api_key");
+    expect(await resolver.headersFor(req)).toMatchObject({ ok: true });
+    answer = { ok: false, failure: "not_connected" };
+    expect(await resolver.headersFor(req)).toEqual({ ok: false, code: "not_connected" });
+  });
+
   it.each([
     ["oauth", { kind: "api_key", apiKey: KEY, source: "member" }],
     ["api_key", { kind: "oauth", accessToken: "at-123", source: "member" }],
