@@ -855,6 +855,7 @@ describe("search (GET /v1/threads?q=, KOBE-33)", () => {
       agent_model: _am,
       agent_name: _an,
       agent_status: _as,
+      agent_dangerous: _ad,
       ...summary
     } = detail;
     const { matched_entry_id: _m, snippet: _s, score: _sc, ...hitSummary } = hit ?? {};
