@@ -13,6 +13,7 @@ const MESSAGES: Readonly<Record<PackageProblemCode, string>> = {
   control_or_backslash: "Use / between folders, without control characters or \\.",
   invisible_or_bidi: "The path has invisible or direction characters.",
   bad_segment: "The path has an empty, . or .. folder name.",
+  git_reserved: "Git uses .git, .gitattributes and .gitmodules itself: rename it.",
   duplicate: "Another file has this path in a different case.",
   file_and_directory: "That path is both a file and a folder.",
   reserved_name_case:

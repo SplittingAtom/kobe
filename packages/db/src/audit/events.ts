@@ -576,6 +576,35 @@ export const AUDIT_EVENTS = {
    * connection counted in exactly one row (D28 "every connection is logged"). `domain` is absent
    * when the target was not a host name (IP literal, junk).
    */
+  /**
+   * The server's own site-job connections through the egress proxy (KOBE-343: the catalog's git
+   * mirror; actor: system), aggregated like `egress.connection`: the job, never a token.
+   */
+  "egress.site_connection": event("site", {
+    job: z.enum(["skill-mirror", "skill-import"]),
+    domain: egressDomain.optional(),
+    port: z.number().int().min(1).max(65535).optional(),
+    outcome: z.enum(["allowed", "blocked", "failed"]),
+    reason: z
+      .enum([
+        "not_in_ceiling",
+        "forbidden_address",
+        "sni_mismatch",
+        "invalid_target",
+        "port_not_allowed",
+        "connection_limit",
+        "dns_failure",
+        "upstream_unreachable",
+        "policy_unavailable",
+      ])
+      .optional(),
+    aggregated: z.literal(true).optional(),
+    connections: z.number().int().positive(),
+    bytesUp: count,
+    bytesDown: count,
+    from: z.iso.datetime(),
+    to: z.iso.datetime(),
+  }),
   "egress.connection": event("team", {
     userId: id,
     sandboxId: id,
@@ -1477,6 +1506,21 @@ export const AUDIT_EVENTS = {
 
   // ── skill: uploaded bundles (KOBE-78); team skills in the team view, personal site-only ──
   /** A skill bundle was uploaded as a new immutable version (never the bundle's contents). */
+  /**
+   * A version was downloaded as an export (KOBE-345, SK30): a portable zip (with or without
+   * `evals/`) of a team or personal version, or a catalog version's portable zip or full package;
+   * `sha256` names the exact bytes. Team versions in the team view, the rest site-only.
+   */
+  "skill.exported": event("any", {
+    scope: z.enum(["team", "personal", "catalog"]),
+    skillId: id,
+    /** The catalog version (scope catalog). */
+    registryVersionId: id.optional(),
+    name: catalogName,
+    semver: z.string().max(32),
+    format: z.enum(["portable", "portable_evals", "package"]),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  }),
   "skill.uploaded": event("any", {
     skillId: id,
     scope: z.enum(["team", "personal"]),
@@ -1664,6 +1708,30 @@ export const AUDIT_EVENTS = {
   }),
   /** The submitter took back their submission before a decision (KOBE-334 review M3). */
   "registry.retracted": event("site", { registryVersionId: id }),
+  /**
+   * The git mirror pushed an approved version (KOBE-343, SK29): its commit and annotated tag are on
+   * the remote (system actor). `existing`: the remote already had exactly this tag and tree.
+   */
+  "registry.mirror.pushed": event("site", {
+    registryVersionId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    commit: z.string().regex(/^[0-9a-f]{40}$/),
+    tag: z.string().max(200),
+    existing: z.literal(true).optional(),
+  }),
+  /**
+   * The git mirror could not push a version (system actor): recorded on the first failure of a
+   * streak only (retries back off silently); `error` is redacted and never holds the token.
+   */
+  "registry.mirror.failed": event("site", {
+    registryVersionId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    error: z.string().max(500),
+  }),
+  /** A Site admin asked the mirror to retry its failed versions now (KOBE-343). */
+  "registry.mirror.retried": event("site", { versions: count }),
   /** A reviewer started the Registry team's re-run of a version's evals (KOBE-335, SK23). */
   "registry.evals_rerun": event("site", { registryVersionId: id, evalRunId: id, teamId: id }),
   /** A reviewer cancelled a re-run; the version's history keeps it (KOBE-335 review M3). */
@@ -1969,6 +2037,19 @@ export const AUDIT_EVENTS = {
       .optional(),
     /** Save to Workbench: the conversation the files came from. */
     fromThreadId: id.optional(),
+    /** A governed import (KOBE-344, SK30): where it came from and Kobe's hash of what it got. */
+    origin: z
+      .strictObject({
+        kind: z.enum(["git", "zip"]),
+        url: z.string().max(2048),
+        commit: z
+          .string()
+          .regex(/^([0-9a-f]{40}|[0-9a-f]{64})$/)
+          .optional(),
+        path: z.string().max(200).optional(),
+        fetchedSha256: z.string().regex(/^[0-9a-f]{64}$/),
+      })
+      .optional(),
     /** `tool`: the agent's `save_skill_draft` (KOBE-442); absent: the member in the web app. */
     via: z.enum(["tool"]).optional(),
     /** The agent's call behind a `via: tool` save (KOBE-442 review L3). */

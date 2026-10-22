@@ -42,13 +42,19 @@ export type RegistrySubmissionRules = z.infer<typeof registrySubmissionRulesSche
 export const REGISTRY_SUBMISSION_DEFAULTS: RegistrySubmissionRules =
   registrySubmissionRulesSchema.parse({});
 
-/** A host Kobe may import skills from (D2): a lowercase DNS name, no scheme, port or path. */
+/**
+ * Where Kobe may import skills from (D2, KOBE-344, SK30 "hosts and organizations"): a lowercase
+ * DNS host (`github.com`: any repository there) or a host and one owner (`github.com/acme`: only
+ * that organization's or user's repositories). No scheme, port or deeper path.
+ */
+const IMPORT_HOST =
+  "(?=[^/]{1,253}(/|$))([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+";
 const importHostSchema = z
   .string()
-  .max(253)
+  .max(354)
   .regex(
-    /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/,
-    "a host name such as github.com",
+    new RegExp(`^${IMPORT_HOST}(/[a-z0-9]([a-z0-9._-]{0,98}[a-z0-9])?)?$`),
+    "a host such as github.com, or a host and an owner such as github.com/acme",
   );
 export const REGISTRY_IMPORT_HOSTS_MAX = 50;
 export const registryImportAllowlistSchema = z

@@ -11,12 +11,21 @@ import {
 import { invalidRequest, parseBody } from "../teams/http.js";
 import { similarCatalogNames } from "../skills/registry/names-db.js";
 import { registryReviewRoutes } from "./site-skill-registry-review.js";
+import { z } from "zod";
+import { exportCatalogVersion } from "../skills/catalog-export.js";
+import { CATALOG_PACKAGE_RATE, SKILL_EXPORT_RATE, exportResponse } from "../skills/export.js";
+import { hitRateLimit } from "../rate-limit.js";
+import { catalogExportRefusal } from "./skill-catalog.js";
+import { siteSkillMirrorRoutes, type SkillMirrorHandle } from "./site-skill-mirror.js";
 
 /**
  * Registry settings (`/v1/site/skills/registry/settings`, KOBE-330, SK20, SK21): Site Owner and
  * Admins read and change them; Skill reviewers can't (SK22). Each change is audited.
  */
-export function siteSkillRegistryRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
+export function siteSkillRegistryRoutes(
+  deps: ServerDeps,
+  mirror?: SkillMirrorHandle,
+): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
   app.use("/settings", requireSitePermission("site.skills.catalog.manage"));
@@ -51,13 +60,48 @@ export function siteSkillRegistryRoutes(deps: ServerDeps): Hono<{ Variables: Aut
     const body = await parseBody(c, registrySettingsUpdateSchema);
     if (!body) return invalidRequest(c, "Send at least one valid Registry setting.");
     const r = await updateRegistrySettings(db, body, c.get("user").id);
+    if (r.ok && body.mirror) mirror?.kick();
     if (r.ok) return c.json(r.settings);
     return c.json({ code: r.code, message: r.message }, 400);
   });
 
   // The review console (KOBE-334): the queue at `/` and each version at `/:id`, after the fixed
   // paths above.
-  app.route("/", registryReviewRoutes(deps));
+  // A catalog version's export (KOBE-345): the full package (kobe.skill.yaml, provenance.json)
+  // or a portable zip, for Site catalog managers only.
+  app.get(
+    "/versions/:id/export",
+    requireSitePermission("site.skills.catalog.manage"),
+    async (c) => {
+      const id = z.uuid().safeParse(c.req.param("id"));
+      const format = z
+        .enum(["package", "portable", "portable_evals"])
+        .safeParse(c.req.query("format") ?? "package");
+      if (!id.success)
+        return c.json({ code: "not_found", message: "No such catalog version." }, 404);
+      if (!format.success)
+        return invalidRequest(c, "Give format=package, portable or portable_evals.");
+      const rule = format.data === "package" ? CATALOG_PACKAGE_RATE : SKILL_EXPORT_RATE;
+      const bucket = format.data === "package" ? "skill-export-package" : "skill-export";
+      if (!(await hitRateLimit(db, `${bucket}:${c.get("user").id}`, rule)))
+        return c.json(
+          { code: "rate_limited", message: "Too many downloads. Wait a minute and try again." },
+          429,
+        );
+      const r = await exportCatalogVersion(
+        db,
+        deps.blobs ?? null,
+        { id: id.data },
+        format.data,
+        null,
+      );
+      return r.ok ? exportResponse(r.exported) : catalogExportRefusal(c, r.code);
+    },
+  );
+
+  // The git mirror's status and Retry (KOBE-343), before the review console's `/:id`.
+  app.route("/mirror", siteSkillMirrorRoutes(deps, mirror));
+  app.route("/", registryReviewRoutes(deps, mirror));
 
   return app;
 }

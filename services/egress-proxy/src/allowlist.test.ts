@@ -156,3 +156,24 @@ describe("AllowlistCache.sealedHeaders (KOBE-39)", () => {
     expect(await cache.sealedHeaders(TEAM, "pkgs.example.com")).toBeUndefined();
   });
 });
+
+describe("AllowlistCache.decideSite (KOBE-343)", () => {
+  it("allows a site job exactly the ceiling, whatever teams enabled", async () => {
+    const { cache, state } = setup({ ceiling: ["git.example.org", "*.github.com"], teams: {} });
+    expect(await cache.decideSite("git.example.org")).toEqual({
+      allowed: true,
+      pattern: "git.example.org",
+    });
+    expect(await cache.decideSite("api.github.com")).toEqual({
+      allowed: true,
+      pattern: "*.github.com",
+    });
+    expect(await cache.decideSite("pypi.org")).toEqual({
+      allowed: false,
+      reason: "not_in_ceiling",
+    });
+    state.ceiling = [];
+    cache.invalidateCeiling();
+    expect((await cache.decideSite("git.example.org")).allowed).toBe(false);
+  });
+});

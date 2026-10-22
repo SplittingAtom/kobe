@@ -109,6 +109,8 @@ export interface UploadDraft {
    * stored on the version, which promotion reports (SK19).
    */
   readonly fromConversation: boolean;
+  /** The draft's governed-import origin (KOBE-344), kept on the version for promotion. */
+  readonly origin?: Record<string, unknown> | null;
   /** Set for a personal save: what the author confirmed, if anything. */
   readonly personal: { readonly fromConversation: boolean; readonly coEdited: boolean } | null;
 }
@@ -396,6 +398,7 @@ async function insertVersion(
     uncompressedBytes: input.uncompressedBytes,
     uploadedBy: input.uploadedBy,
     fromConversation: input.draft?.fromConversation === true,
+    origin: input.draft?.origin ?? null,
   };
   const [row] =
     location.scope === "team"

@@ -9,6 +9,8 @@ import {
   uploadDraft,
   type DraftSummary,
 } from "../../lib/skills/drafts-api";
+import { useTeamAccess } from "../admin/console-context";
+import { ImportForm } from "./import-draft";
 import { Button, Field, Section, Select, TextInput } from "../ui/console";
 import { MutationStatus } from "../admin/error-notice";
 import { useMutation, useResource } from "../admin/use-resource";
@@ -18,7 +20,7 @@ import { useNavigate } from "../shell/use-navigate";
 const BLANK = "";
 
 /** Opens the draft a start made (client-side: the panel stays, KOBE-452). */
-function useOpenDraft(): (res: ApiResult<DraftSummary>) => ApiResult<DraftSummary> {
+export function useOpenDraft(): (res: ApiResult<DraftSummary>) => ApiResult<DraftSummary> {
   const navigate = useNavigate();
   return (res) => {
     if (res.ok) navigate(draftHref(res.data.id));
@@ -32,10 +34,12 @@ function useOpenDraft(): (res: ApiResult<DraftSummary>) => ApiResult<DraftSummar
  * and a conversation's skill from the thread's menu.
  */
 export function NewDraft({ teamId }: { readonly teamId: string }) {
+  const access = useTeamAccess();
   return (
     <Section title="New draft" level={2}>
       <StartForm teamId={teamId} />
       <UploadForm teamId={teamId} />
+      {access.permissions.includes("team.skills.publish") && <ImportForm teamId={teamId} />}
     </Section>
   );
 }

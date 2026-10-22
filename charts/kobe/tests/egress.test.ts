@@ -96,13 +96,22 @@ describe("egress proxy Deployment", () => {
 });
 
 describe("egress proxy NetworkPolicy", () => {
-  it("admits only team namespaces (sandboxes), only on the proxy port", () => {
+  it("admits only team namespaces (sandboxes) and the server's site jobs, only on the proxy port", () => {
     const spec = policy(render());
     expect(spec?.ingress).toEqual([
       {
         from: [
           {
             namespaceSelector: { matchLabels: { "kobe.splittingatom.io/team-namespace": "true" } },
+          },
+          {
+            podSelector: {
+              matchLabels: {
+                "app.kubernetes.io/name": "kobe",
+                "app.kubernetes.io/instance": "kobe",
+                "app.kubernetes.io/component": "server",
+              },
+            },
           },
         ],
         ports: [{ protocol: "TCP", port: 8080 }],

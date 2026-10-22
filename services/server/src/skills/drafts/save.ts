@@ -111,9 +111,25 @@ export async function saveDraftVersion(
       id,
       teamId: ctx.teamId,
       fromConversation,
+      // An imported draft's origin goes with the version (KOBE-344), marked when edited since.
+      origin: versionOrigin(draft.origin, files),
       personal: personal ? { fromConversation, coEdited: draft.coEdited } : null,
     },
   });
+}
+
+/**
+ * The version's origin (KOBE-344 review): the draft's, with `modified: true` unless the files are
+ * still byte for byte those imported (the canonical zip's hash; an origin without one counts as
+ * modified). Compared before the save writes the chosen number into kobe.skill.yaml.
+ */
+export function versionOrigin(
+  origin: Record<string, unknown> | null,
+  files: ReadonlyMap<string, Uint8Array>,
+): Record<string, unknown> | null {
+  if (!origin) return null;
+  const now = createHash("sha256").update(canonicalZip(files)).digest("hex");
+  return origin.filesSha256 === now ? origin : { ...origin, modified: true };
 }
 
 /**

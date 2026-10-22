@@ -31,6 +31,8 @@ export interface DraftRecord {
   readonly startedFrom: SkillDraftStart;
   readonly parentRef: Record<string, unknown> | null;
   readonly fromThreadId: string | null;
+  /** A governed import's origin (KOBE-344): URL, commit, Kobe's hash, importer. */
+  readonly origin: Record<string, unknown> | null;
   /** Someone besides the author changed it (sticky, kept by the database). */
   readonly coEdited: boolean;
   /** The revision the conversation's last save wrote; null: no conversation saves into it. */
@@ -70,6 +72,7 @@ const columns = {
   startedFrom: skillDrafts.startedFrom,
   parentRef: skillDrafts.parentRef,
   fromThreadId: skillDrafts.fromThreadId,
+  origin: skillDrafts.origin,
   coEdited: skillDrafts.coEdited,
   syncedRev: skillDrafts.syncedRev,
   rev: skillDrafts.rev,
@@ -160,6 +163,7 @@ export interface NewDraft {
   readonly startedFrom: SkillDraftStart;
   readonly parentRef?: Record<string, unknown> | null;
   readonly fromThreadId?: string | null;
+  readonly origin?: Record<string, unknown> | null;
 }
 
 /** Inserts the draft and its first files; the database counts their size. */
@@ -178,6 +182,7 @@ export async function insertDraft(
       startedFrom: draft.startedFrom,
       parentRef: draft.parentRef ?? null,
       fromThreadId: draft.fromThreadId ?? null,
+      origin: draft.origin ?? null,
     })
     .returning({ id: skillDrafts.id });
   if (!row) throw new Error("draft insert returned no row");

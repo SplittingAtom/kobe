@@ -69,8 +69,10 @@ export type PackagePathProblem =
   | "absolute"
   | "control_or_backslash"
   | "invisible_or_bidi"
-  | "bad_segment";
+  | "bad_segment"
+  | "git_reserved";
 
+const GIT_RESERVED = new Set([".git", ".gitattributes", ".gitmodules"]);
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 /** C1 controls, zero-width and bidi controls: they spoof how a path reads in review. */
 const INVISIBLE = /[\u0080-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/;
@@ -81,7 +83,8 @@ const INVISIBLE = /[\u0080-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\
  * normalized: the caller's spelling is the stored one), at most {@link MAX_PACKAGE_PATH_BYTES}
  * UTF-8 bytes, relative and `/`-separated with no empty, `.`, `..` or `__proto__` segment, no
  * C0/C1 control, backslash, zero-width or bidi control character, no leading `/` or drive letter,
- * and no trailing `/` (directories are implied, never entries).
+ * no trailing `/` (directories are implied, never entries), and no `.git`, `.gitattributes` or
+ * `.gitmodules` segment in any case (`git_reserved`).
  */
 export function packagePathProblem(path: string): PackagePathProblem | null {
   if (path === "") return "empty";
@@ -95,6 +98,10 @@ export function packagePathProblem(path: string): PackagePathProblem | null {
   const segments = path.split("/");
   if (segments.some((s) => s === "" || s === "." || s === ".." || s === "__proto__"))
     return "bad_segment";
+  // Packages live in git (the catalog mirror, KOBE-343): no `.git` segment, which git refuses or
+  // treats as a repository, and no `.gitattributes`/`.gitmodules`, which would change how a
+  // checkout reads the files (line endings, submodules). Case-folded: case-insensitive checkouts.
+  if (segments.some((s) => GIT_RESERVED.has(s.toLowerCase()))) return "git_reserved";
   return null;
 }
 

@@ -11,6 +11,8 @@ import type { ProxyPolicy } from "./proxy.js";
 export interface LiveTunnel {
   readonly teamId: string;
   readonly userId: string;
+  /** A site job's tunnel (KOBE-343): re-checked against the ceiling alone. */
+  readonly site?: boolean;
   readonly host: string;
   close(reason: string): void;
 }
@@ -63,12 +65,19 @@ export class TunnelRegistry {
       (t) =>
         scope.kind === "all" ||
         scope.kind === "ceiling" ||
-        (scope.kind === "team" && t.teamId === scope.teamId) ||
-        (scope.kind === "user" && t.userId === scope.userId),
+        (!t.site && scope.kind === "team" && t.teamId === scope.teamId) ||
+        (!t.site && scope.kind === "user" && t.userId === scope.userId),
     );
     let closed = 0;
     for (const tunnel of affected) {
       try {
+        if (tunnel.site) {
+          if (!(await this.policy.decideSite(tunnel.host)).allowed) {
+            tunnel.close("revoked");
+            closed += 1;
+          }
+          continue;
+        }
         const member = await this.policy.isActiveMember(tunnel.teamId, tunnel.userId);
         const decision = member ? await this.policy.decide(tunnel.teamId, tunnel.host) : undefined;
         if (!decision?.allowed) {

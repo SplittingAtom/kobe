@@ -1,3 +1,4 @@
+import type { SkillImportOrigin } from "@kobe/protocol";
 import { withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../../audit/record.js";
 import { parseSkillMd } from "../skill-md.js";
@@ -80,6 +81,8 @@ export interface DraftStartInput {
   readonly parentRef?: Record<string, unknown>;
   /** A start from a conversation: a thread of this team. */
   readonly fromThreadId?: string;
+  /** A governed import (KOBE-344): where the files came from, as the server fetched them. */
+  readonly origin?: SkillImportOrigin;
   /** Made by the agent's `save_skill_draft` (KOBE-442), recorded in the audit event. */
   readonly via?: "tool";
   /** The tool call that made it, for the audit event (KOBE-442 review L3). */
@@ -148,6 +151,7 @@ export async function createDraft(
         startedFrom: start.startedFrom,
         parentRef: start.parentRef ?? null,
         fromThreadId: start.fromThreadId ?? null,
+        origin: start.origin ? { ...start.origin } : null,
       },
       start.files,
     );
@@ -161,6 +165,17 @@ export async function createDraft(
         // What was copied (review N3): the fork's parent version, or the conversation.
         ...(draft.parentRef ? auditParent(draft.parentRef) : {}),
         ...(draft.fromThreadId ? { fromThreadId: draft.fromThreadId } : {}),
+        ...(start.origin
+          ? {
+              origin: {
+                kind: start.origin.kind,
+                url: start.origin.url,
+                ...(start.origin.commit ? { commit: start.origin.commit } : {}),
+                ...(start.origin.path ? { path: start.origin.path } : {}),
+                fetchedSha256: start.origin.fetchedSha256,
+              },
+            }
+          : {}),
         ...(start.via ? { via: start.via } : {}),
         ...(start.toolCall ?? {}),
       },

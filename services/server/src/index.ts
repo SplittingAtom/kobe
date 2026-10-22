@@ -1,6 +1,11 @@
 import { createProxyAppCaller } from "./apps/app-caller.js";
 import type { Server } from "node:http";
 import { ExternalScanRunner } from "./skills/registry/external-scan.js";
+import { egressProxyUrl, loadSkillMirrorConfig } from "./skills/mirror/config.js";
+import { SKILL_MIRROR_SWEEP_MS, SkillMirror } from "./skills/mirror/runner.js";
+import { mirrorHttpClient } from "./skills/mirror/http-client.js";
+import { IMPORT_FETCH_MAX_BYTES } from "./skills/import/service.js";
+import { signSiteEgressToken } from "@kobe/session-token";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { approvalKeyring } from "./approvals/index.js";
@@ -367,6 +372,32 @@ const externalScanSweep = externalScan
   : undefined;
 externalScanSweep?.unref();
 
+// The optional git mirror of the catalog (KOBE-343): off until a Site admin names a remote. It
+// pushes through the egress proxy with a site egress token; the remote's token comes from the
+// chart's Secret. Kicked on approvals and settings changes; swept for retries.
+const skillMirrorConfig = isServer ? loadSkillMirrorConfig(process.env) : undefined;
+const skillMirror =
+  isServer && deps?.blobs && skillMirrorConfig
+    ? new SkillMirror({
+        db: deps.database.db,
+        pool: deps.database.pool,
+        blobs: deps.blobs,
+        credentials: skillMirrorConfig.credentials,
+        egress: sandbox
+          ? {
+              proxyUrl: egressProxyUrl(sandbox.settings),
+              key: sandbox.sessionKeys["kobe.egress-proxy"],
+            }
+          : null,
+        author: skillMirrorConfig.author,
+      })
+    : undefined;
+const skillMirrorSweep = skillMirror
+  ? setInterval(() => skillMirror.kick(), SKILL_MIRROR_SWEEP_MS)
+  : undefined;
+skillMirrorSweep?.unref();
+skillMirror?.kick();
+
 // Skill evals (KOBE-325): every server replica runs eval executions in ephemeral sandboxes (the
 // per-team cap is atomic across replicas), streams progress, and one replica at a time reaps what
 // a dead replica left. Needs the sandbox provider and object storage.
@@ -426,6 +457,26 @@ const server = serve(
       isolation,
       ...(evalRunner ? { evals: evalRunner } : {}),
       ...(externalScan ? { externalScan } : {}),
+      ...(skillMirror ? { skillMirror } : {}),
+      // Governed skill import (KOBE-344): fetched through the egress proxy with a site token.
+      ...(sandbox
+        ? {
+            skillImport: {
+              http: (url: string, deadlineAt: number) =>
+                mirrorHttpClient({
+                  deadlineAt,
+                  remote: url,
+                  credentials: null,
+                  proxy: {
+                    url: egressProxyUrl(sandbox.settings),
+                    token: () =>
+                      signSiteEgressToken("skill-import", sandbox.sessionKeys["kobe.egress-proxy"]),
+                  },
+                  maxResponseBytes: IMPORT_FETCH_MAX_BYTES,
+                }),
+            },
+          }
+        : {}),
       ...(workspaceSync ? { workspaceFiles: { sync: workspaceSync, waker } } : {}),
       skillEvals: {
         ...(skillEvalHub ? { hub: skillEvalHub } : {}),
@@ -627,6 +678,7 @@ function shutdown(signal: string): void {
   stopTeamReconciler?.();
   if (evalSweep) clearInterval(evalSweep);
   if (externalScanSweep) clearInterval(externalScanSweep);
+  if (skillMirrorSweep) clearInterval(skillMirrorSweep);
   if (skillEvalSweep) clearInterval(skillEvalSweep);
   if (skillEvalReaper) clearInterval(skillEvalReaper);
   // Running eval executions go back to queued (another replica takes them), their runs stopped

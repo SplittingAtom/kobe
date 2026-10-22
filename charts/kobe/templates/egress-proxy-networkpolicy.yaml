@@ -1,6 +1,7 @@
 {{- $fullname := include "kobe.fullname" . -}}
 {{- $e := include "kobe.egressProxyValues" . | fromJson -}}
-# Egress proxy (spec D28). Ingress: only sandboxes (team namespaces), only the proxy port; the
+# Egress proxy (spec D28). Ingress: only sandboxes (team namespaces) and the server's site jobs
+# (KOBE-343), only the proxy port; the
 # team namespace's own policy says the same from the sending side, this is the receiving side that
 # holds regardless of how the CNI applies egress selectors (KOBE-22 kube-router finding).
 apiVersion: networking.k8s.io/v1
@@ -23,6 +24,11 @@ spec:
         - namespaceSelector:
             matchLabels:
               kobe.splittingatom.io/team-namespace: "true"
+        # The server's site jobs (KOBE-343: the catalog's git mirror), with a site egress token
+        # the proxy allows ceiling hosts only.
+        - podSelector:
+            matchLabels:
+              {{- include "kobe.selectorLabels" (dict "root" . "component" "server") | nindent 14 }}
       ports:
         - protocol: TCP
           port: 8080

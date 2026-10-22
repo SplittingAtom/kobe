@@ -46,7 +46,7 @@ describe("Registry settings (KOBE-330, SK20, SK21)", () => {
     expect(
       registryImportAllowlistSchema.safeParse(["github.com", "gitlab.example.org"]).success,
     ).toBe(true);
-    for (const host of ["https://github.com", "GitHub.com", "a b", "", "github.com/x"])
+    for (const host of ["https://github.com", "GitHub.com", "a b", "", "github.com/x/y"])
       expect(registryImportAllowlistSchema.safeParse([host]).success, host).toBe(false);
     expect(registryImportAllowlistSchema.safeParse(["a.com", "a.com"]).success).toBe(false);
     expect(registryScannerSchema.parse({})).toEqual({ external: false });

@@ -21,6 +21,7 @@ import {
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource, type Mutation } from "../use-resource";
+import { SkillMirrorStatusPanel } from "./skill-mirror-status";
 
 /**
  * Registry settings (KOBE-330, SK20, SK21): the Registry team that runs all site-side work (until
@@ -60,6 +61,7 @@ export function SkillRegistryPage() {
               onSaved={reload}
             />
             <MutationStatus error={mutation.error} notice={mutation.notice} />
+            {settings.mirror.enabled && <SkillMirrorStatusPanel key={settings.updatedAt} />}
           </>
         )}
       </ResourceView>
@@ -218,7 +220,7 @@ function RegistryForm({
       <ChoiceGroup legend="Import, scanner and mirror" stacked className="my-4">
         <Field
           label="Import allowlist (one host per line)"
-          hint="Skills can be imported only from these hosts."
+          hint="Skills can be imported only from these: a host (github.com) or a host and an owner (github.com/acme). Add each host to the egress ceiling too: imports go through the egress proxy."
         >
           <Textarea rows={3} value={draft.importAllowlist} onChange={set("importAllowlist")} />
         </Field>

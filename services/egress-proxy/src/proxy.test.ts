@@ -7,13 +7,13 @@ import {
   type Server as NetServer,
   type Socket,
 } from "node:net";
-import { signSessionToken } from "@kobe/session-token";
+import { signSessionToken, signSiteEgressToken } from "@kobe/session-token";
 import { InMemorySpanExporter, initTelemetry } from "@kobe/telemetry";
 import { pino } from "pino";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { AddressPolicy } from "./address-policy.js";
 import type { EgressDecision } from "./allowlist.js";
-import { egressTokenVerifier } from "./auth.js";
+import { egressTokenVerifier, siteTokenVerifier } from "./auth.js";
 import type { BlockedAttempt } from "./blocked-reporter.js";
 import type { ConnectionRecord } from "./connection-audit.js";
 import { BandwidthLimiter, ConnectionLimits } from "./limits.js";
@@ -93,6 +93,7 @@ const DNS: Record<string, string[]> = {
   "allowed.example.com": ["127.0.0.1"],
   "internal.example.com": ["10.43.0.10"],
   "mixed.example.com": ["127.0.0.1", "169.254.169.254"],
+  "pypi.org": ["127.0.0.1"],
 };
 
 let proxy: Server;
@@ -121,8 +122,13 @@ async function start(overrides: Partial<ProxyDeps> = {}): Promise<void> {
         ENABLED.has(host)
           ? { allowed: true, pattern: host }
           : { allowed: false, reason: CEILING.has(host) ? "not_enabled" : "not_in_ceiling" },
+      decideSite: async (host): Promise<EgressDecision> =>
+        CEILING.has(host)
+          ? { allowed: true, pattern: host }
+          : { allowed: false, reason: "not_in_ceiling" },
       isActiveMember: async () => true,
     },
+    verifySite: siteTokenVerifier(KEY),
     resolve: async (host) => {
       resolveCalls.push(host);
       // A rebinding name: public (here: the test upstream) first, internal afterwards.
@@ -416,6 +422,24 @@ describe("revocation of open tunnels", () => {
     expect(tunnels.size).toBe(0);
   });
 
+  it("re-checks a site job's tunnel against the ceiling alone (KOBE-343)", async () => {
+    const member = vi.fn(async () => false);
+    const policy = { ...deps.policy, isActiveMember: member };
+    const tunnels = new TunnelRegistry(policy, deps.logger);
+    await start({ tunnels, policy });
+    const socket = await openTunnel(`Bearer ${signSiteEgressToken("skill-mirror", KEY)}`);
+    expect(await tunnels.recheck({ kind: "user", userId: USER })).toBe(0);
+    expect(await tunnels.recheck({ kind: "all" })).toBe(0);
+    expect(member).not.toHaveBeenCalled();
+    CEILING.delete("allowed.example.com");
+    try {
+      expect(await tunnels.recheck({ kind: "ceiling" })).toBe(1);
+      await once(socket, "close");
+    } finally {
+      CEILING.add("allowed.example.com");
+    }
+  });
+
   it("closes a tunnel when its user is removed or deactivated", async () => {
     let member = true;
     const policy = { ...deps.policy, isActiveMember: async () => member };
@@ -610,5 +634,67 @@ describe("tracing (KOBE-10)", () => {
     } finally {
       await telemetry.shutdown();
     }
+  });
+});
+
+describe("site jobs (KOBE-343)", () => {
+  const site = () => `Bearer ${signSiteEgressToken("skill-mirror", KEY)}`;
+
+  it("relays a ceiling host no team enabled, with no membership check, audit row or run report", async () => {
+    const member = vi.fn(async () => false);
+    await start({ policy: { ...deps.policy, isActiveMember: member } });
+    const { socket, head } = await openConnect("pypi.org:443", site());
+    expect(status(head)).toBe("HTTP/1.1 200 Connection Established");
+    const sni = await captureClientHello("pypi.org");
+    socket.write(sni);
+    const echoed = await readExactly(socket, sni.length);
+    expect(echoed.equals(sni)).toBe(true);
+    socket.end();
+    await once(socket, "close");
+    await settle();
+    expect(member).not.toHaveBeenCalled();
+    // Audited as the site job (host, outcome, bytes), never with a team, user or token.
+    expect(audit).toEqual([
+      expect.objectContaining({
+        site: "skill-mirror",
+        domain: "pypi.org",
+        port: 443,
+        outcome: "allowed",
+        teamId: "",
+        bytesUp: sni.length,
+      }),
+    ]);
+    expect(JSON.stringify(audit)).not.toContain("Bearer");
+    expect(blocked).toEqual([]);
+  });
+
+  it("refuses a host outside the ceiling and reports no run", async () => {
+    const { head } = await openConnect("evil.example.net:443", site());
+    expect(status(head)).toMatch(/^HTTP\/1.1 403 .*not allowed on this site/);
+    expect(connectCalls).toEqual([]);
+    expect(blocked).toEqual([]);
+    expect(audit).toMatchObject([
+      {
+        site: "skill-mirror",
+        domain: "evil.example.net",
+        outcome: "blocked",
+        reason: "not_in_ceiling",
+      },
+    ]);
+  });
+
+  it("is refused without the site verifier, and on plain HTTP", async () => {
+    await start({ verifySite: undefined } as unknown as Partial<ProxyDeps>);
+    const { head } = await openConnect("pypi.org:443", site());
+    expect(status(head)).toBe("HTTP/1.1 407 Proxy Authentication Required");
+    await start();
+    const plain = connect(proxyPort, "127.0.0.1");
+    await once(plain, "connect");
+    plain.write(
+      `GET http://pypi.org/ HTTP/1.1\r\nHost: pypi.org\r\nProxy-Authorization: ${site()}\r\n\r\n`,
+    );
+    const [chunk] = (await once(plain, "data")) as [Buffer];
+    expect(chunk.toString("latin1")).toMatch(/^HTTP\/1.1 (407|403)/);
+    plain.destroy();
   });
 });
