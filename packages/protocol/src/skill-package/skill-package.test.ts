@@ -67,6 +67,11 @@ describe("package layout (KOBE-309)", () => {
     expect(packagePathProblem("a\nb")).toBe("control_or_backslash");
     for (const bad of ["a/../b", "./a", "a//b", "a/", "__proto__/x"])
       expect(packagePathProblem(bad), bad).toBe("bad_segment");
+    // Git's own names, in any case and at any depth (KOBE-343: packages are mirrored to git).
+    for (const bad of [".git/config", "scripts/.GIT/hooks/x", ".gitattributes", "a/.GitModules"])
+      expect(packagePathProblem(bad), bad).toBe("git_reserved");
+    expect(packagePathProblem("scripts/.gitignore")).toBeNull();
+    expect(packagePathProblem("notes.git")).toBeNull();
     expect(checkPackagePaths(["SKILL.md", "Notes.md", "notes.md", "evals"])).toEqual([
       { path: "notes.md", problem: "duplicate" },
       { path: "evals", problem: "reserved_directory" },
