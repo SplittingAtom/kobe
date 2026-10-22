@@ -102,4 +102,44 @@ describe("ConnectionAudit", () => {
     await audit.stop();
     expect(write).toHaveBeenCalledTimes(1);
   });
+
+  it("writes a site job's connections as egress.site_connection, without team or user (KOBE-343)", async () => {
+    const written: AuditEvent[] = [];
+    const audit = new ConnectionAudit({
+      write: async (events) => void written.push(...events),
+      logger,
+      flushMs: 60_000,
+    });
+    const site: ConnectionRecord = {
+      ...base,
+      teamId: "",
+      userId: "",
+      sandboxId: "site:skill-mirror",
+      domain: "git.example.org",
+      site: "skill-mirror",
+    };
+    audit.record(site);
+    audit.record(site);
+    audit.record({
+      ...site,
+      outcome: "blocked",
+      reason: "not_in_ceiling",
+      bytesUp: 0,
+      bytesDown: 0,
+    });
+    await audit.flush();
+    expect(written).toHaveLength(2);
+    for (const event of written) {
+      expect(event.action).toBe("egress.site_connection");
+      expect(event).not.toHaveProperty("teamId");
+      expect(AUDIT_EVENTS["egress.site_connection"].target.safeParse(event.target).success).toBe(
+        true,
+      );
+    }
+    expect(written[0]?.target).toMatchObject({
+      job: "skill-mirror",
+      domain: "git.example.org",
+      connections: 2,
+    });
+  });
 });

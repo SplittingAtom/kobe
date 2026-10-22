@@ -195,19 +195,19 @@ export function createEgressProxy(deps: ProxyDeps): Server {
     upgraded = false,
   ) => {
     const { identity } = a;
-    // A site job has no team to audit under: the server audits the job (KOBE-343).
-    if (!identity.site)
-      deps.audit.record({
-        ...(upgraded ? { upgraded: true } : {}),
-        teamId: identity.teamId,
-        userId: identity.userId,
-        sandboxId: identity.sandboxId,
-        domain: a.host,
-        port: a.port,
-        outcome,
-        reason,
-        ...bytes,
-      });
+    // A site job (KOBE-343) is audited site-wide: the job, host and outcome, never a token.
+    deps.audit.record({
+      ...(upgraded ? { upgraded: true } : {}),
+      teamId: identity.teamId,
+      userId: identity.userId,
+      sandboxId: identity.sandboxId,
+      domain: a.host,
+      port: a.port,
+      outcome,
+      reason,
+      ...bytes,
+      ...(identity.site ? { site: identity.site } : {}),
+    });
     // Metadata only: the destination host and port (audited anyway), never a path or query.
     recordSpan("egress.connection", {
       startTime: a.started,

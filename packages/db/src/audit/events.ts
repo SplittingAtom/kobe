@@ -576,6 +576,35 @@ export const AUDIT_EVENTS = {
    * connection counted in exactly one row (D28 "every connection is logged"). `domain` is absent
    * when the target was not a host name (IP literal, junk).
    */
+  /**
+   * The server's own site-job connections through the egress proxy (KOBE-343: the catalog's git
+   * mirror; actor: system), aggregated like `egress.connection`: the job, never a token.
+   */
+  "egress.site_connection": event("site", {
+    job: z.enum(["skill-mirror"]),
+    domain: egressDomain.optional(),
+    port: z.number().int().min(1).max(65535).optional(),
+    outcome: z.enum(["allowed", "blocked", "failed"]),
+    reason: z
+      .enum([
+        "not_in_ceiling",
+        "forbidden_address",
+        "sni_mismatch",
+        "invalid_target",
+        "port_not_allowed",
+        "connection_limit",
+        "dns_failure",
+        "upstream_unreachable",
+        "policy_unavailable",
+      ])
+      .optional(),
+    aggregated: z.literal(true).optional(),
+    connections: z.number().int().positive(),
+    bytesUp: count,
+    bytesDown: count,
+    from: z.iso.datetime(),
+    to: z.iso.datetime(),
+  }),
   "egress.connection": event("team", {
     userId: id,
     sandboxId: id,

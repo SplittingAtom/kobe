@@ -42,6 +42,8 @@ export interface ConnectionRecord {
   readonly bytesDown: number;
   /** A plain-HTTP request the proxy upgraded to HTTPS with injected headers (KOBE-39). */
   readonly upgraded?: boolean;
+  /** A server site job's connection (KOBE-343): audited site-wide, with no team or user. */
+  readonly site?: "skill-mirror";
 }
 
 interface Aggregate {
@@ -201,8 +203,37 @@ export class ConnectionAudit {
   }
 }
 
+function siteEvent(agg: Aggregate, job: "skill-mirror"): AuditEvent {
+  const r = agg.record;
+  return {
+    action: "egress.site_connection",
+    actor: SYSTEM_ACTOR,
+    target: {
+      job,
+      ...(agg.aggregated || r.domain === undefined ? {} : { domain: r.domain }),
+      ...(agg.aggregated || r.port === undefined ? {} : { port: r.port }),
+      outcome: r.outcome,
+      ...(agg.aggregated || r.reason === undefined
+        ? {}
+        : { reason: r.reason as SiteConnectionReason }),
+      ...(agg.aggregated ? { aggregated: true as const } : {}),
+      connections: agg.connections,
+      bytesUp: agg.bytesUp,
+      bytesDown: agg.bytesDown,
+      from: agg.from.toISOString(),
+      to: agg.to.toISOString(),
+    },
+  };
+}
+
+type SiteConnectionReason = Extract<
+  AuditEvent,
+  { action: "egress.site_connection" }
+>["target"]["reason"];
+
 function toEvent(agg: Aggregate): AuditEvent {
   const r = agg.record;
+  if (r.site) return siteEvent(agg, r.site);
   return {
     action: "egress.connection",
     actor: SYSTEM_ACTOR,

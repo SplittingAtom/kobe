@@ -653,7 +653,18 @@ describe("site jobs (KOBE-343)", () => {
     await once(socket, "close");
     await settle();
     expect(member).not.toHaveBeenCalled();
-    expect(audit).toEqual([]);
+    // Audited as the site job (host, outcome, bytes), never with a team, user or token.
+    expect(audit).toEqual([
+      expect.objectContaining({
+        site: "skill-mirror",
+        domain: "pypi.org",
+        port: 443,
+        outcome: "allowed",
+        teamId: "",
+        bytesUp: sni.length,
+      }),
+    ]);
+    expect(JSON.stringify(audit)).not.toContain("Bearer");
     expect(blocked).toEqual([]);
   });
 
@@ -662,6 +673,14 @@ describe("site jobs (KOBE-343)", () => {
     expect(status(head)).toMatch(/^HTTP\/1.1 403 .*not allowed on this site/);
     expect(connectCalls).toEqual([]);
     expect(blocked).toEqual([]);
+    expect(audit).toMatchObject([
+      {
+        site: "skill-mirror",
+        domain: "evil.example.net",
+        outcome: "blocked",
+        reason: "not_in_ceiling",
+      },
+    ]);
   });
 
   it("is refused without the site verifier, and on plain HTTP", async () => {
