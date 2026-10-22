@@ -142,7 +142,7 @@ sections:
     rows:
       - id: node-image
         component: Node.js official image (`node`)
-        version: 24-slim (services, web); 22-trixie-slim, digest-pinned (sandbox build stages and the node binary in the sandbox)
+        version: 24-slim (services, web) and 22-trixie-slim (sandbox build stages and the node binary in the sandbox), both digest-pinned
         license: MIT
         use: bundled (base image; Node.js runs Kobe's services)
         where: images web, server, mcp-proxy, egress-proxy, model-gateway, sandbox
