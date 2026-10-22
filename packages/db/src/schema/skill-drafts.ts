@@ -41,6 +41,8 @@ export const SKILL_DRAFT_MAX_FILES = 200;
 const PATH_MAX_BYTES = 240;
 /** A fork's parent reference is a few ids and a hash. */
 const PARENT_REF_MAX_BYTES = 4096;
+/** An import's origin: an https URL (≤ 2048), a commit and a hash. */
+const ORIGIN_MAX_BYTES = 4096;
 
 /** How a draft was started (SK10); `blank` is a bare SKILL.md skeleton. */
 export const SKILL_DRAFT_STARTS = ["blank", "template", "thread", "fork", "upload", "git"] as const;
@@ -84,6 +86,12 @@ export const skillDrafts = pgTable(
     startedFrom: text().$type<SkillDraftStart>().notNull().default("blank"),
     parentRef: jsonb().$type<Record<string, unknown>>(),
     fromThreadId: uuid(),
+    /**
+     * A governed import's origin (KOBE-344, SK30): `{kind: "git"|"zip", url, commit?,
+     * fetchedSha256, importedBy, importedAt}`, the protocol's `skillImportOriginSchema`. Set for
+     * every `git` draft and for a `upload` draft imported from a zip URL; never changes.
+     */
+    origin: jsonb().$type<Record<string, unknown>>(),
     coEdited: boolean().notNull().default(false),
     /**
      * The revision the last save from its conversation wrote (Save to Workbench, KOBE-322;
@@ -119,6 +127,11 @@ export const skillDrafts = pgTable(
       "skill_drafts_parent_ref",
       sql`${t.parentRef} IS NULL OR (jsonb_typeof(${t.parentRef}) = 'object' AND octet_length(${t.parentRef}::text) <= ${sql.raw(String(PARENT_REF_MAX_BYTES))})`,
     ),
+    check(
+      "skill_drafts_origin",
+      sql`${t.origin} IS NULL OR (jsonb_typeof(${t.origin}) = 'object' AND octet_length(${t.origin}::text) <= ${sql.raw(String(ORIGIN_MAX_BYTES))} AND ${t.startedFrom} IN ('git', 'upload'))`,
+    ),
+    check("skill_drafts_git_origin", sql`${t.startedFrom} <> 'git' OR ${t.origin} IS NOT NULL`),
     check(
       "skill_drafts_provenance",
       sql`(${t.startedFrom} = 'thread') = (${t.fromThreadId} IS NOT NULL) AND (${t.startedFrom} = 'fork') = (${t.parentRef} IS NOT NULL)`,
