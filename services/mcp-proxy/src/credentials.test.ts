@@ -29,18 +29,32 @@ function source(answer: GrantAnswer) {
 
 describe("createServerCredentials", () => {
   it("asks for nothing for a connector without credentials", async () => {
-    const s = source({ ok: true, value: { kind: "api_key", apiKey: KEY } });
+    const s = source({ ok: true, value: { kind: "api_key", apiKey: KEY, source: "member" } });
     const out = await createServerCredentials(s.grants).headersFor(request("none"));
-    expect(out).toEqual({ ok: true, headers: {} });
+    expect(out).toEqual({ ok: true, headers: {}, credential: "none" });
     expect(s.asked).toEqual([]);
   });
 
   it("attaches the user's API key as a bearer token, fetched with the sandbox's own token", async () => {
-    const s = source({ ok: true, value: { kind: "api_key", apiKey: KEY } });
+    const s = source({ ok: true, value: { kind: "api_key", apiKey: KEY, source: "member" } });
     const req = request("api_key");
     const out = await createServerCredentials(s.grants).headersFor(req);
-    expect(out).toEqual({ ok: true, headers: { authorization: `Bearer ${KEY}` } });
+    expect(out).toEqual({
+      ok: true,
+      headers: { authorization: `Bearer ${KEY}` },
+      credential: "member",
+    });
     expect(s.asked).toEqual([{ token: "sandbox-token", connectorId: req.connector.id }]);
+  });
+
+  it("says the site key was used when the server served one (KOBE-449)", async () => {
+    const s = source({ ok: true, value: { kind: "api_key", apiKey: KEY, source: "site" } });
+    const out = await createServerCredentials(s.grants).headersFor(request("api_key"));
+    expect(out).toEqual({
+      ok: true,
+      headers: { authorization: `Bearer ${KEY}` },
+      credential: "site",
+    });
   });
 
   it.each(["not_connected", "unavailable"] as const)("passes %s through", async (failure) => {
@@ -51,16 +65,23 @@ describe("createServerCredentials", () => {
   });
 
   it("attaches the user's OAuth access token as a bearer token (KOBE-109)", async () => {
-    const s = source({ ok: true, value: { kind: "oauth", accessToken: "at-123" } });
+    const s = source({
+      ok: true,
+      value: { kind: "oauth", accessToken: "at-123", source: "member" },
+    });
     const req = request("oauth");
     const out = await createServerCredentials(s.grants).headersFor(req);
-    expect(out).toEqual({ ok: true, headers: { authorization: "Bearer at-123" } });
+    expect(out).toEqual({
+      ok: true,
+      headers: { authorization: "Bearer at-123" },
+      credential: "member",
+    });
     expect(s.asked).toEqual([{ token: "sandbox-token", connectorId: req.connector.id }]);
   });
 
   it.each([
-    ["oauth", { kind: "api_key", apiKey: KEY }],
-    ["api_key", { kind: "oauth", accessToken: "at-123" }],
+    ["oauth", { kind: "api_key", apiKey: KEY, source: "member" }],
+    ["api_key", { kind: "oauth", accessToken: "at-123", source: "member" }],
   ] as const)(
     "refuses a %s connector answered with the other kind of grant",
     async (kind, value) => {
@@ -95,22 +116,28 @@ describe("policy server grant client", () => {
   });
 
   it("posts with the internal key and the sandbox token, and parses the key", async () => {
-    const out = await client(respond(200, { kind: "api_key", api_key: KEY })).fetchGrant(
-      "tok",
-      "c1",
-    );
-    expect(out).toEqual({ ok: true, value: { kind: "api_key", apiKey: KEY } });
+    const out = await client(
+      respond(200, { kind: "api_key", api_key: KEY, source: "site" }),
+    ).fetchGrant("tok", "c1");
+    expect(out).toEqual({ ok: true, value: { kind: "api_key", apiKey: KEY, source: "site" } });
     expect(seen.at(-1)?.path).toBe("/internal/v1/mcp/connectors/c1/grant");
     expect(seen.at(-1)?.headers.get("kobe-sandbox-token")).toBe("tok");
     expect(seen.at(-1)?.headers.get("authorization")).toBe(`Bearer ${"i".repeat(40)}`);
   });
 
   it("parses an OAuth access token", async () => {
-    const out = await client(respond(200, { kind: "oauth", access_token: "at-1" })).fetchGrant(
-      "tok",
-      "c1",
-    );
-    expect(out).toEqual({ ok: true, value: { kind: "oauth", accessToken: "at-1" } });
+    const out = await client(
+      respond(200, { kind: "oauth", access_token: "at-1", source: "member" }),
+    ).fetchGrant("tok", "c1");
+    expect(out).toEqual({
+      ok: true,
+      value: { kind: "oauth", accessToken: "at-1", source: "member" },
+    });
+  });
+
+  it("reads a server that does not say the source (older release) as the member's own key", async () => {
+    const out = await client(respond(200, { kind: "api_key", api_key: KEY })).fetchGrant("t", "c");
+    expect(out).toEqual({ ok: true, value: { kind: "api_key", apiKey: KEY, source: "member" } });
   });
 
   it("separates not connected from everything else, failing closed", async () => {
@@ -125,6 +152,7 @@ describe("policy server grant client", () => {
       [200, { kind: "oauth" }],
       [200, { kind: "oauth", access_token: "" }],
       [200, { kind: "api_key", api_key: "" }],
+      [200, { kind: "api_key", api_key: KEY, source: "nobody" }],
     ] as const) {
       expect(await client(respond(status, body)).fetchGrant("t", "c")).toEqual({
         ok: false,

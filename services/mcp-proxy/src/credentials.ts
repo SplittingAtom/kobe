@@ -16,8 +16,18 @@ export interface CredentialRequest {
   };
 }
 
+/** Whose key a grant is: the member's own, or the connector's site-wide key (KOBE-303). */
+export type GrantSourceKind = "member" | "site";
+
+/** Which credential a call used (KOBE-449, logged per call; the key itself never is). */
+export type CredentialUsed = "none" | GrantSourceKind;
+
 export type CredentialResult =
-  | { readonly ok: true; readonly headers: Readonly<Record<string, string>> }
+  | {
+      readonly ok: true;
+      readonly headers: Readonly<Record<string, string>>;
+      readonly credential: CredentialUsed;
+    }
   | { readonly ok: false; readonly code: "not_connected" | "unavailable" };
 
 export interface CredentialResolver {
@@ -28,7 +38,7 @@ export const NO_GRANTS: CredentialResolver = {
   headersFor: ({ connector }) =>
     Promise.resolve(
       connector.auth_kind === "none"
-        ? { ok: true, headers: {} }
+        ? { ok: true, headers: {}, credential: "none" }
         : { ok: false, code: "not_connected" },
     ),
 };
@@ -46,8 +56,12 @@ export type GrantAnswer =
   | {
       readonly ok: true;
       readonly value:
-        | { readonly kind: "api_key"; readonly apiKey: string }
-        | { readonly kind: "oauth"; readonly accessToken: string };
+        | { readonly kind: "api_key"; readonly apiKey: string; readonly source: GrantSourceKind }
+        | {
+            readonly kind: "oauth";
+            readonly accessToken: string;
+            readonly source: GrantSourceKind;
+          };
     }
   | { readonly ok: false; readonly failure: "not_connected" | "unavailable" };
 
@@ -65,7 +79,7 @@ export interface GrantSource {
 export function createServerCredentials(source: GrantSource): CredentialResolver {
   return {
     async headersFor({ token, connector }) {
-      if (connector.auth_kind === "none") return { ok: true, headers: {} };
+      if (connector.auth_kind === "none") return { ok: true, headers: {}, credential: "none" };
       const grant = await source.fetchGrant(token, connector.id);
       if (!grant.ok) return { ok: false, code: grant.failure };
       const value = grant.value;
@@ -74,6 +88,7 @@ export function createServerCredentials(source: GrantSource): CredentialResolver
         ok: true,
         headers:
           value.kind === "oauth" ? oauthHeaders(value.accessToken) : apiKeyHeaders(value.apiKey),
+        credential: value.source,
       };
     },
   };

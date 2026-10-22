@@ -165,7 +165,8 @@ describe("adding, replacing and removing a key", () => {
     const res = await alice.put(`${BASE}/${apiKeyConnector}`, { api_key: KEY2 });
     expect(res.status).toBe(200);
     expect(res.text).not.toContain(KEY2);
-    expect(keyOf((await grantFor(teamT, aliceId, apiKeyConnector)).text)).toBe(KEY2);
+    const served = await grantFor(teamT, aliceId, apiKeyConnector);
+    expect(JSON.parse(served.text)).toEqual({ kind: "api_key", api_key: KEY2, source: "member" });
   });
 
   it("validates the key and the connector", async () => {

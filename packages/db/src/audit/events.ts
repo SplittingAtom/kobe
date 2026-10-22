@@ -772,6 +772,11 @@ export const AUDIT_EVENTS = {
     approvalFailure: z.enum(MCP_APPROVAL_FAILURES).optional(),
     /** The member's remembered approval that allowed it (KOBE-289). */
     ruleId: id.optional(),
+    /**
+     * Allowed calls (KOBE-449): which credential the proxy attaches, by the connector's mode: none,
+     * the member's own grant, or the KOBE-303 site-wide key. Never the key or its hint.
+     */
+    credential: z.enum(["none", "member", "site"]).optional(),
   }),
 
   /**

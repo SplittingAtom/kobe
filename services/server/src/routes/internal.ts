@@ -128,9 +128,10 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
     if (revealed.ok) {
       const credential = revealed.credential;
       return c.json(
+        // `source` (KOBE-449): whose key it is, so the proxy logs which one a call used.
         credential.kind === "api_key"
-          ? { kind: "api_key", api_key: credential.apiKey }
-          : { kind: "oauth", access_token: credential.accessToken },
+          ? { kind: "api_key", api_key: credential.apiKey, source: revealed.source }
+          : { kind: "oauth", access_token: credential.accessToken, source: revealed.source },
       );
     }
     if (revealed.failure === "not_available") {

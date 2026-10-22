@@ -21,6 +21,7 @@ import { logger } from "../logger.js";
 import type { RunPolicyContextSource } from "../sandbox-wire/types.js";
 import type { McpApprovalFailure, McpApprovalVerifier } from "./approvals.js";
 import {
+  credentialUsed,
   describePinnedTool,
   exposedTools,
   loadTeamConnector,
@@ -161,7 +162,13 @@ async function audit(
   principal: McpPrincipal,
   facts: AuditFacts,
   outcome:
-    | { decision: "allowed"; reason: PolicyReasonCode; approvalId?: string; ruleId?: string }
+    | {
+        decision: "allowed";
+        reason: PolicyReasonCode;
+        approvalId?: string;
+        ruleId?: string;
+        credential: "none" | "member" | "site";
+      }
     | { decision: "denied"; reason: PolicyReasonCode; approvalFailure?: McpApprovalFailure },
 ): Promise<void> {
   await withTeam(deps.db, principal.teamId, (tx) =>
@@ -189,6 +196,7 @@ async function audit(
           ? { approvalFailure: outcome.approvalFailure }
           : {}),
         ...("ruleId" in outcome && outcome.ruleId !== undefined ? { ruleId: outcome.ruleId } : {}),
+        ...("credential" in outcome ? { credential: outcome.credential } : {}),
       },
     }),
   );
@@ -516,6 +524,7 @@ export async function decideMcpCall(
       reason,
       ...(approvalId === undefined ? {} : { approvalId }),
       ...(rule?.rule_id === undefined ? {} : { ruleId: rule.rule_id }),
+      credential: credentialUsed(connector),
     });
     return {
       decision: "allow",

@@ -260,8 +260,15 @@ export type RevealedCredential =
   | { readonly kind: "api_key"; readonly apiKey: string }
   | { readonly kind: "oauth"; readonly accessToken: string };
 
+/** Whose credential was revealed (KOBE-449): the member's own grant or the site-wide key. */
+export type RevealedSource = "member" | "site";
+
 export type RevealOutcome =
-  | { readonly ok: true; readonly credential: RevealedCredential }
+  | {
+      readonly ok: true;
+      readonly credential: RevealedCredential;
+      readonly source: RevealedSource;
+    }
   | { readonly ok: false; readonly failure: "not_available" | "not_connected" | "unavailable" };
 
 /** An access token is refreshed this long before it expires, so a call never races the expiry. */
@@ -334,13 +341,19 @@ async function openRow(
     row.sealed,
     grantContext(subject.teamId, subject.userId, subject.connectorId),
   );
-  if (row.kind !== "oauth") return { ok: true, credential: { kind: "api_key", apiKey: plaintext } };
+  if (row.kind !== "oauth") {
+    return { ok: true, credential: { kind: "api_key", apiKey: plaintext }, source: "member" };
+  }
   const bundle = parseOauthBundle(plaintext);
   if (!sameUrl(bundle.resource, row.connectorUrl)) {
     await auditRefusal(db, subject, row.connectorName, "resource_mismatch");
     return { ok: false, failure: "unavailable" };
   }
-  return { ok: true, credential: { kind: "oauth", accessToken: bundle.access_token } };
+  return {
+    ok: true,
+    credential: { kind: "oauth", accessToken: bundle.access_token },
+    source: "member",
+  };
 }
 
 /**
@@ -388,7 +401,7 @@ async function revealSiteCredential(
   const apiKey = await revealSiteKey(db, envelope, connectorId);
   return apiKey === undefined
     ? { ok: false, failure: "not_connected" }
-    : { ok: true, credential: { kind: "api_key", apiKey } };
+    : { ok: true, credential: { kind: "api_key", apiKey }, source: "site" };
 }
 
 function bundleWithoutVersion(bundle: OauthBundle): Omit<OauthBundle, "v"> {
@@ -527,7 +540,11 @@ async function refreshOnce(
   });
   support.gate.clear(key);
   if (saved.length > 0) {
-    return { ok: true, credential: { kind: "oauth", accessToken: tokens.accessToken } };
+    return {
+      ok: true,
+      credential: { kind: "oauth", accessToken: tokens.accessToken },
+      source: "member",
+    };
   }
   return afterLostRace(db, envelope, subject, now, stale);
 }

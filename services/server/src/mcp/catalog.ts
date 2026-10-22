@@ -15,6 +15,7 @@ import {
   teamConnectors,
   withTeam,
   type ConnectorAuthKind,
+  type ConnectorCredentialSource,
   type ConnectorExposureKind,
   type KobeDb,
   type PinnedTool,
@@ -40,12 +41,28 @@ export interface TeamConnector {
   readonly tools: readonly PinnedTool[];
 }
 
+/** An enabled connector with whose key members call it: their own, or the site's (KOBE-303). */
+export interface EnabledConnector extends TeamConnector {
+  readonly credentialSource: ConnectorCredentialSource;
+}
+
+/**
+ * Which credential a call to `c` goes out with (KOBE-449, audited per call; never the key): none,
+ * the member's own grant, or the site-wide key. The connector's mode decides, never the member:
+ * a `site` connector ignores members' grants, a `member` one ignores a site key left behind.
+ */
+export function credentialUsed(
+  c: Pick<EnabledConnector, "authKind" | "credentialSource">,
+): "none" | ConnectorCredentialSource {
+  return c.authKind === "none" ? "none" : c.credentialSource;
+}
+
 /** The connector as enabled in `teamId`, or undefined (not registered, disabled, not enabled). */
 export async function loadTeamConnector(
   db: KobeDb,
   teamId: string,
   connectorId: string,
-): Promise<TeamConnector | undefined> {
+): Promise<EnabledConnector | undefined> {
   const [row] = await withTeam(db, teamId, (tx) =>
     tx
       .select({
@@ -53,6 +70,7 @@ export async function loadTeamConnector(
         name: connectors.name,
         url: connectors.url,
         authKind: connectors.authKind,
+        credentialSource: connectors.credentialSource,
         status: connectors.status,
         snapshot: connectors.toolsSnapshot,
         exposure: teamConnectors.exposure,
@@ -68,6 +86,7 @@ export async function loadTeamConnector(
     name: row.name,
     url: row.url,
     authKind: row.authKind,
+    credentialSource: row.credentialSource,
     exposure: row.exposure,
     enabledTools: row.enabledTools,
     tools: parseToolsSnapshot(row.snapshot),
