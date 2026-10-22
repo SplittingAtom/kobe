@@ -217,6 +217,28 @@ export interface PurgeBatchResult extends PurgeCounts {
   readonly skipped: readonly string[];
   /** More candidates may remain (the batch was full). */
   readonly more: boolean;
+  /** Candidates another transaction held (`SKIP LOCKED` passed them over): left for later. */
+  readonly locked: number;
+}
+
+/** Threads the batch's query would have picked but for a lock (a plain read is not blocked). */
+async function lockedCandidates(
+  tx: KobeTx,
+  teamId: string,
+  selection: PurgeSelection,
+  retentionDays: number,
+  seen: readonly string[],
+): Promise<number> {
+  const res = await tx.execute<{ n: string }>(sql`
+    SELECT count(*) AS n FROM threads t
+     WHERE t.team_id = ${teamId} AND ${predicate(selection, retentionDays)}
+       ${seen.length > 0 ? sql`AND NOT (t.id = ANY(${uuidArray(seen)}))` : sql``}
+       AND NOT public.legal_hold_covers(t.team_id, t.owner_user_id)
+       AND NOT EXISTS (
+         SELECT 1 FROM runs r
+          WHERE r.team_id = t.team_id AND r.thread_id = t.id
+            AND r.status IN (${PENDING_RUN_STATUSES}))`);
+  return Number(res.rows[0]?.n ?? 0);
 }
 
 /**
@@ -241,7 +263,7 @@ export async function purgeBatchInTx(
       PERIOD_DAYS[
         effectiveAt(await readTeamLayer(tx, teamId), await readMaximumLayer(tx), new Date())
       ];
-    if (days === null) return { ...NO_PURGE, threadIds: [], skipped: [], more: false };
+    if (days === null) return { ...NO_PURGE, threadIds: [], skipped: [], more: false, locked: 0 };
     retentionDays = days;
   }
   const found = await tx.execute<Candidate>(sql`
@@ -256,6 +278,15 @@ export async function purgeBatchInTx(
      ORDER BY ${order(selection)}
      LIMIT ${limits.threads}
      FOR UPDATE OF t SKIP LOCKED`);
+  // SKIP LOCKED passes over a thread another transaction holds without a word: count those when
+  // the batch was not full, so a loop with nothing more to pick does not say done (KOBE-415).
+  const locked =
+    found.rows.length < limits.threads
+      ? await lockedCandidates(tx, teamId, selection, retentionDays, [
+          ...exclude,
+          ...found.rows.map((r) => r.id),
+        ])
+      : 0;
   const picked = withinBudget(found.rows, limits);
   const skipped = await sourcesWithBusyForks(
     tx,
@@ -265,7 +296,7 @@ export async function purgeBatchInTx(
   const ids = picked.map((r) => r.id).filter((id) => !skipped.includes(id));
   const more =
     found.rows.length >= limits.threads || picked.length < found.rows.length || skipped.length > 0;
-  if (ids.length === 0) return { ...NO_PURGE, threadIds: [], skipped, more };
+  if (ids.length === 0) return { ...NO_PURGE, threadIds: [], skipped, more, locked };
   const owned = await countOwned(tx, teamId, ids);
   const blobs = await queueBlobs(tx, teamId, ids);
   // Cascades to entries, runs, run events, approvals and the wire's thread rows (all keyed on
@@ -279,6 +310,7 @@ export async function purgeBatchInTx(
     threadIds: ids,
     skipped,
     more,
+    locked,
   };
   await auditTimeout(tx);
   await record(tx, result);
@@ -350,6 +382,8 @@ export async function purgeThreads(
     counts = add(counts, result);
     skipped = [...skipped, ...result.skipped];
     if (!result.more) {
+      // A thread another transaction held is still there: not done, the next call takes it.
+      if (result.locked > 0) return { status: "busy", counts };
       return skipped.length > 0
         ? { status: "partial", counts, skipped: skipped.length }
         : { status: "done", counts };
