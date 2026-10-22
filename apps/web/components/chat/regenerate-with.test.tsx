@@ -124,7 +124,11 @@ describe("Regenerate with another model (KOBE-217)", () => {
     const post = requests.findIndex((r) => r.method === "POST" && r.path.endsWith("/messages"));
     expect(requests[patch]?.body).toEqual({ model: "glm" });
     expect(patch).toBeLessThan(post);
-    expect(messagePosts()[0]?.body).toEqual({ content: "summarise it", parent_entry_id: root });
+    expect(messagePosts()[0]?.body).toEqual({
+      content: "summarise it",
+      parent_entry_id: root,
+      viewing_from_entry: expect.any(String),
+    });
 
     const run = await answer(t, "glm", "glm answer");
     expect(fake.run(run.run_id).model).toBe("glm");

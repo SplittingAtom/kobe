@@ -610,6 +610,8 @@ function emptyVersion(id: string): ProjectedItem {
 /** A branch point: where it branches from, the member's text and the skill it was sent with. */
 export interface BranchPoint {
   readonly parentEntryId: string;
+  /** The prompt's own entry: a regenerate names it so its run's viewed file goes again (KOBE-467). */
+  readonly promptEntryId?: string | undefined;
   readonly text: string;
   readonly skill?: string | undefined;
 }
@@ -645,6 +647,7 @@ export function branchPointOfMeta(
   if (!projection.loaded.has(meta.parentEntryId)) return undefined;
   return {
     parentEntryId: meta.parentEntryId,
+    ...(meta.entryId === undefined ? {} : { promptEntryId: meta.entryId }),
     text: meta.text,
     ...(meta.skill === undefined ? {} : { skill: meta.skill }),
   };

@@ -69,6 +69,7 @@ describe("lastAnswerPoint", () => {
   it("is the last answer's prompt and its parent entry (the branch point Regenerate uses)", () => {
     expect(lastAnswerPoint(projectThread(twoVersions(), "a3"))).toEqual({
       parentEntryId: "root",
+      promptEntryId: "u2",
       text: "make a chart",
     });
   });

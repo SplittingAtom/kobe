@@ -498,7 +498,7 @@ describe("branches: switch, edit and regenerate (D15)", () => {
       role: "assistant",
       content: [{ type: "text", text: "new answer" }],
     });
-    return { t, root, a1, a2, a2b };
+    return { t, root, a1, a2, a2b, u2b };
   }
 
   it("shows the leaf's branch, switches with the branch picker and moves the leaf", async () => {
@@ -557,7 +557,7 @@ describe("branches: switch, edit and regenerate (D15)", () => {
   });
 
   it("Regenerate re-sends the question as a new branch", async () => {
-    const { t, a1 } = branchedThread();
+    const { t, a1, u2b } = branchedThread();
     openApp(fake, t);
     await screen.findByText("new answer");
     const regenerate = screen.getAllByRole("button", { name: "Regenerate" });
@@ -567,6 +567,7 @@ describe("branches: switch, edit and regenerate (D15)", () => {
       expect(chatRequests(fake, "POST").find((r) => r.path.endsWith("/messages"))?.body).toEqual({
         content: "new question",
         parent_entry_id: a1,
+        viewing_from_entry: u2b,
       }),
     );
   });
@@ -678,6 +679,7 @@ describe("root branches: the first message is editable like any other (KOBE-214,
       expect(chatRequests(fake, "POST").find((r) => r.path.endsWith("/messages"))?.body).toEqual({
         content: "first question",
         parent_entry_id: root,
+        viewing_from_entry: expect.any(String),
       }),
     );
   });

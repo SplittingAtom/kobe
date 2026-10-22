@@ -127,7 +127,11 @@ describe("thread row menu (KOBE-292)", () => {
     await user.keyboard("{Enter}");
     await waitFor(() => expect(messagePosts()).toHaveLength(1));
     expect(fake.threads.get(t)?.model).toBe("glm");
-    expect(messagePosts()[0]?.body).toEqual({ content: "summarise it", parent_entry_id: root });
+    expect(messagePosts()[0]?.body).toEqual({
+      content: "summarise it",
+      parent_entry_id: root,
+      viewing_from_entry: expect.any(String),
+    });
   });
 
   it("Regenerate is unavailable while a run is going, with the reason", async () => {

@@ -6,6 +6,22 @@
  */
 import type { MessageViewing } from "@kobe/protocol";
 
+/**
+ * What a message says about the viewed file: the file open now (`{path}`), or for a regenerate
+ * the prompt it sends again (`{fromEntry}`): the server reuses the path that prompt's run viewed
+ * and reads the file again (KOBE-467, FE7).
+ */
+export type ViewingChoice = MessageViewing | { readonly fromEntry: string };
+
+/** The `sendMessage` body fields for a {@link ViewingChoice}. */
+export function viewingBody(choice: ViewingChoice | undefined): {
+  readonly viewing?: MessageViewing;
+  readonly viewingFromEntry?: string;
+} {
+  if (choice === undefined) return {};
+  return "fromEntry" in choice ? { viewingFromEntry: choice.fromEntry } : { viewing: choice };
+}
+
 type Listener = () => void;
 
 export class ViewingStore {

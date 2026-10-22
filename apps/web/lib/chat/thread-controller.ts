@@ -4,12 +4,7 @@
  * queue, Steer, Stop; D14: Retry / Continue without retry; branch switch and edit-and-regenerate).
  * The server decides everything; this only shows what it says and asks again after each change.
  */
-import {
-  isTerminalRunStatus,
-  type KobeEvent,
-  type MessageViewing,
-  type ThinkingLevel,
-} from "@kobe/protocol";
+import { isTerminalRunStatus, type KobeEvent, type ThinkingLevel } from "@kobe/protocol";
 import type { ApiError, ApiResult } from "../api/client";
 import type { AppContextWire, ChatApi, CompactResult, ForkOptions } from "./api";
 import { newIdempotencyKey } from "./keys";
@@ -44,6 +39,7 @@ import type { MessageFiles } from "./attachments";
 import type { EvalCaseOptions } from "./eval-cases";
 import type { FeedbackChange } from "./feedback";
 import { SHARED_ANNOUNCEMENT } from "./share";
+import { viewingBody, type ViewingChoice } from "./viewing";
 import type { ThreadEntry, ThreadRuns, ThreadSummary, ThreadVisibility } from "./types";
 
 const NO_THREAD: ApiError = {
@@ -634,7 +630,7 @@ export class ThreadController {
     mentions?: readonly string[],
     appContext?: readonly AppContextWire[],
     skill?: string,
-    viewing?: MessageViewing,
+    viewing?: ViewingChoice,
   ): Promise<boolean> => {
     try {
       return await this.#send(text, parentEntryId, attach, mentions, appContext, skill, viewing);
@@ -653,7 +649,7 @@ export class ThreadController {
     mentions?: readonly string[],
     appContext?: readonly AppContextWire[],
     skill?: string,
-    viewing?: MessageViewing,
+    viewing?: ViewingChoice,
   ): Promise<boolean> {
     const threadId = this.#state.threadId;
     // One message at a time: a second Enter before the server answered is not a second message.
@@ -676,7 +672,7 @@ export class ThreadController {
       mentions,
       appContext,
       skill,
-      viewing,
+      ...viewingBody(viewing),
     };
     let res = await this.#api.sendMessage(threadId, body, key);
     if (!res.ok && res.error.status === 0) res = await this.#api.sendMessage(threadId, body, key);
@@ -945,6 +941,7 @@ export class ThreadController {
     model: string | null,
     text: string,
     parentEntryId: string,
+    promptEntryId?: string,
   ): Promise<boolean> => {
     if (!canRegenerateWith(this.#state)) return false;
     const previous = this.#state.summary?.model ?? null;
@@ -952,7 +949,10 @@ export class ThreadController {
     try {
       // No await before these: each marks the thread busy at once (`model`, then `sending`).
       if (switching && !(await this.setModel(model))) return false;
-      if (await this.send(text, parentEntryId)) return true;
+      // The prompt's viewed file goes again, read anew (KOBE-467).
+      const viewing = promptEntryId === undefined ? undefined : { fromEntry: promptEntryId };
+      if (await this.send(text, parentEntryId, undefined, undefined, undefined, undefined, viewing))
+        return true;
     } catch {
       this.#fail(CLIENT_ERROR);
     }

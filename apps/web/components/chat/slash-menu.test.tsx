@@ -172,7 +172,11 @@ describe("the / menu lists the bound actions (ac-1)", { timeout: 30_000 }, () =>
     await waitFor(() => expect(messagePosts()).toHaveLength(1));
     // Regenerate with: the model is saved first, then the last prompt is sent again.
     expect(fake.threads.get(t)?.model).toBe("glm");
-    expect(messagePosts()[0]?.body).toEqual({ content: "Sum the numbers", parent_entry_id: root });
+    expect(messagePosts()[0]?.body).toEqual({
+      content: "Sum the numbers",
+      parent_entry_id: root,
+      viewing_from_entry: expect.any(String),
+    });
     expect(input.value).toBe("");
     noMenu();
   });

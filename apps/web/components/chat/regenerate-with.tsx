@@ -45,7 +45,7 @@ export function RegenerateWith() {
     if (pending.current || !ready || point === undefined) return;
     pending.current = true;
     controller
-      .regenerateWith(model, point.text, point.parentEntryId)
+      .regenerateWith(model, point.text, point.parentEntryId, point.promptEntryId)
       .catch(() => controller.reportError(NOT_SENT))
       .finally(() => {
         pending.current = false;

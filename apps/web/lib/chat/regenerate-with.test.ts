@@ -90,6 +90,16 @@ describe("ThreadController.regenerateWith (KOBE-217)", () => {
     ]);
   });
 
+  it("names the prompt so its run's viewed file goes again (KOBE-467)", async () => {
+    const { t, root } = oneTurn();
+    const c = open(t);
+    await c.load();
+    expect(await c.regenerateWith("glm", "q1", root, "u1")).toBe(true);
+    expect(requests("POST", "/messages").map((r) => r.body)).toEqual([
+      { content: "q1", parent_entry_id: root, viewing_from_entry: "u1" },
+    ]);
+  });
+
   it("a second choice while the first is in flight does nothing (no race)", async () => {
     const { t, root } = oneTurn();
     const c = open(t);

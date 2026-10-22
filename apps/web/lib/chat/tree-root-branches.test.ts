@@ -92,7 +92,11 @@ describe("projectThread: root branches (KOBE-214)", () => {
 describe("branchPoint", () => {
   it("branches a first message from Pi's root settings entry", () => {
     const p = projectThread(session(), "c1");
-    expect(branchPoint(p, "u1")).toEqual({ parentEntryId: "r0", text: "first" });
+    expect(branchPoint(p, "u1")).toEqual({
+      parentEntryId: "r0",
+      promptEntryId: "u1",
+      text: "first",
+    });
   });
 
   it("offers nothing for a prompt with no entry above it, nor one whose parent is not loaded", () => {

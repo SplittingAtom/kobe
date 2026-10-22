@@ -150,9 +150,20 @@ export function useThreadMenuBindings(input: ThreadMenuInput): MenuBindings {
         c.reportError({ ...NOT_SENT, message: blocker ?? NO_ANSWER });
         return;
       }
+      // The prompt's viewed file goes again, read anew (KOBE-467).
+      const viewing =
+        point.promptEntryId === undefined ? undefined : { fromEntry: point.promptEntryId };
       await (model === undefined
-        ? c.send(point.text, point.parentEntryId)
-        : c.regenerateWith(model, point.text, point.parentEntryId));
+        ? c.send(
+            point.text,
+            point.parentEntryId,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            viewing,
+          )
+        : c.regenerateWith(model, point.text, point.parentEntryId, point.promptEntryId));
     }).catch(() => session.peek(threadId)?.reportError(NOT_SENT));
   };
 

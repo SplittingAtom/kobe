@@ -4,7 +4,7 @@
  * Regenerate uses (`branchPoint`).
  */
 import { isBusy, isThreadRunning, queuedRuns, type ThreadState } from "./thread-state";
-import { branchPoint, type ProjectedItem, type Projection } from "./tree";
+import { branchPoint, type BranchPoint, type ProjectedItem, type Projection } from "./tree";
 
 /** The messages on screen, oldest first: from the head up its parents. */
 export function visibleBranch(projection: Projection): readonly ProjectedItem[] {
@@ -98,9 +98,7 @@ export function threadMarkdown(
 }
 
 /** The last answer's prompt and the entry to branch it from, or undefined when there is none. */
-export function lastAnswerPoint(
-  projection: Projection,
-): { readonly parentEntryId: string; readonly text: string } | undefined {
+export function lastAnswerPoint(projection: Projection): BranchPoint | undefined {
   const answer = visibleBranch(projection).findLast((i) => i.message.role === "assistant");
   return answer ? branchPoint(projection, answer.parentId) : undefined;
 }

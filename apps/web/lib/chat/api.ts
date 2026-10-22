@@ -205,6 +205,8 @@ export interface ChatApi {
       readonly skill?: string | undefined;
       /** The workspace file open in the artifact column (KOBE-463, FE7). */
       readonly viewing?: MessageViewing | undefined;
+      /** Regenerate: the prompt entry whose run's viewed file is read again (KOBE-467). */
+      readonly viewingFromEntry?: string | undefined;
     },
     idempotencyKey: string,
   ): Promise<ApiResult<SubmitResult>>;
@@ -407,6 +409,9 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
             : { app_context: body.appContext }),
           ...(body.skill === undefined ? {} : { skill: body.skill }),
           ...(body.viewing === undefined ? {} : { viewing: body.viewing }),
+          ...(body.viewingFromEntry === undefined
+            ? {}
+            : { viewing_from_entry: body.viewingFromEntry }),
         },
         teamId,
         idempotencyKey,
