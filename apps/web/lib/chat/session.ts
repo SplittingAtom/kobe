@@ -6,7 +6,7 @@
 import { AppContextStore, ComposerInsertChannel } from "../apps/app-context";
 import { SkillPickStore } from "./skill-picks";
 import { ViewingStore } from "./viewing";
-import { EditDraftStore, FileReviewStore } from "../files/editor-state";
+import { AutoOpenEditsStore, EditDraftStore, FileReviewStore } from "../files/editor-state";
 import { NotebookExecStore } from "../notebooks/executions";
 import { createNotebookApi, type NotebookApi } from "../notebooks/api";
 import { DraftConnectorStore } from "./draft-connectors";
@@ -106,6 +106,8 @@ export class ChatSession {
   readonly editDrafts = new EditDraftStore();
   /** The agent's file edit proposals under review per file (KOBE-463). */
   readonly fileReviews = new FileReviewStore();
+  /** The proposal cards' auto-open switch (KOBE-489), seeded from the stored preference. */
+  readonly autoOpenEdits = new AutoOpenEditsStore();
   /** Kernel executions seen in this tab's run streams (KOBE-465: the notebook panel). */
   readonly notebookRuns = new NotebookExecStore();
   /** Connectors turned off before the first message (KOBE-451 review MEDIUM-3). */

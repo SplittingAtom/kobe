@@ -292,3 +292,44 @@ describe("run events for the notebook panel (KOBE-465)", () => {
     );
   });
 });
+
+describe("live file.edit_proposed (KOBE-489)", () => {
+  const proposal = (id: string) => ({
+    tool_call_id: id,
+    path: "notes.txt",
+    base_sha256: "a".repeat(64),
+    content: "new\n",
+    summary: "Rewrites notes",
+  });
+
+  it("a proposal of a run this tab started becomes the fileEditRequest", async () => {
+    const t = fake.addThread(null);
+    const c = open(t);
+    await c.load();
+    expect(await c.send("tidy notes")).toBe(true);
+    const runId = fake.latestRun(t).run_id;
+    await until(c, (s) => s.connection === "open");
+    expect(c.getState().fileEditRequest).toBeUndefined();
+    fake.agent.toolCall(runId, "pe1", "propose_file_edit", { path: "notes.txt" });
+    fake.emit(runId, "file.edit_proposed", proposal("pe1"));
+    const s = await until(c, (st) => st.fileEditRequest !== undefined);
+    expect(s.fileEditRequest).toEqual({ runId, toolCallId: "pe1", path: "notes.txt" });
+  });
+
+  it("a replayed backlog of another tab's run never does; a later live proposal does", async () => {
+    const t = fake.addThread("Notes");
+    const runId = fake.queueRetry(t, "tidy notes");
+    Object.assign(fake.run(runId), { status: "running", retry_of_run_id: undefined });
+    fake.emit(runId, "run.started", { thread_id: t, agent_id: null, agent_version: null });
+    fake.agent.toolCall(runId, "pe1", "propose_file_edit", { path: "notes.txt" });
+    fake.emit(runId, "file.edit_proposed", proposal("pe1"));
+    const c = open(t);
+    await c.load();
+    await until(c, (s) => s.live?.tools["pe1"]?.fileEdit !== undefined);
+    expect(c.getState().fileEditRequest).toBeUndefined();
+    fake.agent.toolCall(runId, "pe2", "propose_file_edit", { path: "notes.txt" });
+    fake.emit(runId, "file.edit_proposed", proposal("pe2"));
+    const s = await until(c, (st) => st.fileEditRequest !== undefined);
+    expect(s.fileEditRequest?.toolCallId).toBe("pe2");
+  });
+});

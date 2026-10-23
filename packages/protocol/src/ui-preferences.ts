@@ -20,6 +20,8 @@ import { z } from "zod";
  * `rail_picker` (KOBE-460): the picker app (its app id) the Apps tab renders live, or `null` for
  * None. Absent (never chosen) shows the first live picker (KOBE-461); a remembered picker that is
  * not live for the member shows the first live one, with a note.
+ * `auto_open_edits` (KOBE-489): the proposed-edit card's "Open edits automatically" switch; a live
+ * proposal opens its file with the inline diff. Absent is off.
  */
 
 /** Threads' share of the rail's height over Files (CE5): never squeezing either section out. */
@@ -98,6 +100,7 @@ export const uiPreferencesSchema = z.strictObject({
     .nullable()
     .optional(),
   rail_picker: z.string().regex(APP_ID_PATTERN).nullable().optional(),
+  auto_open_edits: z.boolean().optional(),
 });
 export type UiPreferences = z.infer<typeof uiPreferencesSchema>;
 
