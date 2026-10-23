@@ -65,8 +65,10 @@ test("thread badges: an artifact and a written file each open in their own edito
     const raw = page.getByLabel(`${title} (version 1, read-only)`);
     await expect(raw).toHaveAttribute("contenteditable", "false");
 
-    // Both badges come back after a reload.
+    // Both badges come back after a reload (which clears the page's violation list: read it first).
+    expect(await styleViolations(page)).toEqual([]);
     await page.reload();
+    await watchStyleViolations(page);
     await expect(artifactBadge).toBeVisible({ timeout: RUN_TIMEOUT_MS });
     await expect(fileBadge).toBeVisible();
     expect(await styleViolations(page)).toEqual([]);
