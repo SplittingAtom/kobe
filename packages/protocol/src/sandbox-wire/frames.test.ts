@@ -761,3 +761,22 @@ describe("run.start config forward compatibility (KOBE-82)", () => {
     ).toMatchObject({ ok: false });
   });
 });
+
+describe("policy reason codes stay open on the wire (KOBE-493)", () => {
+  it.each(["viewed_file", "a_code_this_agent_never_heard_of"])(
+    "a sandbox decodes a deny whose reason code is %s",
+    (code) => {
+      const frame = {
+        v: 1,
+        type: "policy.result",
+        request_id: "pc_1",
+        run_id: RUN,
+        tool_call_id: "tc_9",
+        decision: "deny",
+        reasons: [{ code, stage: "site_deny", message: "The user is viewing a.md." }],
+        message: "The user is viewing a.md.",
+      };
+      expect(decodeServerFrame(JSON.stringify(frame))).toMatchObject({ ok: true });
+    },
+  );
+});

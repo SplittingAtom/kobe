@@ -4,7 +4,9 @@ import { ToolCardApp } from "../apps/tool-card-app";
 import { useAuiState, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import { BanIcon, CheckIcon, CircleAlertIcon, ClockIcon, LoaderIcon } from "lucide-react";
 import { REMEMBER_SCOPE_LABELS } from "@kobe/protocol";
-import type { ComponentType } from "react";
+import { useEffect, type ComponentType } from "react";
+import { noteUnknownInput } from "../../lib/build/build-watcher";
+import { isKnownToolName } from "../../lib/build/known-tools";
 import { formatDuration, inputSummary } from "../../lib/chat/history";
 import type { ToolActivity } from "../../lib/chat/live";
 import type { KobeMessageMeta } from "../../lib/chat/tree";
@@ -57,6 +59,20 @@ const OUTCOME_LABEL: Record<Outcome, string> = {
   waiting: "Waiting for approval",
   running: "Running…",
 };
+
+/**
+ * The status label; a write the server refused because the member is viewing the file
+ * (KOBE-493, reason `viewed_file`) says so instead of the generic "Denied by policy".
+ */
+export function outcomeLabel(
+  outcome: Outcome,
+  denied: { readonly reasons: readonly { readonly code: string }[] } | undefined,
+): string {
+  if (outcome === "denied" && denied?.reasons.some((r) => r.code === "viewed_file")) {
+    return "Not written: you're viewing this file";
+  }
+  return OUTCOME_LABEL[outcome];
+}
 
 const OUTCOME_ICON: Record<Outcome, ComponentType<{ className?: string }>> = {
   denied: BanIcon,
@@ -112,9 +128,12 @@ function ToolCardHeader({
   summary,
   skill,
   outcome,
+  label,
   took,
 }: {
   readonly toolName: string;
+  /** The status text ({@link outcomeLabel}). */
+  readonly label: string;
   readonly summary: string;
   /** The skill this call loaded (KOBE-297): "Read skill <name>" instead of tool and path. */
   readonly skill?: string | undefined;
@@ -150,7 +169,7 @@ function ToolCardHeader({
         </>
       )}
       <span className={cn("ms-auto shrink-0", tone)} data-kobe-outcome-label={outcome}>
-        {OUTCOME_LABEL[outcome]}
+        {label}
       </span>
       {took !== undefined && <span className="shrink-0 tabular-nums">{took}</span>}
     </>
@@ -286,6 +305,10 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
   const { output: full, retry } = useFullOutput(fullEntry, open);
   const outcome = outcomeOf(activity, props);
   const timing = props.timing;
+  // KOBE-487: a tool newer than this build renders as this generic card; check for a new build.
+  useEffect(() => {
+    if (!isKnownToolName(props.toolName)) noteUnknownInput();
+  }, [props.toolName]);
   const took =
     timing?.completedAt === undefined
       ? undefined
@@ -306,6 +329,7 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
             summary={inputSummary((props.args ?? {}) as Readonly<Record<string, unknown>>)}
             skill={skill}
             outcome={outcome}
+            label={outcomeLabel(outcome, activity.denied)}
             took={took}
           />
         }

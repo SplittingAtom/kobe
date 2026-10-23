@@ -1,0 +1,5 @@
+ALTER TABLE "site_agents" ADD COLUMN "customized_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "site_agents" ADD COLUMN "customized_by" uuid;--> statement-breakpoint
+ALTER TABLE "site_agents" ADD COLUMN "customized_from_generation" integer;--> statement-breakpoint
+ALTER TABLE "site_agents" ADD CONSTRAINT "site_agents_customized_by_users_id_fk" FOREIGN KEY ("customized_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "site_agents" ADD CONSTRAINT "site_agents_customized" CHECK (("site_agents"."customized_at" IS NULL AND "site_agents"."customized_by" IS NULL AND "site_agents"."customized_from_generation" IS NULL) OR ("site_agents"."customized_at" IS NOT NULL AND "site_agents"."customized_by" IS NOT NULL AND "site_agents"."customized_from_generation" > 0 AND "site_agents"."gallery_key" IS NOT NULL));

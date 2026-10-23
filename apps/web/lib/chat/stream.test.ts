@@ -206,3 +206,48 @@ describe("openRunStream", () => {
     expect(must(sources[0]).closed).toBe(true);
   });
 });
+
+/**
+ * KOBE-487 ac-3: an event this client doesn't know means the web may have been redeployed. The
+ * browser drops an SSE event whose type it never subscribed to, so a skipped seq (seq is gapless)
+ * is the sign; an event of a known type that fails the contract is another.
+ */
+describe("openRunStream: events this client doesn't know (KOBE-487)", () => {
+  function open() {
+    const onUnknown = vi.fn();
+    const seen: number[] = [];
+    openRunStream(
+      RUN,
+      4,
+      { onEvents: (e) => seen.push(...e.map((x) => x.seq)), onSignal: () => {}, onUnknown },
+      factory,
+    );
+    return { s: must(sources[0]), onUnknown, seen };
+  }
+
+  it("says nothing while every seq arrives", () => {
+    const { s, onUnknown } = open();
+    s.send("text.delta", JSON.stringify(delta(5, "a")));
+    s.send("text.delta", JSON.stringify(delta(6, "b")));
+    s.send("text.delta", JSON.stringify(delta(6, "b")));
+    expect(onUnknown).not.toHaveBeenCalled();
+  });
+
+  it("reports a skipped seq (an event type it never subscribed to) and keeps the stream going", () => {
+    const { s, onUnknown, seen } = open();
+    s.send("text.delta", JSON.stringify(delta(5, "a")));
+    s.send("text.delta", JSON.stringify(delta(7, "c")));
+    vi.advanceTimersByTime(40);
+    expect(onUnknown).toHaveBeenCalledOnce();
+    expect(seen).toEqual([5, 7]);
+  });
+
+  it("reports an event of this run that fails the contract", () => {
+    const { s, onUnknown } = open();
+    s.send("text.delta", JSON.stringify({ ...delta(5, "x"), payload: { delta: 5 } }));
+    expect(onUnknown).toHaveBeenCalledOnce();
+    s.send("text.delta", JSON.stringify({ ...delta(9, "x"), run_id: THREAD }));
+    s.send("text.delta", "not json");
+    expect(onUnknown).toHaveBeenCalledOnce();
+  });
+});

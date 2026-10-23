@@ -18,15 +18,21 @@ import { teams } from "./teams.js";
 import type { ThinkingLevelValue } from "./models.js";
 import { threads } from "./threads.js";
 
-/** `runs.viewing` (KOBE-462): `@kobe/protocol` `RunViewingContext` (file-editor.ts) as stored. */
-export interface StoredRunViewing {
-  readonly path: string;
-  readonly sha256: string;
-  readonly size: number;
-  /** The file's first bytes as text; absent when it is not text. */
-  readonly content?: string;
-  readonly truncated: boolean;
-}
+/**
+ * `runs.viewing` (KOBE-462): `@kobe/protocol` `RunViewingContext` (file-editor.ts) as stored, or
+ * only the path when the file could not be read (not synced yet, storage error; KOBE-493 still
+ * guards it).
+ */
+export type StoredRunViewing =
+  | {
+      readonly path: string;
+      readonly sha256: string;
+      readonly size: number;
+      /** The file's first bytes as text; absent when it is not text. */
+      readonly content?: string;
+      readonly truncated: boolean;
+    }
+  | { readonly path: string };
 
 export const runTrigger = pgEnum("run_trigger", ["user", "schedule"]);
 export type RunTrigger = (typeof runTrigger.enumValues)[number];

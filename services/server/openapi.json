@@ -9053,6 +9053,7 @@
                     "connector_not_in_run",
                     "dangerous_mode",
                     "not_a_member",
+                    "viewed_file",
                     "sandbox_policy_unavailable",
                     "install_deny_rule",
                     "install_ask_rule"
@@ -9275,6 +9276,7 @@
                           "connector_not_in_run",
                           "dangerous_mode",
                           "not_a_member",
+                          "viewed_file",
                           "sandbox_policy_unavailable",
                           "install_deny_rule",
                           "install_ask_rule"

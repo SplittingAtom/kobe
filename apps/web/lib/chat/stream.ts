@@ -23,6 +23,7 @@ import {
   type KobeEvent,
   type KobeEventType,
 } from "@kobe/protocol";
+import { noteUnknownInput } from "../build/build-watcher";
 import "../security/zod-jitless";
 import { runEventsUrl } from "./api";
 
@@ -54,6 +55,17 @@ export interface RunStreamHandlers {
   /** Events in seq order, never one at or below a seq already delivered. */
   readonly onEvents: (events: readonly KobeEvent[]) => void;
   readonly onSignal: (signal: StreamSignal) => void;
+  /**
+   * An event this client doesn't know reached the stream (KOBE-487): default, ask whether the web
+   * was redeployed (`lib/build/build-watcher.ts`).
+   */
+  readonly onUnknown?: () => void;
+}
+
+/** An event of this run, past the cursor, that failed the contract (a newer payload shape). */
+function isNewerEvent(parsed: unknown, runId: string, lastSeq: number): boolean {
+  const e = parsed as { run_id?: unknown; seq?: unknown } | null;
+  return e?.run_id === runId && typeof e.seq === "number" && e.seq > lastSeq;
 }
 
 export interface RunStream {
@@ -78,6 +90,7 @@ export function openRunStream(
   let awaiting: Set<KobeEventType> | undefined;
   let epilogueTimer: ReturnType<typeof setTimeout> | undefined;
   const source = factory(runEventsUrl(runId, startingAfter));
+  const onUnknown = handlers.onUnknown ?? noteUnknownInput;
 
   const flush = () => {
     timer = undefined;
@@ -106,8 +119,19 @@ export function openRunStream(
       return; // not a Kobe event; the seq cursor is unchanged
     }
     const result = kobeEventSchema.safeParse(parsed);
-    if (!result.success || result.data.run_id !== runId || result.data.seq <= lastSeq) return;
+    if (!result.success) {
+      if (isNewerEvent(parsed, runId, lastSeq)) onUnknown();
+      return;
+    }
+    if (result.data.run_id !== runId || result.data.seq <= lastSeq) return;
     const event = result.data;
+    // A skipped seq is an event the browser dropped: a type this client never subscribed to.
+    // Seqs never legitimately skip (checked for KOBE-487): the `run_events` trigger assigns them
+    // gapless per run (protocol `events.ts` KobeEvent, `sse.ts` resume: "none is skipped"); the
+    // server sends every row after the cursor in order with no per-viewer filter (visibility is
+    // per run, server `event-stream/stream.ts` + `read.ts` PAGE_SQL); compaction deletes a whole
+    // run's events and answers 410 (`retention/compaction.ts`); epilogue events take the next seqs.
+    if (event.seq > lastSeq + 1) onUnknown();
     lastSeq = event.seq;
     buffer.push(event);
     if (awaiting !== undefined) {
