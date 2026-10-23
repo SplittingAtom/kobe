@@ -16,7 +16,11 @@ import { FilePenIcon } from "lucide-react";
 import { Switch as SwitchPrimitive } from "radix-ui";
 import { useEffect, useId, useState, useSyncExternalStore } from "react";
 import type { KobeEventPayload } from "@kobe/protocol";
-import { proposalFromEvent, type ProposalView } from "../../lib/files/editor-state";
+import {
+  proposalFromEvent,
+  type AutoOpenOutcome,
+  type ProposalView,
+} from "../../lib/files/editor-state";
 import { fileName } from "../../lib/files/preview";
 import { useShellPreferences } from "../../lib/shell/preferences";
 import { useArtifactPanel } from "../chat/artifact-state";
@@ -76,6 +80,24 @@ function useAutoOpenEdits() {
 }
 
 /**
+ * What auto-open does with a live proposal, decided when it arrives (KOBE-489): skipped while the
+ * switch is off, its state unknown (preferences still loading) or there is no artifact column, so
+ * neither a late preference nor a later column ever opens an old proposal; held over unsaved
+ * changes; else opened. Undefined: not yet (the proposal's record is still on its way).
+ */
+export function autoOpenDecision(at: {
+  readonly known: boolean;
+  readonly enabled: boolean;
+  readonly panel: boolean;
+  readonly proposal: boolean;
+  readonly unsaved: boolean;
+}): AutoOpenOutcome | undefined {
+  if (!at.known || !at.enabled || !at.panel) return "skipped";
+  if (!at.proposal) return undefined;
+  return at.unsaved ? "held" : "opened";
+}
+
+/**
  * Starts the review of a live proposal by itself when the switch is on (KOBE-489): once per
  * proposal, never over unsaved changes (held back instead). True while held back.
  */
@@ -83,7 +105,7 @@ function useAutoReview(
   toolCallId: string,
   proposal: ProposalView | undefined,
   enabled: boolean,
-  /** False until the switch's state is known (the preferences are still loading). */
+  /** False while the switch's state is unknown (the preferences are still loading). */
   known: boolean,
 ): boolean {
   const session = useChatSession();
@@ -93,18 +115,18 @@ function useAutoReview(
   const key = request?.toolCallId === toolCallId ? `${request.runId}:${toolCallId}` : undefined;
   const [held, setHeld] = useState(() => key !== undefined && store.outcomeOf(key) === "held");
   useEffect(() => {
-    if (key === undefined || !known || store.outcomeOf(key) !== undefined) return;
-    if (!enabled) {
-      store.record(key, "skipped");
-      return;
-    }
-    if (!panel || proposal === undefined) return;
-    if (session.editDrafts.get(proposal.path) !== undefined) {
-      store.record(key, "held");
-      setHeld(true);
-      return;
-    }
-    store.record(key, "opened");
+    if (key === undefined || store.outcomeOf(key) !== undefined) return;
+    const decision = autoOpenDecision({
+      known,
+      enabled,
+      panel: panel !== null,
+      proposal: proposal !== undefined,
+      unsaved: proposal !== undefined && session.editDrafts.get(proposal.path) !== undefined,
+    });
+    if (decision === undefined) return;
+    store.record(key, decision);
+    if (decision === "held") setHeld(true);
+    if (decision !== "opened" || proposal === undefined || !panel) return;
     session.fileReviews.start(proposal);
     panel.autoOpenFile(proposal.path);
   }, [key, enabled, known, panel, proposal, session, store]);

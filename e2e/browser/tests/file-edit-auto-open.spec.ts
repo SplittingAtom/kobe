@@ -97,7 +97,9 @@ test("proposed edits: the auto-open switch opens the next live proposal with its
     );
     await expect(review).toBeVisible({ timeout: RUN_TIMEOUT_MS });
     await expect(review.getByRole("button", { name: "Commit all", exact: true })).toBeVisible();
-    await expect(chat.composer).toBeFocused();
+    await expect
+      .poll(() => chat.composer.evaluate((el) => el === document.activeElement))
+      .toBe(true);
     await chat.waitForIdle();
     // Nothing is written by itself: committing stays the member's click.
     expect((await workspace(page, "read", path)).text).toBe(BASE);

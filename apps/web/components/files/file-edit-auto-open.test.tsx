@@ -8,7 +8,7 @@ import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { sha256Hex } from "../../lib/files/editor";
 import { must } from "../../lib/testing/must";
 import { composer, openApp } from "../chat/testing";
-import { AUTO_OPEN_HELD_NOTE, AUTO_OPEN_LABEL } from "./file-edit-card";
+import { AUTO_OPEN_HELD_NOTE, AUTO_OPEN_LABEL, autoOpenDecision } from "./file-edit-card";
 
 /**
  * KOBE-489: the proposed-edit card's "Open edits automatically" switch (a stored member
@@ -178,6 +178,29 @@ describe("auto-open (ac-2, ac-3)", () => {
     await expectNoReview();
   });
 
+  it("a proposal that arrived before the preferences loaded never opens once they do", async () => {
+    fake.preferences = { auto_open_edits: true };
+    let release = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const real = fake.fetch;
+    const delayed: typeof fetch = async (input, init) => {
+      const url = new URL(String(input instanceof Request ? input.url : input), "http://x");
+      if (url.pathname === "/v1/me/preferences" && (init?.method ?? "GET") === "GET") await gate;
+      return real(input, init);
+    };
+    Object.assign(fake, { fetch: delayed });
+    vi.stubGlobal("fetch", delayed);
+    const { run } = await startRun(notesThread());
+    propose(run, "pe1");
+    expect(await screen.findByText("Capitalises beta")).toBeTruthy();
+    act(() => release());
+    const toggle = await screen.findByRole("switch", { name: AUTO_OPEN_LABEL });
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
+    await expectNoReview();
+  });
+
   it("a reloaded thread's proposal never opens by itself; Review still does", async () => {
     fake.preferences = { auto_open_edits: true };
     openApp(fake, recordedThread());
@@ -212,5 +235,20 @@ describe("auto-open (ac-2, ac-3)", () => {
     expect(
       screen.getByRole("button", { name: "Review the proposed edit to notes.txt" }),
     ).toBeTruthy();
+  });
+});
+
+describe("autoOpenDecision (KOBE-489 review)", () => {
+  const at = { known: true, enabled: true, panel: true, proposal: true, unsaved: false };
+  it("opens only when known, on, with a column and the proposal; holds over unsaved changes", () => {
+    expect(autoOpenDecision(at)).toBe("opened");
+    expect(autoOpenDecision({ ...at, unsaved: true })).toBe("held");
+    expect(autoOpenDecision({ ...at, proposal: false })).toBeUndefined();
+  });
+
+  it("skips at arrival while the switch is unknown or off, or there is no column", () => {
+    expect(autoOpenDecision({ ...at, known: false })).toBe("skipped");
+    expect(autoOpenDecision({ ...at, enabled: false })).toBe("skipped");
+    expect(autoOpenDecision({ ...at, panel: false })).toBe("skipped");
   });
 });
