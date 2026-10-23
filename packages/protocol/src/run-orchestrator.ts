@@ -1,4 +1,5 @@
 import { skillRequestFieldSchema } from "./skill-request.js";
+import { itemReferencesFieldSchema } from "./item-references.js";
 import { appContextFieldSchema } from "./app-context.js";
 import { messageViewingSchema } from "./file-editor.js";
 import { z } from "zod";
@@ -65,6 +66,11 @@ export const submitMessageBodySchema = z
      * in the run's effective skill set, checked at submit and again at run start.
      */
     skill: skillRequestFieldSchema.optional(),
+    /**
+     * Items an MCP App put in the composer as chips (KOBE-490, item-references.ts): names and kinds,
+     * unique, at most 20; the server appends them to the message text as one fixed line.
+     */
+    references: itemReferencesFieldSchema.optional(),
     /**
      * The workspace file the member has open in the artifact column (KOBE-462, file-editor.ts):
      * the server adds a bounded, fenced copy of it to this run's context, not to the message text.

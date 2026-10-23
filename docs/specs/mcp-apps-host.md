@@ -545,6 +545,16 @@ it because Catalyst does not mark it `"app"`-visible. Kobe does not hard-code th
   the app cannot send it. Text is capped at 4 KiB, other content types are ignored, and text that
   imitates app context is refused. Catalyst's "Use in chat" therefore inserts `` Use table `c.n.t` ``
   for the member to edit or confirm, then send.
+- **Items in `ui/message`** (KOBE-490, agreed with Chris 2026-10-23): a message may add MCP
+  `resource_link` blocks `{uri, name, title?, mimeType?, _meta: {"io.kobe/item-kind": kind}}`
+  (name 1–512 characters without backticks or control characters, uri at most 2048 and not
+  `javascript:`/`data:`/`vbscript:`, at most 20 per message; any app and uri scheme otherwise).
+  Each valid link becomes a removable chip in the composer's chip row of that thread (icon per
+  kind, generic for unknown kinds, de-duplicated by uri), and the message's text is then not
+  inserted; invalid links are dropped (a note in the chip row when nothing was usable). Chips
+  never send anything themselves: the member's next message names those still shown
+  (`references: [{name, kind}]`) and the server appends one fixed line after the member's text,
+  ``Referenced: `cat.ns.orders` (table), …``, which history shows as the same chips.
 - **`ui/update-model-context`** stores the latest `{content, structuredContent}` per open app
   (capped at 8 KiB serialized; anything larger is refused with an error to the app). The composer
   shows a chip, "Context from _Lakehouse Explorer_: _one-line summary_", with a remove button and

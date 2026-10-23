@@ -256,11 +256,68 @@ describe("the §7 method table (ac-3)", () => {
     );
     await t.flush();
     expect(t.handlers.message).toHaveBeenCalledTimes(1);
-    expect(t.handlers.message).toHaveBeenCalledWith("Use table `c.n.t`");
+    expect(t.handlers.message).toHaveBeenCalledWith({
+      text: "Use table `c.n.t`",
+      items: [],
+      dropped: 0,
+    });
     expect(t.reply(1)?.result).toEqual({});
     expect(t.reply(2)?.error).toMatchObject({ code: -32602 });
     expect(t.reply(3)?.error).toMatchObject({ code: -32602 });
     expect(t.reply(4)?.error).toMatchObject({ code: -32602 });
+  });
+
+  it("passes ui/message resource_links as items instead of the text (KOBE-490 ac-1, ac-4)", async () => {
+    const t = setup();
+    detach = t.bridge.detach;
+    const orders = {
+      type: "resource_link",
+      uri: "catalyst://lakehouse/cat/ns/orders",
+      name: "cat.ns.orders",
+      _meta: { "io.kobe/item-kind": "table" },
+    };
+    t.send(
+      rpc(1, "ui/message", {
+        role: "user",
+        content: [
+          { type: "text", text: "`cat.ns.orders`" },
+          orders,
+          { ...orders, uri: "javascript:alert(1)" },
+        ],
+      }),
+    );
+    // Links that are all invalid: the text still goes in, as today.
+    t.send(
+      rpc(2, "ui/message", {
+        role: "user",
+        content: [
+          { type: "text", text: "plain" },
+          { ...orders, uri: "data:x" },
+        ],
+      }),
+    );
+    // Nothing usable: an error to the app, and the composer is told (a visible note).
+    t.send(rpc(3, "ui/message", { role: "user", content: [{ ...orders, name: "" }] }));
+    await t.flush();
+    const calls = (t.handlers.message as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+    expect(calls).toEqual([
+      {
+        text: "",
+        items: [
+          {
+            uri: "catalyst://lakehouse/cat/ns/orders",
+            name: "cat.ns.orders",
+            kind: "table",
+          },
+        ],
+        dropped: 1,
+      },
+      { text: "plain", items: [], dropped: 1 },
+      { text: "", items: [], dropped: 1 },
+    ]);
+    expect(t.reply(1)?.result).toEqual({});
+    expect(t.reply(2)?.result).toEqual({});
+    expect(t.reply(3)?.error).toMatchObject({ code: -32602 });
   });
 
   it("stores model context up to 8 KiB and refuses more", async () => {

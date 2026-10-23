@@ -10,6 +10,9 @@ import {
   COMPACT_THREAD_ERROR_MESSAGES,
   EVENT_ENTRY_PAYLOAD_MAX_BYTES,
   THREAD_CONTEXT_ERROR_MESSAGES,
+  splitItemReferences,
+  withItemReferences,
+  type ItemReference,
 } from "@kobe/protocol";
 import {
   artifactFileExtension,
@@ -2045,7 +2048,11 @@ export class FakeKobe {
       run_id: uuid(4, this.#runN),
       thread_id: thread.thread_id,
       status: "queued",
-      input: String(body?.content ?? ""),
+      // As the server (KOBE-490): the references line after the member's text.
+      input: withItemReferences(
+        (body?.references as readonly ItemReference[] | undefined) ?? [],
+        String(body?.content ?? ""),
+      ),
       parent_entry_id: (body?.parent_entry_id as string | undefined) ?? null,
       queue_pos: this.#queueN,
       events: [],
@@ -2208,7 +2215,11 @@ export class FakeKobe {
     }
     if (action === undefined && method === "PATCH") {
       if (run.status !== "queued") return error(409, "invalid_transition");
-      run.input = String(body?.content);
+      // As the server: the references line stays, never repeated (KOBE-490).
+      run.input = withItemReferences(
+        splitItemReferences(run.input).references,
+        splitItemReferences(String(body?.content)).rest,
+      );
       return json(200, this.#snapshot(run));
     }
     if (action === "steer") {
