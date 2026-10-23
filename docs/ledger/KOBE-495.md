@@ -8,8 +8,8 @@
 
 ## Plan
 
-1. Migration commit (own PR): `0178_catalog_site_edit` (generated) + `0179_registry_publisher_guard`
-   (custom). KOBE-492 holds 0178/0179 on main-to-be: `db:rebase` renumbers these to 0180/0181.
+1. Migration commit (own PR): `0180_catalog_site_edit` (generated) + `0181_registry_publisher_guard`
+   (custom). (renumbered from 0178/0179 after KOBE-492 took those; PR #392).
 2. Feature commit: server (`services/server/src/skills/site-edit/`, route
    `routes/site-skill-catalog-edit.ts` at `/v1/site/skills/catalog-skills/:skillId`), web (Skill
    tags → Open → `/admin/site/skill-catalog/[id]` and `/edit`), docs, browser spec.
