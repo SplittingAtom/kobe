@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { scanDraft, type ScanPreview } from "../../lib/skills/drafts-api";
+import type { ApiResult } from "../../lib/api/client";
+
+/** Asks for the scan of a draft (a team's by default; a Site draft's, KOBE-495). */
+export type ScanFn = (id: string, signal: AbortSignal) => Promise<ApiResult<ScanPreview>>;
 
 /**
  * The live scan preview of a draft (KOBE-321, SK12; review S1/S2). `rescan()` after every write
@@ -31,6 +35,7 @@ export function useScanPreview(
   teamId: string,
   id: string,
   currentRev: () => number,
+  scanFn?: ScanFn,
 ): { readonly scan: ScanState; readonly rescan: () => void } {
   const [scan, setScan] = useState<ScanState>({ status: "idle" });
   const last = useRef<ScanPreview | null>(null);
@@ -47,7 +52,7 @@ export function useScanPreview(
     const mine = new AbortController();
     abort.current = mine;
     setScan({ status: "running", last: last.current });
-    const res = await scanDraft(teamId, id, mine.signal);
+    const res = scanFn ? await scanFn(id, mine.signal) : await scanDraft(teamId, id, mine.signal);
     if (mine.signal.aborted) return;
     const later = (ms: number) => {
       retry.current = setTimeout(() => void run(), ms);
@@ -78,7 +83,7 @@ export function useScanPreview(
     } else {
       setScan({ status: "error", last: last.current, message });
     }
-  }, [teamId, id, currentRev]);
+  }, [teamId, id, currentRev, scanFn]);
 
   const rescan = useCallback(() => {
     tries.current = { busy: 0, unavailable: 0 };

@@ -36,11 +36,23 @@ import { putSkillBundle, sha256Hex } from "./storage.js";
  *   keeps that choice. A new version in the Default's major queues an `add` again, which only
  *   fills teams that miss the install; a new major waits for a Site admin to move Default (SK6).
  *
+ * - **Detached skills are left alone** (KOBE-495). A Site admin's first edit of a Kobe skill
+ *   detaches it: the seed then publishes nothing for it and only records the shipped version
+ *   (`kobe_shipped_version`), so the console can offer Compare and Reset to Kobe. The seed never
+ *   retires or archives a skill, detached or not, when it leaves the package set.
+ *
  * Replicas starting together write each version once: every write takes the exclusive Default-set
  * lock first (the tag and the sync it queues need it anyway, KOBE-314), then the skill's row.
  */
 
-export type KobeSeedAction = "created" | "published" | "unchanged" | "refused" | "failed";
+export type KobeSeedAction =
+  | "created"
+  | "published"
+  | "unchanged"
+  | "refused"
+  | "failed"
+  /** A Site admin detached the skill (KOBE-495): the shipped version is only recorded. */
+  | "skipped_detached";
 export type KobeSeedRefusal = "scan_block" | "version_reused" | "version_not_newer";
 
 export interface KobeSeedResult {
@@ -133,20 +145,43 @@ function provenance(p: KobePackage, scan: ScanResult, at: Date) {
 interface SkillRow {
   readonly id: string;
   readonly created: boolean;
+  readonly detached: boolean;
 }
 
 async function lockedSkill(tx: KobeTx, p: KobePackage): Promise<SkillRow> {
   const summary = p.manifest.summary;
-  const found = await tx.execute<{ id: string }>(sql`
-    SELECT id FROM registry_skills WHERE name = ${p.name} AND publisher = 'kobe' FOR UPDATE`);
-  const id = found.rows[0]?.id;
-  if (id) return { id, created: false };
+  const found = await tx.execute<{ id: string; detached: boolean }>(sql`
+    SELECT id, detached_at IS NOT NULL AS detached FROM registry_skills
+     WHERE name = ${p.name} AND publisher = 'kobe' FOR UPDATE`);
+  const row0 = found.rows[0];
+  if (row0) return { id: row0.id, created: false, detached: row0.detached === true };
   const inserted = await tx.execute<{ id: string }>(sql`
     INSERT INTO registry_skills (name, summary, publisher)
     VALUES (${p.name}, ${summary}, 'kobe') RETURNING id`);
   const row = inserted.rows[0];
   if (!row) throw new Error("skills: Kobe skill insert returned no row");
-  return { id: row.id, created: true };
+  return { id: row.id, created: true, detached: false };
+}
+
+/**
+ * A detached skill (KOBE-495): records the shipped version it skips (when it changed), so the
+ * console can say a newer Kobe version is available. Inside the caller's transaction or alone.
+ */
+async function recordShipped(db: KobeDb | KobeTx, name: string, semver: string): Promise<boolean> {
+  const { rows } = await db.execute<{ id: string }>(sql`
+    UPDATE registry_skills SET kobe_shipped_version = ${semver}, updated_at = now()
+     WHERE name = ${name} AND publisher = 'kobe' AND detached_at IS NOT NULL
+       AND kobe_shipped_version IS DISTINCT FROM ${semver}
+    RETURNING id`);
+  return rows.length > 0;
+}
+
+/** Whether a Site admin detached the skill (a cheap check before the scan; the lock re-checks). */
+async function isDetached(db: KobeDb, name: string): Promise<boolean> {
+  const { rows } = await db.execute(sql`
+    SELECT 1 FROM registry_skills
+     WHERE name = ${name} AND publisher = 'kobe' AND detached_at IS NOT NULL`);
+  return rows.length > 0;
 }
 
 type Decision =
@@ -228,6 +263,10 @@ async function held(db: KobeDb, p: KobePackage): Promise<boolean> {
 
 async function seedOne(deps: KobeSeedDeps, p: KobePackage): Promise<KobeSeedResult> {
   const base = { name: p.name, semver: p.semver };
+  if (await isDetached(deps.db, p.name)) {
+    await recordShipped(deps.db, p.name, p.semver);
+    return { ...base, action: "skipped_detached" };
+  }
   if (await held(deps.db, p)) {
     await storeBytes(deps.blobs, p);
     return { ...base, action: "unchanged" };
@@ -245,6 +284,11 @@ async function seedOne(deps: KobeSeedDeps, p: KobePackage): Promise<KobeSeedResu
   return deps.db.transaction(async (tx) => {
     await lockDefaultSet(tx, "exclusive");
     const skill = await lockedSkill(tx, p);
+    // Detached while this start scanned it: publish nothing (KOBE-495).
+    if (skill.detached) {
+      await recordShipped(tx, p.name, p.semver);
+      return { ...base, action: "skipped_detached" as const };
+    }
     const decision = await decide(tx, skill.id, p);
     if (decision.kind === "unchanged") return { ...base, action: "unchanged" as const };
     if (decision.kind === "refused") {

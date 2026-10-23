@@ -209,7 +209,7 @@ export const registryVersions = pgTable(
      * recorded). `site`: made and published by a Site admin in the Site Console (KOBE-495), on any
      * catalog skill, without review: the admin is the submitter, nobody reviews it.
      * Otherwise always its skill's publisher (trigger `registry_versions_publisher_guard`, which
-     * reports `registry_versions_publisher_fk`, the foreign key it replaced in 0180).
+     * reports `registry_versions_publisher_fk`, the foreign key it replaced in the registry publisher guard migration).
      */
     publisher: registryPublisher().notNull().default("maintainer"),
     semver: text().notNull(),

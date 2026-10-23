@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import {
   listDefaultSyncs,
@@ -30,6 +31,7 @@ import { CatalogMaintainers } from "./skill-catalog-maintainers";
 import { SkillUsagePanel } from "../../skills/skill-usage-panel";
 import { RetirePanel } from "../../skills/retire-panel";
 import { useResource, type Mutation } from "../use-resource";
+import { catalogSkillHref } from "./catalog-skill-page";
 
 const majorOf = (semver: string | null) => (semver ? Number(semver.split(".")[0]) : null);
 
@@ -203,6 +205,13 @@ export function CatalogTagsSection({
                         <DefaultCell skill={s} />
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
+                        <Link
+                          href={catalogSkillHref(s.id)}
+                          aria-label={`Open ${s.name}: files, versions and edit`}
+                          className="me-2"
+                        >
+                          Open
+                        </Link>
                         <Button
                           variant="ghost"
                           aria-label={`Edit tags of ${s.name}`}

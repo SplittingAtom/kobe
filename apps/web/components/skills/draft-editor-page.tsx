@@ -297,7 +297,7 @@ function EvalTab({
   );
 }
 
-function FilePane({
+export function FilePane({
   editor,
   path,
   onRemove,

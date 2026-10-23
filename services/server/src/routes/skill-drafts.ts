@@ -607,7 +607,7 @@ export function skillDraftRoutes(
 }
 
 /** Reads the body up to `max` bytes; null when it (or its declared length) is longer. */
-async function readBounded(req: Request, max: number): Promise<Uint8Array | null> {
+export async function readBounded(req: Request, max: number): Promise<Uint8Array | null> {
   const declared = req.headers.get("content-length");
   if (declared !== null && !(Number(declared) <= max)) return null;
   if (!req.body) return new Uint8Array();

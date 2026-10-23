@@ -1730,6 +1730,23 @@ export const AUDIT_EVENTS = {
   /** The submitter took back their submission before a decision (KOBE-334 review M3). */
   "registry.retracted": event("site", { registryVersionId: id }),
   /**
+   * A Site admin published a version they made in the Site Console straight into the Catalog
+   * (KOBE-495): scanned, never reviewed. `publisher` is always `site`; `previousPublisher` and
+   * `previousSemver` name the version it follows (Kobe's, a maintainer's or the Site's own).
+   */
+  "registry.version_published": event("site", {
+    registryVersionId: id,
+    skillId: id,
+    name: catalogName,
+    semver: z.string().max(32),
+    publisher: z.literal("site"),
+    publishedBy: id,
+    verdict: z.enum(["pass", "caution"]),
+    runtimeHash: z.string().regex(/^[0-9a-f]{64}$/),
+    previousPublisher: z.enum(["kobe", "maintainer", "site"]).nullable(),
+    previousSemver: z.string().max(32).nullable(),
+  }),
+  /**
    * The git mirror pushed an approved version (KOBE-343, SK29): its commit and annotated tag are on
    * the remote (system actor). `existing`: the remote already had exactly this tag and tree.
    */
@@ -1920,6 +1937,25 @@ export const AUDIT_EVENTS = {
     semver: z.string().max(32),
     runtimeHash: z.string().regex(/^[0-9a-f]{64}$/),
     created: z.boolean(),
+  }),
+  /**
+   * A Site admin's first edit of a Kobe-shipped catalog skill detached it (KOBE-495): the Kobe seed
+   * stops publishing it. `fromSemver`: its newest Kobe version then.
+   */
+  "skill.detached": event("site", {
+    skillId: id,
+    name: catalogName,
+    fromSemver: z.string().max(32),
+  }),
+  /**
+   * A Site admin re-attached a detached Kobe skill (KOBE-495): the seed publishes the shipped
+   * version (`shippedSemver`, above every Site version) from now on.
+   */
+  "skill.reset_to_kobe": event("site", {
+    skillId: id,
+    name: catalogName,
+    fromSemver: z.string().max(32),
+    shippedSemver: z.string().max(32),
   }),
   /** A Default sync job failed too often and was parked; the queue moved on (error code only). */
   "skill.default.sync_failed": event("site", {
