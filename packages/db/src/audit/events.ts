@@ -1480,6 +1480,13 @@ export const AUDIT_EVENTS = {
   // Versions (KOBE-46): publish freezes the draft and its tool manifest; rollback republishes.
   "agent.published": event("any", { ...agentRef, version, draftRevision: version }),
   "agent.rolled_back": event("any", { ...agentRef, version, fromVersion: version }),
+  /**
+   * A site admin's first edit of a seeded gallery agent (KOBE-494) detached it from the repo's
+   * definition: `fromGeneration` is the repo generation it was edited from.
+   */
+  "agent.customized": event("site", { ...agentRef, fromGeneration: version }),
+  /** A site admin re-attached a customized gallery agent to the repo's definition (KOBE-494). */
+  "agent.reset_to_repository": event("site", { ...agentRef, fromGeneration: version }),
   // The pre-publish Orbit eval gate (KOBE-93): requested at Publish, finished with a verdict.
   "agent.eval.requested": event("team", { ...agentRef, evalId: id, draftRevision: version }),
   "agent.eval.finished": event("team", {

@@ -162,13 +162,14 @@ describe("publish (D19, D8)", () => {
     expect((await publish("dave", id)).status).toBe(404);
   });
 
-  it("publishes gallery agents only by seeding them from the repo", async () => {
+  it("publishes gallery agents by seeding them, or through the site route (KOBE-494)", async () => {
     const [seeded] = await seedGalleryAgents(h.deps.database.db, [
       { key: "gallery-helper", generation: 1, file: "---\nname: Gallery Helper\n---\nHelp.\n" },
     ]);
     const id = seeded?.agentId ?? "";
     expect((await publish("alice", id)).status).toBe(403);
-    expect((await publish("admin", id, ANY, "/v1/site/gallery/agents")).status).toBe(405);
+    // Nothing changed since the seed published v1: nothing to publish.
+    expect((await publish("admin", id, ANY, "/v1/site/gallery/agents")).status).toBe(409);
     const one = await as.carol.get(`/v1/agents/${id}`);
     expect(one.json.agent.currentVersion).toBe(1);
   });

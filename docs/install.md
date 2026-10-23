@@ -705,6 +705,14 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Editable gallery agents (KOBE-494, migration `0177_gallery_agent_customized`).** Site admins
+  can edit gallery agents in the Site Console (Gallery agents → Edit, the same two-tab creator
+  teams use) and publish new versions. The first edit marks an agent **Customized**: upgrades
+  then leave it as edited (the seed reports `skipped_customized`) while recording the newer
+  repository generation, and the console offers Compare and Reset to repository. The migration
+  adds three nullable columns to `site_agents` (no rewrite, no data change); nothing is
+  customized until someone edits. Rolling back to an earlier release is safe, but that release's
+  seed overwrites customized agents with its own definition when that definition is newer.
 - **Skill evals (KOBE-325, migrations `0143_skill_drafts_thread_skill_test_skill_evals_eval_judge_eval_cap` and `0146_skill_evals_rls`).** Members can run
   a skill's eval suite: each case runs in its own short-lived sandbox in the team namespace
   (template and warm pool `kobe-skill-eval`, claims `e-<thread id>`, PriorityClass and quota
