@@ -19,6 +19,9 @@ class FakeHub implements Pick<RunEventHub, "subscribeWorkspace"> {
   close() {
     for (const s of this.subs.keys()) s.close();
   }
+  revalidate() {
+    for (const s of this.subs.keys()) s.revalidate?.();
+  }
 }
 
 /** A manifest: rows by revision; `reads` counts reads, `allowed` drives revalidation. */
@@ -130,6 +133,26 @@ describe("workspace change stream (KOBE-496)", () => {
     expect(await nextData(s.reader)).toBeUndefined();
     expect(s.ended()).toBe(1);
     expect(hub.subs.size).toBe(0);
+  });
+
+  it("rechecks the viewer at once on an access hint, not at the next periodic check", async () => {
+    const hub = new FakeHub();
+    const m = new FakeManifest();
+    let ended = 0;
+    const body = createWorkspaceChangeStream({
+      userId: USER,
+      paths: ["a.md"],
+      source: m.source(["a.md"]),
+      hub: hub as unknown as RunEventHub,
+      timings: { ...FAST, revalidateMs: 60_000 },
+      onEnd: () => (ended += 1),
+    });
+    const reader = new SseReader(body);
+    await nextData(reader);
+    m.allowed = false;
+    hub.revalidate();
+    expect(await nextData(reader)).toBeUndefined();
+    expect(ended).toBe(1);
   });
 
   it("never sends anything to a viewer refused at the first check", async () => {

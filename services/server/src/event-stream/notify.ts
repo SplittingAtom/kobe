@@ -74,3 +74,27 @@ export function decodeWorkspaceHint(payload: string | undefined): string | undef
   const userId = payload.slice(WORKSPACE_PREFIX.length);
   return uuid.safeParse(userId).success ? userId.toLowerCase() : undefined;
 }
+
+/**
+ * Workspace access hint (KOBE-496): "this user lost access somewhere" (removed from a team,
+ * deactivated). The hub has that user's open change streams recheck the viewer at once instead of
+ * at the next periodic revalidation. Ids only; a forged one costs one recheck.
+ */
+const WORKSPACE_ACCESS_PREFIX = "wsa:";
+
+export function encodeWorkspaceAccessHint(userId: string): string {
+  return `${WORKSPACE_ACCESS_PREFIX}${userId}`;
+}
+
+/** The user id of a workspace access hint; undefined for anything else (never throws). */
+export function decodeWorkspaceAccessHint(payload: string | undefined): string | undefined {
+  if (
+    payload === undefined ||
+    payload.length > 64 ||
+    !payload.startsWith(WORKSPACE_ACCESS_PREFIX)
+  ) {
+    return undefined;
+  }
+  const userId = payload.slice(WORKSPACE_ACCESS_PREFIX.length);
+  return uuid.safeParse(userId).success ? userId.toLowerCase() : undefined;
+}

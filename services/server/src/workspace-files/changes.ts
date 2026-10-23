@@ -1,5 +1,9 @@
 import { sql, type KobeTx } from "@kobe/db";
-import { PROJECT_WORKSPACE_DIR, type WorkspaceFileChange } from "@kobe/protocol";
+import {
+  PROJECT_WORKSPACE_DIR,
+  WORKSPACE_CHANGE_ACTOR_NAME_MAX as ACTOR_NAME_MAX,
+  type WorkspaceFileChange,
+} from "@kobe/protocol";
 import type { WorkspaceOwner } from "../workspace-sync/keys.js";
 
 /**
@@ -36,12 +40,14 @@ export async function readFileChanges(
   const res = await tx.execute<ChangeRow>(sql`
     SELECT f.path, f.sha256, f.rev, f.deleted, f.origin, f.updated_at,
            (SELECT u.name FROM users u WHERE u.id = f.user_id) AS owner_name,
-           (SELECT u.name FROM project_files pf
-              JOIN projects p ON p.team_id = pf.team_id AND p.id = pf.project_id
+           -- projects/<slug>/<path>: by the unique (team, slug) and (team, project, path) indexes.
+           (SELECT u.name FROM projects p
+              JOIN project_files pf ON pf.team_id = p.team_id AND pf.project_id = p.id
+               AND pf.path = substr(f.path, char_length(${PROJECTS} || p.slug || '/') + 1)
               JOIN users u ON u.id = pf.added_by
-             WHERE f.origin = 'server' AND NOT f.deleted AND pf.team_id = f.team_id
+             WHERE f.origin = 'server' AND NOT f.deleted AND f.path LIKE ${`${PROJECTS}%`}
+               AND p.team_id = f.team_id AND p.slug = split_part(f.path, '/', 2)
                AND pf.sha256 = f.sha256
-               AND ${PROJECTS} || p.slug || '/' || pf.path = f.path
              LIMIT 1) AS project_adder
       FROM workspace_files f
      WHERE f.team_id = ${owner.teamId} AND f.user_id = ${owner.userId}
@@ -62,8 +68,26 @@ function toChange(row: ChangeRow): WorkspaceFileChange {
 
 function actorOf(row: ChangeRow): WorkspaceFileChange["actor"] {
   if (row.origin === "sandbox") return { kind: "agent", name: null };
-  if (row.path.startsWith(PROJECTS)) return { kind: "sync", name: row.project_adder };
-  return { kind: "user", name: row.owner_name };
+  if (row.path.startsWith(PROJECTS)) return { kind: "sync", name: actorName(row.project_adder) };
+  return { kind: "user", name: actorName(row.owner_name) };
+}
+
+/**
+ * A display name as the contract allows it (1 to {@link ACTOR_NAME_MAX} characters, no control
+ * characters), or null: `users.name` is unbounded text, and a change must never fail the
+ * client's schema because of a name.
+ */
+export function actorName(raw: string | null): string | null {
+  if (raw === null) return null;
+  // eslint-disable-next-line no-control-regex
+  let name = raw.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").trim();
+  if (name.length > ACTOR_NAME_MAX) {
+    name = name.slice(0, ACTOR_NAME_MAX);
+    // Never end on half a surrogate pair.
+    if (/[\ud800-\udbff]$/.test(name)) name = name.slice(0, -1);
+    name = name.trimEnd();
+  }
+  return name === "" ? null : name;
 }
 
 /** The state of every requested path: its row, or "never seen" for a path with none. */

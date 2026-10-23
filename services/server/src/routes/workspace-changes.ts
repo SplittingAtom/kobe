@@ -67,10 +67,10 @@ export function registerWorkspaceChanges(
       );
     }
     const { hub, timings } = deps.eventStream;
-    const release = hub.acquireSlot(owner.userId);
+    const release = hub.acquireWorkspaceSlot(owner.userId);
     if (!release) {
       return c.json(
-        { code: "too_many_streams", message: "Too many open streams. Close a tab and retry." },
+        { code: "too_many_streams", message: "Too many pages follow file changes. Close a tab." },
         429,
       );
     }

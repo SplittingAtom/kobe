@@ -102,6 +102,10 @@ export function createWorkspaceChangeStream(input: ChangeStreamInput): ReadableS
   const subscriber: WorkspaceHubSubscriber = {
     changed: markDirty,
     resync: markDirty,
+    revalidate: () => {
+      revalidateDue = true;
+      signal();
+    },
     close: () => {
       endRequested = true;
       if (pulling) signal();

@@ -29,7 +29,8 @@ let sync: WorkspaceSync;
 let app: ReturnType<typeof createApp>;
 
 beforeAll(async () => {
-  await fx.setup([{ timings: { keepaliveMs: 100, revalidateMs: 300 } }]);
+  // A long periodic recheck: a removal must end the stream through its hint, not the timer.
+  await fx.setup([{ timings: { keepaliveMs: 100, revalidateMs: 60_000 } }]);
   sync = createWorkspaceSync({ db: fx.db, objects, prefix: "", limits: LIMITS, log: silent });
   app = createApp(fx.replica(0).deps, {
     workspaceFiles: { sync, waker: { wake: () => Promise.resolve() } },
@@ -282,15 +283,41 @@ describe("GET /v1/workspace/changes (KOBE-496)", () => {
     await bobTab.reader.cancel();
   });
 
-  it("ends the stream once the member leaves the team", async () => {
+  it("ends the stream at once when the member is removed from the team", async () => {
     const w = await world();
     const bobTab = await open(w.bob, w.team, ["a.md"]);
     await bobTab.within();
-    await fx.admin.query(`DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`, [
-      w.team,
-      w.bob.id,
-    ]);
+    const removed = await browserFor(w.alice, w.team).delete(`/v1/team/members/${w.bob.id}`);
+    expect(removed.status).toBe(204);
+    // Within the wait (5 s), far before the 60 s periodic recheck: the removal's hint did it.
     expect(await bobTab.within()).toBeUndefined();
+  });
+
+  it("sends a name the contract accepts, whatever is stored", async () => {
+    const w = await world();
+    await fx.admin.query(`UPDATE users SET name = $1 WHERE id = $2`, [
+      `${"N".repeat(300)}\u0007`,
+      w.alice.id,
+    ]);
+    await serverPut(w.team, w.alice, "n.md", "x\n");
+    const tab = await open(w.alice, w.team, ["n.md"]);
+    const state = await tab.within();
+    expect(state?.change.actor).toEqual({ kind: "user", name: "N".repeat(200) });
+    await tab.reader.cancel();
+  });
+
+  it("caps workspace streams per user apart from run streams", async () => {
+    const w = await world();
+    const tabs: Changes[] = [];
+    for (let i = 0; i < 8; i += 1) tabs.push(await open(w.alice, w.team, ["a.md"]));
+    const ninth = await request(w.alice, changesUrl(w.team, ["a.md"]));
+    expect(ninth.status).toBe(429);
+    // Run streams still open: their slots are their own.
+    const run = await fx.run(w.team, w.alice);
+    const runStream = await fx.open(0, w.alice, run);
+    expect(runStream.status).toBe(200);
+    await runStream.body?.cancel();
+    for (const t of tabs) await t.reader.cancel();
   });
 
   it("refuses malformed requests: no paths, too many, internal paths, other parameters", async () => {

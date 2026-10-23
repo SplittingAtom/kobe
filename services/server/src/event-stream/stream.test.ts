@@ -100,6 +100,9 @@ class FakeHub implements RunEventHub {
   subscribeWorkspace() {
     return () => undefined;
   }
+  acquireWorkspaceSlot() {
+    return () => undefined;
+  }
   acquireSlot() {
     return () => undefined;
   }

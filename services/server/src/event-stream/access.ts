@@ -1,6 +1,6 @@
 import { SERVER_CALL_EPILOGUE_MAX_MS } from "@kobe/protocol";
-import { sql, type KobeTx } from "@kobe/db";
-import { RUN_EVENTS_CHANNEL } from "./notify.js";
+import { sql, type KobeDb, type KobeTx } from "@kobe/db";
+import { encodeWorkspaceAccessHint, RUN_EVENTS_CHANNEL } from "./notify.js";
 
 /**
  * Live streams follow a run this long after it ended: the epilogue window (KOBE-234) plus a
@@ -29,4 +29,15 @@ export async function notifyThreadAccess(
        AND r.events_compacted_at IS NULL
        AND (r.ended_at IS NULL
             OR r.ended_at > now() - ${OPEN_AFTER_END_MS}::int * interval '1 millisecond')`);
+}
+
+/**
+ * Tells every replica that this user lost access somewhere (KOBE-496: removed from a team,
+ * deactivated): their open workspace change streams recheck the viewer now, not within 30 s.
+ * Sent after the change committed. Ids only (`notify.ts`).
+ */
+export async function notifyWorkspaceAccess(db: KobeDb, userId: string): Promise<void> {
+  await db.execute(
+    sql`SELECT pg_notify(${RUN_EVENTS_CHANNEL}, ${encodeWorkspaceAccessHint(userId)})`,
+  );
 }

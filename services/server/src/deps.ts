@@ -26,6 +26,7 @@ import { recordAudit } from "./audit/record.js";
 import { BackgroundTasks } from "./background.js";
 import { createAuth, type KobeAuth } from "./auth/auth.js";
 import { createRunEventHub, type HubOptions, type RunEventHub } from "./event-stream/hub.js";
+import { notifyWorkspaceAccess } from "./event-stream/access.js";
 import { createStreamReader, type StreamReader } from "./event-stream/read.js";
 import { STREAM_DEFAULTS, type StreamTimings } from "./event-stream/stream.js";
 import { DEFAULT_VERSION_LIMITS } from "./agents/versions.js";
@@ -484,6 +485,11 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   lifecycle.on("deactivated", {
     name: "sandbox-wire",
     run: (userId) => sandboxWire.revalidateUser(userId),
+  });
+  // Their open file change streams recheck at once (KOBE-496; sessions are gone by now).
+  lifecycle.on("deactivated", {
+    name: "workspace-changes",
+    run: (userId) => notifyWorkspaceAccess(database.db, userId),
   });
   // The last active maintainer of a catalog skill leaves: Unmaintained, Site admins emailed (KOBE-332).
   lifecycle.on("deactivated", {

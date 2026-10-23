@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { logger as rootLogger } from "../logger.js";
-import { decodeAccessHint, decodeHint, decodeWorkspaceHint, RUN_EVENTS_CHANNEL } from "./notify.js";
+import {
+  decodeAccessHint,
+  decodeHint,
+  decodeWorkspaceAccessHint,
+  decodeWorkspaceHint,
+  RUN_EVENTS_CHANNEL,
+} from "./notify.js";
 
 /** What a stream hears from the hub. Every call means "re-read Postgres"; none carries content. */
 export interface HubSubscriber {
@@ -21,6 +27,8 @@ export interface WorkspaceHubSubscriber {
   changed(): void;
   /** Notifications may have been missed (listener (re)connected or down): re-read now. */
   resync(): void;
+  /** The user lost access somewhere (removed, deactivated) or hints were missed: recheck now. */
+  revalidate?(): void;
   /** The hub is shutting down: end the stream so the client reconnects to another replica. */
   close(): void;
 }
@@ -32,6 +40,11 @@ export interface RunEventHub {
   subscribeWorkspace(userId: string, subscriber: WorkspaceHubSubscriber): () => void;
   /** Reserves one of the user's concurrent stream slots on this replica; null when at the cap. */
   acquireSlot(userId: string): (() => void) | null;
+  /**
+   * The same for workspace change streams (KOBE-496), counted apart from run streams: a page
+   * holds one for as long as it shows file tabs, so they must never use up the run streams' slots.
+   */
+  acquireWorkspaceSlot(userId: string): (() => void) | null;
   /** `listening` once the LISTEN connection is up. */
   readonly state: HubState;
   /** Number of subscribed streams (all runs). */
@@ -45,6 +58,13 @@ export interface HubOptions {
   /** App-role URL. Must reach Postgres directly or via a session-mode pooler (LISTEN is per session). */
   readonly connectionString: string;
   readonly maxStreamsPerUser?: number;
+  /** Concurrent workspace change streams per user on this replica (about one per page). */
+  readonly maxWorkspaceStreamsPerUser?: number;
+  /**
+   * While the listener is down, workspace change streams re-read this often (they live as long as
+   * a page, so they are not polled at the run streams' rate).
+   */
+  readonly workspaceDegradedPollMs?: number;
   readonly reconnectMinMs?: number;
   readonly reconnectMaxMs?: number;
   /** While the listener is down, subscribers re-read this often instead of waiting for hints. */
@@ -59,6 +79,8 @@ export interface HubOptions {
 
 export const HUB_DEFAULTS = {
   maxStreamsPerUser: 16,
+  maxWorkspaceStreamsPerUser: 8,
+  workspaceDegradedPollMs: 20_000,
   reconnectMinMs: 250,
   reconnectMaxMs: 10_000,
   degradedPollMs: 1_000,
@@ -84,6 +106,8 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
   const byRun = new Map<string, Set<HubSubscriber>>();
   const byUser = new Map<string, Set<WorkspaceHubSubscriber>>();
   const slots = new Map<string, number>();
+  const workspaceSlots = new Map<string, number>();
+  let lastWorkspacePoll = 0;
   let state: HubState = "idle";
   let client: pg.Client | undefined;
   let attempt = 0;
@@ -101,7 +125,7 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
    * of one run wake together (their reads coalesce into one query in the stream reader) while
    * different runs don't all hit the database in the same instant.
    */
-  const resyncAll = (windowMs: number) => {
+  const resyncAll = (windowMs: number, workspaces = true) => {
     for (const runId of byRun.keys()) {
       const fire = () => {
         const current = byRun.get(runId);
@@ -116,10 +140,14 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
       if (windowMs <= 0) fire();
       else setTimeout(fire, Math.random() * windowMs).unref();
     }
+    if (!workspaces) return;
     // Workspace streams: one random delay per user (their pages read together).
     for (const userId of byUser.keys()) {
       const fire = () => {
-        for (const s of [...(byUser.get(userId) ?? [])]) s.resync();
+        for (const s of [...(byUser.get(userId) ?? [])]) {
+          s.resync();
+          s.revalidate?.(); // a removal's hint may have been missed too
+        }
       };
       if (windowMs <= 0) fire();
       else setTimeout(fire, Math.random() * windowMs).unref();
@@ -139,6 +167,12 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
       if (watchers) for (const s of [...watchers]) s.changed();
       return;
     }
+    const workspaceAccess = decodeWorkspaceAccessHint(payload);
+    if (workspaceAccess !== undefined) {
+      const watchers = byUser.get(workspaceAccess);
+      if (watchers) for (const s of [...watchers]) s.revalidate?.();
+      return;
+    }
     const access = decodeAccessHint(payload);
     if (access !== undefined) {
       const watchers = byRun.get(access);
@@ -152,7 +186,12 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
   };
 
   const startPolling = () => {
-    pollTimer ??= setInterval(() => resyncAll(opts.degradedPollMs), opts.degradedPollMs);
+    pollTimer ??= setInterval(() => {
+      const now = Date.now();
+      const workspaces = now - lastWorkspacePoll >= opts.workspaceDegradedPollMs;
+      if (workspaces) lastWorkspacePoll = now;
+      resyncAll(opts.degradedPollMs, workspaces);
+    }, opts.degradedPollMs);
     pollTimer.unref();
   };
   const stopPolling = () => {
@@ -264,6 +303,21 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
     }
   }
 
+  /** Takes one of `userId`'s slots in `slots` (null at `max`); returns its release. */
+  function takeSlot(slots: Map<string, number>, userId: string, max: number) {
+    const used = slots.get(userId) ?? 0;
+    if (used >= max) return null;
+    slots.set(userId, used + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const n = (slots.get(userId) ?? 1) - 1;
+      if (n <= 0) slots.delete(userId);
+      else slots.set(userId, n);
+    };
+  }
+
   /** Adds `subscriber` under `id`, starting the listener on first use; returns unsubscribe. */
   function register<S>(map: Map<string, Set<S>>, id: string, subscriber: S): () => void {
     const key = id.toLowerCase();
@@ -306,19 +360,9 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
       }
       return register(byUser, userId, subscriber);
     },
-    acquireSlot(userId) {
-      const used = slots.get(userId) ?? 0;
-      if (used >= opts.maxStreamsPerUser) return null;
-      slots.set(userId, used + 1);
-      let released = false;
-      return () => {
-        if (released) return;
-        released = true;
-        const n = (slots.get(userId) ?? 1) - 1;
-        if (n <= 0) slots.delete(userId);
-        else slots.set(userId, n);
-      };
-    },
+    acquireSlot: (userId) => takeSlot(slots, userId, opts.maxStreamsPerUser),
+    acquireWorkspaceSlot: (userId) =>
+      takeSlot(workspaceSlots, userId, opts.maxWorkspaceStreamsPerUser),
     async close() {
       if (state === "closed") return;
       state = "closed";

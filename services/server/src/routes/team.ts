@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import { teamPermissionsFor } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
+import { notifyWorkspaceAccess } from "../event-stream/access.js";
 import { logger } from "../logger.js";
 import { invalidRequest, membershipError, parseBody } from "../teams/http.js";
 import { listMembers, removeMember, setMemberRole } from "../teams/members.js";
@@ -53,6 +54,10 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
     }
     // The removed member's sandbox in this team loses its connection on every replica (KOBE-24).
     await deps.sandboxWire.revalidateUser(userId.data);
+    // Their open file change streams end now on every replica, not at the next recheck (KOBE-496).
+    await notifyWorkspaceAccess(deps.database.db, userId.data).catch((err: unknown) => {
+      logger.warn({ err, team_id: teamId }, "workspace access hint after member removal failed");
+    });
     // The sandbox is destroyed at once and the volume kept 30 days (D12, KOBE-28). The removal is
     // done either way; a failure here is finished by the offboarding sweep.
     try {

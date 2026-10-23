@@ -29,9 +29,12 @@ export type WorkspaceChangeEventType = (typeof WORKSPACE_CHANGE_EVENT_TYPES)[num
  * file, from any browser tab or device); `sync` = the server keeping project files in line
  * (`name` is the member who added that project file, when known).
  */
+/** Longest actor display name on the wire; the server shortens longer names. */
+export const WORKSPACE_CHANGE_ACTOR_NAME_MAX = 200;
+
 export const workspaceChangeActorSchema = z.strictObject({
   kind: z.enum(["agent", "user", "sync"]),
-  name: z.string().min(1).max(200).nullable(),
+  name: z.string().min(1).max(WORKSPACE_CHANGE_ACTOR_NAME_MAX).nullable(),
 });
 export type WorkspaceChangeActor = z.infer<typeof workspaceChangeActorSchema>;
 
