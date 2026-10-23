@@ -291,3 +291,57 @@ describe("Reset to repository (ac-4)", () => {
     expect((await marker(otherId))?.customized_at).toBeNull();
   });
 });
+
+describe("the seed and customized agents", () => {
+  const V3: GalleryDefinition = { ...V1, generation: 3, file: file("Repo v3.") };
+  const race = (generation: number): GalleryDefinition => ({
+    key: "racing-analyst",
+    generation,
+    file: file(`Race repo ${generation}.`),
+  });
+
+  it("never loses an admin's draft to a seed running at the same moment (mark in the save's transaction)", async () => {
+    const id = (await seed(V3, OTHER, race(1)))[2]?.agentId ?? "";
+    expect(id).not.toBe("");
+    for (let round = 2; round <= 6; round++) {
+      await h.admin.query(
+        `UPDATE site_agents SET customized_at = NULL, customized_by = NULL, customized_from_generation = NULL WHERE id = $1`,
+        [id],
+      );
+      const prompt = `Admin round ${round}.`;
+      const [saved] = await Promise.all([
+        as.admin.put(`${BASE}/${id}`, { ...EDIT, prompt }, ANY),
+        seed(V3, OTHER, race(round)),
+      ]);
+      expect(saved.status, json(saved)).toBe(200);
+      const [row] = (
+        await h.admin.query<{ prompt: string; customized_at: Date | null }>(
+          `SELECT prompt, customized_at FROM site_agents WHERE id = $1`,
+          [id],
+        )
+      ).rows;
+      // Whichever ran first, the admin's draft stands and the agent is marked.
+      expect(row?.prompt, `round ${round}`).toBe(prompt);
+      expect(row?.customized_at, `round ${round}`).not.toBeNull();
+    }
+  });
+
+  it("keeps a customized agent whose definition left the repository (kept_customized)", async () => {
+    const leaving = (await seed(V3, OTHER, race(6)))[2]?.agentId ?? "";
+    expect((await marker(leaving))?.customized_at).not.toBeNull();
+    const results = await seed(V3, OTHER);
+    expect(results).toContainEqual({
+      key: "racing-analyst",
+      agentId: leaving,
+      action: "kept_customized",
+    });
+    const [row] = (
+      await h.admin.query<{ archived_at: Date | null }>(
+        `SELECT archived_at FROM site_agents WHERE id = $1`,
+        [leaving],
+      )
+    ).rows;
+    expect(row?.archived_at).toBeNull();
+    expect(await audited("agent.archived", leaving)).toEqual([]);
+  });
+});

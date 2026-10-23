@@ -23,6 +23,8 @@ export interface SeedResult {
     | "restored"
     | "skipped_archived"
     | "skipped_customized"
+    /** Its definition left the repo, but a site admin customized it: not archived (KOBE-494). */
+    | "kept_customized"
     | "failed";
 }
 
@@ -198,31 +200,56 @@ async function seedOne(db: KobeDb, parsed: ParsedGalleryDefinition): Promise<See
 }
 
 /**
- * Archives seeded gallery agents whose definition left the repo (KOBE-254: the five agents Kobe
- * replaced): gone from the gallery, no new threads, existing threads and team forks untouched.
- * Never deletes, not even one that was never published. Idempotent (archived ones are skipped).
+ * Archives seeded gallery agents whose definition left the repo (KOBE-254): gone from the gallery,
+ * no new threads, existing threads and team forks untouched. Never deletes, not even one that was
+ * never published. Idempotent (archived ones are skipped). A customized agent (KOBE-494) is
+ * detached from the repo, so it is kept: reported `kept_customized`, never archived.
  */
-async function retireRemoved(db: KobeDb, keys: readonly string[]): Promise<string[]> {
+async function retireRemoved(
+  db: KobeDb,
+  keys: readonly string[],
+): Promise<{ retired: string[]; kept: SeedResult[] }> {
   const gone = await db
-    .select({ id: siteAgents.id, key: siteAgents.galleryKey })
+    .select({
+      id: siteAgents.id,
+      key: siteAgents.galleryKey,
+      customizedAt: siteAgents.customizedAt,
+    })
     .from(siteAgents)
     .where(
       and(siteWhere(GALLERY), isNotNull(siteAgents.galleryKey), isNull(siteAgents.archivedAt)),
     );
   const removed = gone.filter((g) => g.key !== null && !keys.includes(g.key));
-  for (const { id } of removed) await archiveAgent(db, GALLERY, id, SYSTEM_ACTOR, "seed");
-  return removed.map((g) => g.key ?? "");
+  const retire = removed.filter((g) => g.customizedAt === null);
+  for (const { id } of retire) await archiveAgent(db, GALLERY, id, SYSTEM_ACTOR, "seed");
+  return {
+    retired: retire.map((g) => g.key ?? ""),
+    kept: removed
+      .filter((g) => g.customizedAt !== null)
+      .map((g) => ({ key: g.key ?? "", agentId: g.id, action: "kept_customized" as const })),
+  };
 }
 
-async function retireAll(db: KobeDb, parsed: readonly ParsedGalleryDefinition[]): Promise<void> {
+async function retireAll(
+  db: KobeDb,
+  parsed: readonly ParsedGalleryDefinition[],
+): Promise<SeedResult[]> {
   try {
-    const retired = await retireRemoved(
+    const { retired, kept } = await retireRemoved(
       db,
       parsed.map((p) => p.key),
     );
     if (retired.length > 0) logger.info({ retired }, "gallery agents retired");
+    if (kept.length > 0) {
+      logger.info(
+        { kept: kept.map((k) => k.key) },
+        "gallery agents kept: customized, though their definition left the repository",
+      );
+    }
+    return kept;
   } catch (err) {
     logger.error({ err }, "gallery agents could not be retired");
+    return [];
   }
 }
 
@@ -266,7 +293,7 @@ export async function seedGalleryAgents(
   if (failed.length > 0) {
     logger.warn({ failed }, "gallery retirement postponed: a definition failed to seed");
   } else {
-    await retireAll(db, parsed);
+    results.push(...(await retireAll(db, parsed)));
   }
   const changed = results.filter((r) => r.action !== "unchanged");
   if (changed.length > 0) logger.info({ agents: changed }, "gallery agents seeded");

@@ -27,7 +27,10 @@ Amended:
   (`site_agents.customized_at`, `customized_by`, `customized_from_generation`; audited
   `agent.customized`). The seed never overwrites a customized agent (`skipped_customized`) but
   records the repository's newer generation, so the console shows "A newer repository version is
-  available".
+  available". The mark is set in the save's or publish's own transaction, under the row lock the
+  seed also takes, so a seed never overwrites an edit it could not see. A customized agent whose
+  definition later leaves the repository is not archived either: the seed keeps it and reports
+  `kept_customized`.
 - **Compare** (`GET .../{id}/compare`) shows the repository definition and the agent's current
   version side by side.
 - **Reset to repository** (`POST .../{id}/reset`, asks first) clears the marker (audited

@@ -391,6 +391,8 @@ export async function publishAgent(
     readonly actor?: AuditActor;
     readonly expectedRevision: number | undefined;
     readonly limits?: VersionLimits;
+    /** Runs in the same transaction after a successful publish (KOBE-494: the Customized mark). */
+    readonly afterWrite?: (tx: KobeTx) => Promise<void>;
   },
 ): Promise<Result<Published, PublishError>> {
   return inLocation(db, location, async (tx) => {
@@ -424,6 +426,7 @@ export async function publishAgent(
         draftRevision: agent.revision,
       },
     });
+    await input.afterWrite?.(tx);
     return { ok: true, value: published };
   });
 }
@@ -487,6 +490,8 @@ export async function rollbackAgent(
     readonly fromVersion: number;
     readonly limits?: VersionLimits;
     readonly expectedManifest?: ToolManifest;
+    /** Runs in the same transaction after a successful rollback (KOBE-494). */
+    readonly afterWrite?: (tx: KobeTx) => Promise<void>;
   },
 ): Promise<Result<Published, PublishError>> {
   return inLocation(db, location, async (tx) => {
@@ -516,6 +521,7 @@ export async function rollbackAgent(
         fromVersion: source.version,
       },
     });
+    await input.afterWrite?.(tx);
     return { ok: true, value: published };
   });
 }

@@ -31,9 +31,12 @@
   `GET /builder-options` (site catalog models + active site connectors as `TeamConnectorView`),
   `GET /:id/compare`, `POST /:id/reset` (409 `not_customized`). Create, delete, status and
   unarchive stay 405 `gallery_read_only`. Dangerous mode: `mayUseDangerousMode(null, siteRole)`.
-- **Marking** happens after a successful save/publish (`markCustomized`, idempotent, audited
-  `agent.customized` once). Not in the same transaction as the save (`updateAgent` opens its own);
-  the seed only acts at start-up, so the window is a rollout racing an edit.
+- **Marking** (`markCustomized`, idempotent, audited `agent.customized` once) runs inside the
+  save's/publish's/rollback's own transaction (review fix: `afterWrite` on `updateAgent`,
+  `publishAgent`, `rollbackAgent`; `afterPublish` on the version routes), under the row lock the
+  seed takes too. Race test: save and seed together, five rounds, the admin's draft always stands.
+- **Retirement** (review fix): a customized agent whose definition left the repo is never
+  archived; the seed reports it `kept_customized`.
 - **Audit:** draft saves are the existing `agent.updated` (scope gallery, actor the admin) rather
   than a new `agent.draft_saved` (same event teams' draft saves use); publish `agent.published`;
   new `agent.customized`, `agent.reset_to_repository` (site). Rows in `docs/audit-log.md`.

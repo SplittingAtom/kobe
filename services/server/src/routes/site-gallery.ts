@@ -215,12 +215,12 @@ function mountEditRoutes(app: Hono<{ Variables: AuthVariables }>, deps: ServerDe
       input.definition,
       ifMatch.revision,
       input.source,
+      (tx) => markCustomized(tx, agent.id, c.get("user").id),
     );
     if (!result.ok) {
       if (result.error === "archived") return archivedConflict(c);
       return result.error === "not_found" ? notFound(c) : preconditionFailed(c);
     }
-    await markCustomized(db, agent.id, c.get("user").id);
     return galleryResponse(c, result.value, await galleryState(db, agent.id));
   });
 
@@ -262,9 +262,9 @@ function mountEditRoutes(app: Hono<{ Variables: AuthVariables }>, deps: ServerDe
     },
     userId: (c) => (c as Context<{ Variables: AuthVariables }>).get("user").id,
     mayUseDangerousMode: (c) => mayDangerous(c as Context<{ Variables: AuthVariables }>),
-    onPublished: (c, found) =>
+    afterPublish: (c, found) => (tx) =>
       markCustomized(
-        db,
+        tx,
         found.agent.id,
         (c as Context<{ Variables: AuthVariables }>).get("user").id,
       ),

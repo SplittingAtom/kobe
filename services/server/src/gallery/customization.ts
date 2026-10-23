@@ -1,5 +1,5 @@
 import { serializeAgentFile, type AgentDefinition } from "@kobe/agent-file";
-import { and, eq, isNotNull, isNull, siteAgents, sql, type KobeDb } from "@kobe/db";
+import { and, eq, isNotNull, isNull, siteAgents, sql, type KobeDb, type KobeTx } from "@kobe/db";
 import { siteWhere } from "../agents/store.js";
 import { getVersion } from "../agents/versions.js";
 import { recordAudit } from "../audit/record.js";
@@ -84,33 +84,32 @@ export async function galleryState(db: KobeDb, id: string): Promise<GalleryState
 
 /**
  * Marks a seeded gallery agent Customized by `userId` (idempotent: only the first edit marks and
- * audits it). Called after a successful draft save or publish. Agents not seeded from the repo
+ * audits it). Runs inside the draft save's or publish's own transaction, under its row lock, so
+ * the seed (which locks the row too) never sees the edit without the mark. Agents not seeded from the repo
  * have nothing to detach from and stay unmarked.
  */
-export async function markCustomized(db: KobeDb, id: string, userId: string): Promise<void> {
-  await db.transaction(async (tx) => {
-    const [row] = await tx
-      .update(siteAgents)
-      .set({
-        customizedAt: new Date(),
-        customizedBy: userId,
-        customizedFromGeneration: sql`coalesce(${siteAgents.galleryGeneration}, 1)`,
-      })
-      .where(
-        and(
-          siteWhere(GALLERY),
-          eq(siteAgents.id, id),
-          isNotNull(siteAgents.galleryKey),
-          isNull(siteAgents.customizedAt),
-        ),
-      )
-      .returning({ slug: siteAgents.slug, from: siteAgents.customizedFromGeneration });
-    if (!row) return;
-    await recordAudit(tx, {
-      action: "agent.customized",
-      teamId: null,
-      target: { agentId: id, scope: "gallery", slug: row.slug, fromGeneration: row.from ?? 1 },
-    });
+export async function markCustomized(tx: KobeTx, id: string, userId: string): Promise<void> {
+  const [row] = await tx
+    .update(siteAgents)
+    .set({
+      customizedAt: new Date(),
+      customizedBy: userId,
+      customizedFromGeneration: sql`coalesce(${siteAgents.galleryGeneration}, 1)`,
+    })
+    .where(
+      and(
+        siteWhere(GALLERY),
+        eq(siteAgents.id, id),
+        isNotNull(siteAgents.galleryKey),
+        isNull(siteAgents.customizedAt),
+      ),
+    )
+    .returning({ slug: siteAgents.slug, from: siteAgents.customizedFromGeneration });
+  if (!row) return;
+  await recordAudit(tx, {
+    action: "agent.customized",
+    teamId: null,
+    target: { agentId: id, scope: "gallery", slug: row.slug, fromGeneration: row.from ?? 1 },
   });
 }
 

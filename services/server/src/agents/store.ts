@@ -302,6 +302,8 @@ export async function updateAgent(
   definition: AgentDefinition,
   expectedRevision?: number,
   source: Exclude<AgentSource, "fork"> = "json",
+  /** Runs in the same transaction after a successful update (KOBE-494: the Customized mark). */
+  afterWrite?: (tx: KobeTx) => Promise<void>,
 ): Promise<Result<AgentRecord, UpdateError>> {
   const set = {
     frontmatter: definition.frontmatter,
@@ -359,6 +361,7 @@ export async function updateAgent(
           source,
         },
       });
+      await afterWrite?.(tx);
       return { ok: true, value: toRecord(location.scope, row) };
     }
     const current = await lockAgent(tx, location, id);
