@@ -1240,6 +1240,13 @@
       "when": 1792680451835,
       "tag": "0176_skill_draft_origin_frozen",
       "breakpoints": true
+    },
+    {
+      "idx": 177,
+      "version": "7",
+      "when": 1792737551491,
+      "tag": "0177_gallery_agent_customized",
+      "breakpoints": true
     }
   ]
 }
