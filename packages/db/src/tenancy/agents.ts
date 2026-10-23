@@ -56,6 +56,9 @@ export const agents = defineDomain({
     "skill_default_syncs",
     // Catalog usage aggregates per closed window (KOBE-339).
     "skill_usage_snapshots",
+    // Site drafts of catalog skills (KOBE-495).
+    "site_skill_drafts",
+    "site_skill_draft_files",
   ],
   grants: {
     // Personal and gallery agents (KOBE-45): the server confines personal rows to their owner and
@@ -94,6 +97,10 @@ export const agents = defineDomain({
     skill_default_syncs: ["SELECT", "INSERT", "UPDATE"],
     // One row per closed usage window, written once; the job purges windows older than two.
     skill_usage_snapshots: ["SELECT", "INSERT", "DELETE"],
+    // Site drafts (KOBE-495): Site admins only (the server decides); deleted once published or
+    // discarded, their files with them. No team data behind them.
+    site_skill_drafts: ALL_PRIVILEGES,
+    site_skill_draft_files: ALL_PRIVILEGES,
   },
   teamReferencing: {
     site_skill_settings:
