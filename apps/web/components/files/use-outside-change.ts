@@ -9,11 +9,12 @@
  * - With a draft nothing is replaced: the tab is `changed` (the editor's banner: Compare, Keep
  *   mine, Take theirs). Keep mine dismisses that version's banner; once the draft is gone (saved,
  *   discarded, Take theirs) a waiting change is read in, or offered when it was someone else's.
- * - Without a draft, only this thread's own agent reloads the tab silently (`updated`): a change
- *   found by its write or run-end hint, or a stream change by the agent within
- *   {@link OWN_AGENT_WINDOW_MS} of one. Anything else (another tab or device, the agent of another
- *   thread or a schedule, project files, a change found on focus) is `remote`: the badge with
- *   Reload; nothing is replaced until the member reloads.
+ * - Without a draft, only this thread's own agent reloads the tab silently (`updated`): the version
+ *   must be one this tab's own check found on that agent's live write or run-end hint. A stream
+ *   change by the agent that arrives while such a check is running waits for it; if the check ends
+ *   without finding that version, it is offered. Anything else (another tab or device, the agent
+ *   of another thread or a schedule, project files, a change found on focus) is `remote`: the badge
+ *   with Reload; nothing is replaced until the member reloads.
  * A file gone from the workspace closes a clean tab (the read says so); a draft keeps it open.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -23,13 +24,6 @@ import type { EditDraftStore } from "../../lib/files/editor-state";
 import { fileVersion, VersionWatch, type HintSource } from "../../lib/files/outside-change";
 import type { ChangeHint } from "../chat/use-file-change-hint";
 import { useDraft } from "./file-editor";
-
-/**
- * A stream change by the agent this long after this thread's own write or run-end hint counts as
- * this thread's agent (ms): the sandbox pushes a run's writes when it ends, or on its interval
- * (chart default 60 s) during a long run.
- */
-export const OWN_AGENT_WINDOW_MS = 90_000;
 
 /** Who changed the file and when, as the change stream said (absent: not known). */
 export interface ChangedBy {
@@ -77,17 +71,22 @@ export function useOutsideChange(options: OutsideChangeOptions) {
   remoteRef.current = remote;
   const pathRef = useRef(path);
   pathRef.current = path;
-  /** When this thread's agent last hinted at a change (a live write, a run's end). */
-  const agentHintAt = useRef(Number.NEGATIVE_INFINITY);
+  /** Versions this tab's own check found on this thread's agent's hints. */
+  const ownVersions = useRef(new Set<string>());
+  /** A stream change by the agent waiting for this thread's running check to claim it. */
+  const waiting = useRef<string | null>(null);
 
   /** A new version `sha256` is in the workspace: read it in, offer it, or wait behind the draft. */
   const decideRef = useRef((sha256: string, source: HintSource | "stream") => {
     const latest = remoteRef.current;
     const by = latest?.sha256 === sha256 ? { actor: latest.actor, at: latest.at } : undefined;
     const kind = by?.actor?.kind;
-    const recent = Date.now() - agentHintAt.current < OWN_AGENT_WINDOW_MS;
-    const own =
-      kind === undefined ? source === "agent" : kind === "agent" && (source === "agent" || recent);
+    // This thread's agent: its own check found this version, and the stream (if it said) agrees.
+    if (source === "agent" && (kind === undefined || kind === "agent")) {
+      ownVersions.current.add(sha256);
+    }
+    if (waiting.current === sha256) waiting.current = null;
+    const own = ownVersions.current.has(sha256) && (kind === undefined || kind === "agent");
     if (draftsRef.current?.get(pathRef.current) !== undefined) {
       if (dismissed.current !== sha256) {
         setOutside((o) => sameChange(o, { kind: "changed", sha256, by, own }));
@@ -107,6 +106,12 @@ export function useOutsideChange(options: OutsideChangeOptions) {
     const next = new VersionWatch({
       check: (signal) => fileVersion(api, path, signal),
       known: () => knownRef.current,
+      // The check ended without claiming a waiting agent change: it was another agent's.
+      onIdle: () => {
+        const sha256 = waiting.current;
+        waiting.current = null;
+        if (sha256 !== null && sha256 !== knownRef.current) decideRef.current(sha256, "stream");
+      },
       onChange: (result, source) => {
         if (result.kind === "gone") {
           // The read finds it gone and closes a clean tab; a draft keeps it open.
@@ -121,24 +126,34 @@ export function useOutsideChange(options: OutsideChangeOptions) {
   }, [api, path]);
 
   useEffect(() => {
-    if (!hint || !watch) return;
-    if (hint.oneShot !== true) agentHintAt.current = Date.now();
-    watch.hint(hint.delays, { oneShot: hint.oneShot === true });
+    if (hint && watch) watch.hint(hint.delays, { oneShot: hint.oneShot === true });
   }, [hint, watch]);
 
-  // The change stream (KOBE-496): each revision once; a reconnect's state is compared again.
-  const handledRev = useRef(-1);
+  // The change stream (KOBE-496): each message once (a reconnect's state is a new message, so a
+  // change or deletion made while the stream was down is compared again, whatever its revision).
+  const handled = useRef<WorkspaceFileChange | null>(null);
   useEffect(() => {
-    if (!remote || known === undefined || remote.rev <= handledRev.current) return;
-    handledRev.current = remote.rev;
+    if (!remote || known === undefined || handled.current === remote) return;
+    handled.current = remote;
     if (remote.sha256 === known) return;
     if (remote.sha256 === null) {
-      // Deleted (a path never seen is no news): the read closes a clean tab.
-      if (remote.rev > 0 && draftsRef.current?.get(path) === undefined) rereadRef.current();
+      // Not in the workspace (deleted, or its tombstone already collected): the read closes a
+      // clean tab, or reloads it when the stream was wrong; a draft keeps it open.
+      if (draftsRef.current?.get(path) === undefined) rereadRef.current();
       return;
     }
-    watchRef.current?.settle(); // the stream named the newest version: no need to keep checking
-    decideRef.current(remote.sha256, "stream");
+    const sha256 = remote.sha256;
+    const watcher = watchRef.current;
+    if (
+      remote.actor?.kind === "agent" &&
+      !ownVersions.current.has(sha256) &&
+      watcher?.pending === "agent"
+    ) {
+      waiting.current = sha256; // this thread's running check decides whether it is its agent's
+      return;
+    }
+    watcher?.settle(); // the stream named the newest version: no need to keep checking
+    decideRef.current(sha256, "stream");
   }, [remote, known, path]);
 
   // The draft went away (saved, discarded, Take theirs) while a change waited.

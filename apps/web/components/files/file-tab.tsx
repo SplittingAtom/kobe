@@ -178,6 +178,8 @@ interface EditorWiring {
   dismissOutside(): void;
   /** The badge's Reload (KOBE-496). */
   reloadOutside(): void;
+  /** Past the change stream's path limit: no live changes for this tab (KOBE-496). */
+  readonly liveOff: boolean;
 }
 
 function FileBody({
@@ -263,6 +265,7 @@ function FileBody({
                 outside={editor.outside}
                 onOutsideDismiss={editor.dismissOutside}
                 onOutsideReload={editor.reloadOutside}
+                liveOff={editor.liveOff}
               />
               {isPython(path) && editor.kernel && (
                 <Suspense fallback={null}>
@@ -312,7 +315,10 @@ export function FileTabContent({
   const { loaded, reread, saved } = useFilePreview(api, path, reload, onGone);
   // Text files in the editor follow outside changes; notebooks keep today's explicit reload.
   const known = drafts && loaded.status === "text" && !isNotebook(path) ? loaded.sha256 : undefined;
-  const remote = useRemoteChange(known === undefined ? undefined : changes, path);
+  const { change: remote, overflow: liveOff } = useRemoteChange(
+    known === undefined ? undefined : changes,
+    path,
+  );
   const {
     outside,
     dismiss,
@@ -338,6 +344,7 @@ export function FileTabContent({
           outside,
           dismissOutside: dismiss,
           reloadOutside,
+          liveOff,
         }
       : undefined;
   const [downloadError, setDownloadError] = useState<ApiError | null>(null);

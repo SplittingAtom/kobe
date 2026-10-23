@@ -113,7 +113,7 @@ describe("a clean tab reloads in place (ac-1)", () => {
     // Found on focus, not by this thread's agent: the badge offers it (KOBE-496), nothing is replaced.
     fake.workspaceFiles.set(PATH, enc("third\n"));
     act(() => void window.dispatchEvent(new Event("focus")));
-    const badge = await screen.findByText("This file changed outside this tab just now.");
+    const badge = await screen.findByText("This file changed outside this tab.");
     expect((await editorView()).state.doc.toString()).toBe(THEIRS);
     await userEvent.click(
       within(must(badge.parentElement)).getByRole("button", { name: /Reload/ }),

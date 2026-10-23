@@ -21,7 +21,9 @@ import { fileName, previewOf } from "../../lib/files/preview";
 import { ErrorNotice } from "../admin/error-notice";
 import {
   ChangedBadge,
+  ChangesStatus,
   CompareView,
+  LIVE_OFF_NOTE,
   OutsideChoices,
   TAKE_THEIRS_PROMPT,
   UPDATED_NOTE,
@@ -109,6 +111,8 @@ export interface FileEditorProps {
   onOutsideDismiss?(): void;
   /** The badge's Reload (KOBE-496): read someone else's change in. */
   onOutsideReload?(): void;
+  /** Past the change stream's path limit: this tab gets no live changes (KOBE-496). */
+  readonly liveOff?: boolean | undefined;
 }
 
 export type SaveState =
@@ -192,12 +196,19 @@ export function FileEditor(props: FileEditorProps) {
     props.outside?.kind === "updated" && props.outside.sha256 === sha256 && draft === undefined;
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      {props.outside?.kind === "remote" && draft === undefined && (
-        <ChangedBadge
-          by={props.outside.by}
-          name={name}
-          onReload={() => (props.onOutsideReload ?? props.onReload)()}
-        />
+      <ChangesStatus>
+        {props.outside?.kind === "remote" && draft === undefined && (
+          <ChangedBadge
+            by={props.outside.by}
+            name={name}
+            onReload={() => (props.onOutsideReload ?? props.onReload)()}
+          />
+        )}
+      </ChangesStatus>
+      {props.liveOff === true && (
+        <p role="note" className="text-muted-foreground text-xs">
+          {LIVE_OFF_NOTE}
+        </p>
       )}
       <TextModeToolbar label={`${name} view`} mode={mode} onMode={setMode}>
         {blocked === undefined && (

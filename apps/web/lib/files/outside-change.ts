@@ -81,6 +81,8 @@ export interface VersionWatchOptions {
    */
   onChange(result: Exclude<VersionCheck, { kind: "unknown" }>, source: HintSource): void;
   readonly wait?: (ms: number, signal: AbortSignal) => Promise<void>;
+  /** A schedule ran to its end (found a change, or ran out of checks); not after settle or a newer hint. */
+  onIdle?(source: HintSource): void;
 }
 
 /**
@@ -96,6 +98,7 @@ export class VersionWatch {
   #generation = 0;
   /** The generation whose schedule is still running, if any. */
   #running: number | null = null;
+  #runningSource: HintSource = "agent";
   #inFlight: Promise<VersionCheck> | null = null;
 
   constructor(options: VersionWatchOptions) {
@@ -113,9 +116,17 @@ export class VersionWatch {
     const generation = this.#generation;
     this.#running = generation;
     const source = options.source ?? (options.oneShot ? "focus" : "agent");
+    this.#runningSource = source;
     void this.#run(generation, delays, source).finally(() => {
-      if (this.#running === generation) this.#running = null;
+      if (this.#running !== generation) return;
+      this.#running = null;
+      if (!this.#abort.signal.aborted) this.#options.onIdle?.(source);
     });
+  }
+
+  /** What the schedule still checking was prompted by; null when none is. */
+  get pending(): HintSource | null {
+    return this.#running === null ? null : this.#runningSource;
   }
 
   /**

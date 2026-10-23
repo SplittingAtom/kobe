@@ -8,7 +8,7 @@
  * KOBE-496: the badge at the top of the editor when someone else changed the file of a clean tab
  * ("<who> changed this file <when>" with Reload), and the banner names who when the stream said.
  */
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ApiError } from "../../lib/api/client";
 import type { FilesApi } from "../../lib/files/api";
 import { editorLanguage, sha256Hex } from "../../lib/files/editor";
@@ -51,14 +51,19 @@ export function changedWhen(at: string | null | undefined, now: number = Date.no
   return `at ${new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
 }
 
-/** The badge's text: who changed the file and when ("This file changed …" when not known). */
+/** The badge's text: who changed the file and when; with no word on who, no "when" either. */
 export function changedBadgeText(by: ChangedBy | undefined, now?: number): string {
-  return changeSentence(by, changedWhen(by?.at, now));
+  if (!by?.actor) return "This file changed outside this tab.";
+  return changeSentence(by, changedWhen(by.at, now));
 }
+
+export const LIVE_OFF_NOTE =
+  "Live updates are off for this tab: more than 32 files are open. Changes show when you return to the window.";
 
 /**
  * Someone else changed the file of a clean tab (KOBE-496): nothing was replaced; Reload reads it
- * in place. A polite live region at the top of the editor, the same for read-only viewers.
+ * in place. It sits inside {@link ChangesStatus}, which stays mounted, so screen readers announce
+ * the text when it appears (a live region mounted with its text already in it often is not).
  */
 export function ChangedBadge({
   by,
@@ -71,8 +76,6 @@ export function ChangedBadge({
 }) {
   return (
     <div
-      role="status"
-      aria-live="polite"
       data-kobe-changed-badge=""
       className="bg-muted/50 flex flex-wrap items-center gap-2 rounded-md border px-2 py-1 text-sm"
     >
@@ -80,6 +83,15 @@ export function ChangedBadge({
       <button type="button" className={BUTTON} aria-label={`Reload ${name}`} onClick={onReload}>
         Reload
       </button>
+    </div>
+  );
+}
+
+/** The always-mounted live region at the top of the editor that the badge appears in. */
+export function ChangesStatus({ children }: { readonly children?: ReactNode }) {
+  return (
+    <div role="status" data-kobe-changes-status="">
+      {children}
     </div>
   );
 }

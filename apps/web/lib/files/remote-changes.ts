@@ -5,7 +5,9 @@
  * path is kept for the tabs to read. The browser reconnects by itself after a drop, and every
  * (re)connect starts with each path's current version (`file.state`), which the tabs compare with
  * what they show: the catch-up by version after a dropped stream or sleep. A stream the server
- * ended or refused is opened again after a bounded backoff (never a tight loop).
+ * ended or refused is opened again after a bounded backoff (never a tight loop), unless `probe`
+ * says the page's team is no longer the active one (another tab switched team): then it stops.
+ * Paths past the server's limit get no live changes; `overflow` says so for their tabs.
  */
 import {
   WORKSPACE_CHANGE_EVENT_TYPES,
@@ -37,6 +39,11 @@ export interface WorkspaceChangeFeedOptions {
   readonly eventSource?: EventSourceFactory | undefined;
   readonly debounceMs?: number;
   readonly reopenDelaysMs?: readonly number[];
+  /**
+   * Before re-opening a stream the server ended: false when it can never succeed again (the
+   * active team changed), which stops the feed. EventSource cannot see the 409 itself.
+   */
+  readonly probe?: (() => Promise<boolean>) | undefined;
 }
 
 export class WorkspaceChangeFeed {
@@ -44,6 +51,8 @@ export class WorkspaceChangeFeed {
   readonly #factory: EventSourceFactory;
   readonly #debounceMs: number;
   readonly #reopenDelays: readonly number[];
+  readonly #probe: (() => Promise<boolean>) | undefined;
+  #stopped = false;
   readonly #watchers = new Map<string, number>();
   readonly #latest = new Map<string, WorkspaceFileChange>();
   readonly #listeners = new Set<() => void>();
@@ -58,6 +67,7 @@ export class WorkspaceChangeFeed {
     this.#factory = options.eventSource ?? browserEventSource;
     this.#debounceMs = options.debounceMs ?? PATHS_DEBOUNCE_MS;
     this.#reopenDelays = options.reopenDelaysMs ?? REOPEN_DELAYS_MS;
+    this.#probe = options.probe;
   }
 
   /** A tab shows `path`: it is in the stream's set until the returned function runs. */
@@ -87,6 +97,16 @@ export class WorkspaceChangeFeed {
     return () => this.#listeners.delete(listener);
   };
 
+  /** `path` is open in a tab but past the stream's limit: its tab gets no live changes. */
+  overflow(path: string): boolean {
+    return this.#watchers.has(path) && !this.#wanted().includes(path);
+  }
+
+  /** The feed stopped for good (the page's team is no longer the active one). */
+  get stopped(): boolean {
+    return this.#stopped;
+  }
+
   /** The paths the open stream follows (tests). */
   get streaming(): readonly string[] {
     return this.#source ? this.#openPaths : [];
@@ -99,7 +119,7 @@ export class WorkspaceChangeFeed {
   }
 
   #schedule(ms: number): void {
-    if (this.#disposed) return;
+    if (this.#disposed || this.#stopped) return;
     if (this.#timer !== undefined) clearTimeout(this.#timer);
     this.#timer = setTimeout(() => {
       this.#timer = undefined;
@@ -120,6 +140,8 @@ export class WorkspaceChangeFeed {
       wanted.every((p, i) => p === this.#openPaths[i]);
     if (same) return;
     this.#close();
+    // The set changed: tabs past the limit (or back under it) re-read `overflow`.
+    for (const listener of [...this.#listeners]) listener();
     if (wanted.length === 0) return;
     this.#open(wanted);
   }
@@ -136,13 +158,12 @@ export class WorkspaceChangeFeed {
       } catch {
         return;
       }
-      const parsed = workspaceFileChangeSchema.safeParse(raw);
-      if (!parsed.success || !this.#watchers.has(parsed.data.path)) return;
-      const previous = this.#latest.get(parsed.data.path);
-      // Never step back: a reconnect's state is at least as new as anything heard before it.
-      if (previous !== undefined && previous.rev > parsed.data.rev) return;
+      const parsed = parseChange(raw);
+      if (parsed === undefined || !this.#watchers.has(parsed.path)) return;
+      // Every message counts, even at a lower revision: one connection sends them in order, and a
+      // new connection's state is the truth now (a tombstone collected, revisions restarted).
       this.#attempt = 0;
-      this.#latest.set(parsed.data.path, parsed.data);
+      this.#latest.set(parsed.path, parsed);
       for (const listener of [...this.#listeners]) listener();
     };
     for (const type of WORKSPACE_CHANGE_EVENT_TYPES) source.addEventListener(type, onMessage);
@@ -152,8 +173,23 @@ export class WorkspaceChangeFeed {
       this.#close();
       const delay = this.#reopenDelays[Math.min(this.#attempt, this.#reopenDelays.length - 1)];
       this.#attempt += 1;
-      this.#schedule(delay ?? 60_000);
+      const probe = this.#probe;
+      if (!probe) return this.#schedule(delay ?? 60_000);
+      void probe().then(
+        (retry) => {
+          if (retry) this.#schedule(delay ?? 60_000);
+          else this.#stop();
+        },
+        () => this.#schedule(delay ?? 60_000),
+      );
     };
+  }
+
+  #stop(): void {
+    this.#stopped = true;
+    if (this.#timer !== undefined) clearTimeout(this.#timer);
+    this.#close();
+    for (const listener of [...this.#listeners]) listener();
   }
 
   #close(): void {
@@ -162,4 +198,20 @@ export class WorkspaceChangeFeed {
     this.#openPaths = [];
     source?.close();
   }
+}
+
+/**
+ * A change as the contract has it; one whose only fault is its actor's name keeps the change with
+ * no name (the badge then says who in general terms) instead of being dropped.
+ */
+function parseChange(raw: unknown): WorkspaceFileChange | undefined {
+  const parsed = workspaceFileChangeSchema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  const actor = (raw as { actor?: unknown } | null)?.actor;
+  if (typeof actor !== "object" || actor === null) return undefined;
+  const retry = workspaceFileChangeSchema.safeParse({
+    ...(raw as object),
+    actor: { ...(actor as object), name: null },
+  });
+  return retry.success ? retry.data : undefined;
 }

@@ -188,6 +188,11 @@ export class ChatSession {
     this.fileChanges = new WorkspaceChangeFeed({
       teamId: options.teamId,
       eventSource: options.eventSource,
+      // Another tab switched the active team: this page's stream can never open again.
+      probe: async () => {
+        const res = await this.files.list("");
+        return res.ok || res.error.code !== "team_mismatch";
+      },
     });
     this.#options = options;
     options.listSync?.subscribe((threadId) => this.#listChanged(threadId));

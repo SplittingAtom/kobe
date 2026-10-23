@@ -79,8 +79,10 @@ describe("someone else's change to a clean tab (ac-1)", () => {
     await changeFrom({ kind: "user", name: "Owner" });
     const text = await badge();
     expect(text.textContent).toBe(BADGE_USER);
-    const region = must(text.closest("[role=status]"));
-    expect(region.getAttribute("data-kobe-changed-badge")).toBe("");
+    const region = must(text.closest("[data-kobe-changed-badge]"));
+    // Inside the always-mounted live region, so screen readers announce it.
+    expect(region.parentElement?.getAttribute("role")).toBe("status");
+    expect(region.parentElement?.hasAttribute("data-kobe-changes-status")).toBe(true);
     expect(view.state.doc.toString()).toBe(ORIGINAL);
 
     await user.click(
@@ -181,6 +183,6 @@ describe("badge text", () => {
     expect(changedBadgeText({ actor: { kind: "sync", name: null }, at: null })).toBe(
       "This project file was updated just now.",
     );
-    expect(changedBadgeText(undefined)).toBe("This file changed outside this tab just now.");
+    expect(changedBadgeText(undefined)).toBe("This file changed outside this tab.");
   });
 });
