@@ -33,7 +33,7 @@ import { CatalogVersionPanel } from "./catalog-version-panel";
 
 export const CATALOG_HOME = "/admin/site/skill-tags";
 export const catalogSkillHref = (id: string) =>
-  `/admin/site/skill-catalog/${encodeURIComponent(id)}`;
+  `/admin/site/skill-tags/catalog/${encodeURIComponent(id)}`;
 export const catalogEditHref = (id: string) => `${catalogSkillHref(id)}/edit`;
 
 const PUBLISHER: Readonly<Record<CatalogVersionRow["publisher"], string>> = {

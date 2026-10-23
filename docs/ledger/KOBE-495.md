@@ -12,7 +12,7 @@
    (custom). (renumbered from 0178/0179 after KOBE-492 took those; PR #392).
 2. Feature commit: server (`services/server/src/skills/site-edit/`, route
    `routes/site-skill-catalog-edit.ts` at `/v1/site/skills/catalog-skills/:skillId`), web (Skill
-   tags → Open → `/admin/site/skill-catalog/[id]` and `/edit`), docs, browser spec.
+   tags → Open → `/admin/site/skill-tags/catalog/[id]` and `/edit`), docs, browser spec.
 
 ## Decisions
 
