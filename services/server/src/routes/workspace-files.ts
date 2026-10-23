@@ -37,6 +37,7 @@ import {
   joinPath,
 } from "../workspace-files/paths.js";
 import { registerNotebookOutputFrame } from "./notebook-output-frame.js";
+import { registerWorkspaceChanges } from "./workspace-changes.js";
 import { registerWorkspaceFrame } from "./workspace-frame.js";
 import { registerWorkspaceMove } from "./workspace-move.js";
 import { registerWorkspaceSave } from "./workspace-save.js";
@@ -284,6 +285,7 @@ export function workspaceFileRoutes(
   registerNotebookOutputFrame(app, deps);
   registerWorkspaceMove(app, deps, sync, options.moveLockTimeoutMs);
   registerWorkspaceSave(app, deps, sync);
+  registerWorkspaceChanges(app, deps);
 
   /** The panel opened: start the caller's sandbox so live files and the next sync are ready. */
   app.post("/wake", (c) => {

@@ -297,7 +297,7 @@ sequenceDiagram
     S-->>E: 200 entry, draft cleared, Saved
   else changed by the agent or another save
     S-->>E: 409 version_conflict, current version or null
-    E->>M: nothing was saved, copy your changes, Reload the file
+    E->>M: nothing was saved: Compare, Keep mine, Take theirs (KOBE-491)
   end
   A->>S: next pull, before the next run or on the interval
   S-->>A: new revision, written to /workspace
@@ -384,10 +384,12 @@ browser upload path, so the same size limit and quotas apply.
    reaches the server only on the next push: every `workspaceSync.pushIntervalSeconds` (chart
    default 60 s), about 2 s after the run ends, and before hibernation.
 
-   **Gap (KOBE-491):** an open tab does not notice. The file tab reads the file once and reads it again only
-   when the file is opened again (from the file browser, or by an `open_file`) or after
-   **Reload the file** (`apps/web/components/files/file-tab.tsx:122`). There is no "newer version"
-   notice. The member finds out when a save gets 409, or when they reopen the file.
+   **The open tab follows (KOBE-491, KOBE-496).** The tab compares the synced version with the
+   one it shows. A clean tab of **this thread's own agent** reads the change in place ("Updated by
+   the agent just now.", cursor and scroll kept). Any other change (see
+   [Live changes to an open file](#live-changes-to-an-open-file)) shows a badge with Reload and
+   replaces nothing. With unsaved edits nothing is replaced either: the banner offers **Compare**,
+   **Keep mine** and **Take theirs**.
 
 ```mermaid
 sequenceDiagram
@@ -434,31 +436,109 @@ sequenceDiagram
   S->>A: run.start, beforeRun pull v3
   A->>S: policy.check edit: allow
   A->>A: Pi edit: /workspace now v4, not yet on the server
-  Note over E: tab still shows v3, no notice
+  M->>E: types: a draft on base v3
   A->>S: about 2 s after the run ends: push, commit with base v3
-  S->>S: v4, origin sandbox
-  M->>E: types, Save with base v3
+  S->>S: v4, origin sandbox, NOTIFY ws hint on commit
+  S-->>E: change stream: file.changed v4, actor agent
+  E->>M: banner: the agent changed this file, nothing was replaced
+  M->>E: Save with base v3
   E->>S: PUT base_sha256=v3
   S-->>E: 409 version_conflict, current v4
-  E->>M: copy your changes, Reload the file
+  E->>M: Compare, Keep mine (saves over v4), Take theirs
+```
+
+### Live changes to an open file
+
+KOBE-496. Every viewer of a file is its owner: `/v1/workspace` serves only the caller's own (team,
+user) workspace, and a shared thread's reader opens files from **their own** workspace, never the
+owner's (`open-file-card.tsx`). So the cases are the same member in another browser tab or on
+another device, their agent in another thread or a schedule (one sandbox per member), and project
+files, which every project member has as a server-written, read-only copy
+(`services/server/src/projects/mounts.ts`).
+
+- **Signal.** Every manifest change commits through `saveState`
+  (`services/server/src/workspace-sync/store.ts`). When the revision moved, it queues
+  `pg_notify('kobe_run_events', 'ws:<user id>')` in the same transaction: delivered on commit,
+  never for a rollback, ids only. The run event hub (`event-stream/hub.ts`) hears it on its one
+  LISTEN connection per server process and wakes that user's change streams. No Redis; Postgres
+  stays the record.
+- **Stream.** `GET /v1/workspace/changes?team=&path=…` (contract `packages/protocol/src/workspace-changes.ts`),
+  one per page for its open text tabs (at most 32 paths; a changed set re-opens it after 300 ms).
+  On connect it sends `file.state` for each path; then, 250 ms after a hint, it reads the rows with
+  a newer revision and sends `file.changed` with the SHA-256 (null when deleted), the revision, who
+  (`agent` for a sandbox push, `user` for the member's own save, upload, move or Edit as file,
+  `sync` for a project file, named after the member who added it) and when. Every read runs in
+  `withTeam` with the session's own team and user (`workspace-files/changes.ts`), so nothing of
+  another member or team can be read. The session and role are rechecked every 30 s, at once when
+  the member is removed or deactivated (a `wsa:<user id>` hint), and after the listener
+  reconnects. Change streams have their own cap (8 per user per replica), apart from run streams,
+  and while the listener is down they re-read every 20 s, not every second.
+- **Tab.** A clean tab reads in place only for this thread's own agent: a version this tab's own
+  check found after that agent's live write or run end. A stream change by the agent that arrives
+  while such a check runs waits for it; if the check ends without finding that version, it is
+  offered. Anything else shows the
+  badge at the top of the editor, in an always-mounted `role=status` region: "<who> changed this
+  file <when>." with **Reload**,
+  which reads the file into the same editor (cursor and scroll kept where the text did not change).
+  Typing under the badge turns it into the banner. Read-only tabs (project files, uploads) get the
+  badge with Reload only. A change found on window focus also gets the badge.
+- **Catch-up.** After a dropped stream or sleep the browser reconnects, and the `file.state` of each
+  path is compared with the version the tab shows (a deletion too, even once its tombstone is
+  collected); a server-ended stream is re-opened after 5, 15, 30, then 60 s, unless the page's team
+  is no longer the active one (another tab switched team), which stops it.
+- **Limits.** At most 32 open files follow live changes; a tab past that says "Live updates are off
+  for this tab" and is checked on window focus only. Actor names are shortened to 200 characters.
+- **Not covered.** Notebooks keep their explicit reload. A project file cannot be replaced in place
+  (a new upload of the same name is refused), so its change reaches members as a deletion (a clean
+  tab closes) and a new file.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor M as Member, tab A
+  participant A as Tab A
+  participant B as Tab B or the agent's push
+  participant S as Server
+  participant P as Postgres
+
+  A->>S: GET /v1/workspace/changes?team=&path=notes.md
+  S->>P: hub LISTEN kobe_run_events (once per process)
+  S->>P: withTeam: rows of (team, user) at notes.md
+  S-->>A: file.state notes.md v1, same as the tab: nothing to do
+  B->>S: PUT /v1/workspace/file?base_sha256=v1 (or a sandbox commit)
+  S->>P: workspace lock, write v2, saveState: pg_notify ws:user
+  P-->>S: on commit: ws:user hint
+  S->>P: after 250 ms, withTeam: rows with rev > v1's
+  S-->>A: file.changed notes.md v2, actor user (or agent), at
+  alt clean tab, not this thread's agent
+    A->>M: badge: You changed this file in another tab or device just now. Reload
+    M->>A: Reload
+    A->>S: GET /v1/workspace/file: v2 in the same editor
+  else clean tab, this thread's agent wrote it
+    A->>S: GET /v1/workspace/file: v2, Updated by the agent just now.
+  else unsaved edits
+    A->>M: banner: Compare, Keep mine, Take theirs
+  end
+  Note over A,S: the stream drops: the browser reconnects, file.state is compared again
 ```
 
 ### Who sees what, when
 
-| Change                 | The agent sees it                                                                                                                                            | The member sees it                                                                                                                                                                  |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Member's unsaved edits | Never. Drafts stay in the browser session, and the viewed-file context reads the synced copy.                                                                | At once, in their own editor only. A full page reload loses them.                                                                                                                   |
-| Member's saved edits   | In `/workspace` after the next pull: before every run, and on each sync interval. In the model's context when the next message is sent with the file viewed. | At once. The tab shows the saved text without reading it back.                                                                                                                      |
-| Agent's direct writes  | At once, in `/workspace`.                                                                                                                                    | After the push (interval, about 2 s after the run ends, or before hibernation), and only when the tab reads the file again. Calling `open_file` pushes the file first and opens it. |
-| Agent's proposals      | As its own tool call. It never learns Accept, Reject, Commit or Discard; after a commit it sees the new content as a saved edit.                             | At once, from `file.edit_proposed` on the live stream. After a reload, from the owner-only proposals list for 7 days.                                                               |
+| Change                 | The agent sees it                                                                                                                                            | The member sees it                                                                                                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Member's unsaved edits | Never. Drafts stay in the browser session, and the viewed-file context reads the synced copy.                                                                | At once, in their own editor only. A full page reload loses them.                                                                                                                  |
+| Member's saved edits   | In `/workspace` after the next pull: before every run, and on each sync interval. In the model's context when the next message is sent with the file viewed. | At once. The tab shows the saved text without reading it back.                                                                                                                     |
+| Agent's direct writes  | At once, in `/workspace`.                                                                                                                                    | After the push (interval, about 2 s after the run ends, or before hibernation): an open tab hears it on the change stream. Calling `open_file` pushes the file first and opens it. |
+| Agent's proposals      | As its own tool call. It never learns Accept, Reject, Commit or Discard; after a commit it sees the new content as a saved edit.                             | At once, from `file.edit_proposed` on the live stream. After a reload, from the owner-only proposals list for 7 days.                                                              |
 
 ### Conflict cases
 
 - **The member has unsaved changes and the agent writes the same file.** The draft keeps its base
   version (`EditDraftStore`), and the tab does not change. When the member saves:
-  - If the agent's write was already pushed, the save gets 409 `version_conflict`. The editor says
-    nothing was saved and offers **Reload the file**, which asks before discarding the draft. The
-    member copies their text out first. No merge is offered.
+  - If the agent's write was already pushed, the tab's banner said so first, and the save gets 409
+    `version_conflict`. The editor says nothing was saved and offers **Compare** (the inline diff,
+    Accept or Reject per change), **Keep mine** (saves over exactly the version it named; a newer
+    change is refused again) and **Take theirs** (asks before dropping the draft) (KOBE-491).
   - If the agent's write was not pushed yet, the save succeeds, because the server only knows the
     old base. On its next sync the sandbox finds the server's newer revision. It keeps the agent's
     version beside the file as `<name>.conflict-<time><ext>` and takes the member's version
@@ -494,7 +574,8 @@ sequenceDiagram
 - **Allow a direct write for new files, generated output or bulk changes** you are not editing.
   Ask the agent to `open_file` the result, or reopen the tab, to see the pushed version.
 - **Protect hand edits.** Save before asking for a change: drafts are invisible to the agent, and
-  saving is what puts your text into its context. Reload the tab after a run that wrote the file.
+  saving is what puts your text into its context. A run that wrote the file updates or badges the
+  open tab by itself.
   The guidance to propose is only a prompt instruction: **gap (KOBE-493):** policy does not stop `write` or
   `edit` on a viewed file. For a hard stop, run in `ask-all` mode, or have an admin add an ask rule
   for `write` and `edit`. The site setting that prompts for all sandbox writes

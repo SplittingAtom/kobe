@@ -21,6 +21,7 @@ export {
   type HubOptions,
   type HubState,
   type HubSubscriber,
+  type WorkspaceHubSubscriber,
   type RunEventHub,
 } from "./hub.js";
 export {

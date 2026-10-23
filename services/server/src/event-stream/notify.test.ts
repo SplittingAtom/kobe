@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { decodeAccessHint, decodeHint, encodeAccessHint, encodeHint } from "./notify.js";
+import {
+  decodeAccessHint,
+  decodeHint,
+  decodeWorkspaceHint,
+  encodeAccessHint,
+  encodeHint,
+  encodeWorkspaceHint,
+} from "./notify.js";
 
 const RUN = "0b6f0d4e-5a3c-4d8e-9a43-5f7b0f2d1c11";
 
@@ -41,6 +48,24 @@ describe("thread access hint (KOBE-221)", () => {
     "ignores malformed payload %j",
     (payload) => {
       expect(decodeAccessHint(payload)).toBeUndefined();
+    },
+  );
+});
+
+describe("workspace hint (KOBE-496)", () => {
+  it("round-trips the user id only, and is never read as another hint", () => {
+    const payload = encodeWorkspaceHint(RUN);
+    expect(payload).toBe(`ws:${RUN}`);
+    expect(decodeWorkspaceHint(payload)).toBe(RUN);
+    expect(decodeHint(payload)).toBeUndefined();
+    expect(decodeAccessHint(payload)).toBeUndefined();
+    expect(decodeWorkspaceHint(encodeAccessHint(RUN))).toBeUndefined();
+  });
+
+  it.each([undefined, "", "ws:", "ws:nope", `${RUN}:1`, `ws:${RUN}x`, "x".repeat(100)])(
+    "ignores malformed payload %j",
+    (payload) => {
+      expect(decodeWorkspaceHint(payload)).toBeUndefined();
     },
   );
 });

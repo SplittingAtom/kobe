@@ -7,6 +7,7 @@ import {
   type WorkspaceEntry,
 } from "@kobe/protocol";
 import { sql, type KobeTx } from "@kobe/db";
+import { encodeWorkspaceHint, RUN_EVENTS_CHANNEL } from "../event-stream/notify.js";
 import { workspaceBlobKey, type WorkspaceOwner } from "./keys.js";
 import { LIVE_LOST } from "./lost.js";
 import type { QuotaCheck } from "./quota.js";
@@ -97,18 +98,32 @@ export async function lockWorkspace(tx: KobeTx, owner: WorkspaceOwner): Promise<
   };
 }
 
+/**
+ * Stores the workspace's counters after a manifest change. Every change commits through here, so
+ * this also queues the workspace hint (KOBE-496): open change streams of this user re-read when
+ * the transaction commits (never for a rollback). Only when the revision moved: a push with
+ * nothing new wakes nobody. Ids only (`event-stream/notify.ts`).
+ */
 export async function saveState(
   tx: KobeTx,
   owner: WorkspaceOwner,
   s: SyncState,
   push: boolean,
 ): Promise<void> {
-  await tx.execute(sql`
-    UPDATE workspace_sync
+  const res = await tx.execute<{ moved: boolean }>(sql`
+    UPDATE workspace_sync w
        SET head_rev = ${s.headRev}, horizon_rev = ${s.horizonRev}, live_files = ${s.liveFiles},
            live_bytes = ${s.liveBytes}, tombstones = ${s.tombstones}, updated_at = now()
            ${push ? sql`, last_push_at = now()` : sql``}
-     WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}`);
+      FROM (SELECT head_rev FROM workspace_sync
+             WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}) old
+     WHERE w.team_id = ${owner.teamId} AND w.user_id = ${owner.userId}
+    RETURNING old.head_rev <> w.head_rev AS moved`);
+  if (res.rows[0]?.moved === true) {
+    await tx.execute(
+      sql`SELECT pg_notify(${RUN_EVENTS_CHANNEL}, ${encodeWorkspaceHint(owner.userId)})`,
+    );
+  }
 }
 
 export type ManifestPage =

@@ -53,3 +53,48 @@ export function decodeAccessHint(payload: string | undefined): string | undefine
   const runId = payload.slice(ACCESS_PREFIX.length);
   return uuid.safeParse(runId).success ? runId.toLowerCase() : undefined;
 }
+
+/**
+ * Workspace hint (KOBE-496), on the same channel: "the manifest of this user's workspace (in some
+ * team) has a new revision". Ids only: the user id, never the team, a path or a version. The hub
+ * wakes that user's open change streams, which re-read under their own session's team (RLS), so
+ * a hint from another team, or a forged one, costs one indexed read and sends nothing.
+ */
+const WORKSPACE_PREFIX = "ws:";
+
+export function encodeWorkspaceHint(userId: string): string {
+  return `${WORKSPACE_PREFIX}${userId}`;
+}
+
+/** The user id of a workspace hint; undefined for anything else (never throws). */
+export function decodeWorkspaceHint(payload: string | undefined): string | undefined {
+  if (payload === undefined || payload.length > 64 || !payload.startsWith(WORKSPACE_PREFIX)) {
+    return undefined;
+  }
+  const userId = payload.slice(WORKSPACE_PREFIX.length);
+  return uuid.safeParse(userId).success ? userId.toLowerCase() : undefined;
+}
+
+/**
+ * Workspace access hint (KOBE-496): "this user lost access somewhere" (removed from a team,
+ * deactivated). The hub has that user's open change streams recheck the viewer at once instead of
+ * at the next periodic revalidation. Ids only; a forged one costs one recheck.
+ */
+const WORKSPACE_ACCESS_PREFIX = "wsa:";
+
+export function encodeWorkspaceAccessHint(userId: string): string {
+  return `${WORKSPACE_ACCESS_PREFIX}${userId}`;
+}
+
+/** The user id of a workspace access hint; undefined for anything else (never throws). */
+export function decodeWorkspaceAccessHint(payload: string | undefined): string | undefined {
+  if (
+    payload === undefined ||
+    payload.length > 64 ||
+    !payload.startsWith(WORKSPACE_ACCESS_PREFIX)
+  ) {
+    return undefined;
+  }
+  const userId = payload.slice(WORKSPACE_ACCESS_PREFIX.length);
+  return uuid.safeParse(userId).success ? userId.toLowerCase() : undefined;
+}

@@ -67,14 +67,22 @@ function defaultWait(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+/** What prompted a check: the thread's own agent (a live write, a run's end) or window focus. */
+export type HintSource = "agent" | "focus";
+
 export interface VersionWatchOptions {
   /** One check; `signal` aborts when the watch is disposed. */
   check(signal: AbortSignal): Promise<VersionCheck>;
   /** The version the tab shows now (undefined: nothing to compare, no check). */
   known(): string | undefined;
-  /** A different version, or the file is gone. */
-  onChange(result: Exclude<VersionCheck, { kind: "unknown" }>): void;
+  /**
+   * A different version, or the file is gone. `source`: what the hint that found it was (KOBE-496:
+   * the agent's own write or run end in this thread may reload silently; focus may not).
+   */
+  onChange(result: Exclude<VersionCheck, { kind: "unknown" }>, source: HintSource): void;
   readonly wait?: (ms: number, signal: AbortSignal) => Promise<void>;
+  /** A schedule ran to its end (found a change, or ran out of checks); not after settle or a newer hint. */
+  onIdle?(source: HintSource): void;
 }
 
 /**
@@ -90,6 +98,7 @@ export class VersionWatch {
   #generation = 0;
   /** The generation whose schedule is still running, if any. */
   #running: number | null = null;
+  #runningSource: HintSource = "agent";
   #inFlight: Promise<VersionCheck> | null = null;
 
   constructor(options: VersionWatchOptions) {
@@ -97,15 +106,36 @@ export class VersionWatch {
     this.#wait = options.wait ?? defaultWait;
   }
 
-  hint(delays: readonly number[], options: { readonly oneShot?: boolean } = {}): void {
+  hint(
+    delays: readonly number[],
+    options: { readonly oneShot?: boolean; readonly source?: HintSource } = {},
+  ): void {
     if (this.#abort.signal.aborted) return;
     if (options.oneShot && this.#running !== null) return;
     this.#generation += 1;
     const generation = this.#generation;
     this.#running = generation;
-    void this.#run(generation, delays).finally(() => {
-      if (this.#running === generation) this.#running = null;
+    const source = options.source ?? (options.oneShot ? "focus" : "agent");
+    this.#runningSource = source;
+    void this.#run(generation, delays, source).finally(() => {
+      if (this.#running !== generation) return;
+      this.#running = null;
+      if (!this.#abort.signal.aborted) this.#options.onIdle?.(source);
     });
+  }
+
+  /** What the schedule still checking was prompted by; null when none is. */
+  get pending(): HintSource | null {
+    return this.#running === null ? null : this.#runningSource;
+  }
+
+  /**
+   * A newer version arrived another way (the change stream, KOBE-496): the pending schedule has
+   * done its job and stops; a check in flight is dropped. Later hints start afresh.
+   */
+  settle(): void {
+    this.#generation += 1;
+    this.#running = null;
   }
 
   dispose(): void {
@@ -118,7 +148,7 @@ export class VersionWatch {
     return !this.#abort.signal.aborted && generation === this.#generation;
   }
 
-  async #run(generation: number, delays: readonly number[]): Promise<void> {
+  async #run(generation: number, delays: readonly number[], source: HintSource): Promise<void> {
     for (const delay of delays) {
       if (delay > 0) await this.#wait(delay, this.#abort.signal);
       if (this.#inFlight) await this.#inFlight.catch(() => undefined);
@@ -129,9 +159,9 @@ export class VersionWatch {
       if (!this.#current(generation)) return;
       // The tab's own version moved meanwhile (its save, a re-read): this answer is stale.
       if (this.#options.known() !== before) return;
-      if (result.kind === "gone") return this.#options.onChange(result);
+      if (result.kind === "gone") return this.#options.onChange(result, source);
       if (result.kind === "version" && result.sha256 !== before) {
-        return this.#options.onChange(result);
+        return this.#options.onChange(result, source);
       }
     }
   }

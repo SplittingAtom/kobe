@@ -106,11 +106,18 @@ describe("a clean tab reloads in place (ac-1)", () => {
     const before = listed();
     act(() => fake.agent.complete(run));
     expect(await screen.findByText(UPDATED_NOTE, undefined, { timeout: 4_000 })).toBeTruthy();
-    expect(listed()).toBe(before + 1);
+    // The run end's check, or the change stream first (KOBE-496): at most one listing.
+    expect(listed()).toBeLessThanOrEqual(before + 1);
     expect((await editorView()).state.doc.toString()).toBe(THEIRS);
 
+    // Found on focus, not by this thread's agent: the badge offers it (KOBE-496), nothing is replaced.
     fake.workspaceFiles.set(PATH, enc("third\n"));
     act(() => void window.dispatchEvent(new Event("focus")));
+    const badge = await screen.findByText("This file changed outside this tab.");
+    expect((await editorView()).state.doc.toString()).toBe(THEIRS);
+    await userEvent.click(
+      within(must(badge.parentElement)).getByRole("button", { name: /Reload/ }),
+    );
     await waitFor(async () => expect((await editorView()).state.doc.toString()).toBe("third\n"));
     const afterFocus = listed();
     act(() => void window.dispatchEvent(new Event("focus")));
