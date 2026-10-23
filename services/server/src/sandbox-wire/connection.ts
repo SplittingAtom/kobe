@@ -668,7 +668,11 @@ export class SandboxConnection implements RegisteredConnection {
     this.#ctx.metrics.policyChecks += 1;
     void decidePolicyCheck(
       this.#ctx.policy,
-      { ...this.target, connectionId: this.id },
+      {
+        ...this.target,
+        connectionId: this.id,
+        fileEdits: this.hasCapability(CAPABILITY_FILE_EDITS),
+      },
       frame,
       abort.signal,
       (pending) =>

@@ -16,6 +16,7 @@ import {
   type SizeChanged,
 } from "./bridge-schema";
 import { callQueue, roughlyTooLarge, windowCounter } from "./bridge-limits";
+import { appItemsOf, type LinkedItem } from "./app-items";
 
 /**
  * Kobe's host bridge for MCP Apps (KOBE-437, spec MA2, T4, T5, §7 and §8). Kobe's own, not the
@@ -55,6 +56,14 @@ const HOST_VERSION = "1";
 /** One retry of a call the server's validator had no room for (review LOW-3). */
 const BUSY_RETRY_MS = 250;
 
+/** A `ui/message` for the composer: its text, or its items (which replace the text). */
+export interface AppMessage {
+  readonly text: string;
+  readonly items: readonly LinkedItem[];
+  /** resource_link blocks dropped as invalid or extra. */
+  readonly dropped: number;
+}
+
 export type ToolCallAnswer =
   | { readonly ok: true; readonly result: unknown }
   | { readonly ok: false; readonly code: string; readonly message: string };
@@ -67,8 +76,12 @@ export interface HostBridgeHandlers {
   callTool(name: string, args: Record<string, unknown>): Promise<ToolCallAnswer>;
   /** `GET /v1/team/apps/:appId/tools`. */
   listTools(): Promise<ToolListAnswer>;
-  /** Insert into the composer draft, never send (MA-7). False if there is no composer. */
-  message(text: string): boolean;
+  /**
+   * Insert into the composer draft, never send (MA-7): the text, or the message's items as chips
+   * in its place (KOBE-490). False if there is no composer. Told also when nothing was usable
+   * (`dropped` > 0, no text, no items) so the composer can say so; the app gets an error then.
+   */
+  message(message: AppMessage): boolean;
   /** Show or replace the context chip (MA-7). False if refused. */
   updateModelContext(context: ModelContext): boolean;
   requestDisplayMode(mode: DisplayMode): DisplayMode;
@@ -201,12 +214,25 @@ export function attachHostBridge(
       case "ui/message": {
         const message = parse(messageParams, params);
         if (!message) return INVALID;
-        const text = message.content
-          .filter((b) => b.type === "text" && typeof b["text"] === "string")
-          .map((b) => b["text"] as string)
-          .join("\n");
-        if (text === "" || new TextEncoder().encode(text).length > MESSAGE_TEXT_MAX) return INVALID;
-        return handlers.message(text) ? { result: {} } : { result: { isError: true } };
+        // resource_links become chips and replace the text (KOBE-490); text-only is as before.
+        const { items, dropped } = appItemsOf(message.content);
+        const text =
+          items.length > 0
+            ? ""
+            : message.content
+                .filter((b) => b.type === "text" && typeof b["text"] === "string")
+                .map((b) => b["text"] as string)
+                .join("\n");
+        if (
+          items.length === 0 &&
+          (text === "" || new TextEncoder().encode(text).length > MESSAGE_TEXT_MAX)
+        ) {
+          if (dropped > 0) handlers.message({ text: "", items: [], dropped });
+          return INVALID;
+        }
+        return handlers.message({ text, items, dropped })
+          ? { result: {} }
+          : { result: { isError: true } };
       }
       case "ui/update-model-context": {
         const context = parse(modelContextParams, params);

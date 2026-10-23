@@ -1,4 +1,9 @@
-import { splitAppContext, splitSkillRequest } from "@kobe/protocol";
+import {
+  splitAppContext,
+  splitItemReferences,
+  splitSkillRequest,
+  type ItemReference,
+} from "@kobe/protocol";
 /**
  * Projects the Pi entry tree (`thread_entries`, D15) and the active run's live stream into the
  * branchable message list assistant-ui renders (D16: `ThreadMessage[]` with `parentId` + `headId`).
@@ -50,6 +55,11 @@ export type KobeMessageMeta =
        * an edit or a regenerate sends the member's text and names the skill again.
        */
       readonly skill?: string | undefined;
+      /**
+       * App items it referenced (KOBE-490): the server's line, taken out of `text`, so an edit or
+       * a regenerate sends them again as references (chips), never as typed text.
+       */
+      readonly references?: readonly ItemReference[] | undefined;
       /** Not an entry yet: the run's prompt as sent, shown until Pi saves it (no edit, no fork). */
       readonly pending: boolean;
       /** Its run still holds the thread ("Sent, waiting for the agent"); never once it ended. */
@@ -460,7 +470,7 @@ export function projectThread(
     if (node.role === "user") {
       const p = parsed.get(first.entryId);
       const split = splitAttachedFiles(p?.kind === "user" ? p.text : "");
-      const { text, skill } = withoutSkillLine(split.text);
+      const { text, skill, references } = withoutSkillLine(split.text);
       const { deps: markerDeps, ...markers } = markersOf(node);
       const meta: KobeMessageMeta = {
         kind: "user",
@@ -468,6 +478,7 @@ export function projectThread(
         parentEntryId: first.parentId,
         text,
         ...(skill === null ? {} : { skill }),
+        ...(references.length === 0 ? {} : { references }),
         pending: false,
         ...(split.files.length > 0 ? { attachments: split.files } : {}),
         ...markers,
@@ -614,6 +625,8 @@ export interface BranchPoint {
   readonly promptEntryId?: string | undefined;
   readonly text: string;
   readonly skill?: string | undefined;
+  /** App items it referenced (KOBE-490), sent again as references. */
+  readonly references?: readonly ItemReference[] | undefined;
 }
 
 /**
@@ -623,10 +636,14 @@ export interface BranchPoint {
 export function withoutSkillLine(text: string): {
   readonly text: string;
   readonly skill: string | null;
+  readonly references: readonly ItemReference[];
 } {
   const ctx = splitAppContext(text);
   const { skill, rest } = splitSkillRequest(ctx.rest);
-  return skill === null ? { text, skill } : { text: text.slice(0, ctx.restAt) + rest, skill };
+  // ... and the server's references line (KOBE-490), taken off the end.
+  const refs = splitItemReferences(rest);
+  if (skill === null && refs.references.length === 0) return { text, skill, references: [] };
+  return { text: text.slice(0, ctx.restAt) + refs.rest, skill, references: refs.references };
 }
 
 export function branchPoint(
@@ -650,6 +667,7 @@ export function branchPointOfMeta(
     ...(meta.entryId === undefined ? {} : { promptEntryId: meta.entryId }),
     text: meta.text,
     ...(meta.skill === undefined ? {} : { skill: meta.skill }),
+    ...(meta.references === undefined ? {} : { references: meta.references }),
   };
 }
 

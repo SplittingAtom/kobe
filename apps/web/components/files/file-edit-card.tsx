@@ -175,7 +175,8 @@ export function FileEditCard({
       <FilePenIcon aria-hidden className="size-4" />
       <div className={styles.fileInfo}>
         <span className={styles.fileName} title={proposal.path}>
-          Proposed edit: {fileName(proposal.path)}
+          <span className="text-status-failed font-semibold">Proposed edit:</span>{" "}
+          {fileName(proposal.path)}
         </span>
         <span className={styles.fileMeta}>{proposal.summary}</span>
         <span className={styles.fileMeta}>
@@ -193,7 +194,7 @@ export function FileEditCard({
       {!readOnly && panel && outcome !== "committed" && (
         <button
           type="button"
-          className="hover:bg-muted rounded-md border px-2 py-0.5 text-xs"
+          className="bg-confirm text-confirm-fg hover:bg-confirm-hover focus-visible:ring-ring rounded-md px-2 py-0.5 text-xs font-medium focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
           aria-label={`Review the proposed edit to ${fileName(proposal.path)}`}
           onClick={review}
         >

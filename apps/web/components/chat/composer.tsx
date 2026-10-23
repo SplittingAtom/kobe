@@ -1,6 +1,8 @@
 "use client";
 
 import { AppContextChips } from "../apps/app-context-chips";
+import { AppItemChips } from "../apps/app-item-chips";
+import { referencesBody } from "../../lib/apps/app-items";
 import { textAfterSend } from "../../lib/chat/after-send";
 import { appContextBody, insertAt } from "../../lib/apps/app-context";
 import { ComposerPrimitive, useAui, useAuiState } from "@assistant-ui/react";
@@ -41,6 +43,7 @@ import { cn } from "../../lib/utils";
 import { ComposerSelectors, useComposerPicker, useFoldedSelectors } from "./composer-selectors";
 import { ModelWarning } from "./model-picker";
 import { PlusMenu } from "./plus-menu";
+import { useReloadDraft } from "./use-reload-draft";
 import { SkillPickChip } from "./plus-skills";
 import { SlashMenu } from "./slash-menu";
 import styles from "./chat.module.css";
@@ -134,6 +137,7 @@ export function Composer({
     const prefill = session.takeComposerDraft(remoteId);
     if (prefill !== undefined) aui.composer.setText(prefill);
   }, [remoteId, session, aui]);
+  useReloadDraft(draft);
 
   const attach = (list: FileList | null) => {
     if (list && list.length > 0) session.attachments.add(draft, [...list], remoteId);
@@ -174,12 +178,26 @@ export function Composer({
     const skill = session.skillPicks.get(draft);
     const viewing = session.viewing.body();
     const contexts = appContextBody(chips);
-    if (await controller.send(text.trim(), undefined, attach, mentions, contexts, skill, viewing)) {
+    const items = session.appItems.forDraft(draft);
+    const references = referencesBody(items);
+    if (
+      await controller.send(
+        text.trim(),
+        undefined,
+        attach,
+        mentions,
+        contexts,
+        skill,
+        viewing,
+        references,
+      )
+    ) {
       // Only what went: text, mentions, chips and a skill added during the send stay (KOBE-415).
       const remaining = textAfterSend(aui.composer.getState().text, text);
       session.attachments.sent(draft);
       session.mentions.settleSent(draft, mentions, remaining);
       session.appContexts.removeSent(draft, chips);
+      session.appItems.removeSent(draft, items);
       session.skillPicks.clearSent(draft, skill);
       aui.composer.setText(remaining);
     }
@@ -302,6 +320,7 @@ export function Composer({
           <ComposerAttachments draft={draft} threadId={remoteId} />
           <MentionChips draft={draft} />
           <AppContextChips draft={draft} />
+          <AppItemChips draft={draft} />
           <SkillPickChip draft={draft} />
           <ViewingChip />
           {appInsert.pending && (

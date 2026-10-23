@@ -142,6 +142,16 @@ export const siteAgents = pgTable(
      * back); null for archives by people, which seeding never undoes.
      */
     archivedBy: text(),
+    /**
+     * Customized by a site admin (KOBE-494, D19/D21 as amended 2026-10-23): the first edit of a
+     * seeded gallery agent detaches it from its repo definition, so the seed no longer overwrites
+     * it. `customizedFromGeneration` is the repo generation it was edited from; once the seed
+     * records a newer `galleryGeneration` the console offers Compare and Reset to repository
+     * (which clears all three). Users are deactivated, never deleted (NO ACTION).
+     */
+    customizedAt: timestamp({ withTimezone: true }),
+    customizedBy: uuid().references(() => users.id),
+    customizedFromGeneration: integer(),
     ...definitionColumns(),
   },
   (t): PgTableExtraConfigValue[] => [
@@ -166,6 +176,11 @@ export const siteAgents = pgTable(
     check(
       "site_agents_archived_by",
       sql`${t.archivedBy} IS NULL OR (${t.archivedBy} = 'seed' AND ${t.archivedAt} IS NOT NULL)`,
+    ),
+    // All or nothing, and only on a seeded gallery agent.
+    check(
+      "site_agents_customized",
+      sql`(${t.customizedAt} IS NULL AND ${t.customizedBy} IS NULL AND ${t.customizedFromGeneration} IS NULL) OR (${t.customizedAt} IS NOT NULL AND ${t.customizedBy} IS NOT NULL AND ${t.customizedFromGeneration} > 0 AND ${t.galleryKey} IS NOT NULL)`,
     ),
     check("site_agents_gallery_key_scope", sql`${t.galleryKey} IS NULL OR ${t.scope} = 'gallery'`),
     check(

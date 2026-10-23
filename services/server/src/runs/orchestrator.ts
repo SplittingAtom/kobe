@@ -2,9 +2,10 @@ import {
   imitatesAppContext,
   imitatesSkillRequest,
   splitAppContext,
+  splitItemReferences,
   splitSkillRequest,
+  withItemReferences,
   withSkillRequest,
-  type RunViewingContext,
 } from "@kobe/protocol";
 import type { NotebookFiles } from "../notebooks/files.js";
 import { notebookKernel, startNotebookRun, type NotebookRunHost } from "../notebooks/user-run.js";
@@ -58,6 +59,7 @@ import type { SandboxRouter, SandboxTarget } from "../sandbox-wire/types.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread, isLockTimeout, type Viewer } from "../threads/repository.js";
 import type { AttachmentStager, StagedFile } from "../uploads/attach.js";
+import { isInternalPath } from "../workspace-files/paths.js";
 import type { ViewingReader } from "../workspace-files/viewing.js";
 import { cancelScheduledRuns, type ScheduledCancelReason } from "./cancel-scheduled.js";
 import { RunError } from "./errors.js";
@@ -106,6 +108,7 @@ import {
   touchThread,
   type AppliedTransition,
   type RunRow,
+  type StoredViewing,
 } from "./store.js";
 import { lockOwnedThread, ownedRun } from "./access.js";
 import { queuedMessageCount, reorderQueuedRuns } from "./queue-order.js";
@@ -421,12 +424,13 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
 
   /**
    * The member's viewed file (KOBE-462, spec FE6), read from their own synced workspace before the
-   * transaction (object storage); only for their own messages. Missing or unreadable: none.
+   * transaction (object storage); only for their own messages. Missing or unreadable: only its
+   * path, which the viewed-file guard still applies to (KOBE-493); the run gets no context.
    */
   async #readViewing(
     actor: ActorContext,
     command: SubmitMessageCommand,
-  ): Promise<RunViewingContext | undefined> {
+  ): Promise<StoredViewing | undefined> {
     if (command.trigger !== "user") return undefined;
     const fromEntry = command.viewing_from_entry;
     if (command.viewing === undefined && fromEntry === undefined) return undefined;
@@ -442,27 +446,39 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
           : await promptViewingPath(tx, actor.team_id, thread.thread.id, fromEntry);
       return path === undefined ? undefined : { owner: thread.thread.ownerUserId, path };
     });
-    if (found === undefined || this.#viewing === undefined) return undefined;
-    return this.#viewing({ teamId: actor.team_id, userId: found.owner }, found.path);
+    return this.#viewingOf(actor, found);
+  }
+
+  /** The file as read, else only its path (KOBE-493); undefined when nothing was viewed. */
+  async #viewingOf(
+    actor: ActorContext,
+    found: { readonly owner: string; readonly path: string } | undefined,
+  ): Promise<StoredViewing | undefined> {
+    // Agent-internal files are never the member's to view (nor guarded).
+    if (found === undefined || isInternalPath(found.path)) return undefined;
+    const read =
+      this.#viewing === undefined
+        ? undefined
+        : await this.#viewing({ teamId: actor.team_id, userId: found.owner }, found.path);
+    return read ?? { path: found.path };
   }
 
   /**
    * A retry's viewed file (KOBE-462 FE7): the original's path (its text was cleared when it
    * ended), read again from the owner's workspace once the run is known to be theirs.
    */
-  async #retryViewing(actor: ActorContext, runId: string): Promise<RunViewingContext | undefined> {
+  async #retryViewing(actor: ActorContext, runId: string): Promise<StoredViewing | undefined> {
     const found = await this.#readTx(actor, async (tx, viewer) => {
       const { thread } = await ownedRun(tx, viewer, runId, false);
       const path = await runViewingPath(tx, actor.team_id, runId);
       return path === undefined ? undefined : { owner: thread.ownerUserId, path };
     });
-    if (found === undefined || this.#viewing === undefined) return undefined;
-    return this.#viewing({ teamId: actor.team_id, userId: found.owner }, found.path);
+    return this.#viewingOf(actor, found);
   }
 
   async #submitInTx(
     actor: ActorContext,
-    command: SubmitMessageCommand & { readonly resolvedViewing?: RunViewingContext },
+    command: SubmitMessageCommand & { readonly resolvedViewing?: StoredViewing },
     clientKey: string | null,
     attach: StagedAttachments | undefined,
     onAttached: () => void,
@@ -512,7 +528,12 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         });
         if (!names.includes(skill)) throw new RunError("skill_not_available");
       }
-      const text = skill === undefined ? mentioned.text : withSkillRequest(skill, mentioned.text);
+      // Items an app put in the composer as chips (KOBE-490): one line after the member's text.
+      const own = withItemReferences(
+        command.trigger === "user" ? (command.references ?? []) : [],
+        mentioned.text,
+      );
+      const text = skill === undefined ? own : withSkillRequest(skill, own);
       // The member's chips go first, fenced as untrusted data (KOBE-439, spec §8).
       const input = withAppContext(appContext, text);
       // The rendered blocks count toward the input's limit (review LOW-F): a clear 413.
@@ -766,7 +787,13 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       const kept = splitAppContext(old);
       // ... and so does the skill picked for it (KOBE-451).
       const skill = splitSkillRequest(kept.rest).skill;
-      const own = skill === null ? text : withSkillRequest(skill, text);
+      // ... and so do the app items it references (KOBE-490): any references line in the new
+      // text is dropped first, so an edit never repeats it (idempotent; review MEDIUM-2).
+      const withRefs = withItemReferences(
+        splitItemReferences(kept.rest).references,
+        splitItemReferences(text).rest,
+      );
+      const own = skill === null ? withRefs : withSkillRequest(skill, withRefs);
       const input = kept.contexts.length > 0 ? old.slice(0, kept.restAt) + own : own;
       if (input.length > RUN_INPUT_MAX_CHARS) throw new RunError("message_too_large");
       await tx.execute(sql`

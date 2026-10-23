@@ -5,6 +5,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "env": ["KOBE_BUILD_ID"],
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
     },
     "test": {

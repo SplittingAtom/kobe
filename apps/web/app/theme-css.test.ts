@@ -200,6 +200,13 @@ describe("status tokens (KOBE-301)", () => {
     ["light", light],
     ["dark", dark],
   ] as const) {
+    it(`white on the confirm button keeps AA, hovered too (${name})`, () => {
+      const fg = resolve(theme, "--kobe-confirm-fg");
+      for (const bg of ["--kobe-confirm", "--kobe-confirm-hover"]) {
+        expect(contrast(fg, resolve(theme, bg)), bg).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+
     it(`the gold tool badge keeps AA on its tint and on cards (${name}, KOBE-374)`, () => {
       const gold = resolve(theme, "--kobe-tool-badge");
       for (const surface of ["--kobe-tool-badge-bg", "--card", "--background"]) {

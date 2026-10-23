@@ -74,7 +74,7 @@ describe("ext-apps App against Kobe's bridge (review LOW-5)", () => {
     const result = await app.callServerTool({ name: "preview_table", arguments: { table: "t" } });
     expect(result.structuredContent).toEqual({ n: 1 });
     await app.sendMessage({ role: "user", content: [{ type: "text", text: "Use table t" }] });
-    expect(h.message).toHaveBeenCalledWith("Use table t");
+    expect(h.message).toHaveBeenCalledWith({ text: "Use table t", items: [], dropped: 0 });
     await app.updateModelContext({ structuredContent: { table: "t" } });
     expect(h.updateModelContext).toHaveBeenCalledWith({ structuredContent: { table: "t" } });
     expect(await app.requestDisplayMode({ mode: "fullscreen" })).toMatchObject({

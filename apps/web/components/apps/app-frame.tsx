@@ -13,7 +13,12 @@ import {
 import { appFrameUrl, callAppTool, listAppTools } from "../../lib/apps/app-api";
 import { APP_FRAME_SANDBOX } from "../../lib/apps/app-frame";
 import type { DisplayMode, ModelContext } from "../../lib/apps/bridge-schema";
-import { attachHostBridge, type HostBridge, type ToolCallAnswer } from "../../lib/apps/host-bridge";
+import {
+  attachHostBridge,
+  type AppMessage,
+  type HostBridge,
+  type ToolCallAnswer,
+} from "../../lib/apps/host-bridge";
 import { buildHostContext, type Placement } from "../../lib/apps/host-context";
 
 /**
@@ -56,7 +61,7 @@ export interface AppFrameProps {
   readonly toolInput?: Record<string, unknown> | undefined;
   readonly toolResult?: unknown;
   /** `ui/message`: insert into the composer, never send. False when there is no composer. */
-  readonly onMessage?: ((text: string) => boolean) | undefined;
+  readonly onMessage?: ((message: AppMessage) => boolean) | undefined;
   /** `ui/update-model-context`: the context chip. False when refused. */
   readonly onModelContext?: ((context: ModelContext) => boolean) | undefined;
   /** `ui/request-display-mode`: the mode actually shown. */
@@ -165,7 +170,7 @@ function FrameInstance(
           return answer;
         },
         listTools: () => listAppTools(appId, team, fetchFn),
-        message: (text) => current().onMessage?.(text) ?? false,
+        message: (message) => current().onMessage?.(message) ?? false,
         updateModelContext: (context) => current().onModelContext?.(context) ?? false,
         requestDisplayMode: (mode) =>
           current().onDisplayMode?.(mode) ??

@@ -14,6 +14,10 @@ WORKDIR /repo
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm fetch
 COPY . .
+# KOBE-487: the build id open tabs compare with /api/build (e.g. local-<sha12>); empty = a fresh
+# random one per build. Declared after COPY so it never invalidates the dependency layers.
+ARG KOBE_BUILD_ID=""
+ENV KOBE_BUILD_ID=${KOBE_BUILD_ID}
 RUN pnpm install --offline --frozen-lockfile \
  && pnpm turbo run build --filter=@kobe/web...
 

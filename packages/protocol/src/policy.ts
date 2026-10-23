@@ -158,6 +158,9 @@ export const POLICY_REASON_CODES = [
   "connector_not_in_run", // KOBE-451: not in the named run's run.start.mcp (off, or not the agent's) → deny
   "dangerous_mode", // AC1 (KOBE-476): an admin's Dangerous agent; allowed without asking (stage approval_mode)
   "not_a_member", // the run's user is deactivated or no longer in the team → deny
+  // KOBE-493: Pi write/edit to the run's viewed file: deny (stage site_deny) when the agent can
+  // propose_file_edit, else ask (stage ask_rule); in every mode. Never remembered.
+  "viewed_file",
   // Sandbox-side deny (kobe-policy / kobe-sandbox-agent): no server decision could be obtained
   // (policy channel closed, timed out, extension refused). Never produced by the server.
   "sandbox_policy_unavailable",

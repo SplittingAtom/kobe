@@ -7,7 +7,7 @@ import type { appContextBody } from "../apps/app-context";
 
 /** One `app_context` part as sent (KOBE-439). */
 export type AppContextWire = ReturnType<typeof appContextBody>[number];
-import type { MessageViewing, ThinkingLevel } from "@kobe/protocol";
+import type { ItemReference, MessageViewing, ThinkingLevel } from "@kobe/protocol";
 import type { FileEntry } from "../files/api";
 import type { ProposalView } from "../files/editor-state";
 import { apiDownload, apiRequest, apiTextFile, type ApiResult, type TextFile } from "../api/client";
@@ -208,6 +208,8 @@ export interface ChatApi {
       readonly viewing?: MessageViewing | undefined;
       /** Regenerate: the prompt entry whose run's viewed file is read again (KOBE-467). */
       readonly viewingFromEntry?: string | undefined;
+      /** Items an app put in the composer as chips (KOBE-490). */
+      readonly references?: readonly ItemReference[] | undefined;
     },
     idempotencyKey: string,
   ): Promise<ApiResult<SubmitResult>>;
@@ -423,6 +425,9 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
           ...(body.viewingFromEntry === undefined
             ? {}
             : { viewing_from_entry: body.viewingFromEntry }),
+          ...(body.references === undefined || body.references.length === 0
+            ? {}
+            : { references: body.references }),
         },
         teamId,
         idempotencyKey,

@@ -2,7 +2,8 @@
 # The Kobe Explorer Gate (KOBE-441; MCP Apps host spec docs/specs/mcp-apps-host.md §11): an MCP App
 # in the conversation first, then from the rail, with the negative checks. API checks run in a
 # server pod (e2e/gate-apps/client.mjs); the browser checks are Playwright specs in a real Chromium
-# (e2e/browser/tests/gate-apps/explorer.spec.ts and app-frame.spec.ts with KOBE_REQUIRE_APP=1).
+# (e2e/browser/tests/gate-apps/explorer.spec.ts, app-frame.spec.ts with KOBE_REQUIRE_APP=1, and
+# app-item-chips.spec.ts, KOBE-490).
 # docs/gates/gate-apps.md says what each check proves.
 #
 #   e2e/gate-apps.sh                  on k3d after the gate1-prep install (CI): the fake MCP server
@@ -245,7 +246,7 @@ contains "the member without a key sees the card as text" '^result=card:text:no_
 part_end nokey
 
 # ---- the browser checks -----------------------------------------------------------------------------
-SPECS=(gate-apps/explorer.spec.ts app-frame.spec.ts)
+SPECS=(gate-apps/explorer.spec.ts app-frame.spec.ts app-item-chips.spec.ts)
 PUBLIC_URL=$($KUBECTL -n "$NS" exec "$SERVER" -c server -- printenv KOBE_PUBLIC_URL 2>/dev/null || true)
 browser_env() { # the variables the specs read, except the password
   printf 'KOBE_BASE_URL=%s KOBE_USER=gate-apps-ad@gate-apps.test KOBE_FAKE_MODEL=1 KOBE_APPS_CONNECTOR=e2e-apps KOBE_APPS_PROBES=1 KOBE_APPS_SECRET=%s KOBE_REQUIRE_APP=1 KOBE_APP_ID=%s' \

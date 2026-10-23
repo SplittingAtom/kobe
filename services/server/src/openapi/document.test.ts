@@ -129,6 +129,7 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
       "mentions",
       "app_context",
       "skill",
+      "references",
       "viewing",
       "viewing_from_entry",
     ]);

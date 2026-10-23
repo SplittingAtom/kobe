@@ -79,6 +79,7 @@ const APP = () => `<!doctype html>
 <ul role="tree" aria-label="Catalog" id="tree"></ul>
 <section aria-label="Details" id="details"></section>
 <button type="button" id="use" hidden>Use in chat</button>
+<button type="button" id="use-item" hidden>Use as item</button>
 <div>
 <button type="button" id="probe-fetch">Probe fetch</button>
 <button type="button" id="probe-link">Probe open link</button>
@@ -133,6 +134,7 @@ async function select(id) {
   selected = id;
   await request("ui/update-model-context", { structuredContent: { table: id, columns } });
   document.getElementById("use").hidden = false;
+  document.getElementById("use-item").hidden = false;
   log("selected", id);
 }
 document.getElementById("use").addEventListener("click", async () => {
@@ -141,6 +143,27 @@ document.getElementById("use").addEventListener("click", async () => {
     content: [{ type: "text", text: "Use table \`" + selected + "\`" }],
   });
   log("message", answer.error ? "error" : "ok");
+});
+// KOBE-490: the item as a resource_link (a chip in Kobe's composer instead of the text), with
+// the parent namespace as a second link of another kind.
+document.getElementById("use-item").addEventListener("click", async () => {
+  const parts = selected.split(".");
+  const link = (path, kind) => ({
+    type: "resource_link",
+    uri: "e2e://explorer/" + path.map(encodeURIComponent).join("/"),
+    name: path.join("."),
+    title: kind + " " + path.join("."),
+    _meta: { "io.kobe/item-kind": kind },
+  });
+  const answer = await request("ui/message", {
+    role: "user",
+    content: [
+      { type: "text", text: "\`" + selected + "\`" },
+      link(parts, "table"),
+      link(parts.slice(0, -1), "namespace"),
+    ],
+  });
+  log("item", answer.error ? "error" : "ok");
 });
 document.getElementById("probe-fetch").addEventListener("click", async () => {
   try {

@@ -149,6 +149,59 @@ describe("site_agents (personal and gallery)", () => {
     expect(deleted).toHaveLength(1);
   });
 
+  it("marks a seeded gallery agent customized only as a whole (KOBE-494)", async () => {
+    const key = `cust-${randomUUID().slice(0, 8)}`;
+    const gallery = { scope: "gallery" as const, ownerUserId: null, galleryGeneration: 1 };
+    const marker = { customizedAt: new Date(), customizedBy: alice, customizedFromGeneration: 1 };
+    // Partial marker, a zero generation, or a gallery agent not seeded from the repo: refused.
+    expect(
+      await sqlState(
+        siteAgent({
+          ...gallery,
+          slug: `${key}-a`,
+          galleryKey: `${key}-a`,
+          customizedAt: new Date(),
+        }),
+      ),
+    ).toBe("23514");
+    expect(
+      await sqlState(
+        siteAgent({
+          ...gallery,
+          slug: `${key}-b`,
+          galleryKey: `${key}-b`,
+          ...marker,
+          customizedFromGeneration: 0,
+        }),
+      ),
+    ).toBe("23514");
+    expect(await sqlState(siteAgent({ ...gallery, slug: `${key}-c`, ...marker }))).toBe("23514");
+    // An unknown user: NO ACTION foreign key.
+    expect(
+      await sqlState(
+        siteAgent({
+          ...gallery,
+          slug: `${key}-d`,
+          galleryKey: `${key}-d`,
+          ...marker,
+          customizedBy: randomUUID(),
+        }),
+      ),
+    ).toBe("23503");
+    const [row] = await siteAgent({ ...gallery, slug: key, galleryKey: key, ...marker });
+    const id = row?.id ?? "";
+    // Reset to repository clears it as a whole.
+    await app.db
+      .update(siteAgents)
+      .set({ customizedAt: null, customizedBy: null, customizedFromGeneration: null })
+      .where(eq(siteAgents.id, id));
+    const [after] = await app.db
+      .select({ at: siteAgents.customizedAt })
+      .from(siteAgents)
+      .where(eq(siteAgents.id, id));
+    expect(after?.at).toBeNull();
+  });
+
   it("applies the same backstop checks as team agents", async () => {
     expect(await sqlState(siteAgent({ slug: "x".repeat(49) }))).toBe("23514");
     expect(await sqlState(siteAgent({ slug: "huge", prompt: "p".repeat(100 * 1024 + 1) }))).toBe(

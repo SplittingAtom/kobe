@@ -1,5 +1,6 @@
 "use client";
 
+import { splitItemReferences } from "@kobe/protocol";
 import { useId, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { moveItem, queuedMessages, queuingText } from "../../lib/chat/steering";
 import type { ThreadController } from "../../lib/chat/thread-controller";
@@ -16,6 +17,11 @@ interface Props {
   readonly controller: ThreadController;
 }
 
+/** A queued message's own text, without the server's references line (KOBE-490 review MEDIUM-2). */
+export function memberOwn(content: string): string {
+  return splitItemReferences(content).rest;
+}
+
 /** Where a drag would drop: the chips whose centre lies left of the pointer (start-of-drag rects). */
 function dropIndex(centres: readonly number[], from: number, x: number): number {
   return centres.filter((c, i) => i !== from && c < x).length;
@@ -29,10 +35,12 @@ function QueueEditor({
   onDone,
 }: Props & { readonly message: PendingMessage; readonly position: number; onDone(): void }) {
   const id = useId();
-  const [draft, setDraft] = useState(message.content);
+  // The server's references line (KOBE-490) is not the member's text: it stays with the message.
+  const own = memberOwn(message.content);
+  const [draft, setDraft] = useState(own);
   const save = async () => {
     const content = draft.trim();
-    if (content === "" || content === message.content) return onDone();
+    if (content === "" || content === own) return onDone();
     if (await controller.editQueued(message.runId, content)) onDone();
   };
   return (
@@ -189,12 +197,12 @@ export function SteeringQueue({ state, controller }: Props) {
                 />
                 <button
                   type="button"
-                  title={m.content}
-                  aria-label={`Edit queued message ${position}: ${m.content}`}
+                  title={memberOwn(m.content)}
+                  aria-label={`Edit queued message ${position}: ${memberOwn(m.content)}`}
                   className="min-w-0 truncate rounded-full px-1 text-start hover:underline"
                   onClick={() => setEditing(m.runId)}
                 >
-                  {m.content}
+                  {memberOwn(m.content)}
                 </button>
                 <IconAction
                   command="delete-queued"
