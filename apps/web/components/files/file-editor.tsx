@@ -9,7 +9,7 @@
  * under review (the session's `fileReviews`) replaces both modes with the inline diff: per-change
  * Accept/Reject, Commit all (saves at the proposal's base version, FE10) and Discard all.
  */
-import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from "react";
+import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
 import type { ApiError } from "../../lib/api/client";
 import type { FilesApi } from "../../lib/files/api";
 import { editBlockReason, editorLanguage, sha256Hex } from "../../lib/files/editor";
@@ -17,17 +17,20 @@ import type { EditDraftStore, FileReviewStore, ProposalView } from "../../lib/fi
 import { describeFileError } from "../../lib/files/format";
 import { fileName, previewOf } from "../../lib/files/preview";
 import { ErrorNotice } from "../admin/error-notice";
-import { TextView } from "./text-view";
+import {
+  BUTTON,
+  CodeEditor,
+  EditorFallback,
+  TextModeBody,
+  TextModeToolbar,
+  type TextMode,
+} from "./text-modes";
 
-const CodeEditor = lazy(() => import("./code-editor"));
+export { BUTTON, EditorFallback };
 
 export const CONFLICT_NOTICE =
   "This file changed since it was opened here (another save, or the agent), so nothing was saved.";
 const DISCARD_PROMPT = (name: string) => `Discard your unsaved changes to ${name}?`;
-
-type Mode = "rendered" | "raw";
-
-export const BUTTON = "hover:bg-muted rounded-md border px-2 py-0.5 text-xs disabled:opacity-50";
 
 /** The editor's saved version: the server's, else computed from what was saved. */
 async function savedVersion(text: string, sha256: string | undefined): Promise<string> {
@@ -129,15 +132,11 @@ export function SaveNotices({ state, onReload }: { readonly state: SaveState; on
   );
 }
 
-export function EditorFallback() {
-  return <p role="status">Loading the editor…</p>;
-}
-
 export function FileEditor(props: FileEditorProps) {
   const { path, text, sha256, truncated, drafts, reviews } = props;
   const draft = useDraft(drafts, path);
   const review = useReview(reviews, path);
-  const [mode, setMode] = useState<Mode>(draft === undefined ? "rendered" : "raw");
+  const [mode, setMode] = useState<TextMode>(draft === undefined ? "rendered" : "raw");
   const { state, save, reset } = useSave(props.api, path, (saved, version) => {
     // Keystrokes typed while the save was in flight stay unsaved, now based on the new version.
     const latest = drafts.get(path);
@@ -176,18 +175,7 @@ export function FileEditor(props: FileEditorProps) {
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <div role="toolbar" aria-label={`${name} view`} className="flex items-center gap-1">
-        {(["rendered", "raw"] as const).map((m) => (
-          <button
-            key={m}
-            type="button"
-            aria-pressed={mode === m}
-            className={`${BUTTON} aria-pressed:bg-muted`}
-            onClick={() => setMode(m)}
-          >
-            {m === "rendered" ? "Rendered" : "Raw"}
-          </button>
-        ))}
+      <TextModeToolbar label={`${name} view`} mode={mode} onMode={setMode}>
         {blocked === undefined && (
           <button
             type="button"
@@ -198,7 +186,7 @@ export function FileEditor(props: FileEditorProps) {
             {state.status === "saving" ? "Saving…" : "Save"}
           </button>
         )}
-      </div>
+      </TextModeToolbar>
       <p role="status" className="text-muted-foreground text-xs empty:hidden">
         {draft !== undefined ? "Unsaved changes." : state.status === "saved" ? "Saved." : ""}
       </p>
@@ -208,19 +196,14 @@ export function FileEditor(props: FileEditorProps) {
         </p>
       )}
       <SaveNotices state={state} onReload={reload} />
-      {mode === "rendered" ? (
-        <TextView text={current} preview={previewOf(path)} />
-      ) : (
-        <Suspense fallback={<EditorFallback />}>
-          <CodeEditor
-            value={current}
-            language={editorLanguage(previewOf(path))}
-            label={`Edit ${name}`}
-            readOnly={blocked !== undefined}
-            onChange={edit}
-          />
-        </Suspense>
-      )}
+      <TextModeBody
+        mode={mode}
+        text={current}
+        preview={previewOf(path)}
+        label={`Edit ${name}`}
+        readOnly={blocked !== undefined}
+        onChange={edit}
+      />
     </div>
   );
 }

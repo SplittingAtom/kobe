@@ -11,7 +11,12 @@ import {
   EVENT_ENTRY_PAYLOAD_MAX_BYTES,
   THREAD_CONTEXT_ERROR_MESSAGES,
 } from "@kobe/protocol";
-import type { KobeEvent, KobeEventPayload, KobeEventType } from "@kobe/protocol";
+import {
+  artifactFileExtension,
+  type KobeEvent,
+  type KobeEventPayload,
+  type KobeEventType,
+} from "@kobe/protocol";
 import { sha256Hex } from "../../files/editor";
 import type { EventSourceFactory, EventSourceLike } from "../stream";
 
@@ -1095,7 +1100,7 @@ export class FakeKobe {
         next_cursor: next < this.runnableAgents.length ? String(next) : null,
       });
     }
-    if (url.pathname.startsWith("/v1/artifacts")) return this.#artifactRoute(url, headers);
+    if (url.pathname.startsWith("/v1/artifacts")) return this.#artifactRoute(method, url, headers);
     if (url.pathname === "/v1/workspace/files/search" && method === "GET") {
       // KOBE-223: path contains q (case-insensitive), names starting with it first.
       const q = (url.searchParams.get("q") ?? "").toLowerCase();
@@ -1218,7 +1223,7 @@ export class FakeKobe {
     return error(404, "not_found");
   }
 
-  #artifactRoute(url: URL, headers: Headers): Response {
+  #artifactRoute(method: string, url: URL, headers: Headers): Response {
     const [, , id, , n, leaf] = url.pathname.split("/").filter(Boolean); // v1 artifacts id versions n leaf
     const isFrame = leaf === "frame";
     const team = isFrame ? url.searchParams.get("team") : headers.get("x-kobe-team");
@@ -1252,6 +1257,7 @@ export class FakeKobe {
     }
     const content = artifact.versions[Number(n) - 1];
     if (content === undefined) return error(404, "not_found");
+    if (leaf === "edit-as-file" && method === "POST") return this.#editAsFile(artifact, content);
     if (isFrame) {
       if (artifact.kind !== "html" && artifact.kind !== "svg") return error(404, "not_found");
       return new Response(content, {
@@ -1273,6 +1279,33 @@ export class FakeKobe {
         "x-content-type-options": "nosniff",
         "content-disposition": `attachment; filename="${artifact.title}-v${n}.txt"`,
       },
+    });
+  }
+
+  /**
+   * `POST /v1/artifacts/:id/versions/:n/edit-as-file` (KOBE-485): the version copied into the
+   * workspace as `artifacts/<slug>.<ext>`, `-2`, `-3` … on a clash; a reader's thread answers 403.
+   */
+  #editAsFile(artifact: FakeArtifact, content: string): Response {
+    if (this.threads.get(artifact.thread_id)?.read_only === true) return error(403, "read_only");
+    const stem = artifact.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+    const ext = artifactFileExtension(artifact.kind, artifact.language);
+    let path = `artifacts/${stem}.${ext}`;
+    for (let n = 2; this.workspaceFiles.has(path); n += 1) path = `artifacts/${stem}-${n}.${ext}`;
+    const bytes = new TextEncoder().encode(content);
+    this.workspaceFiles.set(path, bytes);
+    return json(201, {
+      name: path.split("/").at(-1),
+      path,
+      type: "file",
+      size_bytes: bytes.length,
+      mtime: NOW,
+      source: "synced",
+      owner: "server",
+      area: "workspace",
     });
   }
 

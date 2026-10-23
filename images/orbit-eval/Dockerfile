@@ -32,7 +32,13 @@ COPY images/orbit-eval/scenarios /opt/kobe/orbit-eval/scenarios
 
 # User 1000:1000 (numeric, for runAsNonRoot). /input holds the exported YAML (and an optional
 # pack), /output is where the Job mounts a volume for result.json. No setuid/setgid bits.
-RUN groupadd --gid 1000 kobe \
+# ca-certificates from trixie's updates: the base's 20250419 still trusts emSign ECC Root CA - G3
+# (compromised intermediates, KOBE-486); Python's ssl and aiohttp read this store. libpcre2-8-0
+# takes the trixie security fix (CVE-2026-103111).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates libpcre2-8-0 \
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd --gid 1000 kobe \
  && useradd --uid 1000 --gid 1000 --no-create-home --home-dir /tmp/home --shell /usr/sbin/nologin kobe \
  && mkdir -p /input /output \
  && chown 1000:1000 /output \

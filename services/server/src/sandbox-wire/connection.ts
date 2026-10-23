@@ -8,6 +8,7 @@ import {
   CAPABILITY_PROJECTS,
   CAPABILITY_SKILL_DRAFTS,
   CAPABILITY_TRACE_SPANS,
+  CAPABILITY_SESSION_RENEW,
   CAPABILITY_WEB_SEARCH,
   CAPABILITY_WORKSPACE_MOVES,
   builtinToolDescriptor,
@@ -65,7 +66,8 @@ import { onNotebookRun } from "./notebook-run.js";
 import { onSkillDraftSave } from "./skill-draft-save.js";
 import { createRunTranslator } from "./translate.js";
 import { TraceFrameRate, type RunOwner, type TraceIntake } from "./trace-intake.js";
-import type { CommandOutcome, SandboxTarget } from "./types.js";
+import type { CommandOutcome, SandboxTarget, SessionTokenVerifier } from "./types.js";
+import { RecentlyEndedRuns } from "./recently-ended.js";
 
 export interface ConnectionClaims {
   readonly sandboxId: string;
@@ -93,6 +95,8 @@ const POLICY_ANSWERED_MAX = 4_096;
 const FRAME_PREFIX = /^\s*\{\s*"v"\s*:\s*1\s*,\s*"type"\s*:\s*"([a-z._]{1,32})"/;
 /** Ended leases kept to answer late frames with `run_not_active`; older ones are forgotten. */
 const ENDED_LEASES_MAX = 256;
+/** `session.renew` frames with an invalid token a connection may send before it is closed. */
+const INVALID_RENEWALS_MAX = 3;
 
 function remember(set: Set<string>, value: string, max: number): void {
   set.add(value);
@@ -123,6 +127,8 @@ export class SandboxConnection implements RegisteredConnection {
   readonly #socket: WebSocket;
   readonly #registry: ConnectionRegistry;
   readonly #leases = new Map<string, Lease>();
+  /** Runs this sandbox held that ended without a live lease here (KOBE-483): late frames dropped. */
+  readonly #recentlyEnded = new RecentlyEndedRuns();
   readonly #threads = new Set<string>();
   readonly #uiSeen = new Set<string>();
   readonly #policyPending = new Map<string, AbortController>();
@@ -154,7 +160,9 @@ export class SandboxConnection implements RegisteredConnection {
   readonly #traces: TraceIntake | undefined;
   readonly #traceRate: TraceFrameRate | undefined;
   readonly #owner: RunOwner;
-  readonly #tokenExpiresAt: number;
+  #tokenExpiresAt: number;
+  #expiryTimer: NodeJS.Timeout | undefined;
+  #invalidRenewals = 0;
 
   constructor(
     ctx: WireContext,
@@ -308,6 +316,7 @@ export class SandboxConnection implements RegisteredConnection {
     const lease = this.#leases.get(runId);
     if (!lease) return;
     lease.ended = true;
+    this.#recentlyEnded.add(runId, lease.threadId);
     this.#traces?.ended(runId);
     lease.ingest.close();
     this.#deniedBuckets.delete(runId);
@@ -495,6 +504,9 @@ export class SandboxConnection implements RegisteredConnection {
       case "trace.spans":
         this.#onTraceSpans(frame);
         return;
+      case "session.renew":
+        this.#onSessionRenew(frame.token);
+        return;
       case "command.result":
         this.#onCommandResult(frame);
         return;
@@ -534,10 +546,7 @@ export class SandboxConnection implements RegisteredConnection {
 
   #checkRun(runId: string, threadId: string, frameType: string): "ok" | "ended" | "violation" {
     const lease = this.#leases.get(runId);
-    if (!lease) {
-      this.#violate("unknown_run", frameType);
-      return "violation";
-    }
+    if (!lease) return this.#checkRecentlyEnded(runId, threadId, frameType);
     if (lease.threadId !== threadId) {
       this.#violate("unknown_thread", frameType);
       return "violation";
@@ -548,6 +557,26 @@ export class SandboxConnection implements RegisteredConnection {
       return "ended";
     }
     return "ok";
+  }
+
+  /**
+   * No lease here: a run this sandbox held that just ended (interrupted by this connection's hello,
+   * or an ended lease the count cap evicted) gets its late frame dropped within the grace window
+   * (KOBE-483); anything else is a lease violation and closes the connection.
+   */
+  #checkRecentlyEnded(runId: string, threadId: string, frameType: string): "ended" | "violation" {
+    const recent = this.#recentlyEnded.match(runId, threadId);
+    if (recent === "match") {
+      this.#ctx.metrics.lateFrames += 1;
+      this.log.debug(
+        { run_id: runId, frame_type: frameType },
+        "late frame of an ended run dropped",
+      );
+      this.sendError("run_not_active", "the run has ended", frameType);
+      return "ended";
+    }
+    this.#violate(recent === "thread_mismatch" ? "unknown_thread" : "unknown_run", frameType);
+    return "violation";
   }
 
   #checkThread(threadId: string, frameType: string): boolean {
@@ -1535,7 +1564,11 @@ export class SandboxConnection implements RegisteredConnection {
     }
     // Runs the sandbox no longer has (Pi or agent restarted, volume lost): interrupted, never
     // resumed (D14). Runs it offers that we don't list are aborted by the agent.
-    for (const run of lost) await this.interrupt(run.runId, "not_resumed");
+    for (const run of lost) {
+      // The agent may still send a frame of it (an abort in flight): dropped, not a violation.
+      this.#recentlyEnded.add(run.runId, run.threadId);
+      await this.interrupt(run.runId, "not_resumed");
+    }
     await this.#reconcileOrphans(orphans, new Set(listed.map((r) => r.runId)));
     if ((this.#state as State) === "closed") return;
     this.#state = "ready";
@@ -1613,10 +1646,64 @@ export class SandboxConnection implements RegisteredConnection {
         .catch((err: unknown) => this.log.warn({ err }, "connection heartbeat write failed"));
     });
     this.#every(tuning.revalidateMs, () => this.revalidate());
-    // The session token expires (15 min, KOBE-22): the sandbox reconnects with a fresh one and
-    // resumes its runs from their durable cursors.
-    const expiresIn = this.#tokenExpiresAt - Date.now() + tuning.tokenExpiryGraceMs;
-    this.#later(Math.max(0, expiresIn), () => this.close("unauthorized", "session token expired"));
+    this.#armExpiry();
+  }
+
+  /**
+   * The session token expires (15 min, KOBE-22). An agent with `session_renew` hands over its fresh
+   * token in band before then (KOBE-483) and the deadline moves; otherwise the sandbox reconnects
+   * with a fresh one and resumes its runs from their durable cursors.
+   */
+  #armExpiry(): void {
+    clearTimeout(this.#expiryTimer);
+    const expiresIn = this.#tokenExpiresAt - Date.now() + this.#ctx.tuning.tokenExpiryGraceMs;
+    this.#expiryTimer = setTimeout(
+      () => this.close("unauthorized", "session token expired"),
+      Math.max(0, expiresIn),
+    );
+    this.#expiryTimer.unref();
+  }
+
+  /**
+   * `session.renew` (KOBE-483): a fresh token for the same (sandbox, team, user, eval thread) moves
+   * the expiry; a token for any other identity closes the connection; an invalid or expired one is
+   * ignored (the old deadline stands). Never logs the token.
+   */
+  #onSessionRenew(token: string): void {
+    if (!this.#capabilities.has(CAPABILITY_SESSION_RENEW)) {
+      this.log.warn({ sandbox_id: this.sandboxId }, "session.renew without the capability ignored");
+      return;
+    }
+    let claims: ReturnType<SessionTokenVerifier>;
+    try {
+      claims = this.#ctx.verifyToken(token);
+    } catch {
+      this.#invalidRenewals += 1;
+      this.log.warn({ sandbox_id: this.sandboxId }, "session.renew with an invalid token ignored");
+      if (this.#invalidRenewals >= INVALID_RENEWALS_MAX)
+        this.close("unauthorized", "too many invalid session renewals");
+      return;
+    }
+    const sameIdentity =
+      claims.sub === this.sandboxId &&
+      claims.team_id === this.target.teamId &&
+      claims.user_id === this.target.userId &&
+      claims.eval_thread === this.target.evalThreadId;
+    if (!sameIdentity) {
+      this.log.warn(
+        { sandbox_id: this.sandboxId, security: true },
+        "session.renew for another identity",
+      );
+      this.close("unauthorized", "renewed token names another identity");
+      return;
+    }
+    const expiresAt = claims.exp * 1000;
+    if (expiresAt <= Date.now() || expiresAt <= this.#tokenExpiresAt) return;
+    this.#tokenExpiresAt = expiresAt;
+    this.#armExpiry();
+    // A renewal never outlives offboarding: re-check liveness, account and membership now.
+    this.revalidate();
+    this.log.debug({ sandbox_id: this.sandboxId, expires_at: expiresAt }, "session renewed");
   }
 
   /** Re-checks the sandbox's liveness and its user's account and membership; closes if gone. */
@@ -1635,6 +1722,7 @@ export class SandboxConnection implements RegisteredConnection {
     this.#state = "closed";
     this.#ctx.metrics.connectionsClosed += 1;
     for (const t of this.#timers) clearTimeout(t);
+    clearTimeout(this.#expiryTimer);
     this.#timers = [];
     for (const abort of this.#policyPending.values()) abort.abort();
     this.#policyPending.clear();

@@ -3,9 +3,11 @@
  * snake_case; `apiRequest` camelizes, so these are the camelized shapes of `ArtifactSummary` /
  * `ArtifactDetail` (`@kobe/protocol`).
  */
-import type { ArtifactKind } from "@kobe/protocol";
+import { artifactFileExtension, isArtifactTextKind, type ArtifactKind } from "@kobe/protocol";
+import { previewOf, type FilePreview } from "../files/preview";
 
 export type { ArtifactKind };
+export { isArtifactTextKind };
 
 export interface ArtifactSummaryView {
   readonly id: string;
@@ -112,3 +114,16 @@ export const ARTIFACT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "create_artifact",
   "update_artifact",
 ]);
+
+/**
+ * How a text artifact shows in the file editor's UI (KOBE-485): as a workspace file with the
+ * artifact's extension would, so Rendered and Raw match the file editor. A code artifact whose
+ * language has no extension of its own keeps its language for highlighting.
+ */
+export function artifactPreview(kind: ArtifactKind, language: string | null): FilePreview {
+  const preview = previewOf(`artifact.${artifactFileExtension(kind, language)}`);
+  if (kind === "code" && language !== null && language !== "text" && preview.kind === "text") {
+    return { kind: "code", language };
+  }
+  return preview;
+}

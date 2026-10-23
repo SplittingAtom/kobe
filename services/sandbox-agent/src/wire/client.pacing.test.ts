@@ -114,3 +114,147 @@ describe("WireClient send pacing (KOBE-429)", () => {
     expect(server.received).toEqual(backlog);
   }, 15_000);
 });
+
+describe("WireClient ended runs (KOBE-483)", () => {
+  const RUN_A = "11111111-1111-4111-8111-111111111111";
+  const RUN_B = "22222222-2222-4222-8222-222222222222";
+  const THREAD = "33333333-3333-4333-8333-333333333333";
+  const ui = (runId: string, id: string) =>
+    ({
+      v: 1,
+      type: "pi.ui_request",
+      thread_id: THREAD,
+      run_id: runId,
+      request: { type: "extension_ui_request", id, method: "setStatus" },
+    }) as const;
+
+  it("drops queued frames of a run once it ended and refuses later ones; events and other runs go out", async () => {
+    const server = rateLimitedServer();
+    const slow: PaceLimits = {
+      framesPerSec: 20,
+      frameBurst: 2,
+      bytesPerSec: 48 * 1024,
+      byteBurst: 32 * 1024,
+    };
+    const ready = new Promise<void>((resolve) => {
+      client = new WireClient({
+        url: server.url,
+        readToken: () => Promise.resolve("t"),
+        hello: () =>
+          ({
+            v: 1,
+            type: "hello",
+            sandbox_id: "6f1c2b9e-3a4d-4e5f-8a7b-1c2d3e4f5a6b",
+            agent_version: "0.0.0-test",
+            pi_version: "1.0.0",
+            runs: [],
+          }) as never,
+        onReady: () => resolve(),
+        onFrame: () => undefined,
+        onDisconnected: () => undefined,
+        onFatal: () => undefined,
+        logger: { info: () => undefined, warn: () => undefined, debug: () => undefined },
+        pace: slow,
+      });
+      client.start();
+    });
+    await ready;
+    const c = client as WireClient;
+    const event = JSON.stringify({ v: 1, type: "pi.event", run_id: RUN_A, seq: 1 });
+    for (let i = 0; i < 4; i++) c.send(ui(RUN_B, `b${i}`)); // fill the burst and queue
+    expect(c.send(ui(RUN_A, "late"))).toBe(true); // queued behind the pacer
+    c.sendText(event); // durable events of an ended run still go (the outbox owns them)
+    c.endRun(RUN_A);
+    expect(c.send(ui(RUN_A, "later"))).toBe(false);
+    const deadline = Date.now() + 3_000;
+    while (server.received.length < 5 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    await new Promise((r) => setTimeout(r, 200));
+    const ids = server.received.map((t) => {
+      const f = JSON.parse(t) as { type: string; request?: { id: string } };
+      return f.type === "pi.ui_request" ? f.request?.id : f.type;
+    });
+    expect(ids).toEqual(["b0", "b1", "b2", "b3", "pi.event"]);
+  }, 10_000);
+
+  it("sends frames of a run again once it starts again under the same id", async () => {
+    const server = rateLimitedServer();
+    const ready = new Promise<void>((resolve) => {
+      client = new WireClient({
+        url: server.url,
+        readToken: () => Promise.resolve("t"),
+        hello: () =>
+          ({
+            v: 1,
+            type: "hello",
+            sandbox_id: "6f1c2b9e-3a4d-4e5f-8a7b-1c2d3e4f5a6b",
+            agent_version: "0.0.0-test",
+            pi_version: "1.0.0",
+            runs: [],
+          }) as never,
+        onReady: () => resolve(),
+        onFrame: () => undefined,
+        onDisconnected: () => undefined,
+        onFatal: () => undefined,
+        logger: { info: () => undefined, warn: () => undefined, debug: () => undefined },
+        pace: AGENT,
+      });
+      client.start();
+    });
+    await ready;
+    const c = client as WireClient;
+    c.endRun(RUN_A);
+    expect(c.send(ui(RUN_A, "ended"))).toBe(false);
+    c.startRun(RUN_A);
+    expect(c.send(ui(RUN_A, "again"))).toBe(true);
+    const deadline = Date.now() + 3_000;
+    while (server.received.length < 1 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    const ids = server.received.map(
+      (t) => (JSON.parse(t) as { request?: { id: string } }).request?.id,
+    );
+    expect(ids).toEqual(["again"]);
+  }, 10_000);
+});
+
+describe("WireClient session renewal (KOBE-483)", () => {
+  it("hands the live connection each fresh token once, never the one it dialled with", async () => {
+    const server = rateLimitedServer();
+    let token = "token-one-aaaaaaaaaaaaaaaa";
+    const ready = new Promise<void>((resolve) => {
+      client = new WireClient({
+        url: server.url,
+        readToken: () => Promise.resolve(token),
+        hello: () =>
+          ({
+            v: 1,
+            type: "hello",
+            sandbox_id: "6f1c2b9e-3a4d-4e5f-8a7b-1c2d3e4f5a6b",
+            agent_version: "0.0.0-test",
+            pi_version: "1.0.0",
+            runs: [],
+          }) as never,
+        onReady: () => resolve(),
+        onFrame: () => undefined,
+        onDisconnected: () => undefined,
+        onFatal: () => undefined,
+        logger: { info: () => undefined, warn: () => undefined, debug: () => undefined },
+        pace: AGENT,
+        renewIntervalMs: 30,
+      });
+      client.start();
+    });
+    await ready;
+    await new Promise((r) => setTimeout(r, 150));
+    token = "token-two-bbbbbbbbbbbbbbbb";
+    await new Promise((r) => setTimeout(r, 200));
+    const renewals = server.received
+      .map((t) => JSON.parse(t) as { type: string; token?: string })
+      .filter((f) => f.type === "session.renew");
+    expect(renewals).toEqual([
+      { v: 1, type: "session.renew", token: "token-two-bbbbbbbbbbbbbbbb" },
+    ]);
+  }, 10_000);
+});

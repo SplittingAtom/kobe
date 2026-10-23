@@ -167,6 +167,9 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
     });
   const approvals = options.approvals ?? DENY_APPROVALS;
   let liveness: SandboxLiveness = NOT_LIVE;
+  let verifyToken: SessionTokenVerifier = () => {
+    throw new Error("sandbox listener not attached");
+  };
   const userListeners = new Set<(userId: string) => void>();
   const violationAudits = new Map<string, number>();
 
@@ -324,6 +327,9 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
     hooks,
     get liveness() {
       return liveness;
+    },
+    get verifyToken() {
+      return verifyToken;
     },
     metrics,
     log,
@@ -498,6 +504,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
     router,
     attach(server, auth) {
       liveness = auth.liveness;
+      verifyToken = auth.verify;
       const detach = attachSandboxGateway(server, {
         verify: auth.verify,
         liveness: auth.liveness,

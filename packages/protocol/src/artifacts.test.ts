@@ -15,6 +15,8 @@ import {
   kobeToolsResponseSchema,
   updateArtifactInputSchema,
   CAPABILITY_ARTIFACTS,
+  artifactFileExtension,
+  isArtifactTextKind,
 } from "./index.js";
 import { EXAMPLE_IDS } from "./testing/index.js";
 
@@ -251,5 +253,23 @@ describe("kobe-tools memory ops (KOBE-157)", () => {
         truncated: false,
       }).success,
     ).toBe(true);
+  });
+});
+
+describe("Edit as file (KOBE-485)", () => {
+  it("treats markdown, code and csv as text kinds; html, svg and mermaid keep their viewers", () => {
+    expect(ARTIFACT_KINDS.filter(isArtifactTextKind)).toEqual(["markdown", "code", "csv"]);
+  });
+
+  it("names the extension from the kind, else the code language, else txt", () => {
+    expect(artifactFileExtension("markdown", null)).toBe("md");
+    expect(artifactFileExtension("csv", null)).toBe("csv");
+    expect(artifactFileExtension("code", "python")).toBe("py");
+    expect(artifactFileExtension("code", "json")).toBe("json");
+    expect(artifactFileExtension("code", "tsv")).toBe("tsv");
+    expect(artifactFileExtension("code", "text")).toBe("txt");
+    expect(artifactFileExtension("code", "haskell")).toBe("txt");
+    expect(artifactFileExtension("code", null)).toBe("txt");
+    expect(artifactFileExtension("mermaid", null)).toBe("mmd");
   });
 });

@@ -191,3 +191,75 @@ export const artifactDetailSchema = artifactSummarySchema.extend({
   versions: z.array(artifactVersionInfoSchema),
 });
 export type ArtifactDetail = z.infer<typeof artifactDetailSchema>;
+
+// ------------------------------------------------------------------ Edit as file (KOBE-485)
+
+/**
+ * Kinds shown in the file editor's UI (read-only Rendered/Raw) that a thread's owner may copy into
+ * their workspace with Edit as file. HTML, SVG and Mermaid keep their own viewers.
+ */
+export const ARTIFACT_TEXT_KINDS = [
+  "markdown",
+  "code",
+  "csv",
+] as const satisfies readonly ArtifactKind[];
+
+export function isArtifactTextKind(kind: ArtifactKind | string): boolean {
+  return (ARTIFACT_TEXT_KINDS as readonly string[]).includes(kind);
+}
+
+/** The workspace folder Edit as file copies into: `artifacts/<slug>.<ext>`. */
+export const ARTIFACT_FILE_FOLDER = "artifacts";
+
+/** File extension of a code artifact's `language`; anything else is `txt`. */
+const LANGUAGE_EXTENSIONS: Readonly<Record<string, string>> = {
+  python: "py",
+  javascript: "js",
+  typescript: "ts",
+  tsx: "tsx",
+  jsx: "jsx",
+  json: "json",
+  yaml: "yaml",
+  toml: "toml",
+  xml: "xml",
+  markdown: "md",
+  csv: "csv",
+  tsv: "tsv",
+  text: "txt",
+  bash: "sh",
+  shell: "sh",
+  sh: "sh",
+  sql: "sql",
+  css: "css",
+  html: "html",
+  rust: "rs",
+  go: "go",
+  java: "java",
+  c: "c",
+  "c++": "cpp",
+  "c#": "cs",
+  ruby: "rb",
+  php: "php",
+  r: "r",
+};
+
+/** File extension of an artifact (downloads, exports and Edit as file). */
+export function artifactFileExtension(
+  kind: ArtifactKind | string,
+  language: string | null,
+): string {
+  switch (kind) {
+    case "html":
+      return "html";
+    case "svg":
+      return "svg";
+    case "markdown":
+      return "md";
+    case "mermaid":
+      return "mmd";
+    case "csv":
+      return "csv";
+    default:
+      return (language !== null && LANGUAGE_EXTENSIONS[language]) || "txt";
+  }
+}

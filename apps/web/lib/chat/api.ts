@@ -8,6 +8,7 @@ import type { appContextBody } from "../apps/app-context";
 /** One `app_context` part as sent (KOBE-439). */
 export type AppContextWire = ReturnType<typeof appContextBody>[number];
 import type { MessageViewing, ThinkingLevel } from "@kobe/protocol";
+import type { FileEntry } from "../files/api";
 import type { ProposalView } from "../files/editor-state";
 import { apiDownload, apiRequest, apiTextFile, type ApiResult, type TextFile } from "../api/client";
 import { readThreadContext, type ContextRead } from "./context-viewer";
@@ -282,6 +283,11 @@ export interface ChatApi {
   /** The bytes of one version as text, for the panel's renderers. */
   artifactContent(artifactId: string, version: number): Promise<ApiResult<TextFile>>;
   /**
+   * Edit as file (KOBE-485): the server copies the version into the caller's workspace as
+   * `artifacts/<slug>.<ext>` (`-2`, `-3` … on a clash) and answers the new file. Thread owner only.
+   */
+  artifactEditAsFile(artifactId: string, version: number): Promise<ApiResult<FileEntry>>;
+  /**
    * The thread's `propose_file_edit` proposals as the server recorded them (KOBE-462, FE9; the
    * owner only), oldest first: the proposal cards after a reload.
    */
@@ -458,6 +464,8 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     getArtifact: (id) => get(`/v1/artifacts/${enc(id)}`),
     artifactContent: (id, version) =>
       apiTextFile(`/v1/artifacts/${enc(id)}/versions/${version}/content`, { teamId, fetchFn }),
+    artifactEditAsFile: (id, version) =>
+      send("POST", `/v1/artifacts/${enc(id)}/versions/${version}/edit-as-file`),
     fileEditProposals: async (id) => {
       const res = await get<{ proposals: readonly (ProposalView & Record<string, unknown>)[] }>(
         `/v1/threads/${enc(id)}/file-edit-proposals`,
