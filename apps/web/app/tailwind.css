@@ -54,6 +54,10 @@
   --color-status-idle: var(--kobe-status-idle);
   --color-status-accent: var(--kobe-status-accent);
   --color-status-accent-fg: var(--kobe-status-accent-fg);
+  /* The confirm call to action (app/theme.css): bg-confirm, hover:bg-confirm-hover, text-confirm-fg. */
+  --color-confirm: var(--kobe-confirm);
+  --color-confirm-hover: var(--kobe-confirm-hover);
+  --color-confirm-fg: var(--kobe-confirm-fg);
   /* The gold tool badge (KOBE-374): text-tool-badge, bg-tool-badge-bg, border-tool-badge-border. */
   --color-tool-badge: var(--kobe-tool-badge);
   --color-tool-badge-bg: var(--kobe-tool-badge-bg);

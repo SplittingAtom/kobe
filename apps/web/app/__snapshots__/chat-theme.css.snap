@@ -41,6 +41,9 @@
   --color-status-idle: var(--kobe-status-idle);
   --color-status-accent: var(--kobe-status-accent);
   --color-status-accent-fg: var(--kobe-status-accent-fg);
+  --color-confirm: var(--kobe-confirm);
+  --color-confirm-hover: var(--kobe-confirm-hover);
+  --color-confirm-fg: var(--kobe-confirm-fg);
   --color-tool-badge: var(--kobe-tool-badge);
   --color-tool-badge-bg: var(--kobe-tool-badge-bg);
   --color-tool-badge-border: var(--kobe-tool-badge-border);
