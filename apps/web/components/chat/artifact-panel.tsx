@@ -30,6 +30,7 @@ import type { FilesApi } from "../../lib/files/api";
 import { fileName, filePathOfTab, tabDomId } from "../../lib/files/preview";
 import { confirmDiscard, useUnsavedGuard } from "../files/file-editor";
 import { FileTabContent } from "../files/file-tab";
+import { useFileChangeHint } from "./use-file-change-hint";
 import type { TextMode } from "../files/text-modes";
 import { AppFrame } from "../apps/app-frame";
 import { useAppComposer } from "../apps/use-app-composer";
@@ -256,6 +257,7 @@ function FileTab({
   // The kernel of the conversation on screen (KOBE-465): notebooks and `.py` files run there.
   const threadId = useAuiState((s) => kobeExtrasOf(s)?.state.threadId ?? null);
   const readOnly = useThreadReadOnly();
+  const changeHint = useFileChangeHint(path, threadId);
   const kernel = useMemo(
     () => ({
       threadId,
@@ -279,6 +281,7 @@ function FileTab({
       drafts={session.editDrafts}
       reviews={session.fileReviews}
       kernel={kernel}
+      changeHint={changeHint}
     />
   );
 }

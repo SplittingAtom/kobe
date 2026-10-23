@@ -9,7 +9,7 @@ import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { sha256Hex } from "../../lib/files/editor";
 import { must } from "../../lib/testing/must";
 import { composer, openApp } from "../chat/testing";
-import { CONFLICT_NOTICE } from "./file-editor";
+import { SAVE_CONFLICT_NOTICE } from "./outside-change-notice";
 import { EXPIRED_NOTE } from "./file-edit-card";
 
 /**
@@ -121,7 +121,7 @@ describe("Rendered and Raw (ac-1)", () => {
     });
   });
 
-  it("a file changed meanwhile is not overwritten: the conflict notice offers a reload", async () => {
+  it("a file changed meanwhile is not overwritten: the conflict offers Take theirs (KOBE-491)", async () => {
     const thread = threadWithFile("data.json", '{"a":1}');
     openApp(fake, thread);
     const user = userEvent.setup();
@@ -130,12 +130,12 @@ describe("Rendered and Raw (ac-1)", () => {
     fake.workspaceFiles.set("data.json", enc('{"a":3}')); // the agent pushed meanwhile
     await user.click(screen.getByRole("button", { name: "Save" }));
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain(CONFLICT_NOTICE);
+    expect(alert.textContent).toContain(SAVE_CONFLICT_NOTICE);
     expect(fake.workspaceSaves).toEqual([]);
     expect(new TextDecoder().decode(fake.workspaceFiles.get("data.json"))).toBe('{"a":3}');
 
     answerConfirm(true);
-    await user.click(within(alert).getByRole("button", { name: "Reload the file" }));
+    await user.click(within(alert).getByRole("button", { name: "Take theirs" }));
     await waitFor(async () =>
       expect((await editorView("Edit data.json")).state.doc.toString()).toBe('{"a":3}'),
     );

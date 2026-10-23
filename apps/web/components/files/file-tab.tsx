@@ -12,6 +12,7 @@
  * Cannot preview, with Download. Text is read up to 1 MB; large images are not fetched. Text files
  * open in the file editor (KOBE-463, `file-editor.tsx`): Rendered and Raw modes, Save, and the
  * review of the agent's proposals; the version a save names is the SHA-256 of the bytes read.
+ * An open text tab follows outside changes to its file (KOBE-491, `use-outside-change.ts`).
  */
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { NOTEBOOK_FILE_MAX_BYTES } from "@kobe/protocol";
@@ -38,6 +39,8 @@ import { useArtifactPanel } from "../chat/artifact-state";
 import { EditorFallback, FileEditor } from "./file-editor";
 import type { KernelWiring } from "../notebooks/use-kernel";
 import { TextView } from "./text-view";
+import type { ChangeHint } from "../chat/use-file-change-hint";
+import { useOutsideChange, type OutsideChange } from "./use-outside-change";
 import { IconAction } from "../shell/icon-action";
 import styles from "../chat/chat.module.css";
 
@@ -167,6 +170,9 @@ interface EditorWiring {
   reread(): void;
   /** The conversation's kernel (KOBE-465): notebooks and `.py` files run in it. */
   readonly kernel?: KernelWiring | undefined;
+  /** An outside change to the file (KOBE-491) and the banner's Keep mine. */
+  readonly outside: OutsideChange | null;
+  dismissOutside(): void;
 }
 
 function FileBody({
@@ -249,6 +255,8 @@ function FileBody({
                 reviews={editor.reviews}
                 onSaved={editor.saved}
                 onReload={editor.reread}
+                outside={editor.outside}
+                onOutsideDismiss={editor.dismissOutside}
               />
               {isPython(path) && editor.kernel && (
                 <Suspense fallback={null}>
@@ -275,6 +283,7 @@ export function FileTabContent({
   drafts,
   reviews,
   kernel,
+  changeHint,
 }: {
   readonly path: string;
   readonly api: FilesApi;
@@ -288,9 +297,24 @@ export function FileTabContent({
   readonly reviews?: FileReviewStore | undefined;
   /** The conversation's kernel (KOBE-465); without it, notebooks and `.py` files do not run. */
   readonly kernel?: KernelWiring | undefined;
+  /** When to check whether the file changed outside this tab (KOBE-491). */
+  readonly changeHint?: ChangeHint | null | undefined;
 }) {
   const { loaded, reread, saved } = useFilePreview(api, path, reload, onGone);
-  const editor = drafts && reviews ? { api, drafts, reviews, saved, reread, kernel } : undefined;
+  // Text files in the editor follow outside changes; notebooks keep today's explicit reload.
+  const known = drafts && loaded.status === "text" && !isNotebook(path) ? loaded.sha256 : undefined;
+  const { outside, dismiss } = useOutsideChange({
+    api,
+    path,
+    known,
+    hint: changeHint,
+    drafts,
+    reread,
+  });
+  const editor =
+    drafts && reviews
+      ? { api, drafts, reviews, saved, reread, kernel, outside, dismissOutside: dismiss }
+      : undefined;
   const [downloadError, setDownloadError] = useState<ApiError | null>(null);
   const name = fileName(path);
   const download = async () => {

@@ -118,17 +118,17 @@ test("file editor: raw edit and save, conflict notice, viewing chip, proposal co
     await expect(tab.getByText("Saved.")).toBeVisible();
     expect((await workspace(page, "read", path)).text).toBe(`${BASE}edited in raw\n`);
 
-    // Someone else saves meanwhile: this save is refused with the notice; Reload shows theirs.
+    // Someone else saves meanwhile: this save is refused with the choices; Take theirs shows it.
     await editor.click();
     await page.keyboard.press("ControlOrMeta+End");
     await page.keyboard.type("never saved\n");
     expect((await workspace(page, "overwrite", path, BASE)).status).toBe(200);
     await tab.getByRole("button", { name: "Save", exact: true }).click();
-    const conflict = tab.getByRole("alert").filter({ hasText: "changed since it was opened" });
+    const conflict = tab.getByRole("alert").filter({ hasText: "nothing was saved" });
     await expect(conflict).toBeVisible();
     expect((await workspace(page, "read", path)).text).toBe(BASE);
     page.once("dialog", (dialog) => void dialog.accept());
-    await conflict.getByRole("button", { name: "Reload the file" }).click();
+    await conflict.getByRole("button", { name: "Take theirs" }).click();
     await expect(tab.getByText("Unsaved changes.")).toHaveCount(0);
     await expect(editor).not.toContainText("never saved");
 

@@ -22,26 +22,33 @@ export const THREAD_FILES_RETRY_MS: readonly number[] = [1_500, 3_000, 6_000, 12
 const NO_FILES: readonly FileEntry[] = [];
 
 /**
- * Paths of the live run's successful `write`/`edit` calls outside agent-internal folders,
- * normalised, sorted and joined by
- * newlines: a stable string, so streamed deltas don't re-render the caller.
+ * The workspace paths of the live run's successful `write`/`edit` calls, one per call (normalised;
+ * agent-internal folders skipped). Also the open file tabs' change hint (KOBE-491).
+ */
+export function liveWritePaths(
+  s: Parameters<typeof kobeExtrasOf>[0],
+  threadId: string | undefined,
+): readonly string[] {
+  const extras = kobeExtrasOf(s);
+  const live = extras?.state.live;
+  if (!live || threadId === undefined || extras?.state.threadId !== threadId) return [];
+  return Object.values(live.tools).flatMap((t) => {
+    if (t.result === undefined || t.result.is_error || !WRITE_TOOLS.includes(t.result.tool)) {
+      return [];
+    }
+    const path = (t.call?.input as { path?: unknown } | undefined)?.path;
+    const normal = typeof path === "string" ? workspaceToolPath(path) : undefined;
+    // Agent-internal files (`.kobe/`) are never listed: waiting for them would only re-read.
+    return normal === undefined || isExcludedPath(normal) ? [] : [normal];
+  });
+}
+
+/**
+ * Paths of the live run's successful writes, sorted and joined by newlines: a stable string, so
+ * streamed deltas don't re-render the caller.
  */
 function useLiveWrites(threadId: string | undefined): string {
-  return useAuiState((s) => {
-    const extras = kobeExtrasOf(s);
-    const live = extras?.state.live;
-    if (!live || threadId === undefined || extras?.state.threadId !== threadId) return "";
-    const paths = Object.values(live.tools).flatMap((t) => {
-      if (t.result === undefined || t.result.is_error || !WRITE_TOOLS.includes(t.result.tool)) {
-        return [];
-      }
-      const path = (t.call?.input as { path?: unknown } | undefined)?.path;
-      const normal = typeof path === "string" ? workspaceToolPath(path) : undefined;
-      // Agent-internal files (`.kobe/`) are never listed: waiting for them would only re-read.
-      return normal === undefined || isExcludedPath(normal) ? [] : [normal];
-    });
-    return [...new Set(paths)].sort().join("\n");
-  });
+  return useAuiState((s) => [...new Set(liveWritePaths(s, threadId))].sort().join("\n"));
 }
 
 interface ThreadFiles {

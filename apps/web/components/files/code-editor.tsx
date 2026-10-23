@@ -29,6 +29,7 @@ import {
   lineNumbers,
 } from "@codemirror/view";
 import type { EditorLanguage } from "../../lib/files/editor";
+import { minimalChange } from "../../lib/files/outside-change";
 import { documentCspNonce } from "../../lib/security/csp-nonce";
 import { languageExtension } from "./editor-languages";
 
@@ -281,7 +282,12 @@ export default function CodeEditor({
     if (!view || value === synced.current) return;
     synced.current = value;
     if (view.state.doc.toString() === value) return;
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
+    // Only the changed middle (KOBE-491): the cursor and scroll outside it stay where they were.
+    const change = minimalChange(view.state.doc.toString(), value);
+    if (!change) return;
+    const top = view.scrollDOM.scrollTop;
+    view.dispatch({ changes: change });
+    view.scrollDOM.scrollTop = top;
   }, [view, value]);
 
   return (
