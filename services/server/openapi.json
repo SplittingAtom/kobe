@@ -7949,6 +7949,28 @@
             "type": "string",
             "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$"
           },
+          "references": {
+            "minItems": 1,
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "pattern": "^[^`\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]+$"
+                },
+                "kind": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]{0,31}$"
+                }
+              },
+              "required": ["name", "kind"],
+              "additionalProperties": false
+            }
+          },
           "viewing": {
             "type": "object",
             "properties": {

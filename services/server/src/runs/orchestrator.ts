@@ -2,7 +2,9 @@ import {
   imitatesAppContext,
   imitatesSkillRequest,
   splitAppContext,
+  splitItemReferences,
   splitSkillRequest,
+  withItemReferences,
   withSkillRequest,
   type RunViewingContext,
 } from "@kobe/protocol";
@@ -512,7 +514,12 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
         });
         if (!names.includes(skill)) throw new RunError("skill_not_available");
       }
-      const text = skill === undefined ? mentioned.text : withSkillRequest(skill, mentioned.text);
+      // Items an app put in the composer as chips (KOBE-490): one line after the member's text.
+      const own = withItemReferences(
+        command.trigger === "user" ? (command.references ?? []) : [],
+        mentioned.text,
+      );
+      const text = skill === undefined ? own : withSkillRequest(skill, own);
       // The member's chips go first, fenced as untrusted data (KOBE-439, spec §8).
       const input = withAppContext(appContext, text);
       // The rendered blocks count toward the input's limit (review LOW-F): a clear 413.
@@ -766,7 +773,9 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       const kept = splitAppContext(old);
       // ... and so does the skill picked for it (KOBE-451).
       const skill = splitSkillRequest(kept.rest).skill;
-      const own = skill === null ? text : withSkillRequest(skill, text);
+      // ... and so do the app items it references (KOBE-490).
+      const withRefs = withItemReferences(splitItemReferences(kept.rest).references, text);
+      const own = skill === null ? withRefs : withSkillRequest(skill, withRefs);
       const input = kept.contexts.length > 0 ? old.slice(0, kept.restAt) + own : own;
       if (input.length > RUN_INPUT_MAX_CHARS) throw new RunError("message_too_large");
       await tx.execute(sql`

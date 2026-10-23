@@ -6,6 +6,7 @@
  * a branchable message repository (`parentId` + `headId`).
  */
 import { appContextBody } from "../../lib/apps/app-context";
+import { referencesBody } from "../../lib/apps/app-items";
 import {
   fromThreadMessageLike,
   MessageNotSentError,
@@ -186,6 +187,8 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
     const skill = session.skillPicks.get(draft);
     // The file open in the artifact column, unless its chip was removed (KOBE-463, FE7).
     const viewing = session.viewing.body();
+    // Items an app put in the composer as chips (KOBE-490): the ones shown, as references.
+    const items = session.appItems.forDraft(draft);
     const created = threadId === undefined;
     if (threadId === undefined) {
       try {
@@ -198,14 +201,23 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
     const target = session.peek(threadId) ?? controller;
     // The controller reports its own failures; a throw must never leave the composer stuck.
     const sent = await (
-      target?.send(text, parentEntryId, attach, mentions, contexts, skill, viewing) ??
-      Promise.resolve(false)
+      target?.send(
+        text,
+        parentEntryId,
+        attach,
+        mentions,
+        contexts,
+        skill,
+        viewing,
+        referencesBody(items),
+      ) ?? Promise.resolve(false)
     ).catch(() => false);
     if (sent) {
       session.attachments.sent(draft);
       session.mentions.clear(draft);
       session.appContexts.clear(draft);
       session.skillPicks.clear(draft);
+      session.appItems.removeSent(draft, items);
     }
     // The thread exists but the message did not go: the composer is on that thread now, so the
     // files (and picked mentions) follow it instead of staying under the abandoned "new" draft
@@ -214,6 +226,7 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
       session.attachments.move(draft, threadId);
       session.mentions.move(draft, threadId);
       session.skillPicks.move(draft, threadId);
+      session.appItems.move(draft, threadId);
     }
     if (created) session.threadCreated();
     return sent;

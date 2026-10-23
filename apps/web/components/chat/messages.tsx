@@ -1,7 +1,7 @@
 "use client";
 
 import { splitAppContext } from "../../lib/apps/app-context";
-import { splitSkillRequest } from "@kobe/protocol";
+import { splitItemReferences, splitSkillRequest } from "@kobe/protocol";
 import {
   ActionBarPrimitive,
   AuiIf,
@@ -24,6 +24,7 @@ import { shortcutOf } from "../../lib/shell/shortcuts";
 import { Button } from "../ui/button";
 import { IconAction } from "../shell/icon-action";
 import { AppCardPart } from "../apps/app-card";
+import { SentItemChips } from "../apps/app-item-chips";
 import { editSkillKey, useChatSession, useKobeExtras } from "./kobe-runtime";
 import { useSkillPick } from "./plus-skills";
 import { isReadOnlyThread } from "./project-bar";
@@ -69,8 +70,11 @@ function PlainText({ text }: TextMessagePartProps) {
   const meta = useMeta();
   const parsed = splitSkillRequest(afterContext);
   const skill = (meta?.kind === "user" ? meta.skill : undefined) ?? parsed.skill;
-  const rest = parsed.rest;
-  if (contexts.length === 0 && skill === null) return <span>{text}</span>;
+  // Items an app put in the composer as chips (KOBE-490): the server's line, shown as chips.
+  const { references, rest } = splitItemReferences(parsed.rest);
+  if (contexts.length === 0 && skill === null && references.length === 0) {
+    return <span>{text}</span>;
+  }
   return (
     <>
       {contexts.length > 0 && (
@@ -89,6 +93,7 @@ function PlainText({ text }: TextMessagePartProps) {
       )}
       {skill !== null && <SentSkill name={skill} />}
       <span className={skill !== null ? "block" : undefined}>{rest}</span>
+      <SentItemChips references={references} />
     </>
   );
 }

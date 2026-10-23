@@ -4,7 +4,12 @@
  * queue, Steer, Stop; D14: Retry / Continue without retry; branch switch and edit-and-regenerate).
  * The server decides everything; this only shows what it says and asks again after each change.
  */
-import { isTerminalRunStatus, type KobeEvent, type ThinkingLevel } from "@kobe/protocol";
+import {
+  isTerminalRunStatus,
+  type ItemReference,
+  type KobeEvent,
+  type ThinkingLevel,
+} from "@kobe/protocol";
 import type { ApiError, ApiResult } from "../api/client";
 import type { AppContextWire, ChatApi, CompactResult, ForkOptions } from "./api";
 import { newIdempotencyKey } from "./keys";
@@ -669,9 +674,19 @@ export class ThreadController {
     appContext?: readonly AppContextWire[],
     skill?: string,
     viewing?: ViewingChoice,
+    references?: readonly ItemReference[],
   ): Promise<boolean> => {
     try {
-      return await this.#send(text, parentEntryId, attach, mentions, appContext, skill, viewing);
+      return await this.#send(
+        text,
+        parentEntryId,
+        attach,
+        mentions,
+        appContext,
+        skill,
+        viewing,
+        references,
+      );
     } catch {
       // Whatever failed, the composer must not stay stuck: the message is offered back.
       this.#set((s) => ({ ...s, sending: undefined }));
@@ -688,6 +703,7 @@ export class ThreadController {
     appContext?: readonly AppContextWire[],
     skill?: string,
     viewing?: ViewingChoice,
+    references?: readonly ItemReference[],
   ): Promise<boolean> {
     const threadId = this.#state.threadId;
     // One message at a time: a second Enter before the server answered is not a second message.
@@ -711,6 +727,7 @@ export class ThreadController {
       appContext,
       skill,
       ...viewingBody(viewing),
+      references,
     };
     let res = await this.#api.sendMessage(threadId, body, key);
     if (!res.ok && res.error.status === 0) res = await this.#api.sendMessage(threadId, body, key);
