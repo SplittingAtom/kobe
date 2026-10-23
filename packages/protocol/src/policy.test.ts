@@ -153,6 +153,7 @@ describe("server-side tool registry", () => {
         "propose_project_file",
         "read",
         "propose_file_edit",
+        "open_file",
         "run_python",
         "read_mcp_resource",
         "recall",

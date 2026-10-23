@@ -19,8 +19,9 @@ import { useSkillOfToolCall } from "./skill-badge";
 import { ApprovalSlot, ArtifactSlot, EgressBlocked, FileSlot } from "./slots";
 import { SkillDraftCard } from "./skill-draft-card";
 import { SAVE_SKILL_DRAFT_TOOL } from "../../lib/skills/draft-tool-result";
-import { PROPOSE_FILE_EDIT_TOOL } from "@kobe/protocol";
+import { OPEN_FILE_TOOL, PROPOSE_FILE_EDIT_TOOL } from "@kobe/protocol";
 import { FileEditCard } from "../files/file-edit-card";
+import { OpenFileCard } from "../files/open-file-card";
 import styles from "./chat.module.css";
 
 const NO_ACTIVITY: ToolActivity = { egressBlocked: [], artifacts: [], files: [] };
@@ -197,12 +198,15 @@ function ToolCardSlots({
   toolName,
   toolCallId,
   result,
+  args,
   failed,
 }: {
   readonly activity: ToolActivity;
   readonly toolName: string;
   readonly toolCallId?: string;
   readonly result: unknown;
+  /** The call's input (KOBE-484: the path `open_file` opened, after a reload). */
+  readonly args?: unknown;
   /** The call failed or was denied (KOBE-463: no proposal to show). */
   readonly failed: boolean;
 }) {
@@ -250,6 +254,15 @@ function ToolCardSlots({
         <FileEditCard
           toolCallId={toolCallId}
           live={activity.fileEdit}
+          done={result !== undefined}
+          failed={failed}
+        />
+      )}
+      {toolName === OPEN_FILE_TOOL && toolCallId !== undefined && (
+        <OpenFileCard
+          toolCallId={toolCallId}
+          live={activity.fileOpened}
+          args={args}
           done={result !== undefined}
           failed={failed}
         />
@@ -311,6 +324,7 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
         toolName={props.toolName}
         toolCallId={props.toolCallId}
         result={props.result ?? activity.result?.preview}
+        args={props.args}
         failed={outcome === "error" || outcome === "denied"}
       />
       {props.toolName.startsWith("mcp__") && (

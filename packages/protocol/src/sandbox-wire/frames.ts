@@ -44,6 +44,7 @@ import {
   fileEditProposeFrameSchema,
   fileEditProposeResultFrameSchema,
 } from "./file-edit-frames.js";
+import { fileOpenFrameSchema, fileOpenResultFrameSchema } from "./file-open-frames.js";
 import {
   notebookExecuteFrameSchema,
   notebookInterruptFrameSchema,
@@ -292,6 +293,7 @@ export const sandboxToServerFrameSchema = z.union([
   projectFileProposeFrameSchema,
   skillDraftSaveFrameSchema,
   fileEditProposeFrameSchema,
+  fileOpenFrameSchema,
   notebookOutputFrameSchema,
   notebookRunFrameSchema,
   webSearchQueryFrameSchema,
@@ -673,6 +675,7 @@ export const serverToSandboxFrameSchema = z.union([
   projectFileProposeResultFrameSchema,
   skillDraftSaveResultFrameSchema,
   fileEditProposeResultFrameSchema,
+  fileOpenResultFrameSchema,
   notebookRunResultFrameSchema,
   notebookExecuteFrameSchema,
   notebookInterruptFrameSchema,

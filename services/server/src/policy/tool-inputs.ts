@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   artifactToolInputSchema,
   fileEditToolInputSchema,
+  fileOpenToolInputSchema,
   notebookToolInputSchema,
   projectToolInputSchema,
   skillDraftToolInputSchema,
@@ -64,6 +65,7 @@ export const BUILTIN_INPUT_SCHEMAS: Readonly<Record<string, z.ZodType<unknown>>>
   propose_project_file: projectToolInputSchema.propose_project_file,
   save_skill_draft: skillDraftToolInputSchema.save_skill_draft,
   propose_file_edit: fileEditToolInputSchema.propose_file_edit,
+  open_file: fileOpenToolInputSchema.open_file,
   run_python: notebookToolInputSchema.run_python,
 };
 
@@ -78,6 +80,7 @@ const PATH_TOOLS: Readonly<Record<string, { readonly defaultsToCwd: boolean }>> 
   share_file: { defaultsToCwd: false },
   propose_project_file: { defaultsToCwd: false },
   propose_file_edit: { defaultsToCwd: false },
+  open_file: { defaultsToCwd: false },
   run_python: { defaultsToCwd: false },
 };
 

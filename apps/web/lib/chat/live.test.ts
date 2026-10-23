@@ -302,6 +302,21 @@ describe("file.edit_proposed (KOBE-463)", () => {
   });
 });
 
+describe("file.opened (KOBE-484)", () => {
+  it("lands on its tool call (the card's Open again), not as a notice", () => {
+    seq = 0;
+    const opened = { tool_call_id: "call-4", path: "notes.md" };
+    const events = [
+      ev("run.started", { thread_id: THREAD, agent_id: null, agent_version: null }),
+      ev("tool.call", { tool_call_id: "call-4", tool: "open_file", input: {}, risk: "read" }),
+      ev("file.opened", opened),
+    ];
+    const run = applyRunEvents(newLiveRun(RUN), events).run;
+    expect(run.tools["call-4"]?.fileOpened).toEqual(opened);
+    expect(run.notices).toEqual([]);
+  });
+});
+
 describe("notebook events (KOBE-464)", () => {
   it("are ignored by the chat stream until the notebook view (KOBE-465)", () => {
     seq = 0;

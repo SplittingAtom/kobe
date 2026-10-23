@@ -70,6 +70,14 @@ the end. Needs the deployment's sandbox agent with `file_edits` (KOBE-462) and n
 mode for the team; run it pinned to the member's team: `KOBE_TEAM=team1 npx playwright test
 file-editor`.
 
+## Agent opens a file (KOBE-484)
+
+`open-file.spec.ts` uploads `kobe-484-*/notes.md` into the member's workspace, asks the agent to
+open it (one short turn; with `KOBE_FAKE_MODEL=1` the fake's `tool: open_file` line), and expects
+the "Opened notes.md" card and the file's tab open by itself in the editor with Rendered and Raw.
+It deletes the folder at the end. Needs a deployment whose sandbox agent registers `open_file`
+(`file_edits`) and no `ask-all` approval mode: `KOBE_TEAM=team1 npx playwright test open-file`.
+
 ## Resizable rail (KOBE-305)
 
 `rail-resize.spec.ts` drags the handle on the rail's right edge to 400 px, checks the width is

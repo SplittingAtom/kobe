@@ -213,13 +213,14 @@ const EVAL_ISOLATED: PolicyReason = {
     "Skill evals never use your memory, projects or synced workspace files; this call was denied.",
 };
 /**
- * Never in an eval run: memory, projects, and `propose_file_edit` (KOBE-462), which reads and
- * targets the member's synced workspace, not the eval sandbox's own files.
+ * Never in an eval run: memory, projects, `propose_file_edit` (KOBE-462) and `open_file`
+ * (KOBE-484), which read and target the member's synced workspace, not the eval sandbox's files.
  */
 const EVAL_ISOLATED_TOOLS: ReadonlySet<string> = new Set([
   ...MEMORY_TOOLS,
   ...PROJECT_TOOLS,
   "propose_file_edit",
+  "open_file",
 ]);
 
 /**

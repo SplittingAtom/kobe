@@ -4,6 +4,7 @@ import { parseMemoryReply } from "./memory-reply.js";
 import { parseProjectReply } from "./project-reply.js";
 import { parseSkillDraftReply } from "./skill-draft-tool.js";
 import { parseFileEditReply } from "./file-edit-tool.js";
+import { parseFileOpenReply } from "./open-file-tool.js";
 import { parseNotebookReply } from "./notebook-tool.js";
 import {
   MAX_PENDING_REQUESTS,
@@ -19,6 +20,7 @@ import {
   type ProjectProposeAnswer,
   type SkillDraftAnswer,
   type FileEditAnswer,
+  type FileOpenAnswer,
   type NotebookRunAnswer,
   type WebSearchUnavailable,
 } from "./protocol.js";
@@ -32,6 +34,7 @@ export type ToolsOutcome =
   | SkillDraftAnswer
   | NotebookRunAnswer
   | FileEditAnswer
+  | FileOpenAnswer
   | { readonly ok: true; readonly artifact_id: string; readonly version: number }
   | ({ readonly ok: true } & SharedFileFields)
   | { readonly ok: false; readonly error: ToolsError };
@@ -145,6 +148,7 @@ function parseResponse(line: string): ToolsResponse | undefined {
   if (value.ok === true && value.op === "project_file_propose") return parseProjectReply(value);
   if (value.ok === true && value.op === "skill_draft_save") return parseSkillDraftReply(value);
   if (value.ok === true && value.op === "file_edit_propose") return parseFileEditReply(value);
+  if (value.ok === true && value.op === "file_open") return parseFileOpenReply(value);
   if (value.ok === true && value.op === "notebook_run") return parseNotebookReply(value);
   if (value.ok === true && "op" in value) return parseMemoryReply(value);
   if (value.ok === true && "available" in value) return parseWebSearchReply(value);

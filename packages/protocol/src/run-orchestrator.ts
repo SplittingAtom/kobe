@@ -129,6 +129,11 @@ export const runSnapshotSchema = z.strictObject({
   approval_mode: approvalModeSchema,
   started_at: timestampSchema.optional(),
   ended_at: timestampSchema.optional(),
+  /**
+   * `runs.last_seq` when read — KOBE-484: a client streaming a run it did not start treats events
+   * at or below it as history (no auto-open of `file.opened`). Absent from older servers.
+   */
+  last_seq: z.number().int().nonnegative().optional(),
 });
 export type RunSnapshot = z.infer<typeof runSnapshotSchema>;
 

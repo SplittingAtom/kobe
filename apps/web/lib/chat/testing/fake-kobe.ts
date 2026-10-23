@@ -872,6 +872,7 @@ export class FakeKobe {
       approval_mode: "ask-on-write",
       ...(rank >= 0 ? { queue_pos: rank + 1 } : {}),
       ...(run.retry_of_run_id ? { retry_of_run_id: run.retry_of_run_id } : {}),
+      last_seq: run.events.length,
     };
   }
 

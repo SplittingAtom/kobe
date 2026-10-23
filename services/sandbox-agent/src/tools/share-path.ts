@@ -52,20 +52,32 @@ function lexicalRel(root: string, input: string): string {
   const issue = rel === "." ? "the workspace root" : workspacePathIssue(rel);
   if (issue !== undefined) throw new SharePathError("invalid_path", `invalid path: ${issue}`);
   if (isExcludedPath(rel)) {
-    throw new SharePathError("invalid_path", "files under .kobe/ cannot be shared");
+    throw new SharePathError("invalid_path", "files under .kobe/ are the agent's own data");
   }
   return rel;
 }
 
-export async function resolveSharePath(root: string, input: string): Promise<ResolvedSharePath> {
+/**
+ * Steps 1 and 2 only (no size limit): one regular workspace file outside `.kobe/`, reached without
+ * a symlink. Also `open_file` (KOBE-484), which opens files of any size.
+ */
+export async function resolveWorkspaceFile(
+  root: string,
+  input: string,
+): Promise<ResolvedSharePath> {
   const rel = lexicalRel(root, input);
-  let file;
   try {
-    file = await confineFile(root, rel, { allowMissing: false });
+    const file = await confineFile(root, rel, { allowMissing: false });
+    return { rel, size: file.size };
   } catch (error) {
     if (error instanceof ConfineError) throw new SharePathError(error.code, error.message);
     throw error;
   }
+}
+
+export async function resolveSharePath(root: string, input: string): Promise<ResolvedSharePath> {
+  const file = await resolveWorkspaceFile(root, input);
+  const { rel } = file;
   if (file.size > FILE_SHARE_MAX_BYTES) {
     throw new SharePathError(
       "too_large",

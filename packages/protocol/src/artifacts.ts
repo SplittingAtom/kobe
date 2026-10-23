@@ -10,6 +10,7 @@ import { fileShareOkFields, fileShareToolsRequestSchema } from "./files.js";
 import { memoryPutOkFields, memoryReadOkFields, memoryToolsRequestSchema } from "./memory.js";
 import { skillDraftSaveOkFields, skillDraftToolsRequestSchema } from "./skill-draft-tool.js";
 import { fileEditProposeOkFields, fileEditToolsRequestSchema } from "./file-editor.js";
+import { fileOpenOkFields, fileOpenToolsRequestSchema } from "./file-open.js";
 import { notebookRunOkFields, notebookToolsRequestSchema } from "./notebooks.js";
 
 /**
@@ -137,6 +138,7 @@ export const kobeToolsRequestSchema = z.union([
   memoryToolsRequestSchema, // KOBE-157 (memory.ts)
   skillDraftToolsRequestSchema, // KOBE-442 (skill-draft-tool.ts)
   fileEditToolsRequestSchema, // KOBE-462 (file-editor.ts)
+  fileOpenToolsRequestSchema, // KOBE-484 (file-open.ts)
   notebookToolsRequestSchema, // KOBE-464 (notebooks.ts)
 ]);
 export type KobeToolsRequest = z.infer<typeof kobeToolsRequestSchema>;
@@ -151,6 +153,7 @@ export const kobeToolsResponseSchema = z.union([
   z.strictObject({ id: idSchema, ...memoryReadOkFields }), // KOBE-157
   z.strictObject({ id: idSchema, ...skillDraftSaveOkFields }), // KOBE-442 (skill-draft-tool.ts)
   z.strictObject({ id: idSchema, ...fileEditProposeOkFields }), // KOBE-462 (file-editor.ts)
+  z.strictObject({ id: idSchema, ...fileOpenOkFields }), // KOBE-484 (file-open.ts)
   z.strictObject({ id: idSchema, ...notebookRunOkFields }), // KOBE-464 (notebooks.ts)
   z.strictObject({ id: idSchema, ...artifactFailFields }),
 ]);

@@ -469,6 +469,28 @@ const CASES: readonly Case[] = [
     effect: "deny",
     codes: ["invalid_input"],
   },
+  {
+    name: "open_file is a read: not prompted in ask-on-write (KOBE-484)",
+    tool: builtin("open_file"),
+    input: { path: "/workspace/notes.md" },
+    effect: "allow",
+    codes: ["risk_read"],
+  },
+  {
+    name: "a team deny rule on a path refuses open_file (KOBE-484)",
+    tool: builtin("open_file"),
+    input: { path: "/workspace/secret/plan.md" },
+    rules: [rule("team", "deny", "open_file", { arg_pattern: { "/path": "/workspace/secret/*" } })],
+    effect: "deny",
+    codes: ["team_deny_rule"],
+  },
+  {
+    name: "open_file takes only a path (KOBE-484)",
+    tool: builtin("open_file"),
+    input: { path: "notes.md", content: "x" },
+    effect: "deny",
+    codes: ["invalid_input"],
+  },
   // 5. thread approval mode.
   {
     name: "ask-all prompts even for a read-only tool",

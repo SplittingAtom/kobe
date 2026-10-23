@@ -22,6 +22,7 @@ export const BOUND_TOOLS = [
   "propose_project_file",
   "save_skill_draft",
   "propose_file_edit",
+  "open_file",
   "run_python",
 ] as const;
 export type BoundToolName = (typeof BOUND_TOOLS)[number];

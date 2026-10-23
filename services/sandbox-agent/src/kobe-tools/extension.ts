@@ -17,6 +17,7 @@ import {
 } from "./protocol.js";
 import { saveSkillDraftTool } from "./skill-draft-tool.js";
 import { proposeFileEditTool } from "./file-edit-tool.js";
+import { openFileTool } from "./open-file-tool.js";
 import { runPythonTool } from "./notebook-tool.js";
 import {
   artifactTools,
@@ -135,7 +136,10 @@ export function registerKobeTools(
   if (options.files === true) pi.registerTool(shareFileTool(transport));
   if (options.projects === true) pi.registerTool(proposeProjectFileTool(transport));
   if (options.skillDrafts === true) pi.registerTool(saveSkillDraftTool(transport));
-  if (options.fileEdits === true) pi.registerTool(proposeFileEditTool(transport));
+  if (options.fileEdits === true) {
+    pi.registerTool(proposeFileEditTool(transport));
+    pi.registerTool(openFileTool(transport)); // KOBE-484
+  }
   if (options.notebooks === true) pi.registerTool(runPythonTool(transport));
   if (options.memory === true) {
     pi.registerTool(rememberTool(transport));

@@ -101,6 +101,13 @@ export class ThreadController {
   #loadStarted = false;
   #leafVersion = 0;
   #lastStreamedRun: string | undefined;
+  /**
+   * KOBE-484: per streamed run, the seq this client already counts as history when it first
+   * opened the run's stream (0 for runs this tab started; else the run's `last_seq` the server
+   * reported, at least the resume point). Only `file.opened` events above it open a tab.
+   */
+  readonly #historySeq = new Map<string, number>();
+  readonly #ownRuns = new Set<string>();
 
   constructor(threadId: string | null, options: ControllerOptions) {
     this.#state = initialThreadState(threadId);
@@ -432,6 +439,7 @@ export class ThreadController {
   #open(runId: string): void {
     if (this.#disposed) return;
     const after = this.#state.live?.runId === runId ? this.#state.live.lastSeq : 0;
+    if (!this.#historySeq.has(runId)) this.#historySeq.set(runId, this.#historyOf(runId, after));
     this.#set((s) => ({ ...s, connection: "connecting" }));
     this.#stream = openRunStream(
       runId,
@@ -456,11 +464,13 @@ export class ThreadController {
     const wasStarted = live.started;
     const applied = applyRunEvents(live, events);
     const now = new Date().toISOString();
+    const opened = this.#liveFileOpen(runId, live.lastSeq, events);
     this.#set((s) => ({
       ...s,
       live: applied.run,
       entries: mergeCommittedEntries(s.entries, applied.entries, now),
       connection: "open",
+      ...(opened === undefined ? {} : { fileOpenRequest: opened }),
     }));
     const terminal = applied.run.terminal;
     if (terminal !== undefined) clearResumePoint(this.#resume, runId);
@@ -555,6 +565,34 @@ export class ThreadController {
     }
     this.#stream = undefined;
     void this.refresh();
+  }
+
+  /**
+   * Where history ends for a run whose stream opens now: nothing for a run this tab started;
+   * else the server's `last_seq` from the run list (a reload's or another tab's run), never below
+   * the resume point; unknown (older server) means everything already sent is history.
+   */
+  #historyOf(runId: string, after: number): number {
+    if (this.#ownRuns.has(runId)) return 0;
+    const snapshot = [...this.#state.runs, this.#state.interruptedRun].find(
+      (r) => r?.runId === runId,
+    );
+    return Math.max(after, snapshot?.lastSeq ?? Number.POSITIVE_INFINITY);
+  }
+
+  /**
+   * The newest `file.opened` of this batch that is new to this client and above the run's
+   * history (KOBE-484): a replayed backlog never opens a tab, live events do.
+   */
+  #liveFileOpen(
+    runId: string,
+    afterSeq: number,
+    events: readonly KobeEvent[],
+  ): ThreadState["fileOpenRequest"] {
+    const history = Math.max(afterSeq, this.#historySeq.get(runId) ?? Number.POSITIVE_INFINITY);
+    const last = events.findLast((e) => e.type === "file.opened" && e.seq > history);
+    if (last?.type !== "file.opened") return undefined;
+    return { runId, toolCallId: last.payload.tool_call_id, path: last.payload.path };
   }
 
   #onSignal(runId: string, signal: StreamSignal): void {
@@ -684,6 +722,7 @@ export class ThreadController {
       return false;
     }
     const { runId, queued } = res.data;
+    this.#ownRuns.add(runId);
     this.#set((s) => ({
       ...s,
       // A queued message stays shown as "sending" until the queue read below lists it.

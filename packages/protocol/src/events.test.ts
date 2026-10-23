@@ -43,6 +43,7 @@ describe("Kobe Event Stream types", () => {
       "file.shared",
       "skill.draft_saved",
       "file.edit_proposed",
+      "file.opened",
       "notebook.started",
       "notebook.output",
       "notebook.finished",

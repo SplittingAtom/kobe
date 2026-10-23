@@ -12,6 +12,7 @@ setup:
         - find
         - grep
         - ls
+        - open_file
         - powershell
         - propose_file_edit
         - propose_project_file

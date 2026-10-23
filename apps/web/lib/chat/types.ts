@@ -189,6 +189,8 @@ export interface RunSnapshot {
   readonly userEntryId?: string | undefined;
   readonly startedAt?: string | undefined;
   readonly endedAt?: string | undefined;
+  /** The run's last event seq when the server answered (KOBE-484; absent from older servers). */
+  readonly lastSeq?: number | undefined;
 }
 
 /** `GET /v1/threads/{id}/runs`: the active run, then queued runs; the run an interrupted thread waits on. */

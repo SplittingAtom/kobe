@@ -9,6 +9,7 @@
  *                       {"id","op":"project.file_propose","tool_call_id","tool":"propose_project_file","input"}
  *                       {"id","op":"skill.draft_save","tool_call_id","tool":"save_skill_draft","input"}
  *                       {"id","op":"file.edit_propose","tool_call_id","tool":"propose_file_edit","input"}
+ *                       {"id","op":"file.open","tool_call_id","tool":"open_file","input"}
  *   agent → extension   {"id","ok":true,"artifact_id","version"}            (artifact.put)
  *                       {"id","ok":true,"file_id","name","mime_type","size_bytes","scan",
  *                        "created_at","sha256"}                              (file.share)
@@ -36,6 +37,7 @@ export const OP_MEMORY_PUT = "memory.put";
 export const OP_MEMORY_READ = "memory.read";
 export const OP_SKILL_DRAFT_SAVE = "skill.draft_save";
 export const OP_FILE_EDIT_PROPOSE = "file.edit_propose";
+export const OP_FILE_OPEN = "file.open";
 export const OP_NOTEBOOK_RUN = "notebook.run";
 export const OPS = [
   OP_ARTIFACT_PUT,
@@ -46,6 +48,7 @@ export const OPS = [
   OP_MEMORY_READ,
   OP_SKILL_DRAFT_SAVE,
   OP_FILE_EDIT_PROPOSE,
+  OP_FILE_OPEN,
   OP_NOTEBOOK_RUN,
 ] as const;
 
@@ -98,6 +101,8 @@ export const SKILL_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
  */
 export const TOOLS_FILE_EDITS_ENV = "KOBE_TOOLS_FILE_EDITS";
 export const TOOL_PROPOSE_FILE_EDIT = "propose_file_edit";
+/** KOBE-484: registered with `propose_file_edit` (same capability and env var). */
+export const TOOL_OPEN_FILE = "open_file";
 /** Mirror packages/protocol `file-editor.ts` (pinned by a test). */
 export const FILE_EDIT_CONTENT_MAX_BYTES = 128 * 1024;
 export const FILE_EDIT_SUMMARY_MAX = 500;
@@ -185,6 +190,13 @@ export interface FileEditAnswer {
   readonly base_sha256: string;
 }
 
+/** `open_file` answer (KOBE-484): the user's client opens `path`. */
+export interface FileOpenAnswer {
+  readonly ok: true;
+  readonly op: "file_open";
+  readonly path: string;
+}
+
 /** `run_python` answer: how the execution ended, its outputs as text for the model. */
 export interface NotebookRunAnswer {
   readonly ok: true;
@@ -244,6 +256,7 @@ export type ToolsResponse =
   | ({ readonly id: string } & ProjectProposeAnswer)
   | ({ readonly id: string } & SkillDraftAnswer)
   | ({ readonly id: string } & FileEditAnswer)
+  | ({ readonly id: string } & FileOpenAnswer)
   | ({ readonly id: string } & NotebookRunAnswer)
   | ({ readonly id: string } & WebSearchAnswer)
   | ({ readonly id: string } & WebSearchUnavailable)

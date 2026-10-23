@@ -120,6 +120,17 @@ one run event (256 KiB as JSON; a larger escaped payload is refused `too_large`)
 never gets `run.start.viewing` (the server drops it); old clients never send `viewing` or call
 the save route. One migration (`runs.viewing`, nullable).
 
+**FE13. `open_file` (KOBE-484).** `open_file {path}` asks the run owner's web client to open a
+workspace file in the artifact column (text in the editor, other types in their viewers). A read
+(not prompted in ask-on-write), bound to its allowed check and single use, eval-isolated like
+`propose_file_edit`, and registered with it (`file_edits`). The agent confines the path (a missing
+file is a tool error), pushes the file, then sends `file.open`; the server checks a live synced
+file of the owner's own workspace (read-only areas allowed, internal paths never) and records
+`file.opened {tool_call_id, path}`, no content. The web opens the tab only on a live event (a run
+this tab started, or after the replay window), never on a reload; the card "Opened <name>" offers
+Open again to the owner only. Agent guidance: `open_file` to open, show or view a file;
+`share_file` only for a download.
+
 ## 3. Shapes the web needs (KOBE-463)
 
 - Save: `workspaceSaveQuerySchema`, 200 `workspaceSaveResponseSchema` (a file entry), 409
@@ -128,3 +139,5 @@ the save route. One migration (`runs.viewing`, nullable).
 - Proposals: event `file.edit_proposed` (`fileEditProposedPayloadSchema`), list
   `fileEditProposalsResponseSchema`; the tool card is the `propose_file_edit` tool call
   (`PROPOSE_FILE_EDIT_TOOL`), matched by `tool_call_id`.
+- Open: event `file.opened` (`fileOpenedPayloadSchema`) on the `open_file` tool call
+  (`OPEN_FILE_TOOL`), matched by `tool_call_id` (KOBE-484).

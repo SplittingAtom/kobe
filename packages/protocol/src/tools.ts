@@ -146,6 +146,17 @@ export const BUILTIN_TOOLS: Readonly<Record<string, BuiltinTool>> = {
     primary_arg: "/path",
   },
   /**
+   * KOBE-484: asks the run owner's client to open a workspace file; writes nothing and reads no
+   * content, so it is a read: not prompted in ask-on-write; deny/ask rules still apply.
+   */
+  open_file: {
+    source: "kobe",
+    risk: "read",
+    scope: "kobe",
+    open_world: false,
+    primary_arg: "/path",
+  },
+  /**
    * KOBE-464: runs Python in the thread's kernel in the sandbox, so it is treated like `bash`
    * (risk destructive, scope sandbox): the team's tool policy applies unchanged (NB3).
    */
