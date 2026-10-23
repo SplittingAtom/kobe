@@ -17,6 +17,8 @@
  *   without covering the conversation. The width is neither applied nor saved there.
  * - Workspace files open as tabs too (KOBE-268, `lib/files/preview.ts`: `file:<path>` ids, so they
  *   never collide with artifact ids); one whose file is gone is dropped with a notice.
+ * - The files the agent wrote in the thread (KOBE-488, `GET /v1/threads/{id}/files`) are listed
+ *   beside its artifacts, for the badge row under the title.
  */
 import {
   createContext,
@@ -31,6 +33,7 @@ import {
 import { useAuiState } from "@assistant-ui/react";
 import { tabsKey, type ArtifactTabs } from "../../lib/chat/artifact-tabs";
 import type { ArtifactSummaryView } from "../../lib/chat/artifacts";
+import type { FileEntry } from "../../lib/files/api";
 import type { LiveRun } from "../../lib/chat/live";
 import {
   applyArtifactWidth,
@@ -47,6 +50,7 @@ import { useRail } from "../shell/rail-state";
 import { useShellBand } from "../shell/shell-band";
 import { kobeExtrasOf, useChatSession } from "./kobe-runtime";
 import { useArtifactTabs, type OpenRequest } from "./use-artifact-tabs";
+import { useThreadFiles } from "./use-thread-files";
 
 export type { OpenRequest };
 
@@ -56,6 +60,11 @@ export interface ArtifactPanelApi {
   readonly tabs: ArtifactTabs;
   /** The thread's artifacts; null while they load or when the list could not be read. */
   readonly artifacts: readonly ArtifactSummaryView[] | null;
+  /**
+   * Workspace files the agent wrote in the thread (KOBE-488), first written first; empty while they
+   * load, when the list could not be read, and for anyone but the thread's owner.
+   */
+  readonly files: readonly FileEntry[];
   /** Titles the run announced (`artifact.created`), for tabs the list doesn't have yet. */
   readonly createdTitles: Readonly<Record<string, string>>;
   /** The column's dragged width in px; null is the default (half the space right of the rail). */
@@ -285,6 +294,7 @@ export function ArtifactPanelProvider({
   const [width, setWidth] = useArtifactWidth(preferences, onSavePreferences);
   const createdTitles = useAgentCreated(threadId, t.autoOpen);
   const artifacts = useThreadArtifacts(threadId, t.prune);
+  const files = useThreadFiles(threadId);
   const sheet = useSheet(threadId, t.tabs.active !== null, artifactAsSheet(useShellBand()));
   const { openArtifact: openTab, drop, retargetFiles } = t;
   const editDrafts = useChatSession().editDrafts;
@@ -365,6 +375,7 @@ export function ArtifactPanelProvider({
       openId: t.tabs.active,
       tabs: t.tabs,
       artifacts,
+      files,
       createdTitles,
       width,
       sheetOpen: sheet.open,
@@ -396,6 +407,7 @@ export function ArtifactPanelProvider({
       dismissGone,
       t.tabs,
       artifacts,
+      files,
       createdTitles,
       width,
       setWidth,

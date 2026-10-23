@@ -46,8 +46,10 @@ function threadWith(artifact: Parameters<FakeKobe["addArtifact"]>[1]) {
 
 async function openFromList(title: string) {
   const user = userEvent.setup();
-  const list = await screen.findByRole("navigation", { name: "Artifacts in this conversation" });
-  await user.click(within(list).getByRole("button", { name: title }));
+  const list = await screen.findByRole("navigation", {
+    name: "Artifacts and files in this conversation",
+  });
+  await user.click(within(list).getByRole("button", { name: `Open artifact ${title}` }));
   const panel = await screen.findByRole("region", { name: title });
   return { user, panel };
 }
@@ -69,7 +71,9 @@ describe("reopening artifacts (an old thread)", () => {
     const t = fake.addThread("Plain");
     openApp(fake, t);
     await screen.findByLabelText("Message");
-    expect(screen.queryByRole("navigation", { name: "Artifacts in this conversation" })).toBeNull();
+    expect(
+      screen.queryByRole("navigation", { name: "Artifacts and files in this conversation" }),
+    ).toBeNull();
   });
 
   it("is closed with Escape and focus returns to the opener", async () => {
@@ -79,7 +83,7 @@ describe("reopening artifacts (an old thread)", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("region", { name: "Plan" })).toBeNull();
     expect(panel.isConnected).toBe(false);
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Plan" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Open artifact Plan" }));
   });
 });
 
@@ -269,7 +273,7 @@ describe("switching threads", () => {
     await waitFor(() => expect(screen.queryByRole("region", { name: "Plan" })).toBeNull());
     await waitFor(() =>
       expect(
-        screen.queryByRole("navigation", { name: "Artifacts in this conversation" }),
+        screen.queryByRole("navigation", { name: "Artifacts and files in this conversation" }),
       ).toBeNull(),
     );
   });

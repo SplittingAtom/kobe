@@ -381,8 +381,10 @@ describe("memory, deleted files and caps (ac-3)", () => {
     fake.addArtifact(t, { kind: "markdown", title: "Plan", versions: ["plan body"] });
     mount(t);
     const user = userEvent.setup();
-    const list = await screen.findByRole("navigation", { name: "Artifacts in this conversation" });
-    await user.click(within(list).getByRole("button", { name: "Plan" }));
+    const list = await screen.findByRole("navigation", {
+      name: "Artifacts and files in this conversation",
+    });
+    await user.click(within(list).getByRole("button", { name: "Open artifact Plan" }));
     await view(user, await openFiles(), "a.md");
     expect(tabNames()).toEqual(["Plan", "a.md*"]);
     const stored = JSON.parse(must(localStorage.getItem(tabsKey(fake.teamId, t)))) as {

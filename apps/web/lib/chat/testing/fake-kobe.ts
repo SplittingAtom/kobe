@@ -239,6 +239,13 @@ export class FakeKobe {
   readonly skillDraftSaves = new Map<string, readonly Record<string, unknown>[]>();
   /** `GET /v1/threads/{id}/file-edit-proposals` (KOBE-462): the thread's proposals, wire casing. */
   readonly fileEditProposals = new Map<string, readonly Record<string, unknown>[]>();
+  /**
+   * `GET /v1/threads/{id}/files` (KOBE-488): the agent-written files, wire casing; a thread named
+   * in `threadFilesHidden` answers 404 (a shared reader). Counts the reads in `threadFilesReads`.
+   */
+  readonly threadFiles = new Map<string, readonly Record<string, unknown>[]>();
+  readonly threadFilesHidden = new Set<string>();
+  threadFilesReads = 0;
   /** Message bodies as `POST /v1/threads/{id}/messages` received them (KOBE-463: `viewing`). */
   readonly submittedBodies: Json[] = [];
   /** `PUT /v1/workspace/file` saves (KOBE-463): path, base version and the saved text. */
@@ -1747,6 +1754,13 @@ export class FakeKobe {
       return new Response(null, { status: 204 });
     }
     if (action === "card" && method === "GET") return json(200, this.#card(thread));
+    if (action === "files" && method === "GET") {
+      this.threadFilesReads += 1;
+      if (this.threadFilesHidden.has(thread.thread_id)) {
+        return error(404, "thread_not_found", "No thread with that id.");
+      }
+      return json(200, { files: this.threadFiles.get(thread.thread_id) ?? [] });
+    }
     if (action === "file-edit-proposals" && method === "GET") {
       return json(200, { proposals: this.fileEditProposals.get(thread.thread_id) ?? [] });
     }

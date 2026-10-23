@@ -42,8 +42,10 @@ const tabNames = () =>
     .map((t) => `${t.textContent}${t.getAttribute("aria-selected") === "true" ? "*" : ""}`);
 
 async function openFromList(user: ReturnType<typeof userEvent.setup>, title: string) {
-  const list = await screen.findByRole("navigation", { name: "Artifacts in this conversation" });
-  await user.click(within(list).getByRole("button", { name: title }));
+  const list = await screen.findByRole("navigation", {
+    name: "Artifacts and files in this conversation",
+  });
+  await user.click(within(list).getByRole("button", { name: `Open artifact ${title}` }));
   await screen.findByRole("tab", { name: title, selected: true });
 }
 
@@ -239,7 +241,7 @@ describe("per-thread memory (ac-3)", () => {
 
     localStorage.setItem(key, "{not json");
     openApp(fake, t);
-    await screen.findByRole("navigation", { name: "Artifacts in this conversation" });
+    await screen.findByRole("navigation", { name: "Artifacts and files in this conversation" });
     expect(screen.queryByRole("tablist")).toBeNull();
     expect(region("artifact").childElementCount).toBe(0);
   });

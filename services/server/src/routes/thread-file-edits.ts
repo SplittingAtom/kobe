@@ -5,11 +5,14 @@ import {
   fileEditProposedPayloadSchema,
   type FileEditProposal,
   type FileEditProposalsResponse,
+  type ThreadFilesResponse,
 } from "@kobe/protocol";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { invalidRequest } from "../teams/http.js";
+import { readAgentFiles } from "../threads/agent-files.js";
 import { viewerProjectIds } from "../threads/references.js";
+import { fileEntry } from "../workspace-files/browse.js";
 import { findThread } from "../threads/repository.js";
 import { uuidSchema } from "../threads/schemas.js";
 
@@ -59,6 +62,29 @@ export function threadFileEditRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
     });
     if (proposals === null) return c.json(NOT_FOUND, 404);
     const body: FileEditProposalsResponse = { proposals };
+    c.header("cache-control", "private, no-store");
+    return c.json(body);
+  });
+
+  /**
+   * `GET /v1/threads/{id}/files` (KOBE-488, contract thread-files.ts): the workspace files the
+   * agent wrote in this thread that are still live in the owner's synced workspace, in order of
+   * first appearance. Only the owner: a shared reader's file tab would read their own workspace,
+   * so they get the same 404 as anyone else (and see the artifact badges only).
+   */
+  app.get("/:id/files", async (c) => {
+    const id = uuidSchema.safeParse(c.req.param("id"));
+    if (!id.success) return invalidRequest(c);
+    const teamId = c.get("team").id;
+    const userId = c.get("user").id;
+    const files = await withTeam(db, teamId, async (tx) => {
+      const viewer = { teamId, userId, projectIds: await viewerProjectIds(tx, teamId, userId) };
+      const found = await findThread(tx, viewer, id.data);
+      if (found?.access !== "owner") return null;
+      return readAgentFiles(tx, { teamId, userId }, id.data);
+    });
+    if (files === null) return c.json(NOT_FOUND, 404);
+    const body: ThreadFilesResponse = { files: files.map(fileEntry) };
     c.header("cache-control", "private, no-store");
     return c.json(body);
   });
