@@ -45,7 +45,7 @@ export function useOutsideChange(options: OutsideChangeOptions) {
   const [watch, setWatch] = useState<VersionWatch | null>(null);
   useEffect(() => {
     const next = new VersionWatch({
-      check: () => fileVersion(api, path),
+      check: (signal) => fileVersion(api, path, signal),
       known: () => knownRef.current,
       onChange: (result) => {
         const dirty = draftsRef.current?.get(path) !== undefined;
@@ -54,10 +54,10 @@ export function useOutsideChange(options: OutsideChangeOptions) {
           return;
         }
         if (!dirty) {
-          setOutside({ kind: "updated", sha256: result.sha256 });
+          setOutside((o) => same(o, "updated", result.sha256));
           rereadRef.current();
         } else if (dismissed.current !== result.sha256) {
-          setOutside({ kind: "changed", sha256: result.sha256 });
+          setOutside((o) => same(o, "changed", result.sha256));
         }
       },
     });
@@ -66,7 +66,7 @@ export function useOutsideChange(options: OutsideChangeOptions) {
   }, [api, path]);
 
   useEffect(() => {
-    if (hint && watch) watch.hint(hint.delays);
+    if (hint && watch) watch.hint(hint.delays, { oneShot: hint.oneShot === true });
   }, [hint, watch]);
 
   // The draft went away (saved, discarded, Take theirs) while a change waited: read it in.
@@ -75,7 +75,7 @@ export function useOutsideChange(options: OutsideChangeOptions) {
     if (draft !== undefined || outside?.kind !== "changed") return;
     if (known === outside.sha256) setOutside(null);
     else {
-      setOutside({ kind: "updated", sha256: outside.sha256 });
+      setOutside((o) => same(o, "updated", outside.sha256));
       rereadRef.current();
     }
   }, [draft, outside, known]);
@@ -86,6 +86,15 @@ export function useOutsideChange(options: OutsideChangeOptions) {
     setOutside(null);
   }, [outside]);
   return { outside, dismiss };
+}
+
+/** The current state when it already says this (no new object, no re-render). */
+function same(
+  current: OutsideChange | null,
+  kind: OutsideChange["kind"],
+  sha256: string,
+): OutsideChange {
+  return current?.kind === kind && current.sha256 === sha256 ? current : { kind, sha256 };
 }
 
 const NO_DRAFTS = {

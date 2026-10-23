@@ -49,7 +49,7 @@ export interface FileSearchResult {
 export interface FilesApi {
   /** The team every call names (the tree remembers its folders per team, KOBE-304). */
   readonly teamId: string;
-  list(path: string, cursor?: string): Promise<ApiResult<FolderListing>>;
+  list(path: string, cursor?: string, signal?: AbortSignal): Promise<ApiResult<FolderListing>>;
   /**
    * The caller's own synced files whose path contains `query` (KOBE-223, the composer's `@`
    * picker): names starting with it first, then newest; at most 50.
@@ -92,7 +92,8 @@ export function createFilesApi(teamId: string, fetchFn?: typeof fetch): FilesApi
   const opts = { teamId, fetchFn };
   return {
     teamId,
-    list: (path, cursor) => apiRequest(`/v1/workspace/files${query({ path, cursor })}`, opts),
+    list: (path, cursor, signal) =>
+      apiRequest(`/v1/workspace/files${query({ path, cursor })}`, { ...opts, signal }),
     search: (q, limit, signal) =>
       apiRequest(
         `/v1/workspace/files/search${query({ q, limit: limit === undefined ? undefined : String(limit) })}`,

@@ -188,6 +188,77 @@ describe("VersionWatch", () => {
   });
 });
 
+describe("VersionWatch: focus and dispose (review)", () => {
+  it("a one-shot hint never cancels a pending schedule, and runs when none is pending", async () => {
+    const waits: { ms: number; resolve: () => void }[] = [];
+    const wait = (ms: number) => new Promise<void>((resolve) => waits.push({ ms, resolve }));
+    const results: VersionCheck[] = [
+      { kind: "version", sha256: "v1" },
+      { kind: "version", sha256: "v2" },
+      { kind: "version", sha256: "v2" },
+    ];
+    const check = vi.fn(async (): Promise<VersionCheck> => results.shift() ?? { kind: "unknown" });
+    const changed = vi.fn();
+    let known = "v1";
+    const watch = new VersionWatch({ check, known: () => known, onChange: changed, wait });
+    const flush = () => new Promise((r) => setTimeout(r, 0));
+    watch.hint([0, 1_500, 3_000]);
+    await flush();
+    expect(check).toHaveBeenCalledTimes(1);
+    watch.hint([0], { oneShot: true }); // focus mid-schedule: skipped
+    await flush();
+    expect(check).toHaveBeenCalledTimes(1);
+    waits.shift()?.resolve(); // the schedule's retry still runs and finds the change
+    await flush();
+    expect(changed).toHaveBeenCalledWith({ kind: "version", sha256: "v2" });
+    known = "v2";
+    watch.hint([0], { oneShot: true }); // nothing pending now: it checks
+    await flush();
+    expect(check).toHaveBeenCalledTimes(3);
+  });
+
+  it("dispose clears pending timers and aborts the in-flight listing", async () => {
+    vi.useFakeTimers();
+    try {
+      const signals: AbortSignal[] = [];
+      const check = vi.fn(
+        (signal: AbortSignal) =>
+          new Promise<VersionCheck>((resolve) => {
+            signals.push(signal);
+            signal.addEventListener("abort", () => resolve({ kind: "unknown" }));
+          }),
+      );
+      const watch = new VersionWatch({ check, known: () => "v1", onChange: vi.fn() });
+      watch.hint([0]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(signals[0]?.aborted).toBe(false);
+      watch.dispose();
+      expect(signals[0]?.aborted).toBe(true);
+
+      const second = new VersionWatch({ check, known: () => "v1", onChange: vi.fn() });
+      second.hint([5_000]);
+      expect(vi.getTimerCount()).toBe(1);
+      second.dispose();
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(check).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fileVersion passes the signal to the listing", async () => {
+    const list = vi.fn(async () => ({
+      ok: true as const,
+      status: 200,
+      data: { path: "", entries: [entry("a.md", "a")] },
+    }));
+    const signal = new AbortController().signal;
+    await fileVersion({ list } as unknown as FilesApi, "a.md", signal);
+    expect(list).toHaveBeenCalledWith("", undefined, signal);
+  });
+});
+
 describe("minimalChange", () => {
   it("replaces only the differing middle, so the cursor and scroll outside it stay", () => {
     expect(minimalChange("a\nb\nc\n", "a\nB\nc\n")).toEqual({ from: 2, to: 3, insert: "B" });

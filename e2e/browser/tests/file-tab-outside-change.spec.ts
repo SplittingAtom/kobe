@@ -7,14 +7,16 @@ import { toolTurn } from "./support/gate5.js";
  * KOBE-491: an open file tab notices the agent's change to its file. With the file open and no
  * unsaved edits, the agent's `write` lands in place with "Updated by the agent just now."; with a
  * draft, nothing is replaced and the banner offers Compare (the inline diff), Keep mine and Take
- * theirs. The Viewing chip is dismissed before each turn so the agent writes directly (KOBE-493
+ * theirs; Keep mine keeps the draft, the next Save is refused with the same choices, and Keep
+ * mine there saves over the agent's version. The Viewing chip is dismissed before each turn so the agent writes directly (KOBE-493
  * refuses direct writes to the viewed file). Writes `kobe-491-*\/notes.md`, deletes the folder at
- * the end. Two short model turns; the model may phrase replies freely, only the file matters.
+ * the end. Three short model turns; the model may phrase replies freely, only the file matters.
  */
 const TEAM_KEY = "kobe.lastTeamId";
 const BASE = "alpha\nbeta\ngamma\n";
 const FIRST = "alpha\nbeta\ngamma\nfrom the agent\n";
 const SECOND = "ALPHA\nbeta\ngamma\nfrom the agent\n";
+const THIRD = "ALPHA\nBETA\ngamma\nfrom the agent\n";
 
 async function workspace(page: Page, method: "POST" | "DELETE", path: string, content = "") {
   return page.evaluate(
@@ -90,6 +92,27 @@ test("file tab: picks up the agent's write when clean, shows the banner and Comp
     await banner.getByRole("button", { name: "Take theirs", exact: true }).click();
     await expect(tab.getByText("Unsaved changes.")).toHaveCount(0);
     await expect(page.getByLabel("Edit notes.md")).toContainText("ALPHA");
+
+    // Keep mine: the banner goes, the draft stays; Save is refused with the same choices, and
+    // Keep mine there saves the draft over the agent's version explicitly.
+    await editor.click();
+    await page.keyboard.press("ControlOrMeta+End");
+    await page.keyboard.type("kept line\n");
+    if (await notViewing.isVisible()) await notViewing.click();
+    await chat.waitForIdle();
+    await chat.send(toolTurn("write", { path: `/workspace/${path}`, content: THIRD }));
+    await expect(banner).toBeVisible({ timeout: RUN_TIMEOUT_MS });
+    await banner.getByRole("button", { name: "Keep mine", exact: true }).click();
+    await expect(banner).toHaveCount(0);
+    await expect(editor).toContainText("kept line");
+    await tab.getByRole("button", { name: "Save", exact: true }).click();
+    const refused = tab.getByRole("alert").filter({ hasText: "nothing was saved" });
+    await expect(refused).toBeVisible();
+    await refused.getByRole("button", { name: "Keep mine", exact: true }).click();
+    await expect(tab.getByText("Saved.")).toBeVisible();
+    await expect(refused).toHaveCount(0);
+    await expect(editor).toContainText("kept line");
+    await expect(editor).not.toContainText("BETA");
   } finally {
     await workspace(page, "DELETE", dir);
   }

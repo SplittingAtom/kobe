@@ -59,6 +59,15 @@ An open text tab in the file editor follows outside changes to its file (the age
 - The e2e `file-editor.spec.ts` conflict step now uses Take theirs (the old "Reload the file"
   button remains only for proposal reviews and notebooks).
 
+## Review fixes (Sonnet review, second commit)
+
+- Focus hints are one-shot: skipped while a write/run-end schedule is pending, never cancel it.
+- `VersionWatch.dispose()` clears pending timers and aborts the in-flight listing (`AbortSignal`
+  through `fileVersion` → `FilesApi.list`).
+- The outside state keeps its object when kind and SHA are unchanged (no re-render).
+- Compare's loading status is `aria-live="polite"` with a label.
+- Browser spec adds Keep mine on the banner and the refused-save-then-Keep-mine path.
+
 ## Open questions (for Chris or the coordinator)
 
 - docs/file-editing.md section 4: replace the gap note with the Behaviour section above.

@@ -120,6 +120,23 @@ describe("a clean tab reloads in place (ac-1)", () => {
   });
 });
 
+describe("focus during a pending write schedule (review)", () => {
+  it("a refocus mid-run does not lose the write's later checks", async () => {
+    const { run } = await openAndRun();
+    const listed = () => fake.workspaceListings.filter((d) => d === "docs").length;
+    // The write is seen live but not synced yet: the first check finds nothing new.
+    act(() => fake.agent.toolCall(run, "e1", "edit", { path: `/workspace/${PATH}` }));
+    act(() => fake.agent.toolResult(run, "e1", "edit", "ok"));
+    await waitFor(() => expect(listed()).toBeGreaterThan(0));
+    const before = listed();
+    act(() => void window.dispatchEvent(new Event("focus")));
+    await act(() => new Promise((r) => setTimeout(r, 50)));
+    expect(listed()).toBe(before); // skipped: the write's schedule is pending
+    fake.workspaceFiles.set(PATH, enc(THEIRS)); // the sync lands
+    expect(await screen.findByText(UPDATED_NOTE, undefined, { timeout: 3_000 })).toBeTruthy();
+  });
+});
+
 describe("a tab with unsaved edits is never replaced (ac-2)", () => {
   it("shows the banner; Compare opens the diff; Take theirs asks first", async () => {
     const { user, view, run } = await openAndRun();

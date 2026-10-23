@@ -30,11 +30,16 @@ function parentOf(path: string): string {
 }
 
 /** The synced version of `path`, from its folder's listing. */
-export async function fileVersion(api: FilesApi, path: string): Promise<VersionCheck> {
+export async function fileVersion(
+  api: FilesApi,
+  path: string,
+  signal?: AbortSignal,
+): Promise<VersionCheck> {
   const folder = parentOf(path);
   let cursor: string | undefined;
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const res = await api.list(folder, cursor);
+    if (signal?.aborted) return { kind: "unknown" };
+    const res = await api.list(folder, cursor, signal);
     if (!res.ok) return res.error.status === 404 ? { kind: "gone" } : { kind: "unknown" };
     const found = res.data.entries.find((e) => e.path === path && e.type === "file");
     if (found) {
@@ -48,51 +53,74 @@ export async function fileVersion(api: FilesApi, path: string): Promise<VersionC
   return { kind: "unknown" };
 }
 
-const defaultWait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+/** Resolves after `ms`, or at once (clearing the timer) when `signal` aborts. */
+function defaultWait(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal.aborted) return resolve();
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener("abort", done);
+  });
+}
 
 export interface VersionWatchOptions {
-  check(): Promise<VersionCheck>;
+  /** One check; `signal` aborts when the watch is disposed. */
+  check(signal: AbortSignal): Promise<VersionCheck>;
   /** The version the tab shows now (undefined: nothing to compare, no check). */
   known(): string | undefined;
   /** A different version, or the file is gone. */
   onChange(result: Exclude<VersionCheck, { kind: "unknown" }>): void;
-  readonly wait?: (ms: number) => Promise<void>;
+  readonly wait?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
 
 /**
  * Checks on hints. Each hint replaces the previous schedule (`delays`: waits before each check,
- * the first usually 0); the schedule stops at the first change. Never two checks at once.
+ * the first usually 0); the schedule stops at the first change. Never two checks at once. A
+ * one-shot hint (window focus) never cancels a pending schedule: while one runs it is skipped,
+ * since that schedule checks anyway. `dispose` clears pending waits and aborts the check.
  */
 export class VersionWatch {
   readonly #options: VersionWatchOptions;
-  readonly #wait: (ms: number) => Promise<void>;
+  readonly #wait: (ms: number, signal: AbortSignal) => Promise<void>;
+  readonly #abort = new AbortController();
   #generation = 0;
+  /** The generation whose schedule is still running, if any. */
+  #running: number | null = null;
   #inFlight: Promise<VersionCheck> | null = null;
-  #disposed = false;
 
   constructor(options: VersionWatchOptions) {
     this.#options = options;
     this.#wait = options.wait ?? defaultWait;
   }
 
-  hint(delays: readonly number[]): void {
-    if (this.#disposed) return;
+  hint(delays: readonly number[], options: { readonly oneShot?: boolean } = {}): void {
+    if (this.#abort.signal.aborted) return;
+    if (options.oneShot && this.#running !== null) return;
     this.#generation += 1;
-    void this.#run(this.#generation, delays);
+    const generation = this.#generation;
+    this.#running = generation;
+    void this.#run(generation, delays).finally(() => {
+      if (this.#running === generation) this.#running = null;
+    });
   }
 
   dispose(): void {
-    this.#disposed = true;
     this.#generation += 1;
+    this.#running = null;
+    this.#abort.abort();
   }
 
   #current(generation: number): boolean {
-    return !this.#disposed && generation === this.#generation;
+    return !this.#abort.signal.aborted && generation === this.#generation;
   }
 
   async #run(generation: number, delays: readonly number[]): Promise<void> {
     for (const delay of delays) {
-      if (delay > 0) await this.#wait(delay);
+      if (delay > 0) await this.#wait(delay, this.#abort.signal);
       if (this.#inFlight) await this.#inFlight.catch(() => undefined);
       if (!this.#current(generation)) return;
       const before = this.#options.known();
@@ -109,7 +137,9 @@ export class VersionWatch {
   }
 
   async #checkOnce(): Promise<VersionCheck> {
-    const pending = this.#options.check().catch((): VersionCheck => ({ kind: "unknown" }));
+    const pending = this.#options
+      .check(this.#abort.signal)
+      .catch((): VersionCheck => ({ kind: "unknown" }));
     this.#inFlight = pending;
     try {
       return await pending;

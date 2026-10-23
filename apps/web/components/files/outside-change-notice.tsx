@@ -115,7 +115,13 @@ export function CompareView({
       current = false;
     };
   }, [api, path]);
-  if (state === null) return <p role="status">Loading the agent&apos;s version…</p>;
+  if (state === null) {
+    return (
+      <p role="status" aria-live="polite" aria-label={`Loading the agent's version of ${name}`}>
+        Loading the agent&apos;s version…
+      </p>
+    );
+  }
   if (!("sha256" in state)) return <ErrorNotice error={state} />;
   return (
     <section aria-label={`Compare ${name}`} className="flex min-h-0 flex-1 flex-col gap-2">

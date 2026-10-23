@@ -23,6 +23,8 @@ export interface ChangeHint {
   readonly seq: number;
   /** Waits before each check (ms). */
   readonly delays: readonly number[];
+  /** Window focus: skipped while a write or run-end schedule is still pending. */
+  readonly oneShot?: boolean | undefined;
 }
 
 /** `runId:count` of the live run's successful writes of `path`: changes on each new one. */
@@ -36,9 +38,9 @@ function useWritesOf(path: string, threadId: string | null): string {
 export function useFileChangeHint(path: string, threadId: string | null): ChangeHint | null {
   const [hint, setHint] = useState<ChangeHint | null>(null);
   const seq = useRef(0);
-  const send = useRef((delays: readonly number[]) => {
+  const send = useRef((delays: readonly number[], oneShot = false) => {
     seq.current += 1;
-    setHint({ seq: seq.current, delays });
+    setHint({ seq: seq.current, delays, oneShot });
   });
 
   const writes = useWritesOf(path, threadId);
@@ -63,7 +65,7 @@ export function useFileChangeHint(path: string, threadId: string | null): Change
       const now = Date.now();
       if (now - last < FOCUS_MIN_INTERVAL_MS) return;
       last = now;
-      send.current([0]);
+      send.current([0], true);
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);
