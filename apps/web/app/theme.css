@@ -76,6 +76,11 @@
   --kobe-status-idle: #5c5c5c;
   --kobe-status-accent: #2449c7;
   --kobe-status-accent-fg: #ffffff;
+  /* A call to action that commits nothing by itself (the proposed-edit card's Review, Chris
+     2026-10-23): green with white text, the same in both themes (AA for white on both). */
+  --kobe-confirm: #15803d;
+  --kobe-confirm-hover: #166534;
+  --kobe-confirm-fg: #ffffff;
 
   /* Tool identity (KOBE-374): the gold name chip on tool-call steps (components/chat/tool-call.tsx),
      apart from the outcome colours above, which stay on the step's status. The text keeps WCAG AA
