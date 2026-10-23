@@ -105,6 +105,9 @@ describe("queue order and current state (B1)", () => {
     try {
       await early.query("BEGIN");
       await early.query("SELECT now()");
+      // now() has microsecond precision but created_at comes back as a millisecond Date: keep
+      // the two transaction starts apart so the comparison below cannot tie (KOBE-480).
+      await early.query("SELECT pg_sleep(0.01)");
       await late.query("BEGIN");
       await late.query(lock);
       const first = (await late.query(insert, [skill, ids.site])).rows[0];

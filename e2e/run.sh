@@ -265,9 +265,18 @@ bifrost_restarts=$($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=bif
   -o jsonpath='{.items[*].status.containerStatuses[*].restartCount}' 2>/dev/null)
 if [[ "$bifrost_restarts" != 0 ]]; then # KOBE-242: say why it restarted (OOM, failed probe) before the check fails
   $KUBECTL -n "$NS" describe pod -l app.kubernetes.io/component=bifrost 2>&1 | grep -E "Last State|Reason|Exit Code|Liveness|Unhealthy" | sed 's/^/     bifrost: /' || true
-  $KUBECTL -n "$NS" logs -l app.kubernetes.io/component=bifrost --previous --tail=30 2>&1 | sed 's/^/     bifrost prev: /' || true
+  bifrost_prev=$($KUBECTL -n "$NS" logs -l app.kubernetes.io/component=bifrost --previous --tail=30 2>&1 || true)
+  printf '%s\n' "$bifrost_prev" | sed 's/^/     bifrost prev: /'
+  # KOBE-480: on a fresh store Bifrost downloads its pricing datasheet at start and exits (fatal)
+  # when the upstream answers 5xx through its 4 attempts; kubelet's restart then succeeds. That
+  # is an outage outside the cluster, not an OOM or probe restart: allow exactly one such exit.
+  pricing_exit='"level":"fatal".*failed to initialize pricing manager.*failed to download pricing data: HTTP 5[0-9][0-9]'
+  if [[ "$bifrost_restarts" == 1 ]] && printf '%s\n' "$bifrost_prev" | grep -qE "$pricing_exit"; then
+    echo "     bifrost: one restart after the upstream pricing download failed (external outage, KOBE-480)"
+    bifrost_restarts=0
+  fi
 fi
-contains "Bifrost has not restarted" '^0$' "$bifrost_restarts"
+contains "Bifrost has not restarted (other than for an upstream pricing outage)" '^0$' "$bifrost_restarts"
 # Once the control answers, the probe pod is in the policy ipsets: BLOCKED below is the policy.
 np=$(probe default "$(gated http://kobe-web.$NS/api/healthz bifrost http://kobe-bifrost.$NS:8080/health)")
 contains "probe from another namespace can reach unrestricted services (control)" '^control=REACHED$' "$np"

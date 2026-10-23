@@ -14,7 +14,7 @@ import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js
 import { notifyScheduledRunEndInTx } from "../notifications/record.js";
 import { reportSkippedActionsInTx } from "../policy/skipped-summary.js";
 import { failureInfo } from "../runs/failure-codes.js";
-import { keepPromptAtEndInTx, type PromptSource } from "../runs/run-prompt.js";
+import { bindUserEntry, keepPromptAtEndInTx, type PromptSource } from "../runs/run-prompt.js";
 import { followupsDecisionInTx } from "../threads/followups.js";
 import { saveFallbackTitleInTx, titleDecisionInTx } from "../threads/title.js";
 import { slotOf } from "./slots.js";
@@ -184,6 +184,9 @@ export async function endRunInTx(
         );
   // A message whose run ends before Pi's first turn_end stays in the conversation (KOBE-290).
   const kept = to === "completed" ? [] : await keepPromptAtEndInTx(tx, teamId, runId, prompt);
+  // A completed run's prompt is bound before run.ended goes out (KOBE-480): the web reads the
+  // thread's markers on run.ended, and a project move's marker sits on this entry.
+  if (to === "completed") await bindUserEntry(tx, teamId, runId);
   // A scheduled run's denied calls (D32) are reported on its terminal event and in its thread.
   await appendRunEventsInTx(tx, teamId, runId, [
     ...kept,
