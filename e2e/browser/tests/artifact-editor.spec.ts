@@ -77,16 +77,19 @@ test("artifact editor: text artifact read-only in Rendered/Raw, Edit as file ope
     await expect(fileTab.getByText("Saved.")).toBeVisible();
 
     // A second copy never overwrites the first.
-    await page.getByRole("tab", { name: title }).click();
+    await page.getByRole("tab", { name: title, exact: true }).click();
     await panel.getByRole("button", { name: "Edit as file", exact: true }).click();
     await expect(page.getByRole("tab", { name: `${stem}-2.md`, selected: true })).toBeVisible();
     const first = await readFile(page, copies[0] ?? "");
     expect(first.status).toBe(200);
     expect(first.text).toContain("edited copy");
-    expect((await readFile(page, copies[1] ?? "")).text).toBe("# Artifact plan\n\nShip it.\n");
+    // A real model may drop the trailing newline from the content it sends.
+    expect((await readFile(page, copies[1] ?? "")).text.trimEnd()).toBe(
+      "# Artifact plan\n\nShip it.",
+    );
 
     // The artifact itself is unchanged.
-    await page.getByRole("tab", { name: title }).click();
+    await page.getByRole("tab", { name: title, exact: true }).click();
     await panel.getByRole("button", { name: "Rendered", exact: true }).click();
     await expect(panel.getByText("edited copy")).toHaveCount(0);
     expect(await styleViolations(page)).toEqual([]);
