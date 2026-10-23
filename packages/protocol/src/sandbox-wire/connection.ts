@@ -47,6 +47,9 @@
  *   `file_edits` (`CAPABILITY_FILE_EDITS`, file-editor.ts, KOBE-462): `file.edit_propose` /
  *   `file.edit_propose_result`, `run.start.viewing`, and `file.open` / `file.open_result`
  *   (`open_file`, file-open.ts, KOBE-484).
+ *   `sync_conflicts` (`CAPABILITY_SYNC_CONFLICTS`, sync-conflicts.ts, KOBE-492): the agent's
+ *   `workspace.conflict` frames (a small frame, never answered: one the server will not take is
+ *   dropped and logged), the server's `workspace.conflict_note` and `run.start.sync_conflicts`.
  *   `notebooks` (`CAPABILITY_NOTEBOOKS`, notebooks.ts, KOBE-464): the commands `notebook.execute`,
  *   `notebook.interrupt`, `notebook.restart` (never sent to agents without it), the agent's
  *   `notebook.output` frames and `notebook.run` / `notebook.run_result` (`run_python`).

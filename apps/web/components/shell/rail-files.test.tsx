@@ -420,3 +420,68 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     expect((await within(panel).findByRole("alert")).textContent).toMatch(/Workspace storage/);
   });
 });
+
+describe("sync conflicts no thread wrote (KOBE-492)", () => {
+  const COPY = "report.conflict-20261023T120000Z.csv";
+  const conflictRow = {
+    id: "22222222-2222-4222-8222-222222222222",
+    path: "report.csv",
+    conflict_path: COPY,
+    member_sha256: "a".repeat(64),
+    agent_sha256: "b".repeat(64),
+    created_at: "2026-10-23T12:00:00.000Z",
+  };
+
+  it("shows them in the Files rail with the same actions; Dismiss settles", async () => {
+    let listed = [conflictRow];
+    overrides["GET /v1/workspace/sync-conflicts"] = () => Response.json({ conflicts: listed });
+    overrides[`POST /v1/workspace/sync-conflicts/${conflictRow.id}`] = () => {
+      listed = [];
+      return new Response(null, { status: 204 });
+    };
+    mount();
+    const panel = await screen.findByRole("region", { name: "Files" });
+    expect(
+      await within(panel).findByText(
+        `The agent's change to report.csv conflicted with your save. Your version was kept; the agent's is in ${COPY}.`,
+      ),
+    ).toBeTruthy();
+    for (const name of ["Open both", "Compare", "Delete the copy"]) {
+      expect(within(panel).getByRole("button", { name })).toBeTruthy();
+    }
+    await userEvent
+      .setup()
+      .click(
+        within(panel).getByRole("button", { name: "Dismiss the conflict notice for report.csv" }),
+      );
+    await waitFor(() =>
+      expect(seen).toContainEqual({
+        method: "POST",
+        url: `/v1/workspace/sync-conflicts/${conflictRow.id}`,
+      }),
+    );
+    expect(within(panel).queryByText(/conflicted with your save/)).toBeNull();
+  });
+
+  it("Delete the copy asks first, then deletes and resolves", async () => {
+    overrides["GET /v1/workspace/sync-conflicts"] = () =>
+      Response.json({ conflicts: [conflictRow] });
+    overrides[`POST /v1/workspace/sync-conflicts/${conflictRow.id}`] = () =>
+      new Response(null, { status: 204 });
+    mount();
+    const panel = await screen.findByRole("region", { name: "Files" });
+    await within(panel).findByText(/conflicted with your save/);
+    const user = userEvent.setup();
+    await user.click(within(panel).getByRole("button", { name: "Delete the copy" }));
+    const confirm = within(panel).getByRole("group", { name: `Delete ${COPY}?` });
+    await user.click(within(confirm).getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(seen.map((s) => `${s.method} ${s.url.split("?")[0]}`)).toEqual(
+        expect.arrayContaining([
+          "DELETE /v1/workspace/files",
+          `POST /v1/workspace/sync-conflicts/${conflictRow.id}`,
+        ]),
+      ),
+    );
+  });
+});
