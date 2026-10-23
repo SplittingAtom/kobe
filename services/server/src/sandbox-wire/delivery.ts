@@ -16,6 +16,8 @@ import {
   CAPABILITY_NOTEBOOK_START,
   CAPABILITY_THREAD_COMPACT,
   CAPABILITY_THREAD_CONTEXT,
+  CAPABILITY_SYNC_CONFLICTS,
+  type SyncConflict,
   serverToSandboxFrameSchema,
   threadCompactFrameSchema,
   type PiGetEntriesData,
@@ -39,6 +41,7 @@ import {
 } from "./entries.js";
 import { endRunInTx, loadRun } from "./run-state.js";
 import { buildRunMemory } from "../memory/agent.js";
+import { takeAgentNotes } from "../sync-conflicts/store.js";
 import { mintRunToken } from "./run-token.js";
 import { slotOf } from "./slots.js";
 import {
@@ -729,6 +732,15 @@ export class CommandDelivery {
       const { viewing: _viewing, ...rest } = out as RunStartFrame;
       out = rest as ServerToSandboxFrame;
     }
+    // Sync conflicts of this thread its agent was not told about (KOBE-492): marked told here.
+    if (
+      row.kind === "run.start" &&
+      !evalSandbox &&
+      this.#host.hasCapability(CAPABILITY_SYNC_CONFLICTS)
+    ) {
+      const conflicts = await this.#runConflicts(row.threadId);
+      if (conflicts.length > 0) out = { ...out, sync_conflicts: conflicts } as ServerToSandboxFrame;
+    }
     // Same for the per-session MCP config (KOBE-111): an agent without it has no connector tools.
     if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_MCP)) {
       const { mcp: _mcp, ...rest } = out as RunStartFrame;
@@ -755,6 +767,17 @@ export class CommandDelivery {
     if (parsed === undefined || parsed.traceId !== runTraceId(row.runId)) return undefined;
     this.#host.traceStarted(row.runId, parsed.parentSpanId);
     return trace;
+  }
+
+  /** `run.start.sync_conflicts`; a failed read means no note (the rows stay untold). */
+  async #runConflicts(threadId: string): Promise<SyncConflict[]> {
+    try {
+      const { teamId, userId } = this.#host.target;
+      return await takeAgentNotes(this.#ctx.db, { teamId, userId }, threadId);
+    } catch (err) {
+      this.#host.log.warn({ err }, "run.start.sync_conflicts could not be read; sent without it");
+      return [];
+    }
   }
 
   /** `run.start.memory`; a failed read means no context (every memory call is still enforced). */

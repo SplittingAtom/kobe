@@ -249,6 +249,16 @@ export class FakeKobe {
   readonly threadFiles = new Map<string, readonly Record<string, unknown>[]>();
   readonly threadFilesHidden = new Set<string>();
   threadFilesReads = 0;
+  /**
+   * `GET /v1/threads/{id}/sync-conflicts` (KOBE-492): open conflicts, wire casing, newest first; a
+   * thread in `threadFilesHidden` answers 404 (a shared reader). Settles are recorded in
+   * `syncConflictActions` and remove the row; reads are counted in `syncConflictReads`.
+   */
+  readonly syncConflicts = new Map<string, readonly Record<string, unknown>[]>();
+  readonly syncConflictActions: { conflictId: string; action: string }[] = [];
+  syncConflictReads = 0;
+  /** `DELETE /v1/workspace/files?path=` (KOBE-492's Delete the copy), in order. */
+  readonly workspaceDeletes: string[] = [];
   /** Message bodies as `POST /v1/threads/{id}/messages` received them (KOBE-463: `viewing`). */
   readonly submittedBodies: Json[] = [];
   /** `PUT /v1/workspace/file` saves (KOBE-463): path, base version and the saved text. */
@@ -1157,6 +1167,12 @@ export class FakeKobe {
         }));
       return json(200, { path: dir, entries });
     }
+    if (url.pathname === "/v1/workspace/files" && method === "DELETE") {
+      const path = url.searchParams.get("path") ?? "";
+      this.workspaceDeletes.push(path);
+      if (!this.workspaceFiles.delete(path)) return error(404, "not_found");
+      return new Response(null, { status: 204 });
+    }
     if (url.pathname === "/v1/workspace/file" && method === "PUT") {
       return this.#saveWorkspaceFile(url, init.body);
     }
@@ -1763,6 +1779,26 @@ export class FakeKobe {
         return error(404, "thread_not_found", "No thread with that id.");
       }
       return json(200, { files: this.threadFiles.get(thread.thread_id) ?? [] });
+    }
+    if (action === "sync-conflicts" && method === "GET") {
+      this.syncConflictReads += 1;
+      if (this.threadFilesHidden.has(thread.thread_id)) {
+        return error(404, "thread_not_found", "No thread with that id.");
+      }
+      return json(200, { conflicts: this.syncConflicts.get(thread.thread_id) ?? [] });
+    }
+    if (action === "sync-conflicts" && method === "POST" && sub !== undefined) {
+      const list = this.syncConflicts.get(thread.thread_id) ?? [];
+      if (!list.some((c) => c.id === sub)) return error(404, "conflict_not_found");
+      this.syncConflictActions.push({
+        conflictId: sub,
+        action: String((body as { action?: unknown } | undefined)?.action),
+      });
+      this.syncConflicts.set(
+        thread.thread_id,
+        list.filter((c) => c.id !== sub),
+      );
+      return new Response(null, { status: 204 });
     }
     if (action === "file-edit-proposals" && method === "GET") {
       return json(200, { proposals: this.fileEditProposals.get(thread.thread_id) ?? [] });

@@ -17,6 +17,10 @@ export interface MemoryFileContent {
   readonly project: string;
   /** The viewed-file section (KOBE-462); empty when the run has none. */
   readonly viewing?: string;
+  /** Sync conflicts told at the run's start (KOBE-492): in its system prompt; empty without. */
+  readonly conflicts?: string;
+  /** Sync conflicts told mid-run (KOBE-492): a custom message before each later model call. */
+  readonly conflictsLive?: string;
 }
 
 export const isMemoryTemp = (name: string): boolean =>
@@ -40,6 +44,8 @@ export class MemoryContextFile {
       text: content.text,
       project: content.project,
       viewing: content.viewing ?? "",
+      conflicts: content.conflicts ?? "",
+      conflicts_live: content.conflictsLive ?? "",
     });
     const next = this.#chain.then(async () => {
       await writeFileAtomic(this.path, text, this.#mode);

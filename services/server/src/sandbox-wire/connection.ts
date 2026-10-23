@@ -9,6 +9,7 @@ import {
   CAPABILITY_SKILL_DRAFTS,
   CAPABILITY_TRACE_SPANS,
   CAPABILITY_SESSION_RENEW,
+  CAPABILITY_SYNC_CONFLICTS,
   CAPABILITY_WEB_SEARCH,
   CAPABILITY_WORKSPACE_MOVES,
   builtinToolDescriptor,
@@ -27,6 +28,7 @@ import {
   type SandboxToServerFrame,
   type FileEditProposeFrame,
   type FileOpenFrame,
+  type WorkspaceConflictFrame,
   type NotebookOutputFrame,
   type NotebookRunFrame,
   type SkillDraftSaveFrame,
@@ -61,6 +63,7 @@ import {
 } from "./run-state.js";
 import { onFileEditPropose } from "./file-edit-propose.js";
 import { onFileOpen } from "./file-open.js";
+import { ConflictRate, onWorkspaceConflict } from "./sync-conflict.js";
 import { NotebookIntake } from "./notebook-intake.js";
 import { onNotebookRun } from "./notebook-run.js";
 import { onSkillDraftSave } from "./skill-draft-save.js";
@@ -127,6 +130,8 @@ export class SandboxConnection implements RegisteredConnection {
   readonly #socket: WebSocket;
   readonly #registry: ConnectionRegistry;
   readonly #leases = new Map<string, Lease>();
+  /** `workspace.conflict` frames (KOBE-492): a few per minute per connection. */
+  readonly #conflictRate = new ConflictRate();
   /** Runs this sandbox held that ended without a live lease here (KOBE-483): late frames dropped. */
   readonly #recentlyEnded = new RecentlyEndedRuns();
   readonly #threads = new Set<string>();
@@ -485,6 +490,9 @@ export class SandboxConnection implements RegisteredConnection {
         return;
       case "file.open":
         this.#onFileOpen(frame);
+        return;
+      case "workspace.conflict":
+        this.#onWorkspaceConflict(frame);
         return;
       case "notebook.output":
         this.#onNotebookOutput(frame, bytes);
@@ -923,6 +931,27 @@ export class SandboxConnection implements RegisteredConnection {
         runCheck: () => this.#checkToolRun(frame.run_id, frame.thread_id, "file.edit_propose"),
         verdict: () =>
           this.#allowedArtifacts.consume(frame.run_id, frame.tool_call_id, frame.tool, frame.input),
+        send: (out) => this.send(out),
+      },
+      frame,
+    );
+  }
+
+  /** `workspace.conflict` (KOBE-492): checks and record in `sync-conflict.ts`. */
+  #onWorkspaceConflict(frame: WorkspaceConflictFrame): void {
+    onWorkspaceConflict(
+      {
+        db: this.#ctx.db,
+        target: this.target,
+        log: this.log,
+        hasCapability: this.hasCapability(CAPABILITY_SYNC_CONFLICTS),
+        rate: this.#conflictRate,
+        activeRun: (threadId) => {
+          for (const [runId, lease] of this.#leases) {
+            if (lease.threadId === threadId && !lease.ended && !lease.compaction) return runId;
+          }
+          return undefined;
+        },
         send: (out) => this.send(out),
       },
       frame,

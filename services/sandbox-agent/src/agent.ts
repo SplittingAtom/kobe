@@ -18,6 +18,7 @@ import {
   CAPABILITY_SKILL_EVAL,
   CAPABILITY_WORKSPACE_MOVES,
   CAPABILITY_THREAD_CONTEXT,
+  CAPABILITY_SYNC_CONFLICTS,
   KOBE_EVENT_DROPPED_TYPE,
   type HelloAckFrame,
   type HelloFrame,
@@ -41,7 +42,8 @@ import type { KernelManager } from "./notebook/manager.js";
 import { MemoryBroker } from "./tools/memory-broker.js";
 import { WebSearchBroker } from "./tools/web-search-broker.js";
 import { toolsError } from "./tools/channel.js";
-import type { PushedFile } from "./workspace/sync.js";
+import type { ConflictListener, PushedFile } from "./workspace/sync.js";
+import { ConflictReporter } from "./workspace/conflict-reporter.js";
 import type { SkillStore } from "./skills/store.js";
 import { ThreadManager } from "./threads/manager.js";
 import { fail, ok, type CommandOutcome } from "./threads/outcome.js";
@@ -130,6 +132,11 @@ export interface WorkspaceHooks {
    * renames now. Present: the agent announces `workspace_moves`.
    */
   movedOnServer?(): void;
+  /**
+   * Hear about conflict copies the sync makes (KOBE-492). Present (with kobe-tools, which tells
+   * the model): the agent announces `sync_conflicts` and reports each one to the server.
+   */
+  onConflict?(listener: ConflictListener): void;
 }
 
 /** The final workspace push before the process exits (inside the pod's 30 s grace period). */
@@ -180,6 +187,8 @@ export class Agent {
   readonly #memory: MemoryBroker;
   /** Run spans relayed to the server (KOBE-274); records only runs started with a trace context. */
   readonly #traces: TraceRecorder;
+  /** Sync conflict copies reported to the server (KOBE-492). */
+  readonly #conflicts: ConflictReporter;
   /** Command ids seen on the current connection (ids are not portable across reconnects). */
   #seenCommands = new Set<string>();
   #queuedExits: { runId: string; frame: PiExitedFrameT }[] = [];
@@ -198,6 +207,13 @@ export class Agent {
     this.#searches = new WebSearchBroker({ send: (frame) => this.#wire.send(frame) });
     this.#fileEdits = new FileEditBroker({ send: (frame) => this.#wire.send(frame) });
     this.#memory = new MemoryBroker({ send: (frame) => this.#wire.send(frame) });
+    this.#conflicts = new ConflictReporter({
+      ready: () => this.#wire.ready,
+      send: (frame) => this.#wire.send(frame),
+    });
+    if (this.#syncConflictsEnabled()) {
+      deps.workspace?.onConflict?.((report) => this.#conflicts.report(report));
+    }
     const pushPath = deps.workspace?.pushPath?.bind(deps.workspace);
     this.#shares = new FileShareBroker({
       root: config.workspaceDir,
@@ -504,6 +520,13 @@ export class Agent {
     return this.#filesEnabled();
   }
 
+  /** Conflict reports (KOBE-492) need sync to see them and kobe-tools to tell the model. */
+  #syncConflictsEnabled(): boolean {
+    return (
+      this.#deps.workspace?.onConflict !== undefined && this.#deps.toolsExtension !== undefined
+    );
+  }
+
   /** `remember` / `recall` need the tools channel (fd 4); without it neither is registered nor announced. */
   #memoryEnabled(): boolean {
     return this.#deps.toolsExtension !== undefined;
@@ -538,6 +561,8 @@ export class Agent {
       CAPABILITY_SESSION_RENEW,
       // Server moves replayed as local renames (KOBE-304).
       ...(this.#deps.workspace?.movedOnServer === undefined ? [] : [CAPABILITY_WORKSPACE_MOVES]),
+      // Sync conflict copies reported, and the model told (KOBE-492).
+      ...(this.#syncConflictsEnabled() ? [CAPABILITY_SYNC_CONFLICTS] : []),
       // The latest model call's context for its owner (KOBE-470): read from Pi's capture or the
       // session file, so it needs nothing but the thread's files.
       CAPABILITY_THREAD_CONTEXT,
@@ -584,6 +609,7 @@ export class Agent {
     const exits = this.#queuedExits;
     this.#queuedExits = [];
     for (const { runId, frame } of exits) if (listed.has(runId)) this.#wire.send(frame);
+    this.#conflicts.flush();
     this.#threads.cancelDialogsExcept(new Set(listed.keys()));
     for (const dialog of this.#threads.pendingDialogs()) {
       this.#deps.logger.debug({ thread_id: dialog.threadId }, "re-sending pending UI request");
@@ -658,6 +684,12 @@ export class Agent {
         return;
       case "workspace.moved":
         this.#deps.workspace?.movedOnServer?.();
+        return;
+      case "workspace.conflict_note":
+        void this.#threads.conflictNote(frame).then((told) => {
+          if (!told)
+            this.#deps.logger.info({ run_id: frame.run_id }, "conflict note not delivered");
+        });
         return;
       case "shutdown":
         this.#deps.logger.info({ reason: frame.reason }, "server requested shutdown");
