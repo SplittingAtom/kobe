@@ -1140,19 +1140,7 @@ export class FakeKobe {
     if (url.pathname === "/v1/workspace/files" && method === "GET") {
       const dir = url.searchParams.get("path") ?? "";
       this.workspaceListings.push(dir);
-      const entries = [...this.workspaceFiles]
-        .filter(([path]) => path.startsWith(`${dir}/`) && !path.slice(dir.length + 1).includes("/"))
-        .map(([path, bytes]) => ({
-          name: path.split("/").at(-1),
-          path,
-          type: "file",
-          size_bytes: bytes.length,
-          mtime: NOW,
-          source: "synced",
-          owner: "server",
-          area: "uploads",
-        }));
-      return json(200, { path: dir, entries });
+      return this.#listWorkspace(dir);
     }
     if (url.pathname === "/v1/workspace/file" && method === "PUT") {
       return this.#saveWorkspaceFile(url, init.body);
@@ -1999,6 +1987,29 @@ export class FakeKobe {
         parent_entry_id: r.parent_entry_id,
       })),
     };
+  }
+
+  /** One folder's files (the root's too), each with its synced version (KOBE-462/491). */
+  async #listWorkspace(dir: string): Promise<Response> {
+    const inDir = (path: string) =>
+      dir === ""
+        ? !path.includes("/")
+        : path.startsWith(`${dir}/`) && !path.slice(dir.length + 1).includes("/");
+    const files = [...this.workspaceFiles].filter(([path]) => inDir(path));
+    const entries = await Promise.all(
+      files.map(async ([path, bytes]) => ({
+        name: path.split("/").at(-1),
+        path,
+        type: "file",
+        size_bytes: bytes.length,
+        mtime: NOW,
+        source: "synced",
+        owner: "server",
+        area: "uploads",
+        sha256: await sha256Hex(bytes),
+      })),
+    );
+    return json(200, { path: dir, entries });
   }
 
   /** The editor's save (FE4): replaces the file when it still has `base_sha256`, else 409. */

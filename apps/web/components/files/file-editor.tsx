@@ -10,13 +10,21 @@
  * Accept/Reject, Commit all (saves at the proposal's base version, FE10) and Discard all.
  */
 import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
+import type { OutsideChange } from "./use-outside-change";
 import type { ApiError } from "../../lib/api/client";
 import type { FilesApi } from "../../lib/files/api";
 import { editBlockReason, editorLanguage, sha256Hex } from "../../lib/files/editor";
 import type { EditDraftStore, FileReviewStore, ProposalView } from "../../lib/files/editor-state";
 import { describeFileError } from "../../lib/files/format";
+import { fileVersion } from "../../lib/files/outside-change";
 import { fileName, previewOf } from "../../lib/files/preview";
 import { ErrorNotice } from "../admin/error-notice";
+import {
+  CompareView,
+  OutsideChoices,
+  TAKE_THEIRS_PROMPT,
+  UPDATED_NOTE,
+} from "./outside-change-notice";
 import {
   BUTTON,
   CodeEditor,
@@ -30,6 +38,12 @@ export { BUTTON, EditorFallback };
 
 export const CONFLICT_NOTICE =
   "This file changed since it was opened here (another save, or the agent), so nothing was saved.";
+const CHANGED_AGAIN: ApiError = {
+  status: 409,
+  code: "version_conflict",
+  message:
+    "The file changed again, so nothing was saved. Compare again, or Keep mine to save over the newest version.",
+};
 const DISCARD_PROMPT = (name: string) => `Discard your unsaved changes to ${name}?`;
 
 /** The editor's saved version: the server's, else computed from what was saved. */
@@ -88,6 +102,10 @@ export interface FileEditorProps {
   onSaved(text: string, sha256: string): void;
   /** Read the file again (after a conflict). */
   onReload(): void;
+  /** The file changed outside this tab (KOBE-491): read in, or waiting behind a draft. */
+  readonly outside?: OutsideChange | null | undefined;
+  /** Keep mine on the banner (or a save over the agent's version): stop showing it. */
+  onOutsideDismiss?(): void;
 }
 
 export type SaveState =
@@ -101,20 +119,19 @@ export function useSave(
   onSaved: (text: string, sha256: string) => void,
 ) {
   const [state, setState] = useState<SaveState>({ status: "idle" });
-  const save = async (base: string, text: string): Promise<boolean> => {
+  const save = async (base: string, text: string): Promise<"saved" | "conflict" | "error"> => {
     setState({ status: "saving" });
     const res = await api.save(path, base, text);
     if (res.ok) {
       onSaved(text, await savedVersion(text, res.data.sha256));
       setState({ status: "saved" });
-      return true;
+      return "saved";
     }
+    const conflict = res.error.code === "version_conflict";
     setState(
-      res.error.code === "version_conflict"
-        ? { status: "conflict" }
-        : { status: "error", error: describeFileError(res.error) },
+      conflict ? { status: "conflict" } : { status: "error", error: describeFileError(res.error) },
     );
-    return false;
+    return conflict ? "conflict" : "error";
   };
   return { state, save, reset: () => setState({ status: "idle" }) };
 }
@@ -144,18 +161,13 @@ export function FileEditor(props: FileEditorProps) {
     else drafts.set(path, { text: latest.text, baseSha256: version });
     props.onSaved(saved, version);
   });
+  const outside = useOutsideChoices(props, draft, state, { save, reset });
   const blocked =
     editBlockReason(path, truncated) ??
     (sha256 === undefined ? "This file's version is unknown, so it opens read-only." : undefined);
   const current = draft?.text ?? text;
   const base = draft?.baseSha256 ?? sha256;
   const name = fileName(path);
-  const reload = () => {
-    if (draft !== undefined && !window.confirm(DISCARD_PROMPT(name))) return;
-    drafts.clear(path);
-    reset();
-    props.onReload();
-  };
   const edit = (next: string) => {
     if (base === undefined) return;
     if (next === text && base === sha256) drafts.clear(path);
@@ -173,6 +185,8 @@ export function FileEditor(props: FileEditorProps) {
       />
     );
   }
+  const updated =
+    props.outside?.kind === "updated" && props.outside.sha256 === sha256 && draft === undefined;
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <TextModeToolbar label={`${name} view`} mode={mode} onMode={setMode}>
@@ -188,24 +202,125 @@ export function FileEditor(props: FileEditorProps) {
         )}
       </TextModeToolbar>
       <p role="status" className="text-muted-foreground text-xs empty:hidden">
-        {draft !== undefined ? "Unsaved changes." : state.status === "saved" ? "Saved." : ""}
+        {draft !== undefined
+          ? "Unsaved changes."
+          : state.status === "saved"
+            ? "Saved."
+            : updated
+              ? UPDATED_NOTE
+              : ""}
       </p>
       {blocked !== undefined && (
         <p role="note" className="text-muted-foreground text-xs">
           {blocked}
         </p>
       )}
-      <SaveNotices state={state} onReload={reload} />
-      <TextModeBody
-        mode={mode}
-        text={current}
-        preview={previewOf(path)}
-        label={`Edit ${name}`}
-        readOnly={blocked !== undefined}
-        onChange={edit}
-      />
+      {state.status === "error" && <ErrorNotice error={state.error} />}
+      {outside.mode !== null && (
+        <OutsideChoices
+          mode={outside.mode}
+          busy={state.status === "saving"}
+          comparing={outside.comparing}
+          onCompare={outside.toggleCompare}
+          onKeepMine={() => void outside.keepMine(current)}
+          onTakeTheirs={outside.takeTheirs}
+        />
+      )}
+      {outside.error && <ErrorNotice error={outside.error} />}
+      {outside.comparing && draft !== undefined ? (
+        <CompareView
+          api={props.api}
+          path={path}
+          name={name}
+          draft={current}
+          onDraft={edit}
+          onTheirs={outside.setTheirs}
+        />
+      ) : (
+        <TextModeBody
+          mode={mode}
+          text={current}
+          preview={previewOf(path)}
+          label={`Edit ${name}`}
+          readOnly={blocked !== undefined}
+          onChange={edit}
+        />
+      )}
     </div>
   );
+}
+
+/**
+ * The banner and conflict choices (KOBE-491). The agent's version is named once: by Compare's
+ * read, by the change that raised the banner, or by a version read when a save was refused; Keep
+ * mine saves over exactly that version, so a newer change is refused again, never overwritten.
+ */
+function useOutsideChoices(
+  props: FileEditorProps,
+  draft: { readonly text: string } | undefined,
+  state: SaveState,
+  saver: Pick<ReturnType<typeof useSave>, "save" | "reset">,
+) {
+  const { api, path, drafts, outside } = props;
+  const [comparing, setComparing] = useState(false);
+  const [theirs, setTheirs] = useState<{ readonly sha256: string } | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
+  const conflict = state.status === "conflict";
+  const banner = outside?.kind === "changed" && draft !== undefined;
+  // A refused save: name the version that is there now.
+  useEffect(() => {
+    if (!conflict) return;
+    let current = true;
+    void fileVersion(api, path).then((v) => {
+      if (current && v.kind === "version") setTheirs((t) => t ?? { sha256: v.sha256 });
+    });
+    return () => {
+      current = false;
+    };
+  }, [conflict, api, path]);
+  const done = () => {
+    setComparing(false);
+    setTheirs(null);
+    setError(null);
+  };
+  const keepMine = async (text: string) => {
+    setError(null);
+    if (!conflict) {
+      // The banner's Keep mine: nothing is saved yet; Save asks again.
+      setComparing(false);
+      props.onOutsideDismiss?.();
+      return;
+    }
+    const base = theirs?.sha256 ?? (outside?.kind === "changed" ? outside.sha256 : undefined);
+    if (base === undefined) return;
+    const result = await saver.save(base, text);
+    if (result === "saved") {
+      done();
+      props.onOutsideDismiss?.();
+      return;
+    }
+    if (result !== "conflict") return;
+    // It changed again since that version: say so, and name the newest for the next Keep mine.
+    setError(CHANGED_AGAIN);
+    const latest = await fileVersion(api, path);
+    setTheirs(latest.kind === "version" ? { sha256: latest.sha256 } : null);
+  };
+  const takeTheirs = () => {
+    if (!window.confirm(TAKE_THEIRS_PROMPT(fileName(path)))) return;
+    drafts.clear(path);
+    done();
+    saver.reset();
+    props.onReload();
+  };
+  return {
+    mode: conflict ? ("conflict" as const) : banner ? ("banner" as const) : null,
+    comparing: comparing && (conflict || banner),
+    toggleCompare: () => setComparing((c) => !c),
+    setTheirs,
+    keepMine,
+    takeTheirs,
+    error,
+  };
 }
 
 function ProposalReview({

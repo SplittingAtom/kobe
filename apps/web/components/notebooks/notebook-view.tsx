@@ -191,7 +191,7 @@ function NotebookBody(
   const ensureSaved = useCallback(async (): Promise<boolean> => {
     if (draft === undefined && !idsAdded) return true;
     if (base === undefined) return false;
-    return save(base, serializeNotebook(notebook));
+    return (await save(base, serializeNotebook(notebook))) === "saved";
   }, [draft, idsAdded, base, save, notebook]);
 
   const runCell = async (id: string) => {
