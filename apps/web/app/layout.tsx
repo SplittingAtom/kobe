@@ -5,15 +5,12 @@ import type { ReactNode } from "react";
 import { StyleNonce } from "../components/security/style-nonce";
 import { NewBuildBanner } from "../components/shell/new-build-banner";
 import { WorkspaceHost } from "../components/shell/workspace-host";
-import { CLIENT_BUILD_ID } from "../lib/build/build-id";
 import { themeFromCookies } from "../lib/theme/theme";
 import "./theme.css";
 
 export const metadata: Metadata = {
   title: "Kobe",
   description: "Self-hosted conversational agent platform",
-  // KOBE-487: the build this page came from (the client compares it with /api/build).
-  other: { "kobe-build": CLIENT_BUILD_ID },
 };
 
 /** The on-screen keyboard shrinks the layout, so the chat's composer stays above it (KOBE-205). */

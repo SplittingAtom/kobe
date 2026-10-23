@@ -21,7 +21,7 @@ test("a newer build shows the reload banner, and Reload keeps the draft", async 
   await watchStyleViolations(page);
   const banner = page.getByRole("status").filter({ hasText: NOTICE });
 
-  // The endpoint answers this page's own build (the meta tag): a focus check shows nothing.
+  // The endpoint answers this page's own build: a focus check shows nothing.
   const served = await page.evaluate(async () => {
     const res = await fetch("/api/build", { cache: "no-store" });
     return { status: res.status, body: (await res.json()) as { buildId?: unknown } };
@@ -29,7 +29,6 @@ test("a newer build shows the reload banner, and Reload keeps the draft", async 
   expect(served.status).toBe(200);
   expect(typeof served.body.buildId).toBe("string");
   const own = String(served.body.buildId);
-  await expect(page.locator('meta[name="kobe-build"]')).toHaveAttribute("content", own);
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await page.clock.fastForward("00:05");
   await expect(banner).toHaveCount(0);

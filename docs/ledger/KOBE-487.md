@@ -9,7 +9,7 @@
 ## Plan
 
 1. Build id: resolved once per `next build`, inlined into client and server code; `/api/build`
-   reports it; the page carries it in `<meta name="kobe-build">`.
+   reports it (no meta tag: removed in review, nothing read it).
 2. Client watcher (`lib/build/build-watcher.ts`): focus/visibility, every 10 min, unknown
    events/tools, failed chunk loads; throttled; stale is final.
 3. Banner in the root layout (`components/shell/new-build-banner.tsx`), every page.
@@ -37,7 +37,9 @@ KOBE_BUILD_ID=local-<sha12>`), else `<base36 time>-<8 hex>` fresh per build. `ne
   cannot see an unknown type directly. `seq` is gapless per run (protocol `events.ts`), so a
   skipped seq in `lib/chat/stream.ts` is the signal; an event of this run that fails the zod
   contract is the other. Both call `noteUnknownInput()` (overridable via `onUnknown`). Nothing
-  else changes: the event is still dropped as before.
+  else changes: the event is still dropped as before. Review check of the server: seqs never
+  skip (no per-viewer filter, whole-run compaction answers 410, epilogue takes the next seqs);
+  the sources are cited in the comment in `stream.ts`.
 - **Unknown tools.** `lib/build/known-tools.ts`: the server runs only `BUILTIN_TOOLS` and
   `mcp__*` (it denies anything else), so any other name means a newer build. `ToolCallCard`
   still renders the generic card and calls `noteUnknownInput()`. A model-hallucinated tool name
@@ -47,7 +49,9 @@ KOBE_BUILD_ID=local-<sha12>`), else `<base36 time>-<8 hex>` fresh per build. `ne
   in-memory), so `lib/build/reload-draft.ts` + `components/chat/use-reload-draft.ts`: Reload
   sets a flag; each composer stashes its text on `pagehide` (only after Reload, so a cancelled
   unload keeps nothing extra) under its draft key (thread id or `new`) in sessionStorage, and takes
-  it back once on mount. Text only: attachments, mentions and chips are not kept.
+  it back once on mount. Text only: attachments, mentions and chips are not kept. Review: the
+  stash expires after 10 min and sign-out (profile menu) clears it, so another person signing in
+  on the tab never gets it.
 - **Unsaved file edits.** Reused the existing `useUnsavedGuard` (`beforeunload`,
   `components/files/file-editor.tsx`, mounted by the artifact panel): the browser asks before the
   reload drops edits. Skill draft editors have their own guard.
@@ -70,16 +74,17 @@ KOBE_BUILD_ID=local-<sha12>`), else `<base36 time>-<8 hex>` fresh per build. `ne
 
 ## Evidence (acceptance criteria → test or command output)
 
-- **ac-1** `lib/build/build-id.test.ts`, `app/api/build/route.test.ts`, `app/layout.test.tsx`
-  (meta). Local `next build` + standalone server: `/api/build` → `{"buildId":"mvkm7aoi-3a13f69d"}`
-  with `cache-control: no-store`; the sign-in page's meta and a client chunk carry the same id,
-  equal to `.next/BUILD_ID`.
+- **ac-1** `lib/build/build-id.test.ts`, `app/api/build/route.test.ts`.
+  Local `next build` + standalone server: `/api/build` → `{"buildId":"mvkm7aoi-3a13f69d"}`
+  with `cache-control: no-store`; client and server chunks carry the same id, equal to
+  `.next/BUILD_ID`.
 - **ac-2** `lib/build/build-watcher.test.ts` (unchanged → quiet; newer → stale; throttle; focus,
   visibility, 10-min timer); `components/shell/new-build-banner.test.tsx`.
 - **ac-3** `lib/chat/stream.test.ts` (skipped seq, contract failure), `lib/build/known-tools.test.ts`,
   `components/chat/unknown-tool.test.tsx` (generic card renders, check fires; not for `read`).
 - **ac-4** `new-build-banner.test.tsx` (reload only on click/Enter), `lib/build/reload-draft.test.ts`,
-  `components/chat/reload-draft.test.tsx` (draft back after a reload; nothing kept otherwise).
+  `components/chat/reload-draft.test.tsx` (draft back after a reload; nothing kept otherwise),
+  `components/shell/profile-menu.test.tsx` (sign-out clears it).
 - **ac-5** `build-watcher.test.ts` (chunk script error, ChunkLoadError rejection,
   `noteChunkLoadError`), `components/shell/page-error.test.tsx`.
 - **ac-6** the unit tests above; `e2e/browser/tests/new-build-reload.spec.ts` (route-faked newer

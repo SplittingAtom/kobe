@@ -125,7 +125,12 @@ export function openRunStream(
     }
     if (result.data.run_id !== runId || result.data.seq <= lastSeq) return;
     const event = result.data;
-    // seq is gapless: a skipped one was an event type the browser dropped (never subscribed).
+    // A skipped seq is an event the browser dropped: a type this client never subscribed to.
+    // Seqs never legitimately skip (checked for KOBE-487): the `run_events` trigger assigns them
+    // gapless per run (protocol `events.ts` KobeEvent, `sse.ts` resume: "none is skipped"); the
+    // server sends every row after the cursor in order with no per-viewer filter (visibility is
+    // per run, server `event-stream/stream.ts` + `read.ts` PAGE_SQL); compaction deletes a whole
+    // run's events and answers 410 (`retention/compaction.ts`); epilogue events take the next seqs.
     if (event.seq > lastSeq + 1) onUnknown();
     lastSeq = event.seq;
     buffer.push(event);
