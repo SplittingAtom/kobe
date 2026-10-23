@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { must } from "./testing/event-stream-fixture.js";
 import { RunFixture, type FakeWorkspace, type RunStart } from "./testing/run-fixture.js";
 
@@ -742,5 +742,24 @@ describe("an unsent prompt as a branch point (L4)", () => {
     const restored = session(fresh, forked).map((e) => e.id);
     expect(restored).toContain(answer);
     expect(restored.filter((id) => id.startsWith("ku-"))).toEqual([]);
+  });
+});
+
+describe("a completed run's prompt (KOBE-480)", () => {
+  it("is bound in the end transaction, before anything that follows run.ended", async () => {
+    // The web reads the thread's markers when run.ended arrives; a move marker sits on the run's
+    // prompt (user_entry_id). The after-end hook must not be what binds it, or that read can win.
+    const hooks = [0, 1].map((i) =>
+      vi.spyOn(f.fx.replica(i).deps.runs, "onRunEnded").mockResolvedValue(undefined),
+    );
+    try {
+      const w = await f.world();
+      const ws = await f.connect(w, 0);
+      const threadId = await f.thread(w.owner);
+      const { start, user } = await nextRun(ws, w.team, threadId, w.owner);
+      expect((await f.run(w.team, start.run_id)).user_entry_id).toBe(user.id);
+    } finally {
+      for (const h of hooks) h.mockRestore();
+    }
   });
 });

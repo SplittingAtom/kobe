@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import {
@@ -37,7 +37,26 @@ export interface GitServerOptions {
   readonly tls?: { readonly key: string; readonly cert: string };
 }
 
-function cgi(root: string, req: IncomingMessage, res: ServerResponse, body: Buffer): void {
+/** Errors that only mean the other end went away first (git exiting early, a client hanging up). */
+const PEER_CLOSED = new Set([
+  "EPIPE",
+  "ECONNRESET",
+  "ERR_STREAM_DESTROYED",
+  "ERR_STREAM_WRITE_AFTER_END",
+]);
+
+function ignorePeerClosed(err: NodeJS.ErrnoException): void {
+  if (err.code && PEER_CLOSED.has(err.code)) return;
+  console.error("git test server stream error", err);
+}
+
+function cgi(
+  root: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+  body: Buffer,
+  children: Set<ChildProcess>,
+): void {
   const url = new URL(req.url ?? "/", "http://x");
   const child = spawn("git", ["http-backend"], {
     env: {
@@ -53,10 +72,23 @@ function cgi(root: string, req: IncomingMessage, res: ServerResponse, body: Buff
       GIT_PROTOCOL: String(req.headers["git-protocol"] ?? ""),
     },
   });
+  children.add(child);
+  // git http-backend may exit before reading the whole request body (e.g. a refused push):
+  // writing the rest then fails with EPIPE, which must not surface as an unhandled error.
+  child.stdin.on("error", ignorePeerClosed);
+  child.stdout.on("error", ignorePeerClosed);
+  child.on("error", (err) => {
+    children.delete(child);
+    console.error("git http-backend failed to start", err);
+    if (!res.headersSent) res.writeHead(500);
+    res.end();
+  });
   const out: Buffer[] = [];
   child.stdout.on("data", (c: Buffer) => out.push(c));
   child.stdin.end(body);
   child.on("close", () => {
+    children.delete(child);
+    if (res.destroyed || res.writableEnded) return;
     const all = Buffer.concat(out);
     let split = all.indexOf("\r\n\r\n");
     let sep = 4;
@@ -86,7 +118,10 @@ export async function startGitServer(options: GitServerOptions = {}): Promise<Gi
   const expected = options.credentials
     ? `Basic ${Buffer.from(`${options.credentials.username}:${options.credentials.token}`).toString("base64")}`
     : undefined;
+  const children = new Set<ChildProcess>();
   const handler = (req: IncomingMessage, res: ServerResponse) => {
+    req.on("error", ignorePeerClosed);
+    res.on("error", ignorePeerClosed);
     requests.push({
       method: req.method ?? "",
       url: req.url ?? "",
@@ -99,7 +134,7 @@ export async function startGitServer(options: GitServerOptions = {}): Promise<Gi
     }
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
-    req.on("end", () => cgi(root, req, res, Buffer.concat(chunks)));
+    req.on("end", () => cgi(root, req, res, Buffer.concat(chunks), children));
   };
   const server = options.tls
     ? createHttpsServer({ key: options.tls.key, cert: options.tls.cert }, handler)
@@ -143,7 +178,12 @@ export async function startGitServer(options: GitServerOptions = {}): Promise<Gi
     },
     async close() {
       server.closeAllConnections();
+      const closed = once(server, "close");
       server.close();
+      const exits = [...children].map((c) => (c.exitCode === null ? once(c, "close") : null));
+      for (const c of children) c.kill("SIGKILL");
+      await Promise.all([closed, ...exits]);
+      children.clear();
       rmSync(root, { recursive: true, force: true });
     },
   };
