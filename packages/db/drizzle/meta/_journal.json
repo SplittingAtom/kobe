@@ -1247,6 +1247,20 @@
       "when": 1792737551491,
       "tag": "0177_gallery_agent_customized",
       "breakpoints": true
+    },
+    {
+      "idx": 178,
+      "version": "7",
+      "when": 1792763054283,
+      "tag": "0178_workspace_sync_conflicts",
+      "breakpoints": true
+    },
+    {
+      "idx": 179,
+      "version": "7",
+      "when": 1792763055865,
+      "tag": "0179_workspace_sync_conflicts_rls",
+      "breakpoints": true
     }
   ]
 }
