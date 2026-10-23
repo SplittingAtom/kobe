@@ -22,10 +22,8 @@ What a member can do today (on `main`):
 - **Edit as file** (KOBE-485). A text artifact (markdown, code, csv) is copied into the member's
   workspace as `artifacts/<slug>.<ext>`. That copy can then be edited like any other file.
 
-In progress (not merged on `main`):
-
-- KOBE-488: badges under the thread title for the files the agent wrote.
-- KOBE-489: a switch that opens proposed edits for review automatically.
+- **Thread file badges** (KOBE-488). Badges under the thread title list the files the agent wrote.
+- **Open proposals for review** (KOBE-489). A switch opens proposed edits for review automatically.
 
 ## 2. Architecture
 
@@ -544,7 +542,10 @@ sequenceDiagram
     version beside the file as `<name>.conflict-<time><ext>` and takes the member's version
     (`#resolveConflict` and `#pull` in `services/sandbox-agent/src/workspace/sync.ts`).
 
-  **Gap (KOBE-492):** the agent is not told about the conflict copy; it is only logged in the sandbox.
+  **The agent and the member are told (KOBE-492).** The sandbox reports each conflict copy to the
+  server, which records it (audit `workspace.sync_conflict`) and tells the agent: as a hidden
+  notice in a run that is still going, otherwise in the thread's next run (newest 5). The notice
+  names the paths only, never content.
 
 - **The proposal's base is older than the member's save.** If that save was made in this tab, the
   tab's version no longer matches `base_sha256`. The review then shows only "changed since the
@@ -576,10 +577,11 @@ sequenceDiagram
 - **Protect hand edits.** Save before asking for a change: drafts are invisible to the agent, and
   saving is what puts your text into its context. A run that wrote the file updates or badges the
   open tab by itself.
-  The guidance to propose is only a prompt instruction: **gap (KOBE-493):** policy does not stop `write` or
-  `edit` on a viewed file. For a hard stop, run in `ask-all` mode, or have an admin add an ask rule
-  for `write` and `edit`. The site setting that prompts for all sandbox writes
-  (`promptSandboxWrites`) is off by default.
+  **The viewed file is guarded (KOBE-493).** In every mode, Dangerous included, Pi `write` and `edit`
+  on the file the run was started from are denied with "Propose the change with propose_file_edit
+  instead" when the agent can propose, and otherwise ask the member (denied in runs nobody can be
+  asked in). **Not covered:** `bash`, `powershell`, `run_python` and other tools that write files,
+  and other names for the same file (symlinks, hard links).
 
 ## 5. Limits and edge cases
 
