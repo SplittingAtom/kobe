@@ -29,13 +29,16 @@ describe("workspace changes contract (KOBE-496)", () => {
     const base = { path: "a.md", sha256: SHA, rev: 1, actor: null, at: null };
     expect(workspaceFileChangeSchema.safeParse({ ...base, extra: 1 }).success).toBe(false);
     expect(
-      workspaceFileChangeSchema.safeParse({ ...base, actor: { kind: "admin", name: null } }).success,
+      workspaceFileChangeSchema.safeParse({ ...base, actor: { kind: "admin", name: null } })
+        .success,
     ).toBe(false);
     expect(workspaceFileChangeSchema.safeParse({ ...base, path: "../x" }).success).toBe(false);
   });
 
   it("bounds the path set and needs the team", () => {
-    expect(workspaceChangesQuerySchema.safeParse({ team: TEAM, path: ["a.md"] }).success).toBe(true);
+    expect(workspaceChangesQuerySchema.safeParse({ team: TEAM, path: ["a.md"] }).success).toBe(
+      true,
+    );
     expect(workspaceChangesQuerySchema.safeParse({ team: TEAM, path: [] }).success).toBe(false);
     expect(workspaceChangesQuerySchema.safeParse({ path: ["a.md"] }).success).toBe(false);
     const many = Array.from({ length: WORKSPACE_CHANGES_MAX_PATHS + 1 }, (_, i) => `f${i}.md`);

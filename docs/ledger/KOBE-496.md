@@ -37,7 +37,7 @@ So every viewer of a manifest row is its owner.
   `team.chat` role) and on `user` access hints; uses the hub's per-user stream slot cap.
 - **No migration:** the actor is derived from `origin` + area (`sandbox` → agent; `server` under
   `projects/` → sync with the project file's `added_by` name; other `server` → user = the owner).
-- **Web:** one `useWorkspaceChanges` per artifact panel; `useOutsideChange` gets the remote change.
+- **Web:** one `WorkspaceChangeFeed` per chat session (page), tabs `watch` their path; `useOutsideChange` gets the remote change.
   Clean tab: badge (role=status) "<who> changed this file <when>" + Reload (no silent replace),
   except own agent in this thread (write/run-end hint in the last 90 s): KOBE-491 silent reload.
   Draft: KOBE-491's Compare / Keep mine / Take theirs with who. Read-only paths: Reload only.
@@ -87,3 +87,8 @@ So every viewer of a manifest row is its owner.
   never steps back); server `change-stream.test.ts` (state first, one read per burst).
 - ac-7: browser spec `e2e/browser/tests/shared-file-badge.spec.ts` (written, typechecked, not run);
   docs/file-editing.md section 4 "Live changes to an open file" + updated sequences.
+- `pnpm verify`: all tasks green except two unrelated web tests that flaked under load
+  (`conversation.test.tsx`, `rail-pickers.test.tsx`; both pass on rerun, 51/51).
+- `@kobe/server test:db`: 2266 passed; 4 files failed on shared-server connection errors (EPIPE,
+  failed rollback): `retention-forks`, `retention`, `sandbox-wire-eval`, `workspace-save`. Rerun
+  alone: 53/53 passed. `workspace-changes.db.test.ts`: 6/6.
