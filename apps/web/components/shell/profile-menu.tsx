@@ -2,6 +2,7 @@
 
 import { useState, type MouseEvent } from "react";
 import { authClient } from "../../lib/auth-client";
+import { forgetReloadDrafts } from "../../lib/build/reload-draft";
 import { forgetLastThread } from "../../lib/shell/last-thread";
 import { barMenuProps } from "./bar-menu";
 import { IconAction } from "./icon-action";
@@ -31,6 +32,7 @@ export function ProfileMenu() {
         return;
       }
       forgetLastThread();
+      forgetReloadDrafts();
       window.location.assign("/sign-in");
     } catch {
       setError("Could not sign out. Check your connection and try again.");

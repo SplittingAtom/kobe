@@ -1,0 +1,63 @@
+/* The new-build banner (KOBE-487): a small card at the top centre, over the page but leaving the
+   rest of it usable. Theme tokens only (app/theme.css), so both themes and every page (chat,
+   consoles, sign-in) paint it the same; the button is the accent fill with its white text. */
+.region {
+  position: fixed;
+  top: 0.75rem;
+  left: 50%;
+  z-index: 60;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 2rem);
+  pointer-events: none;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.5rem 0.5rem 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 18%);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  pointer-events: auto;
+}
+
+.text {
+  margin: 0;
+}
+
+.reload {
+  flex-shrink: 0;
+  height: 2rem;
+  padding: 0 0.75rem;
+  border: 0;
+  border-radius: 0.375rem;
+  background: var(--kobe-status-accent);
+  color: var(--kobe-status-accent-fg);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.reload:hover {
+  filter: brightness(1.1);
+}
+
+.reload:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* An error page's notice (components/shell/page-error.tsx), in the flow of the page. */
+.failed {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1rem;
+  color: var(--foreground);
+  font-size: 0.875rem;
+}

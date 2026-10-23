@@ -4,7 +4,9 @@ import { ToolCardApp } from "../apps/tool-card-app";
 import { useAuiState, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import { BanIcon, CheckIcon, CircleAlertIcon, ClockIcon, LoaderIcon } from "lucide-react";
 import { REMEMBER_SCOPE_LABELS } from "@kobe/protocol";
-import type { ComponentType } from "react";
+import { useEffect, type ComponentType } from "react";
+import { noteUnknownInput } from "../../lib/build/build-watcher";
+import { isKnownToolName } from "../../lib/build/known-tools";
 import { formatDuration, inputSummary } from "../../lib/chat/history";
 import type { ToolActivity } from "../../lib/chat/live";
 import type { KobeMessageMeta } from "../../lib/chat/tree";
@@ -303,6 +305,10 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
   const { output: full, retry } = useFullOutput(fullEntry, open);
   const outcome = outcomeOf(activity, props);
   const timing = props.timing;
+  // KOBE-487: a tool newer than this build renders as this generic card; check for a new build.
+  useEffect(() => {
+    if (!isKnownToolName(props.toolName)) noteUnknownInput();
+  }, [props.toolName]);
   const took =
     timing?.completedAt === undefined
       ? undefined
