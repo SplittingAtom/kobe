@@ -384,7 +384,7 @@ browser upload path, so the same size limit and quotas apply.
    reaches the server only on the next push: every `workspaceSync.pushIntervalSeconds` (chart
    default 60 s), about 2 s after the run ends, and before hibernation.
 
-   **Gap:** an open tab does not notice. The file tab reads the file once and reads it again only
+   **Gap (KOBE-491):** an open tab does not notice. The file tab reads the file once and reads it again only
    when the file is opened again (from the file browser, or by an `open_file`) or after
    **Reload the file** (`apps/web/components/files/file-tab.tsx:122`). There is no "newer version"
    notice. The member finds out when a save gets 409, or when they reopen the file.
@@ -464,7 +464,7 @@ sequenceDiagram
     version beside the file as `<name>.conflict-<time><ext>` and takes the member's version
     (`#resolveConflict` and `#pull` in `services/sandbox-agent/src/workspace/sync.ts`).
 
-  **Gap:** the agent is not told about the conflict copy; it is only logged in the sandbox.
+  **Gap (KOBE-492):** the agent is not told about the conflict copy; it is only logged in the sandbox.
 
 - **The proposal's base is older than the member's save.** If that save was made in this tab, the
   tab's version no longer matches `base_sha256`. The review then shows only "changed since the
@@ -495,7 +495,7 @@ sequenceDiagram
   Ask the agent to `open_file` the result, or reopen the tab, to see the pushed version.
 - **Protect hand edits.** Save before asking for a change: drafts are invisible to the agent, and
   saving is what puts your text into its context. Reload the tab after a run that wrote the file.
-  The guidance to propose is only a prompt instruction: **gap:** policy does not stop `write` or
+  The guidance to propose is only a prompt instruction: **gap (KOBE-493):** policy does not stop `write` or
   `edit` on a viewed file. For a hard stop, run in `ask-all` mode, or have an admin add an ask rule
   for `write` and `edit`. The site setting that prompts for all sandbox writes
   (`promptSandboxWrites`) is off by default.
