@@ -42,6 +42,8 @@ export const NOTIFICATION_KINDS = [
   "skill.version.withdrawn",
   "skill.version.revoked",
   "skill.version.unrevoked",
+  /** A Site admin published a new version of a team-published catalog skill (KOBE-495). */
+  "skill.version.site_published",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
@@ -74,6 +76,8 @@ export const notifications = pgTable(
     /** `skill.version.*`: the version retired (KOBE-340). */
     skillSemver: text(),
     pausedBy: text().$type<(typeof SCHEDULE_PAUSED_BY)[number]>(),
+    /** `skill.version.site_published`: the Site admin who published it (KOBE-495). */
+    actorUserId: uuid().references(() => users.id),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     readAt: timestamp({ withTimezone: true }),
   },
@@ -105,6 +109,10 @@ export const notifications = pgTable(
       sql`${t.skillSemver} IS NULL OR char_length(${t.skillSemver}) BETWEEN 5 AND 32`,
     ),
     check("notifications_paused_by", sql`${t.pausedBy} IN (${list(SCHEDULE_PAUSED_BY)})`),
+    check(
+      "notifications_actor",
+      sql`(${t.kind} = 'skill.version.site_published') = (${t.actorUserId} IS NOT NULL)`,
+    ),
     check("notifications_skipped_count", sql`${t.skippedCount} >= 0`),
     // The notifier is at-least-once: one notification per run and kind.
     uniqueIndex("notifications_run_kind_uniq")

@@ -65,6 +65,11 @@ export const NOTIFICATION_KINDS = [
   "skill.version.withdrawn",
   "skill.version.revoked",
   "skill.version.unrevoked",
+  /**
+   * A Site admin published a new version of a team-published catalog skill (KOBE-495): told to its
+   * maintainers in the publishing team; names the version and the admin (`actor_name`).
+   */
+  "skill.version.site_published",
 ] as const;
 /** Kinds about a catalog skill: they name it (`skill_id`, `skill_name`), not a schedule. */
 export const SKILL_NOTIFICATION_KINDS = NOTIFICATION_KINDS.filter((k) => k.startsWith("skill."));
@@ -101,6 +106,8 @@ export const notificationSchema = z
     skill_name: z.string().min(1).max(64).optional(),
     /** `skill.version.*`: the version (KOBE-340). */
     skill_semver: z.string().min(5).max(32).optional(),
+    /** `skill.version.site_published`: the Site admin's name (KOBE-495). */
+    actor_name: z.string().min(1).max(200).optional(),
     read_at: timestampSchema.nullable(),
     created_at: timestampSchema,
   })

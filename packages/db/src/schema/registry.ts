@@ -49,7 +49,11 @@ export const KOBE_SKILL_NAMES = [
 const NOTE_MAX = 4000;
 const quoted = (values: readonly string[]) => sql.raw(values.map((v) => `'${v}'`).join(", "));
 
-export const registryPublisher = pgEnum("registry_publisher", ["kobe", "maintainer"]);
+/**
+ * `site`: a version a Site admin made in the Site Console and published without review (KOBE-495);
+ * only versions carry it, never a skill (registry_skills keeps its own publisher).
+ */
+export const registryPublisher = pgEnum("registry_publisher", ["kobe", "maintainer", "site"]);
 export const registrySkillStatus = pgEnum("registry_skill_status", [
   "active",
   "deprecated",
@@ -106,6 +110,17 @@ export const registrySkills = pgTable(
     status: registrySkillStatus().notNull().default("active"),
     /** A deprecated skill may name its replacement (SK31). */
     replacementId: uuid(),
+    /**
+     * Detached by a Site admin (KOBE-495, as KOBE-494's gallery agents): the first site edit of a
+     * Kobe-shipped skill stops the Kobe seed publishing it. `detachedFromVersion` is the newest
+     * Kobe version when it was detached; the seed records the newest shipped one it skipped in
+     * `kobeShippedVersion`, so the console can say a newer Kobe version is available. Reset to Kobe
+     * clears all four. Users are deactivated, never deleted (NO ACTION).
+     */
+    detachedAt: ts(),
+    detachedBy: uuid().references(() => users.id),
+    detachedFromVersion: text(),
+    kobeShippedVersion: text(),
     createdAt: ts().notNull().defaultNow(),
     updatedAt: ts().notNull().defaultNow(),
   },
@@ -130,6 +145,15 @@ export const registrySkills = pgTable(
     check(
       "registry_skills_kobe_names",
       sql`(${t.publisher} = 'kobe') = (${t.name} IN (${quoted(KOBE_SKILL_NAMES)}))`,
+    ),
+    // All or nothing, and only on a Kobe skill (KOBE-495).
+    check(
+      "registry_skills_detached",
+      sql`(${t.detachedAt} IS NULL AND ${t.detachedBy} IS NULL AND ${t.detachedFromVersion} IS NULL AND ${t.kobeShippedVersion} IS NULL)
+        OR (${t.detachedAt} IS NOT NULL AND ${t.detachedBy} IS NOT NULL
+          AND ${t.detachedFromVersion} IS NOT NULL AND ${t.detachedFromVersion} ~ ${sql.raw(`'${SEMVER_FORMAT}'`)}
+          AND (${t.kobeShippedVersion} IS NULL OR ${t.kobeShippedVersion} ~ ${sql.raw(`'${SEMVER_FORMAT}'`)})
+          AND ${t.publisher} = 'kobe')`,
     ),
   ],
 );
@@ -182,7 +206,10 @@ export const registryVersions = pgTable(
     /**
      * `kobe`: published by Kobe itself (KOBE-317, SK4), from the package set the server ships:
      * no submitter and no reviewer (no person submits or approves it, and no stand-in user is
-     * recorded). Always its skill's publisher (registry_versions_publisher_fk).
+     * recorded). `site`: made and published by a Site admin in the Site Console (KOBE-495), on any
+     * catalog skill, without review: the admin is the submitter, nobody reviews it.
+     * Otherwise always its skill's publisher (trigger `registry_versions_publisher_guard`, which
+     * reports `registry_versions_publisher_fk`, the foreign key it replaced in 0180).
      */
     publisher: registryPublisher().notNull().default("maintainer"),
     semver: text().notNull(),
@@ -236,17 +263,19 @@ export const registryVersions = pgTable(
     index("registry_versions_state_idx").on(t.state, t.submittedAt),
     index("registry_versions_runtime_idx").on(t.runtimeHash),
     index("registry_versions_package_idx").on(t.packageHash),
-    foreignKey({
-      name: "registry_versions_publisher_fk",
-      columns: [t.skillId, t.publisher],
-      foreignColumns: [registrySkills.id, registrySkills.publisher],
-    }),
     // Kobe publishes without a person (KOBE-317): no submitter, reviewer or claim, never flagged.
     check(
       "registry_versions_kobe_publisher",
       sql`(${t.publisher} = 'kobe') = (${t.submittedBy} IS NULL)
         AND (${t.publisher} <> 'kobe' OR (${t.reviewedBy} IS NULL AND ${t.claimedBy} IS NULL
           AND NOT ${t.selfApproved} AND ${t.runtimeStorageKey} IS NOT NULL))`,
+    ),
+    // A Site admin publishes without review (KOBE-495): the admin submitted it, nobody reviewed or
+    // claimed it, never flagged, its bytes stored. `::text`: the value is new in this migration.
+    check(
+      "registry_versions_site_publisher",
+      sql`${t.publisher}::text <> 'site' OR (${t.submittedBy} IS NOT NULL AND ${t.reviewedBy} IS NULL
+        AND ${t.claimedBy} IS NULL AND NOT ${t.selfApproved} AND ${t.runtimeStorageKey} IS NOT NULL)`,
     ),
     check(
       "registry_versions_storage",
@@ -283,12 +312,12 @@ export const registryVersions = pgTable(
       "registry_versions_self_approval",
       sql`NOT ${t.selfApproved} OR ${t.approvedAt} IS NOT NULL`,
     ),
-    // A version that was ever published carries its approval (a reviewer's, or Kobe's own
-    // publication); one that wasn't, none.
+    // A version that was ever published carries its approval (a reviewer's, or Kobe's or a Site
+    // admin's own publication); one that wasn't, none.
     check(
       "registry_versions_approval",
       sql`(${t.state} IN ('approved', 'deprecated', 'withdrawn', 'revoked'))
-        = (${t.approvedAt} IS NOT NULL AND (${t.reviewedBy} IS NOT NULL OR ${t.publisher} = 'kobe'))`,
+        = (${t.approvedAt} IS NOT NULL AND (${t.reviewedBy} IS NOT NULL OR ${t.publisher}::text IN ('kobe', 'site')))`,
     ),
   ],
 );

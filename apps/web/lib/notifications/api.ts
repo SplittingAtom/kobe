@@ -20,6 +20,8 @@ export interface KobeNotification {
   readonly skillName?: string | undefined;
   /** The retired version (`skill.version.*`, KOBE-340). */
   readonly skillSemver?: string | undefined;
+  /** `skill.version.site_published`: the Site admin who published it (KOBE-495). */
+  readonly actorName?: string | undefined;
   readonly readAt: string | null;
   readonly createdAt: string;
 }

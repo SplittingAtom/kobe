@@ -44,6 +44,8 @@ export function notificationTitle(n: KobeNotification): string {
       return `${skillVersion(n)} was revoked — choose a version`;
     case "skill.version.unrevoked":
       return `${skillVersion(n)} is available again`;
+    case "skill.version.site_published":
+      return `${n.actorName ?? "A Site admin"} published ${skillVersion(n)} for the Site`;
     case "skill.member_add.blocked":
       return `A Team admin blocked ${n.skillName ?? "a catalog skill"} in this team; your Add for me was removed`;
   }
