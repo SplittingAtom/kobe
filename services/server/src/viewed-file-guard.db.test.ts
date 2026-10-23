@@ -135,12 +135,16 @@ async function pendingReasons(w: World) {
 }
 
 async function pinDangerous(w: World): Promise<void> {
+  await pinAgent(w, { approval_mode: "dangerous", tools: { allow: ["write", "edit"] } });
+}
+
+/** Creates and publishes a team agent with `frontmatter`, pinned to the world's run. */
+async function pinAgent(w: World, frontmatter: Record<string, unknown>): Promise<void> {
   const created = await w.owner.browser.post("/v1/agents", {
     scope: "team",
     frontmatter: {
       name: `Agent ${randomBytes(2).toString("hex")}`,
-      approval_mode: "dangerous",
-      tools: { allow: ["write", "edit"] },
+      ...frontmatter,
     },
     prompt: "Do it.",
   });
@@ -171,7 +175,7 @@ describe("the viewed-file guard (KOBE-493)", () => {
       const result = await check(w, tool, input).result();
       expect(result.decision, JSON.stringify(input)).toBe("deny");
       expect(result).toMatchObject({ message: REFUSAL });
-      expect(result.reasons[0]).toMatchObject({ code: "site_deny_rule", message: REFUSAL });
+      expect(result.reasons[0]).toMatchObject({ code: "viewed_file", message: REFUSAL });
     }
     expect(w.sb.frames("policy.pending")).toHaveLength(0);
     // Recorded as the call's decision (existing path): one policy.denied per call.
@@ -210,7 +214,7 @@ describe("the viewed-file guard (KOBE-493)", () => {
     await pinDangerous(dangerous);
     await check(dangerous, "edit", { path: VIEWED, edits: [] }).pending();
     for (const reason of [...(await pendingReasons(w)), ...(await pendingReasons(dangerous))]) {
-      expect(reason).toMatchObject({ code: "site_ask_rule" });
+      expect(reason).toMatchObject({ code: "viewed_file" });
       expect(reason?.message).toContain("The user is viewing notes/plan.md");
     }
     // Other files still run as before (sandbox writes don't ask in ask-on-write).
@@ -229,10 +233,7 @@ describe("the viewed-file guard (KOBE-493)", () => {
     );
     const result = await check(w, "write", { path: VIEWED, content: "x" }).result();
     expect(result.decision).toBe("deny");
-    expect(result.reasons.map((r) => r.code)).toEqual([
-      "mode_auto_not_allowlisted",
-      "site_ask_rule",
-    ]);
+    expect(result.reasons.map((r) => r.code)).toEqual(["mode_auto_not_allowlisted", "viewed_file"]);
     expect((await check(w, "write", { path: "a.md", content: "x" }).result()).decision).toBe(
       "allow",
     );
@@ -244,5 +245,40 @@ describe("the viewed-file guard (KOBE-493)", () => {
     expect((await check(w, "write", { path: VIEWED, content: "x" }).result()).decision).toBe(
       "allow",
     );
+  });
+
+  it("asks instead of pointing at propose_file_edit when the agent's tools.deny removes it", async () => {
+    const w = await world([CAPABILITY_FILE_EDITS]);
+    await pinAgent(w, { tools: { deny: ["propose_file_edit"] } });
+    await check(w, "write", { path: VIEWED, content: "x" }).pending();
+    expect(await pendingReasons(w)).toEqual([
+      expect.objectContaining({ code: "viewed_file", stage: "ask_rule" }),
+    ]);
+    expect(await deniedEvents(w)).toEqual([]);
+  });
+
+  it("its approval offers no remember, refuses one, and is not approved in bulk", async () => {
+    const w = await world([]);
+    const first = await check(w, "write", { path: VIEWED, content: "x" }).pending();
+    await check(w, "edit", { path: VIEWED, edits: [] }).pending();
+    const options = await w.owner.browser.get(`/v1/approvals/${first.approval_id}/remember`);
+    expect(options.status, JSON.stringify(options.json)).toBe(200);
+    expect(options.json).toMatchObject({
+      can_remember: false,
+      reason:
+        "The user is viewing this file, so an approval to change it directly is never remembered.",
+      choices: [],
+      approve_all: null,
+    });
+    const remembered = await w.owner.browser.post(`/v1/approvals/${first.approval_id}`, {
+      decision: "allow",
+      remember: { tool_glob: "write", scope: "day" },
+    });
+    expect(remembered).toMatchObject({ status: 403, json: { code: "remember_not_allowed" } });
+    expect(JSON.stringify(remembered.json)).toContain("The user is viewing this file");
+    const allowed = await w.owner.browser.post(`/v1/approvals/${first.approval_id}`, {
+      decision: "allow",
+    });
+    expect(allowed.status, JSON.stringify(allowed.json)).toBe(200);
   });
 });

@@ -20,7 +20,7 @@ import { neverPromptReason } from "../policy/evaluate.js";
 import { appliedUserRule, recordRuleApplied } from "../policy/rule-applied.js";
 import { appliedDangerousMode, recordDangerousApplied } from "../policy/dangerous-mode.js";
 import { loadRunAgentTools } from "../policy/run-agent-tools.js";
-import { guardViewedFile } from "../policy/viewed-file-guard.js";
+import { guardViewedFile, proposeAvailable } from "../policy/viewed-file-guard.js";
 import { recordSkippedActionInTx } from "../policy/skipped-actions.js";
 import type {
   ApprovalBroker,
@@ -439,11 +439,14 @@ export async function decidePolicyCheck(
       return denyFrame(frame, [{ ...input, message }], message);
     }
     // KOBE-493: Pi write/edit never change the member's viewed file directly, in any mode.
+    const { viewedPath } = evaluated;
     const decision = guardViewedFile(evaluated.decision, {
       tool: evaluated.input.tool,
       input: frame.input,
-      viewedPath: evaluated.viewedPath,
-      fileEdits: target.fileEdits === true,
+      viewedPath,
+      canPropose:
+        viewedPath !== undefined &&
+        proposeAvailable(evaluated.input.agent, target.fileEdits === true, viewedPath),
       now: new Date(),
     });
     // A skill eval's run (KOBE-325) never reads or writes the member's memory or projects: an eval

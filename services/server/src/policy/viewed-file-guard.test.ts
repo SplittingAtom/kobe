@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { APPROVAL_TTL_MS, type PolicyDecision, type ToolDescriptor } from "@kobe/protocol";
-import { guardViewedFile, viewedFileTarget, type ViewedFileGuard } from "./viewed-file-guard.js";
+import {
+  guardViewedFile,
+  isViewedFileAsk,
+  proposeAvailable,
+  viewedFileTarget,
+  type ViewedFileGuard,
+} from "./viewed-file-guard.js";
 
 const NOW = new Date("2026-10-23T10:00:00.000Z");
 const pi = (name: string): ToolDescriptor => ({
@@ -41,7 +47,7 @@ function guard(over: Partial<ViewedFileGuard> = {}): ViewedFileGuard {
     tool: pi("write"),
     input: { path: "notes/plan.md", content: "x" },
     viewedPath: "notes/plan.md",
-    fileEdits: true,
+    canPropose: true,
     now: NOW,
     ...over,
   };
@@ -86,7 +92,7 @@ describe("guardViewedFile (KOBE-493)", () => {
       const out = guardViewedFile(before, guard());
       expect(out.effect).toBe("deny");
       expect(out.reasons[0]).toEqual({
-        code: "site_deny_rule",
+        code: "viewed_file",
         stage: "site_deny",
         message:
           "The user is viewing notes/plan.md. Propose the change with propose_file_edit instead; nothing was written.",
@@ -100,13 +106,13 @@ describe("guardViewedFile (KOBE-493)", () => {
   });
 
   it("ac-2: without file_edits it asks, also where the engine allowed (Dangerous, remembered)", () => {
-    const fromAllow = guardViewedFile(ALLOW, guard({ fileEdits: false }));
+    const fromAllow = guardViewedFile(ALLOW, guard({ canPropose: false }));
     expect(fromAllow).toEqual({
       effect: "require_approval",
       risk: "write",
       reasons: [
         {
-          code: "site_ask_rule",
+          code: "viewed_file",
           stage: "ask_rule",
           message:
             "The user is viewing notes/plan.md; write would change it directly instead of proposing the change.",
@@ -114,14 +120,14 @@ describe("guardViewedFile (KOBE-493)", () => {
       ],
       expires_at: new Date(NOW.getTime() + APPROVAL_TTL_MS).toISOString(),
     });
-    const fromAsk = guardViewedFile(ASK, guard({ fileEdits: false }));
+    const fromAsk = guardViewedFile(ASK, guard({ canPropose: false }));
     expect(fromAsk.effect).toBe("require_approval");
-    expect(fromAsk.reasons.map((r) => r.code)).toEqual(["site_ask_rule", "risk_write"]);
+    expect(fromAsk.reasons.map((r) => r.code)).toEqual(["viewed_file", "risk_write"]);
   });
 
   it("keeps an engine deny as it is", () => {
     expect(guardViewedFile(DENY, guard())).toBe(DENY);
-    expect(guardViewedFile(DENY, guard({ fileEdits: false }))).toBe(DENY);
+    expect(guardViewedFile(DENY, guard({ canPropose: false }))).toBe(DENY);
   });
 
   it("ac-3: leaves other paths, other tools and runs without a viewed file alone", () => {
@@ -131,5 +137,30 @@ describe("guardViewedFile (KOBE-493)", () => {
     expect(guardViewedFile(ALLOW, guard({ tool: pi("propose_file_edit") }))).toBe(ALLOW);
     expect(guardViewedFile(ALLOW, guard({ tool: pi("open_file") }))).toBe(ALLOW);
     expect(guardViewedFile(ALLOW, guard({ tool: mcp }))).toBe(ALLOW);
+  });
+});
+
+describe("isViewedFileAsk (KOBE-493: never remembered)", () => {
+  it("spots the guard's reason among others", () => {
+    expect(isViewedFileAsk([{ code: "risk_write" }, { code: "viewed_file" }])).toBe(true);
+    expect(isViewedFileAsk([{ code: "site_ask_rule" }])).toBe(false);
+  });
+});
+
+describe("proposeAvailable (KOBE-493: ask when the agent can't propose)", () => {
+  const agent = (deny: string[], allow: string[] = []) => ({
+    agent_id: null,
+    version: null,
+    tools_allow: allow,
+    tools_deny: deny,
+    dangerous_tools: [],
+  });
+  it("needs file_edits and propose_file_edit left by the agent's tool lists", () => {
+    expect(proposeAvailable(agent([]), true, "a.md")).toBe(true);
+    expect(proposeAvailable(agent([]), false, "a.md")).toBe(false);
+    expect(proposeAvailable(agent(["propose_file_edit"]), true, "a.md")).toBe(false);
+    expect(proposeAvailable(agent(["propose_*"]), true, "a.md")).toBe(false);
+    expect(proposeAvailable(agent([], ["write"]), true, "a.md")).toBe(false);
+    expect(proposeAvailable(agent(["bash"]), true, "a.md")).toBe(true);
   });
 });

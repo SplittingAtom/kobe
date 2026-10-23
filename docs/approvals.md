@@ -29,16 +29,22 @@ connector exposure, ask rules, Kobe-scoped write prompts and `auto`/scheduled re
 at the sandbox check and again at the MCP proxy.
 
 **The viewed file** (KOBE-493). When the run carries a viewed file (`runs.viewing`, set when the
-member sends while a file is open, and again on Retry and regenerate), Pi's `write` and `edit` on
-that file never change it directly, in every mode, Dangerous and remembered approvals included (a
+member sends while a file is open, and again on Retry and regenerate; only the path is kept when
+the file could not be read, and the guard still applies), Pi's `write` and `edit` on that file
+never change it directly, in every mode, Dangerous and remembered approvals included (a
 member-protection rule, like `tools.deny`; `policy/viewed-file-guard.ts`, applied after the engine
-at the sandbox check). With the sandbox's `file_edits` capability the call is denied with a tool
-error the model can act on ("The user is viewing notes.md. Propose the change with
-propose_file_edit instead; nothing was written."); without it the member is asked (reason
-`site_ask_rule`, no rule id), and where nobody can be asked (`auto`, scheduled, skill eval) it is
-denied. Paths are compared as normalised strings (Pi's path resolved against `/workspace`: absolute
-or relative, `./`, `../`, `//`, trailing slash; case-sensitive; symlinks not followed). `bash` and
-`run_python` are not covered; `propose_file_edit`, `open_file` and other files are unaffected.
+at the sandbox check; reason code `viewed_file`). When the agent can propose instead (the sandbox
+announced `file_edits` and the agent's tool lists leave `propose_file_edit`), the call is denied
+with a tool error the model can act on ("The user is viewing notes.md. Propose the change with
+propose_file_edit instead; nothing was written."). Otherwise the member is asked; that approval
+offers no "remember" (it would be ignored: the guard asks again) and is left out of "Approve all
+waiting"; where nobody can be asked (`auto`, scheduled, skill eval) it is denied. Paths are
+compared as normalised strings (Pi's path resolved against `/workspace`: absolute or relative,
+`./`, `../`, `//`, trailing slash; case-sensitive).
+
+Not covered: `bash`, `powershell` and `run_python` (which can also write a viewed `.ipynb` or
+`.py`), any other tool that writes files, and other names for the same file: symlinks and hard
+links are not followed. `propose_file_edit`, `open_file` and other files are unaffected.
 
 **Sandbox tools ask only when a policy rule says so** (user decision, 2026-10-03). `bash`, `write`,
 `edit` and the other sandbox built-ins have no default prompt. The sandbox, its egress policy and

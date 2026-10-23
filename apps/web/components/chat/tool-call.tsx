@@ -58,6 +58,20 @@ const OUTCOME_LABEL: Record<Outcome, string> = {
   running: "Running…",
 };
 
+/**
+ * The status label; a write the server refused because the member is viewing the file
+ * (KOBE-493, reason `viewed_file`) says so instead of the generic "Denied by policy".
+ */
+export function outcomeLabel(
+  outcome: Outcome,
+  denied: { readonly reasons: readonly { readonly code: string }[] } | undefined,
+): string {
+  if (outcome === "denied" && denied?.reasons.some((r) => r.code === "viewed_file")) {
+    return "Not written: you're viewing this file";
+  }
+  return OUTCOME_LABEL[outcome];
+}
+
 const OUTCOME_ICON: Record<Outcome, ComponentType<{ className?: string }>> = {
   denied: BanIcon,
   error: CircleAlertIcon,
@@ -112,9 +126,12 @@ function ToolCardHeader({
   summary,
   skill,
   outcome,
+  label,
   took,
 }: {
   readonly toolName: string;
+  /** The status text ({@link outcomeLabel}). */
+  readonly label: string;
   readonly summary: string;
   /** The skill this call loaded (KOBE-297): "Read skill <name>" instead of tool and path. */
   readonly skill?: string | undefined;
@@ -150,7 +167,7 @@ function ToolCardHeader({
         </>
       )}
       <span className={cn("ms-auto shrink-0", tone)} data-kobe-outcome-label={outcome}>
-        {OUTCOME_LABEL[outcome]}
+        {label}
       </span>
       {took !== undefined && <span className="shrink-0 tabular-nums">{took}</span>}
     </>
@@ -306,6 +323,7 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
             summary={inputSummary((props.args ?? {}) as Readonly<Record<string, unknown>>)}
             skill={skill}
             outcome={outcome}
+            label={outcomeLabel(outcome, activity.denied)}
             took={took}
           />
         }

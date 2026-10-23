@@ -391,8 +391,15 @@ export interface NewRun {
   readonly retryOfRunId: string | null;
   readonly clientKey: string | null;
   /** The message's viewed file (KOBE-462); null for none. */
-  readonly viewing?: RunViewingContext | null;
+  readonly viewing?: StoredViewing | null;
 }
+
+/**
+ * What `runs.viewing` holds: the file as read, or only its path when it could not be read (not
+ * synced yet, storage error). A path-only row sends no `run.start.viewing` ({@link runViewing}
+ * doesn't parse it) but still guards the file (KOBE-493).
+ */
+export type StoredViewing = RunViewingContext | { readonly path: string };
 
 /** Inserts a queued run at the end of the thread's queue (thread lock held). */
 export async function insertQueuedRun(tx: KobeTx, run: NewRun): Promise<string> {

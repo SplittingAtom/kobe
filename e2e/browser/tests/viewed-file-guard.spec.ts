@@ -77,7 +77,11 @@ test("viewed file: the agent's write to the open file is refused or becomes a pr
     expect((await workspace(page, "read", path)).text).toBe(BASE);
 
     const proposal = page.locator(`[data-kobe-file-edit="${path}"]`);
-    const refusal = page.getByText("Denied by policy").first();
+    // The write's card says why it was refused (reason viewed_file).
+    const refusal = page
+      .getByText("Not written: you're viewing this file")
+      .or(page.getByText("The user is viewing"))
+      .first();
     await expect(proposal.or(refusal).first()).toBeVisible({ timeout: RUN_TIMEOUT_MS });
 
     if ((await proposal.count()) > 0) {
