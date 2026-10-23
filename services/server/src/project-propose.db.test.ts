@@ -219,14 +219,27 @@ const fileRows = (team: string) =>
 const approvals = (team: string) =>
   rows<{ id: string; tool: string }>(`SELECT id, tool FROM approvals WHERE team_id = $1`, [team]);
 
-async function refusals(team: string): Promise<string[]> {
-  await new Promise((r) => setTimeout(r, 300)); // audit rows are written off the frame path
-  return (
-    await rows<{ target: { reason: string } }>(
-      `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'sandbox.project_file_refused' ORDER BY seq`,
-      [team],
-    )
-  ).map((r) => r.target.reason);
+/**
+ * Audit rows are written off the frame path, so wait until `expected` of them have landed (up to
+ * 5 s; a fixed 300 ms sleep flaked on loaded CI runners, KOBE-480), then settle briefly so an
+ * unexpected extra row still shows up.
+ */
+async function refusals(team: string, expected = 0): Promise<string[]> {
+  const read = async () =>
+    (
+      await rows<{ target: { reason: string } }>(
+        `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'sandbox.project_file_refused' ORDER BY seq`,
+        [team],
+      )
+    ).map((r) => r.target.reason);
+  const deadline = Date.now() + 5_000;
+  let seen = await read();
+  while (seen.length < expected && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+    seen = await read();
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  return read();
 }
 
 async function decide(p: Person, approvalId: string, decision: "allow" | "deny") {
@@ -336,7 +349,7 @@ describe("project.file_propose (ac-2)", () => {
     expect(await propose(sb, w, "d1", input, ref)).toMatchObject({ status: "pending_approval" });
     const [approval] = await approvals(w.team);
     await decide(w.owner, must(approval, "approval").id, "deny");
-    expect(await refusals(w.team)).toContain("approval_denied");
+    expect(await refusals(w.team, 1)).toContain("approval_denied");
     expect(await fileRows(w.team)).toEqual([]);
     const keys = [...objects.objects.keys()].filter(
       (k) => k.includes(w.team) && k.includes("/projects/"),
@@ -354,7 +367,7 @@ describe("project.file_propose (ac-2)", () => {
     await check(sb, w, "u2", input);
     const forged = await propose(sb, w, "u2", { ...input, folder: "elsewhere" }, ref);
     expect(errorCode(forged)).toBe("not_allowed");
-    expect(await refusals(w.team)).toEqual(["not_allowed", "input_mismatch"]);
+    expect(await refusals(w.team, 2)).toEqual(["not_allowed", "input_mismatch"]);
     expect(await approvals(w.team)).toEqual([]);
     expect(await fileRows(w.team)).toEqual([]);
   });
@@ -367,7 +380,7 @@ describe("project.file_propose (ac-2)", () => {
     await check(sb, w, "k0", input);
     await asCompaction(w.team, w.runId);
     expect(errorCode(await propose(sb, w, "k0", input, ref))).toBe("not_allowed");
-    expect(await refusals(w.team)).toEqual(["run_not_active"]);
+    expect(await refusals(w.team, 1)).toEqual(["run_not_active"]);
     expect(await approvals(w.team)).toEqual([]);
   });
 
@@ -378,7 +391,7 @@ describe("project.file_propose (ac-2)", () => {
     const ref = await pushed(w, "notes/spec.md", "x");
     await check(sb, w, "k1", input);
     expect(errorCode(await propose(sb, w, "k1", input, ref))).toBe("not_allowed");
-    expect(await refusals(w.team)).toEqual(["capability_missing"]);
+    expect(await refusals(w.team, 1)).toEqual(["capability_missing"]);
   });
 
   it("is refused for a thread outside a project and for a user who is not a member", async () => {
@@ -391,7 +404,7 @@ describe("project.file_propose (ac-2)", () => {
     await inProject(w, false);
     await check(sb, w, "n2", input);
     expect(errorCode(await propose(sb, w, "n2", input, ref))).toBe("not_allowed");
-    expect(await refusals(w.team)).toEqual(["no_project", "not_a_member"]);
+    expect(await refusals(w.team, 2)).toEqual(["no_project", "not_a_member"]);
     expect(await approvals(w.team)).toEqual([]);
     expect(await fileRows(w.team)).toEqual([]);
   });
@@ -409,7 +422,7 @@ describe("project.file_propose (ac-2)", () => {
     expect(errorCode(await propose(sb, w, "s2", input, { ...ref, path: "other.md" }))).toBe(
       "not_allowed",
     );
-    expect(await refusals(w.team)).toEqual(["not_synced", "path_mismatch"]);
+    expect(await refusals(w.team, 2)).toEqual(["not_synced", "path_mismatch"]);
     expect(await approvals(w.team)).toEqual([]);
   });
 
