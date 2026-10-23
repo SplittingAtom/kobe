@@ -273,8 +273,10 @@ describe("with the rest of the shell (ac-4)", () => {
     const t = thread();
     fake.addArtifact(t, { kind: "markdown", title: "Plan", versions: ["Plan body"] });
     const h = await openShell(t);
-    const list = await screen.findByRole("navigation", { name: "Artifacts in this conversation" });
-    await userEvent.setup().click(within(list).getByRole("button", { name: "Plan" }));
+    const list = await screen.findByRole("navigation", {
+      name: "Artifacts and files in this conversation",
+    });
+    await userEvent.setup().click(within(list).getByRole("button", { name: "Open artifact Plan" }));
     await screen.findByRole("tab", { name: "Plan", selected: true });
     expect(
       screen.getByRole("separator", { name: "Resize the artifact column and the conversation" }),

@@ -163,6 +163,20 @@ export async function currentEntry(
   return row ? toEntry(row) : undefined;
 }
 
+/** The current rows (live or tombstone) of these paths; paths with no row are left out. */
+export async function currentEntries(
+  tx: KobeTx,
+  owner: WorkspaceOwner,
+  paths: readonly string[],
+): Promise<StoredEntry[]> {
+  if (paths.length === 0) return [];
+  const res = await tx.execute<FileRow>(sql`
+    SELECT ${FILE_COLUMNS} FROM workspace_files
+     WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}
+       AND path IN ${[...new Set(paths)]}`);
+  return res.rows.map(toEntry);
+}
+
 /**
  * Of these hashes, the ones this workspace does not hold (or is collecting, or lost from storage:
  * KOBE-475, so a push that names lost content uploads it again).

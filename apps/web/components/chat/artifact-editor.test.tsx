@@ -43,8 +43,10 @@ function threadWith(artifact: Parameters<FakeKobe["addArtifact"]>[1]) {
 
 async function openFromList(title: string) {
   const user = userEvent.setup();
-  const list = await screen.findByRole("navigation", { name: "Artifacts in this conversation" });
-  await user.click(within(list).getByRole("button", { name: title }));
+  const list = await screen.findByRole("navigation", {
+    name: "Artifacts and files in this conversation",
+  });
+  await user.click(within(list).getByRole("button", { name: `Open artifact ${title}` }));
   const panel = await screen.findByRole("region", { name: title });
   return { user, panel };
 }

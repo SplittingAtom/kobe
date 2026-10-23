@@ -70,7 +70,7 @@ test("U17: the CE7 table holds at 1280, 960, 800 and 390 px, the conversation ne
       if (band === "overlay") {
         // Opened here, the artifact is a sheet over the conversation, which keeps its 400 px.
         await page
-          .getByRole("navigation", { name: "Artifacts in this conversation" })
+          .getByRole("navigation", { name: "Artifacts and files in this conversation" })
           .getByRole("button", { name: title })
           .click();
         await expect(artifact).toHaveAttribute("data-sheet-open", "");
@@ -171,7 +171,7 @@ test("U17: rail state (width, tab, section) and artifact width persist across tw
     // from the thread's artifact list (the open set itself is per browser, CE6).
     await second.goto(page.url());
     await second
-      .getByRole("navigation", { name: "Artifacts in this conversation" })
+      .getByRole("navigation", { name: "Artifacts and files in this conversation" })
       .getByRole("button", { name: title })
       .click();
     await expect(r2.artifact.getByRole("tab").first()).toBeVisible();

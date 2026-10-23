@@ -73,8 +73,10 @@ async function openArtifact() {
   fake.addEntry(t, u, { role: "assistant", content: [{ type: "text", text: "done" }] });
   fake.addArtifact(t, { kind: "markdown", title: "Plan", versions: ["Plan body"] });
   openApp(fake, t);
-  const list = await screen.findByRole("navigation", { name: "Artifacts in this conversation" });
-  const opener = within(list).getByRole("button", { name: "Plan" });
+  const list = await screen.findByRole("navigation", {
+    name: "Artifacts and files in this conversation",
+  });
+  const opener = within(list).getByRole("button", { name: "Open artifact Plan" });
   await userEvent.setup().click(opener);
   await screen.findByRole("tab", { name: "Plan", selected: true });
   return opener;

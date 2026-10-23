@@ -292,6 +292,11 @@ export interface ChatApi {
    * owner only), oldest first: the proposal cards after a reload.
    */
   fileEditProposals(threadId: string): Promise<ApiResult<readonly ProposalView[]>>;
+  /**
+   * The workspace files the agent wrote in the thread and that still exist (KOBE-488, `GET
+   * /v1/threads/{id}/files`; the owner only, 404 for anyone else), in order of first appearance.
+   */
+  threadFiles(threadId: string): Promise<ApiResult<readonly FileEntry[]>>;
   /** The bytes of a file the agent shared (`GET /v1/files/:id/content`, KOBE-150). */
   downloadSharedFile(fileId: string): Promise<ApiResult<Uint8Array>>;
   /**
@@ -481,6 +486,10 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
         }),
       );
       return { ...res, data: proposals };
+    },
+    threadFiles: async (id) => {
+      const res = await get<{ files: readonly FileEntry[] }>(`/v1/threads/${enc(id)}/files`);
+      return res.ok ? { ...res, data: res.data.files } : res;
     },
     downloadSharedFile: (id) => apiDownload(`/v1/files/${enc(id)}/content`, { teamId, fetchFn }),
     undoMemory: (docId, action) =>
