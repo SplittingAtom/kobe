@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { AppItemStore, appItemsOf, kindLabel, referencesBody, type AppItem } from "./app-items";
+import {
+  AppItemStore,
+  appItemsOf,
+  itemsOfReferences,
+  kindLabel,
+  referencesBody,
+  type AppItem,
+} from "./app-items";
 
 const link = (over: Record<string, unknown> = {}) => ({
   type: "resource_link",
@@ -12,7 +19,7 @@ const link = (over: Record<string, unknown> = {}) => ({
 const FROM = "Lakehouse Picker";
 
 describe("appItemsOf (KOBE-490 ac-1)", () => {
-  it("takes valid resource_links with their kind, title and app", () => {
+  it("takes valid resource_links with their kind (the app's title is not kept)", () => {
     const { items, dropped } = appItemsOf([
       { type: "text", text: "`cat.ns.orders`" },
       link({ title: "Orders\u202e table" }),
@@ -23,7 +30,6 @@ describe("appItemsOf (KOBE-490 ac-1)", () => {
         uri: "catalyst://lakehouse/cat/ns/orders",
         name: "cat.ns.orders",
         kind: "table",
-        title: "Orders table",
       },
     ]);
   });
@@ -33,8 +39,9 @@ describe("appItemsOf (KOBE-490 ac-1)", () => {
       link({ uri: "a://1", _meta: { "io.kobe/item-kind": "Weird Kind" } }),
       link({ uri: "a://2", _meta: undefined }),
       link({ uri: "a://3", _meta: { "io.kobe/item-kind": 7 } }),
+      link({ uri: "a://4", _meta: { "io.kobe/item-kind": "spaceship" } }),
     ]);
-    expect(items.map((i) => i.kind)).toEqual(["item", "item", "item"]);
+    expect(items.map((i) => i.kind)).toEqual(["item", "item", "item", "item"]);
   });
 
   it("drops invalid blocks: script-like schemes, bad uris, names and titles", () => {
@@ -49,7 +56,10 @@ describe("appItemsOf (KOBE-490 ac-1)", () => {
       link({ name: "" }),
       link({ name: "a`b" }),
       link({ name: "a\nb" }),
-      link({ name: "x".repeat(513) }),
+      link({ name: "x".repeat(201) }),
+      link({ name: "orders\uFE0F" }),
+      link({ name: "orders\u{E0101}" }),
+      link({ name: "or\u200Bders" }),
       link({ title: "t".repeat(513) }),
       link({ uri: 5 }),
     ];
@@ -71,7 +81,12 @@ describe("appItemsOf (KOBE-490 ac-1)", () => {
   });
 });
 
-const item = (uri: string, kind = "table"): AppItem => ({ uri, name: uri, kind, from: FROM });
+const item = (uri: string, kind: AppItem["kind"] = "table"): AppItem => ({
+  uri,
+  name: uri,
+  kind,
+  from: FROM,
+});
 
 describe("AppItemStore (KOBE-490)", () => {
   it("adds per draft, de-duplicated by uri, and notifies", () => {
@@ -128,6 +143,19 @@ describe("AppItemStore (KOBE-490)", () => {
     expect(store.snapshot("t").note).toBe("Lakehouse Picker sent items Kobe could not use.");
     store.add("t", [item("a")]);
     expect(store.snapshot("t").note).toBeUndefined();
+  });
+});
+
+describe("itemsOfReferences (review LOW-4)", () => {
+  it("makes a sent message's references chips again, unique by kind and name", () => {
+    const store = new AppItemStore();
+    const refs = [
+      { name: "c.n.t", kind: "table" as const },
+      { name: "c.n.t", kind: "view" as const },
+    ];
+    store.add("edit:m", itemsOfReferences(refs));
+    store.add("edit:m", itemsOfReferences(refs));
+    expect(referencesBody(store.forDraft("edit:m"))).toEqual(refs);
   });
 });
 

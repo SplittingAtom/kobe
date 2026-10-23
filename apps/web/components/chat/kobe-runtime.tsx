@@ -7,6 +7,7 @@
  */
 import { appContextBody } from "../../lib/apps/app-context";
 import { referencesBody } from "../../lib/apps/app-items";
+import type { ItemReference } from "@kobe/protocol";
 import {
   fromThreadMessageLike,
   MessageNotSentError,
@@ -243,6 +244,7 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
     userMessageId: string | null | undefined,
     skill: string | undefined,
     regenerate: boolean,
+    references?: readonly ItemReference[],
   ) => {
     const point = branchPoint(projectionRef.current, userMessageId);
     if (!point) {
@@ -263,6 +265,7 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
       undefined,
       skill,
       viewing,
+      references,
     );
   };
 
@@ -287,12 +290,15 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
       const key = editSkillKey(message.sourceId ?? "");
       const skill = session.skillPicks.get(key);
       session.skillPicks.clear(key);
-      await branchAndSend(textOf(message), message.sourceId, skill, false);
+      // ... and its app items, unless their chips were removed (KOBE-490).
+      const references = referencesBody(session.appItems.forDraft(key));
+      session.appItems.clear(key);
+      await branchAndSend(textOf(message), message.sourceId, skill, false, references);
     },
     // A regenerate sends the same text with the same skill.
     onReload: async (parentId) => {
       const point = branchPoint(projectionRef.current, parentId);
-      await branchAndSend(point?.text ?? "", parentId, point?.skill, true);
+      await branchAndSend(point?.text ?? "", parentId, point?.skill, true, point?.references);
     },
     onCancel: async () => controller?.stop(),
     setMessages: () => {

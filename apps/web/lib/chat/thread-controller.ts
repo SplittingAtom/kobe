@@ -998,6 +998,7 @@ export class ThreadController {
     text: string,
     parentEntryId: string,
     promptEntryId?: string,
+    references?: readonly ItemReference[],
   ): Promise<boolean> => {
     if (!canRegenerateWith(this.#state)) return false;
     const previous = this.#state.summary?.model ?? null;
@@ -1007,8 +1008,17 @@ export class ThreadController {
       if (switching && !(await this.setModel(model))) return false;
       // The prompt's viewed file goes again, read anew (KOBE-467).
       const viewing = promptEntryId === undefined ? undefined : { fromEntry: promptEntryId };
-      if (await this.send(text, parentEntryId, undefined, undefined, undefined, undefined, viewing))
-        return true;
+      const sent = await this.send(
+        text,
+        parentEntryId,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        viewing,
+        references,
+      );
+      if (sent) return true;
     } catch {
       this.#fail(CLIENT_ERROR);
     }

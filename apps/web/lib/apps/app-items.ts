@@ -1,9 +1,9 @@
 import {
-  GENERIC_ITEM_KIND,
   ITEM_KIND_META_KEY,
-  ITEM_KIND_PATTERN,
   ITEM_REFERENCES_MAX,
+  itemKindOf,
   itemReferenceNameSchema,
+  type ItemKind,
   type ItemReference,
 } from "@kobe/protocol";
 import { z } from "zod";
@@ -19,12 +19,14 @@ export const ITEM_TITLE_MAX = 512;
 /** Schemes a link may never use (they run or embed content). */
 const REFUSED_SCHEMES = new Set(["javascript", "data", "vbscript"]);
 
-/** One resource_link as Kobe keeps it: its kind is generic when unknown. */
+/**
+ * One resource_link as Kobe keeps it: its kind is generic outside the vocabulary. The app's
+ * `title` is not kept: the chip shows (and its hover spells out) exactly the name that is sent.
+ */
 export interface LinkedItem {
   readonly uri: string;
   readonly name: string;
-  readonly kind: string;
-  readonly title?: string | undefined;
+  readonly kind: ItemKind;
 }
 
 /** One chip: the item and the app's title, for "from …". */
@@ -53,21 +55,6 @@ export const resourceLinkSchema = z.looseObject({
   _meta: z.record(z.string(), z.unknown()).optional(),
 });
 
-/** The kind from `_meta["io.kobe/item-kind"]`, else generic. */
-function kindOf(meta: Record<string, unknown> | undefined): string {
-  const kind = meta?.[ITEM_KIND_META_KEY];
-  return typeof kind === "string" && ITEM_KIND_PATTERN.test(kind) ? kind : GENERIC_ITEM_KIND;
-}
-
-/** Invisible and bidi characters could make a hover title read differently. */
-const cleanTitle = (title: string | undefined) => {
-  const line = title
-    ?.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return line === "" ? undefined : line;
-};
-
 /**
  * The usable resource_links of a `ui/message`'s content (first {@link ITEM_REFERENCES_MAX},
  * unique by uri) and how many link blocks were dropped as invalid or extra.
@@ -82,15 +69,26 @@ export function appItemsOf(content: readonly Record<string, unknown>[]): {
     const parsed = resourceLinkSchema.safeParse(block);
     if (!parsed.success || items.length >= ITEM_REFERENCES_MAX) continue;
     if (items.some((i) => i.uri === parsed.data.uri)) continue;
-    const title = cleanTitle(parsed.data.title);
     items.push({
       uri: parsed.data.uri,
       name: parsed.data.name,
-      kind: kindOf(parsed.data._meta),
-      ...(title === undefined ? {} : { title }),
+      kind: itemKindOf(parsed.data._meta?.[ITEM_KIND_META_KEY]),
     });
   }
   return { items, dropped: links.length - items.length };
+}
+
+/**
+ * A sent message's references as chips again (edit, KOBE-490 review LOW-4): no uri was kept, so
+ * a stand-in keyed by kind and name de-duplicates them; no app named.
+ */
+export function itemsOfReferences(refs: readonly ItemReference[]): AppItem[] {
+  return refs.map((r) => ({
+    uri: `kobe-reference:${r.kind}:${encodeURIComponent(r.name)}`,
+    name: r.name,
+    kind: r.kind,
+    from: "",
+  }));
 }
 
 /** "Table", "View", … for the accessible name; unknown kinds read "Item". */

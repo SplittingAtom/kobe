@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
 import { BRIDGE_ATTACHED_ATTR } from "./app-frame";
-import { chatRequests, composer, openApp } from "../chat/testing";
+import { chatRequests, composer, openApp, streaming } from "../chat/testing";
 
 /**
  * KOBE-490 ac-1..ac-4: an app's `ui/message` resource_links become removable chips (icon per
@@ -149,9 +149,11 @@ describe("app item chips (KOBE-490)", () => {
       screen.getByRole("button", { name: "Table cat.ns.orders, from Lakehouse Picker; remove" }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Spaceship cat.ns.odd, from Lakehouse Picker; remove" }),
+      screen.getByRole("button", { name: "Item cat.ns.odd, from Lakehouse Picker; remove" }),
     ).toBeTruthy();
-    expect(screen.getByTitle("orders in ns")).toBeTruthy();
+    // The hover spells out the exact name sent, not the app's own title (review MEDIUM-1).
+    expect(screen.getByTitle("cat.ns.orders")).toBeTruthy();
+    expect(screen.queryByTitle("orders in ns")).toBeNull();
     expect(box.value).toBe("");
     expect(document.querySelector("[data-kobe-app-insert-from]")).toBeNull();
     await waitFor(() =>
@@ -230,5 +232,87 @@ describe("app item chips (KOBE-490)", () => {
       ),
     ).toEqual(["table", "view"]);
     expect(screen.queryByText(/Referenced:/)).toBeNull();
+  });
+
+  it("a queued message's editor and chip show the member's text; the edit keeps one line (review MEDIUM-2)", async () => {
+    const t = thread();
+    openApp(fake, t);
+    const app = await appWindow();
+    const user = userEvent.setup();
+    const box = await composer();
+    await user.type(box, "first{Enter}");
+    await waitFor(() => expect(fake.activeRun(t)).toBeDefined());
+    await streaming(fake, must(fake.activeRun(t)).run_id);
+    await message(app, 1, [link("cat", "ns", "orders", "table")]);
+    await waitFor(() => expect(chipRow()).not.toBeNull());
+    await user.type(box, "second{Enter}");
+    const queued = await screen.findByRole("button", { name: /^Edit queued message 1/ });
+    expect(queued.textContent).toBe("second");
+    const run = must([...fake.runs.values()].find((r) => r.status === "queued"));
+    expect(run.input).toBe(
+      withItemReferences([{ name: "cat.ns.orders", kind: "table" }], "second"),
+    );
+    await user.click(queued);
+    const editor = screen.getByLabelText("Edit queued message 1") as HTMLTextAreaElement;
+    expect(editor.value).toBe("second");
+    await user.type(editor, " edited");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(chatRequests(fake, "PATCH").at(-1)?.body).toEqual({ content: "second edited" }),
+    );
+    await waitFor(() =>
+      expect(run.input).toBe(
+        withItemReferences([{ name: "cat.ns.orders", kind: "table" }], "second edited"),
+      ),
+    );
+  });
+
+  it("edit-and-regenerate keeps the references as chips, not typed text (review LOW-4)", async () => {
+    const t = fake.addThread("Edit");
+    const refs = [
+      { name: "cat.ns.orders", kind: "table" as const },
+      { name: "cat.ns.recent", kind: "view" as const },
+    ];
+    const root = fake.addSystemEntry(t, null, "model_change", {
+      provider: "kobe",
+      modelId: "kimi",
+    });
+    const u = fake.addEntry(t, root, {
+      role: "user",
+      content: withItemReferences(refs, "Compare these"),
+    });
+    fake.addEntry(t, u, { role: "assistant", content: [{ type: "text", text: "done" }] });
+    openApp(fake, t);
+    await screen.findByText("done", {}, { timeout: 4_000 });
+    const user = userEvent.setup();
+    await user.click(must(screen.getAllByRole("button", { name: "Edit" })[0]));
+    const editor = (await screen.findByLabelText("Edit your message")) as HTMLTextAreaElement;
+    expect(editor.value).toBe("Compare these");
+    const form = must(editor.closest("form"));
+    // The edit shows the references as chips; the member removes one.
+    await user.click(within(form).getByRole("button", { name: "View cat.ns.recent; remove" }));
+    await user.click(within(form).getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(must(posts()[0]).body).toEqual({
+      parent_entry_id: root,
+      content: "Compare these",
+      references: [{ name: "cat.ns.orders", kind: "table" }],
+    });
+  });
+
+  it("regenerate sends the same references again", async () => {
+    const t = fake.addThread("Regenerate");
+    const root = fake.addSystemEntry(t, null, "model_change", {
+      provider: "kobe",
+      modelId: "kimi",
+    });
+    const refs = [{ name: "cat.ns.orders", kind: "table" as const }];
+    const u = fake.addEntry(t, root, { role: "user", content: withItemReferences(refs, "Count") });
+    fake.addEntry(t, u, { role: "assistant", content: [{ type: "text", text: "done" }] });
+    openApp(fake, t);
+    await screen.findByText("done", {}, { timeout: 4_000 });
+    await userEvent.setup().click(must(screen.getAllByRole("button", { name: "Regenerate" })[0]));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(must(posts()[0]).body).toMatchObject({ content: "Count", references: refs });
   });
 });

@@ -41,16 +41,8 @@ export function itemIcon(kind: string): LucideIcon {
 const CHIP =
   "inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs";
 
-/** One item's look: its kind's icon and its name (the app's title on hover). */
-export function ItemChipBody({
-  kind,
-  name,
-  hover,
-}: {
-  readonly kind: string;
-  readonly name: string;
-  readonly hover?: string | undefined;
-}) {
+/** One item's look: its kind's icon and its name; the hover spells out the full name sent. */
+export function ItemChipBody({ kind, name }: { readonly kind: string; readonly name: string }) {
   const Icon = itemIcon(kind);
   return (
     <>
@@ -60,7 +52,7 @@ export function ItemChipBody({
         className="size-3 shrink-0"
       />
       <span className="sr-only">{kindLabel(kind)} </span>
-      <span className="truncate" title={hover ?? name}>
+      <span className="truncate" title={name}>
         {name}
       </span>
     </>
@@ -88,10 +80,11 @@ export function AppItemChips({ draft }: { readonly draft: string }) {
           className="m-0 flex list-none flex-wrap gap-1 p-0"
         >
           {items.map((item) => {
-            const label = `${kindLabel(item.kind)} ${item.name}, from ${item.from}; remove`;
+            const from = item.from === "" ? "" : `, from ${item.from}`;
+            const label = `${kindLabel(item.kind)} ${item.name}${from}; remove`;
             return (
               <li key={item.uri} data-kobe-app-item={item.kind} className={CHIP}>
-                <ItemChipBody kind={item.kind} name={item.name} hover={item.title} />
+                <ItemChipBody kind={item.kind} name={item.name} />
                 <button
                   type="button"
                   aria-label={label}

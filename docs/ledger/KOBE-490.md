@@ -31,6 +31,19 @@ run input → history parses the line back into chips.
 - Chips need some typed text to send (an empty composer still cannot send).
 - No Enter gate for chips (they never move the focus and carry no free text).
 
+## Review fixes (Opus review)
+
+- MEDIUM-1: names capped at 200; default-ignorable code points (variation selectors, fillers)
+  refused besides Cf; the chip hover shows the exact name sent (the app's link title is no longer
+  kept).
+- MEDIUM-2: queued edit strips any references line from the new text before re-appending
+  (idempotent); the queue chip and editor show the member's text only.
+- LOW-3: kinds outside the vocabulary become `item` (protocol `ITEM_KINDS`, `itemKindOf`; the
+  server refuses others).
+- LOW-4: the projection takes the line out of the text (`meta.references`); edit shows the
+  references as removable chips and sends them as `references`; regenerate and regenerate-with
+  send them again.
+
 ## Open questions (for Chris or the coordinator)
 
 - Protocol contract change inside a feature PR (`references` on the submit body), as the brief

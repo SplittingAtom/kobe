@@ -773,8 +773,12 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
       const kept = splitAppContext(old);
       // ... and so does the skill picked for it (KOBE-451).
       const skill = splitSkillRequest(kept.rest).skill;
-      // ... and so do the app items it references (KOBE-490).
-      const withRefs = withItemReferences(splitItemReferences(kept.rest).references, text);
+      // ... and so do the app items it references (KOBE-490): any references line in the new
+      // text is dropped first, so an edit never repeats it (idempotent; review MEDIUM-2).
+      const withRefs = withItemReferences(
+        splitItemReferences(kept.rest).references,
+        splitItemReferences(text).rest,
+      );
       const own = skill === null ? withRefs : withSkillRequest(skill, withRefs);
       const input = kept.contexts.length > 0 ? old.slice(0, kept.restAt) + own : own;
       if (input.length > RUN_INPUT_MAX_CHARS) throw new RunError("message_too_large");

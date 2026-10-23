@@ -7959,12 +7959,25 @@
                 "name": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 512,
-                  "pattern": "^[^`\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]+$"
+                  "maxLength": 200,
+                  "pattern": "^[^`\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\\p{Default_Ignorable_Code_Point}\\u{FE00}-\\u{FE0F}\\u{E0100}-\\u{E01EF}]+$"
                 },
                 "kind": {
                   "type": "string",
-                  "pattern": "^[a-z][a-z0-9-]{0,31}$"
+                  "enum": [
+                    "catalog",
+                    "namespace",
+                    "schema",
+                    "table",
+                    "view",
+                    "column",
+                    "file",
+                    "folder",
+                    "query",
+                    "dashboard",
+                    "document",
+                    "item"
+                  ]
                 }
               },
               "required": ["name", "kind"],

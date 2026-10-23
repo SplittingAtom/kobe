@@ -13,8 +13,8 @@ beforeAll(() => f.setup());
 afterAll(() => f.teardown());
 
 const refs = [
-  { name: "cat.ns.orders", kind: "table" },
-  { name: "cat.ns.recent", kind: "view" },
+  { name: "cat.ns.orders", kind: "table" as const },
+  { name: "cat.ns.recent", kind: "view" as const },
 ];
 
 describe("item references on a message (KOBE-490)", () => {
@@ -46,6 +46,9 @@ describe("item references on a message (KOBE-490)", () => {
       [],
       [{ name: "a`b", kind: "table" }],
       [{ name: "a", kind: "Table" }],
+      [{ name: "a", kind: "spaceship" }],
+      [{ name: "x".repeat(201), kind: "table" }],
+      [{ name: "a\uFE0F", kind: "table" }],
       [refs[0], refs[0]],
     ]) {
       const res = await f.send(w.owner, threadId, "x", 0, { references });
@@ -64,6 +67,12 @@ describe("item references on a message (KOBE-490)", () => {
     const edited = await w.owner.browser.patch(`/v1/runs/${runId}`, { content: "edited" });
     expect(edited.status, JSON.stringify(edited.json)).toBe(200);
     expect((await f.run(w.team, runId)).input).toBe(withItemReferences(refs, "edited"));
+    // An editor seeded with the raw input sends the line back: it is not repeated.
+    const again = await w.owner.browser.patch(`/v1/runs/${runId}`, {
+      content: withItemReferences(refs, "edited twice"),
+    });
+    expect(again.status, JSON.stringify(again.json)).toBe(200);
+    expect((await f.run(w.team, runId)).input).toBe(withItemReferences(refs, "edited twice"));
   });
 
   it("puts the references after a skill line's member text", () => {

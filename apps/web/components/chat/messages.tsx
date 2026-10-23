@@ -24,7 +24,8 @@ import { shortcutOf } from "../../lib/shell/shortcuts";
 import { Button } from "../ui/button";
 import { IconAction } from "../shell/icon-action";
 import { AppCardPart } from "../apps/app-card";
-import { SentItemChips } from "../apps/app-item-chips";
+import { AppItemChips, SentItemChips } from "../apps/app-item-chips";
+import { itemsOfReferences } from "../../lib/apps/app-items";
 import { editSkillKey, useChatSession, useKobeExtras } from "./kobe-runtime";
 import { useSkillPick } from "./plus-skills";
 import { isReadOnlyThread } from "./project-bar";
@@ -71,7 +72,10 @@ function PlainText({ text }: TextMessagePartProps) {
   const parsed = splitSkillRequest(afterContext);
   const skill = (meta?.kind === "user" ? meta.skill : undefined) ?? parsed.skill;
   // Items an app put in the composer as chips (KOBE-490): the server's line, shown as chips.
-  const { references, rest } = splitItemReferences(parsed.rest);
+  // The projection takes the line out of the text (meta.references), like the skill's.
+  const split = splitItemReferences(parsed.rest);
+  const references = (meta?.kind === "user" ? meta.references : undefined) ?? split.references;
+  const rest = split.rest;
   if (contexts.length === 0 && skill === null && references.length === 0) {
     return <span>{text}</span>;
   }
@@ -384,11 +388,29 @@ function EditSkillChip() {
   );
 }
 
+/**
+ * The edited message's app items (KOBE-490 review LOW-4): chips again, kept for the new version
+ * unless the member removes them; never typed text. Seeded when the edit box opens.
+ */
+function EditItemChips() {
+  const meta = useMeta();
+  const messageId = useAuiState((s) => s.message.id);
+  const session = useChatSession();
+  const key = editSkillKey(messageId);
+  const sent = meta?.kind === "user" ? meta.references : undefined;
+  useEffect(() => {
+    if (sent !== undefined) session.appItems.add(key, itemsOfReferences(sent));
+    return () => session.appItems.clear(key);
+  }, [session, key, sent]);
+  return <AppItemChips draft={key} />;
+}
+
 export function EditComposer() {
   return (
     <div className="flex flex-col px-2">
       <ComposerPrimitive.Root className="border-foreground/10 focus-within:border-foreground/25 bg-muted/30 ms-auto flex w-full max-w-[85%] cursor-text flex-col rounded-2xl border transition-[border-color]">
         <EditSkillChip />
+        <EditItemChips />
         <label className="sr-only" htmlFor="kobe-edit-message">
           Edit your message
         </label>

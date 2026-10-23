@@ -9,7 +9,7 @@ describe("memberText", () => {
   });
 
   it("drops the server's references line (KOBE-490)", () => {
-    const refs = [{ name: "cat.ns.orders", kind: "table" }];
+    const refs = [{ name: "cat.ns.orders", kind: "table" as const }];
     expect(memberText(withSkillRequest("x", withItemReferences(refs, "Look")))).toBe("Look");
   });
 });
