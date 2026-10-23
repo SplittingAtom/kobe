@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { logger as rootLogger } from "../logger.js";
-import { decodeAccessHint, decodeHint, RUN_EVENTS_CHANNEL } from "./notify.js";
+import { decodeAccessHint, decodeHint, decodeWorkspaceHint, RUN_EVENTS_CHANNEL } from "./notify.js";
 
 /** What a stream hears from the hub. Every call means "re-read Postgres"; none carries content. */
 export interface HubSubscriber {
@@ -15,9 +15,21 @@ export interface HubSubscriber {
   close(): void;
 }
 
+/** A workspace change stream (KOBE-496): every call means "re-read Postgres". */
+export interface WorkspaceHubSubscriber {
+  /** A transaction committed a new revision of this user's workspace (in some team). */
+  changed(): void;
+  /** Notifications may have been missed (listener (re)connected or down): re-read now. */
+  resync(): void;
+  /** The hub is shutting down: end the stream so the client reconnects to another replica. */
+  close(): void;
+}
+
 export interface RunEventHub {
   /** Starts listening (lazily, once) and registers a subscriber for one run. Returns unsubscribe. */
   subscribe(runId: string, subscriber: HubSubscriber): () => void;
+  /** The same for one user's workspace changes (KOBE-496), on the same LISTEN connection. */
+  subscribeWorkspace(userId: string, subscriber: WorkspaceHubSubscriber): () => void;
   /** Reserves one of the user's concurrent stream slots on this replica; null when at the cap. */
   acquireSlot(userId: string): (() => void) | null;
   /** `listening` once the LISTEN connection is up. */
@@ -70,6 +82,7 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
   const opts = { ...HUB_DEFAULTS, ...options };
   const log = rootLogger.child({ component: "run-event-hub" });
   const byRun = new Map<string, Set<HubSubscriber>>();
+  const byUser = new Map<string, Set<WorkspaceHubSubscriber>>();
   const slots = new Map<string, number>();
   let state: HubState = "idle";
   let client: pg.Client | undefined;
@@ -78,8 +91,9 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
   let pollTimer: NodeJS.Timeout | undefined;
   let pingTimer: NodeJS.Timeout | undefined;
 
-  const each = (fn: (s: HubSubscriber) => void) => {
+  const each = (fn: (s: { close(): void }) => void) => {
     for (const set of byRun.values()) for (const s of [...set]) fn(s);
+    for (const set of byUser.values()) for (const s of [...set]) fn(s);
   };
 
   /**
@@ -102,6 +116,14 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
       if (windowMs <= 0) fire();
       else setTimeout(fire, Math.random() * windowMs).unref();
     }
+    // Workspace streams: one random delay per user (their pages read together).
+    for (const userId of byUser.keys()) {
+      const fire = () => {
+        for (const s of [...(byUser.get(userId) ?? [])]) s.resync();
+      };
+      if (windowMs <= 0) fire();
+      else setTimeout(fire, Math.random() * windowMs).unref();
+    }
   };
 
   let probe: { nonce: string; resolve: () => void } | undefined;
@@ -109,6 +131,12 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
   const dispatch = (payload: string | undefined) => {
     if (payload?.startsWith(PROBE_PREFIX)) {
       if (probe && payload === PROBE_PREFIX + probe.nonce) probe.resolve();
+      return;
+    }
+    const workspaceUser = decodeWorkspaceHint(payload);
+    if (workspaceUser !== undefined) {
+      const watchers = byUser.get(workspaceUser);
+      if (watchers) for (const s of [...watchers]) s.changed();
       return;
     }
     const access = decodeAccessHint(payload);
@@ -236,6 +264,24 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
     }
   }
 
+  /** Adds `subscriber` under `id`, starting the listener on first use; returns unsubscribe. */
+  function register<S>(map: Map<string, Set<S>>, id: string, subscriber: S): () => void {
+    const key = id.toLowerCase();
+    let set = map.get(key);
+    if (!set) map.set(key, (set = new Set()));
+    set.add(subscriber);
+    if (state === "idle") {
+      startPolling(); // until the first LISTEN is up
+      void connect();
+    }
+    return () => {
+      const current = map.get(key);
+      if (!current) return;
+      current.delete(subscriber);
+      if (current.size === 0) map.delete(key);
+    };
+  }
+
   return {
     get state() {
       return state;
@@ -243,6 +289,7 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
     get size() {
       let n = 0;
       for (const set of byRun.values()) n += set.size;
+      for (const set of byUser.values()) n += set.size;
       return n;
     },
     subscribe(runId, subscriber) {
@@ -250,20 +297,14 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
         queueMicrotask(() => subscriber.close());
         return () => undefined;
       }
-      const key = runId.toLowerCase();
-      let set = byRun.get(key);
-      if (!set) byRun.set(key, (set = new Set()));
-      set.add(subscriber);
-      if (state === "idle") {
-        startPolling(); // until the first LISTEN is up
-        void connect();
+      return register(byRun, runId, subscriber);
+    },
+    subscribeWorkspace(userId, subscriber) {
+      if (state === "closed") {
+        queueMicrotask(() => subscriber.close());
+        return () => undefined;
       }
-      return () => {
-        const current = byRun.get(key);
-        if (!current) return;
-        current.delete(subscriber);
-        if (current.size === 0) byRun.delete(key);
-      };
+      return register(byUser, userId, subscriber);
     },
     acquireSlot(userId) {
       const used = slots.get(userId) ?? 0;
@@ -286,6 +327,7 @@ export function createRunEventHub(options: HubOptions): RunEventHub {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       each((s) => s.close());
       byRun.clear();
+      byUser.clear();
       probe = undefined;
       const current = client;
       client = undefined;

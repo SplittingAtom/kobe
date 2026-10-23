@@ -97,6 +97,9 @@ class FakeHub implements RunEventHub {
     this.subs.add(s);
     return () => this.subs.delete(s);
   }
+  subscribeWorkspace() {
+    return () => undefined;
+  }
   acquireSlot() {
     return () => undefined;
   }
