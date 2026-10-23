@@ -115,7 +115,8 @@ test("another tab's save: badge with Reload when clean, the choices with a draft
     await expect(badge).toHaveText(new RegExp(BADGE.replace(/\./g, "\\.")), {
       timeout: BADGE_TIMEOUT_MS,
     });
-    await expect(badge).toHaveAttribute("role", "status");
+    // Inside the always-mounted live region (announced by screen readers).
+    await expect(tab.locator("[data-kobe-changes-status]")).toHaveAttribute("role", "status");
     await expect(editor).not.toContainText("from tab two");
     await badge.getByRole("button", { name: "Reload notes.md" }).click();
     await expect(editor).toContainText("from tab two");

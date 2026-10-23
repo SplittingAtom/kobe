@@ -469,17 +469,25 @@ files, which every project member has as a server-written, read-only copy
   (`agent` for a sandbox push, `user` for the member's own save, upload, move or Edit as file,
   `sync` for a project file, named after the member who added it) and when. Every read runs in
   `withTeam` with the session's own team and user (`workspace-files/changes.ts`), so nothing of
-  another member or team can be read; the session and role are rechecked every 30 s, and a stream
-  takes one of the user's stream slots.
-- **Tab.** A clean tab reads in place only for this thread's own agent: a change found by its live
-  write or run end, or a stream change by the agent within 90 s of one. Anything else shows the
-  badge at the top of the editor (role=status): "<who> changed this file <when>." with **Reload**,
+  another member or team can be read. The session and role are rechecked every 30 s, at once when
+  the member is removed or deactivated (a `wsa:<user id>` hint), and after the listener
+  reconnects. Change streams have their own cap (8 per user per replica), apart from run streams,
+  and while the listener is down they re-read every 20 s, not every second.
+- **Tab.** A clean tab reads in place only for this thread's own agent: a version this tab's own
+  check found after that agent's live write or run end. A stream change by the agent that arrives
+  while such a check runs waits for it; if the check ends without finding that version, it is
+  offered. Anything else shows the
+  badge at the top of the editor, in an always-mounted `role=status` region: "<who> changed this
+  file <when>." with **Reload**,
   which reads the file into the same editor (cursor and scroll kept where the text did not change).
   Typing under the badge turns it into the banner. Read-only tabs (project files, uploads) get the
   badge with Reload only. A change found on window focus also gets the badge.
 - **Catch-up.** After a dropped stream or sleep the browser reconnects, and the `file.state` of each
-  path is compared with the version the tab shows; a server-ended stream is re-opened after 5, 15,
-  30, then 60 s.
+  path is compared with the version the tab shows (a deletion too, even once its tombstone is
+  collected); a server-ended stream is re-opened after 5, 15, 30, then 60 s, unless the page's team
+  is no longer the active one (another tab switched team), which stops it.
+- **Limits.** At most 32 open files follow live changes; a tab past that says "Live updates are off
+  for this tab" and is checked on window focus only. Actor names are shortened to 200 characters.
 - **Not covered.** Notebooks keep their explicit reload. A project file cannot be replaced in place
   (a new upload of the same name is refused), so its change reaches members as a deletion (a clean
   tab closes) and a new file.

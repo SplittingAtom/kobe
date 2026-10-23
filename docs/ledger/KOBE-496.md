@@ -34,12 +34,13 @@ So every viewer of a manifest row is its owner.
   on each hint (debounced 250 ms) it re-reads rows with `rev > last` among those paths and sends
   `file.changed`. Reads run in `withTeam(session team)` with explicit `team_id`/`user_id` = the session's,
   so a row of another member or team can never be read. Revalidates every 30 s (session live,
-  `team.chat` role) and on `user` access hints; uses the hub's per-user stream slot cap.
+  `team.chat` role), at once on a `wsa:<user>` hint (member removed, deactivated) and after a
+  LISTEN reconnect; its own slot cap (8 per user per replica), apart from run streams.
 - **No migration:** the actor is derived from `origin` + area (`sandbox` → agent; `server` under
   `projects/` → sync with the project file's `added_by` name; other `server` → user = the owner).
 - **Web:** one `WorkspaceChangeFeed` per chat session (page), tabs `watch` their path; `useOutsideChange` gets the remote change.
   Clean tab: badge (role=status) "<who> changed this file <when>" + Reload (no silent replace),
-  except own agent in this thread (write/run-end hint in the last 90 s): KOBE-491 silent reload.
+  except own agent in this thread (a version this tab's own write/run-end check found): KOBE-491 silent reload.
   Draft: KOBE-491's Compare / Keep mine / Take theirs with who. Read-only paths: Reload only.
   Focus checks now raise the badge instead of reloading silently.
 
@@ -92,3 +93,19 @@ So every viewer of a manifest row is its owner.
 - `@kobe/server test:db`: 2266 passed; 4 files failed on shared-server connection errors (EPIPE,
   failed rollback): `retention-forks`, `retention`, `sandbox-wire-eval`, `workspace-save`. Rerun
   alone: 53/53 passed. `workspace-changes.db.test.ts`: 6/6.
+
+## Review fixes (docs/ledger/KOBE-496-review.md)
+
+- M1 own workspace slot cap (8) apart from run streams: `hub-workspace.test.ts`, db "caps workspace
+  streams per user apart from run streams".
+- M2 `wsa:` hint on member removal (`routes/team.ts`) and deactivation (lifecycle), plus a recheck on
+  every resync: db "ends the stream at once when the member is removed" (periodic recheck 60 s in
+  that file), `change-stream.test.ts` "rechecks the viewer at once".
+- M3 silent reload only for a version this tab's own agent-hint check found; a stream agent change
+  waits for a running check, else badge (`VersionWatch.pending`/`onIdle`): `use-outside-change.test.tsx`.
+- M4 workspace streams poll every 20 s while LISTEN is down: `hub-workspace.test.ts`.
+- L5 names clamped server side (`actorName`), client keeps the change without the name.
+- L6 "Live updates are off for this tab" past 32 paths. L7 every message counts (rev 0 deletion
+  after reconnect). L8 feed probes the listing and stops on `team_mismatch`. L9 always-mounted
+  `role=status` region (no `aria-live`), no "just now" for an unknown actor
+  (`changes-status.test.tsx`). L10 adder lookup via the unique slug and path indexes.
