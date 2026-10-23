@@ -7,7 +7,7 @@ import {
 import type { KobeDb } from "@kobe/db";
 import type { Logger } from "pino";
 import { isInternalPath, isReadOnlyPath } from "../workspace-files/paths.js";
-import { recordConflict, takeAgentNotes } from "../sync-conflicts/store.js";
+import { markTold, recordConflict, untoldNotes } from "../sync-conflicts/store.js";
 import type { SandboxTarget } from "./types.js";
 
 /**
@@ -89,6 +89,10 @@ export function onWorkspaceConflict(
 async function deliver(c: SyncConflictConnection, conflict: SyncConflict): Promise<void> {
   const owner = { teamId: c.target.teamId, userId: c.target.userId };
   const recorded = await recordConflict(c.db, owner, conflict);
+  if (recorded === undefined) {
+    c.log.warn({ reason: "member_rate", security: false }, "workspace.conflict dropped");
+    return;
+  }
   c.log.info(
     { conflict_id: recorded.id, thread_id: recorded.threadId ?? null },
     "workspace sync conflict recorded",
@@ -96,13 +100,15 @@ async function deliver(c: SyncConflictConnection, conflict: SyncConflict): Promi
   if (recorded.threadId === undefined) return;
   const runId = c.activeRun(recorded.threadId);
   if (runId === undefined) return; // told at the thread's next run.start
-  const conflicts = await takeAgentNotes(c.db, owner, recorded.threadId, [recorded.id]);
-  if (conflicts.length === 0) return;
-  c.send({
+  const notes = await untoldNotes(c.db, owner, recorded.threadId, [recorded.id]);
+  if (notes.conflicts.length === 0) return;
+  const sent = c.send({
     v: 1,
     type: "workspace.conflict_note",
     run_id: runId,
     thread_id: recorded.threadId,
-    conflicts,
+    conflicts: [...notes.conflicts],
   });
+  // Not sent (the connection closed): it stays untold and goes with the next run.start.
+  if (sent) await markTold(c.db, owner, notes.ids);
 }

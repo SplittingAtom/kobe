@@ -4,9 +4,11 @@ import { threadSyncConflictsResponseSchema, type ServerToSandboxFrame } from "@k
 import { runEvents, withTeam } from "@kobe/db";
 import { ConflictRate, onWorkspaceConflict } from "./sandbox-wire/sync-conflict.js";
 import {
+  CONFLICTS_PER_MEMBER_HOUR,
   CONFLICTS_PER_MEMBER_MAX,
-  recordConflict,
-  takeAgentNotes,
+  markTold,
+  recordConflict as recordOrDrop,
+  untoldNotes,
 } from "./sync-conflicts/store.js";
 import { EventStreamFixture, must, type Person } from "./testing/event-stream-fixture.js";
 
@@ -93,6 +95,18 @@ const conflict = (path = "notes.md") => {
 
 const owner = (w: World) => ({ teamId: w.team, userId: w.owner.id });
 
+/** Records a conflict that must be taken (under the member's hourly cap). */
+async function recordConflict(...args: Parameters<typeof recordOrDrop>) {
+  return must(await recordOrDrop(...args), "recorded");
+}
+
+/** What the next run.start would carry, marked told as an accepted start would. */
+async function takeAgentNotes(o: { teamId: string; userId: string }, threadId: string) {
+  const notes = await untoldNotes(fx.db, o, threadId);
+  await markTold(fx.db, o, notes.ids);
+  return notes.conflicts;
+}
+
 async function auditTargets(w: World): Promise<Record<string, unknown>[]> {
   const { rows } = await fx.admin.query<{ target: Record<string, unknown> }>(
     `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'workspace.sync_conflict' ORDER BY seq`,
@@ -118,11 +132,10 @@ describe("sync conflicts (KOBE-492)", () => {
         conflictId: recorded.id,
         threadId: b.threadId,
         runId: b.runId,
-        memberSha256: M,
-        agentSha256: A,
       },
     ]);
     expect(JSON.stringify(targets)).not.toContain("notes");
+    expect(JSON.stringify(targets)).not.toContain(M);
   });
 
   it("records a conflict no run wrote without a thread", async () => {
@@ -180,9 +193,11 @@ describe("sync conflicts (KOBE-492)", () => {
       await wrote(w, t.runId, p);
       await recordConflict(fx.db, owner(w), conflict(p));
     }
-    const notes = await takeAgentNotes(fx.db, owner(w), t.threadId);
+    const notes = await takeAgentNotes(owner(w), t.threadId);
     expect(notes.map((n) => n.path)).toEqual(["2.md", "3.md", "4.md", "5.md", "6.md"]);
-    expect(await takeAgentNotes(fx.db, owner(w), t.threadId)).toEqual([]);
+    // Only the rows told are marked: the oldest goes with the next run.
+    expect((await takeAgentNotes(owner(w), t.threadId)).map((n) => n.path)).toEqual(["1.md"]);
+    expect(await takeAgentNotes(owner(w), t.threadId)).toEqual([]);
   });
 
   it("tells a run active on the connection at once with a note frame", async () => {
@@ -218,7 +233,67 @@ describe("sync conflicts (KOBE-492)", () => {
         conflicts: [conflict("live.md")],
       },
     ]);
-    expect(await takeAgentNotes(fx.db, owner(w), t.threadId)).toEqual([]);
+    expect(await takeAgentNotes(owner(w), t.threadId)).toEqual([]);
+  });
+
+  it("a note that could not be sent stays untold", async () => {
+    const w = await world();
+    const t = await threadRun(w);
+    await wrote(w, t.runId, "lost.md");
+    const done = new Promise<void>((resolve) => {
+      onWorkspaceConflict(
+        {
+          db: fx.db,
+          target: owner(w),
+          log: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+          hasCapability: true,
+          rate: new ConflictRate(),
+          activeRun: () => t.runId,
+          send: () => {
+            setTimeout(resolve, 100);
+            return false;
+          },
+        },
+        { v: 1, type: "workspace.conflict", ...conflict("lost.md"), at: new Date().toISOString() },
+      );
+    });
+    await done;
+    expect((await takeAgentNotes(owner(w), t.threadId)).map((n) => n.path)).toEqual(["lost.md"]);
+  });
+
+  it("lists conflicts no thread wrote at the workspace level, for their member only", async () => {
+    const w = await world();
+    const orphan = await recordConflict(fx.db, owner(w), conflict("orphan.md"));
+    const t = await threadRun(w);
+    await wrote(w, t.runId, "threaded.md");
+    await recordConflict(fx.db, owner(w), conflict("threaded.md"));
+    const url = "/v1/workspace/sync-conflicts";
+    const mine = threadSyncConflictsResponseSchema.parse((await w.owner.browser.get(url)).json);
+    expect(mine.conflicts.map((c) => c.path)).toEqual(["orphan.md"]);
+    const theirs = threadSyncConflictsResponseSchema.parse((await w.reader.browser.get(url)).json);
+    expect(theirs.conflicts).toEqual([]);
+    expect(
+      (await w.reader.browser.post(`${url}/${orphan.id}`, { action: "dismissed" })).status,
+    ).toBe(404);
+    expect((await w.owner.browser.post(`${url}/${orphan.id}`, { action: "bad" })).status).toBe(400);
+    expect((await w.owner.browser.post(`${url}/${orphan.id}`, { action: "resolved" })).status).toBe(
+      204,
+    );
+    const after = threadSyncConflictsResponseSchema.parse((await w.owner.browser.get(url)).json);
+    expect(after.conflicts).toEqual([]);
+  });
+
+  it("drops conflicts over the member's hourly cap, across connections, unaudited", async () => {
+    const w = await world();
+    await fx.admin.query(
+      `INSERT INTO workspace_sync_conflicts
+         (team_id, user_id, path, conflict_path, member_sha256, agent_sha256)
+       SELECT $1, $2, 'x.md', 'x.conflict-20261023T120000Z.md', $3, $3
+         FROM generate_series(1, $4::int)`,
+      [w.team, w.owner.id, M, CONFLICTS_PER_MEMBER_HOUR],
+    );
+    expect(await recordOrDrop(fx.db, owner(w), conflict("y.md"))).toBeUndefined();
+    expect(await auditTargets(w)).toEqual([]);
   });
 
   it("keeps at most the per-member cap of rows", async () => {
@@ -227,7 +302,7 @@ describe("sync conflicts (KOBE-492)", () => {
       `INSERT INTO workspace_sync_conflicts
          (team_id, user_id, path, conflict_path, member_sha256, agent_sha256, created_at)
        SELECT $1, $2, 'x.md', 'x.conflict-20261023T120000Z.md', $3, $3,
-              now() - make_interval(secs => g)
+              now() - make_interval(hours => 2, secs => g)
          FROM generate_series(1, $4::int) g`,
       [w.team, w.owner.id, M, CONFLICTS_PER_MEMBER_MAX],
     );

@@ -29,6 +29,11 @@ const WRITER_RUNS_MAX = 50;
 const WRITER_LOOKBACK = "30 days";
 /** Rows kept per member: older ones go on insert (resolved or dismissed first). */
 export const CONFLICTS_PER_MEMBER_MAX = 200;
+/**
+ * Conflicts recorded per member per hour at most, on every connection and replica together (a
+ * DB count): more are dropped unrecorded and unaudited, so neither table grows without bound.
+ */
+export const CONFLICTS_PER_MEMBER_HOUR = 60;
 /** Settled (resolved or dismissed) rows older than this go on insert. */
 const SETTLED_KEEP = "30 days";
 
@@ -75,14 +80,24 @@ export async function lastWriter(
 
 /**
  * Records one conflict for the thread that last wrote the path (else none), trims the member's
- * old rows and audits it (ids and hashes only), in one team transaction.
+ * old rows and audits it (ids only), in one team transaction. Undefined: over the member's hourly
+ * cap ({@link CONFLICTS_PER_MEMBER_HOUR}), nothing recorded.
  */
 export async function recordConflict(
   db: KobeDb,
   owner: ConflictOwner,
   conflict: SyncConflict,
-): Promise<RecordedConflict> {
+): Promise<RecordedConflict | undefined> {
   return withTeam(db, owner.teamId, async (tx) => {
+    // Serialises one member's inserts, so the hourly count holds under concurrent frames.
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${`sync-conflicts:${owner.teamId}:${owner.userId}`}, 0))`,
+    );
+    const recent = await tx.execute<{ n: string }>(sql`
+      SELECT count(*) AS n FROM workspace_sync_conflicts
+       WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}
+         AND created_at > now() - interval '1 hour'`);
+    if (Number(recent.rows[0]?.n ?? 0) >= CONFLICTS_PER_MEMBER_HOUR) return undefined;
     const writer = await lastWriter(tx, owner, conflict.path);
     const inserted = await tx.execute<{ id: string }>(sql`
       INSERT INTO workspace_sync_conflicts
@@ -102,8 +117,6 @@ export async function recordConflict(
         userId: owner.userId,
         conflictId: id,
         ...(writer ? { threadId: writer.threadId, runId: writer.runId } : {}),
-        memberSha256: conflict.member_sha256,
-        agentSha256: conflict.agent_sha256,
       },
     });
     return { id, threadId: writer?.threadId, runId: writer?.runId };
@@ -142,16 +155,24 @@ const toConflict = (r: ConflictRow): SyncConflict => ({
   agent_sha256: r.agent_sha256,
 });
 
+/** Conflicts to tell the agent, and the row ids to mark told once the sandbox took them. */
+export interface AgentNotes {
+  readonly ids: readonly string[];
+  readonly conflicts: readonly SyncConflict[];
+}
+
 /**
- * The thread's conflicts its agent was not told about yet, newest {@link SYNC_CONFLICT_NOTES_MAX}
- * (oldest first); all of them are marked told. `only` limits it to those ids (a mid-run note).
+ * The thread's conflicts its agent was not told about yet: the newest
+ * {@link SYNC_CONFLICT_NOTES_MAX}, oldest first. Nothing is marked: the caller marks exactly
+ * these ids told ({@link markTold}) once the sandbox has them, so older ones and ones a dropped
+ * connection lost go with a later run. `only` limits it to those ids (a mid-run note).
  */
-export async function takeAgentNotes(
+export async function untoldNotes(
   db: KobeDb,
   owner: ConflictOwner,
   threadId: string,
   only?: readonly string[],
-): Promise<SyncConflict[]> {
+): Promise<AgentNotes> {
   return withTeam(db, owner.teamId, async (tx) => {
     const ids =
       only === undefined
@@ -161,15 +182,33 @@ export async function takeAgentNotes(
             sql`, `,
           )})`;
     const res = await tx.execute<ConflictRow>(sql`
-      UPDATE workspace_sync_conflicts SET agent_notified_at = now()
+      SELECT id, path, conflict_path, member_sha256, agent_sha256, created_at
+        FROM workspace_sync_conflicts
        WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}
          AND thread_id = ${threadId} AND agent_notified_at IS NULL ${ids}
-      RETURNING id, path, conflict_path, member_sha256, agent_sha256, created_at`);
-    return [...res.rows]
-      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-      .slice(-SYNC_CONFLICT_NOTES_MAX)
-      .map(toConflict);
+       ORDER BY created_at DESC, id DESC
+       LIMIT ${SYNC_CONFLICT_NOTES_MAX}`);
+    const rows = [...res.rows].reverse();
+    return { ids: rows.map((r) => r.id), conflicts: rows.map(toConflict) };
   });
+}
+
+/** Marks exactly these conflicts told to the agent. */
+export async function markTold(
+  db: KobeDb,
+  owner: ConflictOwner,
+  ids: readonly string[],
+): Promise<void> {
+  if (ids.length === 0) return;
+  await withTeam(db, owner.teamId, (tx) =>
+    tx.execute(sql`
+      UPDATE workspace_sync_conflicts SET agent_notified_at = COALESCE(agent_notified_at, now())
+       WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}
+         AND id IN (${sql.join(
+           ids.map((i) => sql`${i}`),
+           sql`, `,
+         )})`),
+  );
 }
 
 /** The thread's unresolved, undismissed conflicts, newest first (the caller checked ownership). */
@@ -192,11 +231,33 @@ export async function listThreadConflicts(
   }));
 }
 
-/** Settles one conflict of the thread; false when there is no such row (idempotent otherwise). */
+/**
+ * The member's open conflicts no thread wrote (`thread_id` null), newest first: shown in the Files
+ * rail, since no thread can show them.
+ */
+export async function listWorkspaceConflicts(
+  tx: KobeTx,
+  owner: ConflictOwner,
+): Promise<ThreadSyncConflict[]> {
+  const res = await tx.execute<ConflictRow>(sql`
+    SELECT id, path, conflict_path, member_sha256, agent_sha256, created_at
+      FROM workspace_sync_conflicts
+     WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId} AND thread_id IS NULL
+       AND resolved_at IS NULL AND dismissed_at IS NULL
+     ORDER BY created_at DESC, id DESC
+     LIMIT ${THREAD_SYNC_CONFLICTS_MAX}`);
+  return res.rows.map((r) => ({
+    id: r.id,
+    ...toConflict(r),
+    created_at: new Date(r.created_at).toISOString(),
+  }));
+}
+
+/** Settles one conflict of the thread (`threadId` null: one no thread wrote); false when there is no such row (idempotent otherwise). */
 export async function settleConflict(
   tx: KobeTx,
   owner: ConflictOwner,
-  threadId: string,
+  threadId: string | null,
   conflictId: string,
   action: "resolved" | "dismissed",
 ): Promise<boolean> {
@@ -204,6 +265,7 @@ export async function settleConflict(
   const res = await tx.execute(sql`
     UPDATE workspace_sync_conflicts SET ${column} = COALESCE(${column}, now())
      WHERE team_id = ${owner.teamId} AND user_id = ${owner.userId}
-       AND thread_id = ${threadId} AND id = ${conflictId}`);
+       AND ${threadId === null ? sql`thread_id IS NULL` : sql`thread_id = ${threadId}`}
+       AND id = ${conflictId}`);
   return (res.rowCount ?? 0) > 0;
 }

@@ -3,7 +3,11 @@ import { withTeam } from "@kobe/db";
 import { syncConflictActionBodySchema, type ThreadSyncConflictsResponse } from "@kobe/protocol";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { listThreadConflicts, settleConflict } from "../sync-conflicts/store.js";
+import {
+  listThreadConflicts,
+  listWorkspaceConflicts,
+  settleConflict,
+} from "../sync-conflicts/store.js";
 import { invalidRequest } from "../teams/http.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread } from "../threads/repository.js";
@@ -65,6 +69,42 @@ export function threadSyncConflictRoutes(deps: ServerDeps): Hono<{ Variables: Te
     });
     if (outcome === "no_thread") return c.json(NOT_FOUND, 404);
     if (outcome === "no_conflict") return c.json(CONFLICT_NOT_FOUND, 404);
+    return c.body(null, 204);
+  });
+
+  return app;
+}
+
+/**
+ * The caller's own sync conflicts no thread wrote (KOBE-492): shown in the Files rail, so every
+ * conflict reaches its member. Same shapes as the thread routes.
+ *
+ * - `GET /v1/workspace/sync-conflicts`
+ * - `POST /v1/workspace/sync-conflicts/{conflict_id}` `{action}`: 204, idempotent.
+ */
+export function workspaceSyncConflictRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
+  const app = new Hono<{ Variables: TeamVariables }>();
+  const db = deps.database.db;
+  app.use(requireTeam(deps));
+  app.use(requireTeamPermission("team.chat"));
+
+  app.get("/sync-conflicts", async (c) => {
+    const owner = { teamId: c.get("team").id, userId: c.get("user").id };
+    const conflicts = await withTeam(db, owner.teamId, (tx) => listWorkspaceConflicts(tx, owner));
+    const body: ThreadSyncConflictsResponse = { conflicts };
+    c.header("cache-control", "private, no-store");
+    return c.json(body);
+  });
+
+  app.post("/sync-conflicts/:conflictId", async (c) => {
+    const conflictId = uuidSchema.safeParse(c.req.param("conflictId"));
+    const body = syncConflictActionBodySchema.safeParse(await c.req.json().catch(() => null));
+    if (!conflictId.success || !body.success) return invalidRequest(c);
+    const owner = { teamId: c.get("team").id, userId: c.get("user").id };
+    const settled = await withTeam(db, owner.teamId, (tx) =>
+      settleConflict(tx, owner, null, conflictId.data, body.data.action),
+    );
+    if (!settled) return c.json(CONFLICT_NOT_FOUND, 404);
     return c.body(null, 204);
   });
 

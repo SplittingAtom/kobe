@@ -65,7 +65,10 @@ import { setupRoutes } from "./routes/setup.js";
 import { skillRoutes } from "./routes/skills.js";
 import { skillDraftRoutes } from "./routes/skill-drafts.js";
 import { threadFileEditRoutes } from "./routes/thread-file-edits.js";
-import { threadSyncConflictRoutes } from "./routes/thread-sync-conflicts.js";
+import {
+  threadSyncConflictRoutes,
+  workspaceSyncConflictRoutes,
+} from "./routes/thread-sync-conflicts.js";
 import { threadNotebookRoutes } from "./routes/thread-notebooks.js";
 import { skillEvalRoutes, type SkillEvalRouteOptions } from "./routes/skill-evals.js";
 import { skillReachRoutes } from "./routes/skill-reach.js";
@@ -241,6 +244,8 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/files", fileRoutes(deps));
   api.route("/connector-grants", connectorOauthRoutes(deps));
   api.route("/connector-grants", connectorGrantRoutes(deps));
+  // Before the file routes, whose guard answers 503 without workspace storage (KOBE-492).
+  api.route("/workspace", workspaceSyncConflictRoutes(deps));
   api.route("/workspace", workspaceFileRoutes(deps, options.workspaceFiles));
   api.route("/agents", agentRoutes(deps, options.evals ? { runner: options.evals } : {}));
   // Skill evals (KOBE-325): full paths under /skills and /skill-evals, before /skills' `/:id`.

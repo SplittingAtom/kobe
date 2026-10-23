@@ -16,6 +16,8 @@ import {
   conflictReview,
   type SyncConflictView,
 } from "../../lib/files/sync-conflicts";
+import type { FilesApi } from "../../lib/files/api";
+import type { FileReviewStore } from "../../lib/files/editor-state";
 import { useArtifactPanel } from "../chat/artifact-state";
 import { useChatSession, useKobeExtras } from "../chat/kobe-runtime";
 import { useSyncConflicts } from "../chat/use-sync-conflicts";
@@ -32,26 +34,42 @@ export function SyncConflictNotices() {
   const threadId = extras?.state.threadId ?? undefined;
   const readOnly = extras?.state.summary?.readOnly === true;
   const { conflicts, settle } = useSyncConflicts(threadId);
+  const session = useChatSession();
   if (conflicts.length === 0) return null;
   return (
     <div className="flex flex-col gap-2" data-kobe-sync-conflicts>
       {conflicts.map((c) => (
-        <ConflictNotice key={c.id} conflict={c} readOnly={readOnly} settle={settle} />
+        <ConflictNotice
+          key={c.id}
+          conflict={c}
+          readOnly={readOnly}
+          settle={settle}
+          files={session.files}
+          reviews={session.fileReviews}
+        />
       ))}
     </div>
   );
 }
 
-function ConflictNotice({
+/**
+ * One notice. Used above the composer (a thread's conflicts) and in the Files rail (conflicts no
+ * thread wrote, `workspace-conflict-notices.tsx`). Without a review store there is no Compare;
+ * without an artifact column, no Open both.
+ */
+export function ConflictNotice({
   conflict,
   readOnly,
   settle,
+  files,
+  reviews,
 }: {
   readonly conflict: SyncConflictView;
   readonly readOnly: boolean;
   settle(id: string, action: "resolved" | "dismissed"): Promise<boolean>;
+  readonly files: FilesApi;
+  readonly reviews?: FileReviewStore | undefined;
 }) {
-  const session = useChatSession();
   const panel = useArtifactPanel();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -66,19 +84,19 @@ function ConflictNotice({
   const compare = async () => {
     setProblem(null);
     setBusy(true);
-    const res = await session.files.read(conflict.conflictPath, TEXT_PREVIEW_MAX_BYTES);
+    const res = await files.read(conflict.conflictPath, TEXT_PREVIEW_MAX_BYTES);
     setBusy(false);
     if (!res.ok) return setProblem(COMPARE_FAILED);
     if (res.data.truncated) return setProblem(COMPARE_TOO_LARGE);
     const text = new TextDecoder().decode(res.data.bytes);
-    session.fileReviews.start(conflictReview(conflict, text));
+    reviews?.start(conflictReview(conflict, text));
     panel?.openFile(conflict.path);
   };
 
   const deleteCopy = async () => {
     setProblem(null);
     setBusy(true);
-    const res = await session.files.remove(conflict.conflictPath);
+    const res = await files.remove(conflict.conflictPath);
     setBusy(false);
     // Already gone counts as deleted.
     if (!res.ok && res.error.status !== 404) return setProblem(DELETE_FAILED);
@@ -96,14 +114,23 @@ function ConflictNotice({
       <GitCompareIcon aria-hidden className="mt-0.5 size-4 shrink-0" />
       <div className="flex flex-1 flex-col gap-1">
         <p>{conflictNoticeText(conflict)}</p>
-        {!readOnly && panel && !confirming && (
+        {!readOnly && !confirming && (
           <div className="flex flex-wrap gap-1">
-            <button type="button" className={BUTTON} onClick={openBoth}>
-              Open both
-            </button>
-            <button type="button" className={BUTTON} disabled={busy} onClick={() => void compare()}>
-              Compare
-            </button>
+            {panel && (
+              <button type="button" className={BUTTON} onClick={openBoth}>
+                Open both
+              </button>
+            )}
+            {panel && reviews && (
+              <button
+                type="button"
+                className={BUTTON}
+                disabled={busy}
+                onClick={() => void compare()}
+              >
+                Compare
+              </button>
+            )}
             <button
               type="button"
               className={BUTTON}

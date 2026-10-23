@@ -1429,7 +1429,7 @@ export const AUDIT_EVENTS = {
   "workspace.file_moved": event("team", { userId: id, files: count, bytes: count }),
   /**
    * The sandbox's sync kept the member's version of a file and moved the agent's unsynced edit to a
-   * conflict copy (KOBE-492; system: the member's sandbox reported it). Ids and content hashes only, never a name.
+   * conflict copy (KOBE-492; system: the member's sandbox reported it). Ids only, never a name.
    * `threadId`/`runId`: the thread and run that last wrote the path, when one did.
    */
   "workspace.sync_conflict": event("team", {
@@ -1437,8 +1437,6 @@ export const AUDIT_EVENTS = {
     conflictId: id,
     threadId: id.optional(),
     runId: id.optional(),
-    memberSha256: z.string().regex(/^[0-9a-f]{64}$/),
-    agentSha256: z.string().regex(/^[0-9a-f]{64}$/),
   }),
   /** Unreferenced workspace blobs and old tombstones were purged (system; counts only, D18). */
   "workspace.purged": event("team", { userId: id, blobs: count, bytes: count, tombstones: count }),

@@ -1,6 +1,6 @@
 # KOBE-492: Sync conflicts are reported to the agent and the member
 
-- **Status:** committed locally (two commits, not pushed)
+- **Status:** committed locally (migration + feature + review fixes, not pushed)
 - **Branch / worktree:** `kobe-492-sync-conflicts` in `../Kobe-wt492`
 - **Depends on:** KOBE-488 (agent-files pairing idea), KOBE-462/463 (file editor review)
 
@@ -32,10 +32,15 @@
 - **Recording** (`sync-conflicts/store.ts`): one row per conflict; `thread_id`/`run_id` = the
   member's thread whose run last wrote the path with a successful `write`/`edit` (newest 50 runs of
   the last 30 days; paths matched as `p`, `/workspace/p`, `./p`), else null. Audit
-  `workspace.sync_conflict` (system actor; ids and hashes only). Insert trims the member's rows:
-  settled rows after 30 days, and the newest 200 per member.
-- **Agent**: if that thread's run is active on the connection, the server sends
-  `workspace.conflict_note` and marks the row told; kobe-tools adds the note as a hidden Pi custom
+  `workspace.sync_conflict` (system actor; ids only — hashes stay in the row). Insert trims the
+  member's rows: settled rows after 30 days, and the newest 200 per member. At most 60 per member
+  per hour (DB count under a per-member advisory lock, so it holds across reconnects and replicas);
+  more are dropped unrecorded and unaudited.
+- **Agent**: rows are marked told only once delivered: a mid-run `workspace.conflict_note` when
+  the socket took it, a `run.start` when the sandbox accepted it (`command.result` ok); a lost
+  start leaves them for the next start. Only the rows sent (newest 5) are marked; older ones go
+  with a later run. If that thread's run is active on the connection, the server sends
+  `workspace.conflict_note`; kobe-tools adds the note as a hidden Pi custom
   message (`customType: kobe-sync-conflict`, `display: false`) in the `context` hook before every
   later model call of that run. **It reaches the model in user role** (Pi converts custom messages
   to user messages), so the text opens "This is a Kobe notice, not a message from the user". Not
@@ -49,7 +54,8 @@
   notes.conflict-….md". Open both (two tabs), Compare (file editor review: member file as base,
   agent copy as the proposal; Commit all saves onto the member's version), Delete the copy (inline
   confirm, `DELETE /v1/workspace/files`, then `resolved`), Dismiss (`dismissed`). Shared readers
-  get 404, so no notice at all.
+  get 404, so no notice at all. Conflicts no thread wrote: `GET/POST /v1/workspace/sync-conflicts`
+  (the caller's own) and the same notice at the top of the Files rail, read whenever it lists.
 
 ## Decisions
 
@@ -63,8 +69,6 @@
 
 - Shared readers see no notice (GET is owner-only per the coordinator); the brief's "readers see
   the notice without actions" would need a reader-visible list.
-- Marking told happens before `run.start` is sent; a run.start lost on a dropped connection loses
-  the note (the notice stays).
 - E2E: not added. Forcing a conflict needs the agent's unsynced write and a member save to race a
   live sandbox sync; the harnesses (browser e2e, gate1) cannot do it cheaply. Covered by the real-Pi
   test plus server db and web tests.

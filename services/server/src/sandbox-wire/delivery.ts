@@ -17,7 +17,6 @@ import {
   CAPABILITY_THREAD_COMPACT,
   CAPABILITY_THREAD_CONTEXT,
   CAPABILITY_SYNC_CONFLICTS,
-  type SyncConflict,
   serverToSandboxFrameSchema,
   threadCompactFrameSchema,
   type PiGetEntriesData,
@@ -41,7 +40,7 @@ import {
 } from "./entries.js";
 import { endRunInTx, loadRun } from "./run-state.js";
 import { buildRunMemory } from "../memory/agent.js";
-import { takeAgentNotes } from "../sync-conflicts/store.js";
+import { markTold, untoldNotes, type AgentNotes } from "../sync-conflicts/store.js";
 import { mintRunToken } from "./run-token.js";
 import { slotOf } from "./slots.js";
 import {
@@ -147,6 +146,8 @@ export class CommandDelivery {
   readonly #issued = new Map<string, IssuedCommand>();
   readonly #answered = new Set<string>();
   readonly #synced = new Set<string>();
+  /** Sync conflicts a `run.start` carried, marked told when it is accepted (KOBE-492). */
+  readonly #conflictNotes = new WeakMap<IssuedCommand, readonly string[]>();
   #draining = false;
   #again = false;
   #closed = false;
@@ -212,6 +213,7 @@ export class CommandDelivery {
 
   /** Records a command's outcome (and its effect on the run, for `run.start`). */
   settle(issued: IssuedCommand, outcome: CommandOutcome): void {
+    this.#conflictsTold(issued, outcome);
     if (issued.kind === "internal") {
       issued.resolve(outcome);
       return;
@@ -738,8 +740,13 @@ export class CommandDelivery {
       !evalSandbox &&
       this.#host.hasCapability(CAPABILITY_SYNC_CONFLICTS)
     ) {
-      const conflicts = await this.#runConflicts(row.threadId);
-      if (conflicts.length > 0) out = { ...out, sync_conflicts: conflicts } as ServerToSandboxFrame;
+      const notes = await this.#runConflicts(row.threadId);
+      if (notes.conflicts.length > 0) {
+        out = { ...out, sync_conflicts: [...notes.conflicts] } as ServerToSandboxFrame;
+        // Told once the sandbox accepts the run (`settle`); a lost start leaves them untold.
+        const issued = this.#issued.get(commandId);
+        if (issued !== undefined) this.#conflictNotes.set(issued, notes.ids);
+      }
     }
     // Same for the per-session MCP config (KOBE-111): an agent without it has no connector tools.
     if (row.kind === "run.start" && !this.#host.hasCapability(CAPABILITY_MCP)) {
@@ -770,14 +777,26 @@ export class CommandDelivery {
   }
 
   /** `run.start.sync_conflicts`; a failed read means no note (the rows stay untold). */
-  async #runConflicts(threadId: string): Promise<SyncConflict[]> {
+  async #runConflicts(threadId: string): Promise<AgentNotes> {
     try {
       const { teamId, userId } = this.#host.target;
-      return await takeAgentNotes(this.#ctx.db, { teamId, userId }, threadId);
+      return await untoldNotes(this.#ctx.db, { teamId, userId }, threadId);
     } catch (err) {
       this.#host.log.warn({ err }, "run.start.sync_conflicts could not be read; sent without it");
-      return [];
+      return { ids: [], conflicts: [] };
     }
+  }
+
+  /** A `run.start` that carried sync conflicts was accepted: they are told now (KOBE-492). */
+  #conflictsTold(issued: IssuedCommand, outcome: CommandOutcome): void {
+    const ids = this.#conflictNotes.get(issued);
+    if (ids === undefined) return;
+    this.#conflictNotes.delete(issued);
+    if (!outcome.ok) return;
+    const { teamId, userId } = this.#host.target;
+    void markTold(this.#ctx.db, { teamId, userId }, ids).catch((err: unknown) =>
+      this.#host.log.warn({ err }, "sync conflicts could not be marked told"),
+    );
   }
 
   /** `run.start.memory`; a failed read means no context (every memory call is still enforced). */
