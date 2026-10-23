@@ -1,6 +1,7 @@
 import { chmod, chown, mkdir, mkdtemp, stat } from "node:fs/promises";
 import path from "node:path";
 import {
+  SYNC_CONFLICT_NOTES_MAX,
   piExtensionUiRequestSchema,
   type PiExtensionUiRequest,
   type PiExtensionUiResponse,
@@ -19,9 +20,11 @@ import type {
   RunMemoryContext,
   RunProjectContext,
   RunViewingContext,
+  SyncConflict,
 } from "@kobe/protocol";
 import { MEMORY_FILE_ENV, MEMORY_FILE_NAME, MemoryContextFile } from "../memory/context-file.js";
 import { memoryRunFileContent } from "../memory/context.js";
+import { conflictNoteText } from "../memory/conflict-context.js";
 import { PiProcess, PiProcessError, type PiExit, type PiRecord } from "../pi/pi-process.js";
 import type { PiIdentities, PiIdentity } from "../pi/identities.js";
 import type { PiLaunch } from "../pi/pi-launch.js";
@@ -238,6 +241,8 @@ export class Thread {
   #memoryFile: MemoryContextFile | undefined;
   /** Where the current Pi's kobe-models records its latest model call (KOBE-470). */
   #contextFile: string | undefined;
+  /** Conflicts told during the current run (KOBE-492); cleared when the next run attaches. */
+  #liveConflicts: readonly SyncConflict[] = [];
   /** Each process's private runtime directory (and identity), removed once it has exited. */
   readonly #runtimeDirs = new Map<PiProcess, RuntimeOf>();
   /** Removal of a runtime directory in progress (awaited by `stopProcess`). */
@@ -710,8 +715,26 @@ export class Thread {
     memory: RunMemoryContext | undefined,
     project?: RunProjectContext,
     viewing?: RunViewingContext,
+    conflicts?: readonly SyncConflict[],
   ): Promise<void> {
-    await this.#memoryFile?.write(memoryRunFileContent(memory, undefined, project, viewing));
+    this.#liveConflicts = [];
+    await this.#memoryFile?.write(
+      memoryRunFileContent(memory, undefined, project, viewing, conflicts),
+    );
+  }
+
+  /**
+   * Sync conflicts told while `runId` is running (KOBE-492): added to the run's memory file, so
+   * kobe-tools puts them before every later model call of this run. False when the run is not
+   * this thread's active one or the thread has no memory file (no kobe-tools).
+   */
+  async noteConflicts(runId: string, conflicts: readonly SyncConflict[]): Promise<boolean> {
+    const file = this.#memoryFile;
+    const written = file?.written;
+    if (file === undefined || written === undefined || this.runId !== runId) return false;
+    this.#liveConflicts = [...this.#liveConflicts, ...conflicts].slice(-SYNC_CONFLICT_NOTES_MAX);
+    await file.write({ ...written, conflictsLive: conflictNoteText(this.#liveConflicts) ?? "" });
+    return true;
   }
 
   /**
@@ -727,7 +750,12 @@ export class Thread {
     const written = this.#memoryFile?.written;
     return written === undefined
       ? undefined
-      : { memory: written.text, project: written.project, viewing: written.viewing ?? "" };
+      : {
+          memory: written.text,
+          project: written.project,
+          viewing: written.viewing ?? "",
+          conflicts: written.conflicts ?? "",
+        };
   }
 
   /** A rotated model-gateway token: the next model request uses it (the current one is not cut). */

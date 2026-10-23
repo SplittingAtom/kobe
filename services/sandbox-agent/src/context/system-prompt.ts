@@ -2,6 +2,7 @@ import type { ContextSectionKind } from "@kobe/protocol";
 import { MEMORY_HEADER } from "../memory/context.js";
 import { PROJECT_HEADER } from "../memory/project-context.js";
 import { VIEWING_HEADER } from "../memory/viewing-context.js";
+import { CONFLICTS_HEADER } from "../memory/conflict-context.js";
 
 /**
  * The system prompt of a model call, split into the context viewer's sections (KOBE-470, CV3).
@@ -26,6 +27,8 @@ export interface KobePromptParts {
   readonly memory: string;
   readonly project: string;
   readonly viewing: string;
+  /** Sync conflicts told at the run's start (KOBE-492); optional for older parts. */
+  readonly conflicts?: string;
 }
 
 const SECTION_KINDS: Readonly<Record<string, ContextSectionKind>> = {
@@ -100,17 +103,23 @@ const KOBE_SECTIONS: readonly {
     label: "Project instructions",
   },
   { part: "viewing", header: VIEWING_HEADER, kind: "viewing_file", label: "Viewed file" },
+  {
+    part: "conflicts",
+    header: CONFLICTS_HEADER,
+    kind: "system_prompt",
+    label: "Workspace sync conflicts",
+  },
 ];
 
 /** A forced prompt: Pi's rendered prompt, then kobe-tools' parts (each after a blank line). */
 export function splitForcedPrompt(text: string, parts: KobePromptParts | undefined): RawSection[] {
   if (parts !== undefined) {
-    const present = KOBE_SECTIONS.filter((s) => parts[s.part] !== "");
-    const suffix = present.map((s) => `\n\n${parts[s.part]}`).join("");
+    const present = KOBE_SECTIONS.filter((s) => (parts[s.part] ?? "") !== "");
+    const suffix = present.map((s) => `\n\n${parts[s.part] ?? ""}`).join("");
     if (present.length > 0 && text.endsWith(suffix)) {
       return [
         ...splitRenderedPrompt(text.slice(0, text.length - suffix.length)),
-        ...present.map((s) => ({ kind: s.kind, label: s.label, text: parts[s.part] })),
+        ...present.map((s) => ({ kind: s.kind, label: s.label, text: parts[s.part] ?? "" })),
       ];
     }
   }

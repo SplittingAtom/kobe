@@ -101,6 +101,15 @@ describe("kobe restore's target check on a started site (KOBE-422)", () => {
          VALUES ('personal', '00000000-0000-4000-8000-0000000000a1', 'mine', '{"name":"Mine"}')`,
     ],
     [
+      // A gallery agent a site admin customized (KOBE-494): their edit, not a start-up seed.
+      "site_agents",
+      `INSERT INTO users (id, name, email) VALUES ('00000000-0000-4000-8000-0000000000a2', 'Ann', 'c@example.com');
+       UPDATE site_agents SET customized_at = now(),
+         customized_by = '00000000-0000-4000-8000-0000000000a2',
+         customized_from_generation = coalesce(gallery_generation, 1)
+         WHERE gallery_key = 'kobe'`,
+    ],
+    [
       "audit_log",
       `INSERT INTO audit_log (actor_kind, action, target)
          VALUES ('system', 'platform.isolation.changed', '{"from":"verified","to":"missing"}')`,

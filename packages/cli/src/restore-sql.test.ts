@@ -53,7 +53,7 @@ describe("restore prelude: rows the server's start seeds (KOBE-422)", () => {
 
   it("refuses only rows a start would not have written", () => {
     expect(sql).toContain(
-      `EXISTS (SELECT 1 FROM public."site_agents" WHERE (gallery_key IS NOT NULL AND (archived_by IS NULL OR archived_by = 'seed')) IS NOT TRUE)`,
+      `EXISTS (SELECT 1 FROM public."site_agents" WHERE (gallery_key IS NOT NULL AND (archived_by IS NULL OR archived_by = 'seed') AND customized_at IS NULL) IS NOT TRUE)`,
     );
     expect(sql).toMatch(/EXISTS \(SELECT 1 FROM public\."audit_log" WHERE \(actor_kind = 'system'/);
     expect(sql).not.toContain('EXISTS (SELECT 1 FROM public."site_agents")');

@@ -22,6 +22,7 @@ import { useKobeExtras, type KobeThreadExtras } from "./kobe-runtime";
 import { AssistantMessage, EditComposer, UserMessage } from "./messages";
 import { RunNotices } from "./run-notices";
 import { SteeringPanel } from "./steering-panel";
+import { SyncConflictNotices } from "../files/sync-conflict-notice";
 import { DroppedAppNotice } from "../apps/queued-app-cards";
 import { ThreadCommands } from "./thread-commands";
 import { AgentStarters, FollowupChips, useAgentStarters } from "./suggestion-chips";
@@ -225,6 +226,7 @@ function MessagesAndComposer({
           <div className="max-h-[30dvh] overflow-y-auto overscroll-contain empty:hidden">
             <RunNotices extras={extras} />
             <DroppedAppNotice />
+            <SyncConflictNotices />
           </div>
           <FollowupChips extras={extras} />
           <ComposerDictationProvider>

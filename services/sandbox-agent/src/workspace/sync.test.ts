@@ -17,7 +17,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { RunStartFrame } from "@kobe/protocol";
 import { FakeSyncServer } from "../testing/fake-sync-server.js";
 import { SyncClient } from "./client.js";
-import { WorkspaceSync } from "./sync.js";
+import { createHash } from "node:crypto";
+import { isConflictCopyOf } from "@kobe/protocol";
+import { WorkspaceSync, type ConflictReport } from "./sync.js";
+
+const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
 const quiet = {
   debug: () => {},
@@ -209,6 +213,51 @@ describe("workspace sync (agent)", () => {
     expect(await text(root, must(copies[0]))).toBe("edited by the agent");
     await sync.push();
     expect(server.content(must(copies[0]))).toBe("edited by the agent");
+  });
+
+  it("reports each conflict copy with names and both hashes (KOBE-492)", async () => {
+    const root = await volume();
+    await mkdir(path.join(root, "docs"), { recursive: true });
+    await put(root, "docs/plan.md", "v1");
+    const sync = await started(root);
+    const reports: ConflictReport[] = [];
+    sync.conflictListener = (r) => reports.push(r);
+    await sync.push();
+    server.serverWrite("docs/plan.md", "the member's save");
+    await put(root, "docs/plan.md", "the agent's edit");
+    await sync.push();
+    expect(reports).toHaveLength(1);
+    const [report] = reports;
+    expect(report).toMatchObject({
+      path: "docs/plan.md",
+      member_sha256: sha256("the member's save"),
+      agent_sha256: sha256("the agent's edit"),
+    });
+    expect(report?.conflict_path).toMatch(/^docs\/plan\.conflict-\d{8}T\d{6}Z\.md$/);
+    expect(isConflictCopyOf("docs/plan.md", report?.conflict_path ?? "")).toBe(true);
+    expect(await text(root, report?.conflict_path ?? "")).toBe("the agent's edit");
+    // A listener that throws never breaks the sync.
+    sync.conflictListener = () => {
+      throw new Error("boom");
+    };
+    server.serverWrite("docs/plan.md", "saved again");
+    await put(root, "docs/plan.md", "edited again");
+    await expect(sync.push()).resolves.toMatchObject({ conflicts: 1 });
+  });
+
+  it("reports a conflict found by a pull before a run (KOBE-492)", async () => {
+    const root = await volume();
+    await put(root, "notes.md", "v1");
+    const sync = await started(root);
+    await sync.push();
+    const reports: ConflictReport[] = [];
+    sync.conflictListener = (r) => reports.push(r);
+    server.serverWrite("notes.md", "member");
+    await put(root, "notes.md", "agent");
+    await sync.beforeRun(runStart());
+    expect(reports.map((r) => [r.path, r.member_sha256, r.agent_sha256])).toEqual([
+      ["notes.md", sha256("member"), sha256("agent")],
+    ]);
   });
 
   it("propagates deletions both ways; a deletion never beats a modification", async () => {

@@ -1427,6 +1427,17 @@ export const AUDIT_EVENTS = {
    * (KOBE-304): counts only, never a name or path.
    */
   "workspace.file_moved": event("team", { userId: id, files: count, bytes: count }),
+  /**
+   * The sandbox's sync kept the member's version of a file and moved the agent's unsynced edit to a
+   * conflict copy (KOBE-492; system: the member's sandbox reported it). Ids only, never a name.
+   * `threadId`/`runId`: the thread and run that last wrote the path, when one did.
+   */
+  "workspace.sync_conflict": event("team", {
+    userId: id,
+    conflictId: id,
+    threadId: id.optional(),
+    runId: id.optional(),
+  }),
   /** Unreferenced workspace blobs and old tombstones were purged (system; counts only, D18). */
   "workspace.purged": event("team", { userId: id, blobs: count, bytes: count, tombstones: count }),
 
@@ -1480,6 +1491,13 @@ export const AUDIT_EVENTS = {
   // Versions (KOBE-46): publish freezes the draft and its tool manifest; rollback republishes.
   "agent.published": event("any", { ...agentRef, version, draftRevision: version }),
   "agent.rolled_back": event("any", { ...agentRef, version, fromVersion: version }),
+  /**
+   * A site admin's first edit of a seeded gallery agent (KOBE-494) detached it from the repo's
+   * definition: `fromGeneration` is the repo generation it was edited from.
+   */
+  "agent.customized": event("site", { ...agentRef, fromGeneration: version }),
+  /** A site admin re-attached a customized gallery agent to the repo's definition (KOBE-494). */
+  "agent.reset_to_repository": event("site", { ...agentRef, fromGeneration: version }),
   // The pre-publish Orbit eval gate (KOBE-93): requested at Publish, finished with a verdict.
   "agent.eval.requested": event("team", { ...agentRef, evalId: id, draftRevision: version }),
   "agent.eval.finished": event("team", {

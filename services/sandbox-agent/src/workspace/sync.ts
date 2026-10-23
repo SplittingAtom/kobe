@@ -64,6 +64,16 @@ export interface WorkspaceSyncOptions {
   readonly now?: () => Date;
 }
 
+/** A conflict copy the sync just made (KOBE-492): names relative to the root, and both hashes. */
+export interface ConflictReport {
+  readonly path: string;
+  readonly conflict_path: string;
+  readonly member_sha256: string;
+  readonly agent_sha256: string;
+  readonly at: Date;
+}
+export type ConflictListener = (report: ConflictReport) => void;
+
 /** Last known state of a path in the durable copy (what the local file was synced from). */
 interface Known {
   readonly rev: number;
@@ -197,6 +207,7 @@ export class WorkspaceSync {
   #timer: NodeJS.Timeout | undefined;
   #soon: NodeJS.Timeout | undefined;
   #stopped = false;
+  #conflictListener: ConflictListener | undefined;
   #unavailable = false;
   #emptyAtStart: boolean | undefined;
   /** Files and bytes downloaded by restore attempts so far. */
@@ -599,7 +610,7 @@ export class WorkspaceSync {
         this.#known.set(e.path, known(e));
         if (file.mtimeMs > e.mtime_ms) continue;
         if ((await hashFile(this.#o.root, e.path))?.sha256 === e.sha256) continue;
-        await this.#conflictCopy(e.path);
+        await this.#conflictCopy(e.path, e.sha256);
         downloads.push(e);
         continue;
       }
@@ -608,7 +619,7 @@ export class WorkspaceSync {
       // server's version wins unless the local file changed after it — then keep both.
       this.#known.set(e.path, known(e));
       if (e.origin === "server") {
-        if (file.mtimeMs > e.updated_ms) await this.#conflictCopy(e.path);
+        if (file.mtimeMs > e.updated_ms) await this.#conflictCopy(e.path, e.sha256);
         downloads.push(e);
       }
     }
@@ -689,10 +700,38 @@ export class WorkspaceSync {
     }
   }
 
-  async #conflictCopy(path: string): Promise<void> {
-    const copy = await conflictCopyName(this.#o.root, path, this.#o.now());
+  /**
+   * The local edit at `path` becomes a conflict copy; `memberSha256` is the server version that
+   * keeps the path. Reported (KOBE-492) when both versions are known: names and hashes only.
+   */
+  async #conflictCopy(path: string, memberSha256: string | undefined): Promise<void> {
+    const now = this.#o.now();
+    const agent = await hashFile(this.#o.root, path).catch(() => undefined);
+    const copy = await conflictCopyName(this.#o.root, path, now);
     await renameWithin(this.#o.root, path, copy);
     this.#o.logger.info({}, "workspace conflict: kept the local version as a conflict copy");
+    if (memberSha256 === undefined || agent === undefined) return;
+    try {
+      this.#conflictListener?.({
+        path,
+        conflict_path: copy,
+        member_sha256: memberSha256,
+        agent_sha256: agent.sha256,
+        at: now,
+      });
+    } catch (error) {
+      this.#warn("could not report a workspace conflict", error);
+    }
+  }
+
+  /** Who hears about conflict copies (the agent reports them to the server, KOBE-492). */
+  set conflictListener(listener: ConflictListener | undefined) {
+    this.#conflictListener = listener;
+  }
+
+  /** `WorkspaceHooks.onConflict` (agent.ts). */
+  onConflict(listener: ConflictListener): void {
+    this.#conflictListener = listener;
   }
 
   async #pull(): Promise<number> {
@@ -744,7 +783,7 @@ export class WorkspaceSync {
           this.#known.set(e.path, known({ ...e, mtime_ms: file.mtimeMs }));
           continue;
         }
-        await this.#conflictCopy(e.path);
+        await this.#conflictCopy(e.path, e.sha256);
       }
       if (await this.#downloadSafely(e)) applied += 1;
     }
@@ -1015,7 +1054,7 @@ export class WorkspaceSync {
         );
         return;
       }
-      await this.#conflictCopy(change.path);
+      await this.#conflictCopy(change.path, current.sha256);
     }
     await this.#downloadSafely(current);
   }

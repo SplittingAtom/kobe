@@ -105,7 +105,25 @@ describe("notification", () => {
       "skill.version.withdrawn",
       "skill.version.revoked",
       "skill.version.unrevoked",
+      "skill.version.site_published",
     ]);
+  });
+  it("names the Site admin of a site-published version (KOBE-495)", () => {
+    const published = {
+      ...notification,
+      kind: "skill.version.site_published",
+      schedule_id: null,
+      thread_id: null,
+      run_id: null,
+      skill_id: notification.schedule_id,
+      skill_name: "sales-report",
+      skill_semver: "1.3.0",
+      actor_name: "Ada Admin",
+    };
+    expect(notificationSchema.safeParse(published).success).toBe(true);
+    expect(notificationSchema.safeParse({ ...published, skill_semver: undefined }).success).toBe(
+      false,
+    );
   });
   it("parses a retirement notification: a skill and, for a version, its semver (KOBE-340)", () => {
     const revoked = {

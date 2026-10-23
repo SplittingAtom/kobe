@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { installMemoryHooks, readMemoryRunFile, type MemoryHooksApi } from "./memory-hooks.js";
+import {
+  CONFLICT_NOTE_TYPE,
+  installMemoryHooks,
+  readMemoryRunFile,
+  type MemoryHooksApi,
+} from "./memory-hooks.js";
 
 function fakePi(initialTools: string[]) {
   const handlers = new Map<string, (event: never) => unknown>();
@@ -24,23 +29,36 @@ describe("readMemoryRunFile", () => {
       text: "",
       project: "",
       viewing: "",
+      conflicts: "",
+      conflictsLive: "",
     });
     expect(
       readMemoryRunFile("/x", () => {
         throw new Error("ENOENT");
       }),
-    ).toEqual({ tools: false, text: "", project: "", viewing: "" });
+    ).toEqual({
+      tools: false,
+      text: "",
+      project: "",
+      viewing: "",
+      conflicts: "",
+      conflictsLive: "",
+    });
     expect(readMemoryRunFile("/x", () => "not json")).toEqual({
       tools: false,
       text: "",
       project: "",
       viewing: "",
+      conflicts: "",
+      conflictsLive: "",
     });
     expect(readMemoryRunFile("/x", file({ tools: "yes", text: 1 }))).toEqual({
       tools: false,
       text: "",
       project: "",
       viewing: "",
+      conflicts: "",
+      conflictsLive: "",
     });
   });
   it("gives no text when tools are off", () => {
@@ -49,12 +67,16 @@ describe("readMemoryRunFile", () => {
       text: "",
       project: "",
       viewing: "",
+      conflicts: "",
+      conflictsLive: "",
     });
     expect(readMemoryRunFile("/x", file({ tools: true, text: "idx" }))).toEqual({
       tools: true,
       text: "idx",
       project: "",
       viewing: "",
+      conflicts: "",
+      conflictsLive: "",
     });
     // Project instructions do not depend on memory being on.
     expect(readMemoryRunFile("/x", file({ tools: false, text: "", project: "P" }))).toEqual({
@@ -62,6 +84,8 @@ describe("readMemoryRunFile", () => {
       text: "",
       project: "P",
       viewing: "",
+      conflicts: "",
+      conflictsLive: "",
     });
   });
 });
@@ -136,6 +160,51 @@ describe("viewed file in the run's prompt (KOBE-462)", () => {
       text: "",
       project: "",
       viewing: "",
+      conflicts: "",
+      conflictsLive: "",
+    });
+  });
+});
+
+describe("sync conflict notes (KOBE-492)", () => {
+  it("adds the run-start note to this run's system prompt", () => {
+    const pi = fakePi([]);
+    installMemoryHooks(pi.api, "/x", () =>
+      JSON.stringify({ tools: false, text: "", viewing: "## Viewed", conflicts: "## Conflicts" }),
+    );
+    expect(pi.fire("before_agent_start", { systemPrompt: "BASE" })).toEqual({
+      systemPrompt: "BASE\n\n## Viewed\n\n## Conflicts",
+    });
+  });
+
+  it("adds a mid-run note as a hidden custom message before every later model call", () => {
+    const pi = fakePi([]);
+    let content: unknown = { tools: false, text: "" };
+    installMemoryHooks(pi.api, "/x", () => JSON.stringify(content));
+    const messages = [{ role: "user", content: "hi" }];
+    expect(pi.fire("context", { messages })).toBeUndefined();
+    content = { tools: false, text: "", conflicts_live: "## Conflicts live" };
+    const out = pi.fire("context", { messages }) as { messages: Record<string, unknown>[] };
+    expect(out.messages.slice(0, 1)).toEqual(messages);
+    expect(out.messages[1]).toMatchObject({
+      role: "custom",
+      customType: CONFLICT_NOTE_TYPE,
+      content: "## Conflicts live",
+      display: false,
+    });
+    expect(messages).toHaveLength(1); // the transcript itself is not changed
+    // Not in the system prompt: only the run-start note is.
+    expect(pi.fire("before_agent_start", { systemPrompt: "BASE" })).toBeUndefined();
+  });
+
+  it("fails closed on a malformed note field", () => {
+    expect(readMemoryRunFile("/x", file({ tools: true, text: "m", conflicts_live: 1 }))).toEqual({
+      tools: false,
+      text: "",
+      project: "",
+      viewing: "",
+      conflicts: "",
+      conflictsLive: "",
     });
   });
 });

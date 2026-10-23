@@ -238,18 +238,16 @@ describe("seeding from the repo's definitions", () => {
 });
 
 describe("gallery agents are read-only (ac-1)", () => {
-  it("answers every write on the site route with 405, site admins included", async () => {
+  it("answers create, delete, status and unarchive on the site route with 405, site admins included", async () => {
+    // Site admins edit and publish gallery agents since KOBE-494 (gallery-edit.db.test.ts).
     const id = await galleryId();
     const base = "/v1/site/gallery/agents";
     const body = { frontmatter: { name: "X" }, prompt: "x" };
     for (const who of ["admin", "bob", "carol"] as const) {
       const calls = [
         as[who].post(base, body),
-        as[who].put(`${base}/${id}`, body, ANY),
         as[who].delete(`${base}/${id}`),
         as[who].put(`${base}/${id}/status`, { status: "suspended" }),
-        as[who].request("POST", `${base}/${id}/publish`, {}, ANY),
-        as[who].request("POST", `${base}/${id}/rollback`, { version: 1 }, ANY),
         as[who].post(`${base}/${id}/unarchive`),
       ];
       const results = await Promise.all(calls);
@@ -259,11 +257,7 @@ describe("gallery agents are read-only (ac-1)", () => {
         who,
       ).toEqual(results.map(() => want));
     }
-    const admin = await as.admin.put(
-      `${base}/${id}`,
-      { frontmatter: { name: "X" }, prompt: "x" },
-      ANY,
-    );
+    const admin = await as.admin.post(base, body);
     expect(admin.json.code).toBe("gallery_read_only");
   });
 
@@ -271,7 +265,7 @@ describe("gallery agents are read-only (ac-1)", () => {
     const id = await galleryId();
     const list = await as.admin.get("/v1/site/gallery/agents");
     expect(list.json.agents.map((a: { id: string }) => a.id)).toContain(id);
-    expect((await as.admin.get(`/v1/site/gallery/agents/${id}`)).json.agent.canEdit).toBe(false);
+    expect((await as.admin.get(`/v1/site/gallery/agents/${id}`)).json.agent.canEdit).toBe(true);
     expect((await as.admin.get(`/v1/site/gallery/agents/${id}/export`)).text).toMatch(
       /^---\nname: Fixture Analyst\n/,
     );

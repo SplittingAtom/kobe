@@ -16,6 +16,7 @@ export * from "./files.js";
 export * from "./workspace-changes.js";
 export * from "./skill-draft-tool.js";
 export * from "./file-editor.js";
+export * from "./sync-conflicts.js";
 export * from "./file-open.js";
 export * from "./thread-files.js";
 export * from "./notebooks.js";

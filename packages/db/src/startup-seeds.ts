@@ -58,8 +58,9 @@ const list = (values: readonly string[]): string => values.map((v) => `'${v}'`).
 export const STARTUP_SEEDED_ROWS: Readonly<Record<string, StartupSeed>> = {
   site_agents: {
     why: "gallery agents seeded at every server start (KOBE-87)",
-    // Archived only by the seed itself (a person's archive is real data).
-    rows: "gallery_key IS NOT NULL AND (archived_by IS NULL OR archived_by = 'seed')",
+    // Archived only by the seed itself (a person's archive is real data), and not customized by
+    // a site admin (KOBE-494: their edits are real data too).
+    rows: "gallery_key IS NOT NULL AND (archived_by IS NULL OR archived_by = 'seed') AND customized_at IS NULL",
   },
   site_agent_versions: {
     why: "the versions the gallery seed publishes (no person publishes them)",

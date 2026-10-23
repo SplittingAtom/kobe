@@ -1,8 +1,8 @@
-import { listTeamModels, modelName } from "../../../../lib/admin/api/team/models";
+import { modelName } from "../../../../lib/admin/api/team/models";
 import type { FieldErrors, FormState } from "../../../../lib/admin/agent-builder/form-model";
 import { Field, Select, TextInput } from "../../../ui/console";
-import { useTeamAccess } from "../../console-context";
 import { useResource } from "../../use-resource";
+import { useBuilderSources } from "./builder-sources";
 import { fieldError } from "./field-errors";
 
 /**
@@ -21,8 +21,8 @@ export function ModelField({
   readonly readOnly: boolean;
   readonly onChange: (model: string) => void;
 }) {
-  const teamId = useTeamAccess().team.id;
-  const { state } = useResource(() => listTeamModels(teamId));
+  const sources = useBuilderSources();
+  const { state } = useResource(sources.models);
   const failed = state.status === "error";
   const enabled = state.status === "ready" ? state.data.models.filter((m) => m.enabled) : [];
   const unlisted = form.model !== "" && !enabled.some((m) => m.alias === form.model);
@@ -32,7 +32,7 @@ export function ModelField({
       hint={
         failed
           ? "The team's models couldn't be loaded; type an alias or model id."
-          : "Models the team has enabled."
+          : sources.modelsHint
       }
       error={fieldError(errors.model)}
     >

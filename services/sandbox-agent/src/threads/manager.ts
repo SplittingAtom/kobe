@@ -6,6 +6,7 @@ import type {
   RunStopFrame,
   ServerToSandboxFrame,
   ThreadContextResult,
+  WorkspaceConflictNoteFrame,
 } from "@kobe/protocol";
 import { PiProcessError } from "../pi/pi-process.js";
 import { buildPiLaunch } from "../pi/pi-launch.js";
@@ -206,6 +207,7 @@ export class ThreadManager {
           frame.memory,
           this.#options.projectTools ? frame.project : undefined,
           this.#options.fileEditTools ? frame.viewing : undefined,
+          frame.sync_conflicts,
         );
       } catch (error) {
         endOwn();
@@ -567,6 +569,17 @@ export class ThreadManager {
       const runId = thread.runId;
       if (runId === undefined || !leasedRuns.has(runId)) thread.cancelDialogs();
     }
+  }
+
+  /**
+   * `workspace.conflict_note` (KOBE-492): conflicts the server recorded for a thread whose run is
+   * active here; the run's later model calls get the note. A note for a run that is not (or no
+   * longer) active is dropped: it is not told again (the server marked it told).
+   */
+  async conflictNote(frame: WorkspaceConflictNoteFrame): Promise<boolean> {
+    const thread = this.#threads.get(frame.thread_id);
+    if (thread === undefined) return false;
+    return thread.noteConflicts(frame.run_id, frame.conflicts);
   }
 
   uiResponse(frame: Frame<"pi.ui_response">): boolean {

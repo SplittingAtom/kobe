@@ -18,6 +18,8 @@ export const sandbox = defineDomain({
     "workspace_file_hold_history",
     // The move journal the sandbox replays as local renames (KOBE-304).
     "workspace_moves",
+    // Sync conflicts reported by the sandbox (KOBE-492).
+    "workspace_sync_conflicts",
   ],
   siteWide: [],
   grants: {},

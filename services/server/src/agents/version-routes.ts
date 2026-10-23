@@ -1,5 +1,5 @@
 import type { Context, Hono } from "hono";
-import { withTeam, type KobeDb } from "@kobe/db";
+import { withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import type { AgentAccess } from "./access.js";
 import {
   agentDetail,
@@ -81,6 +81,11 @@ export interface VersionRouteOptions {
    */
   readonly mayUseDangerousMode: (c: Context) => boolean;
   /**
+   * Work to do in the publish's or rollback's own transaction once it succeeded (the gallery
+   * router marks the agent Customized, KOBE-494). Unset on the team router.
+   */
+  readonly afterPublish?: (c: Context, found: ResolvedAgent) => (tx: KobeTx) => Promise<void>;
+  /**
    * The pre-publish eval gate (KOBE-93), on the team router only: Publish asks it first, and
    * version summaries carry the score each version earned. Unset (the gallery): never gated.
    */
@@ -122,6 +127,8 @@ export function mountVersionRoutes<E extends { Variables: object }>(
   options: VersionRouteOptions,
 ): void {
   const { db, resolve, limits } = options;
+  const afterWrite = (c: Context, found: ResolvedAgent) =>
+    options.afterPublish ? { afterWrite: options.afterPublish(c, found) } : {};
 
   /** Publishes and rollbacks share one per-user budget (review M3); false → 429. */
   const withinRate = (c: Context) =>
@@ -266,6 +273,7 @@ export function mountVersionRoutes<E extends { Variables: object }>(
       publishedBy: options.userId(c),
       expectedRevision: ifMatch.revision,
       limits,
+      ...afterWrite(c, found),
     });
     return result.ok
       ? publishedResponse(c, result.value, found.access)
@@ -290,6 +298,7 @@ export function mountVersionRoutes<E extends { Variables: object }>(
         publishedBy: options.userId(c),
         fromVersion: body.version,
         limits,
+        ...afterWrite(c, found),
       });
       return result.ok
         ? publishedResponse(c, result.value, found.access)

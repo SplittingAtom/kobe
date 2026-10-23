@@ -35,8 +35,11 @@ export type RegistryTagStatus = (typeof REGISTRY_TAG_STATUSES)[number];
 /** A tag name: a lowercase slug (the topic tags of `kobe.skill.yaml` use the same pattern). */
 export const REGISTRY_TAG_PATTERN = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
 
-/** Who publishes a catalog skill: Kobe (built-ins, reserved names) or its maintainers (SK24). */
-export const REGISTRY_PUBLISHERS = ["kobe", "maintainer"] as const;
+/**
+ * Who publishes a catalog skill: Kobe (built-ins, reserved names) or its maintainers (SK24); and,
+ * for a version only, the Site (`site`: a Site admin's edit in the Site Console, KOBE-495).
+ */
+export const REGISTRY_PUBLISHERS = ["kobe", "maintainer", "site"] as const;
 export type RegistryPublisher = (typeof REGISTRY_PUBLISHERS)[number];
 
 /**

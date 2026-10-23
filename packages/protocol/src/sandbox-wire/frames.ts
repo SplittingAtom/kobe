@@ -44,6 +44,11 @@ import {
   fileEditProposeFrameSchema,
   fileEditProposeResultFrameSchema,
 } from "./file-edit-frames.js";
+import {
+  workspaceConflictFrameSchema,
+  workspaceConflictNoteFrameSchema,
+} from "./sync-conflict-frames.js";
+import { SYNC_CONFLICT_NOTES_MAX, syncConflictSchema } from "../sync-conflicts.js";
 import { fileOpenFrameSchema, fileOpenResultFrameSchema } from "./file-open-frames.js";
 import {
   notebookExecuteFrameSchema,
@@ -294,6 +299,7 @@ export const sandboxToServerFrameSchema = z.union([
   skillDraftSaveFrameSchema,
   fileEditProposeFrameSchema,
   fileOpenFrameSchema,
+  workspaceConflictFrameSchema,
   notebookOutputFrameSchema,
   notebookRunFrameSchema,
   webSearchQueryFrameSchema,
@@ -480,6 +486,12 @@ export const runStartFrameSchema = frame("run.start", {
    * untrusted data in this run's system prompt only. Only for agents with capability `file_edits`.
    */
   viewing: runViewingContextSchema.optional(),
+  /**
+   * Workspace sync conflicts of this thread the agent was not told about yet (KOBE-492,
+   * sync-conflicts.ts): names and hashes, fenced as a note in this run's system prompt only. Only
+   * for agents with capability `sync_conflicts`.
+   */
+  sync_conflicts: z.array(syncConflictSchema).max(SYNC_CONFLICT_NOTES_MAX).optional(),
   /**
    * The run's trace context (KOBE-274, trace-frames.ts): only for agents with capability
    * `trace_spans`, and only when the server traces this run. Absent = record and send no spans.
@@ -676,6 +688,7 @@ export const serverToSandboxFrameSchema = z.union([
   skillDraftSaveResultFrameSchema,
   fileEditProposeResultFrameSchema,
   fileOpenResultFrameSchema,
+  workspaceConflictNoteFrameSchema,
   notebookRunResultFrameSchema,
   notebookExecuteFrameSchema,
   notebookInterruptFrameSchema,

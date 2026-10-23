@@ -8,6 +8,7 @@ import type { appContextBody } from "../apps/app-context";
 /** One `app_context` part as sent (KOBE-439). */
 export type AppContextWire = ReturnType<typeof appContextBody>[number];
 import type { ItemReference, MessageViewing, ThinkingLevel } from "@kobe/protocol";
+import type { SyncConflictView } from "../files/sync-conflicts";
 import type { FileEntry } from "../files/api";
 import type { ProposalView } from "../files/editor-state";
 import { apiDownload, apiRequest, apiTextFile, type ApiResult, type TextFile } from "../api/client";
@@ -299,6 +300,17 @@ export interface ChatApi {
    * /v1/threads/{id}/files`; the owner only, 404 for anyone else), in order of first appearance.
    */
   threadFiles(threadId: string): Promise<ApiResult<readonly FileEntry[]>>;
+  /**
+   * The thread's open workspace sync conflicts (KOBE-492, `GET /v1/threads/{id}/sync-conflicts`;
+   * the owner only, 404 for anyone else), newest first.
+   */
+  syncConflicts(threadId: string): Promise<ApiResult<readonly SyncConflictView[]>>;
+  /** Settles one conflict: `resolved` (the copy was deleted) or `dismissed` (204). */
+  settleSyncConflict(
+    threadId: string,
+    conflictId: string,
+    action: "resolved" | "dismissed",
+  ): Promise<ApiResult<void>>;
   /** The bytes of a file the agent shared (`GET /v1/files/:id/content`, KOBE-150). */
   downloadSharedFile(fileId: string): Promise<ApiResult<Uint8Array>>;
   /**
@@ -496,6 +508,14 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
       const res = await get<{ files: readonly FileEntry[] }>(`/v1/threads/${enc(id)}/files`);
       return res.ok ? { ...res, data: res.data.files } : res;
     },
+    syncConflicts: async (id) => {
+      const res = await get<{ conflicts: readonly SyncConflictView[] }>(
+        `/v1/threads/${enc(id)}/sync-conflicts`,
+      );
+      return res.ok ? { ...res, data: res.data.conflicts } : res;
+    },
+    settleSyncConflict: (id, conflictId, action) =>
+      send("POST", `/v1/threads/${enc(id)}/sync-conflicts/${enc(conflictId)}`, { action }),
     downloadSharedFile: (id) => apiDownload(`/v1/files/${enc(id)}/content`, { teamId, fetchFn }),
     undoMemory: (docId, action) =>
       action.action === "restore" ? memory.restore(docId, action.version) : memory.remove(docId),

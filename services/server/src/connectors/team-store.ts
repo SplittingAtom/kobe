@@ -100,6 +100,26 @@ export async function listTeamConnectors(db: KobeDb, teamId: string): Promise<Te
   });
 }
 
+/**
+ * Active connectors as the gallery agent editor offers them (KOBE-494): gallery agents run in
+ * every team, so site admins pick from every active site connector (each team's exposure still
+ * applies at run time, and the frozen manifest is computed against the site floor).
+ */
+export async function listGalleryConnectors(db: KobeDb): Promise<TeamConnectorView[]> {
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .select()
+      .from(connectors)
+      .where(and(isNull(connectors.deletedAt), eq(connectors.status, "active")))
+      .orderBy(asc(connectors.name));
+    const siteKeys = await usableSiteKeyIds(
+      tx,
+      rows.filter((r) => r.credentialSource === "site").map((r) => r.id),
+    );
+    return rows.map((r) => view(r, { exposure: "all", enabledTools: [] }, siteKeys));
+  });
+}
+
 export interface ExposureInput {
   readonly exposure: ConnectorExposureKind;
   readonly enabledTools: readonly string[];

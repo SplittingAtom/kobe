@@ -3,6 +3,7 @@
  * sends `X-Kobe-Team`, so a tab left on another team gets `team_mismatch`. The workspace is the
  * caller's own, so no call names an owner. Entries are camelized by the client.
  */
+import type { SyncConflictView } from "./sync-conflicts";
 import type { WorkspaceArea } from "@kobe/protocol";
 import {
   apiDownload,
@@ -75,6 +76,13 @@ export interface FilesApi {
    * loaded). 409 `version_conflict`: it changed or was deleted meanwhile; read-only areas 403.
    */
   save(path: string, baseSha256: string, text: string): Promise<ApiResult<FileEntry>>;
+  /**
+   * The caller's open sync conflicts no thread wrote (KOBE-492, `GET /v1/workspace/sync-conflicts`),
+   * newest first: shown in the Files rail. Conflicts of a thread show in that thread.
+   */
+  syncConflicts(): Promise<ApiResult<{ readonly conflicts: readonly SyncConflictView[] }>>;
+  /** Settles one of them: `resolved` (the copy was deleted) or `dismissed` (204). */
+  settleSyncConflict(id: string, action: "resolved" | "dismissed"): Promise<ApiResult<void>>;
   /** The panel opened: start the sandbox so the next sync catches up (202, fire and forget). */
   wake(): Promise<ApiResult<{ readonly status: string }>>;
 }
@@ -119,5 +127,12 @@ export function createFilesApi(teamId: string, fetchFn?: typeof fetch): FilesApi
         raw: { body: new TextEncoder().encode(text), contentType: "text/plain; charset=utf-8" },
       }),
     wake: () => apiRequest(`/v1/workspace/wake`, { ...opts, method: "POST" }),
+    syncConflicts: () => apiRequest(`/v1/workspace/sync-conflicts`, opts),
+    settleSyncConflict: (id, action) =>
+      apiRequest(`/v1/workspace/sync-conflicts/${encodeURIComponent(id)}`, {
+        ...opts,
+        method: "POST",
+        json: { action },
+      }),
   };
 }

@@ -9,6 +9,7 @@ import { useArtifactPanel } from "../chat/artifact-state";
 import { ChatSessionContext } from "../chat/kobe-runtime";
 import { mentionRefusal } from "../../lib/chat/mention-insert";
 import { FileBrowser } from "../files/file-browser";
+import { WorkspaceConflictNotices } from "../files/workspace-conflict-notices";
 import { useMyTeams, type MyTeamsState } from "../../app/team-switcher";
 import { useOpenConsoles } from "../admin/console-links";
 import { shows } from "../../lib/shell/rail-panels";
@@ -314,6 +315,9 @@ function RailFiles({
       </div>
       <RailDropNotice status={drop} />
       {/* Nothing until its first showing lists it (KOBE-461): the tab on screen asks at once. */}
+      {rail.filesRequests > 0 && (
+        <WorkspaceConflictNotices api={api} readKey={rail.filesRequests} />
+      )}
       {rail.filesRequests > 0 && (
         <FileBrowser
           api={api}

@@ -244,7 +244,7 @@ transaction:
 - rows a migration seeds (the egress presets in `egress_domains` and the others listed in
   `packages/cli/src/seeded.ts`);
 - rows the server writes when it starts (`packages/db/src/startup-seeds.ts`): the gallery agents
-  with their published versions and the system's audit events for seeding them, and where the
+  (not those a site admin customized, KOBE-494) with their published versions and the system's audit events for seeding them, and where the
   retention pass, the audit PII sweep and SIEM forwarding stand (`site_settings`). The started
   site's own audit events go with them: the restored audit chain is the backup's, continued by
   the restore's event, which records the replaced chain's head and size

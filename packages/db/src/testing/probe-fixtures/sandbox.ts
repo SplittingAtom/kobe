@@ -14,6 +14,7 @@ import {
   workspaceFiles,
   workspaceMoves,
   workspaceSync,
+  workspaceSyncConflicts,
 } from "../../schema/index.js";
 import type { sandbox } from "../../tenancy/sandbox.js";
 import type { ProbeFixture } from "./types.js";
@@ -148,6 +149,19 @@ export const sandboxFixtures: Record<(typeof sandbox.team)[number], ProbeFixture
       type: "dir",
       files: 1,
       bytes: 3,
+    });
+  },
+  workspace_sync_conflicts: async (tx, teamId) => {
+    const { userId, threadId, runId } = await insertRun(tx, teamId);
+    await tx.insert(workspaceSyncConflicts).values({
+      teamId,
+      userId,
+      threadId,
+      runId,
+      path: "notes.md",
+      conflictPath: "notes.conflict-20261023-120000.md",
+      memberSha256: PROBE_SHA,
+      agentSha256: PROBE_SHA,
     });
   },
 };
