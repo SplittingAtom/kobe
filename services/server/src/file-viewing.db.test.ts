@@ -103,9 +103,20 @@ describe("viewed-file context (KOBE-462)", () => {
     if (!other) throw new Error("no member");
     await seed(w, other.id, "theirs.md", Buffer.from("secret\n"));
     for (const path of ["theirs.md", "missing.md", ".kobe/state.md"]) {
-      const { start } = await sendViewing(w, path);
+      const { start, runId } = await sendViewing(w, path);
       expect(start.viewing).toBeUndefined();
+      // KOBE-493: an unread file keeps its path for the viewed-file guard; internal paths don't.
+      expect(await viewingRow(runId)).toEqual(path.startsWith(".kobe/") ? null : { path });
     }
+  });
+
+  it("keeps only the path when the file can't be read from storage (KOBE-493)", async () => {
+    const w = await f.world();
+    const hash = await seed(w, w.owner.id, "lost.md", Buffer.from("x\n"));
+    objects.objects.delete(workspaceBlobKey("", { teamId: w.team, userId: w.owner.id }, hash));
+    const { start, runId } = await sendViewing(w, "lost.md");
+    expect(start.viewing).toBeUndefined();
+    expect(await viewingRow(runId)).toEqual({ path: "lost.md" });
   });
 
   it("is left out for an agent without file_edits", async () => {

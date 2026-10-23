@@ -6,7 +6,6 @@ import {
   splitSkillRequest,
   withItemReferences,
   withSkillRequest,
-  type RunViewingContext,
 } from "@kobe/protocol";
 import type { NotebookFiles } from "../notebooks/files.js";
 import { notebookKernel, startNotebookRun, type NotebookRunHost } from "../notebooks/user-run.js";
@@ -60,6 +59,7 @@ import type { SandboxRouter, SandboxTarget } from "../sandbox-wire/types.js";
 import { viewerProjectIds } from "../threads/references.js";
 import { findThread, isLockTimeout, type Viewer } from "../threads/repository.js";
 import type { AttachmentStager, StagedFile } from "../uploads/attach.js";
+import { isInternalPath } from "../workspace-files/paths.js";
 import type { ViewingReader } from "../workspace-files/viewing.js";
 import { cancelScheduledRuns, type ScheduledCancelReason } from "./cancel-scheduled.js";
 import { RunError } from "./errors.js";
@@ -108,6 +108,7 @@ import {
   touchThread,
   type AppliedTransition,
   type RunRow,
+  type StoredViewing,
 } from "./store.js";
 import { lockOwnedThread, ownedRun } from "./access.js";
 import { queuedMessageCount, reorderQueuedRuns } from "./queue-order.js";
@@ -423,12 +424,13 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
 
   /**
    * The member's viewed file (KOBE-462, spec FE6), read from their own synced workspace before the
-   * transaction (object storage); only for their own messages. Missing or unreadable: none.
+   * transaction (object storage); only for their own messages. Missing or unreadable: only its
+   * path, which the viewed-file guard still applies to (KOBE-493); the run gets no context.
    */
   async #readViewing(
     actor: ActorContext,
     command: SubmitMessageCommand,
-  ): Promise<RunViewingContext | undefined> {
+  ): Promise<StoredViewing | undefined> {
     if (command.trigger !== "user") return undefined;
     const fromEntry = command.viewing_from_entry;
     if (command.viewing === undefined && fromEntry === undefined) return undefined;
@@ -444,27 +446,39 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
           : await promptViewingPath(tx, actor.team_id, thread.thread.id, fromEntry);
       return path === undefined ? undefined : { owner: thread.thread.ownerUserId, path };
     });
-    if (found === undefined || this.#viewing === undefined) return undefined;
-    return this.#viewing({ teamId: actor.team_id, userId: found.owner }, found.path);
+    return this.#viewingOf(actor, found);
+  }
+
+  /** The file as read, else only its path (KOBE-493); undefined when nothing was viewed. */
+  async #viewingOf(
+    actor: ActorContext,
+    found: { readonly owner: string; readonly path: string } | undefined,
+  ): Promise<StoredViewing | undefined> {
+    // Agent-internal files are never the member's to view (nor guarded).
+    if (found === undefined || isInternalPath(found.path)) return undefined;
+    const read =
+      this.#viewing === undefined
+        ? undefined
+        : await this.#viewing({ teamId: actor.team_id, userId: found.owner }, found.path);
+    return read ?? { path: found.path };
   }
 
   /**
    * A retry's viewed file (KOBE-462 FE7): the original's path (its text was cleared when it
    * ended), read again from the owner's workspace once the run is known to be theirs.
    */
-  async #retryViewing(actor: ActorContext, runId: string): Promise<RunViewingContext | undefined> {
+  async #retryViewing(actor: ActorContext, runId: string): Promise<StoredViewing | undefined> {
     const found = await this.#readTx(actor, async (tx, viewer) => {
       const { thread } = await ownedRun(tx, viewer, runId, false);
       const path = await runViewingPath(tx, actor.team_id, runId);
       return path === undefined ? undefined : { owner: thread.ownerUserId, path };
     });
-    if (found === undefined || this.#viewing === undefined) return undefined;
-    return this.#viewing({ teamId: actor.team_id, userId: found.owner }, found.path);
+    return this.#viewingOf(actor, found);
   }
 
   async #submitInTx(
     actor: ActorContext,
-    command: SubmitMessageCommand & { readonly resolvedViewing?: RunViewingContext },
+    command: SubmitMessageCommand & { readonly resolvedViewing?: StoredViewing },
     clientKey: string | null,
     attach: StagedAttachments | undefined,
     onAttached: () => void,

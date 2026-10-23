@@ -20,6 +20,7 @@ import { neverPromptReason } from "../policy/evaluate.js";
 import { appliedUserRule, recordRuleApplied } from "../policy/rule-applied.js";
 import { appliedDangerousMode, recordDangerousApplied } from "../policy/dangerous-mode.js";
 import { loadRunAgentTools } from "../policy/run-agent-tools.js";
+import { guardViewedFile, proposeAvailable } from "../policy/viewed-file-guard.js";
 import { recordSkippedActionInTx } from "../policy/skipped-actions.js";
 import type {
   ApprovalBroker,
@@ -105,9 +106,12 @@ export function createDbRunContextSource(): RunPolicyContextSource {
   return {
     async load(tx, run) {
       const floor = await readApprovalFloor(tx);
-      const res = await tx.execute<{ approval_mode: string }>(sql`
-        SELECT approval_mode FROM runs WHERE team_id = ${run.teamId} AND id = ${run.runId}`);
+      const res = await tx.execute<{ approval_mode: string; viewed_path: string | null }>(sql`
+        SELECT approval_mode, viewing ->> 'path' AS viewed_path
+          FROM runs WHERE team_id = ${run.teamId} AND id = ${run.runId}`);
       const mode = approvalModeSchema.safeParse(res.rows[0]?.approval_mode);
+      // KOBE-493: the run's viewed file (also set by Retry and regenerate), for the guard.
+      const viewedPath = res.rows[0]?.viewed_path ?? undefined;
       // KOBE-481: the agent's own tools.deny in every mode; AC1: its Dangerous tools.
       const agent = await loadRunAgentTools(tx, run);
       return {
@@ -115,6 +119,7 @@ export function createDbRunContextSource(): RunPolicyContextSource {
         ...(mode.success ? { approvalMode: mode.data } : {}),
         toolsDeny: agent.toolsDeny,
         ...(agent.dangerousTools.length > 0 ? { dangerousTools: agent.dangerousTools } : {}),
+        ...(viewedPath === undefined ? {} : { viewedPath }),
       };
     },
   };
@@ -136,7 +141,12 @@ const DEFAULT_RETRY_DELAY_MS = 150;
 
 export type Evaluated =
   | { readonly reason: PolicyReason }
-  | { readonly input: PolicyInput; readonly decision: PolicyDecision };
+  | {
+      readonly input: PolicyInput;
+      readonly decision: PolicyDecision;
+      /** The run's viewed file (KOBE-493), if any. */
+      readonly viewedPath?: string;
+    };
 
 /** The engine's own fail-closed deny (an internal error, already reported through `onError`). */
 function isInternalError(decision: PolicyDecision): boolean {
@@ -158,9 +168,14 @@ async function evaluateOnce(
   target: SandboxTarget,
   frame: PolicyCheckFrame,
 ): Promise<Evaluated> {
-  const input = await buildInput(deps, target, frame);
-  if ("code" in input) return { reason: input };
-  return { input, decision: await deps.engine.decide(input) };
+  const built = await buildInput(deps, target, frame);
+  if ("code" in built) return { reason: built };
+  const { input, viewedPath } = built;
+  return {
+    input,
+    decision: await deps.engine.decide(input),
+    ...(viewedPath === undefined ? {} : { viewedPath }),
+  };
 }
 
 export async function retryEvaluation(
@@ -245,12 +260,12 @@ async function isEvalThread(db: KobeDb, teamId: string, threadId: string): Promi
   return res.rows[0]?.skill_eval === true;
 }
 
-/** Builds the engine input from server state, or the reason to deny instead. */
+/** Builds the engine input from server state (and the run's viewed file), or the reason to deny. */
 async function buildInput(
   deps: PolicyCheckDeps,
   target: SandboxTarget,
   frame: PolicyCheckFrame,
-): Promise<PolicyInput | PolicyReason> {
+): Promise<{ readonly input: PolicyInput; readonly viewedPath?: string } | PolicyReason> {
   const loaded = await withTeam(deps.db, target.teamId, async (tx) => {
     const res = await tx.execute<{
       status: string;
@@ -307,7 +322,7 @@ async function buildInput(
     APPROVAL_MODES.includes(requested) ? requested : "ask-on-write",
     context.floor,
   );
-  return {
+  const input = {
     actor: { user_id: target.userId, kind: row.trigger },
     team_id: target.teamId,
     agent: {
@@ -333,6 +348,7 @@ async function buildInput(
       ...(tool.source === "mcp" ? { connector_exposure: "all" as const } : {}),
     },
   } as PolicyInput;
+  return context.viewedPath === undefined ? { input } : { input, viewedPath: context.viewedPath };
 }
 
 /**
@@ -400,7 +416,11 @@ async function recordSkipped(
  */
 export async function decidePolicyCheck(
   deps: PolicyCheckDeps,
-  target: SandboxTarget & { readonly connectionId: string },
+  target: SandboxTarget & {
+    readonly connectionId: string;
+    /** The sandbox announced `file_edits` (KOBE-493: the viewed-file guard denies, else asks). */
+    readonly fileEdits?: boolean;
+  },
   frame: PolicyCheckFrame,
   signal: AbortSignal,
   onPending: (pending: { approvalId: string; expiresAt: string }) => void,
@@ -418,7 +438,17 @@ export async function decidePolicyCheck(
       const message = `${input.message} The tool call was denied.`;
       return denyFrame(frame, [{ ...input, message }], message);
     }
-    const { decision } = evaluated;
+    // KOBE-493: Pi write/edit never change the member's viewed file directly, in any mode.
+    const { viewedPath } = evaluated;
+    const decision = guardViewedFile(evaluated.decision, {
+      tool: evaluated.input.tool,
+      input: frame.input,
+      viewedPath,
+      canPropose:
+        viewedPath !== undefined &&
+        proposeAvailable(evaluated.input.agent, target.fileEdits === true, viewedPath),
+      now: new Date(),
+    });
     // A skill eval's run (KOBE-325) never reads or writes the member's memory or projects: an eval
     // measures the skill alone and leaves nothing behind in the member's own state.
     const evalRun = await isEvalThread(deps.db, target.teamId, frame.thread_id);

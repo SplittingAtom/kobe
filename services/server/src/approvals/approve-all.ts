@@ -7,6 +7,7 @@ import {
 import { withTeam } from "@kobe/db";
 import { withAppendTx } from "../event-stream/append.js";
 import { readTeamRememberLimits } from "../policy/remember-limits-store.js";
+import { isViewedFileAsk } from "../policy/viewed-file-guard.js";
 import { lockRunRow, lockThreadRow } from "../runs/store.js";
 import { ApprovalError, type ApprovalContext } from "./context.js";
 import { allowRowInTx, askerConnected, isProjectWrite } from "./decide.js";
@@ -22,10 +23,12 @@ import { viewOf, type ApprovalView } from "./view.js";
  * review N4). Those are approved one by one.
  */
 export function batchable(
-  row: Pick<ApprovalRow, "risk" | "tool" | "inputCanonical">,
+  row: Pick<ApprovalRow, "risk" | "tool" | "inputCanonical" | "reasons">,
   tool: ToolDescriptor | undefined,
 ) {
   return (
+    // KOBE-493: a write to the file the member is viewing is decided on its own.
+    !isViewedFileAsk(row.reasons) &&
     !isProjectWrite(row.tool, JSON.parse(row.inputCanonical) as unknown) &&
     tool !== undefined &&
     tool.name === row.tool &&

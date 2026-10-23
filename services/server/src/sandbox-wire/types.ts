@@ -315,6 +315,8 @@ export interface RunPolicyContext {
    * input carries them only when the floor is also `auto`. Absent or empty: Dangerous is off.
    */
   readonly dangerousTools?: readonly string[];
+  /** The run's viewed file (`runs.viewing.path`, KOBE-493 guard); absent when it views none. */
+  readonly viewedPath?: string;
 }
 
 /** KOBE-30/46/47 seam: run-specific policy inputs, read inside the team's transaction. */
