@@ -11,7 +11,8 @@ vi.mock("next/headers", () => ({
   }),
 }));
 
-const { default: RootLayout } = await import("./layout");
+const { default: RootLayout, metadata } = await import("./layout");
+const { CLIENT_BUILD_ID } = await import("../lib/build/build-id");
 
 async function html(): Promise<ReactElement<Record<string, unknown>>> {
   const el = await RootLayout({ children: null });
@@ -35,5 +36,11 @@ describe("root layout theme (KOBE-282)", () => {
     expect((await html()).props["data-theme"]).toBeUndefined();
     cookie = "neon";
     expect((await html()).props["data-theme"]).toBeUndefined();
+  });
+});
+
+describe("root layout build id (KOBE-487)", () => {
+  it("names the page's build in a meta tag", () => {
+    expect(metadata.other).toEqual({ "kobe-build": CLIENT_BUILD_ID });
   });
 });

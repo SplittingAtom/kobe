@@ -43,6 +43,7 @@ import { cn } from "../../lib/utils";
 import { ComposerSelectors, useComposerPicker, useFoldedSelectors } from "./composer-selectors";
 import { ModelWarning } from "./model-picker";
 import { PlusMenu } from "./plus-menu";
+import { useReloadDraft } from "./use-reload-draft";
 import { SkillPickChip } from "./plus-skills";
 import { SlashMenu } from "./slash-menu";
 import styles from "./chat.module.css";
@@ -136,6 +137,7 @@ export function Composer({
     const prefill = session.takeComposerDraft(remoteId);
     if (prefill !== undefined) aui.composer.setText(prefill);
   }, [remoteId, session, aui]);
+  useReloadDraft(draft);
 
   const attach = (list: FileList | null) => {
     if (list && list.length > 0) session.attachments.add(draft, [...list], remoteId);
