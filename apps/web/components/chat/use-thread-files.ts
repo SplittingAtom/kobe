@@ -12,7 +12,7 @@
  */
 import { useEffect, useState } from "react";
 import { useAuiState } from "@assistant-ui/react";
-import { THREAD_FILE_WRITE_TOOLS, workspaceToolPath } from "@kobe/protocol";
+import { THREAD_FILE_WRITE_TOOLS, isExcludedPath, workspaceToolPath } from "@kobe/protocol";
 import type { FileEntry } from "../../lib/files/api";
 import { kobeExtrasOf, useChatSession } from "./kobe-runtime";
 
@@ -22,7 +22,8 @@ export const THREAD_FILES_RETRY_MS: readonly number[] = [1_500, 3_000, 6_000, 12
 const NO_FILES: readonly FileEntry[] = [];
 
 /**
- * Paths of the live run's successful `write`/`edit` calls, normalised, sorted and joined by
+ * Paths of the live run's successful `write`/`edit` calls outside agent-internal folders,
+ * normalised, sorted and joined by
  * newlines: a stable string, so streamed deltas don't re-render the caller.
  */
 function useLiveWrites(threadId: string | undefined): string {
@@ -36,7 +37,8 @@ function useLiveWrites(threadId: string | undefined): string {
       }
       const path = (t.call?.input as { path?: unknown } | undefined)?.path;
       const normal = typeof path === "string" ? workspaceToolPath(path) : undefined;
-      return normal === undefined ? [] : [normal];
+      // Agent-internal files (`.kobe/`) are never listed: waiting for them would only re-read.
+      return normal === undefined || isExcludedPath(normal) ? [] : [normal];
     });
     return [...new Set(paths)].sort().join("\n");
   });

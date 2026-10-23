@@ -129,6 +129,12 @@ describe("thread badges (KOBE-488)", () => {
     await act(() => new Promise((r) => setTimeout(r, 50)));
     expect(fake.threadFilesReads).toBe(reads);
 
+    // An agent-internal write is never listed: no read for it.
+    act(() => fake.agent.toolCall(run, "w4", "write", { path: "/workspace/.kobe/state.json" }));
+    act(() => fake.agent.toolResult(run, "w4", "write", "ok"));
+    await act(() => new Promise((r) => setTimeout(r, 50)));
+    expect(fake.threadFilesReads).toBe(reads);
+
     // The file was deleted; the next write's refresh drops its badge.
     fake.threadFiles.set(t, [entry("other.md")]);
     act(() => fake.agent.toolCall(run, "w3", "write", { path: "other.md" }));

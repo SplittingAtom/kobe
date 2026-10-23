@@ -1,7 +1,8 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { threadFilesResponseSchema } from "@kobe/protocol";
-import { runEvents, threadEntries, withTeam } from "@kobe/db";
+import { runEvents, runs, threadEntries, withTeam } from "@kobe/db";
+import { readAgentFiles } from "./threads/agent-files.js";
 import { EventStreamFixture, must, type Person } from "./testing/event-stream-fixture.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
 import { createWorkspaceSync, workspaceBlobKey } from "./workspace-sync/index.js";
@@ -77,13 +78,65 @@ const tick = () => new Date((clock += 1000));
 async function events(
   w: World,
   rows: readonly { type: string; payload: Record<string, unknown> }[],
+  runId = w.runId,
 ) {
   await withTeam(fx.db, w.team, (tx) =>
     tx
       .insert(runEvents)
-      .values(rows.map((r) => ({ teamId: w.team, runId: w.runId, ...r, createdAt: tick() }))),
+      .values(rows.map((r) => ({ teamId: w.team, runId, ...r, createdAt: tick() }))),
   );
 }
+
+/** Another run of the world's thread. */
+async function secondRun(w: World): Promise<string> {
+  return withTeam(fx.db, w.team, async (tx) => {
+    const [run] = await tx
+      .insert(runs)
+      .values({
+        teamId: w.team,
+        threadId: w.threadId,
+        trigger: "user",
+        status: "completed",
+        startedAt: new Date(),
+        endedAt: new Date(),
+      })
+      .returning({ id: runs.id });
+    return must(run, "run").id;
+  });
+}
+
+/** Mirrored message entries of the world's thread, one after another (seq order). */
+async function entries(w: World, messages: readonly Record<string, unknown>[]) {
+  const at = tick();
+  await withTeam(fx.db, w.team, async (tx) => {
+    let parentId: string | null = null;
+    for (const [i, message] of messages.entries()) {
+      const entryId = `m${i}-${randomBytes(2).toString("hex")}`;
+      await tx.insert(threadEntries).values({
+        teamId: w.team,
+        threadId: w.threadId,
+        entryId,
+        parentId,
+        type: "message",
+        payload: { type: "message", id: entryId, parentId, message },
+        createdAt: at,
+      });
+      parentId = entryId;
+    }
+  });
+}
+
+const callMsg = (id: string, path: string) => ({
+  role: "assistant",
+  content: [{ type: "toolCall", id, name: "write", arguments: { path } }],
+});
+const resultMsg = (id: string, isError = false) => ({
+  role: "toolResult",
+  toolCallId: id,
+  toolName: "write",
+  isError,
+  content: [],
+});
 
 /** A tool call and its result as the run's events. */
 function written(id: string, tool: string, path: string, isError = false) {
@@ -228,5 +281,48 @@ describe("GET /v1/threads/{id}/files", () => {
     expect((await list(w.owner, randomUUID())).status).toBe(404);
     expect((await list(w.owner, "not-a-uuid")).status).toBe(400);
     expect(await paths(w)).toEqual(["a.md"]);
+  });
+
+  it("pairs a call with its result by run: a repeated model id in another run is not its result", async () => {
+    const w = await world();
+    await seed(w, "failed.md", "f");
+    await seed(w, "ok.md", "o");
+    await events(w, written("call_0", "write", "failed.md", true));
+    await events(w, written("call_0", "write", "ok.md"), await secondRun(w));
+    expect(await paths(w)).toEqual(["ok.md"]);
+  });
+
+  it("pairs entries by order (repeated ids across runs) and caps them as a prefix", async () => {
+    const w = await world();
+    for (const p of ["a.md", "b.md", "c.md"]) await seed(w, p, p);
+    await entries(w, [
+      callMsg("call_0", "a.md"),
+      resultMsg("call_0", true),
+      callMsg("call_0", "b.md"),
+      resultMsg("call_0"),
+      callMsg("call_1", "c.md"),
+      resultMsg("call_1"),
+    ]);
+    expect(await paths(w)).toEqual(["b.md", "c.md"]);
+    // Four rows: the first two calls and their results, never calls without their results.
+    const capped = await withTeam(fx.db, w.team, (tx) =>
+      readAgentFiles(tx, { teamId: w.team, userId: w.owner.id }, w.threadId, { rowsMax: 4 }),
+    );
+    expect(capped.map((f) => f.path)).toEqual(["b.md"]);
+  });
+
+  it("leaves agent-internal paths out, proposals included", async () => {
+    const w = await world();
+    // The sync refuses agent-internal paths; move a synced row there to prove the filter.
+    await seed(w, "state.md", "new");
+    await fx.admin.query(
+      `UPDATE workspace_files SET path = '.kobe/state.md' WHERE team_id = $1 AND path = 'state.md'`,
+      [w.team],
+    );
+    await events(w, [
+      ...written("1", "write", ".kobe/state.md"),
+      proposal("2", ".kobe/state.md", "new"),
+    ]);
+    expect(await paths(w)).toEqual([]);
   });
 });

@@ -13,10 +13,15 @@ import { currentEntries, type StoredEntry } from "../workspace-sync/store.js";
  * paths, which are then looked up in the owner's own workspace.
  */
 
-/** One tool call or result, from either source, `at` in ms (orders first appearance). */
+/**
+ * One tool call or result, from either source, in source order; `at` in ms (orders first
+ * appearance). `scope` names where a call id is unique: the run for events (model ids like
+ * `call_0` repeat across runs); entries have no run, so their scope is the thread ("").
+ */
 export type ToolRow =
   | {
       readonly kind: "call";
+      readonly scope: string;
       readonly callId: string;
       readonly tool: string;
       readonly path: string | null;
@@ -24,6 +29,7 @@ export type ToolRow =
     }
   | {
       readonly kind: "result";
+      readonly scope: string;
       readonly callId: string;
       readonly tool: string;
       readonly isError: boolean;
@@ -39,17 +45,29 @@ export interface PathAt {
 const ROWS_MAX = 10_000;
 const WRITE_TOOLS: readonly string[] = THREAD_FILE_WRITE_TOOLS;
 
-/** Paths of write/edit calls whose result succeeded, normalised, at the call's time. */
+/** A tool's workspace path, normalised; undefined outside `/workspace` or agent-internal. */
+function agentPath(path: string | null): string | undefined {
+  const normal = path === null ? undefined : workspaceToolPath(path);
+  return normal === undefined || isInternalPath(normal) ? undefined : normal;
+}
+
+/**
+ * Paths of write/edit calls whose result succeeded, normalised, at the call's time. `rows` are in
+ * source order: a result answers the latest call before it with the same scope and call id.
+ */
 export function succeededWrites(rows: readonly ToolRow[]): PathAt[] {
-  const okIds = new Set(
-    rows.flatMap((r) =>
-      r.kind === "result" && !r.isError && WRITE_TOOLS.includes(r.tool) ? [r.callId] : [],
-    ),
-  );
-  return rows.flatMap((r): PathAt[] => {
-    if (r.kind !== "call" || !WRITE_TOOLS.includes(r.tool) || !okIds.has(r.callId)) return [];
-    const path = r.path === null ? undefined : workspaceToolPath(r.path);
-    return path === undefined || isInternalPath(path) ? [] : [{ path, at: r.at }];
+  const latest = new Map<string, number>();
+  const ok = new Set<number>();
+  rows.forEach((r, i) => {
+    if (!WRITE_TOOLS.includes(r.tool)) return;
+    const key = `${r.scope}\u0000${r.callId}`;
+    if (r.kind === "call") latest.set(key, i);
+    else if (!r.isError && latest.has(key)) ok.add(latest.get(key) ?? -1);
+  });
+  return rows.flatMap((r, i): PathAt[] => {
+    if (r.kind !== "call" || !ok.has(i)) return [];
+    const path = agentPath(r.path);
+    return path === undefined ? [] : [{ path, at: r.at }];
   });
 }
 
@@ -61,6 +79,7 @@ export function orderedAgentFiles(items: readonly PathAt[], max: number): string
 
 type EventRow = {
   readonly type: string;
+  readonly run_id: string;
   readonly call_id: string | null;
   readonly tool: string | null;
   readonly path: string | null;
@@ -75,9 +94,9 @@ const toolNames = sql.join(
 );
 
 /** The thread's write/edit events and proposals (only the fields used; no file content). */
-async function eventRows(tx: KobeTx, teamId: string, threadId: string) {
+async function eventRows(tx: KobeTx, teamId: string, threadId: string, max: number) {
   const res = await tx.execute<EventRow>(sql`
-    SELECT e.type, e.payload->>'tool_call_id' AS call_id, e.payload->>'tool' AS tool,
+    SELECT e.type, e.run_id, e.payload->>'tool_call_id' AS call_id, e.payload->>'tool' AS tool,
            CASE WHEN e.type = 'file.edit_proposed' THEN e.payload->>'path'
                 ELSE e.payload->'input'->>'path' END AS path,
            (e.payload->>'is_error')::boolean AS is_error,
@@ -91,7 +110,7 @@ async function eventRows(tx: KobeTx, teamId: string, threadId: string) {
        AND ((e.type IN ('tool.call', 'tool.result') AND e.payload->>'tool' IN (${toolNames}))
             OR e.type = 'file.edit_proposed')
      ORDER BY e.created_at, e.run_id, e.seq
-     LIMIT ${ROWS_MAX}`);
+     LIMIT ${max}`);
   return res.rows;
 }
 
@@ -104,28 +123,37 @@ type EntryRow = {
   readonly at_ms: string;
 };
 
-/** Write/edit calls and results in the thread's inline (not offloaded) message entries. */
-async function entryRows(tx: KobeTx, teamId: string, threadId: string) {
+/**
+ * Write/edit calls and results in the thread's inline (not offloaded) message entries, in the
+ * thread's append order (`seq`, then the part's place in its message), so the cap keeps a prefix
+ * and a call always comes before its result.
+ */
+async function entryRows(tx: KobeTx, teamId: string, threadId: string, max: number) {
   const res = await tx.execute<EntryRow>(sql`
-    SELECT 'call' AS kind, p->>'id' AS call_id, p->>'name' AS tool,
-           p->'arguments'->>'path' AS path, NULL AS is_error,
-           floor(extract(epoch FROM te.created_at) * 1000)::int8 AS at_ms
-      FROM thread_entries te
-     CROSS JOIN LATERAL jsonb_array_elements(
-             CASE WHEN jsonb_typeof(te.payload->'message'->'content') = 'array'
-                  THEN te.payload->'message'->'content' ELSE '[]'::jsonb END) p
-     WHERE te.team_id = ${teamId} AND te.thread_id = ${threadId} AND te.type = 'message'
-       AND te.payload->'message'->>'role' = 'assistant'
-       AND p->>'type' = 'toolCall' AND p->>'name' IN (${toolNames})
-    UNION ALL
-    SELECT 'result', te.payload->'message'->>'toolCallId', te.payload->'message'->>'toolName',
-           NULL, te.payload->'message'->>'isError',
-           floor(extract(epoch FROM te.created_at) * 1000)::int8
-      FROM thread_entries te
-     WHERE te.team_id = ${teamId} AND te.thread_id = ${threadId} AND te.type = 'message'
-       AND te.payload->'message'->>'role' = 'toolResult'
-       AND te.payload->'message'->>'toolName' IN (${toolNames})
-     LIMIT ${ROWS_MAX}`);
+    SELECT kind, call_id, tool, path, is_error, at_ms FROM (
+      SELECT 'call' AS kind, p.part->>'id' AS call_id, p.part->>'name' AS tool,
+             p.part->'arguments'->>'path' AS path, NULL AS is_error,
+             floor(extract(epoch FROM te.created_at) * 1000)::int8 AS at_ms,
+             te.seq, p.ord
+        FROM thread_entries te
+       CROSS JOIN LATERAL jsonb_array_elements(
+               CASE WHEN jsonb_typeof(te.payload->'message'->'content') = 'array'
+                    THEN te.payload->'message'->'content' ELSE '[]'::jsonb END)
+             WITH ORDINALITY AS p(part, ord)
+       WHERE te.team_id = ${teamId} AND te.thread_id = ${threadId} AND te.type = 'message'
+         AND te.payload->'message'->>'role' = 'assistant'
+         AND p.part->>'type' = 'toolCall' AND p.part->>'name' IN (${toolNames})
+      UNION ALL
+      SELECT 'result', te.payload->'message'->>'toolCallId', te.payload->'message'->>'toolName',
+             NULL, te.payload->'message'->>'isError',
+             floor(extract(epoch FROM te.created_at) * 1000)::int8, te.seq, 0
+        FROM thread_entries te
+       WHERE te.team_id = ${teamId} AND te.thread_id = ${threadId} AND te.type = 'message'
+         AND te.payload->'message'->>'role' = 'toolResult'
+         AND te.payload->'message'->>'toolName' IN (${toolNames})
+    ) rows
+     ORDER BY seq, ord
+     LIMIT ${max}`);
   return res.rows;
 }
 
@@ -134,12 +162,11 @@ function fromEvents(rows: readonly EventRow[]): ToolRow[] {
     if (r.call_id === null || r.tool === null) return [];
     const at = Number(r.at_ms);
     if (r.type === "tool.call") {
-      return [{ kind: "call", callId: r.call_id, tool: r.tool, path: r.path, at }];
+      return [{ kind: "call", scope: r.run_id, callId: r.call_id, tool: r.tool, path: r.path, at }];
     }
     if (r.type === "tool.result") {
-      return [
-        { kind: "result", callId: r.call_id, tool: r.tool, isError: r.is_error !== false, at },
-      ];
+      const isError = r.is_error !== false;
+      return [{ kind: "result", scope: r.run_id, callId: r.call_id, tool: r.tool, isError, at }];
     }
     return [];
   });
@@ -149,9 +176,10 @@ function fromEntries(rows: readonly EntryRow[]): ToolRow[] {
   return rows.flatMap((r): ToolRow[] => {
     if (r.call_id === null || r.tool === null) return [];
     const at = Number(r.at_ms);
+    const base = { scope: "", callId: r.call_id, tool: r.tool, at };
     return r.kind === "call"
-      ? [{ kind: "call", callId: r.call_id, tool: r.tool, path: r.path, at }]
-      : [{ kind: "result", callId: r.call_id, tool: r.tool, isError: r.is_error !== "false", at }];
+      ? [{ kind: "call", ...base, path: r.path }]
+      : [{ kind: "result", ...base, isError: r.is_error !== "false" }];
   });
 }
 
@@ -162,22 +190,25 @@ interface Proposal extends PathAt {
 function proposals(rows: readonly EventRow[]): Proposal[] {
   return rows.flatMap((r): Proposal[] => {
     if (r.type !== "file.edit_proposed" || r.path === null || r.content_sha === null) return [];
-    const path = workspaceToolPath(r.path);
+    const path = agentPath(r.path);
     return path === undefined ? [] : [{ path, sha256: r.content_sha, at: Number(r.at_ms) }];
   });
 }
 
 /**
  * The thread's agent-written files that are live in `owner`'s synced workspace, in order of first
- * appearance. The caller has checked that `owner` owns the thread (inside `withTeam`).
+ * appearance. The caller has checked that `owner` owns the thread (inside `withTeam`). `rowsMax`
+ * caps the rows read per source (tests).
  */
 export async function readAgentFiles(
   tx: KobeTx,
   owner: WorkspaceOwner,
   threadId: string,
+  options: { readonly rowsMax?: number } = {},
 ): Promise<StoredEntry[]> {
-  const events = await eventRows(tx, owner.teamId, threadId);
-  const entries = await entryRows(tx, owner.teamId, threadId);
+  const max = options.rowsMax ?? ROWS_MAX;
+  const events = await eventRows(tx, owner.teamId, threadId, max);
+  const entries = await entryRows(tx, owner.teamId, threadId, max);
   const writes = [...succeededWrites(fromEvents(events)), ...succeededWrites(fromEntries(entries))];
   const proposed = proposals(events);
   const paths = [...new Set([...writes, ...proposed].map((p) => p.path))];

@@ -1,15 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { orderedAgentFiles, succeededWrites, type ToolRow } from "./agent-files.js";
 
-const call = (id: string, path: string | null, at: number, tool = "write"): ToolRow => ({
+const call = (
+  id: string,
+  path: string | null,
+  at: number,
+  tool = "write",
+  scope = "r1",
+): ToolRow => ({
   kind: "call",
+  scope,
   callId: id,
   tool,
   path,
   at,
 });
-const result = (id: string, at: number, isError = false, tool = "write"): ToolRow => ({
+const result = (
+  id: string,
+  at: number,
+  isError = false,
+  tool = "write",
+  scope = "r1",
+): ToolRow => ({
   kind: "result",
+  scope,
   callId: id,
   tool,
   isError,
@@ -45,6 +59,28 @@ describe("succeededWrites", () => {
       result("d", 8),
     ];
     expect(succeededWrites(rows)).toEqual([]);
+  });
+});
+
+describe("pairing by scope and order", () => {
+  it("never pairs a call with a result of the same id from another run", () => {
+    const rows = [
+      call("call_0", "a.md", 1, "write", "r1"),
+      result("call_0", 2, true, "write", "r1"),
+      call("call_0", "b.md", 3, "write", "r2"),
+      result("call_0", 4, false, "write", "r2"),
+    ];
+    expect(succeededWrites(rows)).toEqual([{ path: "b.md", at: 3 }]);
+  });
+
+  it("pairs a result with the latest call before it when ids repeat in one scope", () => {
+    const rows = [
+      call("call_0", "a.md", 1, "write", ""),
+      result("call_0", 2, true, "write", ""),
+      call("call_0", "b.md", 3, "write", ""),
+      result("call_0", 4, false, "write", ""),
+    ];
+    expect(succeededWrites(rows)).toEqual([{ path: "b.md", at: 3 }]);
   });
 });
 
