@@ -171,23 +171,39 @@ function provenance(
   };
 }
 
-/** The team of the skill's newest maintainer version (the publishing team), if any. */
+/** The team of the skill's newest published maintainer version (the publishing team), if any. */
 async function publishingTeam(tx: KobeTx, skillId: string): Promise<string | null> {
   const { rows } = await tx.execute<{ team_id: string | null }>(sql`
     SELECT source ->> 'teamId' AS team_id FROM registry_versions
      WHERE skill_id = ${skillId} AND publisher = 'maintainer'
+       AND state IN ('approved', 'deprecated', 'withdrawn', 'revoked')
      ORDER BY seq DESC LIMIT 1`);
   const id = rows[0]?.team_id ?? null;
   return id && /^[0-9a-f-]{36}$/i.test(id) ? id : null;
 }
 
 /** A Default `add` when the version is in the major Default installs follow (fills teams). */
-async function applyDefault(tx: KobeTx, skillId: string, versionId: string, semver: string) {
+/** The admin asked for it (as a tag change does): installs name them, never Kobe. */
+async function applyDefault(
+  tx: KobeTx,
+  skillId: string,
+  version: { readonly id: string; readonly semver: string },
+  userId: string,
+) {
   const [current] = await defaultTargets(tx, skillId);
-  const target = { id: versionId, semver, major: majorOf(semver) };
+  const target = { id: version.id, semver: version.semver, major: majorOf(version.semver) };
   if (current?.major === target.major)
-    await queueDefaultSync(tx, { skillId, kind: "add", target, requestedBy: null });
+    await queueDefaultSync(tx, { skillId, kind: "add", target, requestedBy: userId });
 }
+
+/** Published states: the version teams could have had (a submission in review is not one). */
+export const PUBLISHED_STATES: readonly string[] = [
+  "approved",
+  "deprecated",
+  "withdrawn",
+  "revoked",
+  "suspended",
+];
 
 export async function publishSiteDraft(
   deps: { readonly db: KobeDb; readonly blobs: BlobStore },
@@ -241,7 +257,8 @@ export async function publishSiteDraft(
     const top = newestSemver(versions);
     if (top !== null && compareSemver(request.semver, top) <= 0)
       throw new Raced(notIncreasing(request.semver, top));
-    const last = versions[0];
+    // The version this one follows: the newest published one, not a submission in review.
+    const last = versions.find((v) => PUBLISHED_STATES.includes(v.state));
     const previous: Previous | null = last
       ? { id: last.id, semver: last.semver, publisher: last.publisher }
       : null;
@@ -276,7 +293,7 @@ export async function publishSiteDraft(
       await tx.execute(sql`
         UPDATE registry_skills SET summary = ${summary}, updated_at = now()
          WHERE id = ${skillId} AND summary IS DISTINCT FROM ${summary}`);
-    await applyDefault(tx, skillId, versionId, request.semver);
+    await applyDefault(tx, skillId, { id: versionId, semver: request.semver }, userId);
     await recordAudit(tx, {
       action: "registry.version_published",
       target: {

@@ -132,6 +132,8 @@ export function siteSkillCatalogEditRoutes(deps: ServerDeps): Hono<{ Variables: 
         return error(c, 422, f.error, `A draft may have at most ${DRAFT_LIMITS.maxFiles} files.`);
       case "invalid_path":
         return error(c, 400, "invalid_path", f.message);
+      case "not_published":
+        return error(c, 409, "not_published", f.message);
       case "file_too_large":
       case "draft_too_large":
         return error(c, 413, f.error, f.message);

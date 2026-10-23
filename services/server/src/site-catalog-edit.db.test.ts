@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { canonicalZip } from "@kobe/protocol";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -34,7 +34,11 @@ const quiet = { info() {}, warn() {}, error() {} };
 let reportId = "";
 
 /** A maintainer-published catalog skill from `team`, its bytes in the catalog store. */
-async function maintainerSkill(name: string, semver = "1.0.0"): Promise<string> {
+async function maintainerSkill(
+  name: string,
+  semver = "1.0.0",
+  extra: Record<string, Uint8Array> = {},
+): Promise<string> {
   const skill = await h.admin.query<{ id: string }>(
     `INSERT INTO registry_skills (name, summary) VALUES ($1, 'Reports.') RETURNING id`,
     [name],
@@ -55,6 +59,7 @@ async function maintainerSkill(name: string, semver = "1.0.0"): Promise<string> 
       ),
       "kobe.skill.yaml": strToU8(`${manifest}\n`),
       "references/notes.md": strToU8("Notes.\n"),
+      ...extra,
     }),
   );
   if (!valid.ok) throw new Error(valid.error.message);
@@ -372,6 +377,12 @@ describe("Kobe-shipped skills (ac-4)", () => {
       [res.json.version.versionId],
     );
     expect(sync.rows).toEqual([{ kind: "add" }]);
+    // Asked for by the admin, as a tag change: the installs name them, not Kobe (review M1).
+    const by = await h.admin.query(
+      `SELECT requested_by, by_kobe FROM skill_default_syncs WHERE version_id = $1`,
+      [res.json.version.versionId],
+    );
+    expect(by.rows).toEqual([{ requested_by: ids.admin, by_kobe: false }]);
     const compare = await as.admin.get(`${BASE}/${pdfId}/kobe/compare`);
     expect(compare.status, json(compare)).toBe(200);
     expect(compare.json).toMatchObject({ current: { semver: "1.0.5", publisher: "site" } });
@@ -405,5 +416,57 @@ describe("Kobe-shipped skills (ac-4)", () => {
         target: expect.objectContaining({ shippedSemver: "2.0.0", fromSemver: pdf.semver }),
       }),
     ]);
+  });
+});
+
+describe("review fixes", () => {
+  /** A maintainer's submission in review on `skillId`, above its published version. */
+  const submission = (skillId: string, semver: string, seq: number) =>
+    h.admin.query<{ id: string }>(
+      `INSERT INTO registry_versions (skill_id, semver, seq, runtime_hash, package_hash,
+         runtime_storage_key, runtime_size_bytes, manifest, provenance, source, scan, verdict,
+         submitted_by, state)
+       SELECT skill_id, $2, $3, runtime_hash, package_hash, runtime_storage_key,
+         runtime_size_bytes, manifest, '{}', $4, '{"findings": []}', 'pass', $5, 'submitted'
+         FROM registry_versions WHERE skill_id = $1 AND seq = 1
+       RETURNING id`,
+      [skillId, semver, seq, JSON.stringify({ teamId: randomUUID() }), ids.maintainer],
+    );
+
+  it("starts a draft only from a published version", async () => {
+    const id = await maintainerSkill("pending-report");
+    const pending = (await submission(id, "1.1.0", 2)).rows[0]?.id as string;
+    const res = await as.admin.post(`${BASE}/${id}/draft`, { versionId: pending });
+    expect(res.status).toBe(409);
+    expect(res.json).toMatchObject({ code: "not_published" });
+    expect(res.json.message).toMatch(/submitted/);
+  });
+
+  it("refuses a version too large for a draft, saying so", async () => {
+    // Random text barely compresses: under the upload's 5 MiB zip, over the draft's 5 MiB.
+    const big = strToU8(randomBytes(4 * 1024 * 1024).toString("base64"));
+    const id = await maintainerSkill("big-report", "1.0.0", { "assets/big.txt": big });
+    const versionId = (await as.admin.get(`${BASE}/${id}`)).json.versions[0].id as string;
+    const res = await as.admin.post(`${BASE}/${id}/draft`, { versionId });
+    expect(res.status, json(res)).toBe(413);
+    expect(res.json).toMatchObject({ code: "draft_too_large" });
+    expect(res.json.message).toMatch(/too large for a draft/);
+  });
+
+  it("follows the newest published version, and tells that version's team", async () => {
+    const id = await maintainerSkill("queued-report");
+    await submission(id, "1.5.0", 2);
+    const versionId = (await as.admin.get(`${BASE}/${id}`)).json.versions.find(
+      (v: { state: string }) => v.state === "approved",
+    ).id as string;
+    const started = await as.admin.post(`${BASE}/${id}/draft`, { versionId });
+    expect(started.status, json(started)).toBe(201);
+    const res = await publish("admin", id, started.json.draft.rev, "2.0.0");
+    expect(res.status, json(res)).toBe(201);
+    // Not the 1.5.0 in review (whose source names another team): 1.0.0, from this team.
+    expect(res.json).toMatchObject({
+      version: { previous: { publisher: "maintainer", semver: "1.0.0" } },
+      notified: 1,
+    });
   });
 });

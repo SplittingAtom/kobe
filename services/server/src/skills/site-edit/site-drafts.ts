@@ -28,7 +28,7 @@ export type SiteDraftFailure =
   | { readonly error: "draft_exists"; readonly draft: SiteDraftInfo }
   | { readonly error: "stale_revision"; readonly rev: number; readonly changedBy: string }
   | {
-      readonly error: "invalid_path" | "file_too_large" | "draft_too_large";
+      readonly error: "invalid_path" | "file_too_large" | "draft_too_large" | "not_published";
       readonly message: string;
     };
 
@@ -229,6 +229,17 @@ export async function refuseBlocklisted(tx: KobeTx, hashes: readonly string[]): 
 
 const READ_ONLY_PATHS = new Set(["provenance.json"]);
 
+/** The states a site draft may start from (KOBE-495 review): published, not revoked. */
+const DRAFT_SOURCE_STATES: readonly string[] = ["approved", "deprecated", "withdrawn"];
+
+/** The version's state; `suspended` while a rescan's Block holds it. */
+async function versionState(db: KobeDb, versionId: string): Promise<string | null> {
+  const { rows } = await db.execute<{ state: string }>(sql`
+    SELECT CASE WHEN suspended_at IS NOT NULL THEN 'suspended' ELSE state::text END AS state
+      FROM registry_versions WHERE id = ${versionId}`);
+  return rows[0]?.state ?? null;
+}
+
 /**
  * Starts the site draft of `skillId` from `versionId`'s package. One draft per skill: an existing
  * one is answered `draft_exists` unless `replace`. A Kobe skill is detached here.
@@ -242,8 +253,23 @@ export async function startSiteDraft(
 ): Promise<SiteDraftOutcome<{ draft: SiteDraftRecord }>> {
   const stored = await storedVersion(deps.db, skillId, versionId);
   if (!stored) return fail({ error: "not_found" });
+  const state = await versionState(deps.db, versionId);
+  if (!state || !DRAFT_SOURCE_STATES.includes(state))
+    return fail({
+      error: "not_published",
+      message: `A site draft starts from a published version (approved, deprecated or withdrawn); this one is ${state ?? "unknown"}.`,
+    });
   const files = await packageFiles(deps.blobs, storedOf(stored));
   if (!files) return fail({ error: "not_stored" });
+  const total = [...files].reduce(
+    (n, [path, bytes]) => n + (READ_ONLY_PATHS.has(path) ? 0 : bytes.length),
+    0,
+  );
+  if (total > DRAFT_LIMITS.maxDraftBytes || files.size > DRAFT_LIMITS.maxFiles)
+    return fail({
+      error: "draft_too_large",
+      message: `This version is too large for a draft: a draft holds at most ${DRAFT_LIMITS.maxDraftBytes} bytes in ${DRAFT_LIMITS.maxFiles} files (it has ${total} bytes in ${files.size} files).`,
+    });
   return asSiteAdmin(deps.db, userId, async (tx) => {
     await lockedSkill(tx, skillId);
     const { rows } = await tx.execute<{ runtime_hash: string; package_hash: string }>(sql`
