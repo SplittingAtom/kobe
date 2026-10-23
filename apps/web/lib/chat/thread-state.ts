@@ -78,6 +78,12 @@ export interface ThreadState {
    */
   readonly fileOpenRequest?:
     { readonly runId: string; readonly toolCallId: string; readonly path: string } | undefined;
+  /**
+   * The newest `propose_file_edit` proposal that arrived live (KOBE-489), by the same rule as
+   * `fileOpenRequest`: with the member's auto-open switch on, its card starts the review once.
+   */
+  readonly fileEditRequest?:
+    { readonly runId: string; readonly toolCallId: string; readonly path: string } | undefined;
   /** Polite status for screen readers ("Message queued", "Run stopped", …). */
   readonly announcement: string;
   /** Bumped per announcement, so the same text twice is announced twice. */

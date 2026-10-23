@@ -79,6 +79,18 @@ describe("/v1/me/preferences", () => {
     expect(both.json.preferences).toEqual({ ...put.json.preferences, rail_panels: "both" });
   });
 
+  it("stores the auto-open switch for proposed edits per member, off by default (KOBE-489)", async () => {
+    const laptop = await h.signIn("alice@prefs.test");
+    const phone = await h.signIn("alice@prefs.test");
+    expect((await laptop.get(PATH)).json.preferences.auto_open_edits).toBeUndefined();
+    const on = await laptop.put(PATH, { auto_open_edits: true });
+    expect(on.status).toBe(200);
+    expect(on.json.preferences.auto_open_edits).toBe(true);
+    expect((await phone.get(PATH)).json.preferences.auto_open_edits).toBe(true);
+    const off = await phone.put(PATH, { auto_open_edits: false });
+    expect(off.json.preferences).toEqual({ ...on.json.preferences, auto_open_edits: false });
+  });
+
   it("clamps the threads share to the rail's bounds", async () => {
     const b = await h.signIn("alice@prefs.test");
     expect((await b.put(PATH, { threads_share: 0.95 })).json.preferences.threads_share).toBe(0.8);
@@ -95,6 +107,7 @@ describe("/v1/me/preferences", () => {
     ["no rail panel at all", { rail_panels: "none" }],
     ["a share outside 0..1", { threads_share: 1.5 }],
     ["a non-boolean rail state", { rail_collapsed: "yes" }],
+    ["a non-boolean auto-open switch", { auto_open_edits: "on" }],
     ["an array", [true]],
   ])("refuses %s with 400 and stores nothing (ac-3)", async (_label, body) => {
     const b = await h.signIn("bob@prefs.test");

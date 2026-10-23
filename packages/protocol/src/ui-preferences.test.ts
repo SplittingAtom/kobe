@@ -37,6 +37,11 @@ describe("uiPreferencesSchema", () => {
     const picker = "a".repeat(64);
     expect(uiPreferencesSchema.parse({ rail_picker: picker })).toEqual({ rail_picker: picker });
     expect(uiPreferencesSchema.parse({ rail_picker: null })).toEqual({ rail_picker: null });
+    // KOBE-489: open the agent's proposed edits automatically.
+    expect(uiPreferencesSchema.parse({ auto_open_edits: true })).toEqual({ auto_open_edits: true });
+    expect(uiPreferencesSchema.parse({ auto_open_edits: false })).toEqual({
+      auto_open_edits: false,
+    });
   });
 
   it("refuses unknown keys (strict, not stripped)", () => {
@@ -73,6 +78,8 @@ describe("uiPreferencesSchema", () => {
     { rail_picker: "A".repeat(64) },
     { rail_picker: "a".repeat(63) },
     { rail_picker: 1 },
+    { auto_open_edits: "on" },
+    { auto_open_edits: null },
     { rail_panels: null },
     { rail_panels: ["threads"] },
     { rail_tab: "threads" },
@@ -119,6 +126,11 @@ describe("readUiPreferences", () => {
       workbench_editor_width: 700,
     });
     expect(readUiPreferences({ workbench_editor_width: 10 })).toEqual({});
+  });
+
+  it("reads the auto-open switch, dropping a non-boolean (KOBE-489)", () => {
+    expect(readUiPreferences({ auto_open_edits: true })).toEqual({ auto_open_edits: true });
+    expect(readUiPreferences({ auto_open_edits: 1 })).toEqual({});
   });
 
   it("drops a share outside the rail's bounds instead of clamping it", () => {

@@ -58,6 +58,8 @@ export interface LayoutPreferences {
   readonly workbenchEditorWidth?: number | null;
   /** The Apps tab's live picker (KOBE-460): its app id, or null for None (the default). */
   readonly railPicker?: string | null;
+  /** The proposed-edit card's "Open edits automatically" switch (KOBE-489); absent is off. */
+  readonly autoOpenEdits?: boolean;
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
@@ -74,6 +76,7 @@ const fromWire = (p: UiPreferences): LayoutPreferences => ({
     ? { workbenchEditorWidth: p.workbench_editor_width }
     : {}),
   ...(p.rail_picker !== undefined ? { railPicker: p.rail_picker } : {}),
+  ...(p.auto_open_edits !== undefined ? { autoOpenEdits: p.auto_open_edits } : {}),
 });
 
 /** The wire body (snake_case) for a change. */
@@ -89,6 +92,7 @@ export function toWire(change: LayoutPreferences): UiPreferences {
       ? { workbench_editor_width: change.workbenchEditorWidth }
       : {}),
     ...(change.railPicker !== undefined ? { rail_picker: change.railPicker } : {}),
+    ...(change.autoOpenEdits !== undefined ? { auto_open_edits: change.autoOpenEdits } : {}),
   };
 }
 
@@ -108,6 +112,7 @@ export function readPreferences(data: unknown): LayoutPreferences {
       rail_tab: raw.railTab,
       workbench_editor_width: raw.workbenchEditorWidth,
       rail_picker: raw.railPicker,
+      auto_open_edits: raw.autoOpenEdits,
     }),
   );
 }

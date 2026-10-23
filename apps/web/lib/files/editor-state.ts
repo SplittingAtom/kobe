@@ -118,3 +118,51 @@ export class FileReviewStore extends Snapshots<ProposalView> {
     this.replace(next);
   }
 }
+
+/**
+ * What auto-open did with a live proposal: started its review, held back over unsaved edits, or
+ * skipped it (the switch was off when it arrived; turning it on later never opens it).
+ */
+export type AutoOpenOutcome = "opened" | "held" | "skipped";
+
+/**
+ * The member's "Open edits automatically" switch (KOBE-489) as flipped on this page, shared by
+ * every proposal card (until flipped, the stored preference applies). It also remembers the live proposals already acted on (by
+ * `<run>:<tool call>`), so a remounted card never reopens one.
+ */
+export class AutoOpenEditsStore {
+  #chosen: boolean | undefined;
+  #listeners: readonly Listener[] = [];
+  #handled: ReadonlyMap<string, AutoOpenOutcome> = new Map();
+
+  outcomeOf(key: string): AutoOpenOutcome | undefined {
+    return this.#handled.get(key);
+  }
+
+  /** Records what auto-open did with the proposal under `key` (once: the first answer stays). */
+  record(key: string, outcome: AutoOpenOutcome): void {
+    if (this.#handled.has(key)) return;
+    this.#handled = new Map(this.#handled).set(key, outcome);
+  }
+
+  subscribe = (listener: Listener): (() => void) => {
+    this.#listeners = [...this.#listeners, listener];
+    return () => {
+      this.#listeners = this.#listeners.filter((l) => l !== listener);
+    };
+  };
+
+  /** The member's choice on this page; undefined until they flip the switch. */
+  chosen = (): boolean | undefined => this.#chosen;
+
+  /** The member flips the switch. */
+  set(on: boolean): void {
+    if (this.#chosen === on) return;
+    this.#chosen = on;
+    this.#notify();
+  }
+
+  #notify(): void {
+    for (const l of this.#listeners) l();
+  }
+}

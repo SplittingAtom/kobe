@@ -104,7 +104,8 @@ export class ThreadController {
   /**
    * KOBE-484: per streamed run, the seq this client already counts as history when it first
    * opened the run's stream (0 for runs this tab started; else the run's `last_seq` the server
-   * reported, at least the resume point). Only `file.opened` events above it open a tab.
+   * reported, at least the resume point). Only `file.opened` events above it open a tab (and,
+   * KOBE-489, only `file.edit_proposed` events above it may start a review by themselves).
    */
   readonly #historySeq = new Map<string, number>();
   readonly #ownRuns = new Set<string>();
@@ -464,13 +465,15 @@ export class ThreadController {
     const wasStarted = live.started;
     const applied = applyRunEvents(live, events);
     const now = new Date().toISOString();
-    const opened = this.#liveFileOpen(runId, live.lastSeq, events);
+    const opened = this.#liveFileRequest("file.opened", runId, live.lastSeq, events);
+    const proposed = this.#liveFileRequest("file.edit_proposed", runId, live.lastSeq, events);
     this.#set((s) => ({
       ...s,
       live: applied.run,
       entries: mergeCommittedEntries(s.entries, applied.entries, now),
       connection: "open",
       ...(opened === undefined ? {} : { fileOpenRequest: opened }),
+      ...(proposed === undefined ? {} : { fileEditRequest: proposed }),
     }));
     const terminal = applied.run.terminal;
     if (terminal !== undefined) clearResumePoint(this.#resume, runId);
@@ -581,17 +584,19 @@ export class ThreadController {
   }
 
   /**
-   * The newest `file.opened` of this batch that is new to this client and above the run's
-   * history (KOBE-484): a replayed backlog never opens a tab, live events do.
+   * The newest `file.opened` (KOBE-484) or `file.edit_proposed` (KOBE-489) of this batch that is
+   * new to this client and above the run's history: a replayed backlog never opens a tab, live
+   * events do.
    */
-  #liveFileOpen(
+  #liveFileRequest(
+    type: "file.opened" | "file.edit_proposed",
     runId: string,
     afterSeq: number,
     events: readonly KobeEvent[],
   ): ThreadState["fileOpenRequest"] {
     const history = Math.max(afterSeq, this.#historySeq.get(runId) ?? Number.POSITIVE_INFINITY);
-    const last = events.findLast((e) => e.type === "file.opened" && e.seq > history);
-    if (last?.type !== "file.opened") return undefined;
+    const last = events.findLast((e) => e.type === type && e.seq > history);
+    if (last?.type !== "file.opened" && last?.type !== "file.edit_proposed") return undefined;
     return { runId, toolCallId: last.payload.tool_call_id, path: last.payload.path };
   }
 

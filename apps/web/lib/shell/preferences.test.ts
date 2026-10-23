@@ -68,6 +68,11 @@ describe("wire", () => {
     });
     expect(readPreferences({ preferences: { railPicker: null } })).toEqual({ railPicker: null });
     expect(readPreferences({ preferences: { railPicker: "x" } })).toEqual({});
+    // KOBE-489: the proposed-edit card's auto-open switch.
+    expect(readPreferences({ preferences: { autoOpenEdits: true } })).toEqual({
+      autoOpenEdits: true,
+    });
+    expect(readPreferences({ preferences: { autoOpenEdits: "yes" } })).toEqual({});
   });
 
   it("writes only the keys that changed, in wire casing", () => {
@@ -83,6 +88,7 @@ describe("wire", () => {
     expect(toWire({ railTab: "apps" })).toEqual({ rail_tab: "apps" });
     expect(toWire({ workbenchEditorWidth: null })).toEqual({ workbench_editor_width: null });
     expect(toWire({ railPicker: null })).toEqual({ rail_picker: null });
+    expect(toWire({ autoOpenEdits: false })).toEqual({ auto_open_edits: false });
     expect(toWire({})).toEqual({});
   });
 });
