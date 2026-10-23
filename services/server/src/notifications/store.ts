@@ -60,6 +60,8 @@ type Row = {
   paused_by: "team_admin" | "deactivation" | null;
   skill_id: string | null;
   skill_name: string | null;
+  skill_semver: string | null;
+  actor_name: string | null;
   read_at: Date | null;
   created_at: Date;
   created_key: string;
@@ -81,16 +83,20 @@ function toNotification(row: Row): Notification {
     ...(row.skill_id !== null && row.skill_name !== null
       ? { skill_id: row.skill_id, skill_name: row.skill_name }
       : {}),
+    ...(row.skill_semver !== null ? { skill_semver: row.skill_semver } : {}),
+    ...(row.actor_name !== null ? { actor_name: row.actor_name } : {}),
     read_at: row.read_at === null ? null : iso(row.read_at),
     created_at: iso(row.created_at),
   };
 }
 
 // A schedule notification needs its schedule (the contract names it); a skill notification
-// (KOBE-338) names a catalog skill instead.
+// (KOBE-338) names a catalog skill instead, and a Site admin's new version (KOBE-495) its version
+// and the admin.
 const mine = (v: Viewer) =>
   sql`team_id = ${v.teamId} AND user_id = ${v.userId}
-    AND (schedule_id IS NOT NULL OR kind = 'skill.member_add.blocked')`;
+    AND (schedule_id IS NOT NULL
+      OR kind IN ('skill.member_add.blocked', 'skill.version.site_published'))`;
 
 async function unreadCount(tx: KobeTx, v: Viewer): Promise<number> {
   const res = await tx.execute<{ n: number }>(sql`
@@ -110,6 +116,8 @@ export async function listNotifications(
       SELECT id, kind, schedule_id, thread_id, run_id, skipped_count, paused_by, skill_id,
              (SELECT r.name FROM registry_skills r WHERE r.id = notifications.skill_id)
                AS skill_name,
+             skill_semver,
+             (SELECT u.name FROM users u WHERE u.id = notifications.actor_user_id) AS actor_name,
              read_at, created_at,
              to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_key
         FROM notifications

@@ -48,7 +48,7 @@ const VERDICT: Readonly<
   },
 };
 
-function Findings({ scan }: { readonly scan: ScanPreview }) {
+export function Findings({ scan }: { readonly scan: ScanPreview }) {
   const v = VERDICT[scan.verdict];
   return (
     <>

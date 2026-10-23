@@ -1,17 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiError, ApiResult } from "../../lib/api/client";
-import {
-  deleteDraftFile,
-  getDraft,
-  putDraftFile,
-  readDraftText,
-  shareDraft,
-  type Changed,
-  type DraftFileInfo,
-  type DraftSummary,
-} from "../../lib/skills/drafts-api";
+import { teamDraftClient, type DraftClient } from "../../lib/skills/draft-client";
+import type { Changed, DraftFileInfo, DraftSummary } from "../../lib/skills/drafts-api";
 import { SKILL_MD } from "../../lib/skills/skill-md";
 import { useScanPreview, type ScanState } from "./use-scan-preview";
 
@@ -73,17 +65,22 @@ const UNSAVED: ApiError = {
   message: "An earlier change isn't saved yet. Fix that first.",
 };
 
-async function loadDraft(teamId: string, id: string): Promise<ApiResult<Loaded>> {
-  const res = await getDraft(teamId, id);
+async function loadDraft(client: DraftClient, id: string): Promise<ApiResult<Loaded>> {
+  const res = await client.get(id);
   if (!res.ok) return res;
   const hasSkillMd = res.data.files.some((f) => f.path === SKILL_MD && f.kind === "text");
-  const text = hasSkillMd ? await readDraftText(teamId, id, SKILL_MD) : null;
+  const text = hasSkillMd ? await client.readText(id, SKILL_MD) : null;
   if (text && !text.ok) return text;
   const texts: Record<string, string> = text?.ok ? { [SKILL_MD]: text.data } : {};
   return { ok: true, status: 200, data: { draft: res.data.draft, files: res.data.files, texts } };
 }
 
-export function useDraftEditor(teamId: string, id: string): EditorLoad {
+/**
+ * `client`: where the draft lives; the active team's Workbench unless given (a Site draft of a
+ * catalog skill, KOBE-495). Pass a stable object (memoized).
+ */
+export function useDraftEditor(teamId: string, id: string, client?: DraftClient): EditorLoad {
+  const api = useMemo(() => client ?? teamDraftClient(teamId), [client, teamId]);
   const [load, setLoad] = useState<
     | { readonly status: "loading" }
     | { readonly status: "error"; readonly error: ApiError }
@@ -92,7 +89,7 @@ export function useDraftEditor(teamId: string, id: string): EditorLoad {
 
   useEffect(() => {
     let current = true;
-    void loadDraft(teamId, id).then((res) => {
+    void loadDraft(api, id).then((res) => {
       if (!current) return;
       setLoad(
         res.ok ? { status: "ready", loaded: res.data } : { status: "error", error: res.error },
@@ -101,14 +98,19 @@ export function useDraftEditor(teamId: string, id: string): EditorLoad {
     return () => {
       current = false;
     };
-  }, [teamId, id]);
+  }, [api, id]);
 
-  const editor = useEditorState(teamId, id, load.status === "ready" ? load.loaded : null);
+  const editor = useEditorState(teamId, id, api, load.status === "ready" ? load.loaded : null);
   if (load.status === "error") return load;
   return load.status === "ready" && editor ? { status: "ready", editor } : { status: "loading" };
 }
 
-function useEditorState(teamId: string, id: string, loaded: Loaded | null): DraftEditor | null {
+function useEditorState(
+  teamId: string,
+  id: string,
+  api: DraftClient,
+  loaded: Loaded | null,
+): DraftEditor | null {
   const [draft, setDraft] = useState<DraftSummary | null>(null);
   const [files, setFiles] = useState<readonly DraftFileInfo[]>([]);
   const [texts, setTexts] = useState<Readonly<Record<string, string>>>({});
@@ -122,7 +124,11 @@ function useEditorState(teamId: string, id: string, loaded: Loaded | null): Draf
   const maxTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stopped = useRef(false);
   const currentRev = useCallback(() => rev.current, []);
-  const { scan, rescan } = useScanPreview(teamId, id, currentRev);
+  const scanFn = useCallback(
+    (draftId: string, signal: AbortSignal) => api.scan(draftId, signal),
+    [api],
+  );
+  const { scan, rescan } = useScanPreview(teamId, id, currentRev, scanFn);
 
   /** Runs `op` after every change queued before it. */
   const enqueue = useCallback(<T>(op: () => Promise<T>): Promise<T> => {
@@ -149,7 +155,7 @@ function useEditorState(teamId: string, id: string, loaded: Loaded | null): Draf
       const [path, text] = pending.current.entries().next().value as [string, string];
       pending.current.delete(path);
       setStatus("saving");
-      const res = await putDraftFile(teamId, id, path, rev.current, text);
+      const res = await api.put(id, path, rev.current, text);
       if (!res.ok) {
         if (!pending.current.has(path)) pending.current.set(path, text);
         failed(res.error);
@@ -165,7 +171,7 @@ function useEditorState(teamId: string, id: string, loaded: Loaded | null): Draf
     // Only a write makes a new revision to scan (a flush before Save version may write nothing).
     if (wrote) rescan();
     return rev.current;
-  }, [teamId, id, changed, failed, rescan]);
+  }, [api, id, changed, failed, rescan]);
 
   const flush = useCallback((): Promise<number | null> => {
     for (const t of [idleTimer, maxTimer]) {
@@ -245,18 +251,18 @@ function useEditorState(teamId: string, id: string, loaded: Loaded | null): Draf
   const open = useCallback(
     async (path: string) => {
       if (texts[path] !== undefined) return null;
-      const res = await readDraftText(teamId, id, path);
+      const res = await api.readText(id, path);
       if (!res.ok) return res.error;
       setTexts((t) => (t[path] === undefined ? { ...t, [path]: res.data } : t));
       return null;
     },
-    [teamId, id, texts],
+    [api, id, texts],
   );
 
   const addFile = useCallback(
     (path: string, text = "") =>
       change(
-        (r) => putDraftFile(teamId, id, path, r, text),
+        (r) => api.put(id, path, r, text),
         (data) => {
           changed(data);
           const info: DraftFileInfo = {
@@ -269,14 +275,14 @@ function useEditorState(teamId: string, id: string, loaded: Loaded | null): Draf
           setTexts((t) => ({ ...t, [path]: text }));
         },
       ),
-    [teamId, id, change, changed],
+    [api, id, change, changed],
   );
 
   const removeFile = useCallback(
     (path: string) => {
       pending.current.delete(path);
       return change(
-        (r) => deleteDraftFile(teamId, id, path, r),
+        (r) => api.remove(id, path, r),
         (data) => {
           changed(data);
           setFiles((fs) => fs.filter((f) => f.path !== path));
@@ -284,19 +290,19 @@ function useEditorState(teamId: string, id: string, loaded: Loaded | null): Draf
         },
       );
     },
-    [teamId, id, change, changed],
+    [api, id, change, changed],
   );
 
   const share = useCallback(
     (shared: boolean) =>
       change(
-        (r) => shareDraft(teamId, id, r, shared),
+        (r) => api.share(id, r, shared),
         (next) => {
           rev.current = next.rev;
           setDraft(next);
         },
       ),
-    [teamId, id, change],
+    [api, id, change],
   );
 
   if (!draft) return null;

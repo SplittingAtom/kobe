@@ -189,6 +189,37 @@ provenance (stored with the version) has `publisher: "kobe"` instead of `source`
 skill's files means raising its `version` (`kobe-packages.test.ts` holds each version's hashes),
 and a Site refuses new bytes under a semver it holds or below its newest.
 
+### Site-published versions
+
+Decision (Chris, 2026-10-23, KOBE-495): Site admins open any catalog skill in the Site Console
+(Skill tags → Catalog skills → Open), edit it in a site draft (the Workbench editor: file tree,
+SKILL.md frontmatter checks, the same package limits) and publish a new version themselves.
+
+- **No review.** Save version validates the files as an upload, scans them in the shared pool (a
+  Block stops it and shows the findings) and publishes the version with the semver the admin
+  confirmed (suggested from the change; it must be above every version of the skill). The version
+  has publisher `site`, the admin as its submitter and no reviewer
+  (`registry_versions_site_publisher`); its bytes are content-addressed and its hashes frozen like
+  every version's. Audited as `registry.version_published` (publisher `site`, the admin, the
+  previous publisher and version). Teams on Default get it as usual (Track installs at their next
+  run, an `add` sync fills teams missing it); pinned installs don't move.
+- **Provenance** has `publisher: "site"`, `publishedBy` (the admin and when), `basedOn` (the
+  version the draft started from) and `previous` (the version it follows: publisher, semver),
+  instead of `source`, `submitter` and `scorecard`; the hashes and scan are as above.
+- **Kobe skills detach.** The first site edit (starting a site draft) of a Kobe-shipped skill
+  detaches it: the Kobe seed then publishes nothing for it and only records the shipped version,
+  and never retires it. When Kobe ships a version above the one it was detached from, the console
+  says so and offers Compare (files diff) and Reset to Kobe, which re-attaches it once the shipped
+  version is above every Site version (otherwise it stays detached and says why); the shipped
+  version is then published at once.
+- **Team-published skills** keep their maintainers; the Site's version records the previous
+  publisher, and the skill's maintainers in the publishing team get an in-app notice naming the
+  version and the admin.
+- **Guards.** Site Owner and Admins only, re-checked in every writing transaction; a skill with
+  bytes on the blocklist can't be edited until they are unblocked; a deprecated or archived skill
+  only after Restore. A site draft is one per skill, shared by the Site admins, and goes away when
+  it is published, discarded or the skill is reset to Kobe.
+
 ## Scan limits
 
 The scanner (`@kobe/skill-scanner`) reads every text file of the package, `evals/` and
