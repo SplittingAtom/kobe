@@ -84,6 +84,11 @@ export interface VersionRouteOptions {
    * The pre-publish eval gate (KOBE-93), on the team router only: Publish asks it first, and
    * version summaries carry the score each version earned. Unset (the gallery): never gated.
    */
+  /**
+   * After a publish or rollback by a person succeeded (the gallery router marks the agent
+   * Customized, KOBE-494). Unset on the team router.
+   */
+  readonly onPublished?: (c: Context, found: ResolvedAgent) => Promise<void>;
   readonly evals?: {
     readonly runner: EvalRunner | undefined;
     readonly background: BackgroundTasks;
@@ -267,6 +272,7 @@ export function mountVersionRoutes<E extends { Variables: object }>(
       expectedRevision: ifMatch.revision,
       limits,
     });
+    if (result.ok) await options.onPublished?.(c, found);
     return result.ok
       ? publishedResponse(c, result.value, found.access)
       : publishError(c, result.error);
@@ -291,6 +297,7 @@ export function mountVersionRoutes<E extends { Variables: object }>(
         fromVersion: body.version,
         limits,
       });
+      if (result.ok) await options.onPublished?.(c, found);
       return result.ok
         ? publishedResponse(c, result.value, found.access)
         : publishError(c, result.error);

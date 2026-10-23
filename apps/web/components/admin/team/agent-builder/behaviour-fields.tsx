@@ -6,10 +6,9 @@ import {
   type FieldErrors,
   type FormState,
 } from "../../../../lib/admin/agent-builder/form-model";
-import { getSkillChoices } from "../../../../lib/admin/api/team/skill-choices";
 import { Checkbox, Field, Notice, Select, Textarea } from "../../../ui/console";
-import { useTeamAccess } from "../../console-context";
 import { useResource } from "../../use-resource";
+import { useBuilderSources } from "./builder-sources";
 import { ConnectorTools } from "./connector-tools";
 import { fieldError } from "./field-errors";
 import { ModelField } from "./model-field";
@@ -25,10 +24,12 @@ const MODE_LABELS = {
 /** Spans both columns of the form's grid on wide screens. */
 const WIDE = "md:col-span-2";
 
-/** Who may choose Dangerous (AC1): team admins and site admins. The server enforces it. */
+/**
+ * Who may choose Dangerous (AC1): team admins and site admins; for a gallery agent, site admins
+ * where the site policy allows it (KOBE-494). The server enforces it.
+ */
 export function useMayChooseDangerous(): boolean {
-  const access = useTeamAccess();
-  return access.role === "team_admin" || access.siteAdmin === true;
+  return useBuilderSources().mayDangerous;
 }
 
 /**
@@ -135,8 +136,8 @@ function SkillsField({
   readonly readOnly: boolean;
   readonly onChange: (next: FormState) => void;
 }) {
-  const teamId = useTeamAccess().team.id;
-  const { state } = useResource(() => getSkillChoices(teamId));
+  const sources = useBuilderSources();
+  const { state } = useResource(sources.skills);
   const names =
     state.status === "ready"
       ? [...state.data.personal, ...state.data.team, ...state.data.catalog].map((s) => s.name)

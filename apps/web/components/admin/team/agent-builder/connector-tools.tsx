@@ -14,10 +14,10 @@ import {
   denyTool,
   withConnectorTools,
 } from "../../../../lib/admin/agent-builder/tool-lists";
-import { listTeamConnectors, type TeamConnector } from "../../../../lib/admin/api/team/connectors";
+import type { TeamConnector } from "../../../../lib/admin/api/team/connectors";
 import { Button, Checkbox, FieldError, Notice, TextInput } from "../../../ui/console";
-import { useTeamAccess } from "../../console-context";
 import { useResource } from "../../use-resource";
+import { useBuilderSources } from "./builder-sources";
 import { fieldError } from "./field-errors";
 import { PickList } from "./pick-list";
 
@@ -48,8 +48,8 @@ export function ConnectorTools({
   readonly readOnly: boolean;
   readonly onChange: (next: FormState) => void;
 }) {
-  const teamId = useTeamAccess().team.id;
-  const { state } = useResource(() => listTeamConnectors(teamId));
+  const sources = useBuilderSources();
+  const { state } = useResource(sources.connectors);
   const team =
     state.status === "ready" ? state.data.filter((c) => c.enabled && c.status === "active") : [];
   const chosen = splitLines(form.connectors);

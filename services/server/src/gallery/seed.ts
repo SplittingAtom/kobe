@@ -3,6 +3,7 @@ import { recordAudit } from "../audit/record.js";
 import { SITE, siteWhere } from "../agents/store.js";
 import { archiveAgent, publishAgent } from "../agents/versions.js";
 import { logger } from "../logger.js";
+import { rememberSeeded } from "./customization.js";
 import {
   GALLERY_DEFINITIONS,
   parseGalleryDefinitions,
@@ -15,7 +16,14 @@ const GALLERY = { scope: "gallery" } as const;
 export interface SeedResult {
   readonly key: string;
   readonly agentId: string;
-  readonly action: "created" | "updated" | "unchanged" | "restored" | "skipped_archived" | "failed";
+  readonly action:
+    | "created"
+    | "updated"
+    | "unchanged"
+    | "restored"
+    | "skipped_archived"
+    | "skipped_customized"
+    | "failed";
 }
 
 const pgCode = (err: unknown): string | undefined => {
@@ -38,6 +46,7 @@ async function ensureDraft(
         ...SITE,
         galleryGeneration: siteAgents.galleryGeneration,
         archivedBy: siteAgents.archivedBy,
+        customizedAt: siteAgents.customizedAt,
       })
       .from(siteAgents)
       .where(and(siteWhere(GALLERY), eq(siteAgents.galleryKey, key)))
@@ -123,6 +132,17 @@ async function ensureDraft(
       });
       restored = true;
     }
+    // Customized by a site admin (KOBE-494): never overwritten. The repo's newer generation is
+    // still recorded (never lowered), so the console can say an update is available.
+    if (found.customizedAt !== null) {
+      if (found.galleryGeneration === null || found.galleryGeneration < generation) {
+        await tx
+          .update(siteAgents)
+          .set({ galleryGeneration: generation })
+          .where(eq(siteAgents.id, found.id));
+      }
+      return { agentId: found.id, action: "skipped_customized", publish: false };
+    }
     // Same or newer generation already seeded: an older replica (rollout, rollback) changes nothing.
     if (
       found.currentVersion !== null &&
@@ -207,16 +227,29 @@ async function retireAll(db: KobeDb, parsed: readonly ParsedGalleryDefinition[])
 }
 
 /**
+ * Seeds one definition now (KOBE-494: Reset to repository brings the repo's definition at once
+ * instead of at the next start). Nothing is retired.
+ */
+export async function seedGalleryAgent(
+  db: KobeDb,
+  definition: ParsedGalleryDefinition,
+): Promise<SeedResult> {
+  return seedOne(db, definition);
+}
+
+/**
  * Seeds the gallery from definitions in the repo (KOBE-87): at server start, so install and every
  * upgrade. Idempotent: an unchanged definition does nothing; a changed one replaces the agent's
- * draft and publishes one new version (threads pinned to older versions keep them). Gallery agents
- * are read-only through the API, so the repo is the only way to change them.
+ * draft and publishes one new version (threads pinned to older versions keep them). A gallery
+ * agent a site admin customized (KOBE-494) is skipped until they reset it to the repository.
  */
 export async function seedGalleryAgents(
   db: KobeDb,
   definitions: readonly GalleryDefinition[] = GALLERY_DEFINITIONS,
 ): Promise<SeedResult[]> {
   const parsed = parseGalleryDefinitions(definitions);
+  // Compare and Reset to repository (KOBE-494) read the definitions this server seeded.
+  rememberSeeded(parsed);
   const results: SeedResult[] = [];
   // One definition failing (say, a row in an unexpected state) must not stop the server starting.
   for (const definition of parsed) {

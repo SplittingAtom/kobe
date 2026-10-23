@@ -572,13 +572,105 @@ describe("Gallery agents", () => {
     ],
   };
 
-  it("lists and exports, with no way to edit a gallery agent", async () => {
+  it("lists and exports, and links each agent to its editor (KOBE-494)", async () => {
     stubApi({ "GET /v1/site/gallery/agents": [200, AGENTS] });
     renderSite(<GalleryPage />);
     const exportLink = await screen.findByRole("link", { name: "Export Kobe" });
     expect(exportLink.getAttribute("href")).toBe("/v1/site/gallery/agents/a-1/export");
-    expect(screen.queryByLabelText("Agent file (.md)")).toBeNull();
-    expect(screen.queryByRole("button", { name: /Delete|Edit|Save/ })).toBeNull();
+    const edit = screen.getByRole("link", { name: "Edit Kobe" });
+    expect(edit.getAttribute("href")).toBe("/admin/site/gallery/a-1");
+    expect(screen.queryByText("Customized")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Delete|Save|Reset/ })).toBeNull();
+  });
+
+  it("offers no Edit for an archived agent or without the right", async () => {
+    const agents = {
+      agents: [
+        { ...AGENTS.agents[0], archivedAt: "2026-10-02T10:00:00Z" },
+        { ...AGENTS.agents[0], id: "a-2", name: "Other", slug: "other", canEdit: false },
+      ],
+    };
+    stubApi({ "GET /v1/site/gallery/agents": [200, agents] });
+    renderSite(<GalleryPage />);
+    await screen.findByRole("link", { name: "Export Kobe" });
+    expect(screen.queryByRole("link", { name: /^Edit/ })).toBeNull();
+  });
+
+  const CUSTOMIZED = {
+    key: "kobe",
+    generation: 3,
+    customized: true,
+    customized_at: "2026-10-23T09:00:00Z",
+    customized_by: "u-me",
+    customized_from_generation: 2,
+    update_available: true,
+  };
+
+  it("badges a customized agent and offers Compare and Reset when the repository moved on", async () => {
+    forbidNativeConfirm();
+    const customized = {
+      agents: [{ ...AGENTS.agents[0], currentVersion: 4, gallery: CUSTOMIZED }],
+    };
+    const reset = {
+      agent: {
+        ...AGENTS.agents[0],
+        frontmatter: { name: "Kobe" },
+        prompt: "Repo.",
+        gallery: { ...CUSTOMIZED, customized: false, update_available: false },
+      },
+    };
+    const calls = stubApi({
+      "GET /v1/site/gallery/agents": [
+        [200, customized],
+        [200, { agents: [{ ...AGENTS.agents[0], currentVersion: 5 }] }],
+      ],
+      "GET /v1/site/gallery/agents/a-1/compare": [
+        200,
+        {
+          gallery: CUSTOMIZED,
+          repository: { generation: 3, frontmatter: {}, prompt: "Repo.", file: "repo file" },
+          current: { version: 4, frontmatter: {}, prompt: "Mine.", file: "my file" },
+        },
+      ],
+      "POST /v1/site/gallery/agents/a-1/reset": [200, reset],
+    });
+    renderSite(<GalleryPage />);
+    expect(await screen.findByText("Customized")).toBeTruthy();
+    expect(screen.getByText(/A newer repository version of Kobe is available/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Compare Kobe with the repository" }));
+    expect(await screen.findByText("repo file")).toBeTruthy();
+    expect(screen.getByText("my file")).toBeTruthy();
+    expect(screen.getByText("Repository definition (generation 3)")).toBeTruthy();
+    expect(screen.getByText("Current version (v4)")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Reset to repository (Kobe)" }));
+    // Asks first: Cancel sends nothing.
+    await answerConfirm("Reset Kobe to the repository definition?", "Cancel");
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    await userEvent.click(screen.getByRole("button", { name: "Reset to repository (Kobe)" }));
+    await answerConfirm("Reset Kobe to the repository definition?", "Reset to repository");
+    await waitFor(() => expect(screen.queryByText("Customized")).toBeNull());
+    expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual([
+      "/v1/site/gallery/agents/a-1/reset",
+    ]);
+  });
+
+  it("shows no notice for a customized agent the repository has not moved past", async () => {
+    stubApi({
+      "GET /v1/site/gallery/agents": [
+        200,
+        {
+          agents: [
+            {
+              ...AGENTS.agents[0],
+              gallery: { ...CUSTOMIZED, generation: 2, update_available: false },
+            },
+          ],
+        },
+      ],
+    });
+    renderSite(<GalleryPage />);
+    expect(await screen.findByText("Customized")).toBeTruthy();
+    expect(screen.queryByText(/A newer repository version/)).toBeNull();
   });
 
   it("shows the published score and starts an eval in the chosen team", async () => {
