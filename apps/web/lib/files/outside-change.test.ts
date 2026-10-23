@@ -115,7 +115,7 @@ describe("VersionWatch", () => {
     expect(h.check).toHaveBeenCalledTimes(1);
     h.releases.shift()?.();
     await h.flush();
-    expect(h.changed).toHaveBeenCalledWith({ kind: "version", sha256: "v2" });
+    expect(h.changed).toHaveBeenCalledWith({ kind: "version", sha256: "v2" }, "agent");
   });
 
   it("retries on its schedule while nothing changed, and stops at the first change", async () => {
@@ -133,7 +133,7 @@ describe("VersionWatch", () => {
     await h.flush();
     h.releases.shift()?.();
     await h.flush();
-    expect(h.changed).toHaveBeenCalledWith({ kind: "version", sha256: "v2" });
+    expect(h.changed).toHaveBeenCalledWith({ kind: "version", sha256: "v2" }, "agent");
     expect(h.waits).toHaveLength(0); // no more retries
     expect(h.check).toHaveBeenCalledTimes(2);
   });
@@ -180,7 +180,7 @@ describe("VersionWatch", () => {
     await h.flush();
     h.releases.shift()?.();
     await h.flush();
-    expect(h.changed).toHaveBeenCalledWith({ kind: "gone" });
+    expect(h.changed).toHaveBeenCalledWith({ kind: "gone" }, "agent");
     h.watch.dispose();
     h.watch.hint([0]);
     await h.flush();
@@ -210,11 +210,40 @@ describe("VersionWatch: focus and dispose (review)", () => {
     expect(check).toHaveBeenCalledTimes(1);
     waits.shift()?.resolve(); // the schedule's retry still runs and finds the change
     await flush();
-    expect(changed).toHaveBeenCalledWith({ kind: "version", sha256: "v2" });
+    expect(changed).toHaveBeenCalledWith({ kind: "version", sha256: "v2" }, "agent");
     known = "v2";
     watch.hint([0], { oneShot: true }); // nothing pending now: it checks
     await flush();
     expect(check).toHaveBeenCalledTimes(3);
+  });
+
+  it("settle stops the pending schedule and drops the check in flight (KOBE-496)", async () => {
+    const waits: { resolve: () => void }[] = [];
+    const wait = () => new Promise<void>((resolve) => waits.push({ resolve }));
+    const check = vi.fn(async (): Promise<VersionCheck> => ({ kind: "version", sha256: "v1" }));
+    const changed = vi.fn();
+    const watch = new VersionWatch({ check, known: () => "v1", onChange: changed, wait });
+    const flush = () => new Promise((r) => setTimeout(r, 0));
+    watch.hint([0, 1_500, 3_000]);
+    await flush();
+    expect(check).toHaveBeenCalledTimes(1);
+    watch.settle();
+    waits.shift()?.resolve();
+    await flush();
+    expect(check).toHaveBeenCalledTimes(1);
+    watch.hint([0], { oneShot: true }); // nothing pending any more: a focus check runs
+    await flush();
+    expect(check).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports which hint found the change: focus never passes for the agent's (KOBE-496)", async () => {
+    const check = vi.fn(async (): Promise<VersionCheck> => ({ kind: "version", sha256: "v2" }));
+    const changed = vi.fn();
+    const watch = new VersionWatch({ check, known: () => "v1", onChange: changed });
+    watch.hint([0], { oneShot: true });
+    await vi.waitFor(() => expect(changed).toHaveBeenCalledWith(expect.anything(), "focus"));
+    watch.hint([0]);
+    await vi.waitFor(() => expect(changed).toHaveBeenLastCalledWith(expect.anything(), "agent"));
   });
 
   it("dispose clears pending timers and aborts the in-flight listing", async () => {

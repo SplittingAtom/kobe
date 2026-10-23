@@ -17,6 +17,7 @@ import type { ApiResult } from "../api/client";
 import type { TeamModels } from "../admin/api/team/models";
 import type { ChatApi } from "./api";
 import { createFilesApi, type FilesApi } from "../files/api";
+import { WorkspaceChangeFeed } from "../files/remote-changes";
 import { createProjectsApi, type Project } from "../projects/api";
 import { AttachmentStore } from "./attachments";
 import { ComposerMentionChannel } from "./mention-insert";
@@ -105,6 +106,8 @@ export class ChatSession {
   readonly viewing = new ViewingStore();
   /** The file editor's unsaved drafts per file (KOBE-463). */
   readonly editDrafts = new EditDraftStore();
+  /** Live changes to the files open in this page's tabs (KOBE-496): one stream per page. */
+  readonly fileChanges: WorkspaceChangeFeed;
   /** The agent's file edit proposals under review per file (KOBE-463). */
   readonly fileReviews = new FileReviewStore();
   /** The proposal cards' auto-open switch (KOBE-489), seeded from the stored preference. */
@@ -182,6 +185,10 @@ export class ChatSession {
     this.files = createFilesApi(options.teamId, options.fetchFn);
     this.notebooks = createNotebookApi(options.teamId, options.fetchFn);
     this.sentFiles = new SentFileCache(this.files);
+    this.fileChanges = new WorkspaceChangeFeed({
+      teamId: options.teamId,
+      eventSource: options.eventSource,
+    });
     this.#options = options;
     options.listSync?.subscribe((threadId) => this.#listChanged(threadId));
   }
@@ -500,6 +507,7 @@ export class ChatSession {
     this.#options.listSync?.close();
     this.attachments.dispose();
     this.sentFiles.dispose();
+    this.fileChanges.dispose();
     for (const untrack of this.#untrack.values()) untrack();
     this.#untrack.clear();
     this.activity.clear();

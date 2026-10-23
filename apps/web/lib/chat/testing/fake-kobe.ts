@@ -22,6 +22,7 @@ import {
 } from "@kobe/protocol";
 import { sha256Hex } from "../../files/editor";
 import type { EventSourceFactory, EventSourceLike } from "../stream";
+import { FakeWorkspaceChanges } from "./fake-workspace-changes";
 
 type Json = Record<string, unknown>;
 
@@ -191,6 +192,8 @@ export class FakeKobe {
   compactGate: Promise<void> | undefined;
   /** The caller's workspace (KOBE-194): path (no leading slash) -> bytes; listed per folder. */
   readonly workspaceFiles = new Map<string, Uint8Array>();
+  /** `GET /v1/workspace/changes` (KOBE-496): tests `announce` changes to open file tabs. */
+  readonly workspaceChanges = new FakeWorkspaceChanges(this.workspaceFiles);
   /** Folders listed so far (`GET /v1/workspace/files`), to assert one request per thread. */
   readonly workspaceListings: string[] = [];
   /** The site catalog with the team's choice (KOBE-44); empty = no models route answers. */
@@ -2294,6 +2297,8 @@ export class FakeKobe {
 
   readonly eventSource: EventSourceFactory = (url) => {
     const parsed = new URL(url, "http://kobe.test");
+    // Not in `requests`: tests count run streams there; `workspaceChanges.open` lists these.
+    if (parsed.pathname === "/v1/workspace/changes") return this.workspaceChanges.connect(parsed);
     const runId = parsed.pathname.split("/")[3] ?? "";
     const after = Number(parsed.searchParams.get("starting_after") ?? "0");
     const source = new FakeEventSource(this, runId, after, () => this.#sources.delete(source));

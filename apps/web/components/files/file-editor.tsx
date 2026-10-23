@@ -20,6 +20,7 @@ import { fileVersion } from "../../lib/files/outside-change";
 import { fileName, previewOf } from "../../lib/files/preview";
 import { ErrorNotice } from "../admin/error-notice";
 import {
+  ChangedBadge,
   CompareView,
   OutsideChoices,
   TAKE_THEIRS_PROMPT,
@@ -106,6 +107,8 @@ export interface FileEditorProps {
   readonly outside?: OutsideChange | null | undefined;
   /** Keep mine on the banner (or a save over the agent's version): stop showing it. */
   onOutsideDismiss?(): void;
+  /** The badge's Reload (KOBE-496): read someone else's change in. */
+  onOutsideReload?(): void;
 }
 
 export type SaveState =
@@ -189,6 +192,13 @@ export function FileEditor(props: FileEditorProps) {
     props.outside?.kind === "updated" && props.outside.sha256 === sha256 && draft === undefined;
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
+      {props.outside?.kind === "remote" && draft === undefined && (
+        <ChangedBadge
+          by={props.outside.by}
+          name={name}
+          onReload={() => (props.onOutsideReload ?? props.onReload)()}
+        />
+      )}
       <TextModeToolbar label={`${name} view`} mode={mode} onMode={setMode}>
         {blocked === undefined && (
           <button
@@ -219,6 +229,7 @@ export function FileEditor(props: FileEditorProps) {
       {outside.mode !== null && (
         <OutsideChoices
           mode={outside.mode}
+          by={props.outside?.kind === "changed" ? props.outside.by : undefined}
           busy={state.status === "saving"}
           comparing={outside.comparing}
           onCompare={outside.toggleCompare}

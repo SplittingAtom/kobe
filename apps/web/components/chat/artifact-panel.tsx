@@ -282,6 +282,7 @@ function FileTab({
       reviews={session.fileReviews}
       kernel={kernel}
       changeHint={changeHint}
+      changes={session.fileChanges}
     />
   );
 }
