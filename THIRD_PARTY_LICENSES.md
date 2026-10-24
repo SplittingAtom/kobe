@@ -17,10 +17,7 @@ default), **external** (operated by the site, not shipped by Kobe), **dev-only**
 
 ## Pending gate review
 
-Outside the allowed family and not decided yet; every gate review clears this list with
-Chris (`pnpm license:gate` fails while it is not empty):
-
-- asttokens 3.0.2 (Apache 2.0, exception in images/sandbox/license-exceptions.json): Apache-2.0 declared with a non-SPDX label (the package's own LICENSE is Apache-2.0); a dependency of IPython for the notebook kernel (KOBE-464).
+Nothing is pending: every component outside the allowed family has Chris's approval.
 
 ## Web and services: npm packages (pnpm workspace)
 
@@ -1284,7 +1281,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 
 Documented exceptions (`images/sandbox/license-exceptions.json`):
 
-- `asttokens` 3.0.2 (Apache 2.0): Apache-2.0 declared with a non-SPDX label (the package's own LICENSE is Apache-2.0); a dependency of IPython for the notebook kernel (KOBE-464). Pending gate review.
+- `asttokens` 3.0.2 (Apache 2.0): Apache-2.0 declared with a non-SPDX label (the package's own LICENSE is Apache-2.0); a dependency of IPython for the notebook kernel (KOBE-464). Approved by Chris on 2026-10-23.
 - `matplotlib` 3.11.2 (Python-2.0): matplotlib's PSF-based license: permissive, not copyleft. Required for chart artifacts (the charts skill, spec D21) (KOBE-21). Approved by Chris on 2026-10-17.
 - `npm` 12.2.1 (Artistic-2.0): The npm CLI, shipped unmodified as a separate program so agents can install packages through the egress proxy. Artistic-2.0 is OSI-approved and not copyleft for unmodified redistribution (KOBE-21). Approved by Chris on 2026-10-17.
 - `pillow` 13.0.0 (MIT-CMU): HPND/MIT-CMU: permissive, MIT-like. matplotlib dependency (KOBE-21). Approved by Chris on 2026-10-17.
