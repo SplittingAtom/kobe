@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseAllDocuments } from "yaml";
 import { loadConfig } from "../../../services/mcp-proxy/src/config.js";
+import { generateSessionKeyPair } from "../../../packages/session-token/src/index.js";
 
 // Render tests for the MCP proxy's chart pieces (KOBE-58): Deployment env, internal key, the
 // server's internal listener, NetworkPolicies.
@@ -51,13 +52,22 @@ const plain = (env: EnvVar[]) =>
 describe("MCP proxy Deployment", () => {
   const ms = render();
 
-  it("gets only its own session key and the internal key; no database, no API token", () => {
+  it("gets only its own session public key and the internal key; no database, no API token", () => {
     const env = envOf(ms, "kobe-mcp-proxy");
-    const secrets = env.filter((e) => e.valueFrom).map((e) => [e.name, e.valueFrom.secretKeyRef]);
-    expect(secrets).toEqual([
-      ["KOBE_SESSION_KEY_MCP_PROXY", { name: "kobe-sandbox-session-keys", key: "mcp-proxy" }],
+    const refs = env
+      .filter((e) => e.valueFrom)
+      .map((e) => [e.name, e.valueFrom.secretKeyRef ?? e.valueFrom.configMapKeyRef]);
+    expect(refs).toEqual([
+      [
+        "KOBE_SESSION_VERIFY_KEY_MCP_PROXY",
+        { name: "kobe-sandbox-session-verify-keys", key: "mcp-proxy" },
+      ],
       ["KOBE_MCP_INTERNAL_KEY", { name: "kobe-mcp-proxy-internal", key: "key" }],
     ]);
+    // No private session key reaches the proxy (KOBE-513).
+    expect(
+      env.filter((e) => e.valueFrom?.secretKeyRef?.name === "kobe-sandbox-session-keys"),
+    ).toEqual([]);
     expect(env.some((e) => e.name.includes("DATABASE"))).toBe(false);
     expect(pod(ms, "kobe-mcp-proxy")?.automountServiceAccountToken).toBe(false);
     expect(pod(ms, "kobe-mcp-proxy")?.initContainers).toBeUndefined();
@@ -66,7 +76,7 @@ describe("MCP proxy Deployment", () => {
   it("renders env the proxy's config schema accepts (HTTPS on 443, server's internal port)", () => {
     const config = loadConfig({
       ...plain(envOf(ms, "kobe-mcp-proxy")),
-      KOBE_SESSION_KEY_MCP_PROXY: "s".repeat(48),
+      KOBE_SESSION_VERIFY_KEY_MCP_PROXY: generateSessionKeyPair().publicPem,
       KOBE_MCP_INTERNAL_KEY: "i".repeat(48),
     });
     expect(config.serverUrl).toBe("http://kobe-server:8082");

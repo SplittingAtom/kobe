@@ -124,11 +124,17 @@ sandbox:
     resources:
       requests: { cpu: 250m, memory: 512Mi }
       limits: { cpu: "1", memory: 2Gi }
-  # Secret with keys sandbox-wire, model-gateway, mcp-proxy, egress-proxy (>= 32 chars each, all
-  # different): HMAC keys of the per-audience sandbox session tokens. Empty: generated, kept.
-  # Also approval-hmac (>= 32 chars): signs tool-call approvals (KOBE-37); without it every call
-  # that needs approval is denied.
+  # Sandbox session tokens are signed with Ed25519, one key pair per audience (KOBE-513). Empty:
+  # generated and kept (Secret <release>-sandbox-session-keys, public keys in ConfigMap
+  # <release>-sandbox-session-verify-keys). A pre-created Secret holds, for each audience
+  # sandbox-wire, model-gateway, mcp-proxy, egress-proxy, `<audience>.key` (Ed25519 private key,
+  # PKCS#8 PEM, all different; the server only); plus model-gateway (>= 32 chars: the gateway's
+  # master secret shared with the server) and approval-hmac (>= 32 chars: signs tool-call
+  # approvals, KOBE-37; without it every call that needs approval is denied). See docs/install.md.
   sessionKeysSecret: ""
+  # With sessionKeysSecret: a pre-created ConfigMap whose keys sandbox-wire, model-gateway,
+  # mcp-proxy, egress-proxy hold each audience's public key PEM (two during a rotation).
+  sessionVerifyKeysConfigMap: ""
 
 # Rancher-managed clusters: grant the server's ServiceAccount `updatepsa` on Rancher projects, which
 # Rancher's namespace webhook requires to create the (Pod Security labelled) team namespaces.

@@ -1,9 +1,17 @@
 import { execFileSync } from "node:child_process";
+import { createPublicKey } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseAllDocuments } from "yaml";
 import { ISOLATION_HANDLER } from "../../../services/server/src/isolation/runtime-class.js";
 import { loadSandboxConfig } from "../../../services/server/src/sandbox/config.js";
+import {
+  SessionKeyError,
+  loadSigningKey,
+  loadVerifyKeys,
+  signSessionToken,
+  verifySessionToken,
+} from "../../../packages/session-token/src/index.js";
 import {
   BOOTSTRAP_TOKEN_AUDIENCE,
   EVAL_PRIORITY_CLASS,
@@ -66,11 +74,12 @@ describe("server sandbox configuration", () => {
   const ms = render();
 
   it("is valid for the server's config schema (with keys as the Secret provides them)", () => {
+    const data = find(ms, "Secret", "kobe-sandbox-session-keys")?.stringData ?? {};
     const keys = {
-      KOBE_SESSION_KEY_SANDBOX_WIRE: "a".repeat(48),
-      KOBE_SESSION_KEY_MODEL_GATEWAY: "b".repeat(48),
-      KOBE_SESSION_KEY_MCP_PROXY: "c".repeat(48),
-      KOBE_SESSION_KEY_EGRESS_PROXY: "d".repeat(48),
+      KOBE_SESSION_SIGNING_KEY_SANDBOX_WIRE: data["sandbox-wire.key"],
+      KOBE_SESSION_SIGNING_KEY_MODEL_GATEWAY: data["model-gateway.key"],
+      KOBE_SESSION_SIGNING_KEY_MCP_PROXY: data["mcp-proxy.key"],
+      KOBE_SESSION_SIGNING_KEY_EGRESS_PROXY: data["egress-proxy.key"],
     };
     const config = loadSandboxConfig({
       KOBE_SANDBOX_CONFIG: JSON.stringify(sandboxConfig(ms)),
@@ -277,23 +286,33 @@ describe("server sandbox configuration", () => {
     });
   });
 
-  it("gives all session keys to the server, and each proxy only its own", () => {
-    const names = (d: string) =>
+  it("gives the private keys to the server only, and each verifier only its public key (KOBE-513)", () => {
+    const names = (d: string, prefix: string) =>
       envOf(ms, d)
         .map((e) => e.name)
-        .filter((n) => n.startsWith("KOBE_SESSION_KEY_"));
-    expect(names("kobe-server").sort()).toEqual([
-      "KOBE_SESSION_KEY_EGRESS_PROXY",
-      "KOBE_SESSION_KEY_MCP_PROXY",
-      "KOBE_SESSION_KEY_MODEL_GATEWAY",
-      "KOBE_SESSION_KEY_SANDBOX_WIRE",
-    ]);
+        .filter((n) => n.startsWith(prefix));
+    const audiences = ["EGRESS_PROXY", "MCP_PROXY", "MODEL_GATEWAY", "SANDBOX_WIRE"];
+    expect(names("kobe-server", "KOBE_SESSION_SIGNING_KEY_").sort()).toEqual(
+      audiences.map((a) => `KOBE_SESSION_SIGNING_KEY_${a}`),
+    );
+    expect(names("kobe-server", "KOBE_SESSION_VERIFY_KEY_").sort()).toEqual(
+      audiences.map((a) => `KOBE_SESSION_VERIFY_KEY_${a}`),
+    );
     // The scheduler wakes sandboxes but never signs tokens (KOBE-174): it holds no session key.
     for (const d of ["kobe-scheduler", "kobe-web"]) {
-      expect(names(d), d).toEqual([]);
+      expect(names(d, "KOBE_SESSION_"), d).toEqual([]);
     }
-    expect(names("kobe-egress-proxy")).toEqual(["KOBE_SESSION_KEY_EGRESS_PROXY"]);
-    expect(names("kobe-mcp-proxy")).toEqual(["KOBE_SESSION_KEY_MCP_PROXY"]);
+    for (const [d, aud] of [
+      ["kobe-egress-proxy", "EGRESS_PROXY"],
+      ["kobe-mcp-proxy", "MCP_PROXY"],
+      ["kobe-model-gateway", "MODEL_GATEWAY"],
+    ] as const) {
+      expect(names(d, "KOBE_SESSION_SIGNING_KEY_"), d).toEqual([]);
+      expect(names(d, "KOBE_SESSION_VERIFY_KEY_"), d).toEqual([`KOBE_SESSION_VERIFY_KEY_${aud}`]);
+      // No private key reaches a verifier, by any route.
+      expect(JSON.stringify(envOf(ms, d)), d).not.toMatch(/\.key"/);
+      expect(JSON.stringify(envOf(ms, d)), d).toContain("kobe-sandbox-session-verify-keys");
+    }
   });
 
   it("gives the approval key to the server only, optional for pre-created Secrets (KOBE-37)", () => {
@@ -363,28 +382,96 @@ describe("release-side NetworkPolicy", () => {
 });
 
 describe("session keys Secret", () => {
-  it("generates five distinct keys (four audiences + approvals) and keeps the Secret on uninstall", () => {
+  const AUDIENCES = ["egress-proxy", "mcp-proxy", "model-gateway", "sandbox-wire"] as const;
+
+  it("generates one Ed25519 pair per audience plus the gateway master and approval keys, kept on uninstall", () => {
     const secret = find(render(), "Secret", "kobe-sandbox-session-keys");
     expect(secret?.metadata.annotations["helm.sh/resource-policy"]).toBe("keep");
-    const values = Object.values(secret?.stringData ?? {}) as string[];
-    expect(Object.keys(secret?.stringData ?? {}).sort()).toEqual([
-      "approval-hmac",
-      "egress-proxy",
-      "mcp-proxy",
-      "model-gateway",
-      "sandbox-wire",
-    ]);
-    expect(new Set(values).size).toBe(5);
-    for (const v of values) expect(v.length).toBeGreaterThanOrEqual(32);
+    const data = (secret?.stringData ?? {}) as Record<string, string>;
+    expect(Object.keys(data).sort()).toEqual(
+      [
+        "approval-hmac",
+        "model-gateway",
+        ...AUDIENCES.flatMap((a) => [`${a}.key`, `${a}.pub`]),
+      ].sort(),
+    );
+    const kids = AUDIENCES.map((a) => loadSigningKey(data[`${a}.key`] ?? "").kid);
+    expect(new Set(kids).size).toBe(4);
+    for (const a of AUDIENCES) {
+      const signing = loadSigningKey(data[`${a}.key`] ?? "");
+      // The stored public half belongs to the private key.
+      expect([...loadVerifyKeys(data[`${a}.pub`] ?? "").keys()]).toEqual([signing.kid]);
+    }
+    for (const k of ["approval-hmac", "model-gateway"]) {
+      expect(data[k]?.length).toBeGreaterThanOrEqual(32);
+    }
+    expect(data["approval-hmac"]).not.toBe(data["model-gateway"]);
   });
 
-  it("uses a pre-created Secret instead (GitOps-safe)", () => {
-    const ms = render({ "sandbox.sessionKeysSecret": "my-keys" });
-    expect(find(ms, "Secret", "kobe-sandbox-session-keys")).toBeUndefined();
-    expect(container(ms, "kobe-server")?.env).toContainEqual({
-      name: "KOBE_SESSION_KEY_SANDBOX_WIRE",
-      valueFrom: { secretKeyRef: { name: "my-keys", key: "sandbox-wire" } },
+  it("publishes only public keys in the verify-keys ConfigMap", () => {
+    const ms = render();
+    const cm = find(ms, "ConfigMap", "kobe-sandbox-session-verify-keys");
+    const data = (cm?.data ?? {}) as Record<string, string>;
+    expect(Object.keys(data).sort()).toEqual([...AUDIENCES]);
+    expect(JSON.stringify(data)).not.toContain("PRIVATE KEY");
+    for (const pem of Object.values(data)) {
+      expect(createPublicKey(pem).asymmetricKeyType).toBe("ed25519");
+      // What a compromised verifier holds is not a signing key.
+      expect(() => loadSigningKey(pem)).toThrow(SessionKeyError);
+    }
+  });
+
+  it("a token the server signs with the Secret's key verifies with each service's ConfigMap key only", () => {
+    const ms = render();
+    const secret = (find(ms, "Secret", "kobe-sandbox-session-keys")?.stringData ?? {}) as Record<
+      string,
+      string
+    >;
+    const cm = (find(ms, "ConfigMap", "kobe-sandbox-session-verify-keys")?.data ?? {}) as Record<
+      string,
+      string
+    >;
+    const now = Math.floor(Date.now() / 1000);
+    for (const a of AUDIENCES) {
+      const aud = `kobe.${a}` as const;
+      const token = signSessionToken(
+        {
+          iss: "kobe-server",
+          aud,
+          sub: "4f9c2d5a-6b7e-4f90-8bc2-4d5e6f708192",
+          team_id: "0b5e8f1c-2d3a-4b5c-8d9e-0f1a2b3c4d5e",
+          user_id: "2d7a0b3e-4f5c-4d7e-8fa0-2b3c4d5e6f70",
+          iat: now,
+          exp: now + 900,
+          jti: "abcdefghijklmnopqrstuv",
+        },
+        loadSigningKey(secret[`${a}.key`] ?? ""),
+      );
+      expect(verifySessionToken(token, aud, loadVerifyKeys(cm[a] ?? "")).aud).toBe(aud);
+      for (const other of AUDIENCES.filter((o) => o !== a)) {
+        expect(() => verifySessionToken(token, aud, loadVerifyKeys(cm[other] ?? ""))).toThrow();
+      }
+    }
+  });
+
+  it("uses a pre-created Secret and ConfigMap instead (GitOps-safe)", () => {
+    const ms = render({
+      "sandbox.sessionKeysSecret": "my-keys",
+      "sandbox.sessionVerifyKeysConfigMap": "my-verify-keys",
     });
+    expect(find(ms, "Secret", "kobe-sandbox-session-keys")).toBeUndefined();
+    expect(find(ms, "ConfigMap", "kobe-sandbox-session-verify-keys")).toBeUndefined();
+    expect(container(ms, "kobe-server")?.env).toContainEqual({
+      name: "KOBE_SESSION_SIGNING_KEY_SANDBOX_WIRE",
+      valueFrom: { secretKeyRef: { name: "my-keys", key: "sandbox-wire.key" } },
+    });
+    expect(container(ms, "kobe-mcp-proxy")?.env).toContainEqual({
+      name: "KOBE_SESSION_VERIFY_KEY_MCP_PROXY",
+      valueFrom: { configMapKeyRef: { name: "my-verify-keys", key: "mcp-proxy" } },
+    });
+    expect(renderError({ "sandbox.sessionKeysSecret": "my-keys" })).toMatch(
+      /sandbox\.sessionVerifyKeysConfigMap/,
+    );
   });
 
   it("refuses to generate them in an offline render", () => {

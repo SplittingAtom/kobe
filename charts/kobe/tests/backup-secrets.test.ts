@@ -51,6 +51,10 @@ function generatedWithOwn(name: string, key: string): string[] {
     "postgres.external.existingSecret": "kobe-db",
     [key]: `${name}-mine`,
     ...(key.startsWith("postgres.cnpg.") ? { "postgres.mode": "cnpg" } : {}),
+    // Its public keys come with it (KOBE-513): a pre-created ConfigMap.
+    ...(key === "sandbox.sessionKeysSecret"
+      ? { "sandbox.sessionVerifyKeysConfigMap": `${name}-verify-mine` }
+      : {}),
   });
 }
 

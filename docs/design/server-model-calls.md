@@ -48,7 +48,7 @@ Why not reuse an existing credential:
 Separation from sandbox credentials (ac-2):
 
 1. Own key: `HKDF(session key, info "kobe/server-call-token/v1")`. A run token (`krt1`, info
-   `kobe/run-token/v1`) or a session token (HS256 JWT) never verifies as a server-call token, and a
+   `kobe/run-token/v1`) or a session token (EdDSA JWT since KOBE-513) never verifies as a server-call token, and a
    server-call token never verifies as either: wrong prefix, and the MAC is over another key.
 2. Own header and audience. The gateway decides the path by the header: with
    `x-kobe-server-call` present, any session token (`Authorization`, `x-api-key`, `x-goog-api-key`,

@@ -129,7 +129,7 @@ give your own through its values key. When you install, copy every one into your
 | `<release>-envelope-key`         | `envelope.keySecret`              | `key`, `key-previous` during a rotation (KOBE-107)                                                    | Every stored credential (connector grants, the web search key) is unreadable; decrypts fail closed and users must reconnect.          |
 | `<release>-model-keys`           | `bifrost.keysSecret`              | `provider-keys`, `virtual-keys` (and `-previous`), `bifrost-admin-password`, `bifrost-encryption-key` | The model provider API keys and members' virtual keys can't be opened: no run reaches a model until the Owner enters every key again. |
 | `<release>-egress-headers`       | `egressProxy.headerSecret`        | `secret`, `secret-previous` during a rotation (KOBE-39)                                               | Header values team admins set for egress domains can't be opened; they must be entered again.                                         |
-| `<release>-sandbox-session-keys` | `sandbox.sessionKeysSecret`       | `sandbox-wire`, `model-gateway`, `mcp-proxy`, `egress-proxy`, `approval-hmac`                         | Approvals allowed but not yet used are void (`approval-hmac`); sandbox session tokens are simply issued again.                        |
+| `<release>-sandbox-session-keys` | `sandbox.sessionKeysSecret`       | `<audience>.key` and `.pub` per audience (KOBE-513), `model-gateway`, `approval-hmac`                 | Approvals allowed but not yet used are void (`approval-hmac`); sandbox session tokens are simply issued again.                        |
 | `<release>-mcp-proxy-internal`   | `mcpProxy.internalKeySecret`      | `key`                                                                                                 | Nothing: no data is sealed with it, a new one works at once. Copy it anyway, so one procedure covers every Secret.                    |
 | `<release>-db-app` (CNPG only)   | `postgres.cnpg.existingAppSecret` | `username`, `password`                                                                                | The bundled database's app credentials; with your own Postgres they are your database credentials.                                    |
 
@@ -281,7 +281,20 @@ target someone has already configured is not a fresh install.
      --set bifrost.keysSecret=kobe-model-keys-restored \
      --set egressProxy.headerSecret=kobe-egress-headers-restored \
      --set sandbox.sessionKeysSecret=kobe-sandbox-session-keys-restored \
+     --set sandbox.sessionVerifyKeysConfigMap=kobe-sandbox-session-verify-keys-restored \
      --set mcpProxy.internalKeySecret=kobe-mcp-proxy-internal-restored
+     ```
+
+     The session tokens' public keys (KOBE-513) are a ConfigMap made from the restored session
+     keys Secret's `<audience>.pub` entries, one key per audience:
+
+     ```bash
+     args=()
+     for a in sandbox-wire model-gateway mcp-proxy egress-proxy; do
+       args+=(--from-literal="$a=$(jq -r --arg k "$a.pub" '.data[$k] | @base64d' \
+         /secure/kobe-sandbox-session-keys.json)")
+     done
+     kubectl -n kobe create configmap kobe-sandbox-session-verify-keys-restored "${args[@]}"
      ```
 
    - use the same S3 bucket, or one that holds a copy of its objects;

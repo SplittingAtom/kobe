@@ -619,12 +619,13 @@ psql_kobe "INSERT INTO users (id, name, email, email_verified) VALUES ('$E2E_USE
 mint() { # audience [sub] [user-id] → a session token signed in the server pod with that audience's key
   $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node --input-type=module -e "
     const { signSessionToken } = await import('/app/dist/sandbox/session-token.js');
-    const { sessionKeyEnvName } = await import('/app/dist/sandbox/config.js');
+    const { loadSandboxConfig } = await import('/app/dist/sandbox/config.js');
     const [aud, sub, user_id] = process.argv.slice(1);
     const now = Math.floor(Date.now() / 1000);
     console.log(signSessionToken({ iss: 'kobe-server', aud, sub, team_id: '$E2E_TEAM_ID',
       user_id, iat: now, exp: now + 600,
-      jti: 'e2e-' + now + '-' + Math.random().toString(36).slice(2) }, process.env[sessionKeyEnvName(aud)]));
+      jti: 'e2e-' + now + '-' + Math.random().toString(36).slice(2) },
+      loadSandboxConfig(process.env).sessionKeys[aud]));
   " "$1" "${2:-${sandbox_id:-00000000-0000-4000-8000-000000000000}}" "${3:-$E2E_USER_ID}" 2>&1 | tail -1
 }
 wire_token=$(mint kobe.sandbox-wire)

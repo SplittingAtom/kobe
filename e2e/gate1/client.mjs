@@ -409,7 +409,9 @@ async function connections() {
 /** Sandbox-wire session tokens signed with the site's key (throwaway installs only). */
 async function mint() {
   const { signSessionToken } = await import("/app/dist/sandbox/session-token.js");
-  const { sessionKeyEnvName } = await import("/app/dist/sandbox/config.js");
+  // The server's Ed25519 signing keys (KOBE-513), loaded as the server loads them.
+  const { loadSandboxConfig } = await import("/app/dist/sandbox/config.js");
+  const keys = loadSandboxConfig(process.env).sessionKeys;
   const aud = "kobe.sandbox-wire";
   const now = Math.floor(Date.now() / 1000);
   for (const id of config.identities) {
@@ -424,7 +426,7 @@ async function mint() {
         exp: now + 1800,
         jti: `gate1-${now}-${Math.random().toString(36).slice(2)}`,
       },
-      process.env[sessionKeyEnvName(aud)],
+      keys[aud],
     );
     console.log(`token ${id.key} ${token}`);
   }
