@@ -24,6 +24,8 @@ export const identity = defineDomain({
     "teams",
     "site_roles",
     "site_settings",
+    // Branding files: logo, dark logo, favicon (KOBE-497, theming TH7)
+    "site_branding_assets",
     // Active team per session (KOBE-14)
     "session_active_teams",
     // Last active team per user, a new session's default (KOBE-456)
@@ -48,6 +50,8 @@ export const identity = defineDomain({
     rate_limits: ALL_PRIVILEGES,
     site_roles: ALL_PRIVILEGES,
     site_settings: ["SELECT", "INSERT", "UPDATE"],
+    // One row per kind, replaced on upload and deleted on removal or reset (TH12).
+    site_branding_assets: ALL_PRIVILEGES,
     // A pointer only; rows also go away with their session (cascade from `sessions`).
     session_active_teams: ALL_PRIVILEGES,
     // A pointer only, replaced on every team switch; rows go away with their user.
