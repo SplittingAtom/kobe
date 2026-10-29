@@ -9,6 +9,10 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Theming wave 1 (2026-10-29):** plan docs/specs/theming.md + docs/theming.md (PR #399 merged 2026-10-29, decisions
+  TH1–TH12 by Chris 2026-10-28); tickets KOBE-497..505. KOBE-497 (schema+contract,
+  ../Kobe-wt497) ∥ KOBE-498 (tokenize UI, ../Kobe-wt498) done on Opus, reviewed (Opus DB pass, code-review medium), folded into
+  `group-theming-1`, one PR. Next: 499 ∥ 500, then 501, then 502 ∥ 503.
 - **Run (2026-10-11):** one agent session at a time, sequentially (ticket agent, then its review);
   ticket agents on Opus 5.5 from KOBE-180 on. Waves A–E are done.
 - **Wave E, done (2026-10-11):** Personal Schedules — KOBE-178 (#226), 180 (#235), 179 (#236),
