@@ -1,4 +1,9 @@
-import { contrastRatio, type FloorFailure, type FloorReport } from "@kobe/protocol";
+import {
+  contrastRatio,
+  relativeLuminance,
+  type FloorFailure,
+  type FloorReport,
+} from "@kobe/protocol";
 
 /**
  * The Appearance page's contrast wording (KOBE-501, TH4): the live line under a custom accent and
@@ -7,7 +12,8 @@ import { contrastRatio, type FloorFailure, type FloorReport } from "@kobe/protoc
  */
 
 const oneDecimal = (ratio: number): string => (Math.floor(ratio * 10) / 10).toFixed(1);
-const fgName = (hex: string): string => (hex === "#ffffff" ? "white" : "near-black");
+/** The accent text is white or near-black (deriveAccent picks one of the two). */
+const fgName = (hex: string): string => (relativeLuminance(hex) > 0.5 ? "white" : "near-black");
 
 /** "Accent text: white, 7.2:1 light / 6.1:1 dark" (the colour named again when it differs). */
 export function contrastLine({ derived }: FloorReport): string {

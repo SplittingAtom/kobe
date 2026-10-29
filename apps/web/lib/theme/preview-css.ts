@@ -18,6 +18,12 @@ import { FONT_STACK_VALUES, PRESETS, RADIUS_SCALES, RADIUS_TOKENS } from "./pres
 
 export const PREVIEW_IDS = { light: "preview-light", dark: "preview-dark" } as const;
 
+/**
+ * Elements with `data-kobe-swatch="light|dark"` (the logo's light and dark backgrounds on the
+ * page) get that scheme's default values too, without the theme: plain light and dark.
+ */
+export const SWATCH_ATTRIBUTE = "data-kobe-swatch";
+
 /** Fixed (never themed) tokens the preview reads, as theme.css sets them (preview-css.test.ts). */
 const FIXED = {
   light: {
@@ -79,9 +85,9 @@ export function previewCss(theme: ThemeSettings): string {
   const light = `#${PREVIEW_IDS.light}`;
   const dark = `#${PREVIEW_IDS.dark}`;
   const css = [
-    rule(light, [...schemeDecls("light"), ...shared]),
+    rule(`${light}, [${SWATCH_ATTRIBUTE}="light"]`, [...schemeDecls("light"), ...shared]),
     rule(dark, shared),
-    rule(`${dark}[data-theme="dark"]`, schemeDecls("dark")),
+    rule(`${dark}[data-theme="dark"], [${SWATCH_ATTRIBUTE}="dark"]`, schemeDecls("dark")),
     brandingCss(theme, light),
     brandingCss(theme, dark),
   ].join("");

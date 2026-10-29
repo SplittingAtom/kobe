@@ -84,18 +84,23 @@ function Current({
       </div>
     );
   }
-  // The logo on a light and a dark background; the dark logo only where it is used.
+  // The logo on a light and a dark background (the dark logo only where it is used): the swatches
+  // take each scheme's default tokens from the preview's stylesheet (lib/theme/preview-css.ts).
   const swatch =
-    "flex h-10 min-w-24 items-center justify-center rounded-md border border-console-border px-3";
+    "flex h-10 min-w-24 items-center justify-center rounded-md border border-console-border bg-console-bg px-3";
   const img = (alt: string) => (
     <img src={url} alt={alt} className="block h-6 w-auto max-w-40 object-contain" />
   );
   return (
     <div className="flex flex-wrap gap-2">
       {kind === "logo" && (
-        <div className={`${swatch} bg-white`}>{img("Logo on a light background")}</div>
+        <div data-kobe-swatch="light" className={swatch}>
+          {img("Logo on a light background")}
+        </div>
       )}
-      <div className={`${swatch} bg-neutral-900`}>{img(`${LABEL[kind]} on a dark background`)}</div>
+      <div data-kobe-swatch="dark" className={swatch}>
+        {img(`${LABEL[kind]} on a dark background`)}
+      </div>
     </div>
   );
 }

@@ -18,7 +18,9 @@ function rules(css: string): [string, [string, string][]][] {
   const out: [string, [string, string][]][] = [];
   const top = css.replace(/@media[^{]*\{(?:[^{}]*\{[^}]*\})*\s*\}/g, "");
   for (const m of top.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
-    out.push([(m[1] ?? "").trim(), declarations(m[2] ?? "")]);
+    for (const selector of (m[1] ?? "").split(",")) {
+      out.push([selector.trim(), declarations(m[2] ?? "")]);
+    }
   }
   return out;
 }
@@ -85,6 +87,16 @@ describe("previewCss", () => {
     expect(dark.get("--kobe-radius-md")).toBe(RADIUS_SCALES.round["--kobe-radius-md"]);
     expect(dark.get("--kobe-font-sans")).toContain("serif");
     expect(dark.get("--kobe-console-bg")).toBe(THEME_DARK.get("--kobe-console-bg"));
+  });
+
+  it("gives the logo swatches plain light and dark values, whatever the theme", () => {
+    const rulesOf = rules(previewCss({ preset: "plum" }));
+    const swatch = (scheme: string) =>
+      new Map(
+        rulesOf.filter(([s]) => s === `[data-kobe-swatch="${scheme}"]`).flatMap(([, d]) => d),
+      );
+    expect(swatch("light").get("--kobe-console-bg")).toBe(THEME_LIGHT.get("--kobe-console-bg"));
+    expect(swatch("dark").get("--kobe-console-bg")).toBe(THEME_DARK.get("--kobe-console-bg"));
   });
 
   it("is token declarations only, in the branding allow-list", () => {
