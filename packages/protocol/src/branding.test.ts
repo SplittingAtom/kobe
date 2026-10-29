@@ -166,4 +166,26 @@ describe("public branding (GET /v1/site/branding)", () => {
     expect(siteBrandingSchema.safeParse(ok).success).toBe(true);
     expect(siteBrandingSchema.safeParse({ ...ok, showName: "yes" }).success).toBe(false);
   });
+
+  it("takes optional logo dimensions, positive whole pixels (KOBE-500)", () => {
+    const base = { appName: "Kobe", showName: true, favicon: null, theme: DEFAULT_THEME };
+    const logo = (extra: object) => ({
+      ...base,
+      logo: { url: "/l?v=1", dark: "/d?v=2", ...extra },
+    });
+    expect(siteBrandingSchema.safeParse(logo({})).success).toBe(true);
+    expect(
+      siteBrandingSchema.safeParse(logo({ width: 320, height: 64, darkWidth: 300, darkHeight: 60 }))
+        .success,
+    ).toBe(true);
+    for (const bad of [
+      { width: 0 },
+      { height: -1 },
+      { width: 1.5 },
+      { darkHeight: "60" },
+      { width: 5000 },
+    ]) {
+      expect(siteBrandingSchema.safeParse(logo(bad)).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
 });

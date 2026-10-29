@@ -1,18 +1,18 @@
 import { z } from "zod";
 
 /**
- * The web's server-side configuration (KOBE-500, theming plan TH5). The web runs without it:
- * an unset or invalid `KOBE_SERVER_URL` only means the site branding falls back to the built-in
- * defaults (lib/theme/branding-server.ts), so this never throws. `instrumentation.ts` prints the
- * outcome once at startup.
+ * The web's server-side configuration (KOBE-500, theming plan TH5). An unset `KOBE_SERVER_URL`
+ * only means the site branding falls back to the built-in defaults (lib/theme/branding-server.ts),
+ * with one warning at startup; an invalid one is a deployment error and fails startup with the
+ * reason (fail fast, as every service's config). `instrumentation.ts` reads it once at startup.
  *
  * `KOBE_SERVER_URL` is the server's in-cluster origin (chart: `http://<fullname>-server`), set by
  * the deployment, never taken from a request.
  */
 export interface WebConfig {
-  /** The server's origin (`http(s)://host[:port]`, no path), or null when unset or invalid. */
+  /** The server's origin (`http(s)://host[:port]`, no path), or null when unset. */
   readonly serverUrl: string | null;
-  /** Why `serverUrl` is null, for the startup log; null when it is set. */
+  /** Why `serverUrl` is null, for the startup warning; null when it is set. */
   readonly problem: string | null;
 }
 
@@ -40,17 +40,14 @@ export function parseWebConfig(env: Readonly<Record<string, string | undefined>>
   const parsed = serverUrlSchema.safeParse(raw);
   if (!parsed.success) {
     const reason = parsed.error.issues[0]?.message ?? "invalid URL";
-    return {
-      serverUrl: null,
-      problem: `KOBE_SERVER_URL is invalid (${reason}): the site branding falls back to the Kobe defaults`,
-    };
+    throw new Error(`KOBE_SERVER_URL is invalid: ${reason} (got ${JSON.stringify(raw)})`);
   }
   return { serverUrl: new URL(parsed.data).origin, problem: null };
 }
 
 let cached: WebConfig | undefined;
 
-/** The process's configuration, read once. */
+/** The process's configuration, read once; throws when KOBE_SERVER_URL is invalid. */
 export function webConfig(): WebConfig {
   cached ??= parseWebConfig(process.env);
   return cached;

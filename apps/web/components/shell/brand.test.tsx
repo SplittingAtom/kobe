@@ -48,7 +48,8 @@ describe("<Brand />", () => {
     expect(img.getAttribute("src")).toBe(LOGO);
     expect(img.getAttribute("alt")).toBe("");
     expect(img.getAttribute("height")).toBe("24");
-    expect(img.getAttribute("decoding")).toBe("async");
+    expect(img.getAttribute("width")).toBeNull();
+    expect(img.hasAttribute("decoding")).toBe(false);
     expect(screen.getByRole("heading", { name: "Acme" })).toBeTruthy();
   });
 
@@ -66,7 +67,17 @@ describe("<Brand />", () => {
     renderBrand({ appName: "Acme", showName: false, logo: { url: LOGO } });
     expect(screen.getByRole("heading", { name: "Acme" })).toBeTruthy();
     const name = screen.getByText("Acme");
-    expect(name.className).toMatch(/hidden/);
+    expect(name.className).toBe("sr-only");
+  });
+
+  it("reserves the logo's space from its known size, scaled to 24 px tall", () => {
+    renderBrand({
+      logo: { url: LOGO, dark: DARK, width: 400, height: 100, darkWidth: 90, darkHeight: 60 },
+    });
+    const light = screen.getByTestId("h").querySelector('img[data-logo="light"]');
+    const dark = screen.getByTestId("h").querySelector('img[data-logo="dark"]');
+    expect([light?.getAttribute("width"), light?.getAttribute("height")]).toEqual(["96", "24"]);
+    expect([dark?.getAttribute("width"), dark?.getAttribute("height")]).toEqual(["36", "24"]);
   });
 
   it("ignores showName without a logo: the name is the brand", () => {

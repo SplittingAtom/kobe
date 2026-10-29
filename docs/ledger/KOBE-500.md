@@ -69,3 +69,17 @@ Plan §4.3, §4.4, TH3, TH5, TH9-TH11 in `docs/specs/theming.md`; catalogue `doc
 - `@kobe/web` vitest: 301 files, 2705 tests passed. `tsc --noEmit` clean. eslint web clean
   (charts' `render.test.ts` has 4 pre-existing non-null-assertion errors, also on the base).
   Protocol 1084 passed. license:check, public hygiene, site wording ok. Prettier clean.
+
+## Review fixes (coordinator code review)
+
+- `getSiteBranding` is stale-while-revalidate: keeps the last validated value; after 30 s one
+  background refresh, renders get the kept value at once; only a load with nothing known waits
+  (≤ 1 s, then defaults, retried 30 s later). Failures never replace a good value; logged ≤ 1/min.
+- Protocol `siteBrandingSchema.logo` gains optional `width`/`height`/`darkWidth`/`darkHeight`
+  (positive integers ≤ 4096): **a change to the KOBE-499 contract file `branding.ts`** (additive,
+  optional). `<Brand>` sets width/height scaled to 24 px when known; no `decoding="async"`.
+- `lib/security/same-origin-path.ts` `isSameOriginPath()` shared by `lib/api/client.ts` and
+  branding-server (rejects `//`, backslashes and whitespace).
+- Hidden name uses Tailwind `sr-only`; Tiltfile override removed (chart default applies).
+- Invalid `KOBE_SERVER_URL` now fails startup (throws in `instrumentation.ts`); unset still warns
+  and serves defaults.

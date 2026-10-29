@@ -22,6 +22,9 @@ const ACME: SiteBranding = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
+/** Lets a background refresh settle. */
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
 function setup(
   respond: (url: string, init?: RequestInit) => Promise<Response>,
   timeoutMs?: number,
@@ -60,19 +63,54 @@ describe("getSiteBranding loader", () => {
     expect(init?.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it("caches a success for 30 s and shares one request between concurrent renders", async () => {
-    const { load, fetchMock, advance } = setup(async () => json(ACME));
+  it("caches for 30 s, then serves the kept value while ONE background refresh runs", async () => {
+    let body: SiteBranding = ACME;
+    let release: () => void = () => undefined;
+    let gate: Promise<void> = Promise.resolve();
+    const { load, fetchMock, advance } = setup(async () => {
+      await gate;
+      return json(body);
+    });
     await Promise.all([load(), load(), load()]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     advance(BRANDING_CACHE_MS - 1);
     await load();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     advance(1);
-    await load();
+    body = { ...ACME, appName: "Acme 2" };
+    gate = new Promise((r) => (release = r));
+    // Stale and due: every render gets the kept value at once; only one refresh starts.
+    expect(await Promise.all([load(), load(), load()])).toEqual([ACME, ACME, ACME]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    release();
+    await flush();
+    expect((await load()).appName).toBe("Acme 2");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("times out after the limit and serves the defaults", async () => {
+  it("serves the last good branding when a refresh fails, and logs it", async () => {
+    let up = true;
+    const { load, lines, advance, fetchMock } = setup(async () =>
+      up ? json(ACME) : Promise.reject(new TypeError("fetch failed")),
+    );
+    expect(await load()).toEqual(ACME);
+    up = false;
+    advance(BRANDING_CACHE_MS);
+    expect(await load()).toEqual(ACME);
+    await flush();
+    expect(await load()).toEqual(ACME);
+    expect(lines).toEqual([
+      "[kobe-web] site branding unavailable (fetch failed); serving the last known branding",
+    ]);
+    // Retried 30 s after the failed attempt, not on every render.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    advance(BRANDING_CACHE_MS);
+    await load();
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("the first load waits at most the timeout, then serves the defaults", async () => {
     const { load, lines } = setup(
       (_url, init) =>
         new Promise((_resolve, reject) => {
@@ -80,7 +118,9 @@ describe("getSiteBranding loader", () => {
         }),
       20,
     );
+    const started = performance.now();
     expect(await load()).toEqual(DEFAULT_BRANDING);
+    expect(performance.now() - started).toBeLessThan(1000);
     expect(lines).toEqual([
       "[kobe-web] site branding unavailable (timed out); serving the Kobe defaults",
     ]);
@@ -112,13 +152,13 @@ describe("getSiteBranding loader", () => {
     expect(lines[0]).toMatch(reason);
   });
 
-  it("caches a failure for 30 s and logs at most once a minute", async () => {
+  it("with nothing known, caches a failure for 30 s and logs at most once a minute", async () => {
     let up = false;
     const { load, fetchMock, lines, advance } = setup(async () =>
       up ? json(ACME) : Promise.reject(new TypeError("fetch failed")),
     );
-    await load();
-    await load();
+    expect(await load()).toEqual(DEFAULT_BRANDING);
+    expect(await load()).toEqual(DEFAULT_BRANDING);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     advance(BRANDING_CACHE_MS);
     await load();

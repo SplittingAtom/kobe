@@ -108,12 +108,25 @@ export const BRANDING_ASSET_MAX_SIDE_PX = 4096;
 
 /** An asset URL as the server builds it (`/v1/site/branding/assets/<kind>?v=<sha256>`). */
 const assetUrl = z.string().min(1).max(2048);
+/** A raster asset's side in pixels. */
+const assetSide = z.number().int().positive().max(BRANDING_ASSET_MAX_SIDE_PX);
 
 /** `GET /v1/site/branding` (public, TH6): what every page needs for its first paint. */
 export const siteBrandingSchema = z.strictObject({
   appName: appNameSchema,
   showName: z.boolean(),
-  logo: z.strictObject({ url: assetUrl, dark: assetUrl.optional() }).nullable(),
+  logo: z
+    .strictObject({
+      url: assetUrl,
+      dark: assetUrl.optional(),
+      /** The logo's pixel size (raster only), so the page can reserve its space (KOBE-500). */
+      width: assetSide.optional(),
+      height: assetSide.optional(),
+      /** The dark logo's pixel size, likewise. */
+      darkWidth: assetSide.optional(),
+      darkHeight: assetSide.optional(),
+    })
+    .nullable(),
   favicon: assetUrl.nullable(),
   theme: themeSettingsSchema,
 });

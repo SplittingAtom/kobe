@@ -77,10 +77,7 @@ else:
     values = [values_file]
     deps = []
 
-# KOBE-500 (theming TH5): the web reads the site branding from the server on every render. The
-# chart's default is the same Service; set here so the dev loop states it (release "kobe").
-k8s_yaml(helm("charts/kobe", name="kobe", namespace=NAMESPACE, values=values,
-              set=["web.serverUrl=http://kobe-server"]))
+k8s_yaml(helm("charts/kobe", name="kobe", namespace=NAMESPACE, values=values))
 
 for name in ["web", "server", "scheduler", "mcp-proxy", "egress-proxy", "model-gateway", "bifrost"]:
     k8s_resource(workload="kobe-" + name, labels=["kobe"], resource_deps=deps if name in ["server", "scheduler"] else [])

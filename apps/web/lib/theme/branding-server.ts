@@ -1,15 +1,19 @@
 import { type SiteBranding, siteBrandingSchema } from "@kobe/protocol";
 import { webConfig } from "../config";
+import { isSameOriginPath } from "../security/same-origin-path";
 import { DEFAULT_BRANDING } from "./branding-defaults";
 
 export { DEFAULT_BRANDING };
 
 /**
  * The site branding for the server render (theming plan TH5; server only: the root layout and
- * generateMetadata call it). One `GET ${KOBE_SERVER_URL}/v1/site/branding` per 30 s per web
- * process, 1 s timeout; a failure is cached for the same 30 s, so an unreachable server costs at
- * most one slow render per window. Every failure yields {@link DEFAULT_BRANDING} (never a failed
- * page) and is logged at most once a minute. The URL is the deployment's, never a request's.
+ * generateMetadata call it), from `GET ${KOBE_SERVER_URL}/v1/site/branding` with a 1 s timeout.
+ *
+ * Stale-while-revalidate per web process: the last validated value is kept; once it is 30 s old
+ * the next render starts ONE background refresh and is served the kept value at once, so no
+ * render waits on the server except the very first (≤ 1 s, then the defaults). A failed refresh
+ * never replaces a known-good value: it is logged (at most once a minute) and retried 30 s later.
+ * The URL is the deployment's, never a request's.
  *
  * The response is validated with the protocol schema, and its asset URLs must be same-origin paths
  * (`/v1/site/branding/assets/…`): they become `<img src>` and `<link rel=icon>` on every page.
@@ -19,9 +23,6 @@ export const BRANDING_TIMEOUT_MS = 1000;
 export const BRANDING_CACHE_MS = 30_000;
 export const BRANDING_LOG_INTERVAL_MS = 60_000;
 export const BRANDING_PATH = "/v1/site/branding";
-
-/** A path on this origin (`/x`, not `//host` or `/\host`). */
-const SAME_ORIGIN_PATH = /^\/(?![/\\])[^\s\\]*$/;
 
 export interface BrandingLoaderOptions {
   /** The server's origin, or null when unconfigured (then always the defaults, nothing logged). */
@@ -36,7 +37,7 @@ export type BrandingLoader = () => Promise<SiteBranding>;
 
 function assetsSameOrigin(b: SiteBranding): boolean {
   const urls = [b.logo?.url, b.logo?.dark, b.favicon].filter((u): u is string => u != null);
-  return urls.every((u) => SAME_ORIGIN_PATH.test(u));
+  return urls.every(isSameOriginPath);
 }
 
 async function fetchBranding(
@@ -63,46 +64,55 @@ function reasonOf(error: unknown): string {
   return String(error);
 }
 
-/** A cached loader; exported for tests, the app uses {@link getSiteBranding}. */
+/** A stale-while-revalidate loader; exported for tests, the app uses {@link getSiteBranding}. */
 export function createBrandingLoader(options: BrandingLoaderOptions): BrandingLoader {
   const { serverUrl } = options;
   const doFetch = options.fetch ?? fetch;
   const now = options.now ?? Date.now;
   const log = options.log ?? ((line: string) => console.warn(line));
   const timeoutMs = options.timeoutMs ?? BRANDING_TIMEOUT_MS;
-  let cached: { value: SiteBranding; expires: number } | undefined;
-  let inflight: Promise<SiteBranding> | undefined;
+  /** The last validated branding; never replaced by a failure. */
+  let good: SiteBranding | undefined;
+  /** When the last attempt (success or failure) started; the next is due BRANDING_CACHE_MS later. */
+  let attemptedAt = Number.NEGATIVE_INFINITY;
+  let inflight: Promise<void> | undefined;
   let lastLog = Number.NEGATIVE_INFINITY;
 
-  const load = async (): Promise<SiteBranding> => {
-    let value: SiteBranding;
-    try {
-      value = await fetchBranding(`${serverUrl}${BRANDING_PATH}`, doFetch, timeoutMs);
-    } catch (error) {
-      value = DEFAULT_BRANDING;
-      const at = now();
-      if (at - lastLog >= BRANDING_LOG_INTERVAL_MS) {
-        lastLog = at;
-        log(`[kobe-web] site branding unavailable (${reasonOf(error)}); serving the Kobe defaults`);
+  const refresh = (): Promise<void> => {
+    inflight ??= (async () => {
+      attemptedAt = now();
+      try {
+        good = await fetchBranding(`${serverUrl}${BRANDING_PATH}`, doFetch, timeoutMs);
+      } catch (error) {
+        const at = now();
+        if (at - lastLog >= BRANDING_LOG_INTERVAL_MS) {
+          lastLog = at;
+          const serving = good === undefined ? "the Kobe defaults" : "the last known branding";
+          log(`[kobe-web] site branding unavailable (${reasonOf(error)}); serving ${serving}`);
+        }
+      } finally {
+        inflight = undefined;
       }
-    }
-    cached = { value, expires: now() + BRANDING_CACHE_MS };
-    return value;
+    })();
+    return inflight;
   };
 
   return async () => {
     if (serverUrl === null) return DEFAULT_BRANDING;
-    if (cached !== undefined && now() < cached.expires) return cached.value;
-    inflight ??= load().finally(() => {
-      inflight = undefined;
-    });
-    return inflight;
+    const due = now() - attemptedAt >= BRANDING_CACHE_MS;
+    if (good !== undefined) {
+      if (due) void refresh();
+      return good;
+    }
+    // Nothing known yet: the first load (or a retry 30 s after a failed one) waits, ≤ timeoutMs.
+    if (due || inflight !== undefined) await refresh();
+    return good ?? DEFAULT_BRANDING;
   };
 }
 
 let loader: BrandingLoader | undefined;
 
-/** The site branding for this render: cached, never throws. */
+/** The site branding for this render: never throws, never waits on a refresh once known. */
 export function getSiteBranding(): Promise<SiteBranding> {
   loader ??= createBrandingLoader({ serverUrl: webConfig().serverUrl });
   return loader();
