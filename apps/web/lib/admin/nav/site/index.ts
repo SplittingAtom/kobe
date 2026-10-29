@@ -20,5 +20,6 @@ export { default as retention } from "./retention";
 export { default as usage } from "./usage";
 export { default as isolation } from "./isolation";
 export { default as settings } from "./settings";
+export { default as appearance } from "./appearance";
 export { default as backup } from "./backup";
 export { default as auditForwarding } from "./audit-forwarding";

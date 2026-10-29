@@ -67,3 +67,16 @@ export function paintOf(popup: Locator): Promise<Paint> {
     };
   });
 }
+
+/** WCAG contrast ratio of a paint's text on its background (1 to 21). */
+export function contrastOf(paint: Paint): number {
+  const hi = Math.max(paint.backgroundLuminance, paint.textLuminance);
+  const lo = Math.min(paint.backgroundLuminance, paint.textLuminance);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** WCAG AA for text (4.5:1) of `paint`, the element `name`. */
+export function expectAA(name: string, paint: Paint, min = 4.5): void {
+  const ratio = Math.round(contrastOf(paint) * 100) / 100;
+  expect(ratio, `${name}: ${paint.text} on ${paint.background}`).toBeGreaterThanOrEqual(min);
+}

@@ -24,11 +24,13 @@ const THEME_COOKIE = "kobe-theme";
 
 /**
  * Pages outside the consoles' navigation, and sections shot by name so a change to the nav can't
- * drop them: the three KOBE-291 built (no baseline yet: take one with --update-snapshots).
+ * drop them: the three KOBE-291 built and Appearance (KOBE-501) (no baseline yet: take one with
+ * --update-snapshots).
  */
 const FIXED_PAGES = [
   "/admin/site/audit",
   "/admin/site/backup",
+  "/admin/site/appearance",
   "/admin/team/inventory",
   "/admin",
   "/admin/site",
