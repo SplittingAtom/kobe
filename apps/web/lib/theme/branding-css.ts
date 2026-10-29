@@ -47,22 +47,22 @@ function shape(theme: ThemeSettings): { light: Declarations; dark: Declarations 
   if (theme.preset === "custom") {
     if (!ACCENT_PATTERN.test(theme.accent)) return null;
     const d = deriveAccent(theme.accent);
-    const scheme = (link: string, focus: string): Declarations => [
-      ["--kobe-brand-primary", d.primary],
-      ["--kobe-brand-primary-hover", d.primaryHover],
-      ["--kobe-brand-primary-fg", d.primaryFg],
-      ["--kobe-brand-link", link],
-      ["--kobe-brand-focus", focus],
+    const scheme = (k: "light" | "dark"): Declarations => [
+      ["--kobe-brand-primary", d.primary[k]],
+      ["--kobe-brand-primary-hover", d.primaryHover[k]],
+      ["--kobe-brand-primary-fg", d.primaryFg[k]],
+      ["--kobe-brand-link", d.link[k]],
+      ["--kobe-brand-focus", d.focus[k]],
       ["--ring", "var(--kobe-brand-focus)"],
       ["--kobe-composer-focus", "var(--kobe-brand-focus)"],
     ];
     return {
       light: [
-        ...scheme(d.link.light, d.focus.light),
+        ...scheme("light"),
         ...RADIUS_TOKENS.map((t) => [t, RADIUS_SCALES[theme.corners][t]] as const),
         ["--kobe-font-sans", FONT_STACK_VALUES[theme.font]],
       ],
-      dark: scheme(d.link.dark, d.focus.dark),
+      dark: scheme("dark"),
     };
   }
   const preset = PRESETS[theme.preset];

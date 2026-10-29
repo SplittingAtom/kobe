@@ -83,3 +83,10 @@ Plan §4.3, §4.4, TH3, TH5, TH9-TH11 in `docs/specs/theming.md`; catalogue `doc
 - Hidden name uses Tailwind `sr-only`; Tiltfile override removed (chart default applies).
 - Invalid `KOBE_SERVER_URL` now fails startup (throws in `instrumentation.ts`); unset still warns
   and serves defaults.
+
+## KOBE-499 final
+
+- Cherry-picked `0cb64167` (per-scheme derived accent); conflicts in `theme/accent{,.test}.ts`
+  resolved by taking KOBE-499's files; `branding.ts`/`branding.test.ts` set to KOBE-499's
+  (my logo-dimension test dropped in favour of theirs). `brandingCss` emits light primary,
+  hover and fg on the scope and the dark ones in both dark blocks.

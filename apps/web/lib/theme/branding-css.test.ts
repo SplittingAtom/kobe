@@ -106,10 +106,13 @@ describe("brandingCss", () => {
     const { light, chosenDark } = blocks(brandingCss(CUSTOM));
     const l = new Map(light);
     const d = new Map(chosenDark);
-    for (const m of [l, d]) {
-      expect(m.get("--kobe-brand-primary")).toBe(derived.primary);
-      expect(m.get("--kobe-brand-primary-hover")).toBe(derived.primaryHover);
-      expect(m.get("--kobe-brand-primary-fg")).toBe(derived.primaryFg);
+    for (const [m, k] of [
+      [l, "light"],
+      [d, "dark"],
+    ] as const) {
+      expect(m.get("--kobe-brand-primary")).toBe(derived.primary[k]);
+      expect(m.get("--kobe-brand-primary-hover")).toBe(derived.primaryHover[k]);
+      expect(m.get("--kobe-brand-primary-fg")).toBe(derived.primaryFg[k]);
       expect(m.get("--ring")).toBe("var(--kobe-brand-focus)");
       expect(m.get("--kobe-composer-focus")).toBe("var(--kobe-brand-focus)");
       expect(m.has("--background")).toBe(false);
