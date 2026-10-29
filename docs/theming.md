@@ -343,7 +343,7 @@ _Site console → System → Appearance_ (`/admin/site/appearance`), for Owner a
 Save sends only the settings that changed. After every save, upload, removal and reset the page
 calls the web's `POST /api/branding/refresh` (same-origin only; 204), which drops that web
 replica's branding cache and refetches at once, then reloads. **Other web replicas pick the change
-up within 30 seconds** (their cache), and the server's own branding cache is 10 s per server replica
+up within 30 seconds** (their cache), and the server reads the database on every branding request (no per-replica cache, so a save shows on every server replica at once; ETag/304 keeps it cheap)
 (the writing replica drops it at once).
 
 ### API

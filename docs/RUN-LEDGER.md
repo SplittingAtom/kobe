@@ -9,6 +9,12 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Theming deployed for the gate (2026-10-29):** main 5cd8a91e → kobe-gate1 `local-5cd8a91ea59b`, then
+  87398452 → `local-87398452b50d` (#403: default sans token back to Tailwind's stack after the console
+  screenshots showed a font change in the Linux container). Follow-ups: #404 (Appearance e2e exact
+  labels), #405 (server branding read fresh per request: the per-replica 10 s cache served stale values
+  after a save). Gate ticket KOBE-508; evidence in docs/gates/gate-theming.md. Rollback tag on the nodes:
+  `local-5cd8a91ea59b`. Deploy script: coordinator scratchpad `deploy-gate1.sh` (bash, from the GSD VM).
 - **Theming wave 3 (2026-10-29):** KOBE-501 (Appearance page, ../Kobe-wt501) ∥ KOBE-503 (chart-seeded
   defaults, ../Kobe-wt503), then KOBE-502 (docs, ../Kobe-wt502) on Opus, reviewed (code-review medium on
   501: 8 fixed incl. the `POST /api/branding/refresh` route; Opus pass on 503: reset re-seeds in one
