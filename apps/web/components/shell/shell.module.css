@@ -19,8 +19,8 @@
 
 .wordmark {
   margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
+  font-size: var(--kobe-brand-wordmark-size);
+  font-weight: var(--kobe-brand-wordmark-weight);
 }
 
 .actions {
@@ -44,7 +44,7 @@
   width: 2rem;
   height: 2rem;
   color: var(--admin-muted);
-  border-radius: 0.375rem;
+  border-radius: var(--kobe-radius-md);
   cursor: pointer;
   list-style: none;
 }
@@ -89,7 +89,7 @@
   color: inherit;
   background: transparent;
   border: 1px solid var(--admin-border);
-  border-radius: 0.5rem;
+  border-radius: var(--kobe-radius-lg);
 }
 
 .results,
@@ -99,8 +99,8 @@
   top: calc(100% + 0.25rem);
   background: var(--admin-bg);
   border: 1px solid var(--admin-border);
-  border-radius: 0.5rem;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+  border-radius: var(--kobe-radius-lg);
+  box-shadow: var(--kobe-shadow-drawer);
 }
 
 .results {
@@ -136,7 +136,7 @@
   color: var(--admin-muted);
   font-size: 0.75rem;
   border: 1px solid var(--admin-border);
-  border-radius: 999px;
+  border-radius: var(--kobe-radius-pill);
 }
 
 .snippet {
@@ -174,7 +174,7 @@
   text-decoration: none;
   background: none;
   border: 0;
-  border-radius: 0.25rem;
+  border-radius: var(--kobe-radius-sm);
   font: inherit;
   cursor: pointer;
 }
@@ -362,7 +362,7 @@
     inset-inline-end: 0;
     width: clamp(360px, 50%, 100% - var(--kobe-rail-width));
     background: var(--admin-bg);
-    box-shadow: -8px 0 24px rgb(0 0 0 / 0.16);
+    box-shadow: var(--kobe-shadow-drawer);
   }
 
   .artifact:not([data-sheet-open]) {

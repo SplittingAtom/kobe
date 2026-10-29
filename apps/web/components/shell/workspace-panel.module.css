@@ -18,8 +18,8 @@
   color: var(--foreground);
   background: var(--background);
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
-  box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 25%);
+  border-radius: var(--kobe-radius-xl);
+  box-shadow: var(--kobe-shadow-panel);
   outline: none;
 }
 

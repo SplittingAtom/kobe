@@ -2,14 +2,8 @@
    app reads as one; the `--admin-*` names are kept so shared notices (ErrorNotice) match. */
 
 .app {
-  /* The `--admin-*` neutrals map onto the shadcn tokens (app/theme.css), so the sidebar, header
-     and Kobe-specific cards match the assistant-ui thread in both themes; the accents are shared
-     with the consoles and set in app/theme.css. */
-  --admin-fg: var(--foreground);
-  --admin-muted: var(--muted-foreground);
-  --admin-bg: var(--background);
-  --admin-panel: var(--muted);
-  --admin-border: var(--border);
+  /* The `--admin-*` neutrals (aliases of the shadcn tokens) and the accents live on :root in
+     app/theme.css (KOBE-498), so portals and the consoles resolve them too. */
   display: flex;
   flex-direction: column;
   /* The page never scrolls; the columns do (KOBE-205). dvh tracks the browser's toolbars and, with
@@ -24,7 +18,7 @@
   overflow: hidden;
   color: var(--admin-fg);
   background: var(--admin-bg);
-  font-family: system-ui, sans-serif;
+  font-family: var(--kobe-font-sans);
   line-height: 1.5;
 }
 
@@ -35,7 +29,7 @@
 }
 
 .app :focus-visible {
-  outline: 3px solid var(--admin-accent);
+  outline: 3px solid var(--kobe-brand-focus);
   outline-offset: 2px;
 }
 
@@ -80,7 +74,7 @@
   gap: 0.25rem;
   align-items: center;
   min-width: 0;
-  border-radius: 0.375rem;
+  border-radius: var(--kobe-radius-md);
 }
 
 .threadItem[data-active="true"] {
@@ -99,7 +93,7 @@
   color: inherit;
   background: none;
   border: none;
-  border-radius: 0.375rem;
+  border-radius: var(--kobe-radius-md);
   cursor: pointer;
 }
 
@@ -142,14 +136,14 @@
   padding: 0.375rem 0.5rem;
   color: var(--admin-danger);
   background: var(--admin-danger-bg);
-  border-radius: 0.375rem;
+  border-radius: var(--kobe-radius-md);
 }
 
 .notice {
   margin: 0.25rem 0;
   padding: 0.375rem 0.5rem;
   background: var(--admin-warn-bg);
-  border-radius: 0.375rem;
+  border-radius: var(--kobe-radius-md);
 }
 
 .errorText {
@@ -171,7 +165,7 @@
   align-items: flex-start;
   padding: 0.375rem 0.5rem;
   border: 1px dashed var(--admin-border);
-  border-radius: 0.5rem;
+  border-radius: var(--kobe-radius-lg);
 }
 
 .queueText {
@@ -206,14 +200,14 @@
   padding: 0.4rem 0.6rem;
   color: var(--admin-danger);
   background: var(--admin-danger-bg);
-  border-radius: 0.375rem;
+  border-radius: var(--kobe-radius-md);
 }
 
 .banner {
   margin: 0;
   padding: 0.5rem 0.75rem;
   background: var(--admin-warn-bg);
-  border-radius: 0.5rem;
+  border-radius: var(--kobe-radius-lg);
 }
 
 /* "Forked from <thread> at <message>" above a fork's conversation (KOBE-216). */
@@ -234,7 +228,7 @@
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   background: var(--admin-warn-bg);
-  border-radius: 0.5rem;
+  border-radius: var(--kobe-radius-lg);
 }
 
 .dismissibleBanner > p {
@@ -258,7 +252,7 @@
   background: var(--admin-warn-bg);
   border: 1px solid var(--admin-border);
   border-inline-start: 4px solid var(--kobe-status-attention);
-  border-radius: 0.375rem;
+  border-radius: var(--kobe-radius-md);
   scroll-margin-block: 1rem;
 }
 
@@ -280,7 +274,7 @@
   padding: 0 0.5rem;
   font-size: 0.75rem;
   border: 1px solid var(--admin-border);
-  border-radius: 999px;
+  border-radius: var(--kobe-radius-pill);
 }
 
 .who {
@@ -301,14 +295,14 @@
 }
 
 .toolName {
-  font-family: ui-monospace, monospace;
+  font-family: var(--kobe-font-mono);
 }
 
 .toolPre {
   max-height: 16rem;
   margin: 0.25rem 0;
   overflow: auto;
-  font-family: ui-monospace, monospace;
+  font-family: var(--kobe-font-mono);
   font-size: 0.8rem;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -331,7 +325,7 @@
   color: var(--admin-muted);
   background: transparent;
   border: 1px solid var(--admin-border);
-  border-radius: 999px;
+  border-radius: var(--kobe-radius-pill);
   font-size: 0.8rem;
 }
 
@@ -364,7 +358,7 @@
   margin: 0.25rem 0;
   padding: 0.5rem 0.625rem;
   border: 1px solid var(--admin-border);
-  border-radius: 0.375rem;
+  border-radius: var(--kobe-radius-md);
 }
 
 .fileInfo {
@@ -401,8 +395,8 @@
   padding: 0.5rem 0.75rem;
   background: var(--admin-bg);
   border: 1px solid var(--admin-border);
-  border-radius: 0.5rem;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 15%);
+  border-radius: var(--kobe-radius-lg);
+  box-shadow: var(--kobe-shadow-pop);
 }
 
 .noteToolbar {
@@ -444,7 +438,7 @@
   padding: 0.5rem 0.75rem;
   background: var(--admin-warn-bg);
   border: 1px solid var(--admin-border);
-  border-radius: 0.375rem;
+  border-radius: var(--kobe-radius-md);
 }
 
 .skippedTitle {
@@ -465,7 +459,7 @@
   padding: 0.5rem 0.75rem;
   background: var(--admin-bg);
   border: 1px solid var(--admin-border);
-  border-radius: 0.5rem;
+  border-radius: var(--kobe-radius-lg);
 }
 
 .noteBanner > p {

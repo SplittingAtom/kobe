@@ -290,3 +290,306 @@ describe("status tokens (KOBE-301)", () => {
     expect(css).toContain("var(--kobe-gauge-full)");
   });
 });
+
+/** Source files under `dir` with one of `exts`, tests excluded. */
+function sourceFiles(dir: string, exts: readonly string[]): string[] {
+  return readdirSync(join(WEB, dir), { withFileTypes: true }).flatMap((e) => {
+    const path = join(dir, e.name);
+    if (e.isDirectory()) return sourceFiles(path, exts);
+    if (/\.test\.tsx?$/.test(e.name)) return [];
+    return exts.some((x) => e.name.endsWith(x)) ? [path] : [];
+  });
+}
+
+/** Every `name: value` declaration in a stylesheet (comments stripped), with its file. */
+function allDeclarations(
+  files: readonly string[],
+): { file: string; name: string; value: string }[] {
+  return files.flatMap((file) =>
+    [...read(file).matchAll(/([\w-]+)\s*:\s*([^;{}]+)(?=[;}])/g)].map((m) => ({
+      file,
+      name: (m[1] as string).toLowerCase(),
+      value: (m[2] as string).trim(),
+    })),
+  );
+}
+
+const COLOUR_LITERAL = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab|lab|lch|hwb)\(/i;
+/**
+ * Colour literals in TS/TSX, only in a CSS-ish context so prose (`Run #100`, `issue #123,`) and
+ * anchors (`"#add"`) pass: a Tailwind arbitrary value (a hex or colour function in square brackets); a hex after a
+ * colon (`color: "#fff"`, `"color:#fff;"`) or inside a function (`var(--x, #fff)`); a quoted
+ * 6- or 8-digit hex (`"#c62828"`); a colour function call (`rgb(`, `oklch(`, …).
+ */
+const TS_COLOUR_LITERAL = new RegExp(
+  [
+    String.raw`\[[^\]\s]*(?:#[0-9a-f]{3,8}\b|(?:rgba?|hsla?|oklch|oklab|lab|lch|hwb)\()`,
+    String.raw`:\s*["'\x60]?#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})(?=["'\x60;),\s]|$)`,
+    String.raw`(?:\w\(|,\s*)#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})(?=[;),\s"'\x60])`,
+    String.raw`["'\x60]#(?:[0-9a-f]{6}|[0-9a-f]{8})["'\x60]`,
+    String.raw`\b(?:rgba?|hsla?|oklch|oklab|hwb)\(`,
+  ].join("|"),
+  "i",
+);
+/** Joins a class name from parts, so Tailwind's source scan does not compile the test's examples. */
+const split = (...parts: string[]) => `className="${parts.join("")}"`;
+/** A TS/TSX source as written: CSS comment stripping (`read`) is for stylesheets only. */
+const readRaw = (path: string) => readFileSync(join(WEB, path), "utf8");
+const PALETTE =
+  /(?:^|[\s"'`:])(?:text|bg|border(?:-[trblxy])?|ring|ring-offset|outline|fill|stroke|from|via|to|decoration|divide|accent|caret|placeholder|shadow)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(?:50|[1-9]00|950)\b/;
+
+describe("tokenization guard (KOBE-498)", () => {
+  const css = [...cssFiles("app"), ...cssFiles("components")].filter(
+    (f) => f !== join("app", "theme.css"),
+  );
+  const decls = allDeclarations(css);
+  const ts = [
+    ...sourceFiles("app", [".tsx", ".ts"]),
+    ...sourceFiles("components", [".tsx", ".ts"]),
+  ];
+  const where = (d: { file: string; name: string; value: string }) =>
+    `${d.file}: ${d.name}: ${d.value}`;
+
+  it("no stylesheet but theme.css holds a colour literal", () => {
+    expect(decls.filter((d) => COLOUR_LITERAL.test(d.value)).map(where)).toEqual([]);
+  });
+
+  it("no box-shadow or text-shadow carries a colour of its own", () => {
+    const named = /\b(?:black|white|gr[ae]y)\b/i;
+    expect(
+      decls
+        .filter((d) => d.name === "box-shadow" || d.name === "text-shadow")
+        .filter((d) => COLOUR_LITERAL.test(d.value) || named.test(d.value))
+        .map(where),
+    ).toEqual([]);
+  });
+
+  it("font families come from the tokens", () => {
+    const ok = /^(?:var\(--kobe-font-[\w-]+\)|inherit|initial|unset)$/;
+    expect(
+      decls
+        .filter((d) => d.name === "font-family")
+        .filter((d) => !ok.test(d.value))
+        .map(where),
+    ).toEqual([]);
+    const tsFonts = ts.flatMap((f) =>
+      [...readRaw(f).matchAll(/fontFamily\s*:\s*([^,}\n]+(?:,[^}\n]+)?)/g)]
+        .map((m) => (m[1] as string).trim())
+        .filter((v) => !/^["'`]var\(--kobe-font-[\w-]+\)["'`]$/.test(v))
+        .map((v) => `${f}: ${v}`),
+    );
+    expect(tsFonts).toEqual([]);
+  });
+
+  it("corners come from the radius tokens", () => {
+    const ok = /^(?:var\(--kobe-radius-[\w-]+\)|0|50%|inherit)$/;
+    expect(
+      decls
+        .filter((d) => d.name === "border-radius")
+        .filter((d) => !ok.test(d.value))
+        .map(where),
+    ).toEqual([]);
+  });
+
+  it("no TS/TSX source holds a colour literal or a Tailwind default-palette colour class", () => {
+    const offenders = ts.flatMap((f) =>
+      readRaw(f)
+        .split("\n")
+        .flatMap((line, i) =>
+          COLOUR_LITERAL_TS(line) || PALETTE.test(line) ? [`${f}:${i + 1}: ${line.trim()}`] : [],
+        ),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("the guard itself catches what it should", () => {
+    expect(COLOUR_LITERAL.test("0 4px 16px rgb(0 0 0 / 15%)")).toBe(true);
+    expect(COLOUR_LITERAL.test("var(--admin-border, #d0d0d0)")).toBe(true);
+    expect(COLOUR_LITERAL.test("var(--kobe-shadow-pop)")).toBe(false);
+    expect(PALETTE.test('className="text-amber-700 dark:text-amber-400"')).toBe(true);
+    expect(PALETTE.test('className="text-status-attention bg-muted"')).toBe(false);
+    expect(COLOUR_LITERAL_TS('const c = "#c62828";')).toBe(true);
+    expect(COLOUR_LITERAL_TS("TODO(KOBE-184): see PR #150")).toBe(false);
+    expect(COLOUR_LITERAL_TS(split("bg-[", "#2449c7]"))).toBe(true);
+    expect(COLOUR_LITERAL_TS(split("text-[", "#fff]"))).toBe(true);
+    expect(COLOUR_LITERAL_TS(split("bg-[", "rgb(0_0_0/50%)]"))).toBe(true);
+    expect(COLOUR_LITERAL_TS(split("fill-[", "hsl(0_0%_0%)]"))).toBe(true);
+    expect(COLOUR_LITERAL_TS(split("ring-[", "oklch(0.5_0_0)]"))).toBe(true);
+    expect(COLOUR_LITERAL_TS('style={{ color: "#fff" }}')).toBe(true);
+    expect(COLOUR_LITERAL_TS('const s = "color:#abc;";')).toBe(true);
+    expect(COLOUR_LITERAL_TS('const v = "var(--x, #fff)";')).toBe(true);
+    expect(COLOUR_LITERAL_TS('"Run #100 failed"')).toBe(false);
+    expect(COLOUR_LITERAL_TS('"see issue #123, then"')).toBe(false);
+    expect(COLOUR_LITERAL_TS('href="#add"')).toBe(false);
+    expect(COLOUR_LITERAL_TS('t("#abc")')).toBe(false);
+  });
+});
+
+function COLOUR_LITERAL_TS(line: string): boolean {
+  return TS_COLOUR_LITERAL.test(line);
+}
+
+describe("design tokens (KOBE-498)", () => {
+  const light = new Map(declarations(block(THEME, ":root")));
+  const chosenDark = new Map(declarations(block(THEME, ':root[data-theme="dark"]')));
+  const dark = new Map([...light, ...chosenDark]);
+  const resolve = (theme: Map<string, string>, name: string): string => {
+    const value = theme.get(name);
+    if (value === undefined) throw new Error(`no ${name}`);
+    const ref = /^var\((--[\w-]+)\)$/.exec(value);
+    return ref ? resolve(theme, ref[1] as string) : value;
+  };
+  const BRAND = [
+    "--kobe-brand-primary",
+    "--kobe-brand-primary-hover",
+    "--kobe-brand-primary-fg",
+    "--kobe-brand-link",
+    "--kobe-brand-focus",
+  ];
+  /** Set per scheme: a light value on :root and a dark one in both dark blocks. */
+  const THEMED = BRAND.filter((t) => t !== "--kobe-brand-primary-hover");
+  /** One value for both schemes for now (dark inherits :root; T4's presets may set dark values). */
+  const SHARED = [
+    "--kobe-shadow-pop",
+    "--kobe-shadow-drawer",
+    "--kobe-shadow-panel",
+    "--kobe-scrim",
+  ];
+  const FIXED = [
+    "--kobe-font-sans",
+    "--kobe-font-mono",
+    "--kobe-brand-wordmark-size",
+    "--kobe-brand-wordmark-weight",
+    "--kobe-radius-sm",
+    "--kobe-radius-md",
+    "--kobe-radius-lg",
+    "--kobe-radius-xl",
+    "--kobe-radius-pill",
+  ];
+
+  it("every T2 token has a light value, and the themed ones a dark value", () => {
+    for (const token of [...BRAND, ...SHARED, ...FIXED]) expect(light.has(token), token).toBe(true);
+    for (const token of THEMED) expect(chosenDark.has(token), token).toBe(true);
+    for (const token of [...SHARED, ...FIXED]) expect(chosenDark.has(token), token).toBe(false);
+    expect(light.get("--kobe-brand-primary-hover")).toBe(
+      "color-mix(in oklab, var(--kobe-brand-primary) 90%, transparent)",
+    );
+  });
+
+  it("the existing accents read the brand layer and keep today's values", () => {
+    expect(light.get("--admin-accent")).toBe("var(--kobe-brand-link)");
+    expect(light.get("--kobe-status-accent")).toBe("var(--kobe-brand-primary)");
+    expect(light.get("--kobe-status-accent-fg")).toBe("var(--kobe-brand-primary-fg)");
+    for (const alias of ["--admin-accent", "--kobe-status-accent", "--kobe-status-accent-fg"])
+      expect(chosenDark.has(alias), alias).toBe(false);
+    // Today's colours (KOBE-479), so nothing on screen changes.
+    const today = {
+      light: {
+        "--admin-accent": "#2449c7",
+        "--kobe-status-accent": "#2449c7",
+        "--kobe-status-accent-fg": "#ffffff",
+        "--ring": "oklch(0.708 0 0)",
+        "--kobe-composer-focus": "#52525b",
+      },
+      dark: {
+        "--admin-accent": "#8fa8ff",
+        "--kobe-status-accent": "#4263eb",
+        "--kobe-status-accent-fg": "#ffffff",
+        "--ring": "oklch(0.556 0 0)",
+        "--kobe-composer-focus": "#a1a1aa",
+      },
+    };
+    for (const [token, value] of Object.entries(today.light))
+      expect(resolve(light, token), token).toBe(value);
+    for (const [token, value] of Object.entries(today.dark))
+      expect(resolve(dark, token), token).toBe(value);
+  });
+
+  for (const [name, theme] of [
+    ["light", light],
+    ["dark", dark],
+  ] as const) {
+    it(`brand links keep AA and focus 3:1 on the page and panels (${name})`, () => {
+      for (const surface of [
+        "--kobe-console-bg",
+        "--kobe-console-panel",
+        "--background",
+        "--muted",
+      ]) {
+        const bg = resolve(theme, surface);
+        expect(contrast(resolve(theme, "--kobe-brand-link"), bg), surface).toBeGreaterThanOrEqual(
+          4.5,
+        );
+        expect(contrast(resolve(theme, "--kobe-brand-focus"), bg), surface).toBeGreaterThanOrEqual(
+          3,
+        );
+      }
+      expect(
+        contrast(resolve(theme, "--kobe-brand-primary-fg"), resolve(theme, "--kobe-brand-primary")),
+      ).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+
+  it("corners reproduce Tailwind's default radii", () => {
+    expect(light.get("--kobe-radius-sm")).toBe("0.25rem");
+    expect(light.get("--kobe-radius-md")).toBe("0.375rem");
+    expect(light.get("--kobe-radius-lg")).toBe("0.5rem");
+    expect(light.get("--kobe-radius-xl")).toBe("0.75rem");
+  });
+
+  it("the --admin-* neutrals are aliases on :root, no longer scoped to the chat root", () => {
+    const aliases = {
+      "--admin-fg": "var(--foreground)",
+      "--admin-muted": "var(--muted-foreground)",
+      "--admin-bg": "var(--background)",
+      "--admin-panel": "var(--muted)",
+      "--admin-border": "var(--border)",
+    };
+    for (const [alias, value] of Object.entries(aliases))
+      expect(light.get(alias), alias).toBe(value);
+    expect(light.has("--admin-hover")).toBe(true);
+    expect(read("components/chat/chat.module.css")).not.toMatch(/--admin-[\w-]+\s*:/);
+  });
+
+  it("every brand, font and radius token is mapped in tailwind.css (circles keep rounded-full)", () => {
+    const theme = block(read("app/tailwind.css"), "@theme inline");
+    const tokens = [...light.keys()].filter(
+      (t) => /^--kobe-(?:brand-(?!wordmark)|font-|radius-)/.test(t) && t !== "--kobe-radius-pill",
+    );
+    expect(tokens.length).toBe(11);
+    expect(theme).not.toMatch(/--radius-full\s*:/);
+    for (const token of tokens) expect(theme, token).toContain(`var(${token})`);
+    expect(theme).toMatch(/--font-sans:\s*var\(--kobe-font-sans\)/);
+    expect(theme).toMatch(/--font-mono:\s*var\(--kobe-font-mono\)/);
+    for (const size of ["sm", "md", "lg", "xl"])
+      expect(theme).toMatch(new RegExp(`--radius-${size}:\\s*var\\(--kobe-radius-${size}\\)`));
+  });
+
+  it("every focus outline reads the brand focus colour", () => {
+    const admin = read("app/admin/admin-global.css");
+    expect(block(admin, "[data-kobe-console] :focus-visible")).toContain(
+      "outline: 3px solid var(--kobe-brand-focus)",
+    );
+    expect(block(read("components/chat/chat.module.css"), ".app :focus-visible")).toContain(
+      "outline: 3px solid var(--kobe-brand-focus)",
+    );
+  });
+
+  it("the consoles' focus ring utility reads the brand focus colour", () => {
+    expect(readRaw("components/ui/console/focus.ts")).toContain(
+      "focus-visible:outline-brand-focus",
+    );
+  });
+
+  it("the console primary button hovers with the brand hover token", () => {
+    const button = readRaw("components/ui/console/button.tsx");
+    expect(button).toContain("hover:enabled:bg-brand-primary-hover");
+    expect(button).not.toContain(["bg-status-", "accent/90"].join(""));
+  });
+
+  it("the wordmark reads its type tokens", () => {
+    const wordmark = block(read("components/shell/shell.module.css"), ".wordmark");
+    expect(wordmark).toContain("font-size: var(--kobe-brand-wordmark-size)");
+    expect(wordmark).toContain("font-weight: var(--kobe-brand-wordmark-weight)");
+  });
+});

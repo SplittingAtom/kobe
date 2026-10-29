@@ -75,4 +75,18 @@
   --color-console-danger: var(--admin-danger);
   --color-console-danger-bg: var(--admin-danger-bg);
   --color-console-warn-bg: var(--admin-warn-bg);
+  /* Brand (KOBE-498, app/theme.css): bg-brand-primary, text-brand-link, ring-brand-focus, … */
+  --color-brand-primary: var(--kobe-brand-primary);
+  --color-brand-primary-hover: var(--kobe-brand-primary-hover);
+  --color-brand-primary-fg: var(--kobe-brand-primary-fg);
+  --color-brand-link: var(--kobe-brand-link);
+  --color-brand-focus: var(--kobe-brand-focus);
+  /* Typography: font-sans, font-mono. */
+  --font-sans: var(--kobe-font-sans);
+  --font-mono: var(--kobe-font-mono);
+  /* Corners: rounded-sm..xl follow the radius tokens; rounded-full stays Tailwind's (circles). */
+  --radius-sm: var(--kobe-radius-sm);
+  --radius-md: var(--kobe-radius-md);
+  --radius-lg: var(--kobe-radius-lg);
+  --radius-xl: var(--kobe-radius-xl);
 }
