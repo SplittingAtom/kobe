@@ -62,7 +62,7 @@ Arial` stack → Liberation Sans before; `system-ui` → WenQuanYi after). Fixed
 
 ## How to review on gate1
 
-Sign in as the owner at https://kobe.atom.splittingatom.io → Site console → System → Appearance.
+Sign in as the owner on the gate1 site (address and credentials in CLAUDE.local.md) → Site console → System → Appearance.
 Rename the site, upload a logo (SVG from Inkscape: save as Plain SVG) and a favicon, try each preset
 in light and dark, set a custom accent (watch the contrast line; `#777777` is refused), then Reset to
 defaults. Other web replicas pick a change up within 30 s.
