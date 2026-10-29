@@ -19,8 +19,7 @@ const BRANDING = {
 
 function stub(status: number, body: unknown) {
   const fetchFn = vi.fn(
-    async (_url: string, _init?: RequestInit) =>
-      new Response(JSON.stringify(body), { status }),
+    async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(body), { status }),
   );
   vi.stubGlobal("fetch", fetchFn);
   return fetchFn;

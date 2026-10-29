@@ -6,7 +6,12 @@ import { PREVIEW_FIXED_TOKENS, PREVIEW_IDS, previewCss } from "./preview-css";
 import { declarations, THEME_DARK, THEME_LIGHT } from "./theme-css-source.test-helpers";
 
 /** KOBE-501: the Appearance preview's CSS, the real brandingCss over a scoped copy of theme.css. */
-const CUSTOM: ThemeSettings = { preset: "custom", accent: "#0f766e", corners: "round", font: "serif" };
+const CUSTOM: ThemeSettings = {
+  preset: "custom",
+  accent: "#0f766e",
+  corners: "round",
+  font: "serif",
+};
 
 /** The top-level rules (the OS-dark @media block repeats the chosen-dark one, so it is skipped). */
 function rules(css: string): [string, [string, string][]][] {
@@ -64,8 +69,12 @@ describe("previewCss", () => {
 
   it.each(PRESET_IDS)("shows preset %s in its light and its dark values", (id) => {
     const css = previewCss({ preset: id });
-    expect(resolve(css, "light").get("--kobe-console-bg")).toBe(PRESETS[id].light["--kobe-console-bg"]);
-    expect(resolve(css, "dark").get("--kobe-console-bg")).toBe(PRESETS[id].dark["--kobe-console-bg"]);
+    expect(resolve(css, "light").get("--kobe-console-bg")).toBe(
+      PRESETS[id].light["--kobe-console-bg"],
+    );
+    expect(resolve(css, "dark").get("--kobe-console-bg")).toBe(
+      PRESETS[id].dark["--kobe-console-bg"],
+    );
     expect(resolve(css, "dark").get("--kobe-brand-primary")).toBe(
       PRESETS[id].dark["--kobe-brand-primary"],
     );

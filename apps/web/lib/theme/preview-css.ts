@@ -46,7 +46,9 @@ const FIXED = {
   },
 } as const;
 
-export const PREVIEW_FIXED_TOKENS = Object.keys(FIXED.light) as readonly (keyof typeof FIXED.light)[];
+export const PREVIEW_FIXED_TOKENS = Object.keys(
+  FIXED.light,
+) as readonly (keyof typeof FIXED.light)[];
 
 /** theme.css's aliases of the brand tokens, declared again on each root (see above). */
 const ALIASES = [

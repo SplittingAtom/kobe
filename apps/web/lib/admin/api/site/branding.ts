@@ -4,12 +4,7 @@
  * name, the name switch and the style, one file per kind, removal and reset. Every change is
  * audited by the server (`site.branding.updated`).
  */
-import type {
-  BrandingAssetKind,
-  FloorFailure,
-  SiteBranding,
-  ThemeSettings,
-} from "@kobe/protocol";
+import type { BrandingAssetKind, FloorFailure, SiteBranding, ThemeSettings } from "@kobe/protocol";
 import { apiRequest, type ApiError, type ApiResult } from "../../../api/client";
 
 export interface BrandingChange {
@@ -59,7 +54,13 @@ export async function putBranding(change: BrandingChange): Promise<BrandingSaveR
   // apiRequest keeps only code and message: read the 422's failures from a copy of the answer.
   const capture: typeof fetch = async (input, init) => {
     const res = await fetch(input, init);
-    if (res.status === 422) failures = failuresOf(await res.clone().json().catch(() => null));
+    if (res.status === 422)
+      failures = failuresOf(
+        await res
+          .clone()
+          .json()
+          .catch(() => null),
+      );
     return res;
   };
   const res = await apiRequest<SiteBranding>(BASE, {
