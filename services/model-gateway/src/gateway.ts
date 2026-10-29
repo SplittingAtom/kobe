@@ -45,7 +45,7 @@ import { UsageMeter, type UsageReading } from "./usage/meter.js";
  * The model gateway shim (KOBE-40, spec D30; principle 2 "secrets never enter the sandbox"). The
  * only way a sandbox reaches a model:
  *
- * 1. the sandbox's `kobe.model-gateway` session token (HS256 pinned, own key; other audiences'
+ * 1. the sandbox's `kobe.model-gateway` session token (EdDSA pinned, own public key; other audiences'
  *    tokens fail) in any header a model SDK uses for its API key;
  * 2. an inference path (routes.ts) — never Bifrost's admin API;
  * 3. the token's member and sandbox still live (principals.ts; cached ≤ a few seconds);

@@ -1,3 +1,4 @@
+import { verifyKeysFromEnv, type SessionVerifyKeys } from "@kobe/session-token";
 import { z } from "zod";
 import { validateCidrs } from "./address-policy.js";
 
@@ -39,12 +40,6 @@ const configSchema = z.object({
   KOBE_DATABASE_URL: z
     .string({ error: "KOBE_DATABASE_URL is required" })
     .min(1, "KOBE_DATABASE_URL is required"),
-  KOBE_SESSION_KEY_EGRESS_PROXY: z
-    .string({ error: "KOBE_SESSION_KEY_EGRESS_PROXY is required" })
-    .min(
-      MIN_KEY_LENGTH,
-      `KOBE_SESSION_KEY_EGRESS_PROXY must be at least ${MIN_KEY_LENGTH} characters`,
-    ),
   /** Destination ports a sandbox may CONNECT to (HTTPS only by default). */
   KOBE_EGRESS_ALLOWED_PORTS: list,
   /** Internal targets explicitly allowed (CIDRs); still subject to the domain allowlist. */
@@ -105,7 +100,8 @@ const configSchema = z.object({
 export interface Config {
   readonly port: number;
   readonly databaseUrl: string;
-  readonly sessionKey: string;
+  /** Public key(s) of the `kobe.egress-proxy` audience (KOBE-513): verify only, never sign. */
+  readonly sessionVerifyKeys: SessionVerifyKeys;
   readonly allowedPorts: readonly number[];
   readonly allowedInternalCidrs: readonly string[];
   readonly deniedCidrs: readonly string[];
@@ -140,6 +136,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     throw new Error(`Invalid configuration: ${issues}`);
   }
   const c = parsed.data;
+  const sessionVerifyKeys = verifyKeysFromEnv(env, "kobe.egress-proxy");
   const ports = c.KOBE_EGRESS_ALLOWED_PORTS.length > 0 ? c.KOBE_EGRESS_ALLOWED_PORTS : ["443"];
   const allowedPorts = ports.map((p) => {
     const n = Number(p);
@@ -170,7 +167,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   return {
     port: c.PORT,
     databaseUrl: c.KOBE_DATABASE_URL,
-    sessionKey: c.KOBE_SESSION_KEY_EGRESS_PROXY,
+    sessionVerifyKeys,
     allowedPorts,
     allowedInternalCidrs: c.KOBE_EGRESS_ALLOWED_INTERNAL_CIDRS,
     deniedCidrs: c.KOBE_EGRESS_DENIED_CIDRS,

@@ -1,10 +1,11 @@
 import { MIN_SECRET_LENGTH } from "@kobe/db";
+import { verifyKeysFromEnv, type SessionVerifyKeys } from "@kobe/session-token";
 import { z } from "zod";
 
 /**
  * Model gateway shim configuration (KOBE-40), validated at startup: invalid env fails fast and
- * messages never echo values. The chart renders it; the shim holds only its own session key and
- * the virtual-key secret (never provider keys, never Bifrost's admin password).
+ * messages never echo values. The chart renders it; the shim holds only its audience's session
+ * public key(s), its master secret shared with the server, and the virtual-key secret (never provider keys, never Bifrost's admin password).
  */
 const int = (name: string, min: number, max: number, fallback: number) =>
   z.coerce
@@ -19,6 +20,8 @@ const configSchema = z.object({
   KOBE_DATABASE_URL: z
     .string({ error: "KOBE_DATABASE_URL is required" })
     .min(1, "KOBE_DATABASE_URL is required"),
+  // The gateway's shared master secret with the server (run, trace-span and server-call token
+  // keys are derived from it). Since KOBE-513 it no longer signs or verifies session tokens.
   KOBE_SESSION_KEY_MODEL_GATEWAY: z
     .string({ error: "KOBE_SESSION_KEY_MODEL_GATEWAY is required" })
     .min(32, "KOBE_SESSION_KEY_MODEL_GATEWAY must be at least 32 characters"),
@@ -98,7 +101,13 @@ const configSchema = z.object({
 export interface Config {
   readonly port: number;
   readonly databaseUrl: string;
-  readonly sessionKey: string;
+  /**
+   * Master secret shared with the server (KOBE_SESSION_KEY_MODEL_GATEWAY): run, trace-span and
+   * server-call token keys are derived from it. Not a session-token key since KOBE-513.
+   */
+  readonly masterKey: string;
+  /** Public key(s) of the `kobe.model-gateway` session tokens (KOBE-513): verify only. */
+  readonly sessionVerifyKeys: SessionVerifyKeys;
   readonly virtualKeySecret: string;
   readonly bifrostUrl: string;
   readonly maxBodyBytes: number;
@@ -135,7 +144,8 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   return {
     port: c.PORT,
     databaseUrl: c.KOBE_DATABASE_URL,
-    sessionKey: c.KOBE_SESSION_KEY_MODEL_GATEWAY,
+    masterKey: c.KOBE_SESSION_KEY_MODEL_GATEWAY,
+    sessionVerifyKeys: verifyKeysFromEnv(env, "kobe.model-gateway"),
     virtualKeySecret: c.KOBE_MODELS_VIRTUAL_KEY_SECRET,
     bifrostUrl: c.KOBE_BIFROST_URL.replace(/\/+$/, ""),
     maxBodyBytes: c.KOBE_MODEL_GATEWAY_MAX_BODY_BYTES,

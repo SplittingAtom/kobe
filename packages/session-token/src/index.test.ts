@@ -10,6 +10,9 @@ import {
   loadVerifyKeys,
   mergeVerifyKeys,
   signSessionToken,
+  signingKeyEnvName,
+  verifyKeyEnvName,
+  verifyKeysFromEnv,
   verifyKeysOf,
   verifySessionToken,
 } from "./index.js";
@@ -149,5 +152,27 @@ describe("session keys", () => {
     } catch (e) {
       expect((e as Error).message).not.toContain("MIIB");
     }
+  });
+
+  it("names the env per audience and reads a verifier's keys from it", () => {
+    expect(signingKeyEnvName("kobe.sandbox-wire")).toBe("KOBE_SESSION_SIGNING_KEY_SANDBOX_WIRE");
+    expect(verifyKeyEnvName("kobe.mcp-proxy")).toBe("KOBE_SESSION_VERIFY_KEY_MCP_PROXY");
+    const name = "KOBE_SESSION_VERIFY_KEY_MCP_PROXY";
+    expect(
+      verifyKeysFromEnv({ [name]: PAIR.publicPem }, "kobe.mcp-proxy").has(PAIR.signing.kid),
+    ).toBe(true);
+    const escaped = PAIR.publicPem.replace(/\n/g, "\\n");
+    expect(verifyKeysFromEnv({ [name]: escaped }, "kobe.mcp-proxy").size).toBe(1);
+    expect(() => verifyKeysFromEnv({}, "kobe.mcp-proxy")).toThrow(
+      new RegExp(`${name} is required`),
+    );
+    let message = "";
+    try {
+      verifyKeysFromEnv({ [name]: PAIR.privatePem }, "kobe.mcp-proxy");
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toMatch(/public keys only/);
+    expect(message).not.toContain(PAIR.privatePem.split("\n")[1]);
   });
 });

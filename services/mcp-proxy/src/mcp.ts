@@ -3,6 +3,7 @@ import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Logger } from "pino";
 import { canonicalJson, toolInputSchema, uuidSchema } from "@kobe/protocol";
+import type { SessionVerifyKeys } from "@kobe/session-token";
 import { bearerToken, isExpiredSandboxToken, verifySandboxToken } from "./auth.js";
 import type { Limits } from "./config.js";
 import type { CredentialResolver } from "./credentials.js";
@@ -35,7 +36,8 @@ export const THREAD_HEADER = "kobe-thread-id";
 export const TOOL_CALL_ID_META_KEY = "kobe.dev/tool_call_id";
 
 export interface McpRouteDeps {
-  readonly sessionKey: string;
+  /** Public key(s) of the `kobe.mcp-proxy` audience (KOBE-513): verify only. */
+  readonly sessionVerifyKeys: SessionVerifyKeys;
   readonly server: PolicyServer;
   readonly upstream: UpstreamClient;
   readonly credentials: CredentialResolver;
@@ -107,12 +109,12 @@ const EXPIRED_SESSION_LOG = "mcp: expired token on a live session; answered 404"
 async function handlePost(deps: McpRouteDeps, c: Context): Promise<Response> {
   c.header("Cache-Control", "no-store");
   const token = bearerToken(c.req.header("authorization"));
-  const claims = verifySandboxToken(token, deps.sessionKey);
+  const claims = verifySandboxToken(token, deps.sessionVerifyKeys);
   if (
     token &&
     !claims &&
     c.req.header(SESSION_HEADER) &&
-    isExpiredSandboxToken(token, deps.sessionKey)
+    isExpiredSandboxToken(token, deps.sessionVerifyKeys)
   ) {
     deps.log.info({ connectorId: c.req.param("connectorId") }, EXPIRED_SESSION_LOG);
     return c.json(rpcError(null, JSONRPC_ERRORS.invalidRequest, "Session expired."), 404);

@@ -1,8 +1,10 @@
+import { generateSessionKeyPair } from "@kobe/session-token";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "./config.js";
 
+const PAIR = generateSessionKeyPair();
 const ENV = {
-  KOBE_SESSION_KEY_MCP_PROXY: "s".repeat(32),
+  KOBE_SESSION_VERIFY_KEY_MCP_PROXY: PAIR.publicPem,
   KOBE_MCP_INTERNAL_KEY: "i".repeat(32),
   KOBE_MCP_SERVER_URL: "http://kobe-server:8082/",
 };
@@ -41,14 +43,22 @@ describe("loadConfig", () => {
   });
 
   it.each([
-    ["no session key", { KOBE_SESSION_KEY_MCP_PROXY: undefined }, /KOBE_SESSION_KEY_MCP_PROXY/],
+    [
+      "no session verify key",
+      { KOBE_SESSION_VERIFY_KEY_MCP_PROXY: undefined },
+      /KOBE_SESSION_VERIFY_KEY_MCP_PROXY is required/,
+    ],
+    [
+      "a private key as the verify key",
+      { KOBE_SESSION_VERIFY_KEY_MCP_PROXY: PAIR.privatePem },
+      /public keys only/,
+    ],
     ["a short internal key", { KOBE_MCP_INTERNAL_KEY: "short" }, /KOBE_MCP_INTERNAL_KEY/],
     ["no server URL", { KOBE_MCP_SERVER_URL: undefined }, /KOBE_MCP_SERVER_URL/],
     ["a bad port", { PORT: "70000" }, /PORT/],
     ["a bad CIDR", { KOBE_MCP_ALLOWED_INTERNAL_CIDRS: "nope" }, /CIDRs/],
     ["a bad upstream port", { KOBE_MCP_ALLOWED_PORTS: "0" }, /KOBE_MCP_ALLOWED_PORTS/],
     ["a bad switch", { KOBE_MCP_ALLOW_INSECURE_HTTP: "yes" }, /KOBE_MCP_ALLOW_INSECURE_HTTP/],
-    ["the same key twice", { KOBE_MCP_INTERNAL_KEY: "s".repeat(32) }, /must differ/],
   ])("rejects %s with a clear error", (_, override, message) => {
     expect(() => loadConfig({ ...ENV, ...override })).toThrow(message);
   });

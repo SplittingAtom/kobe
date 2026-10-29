@@ -9,7 +9,12 @@ import {
   mapSandboxSpanId,
   signRunToken,
 } from "@kobe/protocol/node";
-import { signSessionToken, verifySessionToken } from "@kobe/session-token";
+import {
+  generateSessionKeyPair,
+  signSessionToken,
+  verifySessionToken,
+  type SessionSigningKey,
+} from "@kobe/session-token";
 import { usageRecordOf } from "./usage/sink.js";
 import { InMemorySpanExporter, initTelemetry, type Telemetry } from "@kobe/telemetry";
 import { runRootSpanId, runTraceId } from "@kobe/protocol";
@@ -20,8 +25,8 @@ import { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import { PrincipalCache } from "./principals.js";
 import { OPEN_GATE, type CallGate, type CallRecord } from "./seams.js";
 
-const KEY = "m".repeat(40);
-const OTHER_KEY = "e".repeat(40);
+const SESSION = generateSessionKeyPair();
+const OTHER = generateSessionKeyPair();
 const box = new SecretBox("v".repeat(40), VIRTUAL_KEY_PURPOSE);
 const team = randomUUID();
 const user = randomUUID();
@@ -33,7 +38,7 @@ function token(
     aud: SessionTokenAudience;
     exp: number;
     sub: string;
-    key: string;
+    key: SessionSigningKey;
     evalThread: string;
   }> = {},
 ) {
@@ -50,7 +55,7 @@ function token(
       jti: randomUUID().replace(/-/g, ""),
       ...(over.evalThread ? { eval_thread: over.evalThread } : {}),
     },
-    over.key ?? KEY,
+    over.key ?? SESSION.signing,
   );
 }
 
@@ -192,7 +197,7 @@ async function start(over: ShimOptions = {}): Promise<void> {
     { ttlMs: cacheTtl, keyWaitMs: 1_000, keyPollMs: 20 },
   );
   shim = createModelGateway({
-    verify: (t) => verifySessionToken(t, "kobe.model-gateway", KEY),
+    verify: (t) => verifySessionToken(t, "kobe.model-gateway", SESSION.verify),
     principals: cache,
     isRunLeased: async (_t, runId) => {
       leaseChecks++;
@@ -274,8 +279,8 @@ describe("authentication", () => {
     for (const headers of [
       {},
       { authorization: "Bearer not.a.token" },
-      bearer(token({ key: OTHER_KEY })),
-      bearer(token({ aud: "kobe.egress-proxy", key: KEY })),
+      bearer(token({ key: OTHER.signing })),
+      bearer(token({ aud: "kobe.egress-proxy", key: SESSION.signing })),
       bearer(token({ exp: now - 1 })),
       { authorization: "Basic a29iZTpwYXNz" },
     ]) {
@@ -990,7 +995,7 @@ describe("shared eval cases for an Orbit eval Job (KOBE-276)", () => {
   it("refuses without a valid token, for a revoked principal, another method, or no cases", async () => {
     caseFiles.set(sandbox, "{}");
     expect((await get({})).status).toBe(401);
-    expect((await get(bearer(token({ key: OTHER_KEY })))).status).toBe(401);
+    expect((await get(bearer(token({ key: OTHER.signing })))).status).toBe(401);
     expect((await call("/kobe/eval-cases", { headers: bearer() })).status).toBe(404);
     expect((await get(bearer(token({ sub: randomUUID() })))).status).toBe(404);
     principal = { ...principal, sandbox: "revoked" };

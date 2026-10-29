@@ -67,9 +67,9 @@ setInterval(() => {
     logger.warn({ refused }, "egress proxy refused unauthenticated sockets over the limit");
 }, 60_000).unref();
 const server = createEgressProxy({
-  verify: egressTokenVerifier(config.sessionKey),
+  verify: egressTokenVerifier(config.sessionVerifyKeys),
   // The server's site jobs (KOBE-343: the catalog's git mirror), with the same key.
-  verifySite: siteTokenVerifier(config.sessionKey),
+  verifySite: siteTokenVerifier(config.sessionVerifyKeys),
   policy: cache,
   resolve: dnsResolver({ timeoutMs: config.dnsTimeoutMs }),
   addresses: new AddressPolicy({

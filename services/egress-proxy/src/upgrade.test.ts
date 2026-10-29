@@ -3,7 +3,7 @@ import { request as httpRequest, type IncomingHttpHeaders, type Server } from "n
 import { createServer as createHttpsServer, type Server as HttpsServer } from "node:https";
 import { connect, type AddressInfo } from "node:net";
 import type { TLSSocket } from "node:tls";
-import { signSessionToken } from "@kobe/session-token";
+import { generateSessionKeyPair, signSessionToken } from "@kobe/session-token";
 import { pino } from "pino";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { AddressPolicy } from "./address-policy.js";
@@ -24,7 +24,9 @@ import {
 } from "./upgrade.js";
 
 /** KOBE-39: plain HTTP for header-injected domains, upgraded to verified HTTPS by the proxy. */
-const KEY = "p".repeat(40);
+const PAIR = generateSessionKeyPair();
+const KEY = PAIR.signing;
+const PUB = PAIR.verify;
 const TEAM = "0b5e8f1c-2d3a-4b5c-8d9e-0f1a2b3c4d5e";
 const USER = "2d7a0b3e-4f5c-4d7e-8fa0-2b3c4d5e6f70";
 const SANDBOX = "4f9c2d5a-6b7e-4f90-8bc2-4d5e6f708192";
@@ -189,7 +191,7 @@ async function start(
     sealedHeaders: async (_team: string, pattern: string) => HEADERS[pattern],
   };
   deps = {
-    verify: egressTokenVerifier(KEY),
+    verify: egressTokenVerifier(PUB),
     policy,
     resolve: async (host) => {
       const found = DNS[host];

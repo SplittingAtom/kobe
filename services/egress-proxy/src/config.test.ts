@@ -1,8 +1,12 @@
+import { generateSessionKeyPair } from "@kobe/session-token";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "./config.js";
 
-const KEY = "s".repeat(40);
-const base = { KOBE_DATABASE_URL: "postgres://app@db/kobe", KOBE_SESSION_KEY_EGRESS_PROXY: KEY };
+const PAIR = generateSessionKeyPair();
+const base = {
+  KOBE_DATABASE_URL: "postgres://app@db/kobe",
+  KOBE_SESSION_VERIFY_KEY_EGRESS_PROXY: PAIR.publicPem,
+};
 
 describe("loadConfig", () => {
   it("defaults: port 8080, HTTPS only, limits on", () => {
@@ -34,14 +38,17 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...base, KOBE_EGRESS_DENIED_CIDRS: "10.0.0.0/99" })).toThrow(
       /DENIED_CIDRS/,
     );
-    expect(() => loadConfig({ KOBE_DATABASE_URL: "x" })).toThrow(/KOBE_SESSION_KEY_EGRESS_PROXY/);
+    expect(() => loadConfig({ KOBE_DATABASE_URL: "x" })).toThrow(
+      /KOBE_SESSION_VERIFY_KEY_EGRESS_PROXY is required/,
+    );
     let message = "";
     try {
-      loadConfig({ ...base, KOBE_SESSION_KEY_EGRESS_PROXY: "short-secret" });
+      loadConfig({ ...base, KOBE_SESSION_VERIFY_KEY_EGRESS_PROXY: PAIR.privatePem });
     } catch (err) {
       message = (err as Error).message;
     }
-    expect(message).toMatch(/at least 32/);
-    expect(message).not.toContain("short-secret");
+    expect(message).toMatch(/public keys only/);
+    expect(message).not.toContain(PAIR.privatePem.split("\n")[1]);
+    expect(loadConfig(base).sessionVerifyKeys.has(PAIR.signing.kid)).toBe(true);
   });
 });

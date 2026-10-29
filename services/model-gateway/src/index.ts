@@ -72,7 +72,7 @@ const budgets = new BudgetGate(
       ttlMs: config.reservationTtlMs,
       // Hashes the site-wide keys; the same on every replica (derived from the shared key).
       salt: createHash("sha256")
-        .update(`kobe.budget-reservations:${config.sessionKey}`)
+        .update(`kobe.budget-reservations:${config.masterKey}`)
         .digest("hex"),
     }),
     // Settled reservations end at once: the reservation reads the spend itself (KOBE-286). A
@@ -132,7 +132,7 @@ const usage = new DbUsageSink({
 let lastResync = 0;
 let draining = false;
 const server = createModelGateway({
-  verify: (token) => verifySessionToken(token, "kobe.model-gateway", config.sessionKey),
+  verify: (token) => verifySessionToken(token, "kobe.model-gateway", config.sessionVerifyKeys),
   principals,
   // Shared eval cases for a running Orbit eval Job (KOBE-276): read from Postgres on request.
   evalCases: { load: (teamId, userId, evalId) => loadEvalCaseFile(db, teamId, userId, evalId) },
@@ -142,7 +142,7 @@ const server = createModelGateway({
     ),
   runTokens: {
     // Same derivation as the server's: the gateway session key is the shared master secret.
-    key: deriveRunTokenKey(new TextEncoder().encode(config.sessionKey)),
+    key: deriveRunTokenKey(new TextEncoder().encode(config.masterKey)),
     isActive: (s) => tokenRecords.get(`${s.teamId}:${s.jti}`, () => isRunTokenActive(db, s)),
     require: config.requireRunToken,
   },
@@ -154,13 +154,13 @@ const server = createModelGateway({
     ),
   // Run traces (KOBE-274): sandbox span ids remap with the server's key (same derivation).
   tracing: {
-    spanKey: deriveTraceSpanKey(new TextEncoder().encode(config.sessionKey)),
+    spanKey: deriveTraceSpanKey(new TextEncoder().encode(config.masterKey)),
     runSession: (teamId, runId) =>
       runSessions.get(`${teamId}:${runId}`, () => runSessionOf(db, teamId, runId)),
   },
   // Server-originated calls (KOBE-234): the server derives the same key from the same secret.
   serverCalls: {
-    key: deriveServerCallTokenKey(new TextEncoder().encode(config.sessionKey)),
+    key: deriveServerCallTokenKey(new TextEncoder().encode(config.masterKey)),
     replay: new ServerCallReplay(),
     runMatches: (claim) => serverCallRunMatches(db, claim),
     limiter: new CallLimiter({ perSandbox: SC.concurrentPerTeam, total: SC.concurrentTotal }),

@@ -2,7 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { pino } from "pino";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { canonicalJson } from "@kobe/protocol";
-import { signSessionToken } from "@kobe/session-token";
+import {
+  generateSessionKeyPair,
+  signSessionToken,
+  type SessionSigningKey,
+} from "@kobe/session-token";
 import { InMemorySpanExporter, initTelemetry } from "@kobe/telemetry";
 import { createApp } from "./app.js";
 import { DEFAULT_LIMITS, type Limits } from "./config.js";
@@ -23,7 +27,8 @@ import type {
 import { FakeUpstream } from "./testing/fake-upstream.js";
 import { createUpstreamClient, type UpstreamClient } from "./upstream.js";
 
-const KEY = "k".repeat(48);
+const PAIR = generateSessionKeyPair();
+const KEY = PAIR.signing;
 const TEAM = randomUUID();
 const USER = randomUUID();
 const SANDBOX = randomUUID();
@@ -32,7 +37,7 @@ const THREAD = randomUUID();
 
 function token(
   options: {
-    key?: string;
+    key?: SessionSigningKey;
     aud?: "kobe.mcp-proxy" | "kobe.egress-proxy";
     ttl?: number;
     sub?: string;
@@ -152,7 +157,7 @@ function app(
 ) {
   const l = { ...limits, ...overrides.limits };
   return createApp({
-    sessionKey: KEY,
+    sessionVerifyKeys: PAIR.verify,
     server,
     upstream,
     credentials,
@@ -235,7 +240,7 @@ describe("authentication and transport", () => {
     for (const t of [
       "",
       "forged.token.value",
-      token({ key: "x".repeat(48) }),
+      token({ key: generateSessionKeyPair().signing }),
       token({ ttl: -60 }),
       token({ aud: "kobe.egress-proxy" }),
     ]) {
@@ -284,7 +289,7 @@ describe("authentication and transport", () => {
     expect(server.asked).toEqual([]);
     // Forged or wrong-audience tokens never get the softer answer; neither does a fresh session.
     for (const t of [
-      token({ key: "x".repeat(48), age: 1200, ttl: 600 }),
+      token({ key: generateSessionKeyPair().signing, age: 1200, ttl: 600 }),
       token({ aud: "kobe.egress-proxy", age: 1200, ttl: 600 }),
     ]) {
       const res = await rpc("tools/list", undefined, {

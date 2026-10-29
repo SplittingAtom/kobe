@@ -24,7 +24,7 @@ import {
   withTeam,
   type KobeDatabase,
 } from "@kobe/db";
-import { signSessionToken, verifySessionToken } from "@kobe/session-token";
+import { generateSessionKeyPair, signSessionToken, verifySessionToken } from "@kobe/session-token";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { BudgetGate } from "./budget-gate.js";
@@ -43,7 +43,7 @@ import { DbUsageSink } from "./usage/sink.js";
  * after the first wave ended (their ledger rows may not be visible yet: until a row lands its call
  * keeps its hold, and the reservation reads the spend itself, KOBE-286).
  */
-const KEY = "m".repeat(40);
+const SESSION = generateSessionKeyPair();
 const box = new SecretBox("v".repeat(40), VIRTUAL_KEY_PURPOSE);
 const logger = pino({ level: "silent" });
 const team = randomUUID();
@@ -106,7 +106,7 @@ async function startReplica(): Promise<Replica> {
     },
   });
   const shim = createModelGateway({
-    verify: (t) => verifySessionToken(t, "kobe.model-gateway", KEY),
+    verify: (t) => verifySessionToken(t, "kobe.model-gateway", SESSION.verify),
     runTokens: noRunTokens(),
     principals,
     isRunLeased: async () => false,
@@ -147,7 +147,7 @@ const token = (m: { user: string; sandboxId: string }) => {
       exp: now + 900,
       jti: randomUUID().replace(/-/g, ""),
     },
-    KEY,
+    SESSION.signing,
   );
 };
 const chat = (base: string, m: (typeof members)[number]) =>

@@ -45,7 +45,9 @@ export function keyId(publicKey: KeyObject): string {
 }
 
 function pemBlocks(text: string): { type: string; pem: string }[] {
-  return [...text.matchAll(PEM_BLOCK)].map((m) => ({ type: m[1] ?? "", pem: m[0] }));
+  // Env files sometimes carry PEMs with escaped newlines.
+  const normalised = text.includes("\n") ? text : text.replace(/\\n/g, "\n");
+  return [...normalised.matchAll(PEM_BLOCK)].map((m) => ({ type: m[1] ?? "", pem: m[0] }));
 }
 
 /** One Ed25519 private key (PKCS#8 PEM). Never echoes the key in errors. */
@@ -107,6 +109,36 @@ export function mergeVerifyKeys(...sets: SessionVerifyKeys[]): SessionVerifyKeys
   const merged = new Map<string, KeyObject>();
   for (const set of sets) for (const [kid, key] of set) merged.set(kid, key);
   return merged;
+}
+
+const audienceSuffix = (audience: string): string =>
+  audience
+    .replace(/^kobe\./, "")
+    .replace(/-/g, "_")
+    .toUpperCase();
+
+/** KOBE_SESSION_SIGNING_KEY_<AUDIENCE>: the audience's private key (server only). */
+export const signingKeyEnvName = (audience: string): string =>
+  `KOBE_SESSION_SIGNING_KEY_${audienceSuffix(audience)}`;
+
+/** KOBE_SESSION_VERIFY_KEY_<AUDIENCE>: the audience's public key bundle (each verifier). */
+export const verifyKeyEnvName = (audience: string): string =>
+  `KOBE_SESSION_VERIFY_KEY_${audienceSuffix(audience)}`;
+
+type Env = Readonly<Record<string, string | undefined>>;
+
+/** A verifier's keys from its env (fails fast, naming the variable, never echoing the value). */
+export function verifyKeysFromEnv(env: Env, audience: string): SessionVerifyKeys {
+  const name = verifyKeyEnvName(audience);
+  const value = env[name];
+  if (!value?.trim()) {
+    throw new Error(`Invalid configuration: ${name} is required (Ed25519 public key PEM)`);
+  }
+  try {
+    return loadVerifyKeys(value, name);
+  } catch (err) {
+    throw new Error(`Invalid configuration: ${(err as Error).message}`, { cause: err });
+  }
 }
 
 export interface GeneratedSessionKeyPair {

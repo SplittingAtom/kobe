@@ -1,9 +1,12 @@
+import { generateSessionKeyPair } from "@kobe/session-token";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "./config.js";
 
+const PAIR = generateSessionKeyPair();
 const env = {
   KOBE_DATABASE_URL: "postgres://app@db/kobe",
   KOBE_SESSION_KEY_MODEL_GATEWAY: "m".repeat(40),
+  KOBE_SESSION_VERIFY_KEY_MODEL_GATEWAY: PAIR.publicPem,
   KOBE_MODELS_VIRTUAL_KEY_SECRET: "v".repeat(40),
   KOBE_BIFROST_URL: "http://kobe-bifrost:8080/",
 };
@@ -37,6 +40,14 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ ...env, KOBE_SESSION_KEY_MODEL_GATEWAY: undefined })).toThrow(
       /KOBE_SESSION_KEY_MODEL_GATEWAY is required/,
     );
+    // Session tokens: public key(s) only (KOBE-513); a private key is refused.
+    expect(() => loadConfig({ ...env, KOBE_SESSION_VERIFY_KEY_MODEL_GATEWAY: undefined })).toThrow(
+      /KOBE_SESSION_VERIFY_KEY_MODEL_GATEWAY is required/,
+    );
+    expect(() =>
+      loadConfig({ ...env, KOBE_SESSION_VERIFY_KEY_MODEL_GATEWAY: PAIR.privatePem }),
+    ).toThrow(/public keys only/);
+    expect(loadConfig(env).sessionVerifyKeys.has(PAIR.signing.kid)).toBe(true);
     const weak = { ...env, KOBE_MODELS_VIRTUAL_KEY_SECRET: "weak-secret-value" };
     expect(() => loadConfig(weak)).toThrow(/at least 32/);
     expect(() => loadConfig(weak)).not.toThrow(/weak-secret-value/);

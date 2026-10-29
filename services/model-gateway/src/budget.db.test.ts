@@ -28,7 +28,7 @@ import {
   withTeam,
   type KobeDatabase,
 } from "@kobe/db";
-import { signSessionToken, verifySessionToken } from "@kobe/session-token";
+import { generateSessionKeyPair, signSessionToken, verifySessionToken } from "@kobe/session-token";
 import { noRunTokens } from "./testing/run-tokens.js";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
@@ -45,7 +45,7 @@ import { DbUsageSink } from "./usage/sink.js";
  * the gate's cached state (its TTL is far longer than the test), and the next call is refused
  * with 402 before Bifrost; a `budgets:` hint after the budget is raised lets calls through again.
  */
-const KEY = "m".repeat(40);
+const SESSION = generateSessionKeyPair();
 const box = new SecretBox("v".repeat(40), VIRTUAL_KEY_PURPOSE);
 const team = randomUUID();
 const user = randomUUID();
@@ -73,7 +73,7 @@ const token = () => {
       exp: now + 900,
       jti: randomUUID().replace(/-/g, ""),
     },
-    KEY,
+    SESSION.signing,
   );
 };
 const chat = () =>
@@ -172,7 +172,7 @@ beforeAll(async () => {
     },
   });
   shim = createModelGateway({
-    verify: (t) => verifySessionToken(t, "kobe.model-gateway", KEY),
+    verify: (t) => verifySessionToken(t, "kobe.model-gateway", SESSION.verify),
     runTokens: noRunTokens(),
     principals,
     isRunLeased: async () => false,

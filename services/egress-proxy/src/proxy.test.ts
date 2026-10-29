@@ -7,7 +7,7 @@ import {
   type Server as NetServer,
   type Socket,
 } from "node:net";
-import { signSessionToken, signSiteEgressToken } from "@kobe/session-token";
+import { generateSessionKeyPair, signSessionToken, signSiteEgressToken } from "@kobe/session-token";
 import { InMemorySpanExporter, initTelemetry } from "@kobe/telemetry";
 import { pino } from "pino";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -28,7 +28,9 @@ import {
 import { TunnelRegistry } from "./tunnel-registry.js";
 import { captureClientHello } from "./testing/client-hello.js";
 
-const KEY = "p".repeat(40);
+const PAIR = generateSessionKeyPair();
+const KEY = PAIR.signing;
+const PUB = PAIR.verify;
 const TEAM = "0b5e8f1c-2d3a-4b5c-8d9e-0f1a2b3c4d5e";
 const USER = "2d7a0b3e-4f5c-4d7e-8fa0-2b3c4d5e6f70";
 const SANDBOX = "4f9c2d5a-6b7e-4f90-8bc2-4d5e6f708192";
@@ -116,7 +118,7 @@ async function start(overrides: Partial<ProxyDeps> = {}): Promise<void> {
   connectCalls = [];
   let rebinds = 0;
   deps = {
-    verify: egressTokenVerifier(KEY),
+    verify: egressTokenVerifier(PUB),
     policy: {
       decide: async (_team, host): Promise<EgressDecision> =>
         ENABLED.has(host)
@@ -128,7 +130,7 @@ async function start(overrides: Partial<ProxyDeps> = {}): Promise<void> {
           : { allowed: false, reason: "not_in_ceiling" },
       isActiveMember: async () => true,
     },
-    verifySite: siteTokenVerifier(KEY),
+    verifySite: siteTokenVerifier(PUB),
     resolve: async (host) => {
       resolveCalls.push(host);
       // A rebinding name: public (here: the test upstream) first, internal afterwards.
@@ -213,7 +215,7 @@ describe("authentication", () => {
     for (const credentials of [
       undefined,
       `Bearer ${token("kobe.mcp-proxy")}`,
-      `Bearer ${token("kobe.egress-proxy", "x".repeat(40))}`,
+      `Bearer ${token("kobe.egress-proxy", generateSessionKeyPair().signing)}`,
     ]) {
       const { head } = await openConnect("allowed.example.com:443", credentials);
       expect(status(head)).toBe("HTTP/1.1 407 Proxy Authentication Required");

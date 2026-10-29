@@ -32,7 +32,7 @@ import {
   type ServerCallTokenPurpose,
 } from "@kobe/protocol";
 import { deriveServerCallTokenKey, signServerCallToken } from "@kobe/protocol/node";
-import { verifySessionToken } from "@kobe/session-token";
+import { generateSessionKeyPair, verifySessionToken } from "@kobe/session-token";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { BudgetGate } from "./budget-gate.js";
@@ -52,6 +52,7 @@ import { DbUsageSink } from "./usage/sink.js";
  */
 const KEY = "m".repeat(40);
 const SC_KEY = deriveServerCallTokenKey(new TextEncoder().encode(KEY));
+const SESSION = generateSessionKeyPair();
 const box = new SecretBox("v".repeat(40), VIRTUAL_KEY_PURPOSE);
 const team = randomUUID();
 const user = randomUUID();
@@ -164,7 +165,7 @@ beforeAll(async () => {
     onWritten: (teamId, callIds) => gate.settle(teamId, callIds),
   });
   shim = createModelGateway({
-    verify: (t) => verifySessionToken(t, "kobe.model-gateway", KEY),
+    verify: (t) => verifySessionToken(t, "kobe.model-gateway", SESSION.verify),
     runTokens: noRunTokens(),
     principals: new PrincipalCache(
       { load: (t, u, s) => loadGatewayPrincipal(db, t, u, s), requestKey: async () => undefined },
