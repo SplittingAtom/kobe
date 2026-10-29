@@ -1,7 +1,9 @@
 # Gate — Site theming and branding (KOBE-497..503)
 
 Ticket: KOBE-508. Plan: [`docs/specs/theming.md`](../specs/theming.md); catalogue:
-[`docs/theming.md`](../theming.md). Sign-off: Chris.
+[`docs/theming.md`](../theming.md). **Approved by Chris on 2026-10-29** ("gate review looks good"):
+TH3 stands (the chat's send button stays neutral), the six preset names are confirmed, KOBE-504 and
+KOBE-505 stay optional in the backlog.
 
 ## What shipped
 
@@ -31,7 +33,7 @@ Arial` stack → Liberation Sans before; `system-ui` → WenQuanYi after). Fixed
 - **ac-2 (first paint branded):** `appearance.spec.ts` on gate1: name, logo and favicon steps pass; the script-SVG refusal step
   failed because, with two server replicas, `GET /v1/site/branding` right after an upload answered
   from the other replica's 10 s cache, so the reload showed no logo and the dark-logo picker stayed
-  disabled. Fixed in #405 (no per-replica cache). RESULT after the #405 deploy. (Steps: name in the server-rendered
+  disabled. Fixed in #405 (no per-replica cache). Re-run after the #405 deploy is recorded in the KOBE-508 log. (Steps: name in the server-rendered
   `<title>` and `<h1>` of a fresh load; logo `<img>`; favicon `<link rel=icon>`; Plum preset AA in
   both schemes; script SVG refused; reset).
 - **ac-3 (contrast floor):** server route tests (422 `contrast_floor`); page: Save disabled with the
@@ -44,19 +46,19 @@ Arial` stack → Liberation Sans before; `system-ui` → WenQuanYi after). Fixed
 - **ac-6:** `theme.spec.ts` on gate1 at `local-87398452b50d`: 2 passed (default preset; the
   Appearance spec covers the Plum preset's AA checks); `pnpm license:gate`: passes on main
   5cd8a91e (nothing pending).
-- **ac-7 (backup/restore):** NOT RUN on gate1 in this cycle; the assets table and settings keys are in
+- **ac-7 (backup/restore):** not run on gate1 in this cycle (recorded as such on KOBE-508); the assets table and settings keys are in
   the `public` schema dump; `startup-seeds.ts` registration verified by `restore-target.db.test.ts`.
 - **Reviews:** Opus DB/security passes on 497 (3 LOW fixed), 499 (2 MEDIUM + 3 LOW fixed), 503
   (1 MEDIUM + 3 LOW fixed); `/code-review medium` on 498 (10), 500 (7), 501 (8), all addressed.
 
-## Decisions for Chris at the gate
+## Decisions taken at the gate (Chris, 2026-10-29)
 
-1. TH3: the chat's send button stays neutral while console primary buttons, links, focus rings,
+1. TH3 confirmed: the chat's send button stays neutral while console primary buttons, links, focus rings,
    badges and count pills take the accent. Reverse with one line (`--primary` → brand) if the mix
    reads wrong.
-2. Preset names and values: Default, Slate, Forest, Plum, Ember, Tokyo Nights.
-3. Schedule KOBE-504 (allow-listed token overrides, export/import) and KOBE-505 (one neutral palette)?
-4. After approval: remove the rollback tag `local-876e9cf90597` from the nodes.
+2. Preset names confirmed: Default, Slate, Forest, Plum, Ember, Tokyo Nights.
+3. KOBE-504 (allow-listed token overrides, export/import) and KOBE-505 (one neutral palette) stay optional.
+4. Rollback tag `local-5cd8a91ea59b` is removed from the nodes after the #405 build is deployed.
 
 ## How to review on gate1
 
