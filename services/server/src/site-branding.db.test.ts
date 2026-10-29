@@ -123,13 +123,16 @@ describe("GET /v1/site/branding (public, TH6)", () => {
     );
   });
 
-  it("caches for 10 s and drops the cache on every write", async () => {
-    await as.anon.get("/v1/site/branding");
-    // Written behind the server's back: the cached snapshot still answers.
+  it("reads fresh on every request: a write by another replica shows on the next read", async () => {
+    const before = await as.anon.get("/v1/site/branding");
+    // Written behind this replica's back (another server replica, the seed, a restore): no
+    // per-replica cache, so the next read answers with it and the ETag moves.
     await h.admin.query(
-      `INSERT INTO site_settings (key, value) VALUES ('branding.app_name', 'Sneaky')`,
+      `INSERT INTO site_settings (key, value) VALUES ('branding.app_name', 'Other replica')`,
     );
-    expect((await as.anon.get("/v1/site/branding")).json.appName).toBe("Kobe");
+    const after = await as.anon.get("/v1/site/branding");
+    expect(after.json.appName).toBe("Other replica");
+    expect(after.headers.get("etag")).not.toBe(before.headers.get("etag"));
     const put = await as.admin.put("/v1/site/branding", { appName: "Acme" });
     expect(put.json.appName).toBe("Acme");
     expect((await as.anon.get("/v1/site/branding")).json.appName).toBe("Acme");
