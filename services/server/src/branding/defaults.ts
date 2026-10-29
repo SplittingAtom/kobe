@@ -1,5 +1,5 @@
 import { BRANDING_SETTING_KEYS, type ThemeSettings } from "@kobe/protocol";
-import { SYSTEM_ACTOR, siteSettings, type KobeDb } from "@kobe/db";
+import { SYSTEM_ACTOR, siteSettings, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import type { BrandingDefaults } from "./defaults-config.js";
 import { themeLabel } from "./settings.js";
@@ -43,36 +43,58 @@ function seedsOf(defaults: BrandingDefaults): Seed[] {
   return seeds;
 }
 
+/** A default written by {@link writeBrandingDefaults}, to audit with {@link auditBrandingDefaults}. */
+export type WrittenDefault = Seed;
+
 /**
- * Writes each configured default whose key is unset (INSERT … ON CONFLICT DO NOTHING per key, so
- * two replicas starting together seed once), records one `site.branding.updated` event per
- * written key with the system actor (as the gallery seed records its agents), and drops this
+ * Writes each configured default whose key is unset in `tx` (INSERT … ON CONFLICT DO NOTHING per
+ * key, so two replicas starting together seed once). Returns what it wrote, for the audit.
+ */
+export async function writeBrandingDefaults(
+  tx: KobeTx,
+  defaults: BrandingDefaults,
+): Promise<WrittenDefault[]> {
+  const done: Seed[] = [];
+  for (const seed of seedsOf(defaults)) {
+    const rows = await tx
+      .insert(siteSettings)
+      .values({ key: seed.key, value: seed.value })
+      .onConflictDoNothing({ target: siteSettings.key })
+      .returning({ key: siteSettings.key });
+    if (rows.length > 0) done.push(seed);
+  }
+  return done;
+}
+
+/**
+ * One `site.branding.updated` event per written default, actor system (as the gallery seed records
+ * its agents). The transaction's last writes: audit after every write.
+ */
+export async function auditBrandingDefaults(
+  tx: KobeTx,
+  written: readonly WrittenDefault[],
+): Promise<void> {
+  for (const seed of written) {
+    await recordAudit(tx, {
+      actor: SYSTEM_ACTOR,
+      action: "site.branding.updated",
+      target: { setting: seed.setting, value: seed.label },
+    });
+  }
+}
+
+/**
+ * The start-up seed: writes and audits the unset defaults in one transaction and drops this
  * replica's branding cache. Returns the settings it wrote.
  */
 export async function seedBrandingDefaults(
   db: KobeDb,
   defaults: BrandingDefaults,
 ): Promise<Setting[]> {
-  const seeds = seedsOf(defaults);
-  if (seeds.length === 0) return [];
+  if (seedsOf(defaults).length === 0) return [];
   const written = await db.transaction(async (tx) => {
-    const done: Seed[] = [];
-    for (const seed of seeds) {
-      const rows = await tx
-        .insert(siteSettings)
-        .values({ key: seed.key, value: seed.value })
-        .onConflictDoNothing({ target: siteSettings.key })
-        .returning({ key: siteSettings.key });
-      if (rows.length > 0) done.push(seed);
-    }
-    // Audit last: every write first, then one event per seeded setting.
-    for (const seed of done) {
-      await recordAudit(tx, {
-        actor: SYSTEM_ACTOR,
-        action: "site.branding.updated",
-        target: { setting: seed.setting, value: seed.label },
-      });
-    }
+    const done = await writeBrandingDefaults(tx, defaults);
+    await auditBrandingDefaults(tx, done);
     return done.map((s) => s.setting);
   });
   if (written.length > 0) brandingCache(db).invalidate();

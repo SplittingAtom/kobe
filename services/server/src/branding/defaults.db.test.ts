@@ -161,6 +161,8 @@ describe("POST /v1/site/branding/reset with chart defaults (KOBE-503)", () => {
       showName: true,
       theme: { preset: "forest" },
     });
+    // A key the chart sets gets the reset's user event and then the seed's system event, even when
+    // its value ends up unchanged: the audit shows both steps of the reset.
     const events = await hc.admin.query<{ actor_kind: string; target: unknown }>(
       `SELECT actor_kind, target FROM audit_log
         WHERE action = 'site.branding.updated' AND seq > $1 ORDER BY seq`,
@@ -173,6 +175,39 @@ describe("POST /v1/site/branding/reset with chart defaults (KOBE-503)", () => {
       { actor_kind: "system", target: { setting: "app_name", value: "Acme Assist" } },
       { actor_kind: "system", target: { setting: "theme", value: "theme:forest" } },
     ]);
+  });
+
+  it("seeds inside the reset's transaction: a failed seed rolls the reset back", async () => {
+    const owner = await hc.signIn("owner@reset.test");
+    await owner.put("/v1/site/branding", { appName: "Admin Choice", theme: { preset: "plum" } });
+    await hc.admin.query(`
+      CREATE FUNCTION branding_seed_fail() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.key = 'branding.theme' AND NEW.value = '{"preset":"forest"}' THEN
+          RAISE EXCEPTION 'injected failure';
+        END IF;
+        RETURN NEW;
+      END $$;
+      CREATE TRIGGER branding_seed_fail BEFORE INSERT ON site_settings
+        FOR EACH ROW EXECUTE FUNCTION branding_seed_fail();`);
+    try {
+      expect((await owner.post("/v1/site/branding/reset")).status).toBe(500);
+    } finally {
+      await hc.admin.query(
+        `DROP TRIGGER branding_seed_fail ON site_settings; DROP FUNCTION branding_seed_fail();`,
+      );
+    }
+    const { rows } = await hc.admin.query<{ key: string; value: string }>(
+      `SELECT key, value FROM site_settings WHERE key LIKE 'branding.%' ORDER BY key`,
+    );
+    expect(rows).toEqual([
+      { key: "branding.app_name", value: "Admin Choice" },
+      { key: "branding.theme", value: '{"preset":"plum"}' },
+    ]);
+    expect((await hc.browser().get("/v1/site/branding")).json).toMatchObject({
+      appName: "Admin Choice",
+      theme: { preset: "plum" },
+    });
   });
 });
 

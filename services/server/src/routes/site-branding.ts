@@ -26,7 +26,7 @@ import {
   storeSetting,
   themeLabel,
 } from "../branding/settings.js";
-import { seedBrandingDefaults } from "../branding/defaults.js";
+import { auditBrandingDefaults, writeBrandingDefaults } from "../branding/defaults.js";
 import { inspectImage } from "../branding/sniff.js";
 import { brandingCache, deleteAsset, sha256Hex, storeAsset } from "../branding/store.js";
 import type { ServerDeps } from "../deps.js";
@@ -272,7 +272,10 @@ export function siteBrandingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
     return current(c);
   });
 
-  /** TH12: the name, the files and the style back to Kobe's, in one transaction. */
+  /**
+   * TH12: the name, the files and the style back to Kobe's, or to the chart's branding defaults
+   * where set (KOBE-503), in one transaction.
+   */
   app.post("/reset", async (c) => {
     await db.transaction(async (tx) => {
       const settings = await tx
@@ -283,6 +286,10 @@ export function siteBrandingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
         .delete(siteBrandingAssets)
         .where(inArray(siteBrandingAssets.kind, [...BRANDING_ASSET_KINDS]))
         .returning({ kind: siteBrandingAssets.kind });
+      // The chart's branding defaults (KOBE-503) are this install's defaults: the reset returns to
+      // them in the same transaction (a failure rolls the reset back). Without chart values the
+      // keys stay unset.
+      const seeded = await writeBrandingDefaults(tx, deps.brandingDefaults);
       const removedKeys = new Set(settings.map((r) => r.key));
       const defaults: [Setting, string, string][] = [
         ["app_name", BRANDING_SETTING_KEYS.appName, DEFAULT_APP_NAME],
@@ -295,10 +302,9 @@ export function siteBrandingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
       for (const kind of BRANDING_ASSET_KINDS) {
         if (assets.some((a) => a.kind === kind)) await audited(tx, kind, REMOVED);
       }
+      // The reset's events, then the seed's system events (even where the value did not change).
+      await auditBrandingDefaults(tx, seeded);
     });
-    // The chart's branding defaults (KOBE-503) are this install's defaults: a reset returns to
-    // them at once (audited as the system's seed). Without chart values the keys stay unset.
-    await seedBrandingDefaults(db, deps.brandingDefaults);
     return current(c);
   });
 

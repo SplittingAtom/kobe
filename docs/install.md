@@ -679,7 +679,9 @@ unset**, and records it in the site audit log as the system (`site.branding.upda
 change on the Appearance page always wins: it is never overwritten on a restart or upgrade, and
 changing a value here later does not change a site that already has the setting. Reset to defaults
 on the Appearance page returns to the chart's values at once (keys without a chart value go back to
-Kobe's built-in defaults); clear a value here to make Kobe's default the reset target. An invalid value stops the server at start with the key named.
+Kobe's built-in defaults); clear a value here to make Kobe's default the reset target. The audit
+log then shows the reset's event and the system's seed event for each such key, even when its
+value ends up unchanged. An invalid value stops the server at start with the key named.
 `kobe restore` accepts a fresh target seeded this way and replaces those rows with the backup's.
 
 ### Private certificate authorities

@@ -123,6 +123,25 @@ describe("kobe restore's target check on a started site (KOBE-422)", () => {
     );
   });
 
+  it("refuses a branding row re-seeded after an admin's reset (KOBE-503)", async () => {
+    const db = await started();
+    // An admin set the name, then reset it: the reset re-seeded the chart's value as the system,
+    // so the row equals a seed's, but a person's event for the setting marks a configured site.
+    await sql(
+      db.adminUrl,
+      `${BRANDING_SEED}
+       INSERT INTO audit_log (actor_kind, actor_id, action, target) VALUES
+         ('user', '00000000-0000-4000-8000-0000000000c2', 'site.branding.updated',
+          '{"setting":"app_name","value":"Admin Choice"}'),
+         ('user', '00000000-0000-4000-8000-0000000000c2', 'site.branding.updated',
+          '{"setting":"app_name","value":"Kobe"}'),
+         ('system', NULL, 'site.branding.updated', '{"setting":"app_name","value":"Acme Assist"}')`,
+    );
+    await expect(prelude(db)).rejects.toThrow(
+      /already has data in:.*\bsite_settings\b.*restore only into a freshly installed/,
+    );
+  });
+
   it.each([
     ["users", "INSERT INTO users (name, email) VALUES ('Ann', 'ann@example.com')"],
     [
