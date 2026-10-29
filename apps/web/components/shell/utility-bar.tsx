@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { NotificationBell } from "../chat/notification-bell";
 import { CHAT_PORTALLED } from "../ui/chat-portal";
 import { AreaLinks, ConsoleIconLinks } from "./bar-links";
+import { Brand } from "./brand";
 import { IconAction } from "./icon-action";
 import { ProfileMenu } from "./profile-menu";
 import { useShellBand } from "./shell-band";
@@ -85,7 +86,9 @@ export function UtilityBar({
     >
       <div className={styles.rowOne} data-bar-row="1">
         <ShellSlotTarget name="nav" className={styles.nav} />
-        <h1 className={styles.wordmark}>Kobe</h1>
+        <h1 className={styles.wordmark}>
+          <Brand />
+        </h1>
         {single && (
           <IconAction
             command="thread-menu"

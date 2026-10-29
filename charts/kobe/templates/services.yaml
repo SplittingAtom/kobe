@@ -11,8 +11,11 @@
 {{- $sessionTtl := printf "- name: KOBE_SESSION_TOKEN_TTL_SECONDS\n  value: %s" (.Values.server.sessionTokenTtlSeconds | int | toString | quote) -}}
 {{- $schedTick := printf "- name: KOBE_SCHEDULER_TICK_SECONDS\n  value: %s" (.Values.scheduler.tickSeconds | int | toString | quote) -}}
 {{- $schedGrace := printf "- name: KOBE_SCHEDULER_GRACE_MINUTES\n  value: %s" (.Values.scheduler.catchUpGraceMinutes | int | toString | quote) -}}
+{{- /* KOBE-500 (TH5): the server's in-cluster origin, for the site branding of every render. */ -}}
+{{- $webServerUrl := .Values.web.serverUrl | default (printf "http://%s-server" $fullname) | trimSuffix "/" -}}
 {{- include "kobe.nodeService" (dict "root" . "component" "web" "image" "web" "values" .Values.web
       "healthPath" "/api/healthz" "readyPath" "/api/healthz"
+      "env" (printf "- name: KOBE_SERVER_URL\n  value: %s" ($webServerUrl | quote))
       "extraMounts" "- name: next-cache\n  mountPath: /app/apps/web/.next/cache"
       "extraVolumes" "- name: next-cache\n  emptyDir: {}") }}
 ---

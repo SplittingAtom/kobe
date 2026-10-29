@@ -1,19 +1,21 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { useBranding } from "../../components/shell/branding-context";
 import { validateSetup } from "../../lib/setup";
 
 /** First-run wizard: creates the Owner while Kobe has no users, then disables itself. */
 export default function SetupPage() {
   const [required, setRequired] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { appName } = useBranding();
   const [done, setDone] = useState(false);
 
   useEffect(() => {
     fetch("/v1/setup")
       .then((r) => r.json() as Promise<{ required: boolean }>)
       .then((d) => setRequired(d.required))
-      .catch(() => setError("Could not reach the Kobe server."));
+      .catch(() => setError(`Could not reach the ${appName} server.`));
   }, []);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -44,14 +46,14 @@ export default function SetupPage() {
       <main>
         <h1>Owner created</h1>
         <p>
-          <a href="/sign-in">Sign in</a> to finish setting up Kobe.
+          <a href="/sign-in">Sign in</a> to finish setting up {appName}.
         </p>
       </main>
     );
   if (required === false)
     return (
       <main>
-        <h1>Kobe is set up</h1>
+        <h1>{appName} is set up</h1>
         <p>
           <a href="/sign-in">Sign in</a>
         </p>
@@ -65,7 +67,7 @@ export default function SetupPage() {
     );
   return (
     <main>
-      <h1>Set up Kobe</h1>
+      <h1>Set up {appName}</h1>
       <p>Create the Owner account. You can invite everyone else afterwards.</p>
       <form onSubmit={onSubmit}>
         <label>

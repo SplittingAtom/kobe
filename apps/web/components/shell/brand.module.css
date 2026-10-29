@@ -1,0 +1,24 @@
+/* The site's brand (KOBE-500, docs/theming.md §2): logo 24 px tall, at most 160 px wide, scaled to
+   fit, next to the name; the dark logo shows in the dark theme (app/theme.css display tokens). */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  vertical-align: middle;
+}
+
+.logo {
+  display: block;
+  height: 24px;
+  width: auto;
+  max-width: 160px;
+  object-fit: contain;
+}
+
+.logo.whenLight {
+  display: var(--kobe-when-light);
+}
+
+.logo.whenDark {
+  display: var(--kobe-when-dark);
+}
