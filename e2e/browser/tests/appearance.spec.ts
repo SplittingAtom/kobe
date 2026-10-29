@@ -136,20 +136,20 @@ test("an admin brands the site: name, logo, favicon, preset, refusals and reset 
     await openAppearance(page);
     await reloadedAfter(page, "Logo saved. Reloading…", () =>
       panel
-        .getByLabel("Logo file")
+        .getByLabel("Logo file", { exact: true })
         .setInputFiles({ name: "logo.png", mimeType: "image/png", buffer: PNG }),
     );
     await openAppearance(page);
     await reloadedAfter(page, "Favicon saved. Reloading…", () =>
       panel
-        .getByLabel("Favicon file")
+        .getByLabel("Favicon file", { exact: true })
         .setInputFiles({ name: "favicon.png", mimeType: "image/png", buffer: PNG }),
     );
     await openAppearance(page);
 
     // A `<script>` SVG is refused with the reason.
     await panel
-      .getByLabel("Dark logo file")
+      .getByLabel("Dark logo file", { exact: true })
       .setInputFiles({ name: "bad.svg", mimeType: "image/svg+xml", buffer: SCRIPT_SVG });
     await expect(panel.getByText(/This SVG is refused/)).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
     await expect(panel.getByText(/Export the file as Plain SVG/)).toBeVisible();
