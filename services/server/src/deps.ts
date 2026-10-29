@@ -85,12 +85,15 @@ import { createSkillEvalJudge, type SkillEvalJudge } from "./skills/evals/judge.
 import { DEFAULT_UPLOAD_SETTINGS, type UploadSettings } from "./uploads/settings.js";
 import type { ScoreSink } from "@kobe/telemetry";
 import { FeedbackScores } from "./feedback/scores.js";
+import type { BrandingDefaults } from "./branding/defaults-config.js";
 
 export interface ServerDepsOptions {
   readonly databaseUrl: string;
   readonly publicUrl: string;
   /** KOBE_RETENTION_PAUSED (KOBE-243): shown to site admins; the deleting jobs honour it. */
   readonly retentionPaused?: boolean;
+  /** Chart-seeded branding defaults (KOBE-503): seeded at start and after a reset while unset. */
+  readonly brandingDefaults?: BrandingDefaults;
   readonly authSecret: string;
   /** One-time secret proving possession of the install for first-run setup. */
   readonly setupToken: string;
@@ -200,6 +203,8 @@ export interface ServerDeps {
   readonly publicUrl: string;
   /** The nightly retention pass, offboarding purges and workspace GC are paused (KOBE-243). */
   readonly retentionPaused: boolean;
+  /** Chart-seeded branding defaults (KOBE-503); empty when none is configured. */
+  readonly brandingDefaults: BrandingDefaults;
   /** Kobe Event Stream fan-out (one LISTEN connection per process) and SSE timings (KOBE-31). */
   readonly eventStream: {
     readonly hub: RunEventHub;
@@ -533,6 +538,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     auth,
     publicUrl: new URL(options.publicUrl).origin,
     retentionPaused: options.retentionPaused ?? false,
+    brandingDefaults: options.brandingDefaults ?? {},
     eventStream: { hub, reader, timings: { ...STREAM_DEFAULTS, ...options.eventStream?.timings } },
     mailer: options.mailer,
     agentLimits: { ...AGENT_LIMIT_DEFAULTS, ...options.agents },

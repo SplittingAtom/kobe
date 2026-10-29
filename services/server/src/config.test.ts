@@ -302,4 +302,50 @@ describe("loadConfig", () => {
       );
     });
   });
+  describe("chart-seeded branding defaults (KOBE-503)", () => {
+    it("is empty when unset or blank", () => {
+      expect(loadConfig(REQUIRED).branding).toEqual({});
+      expect(
+        loadConfig({
+          ...REQUIRED,
+          KOBE_BRANDING_APP_NAME: "",
+          KOBE_BRANDING_PRESET: " ",
+          KOBE_BRANDING_SHOW_NAME: "",
+        }).branding,
+      ).toEqual({});
+    });
+
+    it("reads the name (trimmed), the preset and show-name", () => {
+      expect(
+        loadConfig({
+          ...REQUIRED,
+          KOBE_BRANDING_APP_NAME: "  Acme Assist ",
+          KOBE_BRANDING_PRESET: "tokyo-nights",
+          KOBE_BRANDING_SHOW_NAME: "false",
+        }).branding,
+      ).toEqual({ appName: "Acme Assist", preset: "tokyo-nights", showName: false });
+      expect(loadConfig({ ...REQUIRED, KOBE_BRANDING_SHOW_NAME: "true" }).branding).toEqual({
+        showName: true,
+      });
+    });
+
+    it.each([
+      ["KOBE_BRANDING_APP_NAME", "x".repeat(41)],
+      ["KOBE_BRANDING_APP_NAME", "two\nlines"],
+      ["KOBE_BRANDING_PRESET", "custom"],
+      ["KOBE_BRANDING_PRESET", "Slate"],
+      ["KOBE_BRANDING_SHOW_NAME", "yes"],
+    ])("fails fast on an invalid %s, naming the key", (key, value) => {
+      expect(() => loadConfig({ ...REQUIRED, [key]: value })).toThrow(new RegExp(key));
+    });
+
+    it("is not read by the scheduler", () => {
+      const config = loadConfig({
+        ...REQUIRED,
+        KOBE_PROCESS: "scheduler",
+        KOBE_BRANDING_PRESET: "nope",
+      });
+      expect(config.branding).toBeUndefined();
+    });
+  });
 });

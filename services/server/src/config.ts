@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { loadAuditForwardingConfig, type AuditForwardingConfig } from "./audit/forward/config.js";
+import { brandingDefaultsSchema, type BrandingDefaults } from "./branding/defaults-config.js";
 import { smtpSchema, type SmtpConfig } from "./mail/config.js";
 import { parseModelTokenDefaults, type ModelTokenDefaults } from "./models/token-limits.js";
 
@@ -198,6 +199,8 @@ export interface Config {
   readonly auth?: AuthConfig;
   /** Present for the API server only (invites, password resets, notifications). */
   readonly smtp?: SmtpConfig;
+  /** Chart-seeded branding defaults (KOBE-503); API server only, empty when none is set. */
+  readonly branding?: BrandingDefaults;
 }
 
 function fail(error: z.ZodError): never {
@@ -241,6 +244,8 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   if (!auth.success) fail(auth.error);
   const smtp = smtpSchema.safeParse(env);
   if (!smtp.success) fail(smtp.error);
+  const branding = brandingDefaultsSchema.safeParse(env);
+  if (!branding.success) fail(branding.error);
   return {
     ...config,
     auth: {
@@ -251,5 +256,6 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
       ...(auth.data.KOBE_APPROVAL_KEY ? { approvalKey: auth.data.KOBE_APPROVAL_KEY } : {}),
     },
     smtp: smtp.data,
+    branding: branding.data,
   };
 }

@@ -3,7 +3,9 @@
 Kobe is a self-hosted conversational agent platform for one organization and its teams: your own
 Claude.ai-style workspace on your own k3s cluster. Agents run in gVisor-isolated sandboxes with a real
 filesystem and shell, teams are isolated by Postgres row-level security, and every tool call is decided
-by the server. Licensed under Apache-2.0.
+by the server. Site admins can brand the whole site (name, logo, favicon and one of six
+contrast-checked styles) on the Site console's Appearance page; screenshot to follow after the gate
+review. Licensed under Apache-2.0.
 
 > **Status:** pre-release, Phase 1 (Spine) in progress. Deployment is Helm on k3s only — there is no
 > `docker compose`, including for development.

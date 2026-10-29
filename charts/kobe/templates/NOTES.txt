@@ -16,3 +16,5 @@ First run: open {{ include "kobe.publicUrl" . }}/setup and create the Owner. The
 the setup token, which proves you control this site:
 
   kubectl -n {{ .Release.Namespace }} get secret {{ include "kobe.authSecretName" . }} -o jsonpath='{.data.setup-token}' | base64 -d
+
+Branding: site admins set the name, logo, favicon and style in Site console -> System -> Appearance.

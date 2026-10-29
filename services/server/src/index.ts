@@ -127,6 +127,7 @@ if (config.process === "scheduler") {
   deps = createServerDeps({
     databaseUrl: config.databaseUrl,
     retentionPaused: config.retentionPaused,
+    brandingDefaults: config.branding ?? {},
     ...auth,
     ...(approvalKey ? { approvalKeys: approvalKeyring(approvalKey) } : {}),
     mailer: createSmtpMailer(config.smtp),
@@ -197,8 +198,9 @@ if (config.process === "scheduler") {
   }
 }
 
-// Gallery agents (KOBE-87) and Kobe's own catalog skills (KOBE-317), seeded at every start before
-// the server serves (startup/jobs.ts); a failure is logged and never stops the server.
+// Gallery agents (KOBE-87), the chart's branding defaults while unset (KOBE-503) and Kobe's own
+// catalog skills (KOBE-317), seeded at every start before the server serves (startup/jobs.ts); a
+// failure is logged and never stops the server.
 const startSeeds =
   deps && config.process === "server" ? await seedAtStart(deps, logger) : undefined;
 

@@ -469,3 +469,20 @@ missing Secret leaves the mirror unable to push rather than the server down), an
 - name: KOBE_RETENTION_PAUSED
   value: {{ .Values.retention.paused | default false | toString | quote }}
 {{- end -}}
+
+{{/* Branding defaults (KOBE-503): seeded by the API server only while each setting is unset. Only set values render. */}}
+{{- define "kobe.brandingEnv" -}}
+{{- $b := .Values.branding | default dict -}}
+{{- if $b.appName }}
+- name: KOBE_BRANDING_APP_NAME
+  value: {{ $b.appName | quote }}
+{{- end }}
+{{- if $b.preset }}
+- name: KOBE_BRANDING_PRESET
+  value: {{ $b.preset | quote }}
+{{- end }}
+{{- if eq (toString $b.showName) "false" }}
+- name: KOBE_BRANDING_SHOW_NAME
+  value: "false"
+{{- end }}
+{{- end -}}

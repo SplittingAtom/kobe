@@ -612,6 +612,7 @@ chartValues:
   bifrost: [bifrost]
   postgres: [cnpg, postgres]
   retention: first-party
+  branding: first-party
   s3: site-provided
   ingress: [traefik, cert-manager]
   clamav: [clamav]

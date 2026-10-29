@@ -33,7 +33,10 @@ export interface BrandingLoaderOptions {
   readonly timeoutMs?: number;
 }
 
-export type BrandingLoader = () => Promise<SiteBranding>;
+/** Loads the branding; `invalidate()` refetches it now (after an admin's change, KOBE-501). */
+export type BrandingLoader = (() => Promise<SiteBranding>) & {
+  readonly invalidate: () => Promise<void>;
+};
 
 function assetsSameOrigin(b: SiteBranding): boolean {
   const urls = [b.logo?.url, b.logo?.dark, b.favicon].filter((u): u is string => u != null);
@@ -97,7 +100,7 @@ export function createBrandingLoader(options: BrandingLoaderOptions): BrandingLo
     return inflight;
   };
 
-  return async () => {
+  const load = async () => {
     if (serverUrl === null) return DEFAULT_BRANDING;
     const due = now() - attemptedAt >= BRANDING_CACHE_MS;
     if (good !== undefined) {
@@ -108,12 +111,33 @@ export function createBrandingLoader(options: BrandingLoaderOptions): BrandingLo
     if (due || inflight !== undefined) await refresh();
     return good ?? DEFAULT_BRANDING;
   };
+
+  /**
+   * Refetches now, whatever the cache's age. A fetch already in flight may predate the change, so
+   * a new one starts after it. A failure keeps the last good value (as every refresh does).
+   */
+  const invalidate = async (): Promise<void> => {
+    if (serverUrl === null) return;
+    if (inflight !== undefined) await inflight;
+    await refresh();
+  };
+
+  return Object.assign(load, { invalidate });
 }
 
 let loader: BrandingLoader | undefined;
 
+function siteLoader(): BrandingLoader {
+  loader ??= createBrandingLoader({ serverUrl: webConfig().serverUrl });
+  return loader;
+}
+
 /** The site branding for this render: never throws, never waits on a refresh once known. */
 export function getSiteBranding(): Promise<SiteBranding> {
-  loader ??= createBrandingLoader({ serverUrl: webConfig().serverUrl });
-  return loader();
+  return siteLoader()();
+}
+
+/** Refetches this web process's branding now (`POST /api/branding/refresh`, KOBE-501). */
+export function invalidateBranding(): Promise<void> {
+  return siteLoader().invalidate();
 }

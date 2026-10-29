@@ -9,6 +9,11 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Theming wave 3 (2026-10-29):** KOBE-501 (Appearance page, ../Kobe-wt501) ∥ KOBE-503 (chart-seeded
+  defaults, ../Kobe-wt503), then KOBE-502 (docs, ../Kobe-wt502) on Opus, reviewed (code-review medium on
+  501: 8 fixed incl. the `POST /api/branding/refresh` route; Opus pass on 503: reset re-seeds in one
+  transaction), folded into `group-theming-3`. Flaky tests seen: file-viewer rename (KOBE-506), executor
+  e2e shard once. Next: deploy to kobe-gate1 for the gate review; 504/505 optional.
 - **Theming wave 2 (2026-10-29):** KOBE-499 (branding API, ../Kobe-wt499) ∥ KOBE-500 (themed first
   paint, ../Kobe-wt500) on Opus, reviewed (Opus security pass on 499: 2 MEDIUM + 3 LOW fixed;
   code-review medium on 500: 7 fixed), folded into `group-theming-2`. Decisions: per-scheme derived

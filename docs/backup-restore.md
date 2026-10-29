@@ -23,6 +23,8 @@ with the operator's backup key. There is no plaintext mode.
 
 - **New tables are included automatically.** Every table in `public` is backed up unless it is on
   the short exclusion list in `packages/cli/src/excluded.ts`.
+  Site branding is therefore included: the logo, dark logo and favicon (`site_branding_assets`)
+  and the `branding.*` rows of `site_settings` (name, `show_name`, style).
 - **Coverage is checked.** The backup refuses to run when data exists that a dump of `public`
   would skip: tables, materialized views or foreign tables in other schemas (apart from Kobe's
   migration bookkeeping in `drizzle`), and large objects. The manifest records that this check
@@ -245,7 +247,8 @@ transaction:
   `packages/cli/src/seeded.ts`);
 - rows the server writes when it starts (`packages/db/src/startup-seeds.ts`): the gallery agents
   (not those a site admin customized, KOBE-494) with their published versions and the system's audit events for seeding them, and where the
-  retention pass, the audit PII sweep and SIEM forwarding stand (`site_settings`). The started
+  retention pass, the audit PII sweep and SIEM forwarding stand (`site_settings`), and the chart's
+  branding defaults (`branding.*`, KOBE-503) with the system's audit events for them. The started
   site's own audit events go with them: the restored audit chain is the backup's, continued by
   the restore's event, which records the replaced chain's head and size
   (`replacedAuditHeadSeq`, `replacedAuditHeadHash`, `replacedAuditRows`). Audit anchors the
@@ -253,7 +256,9 @@ transaction:
   by the restore event, not a sign of tampering.
 
 Any other row (a user, a personal agent, a person's audit event, a setting) is real data, and the
-restore refuses the target.
+restore refuses the target. A branding setting counts as real data once a person has changed it
+(their `site.branding.updated` event exists), even after a reset re-seeded the chart's value: a
+target someone has already configured is not a fresh install.
 
 1. Recreate every Secret of the [Secrets](#secrets) table from your secret store, each under a
    new name so that Helm does not have to adopt it (the values must be the backed-up ones). From
@@ -331,6 +336,8 @@ restore refuses the target.
 6. Scale back up, either with `helm upgrade` using the same values or with
    `kubectl scale ... --replicas=<n>`. Users have to sign in again; enrolled passkeys and TOTP
    keep working.
+7. Smoke check: the sign-in page shows the backed-up site name, and the logo is served after
+   restore (`curl -sI <public URL>/v1/site/branding/assets/logo` answers 200 when the site had one).
 
 How restore works:
 

@@ -186,3 +186,43 @@ describe("getSiteBranding loader", () => {
     expect(lines).toEqual([]);
   });
 });
+
+describe("invalidating the branding (KOBE-501)", () => {
+  it("refetches at once, inside the 30 s cache, and serves the new value", async () => {
+    let body: SiteBranding = ACME;
+    const { load, fetchMock } = setup(async () => json(body));
+    expect(await load()).toEqual(ACME);
+    body = { ...ACME, appName: "Acme Data" };
+    await load.invalidate();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect((await load()).appName).toBe("Acme Data");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts a new fetch after one already in flight (that one may predate the change)", async () => {
+    let release: (r: Response) => void = () => undefined;
+    let calls = 0;
+    const { load, fetchMock } = setup(() => {
+      calls += 1;
+      return calls === 1
+        ? new Promise<Response>((r) => (release = r))
+        : Promise.resolve(json({ ...ACME, appName: "Fresh" }));
+    });
+    const first = load();
+    const invalidated = load.invalidate();
+    release(json(ACME));
+    await first;
+    await invalidated;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect((await load()).appName).toBe("Fresh");
+  });
+
+  it("keeps the last good value when the refetch fails", async () => {
+    let fail = false;
+    const { load } = setup(async () => (fail ? json({}, 500) : json(ACME)));
+    await load();
+    fail = true;
+    await load.invalidate();
+    expect(await load()).toEqual(ACME);
+  });
+});

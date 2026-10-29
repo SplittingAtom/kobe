@@ -28,6 +28,11 @@ export function formatBytes(bytes: number): string {
   return `${value < 10 && !Number.isInteger(value) ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
 
+/** A size in whole KiB, rounded up ("512 KiB"): upload limits and the file that broke one. */
+export function formatKiB(bytes: number): string {
+  return `${Math.ceil(bytes / 1024)} KiB`;
+}
+
 const LEGAL_HOLD = "Your workspace is under a legal hold, so nothing can be deleted.";
 
 /**
