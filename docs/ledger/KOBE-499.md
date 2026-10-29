@@ -25,17 +25,19 @@
 - **Reset deletes the keys** (TH12): `site_settings` grant widened to ALL (adds DELETE;
   `packages/db/src/tenancy/identity.ts`). The app role could already UPDATE any key, so this
   adds no power; applied by the migration runner, no migration file.
-- `deriveAccent`: hover = OKLCH L −0.06; link/focus searched in 0.01 L steps (max 100);
-  `primaryFg` = `#ffffff` / `#111111`. `checkFloor` on a preset returns ok (presets tested in web).
-- Contrast rule names: `primary-fg on primary`, `primary-fg on primary hover`,
-  `link on page|panel`, `focus on page|panel|card`; 422 message names the first failure's ratio.
-- SVG: `url(` in a `style` attribute or `<style>` is refused, even `url(#id)` (brief, TH8);
-  other attributes allow only `url(#fragment)` (gradients via `fill="url(#g)"` keep working).
+- `deriveAccent`: hover = scheme's primary at OKLCH L −0.06; link/focus searched in 0.01 L steps (max 100);
+  `primaryFg` = `#ffffff` / `#111111` per scheme. `checkFloor` on a preset returns ok (presets tested in web).
+- Contrast rule names: `primary_on_surface`, `fg_on_primary`, `fg_on_hover`, `link on page|panel`, `focus on page|panel|card`; 422 message names the first failure's ratio.
+- SVG (coordinator 2026-10-29): `url(#id)` is allowed everywhere (styles and attributes:
+  gradients, clip paths, masks, markers); any other `url(` is refused with "only url(#id)
+  references are allowed".
   Also refused: `@import` and CSS escapes in style, processing instructions (xml-stylesheet),
   any entity reference beyond the five predefined, `<set|animate attributeName="href">`,
   duplicate attributes, unknown/broken XML, a root other than `<svg>`.
-- Coordinator addition: `checkFloor` adds `primary_on_surface` (accent ≥ 3:1 on the **light**
-  page and panel); #ffffff and #f4f4f6 refused.
+- Per-scheme accent (coordinator 2026-10-29, commit 0cb64167): `primary`, `primaryHover`,
+  `primaryFg` are `{ light, dark }`; dark primary = accent lightened until ≥ 3:1 on dark page and
+  panel. `checkFloor` checks `primary_on_surface` (3:1), `fg_on_primary`, `fg_on_hover` (4.5:1)
+  in both schemes; #ffffff/#f4f4f6 refused (light), #777777 refused (fg), #2449c7 passes.
 - Coordinator addition: public `logo` carries `width`/`height` and `darkWidth`/`darkHeight`
   (schema lines copied verbatim from KOBE-500's working tree). Raster: parsed pixels. SVG: root
   `width`/`height` (unitless or px), else `viewBox`; non-integer or > 4096 sides are stored as
@@ -54,13 +56,6 @@
 
 ## Open questions (for Chris or the coordinator)
 
-- Refusing `url(#id)` inside `style` will refuse many Inkscape/Illustrator exports
-  (`style="fill:url(#gradient)"`). Allowing `url(#fragment)` there as in attributes is safe
-  (assets never load external resources as `<img>`); kept strict per TH8 for now.
-- `primary_on_surface` is checked in light only: the accent is one value in both schemes and
-  the default blue #2449c7 is 2.45:1 on the dark page, so a dark check would refuse it (the
-  coordinator asked for both schemes and for #2449c7 to pass; both cannot hold). A derived dark
-  primary would allow it.
 - Protocol contract change (`showName`) ships inside this feature branch, as the brief asked.
 
 ## Evidence (acceptance criteria → test or command output)
