@@ -25,7 +25,8 @@ export const PI_PINNED_VERSION = "1.4.0";
  * Minor versions the server accepts besides the pinned one (KOBE-511): sandboxes started from the
  * previous image (Pi 1.0.x) keep connecting until they are recreated from the new template. The
  * RPC records above are unchanged between 1.0.0 and 1.4.0 except added fields (`agent_settled`
- * `aborted`, `tool_execution_end` `durationMs`), which the loose schemas pass through.
+ * `aborted`, `tool_execution_end` `durationMs`), which the loose schemas pass through. The server
+ * logs a warning for each such hello. KOBE-518 removes "1.0" once no 1.0 sandbox remains.
  */
 export const PI_PREVIOUS_MINORS: readonly string[] = ["1.0"];
 

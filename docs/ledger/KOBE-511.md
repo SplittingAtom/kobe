@@ -88,8 +88,11 @@ run. Fix: Pi has its own npm entry (limit 5). The new surface test makes such a 
 
 ## Open / follow-ups
 
-- `npm audit` (pre-existing in 1.0.0): Pi pins `undici` 8.10.2 (high: 8 advisories, fixed in 8.12.2+).
-  Not overridden here; candidate follow-up (npm `overrides` now possible without the shrinkwrap).
+- `npm audit` (pre-existing in 1.0.0): Pi pins `undici` 8.10.2 (high, fixed in 8.12.2+); the npm
+  `overrides` fix is KOBE-519.
+- 1.0.x allowance (review): the hello gate (`admitPiVersion`) logs a warning per 1.0.x sandbox;
+  KOBE-518 removes "1.0" from `PI_PREVIOUS_MINORS` once no 1.0 sandbox remains. The web's slash-command
+  list (1.4.0 texts) differing for 1.0.x sandboxes is cosmetic (reviewer's finding 3).
 - `pi-ai/compat` is marked temporary upstream; the surface test fails when it goes.
 - CLAUDE.md still says "Pi pinned 1.0.0" / "Pi `1.0.x`" (not edited by the agent; coordinator to update).
 - Executor and suite e2e shards run in CI only (k3d); not run locally.
