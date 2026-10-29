@@ -60,6 +60,13 @@ describe("site branding assets on upgrade (KOBE-497)", () => {
          VALUES ('logo', $1, 'image/svg+xml', $2, $3, $4)`,
         [bytes, sha, bytes.length, userId],
       );
+      await expect(
+        c.query(
+          `INSERT INTO site_branding_assets (kind, bytes, content_type, sha256, byte_size)
+           VALUES ('favicon', $1, 'image/jpeg', $2, $3)`,
+          [bytes, sha, bytes.length],
+        ),
+      ).rejects.toMatchObject({ constraint: "site_branding_assets_content_type" });
       await c.query(`DELETE FROM site_branding_assets WHERE kind = 'logo'`);
       const { rows } = await c.query(
         `SELECT value FROM site_settings WHERE key = 'branding.app_name'`,

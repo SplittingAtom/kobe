@@ -101,4 +101,39 @@ describe("site_branding_assets", () => {
     const max = Buffer.alloc(512 * 1024);
     await insert(max.length, sha(max), 16, "logo_dark", max);
   });
+
+  it.each([
+    ["logo", "image/x-icon"],
+    ["logo_dark", "image/x-icon"],
+    ["favicon", "image/jpeg"],
+    ["favicon", "image/webp"],
+    ["logo", "text/html"],
+    ["logo", "image/PNG"],
+    ["favicon", "image/svg+xml; charset=utf-8"],
+  ])("refuses %s as %s", async (kind, type) => {
+    await expect(
+      app.query(
+        `INSERT INTO site_branding_assets (kind, bytes, content_type, sha256, byte_size)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [kind, png, type, sha(png), png.length],
+      ),
+    ).rejects.toMatchObject({ code: "23514", constraint: "site_branding_assets_content_type" });
+  });
+
+  it("accepts each kind's allowed content types", async () => {
+    const allowed: Record<string, string[]> = {
+      logo: ["image/png", "image/jpeg", "image/webp", "image/svg+xml"],
+      logo_dark: ["image/png", "image/jpeg", "image/webp", "image/svg+xml"],
+      favicon: ["image/png", "image/svg+xml", "image/x-icon"],
+    };
+    for (const [kind, types] of Object.entries(allowed))
+      for (const type of types) {
+        await app.query(
+          `INSERT INTO site_branding_assets (kind, bytes, content_type, sha256, byte_size)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (kind) DO UPDATE SET content_type = EXCLUDED.content_type`,
+          [kind, png, type, sha(png), png.length],
+        );
+      }
+  });
 });

@@ -64,14 +64,17 @@ export const DEFAULT_APP_NAME = "Kobe";
 
 const codePoints = (s: string): number => [...s].length;
 
-/** The app name: plain text, trimmed, 1-40 characters, no control or line-separator characters. */
+/**
+ * The app name: plain text, trimmed, 1-40 characters; no control (Cc), format (Cf: bidi overrides,
+ * zero-width joiners) or line/paragraph separator characters.
+ */
 export const appNameSchema = z
   .string()
   .trim()
   .refine((s) => codePoints(s) >= APP_NAME_MIN_LENGTH && codePoints(s) <= APP_NAME_MAX_LENGTH, {
     message: `The name must be ${APP_NAME_MIN_LENGTH} to ${APP_NAME_MAX_LENGTH} characters`,
   })
-  .refine((s) => /^[^\p{Cc}\p{Zl}\p{Zp}]*$/u.test(s), {
+  .refine((s) => /^[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]*$/u.test(s), {
     message: "The name must be plain text on one line",
   });
 
@@ -87,6 +90,14 @@ export const BRANDING_ASSET_MAX_BYTES: Readonly<Record<BrandingAssetKind, number
   logo_dark: 512 * KIB,
   favicon: 256 * KIB,
 };
+/** Content types the server stores per kind (detected from the bytes, TH8; mirrors the DB check). */
+export const BRANDING_ASSET_CONTENT_TYPES = {
+  logo: ["image/png", "image/jpeg", "image/webp", "image/svg+xml"],
+  logo_dark: ["image/png", "image/jpeg", "image/webp", "image/svg+xml"],
+  favicon: ["image/png", "image/svg+xml", "image/x-icon"],
+} as const satisfies Readonly<Record<BrandingAssetKind, readonly string[]>>;
+export type BrandingAssetContentType =
+  (typeof BRANDING_ASSET_CONTENT_TYPES)[BrandingAssetKind][number];
 /** The longest side a raster asset may have, in pixels. */
 export const BRANDING_ASSET_MAX_SIDE_PX = 4096;
 

@@ -17,13 +17,13 @@
 
 - Theme schema is a discriminated union on `preset`, both arms strict (no extra keys, so no CSS
   can ride along); accent `^#[0-9a-f]{6}$` only (uppercase refused: the server stores one form).
-- App name: trimmed, 1-40 **code points**, no control / line / paragraph separators. Defaults
+- App name: trimmed, 1-40 **code points**, no control (Cc), format (Cf) or line/paragraph separators. Defaults
   exported: `DEFAULT_APP_NAME = "Kobe"`, `DEFAULT_THEME = { preset: "default" }`.
 - `PRESET_LABELS` (display names, TH9) and `BRANDING_ASSET_KINDS` exported too; the public
   `siteBrandingSchema` follows §4.2's shape `{ appName, logo: {url, dark?} | null, favicon, theme }`.
 - DB backstop checks beyond the plan: sha256 is lowercase hex-64, `byte_size = octet_length(bytes)`
   and within the per-kind cap (favicon 256 KiB, logos 512 KiB), width/height null or 1..4096,
-  content_type 1..255 chars. `updated_by` nullable, FK to users (NO ACTION; users are never deleted).
+  content_type per kind (logos PNG/JPEG/WebP/SVG, favicon PNG/SVG/ICO; review fix), mirrored by `BRANDING_ASSET_CONTENT_TYPES`. `updated_by` nullable, FK to users (NO ACTION; users are never deleted).
 - Audit `value`: hex sha256 or the bounded `label`; one event per setting.
 
 ## Open questions (for Chris or the coordinator)

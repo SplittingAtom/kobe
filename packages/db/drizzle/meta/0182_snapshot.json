@@ -1,5 +1,5 @@
 {
-  "id": "0df7c577-07e2-436b-a0f8-488e405cc8eb",
+  "id": "15d06a94-4d3e-4501-bb31-be748efdbc4d",
   "prevId": "dab2ee9b-2346-4525-9fa2-0816669ec58f",
   "version": "7",
   "dialect": "postgresql",
@@ -21054,7 +21054,7 @@
         },
         "site_branding_assets_content_type": {
           "name": "site_branding_assets_content_type",
-          "value": "length(\"site_branding_assets\".\"content_type\") BETWEEN 1 AND 255"
+          "value": "CASE WHEN \"site_branding_assets\".\"kind\" = 'favicon' THEN \"site_branding_assets\".\"content_type\" IN ('image/png', 'image/svg+xml', 'image/x-icon') ELSE \"site_branding_assets\".\"content_type\" IN ('image/png', 'image/jpeg', 'image/webp', 'image/svg+xml') END"
         }
       },
       "isRLSEnabled": false

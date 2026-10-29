@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   APP_NAME_MAX_LENGTH,
+  BRANDING_ASSET_CONTENT_TYPES,
   BRANDING_ASSET_KINDS,
   BRANDING_ASSET_MAX_BYTES,
   BRANDING_ASSET_MAX_SIDE_PX,
@@ -87,7 +88,17 @@ describe("app name (§4.1)", () => {
     expect(appNameSchema.safeParse("🙂".repeat(41)).success).toBe(false);
   });
 
-  it.each(["", "   ", "x".repeat(41), "Ac\nme", "Ac\u0000me", "Ac me"])("refuses %j", (name) => {
+  it.each([
+    "",
+    "   ",
+    "x".repeat(41),
+    "Ac\nme",
+    "Ac\u0000me",
+    "Ac\u007fme", // DEL (Cc)
+    "Ac\u2028me", // line separator (Zl)
+    "Ac\u202eme", // right-to-left override (Cf)
+    "Ac\u200dme", // zero-width joiner (Cf)
+  ])("refuses %j", (name) => {
     expect(appNameSchema.safeParse(name).success).toBe(false);
   });
 });
@@ -109,6 +120,16 @@ describe("site_settings keys and asset limits (TH7)", () => {
     });
     expect(BRANDING_ASSET_MAX_SIDE_PX).toBe(4096);
     expect(brandingAssetKindSchema.safeParse("banner").success).toBe(false);
+  });
+
+  it("allows per kind exactly the content types the database check allows", () => {
+    expect(BRANDING_ASSET_CONTENT_TYPES).toEqual({
+      logo: ["image/png", "image/jpeg", "image/webp", "image/svg+xml"],
+      logo_dark: ["image/png", "image/jpeg", "image/webp", "image/svg+xml"],
+      favicon: ["image/png", "image/svg+xml", "image/x-icon"],
+    });
+    expect(Object.keys(BRANDING_ASSET_CONTENT_TYPES)).toEqual([...BRANDING_ASSET_KINDS]);
+    expect(Object.keys(BRANDING_ASSET_MAX_BYTES)).toEqual([...BRANDING_ASSET_KINDS]);
   });
 });
 

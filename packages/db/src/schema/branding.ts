@@ -14,6 +14,10 @@ const KIB = 1024;
 const LOGO_MAX_BYTES = 512 * KIB;
 const FAVICON_MAX_BYTES = 256 * KIB;
 const MAX_SIDE_PX = 4096;
+/** Mirrors `BRANDING_ASSET_CONTENT_TYPES` in `@kobe/protocol` (TH8; ICO only as a favicon). */
+const sqlList = (types: readonly string[]) => types.map((t) => `'${t}'`).join(", ");
+const LOGO_TYPES = sqlList(["image/png", "image/jpeg", "image/webp", "image/svg+xml"]);
+const FAVICON_TYPES = sqlList(["image/png", "image/svg+xml", "image/x-icon"]);
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType: () => "bytea",
@@ -49,6 +53,9 @@ export const siteBrandingAssets = pgTable(
       "site_branding_assets_dimensions",
       sql`(${t.width} IS NULL OR ${t.width} BETWEEN 1 AND ${sql.raw(String(MAX_SIDE_PX))}) AND (${t.height} IS NULL OR ${t.height} BETWEEN 1 AND ${sql.raw(String(MAX_SIDE_PX))})`,
     ),
-    check("site_branding_assets_content_type", sql`length(${t.contentType}) BETWEEN 1 AND 255`),
+    check(
+      "site_branding_assets_content_type",
+      sql`CASE WHEN ${t.kind} = 'favicon' THEN ${t.contentType} IN (${sql.raw(FAVICON_TYPES)}) ELSE ${t.contentType} IN (${sql.raw(LOGO_TYPES)}) END`,
+    ),
   ],
 );
