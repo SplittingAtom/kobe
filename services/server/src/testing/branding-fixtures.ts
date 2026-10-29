@@ -126,6 +126,14 @@ export const svg = (inner = '<rect width="10" height="10" fill="#2449c7"/>'): Ui
     `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 10 10">${inner}</svg>`,
   );
 
+/** An Inkscape-style export: gradient, clip path and marker referenced by url(#id) in styles. */
+export const GRADIENT_SVG = svg(
+  '<defs><linearGradient id="g"><stop offset="0" style="stop-color:#2449c7"/></linearGradient>' +
+    '<clipPath id="c"><rect width="5" height="5"/></clipPath></defs>' +
+    "<style>.a { fill: url( '#g' ); clip-path: url(#c) }</style>" +
+    '<rect class="a" style="fill:url(#g);stroke:url(&quot;#g&quot;)" width="10" height="10"/>',
+);
+
 /** Each refused SVG with a word its reason must contain. */
 export const REFUSED_SVGS: readonly {
   readonly name: string;
@@ -154,7 +162,16 @@ export const REFUSED_SVGS: readonly {
     bytes: svg('<image xlink:href="data:image/png;base64,AA"/>'),
     reason: /#fragment/,
   },
-  { name: "url( in style attribute", bytes: svg('<rect style="fill:url(#g)"/>'), reason: /url\(/ },
+  {
+    name: "url(data:) in a style attribute",
+    bytes: svg('<rect style="fill:url(data:image/png;base64,AA)"/>'),
+    reason: /only url\(#id\)/,
+  },
+  {
+    name: "url(https:) in a style attribute",
+    bytes: svg("<rect style=\"fill:url('https://evil.test/x.svg#g')\"/>"),
+    reason: /only url\(#id\)/,
+  },
   {
     name: "url( in <style>",
     bytes: svg("<style>rect{background:url(https://evil.test/x)}</style>"),

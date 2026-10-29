@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { REFUSED_SVGS, svg } from "../testing/branding-fixtures.js";
+import { GRADIENT_SVG, REFUSED_SVGS, svg } from "../testing/branding-fixtures.js";
 import { checkSvg } from "./svg.js";
 
 const text = (s: string) => new TextEncoder().encode(s);
@@ -36,6 +36,10 @@ describe("checkSvg (TH8)", () => {
     expect(root('viewBox="0 0 10000 5000"')).toMatchObject({ size: { width: 1000, height: 500 } });
     expect(root('width="2em" height="1em"')).toMatchObject({ size: null });
     expect(root('viewBox="0 0 0 10"')).toMatchObject({ size: null });
+  });
+
+  it("accepts url(#id) references in style attributes and <style> (Inkscape exports)", () => {
+    expect(checkSvg(GRADIENT_SVG)).toMatchObject({ ok: true });
   });
 
   it.each(REFUSED_SVGS)("refuses $name with the reason", ({ bytes, reason }) => {

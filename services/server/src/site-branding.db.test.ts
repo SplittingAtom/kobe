@@ -5,6 +5,7 @@ import { readAppName } from "./branding/settings.js";
 import { brandingCache } from "./branding/store.js";
 import { RawBody, type TestBrowser } from "./testing/browser.js";
 import {
+  GRADIENT_SVG,
   REFUSED_SVGS,
   ico,
   jpeg,
@@ -212,7 +213,11 @@ describe("PUT /v1/site/branding", () => {
     expect(res.status).toBe(422);
     expect(res.json.code).toBe("contrast_floor");
     expect(res.json.message).toMatch(/4\.\d+:1, needs 4\.5:1/);
-    expect(res.json.failures[0]).toMatchObject({ rule: "primary-fg on primary", required: 4.5 });
+    expect(res.json.failures[0]).toMatchObject({
+      rule: "fg_on_primary",
+      scheme: "light",
+      required: 4.5,
+    });
     expect(res.json.failures[0].ratio).toBeLessThan(4.5);
     expect((await as.admin.put("/v1/site/branding", { theme: custom("#15803d") })).status).toBe(
       200,
@@ -228,6 +233,7 @@ describe("branding files", () => {
     ["logo_dark", "WebP (VP8)", webpLossy(20, 10), "image/webp"],
     ["logo_dark", "WebP (VP8L)", webpLossless(20, 10), "image/webp"],
     ["logo", "SVG", svg(), "image/svg+xml"],
+    ["logo", "SVG with url(#gradient) styles", GRADIENT_SVG, "image/svg+xml"],
     ["favicon", "ICO", ico(), "image/x-icon"],
     ["favicon", "SVG", svg(), "image/svg+xml"],
     ["favicon", "PNG", png(32, 32), "image/png"],

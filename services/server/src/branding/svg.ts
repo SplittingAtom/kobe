@@ -4,8 +4,8 @@
  * skips can reach the browser. Refused: a DOCTYPE or entity declaration (external entities),
  * processing instructions other than the XML declaration (xml-stylesheet), `<script>`,
  * `<foreignObject>`, any `on*` attribute, an `href`/`xlink:href` that is not a `#fragment`
- * (also as an animation target), `url(` / `@import` / CSS escapes in a `style` attribute or
- * `<style>`, and `url(` other than `url(#fragment)` in any other attribute.
+ * (also as an animation target), `@import` and CSS escapes in a `style` attribute or `<style>`,
+ * and anywhere a `url(` other than `url(#fragment)` (gradients, clip paths, masks, markers).
  */
 
 /** An accepted SVG's box (from the root's width/height, else its viewBox), when it has one. */
@@ -53,11 +53,20 @@ function decodeEntities(text: string): string {
 
 const localName = (qname: string): string => (qname.split(":").pop() ?? qname).toLowerCase();
 
+/** Every `url(` must reference a fragment of the image itself (`url(#id)`: gradients, masks). */
+function checkUrls(text: string, where: string): void {
+  for (const m of text.toLowerCase().matchAll(/url\s*\(\s*['"]?\s*(.?)/g)) {
+    if (m[1] !== "#") {
+      refuse(`${where} uses url( outside the image: only url(#id) references are allowed.`);
+    }
+  }
+}
+
 function checkCss(css: string, where: string): void {
-  const flat = css.replace(/\/\*[\s\S]*?\*\//g, "").toLowerCase();
+  const flat = css.replace(/\/\*[\s\S]*?\*\//g, "");
   if (flat.includes("\\")) refuse(`${where} uses CSS escapes.`);
-  if (/url\s*\(/.test(flat)) refuse(`${where} uses url(.`);
-  if (flat.includes("@import")) refuse(`${where} uses @import.`);
+  checkUrls(flat, where);
+  if (flat.toLowerCase().includes("@import")) refuse(`${where} uses @import.`);
 }
 
 function checkAttribute(element: string, qname: string, value: string): void {
@@ -73,10 +82,7 @@ function checkAttribute(element: string, qname: string, value: string): void {
   if (ANIMATION.has(element) && name === "attributename" && /href/i.test(value)) {
     refuse(`<${element}> animates a link.`);
   }
-  const urls = value.toLowerCase().match(/url\s*\(\s*['"]?([^)'"]*)/g) ?? [];
-  for (const u of urls) {
-    if (!/url\s*\(\s*['"]?#/.test(u)) refuse(`the attribute ${qname} uses url( outside the image.`);
-  }
+  checkUrls(value, `the attribute ${qname}`);
   if (value.includes("\\") && value.toLowerCase().includes("url")) {
     refuse(`the attribute ${qname} uses CSS escapes.`);
   }
