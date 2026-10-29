@@ -108,6 +108,7 @@ describe("site_settings keys and asset limits (TH7)", () => {
     expect(BRANDING_SETTING_KEYS).toEqual({
       appName: "branding.app_name",
       theme: "branding.theme",
+      showName: "branding.show_name",
     });
   });
 
@@ -140,6 +141,7 @@ describe("public branding (GET /v1/site/branding)", () => {
     expect(
       siteBrandingSchema.parse({
         appName: "Kobe",
+        showName: true,
         logo: null,
         favicon: null,
         theme: DEFAULT_THEME,
@@ -148,6 +150,7 @@ describe("public branding (GET /v1/site/branding)", () => {
     expect(
       siteBrandingSchema.parse({
         appName: "Acme",
+        showName: false,
         logo: { url: url("logo"), dark: url("logo_dark") },
         favicon: url("favicon"),
         theme: custom,
@@ -156,9 +159,11 @@ describe("public branding (GET /v1/site/branding)", () => {
   });
 
   it("refuses an invalid theme, name or extra keys", () => {
-    const ok = { appName: "Kobe", logo: null, favicon: null, theme: DEFAULT_THEME };
+    const ok = { appName: "Kobe", showName: true, logo: null, favicon: null, theme: DEFAULT_THEME };
     expect(siteBrandingSchema.safeParse({ ...ok, theme: { preset: "kobe" } }).success).toBe(false);
     expect(siteBrandingSchema.safeParse({ ...ok, appName: "" }).success).toBe(false);
     expect(siteBrandingSchema.safeParse({ ...ok, css: "x" }).success).toBe(false);
+    expect(siteBrandingSchema.safeParse(ok).success).toBe(true);
+    expect(siteBrandingSchema.safeParse({ ...ok, showName: "yes" }).success).toBe(false);
   });
 });
