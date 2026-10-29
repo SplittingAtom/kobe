@@ -46,6 +46,7 @@ describe("messages", () => {
     expect(oneLine("Eve\r\nBcc: victim@example.com")).toBe("Eve Bcc: victim@example.com");
     expect(oneLine("x".repeat(300)).length).toBe(100);
     const m = teamInviteMessage({
+      appName: "Kobe",
       to: "a@b.test",
       inviterName: "Eve\nX-Evil: 1",
       teamName: "Fin\rance",
@@ -58,6 +59,7 @@ describe("messages", () => {
 
   it("puts tokens in the link only", () => {
     const invite = siteInviteMessage({
+      appName: "Kobe",
       to: "a@b.test",
       inviterName: "Owner",
       link: "https://kobe.test/invite#token=abc",
@@ -66,11 +68,44 @@ describe("messages", () => {
     expect(invite.subject).not.toContain("abc");
     expect(invite.text).toContain("https://kobe.test/invite#token=abc");
     const reset = passwordResetMessage({
+      appName: "Kobe",
       to: "a@b.test",
       link: "https://kobe.test/reset-password#token=xyz",
       expiresInMinutes: 30,
     });
     expect(reset.subject).not.toContain("xyz");
     expect(reset.text).toContain("30 minutes");
+  });
+
+  it("names the site by its configured name (KOBE-499)", () => {
+    const appName = "Acme\r\nBcc: x@y.test";
+    const invite = siteInviteMessage({
+      appName,
+      to: "a@b.test",
+      inviterName: "Owner",
+      link: "https://kobe.test/invite#token=abc",
+      expiresAt: new Date("2026-10-05T00:00:00Z"),
+    });
+    expect(invite.subject).toBe("Owner invited you to Acme Bcc: x@y.test");
+    expect(invite.text).toContain("join Acme Bcc: x@y.test.");
+    const team = teamInviteMessage({
+      appName: "Acme",
+      to: "a@b.test",
+      inviterName: "Owner",
+      teamName: "Finance",
+      role: "member",
+      signInUrl: "https://kobe.test/",
+    });
+    expect(team.subject).toBe("Owner invited you to the Finance team on Acme");
+    expect(team.text).toContain("team on Acme as a member");
+    const reset = passwordResetMessage({
+      appName: "Acme",
+      to: "a@b.test",
+      link: "https://kobe.test/reset-password#token=xyz",
+      expiresInMinutes: 30,
+    });
+    expect(reset.subject).toBe("Reset your Acme password");
+    expect(reset.text).toContain("your Acme account");
+    for (const m of [invite, team, reset]) expect(`${m.subject}\n${m.text}`).not.toContain("Kobe");
   });
 });

@@ -49,3 +49,4 @@ export * from "./item-references.js";
 export * from "./app-cards.js";
 export * from "./context-viewer.js";
 export * from "./branding.js";
+export * from "./theme/index.js";

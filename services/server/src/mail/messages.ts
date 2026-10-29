@@ -8,18 +8,27 @@ export function oneLine(value: string, max = 100): string {
 
 const ROLE_NAMES = { team_admin: "team admin", builder: "builder", member: "member" } as const;
 
-export function siteInviteMessage(input: {
-  readonly to: string;
-  readonly inviterName: string;
-  readonly link: string;
-  readonly expiresAt: Date;
-}): MailMessage {
+/** Every message names the site by its configured name (`readAppName`, theming TH1). */
+interface Branded {
+  /** The app name (`branding.app_name`, default "Kobe"). */
+  readonly appName: string;
+}
+
+export function siteInviteMessage(
+  input: Branded & {
+    readonly to: string;
+    readonly inviterName: string;
+    readonly link: string;
+    readonly expiresAt: Date;
+  },
+): MailMessage {
   const inviter = oneLine(input.inviterName);
+  const app = oneLine(input.appName);
   return {
     to: input.to,
-    subject: `${inviter} invited you to Kobe`,
+    subject: `${inviter} invited you to ${app}`,
     text: [
-      `${inviter} invited you to join Kobe.`,
+      `${inviter} invited you to join ${app}.`,
       "",
       "Open this link to set your password and sign in:",
       input.link,
@@ -30,36 +39,42 @@ export function siteInviteMessage(input: {
   };
 }
 
-export function teamInviteMessage(input: {
-  readonly to: string;
-  readonly inviterName: string;
-  readonly teamName: string;
-  readonly role: keyof typeof ROLE_NAMES;
-  readonly signInUrl: string;
-}): MailMessage {
+export function teamInviteMessage(
+  input: Branded & {
+    readonly to: string;
+    readonly inviterName: string;
+    readonly teamName: string;
+    readonly role: keyof typeof ROLE_NAMES;
+    readonly signInUrl: string;
+  },
+): MailMessage {
   const inviter = oneLine(input.inviterName);
   const team = oneLine(input.teamName);
+  const app = oneLine(input.appName);
   return {
     to: input.to,
-    subject: `${inviter} invited you to the ${team} team on Kobe`,
+    subject: `${inviter} invited you to the ${team} team on ${app}`,
     text: [
-      `${inviter} invited you to join the ${team} team on Kobe as a ${ROLE_NAMES[input.role]}.`,
+      `${inviter} invited you to join the ${team} team on ${app} as a ${ROLE_NAMES[input.role]}.`,
       "",
       `Sign in to accept or decline: ${input.signInUrl}`,
     ].join("\n"),
   };
 }
 
-export function passwordResetMessage(input: {
-  readonly to: string;
-  readonly link: string;
-  readonly expiresInMinutes: number;
-}): MailMessage {
+export function passwordResetMessage(
+  input: Branded & {
+    readonly to: string;
+    readonly link: string;
+    readonly expiresInMinutes: number;
+  },
+): MailMessage {
+  const app = oneLine(input.appName);
   return {
     to: input.to,
-    subject: "Reset your Kobe password",
+    subject: `Reset your ${app} password`,
     text: [
-      "Someone asked to reset the password of your Kobe account.",
+      `Someone asked to reset the password of your ${app} account.`,
       "",
       "Open this link to choose a new password:",
       input.link,
@@ -86,25 +101,28 @@ const OUTCOME_SUBJECT: Readonly<Record<ScheduledRunOutcome, string>> = {
  * schedule runs, the skipped-action count and links. Never the prompt, the thread title or any
  * output; the thread holds the content.
  */
-export function scheduledRunMessage(input: {
-  readonly to: string;
-  readonly outcome: ScheduledRunOutcome;
-  readonly teamName: string;
-  /** e.g. "daily at 09:00 (Europe/Berlin)"; null when the schedule is gone. */
-  readonly when: string | null;
-  readonly skippedCount: number | null;
-  readonly threadLink: string;
-  readonly schedulesLink: string;
-}): MailMessage {
+export function scheduledRunMessage(
+  input: Branded & {
+    readonly to: string;
+    readonly outcome: ScheduledRunOutcome;
+    readonly teamName: string;
+    /** e.g. "daily at 09:00 (Europe/Berlin)"; null when the schedule is gone. */
+    readonly when: string | null;
+    readonly skippedCount: number | null;
+    readonly threadLink: string;
+    readonly schedulesLink: string;
+  },
+): MailMessage {
   const team = oneLine(input.teamName);
   const when = input.when === null ? "" : ` (${oneLine(input.when)})`;
   const outcome = OUTCOME_SUBJECT[input.outcome];
   const skipped = input.skippedCount ?? 0;
+  const app = oneLine(input.appName);
   return {
     to: input.to,
     subject: `Your scheduled run ${outcome} in the ${team} team`,
     text: [
-      `Your scheduled run${when} in the ${team} team on Kobe ${outcome}.`,
+      `Your scheduled run${when} in the ${team} team on ${app} ${outcome}.`,
       ...(skipped > 0
         ? [
             `${skipped === 1 ? "1 tool call was" : `${skipped} tool calls were`} skipped: scheduled runs do not wait for approval.`,

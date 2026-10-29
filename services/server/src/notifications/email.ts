@@ -6,6 +6,7 @@ import {
 } from "@kobe/protocol";
 import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
+import { readAppName } from "../branding/settings.js";
 import { scheduledRunMessage, type ScheduledRunOutcome } from "../mail/messages.js";
 
 /**
@@ -182,6 +183,7 @@ export async function deliverNotificationEmails(
     const rows = await claim(db, teamId);
     if (rows.length === 0) return 0;
     const [team] = await db.select({ name: teams.name }).from(teams).where(eq(teams.id, teamId));
+    const appName = await readAppName(db);
     for (const row of rows) {
       const to = await recipient(db, teamId, row.user_id);
       const outcome = OUTCOME[row.kind];
@@ -197,6 +199,7 @@ export async function deliverNotificationEmails(
       try {
         await deps.mailer.send(
           scheduledRunMessage({
+            appName,
             to,
             outcome,
             teamName: team.name,

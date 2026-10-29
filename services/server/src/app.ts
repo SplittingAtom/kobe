@@ -50,6 +50,7 @@ import { siteSkillTagRoutes } from "./routes/site-skill-tags.js";
 import { siteSkillRetireRoutes } from "./routes/site-skill-retire.js";
 import { siteSkillCatalogEditRoutes } from "./routes/site-skill-catalog-edit.js";
 import { siteRolesRoutes } from "./routes/site-roles.js";
+import { siteBrandingPublicRoutes, siteBrandingRoutes } from "./routes/site-branding.js";
 import { siteSettingsRoutes } from "./routes/site-settings.js";
 import { siteWebSearchRoutes } from "./routes/site-web-search.js";
 import { teamWebSearchRoutes } from "./routes/team-web-search.js";
@@ -163,6 +164,8 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   app.use("/v1/setup/*", auditRequestContext(deps));
   app.on(["GET", "POST"], "/api/auth/*", (c) => deps.auth.handler(c.req.raw));
   app.route("/v1/setup", setupRoutes(deps));
+  // Site branding (TH6): public reads, before the session check; request context only.
+  app.route("/v1/site/branding", siteBrandingPublicRoutes(deps));
 
   // Kobe's OAuth Client ID Metadata Document (KOBE-109): public, fetched by authorization servers.
   app.get("/v1/oauth/client-metadata.json", (c) => {
@@ -266,6 +269,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/approvals", approvalRoutes(deps));
   api.route("/egress/requests", egressRequestRoutes(deps));
   api.route("/site/settings", siteSettingsRoutes(deps));
+  api.route("/site/branding", siteBrandingRoutes(deps));
   api.route("/site/web-search", siteWebSearchRoutes(deps));
   api.route("/site/teams", siteTeamsRoutes(deps));
   api.route("/site/roles", siteRolesRoutes(deps));
