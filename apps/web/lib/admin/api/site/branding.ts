@@ -89,3 +89,31 @@ export function removeBrandingAsset(kind: BrandingAssetKind): Promise<ApiResult<
 export function resetBranding(): Promise<ApiResult<SiteBranding>> {
   return apiRequest(`${BASE}/reset`, { method: "POST" });
 }
+
+/**
+ * Makes this web process refetch the branding now (`POST /api/branding/refresh`), so the reload
+ * after a change shows it at once. Best effort: other replicas catch up within 30 s anyway.
+ */
+export async function refreshBranding(): Promise<void> {
+  try {
+    await fetch("/api/branding/refresh", { method: "POST", credentials: "same-origin" });
+  } catch {
+    // The reload then shows the change within the web's 30 s cache.
+  }
+}
+
+/**
+ * Whether a dark logo is stored although there is no logo (the public branding names a dark logo
+ * only next to a logo): the Appearance page then still shows it, with Remove.
+ */
+export async function hasDarkLogoAlone(): Promise<boolean> {
+  try {
+    const res = await fetch(DARK_LOGO_URL, { method: "GET", cache: "no-store" });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** The dark logo's public URL without a version (served no-cache). */
+export const DARK_LOGO_URL = `${BASE}/assets/logo_dark`;

@@ -27,6 +27,7 @@ describe("site Appearance page (KOBE-501)", () => {
     const calls = stubApi({
       "GET /v1/site/branding": [200, BRANDING],
       "PUT /v1/site/branding": [200, { ...BRANDING, appName: "Acme", theme: { preset: "plum" } }],
+      "POST /api/branding/refresh": [204],
     });
     const reload = vi.fn();
     renderSite(<AppearancePage reloadPage={reload} />);
@@ -36,10 +37,18 @@ describe("site Appearance page (KOBE-501)", () => {
     await userEvent.type(name, " Acme ");
     await userEvent.click(screen.getByRole("radio", { name: "Plum" }));
     await userEvent.click(save());
-    await screen.findByText(/Saved\./);
+    await screen.findByText("Saved. Reloading…");
     const put = must(calls.find((c) => c.method === "PUT"));
     expect(JSON.parse(String(put.body))).toEqual({ appName: "Acme", theme: { preset: "plum" } });
+    // This web process refetches the branding before the reload, so it shows the change.
+    expect(calls.map((c) => `${c.method} ${c.url}`).slice(-2)).toEqual([
+      "PUT /v1/site/branding",
+      "POST /api/branding/refresh",
+    ]);
     expect(reload).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText("Other web replicas pick the change up within 30 seconds."),
+    ).toBeTruthy();
   });
 
   it("keeps Save off with the ratio while the accent is under the floor", async () => {
@@ -80,12 +89,37 @@ describe("site Appearance page (KOBE-501)", () => {
       ),
     ).toBeTruthy();
     expect(reload).not.toHaveBeenCalled();
+    // Editing the draft clears the refusal: it no longer describes it.
+    await userEvent.click(screen.getByRole("radio", { name: "Round" }));
+    expect(screen.queryByText(/This accent does not reach the contrast floor/)).toBeNull();
+    expect(
+      screen.queryByText(/Text on the accent is too faint in the dark theme \(4\.2/),
+    ).toBeNull();
+  });
+
+  it("refetches the branding and reloads after an upload", async () => {
+    const calls = stubApi({
+      "GET /v1/site/branding": [200, BRANDING],
+      "PUT /v1/site/branding/assets/favicon": [
+        200,
+        { ...BRANDING, favicon: "/v1/site/branding/assets/favicon?v=1" },
+      ],
+      "POST /api/branding/refresh": [204],
+    });
+    const reload = vi.fn();
+    renderSite(<AppearancePage reloadPage={reload} />);
+    const file = new File([new Uint8Array([137, 80, 78, 71])], "f.png", { type: "image/png" });
+    await userEvent.upload(await screen.findByLabelText("Favicon file"), file);
+    await screen.findByText("Favicon saved. Reloading…");
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toContain("POST /api/branding/refresh");
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 
   it("resets to Kobe's defaults after asking", async () => {
     const calls = stubApi({
       "GET /v1/site/branding": [200, { ...BRANDING, appName: "Acme" }],
       "POST /v1/site/branding/reset": [200, BRANDING],
+      "POST /api/branding/refresh": [204],
     });
     const reload = vi.fn();
     renderSite(<AppearancePage reloadPage={reload} />);

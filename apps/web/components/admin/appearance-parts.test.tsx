@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { BRANDING_ASSET_CONTENT_TYPES, type SiteBranding } from "@kobe/protocol";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,7 +9,8 @@ import { brandingCss } from "../../lib/theme/branding-css";
 import { AssetField } from "./site/appearance-asset";
 import { IdentityFields } from "./site/appearance-identity";
 import { AppearancePreview } from "./site/appearance-preview";
-import { StylePicker, draftOf, themeOf, type StyleDraft } from "./site/appearance-style";
+import { StylePicker, draftOf, floorOf, themeOf, type StyleDraft } from "./site/appearance-style";
+import { previewCss } from "../../lib/theme/preview-css";
 import { stubApi } from "./testing";
 
 const BRANDING: SiteBranding = {
@@ -74,8 +75,8 @@ describe("Appearance uploads", () => {
   it("accepts the server's types per kind and shows the size limits", () => {
     render(
       <>
-        <AssetField kind="logo" branding={BRANDING} onChanged={() => undefined} />
-        <AssetField kind="favicon" branding={BRANDING} onChanged={() => undefined} />
+        <AssetField kind="logo" branding={BRANDING} onApplied={() => undefined} />
+        <AssetField kind="favicon" branding={BRANDING} onApplied={() => undefined} />
       </>,
     );
     const logo = screen.getByLabelText("Logo file") as HTMLInputElement;
@@ -90,10 +91,10 @@ describe("Appearance uploads", () => {
   it("uploads the picked file and hands back the new branding", async () => {
     const calls = stubApi({ "PUT /v1/site/branding/assets/logo": [200, WITH_LOGO] });
     const onChanged = vi.fn();
-    render(<AssetField kind="logo" branding={BRANDING} onChanged={onChanged} />);
+    render(<AssetField kind="logo" branding={BRANDING} onApplied={onChanged} />);
     const file = new File([new Uint8Array([137, 80, 78, 71])], "acme.png", { type: "image/png" });
     await userEvent.upload(screen.getByLabelText("Logo file"), file);
-    await screen.findByText(/Logo saved/);
+    await screen.findByText("Logo saved. Reloading…");
     expect(onChanged).toHaveBeenCalledWith(WITH_LOGO);
     expect(((must(calls[0]).body as FormData).get("file") as File).name).toBe("acme.png");
   });
@@ -105,7 +106,7 @@ describe("Appearance uploads", () => {
         { code: "svg_refused", message: "This SVG is refused: it contains a <script> element" },
       ],
     });
-    render(<AssetField kind="logo" branding={BRANDING} onChanged={() => undefined} />);
+    render(<AssetField kind="logo" branding={BRANDING} onApplied={() => undefined} />);
     const file = new File(["<svg><script/></svg>"], "bad.svg", { type: "image/svg+xml" });
     await userEvent.upload(screen.getByLabelText("Logo file"), file);
     expect(
@@ -118,7 +119,7 @@ describe("Appearance uploads", () => {
 
   it("refuses a file over the limit before sending it", async () => {
     const calls = stubApi({});
-    render(<AssetField kind="favicon" branding={BRANDING} onChanged={() => undefined} />);
+    render(<AssetField kind="favicon" branding={BRANDING} onApplied={() => undefined} />);
     const big = new File([new Uint8Array(257 * 1024)], "huge.png", { type: "image/png" });
     await userEvent.upload(screen.getByLabelText("Favicon file"), big);
     expect(await screen.findByText(/huge\.png is 257 KiB; the limit here is 256 KiB/)).toBeTruthy();
@@ -128,19 +129,79 @@ describe("Appearance uploads", () => {
   it("shows the current logo on light and dark and removes it", async () => {
     const calls = stubApi({ "DELETE /v1/site/branding/assets/logo": [200, BRANDING] });
     const onChanged = vi.fn();
-    render(<AssetField kind="logo" branding={WITH_LOGO} onChanged={onChanged} />);
+    render(<AssetField kind="logo" branding={WITH_LOGO} onApplied={onChanged} />);
     const shown = screen.getAllByRole("img").map((i) => i.getAttribute("src"));
     expect(shown).toEqual([must(WITH_LOGO.logo).url, must(WITH_LOGO.logo).url]);
     await userEvent.click(screen.getByRole("button", { name: "Remove the logo" }));
-    await screen.findByText(/Logo removed/);
+    await screen.findByText("Logo removed. Reloading…");
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
       "DELETE /v1/site/branding/assets/logo",
     ]);
     expect(onChanged).toHaveBeenCalledWith(BRANDING);
   });
 
+  it("clears the file input after every pick, so the same file can be picked again", async () => {
+    stubApi({
+      "PUT /v1/site/branding/assets/logo": [422, { code: "invalid_image", message: "Damaged." }],
+    });
+    render(<AssetField kind="logo" branding={BRANDING} onApplied={() => undefined} />);
+    const input = screen.getByLabelText("Logo file") as HTMLInputElement;
+    await userEvent.upload(input, new File(["x"], "a.png", { type: "image/png" }));
+    await screen.findByText("Damaged.");
+    expect(input.value).toBe("");
+    const big = new File([new Uint8Array(513 * 1024)], "big.png", { type: "image/png" });
+    await userEvent.upload(input, big);
+    await screen.findByText(/big\.png is 513 KiB/);
+    expect(input.value).toBe("");
+  });
+
+  it("takes only files on the drop zone", () => {
+    render(<AssetField kind="logo" branding={BRANDING} onApplied={() => undefined} />);
+    const zone = must(document.querySelector('[data-kobe-drop="logo"]'));
+    fireEvent.dragOver(zone, { dataTransfer: { types: ["text/plain"], files: [] } });
+    expect(zone.hasAttribute("data-dragging")).toBe(false);
+    fireEvent.dragOver(zone, { dataTransfer: { types: ["Files"], files: [] } });
+    expect(zone.hasAttribute("data-dragging")).toBe(true);
+    // Moving onto a child is not leaving (happy-dom's DragEvent drops relatedTarget: set it).
+    const leave = (to: Element) => {
+      const event = new Event("dragleave", { bubbles: true });
+      Object.defineProperty(event, "relatedTarget", { value: to });
+      act(() => {
+        zone.dispatchEvent(event);
+      });
+    };
+    leave(must(zone.querySelector("button")));
+    expect(zone.hasAttribute("data-dragging")).toBe(true);
+    leave(document.body);
+    expect(zone.hasAttribute("data-dragging")).toBe(false);
+  });
+
+  it("keeps the dark logo off until there is a logo", async () => {
+    stubApi({});
+    render(<AssetField kind="logo_dark" branding={BRANDING} onApplied={() => undefined} />);
+    const pick = screen.getByRole("button", { name: "Choose a dark logo…" });
+    expect((pick as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Upload a logo first.")).toBeTruthy();
+    expect((screen.getByLabelText("Dark logo file") as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("still shows and removes a dark logo stored without a logo", async () => {
+    const calls = stubApi({
+      "GET /v1/site/branding/assets/logo_dark": [200, {}],
+      "DELETE /v1/site/branding/assets/logo_dark": [200, BRANDING],
+    });
+    render(<AssetField kind="logo_dark" branding={BRANDING} onApplied={() => undefined} />);
+    const remove = await screen.findByRole("button", { name: "Remove the dark logo" });
+    expect(screen.getByRole("img").getAttribute("src")).toBe("/v1/site/branding/assets/logo_dark");
+    await userEvent.click(remove);
+    await screen.findByText("Dark logo removed. Reloading…");
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toContain(
+      "DELETE /v1/site/branding/assets/logo_dark",
+    );
+  });
+
   it("previews the favicon at 16 and 32 px", () => {
-    render(<AssetField kind="favicon" branding={WITH_LOGO} onChanged={() => undefined} />);
+    render(<AssetField kind="favicon" branding={WITH_LOGO} onApplied={() => undefined} />);
     const sizes = screen.getAllByRole("img").map((i) => i.getAttribute("width"));
     expect(sizes).toEqual(["16", "32"]);
   });
@@ -150,7 +211,7 @@ function Style({ initial }: { initial: StyleDraft }) {
   const [draft, setDraft] = useState(initial);
   return (
     <>
-      <StylePicker draft={draft} onDraft={setDraft} />
+      <StylePicker draft={draft} onDraft={setDraft} report={floorOf(themeOf(draft))} />
       <output data-testid="theme">{JSON.stringify(themeOf(draft))}</output>
     </>
   );
@@ -238,7 +299,7 @@ describe("Appearance preview", () => {
     script.setAttribute("nonce", "n0nce");
     script.nonce = "n0nce";
     document.head.append(script);
-    render(<AppearancePreview branding={BRANDING} theme={{ preset: "plum" }} />);
+    render(<AppearancePreview branding={BRANDING} css={previewCss({ preset: "plum" })} />);
     const style = must(document.querySelector("style[data-kobe-preview]"));
     expect(style.textContent).toContain(brandingCss({ preset: "plum" }, "#preview-light"));
     expect(style.textContent).toContain(brandingCss({ preset: "plum" }, "#preview-dark"));
@@ -249,7 +310,7 @@ describe("Appearance preview", () => {
   });
 
   it("shows the brand, a primary button, a link, three status chips and a field in each", () => {
-    render(<AppearancePreview branding={BRANDING} theme={{ preset: "default" }} />);
+    render(<AppearancePreview branding={BRANDING} css={previewCss({ preset: "default" })} />);
     for (const id of ["preview-light", "preview-dark"]) {
       const root = must(document.getElementById(id));
       expect(root.textContent).toContain("Acme");

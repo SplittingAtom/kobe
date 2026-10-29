@@ -6,16 +6,25 @@ import {
   type BrandingAssetKind,
   type SiteBranding,
 } from "@kobe/protocol";
-import { useId, useRef, useState, type DragEvent } from "react";
-import { removeBrandingAsset, uploadBrandingAsset } from "../../../lib/admin/api/site/branding";
+import { useEffect, useId, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import {
+  DARK_LOGO_URL,
+  hasDarkLogoAlone,
+  removeBrandingAsset,
+  uploadBrandingAsset,
+} from "../../../lib/admin/api/site/branding";
+import { formatKiB } from "../../../lib/files/format";
 import { Button, Notice } from "../../ui/console";
+import type { ApiResult } from "../../../lib/api/client";
 import { MutationStatus } from "../error-notice";
 import { useMutation } from "../use-resource";
 
 /**
  * One branding file (KOBE-501, TH7/TH8): pick or drop it, see the current one, remove it. A file
- * applies as soon as it is uploaded (the name and style wait for Save). The server checks the
- * bytes (type, size, pixels, SVG content); its refusal is shown as it says it.
+ * applies as soon as it is uploaded (the name and style wait for Save); the page then reloads.
+ * The server checks the bytes (type, size, pixels, SVG content); its refusal is shown as it says
+ * it. The dark logo needs a logo (the public branding names it only next to one): its field is
+ * off without a logo, but a dark logo stored anyway is still shown with Remove.
  */
 
 const LABEL: Readonly<Record<BrandingAssetKind, string>> = {
@@ -48,8 +57,6 @@ const EXTENSIONS: Readonly<Record<string, readonly string[]>> = {
 
 const SVG_HINT = "Export the file as Plain SVG (Inkscape's own format is refused).";
 
-const kib = (bytes: number): number => Math.ceil(bytes / 1024);
-
 function formats(kind: BrandingAssetKind): string {
   const names = BRANDING_ASSET_CONTENT_TYPES[kind].map((t) => FORMAT[t] ?? t);
   return names.length > 1 ? `${names.slice(0, -1).join(", ")} or ${names.at(-1)}` : names.join("");
@@ -67,14 +74,24 @@ function currentUrl(kind: BrandingAssetKind, b: SiteBranding): string | null {
   return b.logo?.dark ?? null;
 }
 
-function Current({
-  kind,
-  branding,
-}: {
-  readonly kind: BrandingAssetKind;
-  readonly branding: SiteBranding;
-}) {
-  const url = currentUrl(kind, branding);
+/** A dark logo stored while there is no logo, which the public branding does not name. */
+function useDarkLogoAlone(kind: BrandingAssetKind, branding: SiteBranding): string | null {
+  const probe = kind === "logo_dark" && branding.logo === null;
+  const [found, setFound] = useState(false);
+  useEffect(() => {
+    if (!probe) return;
+    let live = true;
+    void hasDarkLogoAlone().then((yes) => {
+      if (live) setFound(yes);
+    });
+    return () => {
+      live = false;
+    };
+  }, [probe, branding]);
+  return probe && found ? DARK_LOGO_URL : null;
+}
+
+function Current({ kind, url }: { readonly kind: BrandingAssetKind; readonly url: string | null }) {
   if (url === null) return <p className="m-0 text-sm text-console-muted">None yet.</p>;
   if (kind === "favicon") {
     return (
@@ -105,14 +122,17 @@ function Current({
   );
 }
 
+const hasFiles = (e: DragEvent) => e.dataTransfer.types.includes("Files");
+
 export function AssetField({
   kind,
   branding,
-  onChanged,
+  onApplied,
 }: {
   readonly kind: BrandingAssetKind;
   readonly branding: SiteBranding;
-  readonly onChanged: (next: SiteBranding) => void;
+  /** After a successful upload or removal, with the new branding (the page reloads). */
+  readonly onApplied: (next: SiteBranding) => void | Promise<void>;
 }) {
   const id = useId();
   const input = useRef<HTMLInputElement>(null);
@@ -121,40 +141,42 @@ export function AssetField({
   const [dragging, setDragging] = useState(false);
   const label = LABEL[kind];
   const max = BRANDING_ASSET_MAX_BYTES[kind];
-  const current = currentUrl(kind, branding);
+  const alone = useDarkLogoAlone(kind, branding);
+  const current = currentUrl(kind, branding) ?? alone;
+  const needsLogo = kind === "logo_dark" && branding.logo === null;
+
+  async function apply(change: () => Promise<ApiResult<SiteBranding>>, notice: string) {
+    const result: { next?: SiteBranding } = {};
+    const done = await mutation.run(
+      async () => {
+        const res = await change();
+        if (res.ok) result.next = res.data;
+        return res;
+      },
+      () => notice,
+    );
+    if (done && result.next !== undefined) await onApplied(result.next);
+  }
 
   async function upload(file: File | undefined) {
-    if (file === undefined) return;
+    if (file === undefined || needsLogo) return;
     mutation.clear();
     if (file.size > max) {
-      setTooLarge(`${file.name} is ${kib(file.size)} KiB; the limit here is ${kib(max)} KiB.`);
+      setTooLarge(`${file.name} is ${formatKiB(file.size)}; the limit here is ${formatKiB(max)}.`);
       return;
     }
     setTooLarge(null);
-    const done = await mutation.run(
-      async () => {
-        const res = await uploadBrandingAsset(kind, file);
-        if (res.ok) onChanged(res.data);
-        return res;
-      },
-      () => `${label} saved. Every page shows it from its next load.`,
-    );
-    if (!done && input.current) input.current.value = "";
+    await apply(() => uploadBrandingAsset(kind, file), `${label} saved. Reloading…`);
   }
 
-  async function remove() {
-    setTooLarge(null);
-    await mutation.run(
-      async () => {
-        const res = await removeBrandingAsset(kind);
-        if (res.ok) onChanged(res.data);
-        return res;
-      },
-      () => `${label} removed.`,
-    );
+  function onPick(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // the same file can be picked again, whatever happened to this one
+    void upload(file);
   }
 
   function onDrop(e: DragEvent<HTMLDivElement>) {
+    if (!hasFiles(e)) return;
     e.preventDefault();
     setDragging(false);
     void upload(e.dataTransfer.files[0]);
@@ -166,17 +188,21 @@ export function AssetField({
         {label}
       </span>
       <p className="m-0 text-sm text-console-muted">
-        {HINT[kind]} {formats(kind)}, up to {kib(max)} KiB.
+        {HINT[kind]} {formats(kind)}, up to {formatKiB(max)}.
       </p>
-      <Current kind={kind} branding={branding} />
+      <Current kind={kind} url={current} />
       <div
         data-kobe-drop={kind}
         {...(dragging ? { "data-dragging": "" } : {})}
         onDragOver={(e) => {
+          if (needsLogo || !hasFiles(e)) return;
           e.preventDefault();
           setDragging(true);
         }}
-        onDragLeave={() => setDragging(false)}
+        onDragLeave={(e) => {
+          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return; // into a child
+          setDragging(false);
+        }}
         onDrop={onDrop}
         className="box-border flex flex-wrap items-center gap-2 rounded-md border border-dashed border-console-control p-3 data-dragging:bg-console-panel"
       >
@@ -186,19 +212,30 @@ export function AssetField({
           hidden
           aria-label={`${label} file`}
           accept={acceptOf(kind)}
-          onChange={(e) => void upload(e.target.files?.[0])}
+          disabled={needsLogo}
+          onChange={onPick}
         />
         <Button
           loading={mutation.pending}
+          disabled={needsLogo}
+          {...(needsLogo ? { "aria-describedby": `${id}-needs-logo` } : {})}
           onClick={() => input.current?.click()}
         >{`Choose a ${label.toLowerCase()}…`}</Button>
-        <span className="text-sm text-console-muted">or drop a file here.</span>
+        {needsLogo ? (
+          <span id={`${id}-needs-logo`} className="text-sm text-console-muted">
+            Upload a logo first.
+          </span>
+        ) : (
+          <span className="text-sm text-console-muted">or drop a file here.</span>
+        )}
         {current !== null && (
           <Button
             variant="danger"
             disabled={mutation.pending}
             aria-label={`Remove the ${label.toLowerCase()}`}
-            onClick={() => void remove()}
+            onClick={() =>
+              void apply(() => removeBrandingAsset(kind), `${label} removed. Reloading…`)
+            }
           >
             Remove
           </Button>

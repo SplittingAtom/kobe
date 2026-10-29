@@ -1,10 +1,11 @@
 "use client";
 
-import { checkFloor, type FloorFailure, type SiteBranding } from "@kobe/protocol";
-import { useState, type FormEvent } from "react";
+import type { FloorFailure, FloorReport, SiteBranding, ThemeSettings } from "@kobe/protocol";
+import { useMemo, useState, type FormEvent } from "react";
 import {
   getBranding,
   putBranding,
+  refreshBranding,
   resetBranding,
   type BrandingChange,
 } from "../../../lib/admin/api/site/branding";
@@ -16,13 +17,15 @@ import { failureTexts, floorReason } from "./appearance-contrast";
 import { AssetField } from "./appearance-asset";
 import { IdentityFields, nameError } from "./appearance-identity";
 import { AppearancePreview } from "./appearance-preview";
-import { StylePicker, draftOf, themeOf, type StyleDraft } from "./appearance-style";
+import { StylePicker, draftOf, floorOf, themeOf, type StyleDraft } from "./appearance-style";
+import { previewCss } from "../../../lib/theme/preview-css";
 
 /**
  * Site console → Appearance (KOBE-501, theming plan §6; decisions TH2-TH12): the site's name,
  * logo, dark logo, favicon and style, with a live light/dark preview. Owner and Admin
  * (`site.settings.manage`; the server checks it). Files apply when uploaded; the name and the
- * style with Save, after which the page reloads so the admin sees the real header and title.
+ * style with Save. After any change the page asks this web process to refetch the branding
+ * (`POST /api/branding/refresh`) and reloads, so the admin sees the real header and title.
  */
 
 const reloadWindow = () => window.location.reload();
@@ -40,6 +43,9 @@ export function AppearancePage({
         title="Appearance"
         description="The site's name, logo, favicon and colours: every page and the sign-in page show them. Colours always keep readable contrast in the light and the dark theme."
       />
+      <p className="m-0 mb-2 text-sm text-console-muted">
+        Other web replicas pick the change up within 30 seconds.
+      </p>
       <ResourceView state={state} label="appearance">
         {(branding) => <AppearanceEditor initial={branding} reloadPage={reloadPage} />}
       </ResourceView>
@@ -64,12 +70,15 @@ function changesOf(
 }
 
 /** Why Save is off, when the draft cannot be saved as it stands. */
-function blocked(appName: string, draft: StyleDraft): string | null {
+function blocked(
+  appName: string,
+  theme: ThemeSettings | null,
+  report: FloorReport | null,
+): string | null {
   const name = nameError(appName);
   if (name !== null) return `Save is off until the name is fixed: ${name}.`;
-  const theme = themeOf(draft);
   if (theme === null) return "Save is off until the accent is a colour such as #2449c7.";
-  return theme.preset === "custom" ? floorReason(checkFloor(theme)) : null;
+  return report === null ? null : floorReason(report);
 }
 
 function AppearanceEditor({
@@ -87,14 +96,33 @@ function AppearanceEditor({
   const [draft, setDraft] = useState(() => draftOf(initial.theme));
   const [refused, setRefused] = useState<readonly FloorFailure[]>([]);
 
+  const theme = useMemo(() => themeOf(draft), [draft]);
+  const report = useMemo(() => floorOf(theme), [theme]);
+  const css = useMemo(() => previewCss(theme ?? saved.theme), [theme, saved.theme]);
   const change = changesOf(saved, appName, showName, draft);
-  const reason = blocked(appName, draft);
+  const reason = blocked(appName, theme, report);
   const unchanged = Object.keys(change).length === 0;
   const preview: SiteBranding = {
     ...saved,
     appName: nameError(appName) === null ? appName.trim() : saved.appName,
     showName,
   };
+
+  /** A draft edit clears the last answer: a refusal no longer describes the draft. */
+  function edited<T>(set: (value: T) => void): (value: T) => void {
+    return (value) => {
+      set(value);
+      setRefused([]);
+      mutation.clear();
+    };
+  }
+
+  /** After a change: this web process refetches the branding, then the page reloads. */
+  async function applied(next?: SiteBranding) {
+    if (next !== undefined) setSaved(next);
+    await refreshBranding();
+    reloadPage();
+  }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -106,10 +134,10 @@ function AppearanceEditor({
         if (!res.ok) failures = res.failures;
         return res;
       },
-      () => "Saved. Reloading to show the new header and title…",
+      () => "Saved. Reloading…",
     );
     setRefused(failures);
-    if (done) reloadPage();
+    if (done) await applied();
   }
 
   async function onReset(e: { currentTarget: EventTarget | null }) {
@@ -125,30 +153,30 @@ function AppearanceEditor({
     if (!yes) return;
     setRefused([]);
     const done = await mutation.run(resetBranding, () => "Reset to Kobe's defaults. Reloading…");
-    if (done) reloadPage();
+    if (done) await applied();
   }
 
   return (
     <form onSubmit={onSubmit} aria-label="Appearance">
       <Section
         title="Identity"
-        description="Files apply as soon as they are uploaded; the name waits for Save."
+        description="Files apply as soon as they are uploaded (the page then reloads); the name waits for Save."
       >
         <IdentityFields
           appName={appName}
-          onAppName={setAppName}
+          onAppName={edited(setAppName)}
           showName={showName}
-          onShowName={setShowName}
+          onShowName={edited(setShowName)}
         />
-        <AssetField kind="logo" branding={saved} onChanged={setSaved} />
-        <AssetField kind="logo_dark" branding={saved} onChanged={setSaved} />
-        <AssetField kind="favicon" branding={saved} onChanged={setSaved} />
+        <AssetField kind="logo" branding={saved} onApplied={applied} />
+        <AssetField kind="logo_dark" branding={saved} onApplied={applied} />
+        <AssetField kind="favicon" branding={saved} onApplied={applied} />
       </Section>
       <Section title="Style">
-        <StylePicker draft={draft} onDraft={setDraft} />
+        <StylePicker draft={draft} onDraft={edited(setDraft)} report={report} />
       </Section>
       <Section title="Preview" description="The draft as every page will show it, in both themes.">
-        <AppearancePreview branding={preview} theme={themeOf(draft) ?? saved.theme} />
+        <AppearancePreview branding={preview} css={css} />
       </Section>
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <Button

@@ -54,6 +54,21 @@ Plan §6 in `docs/specs/theming.md` (TH2-TH4, TH8-TH12).
   branding 30 s (TH5, stale-while-revalidate), so the reload right after Save may still show the
   old values for one cache period. The spec resets the site in `finally`.
 
+## Review fixes (coordinator code review)
+
+- `POST /api/branding/refresh` (web route, same-origin only: `Sec-Fetch-Site: same-origin`, else
+  `Origin` host = `Host`/`X-Forwarded-Host`; 204) calls `invalidateBranding()`: the loader waits
+  for any fetch in flight (it may predate the change), then refetches at once. A failed refetch
+  keeps the last good value instead of dropping it (the loader's rule: a failure never replaces
+  a known-good value). The page calls it after every save, upload, removal and reset, then
+  reloads; copy "Saved. Reloading…"; note "Other web replicas pick the change up within 30 seconds."
+- Dark logo field disabled without a logo ("Upload a logo first."); a dark logo stored anyway is
+  found with a public GET of `/v1/site/branding/assets/logo_dark` and shown with Remove.
+- File input cleared after every pick; drop zone takes only `Files`, ignores leaves into children.
+- Draft edits clear the 422 failures and the mutation error; theme, floor report and preview CSS
+  are memoised in the page and the report passed to the picker. `formatKiB` in `lib/files/format.ts`.
+- e2e measures the preview's enabled primary button per scheme; uploads now wait for the reload.
+
 ## Open questions (for Chris or the coordinator)
 
 - **Screenshot baseline:** the first CI/gate run of `consoles.spec.ts` needs

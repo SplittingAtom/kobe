@@ -10,6 +10,7 @@ import {
   checkFloor,
   deriveAccent,
   type CornerStyle,
+  type FloorReport,
   type FontStack,
   type PresetId,
   type ThemeSettings,
@@ -131,8 +132,7 @@ function StyleCard({
   );
 }
 
-function ContrastReport({ theme }: { readonly theme: ThemeSettings }) {
-  const report = checkFloor(theme);
+function ContrastReport({ report }: { readonly report: FloorReport }) {
   return (
     <div aria-live="polite" className="mt-3">
       <p className="m-0 text-sm">{contrastLine(report)}</p>
@@ -150,11 +150,12 @@ function ContrastReport({ theme }: { readonly theme: ThemeSettings }) {
 function CustomFields({
   draft,
   onDraft,
+  report,
 }: {
   readonly draft: StyleDraft;
   readonly onDraft: (next: StyleDraft) => void;
+  readonly report: FloorReport | null;
 }) {
-  const theme = themeOf(draft);
   const hex = normalHex(draft.accentText);
   const valid = ACCENT_PATTERN.test(hex);
   return (
@@ -181,7 +182,7 @@ function CustomFields({
           className={`m-0 box-border h-8 w-12 cursor-pointer rounded-md border border-console-control bg-console-bg p-0.5 ${FOCUS_RING}`}
         />
       </div>
-      {theme !== null && <ContrastReport theme={theme} />}
+      {report !== null && <ContrastReport report={report} />}
       <ChoiceGroup legend="Corners">
         {CORNER_STYLES.map((c) => (
           <Radio
@@ -208,12 +209,20 @@ function CustomFields({
   );
 }
 
+/** The contrast floor of the draft's custom accent; null for a preset or an incomplete hex. */
+export function floorOf(theme: ThemeSettings | null): FloorReport | null {
+  return theme?.preset === "custom" ? checkFloor(theme) : null;
+}
+
 export function StylePicker({
   draft,
   onDraft,
+  report,
 }: {
   readonly draft: StyleDraft;
   readonly onDraft: (next: StyleDraft) => void;
+  /** {@link floorOf} the draft, computed once by the page (it also gates Save). */
+  readonly report: FloorReport | null;
 }) {
   const theme = themeOf(draft);
   const accent = theme?.preset === "custom" ? theme.accent : null;
@@ -241,7 +250,9 @@ export function StylePicker({
           />
         </div>
       </fieldset>
-      {draft.preset === "custom" && <CustomFields draft={draft} onDraft={onDraft} />}
+      {draft.preset === "custom" && (
+        <CustomFields draft={draft} onDraft={onDraft} report={report} />
+      )}
     </>
   );
 }

@@ -1,9 +1,9 @@
 "use client";
 
-import type { SiteBranding, ThemeSettings } from "@kobe/protocol";
+import type { SiteBranding } from "@kobe/protocol";
 import { useSyncExternalStore } from "react";
 import { documentCspNonce } from "../../../lib/security/csp-nonce";
-import { PREVIEW_IDS, previewCss } from "../../../lib/theme/preview-css";
+import { PREVIEW_IDS } from "../../../lib/theme/preview-css";
 import { Brand } from "../../shell/brand";
 import { BrandingProvider } from "../../shell/branding-context";
 import { Badge, Button, Card, TextInput } from "../../ui/console";
@@ -87,16 +87,16 @@ function MiniShell({
 
 export function AppearancePreview({
   branding,
-  theme,
+  css,
 }: {
   /** The draft: the name and the "show the name" choice as typed, the files as saved. */
   readonly branding: SiteBranding;
-  /** The draft style; the saved one while the draft is not a valid theme. */
-  readonly theme: ThemeSettings;
+  /** `previewCss()` of the draft style (the saved one while the draft is not a valid theme). */
+  readonly css: string;
 }) {
   return (
     <>
-      <PreviewStyle css={previewCss(theme)} />
+      <PreviewStyle css={css} />
       <div className="grid gap-3 md:grid-cols-2">
         <MiniShell scheme="light" branding={branding} />
         <MiniShell scheme="dark" branding={branding} />

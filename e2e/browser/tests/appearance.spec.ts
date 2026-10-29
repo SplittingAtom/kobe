@@ -61,6 +61,18 @@ async function save(page: Page): Promise<void> {
   await reloaded;
 }
 
+/** An upload applies at once: its notice shows, then the page reloads itself. */
+async function reloadedAfter(
+  page: Page,
+  notice: string,
+  action: () => Promise<void>,
+): Promise<void> {
+  const reloaded = page.waitForEvent("load");
+  await action();
+  await expect(panelOf(page).getByText(notice)).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  await reloaded;
+}
+
 async function resetByApi(page: Page): Promise<void> {
   await page.evaluate(async () => {
     await fetch("/v1/site/branding/reset", { method: "POST" });
@@ -75,8 +87,11 @@ async function checkContrast(page: Page, theme: Theme): Promise<void> {
   const heading = panel.getByRole("heading", { level: 1, name: "Appearance" });
   expectThemed("console heading", await paintOf(heading), theme);
   expectAA(`${theme} console heading`, await paintOf(heading));
-  const save = panel.getByRole("button", { name: "Save", exact: true });
-  expectAA(`${theme} primary button`, await paintOf(save));
+  // The preview's primary button (enabled; Save is disabled until something changes), in the
+  // preview root of this scheme: the real theme CSS on the real Button.
+  const primary = panel.locator(`#preview-${theme} [data-variant="primary"]`);
+  await expect(primary).toBeVisible();
+  expectAA(`${theme} primary button`, await paintOf(primary));
   expectAA(
     `${theme} secondary button`,
     await paintOf(panel.getByRole("button", { name: "Choose a logo…" })),
@@ -114,14 +129,18 @@ test("an admin brands the site: name, logo, favicon, preset, refusals and reset 
 
     // Logo and favicon: applied on upload.
     await openAppearance(page);
-    await panel
-      .getByLabel("Logo file")
-      .setInputFiles({ name: "logo.png", mimeType: "image/png", buffer: PNG });
-    await expect(panel.getByText(/Logo saved/)).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
-    await panel
-      .getByLabel("Favicon file")
-      .setInputFiles({ name: "favicon.png", mimeType: "image/png", buffer: PNG });
-    await expect(panel.getByText(/Favicon saved/)).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+    await reloadedAfter(page, "Logo saved. Reloading…", () =>
+      panel
+        .getByLabel("Logo file")
+        .setInputFiles({ name: "logo.png", mimeType: "image/png", buffer: PNG }),
+    );
+    await openAppearance(page);
+    await reloadedAfter(page, "Favicon saved. Reloading…", () =>
+      panel
+        .getByLabel("Favicon file")
+        .setInputFiles({ name: "favicon.png", mimeType: "image/png", buffer: PNG }),
+    );
+    await openAppearance(page);
 
     // A `<script>` SVG is refused with the reason.
     await panel

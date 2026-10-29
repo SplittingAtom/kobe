@@ -2,7 +2,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../../testing/must";
 import {
+  DARK_LOGO_URL,
   getBranding,
+  hasDarkLogoAlone,
+  refreshBranding,
   putBranding,
   removeBrandingAsset,
   resetBranding,
@@ -84,5 +87,25 @@ describe("site branding client", () => {
       "DELETE /v1/site/branding/assets/favicon",
       "POST /v1/site/branding/reset",
     ]);
+  });
+
+  it("asks the web to refetch the branding, and never throws", async () => {
+    const fetchFn = stub(204, undefined);
+    await refreshBranding();
+    const [url, init] = must(fetchFn.mock.calls[0]);
+    expect(`${init?.method} ${url}`).toBe("POST /api/branding/refresh");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Promise.reject(new Error("offline"))),
+    );
+    await expect(refreshBranding()).resolves.toBeUndefined();
+  });
+
+  it("finds a dark logo stored without a logo", async () => {
+    const fetchFn = stub(200, {});
+    expect(await hasDarkLogoAlone()).toBe(true);
+    expect(must(fetchFn.mock.calls[0])[0]).toBe(DARK_LOGO_URL);
+    stub(404, { code: "not_found" });
+    expect(await hasDarkLogoAlone()).toBe(false);
   });
 });
