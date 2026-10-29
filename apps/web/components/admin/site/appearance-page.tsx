@@ -145,7 +145,7 @@ function AppearanceEditor({
       {
         title: "Reset the appearance to Kobe's defaults?",
         description:
-          "This removes the name, the logos, the favicon and the style. Every page shows the built-in look again, or the defaults your install's chart values set.",
+          "This removes the name, the logos, the favicon and the style. Every page shows the built-in look again, or the defaults your site's chart values set.",
         confirmLabel: "Reset",
       },
       eventTrigger(e),
