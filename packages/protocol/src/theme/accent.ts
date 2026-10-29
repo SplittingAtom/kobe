@@ -19,12 +19,19 @@ export const DEFAULT_SURFACES: Readonly<{ light: Surfaces; dark: Surfaces }> = O
   dark: Object.freeze({ page: "#16161a", panel: "#202027", card: "#202027" }),
 });
 
+/** A colour per scheme. */
+export interface SchemePair {
+  readonly light: string;
+  readonly dark: string;
+}
+
 export interface DerivedAccent {
-  readonly primary: string;
-  /** One value in both schemes: the accent one step darker. */
-  readonly primaryHover: string;
-  /** `#ffffff` or `#111111`, whichever contrasts more with `primary`. */
-  readonly primaryFg: string;
+  /** Light: the accent as given; dark: the accent lightened until ≥ 3:1 on page and panel. */
+  readonly primary: SchemePair;
+  /** That scheme's primary one step darker. */
+  readonly primaryHover: SchemePair;
+  /** `#ffffff` or `#111111`, whichever contrasts more with that scheme's primary. */
+  readonly primaryFg: SchemePair;
   readonly link: { readonly light: string; readonly dark: string };
   readonly focus: { readonly light: string; readonly dark: string };
 }
@@ -82,13 +89,21 @@ export function deriveAccent(
   accent: string,
   surfaces: SurfaceSet = DEFAULT_SURFACES,
 ): DerivedAccent {
-  const primary = accent.toLowerCase();
-  const primaryHover = adjustLightness(primary, -HOVER_STEP);
-  const primaryFg =
-    contrastRatio(LIGHT_FG, primary) >= contrastRatio(DARK_FG, primary) ? LIGHT_FG : DARK_FG;
   const { light, dark } = surfaces;
-  const linkLight = adjustUntil(primary, [light.page, light.panel], TEXT_CONTRAST_MIN, -1);
-  const linkDark = adjustUntil(primary, [dark.page, dark.panel], TEXT_CONTRAST_MIN, 1);
+  const accentHex = accent.toLowerCase();
+  const primary = {
+    light: accentHex,
+    dark: adjustUntil(accentHex, [dark.page, dark.panel], NON_TEXT_CONTRAST_MIN, 1),
+  };
+  const primaryHover = {
+    light: adjustLightness(primary.light, -HOVER_STEP),
+    dark: adjustLightness(primary.dark, -HOVER_STEP),
+  };
+  const fgOn = (fill: string) =>
+    contrastRatio(LIGHT_FG, fill) >= contrastRatio(DARK_FG, fill) ? LIGHT_FG : DARK_FG;
+  const primaryFg = { light: fgOn(primary.light), dark: fgOn(primary.dark) };
+  const linkLight = adjustUntil(accentHex, [light.page, light.panel], TEXT_CONTRAST_MIN, -1);
+  const linkDark = adjustUntil(accentHex, [dark.page, dark.panel], TEXT_CONTRAST_MIN, 1);
   const focusLight = adjustUntil(
     linkLight,
     [light.page, light.panel, light.card],
@@ -135,22 +150,32 @@ export function checkFloor(
   if (theme.preset !== "custom") return { ok: true, failures: [], derived };
   const failures: FloorFailure[] = [];
   const { primary, primaryHover, primaryFg, link, focus } = derived;
-  check(
-    failures,
-    "primary-fg on primary",
-    "both",
-    contrastRatio(primaryFg, primary),
-    TEXT_CONTRAST_MIN,
-  );
-  check(
-    failures,
-    "primary-fg on primary hover",
-    "both",
-    contrastRatio(primaryFg, primaryHover),
-    TEXT_CONTRAST_MIN,
-  );
   for (const scheme of ["light", "dark"] as const) {
     const s = surfaces[scheme];
+    // The fill stands out from the surfaces (WCAG 1.4.11): no white buttons on a white page.
+    for (const surface of ["page", "panel"] as const) {
+      check(
+        failures,
+        "primary_on_surface",
+        scheme,
+        contrastRatio(primary[scheme], s[surface]),
+        NON_TEXT_CONTRAST_MIN,
+      );
+    }
+    check(
+      failures,
+      "fg_on_primary",
+      scheme,
+      contrastRatio(primaryFg[scheme], primary[scheme]),
+      TEXT_CONTRAST_MIN,
+    );
+    check(
+      failures,
+      "fg_on_hover",
+      scheme,
+      contrastRatio(primaryFg[scheme], primaryHover[scheme]),
+      TEXT_CONTRAST_MIN,
+    );
     for (const surface of ["page", "panel"] as const) {
       check(
         failures,
