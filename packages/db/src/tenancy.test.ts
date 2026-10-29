@@ -1,7 +1,13 @@
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import * as schema from "./schema/index.js";
-import { SITE_WIDE_TABLES, TEAM_TABLES, TENANCY_DOMAINS, isTeamTable } from "./tenancy.js";
+import {
+  SITE_WIDE_TABLES,
+  TEAM_TABLES,
+  TENANCY_DOMAINS,
+  appPrivilegesFor,
+  isTeamTable,
+} from "./tenancy.js";
 
 const schemaTables = Object.values(schema)
   .filter((v) => typeof v === "object" && v !== null && Symbol.for("drizzle:IsDrizzleTable") in v)
@@ -37,6 +43,19 @@ describe("tenancy registry", () => {
     for (const t of ["users", "teams", "site_roles", "connectors", "audit_log"]) {
       expect(SITE_WIDE_TABLES).toContain(t);
     }
+  });
+
+  it("keeps the branding assets site-wide with full privileges and no team_id (KOBE-497)", () => {
+    expect(SITE_WIDE_TABLES).toContain("site_branding_assets");
+    expect(isTeamTable("site_branding_assets")).toBe(false);
+    expect(appPrivilegesFor("site_branding_assets")).toEqual([
+      "SELECT",
+      "INSERT",
+      "UPDATE",
+      "DELETE",
+    ]);
+    const table = schemaTables.find((t) => t.name === "site_branding_assets");
+    expect(table?.columns.map((c) => snake(c.name))).not.toContain("team_id");
   });
 
   it("classifies every table defined in the Drizzle schema", () => {

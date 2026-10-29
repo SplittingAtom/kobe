@@ -103,6 +103,20 @@ describe("audit event taxonomy", () => {
     expect(target.safeParse({ ...ids, runKind: "message", reason: "x" }).success).toBe(false);
   });
 
+  it("records a branding change per setting, with a label or a sha256 (KOBE-497, TH12)", () => {
+    const { target, scope } = AUDIT_EVENTS["site.branding.updated"];
+    expect(scope).toBe("site");
+    const sha = "0123456789abcdef".repeat(4);
+    expect(target.safeParse({ setting: "app_name", value: "Acme" }).success).toBe(true);
+    expect(target.safeParse({ setting: "theme", value: "tokyo-nights" }).success).toBe(true);
+    for (const setting of ["logo", "logo_dark", "favicon"])
+      expect(target.safeParse({ setting, value: sha }).success).toBe(true);
+    expect(target.safeParse({ setting: "css", value: "x" }).success).toBe(false);
+    expect(target.safeParse({ setting: "app_name", value: "" }).success).toBe(false);
+    expect(target.safeParse({ setting: "app_name", value: "a\nb" }).success).toBe(false);
+    expect(target.safeParse({ setting: "logo", value: sha, bytes: "x" }).success).toBe(false);
+  });
+
   it("is documented: docs/audit-log.md lists every action", () => {
     const doc = readFileSync(new URL("../../../../docs/audit-log.md", import.meta.url), "utf8");
     expect(AUDIT_ACTIONS.filter((a) => !doc.includes(`\`${a}\``))).toEqual([]);
