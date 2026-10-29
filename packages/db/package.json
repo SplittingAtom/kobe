@@ -39,7 +39,8 @@
   },
   "files": [
     "dist",
-    "drizzle"
+    "drizzle",
+    "!drizzle/meta/*_snapshot.json"
   ],
   "devDependencies": {
     "@types/pg": "^8.23.1",
