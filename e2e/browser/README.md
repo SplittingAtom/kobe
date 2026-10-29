@@ -135,6 +135,17 @@ Site backup and restore, and the Team inventory, and checks none of them is a "c
 placeholder. Read-only, no tokens. `KOBE_USER` must be a site Admin or the Owner and a team admin
 of the active team: `npx playwright test console-sections`.
 
+## Appearance (KOBE-501)
+
+`appearance.spec.ts` brands the site on Site → Appearance and puts it back: renames it (the bar's
+`h1` and `document.title` follow; the server-rendered HTML of a fresh load already has the name),
+uploads a generated 1×1 PNG as logo and favicon (the header's `<img>`, `<link rel="icon">`), has
+a `<script>` SVG refused with its reason, picks the Plum preset (AA in light and dark on a console
+page and on the chat, `support/colours.ts`) and resets to Kobe's defaults, also when a step fails.
+The web caches the branding for 30 s, so checks poll a fresh render. `KOBE_USER` must be the site
+Owner or an Admin. No tokens: `npx playwright test appearance`. The page is in the console
+screenshots too; its first `consoles` run needs `--update-snapshots` for its new baseline.
+
 ## Thinking level (KOBE-260)
 
 `thinking.spec.ts` looks in the model picker for an enabled model that offers a thinking level
