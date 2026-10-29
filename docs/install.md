@@ -755,6 +755,18 @@ backup's.
 links or namespaces other than SVG and xlink ([theming.md](theming.md#21-svg-rules)). From Inkscape,
 save as **Plain SVG**; from other editors, export a plain SVG without editor metadata.
 
+### Replicas, disruption budgets and spread
+
+The server and the model gateway run two replicas by default; `web`, `scheduler`, `mcpProxy` and
+`egressProxy` can be scaled with their `replicas` value (Bifrost stays at one). Every Kobe workload
+with more than one replica gets a PodDisruptionBudget (`minAvailable: 1`, so a node drain keeps one
+replica serving) and a soft `topologySpreadConstraints` on `kubernetes.io/hostname` (`maxSkew: 1`,
+`ScheduleAnyway`: replicas go to different nodes when they can, and single-node clusters still
+schedule). At one replica neither is rendered, since such a budget would block drains. Turn either
+off per workload with `<component>.podDisruptionBudget.enabled` or
+`<component>.topologySpread.enabled`, or spread over zones with
+`<component>.topologySpread.topologyKey: topology.kubernetes.io/zone`.
+
 ### Private certificate authorities
 
 When a service the server calls over TLS (a syslog or OTLP collector for audit forwarding, an OIDC

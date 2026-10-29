@@ -14,6 +14,13 @@ Hadron via `scripts/hadron.sh`.
   (per-audience key pairs, public keys in a ConfigMap, kid + rotation window; server reads its bundle from
   the Secret; upgrade with no runs active until KOBE-522 lets the sandbox agent re-trade on a 401). Opus
   security reviews on both. KOBE-520 withdrawn (the MCP proxy never held an approval key); KOBE-521 filed.
+- **Hardening lane 1 (2026-10-29):** Chris's spare-lane request after the low-priority review. On
+  `group-hardening-1` (one worktree, agents sequential or path-disjoint): KOBE-506 file-viewer move race
+  (real bug; agent/other-device moves → KOBE-516), KOBE-507 db-core 57P01 (drop waits for sessions; pool
+  error logger), KOBE-510 chart eslint, KOBE-512 Trivy gate on service images, KOBE-515 PDB + spread,
+  KOBE-517 next 16.4.3 (two RCEs), KOBE-514 slim images (server 1.2 GB → 580 MB). Reviews: Opus on 507 and
+  514, code-review medium on 506, coordinator on 510/512/515/517. Next in the lane: KOBE-511 Pi upgrade,
+  KOBE-513 Ed25519 tokens (own group, Opus security reviews).
 - **Theming deployed for the gate (2026-10-29):** main 5cd8a91e → kobe-gate1 `local-5cd8a91ea59b`, then
   87398452 → `local-87398452b50d` (#403: default sans token back to Tailwind's stack after the console
   screenshots showed a font change in the Linux container). Follow-ups: #404 (Appearance e2e exact

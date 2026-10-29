@@ -9,7 +9,7 @@ import { sealAuditV1, verifyAuditChain } from "./audit/index.js";
 import { createDb, type KobeDb } from "./client.js";
 import { DEFAULT_MIGRATIONS_FOLDER, runMigrations } from "./migrate.js";
 import * as schema from "./schema/index.js";
-import { testNameSuffix, testServerUrl } from "./test-support/database.js";
+import { dropDatabase, testNameSuffix, testServerUrl } from "./test-support/database.js";
 
 /**
  * The audit chain v2 upgrade path (KOBE-17): an install whose log was chained by KOBE-15 (v1,
@@ -72,7 +72,7 @@ async function install(folder: string): Promise<Install> {
     adminUrl: url(null),
     appRole,
     async drop() {
-      await server.query(`DROP DATABASE IF EXISTS ${db} WITH (FORCE)`);
+      await dropDatabase(server, db);
       await server.query(`DROP ROLE IF EXISTS ${appRole}`);
       await server.query(`DROP ROLE IF EXISTS ${ownerRole}`);
     },

@@ -40,7 +40,7 @@ MANIFESTS = [
     "tools/license-check/package.json",
     "charts/kobe/package.json",
 ]
-COMMON = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "turbo.json", "tsconfig.base.json", "packages"] + MANIFESTS
+COMMON = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", ".pnpmfile.cjs", "turbo.json", "tsconfig.base.json", "packages"] + MANIFESTS
 
 def kobe_image(name, dockerfile, sources):
     docker_build(

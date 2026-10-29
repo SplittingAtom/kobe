@@ -28,6 +28,7 @@ import { artifactAsSheet } from "../../lib/shell/layout";
 import { cn } from "../../lib/utils";
 import type { FilesApi } from "../../lib/files/api";
 import { fileName, filePathOfTab, tabDomId } from "../../lib/files/preview";
+import { isWithin } from "../../lib/files/tree";
 import { confirmDiscard, useUnsavedGuard } from "../files/file-editor";
 import { FileTabContent } from "../files/file-tab";
 import { useFileChangeHint } from "./use-file-change-hint";
@@ -240,7 +241,10 @@ function FileTab({
   readonly openSeq: number | null;
   readonly filesApi: FilesApi;
 }) {
-  const dropFile = useArtifactPanel()?.dropFile; // stable: the file is not read again
+  const panel = useArtifactPanel();
+  const dropFile = panel?.dropFile; // stable: the file is not read again
+  const isMoving = panel?.isMoving;
+  const recheck = panel?.moveRecheck ?? null;
   const session = useChatSession();
   // The composer's Viewing chip and the message's `viewing` (KOBE-463, FE7).
   useEffect(() => {
@@ -253,7 +257,19 @@ function FileTab({
   const [reload, setReload] = useState({ seq: openSeq, count: 0 });
   if (openSeq !== null && openSeq !== reload.seq)
     setReload({ seq: openSeq, count: reload.count + 1 });
-  const onGone = useCallback((gone: string) => dropFile?.(gone), [dropFile]);
+  // A failed move's files are read again (KOBE-506): one really gone closes as usual.
+  const [rechecked, setRechecked] = useState(recheck?.seq ?? 0);
+  if (recheck !== null && recheck.seq !== rechecked) {
+    setRechecked(recheck.seq);
+    if (isWithin(path, recheck.from)) setReload((r) => ({ ...r, count: r.count + 1 }));
+  }
+  // A pending move's old path reads as gone: the tab follows the move instead (KOBE-506).
+  const onGone = useCallback(
+    (gone: string) => {
+      if (!isMoving?.(gone)) dropFile?.(gone);
+    },
+    [dropFile, isMoving],
+  );
   // The kernel of the conversation on screen (KOBE-465): notebooks and `.py` files run there.
   const threadId = useAuiState((s) => kobeExtrasOf(s)?.state.threadId ?? null);
   const readOnly = useThreadReadOnly();

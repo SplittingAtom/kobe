@@ -11,7 +11,7 @@ ARG PNPM_VERSION
 RUN npm install -g pnpm@${PNPM_VERSION}
 ENV NEXT_TELEMETRY_DISABLED=1
 WORKDIR /repo
-COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.cjs ./
 RUN pnpm fetch
 COPY . .
 # KOBE-487: the build id open tabs compare with /api/build (e.g. local-<sha12>); empty = a fresh

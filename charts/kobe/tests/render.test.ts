@@ -76,6 +76,11 @@ function renderError(values: Record<string, string>, unset: string[] = []): stri
   throw new Error(`expected helm template to fail for ${JSON.stringify(values)}`);
 }
 
+function must<T>(value: T | undefined, what: string): T {
+  if (value === undefined) throw new Error(`expected ${what} in the rendered chart`);
+  return value;
+}
+
 const byKind = (ms: Manifest[], kind: string) => ms.filter((m) => m.kind === kind);
 const find = (ms: Manifest[], kind: string, name: string) =>
   ms.find((m) => m.kind === kind && m.metadata.name === name);
@@ -257,12 +262,14 @@ describe("isolation preflight (ac-2)", () => {
   });
 
   it("creates its least-privilege RBAC before the Job", () => {
-    const job = find(ms, "Job", "kobe-isolation-preflight")!;
-    const [role] = hooked("ClusterRole");
-    expect(role?.rules).toEqual([
+    const job = must(find(ms, "Job", "kobe-isolation-preflight"), "Job/kobe-isolation-preflight");
+    const role = must(hooked("ClusterRole")[0], "hooked ClusterRole");
+    expect(role.rules).toEqual([
       { apiGroups: ["node.k8s.io"], resources: ["runtimeclasses"], verbs: ["get", "list"] },
     ]);
-    for (const m of [role!, hooked("ClusterRoleBinding")[0]!, hooked("ServiceAccount")[0]!]) {
+    const binding = must(hooked("ClusterRoleBinding")[0], "hooked ClusterRoleBinding");
+    const account = must(hooked("ServiceAccount")[0], "hooked ServiceAccount");
+    for (const m of [role, binding, account]) {
       expect(weight(m), m.kind).toBeLessThan(weight(job));
     }
   });
