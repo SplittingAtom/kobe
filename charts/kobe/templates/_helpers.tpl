@@ -63,6 +63,42 @@ app.kubernetes.io/instance: {{ .root.Release.Name }}
 app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 
+{{/* Replicated workloads (KOBE-515): spread replicas across nodes, softly (ScheduleAnyway, so
+  single-node installs and k3d still schedule), and keep one available during voluntary
+  disruptions. Both only when replicas > 1: a minAvailable-1 PDB on one replica blocks node drains.
+  Takes (dict "root" "component" "values"); each switch is <component>.topologySpread /
+  <component>.podDisruptionBudget, on by default. */}}
+{{- define "kobe.topologySpread" -}}
+{{- if and (gt (int .values.replicas) 1) (dig "topologySpread" "enabled" true .values) -}}
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: {{ dig "topologySpread" "topologyKey" "kubernetes.io/hostname" .values }}
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        {{- include "kobe.selectorLabels" (dict "root" .root "component" .component) | nindent 8 }}
+    # Count only the current ReplicaSet's pods, so a rolling update spreads the new ones too.
+    matchLabelKeys: [pod-template-hash]
+{{- end -}}
+{{- end -}}
+
+{{- define "kobe.podDisruptionBudget" -}}
+{{- if and (gt (int .values.replicas) 1) (dig "podDisruptionBudget" "enabled" true .values) -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "kobe.fullname" .root }}-{{ .component }}
+  labels:
+    {{- include "kobe.labels" .root | nindent 4 }}
+    app.kubernetes.io/component: {{ .component }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "kobe.selectorLabels" (dict "root" .root "component" .component) | nindent 6 }}
+{{- end -}}
+{{- end -}}
+
 {{/* Kobe image: <registry>/kobe-<name>:<tag or appVersion>. */}}
 {{- define "kobe.image" -}}
 {{- printf "%s/kobe-%s:%s" .root.Values.global.imageRegistry .name (default .root.Chart.AppVersion .root.Values.global.imageTag) -}}
@@ -242,6 +278,9 @@ spec:
       {{- include "kobe.imagePullSecrets" $root | nindent 6 }}
       serviceAccountName: {{ .serviceAccount | default (printf "%s-workload" $fullname) }}
       automountServiceAccountToken: {{ .automountToken | default false }}
+      {{- with include "kobe.topologySpread" (dict "root" $root "component" .component "values" .values) }}
+      {{- . | nindent 6 }}
+      {{- end }}
       {{- include "kobe.podSecurityContext" $root | nindent 6 }}
       {{- if or .preflight .migrations }}
       initContainers:
@@ -313,6 +352,10 @@ spec:
     {{- with .extraServicePorts }}
     {{- . | nindent 4 }}
     {{- end }}
+{{- with include "kobe.podDisruptionBudget" (dict "root" $root "component" .component "values" .values) }}
+---
+{{ . }}
+{{- end }}
 {{- end -}}
 
 
