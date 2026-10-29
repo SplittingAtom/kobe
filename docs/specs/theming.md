@@ -3,7 +3,36 @@
 Status: **decisions by Chris, 2026-10-28** (TH1–TH12 binding; TH9 amended to six presets with the
 default called `default`). Tickets T1–T9 are filed as KOBE-497–505 (T1 = KOBE-497 … T9 = KOBE-505; label `theming`). Companion document:
 [`docs/theming.md`](../theming.md), the catalogue of everything a theme can change (the target
-state this plan builds; it marks which tokens exist and which T2 adds).
+state this plan builds; since it shipped it records what is actually there).
+
+## Shipped (2026-10-29)
+
+| Tickets                                                              | PR                        |
+| -------------------------------------------------------------------- | ------------------------- |
+| KOBE-497 (T1 schema), KOBE-498 (T2 tokens)                           | #400 (wave 1)             |
+| KOBE-499 (T3 API), KOBE-500 (T4 first paint)                         | #401 (wave 2)             |
+| KOBE-501 (T5 page), KOBE-502 (T6 docs), KOBE-503 (T7 chart defaults) | wave 3 PR (501, 502, 503) |
+
+T8 (KOBE-504) and T9 (KOBE-505) are not built. Decisions made during implementation (the plan
+below is kept as written; where it differs, these and [`docs/theming.md`](../theming.md) win):
+
+- **Per-scheme derived accent** (refines TH4): the light primary is the accent as given; the dark
+  primary is the accent lightened until 3:1 on the dark page and panel; text on it is white or
+  `#111111`, whichever contrasts more; link and focus are derived per scheme. `checkFloor()` checks
+  fill on surface (3:1), text on fill and hover (4.5:1), link on page and panel (4.5:1) and focus on
+  page, panel and card (3:1) in both schemes. Presets set `--ring` and `--kobe-composer-focus` too.
+- **SVG rule** (extends TH8): `url(#id)` references inside the image are allowed (gradients, masks);
+  only the SVG and xlink namespaces are accepted (Inkscape users save as Plain SVG); DOCTYPE,
+  entities, processing instructions, HTML-ish elements and CSS escapes are refused as well.
+- **`branding.show_name`** (new setting): whether the header shows the name next to the logo
+  (default true; audited as `show_name`).
+- **`KOBE_SERVER_URL` defaults to the server Service** `http://<fullname>-server` (port 80, not
+  `:8080` as TH5 said); `web.serverUrl` overrides it for split installs; an invalid value fails the
+  web's start. The web cache is stale-while-revalidate (30 s).
+- **Reset re-seeds the chart values** (KOBE-503): `POST /v1/site/branding/reset` returns to the
+  chart's `branding.*` values in the same transaction, or to Kobe's defaults without them.
+- **Refresh route**: the web's `POST /api/branding/refresh` (same-origin) drops that replica's
+  cache after every change on the Appearance page; other replicas follow within 30 s.
 
 ## 1. Summary
 
