@@ -51,7 +51,7 @@ import { useShellBand } from "../shell/shell-band";
 import { kobeExtrasOf, useChatSession } from "./kobe-runtime";
 import { useArtifactTabs, type OpenRequest } from "./use-artifact-tabs";
 import { useThreadFiles } from "./use-thread-files";
-import { useMovingFiles } from "./use-moving-files";
+import { useMovingFiles, type MoveRecheck } from "./use-moving-files";
 
 export type { OpenRequest };
 
@@ -95,8 +95,12 @@ export interface ArtifactPanelApi {
    * "no longer in your workspace" notice shows for it.
    */
   beginMove(from: string): void;
-  /** The move of `from` failed: its files are where they were. */
+  /** The move of `from` failed or its answer was lost: its open tabs read their files again. */
   endMove(from: string): void;
+  /** `path` is under a pending move: a read finding it gone is the move, not a deletion. */
+  isMoving(path: string): boolean;
+  /** The last failed move, whose tabs read their files again (KOBE-506). */
+  readonly moveRecheck: MoveRecheck | null;
   /** The last file whose tab was dropped, until the member dismisses the notice. */
   readonly goneFile: string | null;
   dismissGone(): void;
@@ -312,7 +316,13 @@ export function ArtifactPanelProvider({
   const { openArtifact: openTab, drop, retargetFiles } = t;
   const editDrafts = useChatSession().editDrafts;
   // Unsaved edits follow a moved file (KOBE-463).
-  const { begin: beginMove, end: endMove, answered: moveAnswered, isMoving } = useMovingFiles();
+  const {
+    begin: beginMove,
+    failed: endMove,
+    answered: moveAnswered,
+    isMoving,
+    recheck: moveRecheck,
+  } = useMovingFiles(t.tabs);
   const moveFiles = useCallback(
     (from: string, to: string) => {
       editDrafts.move(from, to);
@@ -385,13 +395,11 @@ export function ArtifactPanelProvider({
   const goneFile = gone !== null && gone.threadId === threadId ? gone.path : null;
   const dropFile = useCallback(
     (path: string) => {
-      // A pending move's old path reads as gone; the tab follows the move instead (KOBE-506).
-      if (isMoving(path)) return;
       drop(fileTabId(path));
       editDrafts.clear(path);
       setGone(threadId === undefined ? { path } : { path, threadId });
     },
-    [drop, threadId, editDrafts, isMoving],
+    [drop, threadId, editDrafts],
   );
   const dismissGone = useCallback(() => setGone(null), []);
 
@@ -412,6 +420,8 @@ export function ArtifactPanelProvider({
       moveFiles,
       beginMove,
       endMove,
+      isMoving,
+      moveRecheck,
       goneFile,
       dismissGone,
       activate: t.activate,
@@ -434,6 +444,8 @@ export function ArtifactPanelProvider({
       moveFiles,
       beginMove,
       endMove,
+      isMoving,
+      moveRecheck,
       goneFile,
       dismissGone,
       t.tabs,

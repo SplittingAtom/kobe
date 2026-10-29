@@ -22,6 +22,8 @@ let pulled: Map<string, number>;
 let contentMissing: Set<string>;
 /** Holds a move's answer (after the files moved) until the test lets it go (KOBE-506). */
 let moveGate: Promise<void> | null;
+/** A move that fails with this status (after `moveGate`), moving nothing (KOBE-506). */
+let moveFailure: number | null;
 const CHUNK = 64 * 1024;
 
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -59,8 +61,16 @@ const fetchFn: typeof fetch = async (input, init = {}) => {
     return Response.json({ status: "waking" }, { status: 202 });
   }
   const path = url.searchParams.get("path") ?? "";
+  if (method === "DELETE" && url.pathname === "/v1/workspace/files") {
+    files.delete(path);
+    return new Response(null, { status: 204 });
+  }
   if (method === "POST" && url.pathname === "/v1/workspace/files/move") {
     const { from, to } = JSON.parse(String(init.body)) as { from: string; to: string };
+    if (moveFailure !== null) {
+      await moveGate;
+      return Response.json({ code: "not_found", message: "No." }, { status: moveFailure });
+    }
     for (const [p, bytes] of [...files]) {
       if (p !== from && !p.startsWith(`${from}/`)) continue;
       files.delete(p);
@@ -132,6 +142,7 @@ const tabNames = () =>
 beforeEach(() => {
   contentMissing = new Set();
   moveGate = null;
+  moveFailure = null;
   localStorage.clear();
   sessionStorage.clear();
   // The frame route is the server's: don't let happy-dom fetch it from localhost.
@@ -321,6 +332,110 @@ describe("moved files (KOBE-304, ac-9)", () => {
     await waitFor(() => expect(tabNames()).toEqual(["b.md*"]));
     expect(localStorage.getItem(tabsKey(fake.teamId, threadId))).toContain("file:notes/b.md");
     expect(screen.queryByText(/is no longer in your workspace/)).toBeNull();
+  });
+});
+
+/** notes/a.md open, its change stream connected; then a rename to b.md held until `release` (KOBE-506). */
+async function heldRename(failure: number | null = null) {
+  mount(thread("Work"));
+  const user = userEvent.setup();
+  const section = await openFiles();
+  await user.click(await within(section).findByRole("treeitem", { name: "notes" }));
+  const panel = await view(user, section, "a.md");
+  expect(await within(panel).findByRole("heading", { name: "Kept" })).toBeTruthy();
+  await waitFor(() => expect(fake.workspaceChanges.open).toEqual([["notes/a.md"]]), {
+    timeout: 3_000,
+  });
+  await waitFor(() => expect(reads.filter((p) => p === "notes/a.md")).toHaveLength(2));
+  let release = () => {};
+  moveGate = new Promise((resolve) => (release = resolve));
+  moveFailure = failure;
+  within(section).getByRole("treeitem", { name: "a.md" }).focus();
+  await user.keyboard("{F2}");
+  const input = within(
+    await within(section).findByRole("dialog", { name: "Rename a.md" }),
+  ).getByRole("textbox");
+  await user.clear(input);
+  await user.type(input, "b.md{Enter}");
+  return { release };
+}
+
+/** The stream says notes/a.md is gone; the tab reads it again (its `n`th read) and finds nothing. */
+async function streamSaysGone(n: number) {
+  await act(() => fake.workspaceChanges.announce("notes/a.md", { kind: "agent", name: null }));
+  await waitFor(() => expect(reads.filter((p) => p === "notes/a.md")).toHaveLength(n));
+  await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+}
+
+describe("a move that fails (KOBE-506)", () => {
+  it("a file still there keeps its tab: it is read again, no notice", async () => {
+    files.set("notes/a.md", enc("# Kept"));
+    const { release } = await heldRename(500);
+    const kept = must(files.get("notes/a.md"));
+    files.delete("notes/a.md"); // the server's read misses it mid-move
+    await streamSaysGone(3);
+    files.set("notes/a.md", kept);
+    release();
+    await waitFor(() => expect(reads.filter((p) => p === "notes/a.md")).toHaveLength(4));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(tabNames()).toEqual(["a.md*"]);
+    expect(screen.queryByText(/is no longer in your workspace/)).toBeNull();
+  });
+
+  it("a file really gone closes its tab with the notice once the move fails", async () => {
+    files.set("notes/a.md", enc("# Kept"));
+    const { release } = await heldRename(404);
+    files.delete("notes/a.md"); // deleted elsewhere while the move was on its way
+    await streamSaysGone(3);
+    expect(tabNames()).toEqual(["a.md*"]);
+    release();
+    expect(await screen.findByText(/a\.md is no longer in your workspace/)).toBeTruthy();
+    expect(tabNames()).toEqual([]);
+  });
+
+  it("Delete the copy of a sync conflict still closes the copy's tab during a move", async () => {
+    files.set("notes/a.md", enc("# Kept"));
+    files.set("notes/a.conflict.md", enc("# Theirs"));
+    const threadId = thread("Work");
+    fake.syncConflicts.set(threadId, [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        path: "notes/a.md",
+        conflict_path: "notes/a.conflict.md",
+        member_sha256: "a".repeat(64),
+        agent_sha256: "b".repeat(64),
+        created_at: "2026-10-23T12:00:00.000Z",
+      },
+    ]);
+    mount(threadId);
+    const user = userEvent.setup();
+    const section = await openFiles();
+    await screen.findByText(/conflicted with your save/);
+    await user.click(screen.getByRole("button", { name: "Open both" }));
+    await waitFor(() => expect(tabNames()).toHaveLength(2));
+    let release = () => {};
+    moveGate = new Promise((resolve) => (release = resolve));
+    moveFailure = 500;
+    await user.click(await within(section).findByRole("treeitem", { name: "notes" }));
+    await user.click(
+      within(within(section).getByRole("treeitem", { name: "notes" })).getByRole("button", {
+        name: "Actions for notes",
+      }),
+    );
+    await user.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const input = within(
+      await within(section).findByRole("dialog", { name: "Rename notes" }),
+    ).getByRole("textbox");
+    await user.clear(input);
+    await user.type(input, "archive{Enter}");
+    await user.click(screen.getByRole("button", { name: "Delete the copy" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Delete a.conflict.md?" })).getByRole("button", {
+        name: "Delete",
+      }),
+    );
+    await waitFor(() => expect(tabNames().map((n) => n.replace("*", ""))).toEqual(["a.md"]));
+    release();
   });
 });
 
