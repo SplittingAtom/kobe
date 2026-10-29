@@ -157,7 +157,7 @@ later ticket may allow WOFF2 uploads through the same asset table).
 **TH11. Corners: `sharp`, `soft` (today), `round`.** Three radius scales mapped onto
 `--kobe-radius-*`, which Tailwind's `rounded-*` utilities and the CSS modules both read after T2.
 
-**TH12. Reset and audit.** "Reset to Kobe defaults" removes the name, assets and style in one
+**TH12. Reset and audit.** "Reset to defaults" removes the name, assets and style in one
 transaction. Every change is one `site.branding.updated` audit event per setting (`app_name`,
 `theme`, `logo`, `logo_dark`, `favicon`; the value is the label or the asset's sha256, never the
 bytes). Owner and Admin can both change it (permission `site.settings.manage`; nothing here weakens

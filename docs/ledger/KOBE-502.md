@@ -21,7 +21,7 @@
 
 - Appearance reset dialog says "Every page shows Kobe's own look again" / "Reset to Kobe's
   defaults", but with chart `branding.*` values the reset returns to those.
-- `values.yaml` comment says "Reset to defaults"; the button reads "Reset to Kobe defaults".
+- `values.yaml` comment says "Reset to defaults"; the button reads "Reset to defaults".
 - Ledger KOBE-503 and commit 2779e3b5 say the reset seeds in its own transaction; the code
   (`site-branding.ts`) seeds inside the reset's transaction.
 

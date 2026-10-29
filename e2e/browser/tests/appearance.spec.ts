@@ -180,7 +180,7 @@ test("an admin brands the site: name, logo, favicon, preset, refusals and reset 
 
     // Reset: "Kobe" again.
     await openAppearance(page);
-    await panel.getByRole("button", { name: "Reset to Kobe defaults" }).click();
+    await panel.getByRole("button", { name: "Reset to defaults" }).click();
     const dialog = page.getByRole("alertdialog", { name: /Reset the appearance/ });
     const reloaded = page.waitForEvent("load");
     await dialog.getByRole("button", { name: "Reset", exact: true }).click();

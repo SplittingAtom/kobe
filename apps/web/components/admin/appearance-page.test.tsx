@@ -123,10 +123,10 @@ describe("site Appearance page (KOBE-501)", () => {
     });
     const reload = vi.fn();
     renderSite(<AppearancePage reloadPage={reload} />);
-    await userEvent.click(await screen.findByRole("button", { name: "Reset to Kobe defaults" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Reset to defaults" }));
     const text = await answerConfirm(/Reset the appearance/, "Reset");
     expect(text).toMatch(/name, the logos, the favicon and the style/);
-    await screen.findByText(/Reset to Kobe's defaults/);
+    await screen.findByText(/Defaults restored/);
     expect(calls.map((c) => `${c.method} ${c.url}`)).toContain("POST /v1/site/branding/reset");
     expect(reload).toHaveBeenCalledTimes(1);
   });

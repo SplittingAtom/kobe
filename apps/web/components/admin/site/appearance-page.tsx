@@ -145,14 +145,14 @@ function AppearanceEditor({
       {
         title: "Reset the appearance to Kobe's defaults?",
         description:
-          "This removes the name, the logos, the favicon and the style. Every page shows Kobe's own look again.",
+          "This removes the name, the logos, the favicon and the style. Every page shows the built-in look again, or the defaults your install's chart values set.",
         confirmLabel: "Reset",
       },
       eventTrigger(e),
     );
     if (!yes) return;
     setRefused([]);
-    const done = await mutation.run(resetBranding, () => "Reset to Kobe's defaults. Reloading…");
+    const done = await mutation.run(resetBranding, () => "Defaults restored. Reloading…");
     if (done) await applied();
   }
 
@@ -188,7 +188,7 @@ function AppearanceEditor({
           Save
         </Button>
         <Button variant="danger" disabled={mutation.pending} onClick={(e) => void onReset(e)}>
-          Reset to Kobe defaults
+          Reset to defaults
         </Button>
       </div>
       {reason !== null && (

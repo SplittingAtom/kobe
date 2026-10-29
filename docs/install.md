@@ -692,7 +692,7 @@ look. The API server writes each set value into the site settings at start **onl
 setting is unset**, and records it in the site audit log as the system (`site.branding.updated`).
 An admin's change on the Appearance page always wins: it is never overwritten on a restart or
 upgrade, and changing a value here later does not change a site that already has the setting.
-"Reset to Kobe defaults" on the Appearance page returns to the chart's values at once (keys without
+"Reset to defaults" on the Appearance page returns to the chart's values at once (keys without
 a chart value go back to Kobe's built-in defaults); clear a value here to make Kobe's default the
 reset target. The audit log then shows the reset's event and the system's seed event for each such
 key, even when its value ends up unchanged. An invalid value stops the server at start with the key

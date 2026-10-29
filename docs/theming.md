@@ -338,7 +338,7 @@ _Site console → System → Appearance_ (`/admin/site/appearance`), for Owner a
 | Style                          | The six presets (swatches) or Custom: accent colour (`#rrggbb` field and colour picker), Corners, Typeface. Applied with Save.                                                                      |
 | Contrast line                  | Under Custom: the floor (§8) for the draft; Save stays off with the first failure and its ratio (cut to one decimal, never rounded up). A refused save lists the server's failures.                 |
 | Preview                        | The draft in a light and a dark frame, as every page will show it (inert: a picture, not controls).                                                                                                 |
-| Reset to Kobe defaults         | After a confirmation, removes the name, `show_name`, the style and all three files in one transaction, then re-seeds the chart's branding values if any are set (§13).                              |
+| Reset to defaults              | After a confirmation, removes the name, `show_name`, the style and all three files in one transaction, then re-seeds the chart's branding values if any are set (§13).                              |
 
 Save sends only the settings that changed. After every save, upload, removal and reset the page
 calls the web's `POST /api/branding/refresh` (same-origin only; 204), which drops that web
