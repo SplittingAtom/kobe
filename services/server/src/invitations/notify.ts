@@ -1,6 +1,7 @@
 import { and, eq, isNull, users, type TeamRole } from "@kobe/db";
 import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
+import { readAppName } from "../branding/settings.js";
 import { siteInviteMessage, teamInviteMessage } from "../mail/messages.js";
 import type { IssuedInvite } from "./site-invites.js";
 
@@ -13,6 +14,7 @@ export async function mailSiteInvite(
   try {
     await deps.mailer.send(
       siteInviteMessage({
+        appName: await readAppName(deps.database.db),
         to: invite.email,
         inviterName,
         // In the fragment: never sent to the server or proxies, so never in access logs.
@@ -47,7 +49,12 @@ export function notifyTeamInvite(
       .where(and(eq(users.email, input.email), isNull(users.deactivatedAt)));
     if (!user) return;
     await deps.mailer.send(
-      teamInviteMessage({ to: input.email, ...input, signInUrl: `${deps.publicUrl}/` }),
+      teamInviteMessage({
+        to: input.email,
+        ...input,
+        appName: await readAppName(deps.database.db),
+        signInUrl: `${deps.publicUrl}/`,
+      }),
     );
   };
   deps.background.run("team invitation email failed", send);

@@ -38,6 +38,7 @@ describe("scheduleWhen", () => {
 
 describe("scheduledRunMessage", () => {
   const base = {
+    appName: "Kobe",
     to: "a@x.test",
     teamName: "Finance",
     when: "daily at 09:00 (UTC)",
@@ -53,6 +54,13 @@ describe("scheduledRunMessage", () => {
     expect(m.text).toContain("http://kobe.test/?thread=t1");
     expect(scheduledRunMessage({ ...base, outcome: "failed" }).subject).toBe(
       "Your scheduled run failed in the Finance team",
+    );
+  });
+
+  it("names the site by its configured name (KOBE-499)", () => {
+    const m = scheduledRunMessage({ ...base, appName: "Acme", outcome: "succeeded" });
+    expect(m.text.split("\n")[0]).toBe(
+      "Your scheduled run (daily at 09:00 (UTC)) in the Finance team on Acme succeeded.",
     );
   });
 
