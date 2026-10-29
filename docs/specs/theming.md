@@ -125,7 +125,7 @@ extra render-blocking request, no change to the CSP.
 
 **TH6. Branding is public.** `GET /v1/site/branding` and the asset routes need no session: the
 sign-in page must already show the name, logo and favicon. They expose the organisation's name and
-logo, which the sign-in page shows anyway. They are cheap (server memory cache 10 s, ETag,
+logo, which the sign-in page shows anyway. They are cheap (ETag/304; no server-side cache since the gate1 fix, because a per-replica cache served a stale value right after a save,
 immutable asset URLs) and carry no other data.
 
 **TH7. Assets live in Postgres, not S3.** Two or three small files (logo ≤ 512 KiB, dark logo ≤ 512

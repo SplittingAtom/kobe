@@ -5,7 +5,7 @@ import { readBrandingSettings, type BrandingSettings } from "./settings.js";
 
 /**
  * Branding storage and the public snapshot (TH6, TH7): the settings and the files, read together
- * and kept in memory for 10 s per server replica; every write on this replica drops it.
+ * and read from the database on every request (no per-replica cache; see BrandingCache).
  */
 
 export interface StoredAsset {
@@ -24,8 +24,6 @@ export interface BrandingSnapshot {
   readonly body: string;
   readonly etag: string;
 }
-
-export const BRANDING_CACHE_TTL_MS = 10_000;
 
 export const sha256Hex = (bytes: Uint8Array | string): string =>
   createHash("sha256").update(bytes).digest("hex");
@@ -89,37 +87,38 @@ async function loadSnapshot(db: KobeDb): Promise<BrandingSnapshot> {
   return { settings, assets, body, etag: `"${sha256Hex(body).slice(0, 32)}"` };
 }
 
-/** The 10 s snapshot; concurrent misses share one load. */
+/**
+ * The snapshot loader. It keeps no time-based cache: the server runs several replicas, and a write
+ * on one replica must show on the very next read on every replica (the web's 30 s cache and its
+ * refresh route, KOBE-501, rely on `GET /v1/site/branding` being current right after a save; with
+ * a per-replica TTL the admin's reload showed the old values). Concurrent reads share one load; the
+ * rows are few and small, and browsers hold the assets by hash (`?v=`), so this costs little.
+ */
 export class BrandingCache {
-  private entry: { readonly at: number; readonly snapshot: Promise<BrandingSnapshot> } | undefined;
+  private inflight: Promise<BrandingSnapshot> | undefined;
 
-  constructor(
-    private readonly db: KobeDb,
-    private readonly ttlMs = BRANDING_CACHE_TTL_MS,
-    private readonly now: () => number = Date.now,
-  ) {}
+  constructor(private readonly db: KobeDb) {}
 
   get(): Promise<BrandingSnapshot> {
-    const t = this.now();
-    if (this.entry && t - this.entry.at < this.ttlMs) return this.entry.snapshot;
+    if (this.inflight) return this.inflight;
     const snapshot = loadSnapshot(this.db);
-    const entry = { at: t, snapshot };
-    this.entry = entry;
-    // A failed load is not cached.
-    snapshot.catch(() => {
-      if (this.entry === entry) this.entry = undefined;
-    });
+    this.inflight = snapshot;
+    const done = () => {
+      if (this.inflight === snapshot) this.inflight = undefined;
+    };
+    snapshot.then(done, done);
     return snapshot;
   }
 
+  /** Drops a load in flight so the next read starts fresh (after this replica's own writes). */
   invalidate(): void {
-    this.entry = undefined;
+    this.inflight = undefined;
   }
 }
 
 const caches = new WeakMap<KobeDb, BrandingCache>();
 
-/** The replica's cache for this database (shared by the public and the admin routes). */
+/** The replica's loader for this database (shared by the public and the admin routes). */
 export function brandingCache(db: KobeDb): BrandingCache {
   let cache = caches.get(db);
   if (!cache) {
