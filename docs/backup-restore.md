@@ -23,6 +23,8 @@ with the operator's backup key. There is no plaintext mode.
 
 - **New tables are included automatically.** Every table in `public` is backed up unless it is on
   the short exclusion list in `packages/cli/src/excluded.ts`.
+  Site branding is therefore included: the logo, dark logo and favicon (`site_branding_assets`)
+  and the `branding.*` rows of `site_settings` (name, `show_name`, style).
 - **Coverage is checked.** The backup refuses to run when data exists that a dump of `public`
   would skip: tables, materialized views or foreign tables in other schemas (apart from Kobe's
   migration bookkeeping in `drizzle`), and large objects. The manifest records that this check
@@ -334,6 +336,8 @@ target someone has already configured is not a fresh install.
 6. Scale back up, either with `helm upgrade` using the same values or with
    `kubectl scale ... --replicas=<n>`. Users have to sign in again; enrolled passkeys and TOTP
    keep working.
+7. Smoke check: the sign-in page shows the backed-up site name, and the logo is served after
+   restore (`curl -sI <public URL>/v1/site/branding/assets/logo` answers 200 when the site had one).
 
 How restore works:
 
