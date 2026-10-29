@@ -42,6 +42,11 @@
   (schema lines copied verbatim from KOBE-500's working tree). Raster: parsed pixels. SVG: root
   `width`/`height` (unitless or px), else `viewBox`; non-integer or > 4096 sides are stored as
   the aspect scaled to a 1000 px long side. ICO and unsized SVGs: none.
+- Security review fixes: SVG root must be in the SVG namespace; only xlink (and reserved `xml:`)
+  besides; any other xmlns, prefixed element or attribute refused (so Inkscape-namespace saves
+  must be exported as plain SVG); `meta`/`iframe`/`form`/`embed`/`object`/`base`/`link`/`handler`
+  elements and `content`/`action`/`src`/`formaction` attributes refused; any backslash and
+  `image-set(`/`src(` refused. ICO: ICONDIR entries bounds-checked, each PNG/BMP parsed, 4096 px cap.
 - A dark logo alone is not published (`logo` is null until a light logo exists).
 - Asset routes: unknown kind → 404; declared part type ignored; wrong type per kind → 415
   `unsupported_type`; > 4096 px → 422 `image_too_large`; damaged header → 422 `invalid_image`;

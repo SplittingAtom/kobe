@@ -6,6 +6,10 @@
  * `<foreignObject>`, any `on*` attribute, an `href`/`xlink:href` that is not a `#fragment`
  * (also as an animation target), `@import` and CSS escapes in a `style` attribute or `<style>`,
  * and anywhere a `url(` other than `url(#fragment)` (gradients, clip paths, masks, markers).
+ * Namespaces: the root is in the SVG namespace; the only other namespace is xlink (plus the
+ * reserved `xml:` attributes); any other declaration, prefixed element or attribute is refused, as
+ * are HTML-ish elements (`meta`, `iframe`, `form`, ...), the attributes `content`, `action`,
+ * `src`, `formaction`, any backslash (CSS escapes) and `image-set(` / `src(`.
  */
 
 /** An accepted SVG's box (from the root's width/height, else its viewBox), when it has one. */
@@ -26,6 +30,22 @@ const PREDEFINED: Readonly<Record<string, string>> = {
   quot: '"',
   apos: "'",
 };
+const SVG_NS = "http://www.w3.org/2000/svg";
+const XLINK_NS = "http://www.w3.org/1999/xlink";
+const ATTRIBUTE_PREFIXES = new Set(["xlink", "xml"]);
+const REFUSED_ELEMENTS = new Set([
+  "script",
+  "foreignobject",
+  "meta",
+  "iframe",
+  "form",
+  "embed",
+  "object",
+  "base",
+  "link",
+  "handler",
+]);
+const REFUSED_ATTRIBUTES = new Set(["content", "action", "src", "formaction"]);
 const ANIMATION = new Set(["animate", "set", "animatemotion", "animatetransform", "discard"]);
 const MAX_DEPTH = 256;
 
@@ -62,16 +82,44 @@ function checkUrls(text: string, where: string): void {
   }
 }
 
+/** CSS escapes, and the functions that load a URL without `url(`. */
+function checkLoaders(text: string, where: string): void {
+  if (text.includes("\\")) refuse(`${where} uses a backslash (CSS escapes are not allowed).`);
+  if (/(^|[^a-z0-9_-])(image-set|src)\s*\(/i.test(text)) {
+    refuse(`${where} uses image-set( or src( (they load URLs).`);
+  }
+  checkUrls(text, where);
+}
+
 function checkCss(css: string, where: string): void {
   const flat = css.replace(/\/\*[\s\S]*?\*\//g, "");
-  if (flat.includes("\\")) refuse(`${where} uses CSS escapes.`);
-  checkUrls(flat, where);
+  checkLoaders(flat, where);
   if (flat.toLowerCase().includes("@import")) refuse(`${where} uses @import.`);
 }
 
+function checkNamespace(qname: string, value: string): void {
+  if (qname === "xmlns") {
+    if (value !== SVG_NS)
+      refuse(`it declares the namespace ${value || "(empty)"}: only SVG is allowed.`);
+    return;
+  }
+  if (qname.startsWith("xmlns:")) {
+    if (qname !== "xmlns:xlink" || value !== XLINK_NS) {
+      refuse(`it declares the namespace ${qname}: only SVG and xlink are allowed.`);
+    }
+    return;
+  }
+  const prefix = qname.includes(":") ? qname.split(":")[0] : undefined;
+  if (prefix !== undefined && !ATTRIBUTE_PREFIXES.has(prefix)) {
+    refuse(`the attribute ${qname} is in another namespace (only xlink: and xml: are allowed).`);
+  }
+}
+
 function checkAttribute(element: string, qname: string, value: string): void {
+  checkNamespace(qname, value);
   const name = localName(qname);
   if (name.startsWith("on")) refuse(`the attribute ${qname} is an event handler.`);
+  if (REFUSED_ATTRIBUTES.has(name)) refuse(`the attribute ${qname} is not allowed.`);
   if (name === "href" && !value.trim().startsWith("#")) {
     refuse(`<${element}> links outside the image (${qname} must be a #fragment).`);
   }
@@ -82,10 +130,7 @@ function checkAttribute(element: string, qname: string, value: string): void {
   if (ANIMATION.has(element) && name === "attributename" && /href/i.test(value)) {
     refuse(`<${element}> animates a link.`);
   }
-  checkUrls(value, `the attribute ${qname}`);
-  if (value.includes("\\") && value.toLowerCase().includes("url")) {
-    refuse(`the attribute ${qname} uses CSS escapes.`);
-  }
+  checkLoaders(value, `the attribute ${qname}`);
 }
 
 interface Reader {
@@ -193,6 +238,8 @@ function walk(src: string): Map<string, string> {
       const qname = NAME.exec(src.slice(r.pos))?.[0];
       if (!qname) return refuse("it is not well-formed XML (a tag).");
       r.pos += qname.length;
+      if (qname.includes(":"))
+        refuse(`it has the prefixed element <${qname}> (only SVG elements are allowed).`);
       const element = localName(qname);
       if (stack.length === 0) {
         if (rootSeen) refuse("it is not well-formed XML (more than one root element).");
@@ -201,11 +248,12 @@ function walk(src: string): Map<string, string> {
       }
       if (element === "script") refuse("it contains a <script> element.");
       if (element === "foreignobject") refuse("it contains a <foreignObject> element.");
-      const { selfClosing } = readAttributes(
-        r,
-        element,
-        stack.length === 0 ? rootAttributes : undefined,
-      );
+      if (REFUSED_ELEMENTS.has(element)) refuse(`it contains a <${qname}> element (not allowed).`);
+      const isRoot = stack.length === 0;
+      const { selfClosing } = readAttributes(r, element, isRoot ? rootAttributes : undefined);
+      if (isRoot && rootAttributes.get("xmlns") !== SVG_NS) {
+        refuse(`its root element is not in the SVG namespace (xmlns="${SVG_NS}").`);
+      }
       if (!selfClosing) {
         stack.push(element);
         if (stack.length > MAX_DEPTH) refuse("it nests elements too deeply.");

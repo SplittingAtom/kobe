@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  bmpDib,
   ico,
   jpeg,
   png,
@@ -72,6 +73,27 @@ describe("inspectImage", () => {
     expect(inspectImage("logo", png().slice(0, 12))).toMatchObject({ code: "invalid_image" });
     expect(inspectImage("logo", jpeg().slice(0, 6))).toMatchObject({ code: "invalid_image" });
     expect(inspectImage("logo", png(0, 5))).toMatchObject({ code: "invalid_image" });
+    expect(inspectImage("favicon", ico().slice(0, 10))).toMatchObject({ code: "invalid_image" });
+  });
+
+  it("parses the ICO directory and each embedded PNG or BMP", () => {
+    expect(inspectImage("favicon", ico(bmpDib(32, 32)))).toMatchObject({ ok: true });
+    expect(inspectImage("favicon", ico(png(4097, 16)))).toMatchObject({ code: "image_too_large" });
+    expect(inspectImage("favicon", ico(bmpDib(5000, 5000)))).toMatchObject({
+      code: "image_too_large",
+    });
+    expect(inspectImage("favicon", ico(png(), { offset: 6 }))).toMatchObject({
+      code: "invalid_image",
+    });
+    expect(inspectImage("favicon", ico(png(), { size: 10_000 }))).toMatchObject({
+      code: "invalid_image",
+    });
+    expect(inspectImage("favicon", ico(png(), { size: 0 }))).toMatchObject({
+      code: "invalid_image",
+    });
+    expect(inspectImage("favicon", ico(new Uint8Array(12)))).toMatchObject({
+      code: "invalid_image",
+    });
     expect(inspectImage("favicon", ico().slice(0, 10))).toMatchObject({ code: "invalid_image" });
   });
 

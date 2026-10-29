@@ -120,10 +120,44 @@ function webpSize(bytes: Uint8Array): Size | null {
   return null;
 }
 
-function icoValid(bytes: Uint8Array): boolean {
-  if (bytes.length < 6) return false;
-  const count = view(bytes).getUint16(4, true);
-  return count > 0 && bytes.length >= 6 + 16 * count;
+const ICO_ENTRY_BYTES = 16;
+const BITMAPINFOHEADER_BYTES = 40;
+
+/** One embedded image: a PNG (IHDR) or a BMP without file header (BITMAPINFOHEADER). */
+function icoImageSize(image: Uint8Array): Size | null {
+  if (startsWith(image, PNG_SIGNATURE)) return pngSize(image);
+  if (image.length < BITMAPINFOHEADER_BYTES) return null;
+  const v = view(image);
+  if (v.getUint32(0, true) < BITMAPINFOHEADER_BYTES) return null;
+  // The height counts the XOR and the AND mask: half of it is the image.
+  const width = Math.abs(v.getInt32(4, true));
+  const height = Math.abs(v.getInt32(8, true)) / 2;
+  return Number.isInteger(height) ? { width, height } : null;
+}
+
+/**
+ * The ICONDIR: every entry's image lies after the directory and within the file, and parses;
+ * returns the largest image's size (for the side cap), or null when anything is malformed.
+ */
+function icoSize(bytes: Uint8Array): Size | null {
+  if (bytes.length < 6) return null;
+  const v = view(bytes);
+  const count = v.getUint16(4, true);
+  const directoryEnd = 6 + ICO_ENTRY_BYTES * count;
+  if (count === 0 || bytes.length < directoryEnd) return null;
+  let largest: Size = { width: 0, height: 0 };
+  for (let i = 0; i < count; i += 1) {
+    const entry = 6 + ICO_ENTRY_BYTES * i;
+    const size = v.getUint32(entry + 8, true);
+    const offset = v.getUint32(entry + 12, true);
+    if (size === 0 || offset < directoryEnd || offset + size > bytes.length) return null;
+    const image = icoImageSize(bytes.subarray(offset, offset + size));
+    if (image === null || image.width < 1 || image.height < 1) return null;
+    if (Math.max(image.width, image.height) > Math.max(largest.width, largest.height)) {
+      largest = image;
+    }
+  }
+  return largest;
 }
 
 const NAMES: Readonly<Record<DetectedType, string>> = {
@@ -176,11 +210,7 @@ export function inspectImage(
       height: svg.size?.height ?? null,
     };
   }
-  if (type === "image/x-icon") {
-    if (!icoValid(bytes)) return refuse(422, "invalid_image", "The ICO file is damaged.");
-    return { ok: true, contentType, width: null, height: null };
-  }
-  const size = rasterSize(type, bytes);
+  const size = type === "image/x-icon" ? icoSize(bytes) : rasterSize(type, bytes);
   if (size === null || size.width < 1 || size.height < 1) {
     return refuse(422, "invalid_image", `The ${NAMES[type]} file is damaged: no image size found.`);
   }
@@ -191,5 +221,7 @@ export function inspectImage(
       `Images may be at most ${BRANDING_ASSET_MAX_SIDE_PX} px on each side; this one is ${size.width}×${size.height}.`,
     );
   }
+  // An ICO holds several sizes; the browser picks one, so none is recorded.
+  if (type === "image/x-icon") return { ok: true, contentType, width: null, height: null };
   return { ok: true, contentType, width: size.width, height: size.height };
 }

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { BRANDING_ASSET_MAX_BYTES, siteBrandingSchema } from "@kobe/protocol";
+import { REQUIRE_TWO_FACTOR } from "./auth/session.js";
 import { readAppName } from "./branding/settings.js";
 import { brandingCache } from "./branding/store.js";
 import { RawBody, type TestBrowser } from "./testing/browser.js";
@@ -433,6 +434,33 @@ describe("POST /v1/site/branding/reset (TH12)", () => {
     // Nothing left to reset: nothing audited.
     await as.owner.post("/v1/site/branding/reset");
     expect((await brandingEvents()).length).toBe(before + 6);
+  });
+
+  it("leaves every other site setting untouched", async () => {
+    await h.admin.query(
+      `INSERT INTO site_settings (key, value) VALUES ('audit.pii_retention_hours', '48'),
+         ($1, 'false') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [REQUIRE_TWO_FACTOR],
+    );
+    try {
+      await as.admin.put("/v1/site/branding", { appName: "Acme" });
+      expect((await as.owner.post("/v1/site/branding/reset")).status).toBe(200);
+      const { rows } = await h.admin.query<{ key: string; value: string }>(
+        `SELECT key, value FROM site_settings WHERE key IN ('audit.pii_retention_hours', $1) ORDER BY key`,
+        [REQUIRE_TWO_FACTOR],
+      );
+      expect(rows).toEqual(
+        [
+          { key: "audit.pii_retention_hours", value: "48" },
+          { key: REQUIRE_TWO_FACTOR, value: "false" },
+        ].sort((a, b) => a.key.localeCompare(b.key)),
+      );
+    } finally {
+      await h.admin.query(
+        `DELETE FROM site_settings WHERE key IN ('audit.pii_retention_hours', $1)`,
+        [REQUIRE_TWO_FACTOR],
+      );
+    }
   });
 
   it("is one transaction: a failure at the last step keeps everything", async () => {

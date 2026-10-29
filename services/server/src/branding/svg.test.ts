@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { GRADIENT_SVG, REFUSED_SVGS, svg } from "../testing/branding-fixtures.js";
+import {
+  GRADIENT_SVG,
+  REFUSED_SVGS,
+  REVIEW_REFUSED_SVGS,
+  svg,
+} from "../testing/branding-fixtures.js";
 import { checkSvg } from "./svg.js";
 
 const text = (s: string) => new TextEncoder().encode(s);
@@ -40,6 +45,34 @@ describe("checkSvg (TH8)", () => {
 
   it("accepts url(#id) references in style attributes and <style> (Inkscape exports)", () => {
     expect(checkSvg(GRADIENT_SVG)).toMatchObject({ ok: true });
+  });
+
+  it.each(REVIEW_REFUSED_SVGS)(
+    "refuses $name with the reason (security review)",
+    ({ bytes, reason }) => {
+      const result = checkSvg(bytes);
+      expect(result.ok).toBe(false);
+      expect(result.ok ? "" : result.reason).toMatch(reason);
+    },
+  );
+
+  it.each(["embed", "object", "base", "link"])("refuses a <%s> element", (element) => {
+    expect(checkSvg(svg(`<${element}/>`))).toMatchObject({
+      ok: false,
+      reason: new RegExp(`<${element}>`),
+    });
+  });
+
+  it("refuses action and formaction attributes", () => {
+    for (const attr of ["action", "formaction"]) {
+      expect(checkSvg(svg(`<g ${attr}="https://evil.test"/>`)).ok, attr).toBe(false);
+    }
+  });
+
+  it("allows xml: attributes and the xlink namespace", () => {
+    expect(checkSvg(svg('<g xml:space="preserve"><use xlink:href="#g"/></g>'))).toMatchObject({
+      ok: true,
+    });
   });
 
   it.each(REFUSED_SVGS)("refuses $name with the reason", ({ bytes, reason }) => {

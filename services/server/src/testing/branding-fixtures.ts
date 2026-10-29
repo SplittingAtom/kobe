@@ -100,9 +100,23 @@ export function webpLossless(width = 2, height = 2): Uint8Array {
   return riff("VP8L", [0x2f, ...u32le(bits), 0, 0, 0]);
 }
 
-/** An ICO with one 1×1 entry pointing at a PNG. */
-export function ico(): Uint8Array {
-  const image = png(1, 1);
+/** A BMP as stored in an ICO: BITMAPINFOHEADER (height doubled for the AND mask), no pixels. */
+export function bmpDib(width = 1, height = 1): Uint8Array {
+  return Uint8Array.from([
+    ...u32le(40),
+    ...u32le(width),
+    ...u32le(height * 2),
+    ...u16le(1),
+    ...u16le(32),
+    ...new Array<number>(24).fill(0),
+  ]);
+}
+
+/** An ICO with one entry holding `image` (a PNG by default); `offset`/`size` override the entry. */
+export function ico(
+  image: Uint8Array = png(1, 1),
+  entry: { offset?: number; size?: number } = {},
+): Uint8Array {
   return Uint8Array.from([
     0,
     0,
@@ -115,8 +129,8 @@ export function ico(): Uint8Array {
     0,
     ...u16le(1),
     ...u16le(32),
-    ...u32le(image.length),
-    ...u32le(22),
+    ...u32le(entry.size ?? image.length),
+    ...u32le(entry.offset ?? 22),
     ...image,
   ]);
 }
@@ -133,6 +147,93 @@ export const GRADIENT_SVG = svg(
     "<style>.a { fill: url( '#g' ); clip-path: url(#c) }</style>" +
     '<rect class="a" style="fill:url(#g);stroke:url(&quot;#g&quot;)" width="10" height="10"/>',
 );
+
+const doc = (s: string) => new TextEncoder().encode(s);
+const SVG_OPEN =
+  '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">';
+
+/** Security review (KOBE-499): each bypass attempt with a word its reason must contain. */
+export const REVIEW_REFUSED_SVGS: readonly {
+  readonly name: string;
+  readonly bytes: Uint8Array;
+  readonly reason: RegExp;
+}[] = [
+  {
+    name: "svg:script",
+    bytes: doc(
+      `${SVG_OPEN}<svg:script xmlns:svg="http://www.w3.org/2000/svg">x</svg:script></svg>`,
+    ),
+    reason: /prefixed element/,
+  },
+  {
+    name: "XLINK:HREF casing",
+    bytes: svg('<use XLINK:HREF="https://evil.test/#x"/>'),
+    reason: /another namespace/,
+  },
+  { name: "OnLoad casing", bytes: svg('<rect OnLoad="alert(1)"/>'), reason: /event handler/ },
+  {
+    name: "use href data:",
+    bytes: svg('<use href="data:image/svg+xml,&lt;svg/&gt;"/>'),
+    reason: /#fragment/,
+  },
+  {
+    name: "image href https:",
+    bytes: svg('<image href="https://evil.test/x.png"/>'),
+    reason: /#fragment/,
+  },
+  { name: "a href", bytes: svg('<a href="https://evil.test/"><rect/></a>'), reason: /#fragment/ },
+  {
+    name: "comment-split @import",
+    bytes: svg("<style>@im/**/port 'https://evil.test/x.css';</style>"),
+    reason: /@import/,
+  },
+  { name: "<style>@import", bytes: svg("<style>@import url(#x);</style>"), reason: /@import/ },
+  {
+    name: "CDATA-wrapped script",
+    bytes: svg("<script><![CDATA[alert(1)]]></script>"),
+    reason: /<script>/,
+  },
+  {
+    name: "XHTML namespace root with meta refresh",
+    bytes: doc(
+      '<svg xmlns="http://www.w3.org/1999/xhtml"><meta http-equiv="refresh" content="0;url=https://evil.test"/></svg>',
+    ),
+    reason: /namespace/,
+  },
+  { name: "meta element", bytes: svg('<meta http-equiv="refresh"/>'), reason: /<meta>/ },
+  { name: "iframe element", bytes: svg("<iframe/>"), reason: /<iframe>/ },
+  { name: "form element", bytes: svg("<form/>"), reason: /<form>/ },
+  { name: "handler element", bytes: svg("<handler/>"), reason: /<handler>/ },
+  { name: "content attribute", bytes: svg('<g content="x"/>'), reason: /content is not allowed/ },
+  { name: "src attribute", bytes: svg('<g src="x"/>'), reason: /src is not allowed/ },
+  { name: "other namespace declaration", bytes: svg('<g xmlns:x="urn:evil"/>'), reason: /xmlns:x/ },
+  {
+    name: "default namespace switch",
+    bytes: svg('<g xmlns="http://www.w3.org/1999/xhtml"/>'),
+    reason: /only SVG/,
+  },
+  { name: "no namespace", bytes: doc("<svg><rect/></svg>"), reason: /SVG namespace/ },
+  {
+    name: "CSS escape in a presentation attribute",
+    bytes: svg('<rect fill="\\75 rl(https://evil.test/x)"/>'),
+    reason: /backslash/,
+  },
+  {
+    name: "CSS escape in <style>",
+    bytes: svg("<style>rect{fill:\\75 rl(x)}</style>"),
+    reason: /backslash/,
+  },
+  {
+    name: "image-set(",
+    bytes: svg("<style>rect{fill:image-set('https://evil.test/x' 1x)}</style>"),
+    reason: /image-set/,
+  },
+  {
+    name: "src(",
+    bytes: svg('<rect style="fill:src(&quot;https://evil.test&quot;)"/>'),
+    reason: /src\(/,
+  },
+];
 
 /** Each refused SVG with a word its reason must contain. */
 export const REFUSED_SVGS: readonly {
