@@ -5,11 +5,41 @@ import { laneServerUrl, laneSuffix, resolveTestLane } from "./lane.js";
 import { assertAllMigrationsApplied, assertJournalExtendsBase } from "./upgrade.js";
 
 export { migrationsBefore } from "./upgrade.js";
+export { installPoolErrorLogger, type PoolErrorLog } from "./pool-errors.js";
 export { dropTestLane, listTestLanes, prepareTestLane, resolveTestLane } from "./lane.js";
 
 /** Random suffix for throwaway database and role names, ending in this run's lane if any. */
 export function testNameSuffix(): string {
   return laneSuffix(randomBytes(4).toString("hex"), resolveTestLane());
+}
+
+/** How long `dropDatabase` lets the database's own sessions finish closing before forcing. */
+const DROP_GRACE_MS = 5_000;
+const DROP_POLL_MS = 25;
+
+/**
+ * Drops a throwaway database WITH (FORCE), after giving its sessions up to `graceMs` to end
+ * (KOBE-507). A pool's `end()` resolves before its clients' sockets close, so a test that closes
+ * its pool and drops at once would otherwise terminate a still-closing backend: Postgres sends
+ * FATAL 57P01 to that client, which surfaces as an unhandled error. Only sessions of `dbName` are
+ * waited for or terminated.
+ */
+export async function dropDatabase(
+  admin: pg.Client,
+  dbName: string,
+  graceMs = DROP_GRACE_MS,
+): Promise<void> {
+  const deadline = Date.now() + graceMs;
+  for (;;) {
+    const { rows } = await admin.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE datname = $1 AND pid <> pg_backend_pid()`,
+      [dbName],
+    );
+    if ((rows[0]?.n ?? 0) === 0 || Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, DROP_POLL_MS));
+  }
+  await admin.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`);
 }
 
 export interface TestDatabase {
@@ -56,7 +86,7 @@ export async function createTestDatabase(
   const admin = new pg.Client({ connectionString: serverUrl });
   await admin.connect();
   const drop = async (): Promise<void> => {
-    await admin.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`);
+    await dropDatabase(admin, dbName);
     await admin.query(`DROP ROLE IF EXISTS ${appRole}`);
     await admin.query(`DROP ROLE IF EXISTS ${ownerRole}`);
     await admin.end();
