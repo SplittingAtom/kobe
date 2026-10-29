@@ -5,7 +5,7 @@ import { laneServerUrl, laneSuffix, resolveTestLane } from "./lane.js";
 import { assertAllMigrationsApplied, assertJournalExtendsBase } from "./upgrade.js";
 
 export { migrationsBefore } from "./upgrade.js";
-export { installPoolErrorLogger, type PoolErrorLog } from "./pool-errors.js";
+export { attachPoolErrorLogger, type PoolErrorLog } from "./pool-errors.js";
 export { dropTestLane, listTestLanes, prepareTestLane, resolveTestLane } from "./lane.js";
 
 /** Random suffix for throwaway database and role names, ending in this run's lane if any. */

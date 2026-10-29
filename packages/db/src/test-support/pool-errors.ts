@@ -23,7 +23,7 @@ function isAdminShutdown(err: unknown): boolean {
  * visible. Pools with their own listener are unaffected.
  * Returns a function that uninstalls it.
  */
-export function installPoolErrorLogger(log: PoolErrorLog = defaultLog): () => void {
+export function attachPoolErrorLogger(log: PoolErrorLog = defaultLog): () => void {
   const proto = pg.Pool.prototype as {
     emit: (event: string | symbol, ...args: unknown[]) => boolean;
   };

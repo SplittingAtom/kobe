@@ -1,7 +1,7 @@
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createTestDatabase, testServerUrl, type TestDatabase } from "./database.js";
-import { installPoolErrorLogger } from "./pool-errors.js";
+import { attachPoolErrorLogger } from "./pool-errors.js";
 
 /**
  * KOBE-507: a db test file closed its pool and dropped its database WITH (FORCE) at once. A pool's
@@ -44,7 +44,7 @@ async function terminate(pid: number): Promise<void> {
 describe("db test pools (KOBE-507)", () => {
   it("logs a terminated idle pool client instead of throwing", async () => {
     const log = vi.fn();
-    const uninstall = installPoolErrorLogger(log);
+    const uninstall = attachPoolErrorLogger(log);
     const pool = new pg.Pool({ connectionString: database().adminUrl, max: 1 });
     try {
       const removed = new Promise((resolve) => pool.once("remove", resolve));
@@ -60,7 +60,7 @@ describe("db test pools (KOBE-507)", () => {
 
   it("still throws any other error on a pool without its own listener", async () => {
     const log = vi.fn();
-    const uninstall = installPoolErrorLogger(log);
+    const uninstall = attachPoolErrorLogger(log);
     const pool = new pg.Pool({ connectionString: database().adminUrl, max: 1 });
     try {
       const lost = new Error("Connection terminated unexpectedly");
@@ -74,7 +74,7 @@ describe("db test pools (KOBE-507)", () => {
 
   it("leaves a pool's own 'error' listener in charge", async () => {
     const log = vi.fn();
-    const uninstall = installPoolErrorLogger(log);
+    const uninstall = attachPoolErrorLogger(log);
     const pool = new pg.Pool({ connectionString: database().adminUrl, max: 1 });
     const own = vi.fn();
     pool.on("error", own);
