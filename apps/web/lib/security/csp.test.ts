@@ -31,6 +31,28 @@ describe("Content Security Policy", () => {
     expect(directives(buildCsp("abc", { dev: true })).get("script-src")).toContain("'unsafe-eval'");
   });
 
+  it("is unchanged by site branding (KOBE-500): nonced theme <style>, same-origin logo and icon", () => {
+    expect(buildCsp("abc", { dev: false })).toBe(
+      [
+        "default-src 'self'",
+        "script-src 'self' 'nonce-abc' 'strict-dynamic'",
+        "style-src 'self' 'nonce-abc'",
+        "style-src-attr 'unsafe-inline'",
+        "img-src 'self' data:",
+        "font-src 'self'",
+        "connect-src 'self'",
+        "media-src 'self'",
+        "frame-src 'self'",
+        "worker-src 'self'",
+        "manifest-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+      ].join("; "),
+    );
+  });
+
   it("uses a fresh, unguessable nonce per request on both the request and the response", () => {
     const a = proxy(new NextRequest("http://kobe.test/"));
     const b = proxy(new NextRequest("http://kobe.test/?thread=x"));

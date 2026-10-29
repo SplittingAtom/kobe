@@ -360,6 +360,10 @@
         },
         "resources": {
           "$ref": "#/$defs/resources"
+        },
+        "serverUrl": {
+          "type": "string",
+          "pattern": "^(https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?)?$"
         }
       }
     },

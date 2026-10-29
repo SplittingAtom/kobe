@@ -165,6 +165,12 @@ web:
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 512Mi }
+  # The server's in-cluster origin the web reads the site branding from on every server render
+  # (KOBE-500, theming plan TH5): KOBE_SERVER_URL. Empty = this release's server Service
+  # (http://<fullname>-server, port 80 -> the server's 8080, which the not-from-sandboxes
+  # NetworkPolicy already admits). Set it only for split installs where web and server are not one
+  # release. Origin only (http(s)://host[:port]); when unreachable the web serves the Kobe defaults.
+  serverUrl: ""
 
 server:
   # Stateless; at least two replicas from day one (spec D2).

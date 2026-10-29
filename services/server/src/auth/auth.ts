@@ -20,6 +20,7 @@ import { recordAuditAfter } from "../audit/record.js";
 import type { BackgroundTasks } from "../background.js";
 import type { Mailer } from "../mail/mailer.js";
 import { passwordResetMessage } from "../mail/messages.js";
+import { readAppName } from "../branding/settings.js";
 import { isDeactivated } from "../users/deactivation.js";
 import { invitationPlugin, PASSWORD_MAX, PASSWORD_MIN } from "./invitation-plugin.js";
 import { claimResetLinkSend, releaseResetLinkClaim, revokeResetLinks } from "./reset-links.js";
@@ -92,6 +93,7 @@ export function createAuth({
     try {
       await mailer.send(
         passwordResetMessage({
+          appName: await readAppName(db),
           to: user.email,
           link: `${origin.origin}/reset-password#token=${token}`,
           expiresInMinutes: RESET_TOKEN_TTL_SECONDS / 60,

@@ -391,7 +391,7 @@ describe("site rename migration on an existing database (KOBE-256)", () => {
       expect(res.rows).toEqual([
         { t: "site_agent_versions", p: "INSERT,SELECT" },
         { t: "site_roles", p: "DELETE,INSERT,SELECT,UPDATE" },
-        { t: "site_settings", p: "INSERT,SELECT,UPDATE" },
+        { t: "site_settings", p: "DELETE,INSERT,SELECT,UPDATE" },
       ]);
     });
   });

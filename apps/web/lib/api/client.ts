@@ -5,6 +5,7 @@
  */
 import { TEAM_HEADER } from "../teams";
 import { camelizeKeys } from "./casing";
+import { isSameOriginPath } from "../security/same-origin-path";
 
 export interface ApiError {
   readonly status: number;
@@ -119,7 +120,7 @@ function toError(status: number, body: unknown): ApiError {
 
 /** Only same-origin absolute paths: an API call must never leave this origin. */
 function assertApiPath(path: string): void {
-  if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\")) {
+  if (!isSameOriginPath(path)) {
     throw new Error(`API paths are same-origin absolute paths, got ${JSON.stringify(path)}.`);
   }
 }

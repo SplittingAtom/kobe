@@ -20,6 +20,8 @@ import { ConsoleNav } from "./console-nav";
 import { ConsoleThemeToggle } from "./console-theme-toggle";
 import { ErrorNotice } from "./error-notice";
 import { IsolationBanner } from "./isolation-banner";
+import { Brand } from "../shell/brand";
+import { AppName } from "../shell/branding-context";
 import { ChatReturnLink } from "../shell/chat-return-link";
 import {
   ConsoleLayout,
@@ -123,7 +125,10 @@ export function ConsoleShell({
         <ConsoleMain>
           <PageHeader title={title} />
           <Notice tone="error">
-            {DENIED[kind]} <ChatReturnLink>Back to Kobe</ChatReturnLink>
+            {DENIED[kind]}{" "}
+            <ChatReturnLink>
+              Back to <AppName />
+            </ChatReturnLink>
           </Notice>
         </ConsoleMain>
       </Frame>
@@ -209,7 +214,10 @@ function Frame({
       panel={panel}
       brand={
         <>
-          <ChatReturnLink>Kobe</ChatReturnLink> <span aria-hidden="true">/</span> {title}
+          <ChatReturnLink>
+            <Brand />
+          </ChatReturnLink>{" "}
+          <span aria-hidden="true">/</span> {title}
         </>
       }
       // Top-left, as everywhere (D9). Switching reloads, so access is checked again.

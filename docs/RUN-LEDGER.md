@@ -9,6 +9,11 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Theming wave 2 (2026-10-29):** KOBE-499 (branding API, ../Kobe-wt499) ∥ KOBE-500 (themed first
+  paint, ../Kobe-wt500) on Opus, reviewed (Opus security pass on 499: 2 MEDIUM + 3 LOW fixed;
+  code-review medium on 500: 7 fixed), folded into `group-theming-2`. Decisions: per-scheme derived
+  accent; SVG allows `url(#id)` and only the SVG/xlink namespaces; `branding.show_name` key;
+  web `KOBE_SERVER_URL` defaults to the server Service (port 80). Next: 501, then 502 ∥ 503.
 - **Theming wave 1 (2026-10-29):** plan docs/specs/theming.md + docs/theming.md (PR #399 merged 2026-10-29, decisions
   TH1–TH12 by Chris 2026-10-28); tickets KOBE-497..505. KOBE-497 (schema+contract,
   ../Kobe-wt497) ∥ KOBE-498 (tokenize UI, ../Kobe-wt498) done on Opus, reviewed (Opus DB pass, code-review medium), folded into

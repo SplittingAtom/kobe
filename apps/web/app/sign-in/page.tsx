@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { useBranding } from "../../components/shell/branding-context";
 import { authClient } from "../../lib/auth-client";
 
 /** Sign in with a passkey, or email + password followed by a TOTP code when 2FA is enrolled. */
 export default function SignInPage() {
   const [step, setStep] = useState<"password" | "totp">("password");
   const [error, setError] = useState<string | null>(null);
+  const { appName } = useBranding();
 
   const done = () => window.location.assign("/");
 
@@ -39,7 +41,7 @@ export default function SignInPage() {
 
   return (
     <main>
-      <h1>Sign in to Kobe</h1>
+      <h1>Sign in to {appName}</h1>
       {step === "password" ? (
         <>
           <button type="button" onClick={onPasskey}>
