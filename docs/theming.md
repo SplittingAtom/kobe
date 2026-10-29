@@ -288,7 +288,7 @@ Always:
 - **Status, danger, confirm, tool, diff and context-viewer colours** (§4.4): meaning and
   colour-vision safety.
 - **Shadows, the mono stack and the wordmark's type** (§5, §7): fixed in this release.
-- **Layout**: rail widths (`--kobe-rail-width`, `--kobe-rail-room`, `--kobe-artifact-width`),
+- **Layout**: rail widths (`--kobe-rail-width`, `--kobe-rail-room`, `--kobe-artifact-width`, declared in `components/shell/shell.module.css`, not theme.css),
   breakpoints, viewport variables, densities. They are behaviour, not style.
 - **Artifact frames and MCP app frames**: sandboxed documents with their own CSP; the host's tokens
   do not reach them (an app may read `prefers-color-scheme` itself).
