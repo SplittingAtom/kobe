@@ -25,7 +25,6 @@ import { resealTeamHeaders } from "../egress/header-store.js";
 import { EgressRequestSweeper, sweepEgressRequestNotifications } from "../egress/request-notify.js";
 import { seedGalleryAgents } from "../gallery/seed.js";
 import { seedBrandingDefaults } from "../branding/defaults.js";
-import type { BrandingDefaults } from "../branding/defaults-config.js";
 import type { BifrostAdmin } from "../models/bifrost-admin.js";
 import type { ModelsConfig } from "../models/config.js";
 import { ModelGatewaySync } from "../models/sync.js";
@@ -88,15 +87,11 @@ export interface StartSeeds {
  * attempt (the object store or Postgres briefly away) is retried with backoff until it gets
  * through (review-317 S3); `stop` ends those retries.
  */
-export async function seedAtStart(
-  deps: ServerDeps,
-  logger: Logger,
-  branding: BrandingDefaults = {},
-): Promise<StartSeeds> {
+export async function seedAtStart(deps: ServerDeps, logger: Logger): Promise<StartSeeds> {
   await seedGalleryAgents(deps.database.db).catch((err: unknown) =>
     logger.error({ err }, "gallery agents could not be seeded"),
   );
-  await seedBrandingDefaults(deps.database.db, branding)
+  await seedBrandingDefaults(deps.database.db, deps.brandingDefaults)
     .then((settings) => {
       if (settings.length > 0) logger.info({ settings }, "branding defaults seeded from the chart");
     })

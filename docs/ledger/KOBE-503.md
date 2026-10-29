@@ -27,13 +27,14 @@ Chart values `branding.appName` / `branding.preset` / `branding.showName` → se
   person's `site.branding.updated` event exists for that setting (the admin route audits in the
   same transaction as its write, so such an event marks the admin's choice: real data).
   `audit_log`: system `site.branding.updated` events (only this seed writes them as the system).
-- A reset on the Appearance page unsets the key, so the next start seeds the chart value again
-  (documented in values.yaml and docs/install.md: clear the chart value to keep the default).
+- Reset (coordinator, 2026-10-29): `POST /v1/site/branding/reset` runs the same seed right after
+  its transaction with `deps.brandingDefaults`, so it returns to the chart's values at once (reset
+  events as before, then the seed's system events); without chart values the keys stay unset.
+- Restore refusal after admin set → reset → re-seed: accepted by the coordinator (a configured
+  target is not a fresh install); documented in docs/backup-restore.md.
 
 ## Open questions (for Chris or the coordinator)
 
-- After an admin set then reset a key, a later re-seed of that key makes `kobe restore` refuse the
-  target (the admin event still exists). Conservative; acceptable for a fresh-install restore?
 - Chart render test `charts/kobe/tests/branding.test.ts` not run locally (no helm); CI runs it.
 
 ## Evidence (acceptance criteria → test or command output)

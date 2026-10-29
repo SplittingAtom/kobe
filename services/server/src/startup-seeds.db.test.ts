@@ -20,6 +20,8 @@ beforeAll(async () => {
   h = await openHarness({
     egressHeaderSecrets: ["e".repeat(48)],
     blobs: { objects: new MemoryObjects(), prefix: "kobe/" },
+    // The chart's branding defaults (KOBE-503), all three set.
+    brandingDefaults: { appName: "Acme Assist", preset: "slate", showName: false },
   });
 });
 afterAll(async () => {
@@ -55,10 +57,7 @@ async function snapshot(): Promise<Map<string, string[]>> {
  */
 async function start(): Promise<void> {
   const db = h.deps.database.db;
-  // The chart's branding defaults (KOBE-503), all three set.
-  (
-    await seedAtStart(h.deps, logger, { appName: "Acme Assist", preset: "slate", showName: false })
-  ).stop();
+  (await seedAtStart(h.deps, logger)).stop();
   const isolation = isolationAuditor(db, "replica-1");
   await isolation({
     state: "verified",

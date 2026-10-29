@@ -245,7 +245,8 @@ transaction:
   `packages/cli/src/seeded.ts`);
 - rows the server writes when it starts (`packages/db/src/startup-seeds.ts`): the gallery agents
   (not those a site admin customized, KOBE-494) with their published versions and the system's audit events for seeding them, and where the
-  retention pass, the audit PII sweep and SIEM forwarding stand (`site_settings`). The started
+  retention pass, the audit PII sweep and SIEM forwarding stand (`site_settings`), and the chart's
+  branding defaults (`branding.*`, KOBE-503) with the system's audit events for them. The started
   site's own audit events go with them: the restored audit chain is the backup's, continued by
   the restore's event, which records the replaced chain's head and size
   (`replacedAuditHeadSeq`, `replacedAuditHeadHash`, `replacedAuditRows`). Audit anchors the
@@ -253,7 +254,9 @@ transaction:
   by the restore event, not a sign of tampering.
 
 Any other row (a user, a personal agent, a person's audit event, a setting) is real data, and the
-restore refuses the target.
+restore refuses the target. A branding setting counts as real data once a person has changed it
+(their `site.branding.updated` event exists), even after a reset re-seeded the chart's value: a
+target someone has already configured is not a fresh install.
 
 1. Recreate every Secret of the [Secrets](#secrets) table from your secret store, each under a
    new name so that Helm does not have to adopt it (the values must be the backed-up ones). From

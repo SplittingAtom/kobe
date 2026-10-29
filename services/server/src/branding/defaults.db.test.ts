@@ -128,3 +128,61 @@ describe("seedBrandingDefaults (KOBE-503)", () => {
     expect(res.json).toMatchObject({ appName: "Acme Assist", theme: { preset: "ember" } });
   });
 });
+
+describe("POST /v1/site/branding/reset with chart defaults (KOBE-503)", () => {
+  let hc: Harness;
+
+  beforeAll(async () => {
+    hc = await openHarness({ brandingDefaults: { appName: "Acme Assist", preset: "forest" } });
+    await hc.createUser("owner@reset.test", "owner");
+  });
+  afterAll(async () => {
+    await hc.close();
+  });
+
+  it("returns to the chart's values at once, audited as the reset and then the seed", async () => {
+    const owner = await hc.signIn("owner@reset.test");
+    await owner.put("/v1/site/branding", {
+      appName: "Admin Choice",
+      showName: false,
+      theme: { preset: "plum" },
+    });
+    const { rows } = await hc.admin.query<{ seq: string }>(`SELECT max(seq) AS seq FROM audit_log`);
+    const since = Number(rows[0]?.seq ?? 0);
+    const res = await owner.post("/v1/site/branding/reset");
+    expect(res.status).toBe(200);
+    expect(res.json).toMatchObject({
+      appName: "Acme Assist",
+      showName: true,
+      theme: { preset: "forest" },
+    });
+    expect((await hc.browser().get("/v1/site/branding")).json).toMatchObject({
+      appName: "Acme Assist",
+      showName: true,
+      theme: { preset: "forest" },
+    });
+    const events = await hc.admin.query<{ actor_kind: string; target: unknown }>(
+      `SELECT actor_kind, target FROM audit_log
+        WHERE action = 'site.branding.updated' AND seq > $1 ORDER BY seq`,
+      [since],
+    );
+    expect(events.rows).toEqual([
+      { actor_kind: "user", target: { setting: "app_name", value: "Kobe" } },
+      { actor_kind: "user", target: { setting: "show_name", value: "true" } },
+      { actor_kind: "user", target: { setting: "theme", value: "theme:default" } },
+      { actor_kind: "system", target: { setting: "app_name", value: "Acme Assist" } },
+      { actor_kind: "system", target: { setting: "theme", value: "theme:forest" } },
+    ]);
+  });
+});
+
+describe("POST /v1/site/branding/reset without chart defaults (KOBE-503)", () => {
+  it("leaves the keys unset: the built-in defaults", async () => {
+    await h.createUser("owner@plain.test", "owner");
+    const owner = await h.signIn("owner@plain.test");
+    await owner.put("/v1/site/branding", { appName: "Admin Choice", theme: { preset: "plum" } });
+    const res = await owner.post("/v1/site/branding/reset");
+    expect(res.json).toMatchObject({ appName: "Kobe", theme: { preset: "default" } });
+    expect(await settings()).toEqual({});
+  });
+});

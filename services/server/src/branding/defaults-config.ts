@@ -5,9 +5,9 @@ import { z } from "zod";
  * Chart-seeded branding defaults (theming plan T7, KOBE-503): `branding.appName`,
  * `branding.preset` and `branding.showName` in the chart become `KOBE_BRANDING_*` on the API
  * server, which writes each into `site_settings` at start ONLY while that key is unset. An
- * admin's later change (or a value seeded earlier) is never overwritten on a restart. A setting
- * reset on the Appearance page is unset again, so the next start seeds the chart's value back;
- * remove the chart value to keep the built-in default.
+ * admin's later change (or a value seeded earlier) is never overwritten on a restart. A reset on
+ * the Appearance page re-seeds them at once (`POST /v1/site/branding/reset`): the chart's values
+ * are this install's defaults.
  */
 export interface BrandingDefaults {
   readonly appName?: string;

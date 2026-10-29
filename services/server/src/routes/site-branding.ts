@@ -26,6 +26,7 @@ import {
   storeSetting,
   themeLabel,
 } from "../branding/settings.js";
+import { seedBrandingDefaults } from "../branding/defaults.js";
 import { inspectImage } from "../branding/sniff.js";
 import { brandingCache, deleteAsset, sha256Hex, storeAsset } from "../branding/store.js";
 import type { ServerDeps } from "../deps.js";
@@ -295,6 +296,9 @@ export function siteBrandingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
         if (assets.some((a) => a.kind === kind)) await audited(tx, kind, REMOVED);
       }
     });
+    // The chart's branding defaults (KOBE-503) are this install's defaults: a reset returns to
+    // them at once (audited as the system's seed). Without chart values the keys stay unset.
+    await seedBrandingDefaults(db, deps.brandingDefaults);
     return current(c);
   });
 

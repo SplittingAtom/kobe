@@ -677,9 +677,9 @@ For GitOps installs, `branding.appName` (1-40 characters, plain text), `branding
 The API server writes each set value into the site settings at start **only while that setting is
 unset**, and records it in the site audit log as the system (`site.branding.updated`). An admin's
 change on the Appearance page always wins: it is never overwritten on a restart or upgrade, and
-changing a value here later does not change a site that already has the setting. A setting reset
-on the Appearance page is unset again, so the next start seeds the value from here; clear the value
-to keep the built-in default. An invalid value stops the server at start with the key named.
+changing a value here later does not change a site that already has the setting. Reset to defaults
+on the Appearance page returns to the chart's values at once (keys without a chart value go back to
+Kobe's built-in defaults); clear a value here to make Kobe's default the reset target. An invalid value stops the server at start with the key named.
 `kobe restore` accepts a fresh target seeded this way and replaces those rows with the backup's.
 
 ### Private certificate authorities

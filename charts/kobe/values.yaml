@@ -466,9 +466,8 @@ retention:
 # Branding defaults for GitOps installs (KOBE-503, theming T7). The API server writes each set
 # value into the site settings at start ONLY while that setting is unset: an admin's change on the
 # Appearance page always wins and is never overwritten on a restart or upgrade. Changing a value
-# here later does not change a site that already has the setting; a setting reset on the Appearance
-# page is seeded from here again at the next start (clear the value here to keep the built-in
-# default).
+# here later does not change a site that already has the setting; "Reset to defaults" on the
+# Appearance page returns to these values at once (clear a value to reset to Kobe's built-in one).
 branding:
   # The site's name (1-40 characters, plain text on one line). Empty: "Kobe".
   appName: ""
