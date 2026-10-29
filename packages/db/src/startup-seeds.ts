@@ -2,10 +2,12 @@
  * Rows the server writes into a fresh site when it starts, before anyone signs up (KOBE-422):
  * the gallery agents (`services/server/src/gallery/seed.ts`, at every start), Kobe's own catalog
  * skills (`services/server/src/skills/kobe-seed.ts`, KOBE-317) with their Default tags and sync
- * jobs, the audit events of that seeding, and the background jobs' own bookkeeping in
- * `site_settings` (retention, PII erasure, SIEM forwarding). The catalog skills' bytes in the
- * bucket (`<prefix>skills/catalog/<sha256>`) need nothing here: the restore leaves objects that
- * are not in the backup untouched, and the backup's rows name the same content-addressed keys.
+ * jobs, the chart's branding defaults (KOBE-503, `services/server/src/branding/defaults.ts`,
+ * written only while each key is unset), the audit events of that seeding, and the background
+ * jobs' own bookkeeping in `site_settings` (retention, PII erasure, SIEM forwarding). The catalog
+ * skills' bytes in the bucket (`<prefix>skills/catalog/<sha256>`) need nothing here: the restore
+ * leaves objects that are not in the backup untouched, and the backup's rows name the same
+ * content-addressed keys.
  * `kobe restore`
  * accepts a target holding only these and replaces them with the backup's rows, in its one
  * transaction; any other row in these tables (a personal agent, a person's audit event, a setting
@@ -50,10 +52,28 @@ export const JOB_SETTING_KEYS = [
   "audit.pii_sweep_resume_at",
 ] as const;
 
+/**
+ * Branding keys the chart's defaults seed (KOBE-503) while unset; each is audited as the
+ * `site.branding.updated` setting named by the part after `branding.`. An admin's write of the same
+ * key is audited with a person as the actor in the same transaction, so a key with such an event
+ * is the admin's choice: real data.
+ */
+export const SEEDED_BRANDING_KEYS = [
+  "branding.app_name",
+  "branding.show_name",
+  "branding.theme",
+] as const;
+
 /** Per destination (`audit.forward.syslog`, `audit.forward.otlp`): the forwarder's position. */
 export const FORWARD_STATE_PREFIX = "audit.forward.";
 
 const list = (values: readonly string[]): string => values.map((v) => `'${v}'`).join(", ");
+
+/** A branding key no person has written: no admin `site.branding.updated` event for its setting. */
+const SEEDED_BRANDING_ROW =
+  `(key IN (${list(SEEDED_BRANDING_KEYS)}) AND NOT EXISTS (` +
+  `SELECT 1 FROM public.audit_log a WHERE a.action = 'site.branding.updated'` +
+  ` AND a.actor_kind <> 'system' AND a.target ->> 'setting' = substr(key, ${"branding.".length + 1})))`;
 
 export const STARTUP_SEEDED_ROWS: Readonly<Record<string, StartupSeed>> = {
   site_agents: {
@@ -95,18 +115,20 @@ export const STARTUP_SEEDED_ROWS: Readonly<Record<string, StartupSeed>> = {
     rows: "true",
   },
   audit_log: {
-    why: "the system's audit events of the gallery and Kobe skills seeds, and of the Default sync of Kobe's skills",
+    why: "the system's audit events of the gallery, Kobe skills and branding defaults seeds, and of the Default sync of Kobe's skills",
     rows:
       `actor_kind = 'system' AND actor_id IS NULL AND (` +
       `(team_id IS NULL AND action IN (${list(GALLERY_AUDIT_ACTIONS)}) AND target ->> 'scope' = 'gallery')` +
       ` OR (team_id IS NULL AND action = 'skill.kobe.published')` +
+      // Only the branding defaults seed writes this event as the system; an admin's is a person's.
+      ` OR (team_id IS NULL AND action = 'site.branding.updated')` +
       // A site admin's Default jobs write the same system events for their skills: real data.
       ` OR (action IN (${list(DEFAULT_SYNC_AUDIT_ACTIONS)}) AND target ->> 'skillId' IN (SELECT id::text FROM (${KOBE_SKILL_IDS}) k))` +
       `)`,
   },
   site_settings: {
-    why: "where the retention pass, the audit PII sweep and SIEM forwarding stand (KOBE-18, KOBE-17, KOBE-19)",
-    rows: `key IN (${list(JOB_SETTING_KEYS)}) OR key LIKE '${FORWARD_STATE_PREFIX}%'`,
+    why: "where the retention pass, the audit PII sweep and SIEM forwarding stand (KOBE-18, KOBE-17, KOBE-19), and the chart's branding defaults no admin has changed (KOBE-503)",
+    rows: `key IN (${list(JOB_SETTING_KEYS)}) OR key LIKE '${FORWARD_STATE_PREFIX}%' OR ${SEEDED_BRANDING_ROW}`,
   },
 };
 

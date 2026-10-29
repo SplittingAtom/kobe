@@ -197,10 +197,13 @@ if (config.process === "scheduler") {
   }
 }
 
-// Gallery agents (KOBE-87) and Kobe's own catalog skills (KOBE-317), seeded at every start before
+// Gallery agents (KOBE-87), the chart's branding defaults while unset (KOBE-503) and Kobe's own
+// catalog skills (KOBE-317), seeded at every start before
 // the server serves (startup/jobs.ts); a failure is logged and never stops the server.
 const startSeeds =
-  deps && config.process === "server" ? await seedAtStart(deps, logger) : undefined;
+  deps && config.process === "server"
+    ? await seedAtStart(deps, logger, config.branding)
+    : undefined;
 
 // KOBE-425: sealed values whose key this server does not hold (a restore with other Secrets) are
 // named at start, with the Secret to put back. Reads key ids only; never stops the start.

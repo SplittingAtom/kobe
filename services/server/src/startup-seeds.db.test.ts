@@ -55,7 +55,10 @@ async function snapshot(): Promise<Map<string, string[]>> {
  */
 async function start(): Promise<void> {
   const db = h.deps.database.db;
-  (await seedAtStart(h.deps, logger)).stop();
+  // The chart's branding defaults (KOBE-503), all three set.
+  (
+    await seedAtStart(h.deps, logger, { appName: "Acme Assist", preset: "slate", showName: false })
+  ).stop();
   const isolation = isolationAuditor(db, "replica-1");
   await isolation({
     state: "verified",
@@ -138,7 +141,17 @@ describe("rows a fresh site's start writes (KOBE-422)", () => {
     );
     const keys = await h.admin.query<{ key: string }>(`SELECT key FROM site_settings ORDER BY key`);
     expect(keys.rows.map((r) => r.key)).toEqual(
-      expect.arrayContaining(["audit.forward.otlp", "audit.forward.syslog"]),
+      expect.arrayContaining([
+        "audit.forward.otlp",
+        "audit.forward.syslog",
+        "branding.app_name",
+        "branding.show_name",
+        "branding.theme",
+      ]),
     );
+    const seeded = await h.admin.query(
+      `SELECT 1 FROM audit_log WHERE action = 'site.branding.updated' AND actor_kind = 'system'`,
+    );
+    expect(seeded.rows).toHaveLength(3); // seeded once: the restart finds the keys set
   });
 });

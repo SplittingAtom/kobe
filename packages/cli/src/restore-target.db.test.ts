@@ -60,6 +60,14 @@ async function prelude(db: TestDatabase): Promise<Record<string, number | string
   }
 }
 
+/** What the server's start writes with the chart's branding values set (KOBE-503). */
+const BRANDING_SEED = `
+  INSERT INTO site_settings (key, value) VALUES ('branding.app_name', 'Acme Assist'),
+    ('branding.theme', '{"preset":"forest"}');
+  INSERT INTO audit_log (actor_kind, action, target) VALUES
+    ('system', 'site.branding.updated', '{"setting":"app_name","value":"Acme Assist"}'),
+    ('system', 'site.branding.updated', '{"setting":"theme","value":"theme:forest"}');`;
+
 describe("kobe restore's target check on a started site (KOBE-422)", () => {
   it("accepts the rows the server's start wrote and replaces them before the load", async () => {
     const db = await started();
@@ -90,6 +98,29 @@ describe("kobe restore's target check on a started site (KOBE-422)", () => {
     expect(await sql(db.adminUrl, "SELECT count(*)::int AS n FROM skill_usage_snapshots")).toEqual([
       { n: 1 },
     ]);
+  });
+
+  it("accepts the chart's branding defaults seeded at start (KOBE-503) and replaces them", async () => {
+    const db = await started();
+    await sql(db.adminUrl, BRANDING_SEED);
+    const counts = await prelude(db);
+    expect(counts).toMatchObject({ site_settings: 0, audit_log: 0 });
+    expect(await sql(db.adminUrl, "SELECT count(*)::int AS n FROM audit_log")).toEqual([{ n: 4 }]);
+  });
+
+  it("refuses a branding setting an admin changed after the seed (KOBE-503)", async () => {
+    const db = await started();
+    await sql(
+      db.adminUrl,
+      `${BRANDING_SEED}
+       UPDATE site_settings SET value = 'Admin Choice' WHERE key = 'branding.app_name';
+       INSERT INTO audit_log (actor_kind, actor_id, action, target) VALUES ('user',
+         '00000000-0000-4000-8000-0000000000c1', 'site.branding.updated',
+         '{"setting":"app_name","value":"Admin Choice"}')`,
+    );
+    await expect(prelude(db)).rejects.toThrow(
+      /already has data in:.*\bsite_settings\b.*restore only into a freshly installed/,
+    );
   });
 
   it.each([

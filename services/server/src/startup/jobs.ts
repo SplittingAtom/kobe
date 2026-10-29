@@ -24,6 +24,8 @@ import { EgressBlockedRelay } from "../egress/blocked-relay.js";
 import { resealTeamHeaders } from "../egress/header-store.js";
 import { EgressRequestSweeper, sweepEgressRequestNotifications } from "../egress/request-notify.js";
 import { seedGalleryAgents } from "../gallery/seed.js";
+import { seedBrandingDefaults } from "../branding/defaults.js";
+import type { BrandingDefaults } from "../branding/defaults-config.js";
 import type { BifrostAdmin } from "../models/bifrost-admin.js";
 import type { ModelsConfig } from "../models/config.js";
 import { ModelGatewaySync } from "../models/sync.js";
@@ -80,15 +82,25 @@ export interface StartSeeds {
 /**
  * Work awaited before the server serves (and so before {@link serverJobs} start the Default
  * sync), at every start, so install and upgrade alike; idempotent, and a failure is logged and
- * never stops the server: the gallery (KOBE-87), then the first attempt of Kobe's own catalog
+ * never stops the server: the gallery (KOBE-87), the chart's branding defaults while their keys
+ * are unset (KOBE-503), then the first attempt of Kobe's own catalog
  * skills (KOBE-317, SK4: the former built-ins) from the package set the server ships. A failed
  * attempt (the object store or Postgres briefly away) is retried with backoff until it gets
  * through (review-317 S3); `stop` ends those retries.
  */
-export async function seedAtStart(deps: ServerDeps, logger: Logger): Promise<StartSeeds> {
+export async function seedAtStart(
+  deps: ServerDeps,
+  logger: Logger,
+  branding: BrandingDefaults = {},
+): Promise<StartSeeds> {
   await seedGalleryAgents(deps.database.db).catch((err: unknown) =>
     logger.error({ err }, "gallery agents could not be seeded"),
   );
+  await seedBrandingDefaults(deps.database.db, branding)
+    .then((settings) => {
+      if (settings.length > 0) logger.info({ settings }, "branding defaults seeded from the chart");
+    })
+    .catch((err: unknown) => logger.error({ err }, "branding defaults could not be seeded"));
   if (!deps.blobs) {
     logger.warn("no object storage (s3.*): Kobe's catalog skills are not published");
     return { stop: () => undefined };
