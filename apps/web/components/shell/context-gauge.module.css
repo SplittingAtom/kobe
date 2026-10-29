@@ -5,7 +5,7 @@
   --gauge-ok: var(--kobe-gauge-ok);
   --gauge-warn: var(--kobe-gauge-warn);
   --gauge-full: var(--kobe-gauge-full);
-  --gauge-track: var(--admin-border, #d0d0d0);
+  --gauge-track: var(--admin-border);
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
@@ -19,7 +19,7 @@
   height: 0.5rem;
   margin: 0;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--kobe-radius-pill);
   background: var(--gauge-track);
   cursor: default;
 }

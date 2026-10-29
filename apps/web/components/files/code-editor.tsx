@@ -59,7 +59,7 @@ const theme = EditorView.theme({
     height: "100%",
   },
   "&.cm-focused": { outline: "2px solid var(--ring)", outlineOffset: "-2px" },
-  ".cm-scroller": { fontFamily: "var(--font-mono, ui-monospace, monospace)" },
+  ".cm-scroller": { fontFamily: "var(--kobe-font-mono)" },
   ".cm-content": { caretColor: "var(--foreground)" },
   ".cm-cursor": { borderLeftColor: "var(--foreground)" },
   ".cm-gutters": {

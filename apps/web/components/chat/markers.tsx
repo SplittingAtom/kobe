@@ -253,7 +253,7 @@ function MarkerRow({
       data-kobe-marker={kind}
       className={cn(
         "text-muted-foreground flex min-w-0 items-center gap-2 px-2 py-0.5 text-xs",
-        tone === "warn" && "text-amber-700 dark:text-amber-400",
+        tone === "warn" && "text-status-attention",
       )}
     >
       <span aria-hidden className="bg-border h-px min-w-4 flex-1" />
