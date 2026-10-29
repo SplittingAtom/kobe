@@ -669,20 +669,39 @@ scratch.
 
 Every value is validated by `charts/kobe/values.schema.json`; unknown keys are rejected.
 
-### Branding defaults (optional)
+### Branding and theming
 
-For GitOps installs, `branding.appName` (1-40 characters, plain text), `branding.preset`
-(`default`, `slate`, `forest`, `plum`, `ember` or `tokyo-nights`) and `branding.showName` (only
-`false` is passed on; `true` is the default) give a new site its name and look from the values.
-The API server writes each set value into the site settings at start **only while that setting is
-unset**, and records it in the site audit log as the system (`site.branding.updated`). An admin's
-change on the Appearance page always wins: it is never overwritten on a restart or upgrade, and
-changing a value here later does not change a site that already has the setting. Reset to defaults
-on the Appearance page returns to the chart's values at once (keys without a chart value go back to
-Kobe's built-in defaults); clear a value here to make Kobe's default the reset target. The audit
-log then shows the reset's event and the system's seed event for each such key, even when its
-value ends up unchanged. An invalid value stops the server at start with the key named.
-`kobe restore` accepts a fresh target seeded this way and replaces those rows with the backup's.
+Owners and Admins set the site's name, logo (and an optional dark logo), favicon and style on
+_Site console → System → Appearance_ (permission `site.settings.manage`); the catalogue of what a
+style changes, the presets and the upload rules are in [theming.md](theming.md). Logos and favicons
+live in Postgres (`site_branding_assets`), so they need no S3 and are in every backup.
+
+**Server URL for the web.** The web reads the branding from the server on every server render, so
+even the first paint and the sign-in page are branded. `web.serverUrl` (env `KOBE_SERVER_URL` on
+the web pod) defaults to this release's server Service, `http://<fullname>-server` (port 80, which
+the existing NetworkPolicies already admit); leave it empty for a normal install. Set it only for a
+split install where web and server are not one release, to the server's in-cluster origin
+(`http(s)://host[:port]`, no path). An invalid value fails the web's start; an unreachable server
+is not fatal: the web serves Kobe's default name and look and logs it at most once a minute. Each
+web replica caches the branding for 30 s.
+
+**Defaults from the values (optional, for GitOps).** `branding.appName` (1-40 characters, plain
+text), `branding.preset` (`default`, `slate`, `forest`, `plum`, `ember` or `tokyo-nights`) and
+`branding.showName` (only `false` is passed on; `true` is the default) give a new site its name and
+look. The API server writes each set value into the site settings at start **only while that
+setting is unset**, and records it in the site audit log as the system (`site.branding.updated`).
+An admin's change on the Appearance page always wins: it is never overwritten on a restart or
+upgrade, and changing a value here later does not change a site that already has the setting.
+"Reset to Kobe defaults" on the Appearance page returns to the chart's values at once (keys without
+a chart value go back to Kobe's built-in defaults); clear a value here to make Kobe's default the
+reset target. The audit log then shows the reset's event and the system's seed event for each such
+key, even when its value ends up unchanged. An invalid value stops the server at start with the key
+named. `kobe restore` accepts a fresh target seeded this way and replaces those rows with the
+backup's.
+
+**SVG logos** are refused, with the reason, when they carry scripts, event handlers, external
+links or namespaces other than SVG and xlink ([theming.md](theming.md#21-svg-rules)). From Inkscape,
+save as **Plain SVG**; from other editors, export a plain SVG without editor metadata.
 
 ### Private certificate authorities
 
