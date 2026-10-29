@@ -324,7 +324,7 @@ function workspaceAuth(d: ServerDeps, s: NonNullable<typeof sandbox>, allowEval 
   const authenticate = createSandboxAuthenticator({
     allowEval,
     db: d.database.db,
-    verify: sandboxWireVerifier(s.sessionKeys),
+    verify: sandboxWireVerifier(s.sessionVerifyKeys),
     // Short positive cache: a destroyed or replaced sandbox loses access within 5 s.
     liveness: providerLiveness(s.provider, d.database.db, 5_000),
   });
@@ -535,7 +535,7 @@ const sandboxServer =
 const liveness = sandbox && deps ? providerLiveness(sandbox.provider, deps.database.db) : undefined;
 if (sandbox && sandboxServer && deps && liveness) {
   deps.sandboxWire.attach(sandboxServer as Server, {
-    verify: sandboxWireVerifier(sandbox.sessionKeys),
+    verify: sandboxWireVerifier(sandbox.sessionVerifyKeys),
     liveness,
   });
 }
@@ -551,7 +551,7 @@ const internalServer =
             appResults: deps.appResults,
             auth: {
               db: deps.database.db,
-              sessionKey: sandbox.sessionKeys["kobe.mcp-proxy"],
+              sessionVerifyKeys: sandbox.sessionVerifyKeys["kobe.mcp-proxy"],
               liveness,
             },
           }).fetch,

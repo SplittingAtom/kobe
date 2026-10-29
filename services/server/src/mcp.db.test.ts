@@ -1,3 +1,4 @@
+import { generateSessionKeyPair } from "@kobe/session-token";
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { PinnedTool } from "@kobe/db";
@@ -17,7 +18,6 @@ import { createRateLimiter } from "./sandbox/rate-limit.js";
 import { EventStreamFixture, must, type Person } from "./testing/event-stream-fixture.js";
 import {
   INTERNAL_KEY,
-  MCP_SESSION_KEY,
   allowApproval,
   WIRE_SESSION_KEY,
   enableConnector,
@@ -26,6 +26,7 @@ import {
   piName,
   pinnedTool,
   registerConnector,
+  MCP_VERIFY_KEYS,
 } from "./testing/mcp-fixtures.js";
 
 /**
@@ -55,7 +56,7 @@ function internalApp(mcp: ReturnType<typeof createMcpService>) {
     mcp,
     auth: {
       db: fx.db,
-      sessionKey: MCP_SESSION_KEY,
+      sessionVerifyKeys: MCP_VERIFY_KEYS,
       liveness: { isLive: ({ sandboxId }) => Promise.resolve(live.has(sandboxId)) },
     },
   });
@@ -159,7 +160,7 @@ describe("internal listener authentication", () => {
     for (const token of [
       "",
       "forged.token.value",
-      mcpToken(claims, { key: "f".repeat(48) }),
+      mcpToken(claims, { key: generateSessionKeyPair().signing }),
       mcpToken(claims, { ttl: -60 }),
       mcpToken(claims, { audience: "kobe.sandbox-wire", key: WIRE_SESSION_KEY }),
     ]) {
@@ -896,7 +897,7 @@ describe("internal listener limits (review L5)", () => {
       mcp: fx.replica(0).deps.mcp,
       auth: {
         db: fx.db,
-        sessionKey: MCP_SESSION_KEY,
+        sessionVerifyKeys: MCP_VERIFY_KEYS,
         liveness: { isLive: ({ sandboxId }) => Promise.resolve(live.has(sandboxId)) },
       },
       decideLimiter: createRateLimiter({ capacity: 2, refillPerSecond: 0.001 }),

@@ -7,6 +7,7 @@ import {
   loadSandboxSettings,
   type SandboxSettings,
   type SessionKeys,
+  type SessionVerifyKeySets,
 } from "./config.js";
 import { createKubeClient, type KubeClient } from "./kube.js";
 import { logger } from "../logger.js";
@@ -32,11 +33,13 @@ export interface SandboxRuntime {
   /** The Kubernetes client the provider uses (Orbit evals create Jobs through it, KOBE-93). */
   readonly kube: KubeClient;
   readonly sessionKeys: SessionKeys;
+  /** Public keys the server checks sandbox-wire and MCP tokens with (KOBE-513 rotation). */
+  readonly sessionVerifyKeys: SessionVerifyKeySets;
   readonly settings: SandboxSettings;
 }
 
 /** The provider without session keys: enough to wake and create sandboxes (the scheduler). */
-export type SandboxProviderRuntime = Omit<SandboxRuntime, "sessionKeys">;
+export type SandboxProviderRuntime = Omit<SandboxRuntime, "sessionKeys" | "sessionVerifyKeys">;
 
 /**
  * The sandbox provider wired to the in-cluster API, or undefined when the chart did not configure
@@ -129,12 +132,14 @@ export function createSandboxRuntime(
       timer?.unref();
       return () => clearInterval(timer);
     },
-    ...(config.sessionKeys ? { sessionKeys: config.sessionKeys } : {}),
+    ...(config.sessionKeys
+      ? { sessionKeys: config.sessionKeys, sessionVerifyKeys: config.sessionVerifyKeys }
+      : {}),
     settings: config.settings,
   } as SandboxRuntime;
 }
 
 function providerOnlyConfig(env: Readonly<Record<string, string | undefined>>) {
   const settings = loadSandboxSettings(env);
-  return settings ? { settings, sessionKeys: undefined } : undefined;
+  return settings ? { settings, sessionKeys: undefined, sessionVerifyKeys: undefined } : undefined;
 }

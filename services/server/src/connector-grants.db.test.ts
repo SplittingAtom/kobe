@@ -6,7 +6,7 @@ import { createMcpService } from "./mcp/service.js";
 import { createInternalApp } from "./routes/internal.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
-import { INTERNAL_KEY, MCP_SESSION_KEY, mcpToken, activeSandbox } from "./testing/mcp-fixtures.js";
+import { INTERNAL_KEY, mcpToken, activeSandbox, MCP_VERIFY_KEYS } from "./testing/mcp-fixtures.js";
 
 /**
  * Per-user API-key grants (KOBE-108): the key is sealed at rest, no API returns it, only the run's
@@ -104,7 +104,7 @@ beforeAll(async () => {
     mcp: h.deps.mcp,
     auth: {
       db: h.deps.database.db,
-      sessionKey: MCP_SESSION_KEY,
+      sessionVerifyKeys: MCP_VERIFY_KEYS,
       liveness: { isLive: () => Promise.resolve(true) },
     },
   });

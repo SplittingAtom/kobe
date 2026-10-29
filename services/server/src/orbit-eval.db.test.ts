@@ -16,7 +16,7 @@ import { createFakeKube, type FakeKube } from "./testing/fake-kube.js";
 import { enableConnector, piName, registerConnector } from "./testing/mcp-fixtures.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 import type { TestBrowser } from "./testing/browser.js";
-import { KEYS, SETTINGS, gateFor, seedCluster } from "./testing/sandbox-fixtures.js";
+import { KEYS, SETTINGS, gateFor, seedCluster, VERIFY_KEYS } from "./testing/sandbox-fixtures.js";
 
 /**
  * The pre-publish eval gate (KOBE-93) end to end on a fake cluster: the Job's result is
@@ -287,7 +287,7 @@ describe("Publish with the gate on (KOBE-93)", () => {
     const claims = verifySessionToken(
       env.KOBE_MODEL_SESSION_TOKEN as string,
       "kobe.model-gateway",
-      KEYS["kobe.model-gateway"],
+      VERIFY_KEYS["kobe.model-gateway"],
     );
     expect(claims).toMatchObject({ sub: list[0].id, team_id: finance, user_id: builderId });
     expect(claims.exp - claims.iat).toBeLessThanOrEqual(15 * 60 + 60);

@@ -6,7 +6,7 @@ import { createInternalApp } from "./routes/internal.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { FakeOauthServer } from "./testing/fake-oauth-server.js";
 import { openHarness, type Harness } from "./testing/harness.js";
-import { INTERNAL_KEY, MCP_SESSION_KEY, activeSandbox, mcpToken } from "./testing/mcp-fixtures.js";
+import { INTERNAL_KEY, activeSandbox, mcpToken, MCP_VERIFY_KEYS } from "./testing/mcp-fixtures.js";
 
 /**
  * Per-user OAuth grants (KOBE-109) against a fake authorization server following the MCP
@@ -102,7 +102,7 @@ beforeAll(async () => {
     mcp: h.deps.mcp,
     auth: {
       db: h.deps.database.db,
-      sessionKey: MCP_SESSION_KEY,
+      sessionVerifyKeys: MCP_VERIFY_KEYS,
       liveness: { isLive: () => Promise.resolve(true) },
     },
   });

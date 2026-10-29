@@ -16,6 +16,7 @@ import {
   leaseRun,
   mcpToken,
   activeSandbox,
+  MCP_VERIFY_KEYS,
 } from "./testing/mcp-fixtures.js";
 
 /**
@@ -104,7 +105,7 @@ beforeAll(async () => {
     mcp: h.deps.mcp,
     auth: {
       db: h.deps.database.db,
-      sessionKey: MCP_SESSION_KEY,
+      sessionVerifyKeys: MCP_VERIFY_KEYS,
       liveness: { isLive: () => Promise.resolve(true) },
     },
   });

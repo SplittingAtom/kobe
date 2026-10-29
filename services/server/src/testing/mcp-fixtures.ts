@@ -2,14 +2,21 @@ import { createHash, randomUUID } from "node:crypto";
 import type pg from "pg";
 import { canonicalJson, mcpServerSegment, type JsonObject } from "@kobe/protocol";
 import { signApproval, type ApprovalKey } from "@kobe/protocol/node";
-import { signSessionToken } from "@kobe/session-token";
+import {
+  generateSessionKeyPair,
+  signSessionToken,
+  type SessionSigningKey,
+} from "@kobe/session-token";
 import type { PinnedTool } from "@kobe/db";
 
 // MCP connector fixtures (tests only): an in-DB registry entry with a pinned snapshot, team
 // enablement, run leases and mcp-proxy session tokens — the minimal model KOBE-59/60 will manage.
 
-export const MCP_SESSION_KEY = "m".repeat(48);
-export const WIRE_SESSION_KEY = "w".repeat(48);
+const MCP_PAIR = generateSessionKeyPair();
+/** The server's `kobe.mcp-proxy` signing key and the public key the proxy verifies with. */
+export const MCP_SESSION_KEY = MCP_PAIR.signing;
+export const MCP_VERIFY_KEYS = MCP_PAIR.verify;
+export const WIRE_SESSION_KEY = generateSessionKeyPair().signing;
 export const INTERNAL_KEY = "i".repeat(40);
 
 export interface ToolSpec {
@@ -124,7 +131,11 @@ export async function leaseRun(
 
 export function mcpToken(
   claims: { sandboxId: string; teamId: string; userId: string },
-  options: { audience?: "kobe.mcp-proxy" | "kobe.sandbox-wire"; key?: string; ttl?: number } = {},
+  options: {
+    audience?: "kobe.mcp-proxy" | "kobe.sandbox-wire";
+    key?: SessionSigningKey;
+    ttl?: number;
+  } = {},
 ): string {
   const now = Math.floor(Date.now() / 1000);
   return signSessionToken(
