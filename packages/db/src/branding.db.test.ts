@@ -75,7 +75,13 @@ describe("site_branding_assets", () => {
   });
 
   it("keeps byte_size the real length, the sha256 a hex digest, and the limits (TH7)", async () => {
-    const insert = (size: number, digest: string, side: number | null = 16, kind = "logo", bytes = png) =>
+    const insert = (
+      size: number,
+      digest: string,
+      side: number | null = 16,
+      kind = "logo",
+      bytes = png,
+    ) =>
       app.query(
         `INSERT INTO site_branding_assets (kind, bytes, content_type, sha256, byte_size, width, height)
          VALUES ($1, $2, 'image/png', $3, $4, $5, $5)`,

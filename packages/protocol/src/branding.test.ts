@@ -87,12 +87,9 @@ describe("app name (§4.1)", () => {
     expect(appNameSchema.safeParse("🙂".repeat(41)).success).toBe(false);
   });
 
-  it.each(["", "   ", "x".repeat(41), "Ac\nme", "Ac\u0000me", "Ac me"])(
-    "refuses %j",
-    (name) => {
-      expect(appNameSchema.safeParse(name).success).toBe(false);
-    },
-  );
+  it.each(["", "   ", "x".repeat(41), "Ac\nme", "Ac\u0000me", "Ac me"])("refuses %j", (name) => {
+    expect(appNameSchema.safeParse(name).success).toBe(false);
+  });
 });
 
 describe("site_settings keys and asset limits (TH7)", () => {
@@ -120,7 +117,12 @@ describe("public branding (GET /v1/site/branding)", () => {
 
   it("accepts the defaults and a fully branded site", () => {
     expect(
-      siteBrandingSchema.parse({ appName: "Kobe", logo: null, favicon: null, theme: DEFAULT_THEME }),
+      siteBrandingSchema.parse({
+        appName: "Kobe",
+        logo: null,
+        favicon: null,
+        theme: DEFAULT_THEME,
+      }),
     ).toBeTruthy();
     expect(
       siteBrandingSchema.parse({
