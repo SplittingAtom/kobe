@@ -58,6 +58,20 @@ describe("db test pools (KOBE-507)", () => {
     }
   });
 
+  it("still throws any other error on a pool without its own listener", async () => {
+    const log = vi.fn();
+    const uninstall = installPoolErrorLogger(log);
+    const pool = new pg.Pool({ connectionString: database().adminUrl, max: 1 });
+    try {
+      const lost = new Error("Connection terminated unexpectedly");
+      expect(() => pool.emit("error", lost)).toThrow("Connection terminated unexpectedly");
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      uninstall();
+      await pool.end();
+    }
+  });
+
   it("leaves a pool's own 'error' listener in charge", async () => {
     const log = vi.fn();
     const uninstall = installPoolErrorLogger(log);

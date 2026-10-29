@@ -36,7 +36,14 @@ export async function dropDatabase(
         WHERE datname = $1 AND pid <> pg_backend_pid()`,
       [dbName],
     );
-    if ((rows[0]?.n ?? 0) === 0 || Date.now() >= deadline) break;
+    const remaining = rows[0]?.n ?? 0;
+    if (remaining === 0) break;
+    if (Date.now() >= deadline) {
+      console.warn(
+        `dropping test database ${dbName} WITH (FORCE): ${remaining} session(s) still open after ${graceMs} ms (leaked client?)`,
+      );
+      break;
+    }
     await new Promise((resolve) => setTimeout(resolve, DROP_POLL_MS));
   }
   await admin.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`);

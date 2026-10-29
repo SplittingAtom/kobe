@@ -20,8 +20,10 @@
   the database's own sessions (`pg_stat_activity.datname = dbName`) to end, then drops WITH (FORCE).
   Used by `createTestDatabase().drop()` and `audit-upgrade.db.test.ts`.
 - (b) `installPoolErrorLogger()` (`test-support/pool-errors.ts`, re-exported from `@kobe/db/testing`),
-  installed for every db test by `src/testing/db-setup.ts` (vitest.db `setupFiles`): a pool `'error'`
-  with no listener is logged (`console.warn`), never thrown. Pools with their own listener unchanged.
+  installed for every db test by `src/testing/db-setup.ts` (vitest.db `setupFiles`): a 57P01 pool
+  `'error'` with no listener is logged (`console.warn`); any other error still throws (review). Pools
+  with their own listener unchanged. `dropDatabase` warns with the db name and session count when
+  the 5 s grace runs out (review).
 - Production `createDb` unchanged (no error handler there; out of scope).
 
 ## Evidence
@@ -33,4 +35,5 @@
   - Run 2: 98 files, 1600 tests passed, 0 errors (255 s).
   - Run 3: 98 files, 1600 tests passed, 0 errors (276 s).
   - No pool-error warnings logged in any run. ac-1 asks for 10 runs; 3 done here, CI adds more.
+  - Run 4 (after review fixes): 98 files, 1601 tests passed, 0 errors.
 - `pnpm --filter @kobe/db test` (739 passed), typecheck, eslint, prettier: clean.
