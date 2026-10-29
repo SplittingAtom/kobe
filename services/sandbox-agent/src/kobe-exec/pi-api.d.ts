@@ -1,6 +1,6 @@
 /**
- * The slice of `@earendil-works/pi-coding-agent` (MIT, the pinned Pi 1.4.0; first verified on 1.0.0) that
- * kobe-exec uses, declared here so the extension compiles without the package in this workspace:
+ * The slice of `@earendil-works/pi-coding-agent` (MIT, the pinned Pi 1.4.0; first verified on
+ * 1.0.0) that kobe-exec uses, declared here so the extension compiles without the package here:
  * Pi's extension loader (jiti) resolves the specifier to its own copy at runtime (verified 1.0.0,
  * `core/extensions/loader.js` aliases). Shapes follow Pi's `core/tools/*.d.ts` and
  * `core/extensions/types.d.ts`; `kobe-exec.real-pi.test.ts` proves them against the real package.

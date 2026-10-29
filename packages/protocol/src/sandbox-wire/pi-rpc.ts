@@ -2,8 +2,8 @@ import { z } from "zod";
 
 /**
  * Pi RPC records as bridged over the sandbox wire. VERIFIED against the published
- * `@earendil-works/pi-coding-agent@1.0.0` tarball, re-checked on 1.4.0 (KOBE-511) (docs/rpc.md, rpc-commands.md, json.md,
- * rpc-extension-ui.md, dist/modes/rpc/rpc-types.d.ts):
+ * `@earendil-works/pi-coding-agent@1.0.0` tarball and re-checked on 1.4.0 (KOBE-511)
+ * (docs/rpc.md, rpc-commands.md, json.md, rpc-extension-ui.md, dist/modes/rpc/rpc-types.d.ts):
  *
  * - `pi --mode rpc`: strict JSONL on stdin/stdout, split on LF only (Node `readline` is unsafe: it
  *   also splits on U+2028/U+2029). Commands carry an optional `id`; responses repeat it as
