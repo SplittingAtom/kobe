@@ -10,7 +10,7 @@ import { NOT_HERE, SLASH_NO_MATCH, slashEntries, slashItems, slashOutcome } from
  * `dist/core/slash-commands.js`, plus `/llama`, which its docs list) each map to a Kobe command
  * or are not offered, with the reason. Nothing typed is ever run by Pi as a command.
  */
-const PI_1_0_0_BUILTINS = [
+const PI_BUILTINS = [
   "settings",
   "model",
   "tree",
@@ -52,10 +52,8 @@ const items = (name: string, arg?: string) => slashItems({ offset: 0, name, arg 
 
 describe("the Pi command mapping (ac-2, ac-6)", () => {
   it("covers every built-in command of the pinned Pi, and /llama from its docs", () => {
-    expect(PI_VERSION).toBe("1.0.0");
-    expect(PI_BUILTIN_COMMANDS.map((c) => c.word).sort()).toEqual(
-      [...PI_1_0_0_BUILTINS, "llama"].sort(),
-    );
+    expect(PI_VERSION).toBe("1.4.0");
+    expect(PI_BUILTIN_COMMANDS.map((c) => c.word).sort()).toEqual([...PI_BUILTINS, "llama"].sort());
   });
 
   it("a mapped word names a Kobe command with a / word: the same word, or Kobe's own", () => {

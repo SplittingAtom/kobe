@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 /**
- * Pi 1.0.x RPC records as bridged over the sandbox wire. VERIFIED against the published
- * `@earendil-works/pi-coding-agent@1.0.0` tarball (docs/rpc.md, rpc-commands.md, json.md,
+ * Pi RPC records as bridged over the sandbox wire. VERIFIED against the published
+ * `@earendil-works/pi-coding-agent@1.0.0` tarball, re-checked on 1.4.0 (KOBE-511) (docs/rpc.md, rpc-commands.md, json.md,
  * rpc-extension-ui.md, dist/modes/rpc/rpc-types.d.ts):
  *
  * - `pi --mode rpc`: strict JSONL on stdin/stdout, split on LF only (Node `readline` is unsafe: it
@@ -14,13 +14,20 @@ import { z } from "zod";
  * - Extension UI is a sub-protocol: `extension_ui_request` (stdout) / `extension_ui_response` (stdin).
  *
  * Schemas here validate the envelope (`type`, discriminators, ids) and pass the rest through
- * (`looseObject`), so a Pi 1.0.x patch adding fields does not break the bridge. Only the commands
+ * (`looseObject`), so a Pi release adding fields does not break the bridge. Only the commands
  * the server may issue are admitted (no `bash`, `switch_session`, `export_html`, `fork`, `compact`, ...).
  * `fork` is excluded because it moves Pi to a new session file with fresh history (verified 1.0.0),
  * which would split the thread from the session file Kobe mirrors; edit-and-regenerate branches
  * with `run.start.parent_entry_id` instead (KOBE-23 refused it before the contract dropped it).
  */
-export const PI_PINNED_VERSION = "1.0.0";
+export const PI_PINNED_VERSION = "1.4.0";
+/**
+ * Minor versions the server accepts besides the pinned one (KOBE-511): sandboxes started from the
+ * previous image (Pi 1.0.x) keep connecting until they are recreated from the new template. The
+ * RPC records above are unchanged between 1.0.0 and 1.4.0 except added fields (`agent_settled`
+ * `aborted`, `tool_execution_end` `durationMs`), which the loose schemas pass through.
+ */
+export const PI_PREVIOUS_MINORS: readonly string[] = ["1.0"];
 
 const piId = z.string().min(1).max(256);
 const imageContent = z.looseObject({

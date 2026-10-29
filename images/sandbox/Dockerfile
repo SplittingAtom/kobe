@@ -44,7 +44,7 @@ RUN mkdir -p /out /uapi \
       -nostartfiles -nodefaultlibs -o /out/kobe-runas \
       "$musl/rcrt1.o" "$musl/crti.o" /src/kobe-runas.c -lc "$musl/crtn.o"
 
-# Node runtime with a pinned npm, and Pi 1.0.x from its lockfile (spec D13). Dependency install
+# Node runtime with a pinned npm, and Pi 1.4.x from its lockfile (spec D13). Dependency install
 # scripts are not run (Pi works without them; they would run as root at build time).
 FROM ${NODE_IMAGE} AS pi
 ARG NPM_VERSION

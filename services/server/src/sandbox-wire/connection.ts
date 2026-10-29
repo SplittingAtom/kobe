@@ -14,6 +14,7 @@ import {
   CAPABILITY_WORKSPACE_MOVES,
   builtinToolDescriptor,
   PI_PINNED_VERSION,
+  PI_PREVIOUS_MINORS,
   SANDBOX_CLOSE_CODES,
   decodeSandboxFrame,
   type ArtifactPutFrame,
@@ -109,10 +110,15 @@ function remember(set: Set<string>, value: string, max: number): void {
   }
 }
 
-/** `1.0.x` only (contract: the server refuses anything else with `unsupported_version`). */
+/**
+ * The pinned Pi's minor (`1.4.x`) or a previous minor still in running sandboxes (`1.0.x`); the
+ * server refuses anything else with `unsupported_version` (contract).
+ */
 export function supportedPiVersion(version: string): boolean {
   const pinned = PI_PINNED_VERSION.split(".").slice(0, 2).join(".");
-  return new RegExp(`^${pinned.replace(".", "\\.")}\\.\\d+$`).test(version);
+  return [pinned, ...PI_PREVIOUS_MINORS].some((minor) =>
+    new RegExp(`^${minor.replace(".", "\\.")}\\.\\d+$`).test(version),
+  );
 }
 
 /**
