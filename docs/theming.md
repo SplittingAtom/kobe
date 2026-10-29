@@ -210,15 +210,15 @@ on every preset's surfaces.
 
 ## 5. Typography
 
-| Token                          | Used for                                      | Default                                                    | Set by            |
-| ------------------------------ | --------------------------------------------- | ---------------------------------------------------------- | ----------------- |
-| `--kobe-font-sans`             | Everything (`font-sans`, chat root, consoles) | `system-ui, sans-serif`                                    | typeface / preset |
-| `--kobe-font-mono`             | Code, file editor, context viewer             | `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace` | **fixed**         |
-| `--kobe-brand-wordmark-size`   | The bar's app name                            | `1.125rem`                                                 | **fixed**         |
-| `--kobe-brand-wordmark-weight` | The bar's app name                            | `600`                                                      | **fixed**         |
+| Token                          | Used for                                      | Default                                                                                                                                         | Set by            |
+| ------------------------------ | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `--kobe-font-sans`             | Everything (`font-sans`, chat root, consoles) | Tailwind's sans stack (`-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans', Arial, sans-serif` + emoji fonts) | typeface / preset |
+| `--kobe-font-mono`             | Code, file editor, context viewer             | `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`                                                                                      | **fixed**         |
+| `--kobe-brand-wordmark-size`   | The bar's app name                            | `1.125rem`                                                                                                                                      | **fixed**         |
+| `--kobe-brand-wordmark-weight` | The bar's app name                            | `600`                                                                                                                                           | **fixed**         |
 
 Typeface stacks (`FONT_STACK_VALUES` in `apps/web/lib/theme/presets.ts`): `system` =
-`system-ui, sans-serif`; `humanist` =
+Tailwind's sans stack above; `humanist` =
 `Seravek, "Gill Sans Nova", Ubuntu, Calibri, "DejaVu Sans", source-sans-pro, sans-serif`;
 `grotesk` = `Inter, Roboto, "Helvetica Neue", "Arial Nova", "Nimbus Sans", Arial, sans-serif`;
 `serif` = `Charter, "Bitstream Charter", "Sitka Text", Cambria, serif`. All system stacks: no font

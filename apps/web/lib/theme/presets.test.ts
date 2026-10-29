@@ -51,7 +51,9 @@ describe("presets", () => {
   });
 
   it("font stacks and radius scales are the catalogue's (docs/theming.md §5, §6)", () => {
-    expect(FONT_STACK_VALUES.system).toBe("system-ui, sans-serif");
+    expect(FONT_STACK_VALUES.system).toBe(
+      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"',
+    );
     expect(FONT_STACK_VALUES.humanist).toBe(
       'Seravek, "Gill Sans Nova", Ubuntu, Calibri, "DejaVu Sans", source-sans-pro, sans-serif',
     );

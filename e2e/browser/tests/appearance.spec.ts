@@ -67,9 +67,14 @@ async function reloadedAfter(
   notice: string,
   action: () => Promise<void>,
 ): Promise<void> {
+  // The notice shows for a moment and the page reloads itself; on a fast reload the notice is
+  // gone before it can be seen, so the reload is the proof (the notice has its component test).
   const reloaded = page.waitForEvent("load");
   await action();
-  await expect(panelOf(page).getByText(notice)).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  await Promise.race([
+    expect(panelOf(page).getByText(notice)).toBeVisible({ timeout: SHELL_TIMEOUT_MS }),
+    reloaded,
+  ]);
   await reloaded;
 }
 
