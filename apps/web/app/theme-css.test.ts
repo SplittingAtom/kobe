@@ -302,7 +302,9 @@ function sourceFiles(dir: string, exts: readonly string[]): string[] {
 }
 
 /** Every `name: value` declaration in a stylesheet (comments stripped), with its file. */
-function allDeclarations(files: readonly string[]): { file: string; name: string; value: string }[] {
+function allDeclarations(
+  files: readonly string[],
+): { file: string; name: string; value: string }[] {
   return files.flatMap((file) =>
     [...read(file).matchAll(/([\w-]+)\s*:\s*([^;{}]+)(?=[;}])/g)].map((m) => ({
       file,
@@ -314,7 +316,8 @@ function allDeclarations(files: readonly string[]): { file: string; name: string
 
 const COLOUR_LITERAL = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab|lab|lch|hwb)\(/i;
 /** A hex colour or colour function inside a string in TS/TSX (`"#fff"`, `"rgb(…)"`). */
-const TS_COLOUR_LITERAL = /["'`](?:[^"'`]*\s)?#[0-9a-f]{3,8}["'`\s;,)]|\b(?:rgba?|hsla?|oklch|oklab|hwb)\(/i;
+const TS_COLOUR_LITERAL =
+  /["'`](?:[^"'`]*\s)?#[0-9a-f]{3,8}["'`\s;,)]|\b(?:rgba?|hsla?|oklch|oklab|hwb)\(/i;
 const PALETTE =
   /(?:^|[\s"'`:])(?:text|bg|border(?:-[trblxy])?|ring|ring-offset|outline|fill|stroke|from|via|to|decoration|divide|accent|caret|placeholder|shadow)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-(?:50|[1-9]00|950)\b/;
 
@@ -473,12 +476,19 @@ describe("design tokens (KOBE-498)", () => {
     ["dark", dark],
   ] as const) {
     it(`brand links keep AA and focus 3:1 on the page and panels (${name})`, () => {
-      for (const surface of ["--kobe-console-bg", "--kobe-console-panel", "--background", "--muted"]) {
+      for (const surface of [
+        "--kobe-console-bg",
+        "--kobe-console-panel",
+        "--background",
+        "--muted",
+      ]) {
         const bg = resolve(theme, surface);
         expect(contrast(resolve(theme, "--kobe-brand-link"), bg), surface).toBeGreaterThanOrEqual(
           4.5,
         );
-        expect(contrast(resolve(theme, "--kobe-brand-focus"), bg), surface).toBeGreaterThanOrEqual(3);
+        expect(contrast(resolve(theme, "--kobe-brand-focus"), bg), surface).toBeGreaterThanOrEqual(
+          3,
+        );
       }
       expect(
         contrast(resolve(theme, "--kobe-brand-primary-fg"), resolve(theme, "--kobe-brand-primary")),
@@ -501,7 +511,8 @@ describe("design tokens (KOBE-498)", () => {
       "--admin-panel": "var(--muted)",
       "--admin-border": "var(--border)",
     };
-    for (const [alias, value] of Object.entries(aliases)) expect(light.get(alias), alias).toBe(value);
+    for (const [alias, value] of Object.entries(aliases))
+      expect(light.get(alias), alias).toBe(value);
     expect(light.has("--admin-hover")).toBe(true);
     expect(read("components/chat/chat.module.css")).not.toMatch(/--admin-[\w-]+\s*:/);
   });
