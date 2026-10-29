@@ -49,7 +49,9 @@ export const identity = defineDomain({
     jwks: ["SELECT", "INSERT"],
     rate_limits: ALL_PRIVILEGES,
     site_roles: ALL_PRIVILEGES,
-    site_settings: ["SELECT", "INSERT", "UPDATE"],
+    // DELETE: a branding reset removes its keys so the defaults apply again (TH12, KOBE-499); the
+    // app role could already set any key, so removing one grants nothing new.
+    site_settings: ALL_PRIVILEGES,
     // One row per kind, replaced on upload and deleted on removal or reset (TH12).
     site_branding_assets: ALL_PRIVILEGES,
     // A pointer only; rows also go away with their session (cascade from `sessions`).
