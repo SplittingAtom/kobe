@@ -273,14 +273,14 @@ sections:
     rows:
       - id: pi
         component: Pi coding agent (`@earendil-works/pi-coding-agent`)
-        version: 1.0.0 (pinned in images/sandbox/pi/package-lock.json)
+        version: 1.4.0 (pinned in images/sandbox/pi/package-lock.json)
         license: MIT
         use: bundled (separate process, RPC mode under kobe-sandbox-agent)
         where: sandbox image (/opt/pi); dependencies in the sandbox table
-        link: https://github.com/earendil-works/pi/blob/v1.0.0/LICENSE
+        link: https://github.com/earendil-works/pi/blob/v1.4.0/LICENSE
         images: []
         reason: >-
-          Checked at v1.0.0: the repository has one LICENSE (MIT) at its root; the npm package
+          Checked at v1.0.0 and v1.4.0: the repository has one LICENSE (MIT) at its root; the npm package
           declares MIT; packages/mcp/LICENSES holds the MIT license of the MCP TypeScript SDK.
       - id: agent-sandbox
         component: agent-sandbox controller (kubernetes-sigs/agent-sandbox)

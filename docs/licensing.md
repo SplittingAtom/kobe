@@ -97,7 +97,7 @@ family. `pnpm license:check` names anything missing.
   Bifrost's enterprise features are separate (an enterprise build and license key; in the open
   code they show up as `is_enterprise` flags, user-level governance, clustering, SCIM and UI
   fallbacks), and Kobe uses none of them. Re-check on every Bifrost bump.
-- **Pi** (`@earendil-works/pi-coding-agent`, pinned 1.0.0): MIT. Checked at `v1.0.0`
+- **Pi** (`@earendil-works/pi-coding-agent`, pinned 1.4.0): MIT. Checked at `v1.0.0` and `v1.4.0`
   (`github.com/earendil-works/pi`): one `LICENSE` (MIT) at the root, the npm package declares MIT,
   and `packages/mcp/LICENSES` holds the MIT license of the MCP TypeScript SDK it includes.
 - **agent-sandbox** (`kubernetes-sigs/agent-sandbox`, v1.0.4): Apache-2.0, a single `LICENSE` at

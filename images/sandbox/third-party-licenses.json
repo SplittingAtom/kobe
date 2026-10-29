@@ -47,7 +47,7 @@
     {
       "name": "@aws-sdk/core",
       "versions": [
-        "3.977.9"
+        "3.978.7"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -57,7 +57,7 @@
     {
       "name": "@aws-sdk/credential-provider-env",
       "versions": [
-        "3.972.70"
+        "3.972.78"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -67,7 +67,7 @@
     {
       "name": "@aws-sdk/credential-provider-http",
       "versions": [
-        "3.972.72"
+        "3.972.80"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -77,7 +77,7 @@
     {
       "name": "@aws-sdk/credential-provider-ini",
       "versions": [
-        "3.973.15"
+        "3.973.23"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -87,7 +87,7 @@
     {
       "name": "@aws-sdk/credential-provider-login",
       "versions": [
-        "3.972.77"
+        "3.972.85"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -97,7 +97,7 @@
     {
       "name": "@aws-sdk/credential-provider-node",
       "versions": [
-        "3.972.82"
+        "3.972.90"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -107,7 +107,7 @@
     {
       "name": "@aws-sdk/credential-provider-process",
       "versions": [
-        "3.972.70"
+        "3.972.78"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -117,7 +117,7 @@
     {
       "name": "@aws-sdk/credential-provider-sso",
       "versions": [
-        "3.973.14"
+        "3.973.22"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -127,7 +127,7 @@
     {
       "name": "@aws-sdk/credential-provider-web-identity",
       "versions": [
-        "3.972.76"
+        "3.972.84"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -137,7 +137,7 @@
     {
       "name": "@aws-sdk/eventstream-handler-node",
       "versions": [
-        "3.972.34"
+        "3.972.39"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -147,7 +147,7 @@
     {
       "name": "@aws-sdk/middleware-eventstream",
       "versions": [
-        "3.972.29"
+        "3.972.35"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -157,7 +157,7 @@
     {
       "name": "@aws-sdk/middleware-websocket",
       "versions": [
-        "3.972.52"
+        "3.972.60"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -167,7 +167,7 @@
     {
       "name": "@aws-sdk/nested-clients",
       "versions": [
-        "3.997.44"
+        "3.997.52"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -177,17 +177,7 @@
     {
       "name": "@aws-sdk/signature-v4-multi-region",
       "versions": [
-        "3.996.46"
-      ],
-      "ecosystem": "npm",
-      "locations": [
-        "/opt/pi"
-      ]
-    },
-    {
-      "name": "@aws-sdk/token-providers",
-      "versions": [
-        "3.1116.0"
+        "3.996.50"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -205,9 +195,19 @@
       ]
     },
     {
+      "name": "@aws-sdk/token-providers",
+      "versions": [
+        "3.1159.0"
+      ],
+      "ecosystem": "npm",
+      "locations": [
+        "/opt/pi"
+      ]
+    },
+    {
       "name": "@aws-sdk/types",
       "versions": [
-        "3.974.5"
+        "3.975.0"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -217,7 +217,7 @@
     {
       "name": "@aws-sdk/xml-builder",
       "versions": [
-        "3.972.40"
+        "3.972.42"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -327,7 +327,7 @@
     {
       "name": "@smithy/core",
       "versions": [
-        "3.33.3"
+        "3.37.0"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -365,9 +365,19 @@
       ]
     },
     {
+      "name": "@smithy/node-http-handler",
+      "versions": [
+        "4.13.0"
+      ],
+      "ecosystem": "npm",
+      "locations": [
+        "/opt/pi"
+      ]
+    },
+    {
       "name": "@smithy/signature-v4",
       "versions": [
-        "5.7.3"
+        "5.7.4"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -377,7 +387,7 @@
     {
       "name": "@smithy/types",
       "versions": [
-        "4.18.0"
+        "4.19.0"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -407,7 +417,7 @@
     {
       "name": "gaxios",
       "versions": [
-        "7.1.4"
+        "7.3.1"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -427,7 +437,7 @@
     {
       "name": "google-auth-library",
       "versions": [
-        "10.6.2"
+        "10.9.1"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -688,7 +698,7 @@
     {
       "name": "@protobufjs/utf8",
       "versions": [
-        "1.1.1"
+        "1.1.2"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1913,7 +1923,7 @@
     {
       "name": "@anthropic-ai/sdk",
       "versions": [
-        "0.124.0"
+        "0.129.0"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1923,17 +1933,7 @@
     {
       "name": "@babel/runtime",
       "versions": [
-        "7.29.2"
-      ],
-      "ecosystem": "npm",
-      "locations": [
-        "/opt/pi"
-      ]
-    },
-    {
-      "name": "@earendil-works/chord",
-      "versions": [
-        "1.0.0"
+        "7.29.10"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1943,7 +1943,7 @@
     {
       "name": "@earendil-works/pi-agent-core",
       "versions": [
-        "1.0.0"
+        "1.4.0"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1953,7 +1953,7 @@
     {
       "name": "@earendil-works/pi-ai",
       "versions": [
-        "1.0.0"
+        "1.4.0"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1963,7 +1963,7 @@
     {
       "name": "@earendil-works/pi-codemode",
       "versions": [
-        "1.0.0"
+        "1.4.0"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1973,7 +1973,7 @@
     {
       "name": "@earendil-works/pi-coding-agent",
       "versions": [
-        "1.0.0"
+        "1.4.0"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1983,7 +1983,7 @@
     {
       "name": "@earendil-works/pi-mcp",
       "versions": [
-        "1.0.0"
+        "1.4.0"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1993,7 +1993,7 @@
     {
       "name": "@earendil-works/pi-telemetry",
       "versions": [
-        "1.0.0"
+        "1.4.0"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -2003,17 +2003,7 @@
     {
       "name": "@earendil-works/pi-tui",
       "versions": [
-        "1.0.0"
-      ],
-      "ecosystem": "npm",
-      "locations": [
-        "/opt/pi"
-      ]
-    },
-    {
-      "name": "@esbuild/linux-x64",
-      "versions": [
-        "0.28.2"
+        "1.4.0"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -2063,7 +2053,7 @@
     {
       "name": "@types/node",
       "versions": [
-        "22.19.19"
+        "26.6.6"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -2155,7 +2145,7 @@
     {
       "name": "bowser",
       "versions": [
-        "2.14.1"
+        "2.15.0"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -2252,16 +2242,6 @@
       "ecosystem": "npm",
       "locations": [
         "/usr/local/lib"
-      ]
-    },
-    {
-      "name": "esbuild",
-      "versions": [
-        "0.28.2"
-      ],
-      "ecosystem": "npm",
-      "locations": [
-        "/opt/pi"
       ]
     },
     {
@@ -2480,6 +2460,16 @@
       "name": "marked",
       "versions": [
         "18.0.11"
+      ],
+      "ecosystem": "npm",
+      "locations": [
+        "/opt/pi"
+      ]
+    },
+    {
+      "name": "marked-cjk-friendly",
+      "versions": [
+        "0.1.2"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -2861,7 +2851,7 @@
     {
       "name": "undici-types",
       "versions": [
-        "6.21.0"
+        "8.9.0"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -2891,21 +2881,12 @@
     {
       "name": "ws",
       "versions": [
-        "8.21.0"
-      ],
-      "ecosystem": "npm",
-      "locations": [
-        "/opt/pi"
-      ]
-    },
-    {
-      "name": "ws",
-      "versions": [
         "8.22.0"
       ],
       "ecosystem": "npm",
       "locations": [
-        "/opt/kobe/sandbox-agent"
+        "/opt/kobe/sandbox-agent",
+        "/opt/pi"
       ]
     },
     {
