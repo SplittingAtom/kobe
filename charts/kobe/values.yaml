@@ -463,6 +463,20 @@ postgres:
 retention:
   paused: false
 
+# Branding defaults for GitOps installs (KOBE-503, theming T7). The API server writes each set
+# value into the site settings at start ONLY while that setting is unset: an admin's change on the
+# Appearance page always wins and is never overwritten on a restart or upgrade. Changing a value
+# here later does not change a site that already has the setting; a setting reset on the Appearance
+# page is seeded from here again at the next start (clear the value here to keep the built-in
+# default).
+branding:
+  # The site's name (1-40 characters, plain text on one line). Empty: "Kobe".
+  appName: ""
+  # One of default, slate, forest, plum, ember, tokyo-nights. Empty: the built-in default.
+  preset: ""
+  # Show the name next to the logo in the header. Only false is seeded (true is the default).
+  showName: true
+
 s3:
   endpoint: ""
   region: us-east-1

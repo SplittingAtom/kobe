@@ -1028,6 +1028,23 @@
         }
       }
     },
+    "branding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "appName": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "preset": {
+          "type": "string",
+          "enum": ["", "default", "slate", "forest", "plum", "ember", "tokyo-nights"]
+        },
+        "showName": {
+          "type": "boolean"
+        }
+      }
+    },
     "s3": {
       "type": "object",
       "additionalProperties": false,
