@@ -61,7 +61,8 @@ export interface Preset {
 
 /** `--kobe-font-sans` per typeface (§5); `system` is today's. All system stacks: no font files. */
 export const FONT_STACK_VALUES: Readonly<Record<FontStack, string>> = {
-  system: "system-ui, sans-serif",
+  system:
+    '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"',
   humanist:
     'Seravek, "Gill Sans Nova", Ubuntu, Calibri, "DejaVu Sans", source-sans-pro, sans-serif',
   grotesk: 'Inter, Roboto, "Helvetica Neue", "Arial Nova", "Nimbus Sans", Arial, sans-serif',

@@ -25,7 +25,13 @@ export function declarations(body: string): [string, string][] {
     .filter(Boolean)
     .map((d) => {
       const i = d.indexOf(":");
-      return [d.slice(0, i).trim(), d.slice(i + 1).trim()];
+      return [
+        d.slice(0, i).trim(),
+        d
+          .slice(i + 1)
+          .trim()
+          .replace(/\s+/g, " "),
+      ];
     });
 }
 

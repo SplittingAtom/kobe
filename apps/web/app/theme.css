@@ -151,7 +151,11 @@
 
   /* Typography (KOBE-498, docs/theming.md §5): the chat root and Tailwind's font-sans read the sans
      stack; the chat's code, the file editor, the context viewer and font-mono the mono stack. */
-  --kobe-font-sans: system-ui, sans-serif;
+  /* Tailwind 4.3's own sans stack (the consoles' font since KOBE-294), now the chat's too: on a Linux
+     browser without it, `system-ui` resolved to another face and every console screenshot changed. */
+  --kobe-font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial,
+    sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   --kobe-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --kobe-brand-wordmark-size: 1.125rem;
   --kobe-brand-wordmark-weight: 600;
