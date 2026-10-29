@@ -6,7 +6,7 @@ const text = (s: string) => new TextEncoder().encode(s);
 
 describe("checkSvg (TH8)", () => {
   it("accepts a clean SVG with fragments, gradients, comments and CDATA", () => {
-    expect(checkSvg(svg())).toEqual({ ok: true });
+    expect(checkSvg(svg())).toEqual({ ok: true, size: { width: 10, height: 10 } });
     expect(
       checkSvg(
         svg(
@@ -15,8 +15,27 @@ describe("checkSvg (TH8)", () => {
             "<style><![CDATA[rect { fill: #123456 }]]></style>",
         ),
       ),
-    ).toEqual({ ok: true });
-    expect(checkSvg(text('﻿  <svg xmlns="http://www.w3.org/2000/svg"/>'))).toEqual({ ok: true });
+    ).toMatchObject({ ok: true });
+    expect(checkSvg(text('﻿  <svg xmlns="http://www.w3.org/2000/svg"/>'))).toEqual({
+      ok: true,
+      size: null,
+    });
+  });
+
+  it("reports the box from width/height, else the viewBox, as whole pixels", () => {
+    const root = (attrs: string) =>
+      checkSvg(text(`<svg xmlns="http://www.w3.org/2000/svg" ${attrs}/>`));
+    expect(root('width="120" height="40" viewBox="0 0 12 4"')).toMatchObject({
+      size: { width: 120, height: 40 },
+    });
+    expect(root('width="120px" height="40px"')).toMatchObject({ size: { width: 120, height: 40 } });
+    expect(root('width="100%" height="100%" viewBox="0 0 300 100"')).toMatchObject({
+      size: { width: 300, height: 100 },
+    });
+    expect(root('viewBox="0,0,1.5,1"')).toMatchObject({ size: { width: 1000, height: 667 } });
+    expect(root('viewBox="0 0 10000 5000"')).toMatchObject({ size: { width: 1000, height: 500 } });
+    expect(root('width="2em" height="1em"')).toMatchObject({ size: null });
+    expect(root('viewBox="0 0 0 10"')).toMatchObject({ size: null });
   });
 
   it.each(REFUSED_SVGS)("refuses $name with the reason", ({ bytes, reason }) => {

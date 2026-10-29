@@ -8,7 +8,15 @@
  * `<style>`, and `url(` other than `url(#fragment)` in any other attribute.
  */
 
-export type SvgCheck = { readonly ok: true } | { readonly ok: false; readonly reason: string };
+/** An accepted SVG's box (from the root's width/height, else its viewBox), when it has one. */
+export interface SvgSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+export type SvgCheck =
+  | { readonly ok: true; readonly size: SvgSize | null }
+  | { readonly ok: false; readonly reason: string };
 
 const NAME = /^[A-Za-z_:][-A-Za-z0-9_:.]*/;
 const PREDEFINED: Readonly<Record<string, string>> = {
@@ -79,7 +87,11 @@ interface Reader {
   pos: number;
 }
 
-function readAttributes(r: Reader, element: string): { selfClosing: boolean } {
+function readAttributes(
+  r: Reader,
+  element: string,
+  attributes?: Map<string, string>,
+): { selfClosing: boolean } {
   const seen = new Set<string>();
   for (;;) {
     const ws = /^\s*/.exec(r.src.slice(r.pos))?.[0].length ?? 0;
@@ -109,7 +121,9 @@ function readAttributes(r: Reader, element: string): { selfClosing: boolean } {
     r.pos = end + 1;
     if (seen.has(name)) refuse(`it is not well-formed XML (${name} appears twice).`);
     seen.add(name);
-    checkAttribute(element, name, decodeEntities(raw));
+    const value = decodeEntities(raw);
+    checkAttribute(element, name, value);
+    attributes?.set(name, value);
   }
 }
 
@@ -121,7 +135,8 @@ function skipPast(r: Reader, terminator: string, what: string): string {
   return body;
 }
 
-function walk(src: string): void {
+function walk(src: string): Map<string, string> {
+  const rootAttributes = new Map<string, string>();
   const r: Reader = { src, pos: 0 };
   const stack: string[] = [];
   let rootSeen = false;
@@ -180,7 +195,11 @@ function walk(src: string): void {
       }
       if (element === "script") refuse("it contains a <script> element.");
       if (element === "foreignobject") refuse("it contains a <foreignObject> element.");
-      const { selfClosing } = readAttributes(r, element);
+      const { selfClosing } = readAttributes(
+        r,
+        element,
+        stack.length === 0 ? rootAttributes : undefined,
+      );
       if (!selfClosing) {
         stack.push(element);
         if (stack.length > MAX_DEPTH) refuse("it nests elements too deeply.");
@@ -189,10 +208,53 @@ function walk(src: string): void {
   }
   if (!rootSeen) refuse("it has no <svg> root element.");
   if (stack.length > 0) refuse("it is not well-formed XML (unclosed tags).");
+  return rootAttributes;
 }
 
-/** Checks SVG bytes against the TH8 rule. */
-export function checkSvg(bytes: Uint8Array): SvgCheck {
+/** A length in user units or px (`120`, `120.5px`); null for %, em and the like. */
+function length(value: string | undefined): number | null {
+  const m = /^\s*(\d+(?:\.\d+)?|\.\d+)(?:px)?\s*$/.exec(value ?? "");
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Whole-pixel sides for the page's layout box: exact when whole and ≤ max, else the aspect. */
+function wholeSize(width: number, height: number, max: number): SvgSize {
+  if (Number.isInteger(width) && Number.isInteger(height) && Math.max(width, height) <= max) {
+    return { width, height };
+  }
+  const scale = Math.min(max, 1000) / Math.max(width, height);
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+/** The root's box: width/height attributes, else the viewBox's size. */
+export function svgSize(attributes: ReadonlyMap<string, string>, max: number): SvgSize | null {
+  const w = length(attributes.get("width"));
+  const h = length(attributes.get("height"));
+  if (w !== null && h !== null) return wholeSize(w, h, max);
+  const box = (attributes.get("viewBox") ?? "")
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number);
+  const [, , vw, vh] = box;
+  if (
+    box.length === 4 &&
+    box.every(Number.isFinite) &&
+    vw !== undefined &&
+    vh !== undefined &&
+    vw > 0 &&
+    vh > 0
+  ) {
+    return wholeSize(vw, vh, max);
+  }
+  return null;
+}
+
+/** Checks SVG bytes against the TH8 rule; `maxSide` bounds the reported size. */
+export function checkSvg(bytes: Uint8Array, maxSide = 4096): SvgCheck {
   let src: string;
   try {
     src = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
@@ -201,8 +263,7 @@ export function checkSvg(bytes: Uint8Array): SvgCheck {
   }
   src = src.replace(/^\s+/, "");
   try {
-    walk(src);
-    return { ok: true };
+    return { ok: true, size: svgSize(walk(src), maxSide) };
   } catch (err) {
     if (err instanceof Refused) return { ok: false, reason: err.message };
     throw err;

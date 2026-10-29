@@ -17,7 +17,7 @@ export type DetectedType =
 export interface AcceptedImage {
   readonly ok: true;
   readonly contentType: BrandingAssetContentType;
-  /** Null for SVG and ICO. */
+  /** Null for ICO and for an SVG without width/height or viewBox. */
   readonly width: number | null;
   readonly height: number | null;
 }
@@ -166,9 +166,15 @@ export function inspectImage(
   }
   const contentType = type as BrandingAssetContentType;
   if (type === "image/svg+xml") {
-    const svg = checkSvg(bytes);
+    const svg = checkSvg(bytes, BRANDING_ASSET_MAX_SIDE_PX);
     if (!svg.ok) return refuse(422, "svg_refused", `This SVG is refused: ${svg.reason}`);
-    return { ok: true, contentType, width: null, height: null };
+    // The box from width/height or the viewBox (aspect only), so pages can reserve the space.
+    return {
+      ok: true,
+      contentType,
+      width: svg.size?.width ?? null,
+      height: svg.size?.height ?? null,
+    };
   }
   if (type === "image/x-icon") {
     if (!icoValid(bytes)) return refuse(422, "invalid_image", "The ICO file is damaged.");

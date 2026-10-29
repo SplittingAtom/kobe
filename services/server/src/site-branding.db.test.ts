@@ -249,7 +249,8 @@ describe("branding files", () => {
     expect(rows[0]?.updated_by).not.toBeNull();
     const url = `/v1/site/branding/assets/${kind}?v=${digest}`;
     if (kind === "favicon") expect(res.json.favicon).toBe(url);
-    if (kind === "logo") expect(res.json.logo).toEqual({ url });
+    if (kind === "logo") expect(res.json.logo).toMatchObject({ url });
+    expect(siteBrandingSchema.safeParse(res.json).success).toBe(true);
     const served = await as.anon.get(url);
     expect(served.status).toBe(200);
     expect(Buffer.from(served.bytes).equals(Buffer.from(data))).toBe(true);
@@ -287,7 +288,12 @@ describe("branding files", () => {
     await upload(as.admin, "logo", svg());
     expect((await as.anon.get("/v1/site/branding")).json.logo).toEqual({
       url: `/v1/site/branding/assets/logo?v=${sha(svg())}`,
+      // The box for layout: the SVG's viewBox, the PNG's pixels.
+      width: 10,
+      height: 10,
       dark: `/v1/site/branding/assets/logo_dark?v=${sha(png())}`,
+      darkWidth: 2,
+      darkHeight: 2,
     });
   });
 

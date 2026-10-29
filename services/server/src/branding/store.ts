@@ -13,6 +13,8 @@ export interface StoredAsset {
   readonly bytes: Buffer;
   readonly contentType: string;
   readonly sha256: string;
+  readonly width: number | null;
+  readonly height: number | null;
 }
 
 export interface BrandingSnapshot {
@@ -39,6 +41,11 @@ export function publicBranding(
     const asset = assets.get(kind);
     return asset ? assetUrl(kind, asset.sha256) : undefined;
   };
+  /** The known pixel box of `kind` under the given field names (both sides or neither). */
+  const size = (kind: BrandingAssetKind, w: string, h: string) => {
+    const asset = assets.get(kind);
+    return asset?.width && asset.height ? { [w]: asset.width, [h]: asset.height } : {};
+  };
   const light = url("logo");
   const dark = url("logo_dark");
   const favicon = url("favicon");
@@ -46,7 +53,14 @@ export function publicBranding(
     appName: settings.appName,
     showName: settings.showName,
     // A dark logo alone is not shown: it is the light logo's variant.
-    logo: light === undefined ? null : { url: light, ...(dark ? { dark } : {}) },
+    logo:
+      light === undefined
+        ? null
+        : {
+            url: light,
+            ...size("logo", "width", "height"),
+            ...(dark ? { dark, ...size("logo_dark", "darkWidth", "darkHeight") } : {}),
+          },
     favicon: favicon ?? null,
     theme: settings.theme,
   };
@@ -61,6 +75,8 @@ async function loadSnapshot(db: KobeDb): Promise<BrandingSnapshot> {
         bytes: siteBrandingAssets.bytes,
         contentType: siteBrandingAssets.contentType,
         sha256: siteBrandingAssets.sha256,
+        width: siteBrandingAssets.width,
+        height: siteBrandingAssets.height,
       })
       .from(siteBrandingAssets),
   ]);

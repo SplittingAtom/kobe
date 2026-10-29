@@ -60,6 +60,19 @@ describe("checkFloor", () => {
     expect(report.failures[0]?.ratio).toBeLessThan(4.5);
   });
 
+  it("refuses an accent that does not stand out from the light page or panel", () => {
+    for (const accent of ["#ffffff", "#f4f4f6"]) {
+      const report = checkFloor(custom(accent));
+      expect(report.ok, accent).toBe(false);
+      expect(report.failures).toContainEqual(
+        expect.objectContaining({ rule: "primary_on_surface", scheme: "light", required: 3 }),
+      );
+    }
+    expect(
+      checkFloor(custom("#2449c7")).failures.filter((f) => f.rule === "primary_on_surface"),
+    ).toEqual([]);
+  });
+
   it("measures against the surfaces given", () => {
     const grey = { page: "#777777", panel: "#777777", card: "#777777" };
     const report = checkFloor(custom("#2449c7"), { light: grey, dark: grey });

@@ -149,6 +149,18 @@ export function checkFloor(
     contrastRatio(primaryFg, primaryHover),
     TEXT_CONTRAST_MIN,
   );
+  // The fill itself must stand out from the light surfaces (WCAG 1.4.11): a white accent would
+  // draw white buttons on a white page. Dark is not measured: the accent is one value in both
+  // schemes, and the default blue (#2449c7) is only 2.45:1 on the dark page.
+  for (const surface of ["page", "panel"] as const) {
+    check(
+      failures,
+      "primary_on_surface",
+      "light",
+      contrastRatio(primary, surfaces.light[surface]),
+      NON_TEXT_CONTRAST_MIN,
+    );
+  }
   for (const scheme of ["light", "dark"] as const) {
     const s = surfaces[scheme];
     for (const surface of ["page", "panel"] as const) {
