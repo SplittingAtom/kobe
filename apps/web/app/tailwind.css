@@ -81,22 +81,12 @@
   --color-brand-primary-fg: var(--kobe-brand-primary-fg);
   --color-brand-link: var(--kobe-brand-link);
   --color-brand-focus: var(--kobe-brand-focus);
-  /* Typography: font-sans, font-mono (Tailwind's default stacks, so nothing changes), and the
-     chat root's stacks as font-chat, font-chat-mono. */
+  /* Typography: font-sans, font-mono. */
   --font-sans: var(--kobe-font-sans);
   --font-mono: var(--kobe-font-mono);
-  --font-chat: var(--kobe-font-chat);
-  --font-chat-mono: var(--kobe-font-chat-mono);
-  /* Corners: rounded-sm..xl and rounded-full follow the radius tokens. */
+  /* Corners: rounded-sm..xl follow the radius tokens; rounded-full stays Tailwind's (circles). */
   --radius-sm: var(--kobe-radius-sm);
   --radius-md: var(--kobe-radius-md);
   --radius-lg: var(--kobe-radius-lg);
   --radius-xl: var(--kobe-radius-xl);
-  --radius-full: var(--kobe-radius-pill);
-  /* Shadows: shadow-pop, shadow-banner, shadow-drawer, shadow-edge, shadow-panel. */
-  --shadow-pop: var(--kobe-shadow-pop);
-  --shadow-banner: var(--kobe-shadow-banner);
-  --shadow-drawer: var(--kobe-shadow-drawer);
-  --shadow-edge: var(--kobe-shadow-edge);
-  --shadow-panel: var(--kobe-shadow-panel);
 }

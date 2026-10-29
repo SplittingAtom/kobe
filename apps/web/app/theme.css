@@ -149,23 +149,16 @@
   --kobe-ctx-pattern-stripe: rgb(255 255 255 / 45%);
   --kobe-ctx-pattern-dot: rgb(255 255 255 / 55%);
 
-  /* Typography (KOBE-498, docs/theming.md §5). --kobe-font-sans/-mono are Tailwind's font-sans and
-     font-mono (the consoles, code), with Tailwind's default stacks so nothing changes;
-     --kobe-font-chat/-chat-mono are the chat root's and its code's stacks (the shell, rail, chat
-     and context viewer), which differ from Tailwind's today. A typeface preset sets all four. */
-  --kobe-font-sans:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial,
-    sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --kobe-font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace;
-  --kobe-font-chat: system-ui, sans-serif;
-  --kobe-font-chat-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Typography (KOBE-498, docs/theming.md §5): the chat root and Tailwind's font-sans read the sans
+     stack; the chat's code, the file editor, the context viewer and font-mono the mono stack. */
+  --kobe-font-sans: system-ui, sans-serif;
+  --kobe-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --kobe-brand-wordmark-size: 1.125rem;
   --kobe-brand-wordmark-weight: 600;
 
-  /* Corners (KOBE-498, docs/theming.md §6): Tailwind's rounded-sm..xl and rounded-full read them
-     (app/tailwind.css), with Tailwind's default radii; CSS modules read them too. */
+  /* Corners (KOBE-498, docs/theming.md §6): Tailwind's rounded-sm..xl read them (app/tailwind.css),
+     with Tailwind's default radii; CSS modules read them too. The pill is for the modules' pill
+     shapes; circles keep Tailwind's rounded-full. */
   --kobe-radius-sm: 0.25rem;
   --kobe-radius-md: 0.375rem;
   --kobe-radius-lg: 0.5rem;
@@ -173,12 +166,9 @@
   --kobe-radius-pill: 9999px;
 
   /* Shadows and the drawer's scrim (KOBE-498, docs/theming.md §7): today's values, the same in
-     both themes for now (the dark blocks repeat them so a theme can tune dark). The banner's and
-     the artifact column's edge differ from pop/drawer today and keep their own values. */
+     both themes for now (the dark schemes inherit them; T4's presets set dark values). */
   --kobe-shadow-pop: 0 4px 16px rgb(0 0 0 / 15%);
-  --kobe-shadow-banner: 0 4px 16px rgb(0 0 0 / 18%);
   --kobe-shadow-drawer: 0 8px 24px rgb(0 0 0 / 12%);
-  --kobe-shadow-edge: -8px 0 24px rgb(0 0 0 / 16%);
   --kobe-shadow-panel: 0 1.5rem 4rem rgb(0 0 0 / 25%);
   --kobe-scrim: rgb(0 0 0 / 40%);
 
@@ -248,12 +238,6 @@
   --kobe-ctx-tools: #f0b429;
   --kobe-ctx-compaction: #f07a3a;
   --kobe-ctx-other: #a3a3a3;
-  --kobe-shadow-pop: 0 4px 16px rgb(0 0 0 / 15%);
-  --kobe-shadow-banner: 0 4px 16px rgb(0 0 0 / 18%);
-  --kobe-shadow-drawer: 0 8px 24px rgb(0 0 0 / 12%);
-  --kobe-shadow-edge: -8px 0 24px rgb(0 0 0 / 16%);
-  --kobe-shadow-panel: 0 1.5rem 4rem rgb(0 0 0 / 25%);
-  --kobe-scrim: rgb(0 0 0 / 40%);
   --kobe-when-light: none;
   --kobe-when-dark: block;
 }
@@ -316,12 +300,6 @@
     --kobe-ctx-tools: #f0b429;
     --kobe-ctx-compaction: #f07a3a;
     --kobe-ctx-other: #a3a3a3;
-    --kobe-shadow-pop: 0 4px 16px rgb(0 0 0 / 15%);
-    --kobe-shadow-banner: 0 4px 16px rgb(0 0 0 / 18%);
-    --kobe-shadow-drawer: 0 8px 24px rgb(0 0 0 / 12%);
-    --kobe-shadow-edge: -8px 0 24px rgb(0 0 0 / 16%);
-    --kobe-shadow-panel: 0 1.5rem 4rem rgb(0 0 0 / 25%);
-    --kobe-scrim: rgb(0 0 0 / 40%);
     --kobe-when-light: none;
     --kobe-when-dark: block;
   }

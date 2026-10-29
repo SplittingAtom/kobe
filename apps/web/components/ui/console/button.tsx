@@ -18,7 +18,7 @@ export const buttonVariants = cva(
     variants: {
       variant: {
         primary:
-          "border-transparent bg-status-accent text-status-accent-fg hover:enabled:bg-status-accent/90",
+          "border-transparent bg-status-accent text-status-accent-fg hover:enabled:bg-brand-primary-hover",
         secondary:
           "border-console-control bg-console-bg text-console-fg hover:enabled:bg-console-panel",
         danger:

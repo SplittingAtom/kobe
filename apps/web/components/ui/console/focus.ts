@@ -4,4 +4,4 @@
  * (app/admin/admin-global.css): 3px accent outline, 2px offset.
  */
 export const FOCUS_RING =
-  "focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-console-accent";
+  "focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-brand-focus";

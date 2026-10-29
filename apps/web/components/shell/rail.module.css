@@ -389,7 +389,7 @@ button.teamIcon {
 /* A thread row dragged over a project header (CE19): dropping moves it there. */
 .groupToggle[data-drop-target="true"] {
   color: var(--admin-fg);
-  outline: 2px dashed var(--admin-accent);
+  outline: 2px dashed var(--kobe-brand-focus);
   outline-offset: -2px;
 }
 

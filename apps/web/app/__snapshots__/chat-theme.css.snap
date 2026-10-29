@@ -54,16 +54,8 @@
   --color-brand-focus: var(--kobe-brand-focus);
   --font-sans: var(--kobe-font-sans);
   --font-mono: var(--kobe-font-mono);
-  --font-chat: var(--kobe-font-chat);
-  --font-chat-mono: var(--kobe-font-chat-mono);
   --radius-sm: var(--kobe-radius-sm);
   --radius-md: var(--kobe-radius-md);
   --radius-lg: var(--kobe-radius-lg);
   --radius-xl: var(--kobe-radius-xl);
-  --radius-full: var(--kobe-radius-pill);
-  --shadow-pop: var(--kobe-shadow-pop);
-  --shadow-banner: var(--kobe-shadow-banner);
-  --shadow-drawer: var(--kobe-shadow-drawer);
-  --shadow-edge: var(--kobe-shadow-edge);
-  --shadow-panel: var(--kobe-shadow-panel);
 }

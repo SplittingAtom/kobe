@@ -362,7 +362,7 @@
     inset-inline-end: 0;
     width: clamp(360px, 50%, 100% - var(--kobe-rail-width));
     background: var(--admin-bg);
-    box-shadow: var(--kobe-shadow-edge);
+    box-shadow: var(--kobe-shadow-drawer);
   }
 
   .artifact:not([data-sheet-open]) {
