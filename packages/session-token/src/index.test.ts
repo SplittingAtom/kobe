@@ -70,7 +70,10 @@ describe("@kobe/session-token (EdDSA, KOBE-513)", () => {
     expect(() => verifySessionToken(forged, "kobe.egress-proxy", PAIR.verify, NOW)).toThrow(
       /signature/,
     );
-    const flipped = `${h}.${b64(claims)}.${(s ?? "").slice(0, -2)}AA`;
+    // Change the last signature character to a different valid one, so the tamper is never a no-op
+    // (a random signature ends in "AA" about once in 256 runs).
+    const sig = s ?? "";
+    const flipped = `${h}.${b64(claims)}.${sig.slice(0, -1)}${sig.endsWith("A") ? "B" : "A"}`;
     expect(() => verifySessionToken(flipped, "kobe.egress-proxy", PAIR.verify, NOW)).toThrow(
       /signature/,
     );
