@@ -10,7 +10,7 @@ FROM ${NODE_IMAGE} AS build
 ARG PNPM_VERSION
 RUN npm install -g pnpm@${PNPM_VERSION}
 WORKDIR /repo
-COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.cjs ./
 RUN pnpm fetch
 COPY . .
 RUN pnpm install --offline --frozen-lockfile \
