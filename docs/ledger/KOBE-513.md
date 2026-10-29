@@ -24,7 +24,9 @@ the server's internal `/grant` endpoint to pull another user's connector grant.
 - Claims, audiences, TTL (15 min), transport and the sandbox's view are unchanged: the sandbox
   still gets opaque bearer tokens from `/v1/sandbox/session`.
 - Env: server `KOBE_SESSION_SIGNING_KEY_<AUD>` (PKCS#8 PEM, all four, must differ) plus optional
-  `KOBE_SESSION_VERIFY_KEY_<AUD>` (merged with its own public key, for rotations); each verifier
+  `KOBE_SESSION_VERIFY_KEY_<AUD>` (merged with its own public key, for rotations) which the chart
+  takes from the Secret's `<aud>.pub` (review fix: never the ConfigMap, so a ConfigMap editor
+  cannot add a key the server accepts at the wire or `/grant`); each verifier
   `KOBE_SESSION_VERIFY_KEY_<AUD>` = a bundle of 1–4 `PUBLIC KEY` or `CERTIFICATE` PEM blocks. A
   `PRIVATE KEY` block in a verify bundle is refused at startup.
 - The model gateway keeps `KOBE_SESSION_KEY_MODEL_GATEWAY`: it is the master secret shared with
@@ -36,13 +38,13 @@ the server's internal `/grant` endpoint to pull another user's connector grant.
   `<aud>.key`, `<aud>.pub`, `model-gateway`, `approval-hmac`; the old per-audience HMAC entries
   drop out. ConfigMap `<release>-sandbox-session-verify-keys` mirrors the `.pub` entries; proxies
   and the gateway get only `configMapKeyRef` to their audience; the server gets all `.key` and
-  all bundles. `existingSecret` path: `sandbox.sessionKeysSecret` now requires
+  bundles from the Secret (`.pub`, optional). `existingSecret` path: `sandbox.sessionKeysSecret` now requires
   `sandbox.sessionVerifyKeysConfigMap` (render fails with a pointer to docs/install.md).
 
 ## Rotation (docs/install.md "Session-token keys")
 
-1. Append the new public key to the audience's bundle (ConfigMap, or the Secret's `.pub` for
-   generated keys, copied on the next `helm upgrade`); restart verifiers and server.
+1. Append the new public key to the Secret's `<aud>.pub` (the server's bundle) and the ConfigMap
+   (generated keys: copied on the next `helm upgrade`); restart verifiers and server.
 2. Swap `<aud>.key` in the Secret; restart the server (new `kid`, old tokens still verify).
 3. After 15 min remove the old public key; restart.
 
@@ -69,10 +71,9 @@ the server's internal `/grant` endpoint to pull another user's connector grant.
 - The gateway still shares `KOBE_SESSION_KEY_MODEL_GATEWAY` with the server (run-token and
   server-call HMAC keys). A compromised gateway can mint run/server-call tokens only it verifies;
   worth a rename (`KOBE_MODEL_GATEWAY_MASTER_KEY`) in a later chart release?
-- `approval-hmac` stays symmetric (server signs, MCP proxy verifies): same class of issue
-  (a compromised MCP proxy could mint approvals it then honours). Out of scope here; candidate for
-  the same Ed25519 treatment.
-- Deploying to gate1 interrupts live sandboxes for up to ~13 min (see decision above).
+- Upgrade window confirmed by review; it will be closed on the sandbox side by a separate ticket
+  (refetch the grant on a 401, rate-limited; KOBE-522). The model-gateway master
+  secret is out of scope (KOBE-521).
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -83,7 +84,8 @@ the server's internal `/grant` endpoint to pull another user's connector grant.
   public key cannot mint a token for any sandbox": forged payload with HMAC/zero/reused signature,
   own fresh key pair → unknown kid); proxies' config tests refuse a private key;
   `charts/kobe/tests/sandbox.test.ts` (verifiers get only `configMapKeyRef` to their audience, no
-  `.key`; ConfigMap has no private key and its keys do not load as signing keys; a token signed with
+  `.key`; the server's bundles come from the Secret, and a key added only to the ConfigMap is not
+  accepted by the server; ConfigMap has no private key and its keys do not load as signing keys; a token signed with
   the rendered Secret's key verifies with the rendered ConfigMap key of its audience only).
 - **ac-2** (audience/TTL/claims unchanged): server session-token tests (claims contract, TTL,
   audiences); every proxy's existing auth/route tests pass on EdDSA tokens. e2e scripts updated

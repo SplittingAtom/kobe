@@ -182,7 +182,15 @@ still starts: the server then denies every tool call that needs approval (fail c
     secretKeyRef:
       name: {{ include "kobe.sessionKeysSecretName" $ }}
       key: {{ $aud }}.key
-{{ include "kobe.sessionVerifyKeyEnv" (dict "root" $ "env" $env "aud" $aud) }}
+{{- /* The server's own rotation bundle comes from the Secret, never the ConfigMap: a ConfigMap
+  editor must not be able to add a key the server accepts (sandbox-wire, MCP /grant). Optional: the
+  server always accepts its own key's public half. */}}
+- name: KOBE_SESSION_VERIFY_KEY_{{ $env }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "kobe.sessionKeysSecretName" $ }}
+      key: {{ $aud }}.pub
+      optional: true
 {{- end }}
 - name: KOBE_SESSION_KEY_MODEL_GATEWAY
   valueFrom:

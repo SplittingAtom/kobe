@@ -20,12 +20,13 @@
 {{- end }}
 # Sandbox session tokens (packages/session-token, KOBE-513): one Ed25519 key pair per audience.
 # `<audience>.key` (private, PKCS#8 PEM) is mounted in the server only; `<audience>.pub` (public,
-# PEM certificate or key; current and previous during a rotation, docs/install.md) is copied into
-# the verify-keys ConfigMap below, which is all the verifying services get, so none of them can
-# mint a token. `model-gateway` is the gateway's master secret shared with the server (run,
+# PEM certificate or key; current and previous during a rotation, docs/install.md) is the server's
+# own rotation bundle (read from this Secret, never from the ConfigMap) and is copied into the
+# verify-keys ConfigMap below, which is all the verifying services get, so none of them can mint a
+# token. `model-gateway` is the gateway's master secret shared with the server (run,
 # trace-span and server-call keys are derived from it; no longer a session-token key).
-# approval-hmac signs tool-call approvals (D29, KOBE-37): the server signs, the MCP proxy verifies
-# (KOBE-58); never mounted in a sandbox. Rotating it voids approvals allowed but not yet used.
+# approval-hmac signs tool-call approvals (D29, KOBE-37): only the server holds it, signing and
+# verifying; never mounted in a proxy or a sandbox. Rotating it voids approvals not yet used.
 apiVersion: v1
 kind: Secret
 metadata:

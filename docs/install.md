@@ -126,7 +126,9 @@ holds `model-gateway` (the gateway's master secret shared with the server, from 
 and server-call token keys are derived) and `approval-hmac`.
 
 **Pre-created keys (GitOps).** Set `sandbox.sessionKeysSecret` and
-`sandbox.sessionVerifyKeysConfigMap` (the chart refuses one without the other):
+`sandbox.sessionVerifyKeysConfigMap` (the chart refuses one without the other). The Secret may
+also hold `<audience>.pub`, the server's rotation bundle (optional; the server always accepts its
+own key):
 
 ```bash
 for a in sandbox-wire model-gateway mcp-proxy egress-proxy; do
@@ -148,13 +150,14 @@ its bundle (up to four PEM blocks, current and previous during a rotation), so r
 steps; nothing is refused at any point:
 
 1. Generate the new pair (as above). Append the new public key to the audience's bundle, after the
-   old one: in the ConfigMap (pre-created keys) or in the Secret's `<audience>.pub` (generated
-   keys; the next `helm upgrade` copies it into the ConfigMap). Restart the verifiers and the
-   server (`kubectl rollout restart deploy/<release>-server deploy/<release>-mcp-proxy …`): env
-   from a ConfigMap is read at start.
+   old one, in the Secret's `<audience>.pub` (the server reads its bundle from the Secret only)
+   and in the ConfigMap (pre-created keys; generated keys: the next `helm upgrade` copies the
+   Secret's `.pub` into the ConfigMap). Restart the verifiers and the server
+   (`kubectl rollout restart deploy/<release>-server deploy/<release>-mcp-proxy …`): env is read
+   at start.
 2. Replace `<audience>.key` in the Secret with the new private key and restart the server. New
    tokens carry the new `kid`; tokens signed with the old key still verify.
-3. After 15 minutes (the token lifetime), remove the old public key from the bundle and restart
+3. After 15 minutes (the token lifetime), remove the old public key from both bundles and restart
    the verifiers and the server.
 
 ### Workspace storage

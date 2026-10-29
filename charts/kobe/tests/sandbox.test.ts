@@ -7,6 +7,7 @@ import { ISOLATION_HANDLER } from "../../../services/server/src/isolation/runtim
 import { loadSandboxConfig } from "../../../services/server/src/sandbox/config.js";
 import {
   SessionKeyError,
+  generateSessionKeyPair,
   loadSigningKey,
   loadVerifyKeys,
   signSessionToken,
@@ -454,6 +455,49 @@ describe("session keys Secret", () => {
     }
   });
 
+  it("the server takes its rotation bundles from the Secret: a key only in the ConfigMap is not accepted", () => {
+    const ms = render();
+    const secret = (find(ms, "Secret", "kobe-sandbox-session-keys")?.stringData ?? {}) as Record<
+      string,
+      string
+    >;
+    const cm = (find(ms, "ConfigMap", "kobe-sandbox-session-verify-keys")?.data ?? {}) as Record<
+      string,
+      string
+    >;
+    // A ConfigMap editor appends a key of their own to every audience's bundle.
+    const intruder = generateSessionKeyPair();
+    const tampered = Object.fromEntries(
+      Object.entries(cm).map(([k, v]) => [k, `${v}${intruder.publicPem}`]),
+    );
+    const env = envOf(ms, "kobe-server") as {
+      name: string;
+      value?: string;
+      valueFrom?: {
+        secretKeyRef?: { name: string; key: string };
+        configMapKeyRef?: { name: string; key: string };
+      };
+    }[];
+    const session = env.filter((e) => e.name.startsWith("KOBE_SESSION_"));
+    expect(session.filter((e) => e.valueFrom?.configMapKeyRef)).toEqual([]);
+    const resolved = Object.fromEntries(
+      session.map((e) => {
+        const s = e.valueFrom?.secretKeyRef;
+        const c = e.valueFrom?.configMapKeyRef;
+        return [e.name, e.value ?? (s ? secret[s.key] : c ? tampered[c.key] : undefined)];
+      }),
+    );
+    const config = loadSandboxConfig({
+      KOBE_SANDBOX_CONFIG: JSON.stringify(sandboxConfig(ms)),
+      ...resolved,
+    });
+    for (const a of AUDIENCES) {
+      const keys = config?.sessionVerifyKeys[`kobe.${a}`];
+      expect(keys?.has(intruder.signing.kid), a).toBe(false);
+      expect(keys?.size, a).toBe(1);
+    }
+  });
+
   it("uses a pre-created Secret and ConfigMap instead (GitOps-safe)", () => {
     const ms = render({
       "sandbox.sessionKeysSecret": "my-keys",
@@ -464,6 +508,10 @@ describe("session keys Secret", () => {
     expect(container(ms, "kobe-server")?.env).toContainEqual({
       name: "KOBE_SESSION_SIGNING_KEY_SANDBOX_WIRE",
       valueFrom: { secretKeyRef: { name: "my-keys", key: "sandbox-wire.key" } },
+    });
+    expect(container(ms, "kobe-server")?.env).toContainEqual({
+      name: "KOBE_SESSION_VERIFY_KEY_SANDBOX_WIRE",
+      valueFrom: { secretKeyRef: { name: "my-keys", key: "sandbox-wire.pub", optional: true } },
     });
     expect(container(ms, "kobe-mcp-proxy")?.env).toContainEqual({
       name: "KOBE_SESSION_VERIFY_KEY_MCP_PROXY",
