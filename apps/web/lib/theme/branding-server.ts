@@ -1,11 +1,8 @@
-import {
-  DEFAULT_APP_NAME,
-  DEFAULT_SHOW_NAME,
-  DEFAULT_THEME,
-  type SiteBranding,
-  siteBrandingSchema,
-} from "@kobe/protocol";
+import { type SiteBranding, siteBrandingSchema } from "@kobe/protocol";
 import { webConfig } from "../config";
+import { DEFAULT_BRANDING } from "./branding-defaults";
+
+export { DEFAULT_BRANDING };
 
 /**
  * The site branding for the server render (theming plan TH5; server only: the root layout and
@@ -17,14 +14,6 @@ import { webConfig } from "../config";
  * The response is validated with the protocol schema, and its asset URLs must be same-origin paths
  * (`/v1/site/branding/assets/…`): they become `<img src>` and `<link rel=icon>` on every page.
  */
-
-export const DEFAULT_BRANDING: SiteBranding = Object.freeze({
-  appName: DEFAULT_APP_NAME,
-  showName: DEFAULT_SHOW_NAME,
-  logo: null,
-  favicon: null,
-  theme: DEFAULT_THEME,
-});
 
 export const BRANDING_TIMEOUT_MS = 1000;
 export const BRANDING_CACHE_MS = 30_000;

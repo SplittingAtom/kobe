@@ -100,7 +100,8 @@ function floorFailures(id: string, values: SchemeValues, fixed: ReadonlyMap<stri
   const need = (fg: string, bg: string, min: number) => {
     const a = hex(fg);
     const b = hex(bg);
-    if (a === null || b === null) throw new Error(`${id}: ${fg} or ${bg} is not a measurable colour`);
+    if (a === null || b === null)
+      throw new Error(`${id}: ${fg} or ${bg} is not a measurable colour`);
     const ratio = contrastRatio(a, b);
     if (ratio < min) failures.push(`${fg} on ${bg}: ${ratio.toFixed(2)} < ${min}`);
   };
@@ -124,7 +125,11 @@ function floorFailures(id: string, values: SchemeValues, fixed: ReadonlyMap<stri
   }
   // 4. Focus outlines and control borders: 3:1 (WCAG 1.4.11). Default's chat ring stays today's
   //    neutral grey (docs/theming.md §4.2), so only the themed presets are held to it.
-  const outlines = ["--kobe-brand-focus", "--kobe-composer-focus", ...(id === "default" ? [] : ["--ring"])];
+  const outlines = [
+    "--kobe-brand-focus",
+    "--kobe-composer-focus",
+    ...(id === "default" ? [] : ["--ring"]),
+  ];
   for (const outline of outlines) for (const bg of PAGES) need(outline, bg, 3);
   for (const bg of ["--kobe-console-bg", "--kobe-console-panel"]) {
     need("--kobe-console-control-border", bg, 3);

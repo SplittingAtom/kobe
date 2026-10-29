@@ -78,7 +78,8 @@ function shape(theme: ThemeSettings): { light: Declarations; dark: Declarations 
 }
 
 export function brandingCss(theme: ThemeSettings, scope = ":root"): string {
-  if (!SCOPE.test(scope)) throw new Error(`brandingCss: unsupported scope ${JSON.stringify(scope)}`);
+  if (!SCOPE.test(scope))
+    throw new Error(`brandingCss: unsupported scope ${JSON.stringify(scope)}`);
   const blocks = shape(theme);
   if (blocks === null) return "";
   const css = render(scope, blocks.light, blocks.dark);

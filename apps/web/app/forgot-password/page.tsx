@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { useBranding } from "../../components/shell/branding-context";
 import { authClient } from "../../lib/auth-client";
 
 /** Ask for a reset link. The answer never says whether the address has an account. */
 export default function ForgotPasswordPage() {
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { appName } = useBranding();
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -21,7 +23,8 @@ export default function ForgotPasswordPage() {
       <main>
         <h1>Check your email</h1>
         <p>
-          If that address has a Kobe account, a reset link is on its way. It works for 30 minutes.
+          If that address has a {appName} account, a reset link is on its way. It works for 30
+          minutes.
         </p>
       </main>
     );

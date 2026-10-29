@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { useBranding } from "../../components/shell/branding-context";
 import { tokenFromHash, validateNewPassword } from "../../lib/invites";
 
 type State =
@@ -12,6 +13,7 @@ type State =
 export default function InvitePage() {
   const [state, setState] = useState<State>({ step: "checking" });
   const [error, setError] = useState<string | null>(null);
+  const { appName } = useBranding();
 
   useEffect(() => {
     const token = tokenFromHash(window.location.hash);
@@ -28,7 +30,7 @@ export default function InvitePage() {
         const { email } = (await r.json()) as { email: string };
         setState({ step: "form", token, email });
       })
-      .catch(() => setError("Could not reach the Kobe server."));
+      .catch(() => setError(`Could not reach the ${appName} server.`));
   }, []);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -67,7 +69,7 @@ export default function InvitePage() {
     );
   return (
     <main>
-      <h1>Join Kobe</h1>
+      <h1>Join {appName}</h1>
       <p>
         You were invited as <strong>{state.email}</strong>. Choose a name and a password; you can
         add a passkey after signing in.

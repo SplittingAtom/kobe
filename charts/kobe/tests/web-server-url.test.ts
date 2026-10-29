@@ -30,7 +30,11 @@ function helm(values: Record<string, string>, release = "kobe"): string {
   });
 }
 
-function envOf(deployment: string, values: Record<string, string> = {}, release = "kobe"): EnvVar[] {
+function envOf(
+  deployment: string,
+  values: Record<string, string> = {},
+  release = "kobe",
+): EnvVar[] {
   const ms = parseAllDocuments(helm(values, release))
     .map((d) => d.toJSON() as Manifest | null)
     .filter((m): m is Manifest => m !== null);

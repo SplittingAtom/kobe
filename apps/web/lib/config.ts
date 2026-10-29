@@ -16,19 +16,17 @@ export interface WebConfig {
   readonly problem: string | null;
 }
 
-const serverUrlSchema = z
-  .url({ protocol: /^https?$/ })
-  .refine((value) => {
-    if (!URL.canParse(value)) return false;
-    const url = new URL(value);
-    return (
-      url.username === "" &&
-      url.password === "" &&
-      (url.pathname === "/" || url.pathname === "") &&
-      url.search === "" &&
-      url.hash === ""
-    );
-  }, "must be an origin only (http(s)://host[:port], no path, query or credentials)");
+const serverUrlSchema = z.url({ protocol: /^https?$/ }).refine((value) => {
+  if (!URL.canParse(value)) return false;
+  const url = new URL(value);
+  return (
+    url.username === "" &&
+    url.password === "" &&
+    (url.pathname === "/" || url.pathname === "") &&
+    url.search === "" &&
+    url.hash === ""
+  );
+}, "must be an origin only (http(s)://host[:port], no path, query or credentials)");
 
 export function parseWebConfig(env: Readonly<Record<string, string | undefined>>): WebConfig {
   const raw = env.KOBE_SERVER_URL?.trim() ?? "";

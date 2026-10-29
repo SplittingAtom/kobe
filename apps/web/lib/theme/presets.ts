@@ -62,7 +62,8 @@ export interface Preset {
 /** `--kobe-font-sans` per typeface (§5); `system` is today's. All system stacks: no font files. */
 export const FONT_STACK_VALUES: Readonly<Record<FontStack, string>> = {
   system: "system-ui, sans-serif",
-  humanist: 'Seravek, "Gill Sans Nova", Ubuntu, Calibri, "DejaVu Sans", source-sans-pro, sans-serif',
+  humanist:
+    'Seravek, "Gill Sans Nova", Ubuntu, Calibri, "DejaVu Sans", source-sans-pro, sans-serif',
   grotesk: 'Inter, Roboto, "Helvetica Neue", "Arial Nova", "Nimbus Sans", Arial, sans-serif',
   serif: 'Charter, "Bitstream Charter", "Sitka Text", Cambria, serif',
 };

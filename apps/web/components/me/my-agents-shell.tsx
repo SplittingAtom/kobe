@@ -9,6 +9,7 @@ import { ACTIVE_TEAM_EVENT } from "../../lib/teams";
 import { ConsoleAccessContext } from "../admin/console-context";
 import { ConsoleThemeToggle } from "../admin/console-theme-toggle";
 import { ErrorNotice } from "../admin/error-notice";
+import { Brand } from "../shell/brand";
 import { ChatReturnLink } from "../shell/chat-return-link";
 import { ConsoleLayout, ConsoleMain, ConsoleWho, useInPanel } from "../ui/console";
 
@@ -73,7 +74,10 @@ export function MyAgentsShell({
       panel={panel}
       brand={
         <>
-          <ChatReturnLink>Kobe</ChatReturnLink> <span aria-hidden="true">/</span> My area
+          <ChatReturnLink>
+            <Brand />
+          </ChatReturnLink>{" "}
+          <span aria-hidden="true">/</span> My area
         </>
       }
       headerStart={<TeamSwitcher />}

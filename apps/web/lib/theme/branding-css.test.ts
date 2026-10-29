@@ -5,7 +5,12 @@ import { PRESET_SCHEME_TOKENS, PRESETS } from "./presets";
 import { block, declarations } from "./theme-css-source.test-helpers";
 
 /** KOBE-500 (TH5, ac-2): the theme <style> is token declarations in theme.css's three blocks. */
-const CUSTOM: ThemeSettings = { preset: "custom", accent: "#0f766e", corners: "round", font: "serif" };
+const CUSTOM: ThemeSettings = {
+  preset: "custom",
+  accent: "#0f766e",
+  corners: "round",
+  font: "serif",
+};
 const THEMES: ThemeSettings[] = [
   ...PRESET_IDS.filter((id) => id !== "default").map((preset) => ({ preset })),
   CUSTOM,
@@ -17,12 +22,16 @@ function blocks(css: string, scope = ":root") {
     light: declarations(block(css, scope)),
     chosenDark: declarations(block(css, `${scope}[data-theme="dark"]`)),
     osDark: declarations(
-      block(block(css, "@media (prefers-color-scheme: dark)"), `${scope}:not([data-theme="light"])`),
+      block(
+        block(css, "@media (prefers-color-scheme: dark)"),
+        `${scope}:not([data-theme="light"])`,
+      ),
     ),
   };
 }
 
-const ALLOWED_NAME = /^--(?:kobe-brand-[\w-]+|kobe-radius-[\w-]+|kobe-font-sans|ring|kobe-composer-focus)$/;
+const ALLOWED_NAME =
+  /^--(?:kobe-brand-[\w-]+|kobe-radius-[\w-]+|kobe-font-sans|ring|kobe-composer-focus)$/;
 const PRESET_NAMES = new Set<string>(PRESET_SCHEME_TOKENS);
 
 describe("brandingCss", () => {
@@ -63,8 +72,12 @@ describe("brandingCss", () => {
   it("scopes every block to the preview root", () => {
     const css = brandingCss({ preset: "forest" }, "#preview-light");
     const { light, chosenDark, osDark } = blocks(css, "#preview-light");
-    expect(new Map(light).get("--kobe-brand-primary")).toBe(PRESETS.forest.light["--kobe-brand-primary"]);
-    expect(new Map(chosenDark).get("--kobe-brand-primary")).toBe(PRESETS.forest.dark["--kobe-brand-primary"]);
+    expect(new Map(light).get("--kobe-brand-primary")).toBe(
+      PRESETS.forest.light["--kobe-brand-primary"],
+    );
+    expect(new Map(chosenDark).get("--kobe-brand-primary")).toBe(
+      PRESETS.forest.dark["--kobe-brand-primary"],
+    );
     expect(osDark).toEqual(chosenDark);
     expect(css).not.toContain(":root");
   });

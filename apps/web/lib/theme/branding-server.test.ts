@@ -11,7 +11,10 @@ import {
 const ACME: SiteBranding = {
   appName: "Acme",
   showName: false,
-  logo: { url: "/v1/site/branding/assets/logo?v=ab", dark: "/v1/site/branding/assets/logo_dark?v=cd" },
+  logo: {
+    url: "/v1/site/branding/assets/logo?v=ab",
+    dark: "/v1/site/branding/assets/logo_dark?v=cd",
+  },
   favicon: "/v1/site/branding/assets/favicon?v=ef",
   theme: { preset: "forest" },
 };
@@ -19,7 +22,10 @@ const ACME: SiteBranding = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-function setup(respond: (url: string, init?: RequestInit) => Promise<Response>, timeoutMs?: number) {
+function setup(
+  respond: (url: string, init?: RequestInit) => Promise<Response>,
+  timeoutMs?: number,
+) {
   let t = 1_000_000;
   const lines: string[] = [];
   const fetchMock = vi.fn(respond);
@@ -81,7 +87,11 @@ describe("getSiteBranding loader", () => {
   });
 
   it.each([
-    ["a refused connection", async () => Promise.reject(new TypeError("fetch failed")), /fetch failed/],
+    [
+      "a refused connection",
+      async () => Promise.reject(new TypeError("fetch failed")),
+      /fetch failed/,
+    ],
     ["an HTTP error", async () => json({ error: "nope" }, 503), /HTTP 503/],
     ["a body off the schema", async () => json({ ...ACME, css: "x" }), /schema/],
     ["not JSON", async () => new Response("<html>"), /JSON|Unexpected/],
@@ -90,7 +100,11 @@ describe("getSiteBranding loader", () => {
       async () => json({ ...ACME, favicon: "https://evil.example/x.ico" }),
       /same-origin/,
     ],
-    ["a protocol-relative logo", async () => json({ ...ACME, logo: { url: "//evil.example/x" } }), /same-origin/],
+    [
+      "a protocol-relative logo",
+      async () => json({ ...ACME, logo: { url: "//evil.example/x" } }),
+      /same-origin/,
+    ],
   ])("falls back on %s", async (_name, respond, reason) => {
     const { load, lines } = setup(respond);
     expect(await load()).toEqual(DEFAULT_BRANDING);
