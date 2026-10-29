@@ -26,7 +26,7 @@
   inset-inline-start: 0;
   width: min(280px, 85vw);
   height: auto;
-  box-shadow: 0 0 0 100vmax rgb(0 0 0 / 0.4);
+  box-shadow: 0 0 0 100vmax var(--kobe-scrim);
   outline: none;
 }
 
@@ -201,7 +201,7 @@
   font-weight: 600;
   background: var(--admin-bg);
   border: 1px solid var(--admin-border);
-  border-radius: 0.375rem;
+  border-radius: var(--kobe-radius-md);
   cursor: default;
 }
 
@@ -217,8 +217,8 @@ button.teamIcon {
   color: var(--admin-fg);
   background: var(--admin-bg);
   border: 1px solid var(--admin-border);
-  border-radius: 0.5rem;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+  border-radius: var(--kobe-radius-lg);
+  box-shadow: var(--kobe-shadow-drawer);
 }
 
 .teamPopover ul {
@@ -235,7 +235,7 @@ button.teamIcon {
   text-align: start;
   background: none;
   border: 0;
-  border-radius: 0.25rem;
+  border-radius: var(--kobe-radius-sm);
   font: inherit;
   cursor: pointer;
 }
@@ -378,7 +378,7 @@ button.teamIcon {
   text-align: start;
   background: none;
   border: 0;
-  border-radius: 0.25rem;
+  border-radius: var(--kobe-radius-sm);
   cursor: pointer;
 }
 
@@ -389,7 +389,7 @@ button.teamIcon {
 /* A thread row dragged over a project header (CE19): dropping moves it there. */
 .groupToggle[data-drop-target="true"] {
   color: var(--admin-fg);
-  outline: 2px dashed var(--admin-accent);
+  outline: 2px dashed var(--kobe-brand-focus);
   outline-offset: -2px;
 }
 
@@ -421,7 +421,7 @@ button.teamIcon {
   font-size: 0.8rem;
   background: none;
   border: 1px solid var(--admin-border);
-  border-radius: 0.375rem;
+  border-radius: var(--kobe-radius-md);
   cursor: pointer;
 }
 
@@ -443,7 +443,7 @@ button.teamIcon {
   text-align: center;
   background: color-mix(in srgb, var(--admin-panel) 88%, transparent);
   border: 2px dashed var(--admin-accent);
-  border-radius: 0.5rem;
+  border-radius: var(--kobe-radius-lg);
   pointer-events: none;
 }
 
@@ -475,8 +475,8 @@ button.teamIcon {
   color: var(--admin-fg);
   background: var(--admin-bg);
   border: 1px solid var(--admin-border);
-  border-radius: 0.5rem;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 15%);
+  border-radius: var(--kobe-radius-lg);
+  box-shadow: var(--kobe-shadow-pop);
   font-size: 0.85rem;
 }
 
@@ -568,7 +568,7 @@ button.teamIcon {
 .appsSection[data-picker-live] .appsList {
   flex: 0 1 auto;
   max-height: 35%;
-  border-top: 1px solid var(--admin-border, rgb(127 127 127 / 0.25));
+  border-top: 1px solid var(--admin-border);
 }
 
 .pickerControl {
@@ -579,8 +579,8 @@ button.teamIcon {
   width: 100%;
   min-width: 0;
   padding: 0.25rem 0.375rem;
-  border: 1px solid var(--admin-border, rgb(127 127 127 / 0.35));
-  border-radius: 0.375rem;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--kobe-radius-md);
   background: var(--background);
   color: inherit;
   font-size: 0.85rem;
@@ -602,8 +602,8 @@ button.teamIcon {
 
 .pickerRetry {
   padding: 0.125rem 0.5rem;
-  border: 1px solid var(--admin-border, rgb(127 127 127 / 0.35));
-  border-radius: 0.375rem;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--kobe-radius-md);
   background: none;
   color: inherit;
   font-size: 0.8rem;
@@ -621,12 +621,12 @@ button.teamIcon {
   text-align: start;
   background: none;
   border: 0;
-  border-radius: 0.375rem;
+  border-radius: var(--kobe-radius-md);
   cursor: pointer;
 }
 
 .appRow:hover:not(:disabled) {
-  background: var(--admin-hover, rgb(127 127 127 / 0.12));
+  background: var(--admin-hover);
 }
 
 .appRow:disabled {

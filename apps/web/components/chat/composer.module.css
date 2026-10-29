@@ -70,7 +70,7 @@
 .panel[data-mention-drop="file"],
 .panel[data-mention-drop="file"]:focus-within {
   outline-style: solid;
-  outline-color: var(--admin-accent);
+  outline-color: var(--kobe-brand-focus);
   background-color: color-mix(in srgb, var(--admin-accent) 6%, transparent);
 }
 

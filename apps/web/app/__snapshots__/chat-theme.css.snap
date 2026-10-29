@@ -47,4 +47,15 @@
   --color-tool-badge: var(--kobe-tool-badge);
   --color-tool-badge-bg: var(--kobe-tool-badge-bg);
   --color-tool-badge-border: var(--kobe-tool-badge-border);
+  --color-brand-primary: var(--kobe-brand-primary);
+  --color-brand-primary-hover: var(--kobe-brand-primary-hover);
+  --color-brand-primary-fg: var(--kobe-brand-primary-fg);
+  --color-brand-link: var(--kobe-brand-link);
+  --color-brand-focus: var(--kobe-brand-focus);
+  --font-sans: var(--kobe-font-sans);
+  --font-mono: var(--kobe-font-mono);
+  --radius-sm: var(--kobe-radius-sm);
+  --radius-md: var(--kobe-radius-md);
+  --radius-lg: var(--kobe-radius-lg);
+  --radius-xl: var(--kobe-radius-xl);
 }

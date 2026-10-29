@@ -22,7 +22,7 @@ body:has([data-kobe-console]) {
   }
 
   [data-kobe-console] :focus-visible {
-    outline: 3px solid var(--admin-accent);
+    outline: 3px solid var(--kobe-brand-focus);
     outline-offset: 2px;
   }
 

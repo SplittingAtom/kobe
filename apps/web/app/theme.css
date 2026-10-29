@@ -36,12 +36,33 @@
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
+  /* The chat's focus ring stays neutral grey (the catalogue's default preset keeps today's values,
+     docs/theming.md §4.2); a theme points it at --kobe-brand-focus. */
   --ring: oklch(0.708 0 0);
+
+  /* Brand (KOBE-498, docs/theming.md §4.1): the one coloured fill, its hover and its text, links
+     and focus outlines. The accents below read them; a theme sets these, not the aliases. The
+     hover is today's `bg-status-accent/90` (Tailwind's color-mix), so nothing changes on screen. */
+  --kobe-brand-primary: #2449c7;
+  --kobe-brand-primary-hover: color-mix(in oklab, var(--kobe-brand-primary) 90%, transparent);
+  --kobe-brand-primary-fg: #ffffff;
+  --kobe-brand-link: #2449c7;
+  --kobe-brand-focus: #2449c7;
+
+  /* The --admin-* neutrals (legacy aliases, moved here from the chat root in KOBE-498): the rail,
+     the shell and shared notices read them; they follow the shadcn tokens above. --admin-hover is
+     today's translucent grey row hover (the rail's app rows), the same in both themes. */
+  --admin-fg: var(--foreground);
+  --admin-muted: var(--muted-foreground);
+  --admin-bg: var(--background);
+  --admin-panel: var(--muted);
+  --admin-border: var(--border);
+  --admin-hover: rgb(127 127 127 / 12%);
 
   /* Shared accents: links, focus rings, errors, warnings. The chat (chat.module.css) and the
      consoles (the console-* colours in app/tailwind.css) read them under these names; only the
      neutrals differ. */
-  --admin-accent: #2449c7;
+  --admin-accent: var(--kobe-brand-link);
   --admin-danger: #a4161a;
   --admin-danger-bg: #fdecec;
   --admin-warn-bg: #fff4d6;
@@ -74,8 +95,8 @@
   --kobe-status-failed-bg: #fee2e2;
   --kobe-status-done: #3f7a55;
   --kobe-status-idle: #5c5c5c;
-  --kobe-status-accent: #2449c7;
-  --kobe-status-accent-fg: #ffffff;
+  --kobe-status-accent: var(--kobe-brand-primary);
+  --kobe-status-accent-fg: var(--kobe-brand-primary-fg);
   /* A call to action that commits nothing by itself (the proposed-edit card's Review, Chris
      2026-10-23): green with white text, the same in both themes (AA for white on both). */
   --kobe-confirm: #15803d;
@@ -91,7 +112,9 @@
   --kobe-tool-badge-border: #b8860b;
 
   /* The composer panel's focus outline (KOBE-374, components/chat/composer.module.css): 3:1 or more
-     (WCAG 1.4.11) on the page, the muted panel and cards in both themes. */
+     (WCAG 1.4.11) on the page, the muted panel and cards in both themes. Today's neutral, not
+     --kobe-brand-focus (docs/theming.md §4.1), so the default look stays; a theme may point it
+     there. */
   --kobe-composer-focus: #52525b;
 
   /* The context gauge (components/shell/context-gauge.module.css), from the status colours. */
@@ -122,6 +145,33 @@
   --kobe-ctx-compaction: #d55e00;
   --kobe-ctx-other: #7a7a7a;
 
+  /* Context viewer patterns (KOBE-471): the stripes and dots laid over a kind's colour. */
+  --kobe-ctx-pattern-stripe: rgb(255 255 255 / 45%);
+  --kobe-ctx-pattern-dot: rgb(255 255 255 / 55%);
+
+  /* Typography (KOBE-498, docs/theming.md §5): the chat root and Tailwind's font-sans read the sans
+     stack; the chat's code, the file editor, the context viewer and font-mono the mono stack. */
+  --kobe-font-sans: system-ui, sans-serif;
+  --kobe-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --kobe-brand-wordmark-size: 1.125rem;
+  --kobe-brand-wordmark-weight: 600;
+
+  /* Corners (KOBE-498, docs/theming.md §6): Tailwind's rounded-sm..xl read them (app/tailwind.css),
+     with Tailwind's default radii; CSS modules read them too. The pill is for the modules' pill
+     shapes; circles keep Tailwind's rounded-full. */
+  --kobe-radius-sm: 0.25rem;
+  --kobe-radius-md: 0.375rem;
+  --kobe-radius-lg: 0.5rem;
+  --kobe-radius-xl: 0.75rem;
+  --kobe-radius-pill: 9999px;
+
+  /* Shadows and the drawer's scrim (KOBE-498, docs/theming.md §7): today's values, the same in
+     both themes for now (the dark schemes inherit them; T4's presets set dark values). */
+  --kobe-shadow-pop: 0 4px 16px rgb(0 0 0 / 15%);
+  --kobe-shadow-drawer: 0 8px 24px rgb(0 0 0 / 12%);
+  --kobe-shadow-panel: 0 1.5rem 4rem rgb(0 0 0 / 25%);
+  --kobe-scrim: rgb(0 0 0 / 40%);
+
   /* `display` for content shown in one theme only (the toggle's icon). */
   --kobe-when-light: block;
   --kobe-when-dark: none;
@@ -151,7 +201,10 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --admin-accent: #8fa8ff;
+  --kobe-brand-primary: #4263eb;
+  --kobe-brand-primary-fg: #ffffff;
+  --kobe-brand-link: #8fa8ff;
+  --kobe-brand-focus: #8fa8ff;
   --admin-danger: #ff8a8a;
   --admin-danger-bg: #3a1c1e;
   --admin-warn-bg: #3a3218;
@@ -170,8 +223,6 @@
   --kobe-status-failed-bg: #450a0a;
   --kobe-status-done: #8fbf9f;
   --kobe-status-idle: #a3a3a3;
-  --kobe-status-accent: #4263eb;
-  --kobe-status-accent-fg: #ffffff;
   --kobe-tool-badge: #f5cd5b;
   --kobe-tool-badge-bg: #3b2f08;
   --kobe-tool-badge-border: #c9a227;
@@ -212,7 +263,10 @@
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);
-    --admin-accent: #8fa8ff;
+    --kobe-brand-primary: #4263eb;
+    --kobe-brand-primary-fg: #ffffff;
+    --kobe-brand-link: #8fa8ff;
+    --kobe-brand-focus: #8fa8ff;
     --admin-danger: #ff8a8a;
     --admin-danger-bg: #3a1c1e;
     --admin-warn-bg: #3a3218;
@@ -231,8 +285,6 @@
     --kobe-status-failed-bg: #450a0a;
     --kobe-status-done: #8fbf9f;
     --kobe-status-idle: #a3a3a3;
-    --kobe-status-accent: #4263eb;
-    --kobe-status-accent-fg: #ffffff;
     --kobe-tool-badge: #f5cd5b;
     --kobe-tool-badge-bg: #3b2f08;
     --kobe-tool-badge-border: #c9a227;

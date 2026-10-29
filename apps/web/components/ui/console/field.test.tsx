@@ -231,7 +231,7 @@ describe("focus rings (review S1)", () => {
       screen.getByRole("checkbox"),
       screen.getByRole("switch"),
     ]) {
-      expect(el.className, el.tagName).toContain("focus-visible:outline-console-accent");
+      expect(el.className, el.tagName).toContain("focus-visible:outline-brand-focus");
     }
     // Form-control boundaries use the 3:1 token (review M1), not the divider colour.
     expect(screen.getByRole("textbox", { name: "Name" }).className).toContain(

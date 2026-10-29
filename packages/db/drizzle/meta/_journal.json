@@ -1275,6 +1275,13 @@
       "when": 1792776273982,
       "tag": "0181_registry_publisher_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 182,
+      "version": "7",
+      "when": 1793252706368,
+      "tag": "0182_site_branding_assets",
+      "breakpoints": true
     }
   ]
 }

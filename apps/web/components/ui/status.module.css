@@ -57,7 +57,7 @@
   font-size: 0.75rem;
   line-height: 1.25rem;
   border: 1px solid currentColor;
-  border-radius: 999px;
+  border-radius: var(--kobe-radius-pill);
 }
 
 .badge.running {

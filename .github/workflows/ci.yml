@@ -24,7 +24,9 @@ defaults:
 jobs:
   checks:
     runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-24.04') || vars.KOBE_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 15
+    # 14-15 min on hosted runners since 2026-10 (the queue run of #400 hit 15 min inside
+    # license:check with every step green); 25 only bounds a hang, a healthy run stays ~15.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

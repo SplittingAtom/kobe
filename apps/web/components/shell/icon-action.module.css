@@ -17,8 +17,8 @@
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 50%;
-  background: var(--admin-danger, #c62828);
-  box-shadow: 0 0 0 2px var(--admin-bg, #fff);
+  background: var(--admin-danger);
+  box-shadow: 0 0 0 2px var(--admin-bg);
 }
 
 .keys {
@@ -47,6 +47,6 @@
   font-weight: 600;
   color: var(--kobe-status-accent-fg);
   background: var(--kobe-status-accent);
-  border-radius: 999px;
-  box-shadow: 0 0 0 2px var(--admin-bg, #fff);
+  border-radius: var(--kobe-radius-pill);
+  box-shadow: 0 0 0 2px var(--admin-bg);
 }

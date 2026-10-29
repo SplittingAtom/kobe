@@ -407,6 +407,15 @@ export const AUDIT_EVENTS = {
     setting: z.enum(["require_two_factor", "audit_pii_retention_hours"]),
     value: z.union([z.boolean(), z.number().int().nonnegative(), label]),
   }),
+  /**
+   * Site branding changed (KOBE-497, theming TH12): one event per setting. `value` is the new name,
+   * the theme's label (a preset id, or `custom` with its accent, corners and font), the new
+   * asset's hex sha256, or `default` when the setting was cleared or reset; never the bytes.
+   */
+  "site.branding.updated": event("site", {
+    setting: z.enum(["app_name", "theme", "logo", "logo_dark", "favicon"]),
+    value: z.union([z.string().regex(/^[0-9a-f]{64}$/), label]),
+  }),
 
   // ── platform: isolation runtime, restore (actor: system) ──
   /** A server replica's isolation state changed (spec D4); boot-time "verified" is not recorded. */
