@@ -2,6 +2,21 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Kobe chart values",
   "$defs": {
+    "podDisruptionBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "PodDisruptionBudget (minAvailable 1), rendered only while replicas > 1 (KOBE-515).",
+      "properties": { "enabled": { "type": "boolean" } }
+    },
+    "topologySpread": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Soft topology spread of replicas (maxSkew 1, ScheduleAnyway), rendered only while replicas > 1 (KOBE-515).",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "topologyKey": { "type": "string", "minLength": 1 }
+      }
+    },
     "resources": {
       "type": "object",
       "additionalProperties": false,
@@ -358,6 +373,8 @@
           "type": "integer",
           "minimum": 1
         },
+        "podDisruptionBudget": { "$ref": "#/$defs/podDisruptionBudget" },
+        "topologySpread": { "$ref": "#/$defs/topologySpread" },
         "resources": {
           "$ref": "#/$defs/resources"
         },
@@ -375,6 +392,8 @@
           "type": "integer",
           "minimum": 2
         },
+        "podDisruptionBudget": { "$ref": "#/$defs/podDisruptionBudget" },
+        "topologySpread": { "$ref": "#/$defs/topologySpread" },
         "resources": {
           "$ref": "#/$defs/resources"
         },
@@ -483,6 +502,8 @@
           "type": "integer",
           "minimum": 1
         },
+        "podDisruptionBudget": { "$ref": "#/$defs/podDisruptionBudget" },
+        "topologySpread": { "$ref": "#/$defs/topologySpread" },
         "tickSeconds": {
           "type": "integer",
           "minimum": 5,
@@ -506,6 +527,8 @@
           "type": "integer",
           "minimum": 1
         },
+        "podDisruptionBudget": { "$ref": "#/$defs/podDisruptionBudget" },
+        "topologySpread": { "$ref": "#/$defs/topologySpread" },
         "resources": {
           "$ref": "#/$defs/resources"
         },
@@ -628,6 +651,8 @@
           "type": "integer",
           "minimum": 1
         },
+        "podDisruptionBudget": { "$ref": "#/$defs/podDisruptionBudget" },
+        "topologySpread": { "$ref": "#/$defs/topologySpread" },
         "resources": {
           "$ref": "#/$defs/resources"
         },
@@ -759,6 +784,8 @@
           "type": "integer",
           "minimum": 1
         },
+        "podDisruptionBudget": { "$ref": "#/$defs/podDisruptionBudget" },
+        "topologySpread": { "$ref": "#/$defs/topologySpread" },
         "resources": {
           "$ref": "#/$defs/resources"
         },

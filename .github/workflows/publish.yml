@@ -3,6 +3,7 @@
 # pins appVersion sha-<short>. Only after every image and the chart are published is :main moved,
 # for all images together, and only if this commit is still the head of main. Deploy sha-* tags or
 # chart versions, not :main (the chart's IfNotPresent pull policy would keep a stale :main).
+# Every image is scanned with Trivy before it is pushed; a fixable CRITICAL fails its job (KOBE-512).
 name: publish
 
 on:
@@ -50,7 +51,40 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      # KOBE-512: build into the local daemon first and scan it, so an image with a fixable CRITICAL
+      # never reaches ghcr. The push below rebuilds from this builder's layer cache.
+      - name: Build for the scan (loaded locally, not pushed)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          tags: kobe-${{ matrix.name }}:scan
+      - name: Vulnerability report (HIGH and CRITICAL with fixes available)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: kobe-${{ matrix.name }}:scan
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: "0"
+      - name: Vulnerability gate (fail on any fixable CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: kobe-${{ matrix.name }}:scan
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: "1"
+      - name: Build and push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: ${{ matrix.dockerfile }}

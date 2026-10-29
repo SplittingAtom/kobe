@@ -68,7 +68,15 @@ every image build and every shard passed.
 | `ci`            | every push, merge queue             | format, build, typecheck, lint, unit + chart tests, license check, DB/RLS suite, image non-root check                 |
 | `sandbox-image` | sandbox inputs change, nightly      | build, acceptance checks, license audit, Trivy (fails on fixable CRITICAL)                                            |
 | `e2e`           | PRs to `main`, merge queue, nightly | images built once, then parallel k3d + gVisor shards: `e2e/run.sh`, cold-start trials, `e2e/gate1.sh`, `e2e/gate2.sh` |
-| `publish`       | push to `main`                      | images (`sha-<short>`; `main` moved last) and the chart (`<version>-main.<run>.<attempt>`) to ghcr                    |
+| `publish`       | push to `main`                      | images (Trivy-scanned before push, fails on fixable CRITICAL; `sha-<short>`; `main` moved last) and the chart to ghcr |
+
+Image vulnerability gate: `sandbox-image`, `orbit-eval-image`, `skill-scan-image` and every image
+in `publish` run Trivy (`aquasecurity/trivy-action`, pinned by digest) twice: a report of HIGH and
+CRITICAL findings that have a fix, then a gate that fails the job on any fixable CRITICAL. Unfixed
+CVEs are ignored. `publish` builds each image into the runner's daemon and scans it before pushing,
+so a failing image never reaches ghcr. Charts publish as `<version>-main.<run>.<attempt>`. There
+are no waivers; if one is ever needed, add a root `.trivyignore` with one comment per CVE (id,
+image, reason, expiry) and pass it as `trivyignores`.
 
 CI runs on GitHub-hosted runners (free for public repositories). Deploy `sha-*` image tags or
 published chart versions, never `:main` (pods with `IfNotPresent` would keep a stale `:main`).

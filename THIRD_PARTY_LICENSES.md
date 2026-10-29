@@ -211,15 +211,15 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @modelcontextprotocol/client | 2.3.1 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@modelcontextprotocol/client@2.3.1/LICENSE) |
 | @modelcontextprotocol/core | 2.3.1 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@modelcontextprotocol/core@2.3.1/LICENSE) |
 | @modelcontextprotocol/ext-apps | 2.0.3 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@modelcontextprotocol/ext-apps@2.0.3/LICENSE) |
-| @next/env | 16.3.8 | MIT | linked, bundled | web | [license](https://www.npmjs.com/package/@next/env/v/16.3.8) |
-| @next/swc-darwin-arm64 | 16.3.8 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
-| @next/swc-darwin-x64 | 16.3.8 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
-| @next/swc-linux-arm64-gnu | 16.3.8 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
-| @next/swc-linux-arm64-musl | 16.3.8 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
-| @next/swc-linux-x64-gnu | 16.3.8 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
-| @next/swc-linux-x64-musl | 16.3.8 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
-| @next/swc-win32-arm64-msvc | 16.3.8 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
-| @next/swc-win32-x64-msvc | 16.3.8 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
+| @next/env | 16.4.3 | MIT | linked, bundled | web | [license](https://www.npmjs.com/package/@next/env/v/16.4.3) |
+| @next/swc-darwin-arm64 | 16.4.3 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
+| @next/swc-darwin-x64 | 16.4.3 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
+| @next/swc-linux-arm64-gnu | 16.4.3 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
+| @next/swc-linux-arm64-musl | 16.4.3 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
+| @next/swc-linux-x64-gnu | 16.4.3 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
+| @next/swc-linux-x64-musl | 16.4.3 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
+| @next/swc-win32-arm64-msvc | 16.4.3 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
+| @next/swc-win32-x64-msvc | 16.4.3 | MIT | linked, bundled (platform build) | web | [license](https://github.com/vercel/next.js/blob/canary/license.md) |
 | @noble/ciphers | 2.4.0 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@noble/ciphers@2.4.0/LICENSE) |
 | @noble/hashes | 2.4.0 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@noble/hashes@2.4.0/LICENSE) |
 | @opentelemetry/api-logs | 0.200.0 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@opentelemetry/api-logs@0.200.0/LICENSE) |
@@ -775,7 +775,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | nanoid | 6.0.2 | MIT | linked, bundled | web | [license](https://unpkg.com/nanoid@6.0.2/LICENSE) |
 | nanostores | 1.5.4 | MIT | linked, bundled | server, web | [license](https://unpkg.com/nanostores@1.5.4/LICENSE) |
 | natural-compare | 1.4.0 | MIT | dev-only | build, lint and test tooling | [license](https://www.npmjs.com/package/natural-compare/v/1.4.0) |
-| next | 16.3.8 | MIT | linked, bundled | web | [license](https://unpkg.com/next@16.3.8/license.md) |
+| next | 16.4.3 | MIT | linked, bundled | web | [license](https://unpkg.com/next@16.4.3/license.md) |
 | nodemailer | 10.1.0 | MIT-0 | linked, bundled | server | [license](https://unpkg.com/nodemailer@10.1.0/LICENSE) |
 | oauth4webapi | 3.8.8 | MIT | linked, bundled | server | [license](https://unpkg.com/oauth4webapi@3.8.8/LICENSE.md) |
 | obug | 2.2.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/obug@2.2.1/LICENSE) |
