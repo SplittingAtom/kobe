@@ -326,6 +326,8 @@ function RailFiles({
           showFolder={showFolder}
           onOpenFile={openFile}
           onMoved={panel?.moveFiles}
+          onMoveStart={panel?.beginMove}
+          onMoveFailed={panel?.endMove}
           onMention={mention}
         />
       )}

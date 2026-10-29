@@ -51,6 +51,7 @@ import { useShellBand } from "../shell/shell-band";
 import { kobeExtrasOf, useChatSession } from "./kobe-runtime";
 import { useArtifactTabs, type OpenRequest } from "./use-artifact-tabs";
 import { useThreadFiles } from "./use-thread-files";
+import { useMovingFiles } from "./use-moving-files";
 
 export type { OpenRequest };
 
@@ -89,6 +90,13 @@ export interface ArtifactPanelApi {
    * the thread on screen (tabs remembered on other threads find the file gone and say so).
    */
   moveFiles(from: string, to: string): void;
+  /**
+   * A move of `from` is under way (KOBE-506): until it answers, its tabs stay open and no
+   * "no longer in your workspace" notice shows for it.
+   */
+  beginMove(from: string): void;
+  /** The move of `from` failed: its files are where they were. */
+  endMove(from: string): void;
   /** The last file whose tab was dropped, until the member dismisses the notice. */
   readonly goneFile: string | null;
   dismissGone(): void;
@@ -304,12 +312,14 @@ export function ArtifactPanelProvider({
   const { openArtifact: openTab, drop, retargetFiles } = t;
   const editDrafts = useChatSession().editDrafts;
   // Unsaved edits follow a moved file (KOBE-463).
+  const { begin: beginMove, end: endMove, answered: moveAnswered, isMoving } = useMovingFiles();
   const moveFiles = useCallback(
     (from: string, to: string) => {
       editDrafts.move(from, to);
       retargetFiles(from, to);
+      moveAnswered(from);
     },
-    [editDrafts, retargetFiles],
+    [editDrafts, retargetFiles, moveAnswered],
   );
   const [hiddenIn, setHiddenIn] = useState<string | undefined | null>(null);
   // Hidden for the thread it was hidden on (`null`: shown); another thread shows its own tabs.
@@ -375,11 +385,13 @@ export function ArtifactPanelProvider({
   const goneFile = gone !== null && gone.threadId === threadId ? gone.path : null;
   const dropFile = useCallback(
     (path: string) => {
+      // A pending move's old path reads as gone; the tab follows the move instead (KOBE-506).
+      if (isMoving(path)) return;
       drop(fileTabId(path));
       editDrafts.clear(path);
       setGone(threadId === undefined ? { path } : { path, threadId });
     },
-    [drop, threadId, editDrafts],
+    [drop, threadId, editDrafts, isMoving],
   );
   const dismissGone = useCallback(() => setGone(null), []);
 
@@ -398,6 +410,8 @@ export function ArtifactPanelProvider({
       autoOpenFile,
       dropFile,
       moveFiles,
+      beginMove,
+      endMove,
       goneFile,
       dismissGone,
       activate: t.activate,
@@ -418,6 +432,8 @@ export function ArtifactPanelProvider({
       autoOpenFile,
       dropFile,
       moveFiles,
+      beginMove,
+      endMove,
       goneFile,
       dismissGone,
       t.tabs,

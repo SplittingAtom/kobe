@@ -20,6 +20,8 @@ let reads: string[];
 let pulled: Map<string, number>;
 /** Files whose saved copy is missing from storage (KOBE-475): listed, but reads answer 503. */
 let contentMissing: Set<string>;
+/** Holds a move's answer (after the files moved) until the test lets it go (KOBE-506). */
+let moveGate: Promise<void> | null;
 const CHUNK = 64 * 1024;
 
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -64,6 +66,7 @@ const fetchFn: typeof fetch = async (input, init = {}) => {
       files.delete(p);
       files.set(`${to}${p.slice(from.length)}`, bytes);
     }
+    await moveGate;
     return Response.json({ from, to, type: "file", files: 1 });
   }
   if (url.pathname === "/v1/workspace/files") {
@@ -128,6 +131,7 @@ const tabNames = () =>
 
 beforeEach(() => {
   contentMissing = new Set();
+  moveGate = null;
   localStorage.clear();
   sessionStorage.clear();
   // The frame route is the server's: don't let happy-dom fetch it from localhost.
@@ -276,6 +280,46 @@ describe("moved files (KOBE-304, ac-9)", () => {
     await waitFor(() =>
       expect(localStorage.getItem(tabsKey(fake.teamId, threadId))).toContain("file:archive/b.md"),
     );
+    expect(screen.queryByText(/is no longer in your workspace/)).toBeNull();
+  });
+
+  it("the stream saying a moving file is gone neither closes its tab nor flashes the notice (KOBE-506)", async () => {
+    files.set("notes/a.md", enc("# Kept"));
+    const threadId = thread("Work");
+    mount(threadId);
+    const user = userEvent.setup();
+    const section = await openFiles();
+    await user.click(await within(section).findByRole("treeitem", { name: "notes" }));
+    const panel = await view(user, section, "a.md");
+    expect(await within(panel).findByRole("heading", { name: "Kept" })).toBeTruthy();
+    await waitFor(() => expect(fake.workspaceChanges.open).toEqual([["notes/a.md"]]), {
+      timeout: 3_000,
+    });
+    await waitFor(() => expect(reads.filter((p) => p === "notes/a.md")).toHaveLength(2));
+    let release = () => {};
+    moveGate = new Promise((resolve) => (release = resolve));
+    within(section).getByRole("treeitem", { name: "a.md" }).focus();
+    await user.keyboard("{F2}");
+    const input = within(
+      await within(section).findByRole("dialog", { name: "Rename a.md" }),
+    ).getByRole("textbox");
+    await user.clear(input);
+    await user.type(input, "b.md{Enter}");
+    // The server moved it and its change stream says the old path is gone before the move answers:
+    // the tab reads it again and finds nothing there.
+    await waitFor(() => expect(files.has("notes/b.md")).toBe(true));
+    await act(() => fake.workspaceChanges.announce("notes/a.md", { kind: "agent", name: null }));
+    await waitFor(() => expect(reads.filter((p) => p === "notes/a.md")).toHaveLength(3));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.queryByText(/is no longer in your workspace/)).toBeNull();
+    expect(tabNames()).toEqual(["a.md*"]);
+    expect(
+      within(screen.getByRole("tabpanel")).getByRole("heading", { name: "Kept" }),
+    ).toBeTruthy();
+    // The move answers: the tab follows it, still without the notice.
+    release();
+    await waitFor(() => expect(tabNames()).toEqual(["b.md*"]));
+    expect(localStorage.getItem(tabsKey(fake.teamId, threadId))).toContain("file:notes/b.md");
     expect(screen.queryByText(/is no longer in your workspace/)).toBeNull();
   });
 });
