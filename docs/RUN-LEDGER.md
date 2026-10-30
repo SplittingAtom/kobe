@@ -9,6 +9,17 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Hardening lane 4 deployed (2026-10-30):** PR #428 merged (main 2e086c54; one CI rerun: the gate4 U7 scan's
+  `sk-…` shape matched a substring of a Kobe session token, fixed in #429 with a boundary and `grep -P`).
+  Deployed to kobe-gate1 as `local-2e086c5496b2` (rollback `local-b06345530688`; `local-533a9dfbc944` pruned),
+  all deployments on the tag, reconcile failed:0, one expected warning (SMTP security none). Baseline filled from
+  gate1: app calls are 0.98 upstream on the proxy and ~130 ms Kobe at p95 (527), probes 0.98 upstream with 26 ms
+  Kobe (528), writes 55–75 % object store with Kobe ≤ 100 ms p95 (529), a fresh web pod's first page is 899 ms
+  server time of which 467 ms the first branding fetch, then 13–20 ms (530). Verdicts: app calls, probe and
+  connector calls leave the 300 ms route budget with their Kobe side held to it; write routes get the proposed
+  Kobe-side 300 / whole-request 600 ms budget pending Chris. Open for Chris: the owner's runs in Team1 get no
+  Catalyst tools (`enabled_tools: []`), so connector `tools/call` has no post-deploy sample; probe cadence 6/h
+  from two replicas is a follow-up candidate.
 - **Hardening lane 4 (2026-10-30, Chris: "work all the hardening tickets and add tests for each; deploy to
   production when done"):** group branch `group-hardening-4` (worktree `../Kobe-g-hardening-4`), one PR;
   the five hardening-labelled backlog tickets, three of them in parallel per-ticket worktrees merged into

@@ -289,13 +289,19 @@ into `reserve_tx`, `s3_put put`, `blob_tx`. Query 7a gives p50/p95 per child spa
 request, object-store and Postgres time per route and the Kobe-side share (request minus its
 object-store calls).
 
-| Route                                     | n   | route p95 ms | S3 p95 ms | Postgres p95 ms | Kobe-side p95 ms | Kobe share p50 |
-| ----------------------------------------- | --- | ------------ | --------- | --------------- | ---------------- | -------------- |
-| `POST /v1/workspace/files`                | –   | –            | –         | –               | –                | –              |
-| `PUT /v1/sandbox/workspace/blobs/:sha256` | –   | –            | –         | –               | –                | –              |
-| `PUT /v1/workspace/file`                  | –   | –            | –         | –               | –                | –              |
+| Route                                     | n   | route p50 / p95 ms | S3 p50 / p95 ms | Postgres p50 / p95 ms | Kobe-side p95 ms | Kobe share p50 |
+| ----------------------------------------- | --- | ------------------ | --------------- | --------------------- | ---------------- | -------------- |
+| `POST /v1/workspace/files`                | 4   | 215 / 292          | 117 / 221       | 51 / 75               | 98               | 0.44           |
+| `PUT /v1/sandbox/workspace/blobs/:sha256` | 2   | 207 / 207          | 179 / 179       | 36 / 36               | 41               | 0.26           |
+| `PUT /v1/workspace/file`                  | 4   | 41 / 209           | 109 (n=1)       | 27 / 68               | 100              | –              |
 
-Numbers: measured after the next gate1 deploy (coordinator fills the table from query 7).
+Measured 2026-10-30 on gate1 at 2e086c54 from two runs of the `file-tab-outside-change` browser
+spec (an upload, three saves of which two were unchanged and skipped the object store, and the
+sandbox's `mv` commit). Small n, but the split is unambiguous: the object store is 55–75 % of a
+write that stores bytes (`stream` 106 / 154 ms for a 20-byte upload body, `put` 109–179 ms, `copy`
+60 ms), Postgres 27–75 ms, lock waits 0–9 ms, and the Kobe side (request minus S3) stays at
+41–100 ms p95 on every route. The 7-day p95s of 307–442 ms were larger uploads: the S3 share grows
+with the body, Kobe's does not.
 
 **Proposed decision (for Chris):** routes whose request includes an object-store round trip (the
 three writes above, and any later route that stores bytes) get their own budget: the Kobe-side
@@ -316,17 +322,26 @@ caller's trace (KOBE-274), so the two halves are separate traces: query 8 splits
 route, query 9 the proxy route. Code: `services/server/src/apps/call.ts`,
 `services/mcp-proxy/src/upstream.ts`.
 
-| Share (p50 / p95)                                 | ms                                   |
-| ------------------------------------------------- | ------------------------------------ |
-| Server route (query 8 `route`)                    | measured after the next gate1 deploy |
-| of which Kobe server (`kobe`: decide, key, audit) | measured after the next gate1 deploy |
-| Proxy route (query 9, `/internal/v1/app-calls`)   | measured after the next gate1 deploy |
-| of which the app backend (`upstream`)             | measured after the next gate1 deploy |
-| of which Kobe proxy (`kobe`)                      | measured after the next gate1 deploy |
+| Share (p50 / p95)                                 | ms                        |
+| ------------------------------------------------- | ------------------------- |
+| Server route (query 8 `route`)                    | 110 / 706 (n=24)          |
+| of which Kobe server (`kobe`: decide, key, audit) | 87 / 131 (decide p95 86)  |
+| of which `app_call.proxy` (hop + backend)         | 24 / 575 (share p50 0.50) |
+| Proxy route (query 9, `/internal/v1/app-calls`)   | 20 / 543 (n=24)           |
+| of which the app backend (`upstream`)             | 18 / 536 (share 0.98)     |
+| of which Kobe proxy (`kobe`)                      | 1 / 5                     |
 
-Budget verdict (ac-2): measured after the next gate1 deploy. If the backend's share dominates,
-the route is excluded from the 300 ms budget with that share recorded here; otherwise the Kobe
-step that dominates gets its own ticket.
+Measured 2026-10-30 on gate1 at 2e086c54 (`local-2e086c5496b2`): 24 `list_catalogs` calls on
+the Lakehouse Explorer app from a server pod, two batches; the first call of each batch took
+712 and 923 ms (the backend's cold session), the rest 41–242 ms. The 7-day p95 of 1022 ms is the
+same shape: the app backend (Catalyst, through the proxy) is the tail, Kobe's two halves together
+stay under ~140 ms at p95.
+
+Budget verdict (ac-2): **excluded from the 300 ms route budget; the Kobe side is held to it
+instead.** The backend's share dominates the tail (0.98 of the proxy route, about half of the
+server route at p50 and nearly all of its p95), and Kobe's own time (server `kobe` p95 131 ms +
+proxy `kobe` p95 5 ms) is within budget. Watch item: `app_call.decide` p95 86 ms (policy, schema,
+member app lookup) is the largest Kobe step; a ticket only if it passes ~150 ms.
 
 ### KOBE-528: MCP connector calls and the probe, upstream split
 
@@ -340,10 +355,24 @@ Query 9 gives each route minus its upstream time (`kobe`), with requests that re
 (a sandbox's `tools/list`, refused calls: the 25 ms p50) listed apart; query 9b splits upstream
 time by kind and outcome; query 9c counts probes per hour.
 
-| Route (p50 / p95)                      | Route                                | Upstream                             | Kobe side                            |
-| -------------------------------------- | ------------------------------------ | ------------------------------------ | ------------------------------------ |
-| `POST /v1/mcp/:connectorId` (upstream) | measured after the next gate1 deploy | measured after the next gate1 deploy | measured after the next gate1 deploy |
-| `POST /internal/v1/probe`              | measured after the next gate1 deploy | measured after the next gate1 deploy | measured after the next gate1 deploy |
+| Route (p50 / p95 ms)                                             | Route                      | Upstream              | Kobe side |
+| ---------------------------------------------------------------- | -------------------------- | --------------------- | --------- |
+| `POST /internal/v1/probe` (reached upstream)                     | 178 / 607 (n=15)           | 171 / 597 (share .98) | 3 / 26    |
+| `POST /v1/mcp/:connectorId` (no upstream: `tools/list`, refused) | 23 / 56 (n=72)             | –                     | 23 / 56   |
+| `POST /v1/mcp/:connectorId` (upstream `tools/call`)              | no sample since the deploy | –                     | –         |
+
+Measured 2026-10-30 on gate1 at 2e086c54: 15 probes triggered through the site console's refresh
+(3 connectors × 5; the sixth each is rate-limited) and the proxy requests of four owner runs. The
+probe's time is the upstream MCP server's `tools/list` session (5 requests): Kobe's side is 26 ms
+p95, so the 7-day 819 ms p95 is upstream. A sandbox's `tools/call` through the proxy had no sample
+after the deploy: the owner's runs in Team1 received no Catalyst tools (the connector lists
+`enabled_tools: []`; the earlier 7-day p50 of 25 ms is the same `tools/list` shape). Query 9
+reports that row as soon as a member calls a connector tool; by the probe's split the expectation
+is the same 0.98 upstream share.
+
+Verdict (ac-2): **both routes leave the 300 ms user-facing budget; the Kobe side is held to it
+instead** (probe 26 ms, connector calls 56 ms p95 so far). The internal probe is not user-facing at
+all and should be excluded on that ground alone.
 
 Probe cadence (query 9c, gate1, 2026-10-28 to 2026-10-30): a steady 6 probes an hour. The
 refresh (`KOBE_CONNECTOR_REFRESH_SECONDS`, default 3600) runs on every server replica: the
@@ -372,8 +401,11 @@ Local `next build` + `next start` (dev box, amd64; `curl` TTFB, first request / 
 The ~400–450 ms is per process, not per route: warming `/admin` first makes `/` 18–32 ms. It is
 Next loading the app's server modules on the first render; the branding fetch adds its own time on
 the same request (≤ 1 s timeout), after which it is cached. So gate1's 1099 ms p95 is the first page
-after a web pod start: module loading plus the first branding fetch. The split on gate1: measured
-after the next gate1 deploy (`Server-Timing` of a fresh pod's first page). One hazard found: while
+after a web pod start: module loading plus the first branding fetch. The split on gate1 (2e086c54,
+a fresh web pod's `Server-Timing` on `/sign-in`, read through a port-forward so no other request
+reached it first): first page `app;dur=899.1` with `branding;dur=467.0` and `cold`, so about 430 ms
+of module loading plus a 467 ms first branding fetch; the second and third pages `app;dur=20.0`
+and `13.1` with `branding` under 0.1 ms. That matches the 1099 ms lab p95 and the local split. One hazard found: while
 the branding endpoint fails, the loader retries with a wait every 30 s, so an unreachable server
 costs up to 1 s on one render every 30 s (`branding;dur≈1000` shows it). Options if the cold load
 matters: fetch the branding in `register()` and send one warm-up request before the pod is Ready.
