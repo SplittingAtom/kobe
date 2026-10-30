@@ -93,6 +93,28 @@ describe("WorkspaceChangeFeed (KOBE-496)", () => {
     expect(listener).toHaveBeenCalledTimes(3);
   });
 
+  it("remembers where a file moved, after its tab followed it (KOBE-516)", () => {
+    const stop = feed.watch("a.md");
+    feed.watch("c.md");
+    vi.advanceTimersByTime(100);
+    const s = sources[0];
+    s?.send("file.changed", { ...change("a.md", 4, null), moved_to: "b.md" });
+    s?.send("file.changed", change("c.md", 5, null)); // a deletion
+    expect(feed.get("a.md")?.moved_to).toBe("b.md");
+    expect(feed.movedTo("a.md")).toBe("b.md");
+    expect(feed.movedTo("c.md")).toBeUndefined();
+    // The tab follows (the old path is no longer watched): a late read of it finding nothing
+    // there is still the move.
+    stop();
+    expect(feed.get("a.md")).toBeUndefined();
+    expect(feed.movedTo("a.md")).toBe("b.md");
+    // The path written again later is a file of its own.
+    feed.watch("a.md");
+    vi.advanceTimersByTime(100);
+    sources.at(-1)?.send("file.state", change("a.md", 9, SHA("e")));
+    expect(feed.movedTo("a.md")).toBeUndefined();
+  });
+
   it("keeps a change whose actor name the contract refuses, without the name", () => {
     feed.watch("a.md");
     vi.advanceTimersByTime(100);

@@ -51,7 +51,7 @@ import { useShellBand } from "../shell/shell-band";
 import { kobeExtrasOf, useChatSession } from "./kobe-runtime";
 import { useArtifactTabs, type OpenRequest } from "./use-artifact-tabs";
 import { useThreadFiles } from "./use-thread-files";
-import { useMovingFiles, type MoveRecheck } from "./use-moving-files";
+import { useFollowMoves } from "./use-follow-moves";
 
 export type { OpenRequest };
 
@@ -90,17 +90,6 @@ export interface ArtifactPanelApi {
    * the thread on screen (tabs remembered on other threads find the file gone and say so).
    */
   moveFiles(from: string, to: string): void;
-  /**
-   * A move of `from` is under way (KOBE-506): until it answers, its tabs stay open and no
-   * "no longer in your workspace" notice shows for it.
-   */
-  beginMove(from: string): void;
-  /** The move of `from` failed or its answer was lost: its open tabs read their files again. */
-  endMove(from: string): void;
-  /** `path` is under a pending move: a read finding it gone is the move, not a deletion. */
-  isMoving(path: string): boolean;
-  /** The last failed move, whose tabs read their files again (KOBE-506). */
-  readonly moveRecheck: MoveRecheck | null;
   /** The last file whose tab was dropped, until the member dismisses the notice. */
   readonly goneFile: string | null;
   dismissGone(): void;
@@ -314,23 +303,17 @@ export function ArtifactPanelProvider({
   const files = useThreadFiles(threadId);
   const sheet = useSheet(threadId, t.tabs.active !== null, artifactAsSheet(useShellBand()));
   const { openArtifact: openTab, drop, retargetFiles } = t;
-  const editDrafts = useChatSession().editDrafts;
-  // Unsaved edits follow a moved file (KOBE-463).
-  const {
-    begin: beginMove,
-    failed: endMove,
-    answered: moveAnswered,
-    isMoving,
-    recheck: moveRecheck,
-  } = useMovingFiles(t.tabs);
+  const { editDrafts, fileChanges } = useChatSession();
+  // Unsaved edits follow a moved file (KOBE-463). The move's answer here, or the change stream for
+  // a move from anywhere (KOBE-516), whichever comes first; the second finds nothing to move.
   const moveFiles = useCallback(
     (from: string, to: string) => {
       editDrafts.move(from, to);
       retargetFiles(from, to);
-      moveAnswered(from);
     },
-    [editDrafts, retargetFiles, moveAnswered],
+    [editDrafts, retargetFiles],
   );
+  useFollowMoves(fileChanges, t.tabs, moveFiles);
   const [hiddenIn, setHiddenIn] = useState<string | undefined | null>(null);
   // Hidden for the thread it was hidden on (`null`: shown); another thread shows its own tabs.
   const hidden = hiddenIn !== null && hiddenIn === threadId && !sheet.asSheet;
@@ -418,10 +401,6 @@ export function ArtifactPanelProvider({
       autoOpenFile,
       dropFile,
       moveFiles,
-      beginMove,
-      endMove,
-      isMoving,
-      moveRecheck,
       goneFile,
       dismissGone,
       activate: t.activate,
@@ -442,10 +421,6 @@ export function ArtifactPanelProvider({
       autoOpenFile,
       dropFile,
       moveFiles,
-      beginMove,
-      endMove,
-      isMoving,
-      moveRecheck,
       goneFile,
       dismissGone,
       t.tabs,

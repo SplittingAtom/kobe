@@ -223,8 +223,6 @@ export function FileBrowser({
   showFolder = null,
   onOpenFile,
   onMoved,
-  onMoveStart,
-  onMoveFailed,
   onMention,
   onRefresh,
 }: {
@@ -240,10 +238,6 @@ export function FileBrowser({
   readonly onOpenFile?: ((entry: FileEntry) => void) | undefined;
   /** A file or folder moved: open tabs of it follow (KOBE-304, ac-9). */
   readonly onMoved?: ((from: string, to: string) => void) | undefined;
-  /** A move of `from` was sent (KOBE-506): open tabs of it wait for it, not close. */
-  readonly onMoveStart?: ((from: string) => void) | undefined;
-  /** The move of `from` failed: its files stayed where they were. */
-  readonly onMoveFailed?: ((from: string) => void) | undefined;
   readonly refreshAfterWakeMs?: number;
   /** A new value wakes the sandbox and lists again (Show files, refresh). */
   readonly wakeKey?: number;
@@ -328,12 +322,10 @@ export function FileBrowser({
   const move = async (from: string, to: string, verb: "Moved" | "Renamed") => {
     setBusy(true);
     start();
-    onMoveStart?.(from);
     const res = await api.move(from, to);
     setBusy(false);
     setDialog(null);
     if (!res.ok) {
-      onMoveFailed?.(from);
       focusRow(from);
       return setActionError(describeFileError(res.error));
     }

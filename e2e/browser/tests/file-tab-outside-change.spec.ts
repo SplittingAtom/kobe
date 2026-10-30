@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { expect, filesSection, test } from "./support/chat.js";
 import { RUN_TIMEOUT_MS } from "./support/constants.js";
-import { toolTurn } from "./support/gate5.js";
+import { bashTurn, toolTurn } from "./support/gate5.js";
 
 /**
  * KOBE-491: an open file tab notices the agent's change to its file. With the file open and no
@@ -113,6 +113,38 @@ test("file tab: picks up the agent's write when clean, shows the banner and Comp
     await expect(refused).toHaveCount(0);
     await expect(editor).toContainText("kept line");
     await expect(editor).not.toContainText("BETA");
+  } finally {
+    await workspace(page, "DELETE", dir);
+  }
+});
+
+/**
+ * KOBE-516 (ac-1): the agent's `mv` in the sandbox keeps the open tab, retargeted to the new path
+ * (the change stream names it once the sandbox pushes the rename), with no "no longer in your
+ * workspace" notice. One short model turn.
+ */
+test("file tab: follows the agent's mv to the new path instead of closing", async ({
+  chat,
+  page,
+}) => {
+  const dir = `kobe-516-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  await chat.open();
+  expect(await workspace(page, "POST", `${dir}/notes.md`, BASE)).toBe(201);
+  try {
+    const files = filesSection(page);
+    await files.getByRole("button", { name: "Refresh files" }).click();
+    const tree = files.getByRole("tree", { name: "Files in your workspace" });
+    await tree.getByRole("treeitem", { name: dir, exact: true }).click();
+    await tree.getByRole("treeitem", { name: "notes.md", exact: true }).click();
+    await expect(page.getByRole("tab", { name: "notes.md", selected: true })).toBeVisible();
+    const notViewing = page.getByRole("button", { name: "Don't send notes.md with the message" });
+    if (await notViewing.isVisible()) await notViewing.click();
+    await chat.send(bashTurn(`mv /workspace/${dir}/notes.md /workspace/${dir}/moved.md`));
+    await expect(page.getByRole("tab", { name: "moved.md", selected: true })).toBeVisible({
+      timeout: RUN_TIMEOUT_MS,
+    });
+    await expect(page.getByRole("tab", { name: "notes.md" })).toHaveCount(0);
+    await expect(page.getByText(/is no longer in your workspace/)).toHaveCount(0);
   } finally {
     await workspace(page, "DELETE", dir);
   }

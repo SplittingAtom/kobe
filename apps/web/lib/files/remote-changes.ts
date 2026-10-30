@@ -8,6 +8,8 @@
  * ended or refused is opened again after a bounded backoff (never a tight loop), unless `probe`
  * says the page's team is no longer the active one (another tab switched team): then it stops.
  * Paths past the server's limit get no live changes; `overflow` says so for their tabs.
+ * A moved file's old path names its new one (`moved_to`, KOBE-516): open tabs follow it, and
+ * `movedTo` keeps saying so after they did, so a late read of the old path is not a deletion.
  */
 import {
   WORKSPACE_CHANGE_EVENT_TYPES,
@@ -22,6 +24,9 @@ import {
   type EventSourceFactory,
   type EventSourceLike,
 } from "../chat/stream";
+
+/** Moves remembered after their tabs followed them (the oldest go first). */
+export const MOVES_KEPT = 256;
 
 /** Waits before a changed tab set re-opens the stream (ms). */
 export const PATHS_DEBOUNCE_MS = 300;
@@ -55,6 +60,7 @@ export class WorkspaceChangeFeed {
   #stopped = false;
   readonly #watchers = new Map<string, number>();
   readonly #latest = new Map<string, WorkspaceFileChange>();
+  readonly #moves = new Map<string, string>();
   readonly #listeners = new Set<() => void>();
   #source: EventSourceLike | undefined;
   #openPaths: readonly string[] = [];
@@ -90,6 +96,11 @@ export class WorkspaceChangeFeed {
   /** The latest change heard for `path` (its state at connect, or a newer revision). */
   get(path: string): WorkspaceFileChange | undefined {
     return this.#latest.get(path);
+  }
+
+  /** Where the stream last said `path` moved to (KOBE-516), until the path is written again. */
+  movedTo(path: string): string | undefined {
+    return this.#moves.get(path);
   }
 
   subscribe = (listener: () => void): (() => void) => {
@@ -164,6 +175,7 @@ export class WorkspaceChangeFeed {
       // new connection's state is the truth now (a tombstone collected, revisions restarted).
       this.#attempt = 0;
       this.#latest.set(parsed.path, parsed);
+      this.#remember(parsed);
       for (const listener of [...this.#listeners]) listener();
     };
     for (const type of WORKSPACE_CHANGE_EVENT_TYPES) source.addEventListener(type, onMessage);
@@ -183,6 +195,16 @@ export class WorkspaceChangeFeed {
         () => this.#schedule(delay ?? 60_000),
       );
     };
+  }
+
+  #remember(change: WorkspaceFileChange): void {
+    this.#moves.delete(change.path);
+    if (change.moved_to == null) return;
+    this.#moves.set(change.path, change.moved_to);
+    if (this.#moves.size > MOVES_KEPT) {
+      const oldest = this.#moves.keys().next().value;
+      if (oldest !== undefined) this.#moves.delete(oldest);
+    }
   }
 
   #stop(): void {

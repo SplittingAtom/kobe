@@ -16,6 +16,7 @@
  *   of another thread or a schedule, project files, a change found on focus) is `remote`: the badge
  *   with Reload; nothing is replaced until the member reloads.
  * A file gone from the workspace closes a clean tab (the read says so); a draft keeps it open.
+ * A file moved (the stream names `moved_to`, KOBE-516) is not read here: its tab follows it.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WorkspaceChangeActor, WorkspaceFileChange } from "@kobe/protocol";
@@ -137,6 +138,8 @@ export function useOutsideChange(options: OutsideChangeOptions) {
     handled.current = remote;
     if (remote.sha256 === known) return;
     if (remote.sha256 === null) {
+      // Moved (KOBE-516): the panel retargets the tab to the new path; nothing to read here.
+      if (remote.moved_to != null) return;
       // Not in the workspace (deleted, or its tombstone already collected): the read closes a
       // clean tab, or reloads it when the stream was wrong; a draft keeps it open.
       if (draftsRef.current?.get(path) === undefined) rereadRef.current();
