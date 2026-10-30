@@ -43,8 +43,9 @@
 
 ## Open questions (for Chris or the coordinator)
 
-- `events_core` column names are assumed (`name`, `start_time`, `end_time`, attributes in
-  `metadata`); query 0 checks them on gate1 before the rest.
+- `events_core` layout verified on gate1 (Langfuse 4.56, 2026-10-30): `name`, `start_time`,
+  `end_time`, attributes as parallel arrays `metadata_names` / `metadata_values` with keys prefixed
+  `attributes.` (not a map); the queries read them with `arrayElement(..., indexOf(...))`.
 - Chat milestones inside a page (thread open, composer ready, stream start) are not separate
   marks: the lab run times page loads, the field data has run latencies. A follow-up could add
   `performance.mark`s if a page turns out slow.

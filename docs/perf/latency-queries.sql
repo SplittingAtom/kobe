@@ -12,11 +12,12 @@
 --
 -- Window: the last 7 days. Percentiles are exact (the volumes here are small).
 
--- 0. Schema check: the queries assume columns `name`, `start_time`, `end_time` and span
---    attributes in the map `metadata` under their OTel key. If the second query shows other
---    keys (for example `attributes.http.route`), replace `metadata['<key>']` below accordingly.
+-- 0. Schema check (verified on gate1, Langfuse 4.56, 2026-10-30): span attributes are not a map but
+--    two parallel arrays, `metadata_names` / `metadata_values`, with OTel attribute keys prefixed
+--    `attributes.` (resource attributes `resourceAttributes.`). `arrayElement(metadata_values, indexOf(metadata_names, 'attributes.<key>'))` reads one; if a
+--    newer Langfuse stores them differently, the second query shows the keys to adapt it to.
 DESCRIBE TABLE events_core FORMAT PrettyCompact;
-SELECT name, mapKeys(metadata) AS keys
+SELECT name, metadata_names
   FROM events_core
  WHERE name IN ('model_gateway.request', 'egress.connection', 'sandbox.wake')
  ORDER BY start_time DESC
@@ -41,7 +42,7 @@ FORMAT PrettyCompact;
 
 -- 2. Model gateway: per-route duration (span `model_gateway.request`, attribute `http.route`).
 --    Streaming completions last until the model finishes (time to first token is query 4).
-SELECT metadata['http.route'] AS route,
+SELECT arrayElement(metadata_values, indexOf(metadata_names, 'attributes.http.route')) AS route,
        count() AS n,
        round(quantileExact(0.50)(dateDiff('millisecond', start_time, end_time))) AS p50_ms,
        round(quantileExact(0.95)(dateDiff('millisecond', start_time, end_time))) AS p95_ms,
@@ -56,15 +57,15 @@ FORMAT PrettyCompact;
 -- 3. Egress proxy: tunnel set-up time (CONNECT → Connection Established; for http-upgrade:
 --    request → verified upstream TLS), attribute `kobe.setup_ms`. The span itself lasts as long
 --    as the tunnel, so its duration is not a latency.
-SELECT metadata['http.route'] AS route,
+SELECT arrayElement(metadata_values, indexOf(metadata_names, 'attributes.http.route')) AS route,
        count() AS n,
-       quantileExact(0.50)(toUInt64OrNull(metadata['kobe.setup_ms'])) AS p50_ms,
-       quantileExact(0.95)(toUInt64OrNull(metadata['kobe.setup_ms'])) AS p95_ms,
-       quantileExact(0.99)(toUInt64OrNull(metadata['kobe.setup_ms'])) AS p99_ms
+       quantileExact(0.50)(toUInt64OrNull(arrayElement(metadata_values, indexOf(metadata_names, 'attributes.kobe.setup_ms')))) AS p50_ms,
+       quantileExact(0.95)(toUInt64OrNull(arrayElement(metadata_values, indexOf(metadata_names, 'attributes.kobe.setup_ms')))) AS p95_ms,
+       quantileExact(0.99)(toUInt64OrNull(arrayElement(metadata_values, indexOf(metadata_names, 'attributes.kobe.setup_ms')))) AS p99_ms
   FROM events_core
  WHERE start_time > now() - INTERVAL 7 DAY
    AND name = 'egress.connection'
-   AND metadata['kobe.setup_ms'] != ''
+   AND arrayElement(metadata_values, indexOf(metadata_names, 'attributes.kobe.setup_ms')) != ''
  GROUP BY route
 FORMAT PrettyCompact;
 
@@ -82,7 +83,7 @@ SELECT name,
 FORMAT PrettyCompact;
 
 -- 4b. Tool call round trip per tool (the ten slowest at p95).
-SELECT metadata['kobe.tool.name'] AS tool,
+SELECT arrayElement(metadata_values, indexOf(metadata_names, 'attributes.kobe.tool.name')) AS tool,
        count() AS n,
        round(quantileExact(0.50)(dateDiff('millisecond', start_time, end_time))) AS p50_ms,
        round(quantileExact(0.95)(dateDiff('millisecond', start_time, end_time))) AS p95_ms
@@ -98,7 +99,7 @@ FORMAT PrettyCompact;
 --    bound to a warm-pool pod, or the Sandbox resumed: `sandbox.claim`) and pod Ready
 --    (`sandbox.pod_ready`); wake → agent hello (`sandbox.agent_hello`). Pi ready is query 4.
 SELECT name,
-       metadata['kobe.wake.reason'] AS reason,
+       arrayElement(metadata_values, indexOf(metadata_names, 'attributes.kobe.wake.reason')) AS reason,
        count() AS n,
        round(quantileExact(0.50)(dateDiff('millisecond', start_time, end_time))) AS p50_ms,
        round(quantileExact(0.95)(dateDiff('millisecond', start_time, end_time))) AS p95_ms,
