@@ -63,6 +63,7 @@ export function appCallRoutes(deps: AppCallDeps): Hono {
             : {};
       const result = await deps.upstream.callTool({
         url: b.url,
+        kind: "app",
         headers,
         tool: b.tool,
         arguments: b.arguments,

@@ -145,8 +145,9 @@ const authSchema = z.object({
         .filter((s) => s.length > 0),
     )
     .pipe(z.array(z.cidrv4().or(z.cidrv6()), { error: "KOBE_TRUSTED_PROXIES must be CIDRs" })),
-  // Approval HMAC key (D29, KOBE-37): signs approvals; the MCP proxy verifies with it. Unset keeps
-  // the server up, but every tool call that needs approval is denied (fail closed).
+  // Approval HMAC key (D29, KOBE-37): the server signs approvals and verifies them itself on the
+  // MCP proxy's policy re-check; no proxy holds it (KOBE-520). Unset keeps the server up, but every
+  // tool call that needs approval is denied (fail closed).
   KOBE_APPROVAL_KEY: z
     .string()
     .transform((v) => (v === "" ? undefined : v))

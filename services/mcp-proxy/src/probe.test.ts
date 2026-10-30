@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { SpanKind, SpanStatusCode } from "@kobe/telemetry";
+import { isChildOf, spanNamed, traced } from "./testing/traced.js";
 import { createApp } from "./app.js";
 import type { UpstreamPolicy } from "./config.js";
 import { probeRoutes } from "./probe.js";
@@ -108,5 +110,48 @@ describe("POST /internal/v1/probe", () => {
   it("is mounted only when probe deps are given", async () => {
     const without = createApp();
     expect((await without.request("/internal/v1/probe", { method: "POST" })).status).toBe(404);
+  });
+});
+
+describe("upstream span (KOBE-528)", () => {
+  const traceApp = () =>
+    createApp(undefined, { internalKey: KEY, upstream, timeoutMs: 5_000, maxRequestBytes: 4096 });
+  const postTraced = (body: unknown) =>
+    traceApp().request("/internal/v1/probe", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${KEY}` },
+      body: JSON.stringify(body),
+    });
+
+  it("records the upstream round trip as a child of the route span, without the connector's URL", async () => {
+    fake.options = { tools: [{ name: "a", inputSchema: { type: "object" } }] };
+    await traced(async (exporter) => {
+      expect((await postTraced({ url: fake.url })).status).toBe(200);
+      const route = spanNamed(exporter, "POST /internal/v1/probe");
+      const span = spanNamed(exporter, "mcp.upstream");
+      expect(isChildOf(span, route)).toBe(true);
+      expect(span?.kind).toBe(SpanKind.CLIENT);
+      expect(span?.attributes).toEqual({
+        "kobe.upstream.kind": "probe",
+        "kobe.upstream.method": "tools/list",
+        "kobe.upstream.outcome": "ok",
+        "kobe.upstream.error": false,
+        // initialize, notifications/initialized, tools/list
+        "kobe.upstream.requests": 3,
+      });
+      expect(span?.status.code).not.toBe(SpanStatusCode.ERROR);
+      expect(JSON.stringify(span?.attributes)).not.toContain("127.0.0.1");
+    });
+  });
+
+  it("flags a failed probe as an error with its failure kind", async () => {
+    fake.options = { status: 401 };
+    await traced(async (exporter) => {
+      await postTraced({ url: fake.url });
+      const span = spanNamed(exporter, "mcp.upstream");
+      expect(span?.attributes["kobe.upstream.outcome"]).toBe("auth_required");
+      expect(span?.attributes["kobe.upstream.error"]).toBe(true);
+      expect(span?.status.code).toBe(SpanStatusCode.ERROR);
+    });
   });
 });

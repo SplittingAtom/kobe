@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
-import { withTeam, type KobeDb } from "@kobe/db";
+import { withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import type { WorkspaceSaveConflict } from "@kobe/protocol";
 import { recordAudit } from "../audit/record.js";
 import { teamStorageAllows } from "../uploads/quota.js";
@@ -15,7 +15,8 @@ import {
   reserveUpload,
   type StoredEntry,
 } from "../workspace-sync/store.js";
-import { fail, QUOTA, storeBlob, type Failure } from "./upload.js";
+import { WRITE_SPAN, lockWaitSpan, s3PutSpan, writeTxSpan } from "../workspace-sync/write-spans.js";
+import { fail, QUOTA, resultOutcome, storeBlob, type Failure } from "./upload.js";
 
 /** The version a save found instead of its base: null when the file no longer exists. */
 export type SaveConflict = {
@@ -95,16 +96,20 @@ export async function saveWorkspaceFile(
   const sha256 = createHash("sha256").update(request.content).digest("hex");
   const blobKey = workspaceBlobKey(sync.prefix, owner, sha256);
 
-  const pre = await withTeam(db, owner.teamId, async (tx) => {
-    const current = await currentEntry(tx, owner, request.path);
-    const mismatch = baseMismatch(current, request.baseSha256);
-    if (mismatch) return mismatch;
-    if (sha256 === request.baseSha256 && current) return { unchanged: current };
-    const held = await blobState(tx, owner, sha256);
-    if (held !== "absent") return held;
-    const ok = await reserveUpload(tx, owner, size, resolveLimits(sync.limits));
-    return ok ? ("reserved" as const) : ("over_quota" as const);
-  });
+  const check = () =>
+    withTeam(db, owner.teamId, async (tx) => {
+      const current = await currentEntry(tx, owner, request.path);
+      const mismatch = baseMismatch(current, request.baseSha256);
+      if (mismatch) return mismatch;
+      if (sha256 === request.baseSha256 && current) return { unchanged: current };
+      const held = await blobState(tx, owner, sha256);
+      if (held !== "absent") return held;
+      const ok = await reserveUpload(tx, owner, size, resolveLimits(sync.limits));
+      return ok ? ("reserved" as const) : ("over_quota" as const);
+    });
+  const pre = await writeTxSpan(WRITE_SPAN.reserveTx, "save", check, (r) =>
+    typeof r !== "object" ? r : "unchanged" in r ? "unchanged" : r.code,
+  );
   if (typeof pre === "object" && "unchanged" in pre) {
     return { ok: true, entry: pre.unchanged, changed: false };
   }
@@ -114,8 +119,10 @@ export async function saveWorkspaceFile(
     return fail(503, "sandbox_unavailable", "That content is being cleaned up; try again shortly.");
   }
   if (pre === "reserved") {
-    const stored = await storeBlob(db, sync, owner, { sha256, blobKey, size }, () =>
-      sync.objects.put(blobKey, Readable.from([request.content]), size),
+    const stored = await storeBlob(db, sync, owner, { sha256, blobKey, size, kind: "save" }, () =>
+      s3PutSpan("save", "put", () =>
+        sync.objects.put(blobKey, Readable.from([request.content]), size),
+      ),
     );
     if (stored) return stored;
   }
@@ -129,40 +136,52 @@ async function commitSave(
   request: SaveRequest,
   blob: { readonly sha256: string; readonly blobKey: string; readonly size: number },
 ): Promise<SaveResult> {
-  return withTeam(db, owner.teamId, async (tx): Promise<SaveResult> => {
-    const state = await lockWorkspace(tx, owner);
-    // Under the workspace lock: the base check is atomic with the write.
-    const current = await currentEntry(tx, owner, request.path);
-    const mismatch = baseMismatch(current, request.baseSha256);
-    if (mismatch || current === undefined) return mismatch ?? conflict(undefined);
-    const delta = blob.size - countedBytes(current);
-    const decision = await sync.quota(tx, {
-      owner,
-      fileBytes: blob.size,
-      liveFiles: state.liveFiles,
-      liveBytes: state.liveBytes + delta,
-    });
-    if (!decision.ok) return QUOTA;
-    if (!(await teamStorageAllows(tx, owner.teamId, request.teamQuotaDefaultBytes, delta))) {
-      return QUOTA;
-    }
-    const entry = await sync.putServerFile(
-      tx,
-      owner,
-      {
-        path: request.path,
-        sha256: blob.sha256,
-        size: blob.size,
-        blobKey: blob.blobKey,
-        executable: current.executable,
-      },
-      "user",
-    );
-    await recordAudit(tx, {
-      action: "workspace.file_saved",
-      teamId: owner.teamId,
-      target: { userId: owner.userId, bytes: blob.size },
-    });
-    return { ok: true, entry, changed: true };
+  const manifest = () =>
+    withTeam(db, owner.teamId, (tx) => saveManifest(tx, sync, owner, request, blob));
+  return writeTxSpan(WRITE_SPAN.manifestTx, "save", manifest, resultOutcome);
+}
+
+/** The save's manifest/team transaction: workspace lock, base check, quotas, row, audit. */
+async function saveManifest(
+  tx: KobeTx,
+  sync: WorkspaceSync,
+  owner: WorkspaceOwner,
+  request: SaveRequest,
+  blob: { readonly sha256: string; readonly blobKey: string; readonly size: number },
+): Promise<SaveResult> {
+  const state = await lockWaitSpan("save", "workspace", () => lockWorkspace(tx, owner));
+  // Under the workspace lock: the base check is atomic with the write.
+  const current = await currentEntry(tx, owner, request.path);
+  const mismatch = baseMismatch(current, request.baseSha256);
+  if (mismatch || current === undefined) return mismatch ?? conflict(undefined);
+  const delta = blob.size - countedBytes(current);
+  const decision = await sync.quota(tx, {
+    owner,
+    fileBytes: blob.size,
+    liveFiles: state.liveFiles,
+    liveBytes: state.liveBytes + delta,
   });
+  if (!decision.ok) return QUOTA;
+  const teamRoom = () => teamStorageAllows(tx, owner.teamId, request.teamQuotaDefaultBytes, delta);
+  if (!(await lockWaitSpan("save", "team_storage", teamRoom))) {
+    return QUOTA;
+  }
+  const entry = await sync.putServerFile(
+    tx,
+    owner,
+    {
+      path: request.path,
+      sha256: blob.sha256,
+      size: blob.size,
+      blobKey: blob.blobKey,
+      executable: current.executable,
+    },
+    "user",
+  );
+  await recordAudit(tx, {
+    action: "workspace.file_saved",
+    teamId: owner.teamId,
+    target: { userId: owner.userId, bytes: blob.size },
+  });
+  return { ok: true, entry, changed: true };
 }

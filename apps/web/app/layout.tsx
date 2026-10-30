@@ -7,6 +7,7 @@ import { BrandingProvider } from "../components/shell/branding-context";
 import { NewBuildBanner } from "../components/shell/new-build-banner";
 import { WebVitalsReporter } from "../components/shell/web-vitals-reporter";
 import { WorkspaceHost } from "../components/shell/workspace-host";
+import { recordServerTiming } from "../lib/telemetry/server-timing";
 import { brandingCss } from "../lib/theme/branding-css";
 import { getSiteBranding } from "../lib/theme/branding-server";
 import { themeFromCookies } from "../lib/theme/theme";
@@ -46,14 +47,18 @@ export const viewport: Viewport = {
  * The site branding (TH5, KOBE-500) is fetched here (cached 30 s, defaults when the server is
  * unreachable): its theme is one nonced `<style>` of token declarations in <head>, rendered only
  * when there is something to override (nothing for the default), and the name and logo reach the
- * client components through BrandingProvider, so the first HTML is already branded.
+ * client components through BrandingProvider, so the first HTML is already branded. How long this
+ * render waited on it goes into the response's Server-Timing (`branding`, KOBE-530).
  */
 export default async function RootLayout({ children }: { readonly children: ReactNode }) {
   await connection();
   const theme = themeFromCookies(await cookies());
+  const requestHeaders = await headers();
+  const brandingStarted = performance.now();
   const branding = await getSiteBranding();
+  recordServerTiming(requestHeaders, "branding", performance.now() - brandingStarted);
   const css = brandingCss(branding.theme);
-  const nonce = css === "" ? undefined : ((await headers()).get("x-nonce") ?? undefined);
+  const nonce = css === "" ? undefined : (requestHeaders.get("x-nonce") ?? undefined);
   return (
     <html lang="en" data-theme={theme ?? undefined}>
       {css !== "" && (

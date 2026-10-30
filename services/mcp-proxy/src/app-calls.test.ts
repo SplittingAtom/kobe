@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { SpanStatusCode } from "@kobe/telemetry";
+import { isChildOf, spanNamed, traced } from "./testing/traced.js";
 import { createApp } from "./app.js";
 import { appCallRoutes } from "./app-calls.js";
 import { FakeUpstream } from "./testing/fake-upstream.js";
@@ -89,5 +91,47 @@ describe("POST /internal/v1/app-calls (KOBE-436)", () => {
   it("is mounted only when its deps are given", async () => {
     const res = await createApp().request("/internal/v1/app-calls", { method: "POST" });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("upstream span (KOBE-527)", () => {
+  const postTraced = (body: unknown) =>
+    createApp(undefined, undefined, { internalKey: KEY, upstream, timeoutMs: 5_000 }).request(
+      "/internal/v1/app-calls",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${KEY}` },
+        body: JSON.stringify(body),
+      },
+    );
+
+  it("records the app backend's round trip as a child of the route span, kind app", async () => {
+    await traced(async (exporter) => {
+      expect((await postTraced(call({ api_key: "sk-member-0123456789" }))).status).toBe(200);
+      const route = spanNamed(exporter, "POST /internal/v1/app-calls");
+      const span = spanNamed(exporter, "mcp.upstream");
+      expect(isChildOf(span, route)).toBe(true);
+      expect(span?.attributes).toMatchObject({
+        "kobe.upstream.kind": "app",
+        "kobe.upstream.method": "tools/call",
+        "kobe.upstream.outcome": "ok",
+        "kobe.upstream.error": false,
+      });
+      const text = JSON.stringify(span?.attributes);
+      expect(text).not.toContain(CONNECTOR);
+      expect(text).not.toContain("preview_table");
+      expect(text).not.toContain("sk-member");
+    });
+  });
+
+  it("flags an upstream JSON-RPC error", async () => {
+    fake.options = { rpcError: true };
+    await traced(async (exporter) => {
+      await postTraced(call());
+      const span = spanNamed(exporter, "mcp.upstream");
+      expect(span?.attributes["kobe.upstream.outcome"]).toBe("rpc_error");
+      expect(span?.attributes["kobe.upstream.error"]).toBe(true);
+      expect(span?.status.code).toBe(SpanStatusCode.ERROR);
+    });
   });
 });
