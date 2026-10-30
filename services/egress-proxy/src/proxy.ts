@@ -174,6 +174,13 @@ export function parseConnectTarget(
   return host ? { host, port } : undefined;
 }
 
+/** Bytes relayed, and the set-up latency (ms) when the connection got that far (KOBE-525). */
+export interface ConnectionBytes {
+  readonly bytesUp: number;
+  readonly bytesDown: number;
+  readonly setupMs?: number;
+}
+
 interface Attempt {
   readonly identity: SandboxIdentity;
   readonly host: string | undefined;
@@ -191,7 +198,7 @@ export function createEgressProxy(deps: ProxyDeps): Server {
     a: Attempt,
     outcome: ConnectionRecord["outcome"],
     reason: ConnectionReason | undefined,
-    bytes: { bytesUp: number; bytesDown: number } = { bytesUp: 0, bytesDown: 0 },
+    bytes: ConnectionBytes = { bytesUp: 0, bytesDown: 0 },
     upgraded = false,
   ) => {
     const { identity } = a;
@@ -228,6 +235,9 @@ export function createEgressProxy(deps: ProxyDeps): Server {
         "kobe.bytes_up": bytes.bytesUp,
         "kobe.bytes_down": bytes.bytesDown,
         "kobe.upgraded": upgraded,
+        // KOBE-525: a fixed route per kind, and the set-up latency of a tunnel that opened.
+        "http.route": upgraded ? "http-upgrade" : "CONNECT",
+        ...(bytes.setupMs === undefined ? {} : { "kobe.setup_ms": bytes.setupMs }),
       },
     });
     logger.info(
@@ -479,6 +489,7 @@ export function createEgressProxy(deps: ProxyDeps): Server {
       }
       if (socket.destroyed) return;
       socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      const setupMs = Date.now() - attempt.started;
 
       const hello = await readClientHello(socket, head, settings.handshakeTimeoutMs);
       if (!sniMatches(hello.serverName, host)) {
@@ -528,7 +539,7 @@ export function createEgressProxy(deps: ProxyDeps): Server {
           throttle: (n) => deps.bandwidth.take(identity.sandboxId, n),
           idleTimeoutMs: settings.idleTimeoutMs,
         });
-        finish(attempt, "allowed", undefined, bytes);
+        finish(attempt, "allowed", undefined, { ...bytes, setupMs });
       } finally {
         unregister?.();
       }

@@ -25,6 +25,15 @@ const EXACT: Readonly<Record<string, readonly [string, RouteKind]>> = {
   "/anthropic/v1/messages/count_tokens": ["POST", "anthropic"],
 };
 
+/**
+ * The route as a low-cardinality span attribute (`http.route`, KOBE-525): the path itself, with a
+ * Gemini path's model replaced by `{model}`.
+ */
+export function routeTemplate(route: Route): string {
+  if (route.pathModel === undefined) return route.path;
+  return route.path.replace(`/models/${route.pathModel}:`, "/models/{model}:");
+}
+
 export function classify(method: string, pathname: string): Route | undefined {
   if (pathname.includes("..") || pathname.includes("//")) return undefined;
   const exact = EXACT[pathname];

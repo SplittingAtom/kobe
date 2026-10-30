@@ -37,6 +37,17 @@ export async function beginWake(
   });
 }
 
+/** When the sandbox last became `running` (the wake's start; KOBE-525 cold-start timing). */
+export async function wakeStartedAt(db: KobeDb, target: SandboxTarget): Promise<Date | null> {
+  return withTeam(db, target.teamId, async (tx) => {
+    const row = await tx.execute<{ state: SandboxState; state_changed_at: Date | string }>(sql`
+      SELECT state, state_changed_at FROM sandboxes
+       WHERE team_id = ${target.teamId} AND user_id = ${target.userId}`);
+    const found = row.rows[0];
+    return found?.state === "running" ? new Date(found.state_changed_at) : null;
+  });
+}
+
 /** After a wake: which claim (sandbox id) and volume the row describes. */
 export async function recordSandboxIdentity(
   tx: KobeTx,

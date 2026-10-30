@@ -52,6 +52,8 @@ export interface RunIngestOptions {
   readonly tuning: WireTuning;
   /** Server calls `run.completed` may announce (KOBE-234/219); default none. */
   readonly serverCalls?: readonly ServerCallPurpose[];
+  /** Each translated frame's events as it is taken, with its time (KOBE-525 run latencies). */
+  readonly onFrame?: (events: readonly NewRunEvent[], nowMs: number) => void;
 }
 
 const SETTLE_SYNC_ATTEMPTS = 3;
@@ -251,6 +253,7 @@ export class RunIngest {
         const t = await this.#translator.translate(item.frame.seq, item.frame.event);
         if (t.invalid !== undefined) host.sendError("malformed_frame", t.invalid, "pi.event");
         if (t.dropped > 0) host.log.debug({ run_id: this.#o.runId }, "dropped invalid Pi output");
+        this.#o.onFrame?.(t.events, Date.now());
         frames.push(item.frame.seq);
         events.push(...t.events);
         const prompt =

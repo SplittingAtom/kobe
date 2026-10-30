@@ -382,3 +382,55 @@ describe("trace.spans over the wire (KOBE-274)", () => {
     expect(upgrades.every((s) => s.spanContext().traceId !== caller)).toBe(true);
   });
 });
+
+describe("run latency spans (KOBE-525)", () => {
+  it("records Pi ready, first token and a tool call round trip in the run's trace", async () => {
+    const w = await world();
+    const { sb } = await started(w, []);
+    sb.event(w.runId, w.threadId, 1, { type: "message_start", message: { role: "assistant" } });
+    sb.event(w.runId, w.threadId, 2, {
+      type: "message_update",
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { total: 0 },
+      },
+      assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "hi" },
+    });
+    sb.event(w.runId, w.threadId, 3, {
+      type: "tool_execution_start",
+      toolCallId: "t1",
+      toolName: "read",
+      args: { path: "a" },
+    });
+    sb.event(w.runId, w.threadId, 4, {
+      type: "tool_execution_end",
+      toolCallId: "t1",
+      toolName: "read",
+      isError: false,
+      result: { content: [{ type: "text", text: "x" }] },
+    });
+    const names = ["run.pi_ready", "run.first_token", "run.tool_call"];
+    const latency = () =>
+      own
+        .getFinishedSpans()
+        .filter((s) => names.includes(s.name) && s.spanContext().traceId === runTraceId(w.runId));
+    await expect
+      .poll(() =>
+        latency()
+          .map((s) => s.name)
+          .sort(),
+      )
+      .toEqual([...names].sort());
+    const tool = latency().find((s) => s.name === "run.tool_call");
+    expect(tool?.attributes).toEqual({
+      "kobe.run.kind": "run",
+      "kobe.tool.name": "read",
+      "kobe.tool.error": false,
+    });
+    expect(tool?.parentSpanContext?.spanId).toBe(runRootSpanId(w.runId));
+  });
+});

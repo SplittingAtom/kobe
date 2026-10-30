@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classify, forwardedQuery } from "./routes.js";
+import { classify, forwardedQuery, routeTemplate } from "./routes.js";
 
 describe("classify", () => {
   it("knows the inference endpoints of each SDK", () => {
@@ -35,5 +35,19 @@ describe("forwardedQuery", () => {
   it("keeps alt=sse only, never key", () => {
     expect(forwardedQuery(new URLSearchParams("alt=sse&key=secret&x=1"))).toBe("?alt=sse");
     expect(forwardedQuery(new URLSearchParams("key=secret"))).toBe("");
+  });
+});
+
+describe("routeTemplate (KOBE-525)", () => {
+  it("is the literal path for fixed routes and names the Gemini model as a placeholder", () => {
+    const fixed = classify("POST", "/v1/chat/completions");
+    const gemini = classify(
+      "POST",
+      "/genai/v1beta/models/gemini/gemini-2.5-pro:streamGenerateContent",
+    );
+    expect(fixed && routeTemplate(fixed)).toBe("/v1/chat/completions");
+    expect(gemini && routeTemplate(gemini)).toBe(
+      "/genai/v1beta/models/{model}:streamGenerateContent",
+    );
   });
 });
