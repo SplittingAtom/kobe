@@ -111,7 +111,7 @@ async function connect(
   sb.hello(
     w.sandboxId,
     options.runs ?? [],
-    "1.0.0",
+    undefined,
     options.capabilities ?? [CAPABILITY_TRACE_SPANS],
   );
   await sb.ready();

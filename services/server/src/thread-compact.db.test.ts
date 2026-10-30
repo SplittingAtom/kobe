@@ -89,7 +89,7 @@ async function reconnect(w: RunWorld, runs: { run_id: string; thread_id: string 
   sb.hello(
     f.auth.verify(token).sub,
     runs.map((r) => ({ ...r, last_seq: 0 })),
-    "1.0.0",
+    undefined,
     CAPABLE,
   );
   await sb.ready();
