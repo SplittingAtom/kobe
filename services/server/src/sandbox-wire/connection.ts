@@ -14,6 +14,7 @@ import {
   CAPABILITY_WORKSPACE_MOVES,
   builtinToolDescriptor,
   PI_PINNED_VERSION,
+  PI_PREVIOUS_MINORS,
   SANDBOX_CLOSE_CODES,
   decodeSandboxFrame,
   type ArtifactPutFrame,
@@ -109,10 +110,41 @@ function remember(set: Set<string>, value: string, max: number): void {
   }
 }
 
-/** `1.0.x` only (contract: the server refuses anything else with `unsupported_version`). */
+/** The minor (`1.4`) of a `major.minor.patch` version, or undefined when it is not one. */
+function piMinor(version: string): string | undefined {
+  return /^(\d+\.\d+)\.\d+$/.exec(version)?.[1];
+}
+
+/**
+ * The pinned Pi's minor (`1.4.x`) or a previous minor still in running sandboxes (`1.0.x`); the
+ * server refuses anything else with `unsupported_version` (contract). KOBE-518 removes "1.0" once
+ * no 1.0 sandbox remains.
+ */
 export function supportedPiVersion(version: string): boolean {
-  const pinned = PI_PINNED_VERSION.split(".").slice(0, 2).join(".");
-  return new RegExp(`^${pinned.replace(".", "\\.")}\\.\\d+$`).test(version);
+  const minor = piMinor(version);
+  return minor !== undefined && (minor === pinnedPiMinor() || PI_PREVIOUS_MINORS.includes(minor));
+}
+
+const pinnedPiMinor = (): string => PI_PINNED_VERSION.split(".").slice(0, 2).join(".");
+
+/**
+ * The hello's Pi gate: whether the version is supported, warning when it is supported only through
+ * PI_PREVIOUS_MINORS (KOBE-511), so the transition stays visible. KOBE-518 removes "1.0" once no
+ * 1.0 sandbox remains.
+ */
+export function admitPiVersion(
+  version: string,
+  log: { warn(obj: Record<string, unknown>, msg: string): void },
+  sandboxId: string,
+): boolean {
+  if (!supportedPiVersion(version)) return false;
+  if (piMinor(version) !== pinnedPiMinor()) {
+    log.warn(
+      { sandbox_id: sandboxId, pi_version: version.slice(0, 32), pinned: PI_PINNED_VERSION },
+      "sandbox runs a previous Pi minor (accepted until KOBE-518)",
+    );
+  }
+  return true;
 }
 
 /**
@@ -1541,7 +1573,8 @@ export class SandboxConnection implements RegisteredConnection {
       this.close("unauthorized", "sandbox_id does not match the token");
       return;
     }
-    if (!supportedPiVersion(hello.pi_version)) {
+    // Logs a warning for a previous minor (PI_PREVIOUS_MINORS; team_id is on this.log).
+    if (!admitPiVersion(hello.pi_version, this.log, this.sandboxId)) {
       this.close("unsupported_version", `Pi ${hello.pi_version.slice(0, 32)} is not supported`);
       return;
     }

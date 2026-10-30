@@ -1,21 +1,21 @@
 import { eq, sql, teams, withTeam, type KobeDb } from "@kobe/db";
 import type { SandboxProvider } from "../sandbox/provider.js";
 import { verifySessionToken } from "../sandbox/session-token.js";
-import type { SessionKeys } from "../sandbox/config.js";
+import type { SessionVerifyKeySets } from "../sandbox/config.js";
 import type { SandboxLiveness, SessionTokenVerifier } from "./types.js";
 
 /** Positive liveness answers are reused this long (each check is a Kubernetes API read). */
 export const LIVENESS_CACHE_MS = 20_000;
 
 /**
- * The wire's token verifier: KOBE-22's `verifySessionToken` with the `kobe.sandbox-wire` key only —
- * HS256 pinned, exact header (no `none`, `kid`, `jku`, embedded keys), audience must be exactly
- * `kobe.sandbox-wire`, `exp`/`iat` checked. Tokens for the model gateway, MCP or egress proxy have
- * other keys and fail the signature.
+ * The wire's token verifier: KOBE-22's `verifySessionToken` with the `kobe.sandbox-wire` public
+ * key(s) only — EdDSA pinned (KOBE-513), exact header (no `none`, `jku`, embedded keys; `kid` only
+ * picks one of these keys), audience must be exactly `kobe.sandbox-wire`, `exp`/`iat` checked.
+ * Tokens for the model gateway, MCP or egress proxy have other keys and fail.
  */
-export function sandboxWireVerifier(keys: SessionKeys): SessionTokenVerifier {
-  const key = keys["kobe.sandbox-wire"];
-  return (token) => verifySessionToken(token, "kobe.sandbox-wire", key);
+export function sandboxWireVerifier(keys: SessionVerifyKeySets): SessionTokenVerifier {
+  const wire = keys["kobe.sandbox-wire"];
+  return (token) => verifySessionToken(token, "kobe.sandbox-wire", wire);
 }
 
 /**

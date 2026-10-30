@@ -16,7 +16,7 @@ import {
   signRunToken,
   signServerCallToken,
 } from "@kobe/protocol/node";
-import { signSessionToken, verifySessionToken } from "@kobe/session-token";
+import { generateSessionKeyPair, signSessionToken, verifySessionToken } from "@kobe/session-token";
 import pino from "pino";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createModelGateway } from "./gateway.js";
@@ -35,6 +35,7 @@ const SESSION_KEY = "m".repeat(40);
 const MASTER = new TextEncoder().encode(SESSION_KEY);
 const SC_KEY = deriveServerCallTokenKey(MASTER);
 const RUN_KEY = deriveRunTokenKey(MASTER);
+const SESSION = generateSessionKeyPair();
 const box = new SecretBox("v".repeat(40), VIRTUAL_KEY_PURPOSE);
 const team = randomUUID();
 const user = randomUUID();
@@ -76,7 +77,7 @@ function sessionToken(): string {
       exp: now() + 900,
       jti: randomUUID().replace(/-/g, ""),
     },
-    SESSION_KEY,
+    SESSION.signing,
   );
 }
 
@@ -178,7 +179,7 @@ beforeEach(async () => {
     { ttlMs: 0 },
   );
   shim = createModelGateway({
-    verify: (t) => verifySessionToken(t, "kobe.model-gateway", SESSION_KEY),
+    verify: (t) => verifySessionToken(t, "kobe.model-gateway", SESSION.verify),
     principals,
     isRunLeased: async () => true,
     runTokens: { key: RUN_KEY, isActive: async () => true, require: false },

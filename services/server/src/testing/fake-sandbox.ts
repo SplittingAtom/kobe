@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
+  PI_PINNED_VERSION,
   SANDBOX_WS_PATH,
   SANDBOX_WS_SUBPROTOCOL,
   decodeServerFrame,
@@ -219,7 +220,7 @@ export class FakeSandbox {
   hello(
     sandboxId: string,
     runs: { run_id: string; thread_id: string; last_seq: number }[] = [],
-    pi = "1.0.0",
+    pi = PI_PINNED_VERSION,
     capabilities?: readonly string[],
   ): void {
     this.send({

@@ -25,7 +25,7 @@ const policyServer = createPolicyServer({
 });
 const app = createApp(
   {
-    sessionKey: config.sessionKey,
+    sessionVerifyKeys: config.sessionVerifyKeys,
     server: policyServer,
     upstream,
     // Per-user API-key and OAuth grants from the server (KOBE-108, KOBE-109).

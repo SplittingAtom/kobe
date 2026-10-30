@@ -1,6 +1,7 @@
 import { createIsolationGate, type IsolationGate } from "../isolation/gate.js";
 import type { RuntimeClassLike } from "../isolation/runtime-class.js";
-import type { SandboxSettings, SessionKeys } from "../sandbox/config.js";
+import { generateSessionKeyPair, verifyKeysOf } from "@kobe/session-token";
+import type { SandboxSettings, SessionKeys, SessionVerifyKeySets } from "../sandbox/config.js";
 import type { TeamRef } from "../sandbox/manifests.js";
 import type { FakeKube } from "./fake-kube.js";
 
@@ -84,11 +85,28 @@ export const SETTINGS: SandboxSettings = {
   skillEval: { maxConcurrentPerTeam: 4, workspaceSize: "2Gi" },
 };
 
+/** One Ed25519 pair per audience, fresh per test process (KOBE-513). */
+export const KEY_PAIRS = {
+  "kobe.sandbox-wire": generateSessionKeyPair(),
+  "kobe.model-gateway": generateSessionKeyPair(),
+  "kobe.mcp-proxy": generateSessionKeyPair(),
+  "kobe.egress-proxy": generateSessionKeyPair(),
+} as const;
+
+/** The server's signing keys. */
 export const KEYS: SessionKeys = {
-  "kobe.sandbox-wire": "w".repeat(40),
-  "kobe.model-gateway": "m".repeat(40),
-  "kobe.mcp-proxy": "p".repeat(40),
-  "kobe.egress-proxy": "e".repeat(40),
+  "kobe.sandbox-wire": KEY_PAIRS["kobe.sandbox-wire"].signing,
+  "kobe.model-gateway": KEY_PAIRS["kobe.model-gateway"].signing,
+  "kobe.mcp-proxy": KEY_PAIRS["kobe.mcp-proxy"].signing,
+  "kobe.egress-proxy": KEY_PAIRS["kobe.egress-proxy"].signing,
+};
+
+/** The matching public keys (what each verifier holds). */
+export const VERIFY_KEYS: SessionVerifyKeySets = {
+  "kobe.sandbox-wire": verifyKeysOf(KEYS["kobe.sandbox-wire"]),
+  "kobe.model-gateway": verifyKeysOf(KEYS["kobe.model-gateway"]),
+  "kobe.mcp-proxy": verifyKeysOf(KEYS["kobe.mcp-proxy"]),
+  "kobe.egress-proxy": verifyKeysOf(KEYS["kobe.egress-proxy"]),
 };
 
 export const CLUSTER_IPS = {

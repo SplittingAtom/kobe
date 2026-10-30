@@ -120,7 +120,7 @@ const serverErrorFrame = frame("error", { code: openCode, ...errorFields });
 export const helloFrameSchema = frame("hello", {
   sandbox_id: uuidSchema,
   agent_version: z.string().min(1).max(64),
-  /** Installed Pi version; the server refuses (close `unsupported_version`) outside 1.0.x. */
+  /** Installed Pi; the server refuses (close `unsupported_version`) outside 1.4.x and 1.0.x. */
   pi_version: z.string().min(1).max(64),
   /** Runs this agent still has a live Pi process for, with the highest outbound seq sent. */
   runs: z.array(

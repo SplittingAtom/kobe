@@ -477,6 +477,11 @@ for kept in "${KEPT_SECRETS[@]}"; do
     "$WORK/secret-$s.json" "$RELEASE-$s-restored" | $KUBECTL -n "$NS" apply -f - >/dev/null
   SITE_ARGS+=(--set "${kept#*:}=$RELEASE-$s-restored")
 done
+# The session tokens' public keys go with their Secret (KOBE-513): a ConfigMap of its `.pub` entries.
+node -e 'const j=require(process.argv[1]);const d={};for(const [k,v] of Object.entries(j.data))if(k.endsWith(".pub"))d[k.slice(0,-4)]=Buffer.from(v,"base64").toString();console.log(JSON.stringify({apiVersion:"v1",kind:"ConfigMap",metadata:{name:process.argv[2]},data:d}))' \
+  "$WORK/secret-sandbox-session-keys.json" "$RELEASE-sandbox-session-verify-keys-restored" \
+  | $KUBECTL -n "$NS" apply -f - >/dev/null
+SITE_ARGS+=(--set "sandbox.sessionVerifyKeysConfigMap=$RELEASE-sandbox-session-verify-keys-restored")
 if out=$(helm_install "$NS" 2>&1); then ok "the fresh site is installed (its key-material Secrets restored)"
 else
   fail "the fresh site is installed: $(tail -5 <<<"$out")"

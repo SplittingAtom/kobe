@@ -17,7 +17,7 @@ export async function readAgentVersion(manifestUrl: URL): Promise<string> {
   }
 }
 
-/** `pi --version` of the installed Pi (the server refuses anything outside 1.0.x). */
+/** `pi --version` of the installed Pi (the server refuses anything outside 1.4.x and 1.0.x). */
 export function detectPiVersion(
   bin: string,
   env: Readonly<Record<string, string>>,

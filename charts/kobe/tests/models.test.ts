@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { parseAllDocuments } from "yaml";
 import { loadConfig as loadShimConfig } from "../../../services/model-gateway/src/config.js";
 import { loadModelsConfig } from "../../../services/server/src/models/config.js";
+import { generateSessionKeyPair } from "../../../packages/session-token/src/index.js";
 
 // Render tests for the model gateway (KOBE-40): Bifrost, the model-gateway shim, their secrets
 // and NetworkPolicies, and how sandboxes reach them.
@@ -162,7 +163,7 @@ describe("who holds which secret", () => {
     expect(secretKeys(env(ms, "kobe-scheduler")).filter((k) => k.includes("model"))).toEqual([]);
   });
 
-  it("the shim holds only its own session key and the virtual-key secret", () => {
+  it("the shim holds only its session public key, its master secret and the virtual-key secret", () => {
     const vars = env(ms, "kobe-model-gateway");
     expect(secretKeys(vars)).toEqual([
       "kobe-db/app-url",
@@ -170,7 +171,17 @@ describe("who holds which secret", () => {
       "kobe-model-keys/virtual-keys-previous",
       "kobe-sandbox-session-keys/model-gateway",
     ]);
-    const shimEnv = resolved(vars.filter((v) => !v.name.endsWith("_PREVIOUS")));
+    // KOBE-513: the session-token key is public, from the verify-keys ConfigMap.
+    expect(vars).toContainEqual({
+      name: "KOBE_SESSION_VERIFY_KEY_MODEL_GATEWAY",
+      valueFrom: {
+        configMapKeyRef: { name: "kobe-sandbox-session-verify-keys", key: "model-gateway" },
+      },
+    });
+    const shimEnv = {
+      ...resolved(vars.filter((v) => !v.name.endsWith("_PREVIOUS"))),
+      KOBE_SESSION_VERIFY_KEY_MODEL_GATEWAY: generateSessionKeyPair().publicPem,
+    };
     expect(loadShimConfig(shimEnv)).toMatchObject({
       bifrostUrl: "http://kobe-bifrost:8080",
       maxCallsPerSandbox: 16,

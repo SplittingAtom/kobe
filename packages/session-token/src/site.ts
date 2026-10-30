@@ -1,13 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { SessionTokenError, signJws, verifyJws } from "./jws.js";
+import type { SessionSigningKey, SessionVerifyKeys } from "./keys.js";
 
 /**
  * Site egress tokens (KOBE-343): how the **server itself** goes out through the egress proxy for
- * a site-level job (the catalog's git mirror, governed skill imports), never a sandbox. Signed with the egress proxy's
- * key like sandbox tokens, but a different audience (`kobe.egress-proxy.site`) and exact claims,
- * so neither kind ever verifies as the other. The proxy allows a site token only hosts in the
- * site egress ceiling: there is no team, user or sandbox. Only the server holds the key; the
- * token is minted per job and lives five minutes.
+ * a site-level job (the catalog's git mirror, governed skill imports), never a sandbox. Signed with
+ * the egress proxy audience's Ed25519 key like sandbox tokens, but a different audience
+ * (`kobe.egress-proxy.site`) and exact claims, so neither kind ever verifies as the other. The proxy
+ * allows a site token only hosts in the site egress ceiling: there is no team, user or sandbox.
+ * Only the server holds the private key; the token is minted per job and lives five minutes.
  */
 export const SITE_EGRESS_AUDIENCE = "kobe.egress-proxy.site";
 export const SITE_EGRESS_PURPOSES = ["skill-mirror", "skill-import"] as const;
@@ -40,7 +41,7 @@ function parseClaims(v: unknown): SiteEgressClaims | null {
 
 export function signSiteEgressToken(
   purpose: SiteEgressPurpose,
-  key: string,
+  key: SessionSigningKey,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): string {
   const claims: SiteEgressClaims = {
@@ -56,10 +57,10 @@ export function signSiteEgressToken(
 
 export function verifySiteEgressToken(
   token: string,
-  key: string,
+  keys: SessionVerifyKeys,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): SiteEgressClaims {
-  const claims = parseClaims(verifyJws(token, key));
+  const claims = parseClaims(verifyJws(token, keys));
   if (!claims) throw new SessionTokenError("claims are not a site egress token");
   if (nowSeconds >= claims.exp || claims.iat > nowSeconds + 60)
     throw new SessionTokenError("expired or issued in the future");

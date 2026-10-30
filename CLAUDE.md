@@ -52,7 +52,7 @@ this repository is public, so infrastructure details never go into tracked files
 - **ESM everywhere**, TS `NodeNext` resolution: relative imports in services/packages use `.js` extensions.
   `apps/web` uses `Bundler` resolution.
 - **Config is validated with zod at startup** (`src/config.ts` per service); invalid env fails fast.
-- **Sandbox image:** `images/sandbox/Dockerfile` (Python 3.12 slim + Node 22 + Pi pinned 1.0.0 +
+- **Sandbox image:** `images/sandbox/Dockerfile` (Python 3.12 slim + Node 22 + Pi pinned 1.4.0 +
   `kobe-sandbox-agent` + data stack from `images/sandbox/requirements.txt`); checks in
   `images/sandbox/test-image.sh <image>`; built, tested and Trivy-scanned by
   `.github/workflows/sandbox-image.yml` (fails on fixable CRITICAL).
@@ -76,7 +76,7 @@ services/<svc>/Dockerfile .`), runtime `USER 1000:1000` (numeric, for `runAsNonR
   different team is already in force. No other code may set the team outside `withTeam()`.
 - Server decides every tool call; approvals are HMAC-signed over (run_id, tool_call_id, canonical input).
   No approval bypass.
-- Pi `1.0.x` in RPC mode behind `kobe-sandbox-agent`, which dials out over WSS; sandboxes accept no
+- Pi `1.4.x` in RPC mode behind `kobe-sandbox-agent`, which dials out over WSS; sandboxes accept no
   inbound connections. `pi-server` is not used in v1.
 - No Redis: Postgres `LISTEN/NOTIFY` for fan-out hints; Postgres is always the durable record.
 - Dependencies MIT/Apache/BSD/MPL only; exceptions documented in

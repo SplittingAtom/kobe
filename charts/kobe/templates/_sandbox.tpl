@@ -18,7 +18,8 @@ predates the `sandbox` key still renders. Keep in sync with values.yaml.
   "skillEval" (dict "maxConcurrentPerTeam" 4 "workspaceSize" "2Gi")
   "orbitEval" (dict "deadlineSeconds" 900 "resources" (dict "requests" (dict "cpu" "250m" "memory" "512Mi") "limits" (dict "cpu" "1" "memory" "2Gi")))
   "skillScan" (dict "enabled" false "deadlineSeconds" 300 "resources" (dict "requests" (dict "cpu" "250m" "memory" "512Mi") "limits" (dict "cpu" "1" "memory" "2Gi")))
-  "sessionKeysSecret" "" -}}
+  "sessionKeysSecret" ""
+  "sessionVerifyKeysConfigMap" "" -}}
 {{- mustMergeOverwrite $defaults (deepCopy (.Values.sandbox | default dict)) | toJson -}}
 {{- end -}}
 
@@ -52,7 +53,32 @@ sandbox.workspace.storageClass ("" = the cluster default). Setting both is refus
 {{- default (printf "%s-sandbox-session-keys" (include "kobe.fullname" .)) $s.sessionKeysSecret -}}
 {{- end -}}
 
-{{/* Session-token audiences and the Secret keys holding their HMAC keys (one per audience). */}}
+{{/*
+ConfigMap with the session tokens' public keys (KOBE-513): the chart's own, or with a pre-created
+sandbox.sessionKeysSecret, sandbox.sessionVerifyKeysConfigMap (required then).
+*/}}
+{{- define "kobe.sessionVerifyKeysName" -}}
+{{- $s := include "kobe.sandboxValues" . | fromJson -}}
+{{- if $s.sessionKeysSecret -}}
+{{- if not $s.sessionVerifyKeysConfigMap -}}
+{{- fail "sandbox.sessionKeysSecret is set: also set sandbox.sessionVerifyKeysConfigMap (the session tokens' public keys, keys sandbox-wire, model-gateway, mcp-proxy, egress-proxy; docs/install.md)" -}}
+{{- end -}}
+{{- $s.sessionVerifyKeysConfigMap -}}
+{{- else -}}
+{{- printf "%s-sandbox-session-verify-keys" (include "kobe.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/* `<audience>` key of the verify-keys ConfigMap as a verifier's env var (public key only). */}}
+{{- define "kobe.sessionVerifyKeyEnv" -}}
+- name: KOBE_SESSION_VERIFY_KEY_{{ .env }}
+  valueFrom:
+    configMapKeyRef:
+      name: {{ include "kobe.sessionVerifyKeysName" .root }}
+      key: {{ .aud }}
+{{- end -}}
+
+{{/* Session-token audiences (env suffix -> Secret/ConfigMap key), one Ed25519 pair each. */}}
 {{- define "kobe.sessionKeyNames" -}}
 {{- toJson (dict "SANDBOX_WIRE" "sandbox-wire" "MODEL_GATEWAY" "model-gateway" "MCP_PROXY" "mcp-proxy" "EGRESS_PROXY" "egress-proxy") -}}
 {{- end -}}
@@ -143,19 +169,34 @@ pod labels and port for the team NetworkPolicy).
 {{- end -}}
 
 {{/*
-Server env: sandbox config, the session-token keys (the server holds all four) and the approval
-HMAC key (KOBE-37). The approval key is optional so a pre-created Secret without `approval-hmac`
+Server env: sandbox config, the session-token private keys (the server holds all four and is the
+only holder, KOBE-513) with their public bundles (rotation), the model gateway's master secret
+(run and server-call token keys) and the approval HMAC key (KOBE-37). The approval key is optional so a pre-created Secret without `approval-hmac`
 still starts: the server then denies every tool call that needs approval (fail closed) and logs it.
 */}}
 {{- define "kobe.sandboxEnv" -}}
 {{ include "kobe.sandboxConfigEnv" . }}
-{{- range $env, $key := include "kobe.sessionKeyNames" . | fromJson }}
-- name: KOBE_SESSION_KEY_{{ $env }}
+{{- range $env, $aud := include "kobe.sessionKeyNames" . | fromJson }}
+- name: KOBE_SESSION_SIGNING_KEY_{{ $env }}
   valueFrom:
     secretKeyRef:
       name: {{ include "kobe.sessionKeysSecretName" $ }}
-      key: {{ $key }}
+      key: {{ $aud }}.key
+{{- /* The server's own rotation bundle comes from the Secret, never the ConfigMap: a ConfigMap
+  editor must not be able to add a key the server accepts (sandbox-wire, MCP /grant). Optional: the
+  server always accepts its own key's public half. */}}
+- name: KOBE_SESSION_VERIFY_KEY_{{ $env }}
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "kobe.sessionKeysSecretName" $ }}
+      key: {{ $aud }}.pub
+      optional: true
 {{- end }}
+- name: KOBE_SESSION_KEY_MODEL_GATEWAY
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "kobe.sessionKeysSecretName" . }}
+      key: model-gateway
 - name: KOBE_APPROVAL_KEY
   valueFrom:
     secretKeyRef:

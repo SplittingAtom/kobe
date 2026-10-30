@@ -3,6 +3,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseAllDocuments } from "yaml";
 import { loadConfig } from "../../../services/egress-proxy/src/config.js";
+import { generateSessionKeyPair } from "../../../packages/session-token/src/index.js";
+
+const PUBLIC_PEM = generateSessionKeyPair().publicPem;
 
 // Render tests for the egress proxy's chart pieces (KOBE-38): Deployment env, NetworkPolicy.
 
@@ -56,13 +59,15 @@ describe("egress proxy Deployment", () => {
     }
   });
 
-  it("gets only its own session key, the app-role database URL, and waits for migrations", () => {
+  it("gets only its own session public key, the app-role database URL, and waits for migrations", () => {
     const env = proxyEnv(ms);
-    const keys = env.filter((e) => e.name.startsWith("KOBE_SESSION_KEY_"));
+    const keys = env.filter((e) => e.name.startsWith("KOBE_SESSION_"));
     expect(keys).toEqual([
       {
-        name: "KOBE_SESSION_KEY_EGRESS_PROXY",
-        valueFrom: { secretKeyRef: { name: "kobe-sandbox-session-keys", key: "egress-proxy" } },
+        name: "KOBE_SESSION_VERIFY_KEY_EGRESS_PROXY",
+        valueFrom: {
+          configMapKeyRef: { name: "kobe-sandbox-session-verify-keys", key: "egress-proxy" },
+        },
       },
     ]);
     expect(env.find((e) => e.name === "KOBE_DATABASE_URL")?.valueFrom.secretKeyRef.key).toBe(
@@ -83,7 +88,7 @@ describe("egress proxy Deployment", () => {
     const config = loadConfig({
       ...vars,
       KOBE_DATABASE_URL: "postgres://x",
-      KOBE_SESSION_KEY_EGRESS_PROXY: "k".repeat(48),
+      KOBE_SESSION_VERIFY_KEY_EGRESS_PROXY: PUBLIC_PEM,
     });
     expect(config.allowedPorts).toEqual([443]);
     expect(config.allowedInternalCidrs).toEqual([]);
@@ -246,7 +251,7 @@ describe("header injection secret (KOBE-39)", () => {
     const config = loadConfig({
       ...vars,
       KOBE_DATABASE_URL: "postgres://x",
-      KOBE_SESSION_KEY_EGRESS_PROXY: "k".repeat(48),
+      KOBE_SESSION_VERIFY_KEY_EGRESS_PROXY: PUBLIC_PEM,
       KOBE_EGRESS_HEADER_SECRET: "h".repeat(48),
     });
     expect(config.headerSecrets).toEqual(["h".repeat(48)]);

@@ -1,8 +1,10 @@
-import { signSessionToken, signSiteEgressToken } from "@kobe/session-token";
+import { generateSessionKeyPair, signSessionToken, signSiteEgressToken } from "@kobe/session-token";
 import { describe, expect, it } from "vitest";
 import { authenticate, egressTokenVerifier, siteTokenVerifier } from "./auth.js";
 
-const KEY = "e".repeat(40);
+const PAIR = generateSessionKeyPair();
+const KEY = PAIR.signing;
+const PUB = PAIR.verify;
 const now = Math.floor(Date.now() / 1000);
 const claims = {
   iss: "kobe-server" as const,
@@ -14,7 +16,7 @@ const claims = {
   jti: "abcdefghijklmnopqrstuv",
 };
 const egressToken = signSessionToken({ ...claims, aud: "kobe.egress-proxy" }, KEY);
-const verify = egressTokenVerifier(KEY);
+const verify = egressTokenVerifier(PUB);
 const basic = (user: string, pass: string) =>
   `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`;
 const THREAD = "9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
@@ -57,7 +59,10 @@ describe("authenticate", () => {
 
   it("refuses tokens for other audiences, other keys, and expired tokens", () => {
     const mcp = signSessionToken({ ...claims, aud: "kobe.mcp-proxy" }, KEY);
-    const otherKey = signSessionToken({ ...claims, aud: "kobe.egress-proxy" }, "o".repeat(40));
+    const otherKey = signSessionToken(
+      { ...claims, aud: "kobe.egress-proxy" },
+      generateSessionKeyPair().signing,
+    );
     const expired = signSessionToken(
       { ...claims, aud: "kobe.egress-proxy", iat: now - 2000, exp: now - 1000 },
       KEY,
@@ -69,7 +74,7 @@ describe("authenticate", () => {
 
   it("accepts a site egress token as Bearer only, and only with the site verifier (KOBE-343)", () => {
     const site = signSiteEgressToken("skill-mirror", KEY);
-    const verifySite = siteTokenVerifier(KEY);
+    const verifySite = siteTokenVerifier(PUB);
     const r = authenticate(`Bearer ${site}`, verify, verifySite);
     expect(r).toMatchObject({
       ok: true,
@@ -81,7 +86,9 @@ describe("authenticate", () => {
       ok: false,
       reason: "invalid",
     });
-    expect(authenticate(`Bearer ${site}`, verify, siteTokenVerifier("o".repeat(40)))).toEqual({
+    expect(
+      authenticate(`Bearer ${site}`, verify, siteTokenVerifier(generateSessionKeyPair().verify)),
+    ).toEqual({
       ok: false,
       reason: "invalid",
     });

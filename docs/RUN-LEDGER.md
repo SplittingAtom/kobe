@@ -9,6 +9,11 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Hardening lane 2 (2026-10-29):** `group-hardening-2`: KOBE-511 Pi 1.0.0 → 1.4.0 (extension-API pin test;
+  server admits 1.0.x with a warning until KOBE-518; undici → KOBE-519) and KOBE-513 Ed25519 session tokens
+  (per-audience key pairs, public keys in a ConfigMap, kid + rotation window; server reads its bundle from
+  the Secret; upgrade with no runs active until KOBE-522 lets the sandbox agent re-trade on a 401). Opus
+  security reviews on both. KOBE-520 withdrawn (the MCP proxy never held an approval key); KOBE-521 filed.
 - **Hardening lane 1 (2026-10-29):** Chris's spare-lane request after the low-priority review. On
   `group-hardening-1` (one worktree, agents sequential or path-disjoint): KOBE-506 file-viewer move race
   (real bug; agent/other-device moves → KOBE-516), KOBE-507 db-core 57P01 (drop waits for sessions; pool

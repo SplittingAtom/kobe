@@ -255,6 +255,9 @@
         "sessionKeysSecret": {
           "type": "string"
         },
+        "sessionVerifyKeysConfigMap": {
+          "type": "string"
+        },
         "ephemeralStorage": {
           "type": "object",
           "additionalProperties": false,

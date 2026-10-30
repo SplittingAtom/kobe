@@ -18,13 +18,20 @@ updates:
     directory: /
     schedule: { interval: weekly }
   - package-ecosystem: npm
-    directories: ["/", "/images/sandbox/pi"]
+    directory: /
     schedule: { interval: weekly }
     open-pull-requests-limit: 10
     ignore:
       # Kobe runs on Node 24 (images and CI); the types follow the runtime's major version.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+  # Pi has its own entry (KOBE-511): while it shared the root's, the root's bumps kept that entry at
+  # its open-PR limit and Pi never got a PR. A Pi bump fails pi-extension-api.real-pi.test.ts until
+  # the extension surface is re-verified (see docs/ledger/KOBE-511.md).
+  - package-ecosystem: npm
+    directory: /images/sandbox/pi
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
   - package-ecosystem: pip
     directory: /images/sandbox
     schedule: { interval: weekly }

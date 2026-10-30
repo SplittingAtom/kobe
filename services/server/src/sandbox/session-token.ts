@@ -9,9 +9,11 @@ import {
 import type { SessionKeys } from "./config.js";
 
 /**
- * Sandbox session tokens: the rules (HS256 pinned, one key per audience, 15 min TTL) and the
- * sign/verify implementation live in @kobe/session-token, shared with every verifying service
- * (egress proxy, MCP proxy, model gateway). The server mints one token per audience here.
+ * Sandbox session tokens: the rules (EdDSA pinned, one Ed25519 key pair per audience, 15 min TTL)
+ * and the sign/verify implementation live in @kobe/session-token, shared with every verifying
+ * service (egress proxy, MCP proxy, model gateway). The server holds the private keys and mints one
+ * token per audience here; the services hold only the public keys, so none of them can mint a
+ * token for any sandbox (KOBE-513).
  */
 export { SESSION_TOKEN_TTL_SECONDS, SessionTokenError, signSessionToken, verifySessionToken };
 

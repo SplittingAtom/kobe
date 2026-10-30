@@ -18,13 +18,13 @@ import { createInternalApp } from "./routes/internal.js";
 import { EventStreamFixture, type Person } from "./testing/event-stream-fixture.js";
 import {
   INTERNAL_KEY,
-  MCP_SESSION_KEY,
   allowApproval,
   enableConnector,
   leaseRun,
   mcpToken,
   piName,
   registerConnector,
+  MCP_VERIFY_KEYS,
 } from "./testing/mcp-fixtures.js";
 
 /**
@@ -53,7 +53,7 @@ beforeAll(async () => {
     mcp: fx.replica(0).deps.mcp,
     auth: {
       db: fx.db,
-      sessionKey: MCP_SESSION_KEY,
+      sessionVerifyKeys: MCP_VERIFY_KEYS,
       liveness: { isLive: ({ sandboxId }) => Promise.resolve(live.has(sandboxId)) },
     },
   });
@@ -71,7 +71,7 @@ beforeAll(async () => {
     maxResponseBytes: 1024 * 1024,
   });
   proxy = createProxyApp({
-    sessionKey: MCP_SESSION_KEY,
+    sessionVerifyKeys: MCP_VERIFY_KEYS,
     server: createPolicyServer({
       baseUrl: `http://127.0.0.1:${port}`,
       internalKey: INTERNAL_KEY,

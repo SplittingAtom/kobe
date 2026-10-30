@@ -1,3 +1,4 @@
+import { verifyKeysFromEnv, type SessionVerifyKeys } from "@kobe/session-token";
 import { z } from "zod";
 import { validateCidrs } from "./address-policy.js";
 
@@ -33,8 +34,6 @@ const key = (name: string) =>
 
 const configSchema = z.object({
   PORT: int("PORT", 1, 65535, 8080),
-  /** Verifies sandboxes' `kobe.mcp-proxy` session tokens (never another audience's key). */
-  KOBE_SESSION_KEY_MCP_PROXY: key("KOBE_SESSION_KEY_MCP_PROXY"),
   /** The server's internal listener (policy re-check), e.g. http://kobe-server:8082. */
   KOBE_MCP_SERVER_URL: z.url({
     protocol: /^https?$/,
@@ -94,7 +93,11 @@ export interface UpstreamPolicy {
 
 export interface Config {
   readonly port: number;
-  readonly sessionKey: string;
+  /**
+   * Public key(s) verifying sandboxes' `kobe.mcp-proxy` session tokens
+   * (KOBE_SESSION_VERIFY_KEY_MCP_PROXY; never a private key, never another audience's).
+   */
+  readonly sessionVerifyKeys: SessionVerifyKeys;
   readonly serverUrl: string;
   readonly internalKey: string;
   readonly upstream: UpstreamPolicy;
@@ -137,12 +140,9 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     throw new Error(`Invalid configuration: ${issues}`);
   }
   const d = parsed.data;
-  if (d.KOBE_SESSION_KEY_MCP_PROXY === d.KOBE_MCP_INTERNAL_KEY) {
-    throw new Error("Invalid configuration: the session key and the internal key must differ");
-  }
   return {
     port: d.PORT,
-    sessionKey: d.KOBE_SESSION_KEY_MCP_PROXY,
+    sessionVerifyKeys: verifyKeysFromEnv(env, "kobe.mcp-proxy"),
     serverUrl: d.KOBE_MCP_SERVER_URL.replace(/\/+$/, ""),
     internalKey: d.KOBE_MCP_INTERNAL_KEY,
     upstream: {

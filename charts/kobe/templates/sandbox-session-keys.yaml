@@ -4,11 +4,29 @@
 {{- $name := include "kobe.sessionKeysSecretName" . -}}
 {{- $existing := lookup "v1" "Secret" .Release.Namespace $name -}}
 {{- $data := ($existing).data | default dict -}}
-# HMAC keys of the sandbox session tokens, one per audience (packages/protocol session-token.ts).
-# The server holds all four; each verifying service gets only its own key. Rotating one
-# invalidates that audience's tokens (sandboxes re-trade their bootstrap token for new ones).
-# approval-hmac signs tool-call approvals (D29, KOBE-37): the server signs, the MCP proxy verifies
-# (KOBE-58); never mounted in a sandbox. Rotating it voids approvals allowed but not yet used.
+{{- /* One Ed25519 pair per audience, kept across upgrades. Helm cannot derive a bare public key,
+  so the public half is a self-signed certificate of the key (only the key in it is used). */ -}}
+{{- $pairs := dict -}}
+{{- range $env, $aud := include "kobe.sessionKeyNames" . | fromJson }}
+{{- $k := printf "%s.key" $aud -}}
+{{- $p := printf "%s.pub" $aud -}}
+{{- if and (hasKey $data $k) (hasKey $data $p) }}
+{{- $_ := set $pairs $aud (dict "key" (index $data $k | b64dec) "pub" (index $data $p | b64dec)) -}}
+{{- else }}
+{{- $priv := genPrivateKey "ed25519" -}}
+{{- $cert := genSelfSignedCertWithKey (printf "kobe.%s session tokens" $aud) nil nil 36500 $priv -}}
+{{- $_ := set $pairs $aud (dict "key" $priv "pub" $cert.Cert) -}}
+{{- end }}
+{{- end }}
+# Sandbox session tokens (packages/session-token, KOBE-513): one Ed25519 key pair per audience.
+# `<audience>.key` (private, PKCS#8 PEM) is mounted in the server only; `<audience>.pub` (public,
+# PEM certificate or key; current and previous during a rotation, docs/install.md) is the server's
+# own rotation bundle (read from this Secret, never from the ConfigMap) and is copied into the
+# verify-keys ConfigMap below, which is all the verifying services get, so none of them can mint a
+# token. `model-gateway` is the gateway's master secret shared with the server (run,
+# trace-span and server-call keys are derived from it; no longer a session-token key).
+# approval-hmac signs tool-call approvals (D29, KOBE-37): only the server holds it, signing and
+# verifying; never mounted in a proxy or a sandbox. Rotating it voids approvals not yet used.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -19,8 +37,23 @@ metadata:
     helm.sh/resource-policy: keep
 type: Opaque
 stringData:
-  {{- range $env, $key := include "kobe.sessionKeyNames" . | fromJson }}
-  {{ $key }}: {{ ternary (index $data $key | default "" | b64dec) (randAlphaNum 48) (hasKey $data $key) | quote }}
+  {{- range $aud, $pair := $pairs }}
+  {{ $aud }}.key: {{ $pair.key | quote }}
+  {{ $aud }}.pub: {{ $pair.pub | quote }}
   {{- end }}
+  model-gateway: {{ ternary (index $data "model-gateway" | default "" | b64dec) (randAlphaNum 48) (hasKey $data "model-gateway") | quote }}
   approval-hmac: {{ ternary (index $data "approval-hmac" | default "" | b64dec) (randAlphaNum 48) (hasKey $data "approval-hmac") | quote }}
+---
+# Public keys of the sandbox session tokens, one bundle per audience (KOBE-513): what the egress
+# proxy, MCP proxy and model gateway verify with. Public material only.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kobe.sessionVerifyKeysName" . }}
+  labels:
+    {{- include "kobe.labels" . | nindent 4 }}
+data:
+  {{- range $aud, $pair := $pairs }}
+  {{ $aud }}: {{ $pair.pub | quote }}
+  {{- end }}
 {{- end }}

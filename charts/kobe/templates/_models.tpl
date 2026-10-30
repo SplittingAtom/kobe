@@ -103,12 +103,14 @@ this.
 {{- end -}}
 
 {{/*
-Model gateway shim env (services/model-gateway/src/config.ts): the database (app role), its own
-session key only, the virtual-key secret only (never provider keys or Bifrost's admin password).
+Model gateway shim env (services/model-gateway/src/config.ts): the database (app role), its
+session-token public key only (KOBE-513), its master secret shared with the server (run and
+server-call token keys), the virtual-key secret only (never provider keys or Bifrost's admin password).
 */}}
 {{- define "kobe.modelGatewayEnv" -}}
 {{- $g := include "kobe.modelGatewayValues" . | fromJson -}}
 {{ include "kobe.databaseEnv" . }}
+{{ include "kobe.sessionVerifyKeyEnv" (dict "root" . "env" "MODEL_GATEWAY" "aud" "model-gateway") }}
 - name: KOBE_SESSION_KEY_MODEL_GATEWAY
   valueFrom:
     secretKeyRef:

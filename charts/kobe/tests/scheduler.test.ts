@@ -79,7 +79,7 @@ describe("scheduler runner chart (KOBE-174)", () => {
   it("gets the sandbox config but no session key, approval key or auth secret", () => {
     const names = envOf(render()).map((e) => e.name);
     expect(names).toContain("KOBE_SANDBOX_CONFIG");
-    expect(names.filter((n) => n.startsWith("KOBE_SESSION_KEY_"))).toEqual([]);
+    expect(names.filter((n) => n.startsWith("KOBE_SESSION_"))).toEqual([]);
     for (const forbidden of ["KOBE_APPROVAL_KEY", "KOBE_AUTH_SECRET", "KOBE_SETUP_TOKEN"]) {
       expect(names).not.toContain(forbidden);
     }

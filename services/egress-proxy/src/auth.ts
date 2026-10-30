@@ -3,6 +3,7 @@ import {
   SessionTokenError,
   verifySessionToken,
   verifySiteEgressToken,
+  type SessionVerifyKeys,
   type SiteEgressClaims,
   type SiteEgressPurpose,
 } from "@kobe/session-token";
@@ -47,14 +48,17 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export type TokenVerifier = (token: string) => SessionTokenClaims;
 export type SiteTokenVerifier = (token: string) => SiteEgressClaims;
 
-/** Verifier bound to the proxy's own key (KOBE_SESSION_KEY_EGRESS_PROXY): HS256, exact header. */
-export function egressTokenVerifier(key: string): TokenVerifier {
-  return (token) => verifySessionToken(token, "kobe.egress-proxy", key);
+/**
+ * Verifier bound to the proxy's own public key(s) (KOBE_SESSION_VERIFY_KEY_EGRESS_PROXY): EdDSA,
+ * exact header. The proxy holds no private key, so it can never mint a token (KOBE-513).
+ */
+export function egressTokenVerifier(keys: SessionVerifyKeys): TokenVerifier {
+  return (token) => verifySessionToken(token, "kobe.egress-proxy", keys);
 }
 
-/** Site egress tokens, verified with the same key (a different audience and exact claims). */
-export function siteTokenVerifier(key: string): SiteTokenVerifier {
-  return (token) => verifySiteEgressToken(token, key);
+/** Site egress tokens, verified with the same keys (a different audience and exact claims). */
+export function siteTokenVerifier(keys: SessionVerifyKeys): SiteTokenVerifier {
+  return (token) => verifySiteEgressToken(token, keys);
 }
 
 function siteIdentity(token: string, verifySite: SiteTokenVerifier): AuthResult {

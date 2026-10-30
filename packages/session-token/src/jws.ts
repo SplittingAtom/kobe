@@ -1,14 +1,17 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { sign, verify } from "node:crypto";
+import { KID_PATTERN, type SessionSigningKey, type SessionVerifyKeys } from "./keys.js";
 
 /**
- * The compact JWS every Kobe token uses: HS256 only, header exactly {"alg":"HS256","typ":"JWT"}
- * (`none`, other algorithms and extra fields such as kid, jku, x5u, jwk or crit are refused; the
- * algorithm is never read from the token). Callers validate the payload themselves.
+ * The compact JWS every Kobe session token uses (KOBE-513): **EdDSA (Ed25519) only**, header
+ * exactly {"alg":"EdDSA","typ":"JWT","kid":"<key id>"}. `none`, every other algorithm (HS256
+ * included) and extra fields such as jku, x5u, jwk or crit are refused; the algorithm is never
+ * read from the token, and `kid` only selects among the verifier's own public keys (an unknown
+ * kid fails). Callers validate the payload themselves.
  */
 export const MAX_SESSION_TOKEN_LENGTH = 4096;
-const HEADER = { alg: "HS256", typ: "JWT" } as const;
-const ENCODED_HEADER = Buffer.from(JSON.stringify(HEADER)).toString("base64url");
+export const SESSION_TOKEN_ALG = "EdDSA";
 const SEGMENT = /^[A-Za-z0-9_-]+$/;
+const ED25519_SIGNATURE_BYTES = 64;
 
 export class SessionTokenError extends Error {
   constructor(reason: string) {
@@ -17,13 +20,12 @@ export class SessionTokenError extends Error {
   }
 }
 
-const mac = (key: string, signingInput: string): Buffer =>
-  createHmac("sha256", key).update(signingInput).digest();
+const b64 = (value: unknown): string => Buffer.from(JSON.stringify(value)).toString("base64url");
 
-export function signJws(payload: unknown, key: string): string {
-  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const signingInput = `${ENCODED_HEADER}.${encoded}`;
-  return `${signingInput}.${mac(key, signingInput).toString("base64url")}`;
+export function signJws(payload: unknown, key: SessionSigningKey): string {
+  const signingInput = `${b64({ alg: SESSION_TOKEN_ALG, typ: "JWT", kid: key.kid })}.${b64(payload)}`;
+  const signature = sign(null, Buffer.from(signingInput), key.privateKey);
+  return `${signingInput}.${signature.toString("base64url")}`;
 }
 
 function decodeJson(segment: string, what: string): unknown {
@@ -34,28 +36,39 @@ function decodeJson(segment: string, what: string): unknown {
   }
 }
 
-/** The payload of a token signed with `key`; throws {@link SessionTokenError} otherwise. */
-export function verifyJws(token: string, key: string): unknown {
+function headerKid(header: unknown): string {
+  if (typeof header !== "object" || header === null || Array.isArray(header)) {
+    throw new SessionTokenError("header must be exactly EdDSA/JWT/kid");
+  }
+  const h = header as Record<string, unknown>;
+  if (
+    Object.keys(h).length !== 3 ||
+    h.alg !== SESSION_TOKEN_ALG ||
+    h.typ !== "JWT" ||
+    typeof h.kid !== "string" ||
+    !KID_PATTERN.test(h.kid)
+  ) {
+    throw new SessionTokenError("header must be exactly EdDSA/JWT/kid");
+  }
+  return h.kid;
+}
+
+/** The payload of a token signed by a key in `keys`; throws {@link SessionTokenError} otherwise. */
+export function verifyJws(token: string, keys: SessionVerifyKeys): unknown {
   if (token.length > MAX_SESSION_TOKEN_LENGTH) throw new SessionTokenError("too long");
   const parts = token.split(".");
   if (parts.length !== 3 || !parts.every((p) => SEGMENT.test(p))) {
     throw new SessionTokenError("not a compact JWS");
   }
   const [encodedHeader, payload, signature] = parts as [string, string, string];
-  const header = decodeJson(encodedHeader, "header");
-  if (
-    typeof header !== "object" ||
-    header === null ||
-    Array.isArray(header) ||
-    Object.keys(header).length !== 2 ||
-    (header as Record<string, unknown>).alg !== HEADER.alg ||
-    (header as Record<string, unknown>).typ !== HEADER.typ
-  ) {
-    throw new SessionTokenError("header must be exactly HS256/JWT");
+  const publicKey = keys.get(headerKid(decodeJson(encodedHeader, "header")));
+  if (!publicKey) throw new SessionTokenError("unknown key id");
+  const sig = Buffer.from(signature, "base64url");
+  // One encoding per signature: no trailing-bit variants of the same token.
+  if (sig.length !== ED25519_SIGNATURE_BYTES || sig.toString("base64url") !== signature) {
+    throw new SessionTokenError("bad signature");
   }
-  const expected = mac(key, `${encodedHeader}.${payload}`);
-  const actual = Buffer.from(signature, "base64url");
-  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+  if (!verify(null, Buffer.from(`${encodedHeader}.${payload}`), publicKey, sig)) {
     throw new SessionTokenError("bad signature");
   }
   return decodeJson(payload, "payload");

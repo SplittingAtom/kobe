@@ -4,6 +4,6 @@
   "description": "Pins Pi and its full dependency tree for the sandbox image (installed with npm ci)",
   "license": "Apache-2.0",
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "1.0.0"
+    "@earendil-works/pi-coding-agent": "1.4.0"
   }
 }

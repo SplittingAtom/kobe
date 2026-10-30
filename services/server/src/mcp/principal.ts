@@ -1,12 +1,12 @@
-import { verifySessionToken } from "@kobe/session-token";
+import { verifySessionToken, type SessionVerifyKeys } from "@kobe/session-token";
 import { eq, getMembership, users, type KobeDb } from "@kobe/db";
 import type { SandboxLiveness } from "../sandbox-wire/types.js";
 import type { McpPrincipal } from "./decide.js";
 
 /**
  * Who is calling the MCP proxy, re-established by the server on every request: the sandbox's
- * `kobe.mcp-proxy` session token (verified here with that audience's key: HS256 pinned, exact
- * header, `aud`, `exp`), the sandbox still live for (team, user) (KOBE-22 claim), the account
+ * `kobe.mcp-proxy` session token (verified here with that audience's public key(s): EdDSA
+ * pinned, exact header, `aud`, `exp`), the sandbox still live for (team, user) (KOBE-22 claim), the account
  * active and the user still a member of the team. The proxy's own check of the token is a
  * pre-filter; this one decides.
  */
@@ -16,8 +16,8 @@ export type McpAuthResult =
 
 export interface McpAuthDeps {
   readonly db: KobeDb;
-  /** The `kobe.mcp-proxy` session-token key (never another audience's). */
-  readonly sessionKey: string;
+  /** The `kobe.mcp-proxy` session-token public key(s) (never another audience's). */
+  readonly sessionVerifyKeys: SessionVerifyKeys;
   readonly liveness: SandboxLiveness;
 }
 
@@ -28,7 +28,7 @@ export async function authenticateSandbox(
   if (!token) return { ok: false, code: "unauthorized" };
   let claims;
   try {
-    claims = verifySessionToken(token, "kobe.mcp-proxy", deps.sessionKey);
+    claims = verifySessionToken(token, "kobe.mcp-proxy", deps.sessionVerifyKeys);
   } catch {
     return { ok: false, code: "unauthorized" };
   }

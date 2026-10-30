@@ -9,7 +9,7 @@ import { openHarness, type Harness } from "./testing/harness.js";
 import { grantContext, revealCredential } from "./connectors/grants.js";
 import { parseOauthBundle, serializeOauthBundle } from "./connectors/oauth/bundle.js";
 import { RefreshGate } from "./connectors/oauth/refresh-gate.js";
-import { INTERNAL_KEY, MCP_SESSION_KEY, activeSandbox, mcpToken } from "./testing/mcp-fixtures.js";
+import { INTERNAL_KEY, activeSandbox, mcpToken, MCP_VERIFY_KEYS } from "./testing/mcp-fixtures.js";
 
 /**
  * OAuth grant refresh, revoke and suspension (KOBE-110): rotating refresh tokens are used once
@@ -70,7 +70,7 @@ beforeAll(async () => {
     mcp: h.deps.mcp,
     auth: {
       db: h.deps.database.db,
-      sessionKey: MCP_SESSION_KEY,
+      sessionVerifyKeys: MCP_VERIFY_KEYS,
       liveness: { isLive: () => Promise.resolve(true) },
     },
   });

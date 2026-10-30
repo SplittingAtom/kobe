@@ -338,7 +338,9 @@ async function mcpClean() {
 /** Session tokens signed with the site's keys, per audience (throwaway installs only). */
 async function mint2() {
   const { signSessionToken } = await import("/app/dist/sandbox/session-token.js");
-  const { sessionKeyEnvName } = await import("/app/dist/sandbox/config.js");
+  // The server's Ed25519 signing keys (KOBE-513), loaded as the server loads them.
+  const { loadSandboxConfig } = await import("/app/dist/sandbox/config.js");
+  const keys = loadSandboxConfig(process.env).sessionKeys;
   const now = Math.floor(Date.now() / 1000);
   for (const aud of config.audiences) {
     const token = signSessionToken(
@@ -352,7 +354,7 @@ async function mint2() {
         exp: now + 900,
         jti: `gate2-${now}-${Math.random().toString(36).slice(2)}`,
       },
-      process.env[sessionKeyEnvName(aud)],
+      keys[aud],
     );
     console.log(`token ${aud} ${token}`);
   }

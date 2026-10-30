@@ -38,7 +38,7 @@ import {
   signServerCallToken,
 } from "@kobe/protocol/node";
 import { RUN_TOKEN_HEADER, SERVER_CALL_AUDIENCE, SERVER_CALL_TOKEN_HEADER } from "@kobe/protocol";
-import { signSessionToken, verifySessionToken } from "@kobe/session-token";
+import { generateSessionKeyPair, signSessionToken, verifySessionToken } from "@kobe/session-token";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createModelGateway } from "./gateway.js";
@@ -55,6 +55,7 @@ import { usageRecordOf } from "./usage/sink.js";
  * refused.
  */
 const KEY = "m".repeat(40);
+const SESSION = generateSessionKeyPair();
 const box = new SecretBox("v".repeat(40), VIRTUAL_KEY_PURPOSE);
 const team = randomUUID();
 const other = randomUUID();
@@ -85,7 +86,7 @@ const token = (teamId = team) => {
       exp: now + 900,
       jti: randomUUID().replace(/-/g, ""),
     },
-    KEY,
+    SESSION.signing,
   );
 };
 const chat = (t: string) =>
@@ -139,7 +140,7 @@ beforeAll(async () => {
   await new Promise<void>((r) => bifrost.listen(0, "127.0.0.1", r));
   const db = app.db;
   shim = createModelGateway({
-    verify: (t) => verifySessionToken(t, "kobe.model-gateway", KEY),
+    verify: (t) => verifySessionToken(t, "kobe.model-gateway", SESSION.verify),
     runTokens: {
       key: RUN_KEY,
       isActive: (s) => isRunTokenActive(db, s),

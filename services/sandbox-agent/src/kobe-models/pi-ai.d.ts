@@ -1,5 +1,5 @@
 /**
- * The slice of `@earendil-works/pi-ai` (MIT, shipped inside the pinned Pi 1.0.0) that kobe-models
+ * The slice of `@earendil-works/pi-ai` (MIT, shipped inside the pinned Pi 1.4.0) that kobe-models
  * uses, declared here so the extension compiles without the package in this workspace: Pi's
  * extension loader (jiti) resolves the specifier to its own copy at runtime (verified 1.0.0,
  * `core/extensions/loader.js` aliases). Shapes follow pi-ai's `models.d.ts`, `auth/types.d.ts`

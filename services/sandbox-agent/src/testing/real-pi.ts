@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * Paths for tests against the REAL pinned Pi (`@earendil-works/pi-coding-agent` 1.0.0 from
+ * Paths for tests against the REAL pinned Pi (`@earendil-works/pi-coding-agent` 1.4.0 from
  * images/sandbox/pi). CI installs Pi with `npm ci --prefix images/sandbox/pi --omit=dev
  * --ignore-scripts`; locally those suites are skipped when Pi is not installed (or set
  * KOBE_TEST_PI_BIN).

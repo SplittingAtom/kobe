@@ -1,5 +1,5 @@
 /**
- * Pi's built-in commands and what Kobe does with each (KOBE-450). The sandbox pins Pi 1.0.0
+ * Pi's built-in commands and what Kobe does with each (KOBE-450). The sandbox pins Pi 1.4.0
  * (`images/sandbox/pi/package.json`); the list is its `BUILTIN_SLASH_COMMANDS`
  * (`dist/core/slash-commands.js`), plus `/llama`, which its docs list. Kobe runs Pi in RPC mode,
  * where these words are no commands at all, so none is ever passed to Pi: each is a Kobe command
@@ -8,7 +8,7 @@
  */
 import { COMMANDS, type CommandId } from "./commands";
 
-export const PI_VERSION = "1.0.0";
+export const PI_VERSION = "1.4.0";
 
 export type PiMapping =
   /** Kobe has a command with this very word. */
@@ -68,7 +68,11 @@ export const PI_BUILTIN_COMMANDS: readonly PiCommand[] = [
     ),
   },
   // Kobe shares within the team (never a public gist); Pi's upload is not offered.
-  { word: "share", pi: "Share session as a secret GitHub gist", mapping: same("share-thread") },
+  {
+    word: "share",
+    pi: "Share session via a Radius artifact or a GitHub gist",
+    mapping: same("share-thread"),
+  },
   {
     word: "bug",
     pi: "Report a bug to the Pi developers",

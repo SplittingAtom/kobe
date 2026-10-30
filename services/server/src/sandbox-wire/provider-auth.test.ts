@@ -2,14 +2,8 @@ import { createHmac } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { KobeDb } from "@kobe/db";
 import { issueSessionTokens, signSessionToken } from "../sandbox/session-token.js";
+import { KEYS as keys, VERIFY_KEYS, KEY_PAIRS } from "../testing/sandbox-fixtures.js";
 import { providerLiveness, sandboxWireVerifier } from "./provider-auth.js";
-
-const keys = {
-  "kobe.sandbox-wire": "w".repeat(40),
-  "kobe.model-gateway": "m".repeat(40),
-  "kobe.mcp-proxy": "p".repeat(40),
-  "kobe.egress-proxy": "e".repeat(40),
-} as const;
 const principal = {
   sandboxId: "00000000-0000-4000-8000-000000000001",
   teamId: "00000000-0000-4000-8000-000000000002",
@@ -17,7 +11,7 @@ const principal = {
 };
 
 describe("sandbox wire verifier (KOBE-22 tokens)", () => {
-  const verify = sandboxWireVerifier(keys);
+  const verify = sandboxWireVerifier(VERIFY_KEYS);
   const { tokens } = issueSessionTokens(principal, keys);
 
   it("accepts the sandbox-wire token and yields its claims", () => {
@@ -55,7 +49,8 @@ describe("sandbox wire verifier (KOBE-22 tokens)", () => {
     const none = Buffer.from('{"alg":"none","typ":"JWT"}').toString("base64url");
     expect(() => verify(`${none}.${payload}.`)).toThrow();
     const hs512 = Buffer.from('{"alg":"HS512","typ":"JWT"}').toString("base64url");
-    const mac = createHmac("sha512", keys["kobe.sandbox-wire"])
+    // HMAC with the public key as the secret (algorithm confusion): refused.
+    const mac = createHmac("sha512", KEY_PAIRS["kobe.sandbox-wire"].publicPem)
       .update(`${hs512}.${payload}`)
       .digest("base64url");
     expect(() => verify(`${hs512}.${payload}.${mac}`)).toThrow();

@@ -25,7 +25,7 @@ check() { # name, expected-regex, runner, command...
 check "runs as non-root uid 1000" '^1000$' run id -u
 host() { "$@"; }
 check "image default user is 1000:1000" '^1000:1000$' host docker image inspect --format '{{.Config.User}}' "$IMAGE"
-check "pi is 1.0.x" '(^|[^0-9])1\.0\.[0-9]+' run pi --version
+check "pi is 1.4.x" '(^|[^0-9])1\.4\.[0-9]+' run pi --version
 check "node is 22.x (>= 22.19)" '^v22\.(19|[2-9][0-9])\.' run node --version
 check "python is 3.12" '^Python 3\.12\.' run python3 --version
 check "python data stack imports" '^ok$' run python3 -c \

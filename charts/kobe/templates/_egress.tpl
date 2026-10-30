@@ -42,17 +42,13 @@ predates these keys still renders. Keep in sync with values.yaml.
 {{- end -}}
 
 {{/*
-Egress proxy env (services/egress-proxy/src/config.ts): the database (app role), its own session
-key only (never the other audiences' keys), the header-injection secret (KOBE-39), and limits.
+Egress proxy env (services/egress-proxy/src/config.ts): the database (app role), its audience's
+session-token public key only (never a private key, never the other audiences', KOBE-513), the header-injection secret (KOBE-39), and limits.
 */}}
 {{- define "kobe.egressProxyEnv" -}}
 {{- $e := include "kobe.egressProxyValues" . | fromJson -}}
 {{ include "kobe.databaseEnv" . }}
-- name: KOBE_SESSION_KEY_EGRESS_PROXY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "kobe.sessionKeysSecretName" . }}
-      key: egress-proxy
+{{ include "kobe.sessionVerifyKeyEnv" (dict "root" . "env" "EGRESS_PROXY" "aud" "egress-proxy") }}
 - name: KOBE_EGRESS_ALLOWED_PORTS
   value: {{ join "," $e.allowedPorts | quote }}
 - name: KOBE_EGRESS_ALLOWED_INTERNAL_CIDRS

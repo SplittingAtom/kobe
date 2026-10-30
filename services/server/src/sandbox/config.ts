@@ -1,11 +1,22 @@
 import { SESSION_TOKEN_AUDIENCES, type SessionTokenAudience } from "@kobe/protocol";
+import {
+  loadSigningKey,
+  loadVerifyKeys,
+  mergeVerifyKeys,
+  signingKeyEnvName,
+  verifyKeyEnvName,
+  verifyKeysOf,
+  type SessionSigningKey,
+  type SessionVerifyKeys,
+} from "@kobe/session-token";
 import { z } from "zod";
 import { KOBE_ENDPOINTS, type KobeEndpoint } from "./constants.js";
 
 /**
  * Sandbox provider configuration (spec D11, D12). The chart renders it into KOBE_SANDBOX_CONFIG
- * (JSON, from the `sandbox` values) and the per-audience session-token keys into
- * KOBE_SESSION_KEY_* (from the generated Secret). Validated at startup; invalid config fails fast.
+ * (JSON, from the `sandbox` values), the per-audience Ed25519 private keys of the session tokens
+ * into KOBE_SESSION_SIGNING_KEY_* (from the generated Secret) and their public keys into
+ * KOBE_SESSION_VERIFY_KEY_* (KOBE-513). Validated at startup; invalid config fails fast.
  */
 
 /** D14: idle time before hibernation, team range 5–60 minutes. */
@@ -178,21 +189,22 @@ export function quantityBytes(q: string): number {
   return Math.floor(Number(m[1]) * (QUANTITY_FACTORS[m[2] ?? ""] ?? 1));
 }
 
-/** KOBE_SESSION_KEY_<AUDIENCE>: one HMAC key per audience (≥ 32 chars). */
-export const sessionKeyEnvName = (audience: SessionTokenAudience): string =>
-  `KOBE_SESSION_KEY_${audience
-    .replace(/^kobe\./, "")
-    .replace(/-/g, "_")
-    .toUpperCase()}`;
+/**
+ * KOBE_SESSION_SIGNING_KEY_<AUDIENCE>: one Ed25519 private key (PKCS#8 PEM) per audience;
+ * KOBE_SESSION_VERIFY_KEY_<AUDIENCE>: its public key bundle (optional here, for rotations).
+ */
+export { signingKeyEnvName, verifyKeyEnvName };
 
-export type SessionKeys = Readonly<Record<SessionTokenAudience, string>>;
+/** The server's signing keys, one per audience (it is the only holder of private keys). */
+export type SessionKeys = Readonly<Record<SessionTokenAudience, SessionSigningKey>>;
+/** Public keys the server verifies its own tokens with: its key plus any rotation bundle. */
+export type SessionVerifyKeySets = Readonly<Record<SessionTokenAudience, SessionVerifyKeys>>;
 
 export interface SandboxConfig {
   readonly settings: SandboxSettings;
   readonly sessionKeys: SessionKeys;
+  readonly sessionVerifyKeys: SessionVerifyKeySets;
 }
-
-const MIN_KEY_LENGTH = 32;
 
 /**
  * Returns undefined when KOBE_SANDBOX_CONFIG is unset (the sandbox provider stays disabled and
@@ -223,22 +235,37 @@ export function loadSandboxConfig(
 ): SandboxConfig | undefined {
   const settings = loadSandboxSettings(env);
   if (!settings) return undefined;
-  const keys: Partial<Record<SessionTokenAudience, string>> = {};
+  const keys: Partial<Record<SessionTokenAudience, SessionSigningKey>> = {};
+  const verify: Partial<Record<SessionTokenAudience, SessionVerifyKeys>> = {};
   const problems: string[] = [];
   for (const audience of SESSION_TOKEN_AUDIENCES) {
-    const name = sessionKeyEnvName(audience);
+    // Never echo values: these are private keys.
+    const name = signingKeyEnvName(audience);
     const value = env[name];
-    // Never echo the value: these are signing keys.
-    if (!value || value.length < MIN_KEY_LENGTH) {
-      problems.push(`${name} must be at least ${MIN_KEY_LENGTH} characters`);
-    } else {
-      keys[audience] = value;
+    if (!value?.trim()) {
+      problems.push(`${name} is required (Ed25519 private key PEM)`);
+      continue;
+    }
+    try {
+      const signing = loadSigningKey(value, name);
+      keys[audience] = signing;
+      // During a rotation the bundle also carries the previous public key (docs/install.md).
+      const bundle = env[verifyKeyEnvName(audience)];
+      verify[audience] = bundle?.trim()
+        ? mergeVerifyKeys(verifyKeysOf(signing), loadVerifyKeys(bundle, verifyKeyEnvName(audience)))
+        : verifyKeysOf(signing);
+    } catch (err) {
+      problems.push((err as Error).message);
     }
   }
-  const distinct = new Set(Object.values(keys));
+  const distinct = new Set(Object.values(keys).map((k) => k.kid));
   if (problems.length === 0 && distinct.size !== SESSION_TOKEN_AUDIENCES.length) {
-    problems.push("KOBE_SESSION_KEY_* must all differ (one key per audience)");
+    problems.push("KOBE_SESSION_SIGNING_KEY_* must all differ (one key pair per audience)");
   }
   if (problems.length > 0) throw new Error(`Invalid configuration: ${problems.join("; ")}`);
-  return { settings, sessionKeys: keys as SessionKeys };
+  return {
+    settings,
+    sessionKeys: keys as SessionKeys,
+    sessionVerifyKeys: verify as SessionVerifyKeySets,
+  };
 }

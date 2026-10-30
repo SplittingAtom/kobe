@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { signSessionToken } from "@kobe/session-token";
+import { generateSessionKeyPair, signSessionToken } from "@kobe/session-token";
 import {
   EXPIRED_TOKEN_MAX_AGE_SECONDS,
   bearerToken,
@@ -7,7 +7,9 @@ import {
   verifySandboxToken,
 } from "./auth.js";
 
-const KEY = "k".repeat(40);
+const PAIR = generateSessionKeyPair();
+const KEY = PAIR.signing;
+const PUB = PAIR.verify;
 const claims = (aud: "kobe.mcp-proxy" | "kobe.sandbox-wire") => ({
   iss: "kobe-server" as const,
   aud,
@@ -29,18 +31,22 @@ describe("sandbox token at the proxy", () => {
 
   it("accepts only an unexpired kobe.mcp-proxy token signed with the proxy's key", () => {
     expect(
-      verifySandboxToken(signSessionToken(claims("kobe.mcp-proxy"), KEY), KEY, 1_500)?.sub,
+      verifySandboxToken(signSessionToken(claims("kobe.mcp-proxy"), KEY), PUB, 1_500)?.sub,
     ).toBe(claims("kobe.mcp-proxy").sub);
     expect(
-      verifySandboxToken(signSessionToken(claims("kobe.mcp-proxy"), KEY), KEY, 2_500),
+      verifySandboxToken(signSessionToken(claims("kobe.mcp-proxy"), KEY), PUB, 2_500),
     ).toBeUndefined();
     expect(
-      verifySandboxToken(signSessionToken(claims("kobe.sandbox-wire"), KEY), KEY, 1_500),
+      verifySandboxToken(signSessionToken(claims("kobe.sandbox-wire"), KEY), PUB, 1_500),
     ).toBeUndefined();
     expect(
-      verifySandboxToken(signSessionToken(claims("kobe.mcp-proxy"), "o".repeat(40)), KEY, 1_500),
+      verifySandboxToken(
+        signSessionToken(claims("kobe.mcp-proxy"), generateSessionKeyPair().signing),
+        PUB,
+        1_500,
+      ),
     ).toBeUndefined();
-    expect(verifySandboxToken(undefined, KEY)).toBeUndefined();
+    expect(verifySandboxToken(undefined, PUB)).toBeUndefined();
   });
 });
 
@@ -53,20 +59,20 @@ describe("expired sandbox token (the 404 on a live MCP session)", () => {
   });
 
   it("is true for a genuine token expired within the cap, including exactly at it", () => {
-    expect(isExpiredSandboxToken(token, KEY, exp + 1)).toBe(true);
-    expect(isExpiredSandboxToken(token, KEY, exp + EXPIRED_TOKEN_MAX_AGE_SECONDS)).toBe(true);
+    expect(isExpiredSandboxToken(token, PUB, exp + 1)).toBe(true);
+    expect(isExpiredSandboxToken(token, PUB, exp + EXPIRED_TOKEN_MAX_AGE_SECONDS)).toBe(true);
   });
 
   it("is false past the cap, so the caller answers 401", () => {
-    expect(isExpiredSandboxToken(token, KEY, exp + EXPIRED_TOKEN_MAX_AGE_SECONDS + 1)).toBe(false);
+    expect(isExpiredSandboxToken(token, PUB, exp + EXPIRED_TOKEN_MAX_AGE_SECONDS + 1)).toBe(false);
   });
 
   it("is false for a live, forged or wrong-audience token and for none", () => {
-    expect(isExpiredSandboxToken(token, KEY, exp - 1)).toBe(false);
-    expect(isExpiredSandboxToken(token, "o".repeat(40), exp + 1)).toBe(false);
+    expect(isExpiredSandboxToken(token, PUB, exp - 1)).toBe(false);
+    expect(isExpiredSandboxToken(token, generateSessionKeyPair().verify, exp + 1)).toBe(false);
     expect(
-      isExpiredSandboxToken(signSessionToken(claims("kobe.sandbox-wire"), KEY), KEY, exp + 1),
+      isExpiredSandboxToken(signSessionToken(claims("kobe.sandbox-wire"), KEY), PUB, exp + 1),
     ).toBe(false);
-    expect(isExpiredSandboxToken(undefined, KEY, exp + 1)).toBe(false);
+    expect(isExpiredSandboxToken(undefined, PUB, exp + 1)).toBe(false);
   });
 });

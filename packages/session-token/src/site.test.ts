@@ -8,14 +8,17 @@ import {
   verifySiteEgressToken,
 } from "./index.js";
 import { signJws } from "./jws.js";
+import { generateSessionKeyPair } from "./keys.js";
 
-const KEY = "k".repeat(40);
+const PAIR = generateSessionKeyPair();
+const KEY = PAIR.signing;
+const PUB = PAIR.verify;
 const NOW = 1_790_000_000;
 
 describe("site egress tokens (KOBE-343)", () => {
   it("round-trips for its purpose, with a short lifetime", () => {
     const token = signSiteEgressToken("skill-mirror", KEY, NOW);
-    const claims = verifySiteEgressToken(token, KEY, NOW);
+    const claims = verifySiteEgressToken(token, PUB, NOW);
     expect(claims).toMatchObject({
       iss: "kobe-server",
       aud: "kobe.egress-proxy.site",
@@ -25,17 +28,19 @@ describe("site egress tokens (KOBE-343)", () => {
     });
     expect(SITE_EGRESS_TOKEN_TTL_SECONDS).toBeLessThanOrEqual(300);
     // Governed imports (KOBE-344) go out as their own job.
-    expect(verifySiteEgressToken(signSiteEgressToken("skill-import", KEY, NOW), KEY, NOW).sub).toBe(
+    expect(verifySiteEgressToken(signSiteEgressToken("skill-import", KEY, NOW), PUB, NOW).sub).toBe(
       "skill-import",
     );
   });
 
   it("refuses expiry, another key and unknown purposes", () => {
     const token = signSiteEgressToken("skill-mirror", KEY, NOW);
-    expect(() => verifySiteEgressToken(token, KEY, NOW + SITE_EGRESS_TOKEN_TTL_SECONDS)).toThrow(
+    expect(() => verifySiteEgressToken(token, PUB, NOW + SITE_EGRESS_TOKEN_TTL_SECONDS)).toThrow(
       /expired/,
     );
-    expect(() => verifySiteEgressToken(token, "x".repeat(40), NOW)).toThrow(/signature/);
+    expect(() => verifySiteEgressToken(token, generateSessionKeyPair().verify, NOW)).toThrow(
+      /key id/,
+    );
     const other = signJws(
       {
         iss: "kobe-server",
@@ -47,12 +52,12 @@ describe("site egress tokens (KOBE-343)", () => {
       },
       KEY,
     );
-    expect(() => verifySiteEgressToken(other, KEY, NOW)).toThrow(SessionTokenError);
+    expect(() => verifySiteEgressToken(other, PUB, NOW)).toThrow(SessionTokenError);
   });
 
   it("is never a sandbox session token, and a sandbox token is never a site token", () => {
     const site = signSiteEgressToken("skill-mirror", KEY, NOW);
-    expect(() => verifySessionToken(site, "kobe.egress-proxy", KEY, NOW)).toThrow(/contract/);
+    expect(() => verifySessionToken(site, "kobe.egress-proxy", PUB, NOW)).toThrow(/contract/);
     const sandbox = signSessionToken(
       {
         iss: "kobe-server",
@@ -66,6 +71,6 @@ describe("site egress tokens (KOBE-343)", () => {
       },
       KEY,
     );
-    expect(() => verifySiteEgressToken(sandbox, KEY, NOW)).toThrow(/claims/);
+    expect(() => verifySiteEgressToken(sandbox, PUB, NOW)).toThrow(/claims/);
   });
 });

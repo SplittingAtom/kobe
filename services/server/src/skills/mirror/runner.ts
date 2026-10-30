@@ -6,7 +6,7 @@ import type { HttpClient } from "isomorphic-git";
 import type pg from "pg";
 import { PROVENANCE_PATH, canonicalJsonBytes, provenanceSchema } from "@kobe/protocol";
 import { skillPackageHashes } from "@kobe/protocol/node";
-import { signSiteEgressToken } from "@kobe/session-token";
+import { signSiteEgressToken, type SessionSigningKey } from "@kobe/session-token";
 import type { KobeDb } from "@kobe/db";
 import { logger } from "../../logger.js";
 import type { BlobStore } from "../../retention/blobs.js";
@@ -41,8 +41,8 @@ export interface SkillMirrorDeps {
   readonly pool: Pick<pg.Pool, "connect">;
   readonly blobs: BlobStore;
   readonly credentials: { readonly username: string; readonly token: string } | null;
-  /** The egress proxy and its key (site egress tokens); null: this server can't push. */
-  readonly egress: { readonly proxyUrl: string; readonly key: string } | null;
+  /** The egress proxy and its signing key (site egress tokens); null: this server can't push. */
+  readonly egress: { readonly proxyUrl: string; readonly key: SessionSigningKey } | null;
   readonly author: MirrorAuthor;
   readonly now?: () => Date;
   /** Tests: the HTTP client for a remote (no proxy). */

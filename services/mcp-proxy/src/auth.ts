@@ -1,10 +1,15 @@
 import type { SessionTokenClaims } from "@kobe/protocol";
-import { SESSION_TOKEN_TTL_SECONDS, verifySessionToken } from "@kobe/session-token";
+import {
+  SESSION_TOKEN_TTL_SECONDS,
+  verifySessionToken,
+  type SessionVerifyKeys,
+} from "@kobe/session-token";
 
 /**
  * Sandbox authentication at the proxy (D27): `Authorization: Bearer <kobe.mcp-proxy session token>`,
- * verified with the MCP proxy's own key (HS256 pinned, exact header, audience, expiry; other
- * audiences' tokens fail the signature). This is a pre-filter that keeps junk away from the
+ * verified with the MCP proxy audience's public key(s) (EdDSA pinned, exact header, audience,
+ * expiry; other audiences' tokens carry another key id and fail). The proxy holds no private key,
+ * so it can never mint a token (KOBE-513). This is a pre-filter that keeps junk away from the
  * server; the server verifies the same token again and checks liveness and membership.
  */
 export function bearerToken(header: string | undefined): string | undefined {
@@ -27,10 +32,11 @@ export const EXPIRED_TOKEN_MAX_AGE_SECONDS = 2 * SESSION_TOKEN_TTL_SECONDS;
  */
 export function isExpiredSandboxToken(
   token: string | undefined,
-  key: string,
+  keys: SessionVerifyKeys,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): boolean {
-  if (token === undefined || verifySandboxToken(token, key, nowSeconds) !== undefined) return false;
+  if (token === undefined || verifySandboxToken(token, keys, nowSeconds) !== undefined)
+    return false;
   try {
     const payload = JSON.parse(
       Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"),
@@ -40,7 +46,7 @@ export function isExpiredSandboxToken(
       typeof iat === "number" &&
       typeof exp === "number" &&
       nowSeconds - exp <= EXPIRED_TOKEN_MAX_AGE_SECONDS &&
-      verifySandboxToken(token, key, iat) !== undefined
+      verifySandboxToken(token, keys, iat) !== undefined
     );
   } catch {
     return false;
@@ -49,12 +55,12 @@ export function isExpiredSandboxToken(
 
 export function verifySandboxToken(
   token: string | undefined,
-  key: string,
+  keys: SessionVerifyKeys,
   nowSeconds?: number,
 ): SessionTokenClaims | undefined {
   if (token === undefined) return undefined;
   try {
-    return verifySessionToken(token, "kobe.mcp-proxy", key, nowSeconds);
+    return verifySessionToken(token, "kobe.mcp-proxy", keys, nowSeconds);
   } catch {
     return undefined;
   }

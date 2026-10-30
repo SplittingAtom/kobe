@@ -10,7 +10,7 @@ import {
 } from "@kobe/db";
 import type { ThinkingLevel } from "@kobe/protocol";
 import { deriveRunTokenKey } from "@kobe/protocol/node";
-import { signSessionToken, verifySessionToken } from "@kobe/session-token";
+import { generateSessionKeyPair, signSessionToken, verifySessionToken } from "@kobe/session-token";
 import pino from "pino";
 import { createModelGateway } from "../gateway.js";
 import { ByteBudget, CallLimiter, RequestRate } from "../limits.js";
@@ -75,6 +75,7 @@ function closeServer(server: Server): Promise<void> {
 
 export async function startLocalGateway(options: LocalGatewayOptions): Promise<LocalGateway> {
   const sessionKey = randomUUID() + randomUUID();
+  const sessionPair = generateSessionKeyPair();
   const box = new SecretBox("v".repeat(40), VIRTUAL_KEY_PURPOSE);
   const identity = { sandboxId: randomUUID(), teamId: randomUUID(), userId: randomUUID() };
   const virtualKey = `sk-bf-${randomUUID()}`;
@@ -101,7 +102,7 @@ export async function startLocalGateway(options: LocalGatewayOptions): Promise<L
     { ttlMs: 0 },
   );
   const shim = createModelGateway({
-    verify: (token) => verifySessionToken(token, "kobe.model-gateway", sessionKey),
+    verify: (token) => verifySessionToken(token, "kobe.model-gateway", sessionPair.verify),
     principals,
     isRunLeased: async (_team, runId) => options.isRunLeased?.(runId) ?? true,
     runThinking: async (_team, runId) => options.runThinking?.(runId),
@@ -143,7 +144,7 @@ export async function startLocalGateway(options: LocalGatewayOptions): Promise<L
           exp: now + (over.expiresInSeconds ?? 900),
           jti: randomUUID().replace(/-/g, ""),
         },
-        sessionKey,
+        sessionPair.signing,
       );
     },
     setEnabledModels(models) {

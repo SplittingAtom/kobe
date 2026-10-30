@@ -125,7 +125,8 @@ export async function executeGrep(
     return lines;
   };
 
-  const args = ["rg", "--json", "--line-number", "--color=never", "--hidden"];
+  // --no-config like Pi 1.4.0's grep: RIPGREP_CONFIG_PATH must not change the tool contract.
+  const args = ["rg", "--no-config", "--json", "--line-number", "--color=never", "--hidden"];
   if (input.ignoreCase) args.push("--ignore-case");
   if (input.literal) args.push("--fixed-strings");
   if (input.glob) args.push("--glob", input.glob);

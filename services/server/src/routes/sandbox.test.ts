@@ -8,7 +8,7 @@ import { SandboxAuthError } from "../sandbox/provider.js";
 import { verifySessionToken } from "../sandbox/session-token.js";
 import { SESSION_WAIT } from "../sandbox/session-hold.js";
 import { createSandboxApp } from "./sandbox.js";
-import { KEYS, TEAM, USER, must } from "../testing/sandbox-fixtures.js";
+import { KEYS, TEAM, USER, VERIFY_KEYS, must } from "../testing/sandbox-fixtures.js";
 
 const SANDBOX_ID = "4f9c2d5a-6b7e-4f90-8bc2-4d5e6f708192";
 const ASSIGNED: BootstrapIdentity = {
@@ -56,8 +56,8 @@ describe("POST /v1/sandbox/session", () => {
     };
     expect(seen).toBe("bootstrap.token.value");
     expect(body).toMatchObject({ sandbox_id: SANDBOX_ID, team_id: TEAM.id, user_id: USER });
-    for (const [aud, key] of Object.entries(KEYS)) {
-      const claims = verifySessionToken(must(body.tokens[aud]), aud as keyof typeof KEYS, key);
+    for (const [aud, keys] of Object.entries(VERIFY_KEYS)) {
+      const claims = verifySessionToken(must(body.tokens[aud]), aud as keyof typeof KEYS, keys);
       expect(claims.sub).toBe(SANDBOX_ID);
     }
   });

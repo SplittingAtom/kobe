@@ -49,17 +49,13 @@ Server env: the internal listener and the key the MCP proxy must present, the pr
 {{- end -}}
 
 {{/*
-MCP proxy env (services/mcp-proxy/src/config.ts): its own session key only (never the other
-audiences'), the server's internal listener and its key, the upstream policy and limits. No
+MCP proxy env (services/mcp-proxy/src/config.ts): its audience's session-token public key only
+(never a private key, never the other audiences', KOBE-513), the server's internal listener and its key, the upstream policy and limits. No
 database: the server decides every call.
 */}}
 {{- define "kobe.mcpProxyEnv" -}}
 {{- $m := include "kobe.mcpProxyValues" . | fromJson -}}
-- name: KOBE_SESSION_KEY_MCP_PROXY
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "kobe.sessionKeysSecretName" . }}
-      key: mcp-proxy
+{{ include "kobe.sessionVerifyKeyEnv" (dict "root" . "env" "MCP_PROXY" "aud" "mcp-proxy") }}
 - name: KOBE_MCP_INTERNAL_KEY
   valueFrom:
     secretKeyRef:

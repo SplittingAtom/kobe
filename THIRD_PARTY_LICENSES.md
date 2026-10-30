@@ -962,41 +962,39 @@ Documented exceptions (`tools/license-check/license-exceptions.json`):
 
 What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sandbox`): the Python data stack (`images/sandbox/requirements.txt`), Pi and its dependencies (`images/sandbox/pi/package-lock.json`), kobe-sandbox-agent's production dependencies and the npm CLI. The committed report is `images/sandbox/third-party-licenses.json`; CI `sandbox-image` compares it with the built image and runs the policy check on it.
 
-312 packages, 312 of them shipped in an image.
+310 packages, 310 of them shipped in an image.
 
 | Component | Version | License (SPDX) | How used | Where | License text |
 | --- | --- | --- | --- | --- | --- |
-| @anthropic-ai/sdk | 0.124.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@anthropic-ai/sdk/v/0.124.0) |
+| @anthropic-ai/sdk | 0.129.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@anthropic-ai/sdk/v/0.129.0) |
 | @aws-sdk/client-bedrock-runtime | 3.1127.0 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/client-bedrock-runtime/v/3.1127.0) |
-| @aws-sdk/core | 3.977.9 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/core/v/3.977.9) |
-| @aws-sdk/credential-provider-env | 3.972.70 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-env/v/3.972.70) |
-| @aws-sdk/credential-provider-http | 3.972.72 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-http/v/3.972.72) |
-| @aws-sdk/credential-provider-ini | 3.973.15 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-ini/v/3.973.15) |
-| @aws-sdk/credential-provider-login | 3.972.77 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-login/v/3.972.77) |
-| @aws-sdk/credential-provider-node | 3.972.82 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-node/v/3.972.82) |
-| @aws-sdk/credential-provider-process | 3.972.70 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-process/v/3.972.70) |
-| @aws-sdk/credential-provider-sso | 3.973.14 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-sso/v/3.973.14) |
-| @aws-sdk/credential-provider-web-identity | 3.972.76 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-web-identity/v/3.972.76) |
-| @aws-sdk/eventstream-handler-node | 3.972.34 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/eventstream-handler-node/v/3.972.34) |
-| @aws-sdk/middleware-eventstream | 3.972.29 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/middleware-eventstream/v/3.972.29) |
-| @aws-sdk/middleware-websocket | 3.972.52 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/middleware-websocket/v/3.972.52) |
-| @aws-sdk/nested-clients | 3.997.44 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/nested-clients/v/3.997.44) |
-| @aws-sdk/signature-v4-multi-region | 3.996.46 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/signature-v4-multi-region/v/3.996.46) |
-| @aws-sdk/token-providers | 3.1116.0 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/token-providers/v/3.1116.0) |
+| @aws-sdk/core | 3.978.7 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/core/v/3.978.7) |
+| @aws-sdk/credential-provider-env | 3.972.78 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-env/v/3.972.78) |
+| @aws-sdk/credential-provider-http | 3.972.80 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-http/v/3.972.80) |
+| @aws-sdk/credential-provider-ini | 3.973.23 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-ini/v/3.973.23) |
+| @aws-sdk/credential-provider-login | 3.972.85 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-login/v/3.972.85) |
+| @aws-sdk/credential-provider-node | 3.972.90 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-node/v/3.972.90) |
+| @aws-sdk/credential-provider-process | 3.972.78 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-process/v/3.972.78) |
+| @aws-sdk/credential-provider-sso | 3.973.22 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-sso/v/3.973.22) |
+| @aws-sdk/credential-provider-web-identity | 3.972.84 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-web-identity/v/3.972.84) |
+| @aws-sdk/eventstream-handler-node | 3.972.39 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/eventstream-handler-node/v/3.972.39) |
+| @aws-sdk/middleware-eventstream | 3.972.35 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/middleware-eventstream/v/3.972.35) |
+| @aws-sdk/middleware-websocket | 3.972.60 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/middleware-websocket/v/3.972.60) |
+| @aws-sdk/nested-clients | 3.997.52 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/nested-clients/v/3.997.52) |
+| @aws-sdk/signature-v4-multi-region | 3.996.50 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/signature-v4-multi-region/v/3.996.50) |
 | @aws-sdk/token-providers | 3.1127.0 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/token-providers/v/3.1127.0) |
-| @aws-sdk/types | 3.974.5 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/types/v/3.974.5) |
-| @aws-sdk/xml-builder | 3.972.40 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/xml-builder/v/3.972.40) |
+| @aws-sdk/token-providers | 3.1159.0 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/token-providers/v/3.1159.0) |
+| @aws-sdk/types | 3.975.0 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/types/v/3.975.0) |
+| @aws-sdk/xml-builder | 3.972.42 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws-sdk/xml-builder/v/3.972.42) |
 | @aws/lambda-invoke-store | 0.3.0 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@aws/lambda-invoke-store/v/0.3.0) |
-| @babel/runtime | 7.29.2 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@babel/runtime/v/7.29.2) |
-| @earendil-works/chord | 1.0.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@earendil-works/chord/v/1.0.0) |
-| @earendil-works/pi-agent-core | 1.0.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@earendil-works/pi-agent-core/v/1.0.0) |
-| @earendil-works/pi-ai | 1.0.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@earendil-works/pi-ai/v/1.0.0) |
-| @earendil-works/pi-codemode | 1.0.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@earendil-works/pi-codemode/v/1.0.0) |
-| @earendil-works/pi-coding-agent | 1.0.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@earendil-works/pi-coding-agent/v/1.0.0) |
-| @earendil-works/pi-mcp | 1.0.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@earendil-works/pi-mcp/v/1.0.0) |
-| @earendil-works/pi-telemetry | 1.0.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@earendil-works/pi-telemetry/v/1.0.0) |
-| @earendil-works/pi-tui | 1.0.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@earendil-works/pi-tui/v/1.0.0) |
-| @esbuild/linux-x64 | 0.28.2 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@esbuild/linux-x64/v/0.28.2) |
+| @babel/runtime | 7.29.10 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@babel/runtime/v/7.29.10) |
+| @earendil-works/pi-agent-core | 1.4.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@earendil-works/pi-agent-core/v/1.4.0) |
+| @earendil-works/pi-ai | 1.4.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@earendil-works/pi-ai/v/1.4.0) |
+| @earendil-works/pi-codemode | 1.4.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@earendil-works/pi-codemode/v/1.4.0) |
+| @earendil-works/pi-coding-agent | 1.4.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@earendil-works/pi-coding-agent/v/1.4.0) |
+| @earendil-works/pi-mcp | 1.4.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@earendil-works/pi-mcp/v/1.4.0) |
+| @earendil-works/pi-telemetry | 1.4.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@earendil-works/pi-telemetry/v/1.4.0) |
+| @earendil-works/pi-tui | 1.4.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@earendil-works/pi-tui/v/1.4.0) |
 | @gar/promise-retry | 1.0.3 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@gar/promise-retry/v/1.0.3) |
 | @google/genai | 2.21.0 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@google/genai/v/2.21.0) |
 | @isaacs/fs-minipass | 4.0.1 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@isaacs/fs-minipass/v/4.0.1) |
@@ -1024,7 +1022,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | @protobufjs/float | 1.0.2 | BSD-3-Clause | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@protobufjs/float/v/1.0.2) |
 | @protobufjs/path | 1.1.2 | BSD-3-Clause | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@protobufjs/path/v/1.1.2) |
 | @protobufjs/pool | 1.1.0 | BSD-3-Clause | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@protobufjs/pool/v/1.1.0) |
-| @protobufjs/utf8 | 1.1.1 | BSD-3-Clause | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@protobufjs/utf8/v/1.1.1) |
+| @protobufjs/utf8 | 1.1.2 | BSD-3-Clause | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@protobufjs/utf8/v/1.1.2) |
 | @sigstore/bundle | 5.0.0 | Apache-2.0 | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@sigstore/bundle/v/5.0.0) |
 | @sigstore/core | 4.0.1 | Apache-2.0 | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@sigstore/core/v/4.0.1) |
 | @sigstore/protobuf-specs | 0.5.1 | Apache-2.0 | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@sigstore/protobuf-specs/v/0.5.1) |
@@ -1032,16 +1030,17 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | @sigstore/tuf | 5.0.0 | Apache-2.0 | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@sigstore/tuf/v/5.0.0) |
 | @sigstore/verify | 4.1.0 | Apache-2.0 | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@sigstore/verify/v/4.1.0) |
 | @silvia-odwyer/photon-node | 0.3.4 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@silvia-odwyer/photon-node/v/0.3.4) |
-| @smithy/core | 3.33.3 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@smithy/core/v/3.33.3) |
+| @smithy/core | 3.37.0 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@smithy/core/v/3.37.0) |
 | @smithy/credential-provider-imds | 4.5.2 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@smithy/credential-provider-imds/v/4.5.2) |
 | @smithy/fetch-http-handler | 5.8.0 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@smithy/fetch-http-handler/v/5.8.0) |
 | @smithy/node-http-handler | 4.12.1 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@smithy/node-http-handler/v/4.12.1) |
-| @smithy/signature-v4 | 5.7.3 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@smithy/signature-v4/v/5.7.3) |
-| @smithy/types | 4.18.0 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@smithy/types/v/4.18.0) |
+| @smithy/node-http-handler | 4.13.0 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@smithy/node-http-handler/v/4.13.0) |
+| @smithy/signature-v4 | 5.7.4 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@smithy/signature-v4/v/5.7.4) |
+| @smithy/types | 4.19.0 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@smithy/types/v/4.19.0) |
 | @stablelib/base64 | 1.0.1 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@stablelib/base64/v/1.0.1) |
 | @tufjs/canonical-json | 2.0.0 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@tufjs/canonical-json/v/2.0.0) |
 | @tufjs/models | 5.0.0 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@tufjs/models/v/5.0.0) |
-| @types/node | 22.19.19 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@types/node/v/22.19.19) |
+| @types/node | 26.6.6 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@types/node/v/26.6.6) |
 | @types/retry | 0.12.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/@types/retry/v/0.12.0) |
 | abbrev | 5.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/abbrev/v/5.0.0) |
 | agent-base | 7.1.4 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/agent-base/v/7.1.4) |
@@ -1055,7 +1054,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | bignumber.js | 9.3.1 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/bignumber.js/v/9.3.1) |
 | bin-links | 7.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/bin-links/v/7.0.0) |
 | binary-extensions | 3.1.0 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/binary-extensions/v/3.1.0) |
-| bowser | 2.14.1 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/bowser/v/2.14.1) |
+| bowser | 2.15.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/bowser/v/2.15.0) |
 | brace-expansion | 5.0.12 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi), npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/brace-expansion/v/5.0.12) |
 | buffer-equal-constant-time | 1.0.1 | BSD-3-Clause | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/buffer-equal-constant-time/v/1.0.1) |
 | cacache | 21.0.1 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/cacache/v/21.0.1) |
@@ -1078,7 +1077,6 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | duckdb | 1.5.6 | MIT | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/duckdb/1.5.6/) |
 | ecdsa-sig-formatter | 1.0.11 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/ecdsa-sig-formatter/v/1.0.11) |
 | env-paths | 2.2.1 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/env-paths/v/2.2.1) |
-| esbuild | 0.28.2 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/esbuild/v/0.28.2) |
 | et_xmlfile | 2.0.0 | MIT | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/et_xmlfile/2.0.0/) |
 | executing | 2.3.0 | MIT | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/executing/2.3.0/) |
 | exponential-backoff | 3.1.3 | Apache-2.0 | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/exponential-backoff/v/3.1.3) |
@@ -1091,11 +1089,11 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | fonttools | 4.66.1 | MIT | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/fonttools/4.66.1/) |
 | formdata-polyfill | 4.0.10 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/formdata-polyfill/v/4.0.10) |
 | fs-minipass | 3.0.3 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/fs-minipass/v/3.0.3) |
-| gaxios | 7.1.4 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/gaxios/v/7.1.4) |
+| gaxios | 7.3.1 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/gaxios/v/7.3.1) |
 | gcp-metadata | 8.1.2 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/gcp-metadata/v/8.1.2) |
 | get-east-asian-width | 1.6.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/get-east-asian-width/v/1.6.0) |
 | glob | 13.0.6 | BlueOak-1.0.0 | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/glob/v/13.0.6) |
-| google-auth-library | 10.6.2 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/google-auth-library/v/10.6.2) |
+| google-auth-library | 10.9.1 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/google-auth-library/v/10.9.1) |
 | google-logging-utils | 1.1.3 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/google-logging-utils/v/1.1.3) |
 | graceful-fs | 4.2.11 | ISC | bundled (npm package) | sandbox: Pi (/opt/pi), npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/graceful-fs/v/4.2.11) |
 | grok-mermaid | 0.2.3 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/grok-mermaid/v/0.2.3) |
@@ -1149,6 +1147,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | lru-cache | 11.5.2 | BlueOak-1.0.0 | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/lru-cache/v/11.5.2) |
 | lxml | 6.1.3 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/lxml/6.1.3/) |
 | make-fetch-happen | 16.0.1 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/make-fetch-happen/v/16.0.1) |
+| marked-cjk-friendly | 0.1.2 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/marked-cjk-friendly/v/0.1.2) |
 | marked | 18.0.11 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/marked/v/18.0.11) |
 | matplotlib-inline | 0.2.2 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/matplotlib-inline/0.2.2/) |
 | matplotlib | 3.11.2 | Python-2.0 (exception) | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/matplotlib/3.11.2/) |
@@ -1261,7 +1260,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | tuf-js | 6.0.0 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/tuf-js/v/6.0.0) |
 | typebox | 1.3.27 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/typebox/v/1.3.27) |
 | typing_extensions | 4.16.0 | PSF-2.0 (exception) | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/typing_extensions/4.16.0/) |
-| undici-types | 6.21.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/undici-types/v/6.21.0) |
+| undici-types | 8.9.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/undici-types/v/8.9.0) |
 | undici | 6.29.0 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/undici/v/6.29.0) |
 | undici | 8.10.2 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/undici/v/8.10.2) |
 | util-deprecate | 1.0.2 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/util-deprecate/v/1.0.2) |
@@ -1272,8 +1271,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | which | 2.0.2 | ISC | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/which/v/2.0.2) |
 | which | 7.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/which/v/7.0.0) |
 | write-file-atomic | 8.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/write-file-atomic/v/8.0.0) |
-| ws | 8.21.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/ws/v/8.21.0) |
-| ws | 8.22.0 | MIT | bundled (npm package) | sandbox: kobe-sandbox-agent | [license](https://www.npmjs.com/package/ws/v/8.22.0) |
+| ws | 8.22.0 | MIT | bundled (npm package) | sandbox: kobe-sandbox-agent, Pi (/opt/pi) | [license](https://www.npmjs.com/package/ws/v/8.22.0) |
 | yallist | 4.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/yallist/v/4.0.0) |
 | yallist | 5.0.0 | BlueOak-1.0.0 | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/yallist/v/5.0.0) |
 | yaml | 2.9.0 | ISC | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/yaml/v/2.9.0) |
@@ -1528,7 +1526,7 @@ What the Helm chart deploys or needs on the cluster, and the services it talks t
 
 | Component | Version | License (SPDX) | How used | Where | License text | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| Pi coding agent (`@earendil-works/pi-coding-agent`) | 1.0.0 (pinned in images/sandbox/pi/package-lock.json) | MIT | bundled (separate process, RPC mode under kobe-sandbox-agent) | sandbox image (/opt/pi); dependencies in the sandbox table | [license](https://github.com/earendil-works/pi/blob/v1.0.0/LICENSE) | Checked at v1.0.0: the repository has one LICENSE (MIT) at its root; the npm package declares MIT; packages/mcp/LICENSES holds the MIT license of the MCP TypeScript SDK. |
+| Pi coding agent (`@earendil-works/pi-coding-agent`) | 1.4.0 (pinned in images/sandbox/pi/package-lock.json) | MIT | bundled (separate process, RPC mode under kobe-sandbox-agent) | sandbox image (/opt/pi); dependencies in the sandbox table | [license](https://github.com/earendil-works/pi/blob/v1.4.0/LICENSE) | Checked at v1.0.0 and v1.4.0: the repository has one LICENSE (MIT) at its root; the npm package declares MIT; packages/mcp/LICENSES holds the MIT license of the MCP TypeScript SDK. |
 | agent-sandbox controller (kubernetes-sigs/agent-sandbox) | v1.0.4 (scripts/install-agent-sandbox.sh) | Apache-2.0 | separate process (cluster prerequisite, installed by the site) | cluster (agent-sandbox-system); CRDs Sandbox, SandboxTemplate/Claim/WarmPool | [license](https://github.com/kubernetes-sigs/agent-sandbox/blob/v1.0.4/LICENSE) | Checked at v1.0.4: a single LICENSE (Apache-2.0) at the repository root, no NOTICE. |
 | gVisor (runsc) | 20260928.0 (scripts/install-gvisor-k3s.sh, scripts/dev-cluster.sh) | Apache-2.0 | separate process (container runtime, cluster prerequisite) | every node; RuntimeClass handler runsc | [license](https://github.com/google/gvisor/blob/master/LICENSE) |  |
 | Kata Containers | chosen by the site (alternative to gVisor) | Apache-2.0 | separate process (container runtime, optional) | nodes; RuntimeClass handler kata* | [license](https://github.com/kata-containers/kata-containers/blob/main/LICENSE) |  |

@@ -108,6 +108,58 @@ the kubelet (pods there cannot mount them). Alternatively configure registry cre
 nodes (k3s `registries.yaml`). Kobe assumes one site per cluster (`kobe-team-*` names are
 cluster-wide).
 
+### Session-token keys
+
+Session tokens are compact JWS signed with **Ed25519** (`alg` `EdDSA`), one key pair per audience
+(`sandbox-wire`, `model-gateway`, `mcp-proxy`, `egress-proxy`; KOBE-513). Only the server holds the
+private keys. The model gateway, MCP proxy and egress proxy hold only their own audience's public
+key, so a compromised service can check tokens but never mint one, not even for its own audience.
+The header names the key (`kid`, derived from the public key); verifiers accept only their own
+keys, never an algorithm or key named by the token.
+
+By default the chart generates the pairs and keeps them across upgrades: the private keys and their
+public halves in the Secret `<release>-sandbox-session-keys` (`<audience>.key`, `<audience>.pub`;
+the public half is a self-signed certificate because Helm cannot derive a bare public key, and only
+its key is used), and the public halves again in the ConfigMap
+`<release>-sandbox-session-verify-keys`, which is all the verifying services read. The same Secret
+holds `model-gateway` (the gateway's master secret shared with the server, from which run, trace
+and server-call token keys are derived) and `approval-hmac`.
+
+**Pre-created keys (GitOps).** Set `sandbox.sessionKeysSecret` and
+`sandbox.sessionVerifyKeysConfigMap` (the chart refuses one without the other). The Secret may
+also hold `<audience>.pub`, the server's rotation bundle (optional; the server always accepts its
+own key):
+
+```bash
+for a in sandbox-wire model-gateway mcp-proxy egress-proxy; do
+  openssl genpkey -algorithm ed25519 -out "$a.key"
+  openssl pkey -in "$a.key" -pubout -out "$a.pub"
+done
+kubectl -n kobe create secret generic kobe-session-keys \
+  --from-file=sandbox-wire.key --from-file=model-gateway.key \
+  --from-file=mcp-proxy.key --from-file=egress-proxy.key \
+  --from-literal=model-gateway="$(openssl rand -base64 36)" \
+  --from-literal=approval-hmac="$(openssl rand -base64 36)"
+kubectl -n kobe create configmap kobe-session-verify-keys \
+  --from-file=sandbox-wire=sandbox-wire.pub --from-file=model-gateway=model-gateway.pub \
+  --from-file=mcp-proxy=mcp-proxy.pub --from-file=egress-proxy=egress-proxy.pub
+```
+
+**Rotating an audience's key pair.** Tokens live 15 minutes, and a verifier accepts every key in
+its bundle (up to four PEM blocks, current and previous during a rotation), so rotate in three
+steps; nothing is refused at any point:
+
+1. Generate the new pair (as above). Append the new public key to the audience's bundle, after the
+   old one, in the Secret's `<audience>.pub` (the server reads its bundle from the Secret only)
+   and in the ConfigMap (pre-created keys; generated keys: the next `helm upgrade` copies the
+   Secret's `.pub` into the ConfigMap). Restart the verifiers and the server
+   (`kubectl rollout restart deploy/<release>-server deploy/<release>-mcp-proxy …`): env is read
+   at start.
+2. Replace `<audience>.key` in the Secret with the new private key and restart the server. New
+   tokens carry the new `kid`; tokens signed with the old key still verify.
+3. After 15 minutes (the token lifetime), remove the old public key from both bundles and restart
+   the verifiers and the server.
+
 ### Workspace storage
 
 Each sandbox's `/workspace` is a PersistentVolumeClaim of `sandbox.workspace.storageClass` (empty:
@@ -751,6 +803,17 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Ed25519 session tokens (KOBE-513).** Sandbox session tokens are now signed with per-audience
+  Ed25519 keys and the proxies hold public keys only (see
+  [Session-token keys](#session-token-keys)). The generated Secret gains `<audience>.key` and
+  `<audience>.pub` and loses the old per-audience HMAC keys (`model-gateway` and `approval-hmac`
+  stay); a ConfigMap `<release>-sandbox-session-verify-keys` is added. With
+  `sandbox.sessionKeysSecret`, add the new keys and set `sandbox.sessionVerifyKeysConfigMap`
+  before upgrading: the server and the proxies refuse to start without them. There is no
+  compatibility window for HS256 tokens: sandboxes running during the upgrade hold HS256 tokens
+  until their next scheduled re-trade (at most about 13 minutes), and their model, MCP and egress
+  calls and wire reconnects are refused until then. Upgrade while no runs are active, or stop
+  running sandboxes first.
 - **Editable gallery agents (KOBE-494, migration `0177_gallery_agent_customized`).** Site admins
   can edit gallery agents in the Site Console (Gallery agents → Edit, the same two-tab creator
   teams use) and publish new versions. The first edit marks an agent **Customized**: upgrades
