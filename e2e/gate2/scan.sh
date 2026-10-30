@@ -32,9 +32,11 @@ b64d() { base64 -d 2>/dev/null || base64 -D 2>/dev/null; }
 # its label in $1/labels (n<TAB>label).
 add_secret_value() { # dir label value-file
   local dir="$1" label="$2" file="$3" n
-  [[ "$(awk 'length($0) >= '"$SCAN_MIN_LEN"' { c++ } END { print c + 0 }' "$file")" == 0 ]] && return 0
+  # PEM armour lines (-----BEGIN/END ...-----) are the same in every key and certificate, so only
+  # a PEM value's body lines are searched for; otherwise any CA bundle in the image would match.
+  [[ "$(awk '!/^-----(BEGIN|END) / && length($0) >= '"$SCAN_MIN_LEN"' { c++ } END { print c + 0 }' "$file")" == 0 ]] && return 0
   n=$(($(wc -l <"$dir/labels") + 1))
-  awk 'length($0) >= '"$SCAN_MIN_LEN" "$file" >"$dir/values/$n"
+  awk '!/^-----(BEGIN|END) / && length($0) >= '"$SCAN_MIN_LEN" "$file" >"$dir/values/$n"
   printf '%s\t%s\n' "$n" "$label" >>"$dir/labels"
 }
 
@@ -46,7 +48,9 @@ collect_k8s_secrets() { # dir namespace...
     while IFS=$'\t' read -r name type; do
       case "$type" in helm.sh/release.v1 | kubernetes.io/service-account-token) continue ;; esac
       while read -r key val; do
-        case "$key" in tls.crt | ca.crt | *.crt | *.pem | ca-bundle*) continue ;; esac
+        # Public material is not a secret: certificates, CA bundles and the session keys' public
+        # halves (`<audience>.pub`, KOBE-513; the verifiers hold the same bytes in a ConfigMap).
+        case "$key" in tls.crt | ca.crt | *.crt | *.pem | *.pub | ca-bundle*) continue ;; esac
         [[ -z "$val" ]] && continue
         printf '%s' "$val" | b64d >"$tmp" || continue
         add_secret_value "$dir" "secret $ns/$name/$key" "$tmp"
