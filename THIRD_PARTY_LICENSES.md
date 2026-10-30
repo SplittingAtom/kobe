@@ -1262,7 +1262,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | typing_extensions | 4.16.0 | PSF-2.0 (exception) | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/typing_extensions/4.16.0/) |
 | undici-types | 8.9.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/undici-types/v/8.9.0) |
 | undici | 6.29.0 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/undici/v/6.29.0) |
-| undici | 8.10.2 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/undici/v/8.10.2) |
+| undici | 8.12.2 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/undici/v/8.12.2) |
 | util-deprecate | 1.0.2 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/util-deprecate/v/1.0.2) |
 | validate-npm-package-name | 8.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/validate-npm-package-name/v/8.0.0) |
 | walk-up-path | 4.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/walk-up-path/v/4.0.0) |
