@@ -266,6 +266,44 @@ Filed in Hadron (backlog, label `performance`), measure-and-explain first:
 Within budget, no ticket: INP (no samples: the lab run does not interact), cold start 13.2 s
 (< 20 s), every other route's LCP, the gateway's own overhead (~1 ms around the model).
 
+## KOBE-530: cold load of `/` and the root-layout bundle
+
+**Cold TTFB.** Every HTML response now carries `Server-Timing` (`apps/web/lib/telemetry/server-timing.ts`,
+installed by `instrumentation.ts`): `app` (the web's time from request to response headers),
+`branding` (the root layout's wait on the site branding) and `cold` on the first page a web process
+serves. Lab runs and DevTools read it as `PerformanceNavigationTiming.serverTiming`; the Web Vitals
+reporter does not forward it (the server's strict schema has no field for it).
+
+Local `next build` + `next start` (dev box, amd64; `curl` TTFB, first request / later ones):
+
+| `KOBE_SERVER_URL`             | First page of the process                   | Later pages (any route) |
+| ----------------------------- | ------------------------------------------- | ----------------------- |
+| unset (defaults)              | 410–570 ms (`branding` 0.3 ms)              | 12–50 ms                |
+| stub server, answers at once  | 450–525 ms (`branding` 107 ms)              | 12–30 ms                |
+| unreachable (packets dropped) | 1.33–1.40 s (`branding` 1003 ms, timed out) | 11–55 ms                |
+
+The ~400–450 ms is per process, not per route: warming `/admin` first makes `/` 18–32 ms. It is
+Next loading the app's server modules on the first render; the branding fetch adds its own time on
+the same request (≤ 1 s timeout), after which it is cached. So gate1's 1099 ms p95 is the first page
+after a web pod start: module loading plus the first branding fetch. The split on gate1: measured
+after the next gate1 deploy (`Server-Timing` of a fresh pod's first page). One hazard found: while
+the branding endpoint fails, the loader retries with a wait every 30 s, so an unreachable server
+costs up to 1 s on one render every 30 s (`branding;dur≈1000` shows it). Options if the cold load
+matters: fetch the branding in `register()` and send one warm-up request before the pod is Ready.
+
+**Root-layout bundle.** `next analyze` on `/` (per-module gzip, which over-counts the 642 KB by
+~1.4×): Next + React DOM 177 KB, assistant-ui family 170, chat components and `lib/chat` 131,
+markdown stack 51, shell 55, `@kobe/protocol` 46 + zod 35, lucide 25. Panels closed at first paint:
+files 28, console panels and admin nav 23, apps host 14, artifact panel / context viewer / steering
+/ palette / dialogs 24: about 65 KB real gzip, ~10 %. `"sideEffects": false` on `@kobe/protocol`
+saves only 4 KB gzip (22 KB raw; tried, not kept). **Decision: no split now.** The panels are
+imported across ~10 modules of `chat-app.tsx` (it even imports `FileGoneNotice` from
+`file-tab.tsx`), so even the files panel needs more than one or two `next/dynamic` boundaries; the
+saving is ≤ 10 %, LCP is within budget, and the cold TTFB is server-side. When `/` LCP p95 nears
+2 s, or for light signed-out pages: first give the signed-out routes (`/sign-in`,
+`/forgot-password`, `/reset-password`, `/invite`) a root layout without the workspace (they need
+none of the chat), then `next/dynamic` for the files panel, console panels and apps host.
+
 ## Limits of the method
 
 - Server-side times are taken where the server sees them (frame arrival), so run latencies include
