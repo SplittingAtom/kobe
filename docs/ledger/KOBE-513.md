@@ -71,8 +71,8 @@ the server's internal `/grant` endpoint to pull another user's connector grant.
 - The gateway still shares `KOBE_SESSION_KEY_MODEL_GATEWAY` with the server (run-token and
   server-call HMAC keys). A compromised gateway can mint run/server-call tokens only it verifies;
   worth a rename (`KOBE_MODEL_GATEWAY_MASTER_KEY`) in a later chart release?
-- Upgrade window confirmed by review; it will be closed on the sandbox side by a separate ticket
-  (refetch the grant on a 401, rate-limited; KOBE-522). The model-gateway master
+- Upgrade window confirmed by review; closed on the sandbox side by KOBE-522 (the agent re-trades
+  its bootstrap token on a refused wire token, rate-limited). The model-gateway master
   secret is out of scope (KOBE-521).
 
 ## Evidence (acceptance criteria → test or command output)

@@ -160,6 +160,14 @@ steps; nothing is refused at any point:
 3. After 15 minutes (the token lifetime), remove the old public key from both bundles and restart
    the verifiers and the server.
 
+**Running sandboxes and a key change.** When the server refuses a sandbox's wire token (an
+upgrade or a key replaced without the three steps), the sandbox agent trades its bootstrap token
+again at once, which does not depend on session keys, and hands the new tokens to the wire, the
+model gateway, MCP and egress (KOBE-522). Running sandboxes recover within seconds, without a
+restart; a call made in that window may see one refusal. Re-trades are rate-limited (one per
+30 s, backing off to one per 5 minutes while the server keeps refusing) and logged
+(`sandbox session re-trade after a rejected token`).
+
 ### Workspace storage
 
 Each sandbox's `/workspace` is a PersistentVolumeClaim of `sandbox.workspace.storageClass` (empty:
@@ -810,10 +818,12 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   stay); a ConfigMap `<release>-sandbox-session-verify-keys` is added. With
   `sandbox.sessionKeysSecret`, add the new keys and set `sandbox.sessionVerifyKeysConfigMap`
   before upgrading: the server and the proxies refuse to start without them. There is no
-  compatibility window for HS256 tokens: sandboxes running during the upgrade hold HS256 tokens
-  until their next scheduled re-trade (at most about 13 minutes), and their model, MCP and egress
-  calls and wire reconnects are refused until then. Upgrade while no runs are active, or stop
-  running sandboxes first.
+  compatibility window for HS256 tokens, but a running sandbox whose agent has KOBE-522 recovers
+  within seconds: its wire reconnect is refused, and the agent trades its bootstrap token for new
+  EdDSA tokens. A model, MCP or egress call made in that window may see one refusal. Sandboxes
+  started from an image without KOBE-522 (a pod keeps its image until it restarts) wait for
+  their next scheduled re-trade (at most about 13 minutes); when upgrading from such a release,
+  upgrade while no runs are active or stop running sandboxes first.
 - **Editable gallery agents (KOBE-494, migration `0177_gallery_agent_customized`).** Site admins
   can edit gallery agents in the Site Console (Gallery agents → Edit, the same two-tab creator
   teams use) and publish new versions. The first edit marks an agent **Customized**: upgrades
