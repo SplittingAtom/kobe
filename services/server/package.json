@@ -35,7 +35,7 @@
     "@kobe/session-token": "workspace:*",
     "@kobe/skill-scanner": "workspace:*",
     "@kobe/telemetry": "workspace:*",
-    "@kubernetes/client-node": "^2.0.0",
+    "@kubernetes/client-node": "^2.0.1",
     "@simplewebauthn/server": "~14.0.3",
     "better-auth": "1.7.7",
     "busboy": "^1.6.0",
