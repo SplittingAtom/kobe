@@ -15,7 +15,7 @@ import {
   serverCallRequestSchema,
   type ServerCallClaims,
 } from "@kobe/protocol";
-import { deriveServerCallTokenKey, verifyServerCallToken } from "@kobe/protocol/node";
+import { generateSessionKeyPair, verifyServerCallToken } from "@kobe/session-token";
 import { SseReader } from "./testing/sse.js";
 import { withAppendTx } from "./event-stream/append.js";
 import { logger } from "./logger.js";
@@ -30,8 +30,8 @@ import { RunFixture, type FakeWorkspace, type RunWorld } from "./testing/run-fix
  * server-call token as the real one does and writes the `followups` usage row, and the
  * `thread.suggestions` event on the run's stream.
  */
-const MASTER = "f".repeat(48);
-const KEY = deriveServerCallTokenKey(new TextEncoder().encode(MASTER));
+const PAIR = generateSessionKeyPair();
+const KEY = PAIR.signing;
 const WAIT_MS = 20_000;
 
 type Mode = "ok" | "soft_limit" | "hold";
@@ -88,7 +88,7 @@ function answer(res: ServerResponse, status: number, body: unknown): void {
 
 async function handle(headers: IncomingHttpHeaders, url: string, raw: string, res: ServerResponse) {
   const verified = verifyServerCallToken(
-    KEY,
+    PAIR.verify,
     headers[SERVER_CALL_TOKEN_HEADER],
     Math.floor(Date.now() / 1000),
   );

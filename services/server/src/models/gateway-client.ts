@@ -12,7 +12,12 @@ import {
   type ServerCallRequest,
   type ServerCallTokenPurpose,
 } from "@kobe/protocol";
-import { deriveServerCallTokenKey, signServerCallToken } from "@kobe/protocol/node";
+import {
+  loadSigningKey,
+  signServerCallToken,
+  signingKeyEnvName,
+  type SessionSigningKey,
+} from "@kobe/session-token";
 import {
   SpanKind,
   idAttributes,
@@ -34,20 +39,23 @@ import {
  * never response text.
  */
 
-/** The env var the gateway's session key comes from (the server already holds it, KOBE-118). */
-const MASTER_ENV = "KOBE_SESSION_KEY_MODEL_GATEWAY";
 /** Largest reply read (a title or three follow-ups are far smaller). */
 const MAX_REPLY_BYTES = 64 * 1024;
 const CODE = /^[a-z][a-z0-9_]{0,63}$/;
 
-/** The server-call token key (HKDF of the gateway session key); undefined when unset or short. */
+/**
+ * The server-call token key (Ed25519 since KOBE-521): the `kobe.model-gateway` session-token
+ * private key, held by the server only; the gateway verifies with its public half. Server-call
+ * tokens carry their own signed `typ` (`ksc2`) and audience. Undefined when unset or unreadable.
+ */
 export function serverCallKeyFromEnv(
   env: Readonly<Record<string, string | undefined>>,
-): Uint8Array | undefined {
-  const master = env[MASTER_ENV];
-  if (!master) return undefined;
+): SessionSigningKey | undefined {
+  const name = signingKeyEnvName("kobe.model-gateway");
+  const pem = env[name];
+  if (!pem?.trim()) return undefined;
   try {
-    return deriveServerCallTokenKey(new TextEncoder().encode(master));
+    return loadSigningKey(pem, name);
   } catch {
     return undefined;
   }
@@ -129,12 +137,12 @@ export interface ServerCallClientOptions {
   /** The gateway's in-cluster origin (`KOBE_MODEL_GATEWAY_URL`). */
   readonly url: string;
   /** From {@link serverCallKeyFromEnv}. */
-  readonly key: Uint8Array;
+  readonly key: SessionSigningKey;
   readonly fetch?: typeof fetch;
   readonly now?: () => Date;
 }
 
-function mintToken(key: Uint8Array, input: ServerCallInput, now: Date): string {
+function mintToken(key: SessionSigningKey, input: ServerCallInput, now: Date): string {
   const iat = Math.floor(now.getTime() / 1000);
   return signServerCallToken(key, {
     iss: "kobe-server",

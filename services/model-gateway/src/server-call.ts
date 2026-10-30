@@ -11,7 +11,7 @@ import {
   type ServerCallClaims,
   type ServerCallTokenPurpose,
 } from "@kobe/protocol";
-import { verifyServerCallToken } from "@kobe/protocol/node";
+import { verifyServerCallToken, type SessionVerifyKeys } from "@kobe/session-token";
 import type { ServerCallRunClaim } from "@kobe/db";
 import { CREDENTIAL_HEADERS } from "./credentials.js";
 import type { CallLimiter, RequestRate } from "./limits.js";
@@ -26,8 +26,8 @@ import type { Route } from "./routes.js";
  * budgets (with the purpose's soft limit) and the usage row then follow the sandbox path.
  */
 export interface ServerCallOptions {
-  /** `deriveServerCallTokenKey` over the gateway's session key (the server derives the same). */
-  readonly key: Uint8Array;
+  /** Public key(s) of the model-gateway pair (KOBE-521): only the server can sign a token. */
+  readonly keys: SessionVerifyKeys;
   readonly replay: ServerCallReplay;
   /**
    * The token's run is a completed run of its thread, leased to its member (review L1): one
@@ -115,7 +115,7 @@ export function authenticateServerCall(
   }
   const presented = headers[SERVER_CALL_TOKEN_HEADER];
   if (!options || typeof presented !== "string") return INVALID;
-  const verified = verifyServerCallToken(options.key, presented.trim(), nowSeconds);
+  const verified = verifyServerCallToken(options.keys, presented.trim(), nowSeconds);
   if (!verified.ok) return INVALID;
   const { claims } = verified;
   if (!options.replay.claim(claims.jti, claims.exp, nowSeconds)) {

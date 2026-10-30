@@ -11,14 +11,16 @@ import { SKILL_EVAL_JUDGE_RESPONSE_SCHEMA } from "./skill-evals/judge.js";
  *
  * Identity: a **server-call token**, minted by the server per call and sent to the model gateway in
  * the {@link SERVER_CALL_TOKEN_HEADER} header, alone (no session token, run token or advisory run
- * id on the same request). Format `ksc1.<payload>.<mac>`, as run tokens: `payload` = base64url (no
- * padding) of the UTF-8 JSON of {@link ServerCallClaims}; `mac` = base64url HMAC-SHA256 over the
- * ASCII `ksc1.<payload>`. Key: `HKDF-SHA256(ikm = the model-gateway session key, salt = empty,
- * info = "kobe/server-call-token/v1", 32)` (`deriveServerCallTokenKey` in `@kobe/protocol/node`):
- * domain-separated from the session-token, run-token and approval keys, so no token of one kind
- * verifies as another. Sandboxes hold none of these keys and never see a server-call token.
+ * id on the same request). Format (KOBE-521): a compact JWS signed **EdDSA (Ed25519)** by the
+ * server with the `kobe.model-gateway` session-token key pair, header exactly
+ * `{"alg":"EdDSA","typ":"ksc2","kid":"<key id>"}` ({@link SERVER_CALL_TOKEN_TYP}), payload the
+ * UTF-8 JSON of {@link ServerCallClaims}. The signed `typ` and the audience keep it apart from
+ * session tokens (`JWT`) and run tokens (`krt2`) under the same key. The gateway holds the public
+ * key(s) only, so it verifies server-call tokens but cannot mint one. Sandboxes hold no key and
+ * never see a server-call token. (`ksc1`, HMAC with a key derived from a secret the gateway shared
+ * with the server, is refused since KOBE-521.)
  *
- * The gateway (every request): size cap, prefix, constant-time MAC, strict claims, `now < exp`,
+ * The gateway (every request): size cap, header, Ed25519 signature, strict claims, `now < exp`,
  * `iat <= now + skew`, the `jti` not seen before on this replica (single use per replica; across
  * replicas the token is bounded by its TTL, purpose, model and output cap; threat model in the
  * design doc), the member still active with a virtual key, the token's run a completed run of its
@@ -46,12 +48,16 @@ export const serverCallTokenPurposeSchema = z.enum(SERVER_CALL_TOKEN_PURPOSES);
 export type ServerCallTokenPurpose = z.infer<typeof serverCallTokenPurposeSchema>;
 
 export const SERVER_CALL_TOKEN_HEADER = "x-kobe-server-call";
-export const SERVER_CALL_TOKEN_PREFIX = "ksc1";
-export const SERVER_CALL_TOKEN_KDF_INFO = "kobe/server-call-token/v1";
+/** The signed JWS `typ` of a server-call token (KOBE-521): never `JWT` or `krt2`. */
+export const SERVER_CALL_TOKEN_TYP = "ksc2";
 /** The audience no other Kobe token carries (session and run tokens say `kobe.model-gateway`). */
 export const SERVER_CALL_AUDIENCE = "kobe.model-gateway.server-call";
-/** Longest token any verifier reads; larger input is rejected before parsing. */
-export const SERVER_CALL_TOKEN_MAX_CHARS = 1024;
+/**
+ * Longest token any verifier reads; larger input is rejected before parsing. 1280 since KOBE-521
+ * (was 1024): the Ed25519 JWS adds a header and a longer signature, and every claims set the
+ * contract allows (256-char model, 128-char `jti`) must still fit.
+ */
+export const SERVER_CALL_TOKEN_MAX_CHARS = 1280;
 /** Tolerated clock skew for `iat`, seconds. */
 export const SERVER_CALL_TOKEN_SKEW_SECONDS = 30;
 /** Upper bound on `exp - iat`: a token is minted right before its one call. */
@@ -198,7 +204,7 @@ export const serverCallClaimsSchema = z
   });
 export type ServerCallClaims = z.infer<typeof serverCallClaimsSchema>;
 
-export type ServerCallTokenFailure = "malformed" | "bad_mac" | "expired" | "not_yet_valid";
+export type ServerCallTokenFailure = "malformed" | "bad_signature" | "expired" | "not_yet_valid";
 
 export type VerifyServerCallTokenResult =
   | { readonly ok: true; readonly claims: ServerCallClaims }

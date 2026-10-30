@@ -26,6 +26,7 @@ export const SESSION_TOKEN_TTL_SECONDS = 15 * 60;
 export { MAX_SESSION_TOKEN_LENGTH, SESSION_TOKEN_ALG, SessionTokenError } from "./jws.js";
 export * from "./keys.js";
 export * from "./site.js";
+export * from "./gateway-tokens.js";
 
 export function signSessionToken(claims: SessionTokenClaims, key: SessionSigningKey): string {
   return signJws(sessionTokenClaimsSchema.parse(claims), key);

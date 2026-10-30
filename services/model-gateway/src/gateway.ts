@@ -9,7 +9,7 @@ import {
 } from "node:http";
 import { request as httpsRequest, Agent as HttpsAgent } from "node:https";
 import type { ServerCallClaims, SessionTokenClaims, ThinkingLevel } from "@kobe/protocol";
-import { SessionTokenError } from "@kobe/session-token";
+import { SessionTokenError, type SessionVerifyKeys } from "@kobe/session-token";
 import {
   contentAttributes,
   idAttributes,
@@ -68,8 +68,8 @@ export interface GatewayOptions {
   readonly isRunLeased: (teamId: string, runId: string, sandboxId: string) => Promise<boolean>;
   /** Run-bound tokens (KOBE-118). */
   readonly runTokens: {
-    /** Key from `deriveRunTokenKey` over the model-gateway session key. */
-    readonly key: Uint8Array;
+    /** Public key(s) of the model-gateway pair (KOBE-521): the gateway verifies, never signs. */
+    readonly keys: SessionVerifyKeys;
     /** The server's record: not revoked or expired, run active on that sandbox (cached by caller). */
     readonly isActive: (subject: RunTokenSubject) => Promise<boolean>;
     /** Enforcement: a call without a run token is refused (off for rollout). */

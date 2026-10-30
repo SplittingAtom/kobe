@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CAPABILITY_RUN_TOKEN } from "@kobe/protocol";
-import { deriveRunTokenKey, verifyRunToken } from "@kobe/protocol/node";
+import { generateSessionKeyPair, verifyRunToken } from "@kobe/session-token";
 import { EventStreamFixture, must, type Person } from "./testing/event-stream-fixture.js";
 import { FakeSandbox, FakeSandboxAuth, isFake, sandboxListener } from "./testing/fake-sandbox.js";
 import { withAppendTx } from "./event-stream/append.js";
@@ -12,7 +12,8 @@ import { RUN_TOKEN_TTL_SECONDS } from "./sandbox-wire/constants.js";
 /** KOBE-118: the server mints a run token at run.start (capable agents only) and revokes it at run end. */
 const fx = new EventStreamFixture();
 const auth = new FakeSandboxAuth();
-const key = deriveRunTokenKey(new TextEncoder().encode("k".repeat(40)));
+const pair = generateSessionKeyPair();
+const key = pair.signing;
 const sandboxes: FakeSandbox[] = [];
 let listener: Awaited<ReturnType<typeof sandboxListener>>;
 
@@ -72,7 +73,7 @@ describe("run tokens at run.start and run end", () => {
     const w = await start([CAPABILITY_RUN_TOKEN]);
     const grant = must(w.frame.run_token, "run_token");
     const now = Math.floor(Date.now() / 1000);
-    const verified = verifyRunToken(key, grant.token, now);
+    const verified = verifyRunToken(pair.verify, grant.token, now);
     expect(verified.ok).toBe(true);
     if (!verified.ok) return;
     expect(verified.claims).toMatchObject({

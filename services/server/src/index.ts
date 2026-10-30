@@ -99,12 +99,12 @@ const bifrostAdmin = modelsConfig
       password: modelsConfig.adminPassword,
     })
   : undefined;
-// Run-bound model-gateway tokens (KOBE-118): keyed from the gateway session key; unset: off.
+// Run-bound model-gateway tokens (KOBE-118): signed with the model-gateway Ed25519 key (KOBE-521).
 const runTokenKey = runTokenKeyFromEnv(process.env);
-// Relayed sandbox spans (KOBE-274): `k_trace` from the same session key; unset: no span relay.
+// Relayed sandbox spans (KOBE-274): `k_trace` from KOBE_TRACE_SPAN_KEY; unset: no span relay.
 const traceSpanKey = traceSpanKeyFromEnv(process.env);
-// The server's own model calls (KOBE-219 auto-titles): the gateway's address and a token key from
-// the same session key. Either unset: no titles (logged once below).
+// The server's own model calls (KOBE-219 auto-titles): the gateway's address and the same
+// Ed25519 signing key (KOBE-521). Either unset: no titles (logged once below).
 const serverCallKey = serverCallKeyFromEnv(process.env);
 // The wire is built before the sandbox provider exists: its waker is set once the provider is.
 const waker = createDeferredWaker();
@@ -178,7 +178,7 @@ if (config.process === "scheduler") {
       : {}),
   });
   if (!config.modelGatewayUrl || !serverCallKey) {
-    logger.info("model gateway or its session key not configured: threads are not auto-titled");
+    logger.info("model gateway or its signing key not configured: threads are not auto-titled");
   }
   if (config.smtp.security === "none") {
     logger.warn(

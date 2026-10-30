@@ -6,7 +6,7 @@ import {
   runTraceId,
   traceparentSchema,
 } from "./index.js";
-import { deriveRunTokenKey, deriveTraceSpanKey, mapSandboxSpanId } from "./node/index.js";
+import { deriveTraceSpanKey, mapSandboxSpanId } from "./node/index.js";
 import { EXAMPLE_IDS } from "./testing/index.js";
 
 const RUN = EXAMPLE_IDS.run;
@@ -81,8 +81,8 @@ describe("sandbox span id remapping (k_trace)", () => {
     expect(id).not.toBe("1111111111111111");
   });
 
-  it("is domain separated from the run-token key and refuses short secrets", () => {
-    expect(Buffer.from(key).equals(Buffer.from(deriveRunTokenKey(master)))).toBe(false);
+  it("is derived, never the secret itself, and refuses short secrets", () => {
+    expect(Buffer.from(key).equals(Buffer.from(master))).toBe(false);
     expect(() => deriveTraceSpanKey(new Uint8Array(8))).toThrow();
     expect(() => mapSandboxSpanId(new Uint8Array(8), RUN, "1111111111111111")).toThrow();
   });

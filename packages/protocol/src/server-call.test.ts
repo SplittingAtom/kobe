@@ -11,7 +11,7 @@ import {
   SERVER_CALL_TOKEN_HEADER,
   SERVER_CALL_TOKEN_PURPOSES,
   SKILL_EVAL_JUDGE_RESPONSE_SCHEMA,
-  SERVER_CALL_TOKEN_SKEW_SECONDS,
+  SERVER_CALL_TOKEN_TYP,
   decideStreamOpen,
   epilogueOpen,
   generatedTitleSchema,
@@ -19,22 +19,11 @@ import {
   serverCallClaimsSchema,
   serverCallRequestSchema,
   type KobeEventType,
-  type RunTokenClaims,
   type ServerCallClaims,
 } from "./index.js";
-import {
-  deriveRunTokenKey,
-  deriveServerCallTokenKey,
-  signRunToken,
-  signServerCallToken,
-  verifyRunToken,
-  verifyServerCallToken,
-} from "./node/index.js";
 import { EXAMPLE_IDS } from "./testing/index.js";
 
 const NOW = 1_800_000_000;
-const MASTER = new Uint8Array(32).fill(7);
-const KEY = deriveServerCallTokenKey(MASTER);
 const CLAIMS: ServerCallClaims = {
   iss: "kobe-server",
   aud: SERVER_CALL_AUDIENCE,
@@ -62,71 +51,7 @@ describe("server-call token", () => {
   it("names its header and an audience no other token carries", () => {
     expect(SERVER_CALL_TOKEN_HEADER).toBe("x-kobe-server-call");
     expect(SERVER_CALL_AUDIENCE).not.toBe("kobe.model-gateway");
-  });
-
-  it("derives a key apart from the run-token key of the same master", () => {
-    expect(deriveServerCallTokenKey(MASTER)).toEqual(KEY);
-    expect(KEY).not.toEqual(deriveRunTokenKey(MASTER));
-    expect(() => deriveServerCallTokenKey(new Uint8Array(8))).toThrow();
-  });
-
-  it("round-trips sign and verify", () => {
-    const token = signServerCallToken(KEY, CLAIMS);
-    expect(token.startsWith("ksc1.")).toBe(true);
-    expect(verifyServerCallToken(KEY, token, NOW + 1)).toEqual({ ok: true, claims: CLAIMS });
-  });
-
-  it("rejects expiry, a future iat, another key and tampering", () => {
-    const token = signServerCallToken(KEY, CLAIMS);
-    expect(verifyServerCallToken(KEY, token, NOW + 30)).toEqual({ ok: false, reason: "expired" });
-    expect(verifyServerCallToken(KEY, token, NOW - SERVER_CALL_TOKEN_SKEW_SECONDS - 1)).toEqual({
-      ok: false,
-      reason: "not_yet_valid",
-    });
-    const other = deriveServerCallTokenKey(new Uint8Array(32).fill(8));
-    expect(verifyServerCallToken(other, token, NOW)).toEqual({ ok: false, reason: "bad_mac" });
-    const [p, payload, mac] = token.split(".");
-    const forged = Buffer.from(
-      JSON.stringify({ ...CLAIMS, purpose: "followups" }),
-      "utf8",
-    ).toString("base64url");
-    expect(verifyServerCallToken(KEY, `${p}.${forged}.${mac}`, NOW).ok).toBe(false);
-    expect(verifyServerCallToken(KEY, `${p}.${payload}`, NOW)).toEqual({
-      ok: false,
-      reason: "malformed",
-    });
-    expect(verifyServerCallToken(KEY, "x".repeat(2000), NOW)).toEqual({
-      ok: false,
-      reason: "malformed",
-    });
-    expect(verifyServerCallToken(KEY, 42, NOW)).toEqual({ ok: false, reason: "malformed" });
-  });
-
-  it("never verifies as a run token, and a run token never verifies as one (same master)", () => {
-    const runKey = deriveRunTokenKey(MASTER);
-    const runClaims: RunTokenClaims = {
-      iss: "kobe-server",
-      aud: "kobe.model-gateway",
-      run_id: EXAMPLE_IDS.run,
-      team_id: EXAMPLE_IDS.team,
-      sandbox_id: EXAMPLE_IDS.sandbox,
-      iat: NOW,
-      exp: NOW + 900,
-      jti: "jti-0123456789abcdef",
-    };
-    const runToken = signRunToken(runKey, runClaims).token;
-    expect(verifyServerCallToken(KEY, runToken, NOW)).toEqual({ ok: false, reason: "malformed" });
-    // Even re-prefixed, the MAC is over another key.
-    expect(verifyServerCallToken(KEY, runToken.replace(/^krt1/, "ksc1"), NOW)).toEqual({
-      ok: false,
-      reason: "bad_mac",
-    });
-    const serverToken = signServerCallToken(KEY, CLAIMS);
-    expect(verifyRunToken(runKey, serverToken, NOW)).toEqual({ ok: false, reason: "malformed" });
-    expect(verifyRunToken(runKey, serverToken.replace(/^ksc1/, "krt1"), NOW)).toEqual({
-      ok: false,
-      reason: "bad_mac",
-    });
+    expect(SERVER_CALL_TOKEN_TYP).toBe("ksc2");
   });
 
   it("bounds the TTL and the output cap per purpose", () => {
@@ -156,7 +81,7 @@ describe("server-call token", () => {
     ).toBe(true);
     expect(parse({ aud: "kobe.model-gateway" as typeof SERVER_CALL_AUDIENCE })).toBe(false);
     expect(parse({ purpose: "chat" as "title" })).toBe(false);
-    expect(() => signServerCallToken(KEY, { ...CLAIMS, max_output_tokens: 10_000 })).toThrow();
+    expect(parse({ max_output_tokens: 10_000 })).toBe(false);
   });
 
   it("sizes the epilogue window to the longest call plus the margin (calls run concurrently)", () => {

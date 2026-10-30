@@ -103,19 +103,20 @@ this.
 {{- end -}}
 
 {{/*
-Model gateway shim env (services/model-gateway/src/config.ts): the database (app role), its
-session-token public key only (KOBE-513), its master secret shared with the server (run and
-server-call token keys), the virtual-key secret only (never provider keys or Bifrost's admin password).
+Model gateway shim env (services/model-gateway/src/config.ts): the database (app role), the
+model-gateway public key only (session, run and server-call tokens: verify only, KOBE-513/521),
+the trace-span secret (span id remapping, budget salt; authorises nothing), the virtual-key secret
+only (never provider keys, Bifrost's admin password or any key that mints a credential).
 */}}
 {{- define "kobe.modelGatewayEnv" -}}
 {{- $g := include "kobe.modelGatewayValues" . | fromJson -}}
 {{ include "kobe.databaseEnv" . }}
 {{ include "kobe.sessionVerifyKeyEnv" (dict "root" . "env" "MODEL_GATEWAY" "aud" "model-gateway") }}
-- name: KOBE_SESSION_KEY_MODEL_GATEWAY
+- name: KOBE_TRACE_SPAN_KEY
   valueFrom:
     secretKeyRef:
       name: {{ include "kobe.sessionKeysSecretName" . }}
-      key: model-gateway
+      key: trace-span
 - name: KOBE_MODELS_VIRTUAL_KEY_SECRET
   {{- include "kobe.modelKeyRef" (dict "root" . "key" "virtual-keys") | nindent 2 }}
 - name: KOBE_MODELS_VIRTUAL_KEY_SECRET_PREVIOUS

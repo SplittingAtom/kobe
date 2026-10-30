@@ -1,12 +1,12 @@
 import { RUN_TOKEN_HEADER } from "@kobe/protocol";
-import { verifyRunToken } from "@kobe/protocol/node";
+import { verifyRunToken } from "@kobe/session-token";
 import type { IncomingHttpHeaders } from "node:http";
 import type { GatewayOptions } from "./gateway.js";
 
 /**
  * Which run a model call belongs to (KOBE-118, contract in KOBE-117). Order:
  *
- * 1. `x-kobe-run-token` present: it must verify (MAC, shape, time; else 401, never a fallback to
+ * 1. `x-kobe-run-token` present: it must verify (Ed25519 signature, shape, time; else 401, never a fallback to
  *    the advisory header), name this very team and sandbox (the session token's), still be active
  *    in the server's record (not revoked at run end, run active on this sandbox), and an
  *    `x-kobe-run-id` that disagrees is refused. The run id is then the token's, so a per-run stop
@@ -63,7 +63,7 @@ export async function resolveRunAttribution(
       ? { ok: true, runId: advisoryId }
       : refuse(403, "run_not_leased", "That run is not active on this sandbox.");
   }
-  const verified = verifyRunToken(runTokens.key, presented, nowSeconds);
+  const verified = verifyRunToken(runTokens.keys, presented, nowSeconds);
   if (!verified.ok) {
     return refuse(401, "invalid_run_token", "A valid run token is required.");
   }

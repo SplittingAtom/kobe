@@ -23,8 +23,10 @@
 # PEM certificate or key; current and previous during a rotation, docs/install.md) is the server's
 # own rotation bundle (read from this Secret, never from the ConfigMap) and is copied into the
 # verify-keys ConfigMap below, which is all the verifying services get, so none of them can mint a
-# token. `model-gateway` is the gateway's master secret shared with the server (run,
-# trace-span and server-call keys are derived from it; no longer a session-token key).
+# token. The `model-gateway` pair also signs run and server-call tokens (KOBE-521): the gateway
+# verifies them with its public key and can mint none. `trace-span` is the secret the server and
+# the gateway remap sandbox span ids with (KOBE-274); it authorises nothing (KOBE-521 replaced the
+# shared `model-gateway` master secret, which this Secret no longer holds).
 # approval-hmac signs tool-call approvals (D29, KOBE-37): only the server holds it, signing and
 # verifying; never mounted in a proxy or a sandbox. Rotating it voids approvals not yet used.
 apiVersion: v1
@@ -41,7 +43,7 @@ stringData:
   {{ $aud }}.key: {{ $pair.key | quote }}
   {{ $aud }}.pub: {{ $pair.pub | quote }}
   {{- end }}
-  model-gateway: {{ ternary (index $data "model-gateway" | default "" | b64dec) (randAlphaNum 48) (hasKey $data "model-gateway") | quote }}
+  trace-span: {{ ternary (index $data "trace-span" | default "" | b64dec) (randAlphaNum 48) (hasKey $data "trace-span") | quote }}
   approval-hmac: {{ ternary (index $data "approval-hmac" | default "" | b64dec) (randAlphaNum 48) (hasKey $data "approval-hmac") | quote }}
 ---
 # Public keys of the sandbox session tokens, one bundle per audience (KOBE-513): what the egress

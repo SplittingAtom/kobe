@@ -1,3 +1,4 @@
+import type { SessionSigningKey } from "@kobe/session-token";
 import { NO_APP_CALLER, type AppCaller } from "./apps/app-caller.js";
 import { createNotebookFiles, type NotebookFiles } from "./notebooks/files.js";
 import type { ForwardDestination } from "./audit/forward/types.js";
@@ -162,12 +163,12 @@ export interface ServerDepsOptions {
   readonly modelTokenDefaults?: ModelTokenDefaults;
   /**
    * The server's own model calls (KOBE-234/219: auto-titles) through the model gateway: its
-   * in-cluster URL (`KOBE_MODEL_GATEWAY_URL`) and the server-call token key (from the gateway
-   * session key). Unset: no run announces an epilogue and nothing is called.
+   * in-cluster URL (`KOBE_MODEL_GATEWAY_URL`) and the server-call token key (the model-gateway
+   * Ed25519 signing key, KOBE-521). Unset: no run announces an epilogue and nothing is called.
    */
   readonly serverCalls?: {
     readonly gatewayUrl: string;
-    readonly key: Uint8Array;
+    readonly key: SessionSigningKey;
     readonly fetch?: typeof fetch;
   };
   /**

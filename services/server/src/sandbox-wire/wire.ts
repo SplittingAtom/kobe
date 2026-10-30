@@ -1,3 +1,4 @@
+import type { SessionSigningKey } from "@kobe/session-token";
 import { randomUUID } from "node:crypto";
 import type { NotebookFiles } from "../notebooks/files.js";
 import type { Server } from "node:http";
@@ -73,8 +74,8 @@ export interface SandboxWireOptions {
   /** Notebook files (KOBE-464): `run_python` reads cells and saves outputs through them. */
   readonly notebooks?: NotebookFiles;
   readonly tuning?: Partial<WireTuning>;
-  /** Key from `deriveRunTokenKey` (KOBE-118); unset: `run.start` carries no run token. */
-  readonly runTokenKey?: Uint8Array;
+  /** The model-gateway Ed25519 signing key (KOBE-118/521); unset: `run.start` carries no run token. */
+  readonly runTokenKey?: SessionSigningKey;
   /** `k_trace` (KOBE-274); unset: sandboxes get no trace context and send no spans. */
   readonly traceSpanKey?: Uint8Array;
   /** Server calls a completed run may announce (KOBE-234/219); unset: none. */

@@ -3,19 +3,16 @@ import { createServer, request, type IncomingHttpHeaders, type Server } from "no
 import type { AddressInfo } from "node:net";
 import { SecretBox, VIRTUAL_KEY_PURPOSE, virtualKeyContext, type GatewayPrincipal } from "@kobe/db";
 import { RUN_TOKEN_HEADER, type RunTokenClaims, type SessionTokenAudience } from "@kobe/protocol";
-import {
-  deriveRunTokenKey,
-  deriveTraceSpanKey,
-  mapSandboxSpanId,
-  signRunToken,
-} from "@kobe/protocol/node";
+import { deriveTraceSpanKey, mapSandboxSpanId } from "@kobe/protocol/node";
 import {
   generateSessionKeyPair,
+  signRunToken,
   signSessionToken,
   verifySessionToken,
   type SessionSigningKey,
 } from "@kobe/session-token";
 import { usageRecordOf } from "./usage/sink.js";
+import { hmacEraToken } from "./testing/hmac-era.js";
 import { InMemorySpanExporter, initTelemetry, type Telemetry } from "@kobe/telemetry";
 import { runRootSpanId, runTraceId } from "@kobe/protocol";
 import pino from "pino";
@@ -138,7 +135,8 @@ let principal: GatewayPrincipal;
 let vkValue = "";
 let keyRequests = 0;
 let leased = new Set<string>();
-const RUN_KEY = deriveRunTokenKey(new TextEncoder().encode("r".repeat(40)));
+/** Run tokens are signed with the model-gateway pair, as session tokens (KOBE-521). */
+const RUN_KEY = SESSION.signing;
 const SPAN_KEY = deriveTraceSpanKey(new TextEncoder().encode("r".repeat(40)));
 const SESSION_THREAD = "2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f60";
 /** jti of the run tokens the (fake) record still holds as active. */
@@ -204,7 +202,7 @@ async function start(over: ShimOptions = {}): Promise<void> {
       return leased.has(runId);
     },
     runTokens: {
-      key: RUN_KEY,
+      keys: SESSION.verify,
       isActive: async (s) => activeTokens.has(s.jti),
       require: over.requireRunToken ?? false,
     },
@@ -660,7 +658,7 @@ describe("run-bound tokens (KOBE-118)", () => {
     ).toBe("run_id_mismatch");
     // A token never verified as ours (forged, expired, malformed, or minted under another key).
     const now = Math.floor(Date.now() / 1000);
-    const forged = signRunToken(deriveRunTokenKey(new TextEncoder().encode("z".repeat(40))), {
+    const forged = signRunToken(generateSessionKeyPair().signing, {
       iss: "kobe-server",
       aud: "kobe.model-gateway",
       run_id: a,
@@ -670,7 +668,30 @@ describe("run-bound tokens (KOBE-118)", () => {
       exp: now + 60,
       jti: randomUUID(),
     }).token;
-    for (const t of [forged, "krt1.x.y", "nope", runToken(a, { iat: now - 120, exp: now - 60 })]) {
+    // KOBE-521: the retired HMAC format with valid claims, and a session token as a run token.
+    const hmacEra = hmacEraToken(
+      "run",
+      {
+        iss: "kobe-server",
+        aud: "kobe.model-gateway",
+        run_id: a,
+        team_id: team,
+        sandbox_id: sandbox,
+        iat: now,
+        exp: now + 60,
+        jti: randomUUID(),
+      },
+      "r".repeat(40),
+    );
+    const sessionAsRun = token({});
+    for (const t of [
+      forged,
+      hmacEra,
+      sessionAsRun,
+      "krt1.x.y",
+      "nope",
+      runToken(a, { iat: now - 120, exp: now - 60 }),
+    ]) {
       const r = await call("/v1/chat/completions", withRun(t));
       expect(r.status).toBe(401);
       expect(errorCode(r)).toBe("invalid_run_token");

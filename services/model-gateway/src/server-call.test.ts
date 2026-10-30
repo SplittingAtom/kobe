@@ -11,18 +11,19 @@ import {
   type ServerCallClaims,
 } from "@kobe/protocol";
 import {
-  deriveRunTokenKey,
-  deriveServerCallTokenKey,
+  generateSessionKeyPair,
   signRunToken,
   signServerCallToken,
-} from "@kobe/protocol/node";
-import { generateSessionKeyPair, signSessionToken, verifySessionToken } from "@kobe/session-token";
+  signSessionToken,
+  verifySessionToken,
+} from "@kobe/session-token";
 import pino from "pino";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createModelGateway } from "./gateway.js";
 import { ByteBudget, CallLimiter, RequestRate } from "./limits.js";
 import { PrincipalCache } from "./principals.js";
 import { ServerCallReplay } from "./server-call.js";
+import { hmacEraToken } from "./testing/hmac-era.js";
 import { OPEN_GATE, type CallContext, type CallGate, type CallRecord } from "./seams.js";
 
 /**
@@ -31,11 +32,10 @@ import { OPEN_GATE, type CallContext, type CallGate, type CallRecord } from "./s
  * no sandbox credential works as one. Provider keys never leave Bifrost: the gateway forwards with
  * the member's virtual key, and neither the token nor any `x-bf-*` header crosses.
  */
-const SESSION_KEY = "m".repeat(40);
-const MASTER = new TextEncoder().encode(SESSION_KEY);
-const SC_KEY = deriveServerCallTokenKey(MASTER);
-const RUN_KEY = deriveRunTokenKey(MASTER);
+/** The model-gateway pair: session, run and server-call tokens share it (typ tells them apart). */
 const SESSION = generateSessionKeyPair();
+const SC_KEY = SESSION.signing;
+const RUN_KEY = SESSION.signing;
 const box = new SecretBox("v".repeat(40), VIRTUAL_KEY_PURPOSE);
 const team = randomUUID();
 const user = randomUUID();
@@ -182,9 +182,9 @@ beforeEach(async () => {
     verify: (t) => verifySessionToken(t, "kobe.model-gateway", SESSION.verify),
     principals,
     isRunLeased: async () => true,
-    runTokens: { key: RUN_KEY, isActive: async () => true, require: false },
+    runTokens: { keys: SESSION.verify, isActive: async () => true, require: false },
     serverCalls: {
-      key: SC_KEY,
+      keys: SESSION.verify,
       replay: new ServerCallReplay(),
       runMatches: async (c) => {
         runChecks.push(c);
@@ -397,8 +397,13 @@ describe("server calls: refused (KOBE-234 ac-2)", () => {
   });
 
   it("no sandbox credential is a server-call token (session token, run token, forged key)", async () => {
-    const wrongKey = serverToken({}, deriveRunTokenKey(MASTER));
-    for (const t of [sessionToken(), runToken(), wrongKey, "ksc1.e30.x"]) {
+    const wrongKey = serverToken({}, generateSessionKeyPair().signing);
+    const claims = JSON.parse(
+      Buffer.from(serverToken().split(".")[1] ?? "", "base64url").toString(),
+    ) as unknown;
+    // KOBE-521: the retired HMAC format, even with valid claims, is refused.
+    const hmacEra = hmacEraToken("server-call", claims, "m".repeat(40));
+    for (const t of [sessionToken(), runToken(), wrongKey, hmacEra, "ksc1.e30.x"]) {
       const r = await post("/v1/chat/completions", asServer(t));
       expect([r.status, r.code]).toEqual([401, "invalid_server_call_token"]);
     }

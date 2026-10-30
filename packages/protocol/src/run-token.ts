@@ -14,16 +14,17 @@ import { uuidSchema } from "./common.js";
  * Wire: the model-gateway shim accepts it in the `x-kobe-run-token` request header
  * ({@link RUN_TOKEN_HEADER}). `Authorization: Bearer <session token>` stays as it is.
  *
- * Format: `krt1.<payload>.<mac>`; `payload` = base64url (no padding) of the UTF-8 JSON of
- * {@link RunTokenClaims}; `mac` = base64url HMAC-SHA256 over the ASCII string `krt1.<payload>`
- * (the exact received text, no re-serialisation). The HMAC key is derived, never the master key
- * itself: `HKDF-SHA256(ikm = server master secret, salt = empty, info = "kobe/run-token/v1", 32)`
- * (`deriveRunTokenKey` in `@kobe/protocol/node`), so it is domain-separated from the approval
- * and session-token keys. Algorithm and version are fixed by the `krt1` prefix, never read from
- * the token. The gateway holds the derived key only (it can verify and also mint: it is a server
- * side component, never in a sandbox).
+ * Format (KOBE-521): a compact JWS signed **EdDSA (Ed25519)** by the server with the
+ * `kobe.model-gateway` session-token key pair (`@kobe/session-token`, KOBE-513): header exactly
+ * `{"alg":"EdDSA","typ":"krt2","kid":"<key id>"}` ({@link RUN_TOKEN_TYP}), payload the UTF-8 JSON
+ * of {@link RunTokenClaims}. The `typ` is signed, so a session token (`typ` `JWT`) or a
+ * server-call token (`ksc2`) under the same key never verifies as a run token, nor the reverse;
+ * the algorithm is never read from the token, and `kid` only selects among the gateway's own
+ * public keys (rotation). The gateway holds the public key(s) only: it verifies run tokens but
+ * cannot mint one. (`krt1`, HMAC with a key derived from a secret the gateway shared with the
+ * server, is refused since KOBE-521.)
  *
- * Verification (gateway, every request): size cap, prefix, constant-time MAC check, strict claims
+ * Verification (gateway, every request): size cap, header, Ed25519 signature, strict claims
  * parse, `now < exp`, `iat <= now + skew`, and then the stateful checks the token cannot carry:
  * the run is still active (revocation at run end; `jti` can name it in audit) and `sandbox_id`/
  * `team_id` match the session token on the same request. The run id used for attribution and
@@ -39,10 +40,8 @@ import { uuidSchema } from "./common.js";
  */
 export const CAPABILITY_RUN_TOKEN = "run_token";
 export const RUN_TOKEN_HEADER = "x-kobe-run-token";
-export const RUN_TOKEN_PREFIX = "krt1";
-export const RUN_TOKEN_KDF_INFO = "kobe/run-token/v1";
-export const RUN_TOKEN_KEY_BYTES = 32;
-export const RUN_TOKEN_MASTER_MIN_BYTES = 32;
+/** The signed JWS `typ` of a run token (KOBE-521): never `JWT` (session tokens) or `ksc2`. */
+export const RUN_TOKEN_TYP = "krt2";
 /** Longest token any verifier reads; larger input is rejected before parsing. */
 export const RUN_TOKEN_MAX_CHARS = 1024;
 /** Tolerated clock skew for `iat`, seconds. */
@@ -78,7 +77,7 @@ export const runTokenGrantSchema = z.strictObject({
 export type RunTokenGrant = z.infer<typeof runTokenGrantSchema>;
 
 export type RunTokenFailure =
-  "malformed" | "bad_mac" | "expired" | "not_yet_valid" | "wrong_audience";
+  "malformed" | "bad_signature" | "expired" | "not_yet_valid" | "wrong_audience";
 
 export type VerifyRunTokenResult =
   | { readonly ok: true; readonly claims: RunTokenClaims }

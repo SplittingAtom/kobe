@@ -9,7 +9,6 @@ import {
   type GatewayThinkingRow,
 } from "@kobe/db";
 import type { ThinkingLevel } from "@kobe/protocol";
-import { deriveRunTokenKey } from "@kobe/protocol/node";
 import { generateSessionKeyPair, signSessionToken, verifySessionToken } from "@kobe/session-token";
 import pino from "pino";
 import { createModelGateway } from "../gateway.js";
@@ -74,7 +73,6 @@ function closeServer(server: Server): Promise<void> {
 }
 
 export async function startLocalGateway(options: LocalGatewayOptions): Promise<LocalGateway> {
-  const sessionKey = randomUUID() + randomUUID();
   const sessionPair = generateSessionKeyPair();
   const box = new SecretBox("v".repeat(40), VIRTUAL_KEY_PURPOSE);
   const identity = { sandboxId: randomUUID(), teamId: randomUUID(), userId: randomUUID() };
@@ -108,7 +106,7 @@ export async function startLocalGateway(options: LocalGatewayOptions): Promise<L
     runThinking: async (_team, runId) => options.runThinking?.(runId),
     // The harness' sessions carry no run token: enforcement stays off, legacy run ids apply.
     runTokens: {
-      key: deriveRunTokenKey(new TextEncoder().encode(sessionKey)),
+      keys: sessionPair.verify,
       isActive: async () => false,
       require: false,
     },

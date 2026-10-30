@@ -1,3 +1,4 @@
+import type { SessionSigningKey } from "@kobe/session-token";
 import type { ServerCallPurpose, ToolRegistry } from "@kobe/protocol";
 import type { NotebookFiles } from "../notebooks/files.js";
 import type {
@@ -98,8 +99,8 @@ export interface WireContext {
   readonly bus: SandboxBus;
   readonly tuning: WireTuning;
   readonly replicaId: string;
-  /** Derived run token key (KOBE-118); unset: no run tokens are minted. */
-  readonly runTokenKey?: Uint8Array;
+  /** Run token signing key (KOBE-118; Ed25519, KOBE-521); unset: no run tokens are minted. */
+  readonly runTokenKey?: SessionSigningKey;
   /** Relayed sandbox spans (KOBE-274); unset (tracing off or no key): no trace context, no intake. */
   readonly traceRelay?: TraceRelayContext;
   /** Server calls a completed run may announce (KOBE-234/219); empty: none configured. */

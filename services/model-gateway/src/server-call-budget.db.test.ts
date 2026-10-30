@@ -31,8 +31,11 @@ import {
   SERVER_CALL_TOKEN_HEADER,
   type ServerCallTokenPurpose,
 } from "@kobe/protocol";
-import { deriveServerCallTokenKey, signServerCallToken } from "@kobe/protocol/node";
-import { generateSessionKeyPair, verifySessionToken } from "@kobe/session-token";
+import {
+  generateSessionKeyPair,
+  signServerCallToken,
+  verifySessionToken,
+} from "@kobe/session-token";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { BudgetGate } from "./budget-gate.js";
@@ -51,8 +54,8 @@ import { DbUsageSink } from "./usage/sink.js";
  * on the full line and still passes. The ledger rows carry their kind.
  */
 const KEY = "m".repeat(40);
-const SC_KEY = deriveServerCallTokenKey(new TextEncoder().encode(KEY));
 const SESSION = generateSessionKeyPair();
+const SC_KEY = SESSION.signing;
 const box = new SecretBox("v".repeat(40), VIRTUAL_KEY_PURPOSE);
 const team = randomUUID();
 const user = randomUUID();
@@ -174,7 +177,7 @@ beforeAll(async () => {
     ),
     isRunLeased: async () => false,
     serverCalls: {
-      key: SC_KEY,
+      keys: SESSION.verify,
       replay: new ServerCallReplay(),
       runMatches: (c) => serverCallRunMatches(db, c),
       limiter: new CallLimiter({ perSandbox: 4, total: 8 }),

@@ -1,16 +1,22 @@
 import { createHmac, hkdfSync } from "node:crypto";
-import { RUN_TOKEN_MASTER_MIN_BYTES } from "../run-token.js";
-import { TRACE_SPAN_KDF_INFO, TRACE_SPAN_KEY_BYTES } from "../tracing.js";
+import {
+  TRACE_SPAN_KDF_INFO,
+  TRACE_SPAN_KEY_BYTES,
+  TRACE_SPAN_SECRET_MIN_BYTES,
+} from "../tracing.js";
 
 /**
  * Sandbox span id remapping (KOBE-274, tracing.ts). Server side only (server and model gateway):
  * never import into sandbox code.
  */
 
-/** `k_trace` = HKDF-SHA256(master = the model-gateway session key, info `kobe/trace-span/v1`). */
+/**
+ * `k_trace` = HKDF-SHA256(secret = `KOBE_TRACE_SPAN_KEY`, info `kobe/trace-span/v1`). The secret
+ * is shared by the server and the model gateway and authorises nothing (KOBE-521).
+ */
 export function deriveTraceSpanKey(master: Uint8Array): Uint8Array {
-  if (master.byteLength < RUN_TOKEN_MASTER_MIN_BYTES) {
-    throw new Error(`trace span master secret is shorter than ${RUN_TOKEN_MASTER_MIN_BYTES} bytes`);
+  if (master.byteLength < TRACE_SPAN_SECRET_MIN_BYTES) {
+    throw new Error(`trace span secret is shorter than ${TRACE_SPAN_SECRET_MIN_BYTES} bytes`);
   }
   return new Uint8Array(
     hkdfSync("sha256", master, new Uint8Array(0), TRACE_SPAN_KDF_INFO, TRACE_SPAN_KEY_BYTES),
