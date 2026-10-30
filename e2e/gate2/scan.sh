@@ -14,9 +14,11 @@
 SCAN_MIN_LEN=12
 # Files of the sandbox that legitimately hold Kobe's own session tokens (see docs/gates/gate-2.md).
 JWT_RE='eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}'
-# Generic key shapes; label=regex. Kobe session tokens (JWT shape) are judged separately.
+# Generic key shapes; label=regex (PCRE: `grep -P`). Kobe session tokens (JWT shape) are judged
+# separately. The provider-key shape starts at a boundary: `sk-` is also a substring of random
+# base64url, and a Kobe session token once carried one (CI 2026-10-30, the sandbox's mcp-token).
 GENERIC_PATTERNS=(
-  'openai-or-anthropic-key=sk-[A-Za-z0-9_-]{20,}'
+  'openai-or-anthropic-key=(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}'
   'aws-access-key=AKIA[0-9A-Z]{16}'
   'github-token=gh[pousr]_[A-Za-z0-9]{30,}'
   'slack-token=xox[abprs]-[A-Za-z0-9-]{10,}'
@@ -220,7 +222,7 @@ run_secret_scan() {
   for entry in "${GENERIC_PATTERNS[@]}"; do
     name=${entry%%=*}
     pat=${entry#*=}
-    matches=$(grep -raoE -- "$pat" "$dir/files" 2>/dev/null | generic_unexpected "$name" | sed -E "s#^$dir/files/##; s#(://[^:/]+:)[^@]*@#\\1***@#" | sort -u | cut -c1-200 | head -3 | tr '\n' ' ' || true)
+    matches=$(grep -raoP -- "$pat" "$dir/files" 2>/dev/null | generic_unexpected "$name" | sed -E "s#^$dir/files/##; s#(://[^:/]+:)[^@]*@#\\1***@#" | sort -u | cut -c1-200 | head -3 | tr '\n' ' ' || true)
     if [[ -n "$matches" ]]; then generic=1; fail "${SCAN_LABEL:-ac-5}: a $name-shaped value is in the sandbox: $matches"; fi
   done
   ((generic == 0)) && scan_ok "no generic API key, private key or credential-bearing URL shape is in the sandbox"
