@@ -35,16 +35,19 @@ export const TRACE_SPAN_KEY_ENV = "KOBE_TRACE_SPAN_KEY";
 /**
  * `k_trace` (KOBE-274): remaps relayed sandbox span ids. Derived from `KOBE_TRACE_SPAN_KEY`, a
  * pseudonymisation secret the model gateway holds too (it remaps the same ids); no credential is
- * derived from it. Undefined (no span relay) when unset or shorter than 32 bytes.
+ * derived from it. Undefined (no span relay) when unset or shorter than 32 bytes; a set but
+ * too-short secret is reported through `warn` (once, at startup), never echoing the value.
  */
 export function traceSpanKeyFromEnv(
   env: Readonly<Record<string, string | undefined>>,
+  warn?: (message: string) => void,
 ): Uint8Array | undefined {
   const secret = env[TRACE_SPAN_KEY_ENV];
   if (!secret) return undefined;
   try {
     return deriveTraceSpanKey(new TextEncoder().encode(secret));
   } catch {
+    warn?.(`${TRACE_SPAN_KEY_ENV} is shorter than 32 bytes: sandbox span relay is off`);
     return undefined;
   }
 }

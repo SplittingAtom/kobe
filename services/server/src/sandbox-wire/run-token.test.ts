@@ -21,7 +21,16 @@ describe("run token and trace keys from env (KOBE-521)", () => {
     expect(traceSpanKeyFromEnv({ KOBE_TRACE_SPAN_KEY: secret })).toEqual(
       deriveTraceSpanKey(new TextEncoder().encode(secret)),
     );
-    expect(traceSpanKeyFromEnv({ KOBE_TRACE_SPAN_KEY: "short" })).toBeUndefined();
+    const warnings: string[] = [];
+    expect(
+      traceSpanKeyFromEnv({ KOBE_TRACE_SPAN_KEY: "short" }, (m) => warnings.push(m)),
+    ).toBeUndefined();
+    expect(warnings).toEqual([
+      "KOBE_TRACE_SPAN_KEY is shorter than 32 bytes: sandbox span relay is off",
+    ]);
+    // Unset is a choice (relay off), not a misconfiguration: no warning.
+    expect(traceSpanKeyFromEnv({}, (m) => warnings.push(m))).toBeUndefined();
+    expect(warnings).toHaveLength(1);
     expect(traceSpanKeyFromEnv({ KOBE_SESSION_KEY_MODEL_GATEWAY: secret })).toBeUndefined();
   });
 });

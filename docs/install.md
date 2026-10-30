@@ -837,8 +837,15 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   if `KOBE_SESSION_KEY_MODEL_GATEWAY` or any `KOBE_SESSION_SIGNING_KEY_*` is still set); the
   server loses `KOBE_SESSION_KEY_MODEL_GATEWAY` and gains `KOBE_TRACE_SPAN_KEY` (optional). With
   `sandbox.sessionKeysSecret`, add a `trace-span` entry (`openssl rand -base64 36`) before
-  upgrading; the old `model-gateway` entry can be deleted afterwards. HMAC-era `krt1`/`ksc1`
-  tokens are refused once the gateway restarts, so upgrade while no runs are active: a run
+  upgrading (the same applies to a Secret restored from a backup taken before this release:
+  without `trace-span` the gateway pod fails with `CreateContainerConfigError`); the old
+  `model-gateway` entry can be deleted afterwards. During the rollout old gateway pods and new
+  server pods (or the reverse) disagree on the token format, so model calls are refused (401)
+  until both Deployments have rolled, and an old gateway pod that restarts mid-rollout cannot
+  start because the Secret no longer has `model-gateway`: restart the gateway and the server
+  together (`kubectl rollout restart deploy/<release>-server deploy/<release>-model-gateway`
+  if one lags) and expect model calls to fail until both are done. HMAC-era `krt1`/`ksc1`
+  tokens are refused once the gateway restarts, so also upgrade while no runs are active: a run
   started before the upgrade carries an old run token, and its model calls are refused (401
   `invalid_run_token`) until it ends; the next run gets an EdDSA token. The budget-reservation
   salt changes with the secret, so holds taken in the minutes before the upgrade stop counting

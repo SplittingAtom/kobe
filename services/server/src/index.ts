@@ -102,7 +102,7 @@ const bifrostAdmin = modelsConfig
 // Run-bound model-gateway tokens (KOBE-118): signed with the model-gateway Ed25519 key (KOBE-521).
 const runTokenKey = runTokenKeyFromEnv(process.env);
 // Relayed sandbox spans (KOBE-274): `k_trace` from KOBE_TRACE_SPAN_KEY; unset: no span relay.
-const traceSpanKey = traceSpanKeyFromEnv(process.env);
+const traceSpanKey = traceSpanKeyFromEnv(process.env, (message) => logger.warn(message));
 // The server's own model calls (KOBE-219 auto-titles): the gateway's address and the same
 // Ed25519 signing key (KOBE-521). Either unset: no titles (logged once below).
 const serverCallKey = serverCallKeyFromEnv(process.env);
