@@ -25,6 +25,20 @@ describe("workspace changes contract (KOBE-496)", () => {
     ).toBe(true);
   });
 
+  it("carries where a moved file went, additively (KOBE-516)", () => {
+    const gone = { path: "notes/a.md", sha256: null, rev: 9, actor: null, at: null };
+    // Old events (no moved_to) still parse, unchanged.
+    expect(workspaceFileChangeSchema.parse(gone)).toEqual(gone);
+    const moved = { ...gone, moved_to: "archive/a.md" };
+    expect(workspaceFileChangeSchema.parse(moved)).toEqual(moved);
+    expect(workspaceFileChangeSchema.safeParse({ ...gone, moved_to: null }).success).toBe(true);
+    expect(workspaceFileChangeSchema.safeParse({ ...gone, moved_to: "../x" }).success).toBe(false);
+    // Only a path no longer there has moved.
+    expect(workspaceFileChangeSchema.safeParse({ ...moved, sha256: "a".repeat(64) }).success).toBe(
+      false,
+    );
+  });
+
   it("refuses unknown fields, actors and bad paths", () => {
     const base = { path: "a.md", sha256: SHA, rev: 1, actor: null, at: null };
     expect(workspaceFileChangeSchema.safeParse({ ...base, extra: 1 }).success).toBe(false);

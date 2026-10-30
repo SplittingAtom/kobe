@@ -107,6 +107,36 @@ async function agentPush(team: string, who: Person, path: string, content: strin
   return hash;
 }
 
+/** The sandbox's push of an agent's `mv`: the new path and the old one's deletion, one commit. */
+async function agentMove(team: string, who: Person, moves: readonly (readonly [string, string])[]) {
+  const owner = { teamId: team, userId: who.id };
+  await withTeam(fx.db, team, async (tx) => {
+    const changes = [];
+    for (const [from, to] of moves) {
+      const current = await currentEntry(tx, owner, from);
+      if (!current || current.deleted || current.sha256 === undefined) throw new Error(from);
+      changes.push(
+        {
+          op: "put" as const,
+          path: to,
+          base_rev: null,
+          sha256: current.sha256,
+          size: current.size,
+          mtime_ms: Date.now(),
+          executable: false,
+        },
+        { op: "delete" as const, path: from, base_rev: current.rev },
+      );
+    }
+    const res = await commitChanges(tx, owner, changes, {
+      prefix: "",
+      quota: () => Promise.resolve({ ok: true }),
+      maxRows: 1000,
+    });
+    expect(res.results.map((r) => r.status)).toEqual(changes.map(() => "applied"));
+  });
+}
+
 function changesUrl(team: string, paths: readonly string[], extra = "") {
   const q = new URLSearchParams({ team });
   for (const p of paths) q.append("path", p);
@@ -204,6 +234,115 @@ describe("GET /v1/workspace/changes (KOBE-496)", () => {
     expect((await tab.within())?.change).toEqual(
       expect.objectContaining({ path: "notes/plan.md", sha256: null }),
     );
+    await tab.reader.cancel();
+  });
+
+  it("tells open tabs where a file moved from another tab or device (KOBE-516, ac-2)", async () => {
+    const w = await world();
+    const v1 = await serverPut(w.team, w.alice, "notes/a.md", "a\n");
+    await serverPut(w.team, w.alice, "notes/sub/c.md", "c\n");
+    await serverPut(w.team, w.alice, "gone.md", "g\n");
+    const tab = await open(w.alice, w.team, ["notes/a.md", "notes/sub/c.md", "gone.md"]);
+    for (let i = 0; i < 3; i += 1) expect((await tab.within())?.event).toBe("file.state");
+    const other = browserFor(w.alice, w.team);
+    const moved = await other.post("/v1/workspace/files/move", { from: "notes/a.md", to: "b.md" });
+    expect(moved.status).toBe(200);
+    expect(await tab.within()).toEqual({
+      event: "file.changed",
+      change: expect.objectContaining({ path: "notes/a.md", sha256: null, moved_to: "b.md" }),
+    });
+    // A folder: each file's own new path.
+    const folder = await other.post("/v1/workspace/files/move", {
+      from: "notes",
+      to: "archive/notes",
+    });
+    expect(folder.status).toBe(200);
+    expect((await tab.within())?.change).toEqual(
+      expect.objectContaining({ path: "notes/sub/c.md", moved_to: "archive/notes/sub/c.md" }),
+    );
+    // A deletion still names no new path.
+    expect((await other.delete("/v1/workspace/files?path=gone.md")).status).toBe(204);
+    const deleted = (await tab.within())?.change;
+    expect(deleted).toEqual(expect.objectContaining({ path: "gone.md", sha256: null }));
+    expect(deleted).not.toHaveProperty("moved_to");
+    await tab.reader.cancel();
+    // A tab that reconnects later catches up on the move too.
+    const later = await open(w.alice, w.team, ["notes/a.md"]);
+    expect((await later.within())?.change).toEqual(
+      expect.objectContaining({ path: "notes/a.md", sha256: null, moved_to: "b.md" }),
+    );
+    await later.reader.cancel();
+    // The old path written again is a file of its own: no move any more.
+    await serverPut(w.team, w.alice, "b.md", "a\n");
+    const again = await serverPut(w.team, w.alice, "notes/a.md", "new\n");
+    expect(again).not.toBe(v1);
+    const fresh = await open(w.alice, w.team, ["notes/a.md"]);
+    const state = (await fresh.within())?.change;
+    expect(state).toEqual(expect.objectContaining({ sha256: again }));
+    expect(state).not.toHaveProperty("moved_to");
+    await fresh.reader.cancel();
+  });
+
+  it("tells open tabs where the agent's mv in the sandbox put a file (KOBE-516, ac-1)", async () => {
+    const w = await world();
+    await agentPush(w.team, w.alice, "data/raw.csv", "a,b\n");
+    await agentPush(w.team, w.alice, "data/x.txt", "same\n");
+    await agentPush(w.team, w.alice, "data/y.txt", "same\n");
+    await agentPush(w.team, w.alice, "old.md", "old\n");
+    const paths = ["data/raw.csv", "data/x.txt", "data/y.txt", "old.md"];
+    const tab = await open(w.alice, w.team, paths);
+    for (const _ of paths) expect((await tab.within())?.event).toBe("file.state");
+    // `mv data/raw.csv input.csv`
+    await agentMove(w.team, w.alice, [["data/raw.csv", "input.csv"]]);
+    expect(await tab.within()).toEqual({
+      event: "file.changed",
+      change: expect.objectContaining({
+        path: "data/raw.csv",
+        sha256: null,
+        moved_to: "input.csv",
+        actor: { kind: "agent", name: null },
+      }),
+    });
+    // `mv data out`: files with the same content follow by name.
+    await agentMove(w.team, w.alice, [
+      ["data/x.txt", "out/x.txt"],
+      ["data/y.txt", "out/y.txt"],
+    ]);
+    const folder = [(await tab.within())?.change, (await tab.within())?.change];
+    expect(folder).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "data/x.txt", moved_to: "out/x.txt" }),
+        expect.objectContaining({ path: "data/y.txt", moved_to: "out/y.txt" }),
+      ]),
+    );
+    // `rm old.md` with an unrelated new file in the same push: a deletion, no move.
+    const owner = { teamId: w.team, userId: w.alice.id };
+    const hash = sha("other\n");
+    objects.objects.set(workspaceBlobKey("", owner, hash), Buffer.from("other\n"));
+    await withTeam(fx.db, w.team, async (tx) => {
+      await recordBlob(tx, owner, hash, 6);
+      const current = await currentEntry(tx, owner, "old.md");
+      await commitChanges(
+        tx,
+        owner,
+        [
+          {
+            op: "put",
+            path: "new.md",
+            base_rev: null,
+            sha256: hash,
+            size: 6,
+            mtime_ms: Date.now(),
+            executable: false,
+          },
+          { op: "delete", path: "old.md", base_rev: current?.rev ?? 0 },
+        ],
+        { prefix: "", quota: () => Promise.resolve({ ok: true }), maxRows: 1000 },
+      );
+    });
+    const removed = (await tab.within())?.change;
+    expect(removed).toEqual(expect.objectContaining({ path: "old.md", sha256: null }));
+    expect(removed).not.toHaveProperty("moved_to");
     await tab.reader.cancel();
   });
 

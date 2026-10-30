@@ -1,0 +1,2 @@
+ALTER TABLE "workspace_files" ADD COLUMN "moved_to" text;--> statement-breakpoint
+ALTER TABLE "workspace_files" ADD CONSTRAINT "workspace_files_moved_to" CHECK ("workspace_files"."moved_to" IS NULL OR ("workspace_files"."deleted" AND octet_length("workspace_files"."moved_to") BETWEEN 1 AND 1024));

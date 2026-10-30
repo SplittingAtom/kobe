@@ -11,6 +11,7 @@ import { encodeWorkspaceHint, RUN_EVENTS_CHANNEL } from "../event-stream/notify.
 import { workspaceBlobKey, type WorkspaceOwner } from "./keys.js";
 import { LIVE_LOST } from "./lost.js";
 import type { QuotaCheck } from "./quota.js";
+import { pairRenames, recordRenames, type CommitFile } from "./renames.js";
 
 /**
  * The workspace manifest in Postgres (KOBE-27): `workspace_sync` (revision counter, totals),
@@ -342,7 +343,8 @@ async function writeRow(
     ON CONFLICT (team_id, user_id, path) DO UPDATE SET
       rev = EXCLUDED.rev, deleted = EXCLUDED.deleted, sha256 = EXCLUDED.sha256,
       blob_key = EXCLUDED.blob_key, size = EXCLUDED.size, mtime_ms = EXCLUDED.mtime_ms,
-      executable = EXCLUDED.executable, origin = EXCLUDED.origin, updated_at = now()
+      executable = EXCLUDED.executable, origin = EXCLUDED.origin, updated_at = now(),
+      moved_to = NULL
     RETURNING ${FILE_COLUMNS}`);
   const row = res.rows[0];
   if (!row) throw new Error("workspace_files write returned nothing");
@@ -430,6 +432,9 @@ export async function commitChanges(
   let state = await lockWorkspace(tx, owner);
   const results: WorkspaceChangeResult[] = [];
   const refused: string[] = [];
+  // The agent's `mv` arrives as a delete and a put of the same content (KOBE-516).
+  const gone: CommitFile[] = [];
+  const created: CommitFile[] = [];
   for (const change of changes) {
     const { path } = change;
     if (workspacePathIssue(path) !== undefined) {
@@ -468,6 +473,7 @@ export async function commitChanges(
         liveBytes: state.liveBytes - countedBytes(current),
         tombstones: state.tombstones + 1,
       };
+      if (current.sha256 !== undefined) gone.push({ path, sha256: current.sha256 });
       results.push({ status: "applied", path, entry: publicEntry(entry) });
       continue;
     }
@@ -527,8 +533,10 @@ export async function commitChanges(
       current,
     );
     state = { ...state, headRev: rev, liveFiles, liveBytes, tombstones };
+    if (!live) created.push({ path, sha256: change.sha256 });
     results.push({ status: "applied", path, entry: publicEntry(entry) });
   }
+  await recordRenames(tx, owner, pairRenames(gone, created));
   await saveState(tx, owner, state, true);
   return { headRev: state.headRev, results, refused };
 }
