@@ -346,7 +346,7 @@ export class RunFixture {
     const sb = await FakeSandbox.connect(must(this.listeners[replica], "listener").url, token);
     if (!isFake(sb)) throw new Error(`upgrade refused: ${sb.status}`);
     const claims = this.auth.verify(token);
-    sb.hello(claims.sub, [], "1.0.0", capabilities ?? undefined);
+    sb.hello(claims.sub, [], undefined, capabilities ?? undefined);
     await sb.ready();
     const ws = new FakeWorkspace(sb);
     this.workspaces.push(ws);

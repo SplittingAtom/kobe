@@ -49,7 +49,7 @@ async function start(capabilities?: readonly string[]) {
   );
   if (!isFake(sb)) throw new Error(`upgrade refused: ${sb.status}`);
   sandboxes.push(sb);
-  sb.hello(sandboxId, [], "1.0.0", capabilities);
+  sb.hello(sandboxId, [], undefined, capabilities);
   await sb.ready();
   const out = await fx
     .replica(0)
