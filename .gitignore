@@ -29,4 +29,5 @@ e2e/browser/.auth/
 e2e/browser/test-results/
 e2e/browser/playwright-report/
 e2e/browser/console-shots/
+e2e/browser/perf-results/
 e2e/browser-results/
