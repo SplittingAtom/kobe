@@ -356,7 +356,7 @@ that no user waits for, so it is not a user-facing latency. Not changed here (se
 ## KOBE-530: cold load of `/` and the root-layout bundle
 
 **Cold TTFB.** Every HTML response now carries `Server-Timing` (`apps/web/lib/telemetry/server-timing.ts`,
-installed by `instrumentation.ts`): `app` (the web's time from request to response headers),
+enabled by `instrumentation.ts`): `app` (the web's time from request to response headers),
 `branding` (the root layout's wait on the site branding) and `cold` on the first page a web process
 serves. Lab runs and DevTools read it as `PerformanceNavigationTiming.serverTiming`; the Web Vitals
 reporter does not forward it (the server's strict schema has no field for it).

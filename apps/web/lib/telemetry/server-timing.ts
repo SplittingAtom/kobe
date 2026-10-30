@@ -11,7 +11,7 @@ import { performance } from "node:perf_hooks";
  * `PerformanceNavigationTiming.serverTiming`, so lab runs and DevTools read it with no extra code.
  *
  * Next has no supported way for a render to set a response header (the proxy runs before it), so
- * `instrumentation.ts` installs this once per process: a `diagnostics_channel` subscriber on
+ * `instrumentation.ts` enables this once per process: a `diagnostics_channel` subscriber on
  * Node's `http.server.request.start` gives each request an id (request header
  * {@link TIMING_ID_HEADER}, always replaced, so a client cannot pick one), the render adds metrics
  * under that id ({@link recordServerTiming}), and the header is set just before the response's
@@ -20,7 +20,7 @@ import { performance } from "node:perf_hooks";
 
 export const TIMING_ID_HEADER = "x-kobe-timing-id";
 const REGISTRY = Symbol.for("kobe.web.serverTiming");
-const INSTALLED = Symbol.for("kobe.web.serverTimingInstalled");
+const ENABLED = Symbol.for("kobe.web.serverTimingEnabled");
 const CHANNEL = "http.server.request.start";
 
 /** The parts of Node's IncomingMessage / ServerResponse this uses (tests pass fakes). */
@@ -116,10 +116,10 @@ export function createServerTiming(options: ServerTimingOptions = {}): void {
   });
 }
 
-/** Installs the subscriber once per process (`instrumentation.ts`, Node runtime only). */
-export function installServerTiming(): void {
-  const g = globalThis as { [INSTALLED]?: true };
-  if (g[INSTALLED]) return;
-  g[INSTALLED] = true;
+/** Enables the subscriber once per process (`instrumentation.ts`, Node runtime only). */
+export function enableServerTiming(): void {
+  const g = globalThis as { [ENABLED]?: true };
+  if (g[ENABLED]) return;
+  g[ENABLED] = true;
   createServerTiming();
 }
