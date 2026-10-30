@@ -16,6 +16,8 @@ vi.mock("next/headers", () => ({
   headers: async () => new Headers({ "x-nonce": NONCE }),
 }));
 vi.mock("../lib/theme/branding-server", () => ({ getSiteBranding: async () => branding }));
+const recordServerTiming = vi.fn();
+vi.mock("../lib/telemetry/server-timing", () => ({ recordServerTiming }));
 
 const { default: RootLayout, generateMetadata } = await import("./layout");
 
@@ -32,6 +34,7 @@ const kids = (el: El): El[] =>
   ([] as unknown[]).concat(el.props.children).filter((c): c is El => isValidElement(c));
 
 afterEach(() => {
+  recordServerTiming.mockClear();
   cookie = undefined;
   branding = DEFAULT_BRANDING;
 });
@@ -90,5 +93,20 @@ describe("root layout branding (KOBE-500)", () => {
     const body = kids(await html()).find((k) => k.type === "body") as El;
     const provider = kids(body).find((k) => k.props.value !== undefined);
     expect(provider?.props.value).toEqual(branding);
+  });
+});
+
+describe("root layout server timing (KOBE-530)", () => {
+  it("records how long the render waited on the branding, under this request", async () => {
+    await html();
+    expect(recordServerTiming).toHaveBeenCalledTimes(1);
+    const [requestHeaders, name, dur] = recordServerTiming.mock.calls[0] as [
+      Headers,
+      string,
+      number,
+    ];
+    expect(requestHeaders.get("x-nonce")).toBe(NONCE);
+    expect(name).toBe("branding");
+    expect(dur).toBeGreaterThanOrEqual(0);
   });
 });
