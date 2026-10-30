@@ -9,6 +9,17 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Hardening lane 4 (2026-10-30, Chris: "work all the hardening tickets and add tests for each; deploy to
+  production when done"):** group branch `group-hardening-4` (worktree `../Kobe-g-hardening-4`), one PR;
+  the five hardening-labelled backlog tickets, three of them in parallel per-ticket worktrees merged into
+  the group branch. KOBE-520 (63450b5b): premise false, the MCP proxy never held the approval key (the
+  server signs and verifies on the policy re-check); tests pin it, no signing change. KOBE-529 (681fbcda):
+  `workspace.*` child spans split S3 from Postgres in the three write routes, query 7/7b, write-route budget
+  proposal for Chris. KOBE-527/528 (09c5a07b): `app_call.*` spans on the server, `mcp.upstream` client span
+  on the proxy, queries 8/9/9b/9c (renumbered at the merge); probe cadence on gate1 is 6/h because both
+  server replicas refresh every connector hourly (left as a follow-up candidate). KOBE-530: see its ledger.
+  The ac-2 numbers of 527/528/529 come from ClickHouse after the deploy and are filled into
+  docs/perf-baseline-2026-10-30.md. "Production" = kobe-gate1, the only install.
 - **Hardening lane 3 deployed (2026-10-30):** PR #425 merged (main b0634553; CI needed two fixture fixes
   for the Pi 1.0 cut, the gate1 e2e shard's scripted agent said 1.0.0 too, and one flaky db-server rerun).
   Deployed to kobe-gate1 as `local-b06345530688` (rollback `local-533a9dfbc944`; `local-a188832871f4`
