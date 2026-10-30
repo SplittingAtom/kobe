@@ -6,7 +6,7 @@ pyarrow==25.0.1
 matplotlib==3.11.2
 openpyxl==3.1.5
 python-docx==1.2.0
-reportlab==5.0.1
+reportlab==5.1.0
 pypdf==6.19.0
 # Notebooks (KOBE-464): the per-thread kernel (docs/specs/notebooks.md). debugpy, ipykernel's
 # debugger, is left out of the lock (--unsafe-package debugpy): no debug adapter in the sandbox.
