@@ -123,3 +123,74 @@ SELECT name,
  GROUP BY name
  ORDER BY name
 FORMAT PrettyCompact;
+
+-- 7. Workspace writes (KOBE-529): the child spans of the three write routes, which split object
+--    store time (`workspace.s3_put`, attribute `kobe.workspace.s3_op`: stream / copy / put /
+--    delete) from Postgres (`workspace.reserve_tx`, `workspace.blob_tx`, `workspace.manifest_tx`,
+--    and `workspace.lock_wait` inside the manifest transaction, attribute `kobe.workspace.lock`).
+--    A server span is the root of its own trace (KOBE-274), so children join their route by
+--    `trace_id`. An upload's `stream` also spans receiving the browser's body. `trace_id` is
+--    assumed to be the column's name: check it in query 0's DESCRIBE before the first run.
+--    7a: p50/p95 per child span (summed per request: an upload has two reserve transactions).
+WITH routes AS (
+       SELECT trace_id, name AS route
+         FROM events_core
+        WHERE start_time > now() - INTERVAL 7 DAY
+          AND name IN ('POST /v1/workspace/files', 'PUT /v1/workspace/file',
+                       'PUT /v1/sandbox/workspace/blobs/:sha256')),
+     children AS (
+       SELECT trace_id,
+              if(name = 'workspace.s3_put',
+                 concat(name, ' ', arrayElement(metadata_values, indexOf(metadata_names, 'attributes.kobe.workspace.s3_op'))),
+                 if(name = 'workspace.lock_wait',
+                    concat(name, ' ', arrayElement(metadata_values, indexOf(metadata_names, 'attributes.kobe.workspace.lock'))),
+                    name)) AS child,
+              sum(dateDiff('millisecond', start_time, end_time)) AS ms
+         FROM events_core
+        WHERE start_time > now() - INTERVAL 7 DAY
+          AND startsWith(name, 'workspace.')
+        GROUP BY trace_id, child)
+SELECT r.route,
+       c.child,
+       count() AS n,
+       round(quantileExact(0.50)(c.ms)) AS p50_ms,
+       round(quantileExact(0.95)(c.ms)) AS p95_ms
+  FROM children AS c
+ INNER JOIN routes AS r ON r.trace_id = c.trace_id
+ GROUP BY r.route, c.child
+ ORDER BY r.route, c.child
+FORMAT PrettyCompact;
+
+-- 7b. Per write route: request, object store and Postgres time per request, and the Kobe-side
+--     share (the request minus its object-store calls, over the request). Lock waits are inside
+--     `manifest_tx`, so they are not added again.
+WITH routes AS (
+       SELECT trace_id, name AS route, dateDiff('millisecond', start_time, end_time) AS route_ms
+         FROM events_core
+        WHERE start_time > now() - INTERVAL 7 DAY
+          AND name IN ('POST /v1/workspace/files', 'PUT /v1/workspace/file',
+                       'PUT /v1/sandbox/workspace/blobs/:sha256')),
+     split AS (
+       SELECT trace_id,
+              sumIf(dateDiff('millisecond', start_time, end_time), name = 'workspace.s3_put') AS s3_ms,
+              sumIf(dateDiff('millisecond', start_time, end_time),
+                    name IN ('workspace.reserve_tx', 'workspace.blob_tx', 'workspace.manifest_tx')) AS pg_ms
+         FROM events_core
+        WHERE start_time > now() - INTERVAL 7 DAY
+          AND startsWith(name, 'workspace.')
+        GROUP BY trace_id)
+SELECT r.route,
+       count() AS n,
+       round(quantileExact(0.50)(r.route_ms)) AS route_p50_ms,
+       round(quantileExact(0.95)(r.route_ms)) AS route_p95_ms,
+       round(quantileExact(0.50)(s.s3_ms)) AS s3_p50_ms,
+       round(quantileExact(0.95)(s.s3_ms)) AS s3_p95_ms,
+       round(quantileExact(0.50)(s.pg_ms)) AS pg_p50_ms,
+       round(quantileExact(0.95)(s.pg_ms)) AS pg_p95_ms,
+       round(quantileExact(0.95)(greatest(r.route_ms - s.s3_ms, 0))) AS kobe_side_p95_ms,
+       round(quantileExact(0.50)(if(r.route_ms > 0, greatest(r.route_ms - s.s3_ms, 0) / r.route_ms, 0)), 2) AS kobe_share_p50
+  FROM routes AS r
+ INNER JOIN split AS s ON s.trace_id = r.trace_id
+ GROUP BY r.route
+ ORDER BY r.route
+FORMAT PrettyCompact;

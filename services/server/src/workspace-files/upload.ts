@@ -10,6 +10,13 @@ import { workspaceBlobKey, workspacePrefix, type WorkspaceOwner } from "../works
 import { resolveLimits } from "../workspace-sync/quota.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
 import {
+  WRITE_SPAN,
+  lockWaitSpan,
+  s3PutSpan,
+  writeTxSpan,
+  type WriteKind,
+} from "../workspace-sync/write-spans.js";
+import {
   blobState,
   finishUpload,
   lockWorkspace,
@@ -90,6 +97,16 @@ async function freePath(
   return undefined;
 }
 
+/** The write kind its spans carry (KOBE-529). */
+function writeKind(incoming: IncomingFile): WriteKind {
+  if (incoming.artifact) return "artifact";
+  return incoming.drop === true ? "drop" : "upload";
+}
+
+/** A failure's code word, `ok` for a success: a write span's outcome. */
+export const resultOutcome = (result: { ok: true } | { ok: false; code: string }): string =>
+  result.ok ? "ok" : result.code;
+
 /** The audit target of an upload: ids and counts only, never a name, path or content. */
 function uploadAudit(owner: WorkspaceOwner, size: number, incoming: IncomingFile) {
   if (incoming.artifact) {
@@ -120,11 +137,19 @@ export async function uploadToWorkspace(
 ): Promise<UploadResult> {
   const ancestors = ancestorsOf(path);
   const copy = copyNaming(incoming) !== undefined;
-  const pre = await withTeam(db, owner.teamId, async (tx) => {
-    if (!copy && (await pathIsTaken(tx, owner, path, ancestors))) return "taken" as const;
-    const limit = await storageLimit(tx, owner.teamId, incoming.teamQuotaDefaultBytes);
-    return (await storageUsed(tx, owner.teamId)) >= limit ? ("full" as const) : ("ok" as const);
-  });
+  const kind = writeKind(incoming);
+  const pre = await writeTxSpan(
+    WRITE_SPAN.reserveTx,
+    kind,
+    () =>
+      withTeam(db, owner.teamId, async (tx) => {
+        if (!copy && (await pathIsTaken(tx, owner, path, ancestors))) return "taken" as const;
+        const limit = await storageLimit(tx, owner.teamId, incoming.teamQuotaDefaultBytes);
+        const used = await storageUsed(tx, owner.teamId);
+        return used >= limit ? ("full" as const) : ("ok" as const);
+      }),
+    String,
+  );
   if (pre !== "ok") {
     incoming.body.destroy(); // refused before reading: never leave the body to the socket
     return pre === "taken" ? TAKEN : QUOTA;
@@ -134,11 +159,11 @@ export async function uploadToWorkspace(
   const meter = new UploadMeter(incoming.limitBytes);
   try {
     pipeline(incoming.body, meter, () => undefined);
-    await sync.objects.putStream(staging, meter);
+    await s3PutSpan(kind, "stream", () => sync.objects.putStream(staging, meter));
   } catch (err) {
     meter.destroy();
     incoming.body.destroy();
-    await discard(sync, staging);
+    await discard(sync, staging, kind);
     if (err instanceof UploadTooLargeError || meter.bytes > incoming.limitBytes) {
       return fail(
         413,
@@ -152,13 +177,13 @@ export async function uploadToWorkspace(
   try {
     return await commitUpload(db, sync, owner, path, ancestors, staging, meter, incoming);
   } finally {
-    await discard(sync, staging);
+    await discard(sync, staging, kind);
   }
 }
 
-async function discard(sync: WorkspaceSync, key: string): Promise<void> {
+async function discard(sync: WorkspaceSync, key: string, kind: WriteKind): Promise<void> {
   try {
-    await sync.objects.delete([key]);
+    await s3PutSpan(kind, "delete", () => sync.objects.delete([key]));
   } catch (err) {
     logger.warn({ err }, "workspace upload: could not delete the staging object");
   }
@@ -181,56 +206,65 @@ async function commitUpload(
     return fail(413, "file_too_large", `Files over ${limits.maxFileBytes} bytes are not accepted.`);
   }
   const blobKey = workspaceBlobKey(sync.prefix, owner, sha256);
-  const reserved = await withTeam(db, owner.teamId, async (tx) => {
-    const copies = copyNaming(incoming) !== undefined;
-    if (!copies && (await pathIsTaken(tx, owner, path, ancestors))) return "taken" as const;
-    const held = await blobState(tx, owner, sha256);
-    if (held !== "absent") return held;
-    const ok = await reserveUpload(tx, owner, size, resolveLimits(limits));
-    return ok ? ("reserved" as const) : ("over_quota" as const);
-  });
+  const kind = writeKind(incoming);
+  const reserved = await writeTxSpan(
+    WRITE_SPAN.reserveTx,
+    kind,
+    () =>
+      withTeam(db, owner.teamId, async (tx) => {
+        const copies = copyNaming(incoming) !== undefined;
+        if (!copies && (await pathIsTaken(tx, owner, path, ancestors))) return "taken" as const;
+        const held = await blobState(tx, owner, sha256);
+        if (held !== "absent") return held;
+        const ok = await reserveUpload(tx, owner, size, resolveLimits(limits));
+        return ok ? ("reserved" as const) : ("over_quota" as const);
+      }),
+    String,
+  );
   if (reserved === "taken") return TAKEN;
   if (reserved === "over_quota") return QUOTA;
   if (reserved === "deleting") {
     return fail(503, "sandbox_unavailable", "That content is being cleaned up; try again shortly.");
   }
   if (reserved === "reserved") {
-    const stored = await storeBlob(db, sync, owner, { sha256, blobKey, size }, () =>
-      sync.objects.copy(staging, blobKey),
+    const stored = await storeBlob(db, sync, owner, { sha256, blobKey, size, kind }, () =>
+      s3PutSpan(kind, "copy", () => sync.objects.copy(staging, blobKey)),
     );
     if (stored) return stored;
   }
 
-  return withTeam(db, owner.teamId, async (tx): Promise<UploadResult> => {
-    const state = await lockWorkspace(tx, owner);
-    // Under the workspace lock: the clash check (and a drop's free name) is atomic with the write.
-    const target = await freePath(tx, owner, path, ancestors, copyNaming(incoming));
-    if (target === undefined) return TAKEN;
-    const decision = await sync.quota(tx, {
-      owner,
-      fileBytes: size,
-      liveFiles: state.liveFiles + 1,
-      liveBytes: state.liveBytes + size,
+  const manifest = () =>
+    withTeam(db, owner.teamId, async (tx): Promise<UploadResult> => {
+      const state = await lockWaitSpan(kind, "workspace", () => lockWorkspace(tx, owner));
+      // Under the workspace lock: the clash check (and a drop's free name) is atomic with the write.
+      const target = await freePath(tx, owner, path, ancestors, copyNaming(incoming));
+      if (target === undefined) return TAKEN;
+      const decision = await sync.quota(tx, {
+        owner,
+        fileBytes: size,
+        liveFiles: state.liveFiles + 1,
+        liveBytes: state.liveBytes + size,
+      });
+      if (!decision.ok) return QUOTA;
+      // The team's storage quota (KOBE-143): check and write under its lock, so uploads racing
+      // across the team's members cannot jointly pass the limit.
+      await lockWaitSpan(kind, "team_storage", () => lockTeamStorage(tx, owner.teamId));
+      const limit = await storageLimit(tx, owner.teamId, incoming.teamQuotaDefaultBytes);
+      if ((await storageUsed(tx, owner.teamId)) + size > limit) return QUOTA;
+      const entry = await sync.putServerFile(
+        tx,
+        owner,
+        { path: target, sha256, size, blobKey },
+        "user",
+      );
+      await recordAudit(tx, {
+        action: "workspace.file_uploaded",
+        teamId: owner.teamId,
+        target: uploadAudit(owner, size, incoming),
+      });
+      return { ok: true, entry };
     });
-    if (!decision.ok) return QUOTA;
-    // The team's storage quota (KOBE-143): check and write under its lock, so uploads racing
-    // across the team's members cannot jointly pass the limit.
-    await lockTeamStorage(tx, owner.teamId);
-    const limit = await storageLimit(tx, owner.teamId, incoming.teamQuotaDefaultBytes);
-    if ((await storageUsed(tx, owner.teamId)) + size > limit) return QUOTA;
-    const entry = await sync.putServerFile(
-      tx,
-      owner,
-      { path: target, sha256, size, blobKey },
-      "user",
-    );
-    await recordAudit(tx, {
-      action: "workspace.file_uploaded",
-      teamId: owner.teamId,
-      target: uploadAudit(owner, size, incoming),
-    });
-    return { ok: true, entry };
-  });
+  return writeTxSpan(WRITE_SPAN.manifestTx, kind, manifest, resultOutcome);
 }
 
 /**
@@ -241,7 +275,12 @@ export async function storeBlob(
   db: KobeDb,
   sync: WorkspaceSync,
   owner: WorkspaceOwner,
-  blob: { readonly sha256: string; readonly blobKey: string; readonly size: number },
+  blob: {
+    readonly sha256: string;
+    readonly blobKey: string;
+    readonly size: number;
+    readonly kind: WriteKind;
+  },
   write: () => Promise<void>,
 ): Promise<Failure | undefined> {
   const { sha256, size } = blob;
@@ -249,11 +288,17 @@ export async function storeBlob(
   let finished = false;
   try {
     await write();
-    const recorded = await withTeam(db, owner.teamId, async (tx) => {
-      const outcome = await recordBlob(tx, owner, sha256, size);
-      await finishUpload(tx, owner, size, outcome === "added");
-      return outcome;
-    });
+    const recorded = await writeTxSpan(
+      WRITE_SPAN.blobTx,
+      blob.kind,
+      () =>
+        withTeam(db, owner.teamId, async (tx) => {
+          const outcome = await recordBlob(tx, owner, sha256, size);
+          await finishUpload(tx, owner, size, outcome === "added");
+          return outcome;
+        }),
+      String,
+    );
     finished = true;
     added = recorded === "added";
     if (recorded === "deleting") {
