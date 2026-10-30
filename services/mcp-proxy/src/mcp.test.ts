@@ -7,7 +7,7 @@ import {
   signSessionToken,
   type SessionSigningKey,
 } from "@kobe/session-token";
-import { InMemorySpanExporter, initTelemetry } from "@kobe/telemetry";
+import { InMemorySpanExporter, SpanStatusCode, initTelemetry } from "@kobe/telemetry";
 import { createApp } from "./app.js";
 import { DEFAULT_LIMITS, type Limits } from "./config.js";
 import {
@@ -899,6 +899,33 @@ describe("tracing (KOBE-274)", () => {
       await rpc("tools/call", { name: "leak the quarterly numbers", arguments: {} });
       expect(callSpan(exporter)?.attributes["kobe.tool.name"]).toBe("unknown");
       expect(JSON.stringify(callSpan(exporter)?.attributes)).not.toContain("quarterly");
+    });
+  });
+
+  it("records the upstream round trip as a child of mcp.tools/call, connector id folded (KOBE-528)", async () => {
+    await traced(async (exporter) => {
+      await rpc("tools/call", { name: "get_issue", arguments: { a: "x" } });
+      const span = exporter.getFinishedSpans().find((s) => s.name === "mcp.upstream");
+      const parent = callSpan(exporter);
+      expect(span?.parentSpanContext?.spanId).toBe(parent?.spanContext().spanId);
+      expect(span?.attributes).toMatchObject({
+        "kobe.upstream.kind": "mcp",
+        "kobe.upstream.method": "tools/call",
+        "kobe.upstream.outcome": "ok",
+        "kobe.upstream.error": false,
+      });
+      expect(span?.attributes).not.toHaveProperty("kobe.connector_id");
+      expect(JSON.stringify(span?.attributes)).not.toContain("get_issue");
+    });
+  });
+
+  it("flags an upstream that refuses the credentials (KOBE-528)", async () => {
+    fake.options = { status: 401 };
+    await traced(async (exporter) => {
+      await rpc("tools/call", { name: "get_issue", arguments: {} });
+      const span = exporter.getFinishedSpans().find((s) => s.name === "mcp.upstream");
+      expect(span?.attributes["kobe.upstream.outcome"]).toBe("auth_required");
+      expect(span?.status.code).toBe(SpanStatusCode.ERROR);
     });
   });
 
