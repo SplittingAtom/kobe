@@ -1,5 +1,5 @@
 # Kobe sandbox Python data stack (spec D12): top-level pins. Lock with pip-compile (see Dockerfile).
-pandas==3.0.6
+pandas==3.1.0
 numpy==2.5.3
 duckdb==1.5.6
 pyarrow==25.0.1
