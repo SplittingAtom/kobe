@@ -38,6 +38,7 @@ import {
   recordRestore,
   reserveUpload,
 } from "./store.js";
+import { WRITE_SPAN, s3PutSpan, writeTxSpan } from "./write-spans.js";
 
 /** Requests per sandbox: a burst big enough for a restore's downloads, then a steady rate. */
 export const WORKSPACE_RATE = { capacity: 2000, refillPerSecond: 500 } as const;
@@ -388,7 +389,8 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
     const verified = source.pipe(verifyingStream(sha256, size));
     source.once("error", (err) => verified.destroy(err));
     try {
-      await objects.put(workspaceBlobKey(prefix, caller, sha256), verified, size);
+      const key = workspaceBlobKey(prefix, caller, sha256);
+      await s3PutSpan("blob", "put", () => objects.put(key, verified, size));
       return undefined;
     } catch (err) {
       if (err instanceof IntegrityError || verified.errored instanceof IntegrityError) {
@@ -440,13 +442,15 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
     if (!release) return busy(c, 429, "Too many transfers at once.");
     try {
       // Reserve the bytes (and one blob) before accepting any: concurrent uploads can't overshoot.
-      const state = await tx(caller, "other", async (t) => {
-        const lostSize = await lostBlobSize(t, caller, sha.data);
-        if (lostSize !== undefined) return lostSize === size ? "lost" : "lost_mismatch";
-        const held = await blobState(t, caller, sha.data);
-        if (held !== "absent") return held;
-        return (await reserveUpload(t, caller, size, limits)) ? "reserved" : "over_quota";
-      });
+      const reserve = () =>
+        tx(caller, "other", async (t) => {
+          const lostSize = await lostBlobSize(t, caller, sha.data);
+          if (lostSize !== undefined) return lostSize === size ? "lost" : "lost_mismatch";
+          const held = await blobState(t, caller, sha.data);
+          if (held !== "absent") return held;
+          return (await reserveUpload(t, caller, size, limits)) ? "reserved" : "over_quota";
+        });
+      const state = await writeTxSpan(WRITE_SPAN.reserveTx, "blob", reserve, String);
       if (state === "lost") return await resend(c, caller, sha.data, size);
       if (state === "lost_mismatch") {
         auditIntegrity(caller);
@@ -469,13 +473,15 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
       try {
         const failed = await storeVerified(c, caller, sha.data, size);
         if (failed) return failed;
-        outcome = await finishTx(caller, async (t) => {
-          const recorded = await recordBlob(t, caller, sha.data, size);
-          await finishUpload(t, caller, size, recorded === "added");
-          // Marked lost while this upload ran: these verified bytes are that content.
-          if (recorded === "exists") await healBlob(t, caller, sha.data, size);
-          return recorded;
-        });
+        const record = () =>
+          finishTx(caller, async (t) => {
+            const recorded = await recordBlob(t, caller, sha.data, size);
+            await finishUpload(t, caller, size, recorded === "added");
+            // Marked lost while this upload ran: these verified bytes are that content.
+            if (recorded === "exists") await healBlob(t, caller, sha.data, size);
+            return recorded;
+          });
+        outcome = await writeTxSpan(WRITE_SPAN.blobTx, "blob", record, String);
         finished = true;
       } finally {
         // A failed upload still ends its reservation (a crash leaves it to collection).
