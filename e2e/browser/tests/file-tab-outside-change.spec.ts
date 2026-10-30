@@ -50,7 +50,8 @@ test("file tab: picks up the agent's write when clean, shows the banner and Comp
     await files.getByRole("button", { name: "Refresh files" }).click();
     const tree = files.getByRole("tree", { name: "Files in your workspace" });
     await tree.getByRole("treeitem", { name: dir, exact: true }).click();
-    await tree.getByRole("treeitem", { name: "notes.md", exact: true }).click();
+    // By path, not name: a member's workspace may hold another notes.md (gate1 does).
+    await tree.locator(`[role="treeitem"][data-path="${path}"]`).click();
     const tab = page
       .getByRole("tabpanel")
       .filter({ has: page.getByRole("toolbar", { name: "notes.md view" }) });
@@ -135,7 +136,7 @@ test("file tab: follows the agent's mv to the new path instead of closing", asyn
     await files.getByRole("button", { name: "Refresh files" }).click();
     const tree = files.getByRole("tree", { name: "Files in your workspace" });
     await tree.getByRole("treeitem", { name: dir, exact: true }).click();
-    await tree.getByRole("treeitem", { name: "notes.md", exact: true }).click();
+    await tree.locator(`[role="treeitem"][data-path="${dir}/notes.md"]`).click();
     await expect(page.getByRole("tab", { name: "notes.md", selected: true })).toBeVisible();
     const notViewing = page.getByRole("button", { name: "Don't send notes.md with the message" });
     if (await notViewing.isVisible()) await notViewing.click();
