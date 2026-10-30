@@ -22,13 +22,13 @@ import { z } from "zod";
  */
 export const PI_PINNED_VERSION = "1.4.0";
 /**
- * Minor versions the server accepts besides the pinned one (KOBE-511): sandboxes started from the
- * previous image (Pi 1.0.x) keep connecting until they are recreated from the new template. The
- * RPC records above are unchanged between 1.0.0 and 1.4.0 except added fields (`agent_settled`
- * `aborted`, `tool_execution_end` `durationMs`), which the loose schemas pass through. The server
- * logs a warning for each such hello. KOBE-518 removes "1.0" once no 1.0 sandbox remains.
+ * Minor versions the server accepts besides the pinned one during a Pi upgrade (KOBE-511):
+ * sandboxes started from the previous image keep connecting until they are recreated from the new
+ * template, and the server logs a warning for each such hello. Empty since KOBE-518 (no 1.0.x
+ * sandbox remains). On the next Pi upgrade, add the previous image's minor here (after checking
+ * the RPC records above still match) and remove it again once every sandbox runs the new image.
  */
-export const PI_PREVIOUS_MINORS: readonly string[] = ["1.0"];
+export const PI_PREVIOUS_MINORS: readonly string[] = [];
 
 const piId = z.string().min(1).max(256);
 const imageContent = z.looseObject({
