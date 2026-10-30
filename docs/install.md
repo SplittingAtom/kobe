@@ -122,8 +122,20 @@ public halves in the Secret `<release>-sandbox-session-keys` (`<audience>.key`, 
 the public half is a self-signed certificate because Helm cannot derive a bare public key, and only
 its key is used), and the public halves again in the ConfigMap
 `<release>-sandbox-session-verify-keys`, which is all the verifying services read. The same Secret
-holds `model-gateway` (the gateway's master secret shared with the server, from which run, trace
-and server-call token keys are derived) and `approval-hmac`.
+holds `trace-span` and `approval-hmac`.
+
+**Run and server-call tokens (KOBE-521).** The server's credentials for the model gateway, run
+tokens (a run's model calls, `x-kobe-run-token`) and server-call tokens (titles, follow-ups, the
+eval judge; `x-kobe-server-call`), are signed with the `model-gateway` private key too, each with
+its own signed JWS `typ` (`krt2`, `ksc2`; session tokens say `JWT`), so no kind passes as another.
+The gateway verifies all three with the `model-gateway` public key and holds no key that signs any
+of them. Rotating the `model-gateway` pair (below) therefore rotates all three at once. Run
+tokens live up to 24 hours (they are revoked when their run ends), so in step 3 wait until every
+run started before step 2 has ended, not just 15 minutes, before removing the old public key. The only secret the gateway shares with the
+server is `trace-span` (`KOBE_TRACE_SPAN_KEY`): both remap sandbox span ids with it (KOBE-274) and
+the gateway salts its budget-reservation keys with it. It authorises nothing; rotating it only
+breaks the link between spans exported before and after the change. Replace it in the Secret and
+restart the server and the gateway together, while no runs are active.
 
 **Pre-created keys (GitOps).** Set `sandbox.sessionKeysSecret` and
 `sandbox.sessionVerifyKeysConfigMap` (the chart refuses one without the other). The Secret may
@@ -138,7 +150,7 @@ done
 kubectl -n kobe create secret generic kobe-session-keys \
   --from-file=sandbox-wire.key --from-file=model-gateway.key \
   --from-file=mcp-proxy.key --from-file=egress-proxy.key \
-  --from-literal=model-gateway="$(openssl rand -base64 36)" \
+  --from-literal=trace-span="$(openssl rand -base64 36)" \
   --from-literal=approval-hmac="$(openssl rand -base64 36)"
 kubectl -n kobe create configmap kobe-session-verify-keys \
   --from-file=sandbox-wire=sandbox-wire.pub --from-file=model-gateway=model-gateway.pub \
@@ -815,6 +827,22 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Ed25519 run and server-call tokens (KOBE-521).** The server now signs run tokens and
+  server-call tokens with the `model-gateway` Ed25519 key, and the gateway verifies them with the
+  public key it already reads (see [Session-token keys](#session-token-keys)); it no longer holds
+  the shared secret they used to be derived from, so a compromised gateway cannot mint them. The
+  generated Secret `<release>-sandbox-session-keys` gains `trace-span` (a fresh random value) and
+  loses `model-gateway`; the ConfigMap is unchanged. Env: the gateway loses
+  `KOBE_SESSION_KEY_MODEL_GATEWAY` and gains `KOBE_TRACE_SPAN_KEY` (required; it refuses to start
+  if `KOBE_SESSION_KEY_MODEL_GATEWAY` or any `KOBE_SESSION_SIGNING_KEY_*` is still set); the
+  server loses `KOBE_SESSION_KEY_MODEL_GATEWAY` and gains `KOBE_TRACE_SPAN_KEY` (optional). With
+  `sandbox.sessionKeysSecret`, add a `trace-span` entry (`openssl rand -base64 36`) before
+  upgrading; the old `model-gateway` entry can be deleted afterwards. HMAC-era `krt1`/`ksc1`
+  tokens are refused once the gateway restarts, so upgrade while no runs are active: a run
+  started before the upgrade carries an old run token, and its model calls are refused (401
+  `invalid_run_token`) until it ends; the next run gets an EdDSA token. The budget-reservation
+  salt changes with the secret, so holds taken in the minutes before the upgrade stop counting
+  until they expire. Span ids exported before and after the upgrade no longer link.
 - **Ed25519 session tokens (KOBE-513).** Sandbox session tokens are now signed with per-audience
   Ed25519 keys and the proxies hold public keys only (see
   [Session-token keys](#session-token-keys)). The generated Secret gains `<audience>.key` and
