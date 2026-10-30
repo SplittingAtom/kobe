@@ -1,5 +1,6 @@
 import { lookup as dnsLookup, type LookupAddress } from "node:dns";
 import { isIP } from "node:net";
+import { SpanKind, SpanStatusCode, withSpan } from "@kobe/telemetry";
 import { Agent, fetch as undiciFetch, type Dispatcher } from "undici";
 import { AddressPolicy } from "./address-policy.js";
 import type { UpstreamPolicy } from "./config.js";
@@ -48,8 +49,16 @@ export type UpstreamResult =
 /** Most `tools/list` pages a probe follows (KOBE-101). */
 export const MAX_TOOL_PAGES = 20;
 
+/**
+ * Which Kobe path an upstream session serves, for its span (KOBE-527/528): a sandbox's MCP call,
+ * the server's pinning probe, or an MCP App's own call. Default: `mcp` for a call, `probe` for a
+ * list.
+ */
+export type UpstreamKind = "mcp" | "probe" | "app";
+
 export interface UpstreamBase {
   readonly url: string;
+  readonly kind?: UpstreamKind;
   /** Credential headers (KOBE-61); never logged. */
   readonly headers: Readonly<Record<string, string>>;
   readonly signal: AbortSignal;
@@ -243,6 +252,8 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
   interface Session {
     id?: string;
     version?: string;
+    /** HTTP requests sent in this session (its span's `kobe.upstream.requests`). */
+    requests: number;
   }
 
   async function post(
@@ -251,6 +262,7 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
     session: Session,
     message: Record<string, unknown>,
   ): Promise<Record<string, unknown> | undefined> {
+    session.requests += 1;
     const res = await undiciFetch(url, {
       method: "POST",
       dispatcher,
@@ -328,14 +340,46 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
       });
   }
 
-  /** initialize → initialized → `run` → session DELETE; maps every failure to a result. */
-  async function inSession(
+  /**
+   * One upstream session as a client span `mcp.upstream` (KOBE-527/528), so a trace separates the
+   * upstream's time from Kobe's. Low-cardinality attributes only: the path's kind, the MCP method,
+   * the outcome (`ok` or the failure kind), an error flag and the request count; never the
+   * connector, its URL, the tool or any content. The best-effort session DELETE is not in it.
+   */
+  function inSession(
     call: UpstreamBase,
+    method: "tools/call" | "tools/list",
+    run: (url: URL, session: Session) => Promise<UpstreamResult>,
+  ): Promise<UpstreamResult> {
+    const kind = call.kind ?? (method === "tools/call" ? "mcp" : "probe");
+    const session: Session = { requests: 0 };
+    return withSpan(
+      "mcp.upstream",
+      {
+        kind: SpanKind.CLIENT,
+        attributes: { "kobe.upstream.kind": kind, "kobe.upstream.method": method },
+      },
+      async (span) => {
+        const result = await sessionResult(call, session, run);
+        span.setAttributes({
+          "kobe.upstream.outcome": result.ok ? "ok" : result.failure,
+          "kobe.upstream.error": !result.ok,
+          "kobe.upstream.requests": session.requests,
+        });
+        if (!result.ok) span.setStatus({ code: SpanStatusCode.ERROR });
+        return result;
+      },
+    );
+  }
+
+  /** initialize → initialized → `run` → session DELETE; maps every failure to a result. */
+  async function sessionResult(
+    call: UpstreamBase,
+    session: Session,
     run: (url: URL, session: Session) => Promise<UpstreamResult>,
   ): Promise<UpstreamResult> {
     const url = checkUpstreamUrl(call.url, options.policy, addresses);
     if (!url) return { ok: false, failure: "url_not_allowed" };
-    const session: Session = {};
     try {
       const init = await post(url, call, session, {
         jsonrpc: "2.0",
@@ -413,7 +457,7 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
   }
 
   const callTool = (call: UpstreamCall): Promise<UpstreamResult> =>
-    inSession(call, async (url, session) => {
+    inSession(call, "tools/call", async (url, session) => {
       let id = 2;
       const next: Next = (method, params) => request(url, call, session, id++, method, params);
       if (call.checkModelVisible === true) {
@@ -466,7 +510,7 @@ export function createUpstreamClient(options: UpstreamOptions): UpstreamClient {
     call: UpstreamBase,
     listOptions: ListToolsOptions = {},
   ): Promise<UpstreamResult> {
-    return inSession(call, async (url, session) => {
+    return inSession(call, "tools/list", async (url, session) => {
       let id = 2;
       const next: Next = (method, params) => request(url, call, session, id++, method, params);
       const listed = await allTools(next);

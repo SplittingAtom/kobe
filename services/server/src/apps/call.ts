@@ -1,5 +1,6 @@
 import { withTeam, type AppCallReason, type KobeDb } from "@kobe/db";
 import { toolInputSchema, type JsonObject } from "@kobe/protocol";
+import { SpanKind, SpanStatusCode, withSpan, type Span } from "@kobe/telemetry";
 import { recordAudit } from "../audit/record.js";
 import { connectorsOffIn } from "../connectors/thread-connectors.js";
 import { viewerProjectIds } from "../threads/references.js";
@@ -225,6 +226,66 @@ export async function takeRateToken(
   return refused("rate_limited");
 }
 
+type Decided =
+  | {
+      readonly ok: true;
+      readonly app: MemberApp;
+      readonly what: Audited;
+      readonly args: JsonObject;
+    }
+  | { readonly ok: false; readonly reason: AppCallReason; readonly what?: Audited };
+
+/** Steps 1-4 for one request: the app, the thread on screen, then {@link decide}. */
+async function decideCall(
+  deps: AppCallDeps,
+  p: BrowserPrincipal,
+  appId: string,
+  request: {
+    readonly tool: string;
+    readonly arguments?: unknown;
+    readonly threadId?: string | undefined;
+  },
+  now: Date,
+): Promise<Decided> {
+  const app = await memberApp(deps.db, p.teamId, p.userId, appId);
+  if (!app) {
+    // Not live for this member (connector not enabled, no key, drifted template, ...): audited
+    // against the connector when the id names a real app; an unknown id has nothing to name.
+    const connectorId = await appConnectorOf(deps.db, appId);
+    return {
+      ok: false,
+      reason: "app_not_available",
+      ...(connectorId ? { what: { connectorId, tool: request.tool } } : {}),
+    };
+  }
+  const what = { connectorId: app.connector.id, tool: request.tool, templateSha256: app.sha256 };
+  if (request.threadId !== undefined) {
+    const refusal = await threadRefusal(deps.db, p, request.threadId, app.connector.id);
+    if (refusal) return { ok: false, reason: refusal, what };
+  }
+  const decided = await decide(deps, p, app, request.tool, request.arguments, now);
+  return decided.ok
+    ? { ok: true, app, what, args: decided.args }
+    : { ok: false, reason: decided.reason, what };
+}
+
+/**
+ * A step's outcome on its span (KOBE-527). Values are fixed reason or failure codes, never ids,
+ * names or content; `error` (when given) also sets the span's status.
+ */
+function outcome(span: Span, value: string, error?: boolean): void {
+  span.setAttribute("kobe.app_call.outcome", value);
+  if (error === undefined) return;
+  span.setAttribute("kobe.app_call.error", error);
+  if (error) span.setStatus({ code: SpanStatusCode.ERROR });
+}
+
+/**
+ * One app call (steps 1-6). Each step is a child span of the route's (KOBE-527), so a trace
+ * shows where the time goes: `app_call.decide` (steps 1-4), `app_call.credential` (5),
+ * `app_call.audit` (the allowed row) and `app_call.proxy` (6: mcp-proxy and the app backend; the
+ * proxy starts a trace of its own, where `mcp.upstream` is the backend's share).
+ */
 export async function callApp(
   deps: AppCallDeps,
   p: BrowserPrincipal,
@@ -237,25 +298,28 @@ export async function callApp(
   },
 ): Promise<AppCallOutcome> {
   const now = deps.now?.() ?? new Date();
-  const app = await memberApp(deps.db, p.teamId, p.userId, appId);
-  if (!app) {
-    // Not live for this member (connector not enabled, no key, drifted template, ...): audited
-    // against the connector when the id names a real app; an unknown id has nothing to name.
-    const connectorId = await appConnectorOf(deps.db, appId);
-    if (connectorId) return deny(deps, p, { connectorId, tool: request.tool }, "app_not_available");
-    return refused("app_not_available");
+  const decided = await withSpan("app_call.decide", {}, async (span) => {
+    const d = await decideCall(deps, p, appId, request, now);
+    outcome(span, d.ok ? "allowed" : d.reason);
+    return d;
+  });
+  if (!decided.ok) {
+    return decided.what ? deny(deps, p, decided.what, decided.reason) : refused(decided.reason);
   }
-  const what = { connectorId: app.connector.id, tool: request.tool, templateSha256: app.sha256 };
-  if (request.threadId !== undefined) {
-    const refusal = await threadRefusal(deps.db, p, request.threadId, app.connector.id);
-    if (refusal) return deny(deps, p, what, refusal);
-  }
-  const decided = await decide(deps, p, app, request.tool, request.arguments, now);
-  if (!decided.ok) return deny(deps, p, what, decided.reason);
+  const { app, what } = decided;
 
   let credential: Parameters<AppCaller["call"]>[0]["credential"];
   if (app.connector.authKind !== "none") {
-    const revealed = await deps.mcp.revealForMember(p.teamId, p.userId, app.connector.id);
+    const revealed = await withSpan("app_call.credential", {}, async (span) => {
+      const r = await deps.mcp.revealForMember(p.teamId, p.userId, app.connector.id);
+      const code = r.ok
+        ? "ok"
+        : r.failure === "unavailable"
+          ? "credential_unavailable"
+          : "not_connected";
+      outcome(span, code, !r.ok);
+      return r;
+    });
     if (!revealed.ok) {
       const reason =
         revealed.failure === "unavailable" ? "credential_unavailable" : "not_connected";
@@ -263,13 +327,17 @@ export async function callApp(
     }
     credential = revealed.credential;
   }
-  await audit(deps.db, p, what, "allowed");
-  const answer = await deps.caller.call({
-    connectorId: app.connector.id,
-    url: app.connector.url,
-    tool: request.tool,
-    arguments: decided.args,
-    ...(credential === undefined ? {} : { credential }),
+  await withSpan("app_call.audit", {}, () => audit(deps.db, p, what, "allowed"));
+  const answer = await withSpan("app_call.proxy", { kind: SpanKind.CLIENT }, async (span) => {
+    const a = await deps.caller.call({
+      connectorId: app.connector.id,
+      url: app.connector.url,
+      tool: request.tool,
+      arguments: decided.args,
+      ...(credential === undefined ? {} : { credential }),
+    });
+    outcome(span, a.ok ? "ok" : a.failure, !a.ok);
+    return a;
   });
   if (answer.ok) return { ok: true, result: answer.result };
   logger.info(
