@@ -193,6 +193,7 @@ SELECT r.route,
  INNER JOIN split AS s ON s.trace_id = r.trace_id
  GROUP BY r.route
  ORDER BY r.route
+FORMAT PrettyCompact;
 
 -- 8. App calls (KOBE-527): where `POST /v1/team/apps/:appId/calls` spends its time on the server.
 --    Child spans: `app_call.decide` (app, thread, schema validation, policy), `app_call.credential`
