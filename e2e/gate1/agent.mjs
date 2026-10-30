@@ -148,7 +148,7 @@ async function serve(identity) {
     type: "hello",
     sandbox_id: identity.sandboxId,
     agent_version: "gate1-scripted",
-    pi_version: "1.0.0",
+    pi_version: "1.4.0",
     runs: [],
   });
 }
