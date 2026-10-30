@@ -25,14 +25,15 @@ Every latency is recorded as a trace span whose duration is the latency (the gat
 Langfuse 4, ingests OTLP traces only; no metrics SDK). Attributes are route templates and
 kinds, never ids or content (`captureContent` stays off).
 
-| Tier                         | Span (name)                                                                 | Measures                                                                          | Code                                                                                  |
-| ---------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Web                          | `web.vital <metric> <route>`                                                | TTFB, FCP, LCP, INP, CLS (×1000), Next.js hydration/render                        | `apps/web/components/shell/web-vitals-reporter.tsx` → `POST /v1/telemetry/web-vitals` |
-| Server, scheduler, MCP proxy | `<METHOD> <route template>`                                                 | request duration per route (`http.route`, status)                                 | `packages/telemetry/src/hono.ts` (existing)                                           |
-| Model gateway                | `model_gateway.request` + `http.route`                                      | request duration per inference route                                              | `services/model-gateway/src/routes.ts`                                                |
-| Egress proxy                 | `egress.connection` + `kobe.setup_ms`                                       | tunnel set-up (CONNECT → established; upgrade → verified TLS)                     | `services/egress-proxy/src/proxy.ts`                                                  |
-| Runs                         | `run.pi_ready`, `run.first_token`, `run.tool_call`                          | run.start → first Pi frame / first token; tool start → result                     | `services/server/src/sandbox-wire/run-latency.ts`                                     |
-| Sandbox                      | `sandbox.wake`, `sandbox.claim`, `sandbox.pod_ready`, `sandbox.agent_hello` | wake → pod Ready, claim (warm-pool bind or resume), pod Ready, wake → agent hello | `services/server/src/sandbox-lifecycle/timing.ts`                                     |
+| Tier                         | Span (name)                                                                                                     | Measures                                                                          | Code                                                                                  |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Web                          | `web.vital <metric> <route>`                                                                                    | TTFB, FCP, LCP, INP, CLS (×1000), Next.js hydration/render                        | `apps/web/components/shell/web-vitals-reporter.tsx` → `POST /v1/telemetry/web-vitals` |
+| Server, scheduler, MCP proxy | `<METHOD> <route template>`                                                                                     | request duration per route (`http.route`, status)                                 | `packages/telemetry/src/hono.ts` (existing)                                           |
+| Model gateway                | `model_gateway.request` + `http.route`                                                                          | request duration per inference route                                              | `services/model-gateway/src/routes.ts`                                                |
+| Egress proxy                 | `egress.connection` + `kobe.setup_ms`                                                                           | tunnel set-up (CONNECT → established; upgrade → verified TLS)                     | `services/egress-proxy/src/proxy.ts`                                                  |
+| Runs                         | `run.pi_ready`, `run.first_token`, `run.tool_call`                                                              | run.start → first Pi frame / first token; tool start → result                     | `services/server/src/sandbox-wire/run-latency.ts`                                     |
+| Workspace writes (KOBE-529)  | `workspace.s3_put`, `workspace.reserve_tx`, `workspace.blob_tx`, `workspace.manifest_tx`, `workspace.lock_wait` | object store vs Postgres time inside the three write routes                       | `services/server/src/workspace-sync/write-spans.ts`                                   |
+| Sandbox                      | `sandbox.wake`, `sandbox.claim`, `sandbox.pod_ready`, `sandbox.agent_hello`                                     | wake → pod Ready, claim (warm-pool bind or resume), pod Ready, wake → agent hello | `services/server/src/sandbox-lifecycle/timing.ts`                                     |
 
 The Playwright measurement run (`e2e/browser/perf/`) adds lab numbers per route: every page under
 `apps/web/app` loaded N times, TTFB / FCP / LCP / CLS / DOM ready / load from the Performance API,
@@ -265,6 +266,41 @@ Filed in Hadron (backlog, label `performance`), measure-and-explain first:
 
 Within budget, no ticket: INP (no samples: the lab run does not interact), cold start 13.2 s
 (< 20 s), every other route's LCP, the gateway's own overhead (~1 ms around the model).
+
+### Workspace writes: object store vs Postgres (KOBE-529)
+
+The three write routes record child spans under their server span
+(`services/server/src/workspace-sync/write-spans.ts`), attributes low-cardinality only (write kind
+`upload` / `drop` / `artifact` / `save` / `blob`, S3 operation, lock, outcome code; never ids,
+paths or content; a failure carries its error type):
+
+| Span                    | Covers                                                                                                                                                                                   |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workspace.s3_put`      | one object-store call: `stream` (upload body → staging, includes receiving the body), `copy` (staging → content key), `put` (save; sandbox blob, streaming its body), `delete` (staging) |
+| `workspace.reserve_tx`  | the read-only checks and the upload reservation transaction                                                                                                                              |
+| `workspace.blob_tx`     | recording the stored blob and ending the reservation                                                                                                                                     |
+| `workspace.manifest_tx` | the manifest/team transaction of an upload or save (lock, quotas, file row, audit)                                                                                                       |
+| `workspace.lock_wait`   | inside `manifest_tx`: the workspace row lock, the team storage lock (save: with the team quota read)                                                                                     |
+
+The sandbox blob PUT has no manifest transaction (its commit is a separate request), so it splits
+into `reserve_tx`, `s3_put put`, `blob_tx`. Query 7a gives p50/p95 per child span and route, 7b the
+request, object-store and Postgres time per route and the Kobe-side share (request minus its
+object-store calls).
+
+| Route                                     | n   | route p95 ms | S3 p95 ms | Postgres p95 ms | Kobe-side p95 ms | Kobe share p50 |
+| ----------------------------------------- | --- | ------------ | --------- | --------------- | ---------------- | -------------- |
+| `POST /v1/workspace/files`                | –   | –            | –         | –               | –                | –              |
+| `PUT /v1/sandbox/workspace/blobs/:sha256` | –   | –            | –         | –               | –                | –              |
+| `PUT /v1/workspace/file`                  | –   | –            | –         | –               | –                | –              |
+
+Numbers: measured after the next gate1 deploy (coordinator fills the table from query 7).
+
+**Proposed decision (for Chris):** routes whose request includes an object-store round trip (the
+three writes above, and any later route that stores bytes) get their own budget: the Kobe-side
+time (request minus `workspace.s3_put`) is held to the 300 ms p95 server budget, and the whole
+request to p95 < 600 ms on gate1, where the object store is MinIO on the NAS over plain-HTTP LAN.
+If query 7 shows the Kobe side itself above 300 ms (for example `lock_wait` or `manifest_tx`), that
+part stays a performance ticket rather than being covered by the write budget.
 
 ## Limits of the method
 
