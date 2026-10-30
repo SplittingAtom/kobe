@@ -38,6 +38,7 @@ import {
   type ServerToSandboxFrame,
 } from "@kobe/protocol";
 import { withTeam } from "@kobe/db";
+import { recordSpan, telemetryState } from "@kobe/telemetry";
 import { withAppendTx } from "../event-stream/append.js";
 import type WebSocket from "ws";
 import { completeCommand, orphanedDeliveries } from "./commands.js";
@@ -45,6 +46,9 @@ import { UI_DEDUPE_MAX } from "./constants.js";
 import type { LeaseViolation, SandboxLimit, WireContext } from "./context.js";
 import { CommandDelivery, type IssuedCommand } from "./delivery.js";
 import { RunIngest } from "./ingest.js";
+import { wakeStartedAt } from "../sandbox-lifecycle/store.js";
+import { agentHelloSpan } from "../sandbox-lifecycle/timing.js";
+import { runLatency, type RunLatency } from "./run-latency-spans.js";
 import { AllowedArtifactCalls } from "../artifacts/allowed.js";
 import { putArtifact } from "../artifacts/put.js";
 import { shareFile } from "../files/share.js";
@@ -116,32 +120,36 @@ function piMinor(version: string): string | undefined {
 }
 
 /**
- * The pinned Pi's minor (`1.4.x`) or a previous minor still in running sandboxes (`1.0.x`); the
- * server refuses anything else with `unsupported_version` (contract). KOBE-518 removes "1.0" once
- * no 1.0 sandbox remains.
+ * The pinned Pi's minor (`1.4.x`), or a previous minor named in `previousMinors` while a Pi
+ * upgrade is rolling out (PI_PREVIOUS_MINORS, empty since KOBE-518); the server refuses anything
+ * else with `unsupported_version` (contract).
  */
-export function supportedPiVersion(version: string): boolean {
+export function supportedPiVersion(
+  version: string,
+  previousMinors: readonly string[] = PI_PREVIOUS_MINORS,
+): boolean {
   const minor = piMinor(version);
-  return minor !== undefined && (minor === pinnedPiMinor() || PI_PREVIOUS_MINORS.includes(minor));
+  return minor !== undefined && (minor === pinnedPiMinor() || previousMinors.includes(minor));
 }
 
 const pinnedPiMinor = (): string => PI_PINNED_VERSION.split(".").slice(0, 2).join(".");
 
 /**
  * The hello's Pi gate: whether the version is supported, warning when it is supported only through
- * PI_PREVIOUS_MINORS (KOBE-511), so the transition stays visible. KOBE-518 removes "1.0" once no
- * 1.0 sandbox remains.
+ * `previousMinors` (KOBE-511), so an upgrade's transition stays visible until the list is emptied
+ * again (as KOBE-518 did for 1.0.x).
  */
 export function admitPiVersion(
   version: string,
   log: { warn(obj: Record<string, unknown>, msg: string): void },
   sandboxId: string,
+  previousMinors: readonly string[] = PI_PREVIOUS_MINORS,
 ): boolean {
-  if (!supportedPiVersion(version)) return false;
+  if (!supportedPiVersion(version, previousMinors)) return false;
   if (piMinor(version) !== pinnedPiMinor()) {
     log.warn(
       { sandbox_id: sandboxId, pi_version: version.slice(0, 32), pinned: PI_PINNED_VERSION },
-      "sandbox runs a previous Pi minor (accepted until KOBE-518)",
+      "sandbox runs a previous Pi minor (accepted while the upgrade rolls out; remove it from PI_PREVIOUS_MINORS once no such sandbox remains)",
     );
   }
   return true;
@@ -339,7 +347,7 @@ export class SandboxConnection implements RegisteredConnection {
       threadId,
       ended: false,
       compaction,
-      ingest: this.#newIngest(runId, threadId, cursor),
+      ingest: this.#newIngest(runId, threadId, cursor, runLatency(runId, cursor > 0, compaction)),
     });
   }
 
@@ -363,7 +371,7 @@ export class SandboxConnection implements RegisteredConnection {
     }
   }
 
-  #newIngest(runId: string, threadId: string, cursor: number): RunIngest {
+  #newIngest(runId: string, threadId: string, cursor: number, latency: RunLatency): RunIngest {
     const ctx = this.#ctx;
     return new RunIngest({
       db: ctx.db,
@@ -371,6 +379,7 @@ export class SandboxConnection implements RegisteredConnection {
       runId,
       threadId,
       cursor,
+      onFrame: (events, nowMs) => latency.observe(events, nowMs),
       tuning: ctx.tuning,
       serverCalls: ctx.serverCalls,
       createTranslator: () =>
@@ -1617,7 +1626,12 @@ export class SandboxConnection implements RegisteredConnection {
         threadId: run.threadId,
         ended: false,
         compaction: false, // never kept (above)
-        ingest: this.#newIngest(run.runId, run.threadId, run.sandboxSeq),
+        ingest: this.#newIngest(
+          run.runId,
+          run.threadId,
+          run.sandboxSeq,
+          runLatency(run.runId, true, false),
+        ),
       });
       // A resumed run keeps the trace context its agent got on the old connection (KOBE-274):
       // on this replica its state (command spans, cap, seen-set) is still known; on another one
@@ -1654,8 +1668,20 @@ export class SandboxConnection implements RegisteredConnection {
       { sandbox_id: this.sandboxId, resumed: listed.length, interrupted: lost.length },
       "sandbox connected",
     );
+    this.#recordHelloTiming(Date.now());
     this.#startTimers();
     this.#delivery.poke();
+  }
+
+  /** KOBE-525: wake start → this hello, when the hello follows a wake (never blocks the hello). */
+  #recordHelloTiming(helloMs: number): void {
+    if (this.target.evalThreadId !== undefined || !telemetryState().enabled) return;
+    wakeStartedAt(this.#ctx.db, this.target)
+      .then((startedAt) => {
+        const span = agentHelloSpan(startedAt, helloMs);
+        if (span) recordSpan(span.name, { startTime: span.startMs, endTime: span.endMs });
+      })
+      .catch((err: unknown) => this.log.debug({ err }, "hello timing unavailable"));
   }
 
   /** Commands delivered on an earlier connection never got their result (ids are per connection). */

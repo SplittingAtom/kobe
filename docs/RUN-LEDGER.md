@@ -9,6 +9,29 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Hardening lane 3 + gate1 deploy (2026-10-30):** group 2 merged (#408 → main 533a9dfb; the gate2/gate4
+  secret scan had to skip the session keys' public halves and PEM armour lines). main 533a9dfb deployed to
+  kobe-gate1 as `local-533a9dfbc944` (rollback tag `local-a188832871f4`; `local-87398452b50d` and the orphan
+  sandbox tag removed): PDBs on server and model-gateway, both spread over two nodes; Secret holds
+  `<aud>.key/.pub`, ConfigMap `kobe-sandbox-session-verify-keys` has the four public keys; warm pools
+  recycled onto the Pi 1.4.0 sandbox image; a live owner run in Team1 (bash tool call via the gateway)
+  completed with no token refusals and no 1.0.x hello warning. Note: the generated Secret still carries the
+  old per-audience HMAC entries (unused). Lane 3 on `group-hardening-3` (Chris: one at a time, then deploy
+  for the next gate review): KOBE-522 → 521 → 519 → 518 → 516 → 525 (perf baseline, filed 2026-10-30).
+  Also filed: KOBE-526 multi-client readiness (future; no API gateway, Chris 2026-10-30).
+  Lane 3 done (all six on `group-hardening-3`, one PR): 522 sandbox agent re-trades its grant on a wire
+  401/4001, rate-limited (Opus review: detection is wire-only); 521 run and server-call tokens signed with the
+  server's Ed25519 `model-gateway` pair, the gateway holds public keys plus the pseudonymising trace-span key
+  only (upgrade: gateway and server roll together; Secrets restored from pre-521 backups need a `trace-span`
+  entry); 519 undici 8.12.2 override in the sandbox Pi install; 518 Pi 1.0.x hellos refused
+  (`PI_PREVIOUS_MINORS` empty; the fake sandboxes greet with the pinned version now, 15 DB suites had said
+  1.0.0); 516 `workspace_files.moved_to` (migration 0183), the agent's `mv` paired inside one sandbox commit,
+  open tabs follow a move from the change stream for every mover and the KOBE-506 client tracking is gone;
+  525 latency spans (run first token / Pi ready / tool round trip, sandbox wake/claim/hello, gateway and
+  egress `http.route`), `POST /v1/telemetry/web-vitals` fed by Next's `useReportWebVitals`, an on-demand
+  Playwright measurement run (`e2e/browser` `perf:measure`) and `docs/perf-baseline-2026-10-30.md` whose
+  gate1 tables are filled after the deploy (`docs/perf/latency-queries.sql`; query 0 checks the ClickHouse
+  column names first).
 - **Hardening lane 2 (2026-10-29):** `group-hardening-2`: KOBE-511 Pi 1.0.0 → 1.4.0 (extension-API pin test;
   server admits 1.0.x with a warning until KOBE-518; undici → KOBE-519) and KOBE-513 Ed25519 session tokens
   (per-audience key pairs, public keys in a ConfigMap, kid + rotation window; server reads its bundle from

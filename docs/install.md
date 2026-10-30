@@ -122,8 +122,20 @@ public halves in the Secret `<release>-sandbox-session-keys` (`<audience>.key`, 
 the public half is a self-signed certificate because Helm cannot derive a bare public key, and only
 its key is used), and the public halves again in the ConfigMap
 `<release>-sandbox-session-verify-keys`, which is all the verifying services read. The same Secret
-holds `model-gateway` (the gateway's master secret shared with the server, from which run, trace
-and server-call token keys are derived) and `approval-hmac`.
+holds `trace-span` and `approval-hmac`.
+
+**Run and server-call tokens (KOBE-521).** The server's credentials for the model gateway, run
+tokens (a run's model calls, `x-kobe-run-token`) and server-call tokens (titles, follow-ups, the
+eval judge; `x-kobe-server-call`), are signed with the `model-gateway` private key too, each with
+its own signed JWS `typ` (`krt2`, `ksc2`; session tokens say `JWT`), so no kind passes as another.
+The gateway verifies all three with the `model-gateway` public key and holds no key that signs any
+of them. Rotating the `model-gateway` pair (below) therefore rotates all three at once. Run
+tokens live up to 24 hours (they are revoked when their run ends), so in step 3 wait until every
+run started before step 2 has ended, not just 15 minutes, before removing the old public key. The only secret the gateway shares with the
+server is `trace-span` (`KOBE_TRACE_SPAN_KEY`): both remap sandbox span ids with it (KOBE-274) and
+the gateway salts its budget-reservation keys with it. It authorises nothing; rotating it only
+breaks the link between spans exported before and after the change. Replace it in the Secret and
+restart the server and the gateway together, while no runs are active.
 
 **Pre-created keys (GitOps).** Set `sandbox.sessionKeysSecret` and
 `sandbox.sessionVerifyKeysConfigMap` (the chart refuses one without the other). The Secret may
@@ -138,7 +150,7 @@ done
 kubectl -n kobe create secret generic kobe-session-keys \
   --from-file=sandbox-wire.key --from-file=model-gateway.key \
   --from-file=mcp-proxy.key --from-file=egress-proxy.key \
-  --from-literal=model-gateway="$(openssl rand -base64 36)" \
+  --from-literal=trace-span="$(openssl rand -base64 36)" \
   --from-literal=approval-hmac="$(openssl rand -base64 36)"
 kubectl -n kobe create configmap kobe-session-verify-keys \
   --from-file=sandbox-wire=sandbox-wire.pub --from-file=model-gateway=model-gateway.pub \
@@ -159,6 +171,18 @@ steps; nothing is refused at any point:
    tokens carry the new `kid`; tokens signed with the old key still verify.
 3. After 15 minutes (the token lifetime), remove the old public key from both bundles and restart
    the verifiers and the server.
+
+**Running sandboxes and a key change.** When the server refuses a sandbox's wire token (an
+upgrade or a key replaced without the three steps), the sandbox agent trades its bootstrap token
+again at once, which does not depend on session keys, and hands the new tokens to the wire, the
+model gateway, MCP and egress (KOBE-522). Detection is on the wire only: Pi and its tools call the
+gateway and proxies directly, so the agent never sees their refusals. Model, MCP and egress calls
+are therefore refused from the moment their verifier restarts with the new keys until the
+sandbox's wire reconnects to a server pod with the new keys and re-trades (in a rolling upgrade,
+the verifiers can restart ahead of the server); after that, running sandboxes recover without a
+restart. Re-trades are rate-limited (one per
+30 s, backing off to one per 5 minutes while the server keeps refusing) and logged
+(`sandbox session re-trade after a rejected token`).
 
 ### Workspace storage
 
@@ -803,6 +827,29 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Ed25519 run and server-call tokens (KOBE-521).** The server now signs run tokens and
+  server-call tokens with the `model-gateway` Ed25519 key, and the gateway verifies them with the
+  public key it already reads (see [Session-token keys](#session-token-keys)); it no longer holds
+  the shared secret they used to be derived from, so a compromised gateway cannot mint them. The
+  generated Secret `<release>-sandbox-session-keys` gains `trace-span` (a fresh random value) and
+  loses `model-gateway`; the ConfigMap is unchanged. Env: the gateway loses
+  `KOBE_SESSION_KEY_MODEL_GATEWAY` and gains `KOBE_TRACE_SPAN_KEY` (required; it refuses to start
+  if `KOBE_SESSION_KEY_MODEL_GATEWAY` or any `KOBE_SESSION_SIGNING_KEY_*` is still set); the
+  server loses `KOBE_SESSION_KEY_MODEL_GATEWAY` and gains `KOBE_TRACE_SPAN_KEY` (optional). With
+  `sandbox.sessionKeysSecret`, add a `trace-span` entry (`openssl rand -base64 36`) before
+  upgrading (the same applies to a Secret restored from a backup taken before this release:
+  without `trace-span` the gateway pod fails with `CreateContainerConfigError`); the old
+  `model-gateway` entry can be deleted afterwards. During the rollout old gateway pods and new
+  server pods (or the reverse) disagree on the token format, so model calls are refused (401)
+  until both Deployments have rolled, and an old gateway pod that restarts mid-rollout cannot
+  start because the Secret no longer has `model-gateway`: restart the gateway and the server
+  together (`kubectl rollout restart deploy/<release>-server deploy/<release>-model-gateway`
+  if one lags) and expect model calls to fail until both are done. HMAC-era `krt1`/`ksc1`
+  tokens are refused once the gateway restarts, so also upgrade while no runs are active: a run
+  started before the upgrade carries an old run token, and its model calls are refused (401
+  `invalid_run_token`) until it ends; the next run gets an EdDSA token. The budget-reservation
+  salt changes with the secret, so holds taken in the minutes before the upgrade stop counting
+  until they expire. Span ids exported before and after the upgrade no longer link.
 - **Ed25519 session tokens (KOBE-513).** Sandbox session tokens are now signed with per-audience
   Ed25519 keys and the proxies hold public keys only (see
   [Session-token keys](#session-token-keys)). The generated Secret gains `<audience>.key` and
@@ -810,10 +857,13 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   stay); a ConfigMap `<release>-sandbox-session-verify-keys` is added. With
   `sandbox.sessionKeysSecret`, add the new keys and set `sandbox.sessionVerifyKeysConfigMap`
   before upgrading: the server and the proxies refuse to start without them. There is no
-  compatibility window for HS256 tokens: sandboxes running during the upgrade hold HS256 tokens
-  until their next scheduled re-trade (at most about 13 minutes), and their model, MCP and egress
-  calls and wire reconnects are refused until then. Upgrade while no runs are active, or stop
-  running sandboxes first.
+  compatibility window for HS256 tokens, but a running sandbox whose agent has KOBE-522 recovers
+  without a restart: its wire reconnect to an upgraded server pod is refused, and the agent
+  trades its bootstrap token for new EdDSA tokens. Until then (the proxies and the gateway may
+  restart ahead of the server), its model, MCP and egress calls are refused. Sandboxes
+  started from an image without KOBE-522 (a pod keeps its image until it restarts) wait for
+  their next scheduled re-trade (at most about 13 minutes); when upgrading from such a release,
+  upgrade while no runs are active or stop running sandboxes first.
 - **Editable gallery agents (KOBE-494, migration `0177_gallery_agent_customized`).** Site admins
   can edit gallery agents in the Site Console (Gallery agents → Edit, the same two-tab creator
   teams use) and publish new versions. The first edit marks an agent **Customized**: upgrades

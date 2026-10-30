@@ -98,6 +98,7 @@ import { threadMarkerRoutes } from "./routes/thread-markers.js";
 import { threadAppResultRoutes } from "./routes/thread-app-results.js";
 import { threadAppCardRoutes } from "./routes/thread-app-cards.js";
 import { threadRetentionRoutes } from "./routes/thread-retention.js";
+import { webVitalsRoutes } from "./routes/web-vitals.js";
 import { threadRoutes } from "./routes/threads.js";
 import { threadConnectorRoutes } from "./routes/thread-connectors.js";
 import { threadSkillRoutes } from "./routes/thread-skills.js";
@@ -191,6 +192,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
     annotate({ userId: c.get("user").id });
     await next();
   });
+  api.route("/telemetry", webVitalsRoutes());
   api.route("/me/teams", myTeamsRoutes(deps));
   api.route("/me/invites", myInvitesRoutes(deps));
   api.route("/me/connector-notices", meConnectorNoticesRoutes(deps));

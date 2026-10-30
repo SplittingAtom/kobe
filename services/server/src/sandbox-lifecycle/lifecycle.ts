@@ -8,6 +8,7 @@ import {
   withTeam,
   type KobeDb,
 } from "@kobe/db";
+import { ROOT_CONTEXT, recordSpan, runParentContext } from "@kobe/telemetry";
 import type { Logger } from "pino";
 import { currentAuditContext } from "../audit/context.js";
 import { recordAudit, recordAuditAfter } from "../audit/record.js";
@@ -20,6 +21,7 @@ import { notifyHintInTx } from "../sandbox-wire/bus.js";
 import { SandboxWakeError, type SandboxTarget, type SandboxWaker } from "../sandbox-wire/types.js";
 import { resolveIdleMinutes, TEAM_IDLE_MINUTES } from "./idle.js";
 import { ensureReady, REMEDY, type ReadyProvider } from "./ready.js";
+import { wakeSpans, type TimingSpan } from "./timing.js";
 import {
   beginWake,
   forgetSandboxIdentity,
@@ -28,6 +30,19 @@ import {
   markHibernated,
   recordSandboxIdentity,
 } from "./store.js";
+
+/** Cold-start spans (KOBE-525) in the trace of the first run that waited for the wake. */
+function recordWakeSpans(spans: readonly TimingSpan[], runId: string | undefined): void {
+  const parent = runId === undefined ? ROOT_CONTEXT : runParentContext(runId);
+  for (const span of spans) {
+    recordSpan(span.name, {
+      startTime: span.startMs,
+      endTime: span.endMs,
+      attributes: span.attributes,
+      parent,
+    });
+  }
+}
 
 /**
  * Sandbox hibernation and wake (KOBE-25, spec D14).
@@ -234,7 +249,18 @@ export function createSandboxLifecycle(options: LifecycleOptions): SandboxLifecy
       throw err;
     }
     const { handle, resumed } = result;
+    const claimedMs = Date.now();
     await waitUntilReady(team, target, started);
+    recordWakeSpans(
+      wakeSpans({
+        startMs: started,
+        claimedMs,
+        readyMs: Date.now(),
+        reason: entry.reason,
+        resumed,
+      }),
+      [...entry.runs][0],
+    );
     // sandbox.woken is recorded by the provider when its resume patch is committed.
     await withTeam(db, target.teamId, (tx) =>
       recordSandboxIdentity(tx, target, handle.sandboxId, workspacePvcName(handle.sandboxName)),
@@ -246,7 +272,14 @@ export function createSandboxLifecycle(options: LifecycleOptions): SandboxLifecy
       if (metrics.wakeMs.length > WAKE_SAMPLES) metrics.wakeMs.shift();
     }
     log.info(
-      { team_id: target.teamId, sandbox_id: handle.sandboxId, resumed, previous, ms },
+      {
+        team_id: target.teamId,
+        sandbox_id: handle.sandboxId,
+        resumed,
+        previous,
+        ms,
+        claim_ms: claimedMs - started,
+      },
       resumed ? "sandbox woken" : "sandbox ensured",
     );
   };

@@ -15,7 +15,8 @@ import type { WorkspaceOwner } from "../workspace-sync/keys.js";
  * Who made a revision follows from the row (no extra column): `sandbox` origin is the member's
  * agent; a server write under `projects/` is the project mount reconcile (`sync`), named after
  * the member who added that project file; any other server write is the member themselves (save,
- * upload, move, Edit as file, from any tab or device).
+ * upload, move, Edit as file, from any tab or device). A moved file's old path carries its new
+ * one (`moved_to`, KOBE-516), in the live change and in the catch-up after a reconnect alike.
  */
 type ChangeRow = {
   path: string;
@@ -26,6 +27,7 @@ type ChangeRow = {
   updated_at: Date | string;
   owner_name: string | null;
   project_adder: string | null;
+  moved_to: string | null;
 };
 
 const PROJECTS = `${PROJECT_WORKSPACE_DIR}/`;
@@ -38,7 +40,7 @@ export async function readFileChanges(
 ): Promise<WorkspaceFileChange[]> {
   if (paths.length === 0) return [];
   const res = await tx.execute<ChangeRow>(sql`
-    SELECT f.path, f.sha256, f.rev, f.deleted, f.origin, f.updated_at,
+    SELECT f.path, f.sha256, f.rev, f.deleted, f.origin, f.updated_at, f.moved_to,
            (SELECT u.name FROM users u WHERE u.id = f.user_id) AS owner_name,
            -- projects/<slug>/<path>: by the unique (team, slug) and (team, project, path) indexes.
            (SELECT u.name FROM projects p
@@ -63,6 +65,8 @@ function toChange(row: ChangeRow): WorkspaceFileChange {
     rev: Number(row.rev),
     actor: actorOf(row),
     at: new Date(row.updated_at).toISOString(),
+    // Where it went (KOBE-516): open tabs follow it instead of closing.
+    ...(row.deleted && row.moved_to !== null ? { moved_to: row.moved_to } : {}),
   };
 }
 

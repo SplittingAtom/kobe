@@ -26,6 +26,8 @@ check "runs as non-root uid 1000" '^1000$' run id -u
 host() { "$@"; }
 check "image default user is 1000:1000" '^1000:1000$' host docker image inspect --format '{{.Config.User}}' "$IMAGE"
 check "pi is 1.4.x" '(^|[^0-9])1\.4\.[0-9]+' run pi --version
+check "pi's undici is >= 8.12.2 (npm audit high, KOBE-519)" '^8\.(1[2-9]\.([2-9]|[1-9][0-9])|1[3-9]\.[0-9]+|[2-9][0-9]\.[0-9]+)$' run node -p \
+  'require("/opt/pi/node_modules/undici/package.json").version'
 check "node is 22.x (>= 22.19)" '^v22\.(19|[2-9][0-9])\.' run node --version
 check "python is 3.12" '^Python 3\.12\.' run python3 --version
 check "python data stack imports" '^ok$' run python3 -c \

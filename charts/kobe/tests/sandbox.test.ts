@@ -10,7 +10,9 @@ import {
   generateSessionKeyPair,
   loadSigningKey,
   loadVerifyKeys,
+  signRunToken,
   signSessionToken,
+  verifyRunToken,
   verifySessionToken,
 } from "../../../packages/session-token/src/index.js";
 import {
@@ -316,6 +318,59 @@ describe("server sandbox configuration", () => {
     }
   });
 
+  it("KOBE-521: the gateway gets no secret that mints a credential, only the trace-span secret", () => {
+    const gateway = envOf(ms, "kobe-model-gateway");
+    const fromSecret = gateway
+      .map((v) => (v as { valueFrom?: { secretKeyRef?: { name: string; key: string } } }).valueFrom)
+      .map((f) => f?.secretKeyRef)
+      .filter((r) => r?.name === "kobe-sandbox-session-keys")
+      .map((r) => r?.key);
+    expect(fromSecret).toEqual(["trace-span"]);
+    expect(gateway.map((v) => v.name)).not.toContain("KOBE_SESSION_KEY_MODEL_GATEWAY");
+    // No Deployment reads the retired master secret entry (the ConfigMap's public key is fine).
+    for (const d of byKind(ms, "Deployment")) {
+      const refs = JSON.stringify(d.spec.template.spec.containers);
+      expect(refs, d.metadata.name).not.toMatch(
+        /"secretKeyRef":\{"name":"kobe-sandbox-session-keys","key":"model-gateway"/,
+      );
+    }
+    // The server signs run and server-call tokens with the model-gateway private key and shares
+    // only the trace-span secret (optional: a pre-created Secret without it turns the relay off).
+    expect(envOf(ms, "kobe-server")).toContainEqual({
+      name: "KOBE_TRACE_SPAN_KEY",
+      valueFrom: {
+        secretKeyRef: { name: "kobe-sandbox-session-keys", key: "trace-span", optional: true },
+      },
+    });
+  });
+
+  it("run and server-call tokens signed with the Secret's key verify with the gateway's ConfigMap key only (KOBE-521)", () => {
+    const secret = (find(ms, "Secret", "kobe-sandbox-session-keys")?.stringData ?? {}) as Record<
+      string,
+      string
+    >;
+    const cm = (find(ms, "ConfigMap", "kobe-sandbox-session-verify-keys")?.data ?? {}) as Record<
+      string,
+      string
+    >;
+    const now = Math.floor(Date.now() / 1000);
+    const ids = ["0b5e8f1c-2d3a-4b5c-8d9e-0f1a2b3c4d5e", "4f9c2d5a-6b7e-4f90-8bc2-4d5e6f708192"];
+    const run = signRunToken(loadSigningKey(secret["model-gateway.key"] ?? ""), {
+      iss: "kobe-server",
+      aud: "kobe.model-gateway",
+      run_id: ids[1] ?? "",
+      team_id: ids[0] ?? "",
+      sandbox_id: ids[1] ?? "",
+      iat: now,
+      exp: now + 900,
+      jti: "abcdefghijklmnopqrstuv",
+    }).token;
+    expect(verifyRunToken(loadVerifyKeys(cm["model-gateway"] ?? ""), run, now).ok).toBe(true);
+    for (const other of ["sandbox-wire", "mcp-proxy", "egress-proxy"]) {
+      expect(verifyRunToken(loadVerifyKeys(cm[other] ?? ""), run, now).ok, other).toBe(false);
+    }
+  });
+
   it("gives the approval key to the server only, optional for pre-created Secrets (KOBE-37)", () => {
     expect(envOf(ms, "kobe-server")).toContainEqual({
       name: "KOBE_APPROVAL_KEY",
@@ -385,16 +440,12 @@ describe("release-side NetworkPolicy", () => {
 describe("session keys Secret", () => {
   const AUDIENCES = ["egress-proxy", "mcp-proxy", "model-gateway", "sandbox-wire"] as const;
 
-  it("generates one Ed25519 pair per audience plus the gateway master and approval keys, kept on uninstall", () => {
+  it("generates one Ed25519 pair per audience plus the trace-span and approval keys, kept on uninstall", () => {
     const secret = find(render(), "Secret", "kobe-sandbox-session-keys");
     expect(secret?.metadata.annotations["helm.sh/resource-policy"]).toBe("keep");
     const data = (secret?.stringData ?? {}) as Record<string, string>;
     expect(Object.keys(data).sort()).toEqual(
-      [
-        "approval-hmac",
-        "model-gateway",
-        ...AUDIENCES.flatMap((a) => [`${a}.key`, `${a}.pub`]),
-      ].sort(),
+      ["approval-hmac", "trace-span", ...AUDIENCES.flatMap((a) => [`${a}.key`, `${a}.pub`])].sort(),
     );
     const kids = AUDIENCES.map((a) => loadSigningKey(data[`${a}.key`] ?? "").kid);
     expect(new Set(kids).size).toBe(4);
@@ -403,10 +454,12 @@ describe("session keys Secret", () => {
       // The stored public half belongs to the private key.
       expect([...loadVerifyKeys(data[`${a}.pub`] ?? "").keys()]).toEqual([signing.kid]);
     }
-    for (const k of ["approval-hmac", "model-gateway"]) {
+    for (const k of ["approval-hmac", "trace-span"]) {
       expect(data[k]?.length).toBeGreaterThanOrEqual(32);
     }
-    expect(data["approval-hmac"]).not.toBe(data["model-gateway"]);
+    expect(data["approval-hmac"]).not.toBe(data["trace-span"]);
+    // KOBE-521: the shared model-gateway master secret is gone.
+    expect(data["model-gateway"]).toBeUndefined();
   });
 
   it("publishes only public keys in the verify-keys ConfigMap", () => {

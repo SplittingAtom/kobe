@@ -10,7 +10,8 @@ import { lockWorkspace, roomForRows, saveState } from "./store.js";
  *
  * 1. every live row at `from` (a file) or under `from/` (a folder) gets a new row at the matching
  *    path under `to`, with the same content (`sha256`, object key, size, mtime, mode) and origin
- *    `server`; then the old rows become tombstones. Revisions: the new rows first, then the
+ *    `server`; then the old rows become tombstones that name their new path (`moved_to`, which
+ *    the change stream hands open tabs, KOBE-516). Revisions: the new rows first, then the
  *    tombstones, so a sandbox pulling page by page never sees the file in neither place.
  * 2. The object store is not touched: objects are content-addressed and the new rows name the same
  *    keys, so nothing is copied, deleted or released (collection only frees content no live row
@@ -198,12 +199,12 @@ export async function moveFiles(
     ON CONFLICT (team_id, user_id, path) DO UPDATE SET
       rev = EXCLUDED.rev, deleted = false, sha256 = EXCLUDED.sha256,
       blob_key = EXCLUDED.blob_key, size = EXCLUDED.size, mtime_ms = EXCLUDED.mtime_ms,
-      executable = EXCLUDED.executable, origin = 'server', updated_at = now()
+      executable = EXCLUDED.executable, origin = 'server', updated_at = now(), moved_to = NULL
       WHERE workspace_files.deleted`);
   const tombstoned = await tx.execute(sql`
     UPDATE workspace_files f
        SET rev = s.rev, deleted = true, sha256 = NULL, blob_key = NULL, executable = false,
-           origin = 'server', updated_at = now()
+           origin = 'server', updated_at = now(), moved_to = ${to} || substr(f.path, ${skip + 1})
       FROM (SELECT path, ${head + moved} + row_number() OVER (ORDER BY path COLLATE "C") AS rev
               FROM workspace_files WHERE ${filter}) s
      WHERE f.team_id = ${owner.teamId} AND f.user_id = ${owner.userId} AND f.path = s.path`);

@@ -11,6 +11,7 @@ import {
   type SandboxLifecycle,
 } from "./sandbox-lifecycle/index.js";
 import type { HibernateOutcome, WakeResult } from "./sandbox/provider.js";
+import { wakeStartedAt } from "./sandbox-lifecycle/store.js";
 import { EventStreamFixture, must, type Person } from "./testing/event-stream-fixture.js";
 import { FakeSandbox, FakeSandboxAuth, isFake, sandboxListener } from "./testing/fake-sandbox.js";
 
@@ -403,6 +404,22 @@ describe("wake (router → waker → provider)", () => {
       sandboxId: provider.sandboxIdOf(w.owner.id),
       userId: w.owner.id,
     });
+  });
+
+  it("knows when the wake started, and nothing while hibernated (KOBE-525 hello timing)", async () => {
+    const w = await world();
+    await hibernated(w);
+    expect(await wakeStartedAt(fx.db, w.target)).toBeNull();
+    const before = Date.now();
+    provider.calls.length = 0;
+    const result = getState(w);
+    await expect.poll(() => provider.calls, { timeout: 5_000 }).toContain(`wake:${w.owner.id}`);
+    const started = await wakeStartedAt(fx.db, w.target);
+    // Postgres now() vs this process's clock: same host in tests, allow a little skew.
+    expect(started?.getTime()).toBeGreaterThanOrEqual(before - 1_000);
+    const sb = await connect(w, 0);
+    await sb.ready();
+    await expect(result).resolves.toMatchObject({ ok: true });
   });
 
   it("refuses a connection from a hibernated sandbox's pod (on its way out) with `hibernating`", async () => {

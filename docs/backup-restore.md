@@ -123,15 +123,15 @@ material: data in Postgres is sealed or signed with them, and a site installed w
 cannot open it. The chart generates each of these (kept across upgrades and uninstalls) unless you
 give your own through its values key. When you install, copy every one into your secret store:
 
-| Secret (generated name)          | Values key to reuse it            | Keys                                                                                                  | Without the same value after a restore                                                                                                |
-| -------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `<release>-auth`                 | `auth.existingSecret`             | `secret`, `setup-token`                                                                               | Every enrolled TOTP factor is unusable. Rotating it is not supported.                                                                 |
-| `<release>-envelope-key`         | `envelope.keySecret`              | `key`, `key-previous` during a rotation (KOBE-107)                                                    | Every stored credential (connector grants, the web search key) is unreadable; decrypts fail closed and users must reconnect.          |
-| `<release>-model-keys`           | `bifrost.keysSecret`              | `provider-keys`, `virtual-keys` (and `-previous`), `bifrost-admin-password`, `bifrost-encryption-key` | The model provider API keys and members' virtual keys can't be opened: no run reaches a model until the Owner enters every key again. |
-| `<release>-egress-headers`       | `egressProxy.headerSecret`        | `secret`, `secret-previous` during a rotation (KOBE-39)                                               | Header values team admins set for egress domains can't be opened; they must be entered again.                                         |
-| `<release>-sandbox-session-keys` | `sandbox.sessionKeysSecret`       | `<audience>.key` and `.pub` per audience (KOBE-513), `model-gateway`, `approval-hmac`                 | Approvals allowed but not yet used are void (`approval-hmac`); sandbox session tokens are simply issued again.                        |
-| `<release>-mcp-proxy-internal`   | `mcpProxy.internalKeySecret`      | `key`                                                                                                 | Nothing: no data is sealed with it, a new one works at once. Copy it anyway, so one procedure covers every Secret.                    |
-| `<release>-db-app` (CNPG only)   | `postgres.cnpg.existingAppSecret` | `username`, `password`                                                                                | The bundled database's app credentials; with your own Postgres they are your database credentials.                                    |
+| Secret (generated name)          | Values key to reuse it            | Keys                                                                                                                                               | Without the same value after a restore                                                                                                |
+| -------------------------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `<release>-auth`                 | `auth.existingSecret`             | `secret`, `setup-token`                                                                                                                            | Every enrolled TOTP factor is unusable. Rotating it is not supported.                                                                 |
+| `<release>-envelope-key`         | `envelope.keySecret`              | `key`, `key-previous` during a rotation (KOBE-107)                                                                                                 | Every stored credential (connector grants, the web search key) is unreadable; decrypts fail closed and users must reconnect.          |
+| `<release>-model-keys`           | `bifrost.keysSecret`              | `provider-keys`, `virtual-keys` (and `-previous`), `bifrost-admin-password`, `bifrost-encryption-key`                                              | The model provider API keys and members' virtual keys can't be opened: no run reaches a model until the Owner enters every key again. |
+| `<release>-egress-headers`       | `egressProxy.headerSecret`        | `secret`, `secret-previous` during a rotation (KOBE-39)                                                                                            | Header values team admins set for egress domains can't be opened; they must be entered again.                                         |
+| `<release>-sandbox-session-keys` | `sandbox.sessionKeysSecret`       | `<audience>.key` and `.pub` per audience (KOBE-513), `trace-span` (KOBE-521; add one, ≥ 32 bytes, when restoring an older backup), `approval-hmac` | Approvals allowed but not yet used are void (`approval-hmac`); sandbox session tokens are simply issued again.                        |
+| `<release>-mcp-proxy-internal`   | `mcpProxy.internalKeySecret`      | `key`                                                                                                                                              | Nothing: no data is sealed with it, a new one works at once. Copy it anyway, so one procedure covers every Secret.                    |
+| `<release>-db-app` (CNPG only)   | `postgres.cnpg.existingAppSecret` | `username`, `password`                                                                                                                             | The bundled database's app credentials; with your own Postgres they are your database credentials.                                    |
 
 Restore each with a new name and point the fresh install's values key at it (see
 [Restore onto a fresh cluster](#restore-onto-a-fresh-cluster), step 1). A server started with a
@@ -270,6 +270,12 @@ target someone has already configured is not a fresh install.
        | kubectl -n kobe apply -f -
    done
    ```
+
+   A `sandbox-session-keys` backup taken before KOBE-521 has no `trace-span` entry, and the model
+   gateway of a release with KOBE-521 does not start without one (`CreateContainerConfigError`).
+   Before installing or upgrading to such a release, add a fresh one (at least 32 bytes; only
+   span-id linkage across the change is lost):
+   `kubectl -n kobe patch secret kobe-sandbox-session-keys-restored --type merge -p "{\"stringData\":{\"trace-span\":\"$(openssl rand -base64 36)\"}}"`.
 
 2. Install the Kobe version the backup was taken with (see [install.md](install.md)), and:
    - point each values key of the [Secrets](#secrets) table at its restored Secret (and

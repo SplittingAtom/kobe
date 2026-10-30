@@ -6,7 +6,7 @@ import {
   compactThreadError,
   type CompactThreadErrorCode,
 } from "@kobe/protocol";
-import { deriveRunTokenKey } from "@kobe/protocol/node";
+import { generateSessionKeyPair } from "@kobe/session-token";
 import { recordModelUsage, type ModelUsageRecord } from "@kobe/db";
 import { must } from "./testing/event-stream-fixture.js";
 import { FakeSandbox, isFake } from "./testing/fake-sandbox.js";
@@ -24,7 +24,7 @@ const f = new RunFixture();
 const CAPABLE = ["skill_bundles", CAPABILITY_RUN_TOKEN, CAPABILITY_THREAD_COMPACT];
 
 beforeAll(async () => {
-  await f.setup({ runTokenKey: deriveRunTokenKey(new TextEncoder().encode("c".repeat(40))) });
+  await f.setup({ runTokenKey: generateSessionKeyPair().signing });
 });
 afterAll(async () => {
   await f.teardown();
@@ -89,7 +89,7 @@ async function reconnect(w: RunWorld, runs: { run_id: string; thread_id: string 
   sb.hello(
     f.auth.verify(token).sub,
     runs.map((r) => ({ ...r, last_seq: 0 })),
-    "1.0.0",
+    undefined,
     CAPABLE,
   );
   await sb.ready();

@@ -110,7 +110,7 @@ describe("heartbeats and revalidation", () => {
     const sb = await FakeSandbox.connect(listener.url, auth.issue(claims, 2));
     if (!isFake(sb)) throw new Error("refused");
     sandboxes.push(sb);
-    sb.hello(sandboxId, [], "1.0.0", capabilities);
+    sb.hello(sandboxId, [], undefined, capabilities);
     await sb.ready();
     return { sb, claims };
   }

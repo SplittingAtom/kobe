@@ -86,6 +86,12 @@ export const workspaceFiles = pgTable(
     executable: boolean().notNull().default(false),
     origin: workspaceFileOrigin().notNull(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    /**
+     * A tombstone's new path when the file moved (KOBE-516): a server move, or a rename the
+     * sandbox pushed. The change stream tells open tabs to follow it. Null otherwise; only a
+     * tombstone carries one, and every write of the row sets it again.
+     */
+    movedTo: text(),
   },
   (t) => [
     primaryKey({ columns: [t.teamId, t.userId, t.path] }),
@@ -104,6 +110,10 @@ export const workspaceFiles = pgTable(
       sql`(${t.deleted} AND ${t.sha256} IS NULL AND ${t.blobKey} IS NULL) OR (NOT ${t.deleted} AND ${t.sha256} ~ '^[0-9a-f]{64}$' AND char_length(${t.blobKey}) BETWEEN 1 AND 1024)`,
     ),
     check("workspace_files_numbers", sql`${t.rev} > 0 AND ${t.size} >= 0 AND ${t.mtimeMs} >= 0`),
+    check(
+      "workspace_files_moved_to",
+      sql`${t.movedTo} IS NULL OR (${t.deleted} AND octet_length(${t.movedTo}) BETWEEN 1 AND 1024)`,
+    ),
   ],
 );
 

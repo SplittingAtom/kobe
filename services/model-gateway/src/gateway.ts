@@ -9,7 +9,7 @@ import {
 } from "node:http";
 import { request as httpsRequest, Agent as HttpsAgent } from "node:https";
 import type { ServerCallClaims, SessionTokenClaims, ThinkingLevel } from "@kobe/protocol";
-import { SessionTokenError } from "@kobe/session-token";
+import { SessionTokenError, type SessionVerifyKeys } from "@kobe/session-token";
 import {
   contentAttributes,
   idAttributes,
@@ -34,7 +34,7 @@ import {
   serverCallBodyLimit,
   type ServerCallOptions,
 } from "./server-call.js";
-import { classify, forwardedQuery, type Route, type RouteKind } from "./routes.js";
+import { classify, forwardedQuery, routeTemplate, type Route, type RouteKind } from "./routes.js";
 import { applyThinking, callThinkingLevel } from "./thinking.js";
 import type { RunTokenSubject } from "@kobe/db";
 import type { CallContext, CallGate, UsageSink } from "./seams.js";
@@ -68,8 +68,8 @@ export interface GatewayOptions {
   readonly isRunLeased: (teamId: string, runId: string, sandboxId: string) => Promise<boolean>;
   /** Run-bound tokens (KOBE-118). */
   readonly runTokens: {
-    /** Key from `deriveRunTokenKey` over the model-gateway session key. */
-    readonly key: Uint8Array;
+    /** Public key(s) of the model-gateway pair (KOBE-521): the gateway verifies, never signs. */
+    readonly keys: SessionVerifyKeys;
     /** The server's record: not revoked or expired, run active on that sandbox (cached by caller). */
     readonly isActive: (subject: RunTokenSubject) => Promise<boolean>;
     /** Enforcement: a call without a run token is refused (off for rollout). */
@@ -358,6 +358,7 @@ export function createModelGateway(options: GatewayOptions): Server {
   ): Promise<void> {
     const url = new URL(req.url ?? "/", "http://gateway.invalid");
     if (url.pathname === "/healthz" && req.method === "GET") {
+      span.setAttributes({ "http.route": "/healthz" });
       const ready = options.ready();
       res.writeHead(ready ? 200 : 503, { "content-type": "application/json" });
       res.end(JSON.stringify({ status: ready ? "ok" : "draining", service: "model-gateway" }));
@@ -365,6 +366,10 @@ export function createModelGateway(options: GatewayOptions): Server {
     }
     const route = classify(req.method ?? "", url.pathname);
     const kind = route?.kind ?? "openai";
+    // Route templates only (KOBE-525): the per-route latency query groups by them.
+    if (route) span.setAttributes({ "http.route": routeTemplate(route) });
+    else if (url.pathname === EVAL_CASES_PATH)
+      span.setAttributes({ "http.route": EVAL_CASES_PATH });
 
     // 1. The caller: a server call's token (KOBE-234), else the sandbox's session token (any SDK's
     // API-key header). No route detail before authentication.

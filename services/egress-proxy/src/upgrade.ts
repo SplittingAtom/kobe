@@ -5,7 +5,7 @@ import { normalizeHost, type InjectedHeader } from "@kobe/db";
 import type { EgressDecision } from "./allowlist.js";
 import { authenticate, type SandboxIdentity } from "./auth.js";
 import type { ConnectionReason, ConnectionRecord } from "./connection-audit.js";
-import type { ProxyDeps } from "./proxy.js";
+import type { ConnectionBytes, ProxyDeps } from "./proxy.js";
 
 /**
  * Header injection by upgrade (spec D28, KOBE-39; user decision 2026-10-03). For a domain whose team
@@ -58,7 +58,7 @@ export interface UpgradeContext {
     a: UpgradeAttempt,
     outcome: ConnectionRecord["outcome"],
     reason: ConnectionReason | undefined,
-    bytes?: { bytesUp: number; bytesDown: number },
+    bytes?: ConnectionBytes,
     upgraded?: boolean,
   ): void;
   /** Records an `egress.blocked` event (blocked-reporter). */
@@ -581,6 +581,7 @@ async function exchange(
     return;
   }
 
+  const setupMs = Date.now() - attempt.started;
   let bytesUp = 0;
   let bytesDown = 0;
   let failure: ConnectionReason | undefined;
@@ -720,8 +721,8 @@ async function exchange(
     tls.destroy();
   }
   if (failure !== undefined) {
-    ctx.finish(attempt, "failed", failure, { bytesUp, bytesDown }, true);
+    ctx.finish(attempt, "failed", failure, { bytesUp, bytesDown, setupMs }, true);
   } else {
-    ctx.finish(attempt, "allowed", undefined, { bytesUp, bytesDown }, true);
+    ctx.finish(attempt, "allowed", undefined, { bytesUp, bytesDown, setupMs }, true);
   }
 }

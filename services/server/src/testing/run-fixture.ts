@@ -1,3 +1,4 @@
+import type { SessionSigningKey } from "@kobe/session-token";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { RunAgentResolver } from "../runs/seams.js";
 import type { BlobStore } from "../retention/blobs.js";
@@ -236,11 +237,11 @@ export class RunFixture {
       /** Limits of models without their own (KOBE-259). */
       readonly modelTokenDefaults?: ModelTokenDefaults;
       /** Mint run tokens (KOBE-118) for agents announcing `run_token`. */
-      readonly runTokenKey?: Uint8Array;
+      readonly runTokenKey?: SessionSigningKey;
       /** A run's sandbox byte budget (default: the wire's). */
       readonly runMaxBytes?: number;
       /** The server's own model calls (KOBE-219 titles): a (fake) gateway and the token key. */
-      readonly serverCalls?: { readonly gatewayUrl: string; readonly key: Uint8Array };
+      readonly serverCalls?: { readonly gatewayUrl: string; readonly key: SessionSigningKey };
       /** Answer ratings as trace scores (KOBE-275): a (fake) sink for both replicas. */
       readonly feedbackScores?: ServerDepsOptions["feedbackScores"];
       /** mcp-proxy's app-calls endpoint (KOBE-436): a (fake) caller for both replicas. */
@@ -345,7 +346,7 @@ export class RunFixture {
     const sb = await FakeSandbox.connect(must(this.listeners[replica], "listener").url, token);
     if (!isFake(sb)) throw new Error(`upgrade refused: ${sb.status}`);
     const claims = this.auth.verify(token);
-    sb.hello(claims.sub, [], "1.0.0", capabilities ?? undefined);
+    sb.hello(claims.sub, [], undefined, capabilities ?? undefined);
     await sb.ready();
     const ws = new FakeWorkspace(sb);
     this.workspaces.push(ws);

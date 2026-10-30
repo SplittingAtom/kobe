@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CAPABILITY_RUN_TOKEN, CAPABILITY_THREAD_COMPACT } from "@kobe/protocol";
-import { deriveRunTokenKey } from "@kobe/protocol/node";
+import { generateSessionKeyPair } from "@kobe/session-token";
 import { auditQuerySchema, listAuditEvents, listTeamAuditEvents, withTeam } from "@kobe/db";
 import { must } from "./testing/event-stream-fixture.js";
 import { RunFixture, type FakeWorkspace, type RunWorld } from "./testing/run-fixture.js";
@@ -19,7 +19,7 @@ const CAPABLE = ["skill_bundles", CAPABILITY_RUN_TOKEN, CAPABILITY_THREAD_COMPAC
 const SANDBOX_TEXT = "agent/models.json changed by pid 4242";
 
 beforeAll(async () => {
-  await f.setup({ runTokenKey: deriveRunTokenKey(new TextEncoder().encode("t".repeat(40))) });
+  await f.setup({ runTokenKey: generateSessionKeyPair().signing });
 });
 afterAll(async () => {
   await f.teardown();

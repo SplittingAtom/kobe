@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { StyleNonce } from "../components/security/style-nonce";
 import { BrandingProvider } from "../components/shell/branding-context";
 import { NewBuildBanner } from "../components/shell/new-build-banner";
+import { WebVitalsReporter } from "../components/shell/web-vitals-reporter";
 import { WorkspaceHost } from "../components/shell/workspace-host";
 import { brandingCss } from "../lib/theme/branding-css";
 import { getSiteBranding } from "../lib/theme/branding-server";
@@ -39,7 +40,8 @@ export const viewport: Viewport = {
  * follows the OS. The workspace (the chat and the panels over it, KOBE-452) lives here, so it stays
  * mounted while a console or a My area page opens over it. StyleNonce gives Radix's injected
  * scroll-lock style the nonce (KOBE-469). The new-build banner (KOBE-487) offers a reload on every
- * page once the web was redeployed under it.
+ * page once the web was redeployed under it. The Web Vitals reporter (KOBE-525) sends every
+ * page's vitals and render timings to the server's telemetry.
  *
  * The site branding (TH5, KOBE-500) is fetched here (cached 30 s, defaults when the server is
  * unreachable): its theme is one nonced `<style>` of token declarations in <head>, rendered only
@@ -66,6 +68,7 @@ export default async function RootLayout({ children }: { readonly children: Reac
         <BrandingProvider value={branding}>
           <WorkspaceHost>{children}</WorkspaceHost>
           <NewBuildBanner />
+          <WebVitalsReporter />
         </BrandingProvider>
       </body>
     </html>

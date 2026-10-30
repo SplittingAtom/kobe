@@ -14,7 +14,7 @@ import {
 
 /** What the gateway needs to place its spans in run traces (KOBE-274). */
 export interface GatewayTracing {
-  /** `k_trace` (`deriveTraceSpanKey` over the gateway session key): remaps sandbox span ids. */
+  /** `k_trace` (`deriveTraceSpanKey` over KOBE_TRACE_SPAN_KEY): remaps sandbox span ids. */
   readonly spanKey: Uint8Array;
   /** The run's thread and owner from the server's record (cached by the caller). */
   readonly runSession: (teamId: string, runId: string) => Promise<RunSession | undefined>;

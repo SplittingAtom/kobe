@@ -1,7 +1,8 @@
 /**
  * FakeKobe's `GET /v1/workspace/changes` (KOBE-496), as the server behaves: on each connect one
  * `file.state` per requested path from the fake workspace, then `file.changed` whenever a test
- * announces a change. Tests change `workspaceFiles` first, then call `announce` with who did it.
+ * announces a change. Tests change `workspaceFiles` first, then call `announce` with who did it,
+ * or call `move` (KOBE-516): it moves the files and says where each old path went (`moved_to`).
  */
 import type { WorkspaceChangeActor, WorkspaceFileChange } from "@kobe/protocol";
 import { sha256Hex } from "../../files/editor";
@@ -13,7 +14,13 @@ export class FakeWorkspaceChanges {
   /** Each path's last revision as the manifest would hold it (content, who, when). */
   readonly #revs = new Map<
     string,
-    { rev: number; sha256: string | null; actor: WorkspaceChangeActor; at: string }
+    {
+      rev: number;
+      sha256: string | null;
+      actor: WorkspaceChangeActor;
+      at: string;
+      movedTo?: string;
+    }
   >();
   #head = 0;
 
@@ -49,6 +56,26 @@ export class FakeWorkspaceChanges {
     for (const source of [...this.#sources]) source.send("file.changed", change);
   }
 
+  /**
+   * A move of a file or folder by `actor` (the move route, another device, the agent's `mv`): the
+   * files move in the fake workspace, then each old path's change names its new path.
+   */
+  async move(from: string, to: string, actor: WorkspaceChangeActor): Promise<void> {
+    const moved = [...this.#files].filter(([p]) => p === from || p.startsWith(`${from}/`));
+    for (const [p, bytes] of moved) {
+      this.#files.delete(p);
+      this.#files.set(`${to}${p.slice(from.length)}`, bytes);
+    }
+    for (const [p] of moved) {
+      this.#head += 1;
+      const movedTo = `${to}${p.slice(from.length)}`;
+      const at = new Date().toISOString();
+      this.#revs.set(p, { rev: this.#head, sha256: null, actor, at, movedTo });
+      const change = await this.state(p);
+      for (const source of [...this.#sources]) source.send("file.changed", change);
+    }
+  }
+
   /** Every open stream drops; the browser reconnects and gets each path's state again. */
   dropAll(): void {
     for (const source of [...this.#sources]) source.drop();
@@ -72,7 +99,8 @@ export class FakeWorkspaceChanges {
       };
       this.#revs.set(path, meta);
     }
-    return { path, sha256, rev: meta.rev, actor: meta.actor, at: meta.at };
+    const moved = sha256 === null && meta.movedTo !== undefined ? { moved_to: meta.movedTo } : {};
+    return { path, sha256, rev: meta.rev, actor: meta.actor, at: meta.at, ...moved };
   }
 }
 

@@ -1,46 +1,59 @@
 import { randomUUID } from "node:crypto";
 import { recordRunToken, type KobeTx } from "@kobe/db";
 import type { RunTokenGrant } from "@kobe/protocol";
-import { deriveRunTokenKey, deriveTraceSpanKey, signRunToken } from "@kobe/protocol/node";
-
-/** Minimum length of the master secret (the gateway's session key) the run token key derives from. */
-const MASTER_ENV = "KOBE_SESSION_KEY_MODEL_GATEWAY";
+import { deriveTraceSpanKey } from "@kobe/protocol/node";
+import {
+  loadSigningKey,
+  signRunToken,
+  signingKeyEnvName,
+  type SessionSigningKey,
+} from "@kobe/session-token";
 
 /**
- * The run token key (KOBE-118): HKDF of the model-gateway session key, which the gateway already
- * holds, so no new secret is deployed. Undefined (no run tokens) when the key is unset or too
- * short; the gateway then keeps the legacy advisory behaviour.
+ * The run token key (KOBE-118, Ed25519 since KOBE-521): the `kobe.model-gateway` session-token
+ * private key (`KOBE_SESSION_SIGNING_KEY_MODEL_GATEWAY`), which only the server holds; the gateway
+ * verifies with the public half. Run tokens carry their own signed `typ` (`krt2`), so they never
+ * pass as session tokens. Undefined (no run tokens) when the key is unset or unreadable; the
+ * sandbox config load then fails with the reason.
  */
 export function runTokenKeyFromEnv(
   env: Readonly<Record<string, string | undefined>>,
-): Uint8Array | undefined {
-  const master = env[MASTER_ENV];
-  if (!master) return undefined;
+): SessionSigningKey | undefined {
+  const name = signingKeyEnvName("kobe.model-gateway");
+  const pem = env[name];
+  if (!pem?.trim()) return undefined;
   try {
-    return deriveRunTokenKey(new TextEncoder().encode(master));
+    return loadSigningKey(pem, name);
   } catch {
     return undefined;
   }
 }
 
+/** The trace-span secret (KOBE-521): shared with the model gateway, authorises nothing. */
+export const TRACE_SPAN_KEY_ENV = "KOBE_TRACE_SPAN_KEY";
+
 /**
- * `k_trace` (KOBE-274): remaps relayed sandbox span ids, derived from the same master secret as the
- * run token key, so the model gateway derives the same one. Undefined when the secret is unset.
+ * `k_trace` (KOBE-274): remaps relayed sandbox span ids. Derived from `KOBE_TRACE_SPAN_KEY`, a
+ * pseudonymisation secret the model gateway holds too (it remaps the same ids); no credential is
+ * derived from it. Undefined (no span relay) when unset or shorter than 32 bytes; a set but
+ * too-short secret is reported through `warn` (once, at startup), never echoing the value.
  */
 export function traceSpanKeyFromEnv(
   env: Readonly<Record<string, string | undefined>>,
+  warn?: (message: string) => void,
 ): Uint8Array | undefined {
-  const master = env[MASTER_ENV];
-  if (!master) return undefined;
+  const secret = env[TRACE_SPAN_KEY_ENV];
+  if (!secret) return undefined;
   try {
-    return deriveTraceSpanKey(new TextEncoder().encode(master));
+    return deriveTraceSpanKey(new TextEncoder().encode(secret));
   } catch {
+    warn?.(`${TRACE_SPAN_KEY_ENV} is shorter than 32 bytes: sandbox span relay is off`);
     return undefined;
   }
 }
 
 export interface MintRunTokenInput {
-  readonly key: Uint8Array;
+  readonly key: SessionSigningKey;
   readonly teamId: string;
   readonly runId: string;
   readonly sandboxId: string;

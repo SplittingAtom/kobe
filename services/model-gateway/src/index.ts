@@ -20,11 +20,7 @@ import {
   type RunSession,
   recordModelUsage,
 } from "@kobe/db";
-import {
-  deriveRunTokenKey,
-  deriveServerCallTokenKey,
-  deriveTraceSpanKey,
-} from "@kobe/protocol/node";
+import { deriveTraceSpanKey } from "@kobe/protocol/node";
 import type { ThinkingLevel } from "@kobe/protocol";
 import { verifySessionToken } from "@kobe/session-token";
 import { initTelemetry, loadTelemetryConfig } from "@kobe/telemetry";
@@ -70,9 +66,10 @@ const budgets = new BudgetGate(
     // Shared by all replicas, with an expiry (KOBE-120).
     reservations: new DbReservations(db, {
       ttlMs: config.reservationTtlMs,
-      // Hashes the site-wide keys; the same on every replica (derived from the shared key).
+      // Hashes the site-wide keys; the same on every replica (from the trace-span secret, which
+      // authorises nothing; KOBE-521).
       salt: createHash("sha256")
-        .update(`kobe.budget-reservations:${config.masterKey}`)
+        .update(`kobe.budget-reservations:${config.traceSpanSecret}`)
         .digest("hex"),
     }),
     // Settled reservations end at once: the reservation reads the spend itself (KOBE-286). A
@@ -141,8 +138,8 @@ const server = createModelGateway({
       isActiveRunLeasedTo(db, teamId, runId, sandboxId),
     ),
   runTokens: {
-    // Same derivation as the server's: the gateway session key is the shared master secret.
-    key: deriveRunTokenKey(new TextEncoder().encode(config.masterKey)),
+    // Ed25519 (KOBE-521): the public key(s) of the model-gateway pair; only the server signs.
+    keys: config.sessionVerifyKeys,
     isActive: (s) => tokenRecords.get(`${s.teamId}:${s.jti}`, () => isRunTokenActive(db, s)),
     require: config.requireRunToken,
   },
@@ -152,15 +149,15 @@ const server = createModelGateway({
       `${teamId}:${runId}`,
       async () => (await runThinkingLevelOf(db, teamId, runId)) ?? null,
     ),
-  // Run traces (KOBE-274): sandbox span ids remap with the server's key (same derivation).
+  // Run traces (KOBE-274): sandbox span ids remap with the server's `k_trace` (same secret).
   tracing: {
-    spanKey: deriveTraceSpanKey(new TextEncoder().encode(config.masterKey)),
+    spanKey: deriveTraceSpanKey(new TextEncoder().encode(config.traceSpanSecret)),
     runSession: (teamId, runId) =>
       runSessions.get(`${teamId}:${runId}`, () => runSessionOf(db, teamId, runId)),
   },
-  // Server-originated calls (KOBE-234): the server derives the same key from the same secret.
+  // Server-originated calls (KOBE-234): verified with the same public key(s) (KOBE-521).
   serverCalls: {
-    key: deriveServerCallTokenKey(new TextEncoder().encode(config.masterKey)),
+    keys: config.sessionVerifyKeys,
     replay: new ServerCallReplay(),
     runMatches: (claim) => serverCallRunMatches(db, claim),
     limiter: new CallLimiter({ perSandbox: SC.concurrentPerTeam, total: SC.concurrentTotal }),

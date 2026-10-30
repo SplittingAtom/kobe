@@ -6,7 +6,7 @@ import {
   type ServerCallClaims,
   type ServerCallRequest,
 } from "@kobe/protocol";
-import { deriveServerCallTokenKey, verifyServerCallToken } from "@kobe/protocol/node";
+import { generateSessionKeyPair, verifyServerCallToken } from "@kobe/session-token";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createServerCallClient } from "./models/gateway-client.js";
 import { createSkillEvalJudge } from "./skills/evals/judge.js";
@@ -24,7 +24,8 @@ import { SkillEvalBench, type SkillEvalWorld } from "./testing/skill-eval-bench.
  */
 const bench = new SkillEvalBench();
 const { f } = bench;
-const KEY = deriveServerCallTokenKey(new Uint8Array(32).fill(5));
+const PAIR = generateSessionKeyPair();
+const KEY = PAIR.signing;
 const RUBRIC = "The report has a totals row and names the total.";
 
 interface GatewayCall {
@@ -41,7 +42,7 @@ const gateway = {
 const gatewayFetch: typeof fetch = async (_url, init) => {
   const headers = init?.headers as Record<string, string>;
   const verified = verifyServerCallToken(
-    KEY,
+    PAIR.verify,
     headers[SERVER_CALL_TOKEN_HEADER] ?? "",
     Math.floor(Date.now() / 1000),
   );

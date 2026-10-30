@@ -17,7 +17,7 @@ import {
   serverCallRequestSchema,
 } from "@kobe/protocol";
 import { InMemorySpanExporter, initTelemetry } from "@kobe/telemetry";
-import { deriveServerCallTokenKey, verifyServerCallToken } from "@kobe/protocol/node";
+import { generateSessionKeyPair, verifyServerCallToken } from "@kobe/session-token";
 import {
   createServerCallClient,
   ServerCallError,
@@ -30,8 +30,10 @@ import {
  * server-call token in its own header and nothing else that is a credential — no session token,
  * no run token or run id, no provider key — and the body is one the gateway accepts.
  */
-const MASTER = "g".repeat(48);
-const KEY = deriveServerCallTokenKey(new TextEncoder().encode(MASTER));
+const PAIR = generateSessionKeyPair();
+const KEY = PAIR.signing;
+/** A distinctive slice of the private key: never on the wire. */
+const MASTER = PAIR.privatePem.slice(30, 70);
 // Secrets the server process holds that must never reach the gateway on this path.
 const PROVIDER_KEY_SECRET = "p".repeat(48);
 const PROVIDER_KEY = "sk-provider-0123456789abcdef";
@@ -107,7 +109,7 @@ describe("server-call gateway client: the eval judge (KOBE-326)", () => {
     expect(bodies[2]).toMatchObject({ temperature: SERVER_CALL_LIMITS.title.temperature });
     expect(bodies[2]).not.toHaveProperty("response_format");
     const claims = verifyServerCallToken(
-      KEY,
+      PAIR.verify,
       seen[0]?.headers[SERVER_CALL_TOKEN_HEADER],
       Math.floor(Date.now() / 1000),
     );
@@ -130,7 +132,7 @@ describe("server-call gateway client (KOBE-219 ac-4, ac-8)", () => {
     expect(body.max_tokens).toBeLessThanOrEqual(SERVER_CALL_LIMITS.title.max_output_tokens);
 
     const token = req?.headers[SERVER_CALL_TOKEN_HEADER];
-    const verified = verifyServerCallToken(KEY, token, Math.floor(Date.now() / 1000));
+    const verified = verifyServerCallToken(PAIR.verify, token, Math.floor(Date.now() / 1000));
     expect(verified.ok).toBe(true);
     if (!verified.ok) return;
     expect(verified.claims).toMatchObject({
@@ -189,7 +191,9 @@ describe("server-call gateway client (KOBE-219 ac-4, ac-8)", () => {
       expect(everything).not.toContain(secret);
     }
     // The token is not a session token (JWT) nor a run token.
-    expect(String(req?.headers[SERVER_CALL_TOKEN_HEADER])).toMatch(/^ksc1\./);
+    expect(String(req?.headers[SERVER_CALL_TOKEN_HEADER])).toMatch(
+      /^eyJ[\w-]+\.[\w-]+\.[\w-]{86}$/,
+    );
   });
 
   it("asks a reasoning model for a low effort within the reasoning headroom (review H1)", async () => {
@@ -200,7 +204,7 @@ describe("server-call gateway client (KOBE-219 ac-4, ac-8)", () => {
     expect(body.reasoning_effort).toBe("low");
     expect(body.max_tokens).toBe(SERVER_CALL_LIMITS.title.reasoning_max_output_tokens);
     const verified = verifyServerCallToken(
-      KEY,
+      PAIR.verify,
       seen[0]?.headers[SERVER_CALL_TOKEN_HEADER],
       Math.floor(Date.now() / 1000),
     );
@@ -281,10 +285,31 @@ describe("server-call gateway client (KOBE-219 ac-4, ac-8)", () => {
     expect(seen).toHaveLength(1);
   });
 
-  it("derives its key only from the gateway session key", () => {
+  it("signs with the model-gateway Ed25519 private key only (KOBE-521)", () => {
     expect(serverCallKeyFromEnv({})).toBeUndefined();
-    expect(serverCallKeyFromEnv({ KOBE_SESSION_KEY_MODEL_GATEWAY: "short" })).toBeUndefined();
-    expect(serverCallKeyFromEnv({ KOBE_SESSION_KEY_MODEL_GATEWAY: MASTER })).toEqual(KEY);
+    expect(
+      serverCallKeyFromEnv({ KOBE_SESSION_SIGNING_KEY_MODEL_GATEWAY: "not a pem" }),
+    ).toBeUndefined();
+    // The retired shared master secret no longer yields a key.
+    expect(
+      serverCallKeyFromEnv({ KOBE_SESSION_KEY_MODEL_GATEWAY: "m".repeat(48) }),
+    ).toBeUndefined();
+    expect(
+      serverCallKeyFromEnv({ KOBE_SESSION_SIGNING_KEY_MODEL_GATEWAY: PAIR.privatePem })?.kid,
+    ).toBe(KEY.kid);
+  });
+
+  it("mints an EdDSA token the public key verifies and another key does not", async () => {
+    const client = createServerCallClient({ url: base, key: KEY });
+    // The stub's reply does not matter here: the token on the request does.
+    await client.complete(input()).catch(() => undefined);
+    const token = String(seen.at(-1)?.headers[SERVER_CALL_TOKEN_HEADER]);
+    const now = Math.floor(Date.now() / 1000);
+    expect(verifyServerCallToken(PAIR.verify, token, now).ok).toBe(true);
+    expect(verifyServerCallToken(generateSessionKeyPair().verify, token, now)).toEqual({
+      ok: false,
+      reason: "bad_signature",
+    });
   });
 });
 

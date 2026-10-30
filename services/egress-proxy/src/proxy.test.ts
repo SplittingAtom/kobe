@@ -631,8 +631,44 @@ describe("tracing (KOBE-10)", () => {
         "server.port": 443,
         "kobe.outcome": "blocked",
         "kobe.reason": "not_enabled",
+        "http.route": "CONNECT",
       });
+      expect(span?.attributes["kobe.setup_ms"]).toBeUndefined();
       expect(JSON.stringify(span?.attributes)).not.toMatch(/authorization|token/i);
+    } finally {
+      await telemetry.shutdown();
+    }
+  });
+});
+
+describe("tracing (KOBE-525)", () => {
+  it("records the tunnel's set-up time (CONNECT → Connection Established) on an allowed tunnel", async () => {
+    const exporter = new InMemorySpanExporter();
+    const telemetry = initTelemetry(
+      {
+        enabled: true,
+        endpoint: "http://x:4318",
+        headers: {},
+        captureContent: false,
+        serviceName: "t",
+      },
+      { exporter },
+    );
+    try {
+      const site = `Bearer ${signSiteEgressToken("skill-mirror", KEY)}`;
+      const { socket } = await openConnect("pypi.org:443", site);
+      const sni = await captureClientHello("pypi.org");
+      socket.write(sni);
+      await readExactly(socket, sni.length);
+      socket.end();
+      await once(socket, "close");
+      await settle();
+      const span = exporter.getFinishedSpans().find((s) => s.name === "egress.connection");
+      expect(span?.attributes).toMatchObject({
+        "kobe.outcome": "allowed",
+        "http.route": "CONNECT",
+      });
+      expect(span?.attributes["kobe.setup_ms"]).toEqual(expect.any(Number));
     } finally {
       await telemetry.shutdown();
     }

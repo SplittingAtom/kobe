@@ -170,8 +170,9 @@ pod labels and port for the team NetworkPolicy).
 
 {{/*
 Server env: sandbox config, the session-token private keys (the server holds all four and is the
-only holder, KOBE-513) with their public bundles (rotation), the model gateway's master secret
-(run and server-call token keys) and the approval HMAC key (KOBE-37). The approval key is optional so a pre-created Secret without `approval-hmac`
+only holder, KOBE-513; the model-gateway key also signs run and server-call tokens, KOBE-521) with
+their public bundles (rotation), the trace-span secret (KOBE-274; authorises nothing) and the
+approval HMAC key (KOBE-37). The approval key is optional so a pre-created Secret without `approval-hmac`
 still starts: the server then denies every tool call that needs approval (fail closed) and logs it.
 */}}
 {{- define "kobe.sandboxEnv" -}}
@@ -192,11 +193,13 @@ still starts: the server then denies every tool call that needs approval (fail c
       key: {{ $aud }}.pub
       optional: true
 {{- end }}
-- name: KOBE_SESSION_KEY_MODEL_GATEWAY
+{{- /* Optional: a pre-created Secret without `trace-span` only turns the span relay off. */}}
+- name: KOBE_TRACE_SPAN_KEY
   valueFrom:
     secretKeyRef:
       name: {{ include "kobe.sessionKeysSecretName" . }}
-      key: model-gateway
+      key: trace-span
+      optional: true
 - name: KOBE_APPROVAL_KEY
   valueFrom:
     secretKeyRef:

@@ -16,7 +16,7 @@ import {
   serverCallRequestSchema,
   type ServerCallClaims,
 } from "@kobe/protocol";
-import { deriveServerCallTokenKey, verifyServerCallToken } from "@kobe/protocol/node";
+import { generateSessionKeyPair, verifyServerCallToken } from "@kobe/session-token";
 import { SseReader } from "./testing/sse.js";
 import { threadCardSchema } from "./threads/schemas.js";
 import { withAppendTx } from "./event-stream/append.js";
@@ -31,8 +31,10 @@ import type { Person } from "./testing/event-stream-fixture.js";
  * token as the real one does and writes the `title` usage row with no sandbox
  * (`recordModelUsage`, the gateway's own writer). Covers ac-1, ac-4, ac-5, ac-6, ac-8, ac-9.
  */
-const MASTER = "s".repeat(48);
-const KEY = deriveServerCallTokenKey(new TextEncoder().encode(MASTER));
+const PAIR = generateSessionKeyPair();
+const KEY = PAIR.signing;
+/** A distinctive slice of the private key: never on the wire. */
+const MASTER = PAIR.privatePem.slice(30, 70);
 const WAIT_MS = 20_000;
 
 type Mode = "ok" | "budget" | "hold" | "empty" | "length";
@@ -61,7 +63,7 @@ function answer(res: ServerResponse, status: number, body: unknown): void {
 
 async function handle(headers: IncomingHttpHeaders, url: string, raw: string, res: ServerResponse) {
   const verified = verifyServerCallToken(
-    KEY,
+    PAIR.verify,
     headers[SERVER_CALL_TOKEN_HEADER],
     Math.floor(Date.now() / 1000),
   );

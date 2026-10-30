@@ -38,17 +38,29 @@ export const workspaceChangeActorSchema = z.strictObject({
 });
 export type WorkspaceChangeActor = z.infer<typeof workspaceChangeActorSchema>;
 
-export const workspaceFileChangeSchema = z.strictObject({
-  path: workspacePathSchema,
-  /** The current version; null when the file is not (or no longer) in the workspace. */
-  sha256: sha256HexSchema.nullable(),
-  /** The manifest revision of that version (0 for a path never seen). */
-  rev: z.number().int().nonnegative(),
-  /** Null for a path never seen. */
-  actor: workspaceChangeActorSchema.nullable(),
-  /** When that revision was written; null for a path never seen. */
-  at: timestampSchema.nullable(),
-});
+export const workspaceFileChangeSchema = z
+  .strictObject({
+    path: workspacePathSchema,
+    /** The current version; null when the file is not (or no longer) in the workspace. */
+    sha256: sha256HexSchema.nullable(),
+    /** The manifest revision of that version (0 for a path never seen). */
+    rev: z.number().int().nonnegative(),
+    /** Null for a path never seen. */
+    actor: workspaceChangeActorSchema.nullable(),
+    /** When that revision was written; null for a path never seen. */
+    at: timestampSchema.nullable(),
+    /**
+     * Where the file went (KOBE-516), on the old path's `sha256: null` row: a move by the member
+     * (the move route, any tab or device) or a rename the sandbox pushed (the agent's `mv`: the
+     * same content at one new path in the same commit). Absent or null: deleted, or not known to
+     * be a move. Open tabs follow it instead of closing. Additive: older servers never send it.
+     */
+    moved_to: workspacePathSchema.nullable().optional(),
+  })
+  .refine((c) => c.moved_to == null || c.sha256 === null, {
+    message: "only a path no longer there has moved",
+    path: ["moved_to"],
+  });
 export type WorkspaceFileChange = z.infer<typeof workspaceFileChangeSchema>;
 
 export const workspaceChangesQuerySchema = z.strictObject({

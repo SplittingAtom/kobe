@@ -111,7 +111,7 @@ async function started(w: World, capabilities: readonly string[] = [CAPABILITY_P
   const sb = await FakeSandbox.connect(listener.url, w.token);
   if (!isFake(sb)) throw new Error(`upgrade refused: ${sb.status}`);
   sandboxes.push(sb);
-  sb.hello(w.sandboxId, [], "1.0.0", capabilities);
+  sb.hello(w.sandboxId, [], undefined, capabilities);
   await sb.ready();
   const res = await fx
     .replica(0)

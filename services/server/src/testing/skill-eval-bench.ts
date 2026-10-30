@@ -56,7 +56,7 @@ export class FakeEvalProvider {
     });
     const sb = await FakeSandbox.connect(this.url(), token);
     if (!isFake(sb)) throw new Error(`upgrade refused: ${sb.status}`);
-    sb.hello(sandboxId, [], "1.0.0", ["skill_bundles", "skill_eval"]);
+    sb.hello(sandboxId, [], undefined, ["skill_bundles", "skill_eval"]);
     await sb.ready();
     const ws = new FakeWorkspace(sb);
     const base = sb.respond;

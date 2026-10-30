@@ -95,4 +95,18 @@ describe("useOutsideChange: whose agent (KOBE-496 review)", () => {
     t.rerender({ remote: { path: PATH, sha256: null, rev: 0, actor: null, at: null } });
     await waitFor(() => expect(t.reread).toHaveBeenCalledTimes(1));
   });
+
+  it("a move the stream names is followed by the tab, not read as gone (KOBE-516)", async () => {
+    const t = setup();
+    t.rerender({ remote: agentChange("v1", 7) });
+    await tick();
+    t.rerender({
+      remote: { ...agentChange("v1", 8), sha256: null, moved_to: "archive/notes.md" },
+    });
+    await tick();
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    // No read of the old path: the panel retargets the tab to the new one.
+    expect(t.reread).not.toHaveBeenCalled();
+    expect(t.hook.result.current.outside).toBeNull();
+  });
 });

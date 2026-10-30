@@ -19,3 +19,5 @@
   still race, because the change stream carries no move; that needs a server-emitted `movedTo`.
 - **ac-1:** the original test 20/20 consecutive local runs pass. **ac-2:** the notice no longer
   flashes during a move.
+- **Superseded by KOBE-516** (`docs/ledger/KOBE-516.md`): the change stream names `moved_to`, open
+  tabs follow it for every mover, and `use-moving-files.ts` is gone.

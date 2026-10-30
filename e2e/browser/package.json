@@ -6,7 +6,10 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "perf:test": "node --test perf/*.test.ts",
+    "perf:measure": "playwright test -c playwright.perf.config.ts",
+    "perf:bundles": "node perf/print-bundles.ts"
   },
   "devDependencies": {
     "@playwright/test": "1.55.0",

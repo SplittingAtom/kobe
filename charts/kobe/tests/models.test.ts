@@ -163,13 +163,13 @@ describe("who holds which secret", () => {
     expect(secretKeys(env(ms, "kobe-scheduler")).filter((k) => k.includes("model"))).toEqual([]);
   });
 
-  it("the shim holds only its session public key, its master secret and the virtual-key secret", () => {
+  it("the shim holds only its public key, the trace-span secret and the virtual-key secret", () => {
     const vars = env(ms, "kobe-model-gateway");
     expect(secretKeys(vars)).toEqual([
       "kobe-db/app-url",
       "kobe-model-keys/virtual-keys",
       "kobe-model-keys/virtual-keys-previous",
-      "kobe-sandbox-session-keys/model-gateway",
+      "kobe-sandbox-session-keys/trace-span",
     ]);
     // KOBE-513: the session-token key is public, from the verify-keys ConfigMap.
     expect(vars).toContainEqual({
@@ -230,7 +230,9 @@ describe("server calls (KOBE-219)", () => {
       name: "KOBE_MODEL_GATEWAY_URL",
       value: "http://kobe-model-gateway",
     });
-    expect(vars.map((v) => v.name)).toContain("KOBE_SESSION_KEY_MODEL_GATEWAY");
+    // Server calls are signed with the model-gateway private key (KOBE-521).
+    expect(vars.map((v) => v.name)).toContain("KOBE_SESSION_SIGNING_KEY_MODEL_GATEWAY");
+    expect(vars.map((v) => v.name)).not.toContain("KOBE_SESSION_KEY_MODEL_GATEWAY");
     // The scheduler starts no server calls: no gateway URL there.
     expect(env(ms, "kobe-scheduler").map((v) => v.name)).not.toContain("KOBE_MODEL_GATEWAY_URL");
   });

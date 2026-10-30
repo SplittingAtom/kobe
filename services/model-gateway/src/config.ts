@@ -4,8 +4,10 @@ import { z } from "zod";
 
 /**
  * Model gateway shim configuration (KOBE-40), validated at startup: invalid env fails fast and
- * messages never echo values. The chart renders it; the shim holds only its audience's session
- * public key(s), its master secret shared with the server, and the virtual-key secret (never provider keys, never Bifrost's admin password).
+ * messages never echo values. The chart renders it; the shim holds only its audience's public
+ * key(s) (session, run and server-call tokens: verify only, KOBE-513/521), the trace-span secret
+ * (pseudonymisation only: no credential derives from it, KOBE-521) and the virtual-key secret
+ * (never provider keys, never Bifrost's admin password, never a key that mints a credential).
  */
 const int = (name: string, min: number, max: number, fallback: number) =>
   z.coerce
@@ -20,11 +22,11 @@ const configSchema = z.object({
   KOBE_DATABASE_URL: z
     .string({ error: "KOBE_DATABASE_URL is required" })
     .min(1, "KOBE_DATABASE_URL is required"),
-  // The gateway's shared master secret with the server (run, trace-span and server-call token
-  // keys are derived from it). Since KOBE-513 it no longer signs or verifies session tokens.
-  KOBE_SESSION_KEY_MODEL_GATEWAY: z
-    .string({ error: "KOBE_SESSION_KEY_MODEL_GATEWAY is required" })
-    .min(32, "KOBE_SESSION_KEY_MODEL_GATEWAY must be at least 32 characters"),
+  // Shared with the server for `k_trace` (sandbox span id remapping, KOBE-274) and the budget
+  // reservation salt; authorises nothing (KOBE-521: run and server-call tokens are Ed25519).
+  KOBE_TRACE_SPAN_KEY: z
+    .string({ error: "KOBE_TRACE_SPAN_KEY is required" })
+    .min(32, "KOBE_TRACE_SPAN_KEY must be at least 32 characters"),
   KOBE_MODELS_VIRTUAL_KEY_SECRET: z
     .string({ error: "KOBE_MODELS_VIRTUAL_KEY_SECRET is required" })
     .min(
@@ -102,11 +104,15 @@ export interface Config {
   readonly port: number;
   readonly databaseUrl: string;
   /**
-   * Master secret shared with the server (KOBE_SESSION_KEY_MODEL_GATEWAY): run, trace-span and
-   * server-call token keys are derived from it. Not a session-token key since KOBE-513.
+   * The trace-span secret (KOBE_TRACE_SPAN_KEY, KOBE-521): `k_trace` and the budget reservation
+   * salt derive from it. A pseudonymisation secret: no credential any service accepts derives
+   * from it.
    */
-  readonly masterKey: string;
-  /** Public key(s) of the `kobe.model-gateway` session tokens (KOBE-513): verify only. */
+  readonly traceSpanSecret: string;
+  /**
+   * Public key(s) of the `kobe.model-gateway` pair (KOBE-513/521): session, run and server-call
+   * tokens are verified with them; the gateway holds no key that signs any of them.
+   */
   readonly sessionVerifyKeys: SessionVerifyKeys;
   readonly virtualKeySecret: string;
   readonly bifrostUrl: string;
@@ -126,7 +132,27 @@ export interface Config {
   readonly requireRunToken: boolean;
 }
 
+/**
+ * KOBE-521 ac-1: the gateway must hold nothing that mints a credential the server or the gateway
+ * accepts. The retired shared master secret and any session-token private key are refused at
+ * startup (an old values file or a hand-edited Deployment), never silently ignored.
+ */
+function refuseMintingMaterial(env: Readonly<Record<string, string | undefined>>): void {
+  const found = Object.keys(env).filter(
+    (name) =>
+      env[name] !== undefined &&
+      (name === "KOBE_SESSION_KEY_MODEL_GATEWAY" || name.startsWith("KOBE_SESSION_SIGNING_KEY_")),
+  );
+  if (found.length > 0) {
+    throw new Error(
+      `Invalid configuration: ${found.join(", ")} must not be set on the model gateway: it verifies ` +
+        "run and server-call tokens with the public key only (KOBE-521, docs/install.md)",
+    );
+  }
+}
+
 export function loadConfig(env: Readonly<Record<string, string | undefined>>): Config {
+  refuseMintingMaterial(env);
   const parsed = configSchema.safeParse(env);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
@@ -144,7 +170,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
   return {
     port: c.PORT,
     databaseUrl: c.KOBE_DATABASE_URL,
-    masterKey: c.KOBE_SESSION_KEY_MODEL_GATEWAY,
+    traceSpanSecret: c.KOBE_TRACE_SPAN_KEY,
     sessionVerifyKeys: verifyKeysFromEnv(env, "kobe.model-gateway"),
     virtualKeySecret: c.KOBE_MODELS_VIRTUAL_KEY_SECRET,
     bifrostUrl: c.KOBE_BIFROST_URL.replace(/\/+$/, ""),

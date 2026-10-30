@@ -132,7 +132,7 @@ async function connected(
       data: { status: "ok", execution_count: 7, outputs: outs.length, truncated: false },
     };
   };
-  sb.hello(w.sandboxId, [], "1.0.0", capabilities);
+  sb.hello(w.sandboxId, [], undefined, capabilities);
   await sb.ready();
   return sb;
 }

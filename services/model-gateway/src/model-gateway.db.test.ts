@@ -31,14 +31,14 @@ import {
   withTeam,
   type KobeDatabase,
 } from "@kobe/db";
+import { RUN_TOKEN_HEADER, SERVER_CALL_AUDIENCE, SERVER_CALL_TOKEN_HEADER } from "@kobe/protocol";
 import {
-  deriveRunTokenKey,
-  deriveServerCallTokenKey,
+  generateSessionKeyPair,
   signRunToken,
   signServerCallToken,
-} from "@kobe/protocol/node";
-import { RUN_TOKEN_HEADER, SERVER_CALL_AUDIENCE, SERVER_CALL_TOKEN_HEADER } from "@kobe/protocol";
-import { generateSessionKeyPair, signSessionToken, verifySessionToken } from "@kobe/session-token";
+  signSessionToken,
+  verifySessionToken,
+} from "@kobe/session-token";
 import pino from "pino";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { createModelGateway } from "./gateway.js";
@@ -54,7 +54,6 @@ import { usageRecordOf } from "./usage/sink.js";
  * member is removed, deactivated, or the sandbox destroyed, the same (still unexpired) token is
  * refused.
  */
-const KEY = "m".repeat(40);
 const SESSION = generateSessionKeyPair();
 const box = new SecretBox("v".repeat(40), VIRTUAL_KEY_PURPOSE);
 const team = randomUUID();
@@ -68,9 +67,9 @@ let shim: Server;
 let base = "";
 const seenVks: string[] = [];
 const seenBodies: string[] = [];
-const RUN_KEY = deriveRunTokenKey(new TextEncoder().encode(KEY));
+const RUN_KEY = SESSION.signing;
 let requireRunToken = false;
-const SC_KEY = deriveServerCallTokenKey(new TextEncoder().encode(KEY));
+const SC_KEY = SESSION.signing;
 const recorded: CallRecord[] = [];
 
 const token = (teamId = team) => {
@@ -142,7 +141,7 @@ beforeAll(async () => {
   shim = createModelGateway({
     verify: (t) => verifySessionToken(t, "kobe.model-gateway", SESSION.verify),
     runTokens: {
-      key: RUN_KEY,
+      keys: SESSION.verify,
       isActive: (s) => isRunTokenActive(db, s),
       get require() {
         return requireRunToken;
@@ -159,7 +158,7 @@ beforeAll(async () => {
     isRunLeased: (t, r, s) => isActiveRunLeasedTo(db, t, r, s),
     runThinking: (t, r) => runThinkingLevelOf(db, t, r),
     serverCalls: {
-      key: SC_KEY,
+      keys: SESSION.verify,
       replay: new ServerCallReplay(),
       runMatches: (c) => serverCallRunMatches(db, c),
       limiter: new CallLimiter({ perSandbox: 2, total: 4 }),

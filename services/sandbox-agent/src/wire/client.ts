@@ -71,6 +71,11 @@ export interface WireClientOptions {
    * `session.renew` (KOBE-483; default {@link SESSION_RENEW_CHECK_MS}).
    */
   readonly renewIntervalMs?: number;
+  /**
+   * The server refused `token` (HTTP 401 on the upgrade, or close 4001; KOBE-522): the session
+   * client re-trades (rate-limited), and the next dial reads the new token.
+   */
+  readonly onTokenRejected?: (token: string, reason: string) => void;
 }
 
 /**
@@ -227,7 +232,21 @@ export class WireClient {
     this.#pacer.reset();
     socket.on("open", () => this.#onOpen(socket));
     socket.on("message", (data, isBinary) => this.#onMessage(socket, data, isBinary));
-    socket.on("close", (code, reason) => this.#onClose(socket, code, reason.toString()));
+    let refused: string | undefined;
+    socket.on("unexpected-response", (_req, res) => {
+      if (res.statusCode === 401) refused = "wire upgrade refused: HTTP 401";
+      else this.#options.logger.debug({ status: res.statusCode }, "sandbox wire upgrade refused");
+      socket.terminate();
+    });
+    socket.on("close", (code, reason) => {
+      if (socket === this.#socket && code === SANDBOX_CLOSE_CODES.unauthorized) {
+        refused = `wire closed: ${code}`;
+      }
+      if (refused !== undefined && socket === this.#socket) {
+        this.#options.onTokenRejected?.(this.#connectionToken ?? token, refused);
+      }
+      this.#onClose(socket, code, reason.toString());
+    });
     socket.on("error", (error) => {
       this.#options.logger.debug({ err: error.message }, "sandbox wire socket error");
     });
