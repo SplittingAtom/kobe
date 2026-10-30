@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadEnvelope } from "@kobe/db";
-import type { AppCallRequest } from "./apps/app-caller.js";
+import { InMemorySpanExporter, SpanKind, SpanStatusCode, initTelemetry } from "@kobe/telemetry";
+import type { AppCallAnswer, AppCallRequest } from "./apps/app-caller.js";
 import { appIdOf } from "./apps/app-id.js";
 import type { ProbeResult } from "./connectors/probe.js";
 import { withWebRtcGuard } from "./connectors/app-frame.js";
@@ -36,6 +37,8 @@ let aliceId = "";
 let bobId = "";
 let rootId = "";
 const calls: AppCallRequest[] = [];
+/** The proxy's next answer (default: a result). */
+let nextAnswer: AppCallAnswer | undefined;
 const upstream = new Map<string, { tools: Record<string, unknown>[]; resources: unknown[] }>();
 
 const t = (name: string, extra: Record<string, unknown> = {}) => ({
@@ -96,7 +99,12 @@ beforeAll(async () => {
     appCaller: {
       call: async (request) => {
         calls.push(request);
-        return { ok: true, result: { content: [{ type: "text", text: "rows" }] } };
+        const answer = nextAnswer ?? {
+          ok: true,
+          result: { content: [{ type: "text", text: "rows" }] },
+        };
+        nextAnswer = undefined;
+        return answer;
       },
     },
   });
@@ -574,6 +582,97 @@ describe("rate limit (spec T10)", () => {
     expect(statuses.at(-1)).toBe(429);
     expect(statuses.filter((s) => s === 200).length).toBeGreaterThanOrEqual(30);
     expect((await audits(id)).filter((r) => r.target.reason === "rate_limited")).toHaveLength(1);
+  });
+});
+
+describe("tracing (KOBE-527)", () => {
+  async function traced(fn: (exporter: InMemorySpanExporter) => Promise<void>): Promise<void> {
+    const exporter = new InMemorySpanExporter();
+    const telemetry = initTelemetry(
+      {
+        enabled: true,
+        endpoint: "http://x:4318",
+        headers: {},
+        captureContent: false,
+        serviceName: "t",
+      },
+      { exporter },
+    );
+    try {
+      await fn(exporter);
+    } finally {
+      await telemetry.shutdown();
+    }
+  }
+  const ROUTE = "POST /v1/team/apps/:appId/calls";
+  const named = (exporter: InMemorySpanExporter, name: string) =>
+    exporter.getFinishedSpans().filter((s) => s.name === name);
+  const childOfRoute = (exporter: InMemorySpanExporter, name: string) => {
+    const [route] = named(exporter, ROUTE);
+    const [span] = named(exporter, name);
+    expect(route).toBeDefined();
+    expect(span).toBeDefined();
+    expect(span?.parentSpanContext?.spanId).toBe(route?.spanContext().spanId);
+    return span;
+  };
+
+  it("splits an allowed call into decide, credential, audit and proxy spans under the route", async () => {
+    const id = await connector("apps7-trace", { authKind: "api_key", credentialSource: "site" });
+    const appId = appIdOf(id, "ui://cat/explorer");
+    await traced(async (exporter) => {
+      expect((await appCall(alice, appId, "preview_table")).status).toBe(200);
+      expect(childOfRoute(exporter, "app_call.decide")?.attributes).toEqual({
+        "kobe.app_call.outcome": "allowed",
+      });
+      expect(childOfRoute(exporter, "app_call.credential")?.attributes).toEqual({
+        "kobe.app_call.outcome": "ok",
+        "kobe.app_call.error": false,
+      });
+      expect(childOfRoute(exporter, "app_call.audit")?.attributes).toEqual({});
+      const proxy = childOfRoute(exporter, "app_call.proxy");
+      expect(proxy?.kind).toBe(SpanKind.CLIENT);
+      expect(proxy?.attributes).toEqual({
+        "kobe.app_call.outcome": "ok",
+        "kobe.app_call.error": false,
+      });
+      // Low-cardinality only: no connector, app, member, tool, key or URL on any of them.
+      const text = JSON.stringify(
+        exporter
+          .getFinishedSpans()
+          .filter((s) => s.name.startsWith("app_call."))
+          .map((s) => s.attributes),
+      );
+      for (const secret of [id, appId, aliceId, "preview_table", SITE_KEY, "apps7-trace"]) {
+        expect(text).not.toContain(secret);
+      }
+    });
+  });
+
+  it("records a denial on the decide span and calls no proxy", async () => {
+    const id = await connector("apps7-deny");
+    const appId = appIdOf(id, "ui://cat/explorer");
+    await traced(async (exporter) => {
+      expect((await appCall(alice, appId, "drop_table")).status).toBe(403);
+      expect(childOfRoute(exporter, "app_call.decide")?.attributes).toEqual({
+        "kobe.app_call.outcome": "tool_not_read_only",
+      });
+      expect(named(exporter, "app_call.proxy")).toHaveLength(0);
+    });
+  });
+
+  it("flags a proxy answer that failed upstream as an error, with its failure kind", async () => {
+    const id = await connector("apps7-fail");
+    const appId = appIdOf(id, "ui://cat/explorer");
+    nextAnswer = { ok: false, failure: "timeout" };
+    await traced(async (exporter) => {
+      expect((await appCall(alice, appId, "preview_table")).status).toBe(502);
+      const proxy = childOfRoute(exporter, "app_call.proxy");
+      expect(proxy?.attributes).toEqual({
+        "kobe.app_call.outcome": "timeout",
+        "kobe.app_call.error": true,
+      });
+      expect(proxy?.status.code).toBe(SpanStatusCode.ERROR);
+    });
   });
 });
 
