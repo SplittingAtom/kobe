@@ -67,7 +67,24 @@ export interface SessionClientOptions {
   readonly unassignedWaitSeconds?: number;
   /** Delays while unassigned and the server answers without holding the request. */
   readonly unassignedBackoff?: { readonly baseMs: number; readonly maxMs: number };
+  /** Gaps between re-trades after rejected tokens (KOBE-522); see {@link RETRADE_BACKOFF}. */
+  readonly retradeBackoff?: RetradePolicy;
 }
+
+export interface RetradePolicy {
+  /** The first gap; doubles while the server keeps refusing. */
+  readonly baseMs: number;
+  readonly maxMs: number;
+  /** A rejection this long after the last re-trade starts the backoff over. */
+  readonly quietMs: number;
+}
+
+/** One re-trade per 30 s at most, doubling to 5 min while the server keeps refusing (KOBE-522). */
+export const RETRADE_BACKOFF: RetradePolicy = {
+  baseMs: 30_000,
+  maxMs: 300_000,
+  quietMs: 600_000,
+};
 
 export const UNASSIGNED_WAIT_SECONDS = 20;
 export const UNASSIGNED_BACKOFF = { baseMs: 2_000, maxMs: 60_000 } as const;
@@ -109,17 +126,29 @@ export function sessionUrl(serverUrl: string): string {
 
 export class SessionClient {
   readonly #o: Required<
-    Omit<SessionClientOptions, "fetch" | "readFile" | "backoff" | "logger" | "unassignedBackoff">
+    Omit<
+      SessionClientOptions,
+      "fetch" | "readFile" | "backoff" | "logger" | "unassignedBackoff" | "retradeBackoff"
+    >
   > & {
     fetch: typeof fetch;
     readFile: (path: string) => Promise<string>;
     backoff: BackoffPolicy;
     logger: WireLogger;
     unassignedBackoff: { readonly baseMs: number; readonly maxMs: number };
+    retradeBackoff: RetradePolicy;
   };
   readonly #url: string;
   #grant: SessionGrant | undefined;
+  /** The pod belongs to one sandbox for its whole life (kept across re-trades). */
+  #sandboxId: string | undefined;
   #pending: Promise<SessionGrant> | undefined;
+  readonly #listeners = new Set<(grant: SessionGrant) => void>();
+  /** Re-trade rate limit (KOBE-522): epoch ms of the last one, the next allowed, the streak. */
+  #lastRetradeAt: number | undefined;
+  #nextRetradeAt = 0;
+  #retradeStreak = 0;
+  #limitWarned = false;
 
   constructor(options: SessionClientOptions) {
     this.#o = {
@@ -138,6 +167,7 @@ export class SessionClient {
       refreshMarginMs: options.refreshMarginMs ?? 120_000,
       unassignedWaitSeconds: options.unassignedWaitSeconds ?? UNASSIGNED_WAIT_SECONDS,
       unassignedBackoff: options.unassignedBackoff ?? UNASSIGNED_BACKOFF,
+      retradeBackoff: options.retradeBackoff ?? RETRADE_BACKOFF,
     };
     this.#url = sessionUrl(options.serverUrl);
   }
@@ -150,6 +180,56 @@ export class SessionClient {
       this.#pending = undefined;
     });
     return this.#pending;
+  }
+
+  /**
+   * A consumer saw `audience`'s token refused (a 401 on the wire upgrade, a 4001 close, a proxy's
+   * or gateway's 401; KOBE-522). After a signing-key change every cached token is dead until the
+   * next scheduled trade (up to ~13 min), so drop the grant and trade the bootstrap token again
+   * now: that trade does not depend on session keys. Rate-limited (one per 30 s, doubling to
+   * 5 min while the server keeps refusing) so a permanently refused token never loops hot.
+   * `token`, when given, is the token that was refused: a rejection of one already replaced is
+   * ignored. Returns whether a re-trade started; listeners ({@link onGrant}) get the new grant.
+   */
+  rejected(audience: SessionTokenAudience, reason: string, token?: string): boolean {
+    const g = this.#grant;
+    if (this.#pending !== undefined || g === undefined) return false;
+    if (token !== undefined && g.tokens[audience] !== token) return false;
+    const now = this.#o.now();
+    if (now < this.#nextRetradeAt) {
+      if (!this.#limitWarned) {
+        this.#limitWarned = true;
+        this.#o.logger.warn(
+          { audience, reason, retry_in_ms: this.#nextRetradeAt - now },
+          "sandbox session re-trade rate-limited",
+        );
+      }
+      return false;
+    }
+    const policy = this.#o.retradeBackoff;
+    const quiet = this.#lastRetradeAt === undefined || now - this.#lastRetradeAt >= policy.quietMs;
+    this.#retradeStreak = quiet ? 0 : this.#retradeStreak + 1;
+    const gap = Math.min(policy.maxMs, policy.baseMs * 2 ** Math.min(this.#retradeStreak, 30));
+    this.#lastRetradeAt = now;
+    this.#nextRetradeAt = now + gap;
+    this.#limitWarned = false;
+    this.#o.logger.info(
+      { audience, reason, retrade: this.#retradeStreak + 1, next_allowed_in_ms: gap },
+      "sandbox session re-trade after a rejected token",
+    );
+    this.#grant = undefined;
+    this.grant().catch((error: unknown) => {
+      this.#o.logger.warn({ err: (error as Error).message }, "sandbox session re-trade failed");
+    });
+    return true;
+  }
+
+  /** Called with every new grant (each trade, scheduled or after a rejection); returns unsubscribe. */
+  onGrant(listener: (grant: SessionGrant) => void): () => void {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
   }
 
   /** The `kobe.sandbox-wire` token for the next dial. */
@@ -189,15 +269,17 @@ export class SessionClient {
     for (let attempt = 0; ; attempt++) {
       try {
         const grant = await this.#tradeOnce(longPoll ? this.#o.unassignedWaitSeconds : 0);
-        if (this.#grant?.sandboxId !== undefined && this.#grant.sandboxId !== grant.sandboxId) {
+        if (this.#sandboxId !== undefined && this.#sandboxId !== grant.sandboxId) {
           // The pod belongs to one sandbox for its whole life; another id means a server bug.
           throw new Error("the server assigned a different sandbox id");
         }
         this.#grant = grant;
+        this.#sandboxId = grant.sandboxId;
         this.#o.logger.info(
           { sandbox_id: grant.sandboxId, attempts: attempt + 1, ms: this.#o.now() - started },
           "sandbox session acquired",
         );
+        for (const listener of this.#listeners) listener(grant);
         return grant;
       } catch (error) {
         if (!(error instanceof AttemptError)) throw error;

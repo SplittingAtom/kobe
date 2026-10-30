@@ -150,6 +150,14 @@ async function main(): Promise<void> {
     skillEval,
     logger,
     readToken,
+    // KOBE-522: a refused wire token (signing-key change) re-trades the bootstrap token, and every
+    // keeper picks up the new grant, so wire, model, MCP and egress recover without a restart.
+    ...(session === undefined
+      ? {}
+      : {
+          onTokenRejected: (token: string, reason: string) =>
+            void session.rejected("kobe.sandbox-wire", reason, token),
+        }),
     ...(workspace === undefined ? {} : { workspace }),
     agentVersion,
     piVersion,
@@ -318,6 +326,7 @@ async function modelWiring(
     refreshMarginMs: session.refreshMarginMs,
     logger,
   });
+  session.onGrant(() => void keeper.refresh().catch(() => undefined));
   await keeper.start();
   return { gatewayUrl: config.modelGatewayUrl, extension, tokens: keeper };
 }
@@ -355,6 +364,7 @@ async function egressWiring(
     refreshMarginMs: session.refreshMarginMs,
     logger,
   });
+  session.onGrant(() => void keeper.refresh().catch(() => undefined));
   await keeper.start();
   return { proxyUrl: config.egressProxyUrl, noProxy: config.noProxy, envScript, tokens: keeper };
 }
@@ -374,6 +384,7 @@ function mcpWiring(
     refreshMarginMs: session.refreshMarginMs,
     logger,
   });
+  session.onGrant(() => void keeper.refresh().catch(() => undefined));
   return keeper.start().then(() => ({ proxyUrl: config.mcpProxyUrl as string, tokens: keeper }));
 }
 

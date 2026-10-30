@@ -58,6 +58,14 @@ export class ModelTokenKeeper implements ModelTokenSource {
     return this.#token !== undefined ? Promise.resolve(this.#token) : this.#refresh();
   }
 
+  /**
+   * Asks the session again now: it re-traded after a rejected token (KOBE-522), so this audience's
+   * token changed too; listeners get it at once instead of at the next scheduled trade.
+   */
+  refresh(): Promise<string> {
+    return this.#refresh();
+  }
+
   onChange(listener: (token: string) => void): () => void {
     this.#listeners.add(listener);
     return () => {

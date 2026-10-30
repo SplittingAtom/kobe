@@ -98,3 +98,18 @@ describe("ModelTokenKeeper", () => {
     expect(h.trades).toHaveLength(1);
   });
 });
+
+describe("ModelTokenKeeper after a rejected token (KOBE-522)", () => {
+  it("refresh() picks up a grant the session re-traded for another audience's rejection", async () => {
+    const h = harness([
+      { token: "t1".padEnd(30, "x"), expiresAt: 1_000_000 + 900_000 },
+      { token: "t2".padEnd(30, "x"), expiresAt: 1_000_000 + 900_000 },
+    ]);
+    const seen: string[] = [];
+    h.keeper.onChange((t) => seen.push(t));
+    await h.keeper.start();
+    await expect(h.keeper.refresh()).resolves.toBe("t2".padEnd(30, "x"));
+    expect(seen).toEqual(["t1".padEnd(30, "x"), "t2".padEnd(30, "x")]);
+    expect(h.timers).toHaveLength(1);
+  });
+});

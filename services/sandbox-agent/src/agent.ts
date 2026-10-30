@@ -70,6 +70,8 @@ export interface AgentDeps {
   readonly config: Config;
   readonly logger: WireLogger;
   readonly readToken: () => Promise<string>;
+  /** The server refused the wire token (KOBE-522): the session client re-trades. */
+  readonly onTokenRejected?: (token: string, reason: string) => void;
   readonly agentVersion: string;
   readonly piVersion: string;
   readonly home: string;
@@ -387,6 +389,7 @@ export class Agent {
     this.#wire = new WireClient({
       url: config.connectUrl,
       readToken: deps.readToken,
+      ...(deps.onTokenRejected === undefined ? {} : { onTokenRejected: deps.onTokenRejected }),
       hello: () => this.#hello(),
       onReady: (ack) => this.#onReady(ack),
       onFrame: (frame) => this.#onFrame(frame),

@@ -238,3 +238,104 @@ describe("SessionClient while its warm-pool pod is unassigned (KOBE-417)", () =>
     expect(h.sleeps.at(-1)).toBeLessThanOrEqual(500);
   });
 });
+
+describe("SessionClient after a rejected session token (KOBE-522)", () => {
+  const LIFE = 900_000;
+  const infos = (h: ReturnType<typeof harness>) =>
+    h.logs.filter((l) => (l as { audience?: string }).audience !== undefined);
+
+  it("drops the cached grant and trades the bootstrap token again at once, telling listeners", async () => {
+    const h = harness([
+      json(200, grantBody(1_000_000 + LIFE, 1)),
+      json(200, grantBody(1_000_000 + LIFE, 2)),
+    ]);
+    const seen: string[] = [];
+    h.client.onGrant((g) => seen.push(g.tokens["kobe.model-gateway"]));
+    await expect(h.client.wireToken()).resolves.toBe(token("wire", 1));
+    h.advance(5_000);
+    expect(h.client.rejected("kobe.sandbox-wire", "wire upgrade refused: HTTP 401")).toBe(true);
+    await expect(h.client.wireToken()).resolves.toBe(token("wire", 2));
+    await expect(h.client.modelGatewayGrant()).resolves.toMatchObject({ token: token("gw", 2) });
+    expect(h.requests).toHaveLength(2);
+    expect(seen).toEqual([token("gw", 1), token("gw", 2)]);
+    expect(infos(h)).toEqual([
+      expect.objectContaining({
+        audience: "kobe.sandbox-wire",
+        reason: "wire upgrade refused: HTTP 401",
+      }),
+    ]);
+    expect(JSON.stringify(h.logs)).not.toMatch(/x{30}/);
+  });
+
+  it("ignores a rejection of a token that was already replaced", async () => {
+    const h = harness([
+      json(200, grantBody(1_000_000 + LIFE, 1)),
+      json(200, grantBody(1_000_000 + LIFE, 2)),
+    ]);
+    await h.client.wireToken();
+    expect(h.client.rejected("kobe.model-gateway", "401", token("gw", 1))).toBe(true);
+    await h.client.wireToken();
+    h.advance(60_000);
+    expect(h.client.rejected("kobe.model-gateway", "401", token("gw", 1))).toBe(false);
+    expect(h.requests).toHaveLength(2);
+  });
+
+  it("re-trades at most once per 30 s and warns once when the limit holds one back", async () => {
+    const steps = [1, 2, 3].map((n) => json(200, grantBody(1_000_000 + 10 * LIFE, n)));
+    const h = harness(steps);
+    await h.client.wireToken();
+    expect(h.client.rejected("kobe.sandbox-wire", "401")).toBe(true);
+    await h.client.wireToken();
+    h.advance(10_000);
+    expect(h.client.rejected("kobe.mcp-proxy", "401")).toBe(false);
+    expect(h.client.rejected("kobe.egress-proxy", "401")).toBe(false);
+    await expect(h.client.wireToken()).resolves.toBe(token("wire", 2));
+    expect(h.requests).toHaveLength(2);
+    const warns = h.logs.filter((l) => (l as { retry_in_ms?: number }).retry_in_ms !== undefined);
+    expect(warns).toEqual([
+      expect.objectContaining({ audience: "kobe.mcp-proxy", retry_in_ms: 20_000 }),
+    ]);
+    h.advance(20_000);
+    expect(h.client.rejected("kobe.sandbox-wire", "401")).toBe(true);
+    await expect(h.client.wireToken()).resolves.toBe(token("wire", 3));
+  });
+
+  it("backs off exponentially to 5 min while the server keeps refusing, so it never loops hot", async () => {
+    const steps = Array.from({ length: 30 }, (_, n) =>
+      json(200, grantBody(1_000_000 + 100 * LIFE, n)),
+    );
+    const h = harness(steps);
+    await h.client.wireToken();
+    const gaps: number[] = [];
+    let last = h.now();
+    // A permanently rejected token: something calls rejected() every second for an hour.
+    for (let s = 0; s < 3_600; s++) {
+      if (h.client.rejected("kobe.sandbox-wire", "401")) {
+        gaps.push(h.now() - last);
+        last = h.now();
+        await h.client.wireToken();
+      }
+      h.advance(1_000);
+    }
+    expect(gaps.slice(1, 6)).toEqual([30_000, 60_000, 120_000, 240_000, 300_000]);
+    expect(h.requests.length).toBeLessThanOrEqual(20);
+  });
+
+  it("starts the backoff over once a grant has been quiet for 10 min", async () => {
+    const steps = Array.from({ length: 6 }, (_, n) =>
+      json(200, grantBody(1_000_000 + 100 * LIFE, n)),
+    );
+    const h = harness(steps);
+    await h.client.wireToken();
+    expect(h.client.rejected("kobe.sandbox-wire", "401")).toBe(true);
+    await h.client.wireToken();
+    h.advance(30_000);
+    expect(h.client.rejected("kobe.sandbox-wire", "401")).toBe(true); // next gap: 60 s
+    await h.client.wireToken();
+    h.advance(700_000);
+    expect(h.client.rejected("kobe.sandbox-wire", "401")).toBe(true);
+    await h.client.wireToken();
+    h.advance(30_000);
+    expect(h.client.rejected("kobe.sandbox-wire", "401")).toBe(true);
+  });
+});
