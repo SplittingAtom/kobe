@@ -9,6 +9,17 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Hardening lane 3 deployed (2026-10-30):** PR #425 merged (main b0634553; CI needed two fixture fixes
+  for the Pi 1.0 cut, the gate1 e2e shard's scripted agent said 1.0.0 too, and one flaky db-server rerun).
+  Deployed to kobe-gate1 as `local-b06345530688` (rollback `local-533a9dfbc944`; `local-a188832871f4`
+  pruned), Helm rev 105: gateway and server rolled together, no token refusals, team reconcile failed:0,
+  Secret carries `trace-span`; live owner run with a bash tool call completed. Browser specs
+  `file-tab-outside-change` (incl. KOBE-516's agent `mv`) pass on gate1 once they open the row by path
+  (#426: the owner's workspace root has its own notes.md). KOBE-525 baseline measured
+  (docs/perf-baseline-2026-10-30.md: 315 page loads over 81 routes, ClickHouse queries 1–6; attributes
+  live in `metadata_names`/`metadata_values`, fixed in the queries) and follow-ups KOBE-527..530 filed.
+  compute2 disk hit 86% after the build (kubelet GC threshold): docker build cache (44 GB) pruned → 44%,
+  so the next image build is a full rebuild.
 - **Hardening lane 3 + gate1 deploy (2026-10-30):** group 2 merged (#408 → main 533a9dfb; the gate2/gate4
   secret scan had to skip the session keys' public halves and PEM armour lines). main 533a9dfb deployed to
   kobe-gate1 as `local-533a9dfbc944` (rollback tag `local-a188832871f4`; `local-87398452b50d` and the orphan
