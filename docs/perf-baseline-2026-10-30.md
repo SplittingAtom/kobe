@@ -25,14 +25,16 @@ Every latency is recorded as a trace span whose duration is the latency (the gat
 Langfuse 4, ingests OTLP traces only; no metrics SDK). Attributes are route templates and
 kinds, never ids or content (`captureContent` stays off).
 
-| Tier                         | Span (name)                                                                 | Measures                                                                          | Code                                                                                  |
-| ---------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Web                          | `web.vital <metric> <route>`                                                | TTFB, FCP, LCP, INP, CLS (×1000), Next.js hydration/render                        | `apps/web/components/shell/web-vitals-reporter.tsx` → `POST /v1/telemetry/web-vitals` |
-| Server, scheduler, MCP proxy | `<METHOD> <route template>`                                                 | request duration per route (`http.route`, status)                                 | `packages/telemetry/src/hono.ts` (existing)                                           |
-| Model gateway                | `model_gateway.request` + `http.route`                                      | request duration per inference route                                              | `services/model-gateway/src/routes.ts`                                                |
-| Egress proxy                 | `egress.connection` + `kobe.setup_ms`                                       | tunnel set-up (CONNECT → established; upgrade → verified TLS)                     | `services/egress-proxy/src/proxy.ts`                                                  |
-| Runs                         | `run.pi_ready`, `run.first_token`, `run.tool_call`                          | run.start → first Pi frame / first token; tool start → result                     | `services/server/src/sandbox-wire/run-latency.ts`                                     |
-| Sandbox                      | `sandbox.wake`, `sandbox.claim`, `sandbox.pod_ready`, `sandbox.agent_hello` | wake → pod Ready, claim (warm-pool bind or resume), pod Ready, wake → agent hello | `services/server/src/sandbox-lifecycle/timing.ts`                                     |
+| Tier                         | Span (name)                                                                  | Measures                                                                          | Code                                                                                  |
+| ---------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Web                          | `web.vital <metric> <route>`                                                 | TTFB, FCP, LCP, INP, CLS (×1000), Next.js hydration/render                        | `apps/web/components/shell/web-vitals-reporter.tsx` → `POST /v1/telemetry/web-vitals` |
+| Server, scheduler, MCP proxy | `<METHOD> <route template>`                                                  | request duration per route (`http.route`, status)                                 | `packages/telemetry/src/hono.ts` (existing)                                           |
+| Model gateway                | `model_gateway.request` + `http.route`                                       | request duration per inference route                                              | `services/model-gateway/src/routes.ts`                                                |
+| Egress proxy                 | `egress.connection` + `kobe.setup_ms`                                        | tunnel set-up (CONNECT → established; upgrade → verified TLS)                     | `services/egress-proxy/src/proxy.ts`                                                  |
+| Runs                         | `run.pi_ready`, `run.first_token`, `run.tool_call`                           | run.start → first Pi frame / first token; tool start → result                     | `services/server/src/sandbox-wire/run-latency.ts`                                     |
+| App calls (server)           | `app_call.decide`, `app_call.credential`, `app_call.audit`, `app_call.proxy` | steps of `POST /v1/team/apps/:appId/calls` (KOBE-527)                             | `services/server/src/apps/call.ts`                                                    |
+| MCP proxy upstream           | `mcp.upstream` + `kobe.upstream.kind`                                        | one upstream MCP session (KOBE-527, KOBE-528)                                     | `services/mcp-proxy/src/upstream.ts`                                                  |
+| Sandbox                      | `sandbox.wake`, `sandbox.claim`, `sandbox.pod_ready`, `sandbox.agent_hello`  | wake → pod Ready, claim (warm-pool bind or resume), pod Ready, wake → agent hello | `services/server/src/sandbox-lifecycle/timing.ts`                                     |
 
 The Playwright measurement run (`e2e/browser/perf/`) adds lab numbers per route: every page under
 `apps/web/app` loaded N times, TTFB / FCP / LCP / CLS / DOM ready / load from the Performance API,
@@ -265,6 +267,55 @@ Filed in Hadron (backlog, label `performance`), measure-and-explain first:
 
 Within budget, no ticket: INP (no samples: the lab run does not interact), cold start 13.2 s
 (< 20 s), every other route's LCP, the gateway's own overhead (~1 ms around the model).
+
+### KOBE-527: app calls, server and proxy split
+
+New spans: on the server, children of `POST /v1/team/apps/:appId/calls`: `app_call.decide`
+(app, thread on screen, schema validation, policy at `app_bridge`), `app_call.credential` (key
+or grant revealed; api_key/OAuth connectors only), `app_call.audit` (the allowed audit row) and
+`app_call.proxy` (client span: mcp-proxy and the app backend), each with `kobe.app_call.outcome`
+(a fixed reason or failure code) and, on credential and proxy, `kobe.app_call.error`. On the
+proxy, `mcp.upstream` (kind `app`) under `POST /internal/v1/app-calls`. The proxy never joins a
+caller's trace (KOBE-274), so the two halves are separate traces: query 7 splits the server
+route, query 8 the proxy route. Code: `services/server/src/apps/call.ts`,
+`services/mcp-proxy/src/upstream.ts`.
+
+| Share (p50 / p95)                                 | ms                                   |
+| ------------------------------------------------- | ------------------------------------ |
+| Server route (query 7 `route`)                    | measured after the next gate1 deploy |
+| of which Kobe server (`kobe`: decide, key, audit) | measured after the next gate1 deploy |
+| Proxy route (query 8, `/internal/v1/app-calls`)   | measured after the next gate1 deploy |
+| of which the app backend (`upstream`)             | measured after the next gate1 deploy |
+| of which Kobe proxy (`kobe`)                      | measured after the next gate1 deploy |
+
+Budget verdict (ac-2): measured after the next gate1 deploy. If the backend's share dominates,
+the route is excluded from the 300 ms budget with that share recorded here; otherwise the Kobe
+step that dominates gets its own ticket.
+
+### KOBE-528: MCP connector calls and the probe, upstream split
+
+New span: `mcp.upstream` (client span, one per upstream MCP session: initialize, initialized,
+the request or requests; the best-effort session DELETE is outside it) under
+`mcp.tools/call` for `POST /v1/mcp/:connectorId` and directly under the route for
+`POST /internal/v1/probe`. Attributes: `kobe.upstream.kind` (`mcp`, `probe`, `app`),
+`kobe.upstream.method`, `kobe.upstream.outcome` (`ok` or the failure kind),
+`kobe.upstream.error`, `kobe.upstream.requests`; never the connector id, URL, tool or content.
+Query 8 gives each route minus its upstream time (`kobe`), with requests that reach no upstream
+(a sandbox's `tools/list`, refused calls: the 25 ms p50) listed apart; query 8b splits upstream
+time by kind and outcome; query 8c counts probes per hour.
+
+| Route (p50 / p95)                      | Route                                | Upstream                             | Kobe side                            |
+| -------------------------------------- | ------------------------------------ | ------------------------------------ | ------------------------------------ |
+| `POST /v1/mcp/:connectorId` (upstream) | measured after the next gate1 deploy | measured after the next gate1 deploy | measured after the next gate1 deploy |
+| `POST /internal/v1/probe`              | measured after the next gate1 deploy | measured after the next gate1 deploy | measured after the next gate1 deploy |
+
+Probe cadence (query 8c, gate1, 2026-10-28 to 2026-10-30): a steady 6 probes an hour. The
+refresh (`KOBE_CONNECTOR_REFRESH_SECONDS`, default 3600) runs on every server replica: the
+advisory lock only stops two passes overlapping, so with `server.replicas: 2` both replicas probe
+each of gate1's 3 pinned connectors about 17 s apart (server logs, "connectors refreshed",
+checked 3 per pass on each pod). Half the probes are redundant; the probe is a background job
+that no user waits for, so it is not a user-facing latency. Not changed here (see
+`docs/ledger/KOBE-528.md`).
 
 ## Limits of the method
 

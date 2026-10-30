@@ -123,3 +123,98 @@ SELECT name,
  GROUP BY name
  ORDER BY name
 FORMAT PrettyCompact;
+
+-- 7. App calls (KOBE-527): where `POST /v1/team/apps/:appId/calls` spends its time on the server.
+--    Child spans: `app_call.decide` (app, thread, schema validation, policy), `app_call.credential`
+--    (key or grant revealed; api_key/oauth connectors only), `app_call.audit` (the allowed row) and
+--    `app_call.proxy` (mcp-proxy + the app backend). Every request is a trace of its own (the
+--    listeners never join a caller's trace), so spans are matched by `trace_id`; `kobe_*` is the
+--    route minus the proxy round trip, per request. The proxy's own split is query 8.
+SELECT count() AS n,
+       round(quantileExact(0.50)(route_ms)) AS route_p50,
+       round(quantileExact(0.95)(route_ms)) AS route_p95,
+       round(quantileExact(0.95)(decide_ms)) AS decide_p95,
+       round(quantileExact(0.95)(credential_ms)) AS credential_p95,
+       round(quantileExact(0.95)(audit_ms)) AS audit_p95,
+       round(quantileExact(0.50)(proxy_ms)) AS proxy_p50,
+       round(quantileExact(0.95)(proxy_ms)) AS proxy_p95,
+       round(quantileExact(0.50)(route_ms - proxy_ms)) AS kobe_p50,
+       round(quantileExact(0.95)(route_ms - proxy_ms)) AS kobe_p95,
+       round(sum(proxy_ms) / sum(route_ms), 2) AS proxy_share
+  FROM (
+        SELECT trace_id,
+               sumIf(ms, name = 'POST /v1/team/apps/:appId/calls') AS route_ms,
+               sumIf(ms, name = 'app_call.decide') AS decide_ms,
+               sumIf(ms, name = 'app_call.credential') AS credential_ms,
+               sumIf(ms, name = 'app_call.audit') AS audit_ms,
+               sumIf(ms, name = 'app_call.proxy') AS proxy_ms,
+               countIf(name = 'POST /v1/team/apps/:appId/calls') AS routes,
+               countIf(name = 'app_call.proxy') AS proxied
+          FROM (SELECT trace_id, name, dateDiff('millisecond', start_time, end_time) AS ms
+                  FROM events_core
+                 WHERE start_time > now() - INTERVAL 7 DAY
+                   AND name IN ('POST /v1/team/apps/:appId/calls', 'app_call.decide',
+                                'app_call.credential', 'app_call.audit', 'app_call.proxy'))
+         GROUP BY trace_id
+        HAVING routes = 1 AND proxied = 1
+       )
+FORMAT PrettyCompact;
+
+-- 8. MCP proxy (KOBE-527, KOBE-528): each route minus its upstream round trip (`mcp.upstream`, one
+--    per upstream MCP session: initialize, initialized, the request(s); the session DELETE is not
+--    in it). `kobe_*` is the proxy's own share, including the policy decision with the server for
+--    `/v1/mcp/:connectorId`. Requests that never reach an upstream (a sandbox's tools/list, a
+--    refused call) are listed apart (`reached_upstream = 0`).
+SELECT route,
+       upstreams > 0 AS reached_upstream,
+       count() AS n,
+       round(quantileExact(0.50)(route_ms)) AS route_p50,
+       round(quantileExact(0.95)(route_ms)) AS route_p95,
+       round(quantileExact(0.50)(upstream_ms)) AS upstream_p50,
+       round(quantileExact(0.95)(upstream_ms)) AS upstream_p95,
+       round(quantileExact(0.50)(route_ms - upstream_ms)) AS kobe_p50,
+       round(quantileExact(0.95)(route_ms - upstream_ms)) AS kobe_p95,
+       round(sum(upstream_ms) / sum(route_ms), 2) AS upstream_share
+  FROM (
+        SELECT trace_id,
+               anyIf(name, name != 'mcp.upstream') AS route,
+               sumIf(ms, name != 'mcp.upstream') AS route_ms,
+               sumIf(ms, name = 'mcp.upstream') AS upstream_ms,
+               countIf(name = 'mcp.upstream') AS upstreams
+          FROM (SELECT trace_id, name, dateDiff('millisecond', start_time, end_time) AS ms
+                  FROM events_core
+                 WHERE start_time > now() - INTERVAL 7 DAY
+                   AND name IN ('POST /v1/mcp/:connectorId', 'POST /internal/v1/probe',
+                                'POST /internal/v1/app-calls', 'mcp.upstream'))
+         GROUP BY trace_id
+        HAVING route != '' AND countIf(name != 'mcp.upstream') = 1
+       )
+ GROUP BY route, reached_upstream
+ ORDER BY route, reached_upstream
+FORMAT PrettyCompact;
+
+-- 8b. Upstream round trips by kind (mcp: a sandbox's call, probe: the server's pinning probe,
+--     app: an MCP App's own call), method and outcome, with the HTTP requests per session.
+SELECT arrayElement(metadata_values, indexOf(metadata_names, 'attributes.kobe.upstream.kind')) AS kind,
+       arrayElement(metadata_values, indexOf(metadata_names, 'attributes.kobe.upstream.method')) AS method,
+       arrayElement(metadata_values, indexOf(metadata_names, 'attributes.kobe.upstream.outcome')) AS outcome,
+       count() AS n,
+       round(avg(toUInt32OrZero(arrayElement(metadata_values, indexOf(metadata_names, 'attributes.kobe.upstream.requests')))), 1) AS requests,
+       round(quantileExact(0.50)(dateDiff('millisecond', start_time, end_time))) AS p50_ms,
+       round(quantileExact(0.95)(dateDiff('millisecond', start_time, end_time))) AS p95_ms
+  FROM events_core
+ WHERE start_time > now() - INTERVAL 7 DAY
+   AND name = 'mcp.upstream'
+ GROUP BY kind, method, outcome
+ ORDER BY kind, method, n DESC
+FORMAT PrettyCompact;
+
+-- 8c. Probes per hour (KOBE-528: the connector refresh cadence; one probe per pinned connector per
+--     pass, plus registrations, pins and admins' re-probes).
+SELECT toStartOfHour(start_time) AS hour, count() AS probes
+  FROM events_core
+ WHERE start_time > now() - INTERVAL 2 DAY
+   AND name = 'POST /internal/v1/probe'
+ GROUP BY hour
+ ORDER BY hour
+FORMAT PrettyCompact;
