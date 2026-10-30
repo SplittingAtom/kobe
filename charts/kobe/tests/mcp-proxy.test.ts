@@ -73,6 +73,20 @@ describe("MCP proxy Deployment", () => {
     expect(pod(ms, "kobe-mcp-proxy")?.initContainers).toBeUndefined();
   });
 
+  it("holds no key that can produce an approval signature (KOBE-520)", () => {
+    // Approvals are HMAC-signed by the server and verified by the server on the proxy's policy
+    // re-check; the proxy only forwards the decision. A proxy compromise cannot mint one.
+    const env = envOf(ms, "kobe-mcp-proxy");
+    expect(env.map((e) => e.name)).not.toContain("KOBE_APPROVAL_KEY");
+    expect(JSON.stringify(env)).not.toContain("approval-hmac");
+    const serverEnv = envOf(ms, "kobe-server");
+    expect(serverEnv.find((e) => e.name === "KOBE_APPROVAL_KEY")?.valueFrom?.secretKeyRef).toEqual({
+      name: "kobe-sandbox-session-keys",
+      key: "approval-hmac",
+      optional: true,
+    });
+  });
+
   it("renders env the proxy's config schema accepts (HTTPS on 443, server's internal port)", () => {
     const config = loadConfig({
       ...plain(envOf(ms, "kobe-mcp-proxy")),

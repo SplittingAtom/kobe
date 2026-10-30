@@ -24,6 +24,12 @@ describe("loadConfig", () => {
     expect(config.limits.upstreamTimeoutMs).toBeLessThan(60_000);
   });
 
+  it("has no approval key: KOBE_APPROVAL_KEY in the environment is ignored (KOBE-520)", () => {
+    const config = loadConfig({ ...ENV, KOBE_APPROVAL_KEY: "a".repeat(48) });
+    expect(JSON.stringify(config)).not.toContain("a".repeat(48));
+    expect(Object.keys(config).some((k) => /approval/i.test(k))).toBe(false);
+  });
+
   it("reads lists and switches", () => {
     const config = loadConfig({
       ...ENV,
