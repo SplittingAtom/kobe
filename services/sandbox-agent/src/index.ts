@@ -7,7 +7,6 @@ import { loadConfig, type Config } from "./config.js";
 import { hardenProcess } from "./harden.js";
 import { logger } from "./logger.js";
 import { sweepRuntimeDir } from "./models/runtime-dir.js";
-import { ModelTokenKeeper } from "./models/token-keeper.js";
 import type { EgressWiring } from "./egress/egress-wiring.js";
 import type { McpWiring } from "./mcp/pi-mcp-config.js";
 import type { ModelWiring } from "./models/types.js";
@@ -18,6 +17,7 @@ import { KernelManager } from "./notebook/manager.js";
 import { checkExtensionFile, checkPolicyExtensionFile } from "./policy/extension-file.js";
 import { sweepPiPrivateDirs } from "./threads/exec-wiring.js";
 import { SessionClient } from "./session/exchange.js";
+import { sessionTokenKeeper } from "./session/keepers.js";
 import { createSkillFetcher } from "./skills/client.js";
 import { createSkillEvalHooks } from "./skill-eval/hooks.js";
 import { SkillStore } from "./skills/store.js";
@@ -151,7 +151,8 @@ async function main(): Promise<void> {
     logger,
     readToken,
     // KOBE-522: a refused wire token (signing-key change) re-trades the bootstrap token, and every
-    // keeper picks up the new grant, so wire, model, MCP and egress recover without a restart.
+    // keeper picks up the new grant. Wire-detected only: the agent never sees the gateway's or the
+    // proxies' 401s (Pi calls them directly).
     ...(session === undefined
       ? {}
       : {
@@ -321,12 +322,7 @@ async function modelWiring(
     return undefined;
   }
   const extension = await checkExtensionFile(config.modelsExtension, "kobe-models");
-  const keeper = new ModelTokenKeeper({
-    grant: () => session.modelGatewayGrant(),
-    refreshMarginMs: session.refreshMarginMs,
-    logger,
-  });
-  session.onGrant(() => void keeper.refresh().catch(() => undefined));
+  const keeper = sessionTokenKeeper(session, "kobe.model-gateway", logger);
   await keeper.start();
   return { gatewayUrl: config.modelGatewayUrl, extension, tokens: keeper };
 }
@@ -359,12 +355,7 @@ async function egressWiring(
 ): Promise<EgressWiring | undefined> {
   if (config.egressProxyUrl === undefined || session === undefined) return undefined;
   const envScript = await checkExtensionFile(config.egressEnvScript, "egress-env");
-  const keeper = new ModelTokenKeeper({
-    grant: () => session.egressProxyGrant(),
-    refreshMarginMs: session.refreshMarginMs,
-    logger,
-  });
-  session.onGrant(() => void keeper.refresh().catch(() => undefined));
+  const keeper = sessionTokenKeeper(session, "kobe.egress-proxy", logger);
   await keeper.start();
   return { proxyUrl: config.egressProxyUrl, noProxy: config.noProxy, envScript, tokens: keeper };
 }
@@ -379,12 +370,7 @@ function mcpWiring(
   session: SessionClient | undefined,
 ): Promise<McpWiring | undefined> {
   if (config.mcpProxyUrl === undefined || session === undefined) return Promise.resolve(undefined);
-  const keeper = new ModelTokenKeeper({
-    grant: () => session.mcpProxyGrant(),
-    refreshMarginMs: session.refreshMarginMs,
-    logger,
-  });
-  session.onGrant(() => void keeper.refresh().catch(() => undefined));
+  const keeper = sessionTokenKeeper(session, "kobe.mcp-proxy", logger);
   return keeper.start().then(() => ({ proxyUrl: config.mcpProxyUrl as string, tokens: keeper }));
 }
 

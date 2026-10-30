@@ -235,6 +235,7 @@ export class WireClient {
     let refused: string | undefined;
     socket.on("unexpected-response", (_req, res) => {
       if (res.statusCode === 401) refused = "wire upgrade refused: HTTP 401";
+      else this.#options.logger.debug({ status: res.statusCode }, "sandbox wire upgrade refused");
       socket.terminate();
     });
     socket.on("close", (code, reason) => {

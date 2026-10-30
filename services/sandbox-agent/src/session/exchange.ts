@@ -183,8 +183,9 @@ export class SessionClient {
   }
 
   /**
-   * A consumer saw `audience`'s token refused (a 401 on the wire upgrade, a 4001 close, a proxy's
-   * or gateway's 401; KOBE-522). After a signing-key change every cached token is dead until the
+   * A consumer saw `audience`'s token refused (KOBE-522). Today only the wire calls this (a 401 on
+   * the upgrade, a 4001 close): Pi and its tools talk to the gateway and proxies directly, so the
+   * agent never sees their 401s. After a signing-key change every cached token is dead until the
    * next scheduled trade (up to ~13 min), so drop the grant and trade the bootstrap token again
    * now: that trade does not depend on session keys. Rate-limited (one per 30 s, doubling to
    * 5 min while the server keeps refusing) so a permanently refused token never loops hot.
@@ -218,7 +219,10 @@ export class SessionClient {
       "sandbox session re-trade after a rejected token",
     );
     this.#grant = undefined;
-    this.grant().catch((error: unknown) => {
+    this.#pending ??= this.#tradeUntilGranted(true).finally(() => {
+      this.#pending = undefined;
+    });
+    this.#pending.catch((error: unknown) => {
       this.#o.logger.warn({ err: (error as Error).message }, "sandbox session re-trade failed");
     });
     return true;
@@ -259,7 +263,11 @@ export class SessionClient {
     return this.#o.refreshMarginMs;
   }
 
-  async #tradeUntilGranted(): Promise<SessionGrant> {
+  /**
+   * `retrade`: after a rejected token (KOBE-522) the network is up, so no fast-retry phase, and
+   * every refusal (not only transport failures) moves along the backoff schedule.
+   */
+  async #tradeUntilGranted(retrade = false): Promise<SessionGrant> {
     const started = this.#o.now();
     // Long-poll once the server has said the pod is unassigned (KOBE-417).
     let longPoll = false;
@@ -279,7 +287,13 @@ export class SessionClient {
           { sandbox_id: grant.sandboxId, attempts: attempt + 1, ms: this.#o.now() - started },
           "sandbox session acquired",
         );
-        for (const listener of this.#listeners) listener(grant);
+        for (const listener of this.#listeners) {
+          try {
+            listener(grant);
+          } catch (error) {
+            this.#o.logger.warn({ err: (error as Error).message }, "session grant listener failed");
+          }
+        }
         return grant;
       } catch (error) {
         if (!(error instanceof AttemptError)) throw error;
@@ -303,10 +317,10 @@ export class SessionClient {
         } else {
           delay =
             error.retryAfterMs ??
-            (this.#o.now() - started < this.#o.fastRetryForMs
+            (!retrade && this.#o.now() - started < this.#o.fastRetryForMs
               ? this.#fastRetry()
               : backoffDelay(failures, this.#o.backoff, this.#o.random));
-          failures = error.refusal === undefined ? failures + 1 : 0;
+          failures = error.refusal === undefined || retrade ? failures + 1 : 0;
         }
         if (attempt === 0 || attempt % 20 === 0) {
           this.#o.logger.info({ reason: error.message, attempt, delay }, "sandbox session retry");

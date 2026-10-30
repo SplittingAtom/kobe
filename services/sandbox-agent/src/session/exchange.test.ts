@@ -338,4 +338,30 @@ describe("SessionClient after a rejected session token (KOBE-522)", () => {
     h.advance(30_000);
     expect(h.client.rejected("kobe.sandbox-wire", "401")).toBe(true);
   });
+
+  it("goes straight to the backoff schedule while the server refuses a re-trade (no fast retries)", async () => {
+    const refused = () => json(401, { code: "unauthorized" });
+    const h = harness([
+      json(200, grantBody(1_000_000 + LIFE, 1)),
+      refused(),
+      refused(),
+      refused(),
+      refused(),
+      json(200, grantBody(1_000_000 + 2 * LIFE, 2)),
+    ]);
+    await h.client.wireToken();
+    expect(h.client.rejected("kobe.sandbox-wire", "401")).toBe(true);
+    await expect(h.client.wireToken()).resolves.toBe(token("wire", 2));
+    // random 0.5: DEFAULT_BACKOFF ceilings 500, 1000, 2000, 4000 halved; never the 200 ms fast retry
+    expect(h.sleeps).toEqual([250, 500, 1_000, 2_000]);
+  });
+
+  it("keeps the new grant when a listener throws", async () => {
+    const h = harness([json(200, grantBody(1_000_000 + LIFE, 1))]);
+    h.client.onGrant(() => {
+      throw new Error("listener bug");
+    });
+    await expect(h.client.wireToken()).resolves.toBe(token("wire", 1));
+    expect(h.logs).toContainEqual(expect.objectContaining({ err: "listener bug" }));
+  });
 });

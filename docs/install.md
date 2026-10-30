@@ -163,8 +163,12 @@ steps; nothing is refused at any point:
 **Running sandboxes and a key change.** When the server refuses a sandbox's wire token (an
 upgrade or a key replaced without the three steps), the sandbox agent trades its bootstrap token
 again at once, which does not depend on session keys, and hands the new tokens to the wire, the
-model gateway, MCP and egress (KOBE-522). Running sandboxes recover within seconds, without a
-restart; a call made in that window may see one refusal. Re-trades are rate-limited (one per
+model gateway, MCP and egress (KOBE-522). Detection is on the wire only: Pi and its tools call the
+gateway and proxies directly, so the agent never sees their refusals. Model, MCP and egress calls
+are therefore refused from the moment their verifier restarts with the new keys until the
+sandbox's wire reconnects to a server pod with the new keys and re-trades (in a rolling upgrade,
+the verifiers can restart ahead of the server); after that, running sandboxes recover without a
+restart. Re-trades are rate-limited (one per
 30 s, backing off to one per 5 minutes while the server keeps refusing) and logged
 (`sandbox session re-trade after a rejected token`).
 
@@ -819,8 +823,9 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   `sandbox.sessionKeysSecret`, add the new keys and set `sandbox.sessionVerifyKeysConfigMap`
   before upgrading: the server and the proxies refuse to start without them. There is no
   compatibility window for HS256 tokens, but a running sandbox whose agent has KOBE-522 recovers
-  within seconds: its wire reconnect is refused, and the agent trades its bootstrap token for new
-  EdDSA tokens. A model, MCP or egress call made in that window may see one refusal. Sandboxes
+  without a restart: its wire reconnect to an upgraded server pod is refused, and the agent
+  trades its bootstrap token for new EdDSA tokens. Until then (the proxies and the gateway may
+  restart ahead of the server), its model, MCP and egress calls are refused. Sandboxes
   started from an image without KOBE-522 (a pod keeps its image until it restarts) wait for
   their next scheduled re-trade (at most about 13 minutes); when upgrading from such a release,
   upgrade while no runs are active or stop running sandboxes first.

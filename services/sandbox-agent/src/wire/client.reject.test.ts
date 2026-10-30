@@ -25,8 +25,8 @@ afterEach(async () => {
   await new Promise((r) => (wss ? wss.close(() => r(undefined)) : r(undefined)));
 });
 
-/** Accepts only `accepted()`; closes a live connection with 4001 when told to. */
-function server(accepted: () => string) {
+/** Accepts only `accepted()` (unless `refuse()` names a status first). */
+function server(accepted: () => string, refuse: () => number | undefined = () => undefined) {
   const upgrades: (string | undefined)[] = [];
   const sockets: WebSocket[] = [];
   wss = new WebSocketServer({
@@ -34,6 +34,11 @@ function server(accepted: () => string) {
     handleProtocols: () => SANDBOX_WS_SUBPROTOCOL,
     verifyClient: (info, done) => {
       upgrades.push(info.req.headers.authorization);
+      const status = refuse();
+      if (status !== undefined) {
+        done(false, status);
+        return;
+      }
       const ok = info.req.headers.authorization === `Bearer ${accepted()}`;
       done(ok, ok ? undefined : 401);
     },
@@ -175,5 +180,24 @@ describe("WireClient with a refused session token (KOBE-522)", () => {
     expect(trades).toBe(2);
     expect(s.upgrades).toEqual([`Bearer ${tok("wire", 1)}`, `Bearer ${tok("wire", 2)}`]);
     expect(gateway).toEqual([tok("gw", 2)]);
+  });
+
+  it("does not report a network drop (1006) or a 503 upgrade answer as a refused token", async () => {
+    let refusals = 1; // the first upgrade gets 503 (capacity), later ones are accepted
+    const s = server(
+      () => "t1",
+      () => (refusals-- > 0 ? 503 : undefined),
+    );
+    const rejected: string[] = [];
+    const w = wire(
+      s.url,
+      async () => "t1",
+      (token) => rejected.push(token),
+    );
+    await w.ready();
+    s.sockets[0]?.terminate(); // 1006 on the agent's side
+    await until(() => w.count() === 2);
+    expect(s.upgrades).toHaveLength(3);
+    expect(rejected).toEqual([]);
   });
 });
