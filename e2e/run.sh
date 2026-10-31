@@ -269,10 +269,16 @@ if [[ "$bifrost_restarts" != 0 ]]; then # KOBE-242: say why it restarted (OOM, f
   printf '%s\n' "$bifrost_prev" | sed 's/^/     bifrost prev: /'
   # KOBE-480: on a fresh store Bifrost downloads its pricing datasheet at start and exits (fatal)
   # when the upstream answers 5xx through its 4 attempts; kubelet's restart then succeeds. That
-  # is an outage outside the cluster, not an OOM or probe restart: allow exactly one such exit.
+  # is an outage outside the cluster, not an OOM or probe restart. An outage that outlasts the
+  # first restart's backoff costs a second or third exit of the same kind (2026-10-31, PR #431's
+  # queue run: two exits, both the pricing download, HTTP 503), so up to three are allowed when
+  # the last exit was that failure and no container was ever OOM-killed; anything else fails.
   pricing_exit='"level":"fatal".*failed to initialize pricing manager.*failed to download pricing data: HTTP 5[0-9][0-9]'
-  if [[ "$bifrost_restarts" == 1 ]] && printf '%s\n' "$bifrost_prev" | grep -qE "$pricing_exit"; then
-    echo "     bifrost: one restart after the upstream pricing download failed (external outage, KOBE-480)"
+  bifrost_oom=$($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=bifrost \
+    -o jsonpath='{.items[*].status.containerStatuses[*].lastState.terminated.reason}' 2>/dev/null)
+  if [[ "$bifrost_restarts" =~ ^[123]$ && "$bifrost_oom" != *OOMKilled* ]] &&
+    printf '%s\n' "$bifrost_prev" | grep -qE "$pricing_exit"; then
+    echo "     bifrost: $bifrost_restarts restart(s) after the upstream pricing download failed (external outage, KOBE-480)"
     bifrost_restarts=0
   fi
 fi
