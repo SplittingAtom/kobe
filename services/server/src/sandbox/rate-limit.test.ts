@@ -19,6 +19,19 @@ describe("per-source rate limiter", () => {
     expect(limiter.take("b")).toBe(0);
   });
 
+  it("reset refills one source, or every source", () => {
+    const limiter = createRateLimiter({ capacity: 1, refillPerSecond: 0, now: () => 0 });
+    expect(limiter.take("a")).toBe(0);
+    expect(limiter.take("b")).toBe(0);
+    expect(limiter.take("a")).toBeGreaterThan(0);
+    limiter.reset("a");
+    expect(limiter.take("a")).toBe(0);
+    expect(limiter.take("b")).toBeGreaterThan(0);
+    limiter.reset();
+    expect(limiter.take("a")).toBe(0);
+    expect(limiter.take("b")).toBe(0);
+  });
+
   it("bounds the number of tracked sources", () => {
     let t = 0;
     const limiter = createRateLimiter({
