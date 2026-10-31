@@ -15,6 +15,8 @@ export interface RateLimiterOptions {
 export interface RateLimiter {
   /** Takes one token for `source`; returns 0 when allowed, else ms until the next token. */
   take(source: string): number;
+  /** Refills `source`'s bucket, or every bucket: tests start each case from a full burst. */
+  reset(source?: string): void;
 }
 
 export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
@@ -46,6 +48,10 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
       }
       buckets.set(source, { tokens, at: t });
       return Math.ceil(((1 - tokens) / refillPerSecond) * 1000);
+    },
+    reset(source) {
+      if (source === undefined) buckets.clear();
+      else buckets.delete(source);
     },
   };
 }
