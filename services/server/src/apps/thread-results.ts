@@ -10,6 +10,7 @@ import {
   threadAppResults,
   type KobeDb,
   type KobeTx,
+  type UiResourcePlacement,
 } from "@kobe/db";
 import { appVisible } from "../connectors/visibility.js";
 import { servedTemplateHash } from "../connectors/template-store.js";
@@ -57,7 +58,7 @@ export interface AppResultView {
   readonly queued: boolean;
   readonly reason?: AppTextReason;
   /** Only with `view: "app"`: what the frame needs. */
-  readonly app?: { readonly title: string };
+  readonly app?: { readonly title: string; readonly placement: UiResourcePlacement };
 }
 
 interface Row {
@@ -167,6 +168,7 @@ export async function appResultViews(
             view: "app" as const,
             app: {
               title: live?.title ?? r.tool,
+              placement: live?.placement ?? "chat",
             },
           }
         : { view: "text" as const, reason: decided.reason }),

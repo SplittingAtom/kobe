@@ -33,6 +33,7 @@ import {
   connectorTemplateSource,
   reviewConnectorTemplates,
 } from "../connectors/template-review.js";
+import { setPlacementSchema, setTemplatePlacement } from "../connectors/template-placement.js";
 import type { ServerDeps } from "../deps.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 import { PIN_MESSAGES } from "./connector-messages.js";
@@ -336,6 +337,20 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
       { code: result.error, uri: result.uri, message: TEMPLATE_APPROVAL_MESSAGES[result.error] },
       409,
     );
+  });
+
+  // Where a template's app opens (KOBE-531): `chat`, `artifacts` or `rail`; not part of the pin.
+  app.put("/:id/templates/placement", async (c) => {
+    const id = idSchema.safeParse(c.req.param("id"));
+    if (!id.success) return notFound(c);
+    const input = await parseBody(c, setPlacementSchema);
+    if (!input) {
+      return invalidRequest(c, "Send uri and placement: one of chat, artifacts or rail.");
+    }
+    const result = await setTemplatePlacement(db, id.data, input);
+    if (result.ok) return c.json({ uri: result.uri, placement: result.placement });
+    if (result.error === "not_found") return notFound(c);
+    return c.json({ code: "not_found", message: "That connector has no such template." }, 404);
   });
 
   app.delete("/:id", async (c) => {

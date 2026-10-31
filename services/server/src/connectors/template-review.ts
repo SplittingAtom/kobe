@@ -9,8 +9,10 @@ import {
   type KobeDb,
   type UiResourceFailure,
   type UiResourceMeta,
+  type UiResourcePlacement,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
+import { templatePlacements } from "./template-placement.js";
 import { loadTemplates } from "./template-store.js";
 import { revalidate, type StoredTemplate } from "./templates.js";
 
@@ -54,6 +56,8 @@ export interface TemplateReview {
   /** The live version awaiting approval; send its `pinnedHash` back to approve it. */
   readonly live?: TemplateVersion;
   readonly invalid?: UiResourceFailure;
+  /** Where the app opens (KOBE-531); set apart from approval. */
+  readonly placement?: UiResourcePlacement;
 }
 
 const version = (t: {
@@ -176,7 +180,11 @@ export async function reviewConnectorTemplates(
 ): Promise<TemplateReview[] | undefined> {
   const [row] = await db.select({ id: connectors.id }).from(connectors).where(live(connectorId));
   if (!row) return undefined;
-  return (await loadTemplates(db, connectorId)).map(reviewOfTemplate);
+  const placements = await templatePlacements(db, connectorId);
+  return (await loadTemplates(db, connectorId)).map((t) => ({
+    ...reviewOfTemplate(t),
+    placement: placements.get(t.uri) ?? "chat",
+  }));
 }
 
 async function storedTemplate(

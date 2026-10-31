@@ -13,6 +13,7 @@ import {
   type ConnectorCredentialSource,
   type KobeDb,
   type PinnedTool,
+  type UiResourcePlacement,
 } from "@kobe/db";
 import { usableSiteKeyIds } from "../connectors/site-key.js";
 import { servedTemplate } from "../connectors/template-store.js";
@@ -48,6 +49,8 @@ export interface MemberApp {
   readonly tool: PinnedTool;
   /** Plain text (KOBE-447): the tool's title, the template's `<title>`, or the readable name. */
   readonly title: string;
+  /** Where it opens (KOBE-531): a site admin's choice; never sent to the model. */
+  readonly placement: UiResourcePlacement;
 }
 
 /** What `GET /v1/team/apps` shows: never the template bytes or a credential. */
@@ -60,6 +63,7 @@ export interface MemberAppView {
   readonly title: string;
   readonly uri: string;
   readonly sha256: string;
+  readonly placement: UiResourcePlacement;
 }
 
 export const viewOf = (app: MemberApp): MemberAppView => ({
@@ -71,6 +75,7 @@ export const viewOf = (app: MemberApp): MemberAppView => ({
   title: app.title,
   uri: app.uri,
   sha256: app.sha256,
+  placement: app.placement,
 });
 
 async function enabledConnectors(
@@ -208,6 +213,7 @@ async function appsOf(db: KobeDb, callable: readonly MemberAppConnector[]): Prom
       connectorId: connectorUiResources.connectorId,
       uri: connectorUiResources.uri,
       sha256: connectorUiResources.sha256,
+      placement: connectorUiResources.placement,
     })
     .from(connectorUiResources)
     .where(
@@ -236,6 +242,7 @@ async function appsOf(db: KobeDb, callable: readonly MemberAppConnector[]): Prom
     connector: f.connector,
     uri: f.uri,
     sha256: f.sha256,
+    placement: f.placement,
     tool: f.tool,
     title: appTitle(f.tool, titles.get(f.sha256)),
   }));

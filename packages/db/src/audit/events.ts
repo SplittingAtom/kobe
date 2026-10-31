@@ -19,6 +19,7 @@ import {
 import { BREAK_GLASS_MAX_MINUTES, BREAK_GLASS_NOTIFICATION_EVENTS } from "../schema/break-glass.js";
 import { RETENTION_PERIODS } from "../schema/retention.js";
 import { teamRole } from "../schema/team-members.js";
+import { UI_RESOURCE_PLACEMENTS } from "../schema/connector-ui-resources.js";
 import { PI_TOOL_NAME_PATTERN } from "../connectors/snapshot.js";
 import { UI_RESOURCE_FAILURES, UI_RESOURCE_URI_PATTERN } from "../connectors/ui-resources.js";
 
@@ -2250,6 +2251,17 @@ export const AUDIT_EVENTS = {
       .array(z.strictObject({ uri: uiUri, sha256: z.string().regex(/^[0-9a-f]{64}$/) }))
       .max(64)
       .optional(),
+  }),
+  /**
+   * A site admin set where a pinned template's app opens (KOBE-531, MA3 as amended 2026-10-31):
+   * the previous and the new placement. Not part of the pin; recorded only when it changes.
+   */
+  "mcp.connector.template_placement_set": event("site", {
+    connectorId: id,
+    name: z.string().max(64),
+    uri: uiUri,
+    previous: z.enum(UI_RESOURCE_PLACEMENTS),
+    placement: z.enum(UI_RESOURCE_PLACEMENTS),
   }),
   /**
    * Which credential probes a connector's `tools/list` (KOBE-431): the connector's site-wide key
