@@ -23,6 +23,22 @@ describe("app results client (KOBE-438)", () => {
     );
   });
 
+  it("carries the app's placement as a site admin set it (KOBE-531)", async () => {
+    const fetchFn = vi.fn(async () =>
+      json(200, {
+        results: [
+          { result_ref: "r", view: "app", app: { title: "Lake Query", placement: "artifacts" } },
+        ],
+        truncated: false,
+      }),
+    );
+    const res = await listAppResults(T, T, fetchFn);
+    expect(res).toMatchObject({
+      ok: true,
+      data: { results: [{ app: { title: "Lake Query", placement: "artifacts" } }] },
+    });
+  });
+
   it("reads a stored result raw, with its keys as the upstream sent them", async () => {
     const result = { structuredContent: { table_name: "t" } };
     const fetchFn = vi.fn(async () => json(200, { input: { q: "t" }, result }));

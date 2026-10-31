@@ -196,7 +196,15 @@ describe("app calls (ac-1, ac-4)", () => {
       title: "Lakehouse & Explorer",
       uri: "ui://cat/explorer",
       sha256: sha(TEMPLATE),
+      placement: "chat",
     });
+    // KOBE-531 (ac-4): the list carries the placement a site admin sets.
+    const place = (placement: string) =>
+      root.put(`${SITE}/${id}/templates/placement`, { uri: "ui://cat/explorer", placement });
+    expect((await place("rail")).status).toBe(200);
+    const railed = (await alice.get("/v1/team/apps")).json.apps as { appId: string }[];
+    expect(railed.find((a) => a.appId === appId)).toMatchObject({ placement: "rail" });
+    expect((await place("chat")).status).toBe(200);
 
     const template = await alice.get(`/v1/team/apps/${appId}/template`);
     expect(template.status).toBe(200);

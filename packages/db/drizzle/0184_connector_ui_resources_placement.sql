@@ -1,0 +1,2 @@
+ALTER TABLE "connector_ui_resources" ADD COLUMN "placement" text DEFAULT 'chat' NOT NULL;--> statement-breakpoint
+ALTER TABLE "connector_ui_resources" ADD CONSTRAINT "connector_ui_resources_placement" CHECK ("connector_ui_resources"."placement" IN ('chat', 'artifacts', 'rail'));

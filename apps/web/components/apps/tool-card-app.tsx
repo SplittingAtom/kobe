@@ -12,6 +12,7 @@ import { useKobeExtras } from "../chat/kobe-runtime";
 import { AppFrame, INLINE_HEIGHT, TEARDOWN_MS, type AppFrameHandle } from "./app-frame";
 import { useThreadApps, type ThreadApps } from "./thread-apps";
 import { useAppComposer } from "./use-app-composer";
+import { useAutoOpenApp } from "./use-app-placement";
 
 /**
  * An MCP App in its tool card (KOBE-438, spec MA3, MA10): the pinned template rendered with the
@@ -23,7 +24,8 @@ import { useAppComposer } from "./use-app-composer";
  * - At most 3 live per thread; further cards say "Show app", and a click retires the frame least
  *   recently in view.
  * - Expand moves the app into the artifact column (one live frame per card): the card says
- *   "Opened in the side column" until the tab closes. An expanded app keeps its card's slot
+ *   "Opened in the side column" until the tab closes. An app a site admin placed there opens so
+ *   by itself (KOBE-531, `use-app-placement.ts`). An expanded app keeps its card's slot
  *   (review LOW-4): retiring it closes the tab.
  * - The app's tool-input is the stored input the upstream ran (review LOW-2), not Pi's entry.
  * - A reload rebuilds the app from the stored result; nothing calls the upstream.
@@ -169,8 +171,33 @@ export function LiveApp({
   }, [expanded, slotted, panel, cardKey]);
   useEffect(() => () => release(cardKey), [release, cardKey]);
 
+  const app = useMemo(
+    () => ({
+      appId: view.appId,
+      connectorName: view.connectorName,
+      title: view.app?.title ?? view.tool,
+      sha256: view.templateSha256,
+    }),
+    [view],
+  );
+  const spec = useMemo(
+    () =>
+      result === null || result === "failed"
+        ? null
+        : { cardKey, app, connectorId: view.connectorId, toolInput: input, toolResult: result },
+    [result, cardKey, app, view.connectorId, input],
+  );
+  const placing = useAutoOpenApp({
+    apps,
+    panel,
+    cardKey,
+    placement: view.app?.placement,
+    spec,
+    expanded,
+  });
+
   // The stored result, read once (a reload rebuilds from it; the upstream is never called).
-  const wanted = slotted || expanded;
+  const wanted = slotted || expanded || placing;
   useEffect(() => {
     if (!wanted || result !== null || threadId === null) return;
     let alive = true;
@@ -201,26 +228,11 @@ export function LiveApp({
     return undefined;
   }, [live, mounted]);
 
-  const app = useMemo(
-    () => ({
-      appId: view.appId,
-      connectorName: view.connectorName,
-      title: view.app?.title ?? view.tool,
-      sha256: view.templateSha256,
-    }),
-    [view],
-  );
   const expand = useCallback(() => {
-    if (!panel || result === null || result === "failed") return;
+    if (!panel || spec === null) return;
     take(cardKey, true);
-    panel.openApp({
-      cardKey,
-      app,
-      connectorId: view.connectorId,
-      toolInput: input,
-      toolResult: result,
-    });
-  }, [panel, result, cardKey, app, input, take, view.connectorId]);
+    panel.openApp(spec);
+  }, [panel, spec, cardKey, take]);
   const composer = useAppComposer({
     appId: view.appId,
     connectorId: view.connectorId,

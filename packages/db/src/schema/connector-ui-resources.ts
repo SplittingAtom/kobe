@@ -27,6 +27,14 @@ export const UI_RESOURCE_STATUSES = ["pinned", "drifted"] as const;
 export type UiResourceStatus = (typeof UI_RESOURCE_STATUSES)[number];
 
 /**
+ * Where an app opens (KOBE-531, spec MA3 as amended 2026-10-31), set by a site admin per template:
+ * `chat` the card in the conversation (default), `artifacts` the card's stub with the frame in the
+ * artifact column, `rail` also offered in the rail's Pickers. Not part of the pin hash.
+ */
+export const UI_RESOURCE_PLACEMENTS = ["chat", "artifacts", "rail"] as const;
+export type UiResourcePlacement = (typeof UI_RESOURCE_PLACEMENTS)[number];
+
+/**
  * Site-wide (†): the pinned `ui://` templates of a connector's tools (MCP Apps, KOBE-433). The
  * server's pin and refresh probes read them through mcp-proxy (never the sandbox) and Kobe hashes
  * the bytes itself. Like `connectors.tools_snapshot`, a drifted row keeps the approved bytes and
@@ -64,6 +72,8 @@ export const connectorUiResources = pgTable(
     approved: boolean().notNull().default(false),
     /** The site admin who pinned or approved it; null for refresh-added (new) rows. */
     pinnedBy: uuid().references(() => users.id, { onDelete: "set null" }),
+    /** Where the app opens (KOBE-531); a site admin's choice, outside `pinnedHash`. */
+    placement: text().$type<UiResourcePlacement>().notNull().default("chat"),
     pinnedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
@@ -88,6 +98,7 @@ export const connectorUiResources = pgTable(
       "connector_ui_resources_meta",
       sql`jsonb_typeof(${t.meta}) = 'object' AND octet_length(${t.meta}::text) <= ${sql.raw(String(UI_RESOURCE_META_MAX_BYTES))}`,
     ),
+    check("connector_ui_resources_placement", sql`${t.placement} IN ('chat', 'artifacts', 'rail')`),
     check("connector_ui_resources_status", sql`${t.status} IN ('pinned', 'drifted')`),
     // Nothing a site admin never approved can be served.
     check("connector_ui_resources_approved", sql`${t.approved} OR ${t.status} = 'drifted'`),

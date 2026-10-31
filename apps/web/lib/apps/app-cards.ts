@@ -15,15 +15,15 @@ export interface RailApp {
   readonly title: string;
   /** The approved template's hash (the frame route serves only these bytes). */
   readonly sha256: string;
+  /**
+   * Where a site admin set it to open (KOBE-531, spec MA3 as amended 2026-10-31); `rail` apps are
+   * also offered in the rail's Pickers. Absent from an older server means `chat`.
+   */
+  readonly placement?: AppPlacement;
 }
 
-/**
- * A picker app (KOBE-460, spec MA3 as amended 2026-10-20): its display name contains "Picker",
- * in any case. One may run live in the rail's Apps tab.
- */
-export function isPicker(app: Pick<RailApp, "title">): boolean {
-  return /picker/i.test(app.title);
-}
+/** Where an MCP App opens: the card, the artifact column (the card a stub), or also the rail. */
+export type AppPlacement = "chat" | "artifacts" | "rail";
 
 export interface MissingKeyApp {
   readonly connectorId: string;

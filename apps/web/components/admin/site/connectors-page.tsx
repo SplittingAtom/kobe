@@ -388,6 +388,13 @@ function ConnectorTable({
                     </Button>
                   </span>
                 ) : null}
+                {c.driftedCount === 0 &&
+                (c.templatesDriftedCount ?? 0) === 0 &&
+                (c.templatesCount ?? 0) > 0 ? (
+                  <Button size="sm" className="ms-1" onClick={() => onReview(c)}>
+                    Apps<span className="sr-only"> of {c.name}</span>
+                  </Button>
+                ) : null}
                 <RefreshSkipped connector={c} />
               </TableCell>
               <TableCell>

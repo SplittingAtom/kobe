@@ -488,7 +488,7 @@ export class FakeKobe {
       template_sha256: app.sha256,
       view: "app",
       queued,
-      app: { title: app.title },
+      app: { title: app.title, placement: app.placement ?? "chat" },
     };
   }
 

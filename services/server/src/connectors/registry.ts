@@ -101,6 +101,8 @@ export interface ConnectorView {
   /** Tools disabled pending re-approval (KOBE-102). */
   readonly driftedCount: number;
   readonly templatesDriftedCount: number;
+  /** Every MCP Apps template of it, pinned or not (KOBE-531: where each opens is set per template). */
+  readonly templatesCount: number;
   /** Why the last periodic refresh was skipped (e.g. `auth_required`, KOBE-431); null when it ran. */
   readonly refreshSkipped: string | null;
   /** When the periodic refresh last probed it; null before the first pass. */
@@ -131,6 +133,10 @@ const columns = {
   /** MCP Apps templates awaiting review (KOBE-434). */
   templatesDriftedCount:
     sql<number>`(SELECT count(*) FROM ${connectorUiResources} WHERE ${connectorUiResources.connectorId} = ${connectors.id} AND ${connectorUiResources.status} = 'drifted')`.mapWith(
+      Number,
+    ),
+  templatesCount:
+    sql<number>`(SELECT count(*) FROM ${connectorUiResources} WHERE ${connectorUiResources.connectorId} = ${connectors.id})`.mapWith(
       Number,
     ),
   refreshSkipped: connectors.refreshSkipped,

@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   activateTab,
+  addTab,
   clampArtifactWidth,
   closeTab,
   MAX_TABS,
@@ -150,5 +151,12 @@ describe("app tabs (KOBE-438)", () => {
     });
     writeTabs(key, openTab(NO_TABS, "app:tc1"));
     expect(readTabs(key)).toEqual(NO_TABS);
+  });
+
+  it("open beside the others without taking the active place (KOBE-531)", () => {
+    expect(addTab(NO_TABS, "app:a")).toEqual({ open: ["app:a"], active: "app:a" });
+    const tabs = openTab(NO_TABS, A);
+    expect(addTab(tabs, "app:a")).toEqual({ open: [A, "app:a"], active: A });
+    expect(addTab(tabs, A)).toBe(tabs);
   });
 });

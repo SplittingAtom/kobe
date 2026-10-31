@@ -1289,6 +1289,20 @@
       "when": 1793338665163,
       "tag": "0183_workspace_files_moved_to",
       "breakpoints": true
+    },
+    {
+      "idx": 184,
+      "version": "7",
+      "when": 1793455801915,
+      "tag": "0184_connector_ui_resources_placement",
+      "breakpoints": true
+    },
+    {
+      "idx": 185,
+      "version": "7",
+      "when": 1793455805886,
+      "tag": "0185_connector_ui_resources_placement_pickers",
+      "breakpoints": true
     }
   ]
 }

@@ -30,6 +30,18 @@ export function openTab(tabs: ArtifactTabs, id: string): ArtifactTabs {
   return { open: open.slice(Math.max(0, open.length - MAX_TABS)), active: id };
 }
 
+/**
+ * Opens `id` beside the others without taking the active place (KOBE-531: an older app placed in
+ * the artifact column); it becomes active only when nothing is.
+ */
+export function addTab(tabs: ArtifactTabs, id: string): ArtifactTabs {
+  if (tabs.open.includes(id)) return tabs;
+  const open = [...tabs.open, id];
+  const kept = open.slice(Math.max(0, open.length - MAX_TABS));
+  const active = tabs.active !== null && kept.includes(tabs.active) ? tabs.active : id;
+  return { open: kept, active };
+}
+
 export function activateTab(tabs: ArtifactTabs, id: string): ArtifactTabs {
   return tabs.open.includes(id) && tabs.active !== id ? { ...tabs, active: id } : tabs;
 }

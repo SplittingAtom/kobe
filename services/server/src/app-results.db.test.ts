@@ -294,8 +294,19 @@ describe("claim, views and reads (ac-2, ac-3, ac-4)", () => {
       view: "app",
       app_id: appIdOf(w.connector.id, URI),
       template_sha256: TEMPLATE_SHA,
-      app: { title: "Open explorer" },
+      app: { title: "Open explorer", placement: "chat" },
     });
+    // KOBE-531 (ac-4): the template's current placement, as a site admin set it.
+    await fx.admin.query(
+      `UPDATE connector_ui_resources SET placement = 'artifacts' WHERE connector_id = $1`,
+      [w.connector.id],
+    );
+    const placed = (await views(w.owner, w.threadId)).json.results as Body[];
+    expect(placed[0]).toMatchObject({ app: { placement: "artifacts" } });
+    await fx.admin.query(
+      `UPDATE connector_ui_resources SET placement = 'chat' WHERE connector_id = $1`,
+      [w.connector.id],
+    );
     const read = await w.owner.browser.get(
       `/v1/threads/${w.threadId}/app-results/${view?.result_ref}`,
     );

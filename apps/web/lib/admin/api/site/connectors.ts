@@ -1,4 +1,5 @@
 /** Site console: connector registry (`/v1/site/connectors`, site.connectors.manage; KOBE-100). */
+import type { AppPlacement } from "../../../apps/app-cards";
 import { apiRequest, type ApiResult } from "../../../api/client";
 
 const BASE = "/v1/site/connectors";
@@ -25,6 +26,8 @@ export interface Connector {
   readonly driftedCount: number;
   /** MCP Apps templates awaiting review (KOBE-434). */
   readonly templatesDriftedCount?: number;
+  /** Every MCP Apps template of it (KOBE-531): the review sets where each opens. */
+  readonly templatesCount?: number;
   /** Why the last periodic refresh was skipped (`auth_required`, `unreachable`, ...; KOBE-431). */
   readonly refreshSkipped: string | null;
   readonly refreshedAt: string | null;
@@ -157,7 +160,11 @@ export interface TemplateReview {
   readonly approved?: TemplateVersion;
   readonly live?: TemplateVersion;
   readonly invalid?: string;
+  /** Where the app opens (KOBE-531); absent from an older server means `chat`. */
+  readonly placement?: AppPlacement;
 }
+
+export type { AppPlacement };
 
 /** One version's bytes with the hashes and meta of the same read (KOBE-434 review M1). */
 export interface TemplateSourceVersion extends TemplateVersion {
@@ -212,6 +219,13 @@ export const approveConnectorTemplates = (
     method: "POST",
     json: { templates },
   });
+
+/** Sets where one template's app opens (KOBE-531). */
+export const setTemplatePlacement = (id: string, uri: string, placement: AppPlacement) =>
+  apiRequest<{ uri: string; placement: AppPlacement }>(
+    `${BASE}/${encodeURIComponent(id)}/templates/placement`,
+    { method: "PUT", json: { uri, placement } },
+  );
 
 /** Sets or replaces the site-wide key (KOBE-303); the key never comes back, only a hint. */
 export const setSiteKey = (id: string, apiKey: string) =>
