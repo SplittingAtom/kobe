@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   activateTab,
+  addTab,
   closeTab as closeTabIn,
   NO_TABS,
   openTab,
@@ -29,6 +30,8 @@ export interface ArtifactTabsApi {
   openArtifact(id: string, version?: number): void;
   /** The agent created one: it opens and becomes active, focus stays where it is. */
   autoOpen(id: string): void;
+  /** Opens a tab beside the others; it becomes active only when none is (KOBE-531). */
+  add(id: string): void;
   activate(id: string): void;
   closeTab(id: string): void;
   /** Closes the active tab. */
@@ -99,6 +102,7 @@ export function useArtifactTabs(key: string | null, conversation?: string): Arti
     setTabs((prev) => openTab(prev, id));
   }, []);
   const autoOpen = useCallback((id: string) => setTabs((prev) => openTab(prev, id)), []);
+  const add = useCallback((id: string) => setTabs((prev) => addTab(prev, id)), []);
   const activate = useCallback((id: string) => setTabs((prev) => activateTab(prev, id)), []);
   const closeTab = useCallback((id: string) => {
     closing.current = true;
@@ -135,6 +139,7 @@ export function useArtifactTabs(key: string | null, conversation?: string): Arti
     request,
     openArtifact,
     autoOpen,
+    add,
     activate,
     closeTab,
     close,

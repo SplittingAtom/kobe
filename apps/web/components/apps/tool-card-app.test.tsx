@@ -174,6 +174,23 @@ describe("apps in tool cards (KOBE-438)", () => {
     expect(must(frames()[0]).closest("[role=tabpanel]")).not.toBeNull();
   });
 
+  it("opens a tool card's app in the artifact column when a site admin placed it there (KOBE-531)", async () => {
+    const { t, prompt } = thread(["tc1"]);
+    fake.appResults.set(t, [
+      view(prompt, "tc1", { app: { title: "Lakehouse Explorer", placement: "artifacts" } }),
+    ]);
+    fake.appResultBodies.set("ref-tc1", { id: "tc1" });
+    openApp(fake, t);
+    const card = await waitFor(
+      () => must(document.querySelector('[data-kobe-app-card="ref-tc1"]')) as HTMLElement,
+      { timeout: 4_000 },
+    );
+    await within(card).findByText("Opened in the side column", {}, { timeout: 4_000 });
+    await waitFor(() => expect(frames()).toHaveLength(1), { timeout: 4_000 });
+    expect(must(frames()[0]).closest("[role=tabpanel]")).not.toBeNull();
+    expect(screen.getByRole("tab", { name: "Lakehouse Explorer", selected: true })).toBeTruthy();
+  });
+
   it("renders the app in the live run's card once its tool result carries the marker", async () => {
     const t = fake.addThread("Live");
     openApp(fake, t);

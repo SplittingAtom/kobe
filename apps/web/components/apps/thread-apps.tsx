@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { listAppResults, type AppResultView } from "../../lib/apps/app-results";
-import { releaseSlot, takeSlot } from "../../lib/apps/live-slots";
+import { MAX_LIVE_FRAMES, releaseSlot, takeSlot } from "../../lib/apps/live-slots";
 import { approvalKey, runToolKey } from "../../lib/chat/markers";
 import { isThreadRunning } from "../../lib/chat/thread-state";
 import { useChatSession, useKobeExtras } from "../chat/kobe-runtime";
@@ -51,6 +51,14 @@ export interface ThreadApps {
   /** A slot for `key`; `force` (the member asked) retires the least recent frame. */
   take(key: string, force: boolean): void;
   release(key: string): void;
+  /**
+   * Cards whose app a site admin placed in the artifact column (KOBE-531): the newest
+   * {@link MAX_LIVE_FRAMES} in the thread, oldest first. Each opens its tab once, the last active.
+   */
+  readonly placed: readonly string[];
+  /** Whether `key`'s tab already opened by itself on this thread (closing it keeps it closed). */
+  autoOpened(key: string): boolean;
+  markAutoOpened(key: string): void;
 }
 
 const NONE: ReadonlyMap<string, AppResultView> = new Map();
@@ -198,6 +206,15 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
     waiting.current = new Map();
     setDropped([]);
   }, [threadId]);
+  const placed = useMemo(() => placedCards(results), [results]);
+  const opened = useRef(new Set<string>());
+  useEffect(() => {
+    opened.current = new Set();
+  }, [threadId]);
+  const autoOpened = useCallback((key: string) => opened.current.has(key), []);
+  const markAutoOpened = useCallback((key: string) => {
+    opened.current.add(key);
+  }, []);
   const forget = useCallback((ref: string) => removed.current.add(ref), []);
   const dismissDropped = useCallback(() => setDropped([]), []);
   const take = useCallback((key: string, force: boolean) => {
@@ -220,8 +237,14 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
       dropped,
       forget,
       dismissDropped,
+      placed,
+      autoOpened,
+      markAutoOpened,
     }),
     [
+      placed,
+      autoOpened,
+      markAutoOpened,
       threadId,
       teamId,
       byPrompt,
@@ -239,6 +262,15 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
     ],
   );
   return <ThreadAppsContext.Provider value={value}>{children}</ThreadAppsContext.Provider>;
+}
+
+/** The newest cards placed in the artifact column that render as apps (KOBE-531), oldest first. */
+function placedCards(results: readonly AppResultView[] | null): readonly string[] {
+  if (results === null) return [];
+  const placed = results.filter(
+    (r) => r.view === "app" && r.queued !== true && r.app?.placement === "artifacts",
+  );
+  return placed.slice(-MAX_LIVE_FRAMES).map((r) => r.resultRef);
 }
 
 /** While `waiting` (cards wait on an idle thread), reads the list again with backoff. */

@@ -14,7 +14,8 @@ import { PICKER_RAIL_PX } from "./rail-pickers";
 
 /**
  * KOBE-460 (spec MA3 as amended 2026-10-20): the Apps tab's Pickers section. A dropdown of the
- * member's live apps named "…Picker…" (and None), the choice kept per member; the chosen picker
+ * member's live apps a site admin placed in the rail (KOBE-531, MA3 as amended 2026-10-31; the
+ * "Picker" name rule is gone) and None, the choice kept per member; the chosen picker
  * runs live in the rail (the cards' frame route and bridge), its `ui/message` fills the draft on
  * screen and never sends, its context is a chip there, and its calls name the thread on screen.
  */
@@ -35,7 +36,7 @@ beforeEach(() => {
 });
 
 const CONNECTOR = "11111111-1111-4111-8111-111111111111";
-const app = (n: string, title: string) => ({
+const app = (n: string, title: string, placement = "chat") => ({
   appId: n.repeat(64),
   connectorId: CONNECTOR,
   connectorName: "Catalyst",
@@ -44,10 +45,13 @@ const app = (n: string, title: string) => ({
   title,
   uri: `ui://catalyst/${n}`,
   sha256: "e".repeat(64),
+  placement,
 });
 const EXPLORER = app("a", "Lakehouse Explorer");
-const PICKER = app("b", "Lakehouse Picker");
-const QUERY_PICKER = app("c", "query picker");
+const PICKER = app("b", "Lakehouse Picker", "rail");
+const QUERY_PICKER = app("c", "query picker", "rail");
+/** Named like a picker, placed as a chat card: the name no longer counts (KOBE-531 ac-6). */
+const NAMED_PICKER = app("d", "Column Picker");
 const PICKER_FRAME = "Lakehouse Picker (app from Catalyst)";
 
 function answered() {
@@ -108,7 +112,7 @@ const uiMessage = (text: string) => ({
 
 describe("the Pickers section (KOBE-460 ac-1, ac-2)", () => {
   it("is absent when the team has no live picker; the app list is unchanged", async () => {
-    fake.teamApps = [EXPLORER];
+    fake.teamApps = [EXPLORER, NAMED_PICKER];
     openApp(fake, answered());
     const section = await appsTab();
     expect(within(section).queryByRole("combobox", { name: "Picker" })).toBeNull();
@@ -117,8 +121,8 @@ describe("the Pickers section (KOBE-460 ac-1, ac-2)", () => {
     ).toBeTruthy();
   });
 
-  it("sits above the list, offers None and the apps named Picker (any case); the list keeps every app", async () => {
-    fake.teamApps = [EXPLORER, PICKER, QUERY_PICKER];
+  it("sits above the list, offers None and the apps placed in the rail; the list keeps every app", async () => {
+    fake.teamApps = [EXPLORER, PICKER, QUERY_PICKER, NAMED_PICKER];
     fake.preferences = { rail_picker: null };
     openApp(fake, answered());
     const section = await appsTab();
@@ -131,7 +135,12 @@ describe("the Pickers section (KOBE-460 ac-1, ac-2)", () => {
     expect(select.value).toBe("");
     const list = must(section.querySelector("ul"));
     expect(select.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    for (const name of ["Lakehouse Explorer", "Lakehouse Picker", "query picker"]) {
+    for (const name of [
+      "Lakehouse Explorer",
+      "Lakehouse Picker",
+      "query picker",
+      "Column Picker",
+    ]) {
       expect(
         within(list).getByRole("button", { name: `Open ${name} in this conversation` }),
       ).toBeTruthy();

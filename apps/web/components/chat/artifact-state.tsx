@@ -110,6 +110,12 @@ export interface ArtifactPanelApi {
    * under 820 px). Its card shows "Opened in the side column" until the tab closes.
    */
   openApp(spec: AppTabSpec): void;
+  /**
+   * An app a site admin placed in the artifact column (KOBE-531): its tab opens by itself, focus
+   * stays where it is; `activate` false leaves the active tab (a newer app's) as it is. Not used
+   * under 820 px, where the card keeps its Expand button.
+   */
+  autoOpenApp(spec: AppTabSpec, activate: boolean): void;
   /** The open app tabs' specs, by tab id. */
   readonly appTabs: ReadonlyMap<string, AppTabSpec>;
 }
@@ -361,6 +367,17 @@ export function ArtifactPanelProvider({
     },
     [openArtifact],
   );
+  const addTab = t.add;
+  const autoOpenApp = useCallback(
+    (spec: AppTabSpec, activate: boolean) => {
+      const id = appTabId(spec.cardKey);
+      setAppSpecs((prev) => new Map(prev).set(id, spec));
+      setHiddenIn(null);
+      if (activate) autoOpenTab(id);
+      else addTab(id);
+    },
+    [autoOpenTab, addTab],
+  );
   // Only the tabs still open (a closed tab, or another thread's, has no spec).
   const openTabs = t.tabs.open;
   const appTabs = useMemo(
@@ -410,10 +427,12 @@ export function ArtifactPanelProvider({
       hidden,
       toggleColumn,
       openApp,
+      autoOpenApp,
       appTabs,
     }),
     [
       openApp,
+      autoOpenApp,
       appTabs,
       hidden,
       toggleColumn,

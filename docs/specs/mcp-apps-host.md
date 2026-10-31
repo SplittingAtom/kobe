@@ -258,6 +258,29 @@ the app's connector is off (`connector_off`), both audited `mcp.app_call`. In a 
 it names no thread, and Kobe does not run it while the draft has its connector off. The picker
 runs only while the Apps tab is on screen in an expanded rail.
 
+_Amended 2026-10-31 (Chris, KOBE-531): a site admin sets where each app opens._ Per pinned
+template (`connector_ui_resources.placement`, site-wide, no team override), set in the connector's
+template review and audited as `mcp.connector.template_placement_set`, one of three values:
+
+1. `chat` (the default): the card in the conversation, exactly as above.
+2. `artifacts`: the card (from a tool call, a rail launch or a queued launch landing) shows "Opened
+   in the side column" and its app opens in the artifact column by itself as soon as its stored
+   result is read, for cards arriving live and in a reopened thread alike: one tab per card, the
+   newest active, within the thread's 3 live frames (the newest three placed cards open; an
+   expanded app holds its card's slot as with Expand). Closing the tab returns the frame to the
+   card. Under 820 px (the artifact sheet) nothing opens by itself: the card keeps its Expand.
+3. `rail`: offered in the rail's Pickers section (amendment 2026-10-20), which lists exactly the
+   member's live apps with this placement; this replaces the "Picker" name rule (its item 4). Such
+   apps still appear in the app list below and launch a card.
+
+The placement is admin-fixed: an app's own `ui/request-display-mode` never moves a frame (§7), and
+the placement is not part of the pinned hash, so drift and re-approval leave it alone. It never
+reaches the model. On deploy, templates the name rule matched (the template's `<title>`, or the
+opening tool's title, annotations title or name, containing "Picker" in any case) became `rail`,
+everything else `chat`. The rejected "artifact column as the main surface" still holds as the
+default: an app opens there only when a site admin placed it there, and its card stays in the
+conversation where it was produced.
+
 **MA4. Server-mediated `resources/read`, never the sandbox.** Templates are fetched only by the
 server's pin and refresh probes, through mcp-proxy's internal probe endpoint (server key only,
 with the KOBE-431 probe credential), and stored in Postgres. **Amended 2026-10-19 (coordinator,
@@ -523,7 +546,7 @@ it because Catalyst does not mark it `"app"`-visible. Kobe does not hard-code th
 | `tools/list`                                                                                                         | Only the tools the app may call (§6 rules 1–2).                                                                                                                                                                                                                                                                        |
 | `ui/message`                                                                                                         | §8: inserted into the composer draft, never sent.                                                                                                                                                                                                                                                                      |
 | `ui/update-model-context`                                                                                            | §8: a context chip, last write wins per app.                                                                                                                                                                                                                                                                           |
-| `ui/request-display-mode`                                                                                            | `inline` (the card) or `fullscreen` (Expand into the artifact column); anything else is refused.                                                                                                                                                                                                                       |
+| `ui/request-display-mode`                                                                                            | `inline` (the card) or `fullscreen` (Expand into the artifact column); anything else is refused. The answer is the frame's current mode and nothing moves: where an app opens is admin-fixed (MA3 as amended 2026-10-31).                                                                                              |
 | `ui/notifications/size-changed`                                                                                      | Honoured within the column; height capped at 4,000 px.                                                                                                                                                                                                                                                                 |
 | `notifications/message` (logging)                                                                                    | Dropped. A debug counter only.                                                                                                                                                                                                                                                                                         |
 | `ui/open-link`, `ui/download-file`, `resources/read`, `resources/list`, `sampling/*`, `elicitation/*`, anything else | **Denied** (JSON-RPC error `-32601`, with a Kobe-specific `data.reason: "not_allowed_in_kobe"`).                                                                                                                                                                                                                       |

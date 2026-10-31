@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState, useSyncExternalStore } from "react";
-import { isPicker, type RailApp } from "../../lib/apps/app-cards";
+import type { RailApp } from "../../lib/apps/app-cards";
 import type { ToolCallAnswer } from "../../lib/apps/host-bridge";
 import { AppFrame } from "../apps/app-frame";
 import { useAppComposer } from "../apps/use-app-composer";
@@ -15,7 +15,8 @@ export { PICKER_RAIL_PX } from "../../lib/shell/rail-width";
 
 /**
  * The Apps tab's Pickers section (KOBE-460, spec MA3 as amended 2026-10-20): a dropdown of the
- * member's live apps whose name contains "Picker" (any case), with None; the member's choice is
+ * member's live apps a site admin placed in the rail (KOBE-531, MA3 as amended 2026-10-31), with
+ * None; the member's choice is
  * kept per member (`rail_picker`, server-side). The chosen picker runs live here, the one picker
  * frame there is, in the cards' frame (`AppFrame`: the member frame route, its header CSP and
  * sandbox, the same host bridge), laid out like the Files tree: it fills the section and scrolls
@@ -160,7 +161,8 @@ export function RailPickers({
   /** A call found the app no longer live: the apps list is read again. */
   onUnavailable(): void;
 }) {
-  const pickers = apps.filter(isPicker);
+  // A site admin places an app in the rail (KOBE-531); the KOBE-460 name rule is gone.
+  const pickers = apps.filter((a) => a.placement === "rail");
   const { chosen, gone } = useChosenPicker(rail, pickers, settled);
   const threadId = useKobeExtras()?.state.threadId ?? null;
   const selectId = useId();

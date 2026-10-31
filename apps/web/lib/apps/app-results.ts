@@ -1,5 +1,6 @@
 import { apiRequest, type ApiResult } from "../api/client";
 import { TEAM_HEADER } from "../teams";
+import type { AppPlacement } from "./app-cards";
 
 /**
  * A thread's MCP App results as this viewer sees them (KOBE-438, spec MA10, T12): the server
@@ -24,7 +25,8 @@ export interface AppResultView {
   /** A rail-launched card waiting for the thread's run to end (KOBE-440); absent = false. */
   readonly queued?: boolean;
   readonly reason?: AppTextReason;
-  readonly app?: { readonly title: string };
+  /** `placement` (KOBE-531): where a site admin set the app to open; absent means `chat`. */
+  readonly app?: { readonly title: string; readonly placement?: AppPlacement };
 }
 
 export interface AppResultList {
