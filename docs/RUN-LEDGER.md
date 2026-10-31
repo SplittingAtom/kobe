@@ -9,6 +9,19 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **App placement lane (2026-10-31, Chris: a site admin decides where an MCP app opens):** KOBE-531 filed
+  and merged as PR #431 (main 114565d7). Per pinned template, `connector_ui_resources.placement` is `chat`
+  (the card, default), `artifacts` (the card is the "Opened in the side column" stub and the app opens in the
+  artifact column by itself, live and on reopen, newest 3 placed cards) or `rail` (the Pickers section; the
+  KOBE-460 "Picker" name rule is gone, picker-named templates were migrated). Set in the site console's
+  template review (`PUT /v1/site/connectors/:id/templates/placement`, audited
+  `mcp.connector.template_placement_set`); admin-fixed: `ui/request-display-mode` never moves a frame. Spec
+  MA3 amended. Deployed to kobe-gate1 as `local-114565d7ceb5` (rollback `local-2e086c5496b2`;
+  `local-b06345530688` pruned), reconcile failed:0; gate1 rows read Lakehouse Picker and Workspace Picker
+  `rail`, the rest `chat`; `e2e/browser/tests/app-placement.spec.ts` passed against gate1 (Lake Query set to
+  `artifacts`, rail launch opened the artifact tab, card showed the stub, placement reset). One merge-queue
+  rerun: the e2e suite's Bifrost restart check saw two exits from one upstream pricing outage (HTTP 503);
+  PR #432 lets the check tolerate up to three such exits.
 - **Hardening lane 4 deployed (2026-10-30):** PR #428 merged (main 2e086c54; one CI rerun: the gate4 U7 scan's
   `sk-…` shape matched a substring of a Kobe session token, fixed in #429 with a boundary and `grep -P`).
   Deployed to kobe-gate1 as `local-2e086c5496b2` (rollback `local-b06345530688`; `local-533a9dfbc944` pruned),
