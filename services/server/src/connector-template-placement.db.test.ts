@@ -70,6 +70,8 @@ describe("template placement (KOBE-531)", () => {
     const created = await root.post(BASE, { name: "place-a", url: "https://place-a.example/mcp" });
     const id = created.json.connector.id as string;
     const path = `${BASE}/${id}/templates/placement`;
+    // The registry says it has templates, so the console offers where each opens.
+    expect((await root.get(`${BASE}/${id}`)).json.connector.templatesCount).toBe(1);
 
     // The review shows each template's placement (default chat).
     const review = await root.get(`${BASE}/${id}/templates`);

@@ -351,6 +351,64 @@ describe("app template review (KOBE-434)", () => {
   });
 });
 
+describe("app placement (KOBE-531)", () => {
+  const pinned = {
+    uri: "ui://c/explorer",
+    status: "pinned",
+    change: null,
+    approved: {
+      sha256: "1".repeat(64),
+      pinnedHash: "a".repeat(64),
+      bytes: 10,
+      mimeType: "text/html;profile=mcp-app",
+      meta: {},
+    },
+    placement: "chat",
+  };
+  const PUT = `PUT ${BASE}/c-1/templates/placement`;
+  const routes = (put: unknown) => ({
+    [`GET ${BASE}`]: [200, { connectors: [connector({ toolCount: 1, templatesCount: 1 })] }],
+    [`GET ${BASE}/c-1/tools`]: [200, { tools: [] }],
+    [`GET ${BASE}/c-1/templates`]: [200, { templates: [pinned] }],
+    [PUT]: put,
+  });
+
+  it("sets where an approved template opens, saved on change", async () => {
+    const calls = stubApi(
+      routes([200, { uri: "ui://c/explorer", placement: "artifacts" }]) as never,
+    );
+    renderSite(<ConnectorsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: /Apps of github/ }));
+    const card = await screen.findByRole("article", { name: "ui://c/explorer" });
+    const select = within(card).getByLabelText(/Placement/) as HTMLSelectElement;
+    expect(select.value).toBe("chat");
+    expect([...select.options].map((o) => o.text)).toEqual([
+      "Chat card",
+      "Artifact column",
+      "Rail",
+    ]);
+    await userEvent.selectOptions(select, "artifacts");
+    expect(await within(card).findByText("Saved.")).toBeTruthy();
+    const put = calls.find((c) => c.method === "PUT");
+    expect(JSON.parse(String(put?.body))).toEqual({
+      uri: "ui://c/explorer",
+      placement: "artifacts",
+    });
+    expect(select.value).toBe("artifacts");
+  });
+
+  it("says when it was not saved and keeps the old value", async () => {
+    stubApi(routes([500, { code: "internal", message: "Something went wrong." }]) as never);
+    renderSite(<ConnectorsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: /Apps of github/ }));
+    const card = await screen.findByRole("article", { name: "ui://c/explorer" });
+    const select = within(card).getByLabelText(/Placement/) as HTMLSelectElement;
+    await userEvent.selectOptions(select, "rail");
+    expect(await within(card).findByText(/Not saved/)).toBeTruthy();
+    expect(select.value).toBe("chat");
+  });
+});
+
 describe("refresh skips (KOBE-431)", () => {
   it("tells admins a connector is not checked for changes and whose key it needs", async () => {
     stubApi({

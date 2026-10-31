@@ -5,6 +5,8 @@ import {
   approveConnectorTemplates,
   getTemplateSource,
   listConnectorTemplates,
+  setTemplatePlacement,
+  type AppPlacement,
   type Connector,
   type TemplateReview,
   templateFrameUrl,
@@ -14,7 +16,7 @@ import {
 import { APP_FRAME_SANDBOX } from "../../../lib/apps/app-frame";
 import { lineDiff } from "../../../lib/apps/line-diff";
 import { attachStubBridge } from "../../../lib/apps/preview-bridge";
-import { Badge, Button, Card } from "../../ui/console";
+import { Badge, Button, Card, Select } from "../../ui/console";
 import { ResourceView } from "../parts";
 import { useResource, type Mutation } from "../use-resource";
 
@@ -96,6 +98,73 @@ export function TemplatePreview({ src, uri }: { readonly src: string; readonly u
   );
 }
 
+const PLACEMENTS: readonly { value: AppPlacement; label: string }[] = [
+  { value: "chat", label: "Chat card" },
+  { value: "artifacts", label: "Artifact column" },
+  { value: "rail", label: "Rail" },
+];
+
+/**
+ * Where the template's app opens (KOBE-531, MA3 as amended 2026-10-31), saved on change: the card
+ * in the conversation, the artifact column (the card shows a stub), or also the rail's Pickers.
+ * Not part of the pin, so approving a new version keeps it.
+ */
+function PlacementSelect({
+  connectorId,
+  uri,
+  initial,
+}: {
+  readonly connectorId: string;
+  readonly uri: string;
+  readonly initial: AppPlacement;
+}) {
+  const [value, setValue] = useState<AppPlacement>(initial);
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const id = `placement-${uri}`;
+
+  async function save(next: AppPlacement) {
+    const before = value;
+    setValue(next);
+    setSaving(true);
+    setNote(null);
+    const res = await setTemplatePlacement(connectorId, uri, next);
+    setSaving(false);
+    if (res.ok) {
+      setNote({ ok: true, text: "Saved." });
+    } else {
+      setValue(before);
+      setNote({ ok: false, text: `Not saved: ${res.error.message}` });
+    }
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+      <label htmlFor={id}>
+        Placement<span className="sr-only"> of {uri}</span>
+      </label>
+      <Select
+        id={id}
+        className="w-auto"
+        value={value}
+        disabled={saving}
+        onChange={(e) => void save(e.target.value as AppPlacement)}
+      >
+        {PLACEMENTS.map((p) => (
+          <option key={p.value} value={p.value}>
+            {p.label}
+          </option>
+        ))}
+      </Select>
+      {note ? (
+        <span role="status" className={note.ok ? "text-console-muted" : "text-console-danger"}>
+          {note.text}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function TemplateCard({
   connectorId,
   t,
@@ -125,7 +194,9 @@ function TemplateCard({
           ? "(new)"
           : t.change === "invalid"
             ? "(cannot be pinned)"
-            : "(changed)"}
+            : t.change === "changed"
+              ? "(changed)"
+              : null}
       </h3>
       {t.invalid ? (
         <p className="m-0 mb-2 text-sm">
@@ -142,6 +213,7 @@ function TemplateCard({
           <Version label="Now" v={source?.live ?? (t.live as TemplateVersion)} />
         ) : null}
       </div>
+      <PlacementSelect connectorId={connectorId} uri={t.uri} initial={t.placement ?? "chat"} />
       {t.live ? (
         <div className="mt-3 flex flex-wrap gap-2">
           {source === null ? (
@@ -211,6 +283,7 @@ export function TemplateReviewSection({
       <ResourceView state={state} label="app templates">
         {(templates) => {
           const pending = templates.filter((t) => t.status === "drifted");
+          const approved = templates.filter((t) => t.status === "pinned");
           return (
             <>
               <p className="m-0 mb-3 text-sm text-console-muted">
@@ -220,6 +293,15 @@ export function TemplateReviewSection({
               {pending.length === 0 ? <p>No app templates are waiting for approval.</p> : null}
               <div className="flex flex-col gap-3">
                 {pending.map((t) => (
+                  <TemplateCard
+                    key={t.uri}
+                    connectorId={connector.id}
+                    t={t}
+                    busy={mutation.pending}
+                    onApprove={(uri, hash) => void approve(uri, hash)}
+                  />
+                ))}
+                {approved.map((t) => (
                   <TemplateCard
                     key={t.uri}
                     connectorId={connector.id}
