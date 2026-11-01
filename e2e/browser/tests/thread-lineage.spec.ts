@@ -2,10 +2,11 @@ import type { Page } from "@playwright/test";
 import { type Chat, expect, test } from "./support/chat.js";
 
 /**
- * KOBE-537 (TLF-6, TL3): the lineage strip. One answered thread forked twice from the same
- * message: the second fork's strip has the source as a link and itself bold with "n of 2"
- * siblings; the source's link opens it in place, where a "2 forks" row lists both and opens one.
- * The `chat` fixture trashes the source and both forks (each is read from the address).
+ * KOBE-537 (TLF-6, TL3): the lineage strip over three generations. One answered thread (the root)
+ * forked twice from the same message (A and B), then B forked once more (C). On C the strip has
+ * three rows: the root as a link, B as a siblings dropdown ("B · n of 2") and C bold with its fork
+ * point. Switching by the link opens the root in place (its "2 forks" row); switching by the
+ * dropdown opens A in place. The source and the three forks go to Trash in `finally`.
  */
 const FORK_TIMEOUT_MS = 60_000;
 
@@ -34,7 +35,7 @@ async function openSource(chat: Chat, page: Page, source: string, title: string)
   await expect(stripOf(page).locator('strong[aria-current="page"]')).toHaveText(title);
 }
 
-test("fork twice: the strip's rows, siblings, the source link and the forks menu", async ({
+test("three generations: the strip's rows, switching by the link and by the dropdown", async ({
   chat,
   page,
 }) => {
@@ -42,49 +43,72 @@ test("fork twice: the strip's rows, siblings, the source link and the forks menu
   const sourceTitle = `Lineage ${suffix}`;
   const first = `Lineage fork A ${suffix}`;
   const second = `Lineage fork B ${suffix}`;
+  const third = `Lineage fork C ${suffix}`;
 
-  await chat.open();
-  const source = await chat.ask("No tools. Reply with the single word ALPHA.");
-  const header = page.locator("header").filter({ has: page.locator("#kobe-thread-title") });
-  await header.getByRole("button", { name: /^Rename / }).click();
-  const name = page.getByRole("textbox", { name: "Conversation name", exact: true });
-  await name.fill(sourceTitle);
-  await name.press("Enter");
-  await expect(page.locator("#kobe-thread-title")).toHaveText(sourceTitle);
+  try {
+    await chat.open();
+    const source = await chat.ask("No tools. Reply with the single word ALPHA.");
+    const header = page.locator("header").filter({ has: page.locator("#kobe-thread-title") });
+    await header.getByRole("button", { name: /^Rename / }).click();
+    const name = page.getByRole("textbox", { name: "Conversation name", exact: true });
+    await name.fill(sourceTitle);
+    await name.press("Enter");
+    await expect(page.locator("#kobe-thread-title")).toHaveText(sourceTitle);
 
-  // First fork, then back to the source by the strip's link, and the second from the same answer.
-  const forkA = await fork(chat, page, first, source);
-  await expect(stripOf(page).getByRole("listitem")).toHaveCount(2, { timeout: 30_000 });
-  await openSource(chat, page, source, sourceTitle);
-  await expect(stripOf(page)).toContainText(`1 fork: ${first}`);
-  const forkB = await fork(chat, page, second, source);
-  expect(forkB).not.toBe(forkA);
+    // Two sibling forks of the root from the same answer (back to the root by the strip's link).
+    const forkA = await fork(chat, page, first, source);
+    await expect(stripOf(page).getByRole("listitem")).toHaveCount(2, { timeout: 30_000 });
+    await openSource(chat, page, source, sourceTitle);
+    await expect(stripOf(page)).toContainText(`1 fork: ${first}`);
+    const forkB = await fork(chat, page, second, source);
+    expect(forkB).not.toBe(forkA);
+    await expect(stripOf(page).getByRole("listitem")).toHaveCount(2, { timeout: 30_000 });
 
-  // On the second fork: two rows, the source a link, the fork bold as "n of 2" siblings.
-  const rows = stripOf(page).getByRole("listitem");
-  await expect(rows).toHaveCount(2, { timeout: 30_000 });
-  await expect(rows.first().getByRole("link", { name: sourceTitle, exact: true })).toBeVisible();
-  const siblings = rows.last().getByRole("button", { name: new RegExp(`^${second} · [12] of 2`) });
-  await expect(siblings).toBeVisible();
-  await expect(rows.last()).toContainText(/ at “.+”/);
-  await siblings.click();
-  const siblingMenu = page.getByRole("menu");
-  await expect(siblingMenu.getByRole("menuitemradio")).toHaveCount(2);
-  await expect(siblingMenu.getByRole("menuitemradio", { name: second })).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
-  await page.keyboard.press("Escape");
-  await expect(siblingMenu).toHaveCount(0);
+    // A fork of the fork: C from B's answer.
+    const forkC = await fork(chat, page, third, forkB);
 
-  // The source by its link, in place: its strip ends with "2 forks ▾"; choosing one opens it.
-  await openSource(chat, page, source, sourceTitle);
-  const forks = stripOf(page).getByRole("button", { name: "2 forks", exact: true });
-  await expect(forks).toBeVisible({ timeout: 30_000 });
-  await forks.click();
-  const forksMenu = page.getByRole("menu", { name: "2 forks", exact: true });
-  await expect(forksMenu.getByRole("menuitem")).toHaveCount(2);
-  await forksMenu.getByRole("menuitem", { name: first }).click();
-  await expect.poll(() => threadParam(page), { timeout: FORK_TIMEOUT_MS }).toBe(forkA);
-  await expect(stripOf(page).getByRole("listitem").last()).toContainText(first);
+    // On C: three rows. The root a link, B a siblings dropdown, C bold with its fork point.
+    const rows = stripOf(page).getByRole("listitem");
+    await expect(rows).toHaveCount(3, { timeout: 30_000 });
+    await expect(rows.nth(0).getByRole("link", { name: sourceTitle, exact: true })).toBeVisible();
+    const parent = rows.nth(1).getByRole("button", { name: new RegExp(`^${second} · [12] of 2`) });
+    await expect(parent).toBeVisible();
+    const current = rows.nth(2);
+    await expect(current.locator('strong[aria-current="page"]')).toHaveText(third);
+    await expect(current).toContainText(/ at “.+”/);
+
+    // Switch by the link: the root opens in place and shows its "2 forks" row.
+    await openSource(chat, page, source, sourceTitle);
+    const forks = stripOf(page).getByRole("button", { name: "2 forks", exact: true });
+    await expect(forks).toBeVisible({ timeout: 30_000 });
+    await forks.click();
+    const forksMenu = page.getByRole("menu", { name: "2 forks", exact: true });
+    await expect(forksMenu.getByRole("menuitem")).toHaveCount(2);
+
+    // Back to C: B from the forks menu, then B's "1 fork: C" link.
+    await forksMenu.getByRole("menuitem", { name: second }).click();
+    await expect.poll(() => threadParam(page), { timeout: FORK_TIMEOUT_MS }).toBe(forkB);
+    await stripOf(page).getByRole("link", { name: third, exact: true }).click();
+    await expect.poll(() => threadParam(page), { timeout: FORK_TIMEOUT_MS }).toBe(forkC);
+    await expect(stripOf(page).getByRole("listitem")).toHaveCount(3, { timeout: 30_000 });
+
+    // Switch by the dropdown: B's row lists both siblings, B checked; choosing A opens it in place.
+    await stripOf(page)
+      .getByRole("button", { name: new RegExp(`^${second} · [12] of 2`) })
+      .click();
+    const siblings = page.getByRole("menu");
+    await expect(siblings.getByRole("menuitemradio")).toHaveCount(2);
+    await expect(siblings.getByRole("menuitemradio", { name: second })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await siblings.getByRole("menuitemradio", { name: first }).click();
+    await expect.poll(() => threadParam(page), { timeout: FORK_TIMEOUT_MS }).toBe(forkA);
+    const onA = stripOf(page).getByRole("listitem");
+    await expect(onA).toHaveCount(2, { timeout: 30_000 });
+    await expect(onA.last()).toContainText(first);
+  } finally {
+    // The root and every fork seen (each read from the address) go to Trash.
+    await chat.trashAll();
+  }
 });

@@ -23,12 +23,12 @@ together for the first time.
   not judged NOTRUN.
 - Clean-up in `finally`: unshare (`POST /v1/threads/{id}/share` private), folder deleted by name
   through `/v1/thread-folders`, second context closed; the `chat` fixture trashes threads.
-- `thread-lineage.spec.ts`: source renamed, Fork A, back by the strip's link, Fork B from the same
-  answer. On B: two rows (source link; B as the siblings dropdown "B · n of 2", B checked), the
-  fork point excerpt. The source link opens it in place (`?thread=` changes, bold
-  `aria-current` title); its "2 forks" dropdown lists both and opens A. The ticket text says
-  "three rows"; the coordinator's brief (two forks of one source) gives two rows plus the forks
-  row, which is what the spec checks.
+- `thread-lineage.spec.ts` (three generations, per the coordinator): root renamed, forks A and B
+  from the same answer, C forked from B. On C: three rows (root link; B as the siblings dropdown
+  "B · n of 2"; C bold with "at “…”"). By the link: the root opens in place with "2 forks". By the
+  dropdown: back to C (forks menu → B, "1 fork: C" link), B's dropdown → A opens in place. Clean-up
+  in `finally` via `chat.trashAll()`, which now takes the ids off its list so the fixture does not
+  trash them twice.
 - Screenshots (light/dark) of the panel after filing, attached to the report (`shoot`).
 
 ## Open questions (for Chris or the coordinator)
