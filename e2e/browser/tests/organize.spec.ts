@@ -32,6 +32,24 @@ async function api(page: Page, method: string, path: string, body?: unknown) {
 const threads = (page: Page) => page.getByRole("dialog", { name: "Threads" });
 const group = (page: Page, kind: string) => threads(page).locator(`[data-group="${kind}"]`);
 
+/**
+ * Chooses a node of the panel's folder tree (KOBE-536): Archived sits under Current, shown by
+ * Current's chevron; each node's list replaces the panel's groups.
+ */
+async function chooseNode(page: Page, name: "Current" | "Archived") {
+  const tree = threads(page).getByRole("tree", { name: "Thread folders" });
+  const node = tree.getByRole("treeitem", { name, exact: true });
+  if (name === "Archived" && (await node.count()) === 0) {
+    await tree
+      .getByRole("treeitem", { name: "Current", exact: true })
+      .locator("button")
+      .first()
+      .click();
+  }
+  await node.click();
+  await expect(node).toHaveAttribute("aria-selected", "true");
+}
+
 async function menuChoice(page: Page, row: Locator, title: string, item: string) {
   await row.hover();
   await row.getByRole("button", { name: `Actions for ${title}`, exact: true }).click();
@@ -76,15 +94,18 @@ test("pin, archive and move to project, in the Threads panel and after a reload"
   await menuChoice(page, rowIn("pinned"), title, "Unpin");
   await expect(rowIn("ungrouped")).toHaveCount(1);
 
-  // ac-1, ac-3: Archive → the folded Archived group, after a reload too; search marks it.
+  // ac-1, ac-3: Archive → the tree's Archived node (folded under Current, KOBE-536), after a
+  // reload too; search marks it.
   await menuChoice(page, rowIn("ungrouped"), title, "Archive");
   await expect(rowIn("ungrouped")).toHaveCount(0);
-  const archivedToggle = group(page, "archived").getByRole("button", { expanded: false });
-  await expect(archivedToggle).toBeVisible();
+  const archivedRow = threads(page)
+    .getByRole("list", { name: "Archived", exact: true })
+    .locator("[data-kobe-thread]")
+    .filter({ hasText: title });
   await page.reload();
   await chat.openThreads();
-  await group(page, "archived").getByRole("button", { expanded: false }).click();
-  await expect(rowIn("archived")).toHaveCount(1);
+  await chooseNode(page, "Archived");
+  await expect(archivedRow).toHaveCount(1);
   // The bar's search is behind the panel: closed first.
   await chat.closeThreads();
   const search = page.getByRole("searchbox", { name: "Search conversations" });
@@ -95,9 +116,12 @@ test("pin, archive and move to project, in the Threads panel and after a reload"
   await expect(hit).toHaveCount(1);
   await expect(hit.locator("[data-kobe-archived]")).toHaveText("Archived");
   await search.press("Escape");
+  // The panel reopens on the node last chosen in this tab (Archived).
   await chat.openThreads();
-  await group(page, "archived").getByRole("button", { expanded: false }).click();
-  await menuChoice(page, rowIn("archived"), title, "Unarchive");
+  await chooseNode(page, "Archived");
+  await menuChoice(page, archivedRow, title, "Unarchive");
+  await expect(archivedRow).toHaveCount(0);
+  await chooseNode(page, "Current");
   await expect(rowIn("ungrouped")).toHaveCount(1);
 
   // ac-2: Move to project → under the project's header; the next run is marked.
