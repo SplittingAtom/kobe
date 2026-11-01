@@ -251,7 +251,7 @@ export function FolderEditor({
       question={deleteQuestion(editing.placed)}
       onCancel={() => done(key)}
       onDelete={async () => {
-        const res = await session.folders.remove(folder.id);
+        const res = await session.removeFolder(folder.id);
         if (res.ok) {
           // The chosen folder (or one inside it) is gone: the panel shows Current.
           const memory = session.panelMemory;

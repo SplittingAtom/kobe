@@ -1,6 +1,6 @@
 # KOBE-535: Threads: Lineage strip (web) (TLF-4)
 
-- **Status:** in review (coordinator opens the PR)
+- **Status:** done (PR #438 merged)
 - **Branch / worktree:** `kobe-535-lineage-strip` in `../Kobe-wt535`
 - **Depends on:** KOBE-532 (protocol), KOBE-533 (`GET /v1/threads/{id}/lineage`)
 

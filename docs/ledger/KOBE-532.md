@@ -1,6 +1,6 @@
 # KOBE-532: Threads: Protocol shapes (`packages/protocol`) (TLF-1)
 
-- **Status:** in review (coordinator opens the PR)
+- **Status:** done (PR #436 merged)
 - **Branch / worktree:** `kobe-532-thread-protocol` in `../Kobe-wt532`
 - **Depends on:** none (spec `docs/specs/thread-lineage-and-folders.md`, arrives through another PR)
 

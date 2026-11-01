@@ -532,6 +532,20 @@ export class ChatSession {
   }
 
   /**
+   * Deletes a team folder (KOBE-536, TF8). The server takes the threads in it and in its folders
+   * back to Current, so once it is gone this tab's list reads again and the other tabs are told
+   * (the folder id stands for the threads it held, which this tab does not know).
+   */
+  async removeFolder(folderId: string): Promise<ApiResult<void>> {
+    const res = await this.folders.remove(folderId);
+    if (res.ok) {
+      for (const listener of this.#listChangedListeners) listener();
+      this.#options.listSync?.post(folderId);
+    }
+    return res;
+  }
+
+  /**
    * Sets who reads one of the member's threads (CE20, KOBE-221): only them, the project's members
    * or the whole team; `private` revokes. Once saved, the rail and the thread read again.
    */

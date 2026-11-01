@@ -277,6 +277,8 @@ export class Chat {
    */
   async trashAll(): Promise<void> {
     if (this.seen.length === 0) return;
+    // Taken off the list: a spec that cleans up in `finally` and the fixture don't trash twice.
+    const ids = this.seen.splice(0);
     const failures = await this.page
       .evaluate(
         async ({ ids, teamKey, teamHeader, settleMs, retryMs }) => {
@@ -307,7 +309,7 @@ export class Chat {
           return failed;
         },
         {
-          ids: this.seen,
+          ids,
           teamKey: TEAM_KEY,
           teamHeader: TEAM_HEADER,
           settleMs: TRASH_SETTLE_MS,
