@@ -136,15 +136,41 @@ describe("the team selector (ac-2)", { timeout: 30_000 }, () => {
     const line = await header();
     const teams = await within(line).findByRole("navigation", { name: "Teams" }, WAIT);
     expect(within(bar()).queryByRole("navigation", { name: "Teams" })).toBeNull();
-    const summary = must(teams.querySelector("summary"));
-    expect(summary.textContent).toContain("Finance");
-    expect(summary.textContent).toContain("Member");
-    expect(summary.getAttribute("title")).toBe("Finance");
-    must(teams.querySelector("details")).open = true;
-    const finance = within(teams).getByRole("button", { name: /Finance/ });
+    const trigger = within(teams).getByRole("button", { name: /Finance/ });
+    expect(trigger.textContent).toContain("Finance");
+    expect(trigger.textContent).toContain("Member");
+    expect(trigger.getAttribute("title")).toBe("Finance");
+    await userEvent.setup().click(trigger);
+    const list = await screen.findByRole("list", { name: "Your teams" });
+    const finance = within(list).getByRole("button", { name: /Finance/ });
     expect(finance.getAttribute("aria-current")).toBe("true");
     expect((finance as HTMLButtonElement).disabled).toBe(true);
-    expect(within(teams).getByRole("button", { name: /Operations Team admin/ })).toBeTruthy();
+    expect(within(list).getByRole("button", { name: /Operations Team admin/ })).toBeTruthy();
+  });
+
+  it("opens the list outside the clipped slot; Escape closes it and refocuses the name (KOBE-538)", async () => {
+    fake.otherTeams.push({ id: "t-2", slug: "ops", name: "Operations", role: "member" });
+    openApp(fake);
+    await composer();
+    const line = await header();
+    const teams = await within(line).findByRole("navigation", { name: "Teams" }, WAIT);
+    const trigger = within(teams).getByRole("button", { name: /Finance/ });
+    const slot = must(trigger.closest<HTMLElement>("[class*='teamSlot']"));
+    expect(screen.queryByRole("list", { name: "Your teams" })).toBeNull();
+    const user = userEvent.setup();
+    trigger.focus();
+    await user.keyboard("{Enter}");
+    const list = await screen.findByRole("list", { name: "Your teams" });
+    expect(document.body.contains(list)).toBe(true);
+    expect(slot.contains(list)).toBe(false);
+    expect(
+      within(list)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["Finance Member", "Operations Member"]);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("list", { name: "Your teams" })).toBeNull());
+    expect(document.activeElement).toBe(trigger);
   });
 
   it("switching sets the active team, remembers it and forgets the last thread", async () => {
@@ -160,8 +186,10 @@ describe("the team selector (ac-2)", { timeout: 30_000 }, () => {
     openApp(fake);
     await composer();
     const teams = await within(await header()).findByRole("navigation", { name: "Teams" }, WAIT);
-    must(teams.querySelector("details")).open = true;
-    await userEvent.setup().click(within(teams).getByRole("button", { name: /Operations/ }));
+    const user = userEvent.setup();
+    await user.click(within(teams).getByRole("button", { name: /Finance/ }));
+    const list = await screen.findByRole("list", { name: "Your teams" });
+    await user.click(within(list).getByRole("button", { name: /Operations/ }));
     await waitFor(() =>
       expect(
         fake.requests.find((r) => r.method === "PUT" && r.path === "/v1/me/teams/active")?.body,
@@ -231,11 +259,10 @@ describe("the team selector (ac-2)", { timeout: 30_000 }, () => {
     await user.click(screen.getByRole("button", { name: "Show the workspace" }));
     const drawer = await screen.findByRole("dialog", { name: "Workspace" });
     const teams = await within(drawer).findByRole("navigation", { name: "Teams" }, WAIT);
-    const details = must(teams.querySelector("details"));
-    await user.click(must(teams.querySelector("summary")));
-    expect(details.open).toBe(true);
+    await user.click(within(teams).getByRole("button", { name: /Finance/ }));
+    expect(await screen.findByRole("list", { name: "Your teams" })).toBeTruthy();
     await user.keyboard("{Escape}");
-    expect(details.open).toBe(false);
+    await waitFor(() => expect(screen.queryByRole("list", { name: "Your teams" })).toBeNull());
     expect(screen.getByRole("dialog", { name: "Workspace" })).toBeTruthy();
   });
 

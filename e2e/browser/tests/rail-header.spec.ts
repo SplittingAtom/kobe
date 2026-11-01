@@ -54,9 +54,8 @@ test("the top line: team, Threads, Files, Team console (admins), collapse (ac-1,
     "href",
     "/admin/team",
   );
-  // One line: every control on it shares a centre. Only the ones on screen: with several teams
-  // the selector's closed menu holds a button per team, laid out below the line but not shown
-  // (KOBE-457).
+  // One line: every control on it shares a centre. Only the ones on screen (KOBE-457); the
+  // selector's list opens in a popover outside the line (KOBE-538).
   const ys = await line.evaluate((el) =>
     [...el.querySelectorAll<HTMLElement>("button, a, summary")]
       .filter((c) => c.checkVisibility())
@@ -76,6 +75,51 @@ test("the top line: team, Threads, Files, Team console (admins), collapse (ac-1,
   await panel.getByRole("button", { name: "Close Team console" }).click();
   await expect(panel).toHaveCount(0);
   await expect(teamConsole).toBeFocused();
+});
+
+/** The rail line's team selector trigger (several teams): the active team's name and role. */
+function teamTrigger(line: Locator): Locator {
+  return line.getByRole("navigation", { name: "Teams" }).getByRole("button");
+}
+
+/** Opens the selector and picks `name`, waiting for the reload under it. */
+async function switchTeam(page: Page, line: Locator, name: string): Promise<void> {
+  await teamTrigger(line).click();
+  const list = page.getByRole("list", { name: "Your teams" });
+  await expect(list).toBeVisible();
+  await Promise.all([
+    page.waitForEvent("load", { timeout: SHELL_TIMEOUT_MS }),
+    list.getByRole("button", { name: new RegExp(`^${name}\\b`) }).click(),
+  ]);
+  await expect(teamTrigger(line)).toContainText(name, { timeout: SHELL_TIMEOUT_MS });
+}
+
+test("switching teams from the top line (KOBE-538)", async ({ chat, page }) => {
+  // The gate1 owner is in Team1 and Skill Registry.
+  await chat.open();
+  const line = chat.railHeader;
+  const trigger = teamTrigger(line);
+  await expect(trigger).toContainText("Team1", { timeout: SHELL_TIMEOUT_MS });
+  try {
+    // The list opens outside the clipped slot, every team visible and clickable.
+    await trigger.click();
+    const list = page.getByRole("list", { name: "Your teams" });
+    await expect(list).toBeVisible();
+    await expect(list.getByRole("button", { name: /^Team1\b/ })).toBeVisible();
+    await expect(list.getByRole("button", { name: /^Team1\b/ })).toBeDisabled();
+    await expect(list.getByRole("button", { name: /^Skill Registry\b/ })).toBeVisible();
+    await shoot(page, "rail-team-menu", page.locator('[data-shell-region="rail"]'));
+    // Escape closes it and returns focus to the name.
+    await page.keyboard.press("Escape");
+    await expect(list).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await switchTeam(page, line, "Skill Registry");
+    await expect(trigger).not.toContainText("Team1");
+  } finally {
+    if (!((await trigger.textContent()) ?? "").includes("Team1")) {
+      await switchTeam(page, line, "Team1");
+    }
+  }
 });
 
 test("Threads opens its panel; the Files toggle hides Files and is saved (KOBE-453)", async ({
