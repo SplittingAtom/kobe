@@ -60,6 +60,7 @@ describe("audit event taxonomy", () => {
       "site",
       "skill",
       "thread",
+      "thread_folder",
       "workspace",
     ]);
   });

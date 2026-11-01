@@ -4,6 +4,7 @@ import { sql, withTeam, type KobeDb } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { threadKey, type BlobStore } from "./blobs.js";
 import { evalCasesForExport } from "./export-eval-cases.js";
+import { folderPaths } from "./export-folders.js";
 import { readOffloadedJson } from "../threads/offloaded-body.js";
 import { logger } from "../logger.js";
 import { personalMemoryForExport } from "../memory/export.js";
@@ -54,6 +55,8 @@ export type ThreadRow = {
   readonly created_at: Timestamp;
   readonly last_activity_at: Timestamp;
   readonly deleted_at: Timestamp | null;
+  /** The thread's team folder (KOBE-534); absent where the reader did not select it. */
+  readonly folder_id?: string | null;
 };
 
 type EntryRow = {
@@ -115,7 +118,8 @@ async function threadPage(db: KobeDb, viewer: ExportViewer, after: string | null
   const cursor = after === null ? sql.raw("") : sql`AND t.id > ${after}`;
   return withTeam(db, viewer.teamId, async (tx) => {
     const res = await tx.execute<ThreadRow>(sql`
-      SELECT t.id, t.title, t.leaf_entry_id, t.created_at, t.last_activity_at, t.deleted_at
+      SELECT t.id, t.title, t.leaf_entry_id, t.created_at, t.last_activity_at, t.deleted_at,
+             t.folder_id
         FROM threads t
        WHERE t.team_id = ${viewer.teamId} AND ${OWN_THREADS(viewer)} ${cursor}
        ORDER BY t.id LIMIT ${THREAD_PAGE}`);
@@ -303,7 +307,7 @@ This archive holds the conversations you own in one Kobe team.
 - \`feedback.json\`: your thumbs up and down on answers in this team, with your reasons and
   comments (on your conversations and on ones shared with you).
 - \`eval-cases.json\`: the answers you shared with agents' owners as eval cases, as shared.
-- \`threads.json\`: an index (id, title, dates, file names).
+- \`threads.json\`: an index (id, title, dates, folder path when filed, file names).
 
 Entries marked \`kobe_unavailable\` had a large body Kobe could not read back from storage.
 `;
@@ -337,6 +341,7 @@ export async function* exportZip(
 
   text("README.md", README);
   const index: Record<string, unknown>[] = [];
+  const folders = await folderPaths(db, viewer.teamId);
   let after: string | null = null;
   for (;;) {
     const threads = await threadPage(db, viewer, after);
@@ -439,6 +444,10 @@ export async function* exportZip(
         created_at: heading.createdAt,
         last_activity_at: heading.lastActivityAt,
         in_trash: heading.inTrash,
+        // The folder path by names (KOBE-534, TF9), when the thread is filed.
+        ...(thread.folder_id && folders.has(thread.folder_id)
+          ? { folder: folders.get(thread.folder_id) }
+          : {}),
         session,
         transcript,
       });

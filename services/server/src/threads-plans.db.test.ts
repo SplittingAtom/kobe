@@ -16,7 +16,8 @@ import {
   touchThread,
 } from "./runs/store.js";
 import { sweepRuns } from "./runs/sweeper.js";
-import { moveThread, setArchived, setPinned } from "./threads/organize.js";
+import { fileThread, moveThread, setArchived, setPinned } from "./threads/organize.js";
+import { listFolders } from "./threads/folders.js";
 import { projectMarkers } from "./threads/project-moves.js";
 import {
   findThread,
@@ -265,6 +266,40 @@ describe("hot thread queries use the team-leading index with the break-glass pol
       }),
     );
     await expectIndexed(statements);
+  });
+
+  it("a folder's list, its Pinned list, the per-viewer counts and filing (KOBE-534)", async () => {
+    const { rows } = await admin.query<{ id: string }>(
+      `INSERT INTO thread_folders (team_id, name, created_by) VALUES ($1, 'Plans', $2) RETURNING id`,
+      [teamId, ownerId],
+    );
+    const folderId = rows[0]?.id ?? "";
+    await admin.query(
+      `UPDATE threads SET folder_id = $2
+        WHERE team_id = $1 AND id IN (SELECT id FROM threads WHERE team_id = $1 AND id <> $3 LIMIT 5)`,
+      [teamId, folderId, threadId],
+    );
+    try {
+      const statements = await capture(() =>
+        inTeamRolledBack(async (tx) => {
+          await listThreads(tx, viewer(), { folder: folderId, cursor: null, limit: 20 });
+          await listThreads(tx, viewer(), { folder: "none", cursor: null, limit: 20 });
+          await listOwnOrganized(tx, viewer(), {
+            which: "pinned",
+            folder: folderId,
+            cursor: null,
+            limit: 20,
+          });
+          await listFolders(tx, viewer());
+          // Unfiled already: the lock and folder reads, no change (and so no audit actor needed).
+          await fileThread(tx, viewer(), threadId, null);
+        }),
+      );
+      await expectIndexed(statements);
+    } finally {
+      await admin.query(`UPDATE threads SET folder_id = NULL WHERE team_id = $1`, [teamId]);
+      await admin.query(`DELETE FROM thread_folders WHERE team_id = $1`, [teamId]);
+    }
   });
 
   it("entries page, rename and leaf switch (repository)", async () => {

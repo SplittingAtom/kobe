@@ -1,4 +1,8 @@
-import { forkThreadRequestSchema, shareThreadRequestSchema } from "@kobe/protocol";
+import {
+  fileThreadRequestSchema,
+  forkThreadRequestSchema,
+  shareThreadRequestSchema,
+} from "@kobe/protocol";
 import { z } from "zod";
 import {
   createThreadBodySchema,
@@ -9,6 +13,7 @@ import {
   errorSchema,
   listThreadsQuerySchema,
   moveThreadBodySchema,
+  pinnedQuerySchema,
   setLeafBodySchema,
   switchAgentVersionBodySchema,
   chooseThreadAgentBodySchema,
@@ -99,6 +104,9 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         description:
           "Keyset pagination on (last_activity_at, id). Never Trash. Without `project_id`, " +
           "pinned and archived threads are left out (`/v1/threads/pinned`, `/archived`, CE19). " +
+          "With `folder` (KOBE-534; not with `q` or `project_id`): a folder's live, unarchived " +
+          "threads the caller may read (own, or shared with them; the caller's pinned ones are " +
+          "in `/pinned?folder=`), or with `none` the caller's own unfiled threads. " +
           "With `q`, full-text search " +
           '(KOBE-33): web-search syntax (`"phrase"`, `-exclude`, `or`) over user/assistant ' +
           "messages (all terms in one message) and titles (plus fuzzy title matching), ranked by " +
@@ -182,7 +190,9 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
       get: {
         operationId: "listPinnedThreads",
         summary: "The viewer's pinned threads, most recently pinned first (CE19)",
-        parameters: [...queryParameters(trashQuerySchema), teamHeader],
+        description:
+          "With `folder` (KOBE-534): only those in that folder, or with `none` the unfiled ones.",
+        parameters: [...queryParameters(pinnedQuerySchema), teamHeader],
         responses: { "200": json("ThreadPage", "A page of pinned threads."), ...ERROR_RESPONSES },
       },
     },
@@ -432,6 +442,24 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         },
       },
     },
+    "/v1/threads/{id}/file": {
+      post: {
+        operationId: "fileThread",
+        summary: "File the thread in a team folder, or take it out of one (KOBE-534, TF3)",
+        description:
+          "The owner or a member who may read the thread (shared to their project or the team). " +
+          "Idempotent; keeps pin, archive, project and shares; never activity. Audited " +
+          "`thread.filed` on a change.",
+        parameters: change([idParameter]),
+        requestBody: body("FileThreadBody"),
+        responses: {
+          "200": json("Thread", "The thread."),
+          "404": json("Error", "`thread_not_found`, or `folder_not_found` (not in this team)."),
+          ...ERROR_RESPONSES,
+          "409": json("Error", "`thread_in_trash`, `test_thread` or `thread_busy`."),
+        },
+      },
+    },
     "/v1/threads/{id}/restore": {
       post: {
         operationId: "restoreThread",
@@ -493,6 +521,7 @@ export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
     ForkThreadBody: withoutDialect(input(forkThreadRequestSchema)),
     SetLeafBody: withoutDialect(input(setLeafBodySchema)),
     MoveThreadBody: withoutDialect(input(moveThreadBodySchema)),
+    FileThreadBody: withoutDialect(input(fileThreadRequestSchema)),
     SwitchAgentVersionBody: withoutDialect(input(switchAgentVersionBodySchema)),
     ChooseThreadAgentBody: withoutDialect(input(chooseThreadAgentBodySchema)),
     CreatedThread: withoutDialect(output(createdThreadSchema)),

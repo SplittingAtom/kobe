@@ -34,7 +34,7 @@ import { visibilityOf } from "./share.js";
 import { loadAccess } from "../projects/access.js";
 import { applyShareScope, recordShareScope, shareScopeRefusal } from "./share-scope.js";
 import { notifyThreadAccess } from "../event-stream/access.js";
-import type { ThinkingLevel, ThreadVisibility } from "@kobe/protocol";
+import type { ThinkingLevel, ThreadFolderFilter, ThreadVisibility } from "@kobe/protocol";
 import { isSkippedSummaryEntry } from "../policy/skipped-summary.js";
 import { isModelEnabled } from "../models/team-store.js";
 import { trimLargeOutput } from "./entry-output.js";
@@ -77,6 +77,7 @@ export type ThreadError =
   | "model_not_enabled"
   | "thread_archived"
   | "test_thread"
+  | "folder_not_found"
   | PinError;
 
 export type ThreadResult = { ok: true; thread: ThreadSummary } | { ok: false; error: ThreadError };
@@ -127,6 +128,8 @@ export const summaryColumns = {
   forkedAtEntryId: threads.forkedAtEntryId,
   pinnedAt: threads.pinnedAt,
   archivedAt: threads.archivedAt,
+  folderId: threads.folderId,
+  skillEval: threads.skillEval,
 };
 
 export type SummaryRow = {
@@ -156,6 +159,9 @@ export type SummaryRow = {
   forkedAtEntryId?: string | null;
   pinnedAt?: Date | null;
   archivedAt?: Date | null;
+  /** KOBE-534; absent in rows read without it. */
+  folderId?: string | null;
+  skillEval?: boolean;
 };
 
 /**
@@ -188,6 +194,7 @@ export function toSummary(row: SummaryRow): ThreadSummary {
     forked_at_entry_id: row.forkedAtEntryId ?? null,
     pinned_at: row.pinnedAt?.toISOString() ?? null,
     archived_at: row.archivedAt?.toISOString() ?? null,
+    folder_id: row.folderId ?? null,
     deleted_at: row.deletedAt?.toISOString() ?? null,
     purge_after: row.deletedAt
       ? new Date(row.deletedAt.getTime() + TRASH_RETENTION_DAYS * DAY_MS).toISOString()
@@ -202,6 +209,45 @@ export function toSummary(row: SummaryRow): ThreadSummary {
 function readableBy(viewer: Viewer): SQL {
   const own = sql`${eq(threads.ownerUserId, viewer.userId)} AND (${threads.deletedAt} IS NULL OR ${threads.deletedAt} > now() - ${TRASH_INTERVAL})`;
   return sql`${eq(threads.teamId, viewer.teamId)} AND (${own} OR (${sharedWith(viewer)} AND ${threads.deletedAt} IS NULL))`;
+}
+
+/**
+ * A folder's threads as the viewer sees them (KOBE-534, TF4/TF5): unarchived and readable (own, or
+ * shared with them); the caller adds live and not a test. The viewer's own pinned threads are in
+ * the folder's Pinned list (`/pinned?folder=`), so the list leaves them out; the counts keep them.
+ */
+function inFolderFor(viewer: Viewer, options: { withOwnPinned?: boolean } = {}): SQL {
+  const pinned = options.withOwnPinned
+    ? sql`true`
+    : sql`(${threads.pinnedAt} IS NULL OR ${threads.ownerUserId} <> ${viewer.userId})`;
+  return sql`${threads.archivedAt} IS NULL AND ${pinned} AND ${readableBy(viewer)}`;
+}
+
+/** Live, listable threads: not in Trash, not a builder test or eval thread. */
+const LISTABLE = sql`${threads.deletedAt} IS NULL AND NOT ${threads.isTest} AND NOT ${threads.skillEval}`;
+
+/**
+ * Per folder, how many of its live, unarchived threads the viewer may read (KOBE-534, TF4): one
+ * grouped query under the same predicate as `GET /v1/threads?folder=` (pinned ones included, as
+ * the folder's Pinned list shows them), on `threads_folder_idx`. Folders with none are absent.
+ */
+export async function folderThreadCounts(
+  tx: KobeTx,
+  viewer: Viewer,
+): Promise<ReadonlyMap<string, number>> {
+  const rows = await tx
+    .select({ folderId: threads.folderId, n: sql<number>`count(*)::int` })
+    .from(threads)
+    .where(
+      and(
+        eq(threads.teamId, viewer.teamId),
+        sql`${threads.folderId} IS NOT NULL`,
+        LISTABLE,
+        inFolderFor(viewer, { withOwnPinned: true }),
+      ),
+    )
+    .groupBy(threads.folderId);
+  return new Map(rows.flatMap((r) => (r.folderId ? [[r.folderId, r.n] as const] : [])));
 }
 
 /** The thread's owner is still a member of its team and not deactivated (see {@link sharedWith}). */
@@ -409,22 +455,32 @@ async function toPage(
 export async function listThreads(
   tx: KobeTx,
   viewer: Viewer,
-  options: { projectId?: string | undefined; cursor: ActivityCursor | null; limit: number },
+  options: {
+    projectId?: string | undefined;
+    folder?: ThreadFolderFilter | undefined;
+    cursor: ActivityCursor | null;
+    limit: number;
+  },
 ): Promise<Page<ThreadSummary>> {
   // Others' threads of a project only for those who may open it: a team share is no way to list
   // the threads of a project one can't see (CE20).
   const projectOpen =
     options.projectId !== undefined && (await canViewProject(tx, viewer, options.projectId));
+  const own = and(
+    eq(threads.teamId, viewer.teamId),
+    eq(threads.ownerUserId, viewer.userId),
+    sql`${threads.pinnedAt} IS NULL AND ${threads.archivedAt} IS NULL`,
+  );
   const scope = options.projectId
     ? and(
         eq(threads.projectId, options.projectId),
         projectOpen ? readableBy(viewer) : eq(threads.ownerUserId, viewer.userId),
       )
-    : and(
-        eq(threads.teamId, viewer.teamId),
-        eq(threads.ownerUserId, viewer.userId),
-        sql`${threads.pinnedAt} IS NULL AND ${threads.archivedAt} IS NULL`,
-      );
+    : options.folder === undefined
+      ? own
+      : options.folder === "none"
+        ? and(own, sql`${threads.folderId} IS NULL`)
+        : and(eq(threads.folderId, options.folder), inFolderFor(viewer));
   const rows = await tx
     .select({ ...summaryColumns, position: micros(threads.lastActivityAt) })
     .from(threads)
@@ -450,9 +506,21 @@ export async function listThreads(
 export async function listOwnOrganized(
   tx: KobeTx,
   viewer: Viewer,
-  options: { which: "pinned" | "archived"; cursor: ActivityCursor | null; limit: number },
+  options: {
+    which: "pinned" | "archived";
+    /** Pinned only (KOBE-534, TF5): the pinned threads of one folder, or the unfiled ones. */
+    folder?: ThreadFolderFilter | undefined;
+    cursor: ActivityCursor | null;
+    limit: number;
+  },
 ): Promise<Page<ThreadSummary>> {
   const column = options.which === "pinned" ? threads.pinnedAt : threads.archivedAt;
+  const folder =
+    options.folder === undefined
+      ? undefined
+      : options.folder === "none"
+        ? sql`${threads.folderId} IS NULL`
+        : eq(threads.folderId, options.folder);
   const rows = await tx
     .select({ ...summaryColumns, position: micros(column) })
     .from(threads)
@@ -463,6 +531,7 @@ export async function listOwnOrganized(
         sql`${column} IS NOT NULL AND ${threads.deletedAt} IS NULL AND NOT ${threads.isTest}
             AND NOT ${threads.skillEval}`,
         options.which === "pinned" ? sql`${threads.archivedAt} IS NULL` : undefined,
+        options.which === "pinned" ? folder : undefined,
         options.cursor ? after(column, options.cursor) : undefined,
       ),
     )
@@ -552,15 +621,19 @@ export async function createThread(
      * link is never updated afterwards (trigger `threads_guard_forked_from`, KOBE-215).
      */
     forkedFrom?: { readonly threadId: string; readonly entryId: string };
+    /** The team folder to start in (KOBE-534, TF9: a fork starts in its source's folder). */
+    folderId?: string | null;
   },
 ): Promise<ThreadSummary> {
-  const { agent, modelAlias, isTest, forkedFrom, skillDraftId, skillEvalRunId, ...rest } = input;
+  const { agent, modelAlias, isTest, forkedFrom, folderId, skillDraftId, skillEvalRunId, ...rest } =
+    input;
   const [row] = await tx
     .insert(threads)
     .values({
       ...rest,
       forkedFromThreadId: forkedFrom?.threadId ?? null,
       forkedAtEntryId: forkedFrom?.entryId ?? null,
+      folderId: folderId ?? null,
       modelAlias: modelAlias ?? null,
       isTest: isTest ?? false,
       skillTest: skillDraftId !== undefined,
@@ -626,6 +699,23 @@ export async function lockForChange(
   const found = await findThread(tx, viewer, id, { lock: true });
   if (!found) return { ok: false, error: "thread_not_found" };
   if (found.access !== "owner") return { ok: false, error: "read_only" };
+  return { ok: true, thread: found.thread };
+}
+
+/**
+ * Locks the thread for filing in a folder (KOBE-534, TF3): unlike {@link lockForChange}, a reader
+ * under D23/CE20 may file too (folders are the team's, and a shared thread is already in front of
+ * them), so the row is locked whenever the viewer may read it. Every other change stays
+ * owner-only. A reader never reaches a thread in Trash (not readable: 404).
+ */
+export async function lockForFiling(
+  tx: KobeTx,
+  viewer: Viewer,
+  id: string,
+): Promise<{ ok: true; thread: SummaryRow } | { ok: false; error: ThreadError }> {
+  await tx.execute(sql.raw(`SET LOCAL lock_timeout = '${THREAD_LOCK_TIMEOUT}'`));
+  const found = await findThread(tx, viewer, id, { lock: true });
+  if (!found) return { ok: false, error: "thread_not_found" };
   return { ok: true, thread: found.thread };
 }
 

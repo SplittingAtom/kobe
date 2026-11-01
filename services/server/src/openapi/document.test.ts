@@ -12,6 +12,7 @@ import { threadMarkerRoutes } from "../routes/thread-markers.js";
 import { threadCompactRoutes } from "../routes/thread-compact.js";
 import { threadContextRoutes } from "../routes/thread-context.js";
 import { threadRoutes } from "../routes/threads.js";
+import { threadFolderRoutes } from "../routes/thread-folders.js";
 import { threadUsageRoutes } from "../routes/usage.js";
 import { openApiDocument } from "./document.js";
 
@@ -70,6 +71,12 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
         ...mountedOperations("/v1/threads", threadUsageRoutes(fakeDeps)),
         ...mountedOperations("/v1/threads", threadFeedbackRoutes(fakeDeps)),
       ].sort(),
+    );
+  });
+
+  it("describes exactly the thread folder routes the server mounts (KOBE-534)", () => {
+    expect(documented("/v1/thread-folders")).toEqual(
+      mountedOperations("/v1/thread-folders", threadFolderRoutes(fakeDeps)),
     );
   });
 

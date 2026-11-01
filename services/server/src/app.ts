@@ -100,6 +100,7 @@ import { threadAppCardRoutes } from "./routes/thread-app-cards.js";
 import { threadRetentionRoutes } from "./routes/thread-retention.js";
 import { webVitalsRoutes } from "./routes/web-vitals.js";
 import { threadRoutes } from "./routes/threads.js";
+import { threadFolderRoutes } from "./routes/thread-folders.js";
 import { threadConnectorRoutes } from "./routes/thread-connectors.js";
 import { threadSkillRoutes } from "./routes/thread-skills.js";
 import { runFeedbackRoutes, threadFeedbackRoutes } from "./routes/feedback.js";
@@ -241,6 +242,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/threads", threadConnectorRoutes(deps));
   api.route("/threads", threadSkillRoutes(deps));
   api.route("/threads", threadRoutes(deps));
+  api.route("/thread-folders", threadFolderRoutes(deps));
   api.route("/artifacts", artifactRoutes(deps, options.workspaceFiles?.sync));
   api.route("/schedules", scheduleRoutes(deps));
   api.route("/notifications", notificationRoutes(deps));

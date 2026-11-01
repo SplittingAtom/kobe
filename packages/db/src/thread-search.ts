@@ -75,6 +75,8 @@ export interface ThreadSearchHit {
   /** Pinned or archived by the owner (CE19, KOBE-220): search shows archived threads, marked. */
   readonly pinnedAt: Date | null;
   readonly archivedAt: Date | null;
+  /** The team folder the thread is filed in (KOBE-534, TF10: a hit shows its folder path). */
+  readonly folderId: string | null;
   /** Relevance; hits are ordered by score, then most recent activity. */
   readonly score: number;
   /** Best-matching entry (may be on an inactive branch); null for a title-only match. */
@@ -108,6 +110,7 @@ interface HitRow extends Record<string, unknown> {
   forked_at_entry_id: string | null;
   pinned_micros: string | null;
   archived_micros: string | null;
+  folder_id: string | null;
   score: number;
   matched_entry_id: string | null;
   headline: string | null;
@@ -228,6 +231,7 @@ function toHit(row: HitRow): ThreadSearchHit {
     forkedAtEntryId: row.forked_at_entry_id,
     pinnedAt: row.pinned_micros === null ? null : fromMicros(row.pinned_micros),
     archivedAt: row.archived_micros === null ? null : fromMicros(row.archived_micros),
+    folderId: row.folder_id,
     score: row.score,
     matchedEntryId: row.matched_entry_id,
     snippet: row.headline === null ? null : parseSnippet(row.headline),
@@ -266,7 +270,7 @@ function searchQuery(
              t.agent_version, t.status, t.shared_to_project, t.shared_to_team, t.model_alias,
              t.thinking_level, t.last_activity_at,
              t.leaf_entry_id, t.created_at, t.forked_from_thread_id, t.forked_at_entry_id,
-             t.pinned_at, t.archived_at
+             t.pinned_at, t.archived_at, t.folder_id
       FROM threads t
       WHERE t.team_id = ${teamId}
         AND t.deleted_at IS NULL
@@ -330,6 +334,7 @@ function searchQuery(
            (extract(epoch FROM r.created_at) * 1000000)::bigint::text AS created_micros,
            (extract(epoch FROM r.pinned_at) * 1000000)::bigint::text AS pinned_micros,
            (extract(epoch FROM r.archived_at) * 1000000)::bigint::text AS archived_micros,
+           r.folder_id,
            r.score, r.matched_entry_id,
            CASE WHEN r.rn <= ${p.limit} AND r.matched_entry_id IS NOT NULL THEN
              (SELECT ts_headline(${TS_CONFIG}::regconfig,

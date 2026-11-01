@@ -115,6 +115,7 @@ function toWire(
     // Archived threads stay searchable (CE19): the hit says so.
     pinned_at: hit.pinnedAt?.toISOString() ?? null,
     archived_at: hit.archivedAt?.toISOString() ?? null,
+    folder_id: hit.folderId,
     model: hit.modelAlias,
     thinking_level: hit.thinkingLevel,
     leaf_entry_id: hit.leafEntryId,
