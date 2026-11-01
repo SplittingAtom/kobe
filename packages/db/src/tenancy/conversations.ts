@@ -12,6 +12,8 @@ export const conversations = defineDomain({
     "answer_feedback_history",
     // MCP Apps results of model calls (KOBE-438): they follow their thread.
     "thread_app_results",
+    // The team's thread folders (KOBE-534, TF1); threads name theirs in folder_id.
+    "thread_folders",
   ],
   siteWide: [],
   grants: {},

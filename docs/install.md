@@ -1163,6 +1163,24 @@ EXISTS` an invalid leftover.
   As above, check `pg_index.indisvalid` for `threads_team_shared_idx` and
   `DROP INDEX CONCURRENTLY IF EXISTS` an invalid leftover.
 
+- **Thread folders index (KOBE-534, migrations `*_thread_folders` and `*_thread_folders_rls`).**
+  The first adds `threads.folder_id` (catalog-only), but its ACCESS EXCLUSIVE lock on `threads` is
+  held until the upgrade commits, so while the second validates `threads_folder_fk` and builds
+  `threads_folder_idx` with a plain `CREATE INDEX IF NOT EXISTS`, **reads and writes of `threads`**
+  wait (its CHECK is `NOT VALID`: no scan). The column is new in this release, so the index can't
+  be built before the first upgrade; each step is one sequential read of `threads` and the index
+  starts empty. On a large site, upgrade in a quiet window. A later re-run (or a failed build) can
+  build it CONCURRENTLY first, and the migration then skips it:
+
+  ```sql
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS threads_folder_idx
+    ON threads (team_id, folder_id, last_activity_at DESC, id DESC)
+    WHERE folder_id IS NOT NULL AND deleted_at IS NULL;
+  ```
+
+  As above, check `pg_index.indisvalid` for `threads_folder_idx` and
+  `DROP INDEX CONCURRENTLY IF EXISTS` an invalid leftover.
+
 - **Retention job (KOBE-18).** One server replica at a time runs the nightly retention pass under
   a session-level advisory lock, so the server needs a direct (or session-mode pooled) Postgres
   connection; transaction-mode poolers break session locks. `KOBE_RETENTION_HOUR_UTC` (0-23,

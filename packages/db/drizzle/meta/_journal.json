@@ -1303,6 +1303,20 @@
       "when": 1793455805886,
       "tag": "0185_connector_ui_resources_placement_pickers",
       "breakpoints": true
+    },
+    {
+      "idx": 186,
+      "version": "7",
+      "when": 1793508421516,
+      "tag": "0186_thread_folders",
+      "breakpoints": true
+    },
+    {
+      "idx": 187,
+      "version": "7",
+      "when": 1793508426787,
+      "tag": "0187_thread_folders_rls",
+      "breakpoints": true
     }
   ]
 }
