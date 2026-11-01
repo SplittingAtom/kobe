@@ -314,6 +314,27 @@ describe("folder actions (ac-2)", () => {
     );
     expect(await within(panel).findByRole("button", { name: "Filed" }, WAIT)).toBeTruthy();
   });
+
+  it("deleting a folder while Current is chosen shows its threads in Current at once (TF8)", async () => {
+    const a = fake.folders.add("Alpha");
+    const t = fake.addThread("Filed");
+    file(t, a);
+    fake.addThread("Loose");
+    const panel = await open();
+    await chooseNode("Current");
+    expect(rowsIn(panel)).toEqual(["Loose"]);
+    const user = userEvent.setup();
+    const menu = await folderMenu(panel, "Alpha");
+    await user.click(within(menu).getByRole("menuitem", { name: "Delete" }));
+    const confirm = within(await within(panel).findByRole("group", { name: "Delete folder" }));
+    await user.click(confirm.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(fake.threads.get(t)?.folder_id).toBeNull());
+    // The node did not change, so only a list read brings the thread back on screen.
+    expect(await within(panel).findByRole("button", { name: "Filed" }, WAIT)).toBeTruthy();
+    expect(
+      within(panel).getByRole("treeitem", { name: "Current" }).getAttribute("aria-selected"),
+    ).toBe("true");
+  });
 });
 
 describe("on a phone (ac-4)", () => {

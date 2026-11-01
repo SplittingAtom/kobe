@@ -7,7 +7,10 @@
  */
 
 export interface ThreadListSync {
-  /** Announces a change of `threadId` to the other tabs (never back to this one). */
+  /**
+   * Announces a change of `threadId` to the other tabs (never back to this one). A deleted folder
+   * posts its id: the other tabs read their lists again all the same (KOBE-536, TF8).
+   */
   post(threadId: string): void;
   /** Called with the thread id of each change another tab announced. */
   subscribe(listener: (threadId: string) => void): () => void;
