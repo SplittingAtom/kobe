@@ -52,7 +52,7 @@ export function ThreadRowMenu() {
   const [notice, setNotice] = useState<Notice | null>(null);
   const state = useHeldThread(threadId, open);
   const readOnly = threadReadOnly(custom, state);
-  const bindings = useThreadMenuBindings({
+  const menu = useThreadMenuBindings({
     threadId,
     title,
     custom,
@@ -61,6 +61,11 @@ export function ThreadRowMenu() {
     state,
     notify: setNotice,
   });
+  // The row names its submenu "Save to folder…" (TF8); the command listings keep the plain name.
+  const save = menu["save-to-folder"];
+  const bindings = save
+    ? { ...menu, "save-to-folder": { ...save, label: "Save to folder…" } }
+    : menu;
   useEffect(() => {
     if (notice === null) return;
     const timer = setTimeout(() => setNotice(null), NOTICE_MS);

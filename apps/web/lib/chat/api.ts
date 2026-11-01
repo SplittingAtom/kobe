@@ -104,7 +104,8 @@ export interface ToolOutput {
 }
 
 export interface ChatApi {
-  listThreads(cursor?: string): Promise<ApiResult<ThreadPage>>;
+  /** The member's own live threads; `folder` (TF5): one folder's readable ones, or `none`. */
+  listThreads(cursor?: string, folder?: string): Promise<ApiResult<ThreadPage>>;
   searchThreads(
     q: string,
     cursor?: string,
@@ -112,7 +113,7 @@ export interface ChatApi {
   ): Promise<ApiResult<ThreadSearchPage>>;
   listTrash(cursor?: string): Promise<ApiResult<ThreadPage>>;
   /** The caller's pinned threads, newest pin first (CE19, KOBE-220). */
-  listPinned(): Promise<ApiResult<ThreadPage>>;
+  listPinned(folder?: string): Promise<ApiResult<ThreadPage>>;
   /** The caller's archived threads, most recently archived first (CE19). */
   listArchived(): Promise<ApiResult<ThreadPage>>;
   /** Others' threads shared with the caller, newest activity first (CE20, KOBE-221). */
@@ -342,11 +343,11 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     apiRequest<T>(path, { method, json, teamId, fetchFn });
 
   return {
-    listThreads: (cursor) => get(`/v1/threads${query({ cursor })}`),
+    listThreads: (cursor, folder) => get(`/v1/threads${query({ folder, cursor })}`),
     searchThreads: (q, cursor, signal) =>
       apiRequest(`/v1/threads${query({ q, cursor })}`, { teamId, fetchFn, signal }),
     listTrash: (cursor) => get(`/v1/threads/trash${query({ cursor })}`),
-    listPinned: () => get(`/v1/threads/pinned${query({ limit: ORGANIZED_PAGE })}`),
+    listPinned: (folder) => get(`/v1/threads/pinned${query({ folder, limit: ORGANIZED_PAGE })}`),
     listArchived: () => get(`/v1/threads/archived${query({ limit: ORGANIZED_PAGE })}`),
     listShared: () => get(`/v1/threads/shared${query({ limit: ORGANIZED_PAGE })}`),
     organizeThread: (id, action) => send("POST", `/v1/threads/${enc(id)}/${action}`),

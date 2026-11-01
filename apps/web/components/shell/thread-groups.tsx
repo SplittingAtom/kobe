@@ -1,8 +1,22 @@
 "use client";
 
 import { useAuiState } from "@assistant-ui/react";
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { groupThreads, placementOf, type ThreadGroup } from "../../lib/chat/thread-groups";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+import type { PanelNode } from "../../lib/chat/folder-tree";
+import {
+  groupThreads,
+  placementOf,
+  type ListedThread,
+  type ThreadGroup,
+} from "../../lib/chat/thread-groups";
 import { createProjectsApi } from "../../lib/projects/api";
 import { useChatSession } from "../chat/kobe-runtime";
 import { useListedThreads } from "./use-listed-threads";
@@ -56,9 +70,18 @@ function useProjectNames(teamId: string, ids: string, fetchFn: typeof fetch | un
 }
 
 export interface ThreadGroupsApi {
-  /** The rail's groups in its order (CE5): what the rail shows and Mod+[ / Mod+] step through. */
+  /**
+   * The chosen node's groups in the rail's order (CE5, KOBE-536 TF6): `Current`'s, or the chosen
+   * folder's; what the Threads panel shows and Mod+[ / Mod+] step through. Never Archived or
+   * Trash (the tree's own nodes).
+   */
   readonly groups: readonly ThreadGroup[];
   readonly projects: ProjectNames;
+  /** The node chosen in the Threads panel (TF7; in memory per tab). */
+  readonly node: PanelNode;
+  /** Every listed thread (not Trash) with its placement, and Trash. */
+  readonly listed: readonly ListedThread[];
+  readonly trashIds: readonly string[];
 }
 
 const ThreadGroupsContext = createContext<ThreadGroupsApi | null>(null);
@@ -84,12 +107,19 @@ export function ThreadGroupsProvider({
     .sort()
     .join(",");
   const projects = useProjectNames(session.teamId, projectIds, fetchFn);
+  const memory = session.panelMemory;
+  useSyncExternalStore(memory.subscribe, memory.getVersion, memory.getVersion);
+  const node = memory.node;
+  const folderId = node.kind === "folder" ? node.id : null;
   const value = useMemo(
     () => ({
-      groups: groupThreads(listed, trashIds, (id) => projects.names.get(id)),
+      groups: groupThreads(listed, trashIds, (id) => projects.names.get(id), { folderId }),
       projects,
+      node,
+      listed,
+      trashIds,
     }),
-    [listed, trashIds, projects],
+    [listed, trashIds, projects, node, folderId],
   );
   return <ThreadGroupsContext.Provider value={value}>{children}</ThreadGroupsContext.Provider>;
 }

@@ -4,7 +4,14 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
-import { chatRequests, openApp, openRowMenu, openThreads, threadGroup } from "./testing";
+import {
+  chatRequests,
+  chooseNode,
+  openApp,
+  openRowMenu,
+  openThreads,
+  threadGroup,
+} from "./testing";
 
 /**
  * KOBE-466: a thread row in the Threads panel shows a trash icon on hover and keyboard focus that
@@ -103,7 +110,7 @@ describe("thread row trash icon (KOBE-466)", () => {
     const panel = await openThreads();
     await within(panel).findByRole("button", { name: "Actions for Theirs" });
     expect(within(panel).queryByRole("button", { name: "Move Theirs to Trash" })).toBeNull();
-    await userEvent.setup().click(within(panel).getByRole("button", { name: "Trash" }));
+    await chooseNode("Deleted");
     const trash = within(await threadGroup("Trash"));
     await trash.findByRole("button", { name: "Restore Old plan" });
     expect(trash.queryByRole("button", { name: /to Trash$/u })).toBeNull();

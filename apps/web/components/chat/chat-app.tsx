@@ -306,6 +306,11 @@ function ChatWorkspace({
     () => session.onThreadListChanged(() => void runtime.threads.reload()),
     [session, runtime],
   );
+  // Another folder chosen in the Threads panel (KOBE-536): the list reads that folder's threads.
+  useEffect(
+    () => session.panelMemory.onFolderChange(() => void runtime.threads.reload()),
+    [session, runtime],
+  );
   const aui = useAui({ suggestions: Suggestions(STARTER_SUGGESTIONS) });
   const panel = panelOfPath(pathname);
   const threadsPanel: Panel | undefined = panel?.id === "threads" ? panel : undefined;

@@ -42,6 +42,21 @@ export function metadataOf(thread: ThreadSummary, provisional?: string): RemoteT
   };
 }
 
+/** `GET /v1/threads?folder=none`: the member's own threads in no folder (`Current`). */
+const NOT_FILED = "none";
+
+/** A page cursor with the list it pages: `<folder>:<server cursor>`. */
+function joinCursor(folder: string, cursor: string | null): string | undefined {
+  return cursor === null ? undefined : `${folder}:${cursor}`;
+}
+
+function splitCursor(cursor: string): { readonly folder: string; readonly inner: string } {
+  const at = cursor.indexOf(":");
+  return at < 0
+    ? { folder: NOT_FILED, inner: cursor }
+    : { folder: cursor.slice(0, at), inner: cursor.slice(at + 1) };
+}
+
 type GenerateTitle = RemoteThreadListAdapter["generateTitle"];
 
 export interface ThreadListAdapterOptions {
@@ -68,19 +83,37 @@ export function createThreadListAdapter(
     async list(params) {
       const cursor = params?.after;
       if (cursor !== undefined) {
-        const page = await unwrap(api.listThreads(cursor));
-        return { threads: page.threads.map(meta), nextCursor: page.nextCursor ?? undefined };
+        // The cursor names the list it pages: `Current`'s unfiled threads or one folder's (TF5).
+        const { folder, inner } = splitCursor(cursor);
+        const page = await unwrap(api.listThreads(inner, folder));
+        return {
+          threads: page.threads.map(meta),
+          nextCursor: joinCursor(folder, page.nextCursor),
+        };
       }
       // CE19: the activity list leaves pinned and archived threads out; their own lists (first
       // page, newest first) frame it, so no thread is listed twice when more pages load. The
       // activity list is the member's own: others' shared threads come from their list (CE20).
-      const [pinned, page, shared, archived, trash] = await Promise.all([
-        unwrap(api.listPinned()),
-        unwrap(api.listThreads()),
+      // KOBE-536 (TF6): `Current` holds the unfiled ones; the folder chosen in the Threads panel
+      // adds its own lists (its pinned and its readable threads, shared ones included).
+      const folderId = session.panelMemory.folderId;
+      const [pinned, page, shared, archived, trash, folderPinned, folderPage] = await Promise.all([
+        unwrap(api.listPinned(NOT_FILED)),
+        unwrap(api.listThreads(undefined, NOT_FILED)),
         unwrap(api.listShared()),
         unwrap(api.listArchived()),
         unwrap(api.listTrash()),
+        folderId === null ? null : unwrap(api.listPinned(folderId)),
+        folderId === null ? null : unwrap(api.listThreads(undefined, folderId)),
       ]);
+      // A shared thread filed in the folder is in both /shared and the folder's list: once.
+      const seen = new Set<string>();
+      const once = (t: ThreadSummary) => {
+        if (seen.has(t.threadId)) return false;
+        seen.add(t.threadId);
+        return true;
+      };
+      const paged = folderPage ?? page;
       return {
         threads: [
           ...pinned.threads,
@@ -88,8 +121,13 @@ export function createThreadListAdapter(
           ...shared.threads,
           ...archived.threads,
           ...trash.threads,
-        ].map(meta),
-        nextCursor: page.nextCursor ?? undefined,
+          ...(folderPinned?.threads ?? []),
+          ...(folderPage?.threads ?? []),
+        ]
+          .filter(once)
+          .map(meta),
+        // Load more pages the list on screen: the folder's when one is chosen.
+        nextCursor: joinCursor(folderId ?? NOT_FILED, paged.nextCursor),
       };
     },
 

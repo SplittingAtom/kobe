@@ -15,6 +15,7 @@ import {
   openThreads,
   closeThreads,
   threadGroup,
+  chooseNode,
 } from "./testing";
 import { must } from "../../lib/testing/must";
 
@@ -145,7 +146,8 @@ describe("thread list (RemoteThreadListAdapter)", () => {
       path: `/v1/threads/${t}`,
       team: fake.teamId,
     });
-    await user.click(screen.getByRole("button", { name: "Trash" }));
+    // Trash is the tree's Deleted node (KOBE-536).
+    await chooseNode("Deleted");
     expect(screen.getByText("Threads in Trash are deleted for good after 30 days.")).toBeTruthy();
     const trash = within(await threadGroup("Trash"));
     // Trash rows keep their own two actions, no menu.
@@ -165,7 +167,7 @@ describe("thread list (RemoteThreadListAdapter)", () => {
     await trashFromMenu(user, "Old plan");
     await waitFor(() => expect(fake.threads.get(t)?.deleted_at).not.toBeNull());
     expect(confirm).not.toHaveBeenCalled(); // Trash is undoable: only Delete forever asks
-    await user.click(screen.getByRole("button", { name: "Trash" }));
+    await chooseNode("Deleted");
     const trash = within(await threadGroup("Trash"));
     // Cancelled: nothing is sent.
     await user.click(await trash.findByRole("button", { name: "Delete Old plan forever" }));
@@ -178,8 +180,8 @@ describe("thread list (RemoteThreadListAdapter)", () => {
       path: `/v1/threads/${t}/purge`,
       team: fake.teamId,
     });
-    // An empty Trash is hidden (CE5).
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Trash" })).toBeNull());
+    // An empty Trash says so (KOBE-536: the Deleted node stays in the tree).
+    expect(await screen.findByText("Trash is empty.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Delete Old plan forever" })).toBeNull();
   });
 

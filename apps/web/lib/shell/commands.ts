@@ -27,8 +27,10 @@ import {
   EllipsisIcon,
   EllipsisVerticalIcon,
   ExternalLinkIcon,
+  FolderDownIcon,
   FolderIcon,
   FolderInputIcon,
+  FolderPlusIcon,
   FolderKanbanIcon,
   GitForkIcon,
   InfoIcon,
@@ -95,6 +97,8 @@ export type CommandScope =
   | "artifact"
   | "thread-menu"
   | "file-menu"
+  /** A folder node's ⋯ menu in the Threads panel's tree (KOBE-536, TF7). */
+  | "folder-menu"
   /** Keyboard and palette only (CE23, KOBE-225): no icon of its own on screen. */
   | "app";
 
@@ -353,6 +357,16 @@ const LIST = [
     slash: "move",
     arg: "project",
   },
+  // Save to folder (KOBE-536, TF8): a submenu of the team's folders; readers may file too (TF3).
+  {
+    id: "save-to-folder",
+    name: "Save to folder",
+    icon: FolderDownIcon,
+    scope: "thread-menu",
+    slash: "folder",
+    arg: "folder",
+    readOnlySafe: true,
+  },
   {
     id: "archive-thread",
     name: "Archive",
@@ -396,6 +410,12 @@ const LIST = [
   },
   // Delete moves the thread to Trash (D18): undoable, so no confirm (Delete forever asks).
   { id: "trash-thread", name: "Delete", icon: Trash2Icon, scope: "thread-menu" },
+  // A folder node's menu in the Threads panel's tree (KOBE-536, TF7); the button names the folder.
+  { id: "folder-node-actions", name: "Folder actions", icon: EllipsisIcon, scope: "rail" },
+  { id: "rename-folder", name: "Rename", icon: PencilIcon, scope: "folder-menu" },
+  { id: "new-subfolder", name: "New folder inside", icon: FolderPlusIcon, scope: "folder-menu" },
+  { id: "move-folder", name: "Move to…", icon: FolderInputIcon, scope: "folder-menu" },
+  { id: "delete-folder", name: "Delete", icon: Trash2Icon, scope: "folder-menu" },
   // A Files row's menu (KOBE-292). Rename (also F2 in the tree) and Move to… (the keyboard way to
   // move, beside drag and drop) use the workspace move API (KOBE-304).
   { id: "open-file", name: "Open", icon: ExternalLinkIcon, scope: "file-menu" },

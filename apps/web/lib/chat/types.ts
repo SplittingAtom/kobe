@@ -99,6 +99,11 @@ export interface ThreadSummary {
    */
   readonly pinnedAt?: string | null;
   readonly archivedAt?: string | null;
+  /**
+   * The team folder the thread is filed in (KOBE-534/536, TF2); null or absent = not filed, in
+   * `Current`. Sent to every reader.
+   */
+  readonly folderId?: string | null;
   readonly leafEntryId: string | null;
   readonly lastActivityAt: string;
   readonly createdAt: string;

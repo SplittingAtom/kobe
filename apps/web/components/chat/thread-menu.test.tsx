@@ -67,6 +67,7 @@ describe("thread row menu (KOBE-292)", () => {
       "Regenerate with",
       "Pin",
       "Move to project",
+      "Save to folder…",
       "Archive",
       "Share",
       "Make a skill from this",

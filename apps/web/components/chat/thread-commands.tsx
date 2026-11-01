@@ -161,6 +161,7 @@ const DRAFT_IDS = [
   "regenerate-thread-with",
   "pin-thread",
   "move-thread",
+  "save-to-folder",
   "archive-thread",
   "share-thread",
   "stop",

@@ -84,9 +84,15 @@ function followRow(threadId: string, group: "pinned" | "archived" | null) {
     const active = document.activeElement;
     const lost = active === null || active === document.body;
     if (lost) {
-      const toggle = group
-        ? document.querySelector<HTMLElement>(`[data-group="${group}"] button[aria-expanded]`)
-        : null;
+      // An archived row left the list for the tree's Archived node (KOBE-536): the focus goes
+      // there, or to Current while Archived is folded inside it.
+      const toggle =
+        group === "archived"
+          ? (document.querySelector<HTMLElement>('[data-kobe-node="archived"]') ??
+            document.querySelector<HTMLElement>('[data-kobe-node="current"]'))
+          : group
+            ? document.querySelector<HTMLElement>(`[data-group="${group}"] button[aria-expanded]`)
+            : null;
       const target = rowButton(threadId) ?? toggle;
       if (target) return target.focus();
     } else if (active !== origin) return;
