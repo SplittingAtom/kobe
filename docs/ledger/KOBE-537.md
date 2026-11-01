@@ -1,6 +1,6 @@
 # KOBE-537: Threads: Browser check and ledger (TLF-6)
 
-- **Status:** in review (specs run against gate1 on `local-f5a5575c1486`; the owner folder test found a web bug, fixed here; re-run after this PR is deployed)
+- **Status:** done (PR #444 merged, main 688f4360; both specs passed on gate1 at `local-688f4360c7f5`)
 - **Branch / worktree:** `kobe-537-browser-checks` in `../Kobe-wt537`
 - **Depends on:** KOBE-535 (lineage strip), KOBE-536 (Threads panel with two rails)
 
@@ -46,7 +46,8 @@ together for the first time.
   stayed off screen until the next list read (the unit test deleted from the folder's own node, which
   changed the node). Fixed in this PR: `session.removeFolder` re-reads the list and tells the other
   tabs (`threads-folders.test.tsx` "deleting a folder while Current is chosen…" was red first).
-  Re-run of both specs after the deploy: pending (recorded in docs/RUN-LEDGER.md).
+  Re-run after the deploy of `local-688f4360c7f5` (2026-11-01): `thread-folders` (owner, second
+  member) and `thread-lineage` passed, 4 passed in 1.0 min.
 - Commands:
   `npx playwright test thread-folders` and `npx playwright test thread-lineage` in `e2e/browser`
   with `KOBE_BASE_URL`, `KOBE_USER`, `KOBE_PW` (and `KOBE_USER2`, `KOBE_PW2` for test 2).
