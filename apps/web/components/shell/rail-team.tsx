@@ -1,18 +1,19 @@
 "use client";
 
 import { Popover } from "radix-ui";
-import { TeamList, TeamMenu, teamInitials, type MyTeamsState } from "../../app/team-switcher";
+import { TeamList, teamInitials, type MyTeamsState } from "../../app/team-switcher";
 import { roleLabel } from "../../lib/teams";
 import { chatPortalContainer } from "../ui/chat-portal";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import styles from "./rail.module.css";
-import shellStyles from "./shell.module.css";
 
 /**
  * The rail's team selector (KOBE-419; the bar's top-left switcher before): the active team's name,
  * a menu of the member's teams with their roles when they are in more than one (switching sets the
  * active team and reloads), its plain name otherwise. The name truncates, with all of it as the
- * tooltip, so the line's buttons never wrap or clip.
+ * tooltip, so the line's buttons never wrap or clip. The slot clips (KOBE-419 review S1), so the
+ * list opens in a popover in the chat portal, like the collapsed rail's (KOBE-538); Escape closes
+ * it and returns focus to the name.
  */
 export function RailTeam({
   teams,
@@ -24,18 +25,27 @@ export function RailTeam({
 }) {
   const { my, switchTo } = teams;
   if (my !== null && my.teams.length > 1) {
+    const active = my.teams.find((t) => t.id === my.activeTeamId);
     return (
       <div className={styles.teamSlot}>
-        <TeamMenu
-          my={my}
-          switchTo={switchTo}
-          classes={{
-            nav: `${shellStyles.menu} ${styles.teamMenu}`,
-            summary: styles.teamSummary,
-            name: styles.team,
-            list: `${shellStyles.menuList} ${styles.teamList}`,
-          }}
-        />
+        <nav aria-label="Teams" className={styles.teamMenu}>
+          <Popover.Root>
+            <Popover.Trigger className={styles.teamSummary} title={active?.name}>
+              <span className={styles.team}>{active ? active.name : "Choose a team"}</span>
+              {active && <small> · {roleLabel(active.role)}</small>}
+            </Popover.Trigger>
+            <Popover.Portal container={chatPortalContainer()}>
+              <Popover.Content
+                side="bottom"
+                align="start"
+                sideOffset={4}
+                className={styles.teamPopover}
+              >
+                <TeamList my={my} switchTo={switchTo} label="Your teams" />
+              </Popover.Content>
+            </Popover.Portal>
+          </Popover.Root>
+        </nav>
       </div>
     );
   }

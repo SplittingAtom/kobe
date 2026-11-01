@@ -134,7 +134,8 @@
   align-items: center;
 }
 
-/* The team menu in the line: its summary holds the truncating name and the role. */
+/* The team menu in the line: its trigger holds the truncating name and the role; the list opens
+   in a popover (.teamPopover) because the slot clips (KOBE-538). */
 .teamMenu {
   min-width: 0;
 }
@@ -144,7 +145,14 @@
   gap: 0.25rem;
   align-items: baseline;
   min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: start;
   cursor: pointer;
+  background: none;
+  border: 0;
   list-style: none;
 }
 
@@ -179,13 +187,6 @@
   .teamSummary small {
     display: none;
   }
-}
-
-.teamMenu .teamList {
-  right: auto;
-  left: 0;
-  min-width: 0;
-  max-width: min(18rem, 85vw);
 }
 
 /* The collapsed rail's team (review S2): its initials in a 32 px square, with a menu of teams

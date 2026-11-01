@@ -332,10 +332,10 @@ describe("bar menus", () => {
     must(
       document.querySelector('summary[aria-label="Profile"]')?.closest("details"),
     ) as HTMLDetailsElement;
-  const teams = async () =>
-    must(
-      (await screen.findByRole("navigation", { name: "Teams" })).querySelector("details"),
-    ) as HTMLDetailsElement;
+  /** The rail's team selector (KOBE-538: a popover, not a disclosure). */
+  const teamTrigger = async () =>
+    within(await screen.findByRole("navigation", { name: "Teams" })).getByRole("button");
+  const teamList = () => screen.queryByRole("list", { name: "Your teams" });
 
   it("closes the profile menu on a click outside and on Escape", async () => {
     openApp(fake);
@@ -357,11 +357,14 @@ describe("bar menus", () => {
     fake.otherTeams.push({ id: "t-2", slug: "ops", name: "Operations", role: "member" });
     openApp(fake);
     await composer();
-    const switcher = await teams();
+    const user = userEvent.setup();
+    const trigger = await teamTrigger();
     profile().open = true;
-    switcher.open = true; // e.g. from the keyboard: no click outside involved
+    await user.click(trigger);
     await waitFor(() => expect(profile().open).toBe(false));
-    profile().open = true;
-    await waitFor(() => expect(switcher.open).toBe(false));
+    expect(teamList()).not.toBeNull();
+    await user.click(must(profile().querySelector("summary")));
+    await waitFor(() => expect(teamList()).toBeNull());
+    expect(profile().open).toBe(true);
   });
 });

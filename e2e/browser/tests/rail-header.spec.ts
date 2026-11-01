@@ -54,9 +54,8 @@ test("the top line: team, Threads, Files, Team console (admins), collapse (ac-1,
     "href",
     "/admin/team",
   );
-  // One line: every control on it shares a centre. Only the ones on screen: with several teams
-  // the selector's closed menu holds a button per team, laid out below the line but not shown
-  // (KOBE-457).
+  // One line: every control on it shares a centre. Only the ones on screen (KOBE-457); the
+  // selector's list opens in a popover outside the line (KOBE-538).
   const ys = await line.evaluate((el) =>
     [...el.querySelectorAll<HTMLElement>("button, a, summary")]
       .filter((c) => c.checkVisibility())
@@ -76,6 +75,80 @@ test("the top line: team, Threads, Files, Team console (admins), collapse (ac-1,
   await panel.getByRole("button", { name: "Close Team console" }).click();
   await expect(panel).toHaveCount(0);
   await expect(teamConsole).toBeFocused();
+});
+
+/** The rail line's team selector trigger (several teams): the active team's name and role. */
+function teamTrigger(line: Locator): Locator {
+  return line.getByRole("navigation", { name: "Teams" }).getByRole("button");
+}
+
+/** The active team's name: the trigger's title (its text also carries the role). */
+async function activeTeam(line: Locator): Promise<string> {
+  return (await teamTrigger(line).getAttribute("title")) ?? "";
+}
+
+/** A team button's name: its text before the role label (`<small>`). */
+async function teamName(button: Locator): Promise<string> {
+  return button.evaluate((el) => (el.firstChild?.textContent ?? "").trim());
+}
+
+/** Opens the selector and picks the team named `name`, waiting for the reload under it. */
+async function switchTeam(page: Page, line: Locator, name: string): Promise<void> {
+  await teamTrigger(line).click();
+  const list = page.getByRole("list", { name: "Your teams" });
+  await expect(list).toBeVisible();
+  const buttons = list.getByRole("button");
+  let target: Locator | undefined;
+  for (const b of await buttons.all()) {
+    if ((await teamName(b)) === name) target = b;
+  }
+  if (!target) throw new Error(`no team named ${name} in the list`);
+  await Promise.all([page.waitForEvent("load", { timeout: SHELL_TIMEOUT_MS }), target.click()]);
+  await expect(teamTrigger(line)).toHaveAttribute("title", name, { timeout: SHELL_TIMEOUT_MS });
+}
+
+test("switching teams from the top line (KOBE-538)", async ({ chat, page }) => {
+  await chat.open();
+  const line = chat.railHeader;
+  const nav = line.getByRole("navigation", { name: "Teams" });
+  const heading = line.getByRole("heading", { level: 2 });
+  await expect(nav.or(heading)).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  if ((await nav.count()) === 0) {
+    // One team: no switcher, the plain name with all of it as the tooltip.
+    await expect(heading).toBeVisible();
+    const name = ((await heading.textContent()) ?? "").trim();
+    expect(name).not.toBe("");
+    await expect(heading).toHaveAttribute("title", name);
+    return;
+  }
+  const trigger = teamTrigger(line);
+  const original = await activeTeam(line);
+  expect(original).not.toBe("");
+  try {
+    // The list opens outside the clipped slot, every team visible; the active one disabled.
+    await trigger.click();
+    const list = page.getByRole("list", { name: "Your teams" });
+    await expect(list).toBeVisible();
+    const buttons = await list.getByRole("button").all();
+    expect(buttons.length).toBeGreaterThanOrEqual(2);
+    let target = "";
+    for (const b of buttons) {
+      await expect(b).toBeVisible();
+      const name = await teamName(b);
+      if (name === original) await expect(b).toBeDisabled();
+      else if (target === "" && (await b.isEnabled())) target = name;
+    }
+    expect(target).not.toBe("");
+    await shoot(page, "rail-team-menu", page.locator('[data-shell-region="rail"]'));
+    // Escape closes it and returns focus to the name.
+    await page.keyboard.press("Escape");
+    await expect(list).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await switchTeam(page, line, target);
+    expect(await activeTeam(line)).not.toBe(original);
+  } finally {
+    if ((await activeTeam(line)) !== original) await switchTeam(page, line, original);
+  }
 });
 
 test("Threads opens its panel; the Files toggle hides Files and is saved (KOBE-453)", async ({
