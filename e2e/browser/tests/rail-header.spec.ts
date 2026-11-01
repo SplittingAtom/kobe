@@ -82,43 +82,65 @@ function teamTrigger(line: Locator): Locator {
   return line.getByRole("navigation", { name: "Teams" }).getByRole("button");
 }
 
-/** Opens the selector and picks `name`, waiting for the reload under it. */
+/** The active team's name: the trigger's title (its text also carries the role). */
+async function activeTeam(line: Locator): Promise<string> {
+  return (await teamTrigger(line).getAttribute("title")) ?? "";
+}
+
+/** A team button's name: its text before the role label (`<small>`). */
+async function teamName(button: Locator): Promise<string> {
+  return button.evaluate((el) => (el.firstChild?.textContent ?? "").trim());
+}
+
+/** Opens the selector and picks the team named `name`, waiting for the reload under it. */
 async function switchTeam(page: Page, line: Locator, name: string): Promise<void> {
   await teamTrigger(line).click();
   const list = page.getByRole("list", { name: "Your teams" });
   await expect(list).toBeVisible();
-  await Promise.all([
-    page.waitForEvent("load", { timeout: SHELL_TIMEOUT_MS }),
-    list.getByRole("button", { name: new RegExp(`^${name}\\b`) }).click(),
-  ]);
-  await expect(teamTrigger(line)).toContainText(name, { timeout: SHELL_TIMEOUT_MS });
+  const buttons = list.getByRole("button");
+  let target: Locator | undefined;
+  for (const b of await buttons.all()) {
+    if ((await teamName(b)) === name) target = b;
+  }
+  if (!target) throw new Error(`no team named ${name} in the list`);
+  await Promise.all([page.waitForEvent("load", { timeout: SHELL_TIMEOUT_MS }), target.click()]);
+  await expect(teamTrigger(line)).toHaveAttribute("title", name, { timeout: SHELL_TIMEOUT_MS });
 }
 
 test("switching teams from the top line (KOBE-538)", async ({ chat, page }) => {
-  // The gate1 owner is in Team1 and Skill Registry.
   await chat.open();
   const line = chat.railHeader;
+  const nav = line.getByRole("navigation", { name: "Teams" });
+  const heading = line.getByRole("heading", { level: 2 });
+  await expect(nav.or(heading)).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  test.skip((await nav.count()) === 0, "the member is in one team only: no switcher to open");
   const trigger = teamTrigger(line);
-  await expect(trigger).toContainText("Team1", { timeout: SHELL_TIMEOUT_MS });
+  const original = await activeTeam(line);
+  expect(original).not.toBe("");
   try {
-    // The list opens outside the clipped slot, every team visible and clickable.
+    // The list opens outside the clipped slot, every team visible; the active one disabled.
     await trigger.click();
     const list = page.getByRole("list", { name: "Your teams" });
     await expect(list).toBeVisible();
-    await expect(list.getByRole("button", { name: /^Team1\b/ })).toBeVisible();
-    await expect(list.getByRole("button", { name: /^Team1\b/ })).toBeDisabled();
-    await expect(list.getByRole("button", { name: /^Skill Registry\b/ })).toBeVisible();
+    const buttons = await list.getByRole("button").all();
+    expect(buttons.length).toBeGreaterThanOrEqual(2);
+    let target = "";
+    for (const b of buttons) {
+      await expect(b).toBeVisible();
+      const name = await teamName(b);
+      if (name === original) await expect(b).toBeDisabled();
+      else if (target === "" && (await b.isEnabled())) target = name;
+    }
+    expect(target).not.toBe("");
     await shoot(page, "rail-team-menu", page.locator('[data-shell-region="rail"]'));
     // Escape closes it and returns focus to the name.
     await page.keyboard.press("Escape");
     await expect(list).toHaveCount(0);
     await expect(trigger).toBeFocused();
-    await switchTeam(page, line, "Skill Registry");
-    await expect(trigger).not.toContainText("Team1");
+    await switchTeam(page, line, target);
+    expect(await activeTeam(line)).not.toBe(original);
   } finally {
-    if (!((await trigger.textContent()) ?? "").includes("Team1")) {
-      await switchTeam(page, line, "Team1");
-    }
+    if ((await activeTeam(line)) !== original) await switchTeam(page, line, original);
   }
 });
 
