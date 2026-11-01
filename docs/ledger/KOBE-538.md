@@ -27,7 +27,7 @@ holds the same `TeamList` the collapsed rail's icon uses.
 ## Open questions (for Chris or the coordinator)
 
 - ac-1 needs the browser run against gate1 (coordinator): `e2e/browser/tests/rail-header.spec.ts`
-  "switching teams from the top line (KOBE-538)" switches to the first other team and back (skips with one team)
+  "switching teams from the top line (KOBE-538)" switches to the first other team and back (with one team, checks the plain name)
   (in `finally`), attaching `rail-team-menu-{light,dark}.png`.
 
 ## Evidence (acceptance criteria → test or command output)

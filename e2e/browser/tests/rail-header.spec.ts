@@ -113,7 +113,14 @@ test("switching teams from the top line (KOBE-538)", async ({ chat, page }) => {
   const nav = line.getByRole("navigation", { name: "Teams" });
   const heading = line.getByRole("heading", { level: 2 });
   await expect(nav.or(heading)).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
-  test.skip((await nav.count()) === 0, "the member is in one team only: no switcher to open");
+  if ((await nav.count()) === 0) {
+    // One team: no switcher, the plain name with all of it as the tooltip.
+    await expect(heading).toBeVisible();
+    const name = ((await heading.textContent()) ?? "").trim();
+    expect(name).not.toBe("");
+    await expect(heading).toHaveAttribute("title", name);
+    return;
+  }
   const trigger = teamTrigger(line);
   const original = await activeTeam(line);
   expect(original).not.toBe("");
