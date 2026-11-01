@@ -21,7 +21,10 @@ Hadron via `scripts/hadron.sh`.
   passed for the second member and failed for the owner at Delete: with Current chosen, the threads
   the server took back stayed off screen until the next list read (the web client only refreshed the
   folder store). Fixed in the KOBE-537 PR (`session.removeFolder` re-reads the list and tells other
-  tabs; unit test first); both specs re-run after its deploy — result below once recorded. KOBE-538
+  tabs; unit test first), PR #444 (one queue rerun: gate4's U1 invite call failed on the runner's
+  network). Deployed as `local-688f4360c7f5` (Helm rev 109; rollback `local-f5a5575c1486`;
+  `local-114565d7ceb5` pruned), reconcile failed:0; both specs then passed on gate1 (owner and second
+  member folder tests, three-generation lineage: 4 passed in 1.0 min). Lane done. KOBE-538
   (Chris, same day: the team name in the upper left did nothing — the list was clipped by the slot's
   `overflow: hidden` from the KOBE-419 review fix): the switcher is a portalled popover, PR #441, its
   spec passed on gate1. The merge queue tripped three times on the e2e suite's Bifrost restart check
