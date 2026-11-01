@@ -9,6 +9,14 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Thread lineage and folders lane (2026-11-01, spec by Chris's decisions of 2026-10-31):**
+  `docs/specs/thread-lineage-and-folders.md` (Hadron spec 71dcf77b): a lineage strip at the top of the
+  conversation column replaces the "Forked from" note (root first, one linked row per generation, dropdowns
+  for siblings and forks; `GET /v1/threads/{id}/lineage`, readable threads only), and team-visible thread
+  folders (3 levels, 500 per team, `thread_folders` + `threads.folder_id`, filing by owner or D23 reader,
+  audited) with a two-rail Threads panel (Current with Archived folded under it, folders, Deleted). Tickets
+  KOBE-532 (protocol) → 533/534 → 535/536 → 537 (browser specs); lane brief with the kickoff prompt in
+  `docs/ledger/thread-lineage-folders-lane.md`. Nothing started yet.
 - **App placement lane (2026-10-31, Chris: a site admin decides where an MCP app opens):** KOBE-531 filed
   and merged as PR #431 (main 114565d7). Per pinned template, `connector_ui_resources.placement` is `chat`
   (the card, default), `artifacts` (the card is the "Opened in the side column" stub and the app opens in the
