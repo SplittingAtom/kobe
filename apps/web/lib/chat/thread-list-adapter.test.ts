@@ -87,7 +87,10 @@ describe("thread list adapter", () => {
   });
 
   it("maps rename, Trash, restore and Delete forever; reports failures", async () => {
-    const { fake, adapter, errors } = setup();
+    const { fake, adapter, errors, session } = setup();
+    // Trash, restore and Delete forever tell the lineage strip to read again (KOBE-535, TL4).
+    let trashSignals = 0;
+    session.onThreadTrashChanged(() => (trashSignals += 1));
     const t = fake.addThread("X");
     await adapter.rename(t, "  Y  ");
     expect(fake.threads.get(t)?.title).toBe("Y");
@@ -104,6 +107,7 @@ describe("thread list adapter", () => {
       "No thread with that id.",
     );
     expect(errors.map((e) => e.code)).toEqual(["not_in_trash", "thread_not_found"]);
+    expect(trashSignals).toBe(4);
   });
 });
 

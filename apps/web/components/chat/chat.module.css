@@ -210,8 +210,8 @@
   border-radius: var(--kobe-radius-lg);
 }
 
-/* "Forked from <thread> at <message>" above a fork's conversation (KOBE-216). */
-.forkOrigin {
+/* A row of the lineage strip above a fork's conversation (KOBE-216, KOBE-535). */
+.lineageRow {
   display: flex;
   align-items: baseline;
   gap: 0.375rem;

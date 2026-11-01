@@ -69,6 +69,8 @@ interface FakeThread {
   forked_from_thread_id?: string | null;
   forked_from_title?: string | null;
   forked_at_entry_id?: string | null;
+  /** The source was deleted forever (the key nulled): the lineage shows no hidden root (TL1). */
+  forked_from_purged?: boolean;
   entries: FakeEntry[];
 }
 
@@ -1764,6 +1766,7 @@ export class FakeKobe {
       return new Response(null, { status: 204 });
     }
     if (action === "card" && method === "GET") return json(200, this.#card(thread));
+    if (action === "lineage" && method === "GET") return json(200, this.#lineage(thread));
     if (action === "files" && method === "GET") {
       this.threadFilesReads += 1;
       if (this.threadFilesHidden.has(thread.thread_id)) {
@@ -1821,6 +1824,61 @@ export class FakeKobe {
       return json(200, this.#threadRuns(thread.thread_id));
     }
     return error(404, "not_found");
+  }
+
+  /**
+   * `GET /v1/threads/{id}/lineage` (TL1, KOBE-533), like the server: up the readable sources
+   * (`forked_from_thread_id`), root first; a fork whose source is unnamed has a hidden root unless
+   * `forked_from_purged`; siblings and forks newest activity first.
+   */
+  #lineage(thread: FakeThread): Json {
+    const all = [...this.threads.values()].filter((t) => t.is_test !== true);
+    const forksOf = (id: string) =>
+      all
+        .filter((t) => t.forked_from_thread_id === id)
+        .sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at))
+        .map((t) => ({
+          thread_id: t.thread_id,
+          title: t.title,
+          deleted_at: t.deleted_at,
+          owner: t.read_only === true ? "other" : "me",
+        }));
+    const parentOf = (t: FakeThread) =>
+      t.forked_from_thread_id ? this.threads.get(t.forked_from_thread_id) : undefined;
+    const siblings = (t: FakeThread) => {
+      const parent = parentOf(t);
+      return parent ? forksOf(parent.thread_id) : [];
+    };
+    const path: FakeThread[] = [];
+    let top: FakeThread = thread;
+    for (let p = parentOf(thread); p && path.length < 20; p = parentOf(p)) {
+      path.unshift(p);
+      top = p;
+    }
+    const rootHidden =
+      !top.forked_from_thread_id &&
+      top.forked_at_entry_id != null &&
+      top.forked_from_purged !== true;
+    return {
+      thread_id: thread.thread_id,
+      root_hidden: rootHidden,
+      ancestors: path.map((a) => ({
+        thread_id: a.thread_id,
+        title: a.title,
+        deleted_at: a.deleted_at,
+        siblings: siblings(a),
+        siblings_more: false,
+      })),
+      self: {
+        thread_id: thread.thread_id,
+        title: thread.title,
+        forked_at_entry_id: thread.forked_at_entry_id ?? null,
+        siblings: siblings(thread),
+        siblings_more: false,
+      },
+      forks: forksOf(thread.thread_id),
+      forks_more: false,
+    };
   }
 
   /** `GET /v1/threads/{id}/card` (KOBE-219), like the server: first message, agent, count. */

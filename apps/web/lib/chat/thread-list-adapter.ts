@@ -100,14 +100,17 @@ export function createThreadListAdapter(
 
     async archive(remoteId) {
       await unwrap(api.trashThread(remoteId));
+      session.threadTrashChanged();
     },
 
     async unarchive(remoteId) {
       await unwrap(api.restoreThread(remoteId));
+      session.threadTrashChanged();
     },
 
     async delete(remoteId) {
       await unwrap(api.purgeThread(remoteId));
+      session.threadTrashChanged();
     },
 
     async initialize() {

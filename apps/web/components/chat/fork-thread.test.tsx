@@ -74,8 +74,10 @@ describe("fork to a new thread from a message (ac-1)", () => {
     // The fork ends at the chosen answer and says where it came from.
     expect(await screen.findByText("Mostly renewals.")).toBeTruthy();
     expect(screen.queryByText("Mostly people.")).toBeNull();
-    const origin = await screen.findByRole("note", { name: "Fork origin" });
-    expect(origin.textContent).toContain("Quarterly plan");
+    // The new thread's lineage strip shows its source above it, without a reload (KOBE-535 ac-4).
+    const origin = await screen.findByRole("navigation", { name: "Thread lineage" });
+    expect(within(origin).getByRole("link", { name: "Quarterly plan" })).toBeTruthy();
+    expect(within(origin).getByText("Renewals").tagName).toBe("STRONG");
   });
 
   it("keeps the dialog open with the server's refusal", async () => {
@@ -125,13 +127,13 @@ describe("fork to a new thread from a message (ac-1)", () => {
   });
 });
 
-describe("the fork's origin (ac-1, ac-3, ac-6)", () => {
+describe("the fork's origin (ac-1, ac-3, ac-6; the lineage strip since KOBE-535)", () => {
   it("names the source and the message, and links back to the source", async () => {
     const src = source();
     const fork = forkOf(src, src.a1, true);
     openApp(fake, fork);
-    const origin = await screen.findByRole("note", { name: "Fork origin" });
-    expect(origin.textContent).toMatch(/Forked from.*Quarterly plan.*at.*Mostly renewals\./);
+    const origin = await screen.findByRole("navigation", { name: "Thread lineage" });
+    expect(origin.textContent).toMatch(/Quarterly plan.*Renewals deep dive at “Mostly renewals\.”/);
     await userEvent.setup().click(within(origin).getByRole("link", { name: "Quarterly plan" }));
     await waitFor(() => expect(window.location.search).toBe(`?thread=${src.id}`));
     expect(await screen.findByText("Mostly people.")).toBeTruthy();
@@ -141,10 +143,8 @@ describe("the fork's origin (ac-1, ac-3, ac-6)", () => {
     const src = source();
     const fork = forkOf(src, src.u1, false);
     openApp(fake, fork);
-    const origin = await screen.findByRole("note", { name: "Fork origin" });
-    expect(origin.textContent).toMatch(
-      /Forked from a thread you can.t open.*What drives revenue\?/,
-    );
+    const origin = await screen.findByRole("navigation", { name: "Thread lineage" });
+    expect(origin.textContent).toMatch(/a thread you can.t open.*What drives revenue\?/);
     expect(within(origin).queryByRole("link")).toBeNull();
   });
 
@@ -152,7 +152,7 @@ describe("the fork's origin (ac-1, ac-3, ac-6)", () => {
     const src = source();
     const fork = forkOf(src, src.a1, true);
     openApp(fake, fork);
-    const origin = await screen.findByRole("note", { name: "Fork origin" });
+    const origin = await screen.findByRole("navigation", { name: "Thread lineage" });
     const link = within(origin).getByRole("link", { name: "Quarterly plan" });
     expect(link.getAttribute("href")).toBe(`/?thread=${src.id}`);
     // Record what the app did, then stop happy-dom's own navigation.
@@ -197,7 +197,8 @@ describe("the fork's origin (ac-1, ac-3, ac-6)", () => {
     const src = source();
     openApp(fake, src.id);
     await screen.findByText("Mostly people.");
-    expect(screen.queryByRole("note", { name: "Fork origin" })).toBeNull();
+    expect(chatRequests(fake, "GET").some((r) => r.path.endsWith("/lineage"))).toBe(true);
+    expect(screen.queryByRole("navigation", { name: "Thread lineage" })).toBeNull();
   });
 
   it("shows the provenance when hovering the fork in the rail", async () => {
