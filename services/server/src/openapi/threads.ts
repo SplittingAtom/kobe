@@ -2,6 +2,7 @@ import {
   fileThreadRequestSchema,
   forkThreadRequestSchema,
   shareThreadRequestSchema,
+  threadLineageResponseSchema,
 } from "@kobe/protocol";
 import { z } from "zod";
 import {
@@ -283,6 +284,24 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         },
       },
     },
+    "/v1/threads/{id}/lineage": {
+      get: {
+        operationId: "getThreadLineage",
+        summary: "The thread's family: readable ancestors root first, siblings and forks",
+        description:
+          "TL1, TL2 (KOBE-533): walks `forked_from_thread_id` up at most 20 generations; each " +
+          "sibling or fork list holds at most 50, newest activity first, with `siblings_more` / " +
+          "`forks_more` when cut. Only threads the viewer may read are named: a chain reaching " +
+          "one they cannot read stops with `root_hidden: true`; a purged ancestor is simply " +
+          "absent. The viewer's own threads in Trash carry `deleted_at`. Never wakes a sandbox.",
+        parameters: [idParameter, teamHeader],
+        responses: {
+          "200": json("ThreadLineage", "The thread's lineage."),
+          "404": notFound,
+          ...ERROR_RESPONSES,
+        },
+      },
+    },
     "/v1/threads/{id}/entries": {
       get: {
         operationId: "listThreadEntries",
@@ -513,6 +532,7 @@ export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
     ThreadSearchPage: withoutDialect(output(threadSearchPageSchema)),
     ThreadDetail: withoutDialect(output(threadDetailSchema)),
     ThreadCard: withoutDialect(output(threadCardSchema)),
+    ThreadLineage: withoutDialect(output(threadLineageResponseSchema)),
     EntryPage: withoutDialect(output(entryPageSchema)),
     ToolOutput: withoutDialect(output(toolOutputSchema)),
     CreateThreadBody: withoutDialect(input(createThreadBodySchema)),

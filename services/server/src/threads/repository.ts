@@ -206,7 +206,7 @@ export function toSummary(row: SummaryRow): ThreadSummary {
  * Rows the viewer may read: own (Trash included while restorable; older Trash is awaiting purge
  * and treated as gone), or shared with the team or to one of their projects (never from Trash).
  */
-function readableBy(viewer: Viewer): SQL {
+export function readableBy(viewer: Viewer): SQL {
   const own = sql`${eq(threads.ownerUserId, viewer.userId)} AND (${threads.deletedAt} IS NULL OR ${threads.deletedAt} > now() - ${TRASH_INTERVAL})`;
   return sql`${eq(threads.teamId, viewer.teamId)} AND (${own} OR (${sharedWith(viewer)} AND ${threads.deletedAt} IS NULL))`;
 }
