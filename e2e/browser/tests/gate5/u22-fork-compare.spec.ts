@@ -41,7 +41,11 @@ test("U22: the fork's back-link opens the source thread", async ({ chat, page })
     .poll(() => new URL(page.url()).searchParams.get("thread"), { timeout: 60_000 })
     .not.toBe(source);
   await chat.threadId();
-  await page.getByRole("note", { name: "Fork origin" }).getByRole("link").click();
+  // The lineage strip's first row (KOBE-535): the source's title, a link back to it.
+  const strip = page.getByRole("navigation", { name: "Thread lineage" });
+  const back = strip.getByRole("listitem").first().getByRole("link");
+  await expect(back).toHaveAttribute("href", new RegExp(source, "i"), { timeout: 30_000 });
+  await back.click();
   await expect
     .poll(() => new URL(page.url()).searchParams.get("thread"), { timeout: 30_000 })
     .toBe(source);
