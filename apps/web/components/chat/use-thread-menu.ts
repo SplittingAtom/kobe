@@ -14,6 +14,7 @@ import type { MenuBindings, MenuChoice } from "../../lib/shell/menu";
 import { useChatSession } from "./kobe-runtime";
 import { useThreadTeamModels, type TeamModelsLoad } from "./use-team-models";
 import { useOrganizeMenu } from "./use-organize-menu";
+import { useSaveToFolderMenu } from "./save-to-folder-menu";
 import { useShareMenu } from "./use-share-menu";
 import { useSkillMenu } from "./use-skill-menu";
 
@@ -88,7 +89,7 @@ export interface ThreadMenuInput {
  * What a thread's menu does (KOBE-292), for the thread under the current `threadListItem`: Copy
  * (the branch on screen as Markdown), Regenerate and Regenerate with (its last answer, as the
  * answer's own buttons do, after opening the thread), Pin, Move to project and Archive (CE19,
- * KOBE-220), Share (CE20, KOBE-221), the skill actions (KOBE-322) and Delete (to Trash, no
+ * KOBE-220), Save to folder (KOBE-536), Share (CE20, KOBE-221), the skill actions (KOBE-322) and Delete (to Trash, no
  * confirm: it can be undone). The rail
  * row's ⋯ menu shows them; the open thread publishes the same bindings to the `/` menu (KOBE-224).
  */
@@ -105,6 +106,14 @@ export function useThreadMenuBindings(input: ThreadMenuInput): MenuBindings {
     open,
     readOnly,
     state,
+    notify,
+  });
+  const folder = useSaveToFolderMenu({
+    threadId: threadId ?? "",
+    title,
+    custom,
+    state,
+    open,
     notify,
   });
   const share = useShareMenu({ threadId: threadId ?? "", title, custom, readOnly, state, notify });
@@ -197,6 +206,7 @@ export function useThreadMenuBindings(input: ThreadMenuInput): MenuBindings {
         }
       : {}),
     ...organize,
+    ...folder,
     ...share,
     ...skills,
     "trash-thread": { onSelect: trash, destructive: true, blocker: readOnly ? NOT_YOURS : null },

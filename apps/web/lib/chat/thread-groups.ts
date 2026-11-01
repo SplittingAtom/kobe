@@ -46,6 +46,8 @@ export interface ThreadPlacement {
   /** CE19: in the Pinned group (by pin time, the list's order), or in Archived. */
   readonly pinned: boolean;
   readonly archived: boolean;
+  /** The team folder it is filed in (KOBE-536, TF2); null = `Current`. */
+  readonly folderId: string | null;
 }
 
 export function placementCustom(thread: ThreadSummary): Record<string, unknown> {
@@ -57,6 +59,7 @@ export function placementCustom(thread: ThreadSummary): Record<string, unknown> 
     visibility: visibilityOf(thread),
     pinned: thread.pinnedAt != null,
     archived: thread.archivedAt != null,
+    folderId: thread.folderId ?? null,
   };
 }
 
@@ -72,6 +75,7 @@ export function placementOf(custom: unknown): ThreadPlacement {
     visibility: c.visibility === "project" || c.visibility === "team" ? c.visibility : "private",
     pinned: c.pinned === true,
     archived: c.archived === true,
+    folderId: typeof c.folderId === "string" ? c.folderId : null,
   };
 }
 
@@ -107,13 +111,23 @@ export interface ListedThread {
 }
 
 /**
+ * One node of the Threads panel's tree (KOBE-536, TF6): `Current` (folder null) or a folder. Its
+ * list is the standard groups of that node's unarchived threads; never Archived or Trash.
+ */
+export interface GroupScope {
+  readonly folderId: string | null;
+}
+
+/**
  * Groups the listed threads. `regular` is in list order (newest first, kept inside a group);
- * projects sort by name. `projectName` may not know a project (yet): it is then "Project".
+ * projects sort by name. `projectName` may not know a project (yet): it is then "Project". With
+ * a `scope`, only that node's unarchived threads are grouped and Trash is left out (TF6).
  */
 export function groupThreads(
   regular: readonly ListedThread[],
   trashIds: readonly string[],
   projectName: (id: string) => string | undefined,
+  scope?: GroupScope,
 ): readonly ThreadGroup[] {
   const buckets = new Map<string, ThreadGroup>();
   const add = (kind: GroupKind, projectId: string | null, thread: GroupedThread) => {
@@ -133,6 +147,7 @@ export function groupThreads(
   };
   regular.forEach(({ id, custom }, index) => {
     const placement = placementOf(custom);
+    if (scope && (placement.archived || placement.folderId !== scope.folderId)) return;
     const kind = kindOf(placement);
     add(kind, placement.projectId, { id, index });
     // CE20: shared to a project, it is also one of that project's threads.
@@ -140,7 +155,7 @@ export function groupThreads(
       add("project", placement.projectId, { id, index });
     }
   });
-  if (trashIds.length > 0) {
+  if (trashIds.length > 0 && !scope) {
     const threads = trashIds.map((id, index) => ({ id, index }));
     buckets.set("trash", { key: "trash", kind: "trash", label: LABELS.trash, threads });
   }

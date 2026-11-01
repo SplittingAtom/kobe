@@ -62,7 +62,16 @@ function Entry({
         <DropdownMenu.Portal container={chatPortalContainer()}>
           <DropdownMenu.SubContent data-kobe-portal sideOffset={4} className={CONTENT}>
             {item.choices.map((choice) => (
-              <DropdownMenu.Item key={choice.key} className={ITEM} onSelect={choice.onSelect}>
+              <DropdownMenu.Item
+                key={choice.key}
+                className={ITEM}
+                onSelect={choice.onSelect}
+                style={
+                  choice.depth
+                    ? { paddingInlineStart: `${0.5 + choice.depth * 0.75}rem` }
+                    : undefined
+                }
+              >
                 {choice.label}
                 {choice.current ? CURRENT : ""}
               </DropdownMenu.Item>

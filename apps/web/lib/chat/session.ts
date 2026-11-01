@@ -29,6 +29,9 @@ import { ThreadController } from "./thread-controller";
 import { activityOfState, ThreadActivityStore } from "./thread-activity";
 import { organizeRequest, type OrganizeChange } from "./organize";
 import type { ThreadListSync } from "./thread-list-sync";
+import { createFoldersApi } from "./folders-api";
+import { ThreadFoldersStore } from "./folders-store";
+import { ThreadsPanelMemory } from "./panel-memory";
 import type { RunnableAgent, ThreadSummary, ThreadVisibility } from "./types";
 
 export interface ChatSessionOptions {
@@ -138,6 +141,10 @@ export class ChatSession {
   }
   /** What the threads held open here are doing, live (KOBE-301: the rail's dots, the tab title). */
   readonly activity = new ThreadActivityStore();
+  /** The team's thread folders (KOBE-536, TF7): the tree, Save to folder. */
+  readonly folders: ThreadFoldersStore;
+  /** The Threads panel's chosen node and fold state, for this tab only (TF12). */
+  readonly panelMemory = new ThreadsPanelMemory();
   readonly #options: ChatSessionOptions;
   readonly #held = new Map<string, Held>();
   /** Stops following a held controller's activity. */
@@ -185,6 +192,7 @@ export class ChatSession {
     });
     this.files = createFilesApi(options.teamId, options.fetchFn);
     this.notebooks = createNotebookApi(options.teamId, options.fetchFn);
+    this.folders = new ThreadFoldersStore(createFoldersApi(options.teamId, options.fetchFn));
     this.sentFiles = new SentFileCache(this.files);
     this.fileChanges = new WorkspaceChangeFeed({
       teamId: options.teamId,
@@ -505,6 +513,20 @@ export class ChatSession {
     if (res.ok) {
       this.#listChanged(threadId);
       this.#options.listSync?.post(threadId);
+    }
+    return res;
+  }
+
+  /**
+   * Files a thread the member may read in a team folder, or takes it out of one (KOBE-536, TF3,
+   * TF8). Once saved, the list, the thread and the folder counts read again; other tabs are told.
+   */
+  async file(threadId: string, folderId: string | null): Promise<ApiResult<ThreadSummary>> {
+    const res = await this.folders.api.file(threadId, folderId);
+    if (res.ok) {
+      this.#listChanged(threadId);
+      this.#options.listSync?.post(threadId);
+      void this.folders.refresh();
     }
     return res;
   }

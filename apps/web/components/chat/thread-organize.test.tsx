@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { THREAD_DRAG_TYPE } from "../../lib/chat/organize";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
-import { openApp, openRowMenu, openThreads } from "./testing";
+import { chooseNode, openApp, openRowMenu, openThreads } from "./testing";
 
 /**
  * KOBE-220 (CE19): Pin, Archive and Move to project from a row's ⋯ menu (and Move by dragging a
@@ -90,25 +90,17 @@ describe("pin and archive (ac-1)", () => {
     await waitFor(() => expect(groups()).toEqual([["ungrouped", ["Plan", "Budget"]]]));
   });
 
-  it("archives into the folded Archived group and unarchives from it", async () => {
+  it("archives into the tree's Archived node and unarchives from it (KOBE-536)", async () => {
     fake.addThread("Budget");
     fake.addThread("Plan");
     openApp(fake);
-    await openThreads();
+    const panel = await openThreads();
     await choose("Actions for Budget", "Archive");
-    await waitFor(() =>
-      expect(groups()).toEqual([
-        ["ungrouped", ["Plan"]],
-        ["archived", []],
-      ]),
-    );
-    const toggle = within(
-      must(document.querySelector<HTMLElement>('[data-group="archived"]')),
-    ).getByRole("button", { expanded: false });
-    expect(toggle.textContent).toContain("Archived");
-    // The row went into a folded group: the focus goes to that group's toggle.
-    await waitFor(() => expect(document.activeElement).toBe(toggle));
-    fireEvent.click(toggle);
+    await waitFor(() => expect(groups()).toEqual([["ungrouped", ["Plan"]]]));
+    // The row went into Archived, folded inside Current: the focus goes to Current.
+    const current = within(panel).getByRole("treeitem", { name: "Current" });
+    await waitFor(() => expect(document.activeElement).toBe(current));
+    await chooseNode("Archived");
     const menu = await openRowMenu("Actions for Budget");
     const names = within(menu)
       .getAllByRole("menuitem")
@@ -117,6 +109,7 @@ describe("pin and archive (ac-1)", () => {
     expect(names).not.toContain("Archive");
     expect(names).not.toContain("Pin");
     await userEvent.setup().click(within(menu).getByRole("menuitem", { name: "Unarchive" }));
+    await chooseNode("Current");
     await waitFor(() => expect(groups()).toEqual([["ungrouped", ["Plan", "Budget"]]]));
   });
 

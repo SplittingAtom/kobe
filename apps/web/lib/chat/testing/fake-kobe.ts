@@ -23,6 +23,7 @@ import {
 import { sha256Hex } from "../../files/editor";
 import type { EventSourceFactory, EventSourceLike } from "../stream";
 import { FakeWorkspaceChanges } from "./fake-workspace-changes";
+import { FakeFolders } from "./fake-folders";
 
 type Json = Record<string, unknown>;
 
@@ -65,6 +66,8 @@ interface FakeThread {
   /** The owner's organization (CE19, KOBE-220); absent = neither. */
   pinned_at?: string | null;
   archived_at?: string | null;
+  /** The team folder it is filed in (KOBE-534/536); absent or null = `Current`. */
+  folder_id?: string | null;
   /** Fork provenance (KOBE-216): the source only when the viewer may open it. */
   forked_from_thread_id?: string | null;
   forked_from_title?: string | null;
@@ -183,6 +186,8 @@ export class FakeKobe {
   readonly teamId = uuid(1, 1);
   readonly requests: RecordedRequest[] = [];
   readonly threads = new Map<string, FakeThread>();
+  /** The team's thread folders (KOBE-536): `/v1/thread-folders`, filing and `?folder=`. */
+  readonly folders = new FakeFolders(() => this.threads.values(), uuid(3, 1));
   readonly runs = new Map<string, FakeRun>();
   /** `GET /v1/runs/{id}/usage` answers (KOBE-43); absent: a run without model calls. */
   readonly usage = new Map<string, Json>();
@@ -967,6 +972,23 @@ export class FakeKobe {
     return json(200, this.#summary(thread));
   }
 
+  /** Filing (KOBE-534, TF3): the owner or a reader; refused in Trash and on test threads. */
+  #file(thread: FakeThread, body: Json | undefined): Response {
+    const target = body?.folder_id;
+    if (target !== null && typeof target !== "string") {
+      return error(400, "invalid_request", "Give folder_id: a folder id, or null.");
+    }
+    if (thread.deleted_at !== null) return error(409, "thread_in_trash", "Restore it first.");
+    if (thread.is_test === true || thread.skill_draft_id !== undefined) {
+      return error(409, "test_thread", "A test conversation can't be put in a folder.");
+    }
+    if (target !== null && !this.folders.has(target)) {
+      return error(404, "folder_not_found", "No folder with that id in this team.");
+    }
+    thread.folder_id = target;
+    return json(200, this.#summary(thread));
+  }
+
   /** A pending approval on the thread (the fake has one member: the run's user). */
   #awaitsApproval(threadId: string): boolean {
     return [...this.approvals.values()].some(
@@ -990,6 +1012,7 @@ export class FakeKobe {
       schedule_id: thread.schedule_id ?? null,
       pinned_at: thread.pinned_at ?? null,
       archived_at: thread.archived_at ?? null,
+      folder_id: thread.folder_id ?? null,
       visibility: thread.visibility ?? "private",
       ...(thread.read_only === undefined ? {} : { read_only: thread.read_only }),
       owner_name: thread.read_only === true ? (thread.owner_name ?? null) : null,
@@ -1194,6 +1217,7 @@ export class FakeKobe {
     const scoped =
       url.pathname === "/v1/team/budgets/status" ||
       url.pathname.startsWith("/v1/threads") ||
+      url.pathname.startsWith("/v1/thread-folders") ||
       url.pathname.startsWith("/v1/runs") ||
       url.pathname.startsWith("/v1/eval-cases") ||
       url.pathname.startsWith("/v1/approvals") ||
@@ -1343,6 +1367,7 @@ export class FakeKobe {
     const parts = url.pathname.split("/").filter(Boolean); // v1, threads|runs, id, action
     const [, area, id, action, sub] = parts;
     if (area === "threads") return this.#threadRoute(method, id, action, sub, url, body, headers);
+    if (area === "thread-folders") return this.folders.route(method, id, body);
     if (area === "projects" && id === undefined && method === "GET") {
       return json(200, { projects: this.projects });
     }
@@ -1519,12 +1544,19 @@ export class FakeKobe {
   ): Response {
     if (id === undefined && method === "GET") {
       const q = url.searchParams.get("q");
+      // KOBE-534 (TF5): `none` = own unfiled; a folder id = its threads the caller reads.
+      const folder = url.searchParams.get("folder");
       const list = [...this.threads.values()]
         .filter((t) => t.deleted_at === null && t.is_test !== true)
         // The activity list leaves out pinned and archived threads; search finds them (CE19).
         .filter((t) => q !== null || (!t.pinned_at && !t.archived_at))
         // ... and others' shared threads, which have their own list (CE20, KOBE-221).
-        .filter((t) => q !== null || t.read_only !== true)
+        .filter((t) => q !== null || t.read_only !== true || (folder !== null && folder !== "none"))
+        .filter(
+          (t) =>
+            folder === null ||
+            (folder === "none" ? (t.folder_id ?? null) === null : t.folder_id === folder),
+        )
         .filter((t) => q === null || (t.title ?? "").toLowerCase().includes(q.toLowerCase()))
         .sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at));
       const threads = list.map((t) =>
@@ -1541,8 +1573,14 @@ export class FakeKobe {
     }
     if ((id === "pinned" || id === "archived") && method === "GET") {
       const key = id === "pinned" ? "pinned_at" : "archived_at";
+      const folder = id === "pinned" ? url.searchParams.get("folder") : null;
       const list = [...this.threads.values()]
         .filter((t) => t.deleted_at === null && t.is_test !== true && t[key])
+        .filter(
+          (t) =>
+            folder === null ||
+            (folder === "none" ? (t.folder_id ?? null) === null : t.folder_id === folder),
+        )
         .sort((a, b) => String(b[key]).localeCompare(String(a[key])));
       return json(200, { threads: list.map((t) => this.#summary(t)), next_cursor: null });
     }
@@ -1731,6 +1769,7 @@ export class FakeKobe {
     if (action === "agent-version" && method === "POST") return this.#switchAgent(thread, body);
     if (action === "agent" && method === "POST") return this.#chooseAgent(thread, body);
     if (ORGANIZE.has(action) && method === "POST") return this.#organize(thread, action, body);
+    if (action === "file" && method === "POST") return this.#file(thread, body);
     if (action === "fork" && method === "POST") {
       // Root to the entry (default: the leaf), with the source as provenance (KOBE-216).
       const at = typeof body?.entry_id === "string" ? body.entry_id : thread.leaf_entry_id;

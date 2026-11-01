@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
 import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
-import { composer, openApp, openRowMenu } from "../chat/testing";
+import { chooseNode, composer, openApp, openRowMenu } from "../chat/testing";
 
 /**
  * KOBE-453: the threads leave the rail for a Threads panel over the workspace (KOBE-452's large
@@ -155,7 +155,7 @@ describe("the Threads panel (ac-1, ac-5)", () => {
 });
 
 describe("Trash (ac-2)", () => {
-  it("is collapsed by default; opened, its rows restore or delete forever", async () => {
+  it("is the tree's Deleted node; its rows restore or delete forever", async () => {
     const old = fake.addThread("Old idea");
     must(fake.threads.get(old)).deleted_at = "2026-10-01T10:00:00.000Z";
     fake.addThread("Current");
@@ -164,10 +164,11 @@ describe("Trash (ac-2)", () => {
       vi.fn(() => true),
     );
     const { user, dialog } = await openOn();
-    const trash = await within(dialog).findByRole("button", { name: "Trash" }, WAIT);
-    expect(trash.getAttribute("aria-expanded")).toBe("false");
     expect(within(dialog).queryByRole("button", { name: "Restore Old idea" })).toBeNull();
-    await user.click(trash);
+    await chooseNode("Deleted");
+    expect(
+      within(dialog).getByText("Threads in Trash are deleted for good after 30 days."),
+    ).toBeTruthy();
     const list = within(within(dialog).getByRole("list", { name: "Trash" }));
     expect(list.getByRole("button", { name: "Delete Old idea forever" })).toBeTruthy();
     await user.click(list.getByRole("button", { name: "Restore Old idea" }));
@@ -175,6 +176,7 @@ describe("Trash (ac-2)", () => {
     // Restoring opens nothing: the panel stays, on the same thread (review M5).
     expect(screen.getByRole("dialog", { name: "Threads" })).toBe(dialog);
     expect(window.location.pathname).toBe("/threads");
+    await chooseNode("Current");
     expect(await within(dialog).findByRole("button", { name: "Old idea" }, WAIT)).toBeTruthy();
   });
 });

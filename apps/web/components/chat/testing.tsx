@@ -173,3 +173,21 @@ export async function threadGroup(name: string): Promise<HTMLElement> {
   await openThreads();
   return screen.findByRole("list", { name }, { timeout: 5_000 });
 }
+
+/**
+ * Chooses a node of the Threads panel's folder tree (KOBE-536), opening the panel first and
+ * Current's chevron for Archived; returns the panel.
+ */
+export async function chooseNode(name: string): Promise<HTMLElement> {
+  const panel = await openThreads();
+  const tree = within(panel);
+  if (name === "Archived" && tree.queryByRole("treeitem", { name: "Archived" }) === null) {
+    const current = await tree.findByRole("treeitem", { name: "Current" }, { timeout: 5_000 });
+    fireEvent.click(current.querySelector("button") as HTMLElement);
+  }
+  fireEvent.click(await tree.findByRole("treeitem", { name }, { timeout: 5_000 }));
+  await waitFor(() =>
+    expect(tree.getByRole("treeitem", { name }).getAttribute("aria-selected")).toBe("true"),
+  );
+  return panel;
+}

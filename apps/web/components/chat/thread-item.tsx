@@ -2,7 +2,7 @@
 
 import { ThreadListItemPrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import { useId } from "react";
-import { THREAD_DRAG_TYPE } from "../../lib/chat/organize";
+import { SHARED_THREAD_DRAG_TYPE, THREAD_DRAG_TYPE } from "../../lib/chat/organize";
 import { useHitNote } from "./hit-note";
 import { placementOf } from "../../lib/chat/thread-groups";
 import { IconAction } from "../shell/icon-action";
@@ -16,7 +16,8 @@ import { ThreadRowMenu } from "./thread-row-menu";
  * moves it to Trash (KOBE-292, KOBE-220; rename is the conversation header's pencil), and a trash
  * icon on hover or focus moves it there too (KOBE-466). In Trash:
  * restore or delete forever. Hovering or focusing the row shows its card (CE18, KOBE-219). The
- * member's own rows can be dragged onto a project header to move there (CE19).
+ * member's own rows can be dragged onto a project header to move there (CE19), and any row onto a
+ * folder in the Threads panel's tree to file it there (KOBE-536, TF8).
  */
 function ThreadItem({ archived }: { readonly archived: boolean }) {
   const aui = useAui();
@@ -25,7 +26,8 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
   const forkHint = useAuiState((s) => s.threadListItem.custom?.["forkHint"]);
   const remoteId = useAuiState((s) => s.threadListItem.remoteId);
   const shared = useAuiState((s) => placementOf(s.threadListItem.custom).shared);
-  const movable = !archived && !shared && remoteId !== undefined;
+  // Own rows drag onto a project header or a folder; shared ones onto a folder only (TF8).
+  const movable = !archived && remoteId !== undefined;
   // A run going or an approval waiting, live, also while another thread is open (KOBE-301).
   const activity = useRowActivity();
   const unread = useRowUnread();
@@ -42,6 +44,7 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
         movable
           ? (e) => {
               e.dataTransfer.setData(THREAD_DRAG_TYPE, remoteId);
+              if (shared) e.dataTransfer.setData(SHARED_THREAD_DRAG_TYPE, remoteId);
               e.dataTransfer.effectAllowed = "move";
             }
           : undefined

@@ -38,6 +38,7 @@ describe("thread list adapter", () => {
       visibility: "private",
       pinned: false,
       archived: false,
+      folderId: null,
       forkHint: null,
       // The rail's dot (KOBE-301).
       activity: "idle",
@@ -66,6 +67,45 @@ describe("thread list adapter", () => {
     const pinnedReads = fake.requests.filter((r) => r.path.startsWith("/v1/threads/pinned"));
     expect(pinnedReads).toHaveLength(1);
     expect(b).toBeDefined();
+  });
+
+  it("reads Current's unfiled lists, and the chosen folder's besides (KOBE-536, TF5)", async () => {
+    const { fake, session, adapter } = setup();
+    const folder = fake.folders.add("Budgets");
+    const loose = fake.addThread("Loose");
+    const filed = fake.addThread("Filed");
+    const pinned = fake.addThread("Pinned filed");
+    const shared = fake.addThread("Shared filed");
+    Object.assign(fake.threads.get(filed) ?? {}, { folder_id: folder });
+    Object.assign(fake.threads.get(pinned) ?? {}, {
+      folder_id: folder,
+      pinned_at: "2026-10-01T10:00:00.000Z",
+    });
+    Object.assign(fake.threads.get(shared) ?? {}, { folder_id: folder, read_only: true });
+    const current = await adapter.list();
+    expect(current.threads.map((t) => t.title)).toEqual(["Loose", "Shared filed"]);
+    expect(fake.requests.map((r) => r.path)).toEqual(
+      expect.arrayContaining([
+        "/v1/threads/pinned?folder=none&limit=100",
+        "/v1/threads?folder=none",
+      ]),
+    );
+    session.panelMemory.choose({ kind: "folder", id: folder });
+    const inFolder = await adapter.list();
+    // The shared one is listed once although both /shared and the folder's list hold it.
+    expect(inFolder.threads.map((t) => [t.title, t.custom?.["folderId"] ?? null])).toEqual([
+      ["Loose", null],
+      ["Shared filed", folder],
+      ["Pinned filed", folder],
+      ["Filed", folder],
+    ]);
+    expect(fake.requests.map((r) => r.path)).toEqual(
+      expect.arrayContaining([
+        `/v1/threads/pinned?folder=${folder}&limit=100`,
+        `/v1/threads?folder=${folder}`,
+      ]),
+    );
+    expect(loose).toBeTruthy();
   });
 
   it("creates a thread untitled, shows its first line until the server titles it, and seeds its controller", async () => {

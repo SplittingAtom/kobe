@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
-import { openApp, openThreads } from "../chat/testing";
+import { chooseNode, openApp, openThreads } from "../chat/testing";
 
 /** KOBE-198 (CE2, CE5): the workspace rail; its threads in the Threads panel since KOBE-453. */
 let fake: FakeKobe;
@@ -116,7 +116,6 @@ describe("thread groups in the Threads panel (ac-2, KOBE-453)", () => {
         "Website1",
         "Your threads1",
         "Scheduled1",
-        "Trash1",
       ]),
     );
     expect(threads.queryByRole("button", { name: "Pinned" })).toBeNull();
@@ -129,10 +128,10 @@ describe("thread groups in the Threads panel (ac-2, KOBE-453)", () => {
     expect(list("Scheduled").getByRole("button", { name: "Morning digest" })).toBeTruthy();
     expect(plain).toBeTruthy();
 
-    // Trash starts collapsed; its toggle opens it.
-    const trash = threads.getByRole("button", { name: "Trash" });
-    expect(trash.getAttribute("aria-expanded")).toBe("false");
-    await userEvent.setup().click(trash);
+    // Trash is the tree's Deleted node (KOBE-536), with its count.
+    const deleted = threads.getByRole("treeitem", { name: "Deleted" });
+    expect(deleted.textContent).toContain("1");
+    await chooseNode("Deleted");
     expect(list("Trash").getByRole("button", { name: "Restore Old idea" })).toBeTruthy();
   });
 

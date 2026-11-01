@@ -94,12 +94,47 @@ describe("thread groups (CE5)", () => {
     expect(groupThreads([], [], () => undefined)).toEqual([]);
   });
 
+  it("groups one node of the tree: Current's unfiled or a folder's, never Archived or Trash (KOBE-536)", () => {
+    const threads = [
+      listed("a", { pinned: true }),
+      listed("b", { folderId: "f1", pinned: true }),
+      listed("c", { folderId: "f1", projectId: "p1" }),
+      listed("d", { folderId: "f1", shared: true }),
+      listed("e", { folderId: "f1", archived: true }),
+      listed("f", { archived: true }),
+      listed("g", {}),
+      listed("h", { folderId: "f2" }),
+    ];
+    const label = (scope: { folderId: string | null }) =>
+      groupThreads(threads, ["t1"], () => "P", scope).map((g) => [
+        g.label,
+        g.threads.map((t) => t.id),
+      ]);
+    expect(label({ folderId: null })).toEqual([
+      ["Pinned", ["a"]],
+      ["Your threads", ["g"]],
+    ]);
+    expect(label({ folderId: "f1" })).toEqual([
+      ["Pinned", ["b"]],
+      ["P", ["c"]],
+      ["Shared with me", ["d"]],
+    ]);
+  });
+
   it("reads malformed placements as ungrouped", () => {
     for (const custom of [
       null,
       "x",
       3,
-      { projectId: 7, scheduled: "yes", shared: 1, pinned: "true", archived: 1, workbench: 1 },
+      {
+        projectId: 7,
+        scheduled: "yes",
+        shared: 1,
+        pinned: "true",
+        archived: 1,
+        workbench: 1,
+        folderId: 4,
+      },
     ]) {
       expect(placementOf(custom)).toEqual({
         projectId: null,
@@ -109,6 +144,7 @@ describe("thread groups (CE5)", () => {
         visibility: "private",
         pinned: false,
         archived: false,
+        folderId: null,
       });
     }
   });

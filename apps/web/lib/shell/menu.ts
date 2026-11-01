@@ -5,7 +5,7 @@
  */
 import { COMMANDS, type CommandId, type RegisteredCommand } from "./commands";
 
-export type MenuScope = "thread-menu" | "file-menu";
+export type MenuScope = "thread-menu" | "file-menu" | "folder-menu";
 
 /** One entry of a submenu (a model to regenerate with). */
 export interface MenuChoice {
@@ -13,6 +13,8 @@ export interface MenuChoice {
   readonly label: string;
   /** The current choice, marked "(current)" as on the answers' menu (KOBE-217). */
   readonly current?: boolean | undefined;
+  /** Indented this many levels below the first (a folder in the tree, KOBE-536). */
+  readonly depth?: number | undefined;
   readonly onSelect: () => void;
 }
 

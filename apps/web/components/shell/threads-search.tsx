@@ -3,6 +3,8 @@
 import { ThreadListPrimitive, useAuiState } from "@assistant-ui/react";
 import { useEffect, useState, type ReactNode } from "react";
 import type { ApiError } from "../../lib/api/client";
+import { folderPath } from "../../lib/chat/folder-tree";
+import type { FolderView } from "../../lib/chat/folders-api";
 import type { ThreadSearchHit } from "../../lib/chat/types";
 import { ErrorNotice } from "../admin/error-notice";
 import { HitNotes } from "../chat/hit-note";
@@ -74,9 +76,21 @@ export function useThreadsSearch(query: string): {
   return { state, more };
 }
 
-function note(hit: ThreadSearchHit): ReactNode {
+/** A muted line under a row: the folder it is filed in (Archived rows, search hits; TF7, TF10). */
+export function FolderNote({ path }: { readonly path: string }) {
+  return (
+    <p className={chat.hint} data-kobe-folder-path="">
+      In {path}
+    </p>
+  );
+}
+
+function note(hit: ThreadSearchHit, folders: readonly FolderView[]): ReactNode {
+  // TF10: a hit in a folder says which, as the match note does.
+  const path = folderPath(folders, hit.folderId ?? null);
   return (
     <>
+      {path && <FolderNote path={path} />}
       {/* Archived threads stay searchable (CE19), marked so the member knows where they live. */}
       {hit.archivedAt != null && (
         <span className={shell.hitBadge} data-kobe-archived="">
@@ -103,7 +117,16 @@ function note(hit: ThreadSearchHit): ReactNode {
  * menu, keyboard access, dot and drag; one the list has not read yet (further down, `Load more`)
  * is a plain row that opens it. Under each, where it matched.
  */
-export function SearchHits({ state, more }: { readonly state: SearchState; more(): void }) {
+export function SearchHits({
+  state,
+  more,
+  folders = [],
+}: {
+  readonly state: SearchState;
+  more(): void;
+  /** The team's folders: a hit in one shows its path (KOBE-536, TF10). */
+  readonly folders?: readonly FolderView[];
+}) {
   const items = useAuiState((s) => s.threads.threadItems);
   const regular = useAuiState((s) => s.threads.threadIds);
   const trash = useAuiState((s) => s.threads.archivedThreadIds);
@@ -123,7 +146,7 @@ export function SearchHits({ state, more }: { readonly state: SearchState; more(
       </p>
     );
   }
-  const notes = new Map(state.hits.map((h) => [h.threadId, note(h)] as const));
+  const notes = new Map(state.hits.map((h) => [h.threadId, note(h, folders)] as const));
   return (
     <HitNotes.Provider value={notes}>
       <p className="sr-only" role="status">

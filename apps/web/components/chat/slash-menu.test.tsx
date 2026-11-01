@@ -91,6 +91,7 @@ describe("the / menu lists the bound actions (ac-1)", { timeout: 30_000 }, () =>
       "/pin, Pin",
       "/unpin, Unpin, unavailable: It isn't pinned.",
       "/move project, Move to project, unavailable: You have no projects to move it to.",
+      "/folder folder, Save to folder",
       "/archive, Archive",
       "/unarchive, Unarchive, unavailable: It isn't archived.",
       "/share with, Share",

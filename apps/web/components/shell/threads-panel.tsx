@@ -1,129 +1,75 @@
 "use client";
 
 import { ThreadListPrimitive, useAuiState } from "@assistant-ui/react";
-import { ChevronRightIcon } from "lucide-react";
 import {
   useCallback,
-  useId,
+  useEffect,
+  useMemo,
   useState,
-  type DragEvent,
+  useSyncExternalStore,
   type MouseEvent,
-  type ReactNode,
 } from "react";
 import type { ApiError } from "../../lib/api/client";
 import { threadExportUrl } from "../../lib/chat/api";
-import type { GroupKind, ThreadGroup } from "../../lib/chat/thread-groups";
-import { carriesThread, organizedMessage, THREAD_DRAG_TYPE } from "../../lib/chat/organize";
+import { folderPath, placeFolders, treeRows, type PanelNode } from "../../lib/chat/folder-tree";
+import { foldersOf } from "../../lib/chat/folders-store";
+import { organizedMessage } from "../../lib/chat/organize";
+import { placementOf, type ThreadGroup } from "../../lib/chat/thread-groups";
 import { ErrorNotice } from "../admin/error-notice";
 import { useChatSession } from "../chat/kobe-runtime";
-import { THREAD_ITEM, TRASH_ITEM } from "../chat/thread-item";
+import { filedMessage } from "../chat/save-to-folder-menu";
 import { RailAnnounce } from "../chat/use-organize-menu";
+import { useFolderReads, useThreadFolders } from "../chat/use-thread-folders";
+import { FolderEditor, useFolderActions } from "./folder-node-menu";
+import { FolderPicker } from "./folder-picker";
+import { FolderTree } from "./folder-tree";
 import { IconAction } from "./icon-action";
+import { useShellBand } from "./shell-band";
+import { NodeList } from "./thread-node-list";
 import { useThreadGroups } from "./thread-groups";
-import { SearchHits, useThreadsSearch } from "./threads-search";
-import { InlineLink } from "./text-links";
+import { FolderNote, SearchHits, useThreadsSearch } from "./threads-search";
 import chat from "../chat/chat.module.css";
-import styles from "./rail.module.css";
 import { RAIL_ACTION, RAIL_ACTION_VARIANT } from "./rail-action";
 
-const HINTS: Partial<Readonly<Record<GroupKind, ReactNode>>> = {
-  scheduled: (
-    <>
-      Threads your <InlineLink href="/me/schedules">schedules</InlineLink> started.
-    </>
-  ),
-  trash: "Threads in Trash are deleted for good after 30 days.",
-};
-
-/** CE5: Archived starts collapsed; so does Trash, which only holds what the member threw away. */
-const START_FOLDED: ReadonlySet<GroupKind> = new Set<GroupKind>(["archived", "trash"]);
-
-/**
- * A project header takes a dragged thread row (CE19): the thread moves to that project, where the
- * server allows it. The row's menu (Move to project) is the keyboard path to the same move.
- */
-function useProjectDrop(group: ThreadGroup, onMove: (threadId: string, projectId: string) => void) {
-  const [over, setOver] = useState(false);
-  const projectId = group.kind === "project" ? group.projectId : undefined;
-  if (projectId === undefined) return { over: false, handlers: {} };
-  return {
-    over,
-    handlers: {
-      onDragOver: (e: DragEvent) => {
-        if (!carriesThread(e.dataTransfer)) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        setOver(true);
-      },
-      onDragLeave: () => setOver(false),
-      onDrop: (e: DragEvent) => {
-        setOver(false);
-        if (!carriesThread(e.dataTransfer)) return;
-        e.preventDefault();
-        const threadId = e.dataTransfer.getData(THREAD_DRAG_TYPE);
-        if (threadId !== "") onMove(threadId, projectId);
-      },
-    },
-  };
-}
-
-function Group({
-  group,
-  open,
-  onToggle,
-  onMove,
-}: {
-  readonly group: ThreadGroup;
-  readonly open: boolean;
-  onToggle(): void;
-  onMove(threadId: string, projectId: string): void;
-}) {
-  const listId = useId();
-  const trash = group.kind === "trash";
-  const drop = useProjectDrop(group, onMove);
-  return (
-    <div className={styles.group} data-group={group.kind}>
-      <h4 className={styles.groupHeading}>
-        <button
-          type="button"
-          className={styles.groupToggle}
-          aria-expanded={open}
-          aria-controls={listId}
-          onClick={onToggle}
-          data-drop-target={drop.over || undefined}
-          {...drop.handlers}
-        >
-          <ChevronRightIcon aria-hidden className={styles.chevron} />
-          <span className={styles.groupLabel}>{group.label}</span>
-          <span aria-hidden className={styles.groupCount}>
-            {group.threads.length}
-          </span>
-        </button>
-      </h4>
-      <div id={listId} hidden={!open}>
-        {HINTS[group.kind] && <p className={chat.hint}>{HINTS[group.kind]}</p>}
-        <ul className={chat.threadList} aria-label={group.label}>
-          {open &&
-            group.threads.map((t) => (
-              <ThreadListPrimitive.ItemByIndex
-                key={t.id}
-                index={t.index}
-                archived={trash}
-                components={trash ? TRASH_ITEM : THREAD_ITEM}
-              />
-            ))}
-        </ul>
-      </div>
-    </div>
-  );
+/** The panel's tree state: the folders placed, the counts, the chosen node and its memory. */
+function useTreeModel() {
+  const session = useChatSession();
+  const memory = session.panelMemory;
+  useSyncExternalStore(memory.subscribe, memory.getVersion, memory.getVersion);
+  const folders = useThreadFolders();
+  const list = foldersOf(folders);
+  const { listed, trashIds } = useThreadGroups();
+  const placed = useMemo(() => placeFolders(list), [list]);
+  const counts = useMemo(() => {
+    let current = 0;
+    let archived = 0;
+    for (const t of listed) {
+      const p = placementOf(t.custom);
+      if (p.archived) archived += 1;
+      else if (p.folderId === null) current += 1;
+    }
+    return { current, archived, deleted: trashIds.length };
+  }, [listed, trashIds]);
+  const rows = treeRows(placed, counts, {
+    currentOpen: memory.currentOpen,
+    open: memory.openFolders,
+  });
+  // A chosen folder another member deleted: the panel falls back to Current.
+  const node = memory.node;
+  const gone =
+    node.kind === "folder" && folders.status === "ready" && !list.some((f) => f.id === node.id);
+  useEffect(() => {
+    if (gone) memory.choose({ kind: "current" });
+  }, [gone, memory]);
+  return { memory, node, list, placed, counts, rows };
 }
 
 /**
- * The Threads panel's content (KOBE-453, CE5): the server's search (titles and content, as rows),
- * else assistant-ui's thread list in the fixed group order with counts and activity dots, Trash
- * collapsed at the end. Rows keep
- * the rail's menu, keyboard access and drag onto a project header. Choosing a thread (its title)
- * calls `onChosen`: the panel closes onto it.
+ * The Threads panel's content (KOBE-453, CE5; two rails since KOBE-536, TF7): the server's search
+ * and Export above; at 820 px and wider the folder tree (Current with Archived under it, the
+ * team's folders, Deleted) beside the chosen node's threads, below that a dropdown above them.
+ * Rows keep the rail's menu, keyboard access and drag onto a project header or a folder. Choosing
+ * a thread (its title) calls `onChosen`: the panel closes onto it.
  */
 export function ThreadsPanelContent({
   listError,
@@ -136,17 +82,22 @@ export function ThreadsPanelContent({
   const items = useAuiState((s) => s.threads.threadItems);
   const hasMore = useAuiState((s) => s.threads.hasMore);
   const loading = useAuiState((s) => s.threads.isLoading);
-  const { groups, projects } = useThreadGroups();
+  const { groups, projects, listed, trashIds } = useThreadGroups();
+  const band = useShellBand();
+  const wide = band === "wide" || band === "medium";
+  useFolderReads();
+  const tree = useTreeModel();
+  const { memory, node, list, placed } = tree;
   const [query, setQuery] = useState("");
-  // Groups the member opened or closed against their default (in memory, not a preference).
-  const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());
   // One polite region for the rows' changes: a row that moves to another group is remounted.
   const [announcement, setAnnouncement] = useState("");
   const announce = useCallback((text: string) => setAnnouncement(text), []);
+  const actions = useFolderActions(placed, announce);
   const titleOf = (threadId: string) =>
     items.find((i) => i.remoteId === threadId)?.title || "Untitled conversation";
   const search = useThreadsSearch(query);
   const searching = query.trim() !== "";
+
   const moveByDrop = (threadId: string, projectId: string) => {
     const change = { action: "move", projectId } as const;
     const title = titleOf(threadId);
@@ -160,12 +111,29 @@ export function ThreadsPanelContent({
         );
     });
   };
-  const flip = (key: string) =>
-    setFlipped((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(key)) next.add(key);
-      return next;
+  const fileByDrop = (threadId: string, folderId: string | null) => {
+    const title = titleOf(threadId);
+    const from = items.find((i) => i.remoteId === threadId);
+    const before = from ? placementOf(from.custom).folderId : null;
+    if (before === folderId) return;
+    void session.file(threadId, folderId).then((res) => {
+      const name = folderId === null ? null : (list.find((f) => f.id === folderId)?.name ?? null);
+      announce(
+        res.ok
+          ? filedMessage(title, name, folderPath(list, before) ?? undefined)
+          : res.error.message,
+      );
     });
+  };
+  const choose = (next: PanelNode) => {
+    memory.choose(next);
+    setQuery("");
+  };
+  const setOpen = (target: PanelNode, open: boolean) => {
+    if (target.kind === "current") memory.setCurrentOpen(open);
+    else if (target.kind === "folder") memory.setFolderOpen(target.id, open);
+  };
+
   // A thread's title opens it: once assistant-ui has switched, the panel closes onto it.
   const chooseOnClick = (e: MouseEvent) => {
     if (!(e.target instanceof Element) || e.defaultPrevented) return;
@@ -173,6 +141,55 @@ export function ThreadsPanelContent({
     const threadId = e.target.closest("[data-kobe-thread]")?.getAttribute("data-kobe-thread");
     if (threadId) queueMicrotask(() => onChosen(threadId));
   };
+
+  const archived = listed.flatMap((t, index) =>
+    placementOf(t.custom).archived ? [{ id: t.id, index }] : [],
+  );
+  const archivedNotes = new Map(
+    archived.flatMap(({ id }) => {
+      const t = listed.find((l) => l.id === id);
+      if (!t) return [];
+      const remoteId = items.find((i) => i.id === t.id)?.remoteId;
+      const path = folderPath(list, placementOf(t.custom).folderId);
+      return remoteId && path ? [[remoteId, <FolderNote key={t.id} path={path} />] as const] : [];
+    }),
+  );
+  const chosenPlaced =
+    node.kind === "folder" ? placed.find((p) => p.folder.id === node.id) : undefined;
+
+  const treeColumn = wide ? (
+    <nav aria-label="Folders" className="flex min-w-0 flex-col gap-2">
+      <FolderTree
+        rows={tree.rows}
+        chosen={node}
+        choose={choose}
+        setOpen={setOpen}
+        bindings={(row) => (row.placed ? actions.bindings(row.placed) : null)}
+        onDropThread={fileByDrop}
+      />
+      <FolderEditor actions={actions} announce={announce} />
+      <button
+        type="button"
+        className="self-start px-1 text-sm underline"
+        onClick={() => actions.startNew(null)}
+      >
+        + New folder
+      </button>
+    </nav>
+  ) : (
+    <div className="flex flex-col gap-2">
+      <FolderPicker
+        placed={placed}
+        counts={tree.counts}
+        chosen={node}
+        choose={choose}
+        onNewFolder={() => actions.startNew(null)}
+        chosenBindings={chosenPlaced ? actions.bindings(chosenPlaced) : null}
+        chosenName={chosenPlaced?.folder.name ?? ""}
+      />
+      <FolderEditor actions={actions} announce={announce} />
+    </div>
+  );
 
   return (
     <RailAnnounce.Provider value={announce}>
@@ -197,38 +214,43 @@ export function ThreadsPanelContent({
             className={RAIL_ACTION}
           />
         </div>
-        {/* Sees the clicks of the rows' own title buttons (Enter on a button is one). */}
-        <div className="min-w-0" onClick={chooseOnClick}>
-          {listError && <ErrorNotice error={listError} />}
-          {projects.failed && (
-            <p className={chat.hint} role="status">
-              Project names could not be loaded.
+        <div
+          className={
+            wide ? "grid min-w-0 grid-cols-[220px_1px_minmax(0,1fr)] gap-3" : "flex flex-col gap-2"
+          }
+          data-kobe-threads-body={wide ? "two-rails" : "dropdown"}
+        >
+          {treeColumn}
+          {wide && <div aria-hidden className="bg-border w-px self-stretch" />}
+          {/* Sees the clicks of the rows' own title buttons (Enter on a button is one). */}
+          <div className="min-w-0" onClick={chooseOnClick}>
+            {listError && <ErrorNotice error={listError} />}
+            {projects.failed && (
+              <p className={chat.hint} role="status">
+                Project names could not be loaded.
+              </p>
+            )}
+            {searching ? (
+              <SearchHits state={search.state} more={search.more} folders={list} />
+            ) : (
+              <NodeList
+                node={node}
+                groups={groups}
+                archived={archived}
+                archivedNotes={archivedNotes}
+                trash={trashIds.map((id, index) => ({ id, index }))}
+                loading={loading}
+                hasMore={hasMore && (node.kind === "current" || node.kind === "folder")}
+                hasSubfolders={(chosenPlaced?.childCount ?? 0) > 0}
+                isOpen={(g: ThreadGroup) => !memory.flipped(g.key)}
+                onToggle={(g: ThreadGroup) => memory.flip(g.key)}
+                onMove={moveByDrop}
+              />
+            )}
+            <p role="status" className="sr-only" data-kobe-rail-status="">
+              {announcement}
             </p>
-          )}
-          {searching ? (
-            <SearchHits state={search.state} more={search.more} />
-          ) : (
-            <>
-              {!loading && groups.length === 0 && <p className={chat.hint}>No threads yet.</p>}
-              {groups.map((g) => (
-                <Group
-                  key={g.key}
-                  group={g}
-                  open={START_FOLDED.has(g.kind) === flipped.has(g.key)}
-                  onToggle={() => flip(g.key)}
-                  onMove={moveByDrop}
-                />
-              ))}
-              {hasMore && (
-                <ThreadListPrimitive.LoadMore className={styles.loadMore}>
-                  Load more
-                </ThreadListPrimitive.LoadMore>
-              )}
-            </>
-          )}
-          <p role="status" className="sr-only" data-kobe-rail-status="">
-            {announcement}
-          </p>
+          </div>
         </div>
       </ThreadListPrimitive.Root>
     </RailAnnounce.Provider>
