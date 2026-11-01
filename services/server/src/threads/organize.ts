@@ -3,10 +3,12 @@ import { and, eq, sql, threads, type KobeTx, type ThreadProjectMove } from "@kob
 import { recordAudit } from "../audit/record.js";
 import { notifyThreadAccess } from "../event-stream/access.js";
 import { canCreateInProject } from "./references.js";
+import { holdFolder } from "./folders.js";
 import { movesOf, withMove } from "./project-moves.js";
 import {
   hasRunIn,
   lockForChange,
+  lockForFiling,
   PENDING_RUN_STATUSES,
   summarizeOne,
   summaryColumns,
@@ -28,17 +30,30 @@ import {
  *   project's), unshares a thread shared to its old project (its audience changes; a team share
  *   stays, KOBE-221), and records
  *   the move for the next run's marker (`project-moves.ts`) and the audit log.
+ * - File (KOBE-534, TF3) puts the thread in a team folder or takes it out (`null`). The one change
+ *   a D23/CE20 reader may make too (`lockForFiling`); pin, archive, project and shares stay as
+ *   they are, and `thread.filed` records who moved it, on a change only.
  */
 
 type Locked = { ok: true; thread: SummaryRow } | Extract<ThreadResult, { ok: false }>;
 
-async function lockOrganizable(tx: KobeTx, viewer: Viewer, id: string): Promise<Locked> {
-  const locked = await lockForChange(tx, viewer, id);
+async function lockOrganizable(
+  tx: KobeTx,
+  viewer: Viewer,
+  id: string,
+  lock: typeof lockForChange = lockForChange,
+): Promise<Locked> {
+  const locked = await lock(tx, viewer, id);
   if (!locked.ok) return locked;
   if (locked.thread.deletedAt) return { ok: false, error: "thread_in_trash" };
   // Builder test threads are never listed (KOBE-85): nothing to organize, never in a project.
   if (locked.thread.isTest) return { ok: false, error: "test_thread" };
   return locked;
+}
+
+/** Workbench test chats and eval threads are never filed either (`threads_folder_not_test`). */
+function isAnyTest(thread: SummaryRow): boolean {
+  return thread.isTest || thread.skillTest === true || thread.skillEval === true;
 }
 
 type Now = ReturnType<typeof sql>;
@@ -50,6 +65,7 @@ interface Organization {
   readonly projectId?: string | null;
   readonly sharedToProject?: boolean;
   readonly projectMoves?: readonly ThreadProjectMove[];
+  readonly folderId?: string | null;
 }
 
 async function save(
@@ -156,5 +172,35 @@ export async function moveThread(
     });
     await notifyThreadAccess(tx, viewer.teamId, id);
   }
+  return result;
+}
+
+/**
+ * Files the thread in a folder of the team, or takes it out of its folder (`null`). The owner or
+ * a reader; refused in Trash and on any test thread; 404 `folder_not_found` for a folder that is
+ * not in this team. The folder row is held (KEY SHARE) until commit, so a concurrent delete waits
+ * and then nulls this thread like the others. Lock order: folders, then the thread.
+ */
+export async function fileThread(
+  tx: KobeTx,
+  viewer: Viewer,
+  id: string,
+  folderId: string | null,
+): Promise<ThreadResult> {
+  // Folder before thread, as a folder delete locks them (no deadlock with its SET NULL).
+  const folderFound = folderId === null || (await holdFolder(tx, viewer.teamId, folderId));
+  const locked = await lockOrganizable(tx, viewer, id, lockForFiling);
+  if (!locked.ok) return locked;
+  const thread = locked.thread;
+  if (isAnyTest(thread)) return { ok: false, error: "test_thread" };
+  if (!folderFound) return { ok: false, error: "folder_not_found" };
+  const from = thread.folderId ?? null;
+  if (from === folderId) return unchanged(tx, viewer, thread);
+  const result = await save(tx, viewer, id, { folderId });
+  await recordAudit(tx, {
+    action: "thread.filed",
+    teamId: viewer.teamId,
+    target: { threadId: id, from, to: folderId },
+  });
   return result;
 }

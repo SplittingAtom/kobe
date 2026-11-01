@@ -4,6 +4,7 @@ import {
   idSchema,
   scheduleThreadMarkerSchema,
   THREAD_TITLE_MAX,
+  threadFolderFilterSchema,
   threadOrganizationSchema,
   threadTitleSchema,
   threadStatusSchema,
@@ -132,6 +133,11 @@ export const listThreadsQuerySchema = z.strictObject({
   q: z.string().trim().min(1).max(SEARCH_QUERY_MAX).optional(),
   cursor: z.string().max(256).optional(),
   limit: limitParam(THREAD_PAGE_MAX, THREAD_PAGE_DEFAULT),
+  /**
+   * A folder's threads (KOBE-534, TF5): its live, unarchived threads the caller may read (own,
+   * or shared with them); `none` = the caller's own unfiled ones. Not with `q` or `project_id`.
+   */
+  folder: threadFolderFilterSchema.optional(),
 });
 export type ListThreadsQuery = z.infer<typeof listThreadsQuerySchema>;
 
@@ -145,6 +151,11 @@ export const moveThreadBodySchema = z.strictObject({ project_id: uuidSchema.null
 export const trashQuerySchema = z.strictObject({
   cursor: z.string().max(256).optional(),
   limit: limitParam(THREAD_PAGE_MAX, THREAD_PAGE_DEFAULT),
+});
+
+/** The Pinned list (CE19) with the folder filter of the thread list (KOBE-534, TF5). */
+export const pinnedQuerySchema = trashQuerySchema.extend({
+  folder: threadFolderFilterSchema.optional(),
 });
 
 export const clearTestThreadsQuerySchema = z.strictObject({
@@ -226,6 +237,11 @@ export const threadSummarySchema = z.object({
    * archived (out of the normal groups, still searchable, retention unchanged); never both.
    */
   ...threadOrganizationSchema.pick({ pinned_at: true, archived_at: true }).shape,
+  /**
+   * The team folder the thread is filed in (KOBE-534, TF2/TF5); null = none. The thread's own
+   * property, so every reader sees it (unlike pin and archive).
+   */
+  ...threadOrganizationSchema.pick({ folder_id: true }).shape,
 });
 export type ThreadSummary = z.infer<typeof threadSummarySchema>;
 

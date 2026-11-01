@@ -8,6 +8,7 @@ import { modelsOpenApiPaths, modelsOpenApiSchemas } from "./models.js";
 import { pendingOpenApiPaths, pendingOpenApiSchemas } from "./pending.js";
 import { runsOpenApiPaths, runsOpenApiSchemas } from "./runs.js";
 import { threadsOpenApiPaths, threadsOpenApiSchemas } from "./threads.js";
+import { threadFoldersOpenApiPaths, threadFoldersOpenApiSchemas } from "./thread-folders.js";
 import { usageOpenApiPaths, usageOpenApiSchemas } from "./usage.js";
 
 /**
@@ -26,6 +27,7 @@ export function openApiDocument(): Record<string, unknown> {
     },
     paths: {
       ...threadsOpenApiPaths(),
+      ...threadFoldersOpenApiPaths(),
       ...runsOpenApiPaths(),
       ...pendingOpenApiPaths(),
       ...markersOpenApiPaths(),
@@ -40,6 +42,7 @@ export function openApiDocument(): Record<string, unknown> {
     components: {
       schemas: {
         ...threadsOpenApiSchemas(),
+        ...threadFoldersOpenApiSchemas(),
         ...runsOpenApiSchemas(),
         ...pendingOpenApiSchemas(),
         ...markersOpenApiSchemas(),

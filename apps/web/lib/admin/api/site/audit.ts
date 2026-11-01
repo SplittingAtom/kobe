@@ -32,6 +32,7 @@ export const AUDIT_CATEGORIES = [
   "site",
   "skill",
   "thread",
+  "thread_folder",
   "workspace",
 ] as const;
 

@@ -9,6 +9,7 @@ import { canCreateInProject } from "./references.js";
 import { logger } from "../logger.js";
 import { threadKey, type BlobStore } from "../retention/blobs.js";
 import { createThread, findThread, type ThreadError, type Viewer } from "./repository.js";
+import { holdFolder } from "./folders.js";
 import {
   forkedAppResultKey,
   planAppCopies,
@@ -228,6 +229,19 @@ async function planFork(
   };
 }
 
+/**
+ * The source's folder for the fork (KOBE-534, TF9: a fork starts in its source's folder, whoever
+ * owns the source), held against deletion until commit; null when it was deleted since the plan.
+ */
+async function sourceFolder(
+  tx: KobeTx,
+  viewer: Viewer,
+  folderId: string | null,
+): Promise<string | null> {
+  if (folderId === null) return null;
+  return (await holdFolder(tx, viewer.teamId, folderId)) ? folderId : null;
+}
+
 async function storeFork(
   tx: KobeTx,
   viewer: Viewer,
@@ -267,6 +281,7 @@ async function storeFork(
     modelAlias: model,
     thinkingLevel: source.thinkingLevel ?? null,
     forkedFrom: { threadId: source.id, entryId: forkPoint },
+    folderId: await sourceFolder(tx, viewer, source.folderId ?? null),
   });
   // In chunks, in path order (append order): one INSERT is capped at 65,535 bind parameters.
   for (let i = 0; i < path.length; i += INSERT_CHUNK) {

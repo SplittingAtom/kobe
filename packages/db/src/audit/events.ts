@@ -86,6 +86,8 @@ const label = z
   .regex(/^[^\p{Cc}\p{Zl}\p{Zp}]*$/u);
 const role = z.enum(teamRole.enumValues);
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
+/** A thread folder's name (KOBE-534, TF1): trimmed, 1-80 characters. */
+const folderName = z.string().min(1).max(80);
 /** A catalog skill or tag name (KOBE-311): lowercase, hyphens inside, at most 64 characters. */
 const catalogName = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/);
 /** Machine-readable reason (e.g. a Better Auth error code), never a free-text message. */
@@ -878,6 +880,31 @@ export const AUDIT_EVENTS = {
     sourceThreadId: id,
     projectId: id.nullable(),
     entries: z.number().int().nonnegative(),
+  }),
+  /**
+   * A member filed a thread they may read in a team folder or took it out of one (KOBE-534, TF3):
+   * `from` and `to` are folder ids, null = no folder. Recorded only on a change.
+   */
+  "thread.filed": event("team", { threadId: id, from: id.nullable(), to: id.nullable() }),
+  /** A member created a team thread folder (KOBE-534, TF4); `parentId` null = top level. */
+  "thread_folder.created": event("team", {
+    folderId: id,
+    name: folderName,
+    parentId: id.nullable(),
+  }),
+  /** A member renamed a team thread folder (KOBE-534). */
+  "thread_folder.renamed": event("team", { folderId: id, from: folderName, to: folderName }),
+  /** A member moved a team thread folder: `from` and `to` are parent ids, null = top level. */
+  "thread_folder.moved": event("team", { folderId: id, from: id.nullable(), to: id.nullable() }),
+  /**
+   * A member deleted a team thread folder (KOBE-534): `folders` is how many subfolders went with
+   * it, `threads` how many threads (any owner, Trash included) went back to no folder.
+   */
+  "thread_folder.deleted": event("team", {
+    folderId: id,
+    name: folderName,
+    folders: z.number().int().nonnegative(),
+    threads: z.number().int().nonnegative(),
   }),
   /**
    * The owner compacted the thread's Pi session (KOBE-213, CE15): the compaction run and how it

@@ -20,7 +20,11 @@ import {
   resolveAgentPin,
   resolveDraftPin,
 } from "../agents/versions.js";
-import { forkThreadRequestSchema, shareThreadRequestSchema } from "@kobe/protocol";
+import {
+  fileThreadRequestSchema,
+  forkThreadRequestSchema,
+  shareThreadRequestSchema,
+} from "@kobe/protocol";
 import { FORK_RATE, forkThread } from "../threads/fork.js";
 import { readLineage } from "../threads/lineage.js";
 import { hitRateLimit } from "../rate-limit.js";
@@ -55,6 +59,7 @@ import {
   entryIdSchema,
   listThreadsQuerySchema,
   moveThreadBodySchema,
+  pinnedQuerySchema,
   setLeafBodySchema,
   switchAgentVersionBodySchema,
   chooseThreadAgentBodySchema,
@@ -67,7 +72,7 @@ import { searchThreadList } from "../threads/search.js";
 import { listThreadActivity } from "../threads/activity.js";
 import { threadCard } from "../threads/card.js";
 import { isModelEnabled } from "../models/team-store.js";
-import { moveThread, setArchived, setPinned } from "../threads/organize.js";
+import { fileThread, moveThread, setArchived, setPinned } from "../threads/organize.js";
 import { testChatStart } from "../skills/drafts/test-chat.js";
 import { chooseThreadAgent } from "../threads/choose-agent.js";
 
@@ -106,7 +111,8 @@ const ERRORS = {
   ],
   thread_in_trash: [409, "The thread is in Trash. Restore it first."],
   thread_archived: [409, "The thread is archived. Unarchive it first."],
-  test_thread: [409, "A test conversation can't be pinned, archived or moved."],
+  test_thread: [409, "A test conversation can't be pinned, archived, moved or put in a folder."],
+  folder_not_found: [404, "No folder with that id in this team."],
   not_in_trash: [409, "The thread is not in Trash."],
   not_in_project: [409, "Only threads in a project can be shared to it."],
   nothing_to_fork: [409, "The thread has no messages to fork."],
@@ -192,6 +198,10 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
   app.get("/", async (c) => {
     const query = parseQuery(c, listThreadsQuerySchema);
     if (!query) return invalidRequest(c);
+    // A folder's list (KOBE-534) is its own view: not a search, not a project's list.
+    if (query.folder !== undefined && (query.q !== undefined || query.project_id !== undefined)) {
+      return invalidRequest(c, "folder can't be combined with q or project_id.");
+    }
     if (query.q !== undefined) {
       const { q, project_id, cursor, limit } = query;
       const result = await asViewer(c, (tx, viewer) =>
@@ -202,7 +212,12 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const cursor = cursorParam(query.cursor);
     if (cursor === undefined) return fail(c, "invalid_cursor");
     const page = await asViewer(c, (tx, viewer) =>
-      listThreads(tx, viewer, { projectId: query.project_id, cursor, limit: query.limit }),
+      listThreads(tx, viewer, {
+        projectId: query.project_id,
+        folder: query.folder,
+        cursor,
+        limit: query.limit,
+      }),
     );
     return c.json(pageBody(page));
   });
@@ -237,14 +252,15 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
   });
 
   // The rail's Pinned and Archived groups (CE19, KOBE-220): the caller's own, newest first.
+  // Pinned takes the folder filter (KOBE-534, TF5); Archived lists every folder's.
   for (const which of ["pinned", "archived"] as const) {
     app.get(`/${which}`, async (c) => {
-      const query = parseQuery(c, trashQuerySchema);
-      if (!query) return invalidRequest(c);
+      const query = parseQuery(c, pinnedQuerySchema);
+      if (!query || (which === "archived" && query.folder !== undefined)) return invalidRequest(c);
       const cursor = cursorParam(query.cursor);
       if (cursor === undefined) return fail(c, "invalid_cursor");
       const page = await asViewer(c, (tx, viewer) =>
-        listOwnOrganized(tx, viewer, { which, cursor, limit: query.limit }),
+        listOwnOrganized(tx, viewer, { which, folder: query.folder, cursor, limit: query.limit }),
       );
       return c.json(pageBody(page));
     });
@@ -502,6 +518,17 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const body = await parseBody(c, moveThreadBodySchema);
     if (!id || !body) return invalidRequest(c, "Give project_id: a project id, or null.");
     return change(c, (tx, viewer) => moveThread(tx, viewer, id, body.project_id));
+  });
+
+  /**
+   * File in a team folder, or out of one (KOBE-534, TF3): the owner or a reader of the thread
+   * (D23/CE20); idempotent, never activity.
+   */
+  app.post("/:id/file", async (c) => {
+    const id = threadIdParam(c);
+    const body = await parseBody(c, fileThreadRequestSchema);
+    if (!id || !body) return invalidRequest(c, "Give folder_id: a folder id, or null.");
+    return change(c, (tx, viewer) => fileThread(tx, viewer, id, body.folder_id));
   });
 
   app.delete("/:id", async (c) => {
