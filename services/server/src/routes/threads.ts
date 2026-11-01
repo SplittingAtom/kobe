@@ -22,6 +22,7 @@ import {
 } from "../agents/versions.js";
 import { forkThreadRequestSchema, shareThreadRequestSchema } from "@kobe/protocol";
 import { FORK_RATE, forkThread } from "../threads/fork.js";
+import { readLineage } from "../threads/lineage.js";
 import { hitRateLimit } from "../rate-limit.js";
 import { findToolOutput, readOffloadedOutput } from "../threads/entry-output.js";
 import { projectDefaultAgent } from "../projects/run-context.js";
@@ -379,6 +380,14 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     if (!id) return invalidRequest(c);
     const card = await asViewer(c, (tx, viewer) => threadCard(tx, viewer, id));
     return card ? c.json(card) : fail(c, "thread_not_found");
+  });
+
+  /** The thread's family for the lineage strip (TL1, KOBE-533): read with the summary. */
+  app.get("/:id/lineage", async (c) => {
+    const id = threadIdParam(c);
+    if (!id) return invalidRequest(c);
+    const lineage = await asViewer(c, (tx, viewer) => readLineage(tx, viewer, id));
+    return lineage ? c.json(lineage) : fail(c, "thread_not_found");
   });
 
   app.get("/:id/entries", async (c) => {
