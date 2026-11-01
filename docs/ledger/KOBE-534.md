@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (two branches; the coordinator opens the PRs)
+- **Status:** done (PRs #439 schema and #440 server merged, main 5aa4be46)
 - **Branch / worktree:** `kobe-534-folders-schema` (migration PR, packages/db only) and
   `kobe-534-folders` (server, on top of it) in `../Kobe-wt534`
 - **Depends on:** KOBE-532 (protocol shapes, on this branch as 081774bf)

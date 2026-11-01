@@ -1,6 +1,6 @@
 # KOBE-533: Threads: Lineage read (server) (TLF-2)
 
-- **Status:** in review (coordinator opens the PR)
+- **Status:** done (PR #437 merged)
 - **Branch / worktree:** `kobe-533-lineage-read` in `../Kobe-wt533`
 - **Depends on:** KOBE-532 (protocol shapes, commit 081774bf)
 

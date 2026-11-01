@@ -1,6 +1,6 @@
 # KOBE-536: Threads panel with two rails (web) (TLF-5)
 
-- **Status:** in review (coordinator opens the PR)
+- **Status:** done (PR #442 merged, main f5a5575c)
 - **Branch / worktree:** `kobe-536-threads-panel` in `../Kobe-wt536`
 - **Depends on:** KOBE-532 (protocol), KOBE-534 (folders db + server), both on this branch
 
@@ -76,3 +76,9 @@ fixtures); every criterion below has a test.
   `thread-groups.test.ts`, `thread-list-adapter.test.ts`.
 - Updated for the tree: `threads.test.tsx`, `thread-organize.test.tsx`, `thread-row-trash.test.tsx`,
   `workspace-rail.test.tsx`, `thread-menu.test.tsx`, `threads-panel.test.tsx`.
+
+## After the merge
+
+- gate1 run of the KOBE-537 specs (2026-11-01): deleting a folder while Current was chosen left its
+  threads off screen until the next list read (only the folder store refreshed). Fixed with the
+  KOBE-537 PR: `session.removeFolder` re-reads the thread list and posts to the other tabs.

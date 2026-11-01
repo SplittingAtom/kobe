@@ -1,6 +1,6 @@
 # KOBE-538: Rail team switcher: the team menu's list is clipped, so a member cannot switch teams
 
-- **Status:** in review (commit on `kobe-538-rail-team-menu`, not pushed)
+- **Status:** done (PR #441 merged; ac-1 run on gate1 2026-11-01, see below)
 - **Branch / worktree:** `kobe-538-rail-team-menu` in `../Kobe-wt538`
 - **Depends on:** none
 
@@ -32,7 +32,7 @@ holds the same `TeamList` the collapsed rail's icon uses.
 
 ## Evidence (acceptance criteria → test or command output)
 
-- ac-1: e2e test above (pending gate1 run); component test "switching sets the active team…"
+- ac-1: e2e test above passed against kobe-gate1 (`local-f5a5575c1486`, 2026-11-01: 2 passed, 9.6 s); component test "switching sets the active team…"
   now opens the popover and picks Operations (PUT `/v1/me/teams/active`, reload).
 - ac-2: rail-header.test.tsx CSS contract and one-line tests unchanged and green.
 - ac-3: rail-header.test.tsx "opens the list outside the clipped slot; Escape closes it and refocuses

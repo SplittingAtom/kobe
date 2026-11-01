@@ -10,13 +10,24 @@ Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-promp
 Hadron via `scripts/hadron.sh`.
 
 - **Thread lineage and folders lane (2026-11-01, spec by Chris's decisions of 2026-10-31):**
-  `docs/specs/thread-lineage-and-folders.md` (Hadron spec 71dcf77b): a lineage strip at the top of the
-  conversation column replaces the "Forked from" note (root first, one linked row per generation, dropdowns
-  for siblings and forks; `GET /v1/threads/{id}/lineage`, readable threads only), and team-visible thread
-  folders (3 levels, 500 per team, `thread_folders` + `threads.folder_id`, filing by owner or D23 reader,
-  audited) with a two-rail Threads panel (Current with Archived folded under it, folders, Deleted). Tickets
-  KOBE-532 (protocol) → 533/534 → 535/536 → 537 (browser specs); lane brief with the kickoff prompt in
-  `docs/ledger/thread-lineage-folders-lane.md`. Nothing started yet.
+  `docs/specs/thread-lineage-and-folders.md` (Hadron spec 71dcf77b). Shipped in six PRs: KOBE-532
+  protocol shapes (#436), KOBE-533 `GET /v1/threads/{id}/lineage` (#437), KOBE-534 the
+  `thread_folders` table and `threads.folder_id` (#439) then the folder routes, filing by owner or
+  reader, `?folder=` lists and counts, export path and audit events (#440), KOBE-535 the lineage strip
+  in place of the "Forked from" note (#438; the fork specs followed it), KOBE-536 the two-rail Threads
+  panel (#442; the organize spec follows the Archived node). Deployed to kobe-gate1 as
+  `local-f5a5575c1486` (Helm rev 108; rollback `local-114565d7ceb5`; `local-2e086c5496b2` pruned),
+  reconcile failed:0. KOBE-537 browser specs on gate1: `thread-lineage` passed; `thread-folders`
+  passed for the second member and failed for the owner at Delete: with Current chosen, the threads
+  the server took back stayed off screen until the next list read (the web client only refreshed the
+  folder store). Fixed in the KOBE-537 PR (`session.removeFolder` re-reads the list and tells other
+  tabs; unit test first); both specs re-run after its deploy — result below once recorded. KOBE-538
+  (Chris, same day: the team name in the upper left did nothing — the list was clipped by the slot's
+  `overflow: hidden` from the KOBE-419 review fix): the switcher is a portalled popover, PR #441, its
+  spec passed on gate1. The merge queue tripped three times on the e2e suite's Bifrost restart check
+  during one upstream pricing outage; PR #443 lets it tolerate any number of such exits. Follow-ups
+  not filed: the row submenu's "New folder…" uses `window.prompt`; the Current count is limited to the
+  pages read. Filed: KOBE-539 (sandbox image libbrotli1 CVE-2026-111497 fails `publish` on main).
 - **App placement lane (2026-10-31, Chris: a site admin decides where an MCP app opens):** KOBE-531 filed
   and merged as PR #431 (main 114565d7). Per pinned template, `connector_ui_resources.placement` is `chat`
   (the card, default), `artifacts` (the card is the "Opened in the side column" stub and the app opens in the
