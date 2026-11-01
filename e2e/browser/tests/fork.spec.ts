@@ -19,9 +19,15 @@ test("Fork to a new thread opens a titled copy with its origin note", async ({ c
   const fork = await chat.threadId();
   expect(fork).not.toBe(source);
 
-  const origin = page.getByRole("note", { name: "Fork origin" });
-  await expect(origin).toContainText("Forked from");
-  await expect(origin.getByRole("link")).toHaveAttribute("href", new RegExp(source, "i"));
+  // The lineage strip (KOBE-535): the source as a link in the first row, the fork bold in the
+  // current row with its fork point's excerpt.
+  const strip = page.getByRole("navigation", { name: "Thread lineage" });
+  const rows = strip.getByRole("listitem");
+  await expect(rows).toHaveCount(2, { timeout: 30_000 });
+  await expect(rows.first().getByRole("link")).toHaveAttribute("href", new RegExp(source, "i"));
+  const current = rows.last();
+  await expect(current.locator("strong")).toHaveText(title);
+  await expect(current).toContainText(/ at “.+”/);
   // The conversation up to the fork point came along, and the rail lists the new title.
   await expect(chat.userMessages.first()).toContainText("ALPHA");
   await expect(chat.answers).toHaveCount(1);

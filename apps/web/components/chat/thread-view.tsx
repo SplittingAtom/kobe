@@ -17,8 +17,8 @@ import { Composer } from "./composer";
 import { ComposerDictationProvider } from "./composer-steer";
 import { DraftProjectNote, ProjectBar } from "./project-bar";
 import { OpenThreadContext } from "./fork-dialog";
-import { ForkOriginNote } from "./fork-origin";
 import { useKobeExtras, type KobeThreadExtras } from "./kobe-runtime";
+import { LineageStrip } from "./lineage-strip";
 import { AssistantMessage, EditComposer, UserMessage } from "./messages";
 import { RunNotices } from "./run-notices";
 import { SteeringPanel } from "./steering-panel";
@@ -287,7 +287,9 @@ export function ThreadView({
       <div className="mx-auto w-full max-w-(--thread-max-width) px-4">
         <ProjectBar extras={extras} onOpenThread={onOpenThread} />
         {state.threadId === null && <DraftProjectNote />}
-        <ForkOriginNote extras={extras} onOpenThread={onOpenThread} />
+        <OpenThreadContext.Provider value={onOpenThread}>
+          <LineageStrip extras={extras} />
+        </OpenThreadContext.Provider>
       </div>
       <ArtifactList />
       {state.phase === "error" && state.loadError && (

@@ -148,6 +148,7 @@ export class ChatSession {
   readonly #createdListeners = new Set<() => void>();
   readonly #retitledListeners = new Set<(threadId: string, title: string) => void>();
   readonly #listChangedListeners = new Set<() => void>();
+  readonly #trashListeners = new Set<() => void>();
   /** First lines of threads created here, shown until their title arrives (KOBE-219). */
   readonly #provisional = new Map<string, string>();
   /** Model for the thread `initialize` creates next (the new-thread picker; null = default). */
@@ -468,6 +469,19 @@ export class ChatSession {
   onThreadRetitled(listener: (threadId: string, title: string) => void): () => void {
     this.#retitledListeners.add(listener);
     return () => this.#retitledListeners.delete(listener);
+  }
+
+  /**
+   * A thread went to Trash, came back or was deleted forever from the list (KOBE-535): the
+   * lineage strip reads its family again (TL4).
+   */
+  onThreadTrashChanged(listener: () => void): () => void {
+    this.#trashListeners.add(listener);
+    return () => this.#trashListeners.delete(listener);
+  }
+
+  threadTrashChanged(): void {
+    for (const listener of this.#trashListeners) listener();
   }
 
   /** A thread was pinned, archived or moved, here or in another tab: the rail reads its list. */

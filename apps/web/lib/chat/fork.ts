@@ -13,6 +13,9 @@ const EXCERPT_MAX = 80;
 /** Neutral text for a fork whose source the viewer can't open (or that no longer exists). */
 export const HIDDEN_SOURCE = "a thread you can't open";
 
+/** A thread without a title, as the chat names it. */
+export const UNTITLED_THREAD = "Untitled conversation";
+
 /** Where a message forks: the entry the fork ends at, and a prompt to re-send there. */
 export interface ForkPoint {
   readonly entryId: string;
@@ -64,7 +67,7 @@ export function forkOrigin(summary: ThreadSummary | null | undefined): ForkOrigi
 
 /** The source's name as shown ("Untitled conversation" when it has no title). */
 export function sourceName(origin: ForkOrigin): string {
-  return origin.kind === "source" ? (origin.title ?? "Untitled conversation") : HIDDEN_SOURCE;
+  return origin.kind === "source" ? (origin.title ?? UNTITLED_THREAD) : HIDDEN_SOURCE;
 }
 
 /** The rail's hover text for a thread's list item (assistant-ui `custom.fork`). */
@@ -75,8 +78,15 @@ export function forkHint(origin: ForkOrigin | null): string | undefined {
     : `Forked from ${HIDDEN_SOURCE}`;
 }
 
-/** The text of the fork's own message holding entry `at`, shortened; null when not loaded. */
-export function forkPointExcerpt(projection: Projection, at: string | null): string | null {
+/**
+ * The text of the fork's own message holding entry `at`, shortened to `max` characters; null when
+ * not loaded.
+ */
+export function forkPointExcerpt(
+  projection: Projection,
+  at: string | null,
+  max: number = EXCERPT_MAX,
+): string | null {
   if (at === null) return null;
   const node = projection.nodeOfEntry.get(at);
   const item = node === undefined ? undefined : projection.items.find((i) => i.message.id === node);
@@ -91,5 +101,5 @@ export function forkPointExcerpt(projection: Projection, at: string | null): str
           .trim();
   const text = raw.replace(/\s+/g, " ").trim();
   if (text === "") return null;
-  return text.length > EXCERPT_MAX ? `${text.slice(0, EXCERPT_MAX - 1).trimEnd()}…` : text;
+  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
 }
