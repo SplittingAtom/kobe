@@ -9,6 +9,7 @@ import {
   runs,
   threadAppResults,
   threadEntries,
+  threadFolders,
   threads,
   users,
 } from "../../schema/index.js";
@@ -28,6 +29,23 @@ async function insertThread(
     .returning({ id: threads.id });
   if (!row) throw new Error("probe: thread insert returned nothing");
   return row.id;
+}
+
+/** A top-level folder with a subfolder (KOBE-534); returns the subfolder's id. */
+async function insertFolder(tx: KobeTx, teamId: string): Promise<string> {
+  const userId = randomUUID();
+  await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+  const [top] = await tx
+    .insert(threadFolders)
+    .values({ teamId, name: `Probe ${userId.slice(0, 8)}`, createdBy: userId })
+    .returning({ id: threadFolders.id });
+  if (!top) throw new Error("probe: folder insert returned nothing");
+  const [sub] = await tx
+    .insert(threadFolders)
+    .values({ teamId, parentId: top.id, name: "Probe sub", position: 1, createdBy: userId })
+    .returning({ id: threadFolders.id });
+  if (!sub) throw new Error("probe: subfolder insert returned nothing");
+  return sub.id;
 }
 
 async function insertRun(tx: KobeTx, teamId: string, threadId?: string): Promise<string> {
@@ -54,6 +72,9 @@ export const conversationsFixtures: Record<(typeof conversations.team)[number], 
     });
     // Shared with the whole team (KOBE-221): still confined to it.
     await insertThread(tx, teamId, { sharedToTeam: true });
+    // Filed in a team folder (KOBE-534): the folder key is per team.
+    const folderId = await insertFolder(tx, teamId);
+    await insertThread(tx, teamId, { folderId, sharedToTeam: true });
   },
   thread_entries: async (tx, teamId) => {
     const threadId = await insertThread(tx, teamId);
@@ -136,5 +157,8 @@ export const conversationsFixtures: Record<(typeof conversations.team)[number], 
       result: { content: [] },
       bytes: 14,
     });
+  },
+  thread_folders: async (tx, teamId) => {
+    await insertFolder(tx, teamId);
   },
 };

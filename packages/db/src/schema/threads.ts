@@ -186,6 +186,16 @@ export const threads = pgTable(
      * Ids only, no foreign key: a deleted project leaves a move to "a project you can't open".
      */
     projectMoves: jsonb().$type<readonly ThreadProjectMove[]>().notNull().default([]),
+    /**
+     * The team folder the thread is filed in (KOBE-534, TF2); null = not in a folder (`Current`).
+     * Seen by everyone who may read the thread. SQL-only (`*_thread_folders_rls.sql`, like
+     * `schedule_id`): foreign key `threads_folder_fk` (team_id, folder_id) → thread_folders ON
+     * DELETE SET NULL (folder_id); check `threads_folder_not_test` (NOT VALID: a builder test,
+     * Workbench or eval thread never has a folder); index `threads_folder_idx` (team_id,
+     * folder_id, last_activity_at DESC, id DESC) WHERE folder_id IS NOT NULL AND deleted_at IS
+     * NULL, IF NOT EXISTS so large sites can build it CONCURRENTLY first (docs/install.md).
+     */
+    folderId: uuid(),
   },
   // Annotated: threads and thread_entries reference each other (leaf and thread foreign keys).
   (t): PgTableExtraConfigValue[] => [

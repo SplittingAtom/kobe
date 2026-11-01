@@ -61,3 +61,4 @@ export * from "./thread-connectors.js";
 export * from "./workspace-sync-conflicts.js";
 export * from "./site-skill-drafts.js";
 export * from "./branding.js";
+export * from "./thread-folders.js";
