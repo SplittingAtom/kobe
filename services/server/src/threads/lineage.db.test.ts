@@ -30,6 +30,8 @@ const MINUTE = 60_000;
 interface Seed {
   title?: string | null;
   forkOf?: string;
+  /** The entry the fork was taken at (default `e1`). */
+  forkAt?: string;
   /** Minutes ago of the last activity: smaller is newer. */
   ago?: number;
   deleted?: boolean;
@@ -52,7 +54,7 @@ async function thread(team: string, owner: Person, s: Seed = {}): Promise<string
       owner.id,
       s.title === undefined ? `t-${id.slice(0, 4)}` : s.title,
       s.forkOf ?? null,
-      s.forkOf ? "e1" : null,
+      s.forkOf ? (s.forkAt ?? "e1") : null,
       new Date(Date.now() - (s.ago ?? 0) * MINUTE),
       s.deleted ? new Date(Date.now() - 1000 * MINUTE) : null,
       s.shared ?? false,
@@ -110,6 +112,25 @@ describe("a family (ac-1)", () => {
     expect(top.ancestors).toEqual([]);
     expect(top.self).toMatchObject({ forked_at_entry_id: null, siblings: [] });
     expect(ids(top.forks)).toEqual([b, a]);
+  });
+});
+
+describe("fork point on relatives (KOBE-545)", () => {
+  it("lists forked_at_entry_id on forks and on siblings", async () => {
+    const w = await f.world();
+    const root = await thread(w.team, w.owner, { ago: 50 });
+    const x = await thread(w.team, w.owner, { forkOf: root, forkAt: "entry-x", ago: 10 });
+    const y = await thread(w.team, w.owner, { forkOf: root, forkAt: "entry-y", ago: 5 });
+    const top = await read(w.owner, root);
+    expect(top.forks.map((r) => [r.thread_id, r.forked_at_entry_id])).toEqual([
+      [y, "entry-y"],
+      [x, "entry-x"],
+    ]);
+    const body = await read(w.owner, x);
+    expect(body.self.siblings.map((r) => [r.thread_id, r.forked_at_entry_id])).toEqual([
+      [y, "entry-y"],
+      [x, "entry-x"],
+    ]);
   });
 });
 

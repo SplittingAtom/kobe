@@ -23,6 +23,8 @@ export interface LineageMember {
   readonly deletedAt: Date | null;
   readonly ownerUserId: string;
   readonly forkedFromThreadId: string | null;
+  /** The entry the thread was forked at; null for a thread that is not a fork. */
+  readonly forkedAtEntryId: string | null;
 }
 
 /** Builder test, Workbench test and eval threads are never part of a lineage (TL2). */
@@ -34,6 +36,7 @@ const memberColumns = {
   deletedAt: threads.deletedAt,
   ownerUserId: threads.ownerUserId,
   forkedFromThreadId: threads.forkedFromThreadId,
+  forkedAtEntryId: threads.forkedAtEntryId,
 };
 
 /** The thread, or null when the viewer may not read it (as every thread read: 404). */
@@ -50,6 +53,7 @@ export async function readLineage(
     deletedAt: found.thread.deletedAt,
     ownerUserId: found.thread.ownerUserId,
     forkedFromThreadId: found.thread.forkedFromThreadId ?? null,
+    forkedAtEntryId: found.thread.forkedAtEntryId ?? null,
   };
   const { path, rootHidden } = await walkUp(tx, viewer, self);
   const forks = await forksOf(tx, viewer, [...path.map((m) => m.id), self.id]);
@@ -147,6 +151,7 @@ function relative(viewer: Viewer, m: LineageMember): LineageRelative {
     title: m.title,
     deleted_at: iso(m.deletedAt),
     owner: m.ownerUserId === viewer.userId ? "me" : "other",
+    forked_at_entry_id: m.forkedAtEntryId,
   };
 }
 
