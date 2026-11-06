@@ -42,6 +42,15 @@ import { splitAttachedFiles } from "./uploads";
 import type { LiveMessage, LiveRun, ToolActivity } from "./live";
 import type { ThreadEntry } from "./types";
 
+// The Conversation tree (CT1, KOBE-545): the same entries projected as a git graph.
+export {
+  junctionCount,
+  projectTree,
+  type TreeNode,
+  type TreeNotes,
+  type TreeProjection,
+} from "./tree-nodes";
+
 export type KobeMessageMeta =
   | {
       readonly kind: "user";
@@ -599,7 +608,7 @@ export function descendantsOf(entryId: string, entries: readonly ThreadEntry[]):
 }
 
 /** The newest message below `entryId` (the last in tree order), if any. */
-function newestBelow(
+export function newestBelow(
   entryId: string,
   entries: readonly ThreadEntry[],
   order: readonly string[],

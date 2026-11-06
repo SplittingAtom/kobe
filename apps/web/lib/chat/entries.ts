@@ -145,7 +145,7 @@ const SKIPPED_SUMMARY_ID = "ks-";
  * A summary is known by its `customType`, or by its server id when its body is offloaded (the
  * payload is then empty): either way it must never enter the tree as a branch or a head.
  */
-function isSkippedSummary(entry: ThreadEntry): boolean {
+export function isSkippedSummary(entry: ThreadEntry): boolean {
   return (
     entry.type === "custom_message" &&
     (entry.payload.customType === SKIPPED_SUMMARY_TYPE ||
@@ -198,8 +198,13 @@ export function recordedModel(entry: ThreadEntry, parsed: ParsedEntry): string |
 /** The server's app card ids: `ka-` and 24 hex characters. */
 const APP_CARD_ID = /^ka-[0-9a-f]{24}$/;
 
+/** A server-written app card entry (KOBE-440): never a branch of the conversation (CT12). */
+export function isAppCardEntry(entry: ThreadEntry): boolean {
+  return entry.type === "custom_message" && APP_CARD_ID.test(entry.entryId);
+}
+
 function appCard(entry: ThreadEntry): ParsedEntry | undefined {
-  if (entry.type !== "custom_message" || !APP_CARD_ID.test(entry.entryId)) return undefined;
+  if (!isAppCardEntry(entry)) return undefined;
   if (!entry.payloadOffloaded && entry.payload.customType !== APP_CARD_TYPE) return undefined;
   const tool = str(record(entry.payload.details)?.tool) ?? "";
   return { kind: "appCard", tool: tool.slice(0, 128) };
