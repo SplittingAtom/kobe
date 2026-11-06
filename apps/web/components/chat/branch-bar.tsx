@@ -1,9 +1,13 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
+import { DropdownMenu } from "radix-ui";
+import { ChevronDownIcon } from "lucide-react";
 import { branchContextTokens, headOf, isBrowsing, messagesDiffer } from "../../lib/chat/head";
 import { IconAction } from "../shell/icon-action";
 import { threadScale } from "../shell/context-gauge";
+import { chatPortalContainer } from "../ui/chat-portal";
+import { BranchSummaryDialog } from "./branch-summary-dialog";
 import type { KobeThreadExtras } from "./kobe-runtime";
 import { useThreadTeamModels } from "./use-team-models";
 import styles from "./chat.module.css";
@@ -81,6 +85,13 @@ function BranchBarBody({
   const overWindow = owner && window !== null && typeof tokens === "number" && tokens > window;
   const scheduled = owner && state.summary?.scheduleId != null;
   const moving = state.busy.includes("leaf");
+  // Make it current ▾ · and carry a summary (KOBE-548, CT11): owner, not on test threads.
+  const canCarry = owner && state.summary?.isTest !== true && head !== null;
+  const [carrying, setCarrying] = useState(false);
+  const leftBehind = useMemo(
+    () => (head === null ? 0 : messagesDiffer(entries, nodeOfEntry, leaf, head)),
+    [entries, nodeOfEntry, leaf, head],
+  );
 
   const makeCurrent = async (button: HTMLButtonElement) => {
     const root = threadRootOf(button);
@@ -110,6 +121,47 @@ function BranchBarBody({
         >
           Make it current
         </button>
+      )}
+      {canCarry && (
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button
+              type="button"
+              className={styles.branchBarAction}
+              aria-label="More ways to make it current"
+              aria-disabled={moving || undefined}
+            >
+              <ChevronDownIcon aria-hidden className="size-3.5" />
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal container={chatPortalContainer()}>
+            <DropdownMenu.Content
+              data-kobe-portal
+              align="end"
+              sideOffset={4}
+              className="bg-background text-foreground z-50 min-w-48 rounded-lg border p-1 shadow-md"
+            >
+              <DropdownMenu.Item
+                className="hover:bg-muted focus:bg-muted flex cursor-pointer items-center rounded-md px-2 py-1.5 text-sm outline-none select-none"
+                onSelect={() => {
+                  if (!moving) setCarrying(true);
+                }}
+              >
+                and carry a summary
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+      )}
+      {carrying && head !== null && controller !== null && (
+        <BranchSummaryDialog
+          controller={controller}
+          target={head}
+          left={leftBehind}
+          filesLeft={filesChanged != null}
+          open
+          onOpenChange={setCarrying}
+        />
       )}
       {tree}
       <IconAction

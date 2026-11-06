@@ -11,7 +11,13 @@ import {
   type ThinkingLevel,
 } from "@kobe/protocol";
 import type { ApiError, ApiResult } from "../api/client";
-import type { AppContextWire, ChatApi, CompactResult, ForkOptions } from "./api";
+import type {
+  AppContextWire,
+  BranchSummaryResult,
+  ChatApi,
+  CompactResult,
+  ForkOptions,
+} from "./api";
 import { newIdempotencyKey } from "./keys";
 import {
   browserResumeStore,
@@ -52,6 +58,13 @@ const NO_THREAD: ApiError = {
   status: 0,
   code: "thread_not_found",
   message: "Send a message first: there is no conversation to compact.",
+};
+
+/** The web offers a carried summary only off the leaf's branch (CT11; the server allows it). */
+export const ON_LEAF_BRANCH: ApiError = {
+  status: 0,
+  code: "on_leaf_branch",
+  message: "This message is on the current branch: there is no other branch to summarize.",
 };
 
 export interface ControllerOptions {
@@ -1128,6 +1141,41 @@ export class ThreadController {
     if (res.ok) this.#announce("The conversation was compacted.");
     else this.#fail(res.error);
     await this.refresh();
+    return res;
+  };
+
+  /**
+   * Make it current and carry a summary (KOBE-548, CT11): Pi summarizes the branch the thread
+   * leaves and puts the summary under `target` (a node off the leaf's branch: the web refuses one
+   * on it); the summary is the new leaf, so the head follows it and the thread is read again. A
+   * refusal (one fixed message per code) shows as the thread's error too, as compaction's does.
+   */
+  readonly carrySummary = async (
+    target: string,
+    focus?: string,
+  ): Promise<ApiResult<BranchSummaryResult> | undefined> => {
+    const { threadId, summary, entries } = this.#state;
+    if (threadId === null || !summary || summary.readOnly === true) return undefined;
+    const leaf = summary.leafEntryId;
+    if (leaf === null || onBranchOf(entries, leaf, target))
+      return { ok: false, error: ON_LEAF_BRANCH };
+    if (this.#state.busy.includes("leaf")) return undefined;
+    this.#leafVersion += 1;
+    const res = await this.#busy("leaf", () =>
+      this.#api.branchSummary(threadId, {
+        to_entry_id: target,
+        ...(focus === undefined ? {} : { focus }),
+      }),
+    );
+    if (!res.ok) {
+      this.#fail(res.error);
+      await this.refresh();
+      return res;
+    }
+    this.#set((s) => ({ ...s, followups: undefined, head: undefined }));
+    await this.refresh();
+    this.#onLeafMoved?.(threadId);
+    this.#announce("This branch is now current");
     return res;
   };
 

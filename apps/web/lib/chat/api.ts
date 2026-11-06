@@ -75,6 +75,13 @@ export interface CompactResult {
   readonly estimatedTokensAfter?: number;
 }
 
+/** `POST /v1/threads/{id}/branch-summary`'s answer (camelized; KOBE-548). */
+export interface BranchSummaryResult {
+  readonly threadId: string;
+  readonly entryId: string;
+  readonly leafEntryId: string;
+}
+
 /** What the chat shows of the team's retention (`GET /v1/team/retention`, camelized). */
 export interface TeamRetentionNotice {
   readonly upcoming: { readonly period: string; readonly effectiveAt: string } | null;
@@ -197,6 +204,14 @@ export interface ChatApi {
    * optional one-line focus. Answers once done; the `compaction` entry is then in the thread.
    */
   compactThread(threadId: string, focus?: string): Promise<ApiResult<CompactResult>>;
+  /**
+   * Make it current and carry a summary (KOBE-548, CT11): Pi summarizes the branch left and the
+   * summary, under `to_entry_id`, becomes the leaf. Answers once done.
+   */
+  branchSummary(
+    threadId: string,
+    body: { readonly to_entry_id: string; readonly focus?: string },
+  ): Promise<ApiResult<BranchSummaryResult>>;
   sendMessage(
     threadId: string,
     body: {
@@ -431,6 +446,7 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     setLeaf: (id, entryId) => send("POST", `/v1/threads/${enc(id)}/leaf`, { entry_id: entryId }),
     compactThread: (id, focus) =>
       send("POST", `/v1/threads/${enc(id)}/compact`, focus === undefined ? {} : { focus }),
+    branchSummary: (id, body) => send("POST", `/v1/threads/${enc(id)}/branch-summary`, body),
     sendMessage: (id, body, idempotencyKey) =>
       apiRequest(`/v1/threads/${enc(id)}/messages`, {
         method: "POST",
