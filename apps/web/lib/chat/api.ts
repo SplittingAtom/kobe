@@ -14,7 +14,8 @@ import type { ProposalView } from "../files/editor-state";
 import { apiDownload, apiRequest, apiTextFile, type ApiResult, type TextFile } from "../api/client";
 import { readThreadContext, type ContextRead } from "./context-viewer";
 import { readThreadLineage } from "./lineage";
-import type { ThreadLineageResponse } from "@kobe/protocol";
+import { readThreadBranches } from "./branches";
+import type { ThreadBranchesResponse, ThreadLineageResponse } from "@kobe/protocol";
 import type { ArtifactDetailView, ArtifactSummaryView } from "./artifacts";
 import type { BudgetStatus } from "../admin/api/budgets";
 import type { RunUsage, ThreadUsage } from "../admin/api/usage";
@@ -241,6 +242,8 @@ export interface ChatApi {
   threadContext(threadId: string): Promise<ContextRead>;
   /** The thread's family for the lineage strip (TL1, KOBE-535); null when the read failed. */
   threadLineage(threadId: string): Promise<ThreadLineageResponse | null>;
+  /** Labels and remembered-rule runs for the Conversation tree (CT2, KOBE-545); null on failure. */
+  getThreadBranches(threadId: string): Promise<ThreadBranchesResponse | null>;
   /** Interrupted and budget-stopped runs and decided approvals (inline markers, KOBE-209). */
   threadMarkers(threadId: string): Promise<ApiResult<ThreadMarkers>>;
   /** The thread's rateable answers with the caller's own ratings (KOBE-275). */
@@ -470,6 +473,7 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     threadUsage: (id) => get(`/v1/threads/${enc(id)}/usage`),
     threadContext: (id) => readThreadContext(id, teamId, fetchFn),
     threadLineage: (id) => readThreadLineage(id, teamId, fetchFn),
+    getThreadBranches: (id) => readThreadBranches(id, teamId, fetchFn),
     threadMarkers: (id) => get(`/v1/threads/${enc(id)}/markers`),
     threadFeedback: (id) => get(`/v1/threads/${enc(id)}/feedback`),
     rateAnswer: (runId, change) =>

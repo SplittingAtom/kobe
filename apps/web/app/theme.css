@@ -117,6 +117,18 @@
      there. */
   --kobe-composer-focus: #52525b;
 
+  /* The Conversation tree's lanes (CT7, KOBE-545; docs/theming.md §4.3): lane 1 is the path on
+     screen in the accent's link colour, lanes 2-8 distinct hues at 3:1 or more on the page and
+     panels. Presets set their own (lib/theme/presets.ts). */
+  --kobe-lane-1: var(--kobe-brand-link);
+  --kobe-lane-2: #926e02;
+  --kobe-lane-3: #b54877;
+  --kobe-lane-4: #048872;
+  --kobe-lane-5: #9057b4;
+  --kobe-lane-6: #548508;
+  --kobe-lane-7: #ba4f23;
+  --kobe-lane-8: #03819e;
+
   /* The context gauge (components/shell/context-gauge.module.css), from the status colours. */
   --kobe-gauge-ok: var(--kobe-status-done);
   --kobe-gauge-warn: var(--kobe-status-attention);
@@ -231,6 +243,13 @@
   --kobe-tool-badge-bg: #3b2f08;
   --kobe-tool-badge-border: #c9a227;
   --kobe-composer-focus: #a1a1aa;
+  --kobe-lane-2: #cea608;
+  --kobe-lane-3: #f67fa5;
+  --kobe-lane-4: #0ec5af;
+  --kobe-lane-5: #cf8bea;
+  --kobe-lane-6: #7ec05b;
+  --kobe-lane-7: #f78953;
+  --kobe-lane-8: #0bbcee;
   --kobe-ctx-system-prompt: #8c7ff0;
   --kobe-ctx-agent-instructions: #d9739f;
   --kobe-ctx-skills: #e0a3c8;
@@ -293,6 +312,13 @@
     --kobe-tool-badge-bg: #3b2f08;
     --kobe-tool-badge-border: #c9a227;
     --kobe-composer-focus: #a1a1aa;
+    --kobe-lane-2: #cea608;
+    --kobe-lane-3: #f67fa5;
+    --kobe-lane-4: #0ec5af;
+    --kobe-lane-5: #cf8bea;
+    --kobe-lane-6: #7ec05b;
+    --kobe-lane-7: #f78953;
+    --kobe-lane-8: #0bbcee;
     --kobe-ctx-system-prompt: #8c7ff0;
     --kobe-ctx-agent-instructions: #d9739f;
     --kobe-ctx-skills: #e0a3c8;

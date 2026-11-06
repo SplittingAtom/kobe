@@ -2,6 +2,8 @@ import { contrastRatio, PRESET_IDS, PRESET_LABELS } from "@kobe/protocol";
 import { describe, expect, it } from "vitest";
 import {
   FONT_STACK_VALUES,
+  LANE_1_VALUE,
+  LANE_TOKENS,
   PRESET_SCHEME_TOKENS,
   PRESETS,
   RADIUS_SCALES,
@@ -97,8 +99,11 @@ const PAGES = [
 /** Contrast failures of one scheme against docs/theming.md §8 (rules 1-5). */
 function floorFailures(id: string, values: SchemeValues, fixed: ReadonlyMap<string, string>) {
   const failures: string[] = [];
-  const hex = (token: string): string | null =>
-    asHex((values as Record<string, string>)[token] ?? fixed.get(token) ?? "");
+  const hex = (token: string): string | null => {
+    const value = (values as Record<string, string>)[token] ?? fixed.get(token) ?? "";
+    const ref = /^var\((--[\w-]+)\)$/.exec(value);
+    return ref ? hex(ref[1] as string) : asHex(value);
+  };
   const need = (fg: string, bg: string, min: number) => {
     const a = hex(fg);
     const b = hex(bg);
@@ -138,6 +143,8 @@ function floorFailures(id: string, values: SchemeValues, fixed: ReadonlyMap<stri
   }
   // 5. The fixed status, danger and tool colours on the retinted surfaces.
   for (const fg of FIXED_TEXT) for (const bg of PAGES) need(fg, bg, 4.5);
+  // 6. The Conversation tree's lane colours (CT7): lines and nodes, 3:1 on every page and panel.
+  for (const lane of LANE_TOKENS) for (const bg of PAGES) need(lane, bg, 3);
   return failures;
 }
 
@@ -146,5 +153,32 @@ describe("the contrast floor (docs/theming.md §8)", () => {
     const preset = PRESETS[id];
     expect(floorFailures(id, preset.light, THEME_LIGHT), "light").toEqual([]);
     expect(floorFailures(id, preset.dark, THEME_DARK), "dark").toEqual([]);
+  });
+});
+
+/** KOBE-545 (CT7, ac-4): eight lane colours per preset and scheme, lane 1 the accent. */
+describe("lane colours", () => {
+  const resolved = (values: SchemeValues, token: PresetSchemeToken): string => {
+    const value = values[token];
+    const ref = /^var\((--[\w-]+)\)$/.exec(value);
+    return ref ? resolved(values, ref[1] as PresetSchemeToken) : value;
+  };
+
+  it.each(PRESET_IDS)("%s defines --kobe-lane-1..8 in light and dark, lane 1 the link", (id) => {
+    for (const values of [PRESETS[id].light, PRESETS[id].dark]) {
+      expect(values["--kobe-lane-1"]).toBe(LANE_1_VALUE);
+      const colours = LANE_TOKENS.map((t) => resolved(values, t));
+      for (const c of colours) expect(c).toMatch(/^#[0-9a-f]{6}$/);
+      expect(new Set(colours).size, "eight distinct colours").toBe(8);
+    }
+  });
+
+  it("lanes 2-8 are the preset's own, not one shared palette", () => {
+    const palettes = PRESET_IDS.map((id) =>
+      LANE_TOKENS.slice(1)
+        .map((t) => PRESETS[id].light[t])
+        .join(" "),
+    );
+    expect(new Set(palettes).size).toBe(PRESET_IDS.length);
   });
 });

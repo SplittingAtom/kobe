@@ -10,7 +10,7 @@ import {
   type LineageRelative,
   type ThreadLineageResponse,
 } from "@kobe/protocol";
-import { TEAM_HEADER } from "../teams";
+import { readWire } from "./wire-read";
 import { UNTITLED_THREAD } from "./fork";
 
 /** More ancestor rows than this fold the middle generations (TL3). */
@@ -243,17 +243,7 @@ export async function readThreadLineage(
   teamId: string,
   fetchFn: typeof fetch = fetch,
 ): Promise<ThreadLineageResponse | null> {
-  try {
-    const res = await fetchFn(`/v1/threads/${encodeURIComponent(threadId)}/lineage`, {
-      method: "GET",
-      headers: { accept: "application/json", [TEAM_HEADER]: teamId },
-      credentials: "same-origin",
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-    const parsed = threadLineageResponseSchema.safeParse(await res.json());
-    return parsed.success && parsed.data.thread_id === threadId ? parsed.data : null;
-  } catch {
-    return null;
-  }
+  const route = `/v1/threads/${encodeURIComponent(threadId)}/lineage`;
+  const read = await readWire(route, threadLineageResponseSchema, teamId, fetchFn);
+  return read?.thread_id === threadId ? read : null;
 }

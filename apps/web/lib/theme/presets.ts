@@ -14,6 +14,27 @@ import { PRESET_LABELS } from "@kobe/protocol";
  * (§4.4), and the test checks they keep their contrast on each preset's surfaces.
  */
 
+/**
+ * The Conversation tree's lane colours (CT7, KOBE-545): lane 1 is the path on screen, the accent
+ * as text on the page (`var(--kobe-brand-link)`, so a custom accent moves it too); lanes 2-8 are
+ * distinct hues per preset, rotated from its accent, each at least 3:1 (WCAG 1.4.11) on every page
+ * and panel surface of its scheme (presets.test.ts).
+ */
+export const LANE_TOKENS = [
+  "--kobe-lane-1",
+  "--kobe-lane-2",
+  "--kobe-lane-3",
+  "--kobe-lane-4",
+  "--kobe-lane-5",
+  "--kobe-lane-6",
+  "--kobe-lane-7",
+  "--kobe-lane-8",
+] as const;
+export type LaneToken = (typeof LANE_TOKENS)[number];
+
+/** Lane 1 in every preset and scheme: the accent's link colour. */
+export const LANE_1_VALUE = "var(--kobe-brand-link)";
+
 /** Tokens a preset sets per scheme, in theme.css order. */
 export const PRESET_SCHEME_TOKENS = [
   "--background",
@@ -46,6 +67,7 @@ export const PRESET_SCHEME_TOKENS = [
   "--kobe-console-control-border",
   "--kobe-console-overlay",
   "--kobe-composer-focus",
+  ...LANE_TOKENS,
 ] as const;
 export type PresetSchemeToken = (typeof PRESET_SCHEME_TOKENS)[number];
 export type SchemeValues = Readonly<Record<PresetSchemeToken, string>>;
@@ -103,6 +125,21 @@ export const RADIUS_SCALES: Readonly<Record<CornerStyle, Readonly<Record<RadiusT
   },
 };
 
+type Lanes = readonly [string, string, string, string, string, string, string];
+
+function laneValues(lanes: Lanes): Readonly<Record<LaneToken, string>> {
+  return {
+    "--kobe-lane-1": LANE_1_VALUE,
+    "--kobe-lane-2": lanes[0],
+    "--kobe-lane-3": lanes[1],
+    "--kobe-lane-4": lanes[2],
+    "--kobe-lane-5": lanes[3],
+    "--kobe-lane-6": lanes[4],
+    "--kobe-lane-7": lanes[5],
+    "--kobe-lane-8": lanes[6],
+  };
+}
+
 /** One scheme from its parts, so each preset below reads as a palette. */
 function scheme(v: {
   page: string;
@@ -124,6 +161,8 @@ function scheme(v: {
   controlBorder: string;
   overlay: string;
   composerFocus: string;
+  /** Lanes 2-8 of the Conversation tree. */
+  lanes: Lanes;
 }): SchemeValues {
   return {
     "--background": v.page,
@@ -156,6 +195,7 @@ function scheme(v: {
     "--kobe-console-control-border": v.controlBorder,
     "--kobe-console-overlay": v.overlay,
     "--kobe-composer-focus": v.composerFocus,
+    ...laneValues(v.lanes),
   };
 }
 
@@ -196,6 +236,7 @@ const DEFAULT_PRESET: Preset = {
     "--kobe-console-control-border": "#80808c",
     "--kobe-console-overlay": "rgb(0 0 0 / 50%)",
     "--kobe-composer-focus": "#52525b",
+    ...laneValues(["#926e02", "#b54877", "#048872", "#9057b4", "#548508", "#ba4f23", "#03819e"]),
   },
   dark: {
     "--background": "oklch(0.145 0 0)",
@@ -228,6 +269,7 @@ const DEFAULT_PRESET: Preset = {
     "--kobe-console-control-border": "#74747f",
     "--kobe-console-overlay": "rgb(0 0 0 / 70%)",
     "--kobe-composer-focus": "#a1a1aa",
+    ...laneValues(["#cea608", "#f67fa5", "#0ec5af", "#cf8bea", "#7ec05b", "#f78953", "#0bbcee"]),
   },
 };
 
@@ -257,6 +299,7 @@ const SLATE: Preset = {
     controlBorder: "#77849a",
     overlay: "rgb(15 23 42 / 50%)",
     composerFocus: "#4e5b70",
+    lanes: ["#936d32", "#9a5e80", "#378568", "#7d68a1", "#6d7c3d", "#a35f54", "#1c8292"],
   }),
   dark: scheme({
     page: "#0f141c",
@@ -278,6 +321,7 @@ const SLATE: Preset = {
     controlBorder: "#6f7d91",
     overlay: "rgb(0 0 0 / 70%)",
     composerFocus: "#a3afc0",
+    lanes: ["#caa468", "#d694b4", "#6ebda1", "#b79dda", "#9fb575", "#dd9686", "#60bacd"],
   }),
 };
 
@@ -307,6 +351,7 @@ const FOREST: Preset = {
     controlBorder: "#72837a",
     overlay: "rgb(10 20 14 / 50%)",
     composerFocus: "#4c5e54",
+    lanes: ["#a05986", "#4077b3", "#9c681a", "#008491", "#ac5950", "#7c65ad", "#707c27"],
   }),
   dark: scheme({
     page: "#0f1712",
@@ -328,6 +373,7 @@ const FOREST: Preset = {
     controlBorder: "#6c8073",
     overlay: "rgb(0 0 0 / 70%)",
     composerFocus: "#a0b3a6",
+    lanes: ["#d88fc2", "#71b0ed", "#d89d5a", "#3ebfca", "#e88e89", "#ae9dea", "#aab25d"],
   }),
 };
 
@@ -357,6 +403,7 @@ const PLUM: Preset = {
     controlBorder: "#88788c",
     overlay: "rgb(34 22 38 / 50%)",
     composerFocus: "#625266",
+    lanes: ["#4d853c", "#ac5c2d", "#0180a7", "#ad536c", "#07877b", "#8b7203", "#5f6dba"],
   }),
   dark: scheme({
     page: "#18121a",
@@ -378,6 +425,7 @@ const PLUM: Preset = {
     controlBorder: "#85758a",
     overlay: "rgb(0 0 0 / 70%)",
     composerFocus: "#b4a6b8",
+    lanes: ["#82bd73", "#e89364", "#49b9e7", "#ea89a1", "#32c3b4", "#c3a948", "#94a4f6"],
   }),
 };
 
@@ -407,6 +455,7 @@ const EMBER: Preset = {
     controlBorder: "#8c7b70",
     overlay: "rgb(36 23 15 / 50%)",
     composerFocus: "#65554a",
+    lanes: ["#06829c", "#5b8314", "#8c5ab2", "#946d04", "#4970c6", "#04886f", "#b04c7a"],
   }),
   dark: scheme({
     page: "#1a1210",
@@ -428,6 +477,7 @@ const EMBER: Preset = {
     controlBorder: "#8a776c",
     overlay: "rgb(0 0 0 / 70%)",
     composerFocus: "#bba79b",
+    lanes: ["#32b8f4", "#71c16f", "#d58bdd", "#c2ab2c", "#98a1fe", "#05c4ba", "#f48399"],
   }),
 };
 
@@ -457,6 +507,7 @@ const TOKYO_NIGHTS: Preset = {
     controlBorder: "#6c7194",
     overlay: "rgb(26 27 38 / 50%)",
     composerFocus: "#4a5170",
+    lanes: ["#976c07", "#af4d7f", "#03896b", "#885cb5", "#618204", "#b75036", "#068298"],
   }),
   dark: scheme({
     page: "#1a1b26",
@@ -478,6 +529,7 @@ const TOKYO_NIGHTS: Preset = {
     controlBorder: "#737aa2",
     overlay: "rgb(0 0 0 / 70%)",
     composerFocus: "#a9b1d6",
+    lanes: ["#d4a22a", "#ee83b0", "#05c7a4", "#c591ed", "#8fbc56", "#f48965", "#00bee4"],
   }),
 };
 
