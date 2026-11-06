@@ -20,14 +20,30 @@
 ## Decisions
 
 - The head is stored only while it differs from the leaf (`state.head`); `#set` runs
-  `settleHead`, so any leaf move that reaches the head (Make it current, a send's commit,
-  another tab's move) makes the tab follow the leaf again. A head at the leaf therefore
-  follows every leaf move by construction (CT13).
+  `settleHead`, which drops it once the leaf is at or below it (on `pathOf(entries, leaf)`) or
+  once the run on screen continues from it. A head at the leaf therefore follows every leaf
+  move by construction (CT13). Review fix: a queued send from a browsed branch leaves the head
+  alone; it settles when that run starts or the leaf moves under it.
 - "N messages differ" = messages on the head's branch that the leaf's branch does not have
   (the ones on screen that would change), counted by projected message, not by entry.
 - While browsing, the live overlay is withheld: a run streams on the leaf's branch, so the
-  browsed branch shows without it. A send clears the head optimistically (restored if the POST
-  fails), so the sending overlay shows under the browsed branch as an edit does today.
+  browsed branch shows without it. A plain send from the browsed branch settles the head (its
+  overlay continues the head); an edit (explicit parent, not queued) clears the head at the send
+  so its new branch shows, restored if the POST fails.
+- `projectThread(entries, head, leaf = head, overlay)`: the head places the conversation, the
+  leaf keeps its own rules (stopped-answer exemption, markers at the leaf). KOBE-545's
+  `projectTree` takes the same pair. `descendantsOf` (tree.ts) is shared by the projection's
+  fallback head and `branchLeafOf`.
+- One `#leafMoved(leaf)` serves `run.completed` and `thread.updated`; a no-op when unchanged.
+- The owner arrowing back to the leaf's own version drops the head locally (no write).
+- CT13 for `POST /leaf` moves: no thread-level stream exists (KOBE-543), so a leaf move made
+  by the route (Make it current, the owner's picker) is posted on this browser's per-team
+  `BroadcastChannel` (`thread-list-sync.ts`, as pin/archive/move); the other tabs re-read the
+  summary (`leaf_entry_id`) and their head follows or their bar updates. Other devices and
+  readers see it on the focus re-read (TL4's 60 s rule). Run-made moves ride the run stream.
+- Reveal and the bar's focus are scoped to this thread view (viewport / thread root).
+- Pending search hits: one at a time, dropped when another thread is acquired or after
+  `SEARCH_HIT_TTL_MS` (30 s). The bar memoizes its O(n) walks.
 - A send from a browsed branch sends `parent_entry_id` = the head (the branch's last entry);
   on the leaf's branch the body is unchanged (no parent).
 - The owner's picker keeps `switchLeaf` (Q21) and clears the head; the reader's picker calls
@@ -59,6 +75,12 @@
 - `thread.updated` arrives only on run streams; a leaf move with no run open in a tab still
   relies on the focus re-read (CT13's fallback), unchanged.
 
+## Known limits (not fixed)
+
+- A hit whose entry lies beyond the loaded entry pages does nothing and shows no note.
+- `thread-controller.ts` is over the 800-line guideline; the head block is self-contained and
+  could move to its own module later.
+
 ## Evidence (acceptance criteria → test or command output)
 
 - ac-1: `components/chat/branch-head.test.tsx` "a reader's arrows move only the head…",
@@ -71,4 +93,7 @@
 - ac-5: `branch-head.test.tsx` "a reader sees the owner's leaf move live…";
   `thread-head.test.ts` "a head at the old leaf follows the new leaf; a browsed head stays".
 - CT16: `branch-head.test.tsx` over-window and schedule cases; `context-gauge-head.test.ts`.
-- Pure rules: `lib/chat/head.test.ts`.
+- Pure rules: `lib/chat/head.test.ts` (incl. the leaf's stopped-answer exemption while
+  browsing); `lib/chat/search-hits.test.ts` (hit expiry).
+- Review fixes 1-2: `thread-head.test.ts` "the owner arrowing back…", "a queued send from a
+  browsed branch keeps that branch…".

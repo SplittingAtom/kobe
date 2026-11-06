@@ -175,7 +175,7 @@ function MessagesAndComposer({
     state.phase === "ready" && hasMessages,
     state.actionError,
   );
-  useReveal(state, extras.projection);
+  useReveal(state, extras.projection, viewport);
   return (
     <>
       <div className="relative flex min-h-0 flex-1 flex-col">

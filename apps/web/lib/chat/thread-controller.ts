@@ -65,6 +65,11 @@ export interface ControllerOptions {
   readonly resumeStore?: ResumeStore | null | undefined;
   /** The server titled the thread after a run (KOBE-219 `thread.updated`): the rail reads it. */
   readonly onRetitled?: ((threadId: string, title: string) => void) | undefined;
+  /**
+   * The member moved the leaf here (`POST /leaf`: Make it current, the owner's picker). No stream
+   * carries it to other tabs (CT13 rides run streams), so the session tells this browser's tabs.
+   */
+  readonly onLeafMoved?: ((threadId: string) => void) | undefined;
   /** Every streamed batch of the thread's runs (KOBE-465: the notebook panel's executions). */
   readonly onRunEvents?: ((threadId: string, events: readonly KobeEvent[]) => void) | undefined;
 }
@@ -99,6 +104,7 @@ export class ThreadController {
   #epilogue: RunStream | undefined;
   readonly #onRetitled: ((threadId: string, title: string) => void) | undefined;
   readonly #onRunEvents: ((threadId: string, events: readonly KobeEvent[]) => void) | undefined;
+  readonly #onLeafMoved: ((threadId: string) => void) | undefined;
   #reopenAttempts = 0;
   #reopenTimer: ReturnType<typeof setTimeout> | undefined;
   #refreshing: Promise<void> | undefined;
@@ -128,6 +134,7 @@ export class ThreadController {
       options.resumeStore === null ? undefined : (options.resumeStore ?? browserResumeStore());
     this.#onRetitled = options.onRetitled;
     this.#onRunEvents = options.onRunEvents;
+    this.#onLeafMoved = options.onLeafMoved;
   }
 
   // --- store ----------------------------------------------------------------------------------
@@ -532,14 +539,7 @@ export class ThreadController {
   }): void {
     const { title, leaf_entry_id: leaf } = payload;
     if (payload.thread_id !== this.#state.threadId) return;
-    if (leaf !== undefined) {
-      this.#leafVersion += 1;
-      this.#set((s) =>
-        s.summary && s.summary.leafEntryId !== leaf
-          ? { ...s, followups: undefined, summary: { ...s.summary, leafEntryId: leaf } }
-          : s,
-      );
-    }
+    if (leaf !== undefined) this.#leafMoved(leaf, true);
     if (title === undefined) return;
     this.#set((s) =>
       s.summary && s.summary.threadId === payload.thread_id
@@ -581,15 +581,11 @@ export class ThreadController {
     if (terminal.type === "run.interrupted" && terminal.payload.reason === "sandbox_lost") {
       message = "The run was interrupted. You can retry it.";
     }
-    this.#set((s) => ({
-      ...s,
-      announcement: message,
-      announcementSeq: s.announcementSeq + 1,
-      summary:
-        terminal.type === "run.completed" && s.summary
-          ? { ...s.summary, leafEntryId: terminal.payload.leaf_entry_id ?? s.summary.leafEntryId }
-          : s.summary,
-    }));
+    if (terminal.type === "run.completed" && terminal.payload.leaf_entry_id != null) {
+      // The run's own answer: its follow-ups arrive after it (KOBE-222), so they are kept.
+      this.#leafMoved(terminal.payload.leaf_entry_id, false);
+    }
+    this.#set((s) => ({ ...s, announcement: message, announcementSeq: s.announcementSeq + 1 }));
     // A run.completed that announces an epilogue: its stream stays open for the results.
     if (terminal.type === "run.completed" && (terminal.payload.epilogue?.length ?? 0) > 0) {
       this.#epilogue?.close();
@@ -597,6 +593,26 @@ export class ThreadController {
     }
     this.#stream = undefined;
     void this.refresh();
+  }
+
+  /**
+   * The leaf moved (a run's end, CT13's `thread.updated`): nothing when it is where it was; else
+   * the summary follows, a read on its way keeps this leaf, a head at the old leaf follows it
+   * (`settleHead`), and the follow-ups go when they belonged to the old leaf (`dropFollowups`).
+   */
+  #leafMoved(leaf: string, dropFollowups: boolean): void {
+    const summary = this.#state.summary;
+    if (!summary || summary.leafEntryId === leaf) return;
+    this.#leafVersion += 1;
+    this.#set((s) =>
+      s.summary
+        ? {
+            ...s,
+            ...(dropFollowups ? { followups: undefined } : {}),
+            summary: { ...s.summary, leafEntryId: leaf },
+          }
+        : s,
+    );
   }
 
   /**
@@ -746,7 +762,9 @@ export class ThreadController {
     const followups = this.#state.followups;
     this.#set((s) => ({
       ...s,
-      head: undefined, // the head follows the leaf this send makes
+      // An edit from a browsed branch shows under the edited prompt (its new branch); a plain
+      // send continues the head, which then settles once its run starts (`settleHead`).
+      ...(parentEntryId !== undefined && !queues ? { head: undefined } : {}),
       sending: { key, text, parentEntryId: branchFrom, queues, files: attach?.files },
       actionError: undefined,
       followups: undefined, // shown until the next send (KOBE-222)
@@ -1123,7 +1141,12 @@ export class ThreadController {
   readonly switchLeaf = async (entryId: string): Promise<void> => {
     const threadId = this.#state.threadId;
     const summary = this.#state.summary;
-    if (threadId === null || !summary || summary.leafEntryId === entryId) return;
+    if (threadId === null || !summary) return;
+    // Back to the leaf's own version: a local move, nothing to write.
+    if (summary.leafEntryId === entryId) {
+      this.#moveHead(undefined);
+      return;
+    }
     const previous = summary.leafEntryId;
     const head = this.#state.head;
     this.#leafVersion += 1;
@@ -1147,6 +1170,7 @@ export class ThreadController {
       return;
     }
     this.#set((s) => ({ ...s, summary: res.data }));
+    this.#onLeafMoved?.(threadId);
   };
 
   // --- the local head (CT3, KOBE-544) ----------------------------------------------------------
@@ -1212,6 +1236,7 @@ export class ThreadController {
       return res;
     }
     this.#set((s) => ({ ...s, followups: undefined, summary: res.data }));
+    this.#onLeafMoved?.(threadId);
     this.#announce("This branch is now current");
     return res;
   };

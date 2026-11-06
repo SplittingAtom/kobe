@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { branchContextTokens, headOf, isBrowsing, messagesDiffer } from "../../lib/chat/head";
 import { IconAction } from "../shell/icon-action";
 import { threadScale } from "../shell/context-gauge";
@@ -17,9 +17,14 @@ export const OVER_WINDOW_NOTE =
 /** CT16: a scheduled thread's next run continues on the leaf. */
 export const SCHEDULE_NOTE = "The schedule will continue on this branch.";
 
-function focusComposer(from: Element | null): void {
-  const root = from?.closest("[data-kobe-thread-root]") ?? document;
-  root.querySelector<HTMLTextAreaElement>("[data-kobe-composer] textarea")?.focus();
+/** This thread view's root (found before the bar goes, so a detached button still knows it). */
+function threadRootOf(from: Element): Element | null {
+  return from.closest("[data-kobe-thread-root]");
+}
+
+/** Focus moves to this thread view's composer once the bar is gone (never another view's). */
+function focusComposer(root: Element | null): void {
+  root?.querySelector<HTMLTextAreaElement>("[data-kobe-composer] textarea")?.focus();
 }
 
 /**
@@ -53,18 +58,29 @@ function BranchBarBody({
   const head = headOf(state);
   const leaf = state.summary?.leafEntryId ?? null;
   const owner = state.summary?.readOnly !== true && controller !== null;
-  const differ = messagesDiffer(state.entries, projection.nodeOfEntry, head, leaf);
-  const window = threadScale(loaded, state).scale?.contextWindow ?? null;
-  const tokens = branchContextTokens(state.entries, head);
+  // O(entries) walks: only again when the tree, the head or the leaf changed (not per event).
+  const { entries } = state;
+  const { nodeOfEntry } = projection;
+  const differ = useMemo(
+    () => messagesDiffer(entries, nodeOfEntry, head, leaf),
+    [entries, nodeOfEntry, head, leaf],
+  );
+  const tokens = useMemo(() => branchContextTokens(entries, head), [entries, head]);
+  const { agentModel } = state;
+  const model = state.summary?.model;
+  const window =
+    useMemo(() => threadScale(loaded, { agentModel, model }).scale, [loaded, agentModel, model])
+      ?.contextWindow ?? null;
   const overWindow = owner && window !== null && typeof tokens === "number" && tokens > window;
   const scheduled = owner && state.summary?.scheduleId != null;
   const moving = state.busy.includes("leaf");
 
   const makeCurrent = async (button: HTMLButtonElement) => {
+    const root = threadRootOf(button);
     setNote(undefined);
     const res = await controller?.makeCurrent();
     if (res && !res.ok && res.error.code === "thread_busy") setNote(LEAF_BUSY_NOTE);
-    else if (res?.ok) focusComposer(button);
+    else if (res?.ok) focusComposer(root);
   };
 
   return (
@@ -95,9 +111,9 @@ function BranchBarBody({
         shortcut={null}
         className="shrink-0"
         onClick={(e) => {
-          const from = e.currentTarget;
+          const root = threadRootOf(e.currentTarget);
           controller?.showLeaf();
-          focusComposer(from);
+          focusComposer(root);
         }}
       />
       {(overWindow || scheduled || note !== undefined || filesChanged != null) && (

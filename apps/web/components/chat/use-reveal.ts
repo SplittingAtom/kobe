@@ -9,9 +9,14 @@ const MAX_FRAMES = 20;
 
 /**
  * Scrolls to a search hit's message once the conversation shows it (CT15): on each new
- * `state.reveal`, the message holding the entry is found by assistant-ui's `data-message-id`.
+ * `state.reveal`, the message holding the entry is found by assistant-ui's `data-message-id`
+ * inside this thread view's message list (`root`), never in another mounted view.
  */
-export function useReveal(state: ThreadState, projection: Projection): void {
+export function useReveal(
+  state: ThreadState,
+  projection: Projection,
+  root: HTMLElement | null,
+): void {
   const projectionRef = useRef(projection);
   projectionRef.current = projection;
   const seq = state.reveal?.seq;
@@ -25,7 +30,7 @@ export function useReveal(state: ThreadState, projection: Projection): void {
       const el =
         node === undefined
           ? null
-          : document.querySelector(`[data-message-id="${CSS.escape(node)}"]`);
+          : (root?.querySelector(`[data-message-id="${CSS.escape(node)}"]`) ?? null);
       if (el) {
         el.scrollIntoView({ block: "center" });
         return;
@@ -35,5 +40,5 @@ export function useReveal(state: ThreadState, projection: Projection): void {
     };
     handle = requestAnimationFrame(tryScroll);
     return () => cancelAnimationFrame(handle);
-  }, [seq, entryId]);
+  }, [seq, entryId, root]);
 }

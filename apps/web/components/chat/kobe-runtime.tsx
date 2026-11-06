@@ -159,7 +159,7 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
   const head = headOf(state);
   const overlay = isBrowsing(state) ? undefined : liveOverlay(state);
   const projection = useMemo(
-    () => projectThread(state.entries, head, overlay),
+    () => projectThread(state.entries, head, state.summary?.leafEntryId ?? null, overlay),
     // `overlay` is rebuilt from these on every render; depend on its sources.
     [
       state.entries,

@@ -137,11 +137,14 @@ function counterOf(models: readonly TeamModel[], size: ContextSize): TeamModel |
  */
 export function threadScale(
   loaded: TeamModelsLoad,
-  state: ThreadState,
+  pins: {
+    readonly agentModel?: string | null | undefined;
+    readonly model?: string | null | undefined;
+  },
 ): { readonly alias: string | null; readonly scale: TeamModel | undefined } {
   const models = loaded.status === "ready" ? loaded.data.models : [];
   const teamDefault = loaded.status === "ready" ? loaded.data.default : null;
-  const alias = state.agentModel ?? state.summary?.model ?? teamDefault;
+  const alias = pins.agentModel ?? pins.model ?? teamDefault;
   return { alias, scale: models.find((m) => m.alias === alias) };
 }
 
@@ -184,7 +187,10 @@ export function ThreadContextGauge({
   if (!extras || state.threadId === null || state.phase !== "ready") return null;
   const size = gaugeSize(state, read);
   const models = loaded.status === "ready" ? loaded.data.models : [];
-  const { alias, scale } = threadScale(loaded, state);
+  const { alias, scale } = threadScale(loaded, {
+    agentModel: state.agentModel,
+    model: state.summary?.model,
+  });
   const window = scale?.contextWindow ?? null;
   if (size === null) return null;
   // Owner only (CV2, KOBE-471): a shared reader's gauge offers nothing.

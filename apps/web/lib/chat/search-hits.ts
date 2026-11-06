@@ -6,21 +6,34 @@
  */
 type Listener = () => void;
 
+/** A hit not taken by its thread within this long is dropped (it never moves a head later). */
+export const SEARCH_HIT_TTL_MS = 30_000;
+
 export class SearchHitStore {
-  readonly #pending = new Map<string, string>();
+  #pending:
+    { readonly threadId: string; readonly entryId: string; readonly at: number } | undefined;
   readonly #offBranch = new Map<string, boolean>();
   readonly #listeners = new Set<Listener>();
+  readonly #now: () => number;
 
-  /** A hit was opened before its thread's controller was held. */
-  open(threadId: string, entryId: string): void {
-    this.#pending.set(threadId, entryId);
+  constructor(now: () => number = Date.now) {
+    this.#now = now;
   }
 
-  /** The hit waiting for this thread, once. */
+  /** A hit was opened before its thread's controller was held (one at a time: the newest). */
+  open(threadId: string, entryId: string): void {
+    this.#pending = { threadId, entryId, at: this.#now() };
+  }
+
+  /**
+   * A thread's controller is acquired: its hit, if one waits and is fresh. Any other thread
+   * acquired first drops the waiting hit.
+   */
   take(threadId: string): string | undefined {
-    const entryId = this.#pending.get(threadId);
-    this.#pending.delete(threadId);
-    return entryId;
+    const pending = this.#pending;
+    this.#pending = undefined;
+    if (pending === undefined || pending.threadId !== threadId) return undefined;
+    return this.#now() - pending.at <= SEARCH_HIT_TTL_MS ? pending.entryId : undefined;
   }
 
   /** What the thread's entries say about a hit (off the leaf's branch or not). */

@@ -221,6 +221,8 @@ export class ChatSession {
         for (const listener of this.#retitledListeners) listener(id, title);
       },
       onRunEvents: (id, events) => this.notebookRuns.apply(id, events),
+      // The other tabs re-read the thread: their head follows or their bar updates (CT13).
+      onLeafMoved: (id) => this.#options.listSync?.post(id),
     });
   }
 

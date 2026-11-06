@@ -95,3 +95,19 @@ describe("the local head (CT3)", () => {
     expect(branchContextTokens(entries, "u1")).toBeUndefined();
   });
 });
+
+describe("projecting from the head keeps the leaf's own rules (KOBE-544 review)", () => {
+  it("while browsing B, an empty stopped answer that is the real leaf on A stays", () => {
+    const entries = [
+      user("u1", null, "q"),
+      entry("x", "u1", { role: "assistant", content: [], stopReason: "aborted" }),
+      assistant("a2", "u1", text("b answer")),
+    ];
+    const browsing = projectThread(entries, "a2", "x");
+    expect(browsing.items.some((i) => i.message.id === browsing.nodeOfEntry.get("x"))).toBe(true);
+    expect(browsing.headId).toBe(browsing.nodeOfEntry.get("a2"));
+    // Not the leaf: hidden as before.
+    const other = projectThread(entries, "a2", "a2");
+    expect(other.nodeOfEntry.has("x")).toBe(false);
+  });
+});

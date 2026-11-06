@@ -4,7 +4,8 @@
  * controller moves the head, the runtime projects from it (`projectThread(entries, head)`).
  */
 import { messageContextTokens } from "./context-usage";
-import type { ThreadState } from "./thread-state";
+import { currentRunId, type ThreadState } from "./thread-state";
+import { descendantsOf } from "./tree";
 import type { ThreadEntry } from "./types";
 
 /** The entry the conversation on screen ends at: the browsed one, else the leaf. */
@@ -17,10 +18,34 @@ export function isBrowsing(state: ThreadState): boolean {
   return state.head !== undefined && state.head !== (state.summary?.leafEntryId ?? null);
 }
 
-/** A head the leaf has reached follows the leaf again (a send, Make it current, another tab). */
+/**
+ * The parent the run on screen continues from (the sending overlay, or the active run's prompt);
+ * undefined when nothing runs or the message only waits in the queue.
+ */
+function runParent(state: ThreadState): string | null | undefined {
+  const sending = state.sending;
+  if (sending && !sending.queues) return sending.parentEntryId;
+  const live = state.live;
+  if (live?.started === true && currentRunId(state) === live.runId) {
+    return state.livePrompt?.parentEntryId;
+  }
+  return undefined;
+}
+
+/**
+ * The head follows the leaf again once the leaf is at or below it (Make it current, a send's
+ * commit, another tab's move), or once a run continues from the head (a send from the browsed
+ * branch starts: the leaf is moving down it). A queued send leaves the head where it is.
+ */
 export function settleHead(state: ThreadState): ThreadState {
-  if (state.head === undefined || state.head !== (state.summary?.leafEntryId ?? null)) return state;
-  return { ...state, head: undefined };
+  const head = state.head;
+  if (head === undefined) return state;
+  const leaf = state.summary?.leafEntryId ?? null;
+  const reached =
+    head === leaf ||
+    runParent(state) === head ||
+    (leaf !== null && pathOf(state.entries, leaf).has(head));
+  return reached ? { ...state, head: undefined } : state;
 }
 
 function parents(entries: readonly ThreadEntry[]): ReadonlyMap<string, string | null> {
@@ -52,21 +77,12 @@ export function onBranchOf(
  */
 export function branchLeafOf(entries: readonly ThreadEntry[], entryId: string): string | undefined {
   if (!entries.some((e) => e.entryId === entryId)) return undefined;
-  const children = new Map<string, ThreadEntry[]>();
-  for (const e of entries) {
-    if (e.parentId === null) continue;
-    children.set(e.parentId, [...(children.get(e.parentId) ?? []), e]);
-  }
+  const below = descendantsOf(entryId, entries);
+  const parentsBelow = new Set(entries.flatMap((e) => (e.parentId === null ? [] : [e.parentId])));
   let newest: ThreadEntry | undefined;
-  const seen = new Set<string>();
-  const stack = [...(children.get(entryId) ?? [])];
-  while (stack.length > 0) {
-    const e = stack.pop() as ThreadEntry;
-    if (seen.has(e.entryId)) continue;
-    seen.add(e.entryId);
-    const below = children.get(e.entryId) ?? [];
-    if (below.length === 0 && (newest === undefined || e.seq > newest.seq)) newest = e;
-    stack.push(...below);
+  for (const e of entries) {
+    if (!below.has(e.entryId) || parentsBelow.has(e.entryId)) continue;
+    if (newest === undefined || e.seq > newest.seq) newest = e;
   }
   return newest?.entryId ?? entryId;
 }

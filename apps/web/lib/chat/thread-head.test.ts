@@ -13,14 +13,18 @@ let controllers: ThreadController[];
 beforeEach(() => {
   fake = new FakeKobe();
   controllers = [];
+  announced.length = 0;
 });
 afterEach(() => {
   for (const c of controllers) c.dispose();
 });
 
+const announced: string[] = [];
+
 function open(threadId: string) {
   let n = 0;
   const controller = new ThreadController(threadId, {
+    onLeafMoved: (id) => announced.push(id),
     api: createChatApi(fake.teamId, fake.fetch),
     eventSource: fake.eventSource,
     newKey: () => `k${++n}`,
@@ -42,7 +46,12 @@ async function until(controller: ThreadController, check: (s: ThreadState) => bo
 /** The texts on screen, root to head, projected from the head as the runtime does. */
 function onScreen(state: ThreadState): string[] {
   const overlay = isBrowsing(state) ? undefined : liveOverlay(state);
-  const p = projectThread(state.entries, headOf(state), overlay);
+  const p = projectThread(
+    state.entries,
+    headOf(state),
+    state.summary?.leafEntryId ?? null,
+    overlay,
+  );
   const byId = new Map(p.items.map((i) => [i.message.id, i] as const));
   const path: string[] = [];
   for (let id = p.headId; id !== null;) {
@@ -165,6 +174,36 @@ describe("the local head (CT3)", () => {
     expect(leafCalls()).toEqual([]);
   });
 
+  it("the owner arrowing back to the leaf's version only drops the head (no write)", async () => {
+    const { t, a2, a2b } = branched();
+    const c = await opened(t);
+    c.showVersion(a2);
+    await c.switchLeaf(a2b);
+    expect(c.getState().head).toBeUndefined();
+    expect(onScreen(c.getState()).at(-1)).toBe("new answer");
+    expect(leafCalls()).toEqual([]);
+  });
+
+  it("a queued send from a browsed branch keeps that branch until the leaf moves under it", async () => {
+    const { t, a2 } = branched();
+    const c = await opened(t);
+    await c.send("long task");
+    const first = fake.latestRun(t);
+    c.showVersion(a2);
+    expect(await c.send("continue B")).toBe(true);
+    const queuedPost = fake.requests.filter((r) => r.path.endsWith("/messages")).at(-1);
+    expect(queuedPost?.body).toEqual({ content: "continue B", parent_entry_id: a2 });
+    await until(c, (s) => s.runs.some((r) => r.status === "queued") && s.sending === undefined);
+    expect(c.getState().head).toBe(a2);
+    expect(onScreen(c.getState()).at(-1)).toBe("old answer");
+    // The first run ends on A; the queued one starts on B: the head follows it.
+    fake.agent.commitPrompt(first.run_id);
+    fake.agent.complete(first.run_id);
+    await until(c, (s) => s.head === undefined);
+    await until(c, (s) => onScreen(s).at(-1) === "continue B");
+    expect(onScreen(c.getState())).toContain("old answer");
+  });
+
   it("a send on the leaf's branch still continues from the leaf without a parent", async () => {
     const { t } = branched();
     const c = await opened(t);
@@ -226,5 +265,31 @@ describe("search hits open on their branch (CT15)", () => {
     c.showHit(a1);
     expect(c.getState().head).toBeUndefined();
     expect(c.getState().reveal?.entryId).toBe(a1);
+  });
+});
+
+describe("leaf moves reach this browser's other tabs (CT13 via the list sync)", () => {
+  it("Make it current and the owner's picker announce once on success", async () => {
+    const { t, a2, a2b } = branched();
+    const c = await opened(t);
+    c.showVersion(a2);
+    await c.makeCurrent();
+    expect(announced).toEqual([t]);
+    await c.switchLeaf(a2b);
+    expect(announced).toEqual([t, t]);
+    // Back to the leaf's own version: nothing written, nothing announced.
+    await c.switchLeaf(a2b);
+    expect(announced).toEqual([t, t]);
+  });
+
+  it("a refused move announces nothing", async () => {
+    const { t, a2 } = branched();
+    fake.queueRetry(t, "waiting");
+    const c = await opened(t);
+    c.showVersion(a2);
+    expect((await c.makeCurrent())?.ok).toBe(false);
+    await c.switchLeaf(a2);
+    expect(c.getState().actionError?.error.code).toBe("thread_busy");
+    expect(announced).toEqual([]);
   });
 });
