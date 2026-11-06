@@ -79,6 +79,25 @@ function assistantMarkdown(message: Json): string {
   return out.join("\n\n");
 }
 
+/**
+ * The plain text of a member's or the assistant's message (no tool calls, no thinking), or ""
+ * for anything else: the excerpt of a branch point and a branch's first words (CT14).
+ */
+export function entryPlainText(payload: unknown): string {
+  const entry = record(payload);
+  if (entry?.type !== "message") return "";
+  const message = record(entry.message);
+  if (message?.role === "user") return contentText(message.content);
+  if (message?.role !== "assistant" || !Array.isArray(message.content)) return "";
+  return message.content
+    .map((part) => {
+      const p = record(part);
+      return p?.type === "text" && typeof p.text === "string" ? p.text : "";
+    })
+    .filter((t) => t !== "")
+    .join("\n\n");
+}
+
 /** The Markdown block of one entry, or null when it is not a conversation turn. */
 export function entryMarkdown(payload: unknown): string | null {
   const entry = record(payload);
