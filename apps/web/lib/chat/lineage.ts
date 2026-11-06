@@ -28,6 +28,8 @@ export interface LineageThread {
   readonly title: string;
   /** In its owner's Trash (only the owner is told): a muted "In Trash" suffix. */
   readonly inTrash: boolean;
+  /** The entry it was forked at, when the server said (KOBE-545). */
+  readonly forkedAtEntryId?: string | null;
 }
 
 /** A row's siblings (its parent has several readable forks): the dropdown's items and label. */
@@ -71,12 +73,14 @@ export function lineageTitle(title: string | null): string {
 function named(t: {
   readonly thread_id: string;
   readonly title: string | null;
-  readonly deleted_at?: string | null;
+  readonly deleted_at?: string | null | undefined;
+  readonly forked_at_entry_id?: string | null | undefined;
 }): LineageThread {
   return {
     threadId: t.thread_id,
     title: lineageTitle(t.title),
     inTrash: t.deleted_at !== null && t.deleted_at !== undefined,
+    ...(t.forked_at_entry_id === undefined ? {} : { forkedAtEntryId: t.forked_at_entry_id }),
   };
 }
 
