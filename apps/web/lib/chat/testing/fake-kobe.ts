@@ -7,7 +7,9 @@
  * `agent` scripts what Pi would do in a run.
  */
 import {
+  BRANCH_SUMMARIES_MAX,
   COMPACT_THREAD_ERROR_MESSAGES,
+  branchSummaryError,
   EVENT_ENTRY_PAYLOAD_MAX_BYTES,
   THREAD_CONTEXT_ERROR_MESSAGES,
   splitItemReferences,
@@ -209,6 +211,8 @@ export class FakeKobe {
   readonly failNext = new Map<string, Response>();
   /** Compact now (KOBE-213): when set, a compaction answers only once it resolves. */
   compactGate: Promise<void> | undefined;
+  /** Branch summaries asked for (KOBE-548): the request bodies, in order. */
+  readonly branchSummaryRequests: Json[] = [];
   /** The caller's workspace (KOBE-194): path (no leading slash) -> bytes; listed per folder. */
   readonly workspaceFiles = new Map<string, Uint8Array>();
   /** `GET /v1/workspace/changes` (KOBE-496): tests `announce` changes to open file tabs. */
@@ -1807,6 +1811,7 @@ export class FakeKobe {
       return json(200, this.#summary(thread));
     }
     if (action === "compact" && method === "POST") return this.#compact(thread, body);
+    if (action === "branch-summary" && method === "POST") return this.#branchSummary(thread, body);
     if (action === "agent-version" && method === "POST") return this.#switchAgent(thread, body);
     if (action === "agent" && method === "POST") return this.#chooseAgent(thread, body);
     if (ORGANIZE.has(action) && method === "POST") return this.#organize(thread, action, body);
@@ -2092,6 +2097,50 @@ export class FakeKobe {
       first_kept_entry_id: parent ?? id,
       tokens_before: 1234,
     });
+  }
+
+  /**
+   * Like the server (KOBE-548, CT11): owner, idle, not a test thread, a known entry other than the
+   * leaf, at most 20 summaries; Pi's `branch_summary` lands under the target and becomes the leaf.
+   */
+  #branchSummary(thread: FakeThread, body: Json | undefined): Response {
+    this.branchSummaryRequests.push(body ?? {});
+    const refuse = (code: Parameters<typeof branchSummaryError>[0], status: number) =>
+      json(status, branchSummaryError(code));
+    if (thread.read_only) return refuse("read_only", 403);
+    if (thread.is_test === true) return refuse("test_thread", 409);
+    if (
+      thread.status !== "idle" ||
+      this.activeRun(thread.thread_id) ||
+      this.#queued(thread.thread_id).length > 0
+    )
+      return refuse("thread_busy", 409);
+    const to = typeof body?.to_entry_id === "string" ? body.to_entry_id : "";
+    if (!thread.entries.some((e) => e.entry_id === to))
+      return error(404, "entry_not_found", "That message is not in this conversation.");
+    if (to === thread.leaf_entry_id) return refuse("nothing_to_summarize", 409);
+    if (thread.entries.filter((e) => e.type === "branch_summary").length >= BRANCH_SUMMARIES_MAX)
+      return refuse("summary_limit", 409);
+    const id = `kb-${thread.entries.length + 1}`;
+    const focus = typeof body?.focus === "string" ? ` Focus: ${body.focus}` : "";
+    thread.entries.push({
+      entry_id: id,
+      parent_id: to,
+      seq: thread.entries.length + 1,
+      type: "branch_summary",
+      payload: {
+        type: "branch_summary",
+        id,
+        parentId: to,
+        timestamp: NOW,
+        fromId: thread.leaf_entry_id,
+        summary: `Summary of the branch left.${focus}`,
+      },
+      payload_offloaded: false,
+      created_at: NOW,
+    });
+    thread.leaf_entry_id = id;
+    return json(200, { thread_id: thread.thread_id, entry_id: id, leaf_entry_id: id });
   }
 
   #threadItself(method: string, thread: FakeThread, url: URL, body: Json | undefined): Response {

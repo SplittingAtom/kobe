@@ -32,8 +32,9 @@ export interface RunSweepResult {
   readonly failedTeams: number;
 }
 
-/** A compaction run still active past `compactionDeadlineMs` (KOBE-213). */
+/** A compaction or branch summary run still active past `compactionDeadlineMs` (KOBE-213, KOBE-548). */
 export interface StaleCompaction {
+  readonly kind: "compaction" | "branch_summary";
   readonly teamId: string;
   readonly runId: string;
   readonly threadId: string;
@@ -60,7 +61,7 @@ async function lostStarts(tx: KobeTx, teamId: string, deadlineMs: number): Promi
                         WHERE l.team_id = r.team_id AND l.run_id = r.id)
        AND NOT EXISTS (SELECT 1 FROM sandbox_commands c
                         WHERE c.team_id = r.team_id AND c.run_id = r.id
-                          AND c.kind IN ('run.start', 'thread.compact', 'notebook.execute')
+                          AND c.kind IN ('run.start', 'thread.compact', 'thread.branch_summary', 'notebook.execute')
                           AND c.status IN ('pending', 'delivered'))`);
   return res.rows.map((r) => ({
     teamId,
@@ -80,13 +81,19 @@ async function staleCompactions(
   teamId: string,
   deadlineMs: number,
 ): Promise<StaleCompaction[]> {
-  const res = await tx.execute<{ id: string; thread_id: string; owner_user_id: string }>(sql`
-    SELECT r.id, r.thread_id, t.owner_user_id
+  const res = await tx.execute<{
+    id: string;
+    kind: StaleCompaction["kind"];
+    thread_id: string;
+    owner_user_id: string;
+  }>(sql`
+    SELECT r.id, r.kind, r.thread_id, t.owner_user_id
       FROM runs r JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
-     WHERE r.team_id = ${teamId} AND r.kind = 'compaction'
+     WHERE r.team_id = ${teamId} AND r.kind IN ('compaction', 'branch_summary')
        AND r.status IN ('running', 'waiting_approval')
        AND r.started_at < now() - make_interval(secs => ${secs(deadlineMs)})`);
   return res.rows.map((r) => ({
+    kind: r.kind,
     teamId,
     runId: r.id,
     threadId: r.thread_id,

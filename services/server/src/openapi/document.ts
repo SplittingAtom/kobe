@@ -1,5 +1,6 @@
 import { approvalsOpenApiPaths, approvalsOpenApiSchemas } from "./approvals.js";
 import { compactOpenApiPaths, compactOpenApiSchemas } from "./compact.js";
+import { branchSummaryOpenApiPaths, branchSummaryOpenApiSchemas } from "./branch-summary.js";
 import { contextOpenApiPaths, contextOpenApiSchemas } from "./context.js";
 import { evalCasesOpenApiPaths, evalCasesOpenApiSchemas } from "./eval-cases.js";
 import { feedbackOpenApiPaths, feedbackOpenApiSchemas } from "./feedback.js";
@@ -32,6 +33,7 @@ export function openApiDocument(): Record<string, unknown> {
       ...pendingOpenApiPaths(),
       ...markersOpenApiPaths(),
       ...compactOpenApiPaths(),
+      ...branchSummaryOpenApiPaths(),
       ...contextOpenApiPaths(),
       ...approvalsOpenApiPaths(),
       ...usageOpenApiPaths(),
@@ -47,6 +49,7 @@ export function openApiDocument(): Record<string, unknown> {
         ...pendingOpenApiSchemas(),
         ...markersOpenApiSchemas(),
         ...compactOpenApiSchemas(),
+        ...branchSummaryOpenApiSchemas(),
         ...contextOpenApiSchemas(),
         ...approvalsOpenApiSchemas(),
         ...usageOpenApiSchemas(),

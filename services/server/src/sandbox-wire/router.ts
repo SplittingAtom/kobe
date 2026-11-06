@@ -23,6 +23,7 @@ import type { ConnectionRegistry } from "./registry.js";
 import { targetForThread } from "./slots.js";
 import {
   SandboxWakeError,
+  startsRun,
   type CommandOutcome,
   type SandboxRouter,
   type SandboxTarget,
@@ -207,6 +208,22 @@ export class CommandRouter implements SandboxRouter {
     });
   }
 
+  branchSummary(
+    target: SandboxTarget,
+    request: Parameters<SandboxRouter["branchSummary"]>[1],
+    options?: SendOptions,
+  ) {
+    return this.#send(target, "thread.branch_summary", request.threadId, request.runId, options, {
+      run_id: request.runId,
+      thread_id: request.threadId,
+      from_leaf_entry_id: request.fromLeafEntryId,
+      to_entry_id: request.toEntryId,
+      ...(request.focus === undefined ? {} : { focus: request.focus }),
+      model: request.model,
+      ...(request.modelLimits === undefined ? {} : { model_limits: request.modelLimits }),
+    });
+  }
+
   notebookExecute(
     target: SandboxTarget,
     request: Parameters<SandboxRouter["notebookExecute"]>[1],
@@ -313,7 +330,7 @@ export class CommandRouter implements SandboxRouter {
     frame: Record<string, unknown>,
   ): Record<string, unknown> {
     if (runId === undefined || !this.#traceRuns || !span.isRecording()) return frame;
-    if (kind !== "run.start" && kind !== "thread.compact") return frame;
+    if (!startsRun(kind)) return frame;
     return {
       ...frame,
       trace: {
@@ -352,7 +369,7 @@ export class CommandRouter implements SandboxRouter {
       // An eval thread's sandbox (KOBE-325) is started by the eval runner, never woken here: the
       // command waits for it to connect (or times out). The member's sandbox is never woken for it.
     } else if (!queued.live) {
-      const starts = kind === "run.start" || kind === "thread.compact";
+      const starts = startsRun(kind);
       void this.#wakeFor(target, queued.id, timeoutMs, starts ? runId : undefined);
     } else if (queued.live.replicaId === this.#replicaId) {
       this.#registry.get(queued.live.connectionId)?.pokeCommands();

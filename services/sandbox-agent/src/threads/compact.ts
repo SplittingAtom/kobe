@@ -27,7 +27,9 @@ export const compactFailure = (code: CompactErrorCode, message: string): Compact
 });
 
 /** The compaction run's model (`thread.compact.model`, required there) and its limits. */
-export function compactModelOf(frame: ThreadCompactFrame): RunModel {
+export function compactModelOf(
+  frame: Pick<ThreadCompactFrame, "model" | "model_limits">,
+): RunModel {
   const limits = frame.model_limits;
   return {
     gatewayModel: frame.model.gateway_model,

@@ -26,6 +26,7 @@ import {
   type ActorContext,
   type ApprovalMode,
   type BudgetStopCommand,
+  type BranchSummaryResponse,
   type CompactThreadResponse,
   type NotebookKernelResponse,
   type NotebookStartResponse,
@@ -64,7 +65,8 @@ import type { ViewingReader } from "../workspace-files/viewing.js";
 import { cancelScheduledRuns, type ScheduledCancelReason } from "./cancel-scheduled.js";
 import { RunError } from "./errors.js";
 import { checkMentionPaths, rewriteMentions } from "./mentions.js";
-import { compactThread } from "./compaction.js";
+import { compactThread, type CompactionHost } from "./compaction.js";
+import { summarizeBranch } from "./branch-summary.js";
 import {
   budgetStoppedEvent,
   cancelledEvent,
@@ -202,6 +204,17 @@ export interface ServerRunOrchestrator extends RunOrchestrator {
    * Throws `CompactionError` (a code of the compact contract) or `RunError` (404/403/trash).
    */
   compact(actor: ActorContext, threadId: string, focus?: string): Promise<CompactThreadResponse>;
+  /**
+   * Make it current and carry a summary (KOBE-548, CT11): a branch summary run on the owner's idle
+   * thread, answered once Pi wrote the summary and the leaf moved to it. Throws
+   * `BranchSummaryError` or `RunError` (404/trash).
+   */
+  branchSummary(
+    actor: ActorContext,
+    threadId: string,
+    toEntryId: string,
+    focus?: string,
+  ): Promise<BranchSummaryResponse>;
   /**
    * The owner runs a notebook cell or a `.py` file (KOBE-464, docs/specs/notebooks.md NB6): a
    * `notebook` run on their idle thread, answered at once. Throws `NotebookRunError` or `RunError`.
@@ -964,22 +977,32 @@ export class DbRunOrchestrator implements ServerRunOrchestrator {
     focus?: string,
   ): Promise<CompactThreadResponse> {
     if (this.#isolation() === "missing") throw new RunError("isolation_unavailable");
-    return compactThread(
-      {
-        db: this.#db,
-        router: this.#router,
-        agents: this.#agents,
-        modelTokenDefaults: this.#modelTokenDefaults,
-        log: this.#log,
-        threadTx: (a, fn) => this.#threadTx(a, fn),
-        assertMayRun: (tx, a) => this.#assertMayRun(tx, a),
-        ended: (teamId, runId, id) => this.onRunEnded({ teamId, runId, threadId: id }),
-        abort: (target) => this.#track(this.#dispatch.sendStop(target, "abort")),
-      },
-      actor,
-      threadId,
-      focus,
-    );
+    return compactThread(this.#compactionHost(), actor, threadId, focus);
+  }
+
+  async branchSummary(
+    actor: ActorContext,
+    threadId: string,
+    toEntryId: string,
+    focus?: string,
+  ): Promise<BranchSummaryResponse> {
+    if (this.#isolation() === "missing") throw new RunError("isolation_unavailable");
+    return summarizeBranch(this.#compactionHost(), actor, threadId, toEntryId, focus);
+  }
+
+  /** What a compaction or a branch summary run borrows (KOBE-213, KOBE-548). */
+  #compactionHost(): CompactionHost {
+    return {
+      db: this.#db,
+      router: this.#router,
+      agents: this.#agents,
+      modelTokenDefaults: this.#modelTokenDefaults,
+      log: this.#log,
+      threadTx: (a, fn) => this.#threadTx(a, fn),
+      assertMayRun: (tx, a) => this.#assertMayRun(tx, a),
+      ended: (teamId, runId, id) => this.onRunEnded({ teamId, runId, threadId: id }),
+      abort: (target) => this.#track(this.#dispatch.sendStop(target, "abort")),
+    };
   }
 
   // ------------------------------------------------------------------------- internal entry points

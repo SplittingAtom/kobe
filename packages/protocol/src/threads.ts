@@ -469,6 +469,17 @@ export const branchSummaryRequestSchema = z.strictObject({
 export type BranchSummaryRequest = z.infer<typeof branchSummaryRequestSchema>;
 
 /**
+ * 200 answer (KOBE-548): the summary is the thread's new leaf; the `branch_summary` entry follows in
+ * the thread's entries (and `thread.updated.leaf_entry_id`).
+ */
+export const branchSummaryResponseSchema = z.strictObject({
+  thread_id: uuidSchema,
+  entry_id: idSchema,
+  leaf_entry_id: idSchema,
+});
+export type BranchSummaryResponse = z.infer<typeof branchSummaryResponseSchema>;
+
+/**
  * Error codes of `POST /v1/threads/{id}/branch-summary` (CT11), next to `thread_not_found` (404)
  * and `forbidden` (403). `thread_busy` also covers queued runs; `nothing_to_summarize`: the branch
  * left has no message; `read_only`: a shared reader.

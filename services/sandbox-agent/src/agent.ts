@@ -12,6 +12,7 @@ import {
   CAPABILITY_WEB_SEARCH,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
+  CAPABILITY_THREAD_BRANCH_SUMMARY,
   CAPABILITY_THREAD_COMPACT,
   CAPABILITY_TRACE_SPANS,
   CAPABILITY_SESSION_RENEW,
@@ -26,6 +27,7 @@ import {
   type RunStartFrame,
   type SandboxToServerFrame,
   type ServerToSandboxFrame,
+  type ThreadBranchSummaryFrame,
   type ThreadCompactFrame,
 } from "@kobe/protocol";
 import type { Config } from "./config.js";
@@ -49,6 +51,7 @@ import { ThreadManager } from "./threads/manager.js";
 import { fail, ok, type CommandOutcome } from "./threads/outcome.js";
 import type { SkillEvalHooks } from "./skill-eval/hooks.js";
 import { compactFailure, type CompactReply } from "./threads/compact.js";
+import { branchSummaryFailure, type BranchSummaryReply } from "./threads/branch-summary.js";
 import { WireClient, type FatalReason, type WireLogger } from "./wire/client.js";
 import { encodeOutbound } from "./wire/encode.js";
 import { Outbox } from "./wire/outbox.js";
@@ -558,6 +561,8 @@ export class Agent {
       CAPABILITY_APP_CARDS,
       // Compaction (KOBE-213) summarizes through the gateway with the run's token: same condition.
       ...(this.#deps.models === undefined ? [] : [CAPABILITY_THREAD_COMPACT]),
+      // Branch summaries (KOBE-548) go through kobe-models the same way.
+      ...(this.#deps.models === undefined ? [] : [CAPABILITY_THREAD_BRANCH_SUMMARY]),
       // Run spans over this wire (KOBE-274); sent only for runs the server gave a trace context.
       CAPABILITY_TRACE_SPANS,
       // Fresh session tokens handed to the live connection, so expiry never drops it (KOBE-483).
@@ -633,6 +638,10 @@ export class Agent {
     }
     if (frame.type === "thread.compact") {
       void this.#runCompact(frame);
+      return;
+    }
+    if (frame.type === "thread.branch_summary") {
+      void this.#runBranchSummary(frame);
       return;
     }
     switch (frame.type) {
@@ -850,6 +859,40 @@ export class Agent {
       thread_id: frame.thread_id,
       ok: false,
       error: { code: "internal", message: "the compaction result could not be sent" },
+    });
+  }
+
+  /**
+   * `thread.branch_summary` (KOBE-548), answered by exactly one `thread.branch_summary_result` on
+   * the connection it arrived on. Pi's text stays in this agent's log; the wire carries codes.
+   */
+  async #runBranchSummary(frame: ThreadBranchSummaryFrame): Promise<void> {
+    const commandId = frame.command_id;
+    if (this.#seenCommands.has(commandId)) return;
+    this.#remember(commandId);
+    const epoch = this.#wire.epoch;
+    this.#traces.startRun(frame.run_id, frame.thread_id, frame.trace, true);
+    let reply: BranchSummaryReply;
+    try {
+      reply = await this.#threads.branchSummary(frame);
+    } catch (error) {
+      this.#deps.logger.warn({ err: (error as Error).message }, "branch summary failed");
+      reply = branchSummaryFailure("internal");
+    }
+    if (!reply.ok) {
+      this.#deps.logger.info(
+        { thread_id: frame.thread_id, run_id: frame.run_id, code: reply.error.code },
+        "branch summary refused",
+      );
+    }
+    this.#traces.runEnded(frame.run_id);
+    if (this.#wire.epoch !== epoch || !this.#wire.ready) return;
+    const base = { v: 1, type: "thread.branch_summary_result", command_id: commandId } as const;
+    if (this.#wire.send({ ...base, thread_id: frame.thread_id, ...reply })) return;
+    this.#wire.send({
+      ...base,
+      thread_id: frame.thread_id,
+      ...branchSummaryFailure("internal"),
     });
   }
 

@@ -72,6 +72,18 @@ export function onBranchOf(
 }
 
 /**
+ * Make it current and carry a summary applies (KOBE-548, CT11): the head is on another branch than
+ * the leaf's, not on the leaf's own path (an ancestor has no other branch to summarize).
+ */
+export function carryOffered(
+  entries: readonly ThreadEntry[],
+  leafEntryId: string | null,
+  head: string | null,
+): boolean {
+  return head !== null && leafEntryId !== null && !onBranchOf(entries, leafEntryId, head);
+}
+
+/**
  * The newest leaf at or below `entryId` (the branch a tree click or a search hit opens, CT4/CT15);
  * undefined when the entry is not loaded.
  */

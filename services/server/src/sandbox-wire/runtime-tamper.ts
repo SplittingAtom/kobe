@@ -23,7 +23,7 @@ export interface RuntimeTamperReport {
   readonly replicaId: string;
   readonly threadId: string;
   readonly runId: string;
-  readonly runKind: "message" | "compaction";
+  readonly runKind: "message" | "compaction" | "branch_summary";
 }
 
 /**
