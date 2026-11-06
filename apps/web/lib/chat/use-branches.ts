@@ -21,6 +21,8 @@ export interface Branches {
   readonly notes: ThreadBranchesResponse;
   /** Read again now (after a label change). */
   readonly refresh: () => void;
+  /** A label write's answer (CT9, KOBE-546): the store becomes that body, no read again. */
+  readonly replace: (notes: ThreadBranchesResponse) => void;
 }
 
 const readBranches = (source: BranchesSource, threadId: string) =>
@@ -31,10 +33,10 @@ export function useBranches(
   source: BranchesSource | null,
   now: () => number = Date.now,
 ): Branches {
-  const { value, refresh } = useFocusReread(threadId, source, readBranches, {
+  const { value, refresh, replace } = useFocusReread(threadId, source, readBranches, {
     rereadMs: BRANCHES_REREAD_MS,
     now,
     keepOnFailure: true,
   });
-  return { notes: value ?? EMPTY_BRANCHES, refresh };
+  return { notes: value ?? EMPTY_BRANCHES, refresh, replace };
 }

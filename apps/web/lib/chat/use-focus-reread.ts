@@ -23,10 +23,16 @@ export function useFocusReread<S, T>(
   source: S | null,
   read: (source: S, threadId: string) => Promise<T | null>,
   options: FocusRereadOptions<S>,
-): { readonly value: T | null; readonly refresh: () => void } {
+): {
+  readonly value: T | null;
+  readonly refresh: () => void;
+  /** A value known newer than any read in flight (a write's answer): it wins over them. */
+  readonly replace: (value: T) => void;
+} {
   const [state, setState] = useState<{ id: string; value: T } | null>(null);
   const last = useRef<{ at: number; ok: boolean } | null>(null);
   const reader = useRef<() => void>(() => {});
+  const seq = useRef(0);
   const latest = useRef({ read, options });
   latest.current = { read, options };
 
@@ -37,11 +43,10 @@ export function useFocusReread<S, T>(
     reader.current = () => {};
     if (threadId === null || source === null) return;
     let alive = true;
-    let seq = 0;
     const reread = () => {
-      const mine = ++seq;
+      const mine = ++seq.current;
       void latest.current.read(source, threadId).then((answer) => {
-        if (!alive || mine !== seq) return;
+        if (!alive || mine !== seq.current) return;
         last.current = { at: now(), ok: answer !== null };
         if (answer !== null) setState({ id: threadId, value: answer });
         else if (latest.current.options.keepOnFailure !== true) setState(null);
@@ -64,5 +69,18 @@ export function useFocusReread<S, T>(
   }, [threadId, source]);
 
   const refresh = useCallback(() => reader.current(), []);
-  return { value: state !== null && state.id === threadId ? state.value : null, refresh };
+  const replace = useCallback(
+    (value: T) => {
+      if (threadId === null) return;
+      seq.current += 1;
+      last.current = { at: (latest.current.options.now ?? Date.now)(), ok: true };
+      setState({ id: threadId, value });
+    },
+    [threadId],
+  );
+  return {
+    value: state !== null && state.id === threadId ? state.value : null,
+    refresh,
+    replace,
+  };
 }

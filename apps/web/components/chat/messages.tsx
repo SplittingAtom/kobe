@@ -38,6 +38,7 @@ import {
 } from "./answer-feedback";
 import { MessageFooter } from "./message-footer";
 import { ForkAction } from "./fork-dialog";
+import { ContinueAction, useDimmed } from "./continue-from";
 import { RegenerateWith } from "./regenerate-with";
 import { AnswerDetailScope, AnswerDetailToggle, Disclosure, useDisclosure } from "./detail";
 import { CompactNowButton } from "./compact-now";
@@ -209,12 +210,15 @@ export function UserMessage() {
   const lastSent = useAuiState(
     (s) => s.thread.messages.findLast((m) => m.role === "user")?.id === s.message.id,
   );
+  const dimmed = useDimmed();
   return (
     <MessagePrimitive.Root
       data-role="user"
+      data-kobe-dimmed={dimmed || undefined}
       className={cn(
         "group/user animate-in fade-in slide-in-from-bottom-1 grid auto-rows-auto grid-cols-[minmax(72px,1fr)_fit-content(85%)] content-start gap-y-2 px-2 duration-150 [&:where(>*)]:col-start-2",
         waiting && "opacity-75",
+        dimmed && "opacity-50",
       )}
     >
       <h3 className="sr-only">You said</h3>
@@ -295,11 +299,16 @@ function AnswerMessage({ meta }: { readonly meta: KobeMessageMeta | undefined })
   const running = useAuiState((s) => s.message.status?.type === "running");
   const readOnly = isReadOnlyThread(useKobeExtras());
   const canRegenerate = useCanRegenerate();
+  const dimmed = useDimmed();
   return (
     <MessagePrimitive.Root
       data-role="assistant"
       aria-busy={running}
-      className="group/answer animate-in fade-in slide-in-from-bottom-1 relative duration-150"
+      data-kobe-dimmed={dimmed || undefined}
+      className={cn(
+        "group/answer animate-in fade-in slide-in-from-bottom-1 relative duration-150",
+        dimmed && "opacity-50",
+      )}
     >
       <AnswerFeedbackScope>
         <AnswerDetailScope>
@@ -340,6 +349,7 @@ function AnswerMessage({ meta }: { readonly meta: KobeMessageMeta | undefined })
               )}
               <ForkAction meta={meta} />
               <AnswerDetailToggle />
+              <ContinueAction />
               <AnswerFeedbackButtons />
               <CompactNowButton />
             </ActionBarPrimitive.Root>

@@ -19,7 +19,9 @@ import { DraftProjectNote, ProjectBar } from "./project-bar";
 import { OpenThreadContext } from "./fork-dialog";
 import { useKobeExtras, type KobeThreadExtras } from "./kobe-runtime";
 import { LineageStrip } from "./lineage-strip";
-import { BranchBar } from "./branch-bar";
+import { ContinueProvider } from "./continue-from";
+import { TreeBranchBar, TreeButton } from "./tree-entry-points";
+import { TreeHost, useTreeData } from "./tree-host";
 import { AssistantMessage, EditComposer, UserMessage } from "./messages";
 import { RunNotices } from "./run-notices";
 import { SteeringPanel } from "./steering-panel";
@@ -176,6 +178,12 @@ function MessagesAndComposer({
     state.actionError,
   );
   useReveal(state, extras.projection, viewport);
+  const tree = useTreeData();
+  // The palette's message actions act on the message last focused or hovered (CT4).
+  const remember = (target: EventTarget) => {
+    const id = (target as Element).closest?.("[data-message-id]")?.getAttribute("data-message-id");
+    if (tree && id) tree.focusedMessage.current = id;
+  };
   return (
     <>
       <div className="relative flex min-h-0 flex-1 flex-col">
@@ -189,6 +197,8 @@ function MessagesAndComposer({
           aria-labelledby="kobe-thread-title"
           data-kobe-scroll="messages"
           data-kobe-follow={follow}
+          onFocusCapture={(e) => remember(e.target)}
+          onPointerOverCapture={(e) => remember(e.target)}
           className="flex min-h-0 flex-1 flex-col overflow-x-auto overflow-y-auto overscroll-contain scroll-smooth [overflow-anchor:auto] motion-reduce:scroll-auto"
         >
           <div
@@ -258,13 +268,25 @@ function MessagesAndComposer({
  * In the chat shell (`inShell`) the title is editable and Compact now is offered; the builder's
  * test pane has neither.
  */
-export function ThreadView({
+export function ThreadView(
+  props: {
+    readonly onOpenThread?: ((threadId: string) => void) | undefined;
+    readonly inShell?: boolean;
+  } = {},
+) {
+  // The workspace hosts the Conversation tree at `/tree`; a test pane hosts its own (CT19).
+  const host = useTreeData();
+  const view = <ThreadViewBody {...props} />;
+  return host ? view : <TreeHost onOpenThread={props.onOpenThread}>{view}</TreeHost>;
+}
+
+function ThreadViewBody({
   onOpenThread,
   inShell = false,
 }: {
   readonly onOpenThread?: ((threadId: string) => void) | undefined;
   readonly inShell?: boolean;
-} = {}) {
+}) {
   const extras = useKobeExtras();
   const isEmpty = useAuiState((s) => s.thread.messages.length === 0);
   if (!extras) return null;
@@ -286,6 +308,7 @@ export function ThreadView({
           </StatusBadge>
         )}
         <AgentVersionBadge extras={extras} />
+        <TreeButton extras={extras} />
       </header>
       <div className="mx-auto w-full max-w-(--thread-max-width) px-4">
         <ProjectBar extras={extras} onOpenThread={onOpenThread} />
@@ -293,7 +316,7 @@ export function ThreadView({
         <OpenThreadContext.Provider value={onOpenThread}>
           <LineageStrip extras={extras} />
         </OpenThreadContext.Provider>
-        <BranchBar extras={extras} />
+        <TreeBranchBar extras={extras} />
       </div>
       <ArtifactList />
       {state.phase === "error" && state.loadError && (
@@ -310,7 +333,9 @@ export function ThreadView({
         <ThreadCommands extras={extras} />
         <CompactNowProvider extras={extras} enabled={inShell}>
           <ThreadPrimitive.ViewportProvider>
-            <MessagesAndComposer extras={extras} welcome={welcome} inShell={inShell} />
+            <ContinueProvider extras={extras}>
+              <MessagesAndComposer extras={extras} welcome={welcome} inShell={inShell} />
+            </ContinueProvider>
           </ThreadPrimitive.ViewportProvider>
         </CompactNowProvider>
       </OpenThreadContext.Provider>

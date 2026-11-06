@@ -35,22 +35,29 @@ function focusComposer(root: Element | null): void {
 export function BranchBar({
   extras,
   filesChanged,
+  tree,
 }: {
   readonly extras: KobeThreadExtras;
   readonly filesChanged?: ReactNode;
+  /** The way to the Conversation tree (KOBE-546), after Make it current. */
+  readonly tree?: ReactNode;
 }) {
   const { state } = extras;
   if (!isBrowsing(state)) return null;
   // Keyed by the head: a note from one branch never shows on the next.
-  return <BranchBarBody key={headOf(state)} extras={extras} filesChanged={filesChanged} />;
+  return (
+    <BranchBarBody key={headOf(state)} extras={extras} filesChanged={filesChanged} tree={tree} />
+  );
 }
 
 function BranchBarBody({
   extras,
   filesChanged,
+  tree,
 }: {
   readonly extras: KobeThreadExtras;
   readonly filesChanged?: ReactNode;
+  readonly tree?: ReactNode;
 }) {
   const { state, controller, projection } = extras;
   const [note, setNote] = useState<string | undefined>(undefined);
@@ -104,6 +111,7 @@ function BranchBarBody({
           Make it current
         </button>
       )}
+      {tree}
       <IconAction
         command="dismiss-notice"
         label="Back to the current branch"

@@ -17,7 +17,7 @@ import { createFilesApi } from "../../lib/files/api";
 import { AREAS, areaFromUrl, onChatPage } from "../../lib/shell/areas";
 import { lastThreadHref, lastThreadId, rememberLastThread } from "../../lib/shell/last-thread";
 import { followWorkspaceEntries, stepsBackToWorkspace } from "../../lib/shell/panel-history";
-import { panelOfPath, type Panel } from "../../lib/shell/panels";
+import { panelOfPath, TREE_PANEL_HREF, type Panel } from "../../lib/shell/panels";
 import { ArtifactPanel } from "./artifact-panel";
 import { ArtifactPanelProvider, useArtifactPanel } from "./artifact-state";
 import { AppCommands } from "../shell/app-commands";
@@ -41,7 +41,8 @@ import { ThreadOnScreenContext } from "./thread-on-screen";
 import { TeamModelsProvider } from "./use-team-models";
 import { ThreadMarkersProvider } from "./markers";
 import { ThreadAppsProvider } from "../apps/thread-apps";
-import { OpenPanelContext } from "../shell/panel-close";
+import { OpenPanelContext, useOpenPanel } from "../shell/panel-close";
+import { TreeHost, type TreeRoute } from "./tree-host";
 import { ContextViewerHost } from "../shell/context-viewer";
 import { WorkspacePanel } from "../shell/workspace-panel";
 import { ThreadsPanelContent } from "../shell/threads-panel";
@@ -337,6 +338,25 @@ function ChatWorkspace({
       chooseThread(threadId);
     }
   }, [threadsOpen, threadId, chooseThread]);
+  // The Conversation tree (CT4, KOBE-546) at `/tree`: a link, a reload and Back work.
+  const push = useOpenPanel();
+  const treeOpen = panel?.id === "conversation-tree";
+  const treeRoute = useMemo<TreeRoute>(
+    () => ({
+      open: treeOpen,
+      show: () => push?.(TREE_PANEL_HREF),
+      close: onClosePanel,
+    }),
+    [treeOpen, push, onClosePanel],
+  );
+  // A fork opened from the tree: the panel's entry becomes that thread's, as in Threads.
+  const openFromTree = useCallback(
+    (id: string) => {
+      setThreadId(id);
+      chooseThread(id);
+    },
+    [setThreadId, chooseThread],
+  );
   return (
     <AssistantRuntimeProvider aui={aui} runtime={runtime}>
       {/* What each action does now: the `/` menu (KOBE-224), the palette and keys (KOBE-225). */}
@@ -372,23 +392,25 @@ function ChatWorkspace({
                             <ShellSlot name="nav">
                               <RailDrawerButton teamName={teamName} />
                             </ShellSlot>
-                            <ContextViewerHost>
-                              <WorkspaceGrid
-                                rail={
-                                  <WorkspaceRail
-                                    teamName={teamName || "Workspace"}
-                                    listError={listError}
-                                    filesApi={filesApi}
-                                  />
-                                }
-                                artifact={<ArtifactPanel filesApi={filesApi} />}
-                                conversation={
-                                  <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
-                                    <ThreadView onOpenThread={setThreadId} inShell />
-                                  </main>
-                                }
-                              />
-                            </ContextViewerHost>
+                            <TreeHost route={treeRoute} onOpenThread={openFromTree}>
+                              <ContextViewerHost>
+                                <WorkspaceGrid
+                                  rail={
+                                    <WorkspaceRail
+                                      teamName={teamName || "Workspace"}
+                                      listError={listError}
+                                      filesApi={filesApi}
+                                    />
+                                  }
+                                  artifact={<ArtifactPanel filesApi={filesApi} />}
+                                  conversation={
+                                    <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
+                                      <ThreadView onOpenThread={setThreadId} inShell />
+                                    </main>
+                                  }
+                                />
+                              </ContextViewerHost>
+                            </TreeHost>
                             {/* The Threads panel (KOBE-453) needs the thread list: it renders in here. */}
                             {threadsPanel !== undefined && (
                               <WorkspacePanel
@@ -547,7 +569,9 @@ export function ChatApp({
                 <TeamActivation />
                 {body}
                 {/* A console, My agents, Skills or a My area page over the workspace (KOBE-452). */}
-                {panel !== undefined && panel.id !== "threads" ? (
+                {panel !== undefined &&
+                panel.id !== "threads" &&
+                panel.id !== "conversation-tree" ? (
                   <WorkspacePanel panel={panel} path={pathname} onClose={closePanel}>
                     {route.page}
                   </WorkspacePanel>

@@ -48,6 +48,8 @@ import {
 } from "../../lib/chat/markers";
 import type { KobeMessageMeta } from "../../lib/chat/tree";
 import { cn } from "../../lib/utils";
+import { useTreeData } from "./tree-context";
+import { TreeLink } from "./tree-entry-points";
 import { IconAction } from "../shell/icon-action";
 import { Disclosure, useDisclosure } from "./detail";
 import { useKobeExtras } from "./kobe-runtime";
@@ -433,6 +435,13 @@ export function withApprovalMarker(Card: (props: ToolCallMessagePartProps) => Re
   };
 }
 
+/** The label of the version on screen (CT9): "Version 2 of 3 · try 5% cut". */
+function PickerLabel() {
+  const id = useAuiState((s) => s.message.id);
+  const label = useTreeData()?.labelOf(id);
+  return label === undefined ? null : <em className="font-normal"> · {label}</em>;
+}
+
 /** Assistant-ui's branch picker: "Version n of m" between previous and next. */
 export function BranchPicker({ className }: { readonly className?: string }) {
   return (
@@ -445,6 +454,7 @@ export function BranchPicker({ className }: { readonly className?: string }) {
       </BranchPickerPrimitive.Previous>
       <span className="font-medium">
         Version <BranchPickerPrimitive.Number /> of <BranchPickerPrimitive.Count />
+        <PickerLabel />
       </span>
       <BranchPickerPrimitive.Next asChild>
         <IconAction command="next-branch" size="sm" />
@@ -459,7 +469,7 @@ function ForkMarker() {
   if (count < 2) return null;
   return (
     <MarkerRow kind="fork" icon={GitForkIcon}>
-      <span>Forked here · {count} branches</span>
+      <TreeLink>Forked here · {count} branches</TreeLink>
       <BranchPicker />
     </MarkerRow>
   );
