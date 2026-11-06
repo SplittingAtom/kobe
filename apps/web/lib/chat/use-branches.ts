@@ -23,6 +23,8 @@ export interface Branches {
   readonly notes: ThreadBranchesResponse;
   /** Read again now (after a label change). */
   readonly refresh: () => void;
+  /** The answer of a label write (CT9, KOBE-546): the store is that body, no read again. */
+  readonly replace: (notes: ThreadBranchesResponse) => void;
 }
 
 export function useBranches(
@@ -33,6 +35,7 @@ export function useBranches(
   const [state, setState] = useState<{ id: string; notes: ThreadBranchesResponse } | null>(null);
   const last = useRef<{ at: number; ok: boolean } | null>(null);
   const reader = useRef<() => void>(() => {});
+  const seq = useRef(0);
   const nowRef = useRef(now);
   nowRef.current = now;
 
@@ -42,11 +45,10 @@ export function useBranches(
     reader.current = () => {};
     if (threadId === null || source === null) return;
     let alive = true;
-    let seq = 0;
     const read = () => {
-      const mine = ++seq;
+      const mine = ++seq.current;
       void source.api.getThreadBranches(threadId).then((answer) => {
-        if (!alive || mine !== seq) return;
+        if (!alive || mine !== seq.current) return;
         last.current = { at: nowRef.current(), ok: answer !== null };
         setState(answer === null ? null : { id: threadId, notes: answer });
       });
@@ -66,6 +68,16 @@ export function useBranches(
   }, [threadId, source]);
 
   const refresh = useCallback(() => reader.current(), []);
+  const replace = useCallback(
+    (notes: ThreadBranchesResponse) => {
+      if (threadId === null) return;
+      // A read still on its way is older than this answer: it must not overwrite it.
+      seq.current += 1;
+      last.current = { at: nowRef.current(), ok: true };
+      setState({ id: threadId, notes });
+    },
+    [threadId],
+  );
   const notes = state !== null && state.id === threadId ? state.notes : EMPTY_BRANCHES;
-  return { notes, refresh };
+  return { notes, refresh, replace };
 }

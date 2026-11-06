@@ -20,7 +20,7 @@ import {
   saveResumePoint,
   type ResumeStore,
 } from "./resume";
-import { branchLeafOf, isBrowsing, onBranchOf, settleHead } from "./head";
+import { branchLeafOf, headOf, isBrowsing, onBranchOf, pathOf, settleHead } from "./head";
 import { applyRunEvents, newLiveRun, type CommittedEntry } from "./live";
 import {
   openRunStream,
@@ -757,14 +757,18 @@ export class ThreadController {
     const queues = currentRunId(this.#state) !== undefined;
     // From a browsed branch (CT3): the message continues the head, which makes it current.
     const head = this.#state.head;
-    const parent = parentEntryId ?? (isBrowsing(this.#state) ? head : undefined);
+    // Continue from here (CT8): the answer's last entry, as an edit names its prompt's parent.
+    const from = this.#state.continueFrom;
+    const explicit = parentEntryId ?? from;
+    const parent = explicit ?? (isBrowsing(this.#state) ? head : undefined);
     const branchFrom = parent ?? this.#state.summary?.leafEntryId ?? null;
     const followups = this.#state.followups;
     this.#set((s) => ({
       ...s,
       // An edit from a browsed branch shows under the edited prompt (its new branch); a plain
       // send continues the head, which then settles once its run starts (`settleHead`).
-      ...(parentEntryId !== undefined && !queues ? { head: undefined } : {}),
+      ...(explicit !== undefined && !queues ? { head: undefined } : {}),
+      continueFrom: undefined,
       sending: { key, text, parentEntryId: branchFrom, queues, files: attach?.files },
       actionError: undefined,
       followups: undefined, // shown until the next send (KOBE-222)
@@ -790,6 +794,7 @@ export class ThreadController {
         sending: undefined,
         followups: s.followups ?? followups,
         head: s.head ?? head,
+        continueFrom: s.continueFrom ?? from,
       }));
       this.#fail(res.error, text);
       return false;
@@ -1176,11 +1181,13 @@ export class ThreadController {
   // --- the local head (CT3, KOBE-544) ----------------------------------------------------------
 
   /** Moves this tab's head (never the leaf); "Showing another branch" when the bar comes up. */
-  #moveHead(head: string | undefined, reveal?: string): void {
+  #moveHead(head: string | undefined, reveal?: string, continueFrom?: string): void {
     const was = isBrowsing(this.#state);
     this.#set((s) => ({
       ...s,
       head,
+      // Another branch shown drops Continue from here (CT8), unless that is what moved the head.
+      continueFrom,
       ...(reveal === undefined
         ? {}
         : { reveal: { entryId: reveal, seq: (s.reveal?.seq ?? 0) + 1 } }),
@@ -1197,6 +1204,26 @@ export class ThreadController {
   /** Shows the version a reader's branch picker chose, ending at that entry (never writes). */
   readonly showVersion = (entryId: string): void => {
     if (this.#state.entries.some((e) => e.entryId === entryId)) this.#moveHead(entryId);
+  };
+
+  /**
+   * Continue from here (CT8, KOBE-546): the conversation shows the path through the answer (the
+   * head stays when the answer is on screen, else moves to the newest branch below it), scrolled
+   * to it; the next send continues from `entryId` (the answer's last entry). Nothing is written.
+   */
+  readonly continueFrom = (entryId: string): void => {
+    const s = this.#state;
+    if (!s.entries.some((e) => e.entryId === entryId)) return;
+    const onScreen = pathOf(s.entries, headOf(s)).has(entryId);
+    const leaf = s.summary?.leafEntryId ?? null;
+    const tip = onScreen ? s.head : branchLeafOf(s.entries, entryId);
+    this.#moveHead(tip === leaf ? undefined : tip, entryId, entryId);
+    this.#announce("Continuing from this answer");
+  };
+
+  /** Escape, the chip's ✕, another thread: the next send continues the branch on screen again. */
+  readonly clearContinue = (): void => {
+    if (this.#state.continueFrom !== undefined) this.#set((s) => ({ ...s, continueFrom: undefined }));
   };
 
   /** ✕ on the bar: back to the leaf's branch. */

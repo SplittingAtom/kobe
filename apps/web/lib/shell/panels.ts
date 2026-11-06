@@ -19,7 +19,9 @@ export type PanelId =
   | "my-shared-cases"
   | "my-area"
   /** The context viewer (KOBE-471): opened from the context gauge, no address of its own. */
-  | "context-viewer";
+  | "context-viewer"
+  /** The Conversation tree (CT4, KOBE-546): every branch of the thread on screen, at `/tree`. */
+  | "conversation-tree";
 
 export interface Panel {
   readonly id: PanelId;
@@ -35,6 +37,7 @@ export interface Panel {
 /** First match wins: the more specific prefixes come first. */
 const PANELS: readonly (Panel & { readonly prefix: string })[] = [
   { prefix: "/threads", id: "threads", title: "Threads", embedded: false },
+  { prefix: "/tree", id: "conversation-tree", title: "Conversation tree", embedded: true },
   { prefix: "/admin/team", id: "team-console", title: "Team console", embedded: false },
   { prefix: "/admin/site", id: "site-console", title: "Site console", embedded: false },
   { prefix: "/admin", id: "administration", title: "Administration", embedded: false },
@@ -69,3 +72,6 @@ export function isWorkspacePath(pathname: string): boolean {
 
 /** The Threads panel (KOBE-453): the member's threads, from the rail's top line. */
 export const THREADS_PANEL_HREF = "/threads";
+
+/** The Conversation tree (CT4, KOBE-546): the thread on screen's branches, over the chat. */
+export const TREE_PANEL_HREF = "/tree";

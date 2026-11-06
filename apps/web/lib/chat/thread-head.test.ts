@@ -293,3 +293,53 @@ describe("leaf moves reach this browser's other tabs (CT13 via the list sync)", 
     expect(announced).toEqual([]);
   });
 });
+
+describe("Continue from here (CT8, KOBE-546)", () => {
+  const posts = () => fake.requests.filter((r) => r.path.endsWith("/messages"));
+
+  it("on screen: the head stays, the send carries the answer's entry, then it clears", async () => {
+    const { t, a1 } = branched();
+    const c = await opened(t);
+    c.continueFrom(a1);
+    let s = c.getState();
+    expect(s.continueFrom).toBe(a1);
+    expect(s.head).toBeUndefined();
+    expect(s.reveal?.entryId).toBe(a1);
+    // Everything stays on screen (dimmed by the view), nothing is written.
+    expect(onScreen(s)).toEqual(["start", "a1", "new question", "new answer"]);
+    expect(fake.requests.filter((r) => r.method !== "GET")).toEqual([]);
+    expect(await c.send("another way")).toBe(true);
+    expect(posts().at(-1)?.body).toMatchObject({ content: "another way", parent_entry_id: a1 });
+    s = c.getState();
+    expect(s.continueFrom).toBeUndefined();
+  });
+
+  it("off screen: the head moves to the newest branch through the answer", async () => {
+    const { t, a2 } = branched();
+    const c = await opened(t);
+    c.continueFrom(a2);
+    const s = c.getState();
+    expect(s.head).toBe(a2);
+    expect(s.continueFrom).toBe(a2);
+    expect(onScreen(s)).toEqual(["start", "a1", "old question", "old answer"]);
+  });
+
+  it("clears on clearContinue and on another branch shown; a failed send keeps it", async () => {
+    const { t, a1, u2 } = branched();
+    const c = await opened(t);
+    c.continueFrom(a1);
+    c.clearContinue();
+    expect(c.getState().continueFrom).toBeUndefined();
+    c.continueFrom(a1);
+    c.showBranch(u2);
+    expect(c.getState().continueFrom).toBeUndefined();
+    c.showLeaf();
+    c.continueFrom(a1);
+    fake.failNext.set(
+      `POST /v1/threads/${t}/messages`,
+      new Response(JSON.stringify({ code: "internal" }), { status: 500 }),
+    );
+    expect(await c.send("again")).toBe(false);
+    expect(c.getState().continueFrom).toBe(a1);
+  });
+});

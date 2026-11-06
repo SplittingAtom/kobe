@@ -21,6 +21,7 @@ describe("panelOfPath (KOBE-452)", () => {
       ["/me/connectors", "My connectors"],
       ["/me/projects/p-1", "Projects"],
       ["/me/shared-cases", "My shared cases"],
+      ["/tree", "Conversation tree"],
     ];
     for (const [path, title] of cases) expect(panelOfPath(path)?.title, path).toBe(title);
   });

@@ -283,6 +283,8 @@ export class FakeKobe {
     }
   >();
   readonly branchesFailing = new Set<string>();
+  /** Label writes as the route took them (CT9, KOBE-546). */
+  readonly labelWrites: { threadId: string; entryId: string; label: string | null }[] = [];
   branchesReads = 0;
   /**
    * `GET /v1/threads/{id}/sync-conflicts` (KOBE-492): open conflicts, wire casing, newest first; a
@@ -1854,6 +1856,9 @@ export class FakeKobe {
       if (this.branchesFailing.has(thread.thread_id)) return error(500, "internal");
       return json(200, this.branches.get(thread.thread_id) ?? { labels: [], runs: [] });
     }
+    if (action === "labels" && method === "PUT" && sub !== undefined) {
+      return this.#setLabel(thread, sub, body);
+    }
     if (action === "files" && method === "GET") {
       this.threadFilesReads += 1;
       if (this.threadFilesHidden.has(thread.thread_id)) {
@@ -1966,6 +1971,27 @@ export class FakeKobe {
       forks: forksOf(thread.thread_id),
       forks_more: false,
     };
+  }
+
+  /**
+   * `PUT /v1/threads/{id}/labels/{entryId}` (CT9, KOBE-543), like the server: owner only, refused
+   * in Trash and on test threads, 404 for an entry not in the thread; answers the `branches` body.
+   */
+  #setLabel(thread: FakeThread, entryId: string, body: Record<string, unknown> | undefined) {
+    if (thread.read_only) return error(403, "forbidden", "Only the owner can label this thread.");
+    if (thread.deleted_at !== null) return error(409, "thread_in_trash", "Restore it first.");
+    if (thread.is_test === true) return error(409, "test_thread", "Not on a test thread.");
+    if (!thread.entries.some((e) => e.entry_id === entryId))
+      return error(404, "entry_not_found", "Entry not found.");
+    const raw = body?.label;
+    if (raw !== null && (typeof raw !== "string" || raw.trim() === "" || raw.length > 60))
+      return error(400, "invalid_request", "Give a label of 1-60 characters, or null.");
+    this.labelWrites.push({ threadId: thread.thread_id, entryId, label: raw });
+    const was = this.branches.get(thread.thread_id) ?? { labels: [], runs: [] };
+    const others = was.labels.filter((l) => l.entry_id !== entryId);
+    const labels = raw === null ? others : [...others, { entry_id: entryId, label: raw.trim() }];
+    this.branches.set(thread.thread_id, { ...was, labels });
+    return json(200, this.branches.get(thread.thread_id) as unknown as Json);
   }
 
   /** `GET /v1/threads/{id}/card` (KOBE-219), like the server: first message, agent, count. */
