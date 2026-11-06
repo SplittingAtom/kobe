@@ -188,8 +188,11 @@ async function answered(
   return runId;
 }
 
+/** Event types; a leaf-only `thread.updated` (a commit's leaf move, KOBE-543) is not a title. */
 const types = async (team: string, runId: string) =>
-  (await f.events(team, runId)).map((e) => e.type);
+  (await f.events(team, runId))
+    .filter((e) => !(e.type === "thread.updated" && e.payload.title === undefined))
+    .map((e) => e.type);
 
 const completedPayload = async (team: string, runId: string) =>
   (await f.events(team, runId)).find((e) => e.type === "run.completed")?.payload;

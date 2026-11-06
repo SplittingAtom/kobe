@@ -10,6 +10,7 @@ import { logger } from "../logger.js";
 import { threadKey, type BlobStore } from "../retention/blobs.js";
 import { createThread, findThread, type ThreadError, type Viewer } from "./repository.js";
 import { holdFolder } from "./folders.js";
+import { copyLabels } from "./branches.js";
 import {
   forkedAppResultKey,
   planAppCopies,
@@ -299,6 +300,14 @@ async function storeFork(
     );
   }
   await storeAppCopies(tx, viewer.teamId, created.thread_id, plan.apps, appCopies);
+  // CT9 (Q12): the copied path keeps its labels, same entry ids.
+  await copyLabels(
+    tx,
+    viewer,
+    source.id,
+    created.thread_id,
+    path.map((e) => e.entryId),
+  );
   await tx
     .update(threads)
     .set({ leafEntryId: forkPoint })

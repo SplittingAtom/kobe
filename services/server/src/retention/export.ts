@@ -8,7 +8,24 @@ import { folderPaths } from "./export-folders.js";
 import { readOffloadedJson } from "../threads/offloaded-body.js";
 import { logger } from "../logger.js";
 import { personalMemoryForExport } from "../memory/export.js";
-import { entryMarkdown, threadHeader, type ThreadHeading } from "./export-markdown.js";
+import {
+  entryMarkdown,
+  entryPlainText,
+  threadHeader,
+  type ThreadHeading,
+} from "./export-markdown.js";
+import {
+  BRANCH_FILES_MAX,
+  branchEntries,
+  branchOf,
+  branchedFromLine,
+  excerptOf,
+  inlinePayload,
+  threadLabels,
+  threadTree,
+  type ExportBranch,
+  type ThreadTree,
+} from "./export-branches.js";
 import { TRASH_RETENTION_DAYS } from "./periods.js";
 import { artifactExtension, readArtifactBytes } from "../artifacts/serve.js";
 
@@ -17,6 +34,8 @@ import { artifactExtension, readArtifactBytes } from "../artifacts/serve.js";
  *  - `sessions/<thread_id>.jsonl`: Pi session format v3 (header line, then every entry in append
  *    order), so Pi can open it as a session file;
  *  - `transcripts/<date>-<title>-<id>.md`: the active branch as Markdown;
+ *  - `branches/<date>-<title>-<id>/<n>-<label-or-first-words>.md`: every other leaf's path, from
+ *    where it leaves the transcript (KOBE-543, CT14; `export-branches.ts`);
  *  - `artifacts/<artifact id>/v<n>.<ext>`: every version of the thread's artifacts (KOBE-129);
  *  - `files/<file id>/<name>`: the thread's uploaded and shared files (KOBE-143), streamed;
  *  - `memory/<path>`: the user's personal memory files, current versions (KOBE-155);
@@ -27,8 +46,9 @@ import { artifactExtension, readArtifactBytes } from "../artifacts/serve.js";
  * Only threads the user owns in this team (Trash included while restorable) — never threads
  * shared with them, never another user's or team's data: every query names the team and the
  * owner. The zip is streamed: threads and entries are read page by page in short transactions, so
- * memory stays bounded whatever the size: one entry (offloaded bodies capped at 8 MiB) and the
- * active branch's ids per thread.
+ * memory stays bounded whatever the size: one entry (offloaded bodies capped at 8 MiB), and per
+ * thread its tree's shape (ids, parents, seq, type), the active branch's ids and one other
+ * branch's ids at a time (at most 200 branch files per thread, `export-branches.ts`).
  */
 
 const THREAD_PAGE = 100;
@@ -59,7 +79,7 @@ export type ThreadRow = {
   readonly folder_id?: string | null;
 };
 
-type EntryRow = {
+export type EntryRow = {
   readonly seq: number;
   readonly entry_id: string;
   readonly parent_id: string | null;
@@ -94,7 +114,8 @@ export async function recordExport(db: KobeDb, viewer: ExportViewer): Promise<Ex
   });
 }
 
-function slug(title: string | null): string {
+/** A title (or label, or first words: CT14) as a file-name part. */
+export function slug(title: string | null): string {
   const s = (title ?? "")
     .normalize("NFKD")
     .toLowerCase()
@@ -294,6 +315,43 @@ async function feedbackPage(db: KobeDb, viewer: ExportViewer, after: string | nu
   });
 }
 
+/** A branch's file (CT14): `branches/<transcript name>/<n>-<label-or-first-words>.md`. */
+async function branchFileName(
+  db: KobeDb,
+  viewer: ExportViewer,
+  threadId: string,
+  transcript: string,
+  n: number,
+  branch: ExportBranch,
+  labelOf: ReadonlyMap<string, string>,
+): Promise<string> {
+  const dir = transcript.replace(/^transcripts\//u, "").replace(/\.md$/u, "");
+  const words =
+    labelOf.get(branch.first) ??
+    entryPlainText(await inlinePayload(db, viewer, threadId, branch.firstShown))
+      .split(/\s+/u)
+      .slice(0, 8)
+      .join(" ");
+  return `branches/${dir}/${n}-${slug(words === "" ? "branch" : words)}.md`;
+}
+
+/**
+ * The branches to write (CT14): each leaf's walk, one at a time, keeping only where it leaves the
+ * transcript; at most {@link BRANCH_FILES_MAX}, `capped` when there were more.
+ */
+function branchPoints(tree: ThreadTree): { points: Set<string>; capped: boolean } {
+  const points = new Set<string>();
+  let n = 0;
+  for (const leaf of tree.leaves) {
+    const b = branchOf(tree, leaf);
+    if (b === undefined) continue;
+    n += 1;
+    if (n > BRANCH_FILES_MAX) return { points, capped: true };
+    if (b.from !== null) points.add(b.from);
+  }
+  return { points, capped: false };
+}
+
 const README = `# Your Kobe conversations
 
 This archive holds the conversations you own in one Kobe team.
@@ -301,6 +359,8 @@ This archive holds the conversations you own in one Kobe team.
 - \`sessions/<thread id>.jsonl\`: each conversation as a Pi session file (session format v3: a
   header line, then every entry, including other branches, in the order they were written).
 - \`transcripts/\`: each conversation's active branch as Markdown.
+- \`branches/<conversation>/\`: each other branch of a conversation as Markdown, from the
+  message where it leaves the transcript (only for conversations with more than one branch).
 - \`artifacts/<artifact id>/v<n>.<ext>\`: every version of the artifacts the assistant made.
 - \`memory/<path>\`: your personal memory files (current versions).
 - \`files/<file id>/<name>\`: the files you uploaded to the conversation or the assistant shared.
@@ -379,16 +439,60 @@ export async function* exportZip(
       };
       const md = file(transcript);
       md.push(strToU8(threadHeader(heading)));
-      const branch = await activeBranchIds(db, viewer, thread.id, thread.leaf_entry_id);
+      // CT14: the transcript stays the leaf's branch; every other leaf's path gets a file.
+      const tree = await threadTree(db, viewer, thread.id, thread.leaf_entry_id);
+      const { points, capped: branchesCapped } = branchPoints(tree);
+      const leftAt = new Map<string, { k: number; excerpt: string }>();
+      let k = 0;
+      let excerpt = "";
       for await (const rows of entries(db, viewer, thread.id)) {
         for (const row of rows) {
-          if (!branch.has(row.entry_id)) continue;
-          const block = entryMarkdown(await piEntry(row, blobs, viewer, thread.id));
+          if (!tree.main.has(row.entry_id)) continue;
+          const entry = await piEntry(row, blobs, viewer, thread.id);
+          const block = entryMarkdown(entry);
           if (block !== null) md.push(strToU8(`\n${block}\n`));
+          const said = excerptOf(entryPlainText(entry));
+          if (said !== "") {
+            k += 1;
+            excerpt = said;
+          }
+          if (points.has(row.entry_id)) leftAt.set(row.entry_id, { k, excerpt });
           yield* drain();
         }
       }
       md.push(new Uint8Array(0), true);
+      const labels = await threadLabels(db, viewer, thread.id);
+      const labelOf = new Map(labels.map((l) => [l.entry_id, l.label]));
+      const branchFiles: string[] = [];
+      for (const leaf of tree.leaves) {
+        if (branchFiles.length >= BRANCH_FILES_MAX) break;
+        // One branch's ids at a time; its rows are read by key.
+        const b = branchOf(tree, leaf);
+        if (b === undefined) continue;
+        const name = await branchFileName(
+          db,
+          viewer,
+          thread.id,
+          transcript,
+          branchFiles.length + 1,
+          b,
+          labelOf,
+        );
+        branchFiles.push(name);
+        const out = file(name);
+        out.push(
+          strToU8(`${branchedFromLine(b.from === null ? undefined : leftAt.get(b.from))}\n`),
+        );
+        for await (const rows of branchEntries(db, viewer, thread.id, b.ids)) {
+          for (const row of rows) {
+            const block = entryMarkdown(await piEntry(row, blobs, viewer, thread.id));
+            if (block !== null) out.push(strToU8(`\n${block}\n`));
+            yield* drain();
+          }
+        }
+        out.push(new Uint8Array(0), true);
+        yield* drain();
+      }
       let afterVersion: { artifactId: string; version: number } | null = null;
       for (;;) {
         const versions = await artifactVersionPage(db, viewer, thread.id, afterVersion);
@@ -450,6 +554,10 @@ export async function* exportZip(
           : {}),
         session,
         transcript,
+        // CT9/CT14: only for a thread that has them (a straight thread's entry is unchanged).
+        ...(labels.length > 0 ? { labels } : {}),
+        ...(branchFiles.length > 0 ? { branches: branchFiles } : {}),
+        ...(branchesCapped ? { branches_capped: true } : {}),
       });
       yield* drain();
     }

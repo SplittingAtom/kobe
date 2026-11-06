@@ -173,6 +173,15 @@ const EPILOGUE_TYPES: ReadonlyMap<KobeEventType, string> = new Map(
 const TAIL = 1 + EPILOGUE_TYPES.size;
 
 /**
+ * An event the epilogue writes. A `thread.updated` without a title is a leaf move (CT13,
+ * KOBE-543), sent while the run commits entries: an ordinary event, never part of the epilogue.
+ */
+function isEpilogueEvent(e: ValidEvent): boolean {
+  if (!EPILOGUE_TYPES.has(e.type)) return false;
+  return !(e.type === "thread.updated" && (e.payload as { title?: unknown }).title === undefined);
+}
+
+/**
  * The run must still take these events (call with the run row locked). Before its terminal event
  * anything but an epilogue event goes. After it, only the epilogue (KOBE-234,
  * `@kobe/protocol` server-call.ts): the event types `run.completed.epilogue` announced, each at
@@ -194,7 +203,7 @@ async function checkRunOpen(
      ORDER BY e.seq`);
   const at = tail.rows.findIndex((r) => isKobeEventType(r.type) && isTerminalEventType(r.type));
   const terminal = at < 0 ? undefined : tail.rows[at];
-  const epilogue = valid.filter((e) => EPILOGUE_TYPES.has(e.type));
+  const epilogue = valid.filter(isEpilogueEvent);
   if (!terminal) {
     if (epilogue.length > 0) {
       throw new AppendError("epilogue_refused", `run ${runId} has not completed`);

@@ -425,11 +425,14 @@ describe("event ingest and the durable cursor", () => {
       "text.delta",
       "entry.committed",
       "entry.committed",
+      "thread.updated",
       "run.completed",
     ]);
     expect(evs[0]?.payload).toEqual({ message_id: "m2", content_index: 0, delta: "abc" });
     expect(evs[2]?.payload).toMatchObject({ entry_id: "a1", message_id: "m2" });
-    expect(evs[3]?.payload).toEqual({ leaf_entry_id: "a1" });
+    // The commit moved the leaf (CT13, KOBE-543): every open stream of the run hears it.
+    expect(evs[3]?.payload).toEqual({ thread_id: w.threadId, leaf_entry_id: "a1" });
+    expect(evs[4]?.payload).toEqual({ leaf_entry_id: "a1" });
     expect(await runRow(w.team, w.runId)).toEqual({ status: "completed", sandbox_seq: 8 });
     const { rows } = await fx.admin.query<{ entry_id: string }>(
       `SELECT entry_id FROM thread_entries WHERE team_id = $1 AND thread_id = $2 ORDER BY seq`,
