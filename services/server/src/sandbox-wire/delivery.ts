@@ -59,10 +59,12 @@ import {
 } from "./runtime-tamper.js";
 import { COMMAND_FAILURES, type CommandOutcome, type SandboxTarget } from "./types.js";
 
-/** The run has no terminal status yet, so it still takes events (KOBE-543). */
+/** The run has no terminal status yet, so it still takes events (KOBE-543); locks the run row. */
 async function runStillOpen(tx: KobeTx, teamId: string, runId: string): Promise<boolean> {
+  // Locked (thread, then run: the mirror holds the thread), so a Stop cannot end the run between
+  // this read and the append, which would roll back the mirror with it.
   const res = await tx.execute<{ status: RunStatus }>(sql`
-    SELECT status FROM runs WHERE team_id = ${teamId} AND id = ${runId}`);
+    SELECT status FROM runs WHERE team_id = ${teamId} AND id = ${runId} FOR NO KEY UPDATE`);
   const status = res.rows[0]?.status;
   return status !== undefined && (ACTIVE_RUN_STATUSES as readonly RunStatus[]).includes(status);
 }

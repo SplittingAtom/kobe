@@ -28,18 +28,32 @@
   (`skill_eval_thread`, 409); builder test and Workbench threads answer `test_thread`.
 - `branches` read lists only runs with a remembered approval (`remembered_rule: true`), distinct by
   `user_entry_id`; runs whose prompt was never committed have no node and are left out.
-- Junctions count every parent with more than one child, server entries included (a skipped-actions
-  note or app card under an entry with another child counts too).
+- Tree nodes (review fix 1): `treeEntrySql` (`sandbox-wire/entries.ts`, beside `piSessionEntrySql`):
+  not a skipped-actions note (`ks-`) and not an app card (`ka-`); unsent prompts (`ku-`) stay.
+  Junctions count only such children; export never takes a `ks-`/`ka-` entry as a leaf (a card Pi
+  appended still links its path). KOBE-545's `projectTree` should apply the same rule.
+- Junction scan: index-only over the whole thread on every hover (no cache).
 - Leaf on the wire: a mirror (`mirrorEntriesInTx`) reports `leafMovedTo` (the leaf after the mirror
   when it changed); ingest, kept/unsent prompts and compaction append a leaf-only `thread.updated`
   to their run. The append guard treats a `thread.updated` without a title as an ordinary event
   (before the terminal event); a titled one stays the title epilogue. `thread-title.db.test.ts`
   now ignores leaf-only updates when it looks for the title event.
+- One leaf-only `thread.updated` per mirroring flush that moves the leaf; it counts against
+  `runMaxEvents` like any event.
+- Leaf events, route (coordinator decision): there is no thread-level stream; the server sends
+  `thread.updated {leaf_entry_id}` only for leaf moves a run makes (send commit, compaction, the
+  KOBE-548 summary run). A `POST /leaf` move reaches this browser's other tabs through the web's
+  per-team BroadcastChannel (KOBE-544) and other devices and readers on the focus re-read. Stated
+  in the route's OpenAPI description.
+- Compaction end: `runStillOpen` reads the run `FOR NO KEY UPDATE` (thread, then run), so a racing
+  Stop cannot make the leaf event's append fail and roll back the mirror.
 - Seam for KOBE-548: the branch-summary run appends `leafMovedEvents(threadId, leafMovedTo)` from its
   end transaction as compaction does (`sandbox-wire/delivery.ts`, guarded by `runStillOpen`).
-- Export: one pass over the tree's shape (ids, parents, seq, type; pages of 5,000) gives the main
-  path and every other leaf's path; each branch file is a paged read from the seq of its branch
-  point. A path whose new part has no message (a ghost marker) adds no file. The Branched-from line
+- Export: one pass over the tree's shape (ids, parents, seq, type, in-tree; pages of 5,000) gives
+  the main path and the other leaves; each branch's ids are built one branch at a time and its rows
+  read by key (50 per page, ownership join as the entry pages; shape, labels and the name payload
+  re-check ownership too). At most 200 branch files per thread; past that `threads.json` says
+  `branches_capped: true`. A path whose new part has no message (a ghost marker) adds no file. The Branched-from line
   counts the main transcript's user/assistant messages with text up to the branch point, excerpt
   120 chars; a branch from the hidden root (another first message) says "Branched from the start
   of the main transcript." File name: the label on the branch's first entry, else its first eight
@@ -48,12 +62,8 @@
 
 ## Open questions (for Chris or the coordinator)
 
-- CT13 "the route": there is no thread-level stream today; thread events ride a run's stream, and
-  `POST /leaf` is refused while any run is pending, so no stream is open to carry a route move
-  (a finished run's stream takes only its announced epilogue). The route answers the summary with
-  the new `leaf_entry_id`; other tabs fall back to the focus re-read (CT13's fallback). A live
-  route move needs a thread stream (new route + web consumer): a separate ticket?
-- Junctions and server-written entries (see Decisions): exclude `ks-`/app-card children?
+- Eval threads answer `skill_eval_thread` (the repo-wide eval guard) where CT9/CT19 say
+  `test_thread`; builder test and Workbench threads answer `test_thread`.
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -62,5 +72,11 @@
 - `services/server` `pnpm test:db`: 202 files, 2428 tests; the 5 failures of the first run were
   event-sequence expectations gaining the leaf-only `thread.updated` (`runs`, `run-prompt`,
   `sandbox-wire` db tests, updated; rerun 74/74 passed).
+- Review fixes: `conversation-tree.db.test.ts` 14/14 (adds the `ks-` note: branches 0, no branch
+  file; Workbench `test_thread`, eval `skill_eval_thread`; 200-file cap); reran thread-compact,
+  sandbox-wire, run-prompt, retention, thread-folders, runs, thread-title, thread-fork, memory,
+  uploads, artifacts, app-cards db tests: 223/223.
+- `pnpm verify` green after the review fixes (one run timed out export-markdown.test.ts under
+  load; it passes alone and on the rerun).
 - ac-2..ac-6: `services/server/src/conversation-tree.db.test.ts` (labels, branches read, card
   junctions and cap, leaf rules and rate limit, send's commit event, export).

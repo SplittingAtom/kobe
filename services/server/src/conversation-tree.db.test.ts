@@ -70,6 +70,27 @@ const STRAIGHT: readonly Entry[] = [
   message("a1", "u1", "assistant", "only answer"),
 ];
 
+/** A scheduled run's skipped-actions note under the leaf, beside the next prompt (server-written). */
+const SKIPPED_NOTE: Entry = {
+  id: "ks-00000000-0000-4000-8000-000000000001",
+  parent: "a1",
+  type: "custom_message",
+  payload: {
+    type: "custom_message",
+    customType: "kobe.skipped_actions",
+    content: "Skipped actions",
+    display: true,
+    timestamp: AT,
+  },
+};
+/** The next prompt, under the same answer as the note. */
+const AFTER_NOTE: readonly Entry[] = [
+  ...STRAIGHT,
+  SKIPPED_NOTE,
+  message("u2", "a1", "user", "next question"),
+  message("a2", "u2", "assistant", "next answer"),
+];
+
 async function seed(team: string, threadId: string, entries: readonly Entry[], leaf: string) {
   for (const e of entries) {
     await f.fx.admin.query(
@@ -163,6 +184,23 @@ describe("labels (ac-2)", () => {
     ]);
     const onTest = await label(w.owner, test, "u1", "x");
     expect([onTest.status, onTest.json.code]).toEqual([409, "test_thread"]);
+    // A Workbench test chat is a test thread too; an eval's thread is refused by the eval guard.
+    await f.fx.admin.query(
+      `UPDATE threads SET is_test = false, skill_test = true WHERE team_id = $1 AND id = $2`,
+      [w.team, test],
+    );
+    const onWorkbench = await label(w.owner, test, "u1", "x");
+    expect([onWorkbench.status, onWorkbench.json.code]).toEqual([409, "test_thread"]);
+    // skill_eval never changes after insert: an eval's thread is made as one.
+    const evalThread = randomUUID();
+    await f.fx.admin.query(
+      `INSERT INTO threads (team_id, id, owner_user_id, title, skill_eval)
+       VALUES ($1, $2, $3, 'eval', true)`,
+      [w.team, evalThread, w.owner.id],
+    );
+    await seed(w.team, evalThread, STRAIGHT, "a1");
+    const onEval = await label(w.owner, evalThread, "u1", "x");
+    expect([onEval.status, onEval.json.code]).toEqual([409, "skill_eval_thread"]);
 
     expect((await as(w.owner).delete(`/v1/threads/${threadId}`)).status).toBe(200);
     const inTrash = await label(w.owner, threadId, "u1", "x");
@@ -274,6 +312,16 @@ describe("hover card junctions (ac-4)", () => {
     const straight = await f.thread(w.owner);
     await seed(w.team, straight, STRAIGHT, "a1");
     expect((await as(w.owner).get(`/v1/threads/${straight}/card`)).json).toMatchObject({
+      branches: 0,
+      branches_capped: false,
+    });
+  });
+
+  it("a server-written note beside the next prompt is no junction", async () => {
+    const w = await f.world();
+    const threadId = await f.thread(w.owner);
+    await seed(w.team, threadId, AFTER_NOTE, "a2");
+    expect((await as(w.owner).get(`/v1/threads/${threadId}/card`)).json).toMatchObject({
       branches: 0,
       branches_capped: false,
     });
@@ -397,5 +445,32 @@ describe("export: every branch (ac-6)", () => {
     expect(plain).not.toHaveProperty("branches");
     const plainDir = plain?.transcript.replace(/^transcripts\//u, "").replace(/\.md$/u, "");
     expect(Object.keys(zip).filter((k) => k.startsWith(`branches/${plainDir}`))).toEqual([]);
+  });
+
+  it("a server-written note is no branch; at most 200 branch files, then branches_capped", async () => {
+    const w = await f.world();
+    const noted = await f.thread(w.owner);
+    await seed(w.team, noted, AFTER_NOTE, "a2");
+    const many = await f.thread(w.owner);
+    await seed(w.team, many, STRAIGHT, "a1");
+    // 201 edits of the first question: 201 branches off the main transcript.
+    await f.fx.admin.query(
+      `INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload)
+       SELECT $1, $2, 'b' || g, 's0', 'message',
+              jsonb_build_object('type', 'message', 'id', 'b' || g, 'parentId', 's0',
+                                 'message', jsonb_build_object('role', 'user', 'content', 'edit ' || g))
+         FROM generate_series(1, 201) g`,
+      [w.team, many],
+    );
+    const zip = await zipOf(w);
+    const index = JSON.parse(strFromU8(zip["threads.json"] ?? new Uint8Array())) as {
+      threads: { id: string; branches?: string[]; branches_capped?: boolean }[];
+    };
+    const plain = index.threads.find((t) => t.id === noted);
+    expect(plain).not.toHaveProperty("branches");
+    const capped = index.threads.find((t) => t.id === many);
+    expect(capped?.branches).toHaveLength(200);
+    expect(capped?.branches_capped).toBe(true);
+    expect(capped?.branches?.[0]).toMatch(/\/1-edit-1\.md$/u);
   });
 });

@@ -1476,7 +1476,7 @@
       "post": {
         "operationId": "setThreadLeaf",
         "summary": "Switch the active branch to an entry of the thread (owner only)",
-        "description": "CT3 (KOBE-543): refused `thread_busy` while a run is running, waiting for approval or queued, and `thread_in_trash` in Trash; at most 120 per 10 minutes per member.",
+        "description": "CT3 (KOBE-543): refused `thread_busy` while a run is running, waiting for approval or queued, and `thread_in_trash` in Trash; at most 120 per 10 minutes per member. No event is streamed for a move made here (there is no thread-level stream): the server sends `thread.updated` with `leaf_entry_id` only for leaf moves a run makes; the browser's other tabs hear of this one from the web, other devices and readers on their next read of the thread.",
         "parameters": [
           {
             "name": "id",

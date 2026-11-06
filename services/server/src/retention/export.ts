@@ -15,12 +15,16 @@ import {
   type ThreadHeading,
 } from "./export-markdown.js";
 import {
+  BRANCH_FILES_MAX,
+  branchEntries,
+  branchOf,
   branchedFromLine,
   excerptOf,
   inlinePayload,
-  threadBranches,
   threadLabels,
-  type ThreadBranches,
+  threadTree,
+  type ExportBranch,
+  type ThreadTree,
 } from "./export-branches.js";
 import { TRASH_RETENTION_DAYS } from "./periods.js";
 import { artifactExtension, readArtifactBytes } from "../artifacts/serve.js";
@@ -42,8 +46,9 @@ import { artifactExtension, readArtifactBytes } from "../artifacts/serve.js";
  * Only threads the user owns in this team (Trash included while restorable) — never threads
  * shared with them, never another user's or team's data: every query names the team and the
  * owner. The zip is streamed: threads and entries are read page by page in short transactions, so
- * memory stays bounded whatever the size: one entry (offloaded bodies capped at 8 MiB) and the
- * active branch's ids per thread.
+ * memory stays bounded whatever the size: one entry (offloaded bodies capped at 8 MiB), and per
+ * thread its tree's shape (ids, parents, seq, type), the active branch's ids and one other
+ * branch's ids at a time (at most 200 branch files per thread, `export-branches.ts`).
  */
 
 const THREAD_PAGE = 100;
@@ -74,7 +79,7 @@ export type ThreadRow = {
   readonly folder_id?: string | null;
 };
 
-type EntryRow = {
+export type EntryRow = {
   readonly seq: number;
   readonly entry_id: string;
   readonly parent_id: string | null;
@@ -157,8 +162,8 @@ async function entryPage(db: KobeDb, viewer: ExportViewer, threadId: string, aft
   });
 }
 
-export async function* entries(db: KobeDb, viewer: ExportViewer, threadId: string, from = 0) {
-  let after = from;
+export async function* entries(db: KobeDb, viewer: ExportViewer, threadId: string) {
+  let after = 0;
   for (;;) {
     const rows = await entryPage(db, viewer, threadId, after);
     yield rows;
@@ -310,31 +315,41 @@ async function feedbackPage(db: KobeDb, viewer: ExportViewer, after: string | nu
   });
 }
 
-/** Each branch's file (CT14): `branches/<transcript name>/<n>-<label-or-first-words>.md`. */
-async function branchFileNames(
+/** A branch's file (CT14): `branches/<transcript name>/<n>-<label-or-first-words>.md`. */
+async function branchFileName(
   db: KobeDb,
   viewer: ExportViewer,
-  thread: ThreadRow,
+  threadId: string,
   transcript: string,
-  tree: ThreadBranches,
-  labels: readonly { entry_id: string; label: string }[],
-) {
+  n: number,
+  branch: ExportBranch,
+  labelOf: ReadonlyMap<string, string>,
+): Promise<string> {
   const dir = transcript.replace(/^transcripts\//u, "").replace(/\.md$/u, "");
-  const labelOf = new Map(labels.map((l) => [l.entry_id, l.label]));
-  const named = [];
-  for (const b of tree.branches) {
-    const words =
-      labelOf.get(b.first) ??
-      entryPlainText(await inlinePayload(db, viewer, thread.id, b.firstShown))
-        .split(/\s+/u)
-        .slice(0, 8)
-        .join(" ");
-    named.push({
-      ...b,
-      name: `branches/${dir}/${b.n}-${slug(words === "" ? "branch" : words)}.md`,
-    });
+  const words =
+    labelOf.get(branch.first) ??
+    entryPlainText(await inlinePayload(db, viewer, threadId, branch.firstShown))
+      .split(/\s+/u)
+      .slice(0, 8)
+      .join(" ");
+  return `branches/${dir}/${n}-${slug(words === "" ? "branch" : words)}.md`;
+}
+
+/**
+ * The branches to write (CT14): each leaf's walk, one at a time, keeping only where it leaves the
+ * transcript; at most {@link BRANCH_FILES_MAX}, `capped` when there were more.
+ */
+function branchPoints(tree: ThreadTree): { points: Set<string>; capped: boolean } {
+  const points = new Set<string>();
+  let n = 0;
+  for (const leaf of tree.leaves) {
+    const b = branchOf(tree, leaf);
+    if (b === undefined) continue;
+    n += 1;
+    if (n > BRANCH_FILES_MAX) return { points, capped: true };
+    if (b.from !== null) points.add(b.from);
   }
-  return named;
+  return { points, capped: false };
 }
 
 const README = `# Your Kobe conversations
@@ -424,9 +439,9 @@ export async function* exportZip(
       };
       const md = file(transcript);
       md.push(strToU8(threadHeader(heading)));
-      // CT14: the walk collects every leaf's id set; the transcript stays the leaf's branch.
-      const tree = await threadBranches(db, viewer, thread.id, thread.leaf_entry_id);
-      const points = new Set(tree.branches.flatMap((b) => (b.from === null ? [] : [b.from])));
+      // CT14: the transcript stays the leaf's branch; every other leaf's path gets a file.
+      const tree = await threadTree(db, viewer, thread.id, thread.leaf_entry_id);
+      const { points, capped: branchesCapped } = branchPoints(tree);
       const leftAt = new Map<string, { k: number; excerpt: string }>();
       let k = 0;
       let excerpt = "";
@@ -447,16 +462,29 @@ export async function* exportZip(
       }
       md.push(new Uint8Array(0), true);
       const labels = await threadLabels(db, viewer, thread.id);
+      const labelOf = new Map(labels.map((l) => [l.entry_id, l.label]));
       const branchFiles: string[] = [];
-      for (const b of await branchFileNames(db, viewer, thread, transcript, tree, labels)) {
-        branchFiles.push(b.name);
-        const out = file(b.name);
+      for (const leaf of tree.leaves) {
+        if (branchFiles.length >= BRANCH_FILES_MAX) break;
+        // One branch's ids at a time; its rows are read by key.
+        const b = branchOf(tree, leaf);
+        if (b === undefined) continue;
+        const name = await branchFileName(
+          db,
+          viewer,
+          thread.id,
+          transcript,
+          branchFiles.length + 1,
+          b,
+          labelOf,
+        );
+        branchFiles.push(name);
+        const out = file(name);
         out.push(
           strToU8(`${branchedFromLine(b.from === null ? undefined : leftAt.get(b.from))}\n`),
         );
-        for await (const rows of entries(db, viewer, thread.id, b.afterSeq)) {
+        for await (const rows of branchEntries(db, viewer, thread.id, b.ids)) {
           for (const row of rows) {
-            if (!b.ids.has(row.entry_id)) continue;
             const block = entryMarkdown(await piEntry(row, blobs, viewer, thread.id));
             if (block !== null) out.push(strToU8(`\n${block}\n`));
             yield* drain();
@@ -529,6 +557,7 @@ export async function* exportZip(
         // CT9/CT14: only for a thread that has them (a straight thread's entry is unchanged).
         ...(labels.length > 0 ? { labels } : {}),
         ...(branchFiles.length > 0 ? { branches: branchFiles } : {}),
+        ...(branchesCapped ? { branches_capped: true } : {}),
       });
       yield* drain();
     }
