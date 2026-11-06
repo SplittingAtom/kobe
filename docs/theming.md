@@ -190,6 +190,13 @@ not theme them directly. `--admin-hover` (the rail's row hover) is not an alias:
 | `--admin-danger-bg`     | Error notice background                          | `#fdecec` | `#3a1c1e` | **fixed**                                        |
 | `--admin-warn-bg`       | Warning notice background                        | `#fff4d6` | `#3a3218` | **fixed**                                        |
 
+**Lane colours** (CT7, KOBE-545): `--kobe-lane-1` … `--kobe-lane-8` colour the Conversation tree's
+git-graph lanes. Lane 1, the path on screen, is `var(--kobe-brand-link)` in every preset, so it
+follows a custom accent. Lanes 2–8 are set by each preset in both schemes (`lib/theme/presets.ts`,
+default in `app/theme.css`): seven distinct hues rotated from the preset's accent, each ≥ 3:1 on the
+page and panels (rule 6 in §8). Custom keeps the default's lanes 2–8. Ghost nodes and summary rows
+use `--muted-foreground`, never a lane colour.
+
 ### 4.4 Status and semantic colours (fixed)
 
 These carry meaning and keep tuned WCAG AA contrast on the page, the rail panel, cards and their
@@ -261,6 +268,7 @@ through `var(--kobe-shadow-…)`.
 4. Focus colours (`--kobe-brand-focus`, `--kobe-composer-focus`, and `--ring` except in `default`)
    against page, panel and card: ≥ 3:1 (WCAG 1.4.11); control borders on page and panel likewise.
 5. The fixed status, danger and tool-badge colours keep 4.5:1 on the preset's surfaces (§4.4).
+6. The eight lane colours (`--kobe-lane-1..8`, §4.3) on page, panel and card: ≥ 3:1, and distinct.
 
 **A custom accent** is checked by `checkFloor()` (`packages/protocol/src/theme/accent.ts`), the same
 function on the Appearance page (Save stays off, with the first failure and its ratio) and on the

@@ -593,3 +593,48 @@ describe("design tokens (KOBE-498)", () => {
     expect(wordmark).toContain("font-weight: var(--kobe-brand-wordmark-weight)");
   });
 });
+
+describe("lane tokens (CT7, KOBE-545)", () => {
+  const light = new Map(declarations(block(THEME, ":root")));
+  const chosenDark = new Map(declarations(block(THEME, ':root[data-theme="dark"]')));
+  const osDark = new Map(
+    declarations(
+      block(block(THEME, "@media (prefers-color-scheme: dark)"), ':root:not([data-theme="light"])'),
+    ),
+  );
+  const dark = new Map([...light, ...chosenDark]);
+  const resolve = (theme: Map<string, string>, name: string): string => {
+    const value = theme.get(name);
+    if (value === undefined) throw new Error(`no ${name}`);
+    const ref = /^var\((--[\w-]+)\)$/.exec(value);
+    return ref ? resolve(theme, ref[1] as string) : value;
+  };
+  const LANES = Array.from({ length: 8 }, (_, i) => `--kobe-lane-${i + 1}`);
+
+  it("lane 1 reads the accent's link colour; lanes 2-8 are set per scheme in both dark blocks", () => {
+    expect(light.get("--kobe-lane-1")).toBe("var(--kobe-brand-link)");
+    expect(chosenDark.has("--kobe-lane-1")).toBe(false);
+    for (const lane of LANES.slice(1)) {
+      expect(light.has(lane), lane).toBe(true);
+      expect(chosenDark.get(lane), lane).toBeDefined();
+      expect(osDark.get(lane), lane).toBe(chosenDark.get(lane));
+      expect(chosenDark.get(lane), lane).not.toBe(light.get(lane));
+    }
+  });
+
+  for (const [name, theme] of [
+    ["light", light],
+    ["dark", dark],
+  ] as const) {
+    it(`every lane is distinct and 3:1 on the page and panels (${name})`, () => {
+      const colours = LANES.map((lane) => resolve(theme, lane));
+      expect(new Set(colours).size).toBe(8);
+      for (const surface of ["--background", "--card", "--muted", "--kobe-console-bg"]) {
+        const bg = resolve(theme, surface);
+        for (const [i, c] of colours.entries()) {
+          expect(contrast(c, bg), `lane ${i + 1} on ${surface}`).toBeGreaterThanOrEqual(3);
+        }
+      }
+    });
+  }
+});
