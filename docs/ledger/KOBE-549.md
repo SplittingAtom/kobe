@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in progress (specs written; the gate1 run comes after main with KOBE-547/548 is deployed)
+- **Status:** in review (PR); specs passed on gate1
 - **Branch / worktree:** `kobe-549-browser-checks` in `../Kobe-wt549`
 - **Depends on:** KOBE-542..546 (on main), KOBE-547 (Compare, PR #454), KOBE-548 (summaries, PR #455)
 
@@ -48,5 +48,11 @@
 
 ## Evidence (acceptance criteria → test or command output)
 
-- ac-1 (gate1 run, image tag `local-<sha12>`): _pending_
-- ac-2: _pending_
+- ac-1: main `cbaf76e1559a` deployed to kobe-gate1 as `local-cbaf76e1559a` (Helm rev 110, rollback
+  `local-688f4360c7f5`), team reconcile failed:0. Browser run from the Playwright container on the
+  build host as owner and second member: `conversation-tree.spec.ts` (5) and
+  `conversation-tree-views.spec.ts` (4) + sign-in: **10 passed in 2.7 min**, nothing skipped (Compare
+  and carry a summary ran against the deployed 547/548).
+- ac-2: RUN-LEDGER "Current" entry and "Open problems" lines, lane brief status, audit-log row
+  `thread.branch_summarized` (KOBE-548; labels are not audited by Q11); no infrastructure details in
+  tracked files (CI's check and a grep of this diff).

@@ -9,6 +9,27 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Conversation tree lane (2026-11-06, spec by Chris's decisions of 2026-11-05):**
+  `docs/specs/conversation-tree.md` (Hadron spec e8b1281a; docs PR #446). Shipped in per-ticket PRs:
+  KOBE-541 spike (#447: a Pi 1.4 extension summarises a branch through `navigateTree`, and
+  `session.restore` keeps inactive branches, so KOBE-548 was built), KOBE-542 protocol shapes (#448;
+  `thread.updated` gains optional `leaf_entry_id`, its title becomes optional), KOBE-543 server (#450:
+  `thread_branch_labels` with RLS and probe fixtures (migrations 0188/0189), the `branches` read, the
+  label write, the hover card's junction count, `thread_busy` on queued runs and the leaf rate limit,
+  `thread.updated {leaf_entry_id}` on run-made leaf moves, every branch in export), KOBE-544 the local
+  head (#449: browse any branch without moving the leaf, the bar with Make it current, a reader's
+  picker never calls the leaf route, search hits open on their branch), KOBE-545 tree projection, lane
+  layout, badges and `--kobe-lane-1..8` in six presets (#452; #451 adds `forked_at_entry_id` to lineage
+  fork rows), KOBE-546 the Conversation tree panel at `/tree`, Continue from here, labels UI, the
+  narrow list (#453), KOBE-547 Compare versions (#454), KOBE-548 Make it current and carry a summary:
+  run kind `branch_summary`, migration 0190, the extension command armed by the sandbox agent, audited
+  `thread.branch_summarized` (#455). Reviews: Opus security + DB passes on 543 and 548, code-review
+  medium on the web tickets; all findings fixed or recorded in the ticket ledgers. Deployed to
+  kobe-gate1 as `local-cbaf76e1559a` (Helm rev 110; rollback `local-688f4360c7f5`; `local-f5a5575c1486`
+  pruned), reconcile failed:0. KOBE-549 browser specs (`conversation-tree`, `conversation-tree-views`)
+  passed on gate1 as owner and second member: 10 passed in 2.7 min (branch from an answer, browse and
+  Make it current, reader browsing, labels, phone-width list, search hit on another branch, Compare,
+  export `branches/`, carry a summary). Lane done.
 - **Thread lineage and folders lane (2026-11-01, spec by Chris's decisions of 2026-10-31):**
   `docs/specs/thread-lineage-and-folders.md` (Hadron spec 71dcf77b). Shipped in six PRs: KOBE-532
   protocol shapes (#436), KOBE-533 `GET /v1/threads/{id}/lineage` (#437), KOBE-534 the
@@ -196,3 +217,12 @@ Hadron via `scripts/hadron.sh`.
   CI installs helm via azure/setup-helm. k3d test cluster `kobe` runs on the remote Docker host;
   CI runs on self-hosted runners (`ci/runners/`).
 - Pending Chris sign-off: license exceptions caniuse-lite (CC-BY-4.0) and argparse (Python-2.0).
+- Conversation tree (2026-11-06): no thread-level stream exists, so a leaf move by `POST /leaf`
+  reaches this browser's other tabs over the per-team BroadcastChannel and other devices only on
+  the focus re-read; only run-made moves ride a run stream (CT13 read that way; a thread stream is a
+  possible follow-up). Eval threads answer the guard's `skill_eval_thread`, not CT9's `test_thread`.
+  A branch summary that lands after Stop answers 200 (Pi's session is on it) and can leave two audit
+  rows on interrupt or timeout, as compaction does. The server accepts a summary target on the leaf's
+  own path (a rewind with summary); the web does not offer it. Tree rows are one line (not wrapped)
+  so the SVG lines up; a search hit beyond the loaded entry pages does nothing;
+  `thread-controller.ts` is over the 800-line guideline.
