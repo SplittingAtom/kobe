@@ -1,6 +1,6 @@
 # KOBE-548: Tree: Make it current and carry a summary — run kind branch_summary (CT-7)
 
-- **Status:** in progress (steps 1–4 done; web pending KOBE-546's hook)
+- **Status:** steps 1–4 done (server code in 99b08615, described by e068d7f9); web pending
 - **Branch / worktree:** `kobe-548-branch-summary` in `../Kobe-wt548` (from `kobe-543-tree-server`)
 - **Depends on:** KOBE-541 (spike: both answers yes), KOBE-543 (leaf rules, `leafMovedEvents`),
   KOBE-546 (tree menu and bar hooks, for the web step)
