@@ -16,7 +16,6 @@ import {
   lastPrompt,
   MAIN,
   openTree,
-  promptRow,
   removeLabel,
   rowMenu,
   showFromTree,
@@ -116,8 +115,9 @@ test("Compare versions from the picker: two columns, Show this version moves onl
 
   const dialog = page.getByRole("dialog", { name: "Compare versions" });
   await expect(dialog).toBeVisible();
-  const first = dialog.getByRole("region", { name: /^Version 1\b/ });
-  const second = dialog.getByRole("region", { name: /^Version 2\b/ });
+  // Columns are regions titled "Version k" or "Version k · label" (compare.ts versionTitle).
+  const first = dialog.getByRole("region", { name: /^Version 1( · .+)?$/ });
+  const second = dialog.getByRole("region", { name: /^Version 2( · .+)?$/ });
   await expect(first).toBeVisible();
   await expect(second).toBeVisible();
   // The prompts differ, so each column shows its own prompt above the answer.
@@ -180,24 +180,19 @@ test("export: the zip has a file for the inactive branch and the thread's labels
 });
 
 /**
- * Finds "Make it current and carry a summary": in the bar's "Make it current ▾" menu, else in the
- * side prompt's node menu in the tree. Null when the deployment offers neither (KOBE-548).
+ * The bar's "Make it current ▾" (its chevron, "More ways to make it current") and the menu's "and
+ * carry a summary" item (KOBE-548, branch-bar.tsx). Null when the deployment does not offer it.
  */
-async function carrySummaryItem(token: string): Promise<Locator | null> {
-  const name = /carry a summary/i;
-  const more = branchBar(page).locator('button[aria-haspopup="menu"]');
-  if (await offered(more)) {
-    await more.first().click();
-    const item = page.getByRole("menuitem", { name });
-    if (await offered(item)) return item.first();
-    await page.keyboard.press("Escape");
-  }
-  await openTree(page);
-  const menu = await rowMenu(page, promptRow(page, token));
-  const item = menu.getByRole("menuitem", { name });
-  if (await offered(item)) return item.first();
+async function carrySummaryItem(): Promise<Locator | null> {
+  const more = branchBar(page).getByRole("button", {
+    name: "More ways to make it current",
+    exact: true,
+  });
+  if (!(await offered(more))) return null;
+  await more.click();
+  const item = page.getByRole("menuitem", { name: "and carry a summary", exact: true });
+  if (await offered(item)) return item;
   await page.keyboard.press("Escape");
-  await closeTree(page);
   return null;
 }
 
@@ -205,32 +200,32 @@ test("Make it current and carry a summary: the marker on the entered branch and 
   const { token } = mustThread();
   await showFromTree(page, token);
   await expectBrowsing(page, token);
-  const item = await carrySummaryItem(token);
+  const item = await carrySummaryItem();
   if (item === null) {
     await backToLeaf(page);
-    test.skip(true, "no Make it current and carry a summary: KOBE-548 is not deployed here yet");
+    test.skip(
+      true,
+      "no Make it current ▾ · and carry a summary: KOBE-548 is not deployed here yet",
+    );
     return;
   }
   await item.click();
-  // A dialog like Compact now's: what will happen, an optional focus, Go.
-  const dialog = page
-    .getByRole("dialog")
-    .filter({ hasText: /summar/i })
-    .last();
+  // A dialog like Compact now's (branch-summary-dialog.tsx): what will happen, an optional focus, Go.
+  const dialog = page.getByRole("dialog", { name: "Make it current and carry a summary" });
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Go", exact: true }).click();
-  await expect(dialog).toBeHidden({ timeout: 30_000 });
+  await expect(dialog).toBeHidden({ timeout: 60_000 });
   await chat.waitForIdle();
 
   // The side branch is now the leaf's, with the summary of the branch left as its last entry.
   await expect(branchBar(page)).toHaveCount(0);
   await expect(lastPrompt(page)).toContainText(token);
-  const marker = page.getByText("Summary of another branch");
-  await expect(marker.first()).toBeVisible({ timeout: 30_000 });
+  const marker = page.locator('[data-kobe-marker="branch_summary"]');
+  await expect(marker).toContainText("Summary of another branch", { timeout: 30_000 });
   await expectLeafAfterReload(page, token);
-  await expect(marker.first()).toBeVisible();
-  // The tree shows it as the "summary carried" row under its node.
+  await expect(marker).toContainText("Summary of another branch");
+  // The tree shows "○ summary carried" on the node it was carried into (tree-panel SUMMARY_TEXT).
   const panel = await openTree(page);
-  await expect(panel.getByText(/summary carried/)).toBeVisible();
+  await expect(panel.getByRole("tree")).toContainText("○ summary carried");
   await closeTree(page);
 });

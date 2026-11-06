@@ -4,7 +4,7 @@
 
 - **Status:** in progress (specs written; the gate1 run comes after main with KOBE-547/548 is deployed)
 - **Branch / worktree:** `kobe-549-browser-checks` in `../Kobe-wt549`
-- **Depends on:** KOBE-542..546 (on main), KOBE-547 (Compare, PR #454), KOBE-548 (summaries, in progress)
+- **Depends on:** KOBE-542..546 (on main), KOBE-547 (Compare, PR #454), KOBE-548 (summaries, PR #455)
 
 ## Plan
 
@@ -39,11 +39,12 @@
 
 ## Open questions (for Chris or the coordinator)
 
-- KOBE-548's web is not built yet: the summary test looks for a `menuitem` /carry a summary/ in a
-  menu button (`aria-haspopup="menu"`) in the bar, else in the tree's node menu, then a dialog with
-  "Go" and the text "Summary of another branch"; adjust once 548's controls exist.
-- If 548 turns the bar's "Make it current" into a split/menu button, `makeCurrentFromBar` (exact
-  name "Make it current") may need the new name.
+- None open. The specs follow the shipped controls (merged `kobe-547-compare` and
+  `kobe-548-branch-summary` here; one conflict in `tree-actions.tsx`, the `compare` case, resolved
+  to 547's body with 548's `carry-summary` case kept): the bar's "More ways to make it current"
+  menu → "and carry a summary", the dialog "Make it current and carry a summary" with Go, the
+  `branch_summary` marker, the tree's "○ summary carried", Compare's "Version k[ · label]" columns.
+  The web suite was not run here after that merge (light checks only).
 
 ## Evidence (acceptance criteria → test or command output)
 
