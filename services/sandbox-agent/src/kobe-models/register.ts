@@ -8,6 +8,11 @@ import {
 import { createKobeProvider, kobeModel, type KobeProviderDeps, type PiAiLike } from "./provider.js";
 import { takeModelFilePath } from "./state-file.js";
 import { ContextRecorder, takeContextFilePath } from "./context-capture.js";
+import {
+  BranchSummaryCommand,
+  type BranchSummaryContextLike,
+  type TreePreparationLike,
+} from "./branch-summary.js";
 
 const RUN_TOKEN_WAIT_MS = 5_000;
 
@@ -93,6 +98,21 @@ export interface ExtensionApiLike {
     event: "input" | "session_before_compact",
     handler: (event: unknown, ctx: InputContextLike) => Promise<void>,
   ): unknown;
+  on(
+    event: "session_before_tree",
+    handler: (
+      event: { readonly preparation?: TreePreparationLike },
+      ctx: InputContextLike,
+    ) => Promise<{ cancel: true } | undefined>,
+  ): unknown;
+  /** Pi's `registerCommand` (the branch summary, KOBE-548); absent in older test doubles. */
+  registerCommand?(
+    name: string,
+    options: {
+      description?: string;
+      handler: (args: string, ctx: BranchSummaryContextLike) => Promise<void>;
+    },
+  ): void;
   setModel(model: Model): Promise<boolean>;
 }
 
@@ -179,6 +199,21 @@ export async function registerKobeModels(
   api.on("session_before_compact", async (_event, ctx) => {
     const state = await readOrWarn();
     if (state !== undefined) await refreshRunToken(state, ctx);
+  });
+  // A branch summary (KOBE-548) runs as an extension command, which skips `input` handlers (spike
+  // KOBE-541 note 2): fetch its run's token when Pi starts the tree navigation, as for compaction.
+  // The agent selected the model first. The command's guard cancels a branch without a message.
+  const branchSummary = new BranchSummaryCommand(deps.warn);
+  api.on("session_before_tree", async (event, ctx) => {
+    const cancel = branchSummary.beforeTree(event.preparation);
+    if (cancel !== undefined) return cancel;
+    const state = await readOrWarn();
+    if (state !== undefined) await refreshRunToken(state, ctx);
+    return undefined;
+  });
+  api.registerCommand?.(branchSummary.name, {
+    description: "Kobe: summarise the branch left (sandbox agent only)",
+    handler: (_args, ctx) => branchSummary.handle(ctx),
   });
   api.on("input", async (_event, ctx) => {
     const state = await readOrWarn();

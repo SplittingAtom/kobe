@@ -32,6 +32,13 @@ import { piCommand } from "../pi/pi-command.js";
 import { shareOnVolume } from "../workspace/volume.js";
 import { ensureSessionDir } from "../pi/session-files.js";
 import { MODEL_FILE_ENV, RUN_TOKEN_UI_TITLE } from "../kobe-models/protocol.js";
+import {
+  BRANCH_SUMMARY_REQUEST_UI_TITLE,
+  BRANCH_SUMMARY_RESULT_UI_TITLE,
+  parseBranchSummaryOutcome,
+  type BranchSummaryOutcome,
+  type BranchSummaryRequest,
+} from "../kobe-models/branch-summary-protocol.js";
 import { CONTEXT_FILE_ENV, CONTEXT_FILE_NAME } from "../kobe-models/context-capture.js";
 import type { KobePromptParts } from "../context/system-prompt.js";
 import {
@@ -233,6 +240,17 @@ export class Thread {
   #modelFile: ModelFile | undefined;
   /** The active run's gateway token (KOBE-118): held in memory for this thread's Pi only. */
   #runToken: { readonly runId: string; readonly token: string } | undefined;
+  /**
+   * A branch summary the agent armed for its run (KOBE-548): handed to kobe-models once, on its
+   * request dialog; then the outcome dialog is awaited. Memory only; cleared with the run.
+   */
+  #branchSummary:
+    | {
+        readonly runId: string;
+        request: BranchSummaryRequest | undefined;
+        outcome: BranchSummaryOutcome | undefined;
+      }
+    | undefined;
   /** Where the current Pi's `mcp.json` lives and what it was built from (KOBE-111). */
   #mcpConfig: McpConfigState | undefined;
   /** The current Pi's egress token file (undefined without egress wiring). */
@@ -843,6 +861,7 @@ export class Thread {
     if (run === undefined) return;
     this.#run = undefined;
     this.#runToken = undefined;
+    this.#branchSummary = undefined;
     this.lastUsed = Date.now();
     this.#modelFile
       ?.update({ runId: null, traceparent: null })
@@ -916,6 +935,15 @@ export class Thread {
       this.#answerRunToken(pi, record);
       return;
     }
+    // The branch summary's channel (KOBE-548): never relayed, whatever the run.
+    if (record.method === "input" && record.title === BRANCH_SUMMARY_REQUEST_UI_TITLE) {
+      this.#answerBranchSummary(pi, record);
+      return;
+    }
+    if (record.method === "input" && record.title === BRANCH_SUMMARY_RESULT_UI_TITLE) {
+      this.#takeBranchSummaryOutcome(pi, record);
+      return;
+    }
     const parsed = piExtensionUiRequestSchema.safeParse(record);
     if (!parsed.success) {
       const id = typeof record.id === "string" ? record.id : undefined;
@@ -953,6 +981,49 @@ export class Thread {
     } else {
       pi.send({ type: "extension_ui_response", id, cancelled: true });
     }
+  }
+
+  /**
+   * Arm one branch summary for the active run (KOBE-548): the next request dialog from kobe-models
+   * gets `request`, once. Without arming the command is refused (a member typed it).
+   */
+  armBranchSummary(runId: string, request: BranchSummaryRequest): boolean {
+    if (this.#run?.runId !== runId) return false;
+    this.#branchSummary = { runId, request, outcome: undefined };
+    return true;
+  }
+
+  /** The outcome kobe-models reported for the armed summary (undefined: none came); disarms. */
+  takeBranchSummary(runId: string): BranchSummaryOutcome | undefined {
+    const armed = this.#branchSummary;
+    if (armed?.runId !== runId) return undefined;
+    this.#branchSummary = undefined;
+    return armed.outcome;
+  }
+
+  #answerBranchSummary(pi: PiProcess, record: PiRecord): void {
+    const id = typeof record.id === "string" ? record.id : undefined;
+    if (id === undefined) return;
+    const armed = this.#branchSummary;
+    const request = armed?.runId === this.#run?.runId ? armed?.request : undefined;
+    if (armed !== undefined && request !== undefined) {
+      armed.request = undefined; // once
+      pi.send({ type: "extension_ui_response", id, value: JSON.stringify(request) });
+      return;
+    }
+    this.#hooks.diagnostic(this.id, "branch summary command refused: not armed by the agent");
+    pi.send({ type: "extension_ui_response", id, cancelled: true });
+  }
+
+  #takeBranchSummaryOutcome(pi: PiProcess, record: PiRecord): void {
+    const id = typeof record.id === "string" ? record.id : undefined;
+    if (id === undefined) return;
+    const armed = this.#branchSummary;
+    // Only after this run's request was handed out, and only the first outcome.
+    if (armed !== undefined && armed.request === undefined && armed.outcome === undefined) {
+      armed.outcome = parseBranchSummaryOutcome(record.placeholder);
+    }
+    pi.send({ type: "extension_ui_response", id, cancelled: true });
   }
 
   /** Cancel open dialogs (their run is no longer leased to this connection). */
