@@ -379,3 +379,33 @@ export function filesLeftBehind(
   const left = nodePath(tree.nodes, tree.leafId);
   return tree.nodes.some((n) => left.has(n.id) && !kept.has(n.id) && (n.badges.files ?? 0) > 0);
 }
+
+/**
+ * Continue from here (CT8): the messages on screen after the answer holding `entryId`, dimmed in
+ * place until the send (or Escape). Empty when the answer is not on screen.
+ */
+export function laterOnScreen(
+  projection: Pick<Projection, "items" | "headId" | "nodeOfEntry">,
+  entryId: string | undefined,
+): ReadonlySet<string> {
+  const from = entryId === undefined ? undefined : projection.nodeOfEntry.get(entryId);
+  if (from === undefined) return EMPTY_SET;
+  const parent = new Map(projection.items.map((i) => [i.message.id, i.parentId] as const));
+  const later: string[] = [];
+  for (let at: string | null = projection.headId; at !== null; at = parent.get(at) ?? null) {
+    if (at === from) return new Set(later);
+    later.push(at);
+    if (later.length > parent.size) break;
+  }
+  return EMPTY_SET;
+}
+
+const EMPTY_SET: ReadonlySet<string> = new Set();
+
+/** The answer's excerpt in the composer's branch chip (CT8). */
+export const CHIP_EXCERPT_MAX = 60;
+
+export function chipExcerpt(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length <= CHIP_EXCERPT_MAX ? flat : `${flat.slice(0, CHIP_EXCERPT_MAX - 1)}…`;
+}

@@ -1934,6 +1934,7 @@ export class FakeKobe {
           title: t.title,
           deleted_at: t.deleted_at,
           owner: t.read_only === true ? "other" : "me",
+          forked_at_entry_id: t.forked_at_entry_id ?? null,
         }));
     const parentOf = (t: FakeThread) =>
       t.forked_from_thread_id ? this.threads.get(t.forked_from_thread_id) : undefined;

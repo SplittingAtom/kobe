@@ -11,7 +11,9 @@ import {
   LABEL_TOO_LONG,
   badgeTexts,
   checkLabel,
+  chipExcerpt,
   filesLeftBehind,
+  laterOnScreen,
   nodeEntries,
   headerCounts,
   isContinuable,
@@ -199,5 +201,19 @@ describe("node entries and files left behind (CT6)", () => {
     expect(filesLeftBehind(fromV1, "b2")).toBe(true);
     expect(filesLeftBehind(fromV1, "b1")).toBe(false);
     expect(filesLeftBehind(tree(), "b1")).toBe(false);
+  });
+});
+
+describe("Continue from here (CT8)", () => {
+  it("dims the messages on screen after the answer, nothing when it is not on screen", () => {
+    const p = projectThread(twoVersions(), "b2", "b2");
+    expect([...laterOnScreen(p, "a1")].sort()).toEqual(["b2", "v2"]);
+    expect(laterOnScreen(p, "b1").size).toBe(0);
+    expect(laterOnScreen(p, undefined).size).toBe(0);
+  });
+
+  it("cuts the chip's excerpt", () => {
+    expect(chipExcerpt("a  b")).toBe("a b");
+    expect(chipExcerpt("x".repeat(80))).toHaveLength(60);
   });
 });
