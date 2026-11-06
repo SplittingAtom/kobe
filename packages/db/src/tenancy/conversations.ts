@@ -14,6 +14,8 @@ export const conversations = defineDomain({
     "thread_app_results",
     // The team's thread folders (KOBE-534, TF1); threads name theirs in folder_id.
     "thread_folders",
+    // Branch labels on tree nodes (KOBE-543, CT9): they follow their thread and entry.
+    "thread_branch_labels",
   ],
   siteWide: [],
   grants: {},

@@ -32,7 +32,25 @@ export interface MirrorResult {
   /** UTF-8 bytes of the inserted payloads. */
   readonly bytes: number;
   readonly leafId: string | null;
+  /** The thread's leaf after this mirror when it moved (CT13), else null. */
+  readonly leafMovedTo: string | null;
 }
+
+/**
+ * `thread.updated` with only `leaf_entry_id` (CT13, KOBE-543): the event every leaf move appends to
+ * the run that moved it, so each open stream of that run (the sender's tab, a reader watching)
+ * re-projects at once; title stays absent (unchanged). The seam for every leaf move a run makes:
+ * a send's commit (ingest, kept prompts), a compaction, and the branch-summary run (KOBE-548),
+ * which appends it from its end transaction as compaction does.
+ */
+export function leafMovedEvents(threadId: string, leafMovedTo: string | null): NewRunEvent[] {
+  return leafMovedTo === null
+    ? []
+    : [{ type: "thread.updated", payload: { thread_id: threadId, leaf_entry_id: leafMovedTo } }];
+}
+
+/** The id prefix of a scheduled run's skipped-actions note (`ks-<run>`, policy/skipped-summary.ts). */
+const SKIPPED_ENTRY_ID_PREFIX = "ks-";
 
 /**
  * Entry ids of prompts the server keeps for runs that ended before Pi ever received them
@@ -56,7 +74,7 @@ export function isUnsentPromptEntryId(entryId: string): boolean {
  */
 export function isServerEntryId(entryId: string): boolean {
   return (
-    entryId.startsWith("ks-") ||
+    entryId.startsWith(SKIPPED_ENTRY_ID_PREFIX) ||
     isUnsentPromptEntryId(entryId) ||
     entryId.startsWith(APP_CARD_ENTRY_PREFIX)
   );
@@ -69,6 +87,19 @@ export function isServerEntryId(entryId: string): boolean {
  */
 export const piSessionEntrySql = sql`NOT (type = 'custom_message' AND payload ->> 'customType' = ${SKIPPED_ENTRY_TYPE})
        AND entry_id NOT LIKE ${`${UNSENT_PROMPT_PREFIX}%`}`;
+
+/**
+ * Rows that are nodes of the conversation tree (CT12, CT14, KOBE-543): not a skipped-actions note
+ * (`ks-`) and not an app card (`ka-`), which the server writes under the leaf, so they can sit
+ * beside the next prompt without anybody having branched; the web keeps them out of its tree
+ * too (apps/web/lib/chat/entries.ts). They are never a junction's child and never a branch's
+ * leaf (a card Pi appended still links its path). Unsent prompts (`ku-`) stay: they are visible
+ * branches. `alias` qualifies `entry_id` (e.g. "e").
+ */
+export function treeEntrySql(alias?: string) {
+  const column = sql.raw(alias === undefined ? "entry_id" : `${alias}.entry_id`);
+  return sql`(${column} NOT LIKE ${`${SKIPPED_ENTRY_ID_PREFIX}%`} AND ${column} NOT LIKE ${`${APP_CARD_ENTRY_PREFIX}%`})`;
+}
 
 export function parseGetEntries(data: unknown): PiGetEntriesData | undefined {
   const parsed = piGetEntriesDataSchema.safeParse(data);
@@ -124,8 +155,8 @@ export async function mirrorEntriesInTx(
   data: PiGetEntriesData,
   maxEntries: number,
 ): Promise<MirrorResult> {
-  const thread = await tx.execute<{ last_entry_seq: number }>(sql`
-    SELECT last_entry_seq FROM threads
+  const thread = await tx.execute<{ last_entry_seq: number; leaf_entry_id: string | null }>(sql`
+    SELECT last_entry_seq, leaf_entry_id FROM threads
      WHERE team_id = ${teamId} AND id = ${threadId} FOR NO KEY UPDATE`);
   let room = maxEntries - (thread.rows[0]?.last_entry_seq ?? maxEntries);
   let capped = false;
@@ -199,7 +230,9 @@ export async function mirrorEntriesInTx(
          SET leaf_entry_id = COALESCE(${leafId}, leaf_entry_id), last_activity_at = now()
        WHERE team_id = ${teamId} AND id = ${threadId}`);
   }
-  return { inserted, orphans, reserved, existing, leafId, capped, bytes };
+  const before = thread.rows[0]?.leaf_entry_id ?? null;
+  const leafMovedTo = leafId !== null && leafId !== before ? leafId : null;
+  return { inserted, orphans, reserved, existing, leafId, leafMovedTo, capped, bytes };
 }
 
 function isAssistantMessage(entry: PiSessionEntry): boolean {

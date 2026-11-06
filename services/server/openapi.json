@@ -1079,7 +1079,7 @@
       "get": {
         "operationId": "getThreadCard",
         "summary": "The rail's hover card: first message, agent, last activity, message count",
-        "description": "CE18 (KOBE-219): read when the card opens. The first user message is cut to 280 characters; the count holds the member's messages and the agent's answers on every branch (turns that only called tools are not counted). Readable by whoever may read the thread. Never wakes a sandbox.",
+        "description": "CE18 (KOBE-219): read when the card opens. The first user message is cut to 280 characters; the count holds the member's messages and the agent's answers on every branch (turns that only called tools are not counted). `branches` (CT12, KOBE-543) counts junctions, entries with more than one child (the hidden root entry included), capped at 1,000 with `branches_capped`. Readable by whoever may read the thread. Never wakes a sandbox.",
         "parameters": [
           {
             "name": "id",
@@ -1476,6 +1476,7 @@
       "post": {
         "operationId": "setThreadLeaf",
         "summary": "Switch the active branch to an entry of the thread (owner only)",
+        "description": "CT3 (KOBE-543): refused `thread_busy` while a run is running, waiting for approval or queued, and `thread_in_trash` in Trash; at most 120 per 10 minutes per member. No event is streamed for a move made here (there is no thread-level stream): the server sends `thread.updated` with `leaf_entry_id` only for leaf moves a run makes; the browser's other tabs hear of this one from the web, other devices and readers on their next read of the thread.",
         "parameters": [
           {
             "name": "id",
@@ -1560,6 +1561,226 @@
           },
           "409": {
             "description": "`no_active_team` or `team_mismatch` (stale tab), or a thread conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`: too many branch switches.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/threads/{id}/branches": {
+      "get": {
+        "operationId": "getThreadBranches",
+        "summary": "The conversation tree's labels and remembered-rule runs",
+        "description": "CT2 (KOBE-543): what the web cannot derive from the entries: every label of the thread (at most 200) and the thread's runs that wrote a remember-rule, by their prompt entry. Readable by whoever may read the thread. Never wakes a sandbox.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active. Required on changes; must match.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The thread's labels and badge runs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadBranches"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`, `invalid_cursor` or `team_header_required`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, `forbidden` (team role) or `read_only`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`thread_not_found`: unknown id, another team's or user's thread.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`no_active_team` or `team_mismatch` (stale tab), or a thread conflict.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/threads/{id}/labels/{entryId}": {
+      "put": {
+        "operationId": "setThreadBranchLabel",
+        "summary": "Label a node of the conversation tree, or remove its label (owner only)",
+        "description": "CT9 (KOBE-543): `label` (1-60 characters, one line) or `null` to remove it. Idempotent; never counts as activity; not audited. Refused in Trash and on builder test, Workbench and eval threads; at most 200 labels per thread and 60 writes per 10 minutes per member. Answers the `branches` body.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "entryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": true,
+            "description": "The team the client believes is active. Required on changes; must match.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetLabelBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The thread's labels and badge runs after the change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadBranches"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`, `invalid_cursor` or `team_header_required`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, `forbidden` (team role) or `read_only`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`thread_not_found` or `entry_not_found`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`label_limit`, `thread_in_trash`, `test_thread`, `skill_eval_thread` or `thread_busy`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited`: too many label changes.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7573,6 +7794,14 @@
           },
           "message_count_capped": {
             "type": "boolean"
+          },
+          "branches": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000
+          },
+          "branches_capped": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -7812,6 +8041,73 @@
           }
         },
         "required": ["thread_id", "root_hidden", "ancestors", "self", "forks", "forks_more"],
+        "additionalProperties": false
+      },
+      "ThreadBranches": {
+        "type": "object",
+        "properties": {
+          "labels": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "entry_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 60
+                }
+              },
+              "required": ["entry_id", "label"],
+              "additionalProperties": false
+            }
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "user_entry_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                },
+                "remembered_rule": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["user_entry_id", "remembered_rule"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["labels", "runs"],
+        "additionalProperties": false
+      },
+      "SetLabelBody": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": ["label"],
         "additionalProperties": false
       },
       "EntryPage": {
