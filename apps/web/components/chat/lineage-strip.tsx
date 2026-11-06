@@ -21,6 +21,7 @@ import { useLineage } from "../../lib/chat/use-lineage";
 import { InlineLink } from "../shell/text-links";
 import { useShellBand } from "../shell/shell-band";
 import { chatPortalContainer } from "../ui/chat-portal";
+import { useTreeData } from "./tree-context";
 import { OpenThreadContext } from "./fork-dialog";
 import { ChatSessionContext, type KobeThreadExtras } from "./kobe-runtime";
 import styles from "./chat.module.css";
@@ -332,7 +333,10 @@ export function LineageStrip({ extras }: { readonly extras: KobeThreadExtras }) 
   const session = useContext(ChatSessionContext);
   const onOpenThread = useContext(OpenThreadContext);
   const band = useShellBand();
-  const lineage = useLineage(extras.state.threadId, session);
+  // The Conversation tree's host reads the lineage once for both (KOBE-546); alone, its own read.
+  const host = useTreeData();
+  const own = useLineage(host ? null : extras.state.threadId, host ? null : session);
+  const lineage = host ? host.lineage : own;
   if (lineage === null) return null;
   const excerpt = forkPointExcerpt(
     extras.projection,

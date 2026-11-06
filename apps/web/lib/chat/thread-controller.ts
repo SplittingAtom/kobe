@@ -1263,19 +1263,33 @@ export class ThreadController {
    * The answer is the caller's (the bar shows `thread_busy` as its own note); other refusals show
    * as the thread's error. The follow-ups go, as on any branch switch.
    */
-  readonly makeCurrent = async (): Promise<ApiResult<ThreadSummary> | undefined> => {
-    const { threadId, summary, head } = this.#state;
-    if (threadId === null || !summary || summary.readOnly === true || !isBrowsing(this.#state)) {
-      return undefined;
-    }
-    if (head === undefined || this.#state.busy.includes("leaf")) return undefined;
+  readonly makeCurrent = async (
+    /** The tree's node (KOBE-546): its newest branch, without browsing it first. */
+    entryId?: string,
+  ): Promise<ApiResult<ThreadSummary> | undefined> => {
+    const { threadId, summary, entries } = this.#state;
+    if (threadId === null || !summary || summary.readOnly === true) return undefined;
+    const head =
+      entryId === undefined
+        ? isBrowsing(this.#state)
+          ? this.#state.head
+          : undefined
+        : branchLeafOf(entries, entryId);
+    if (head === undefined || head === summary.leafEntryId) return undefined;
+    if (this.#state.busy.includes("leaf")) return undefined;
     this.#leafVersion += 1;
     const res = await this.#busy("leaf", () => this.#api.setLeaf(threadId, head));
     if (!res.ok) {
       if (res.error.code !== "thread_busy") this.#fail(res.error);
       return res;
     }
-    this.#set((s) => ({ ...s, followups: undefined, summary: res.data }));
+    this.#set((s) => ({
+      ...s,
+      followups: undefined,
+      summary: res.data,
+      // The tree's node is current now: the conversation shows it.
+      ...(entryId === undefined ? {} : { head: undefined }),
+    }));
     this.#onLeafMoved?.(threadId);
     this.#announce("This branch is now current");
     return res;

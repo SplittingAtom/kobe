@@ -28,8 +28,8 @@ reveal?)`, `reveal(entry)`, `announce(text)`. API `setThreadLabel` → `PUT …/
   workspace's `TreeHost` gets a route (`push("/tree")`, close = the panels' `closePanel`, so Back
   closes it and a reload reopens it over the remembered thread). A thread view without a host
   (builder test, Workbench, eval) wraps itself in a host with in-memory open state (CT19).
-- **One lineage read:** the host reads lineage and `branches`; the tree uses both. The lineage
-  strip still reads its own (unchanged; a second read on open). Could share later.
+- **One lineage read:** the host reads lineage and `branches`; the tree and the lineage strip use
+  them (review fix 7).
 - `useFocusReread` (545) gained `replace(value)` (bumps the read seq so an older in-flight read
   cannot overwrite a label write's answer); `useBranches` exposes it as `replace`.
 - **Click:** a node on screen only scrolls (`reveal`); off screen `showBranch(last entry, reveal =
@@ -68,6 +68,24 @@ first entry)` (newest leaf below, CT4). A tip equal to the leaf clears the head.
 - **Narrow:** `useShellBand()` overlay/single → `TreeList` (sections by junction, rows with label,
   excerpt, time, summed badges, chips, ⋯ as a tab stop).
 
+## Review fixes (2026-11-06)
+
+1. A fork opened from the tree: the host marks the switch, so its thread-change effect no longer
+   closes the panel (no `history.go` after the workspace's replace). Test: a deferred router
+   (`RoutedApp`) records exactly one `replace /?thread=<fork>` and no `go`.
+2. Label refusal for a reader is `read_only` (as the server), mapped to the owner-only words; the
+   fake answers `read_only`.
+3. `checkLabel` counts string length (UTF-16 units), the schema's rule.
+4. The palette's Continue from here refuses a thread in Trash.
+5. `controller.makeCurrent(entryId?)` (optional, additive): the tree makes a node's newest branch
+   current without moving the head first; nothing to do → "This branch can't be made current
+   now." (`CANNOT_MAKE_CURRENT`), busy → `LEAF_BUSY_NOTE`; the panel stays open.
+6. `aria-level` = depth (1 at the root; a fork row one below its node).
+7. LineageStrip reads the host's lineage (`useTreeData()`), its own hook only without a host.
+8. The layout cache is made once (`useState`) and the layout call memoised on its inputs.
+9. The label editor has a rejection path (generic message, `finally` resets saving).
+10. `TREE_NARROW_QUERY` removed (the panel uses `useShellBand()`).
+
 ## Open questions (for Chris or the coordinator)
 
 - A reload at `/tree` on a draft (no remembered thread) shows the chat with no panel and keeps the
@@ -75,7 +93,6 @@ first entry)` (newest leaf below, CT4). A tip equal to the leaf clears the head.
 - Rows are one line (fixed height for the single SVG); CT4 says text wraps. Wrapping would need a
   per-row SVG segment or measured heights.
 - Ghost Retry off the leaf: the web cannot re-send an uncommitted prompt; hidden there.
-- The lineage strip and the tree host each read the lineage once per open.
 
 ## Evidence (acceptance criteria → test or command output)
 

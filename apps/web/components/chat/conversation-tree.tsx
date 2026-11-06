@@ -77,8 +77,14 @@ export function useTreeModel(extras: KobeThreadExtras, data: TreeData) {
     () => treeForks(forkList ?? [], tree.nodeOfEntry),
     [forkList, tree.nodeOfEntry],
   );
-  const layoutFn = useRef(createTreeLayout());
-  const layout = layoutFn.current(state.entries, head, tree, forks.placed);
+  // One cache per panel, made once; the layout is recomputed only when its inputs change (CT4),
+  // never for the filter box or the focus.
+  const [layoutOf] = useState(() => createTreeLayout());
+  const { entries } = state;
+  const layout = useMemo(
+    () => layoutOf(entries, head, tree, forks.placed),
+    [layoutOf, entries, head, tree, forks.placed],
+  );
   const junctions = useMemo(() => junctionCount(state.entries), [state.entries]);
   return { tree, layout, forks, junctions, forkCount: forkList?.length ?? 0 };
 }
@@ -197,6 +203,28 @@ function TreeGraph({
     [forks.placed],
   );
   const siblings = useMemo(() => siblingsOf(tree.nodes), [tree.nodes]);
+  // aria-level is the depth in the tree (1 at the root), not the drawn lane; a fork row sits one
+  // below its node.
+  const depth = useMemo(() => {
+    const parent = new Map(tree.nodes.map((n) => [n.id, n.parentId] as const));
+    const out = new Map<string, number>();
+    const of = (id: string): number => {
+      const known = out.get(id);
+      if (known !== undefined) return known;
+      let d = 1;
+      for (
+        let at = parent.get(id) ?? null;
+        at !== null && d <= parent.size;
+        at = parent.get(at) ?? null
+      )
+        d += 1;
+      out.set(id, d);
+      return d;
+    };
+    for (const n of tree.nodes) of(n.id);
+    for (const f of forks.placed) out.set(f.id, (out.get(f.nodeId) ?? 0) + 1);
+    return out;
+  }, [tree.nodes, forks.placed]);
   const ids = layout.rows.map((r) => r.id);
   const current = focus !== undefined && ids.includes(focus) ? focus : (tree.headId ?? ids[0]);
   const currentRow = current;
@@ -247,7 +275,7 @@ function TreeGraph({
         else rowRefs.current.delete(r.id);
       },
       role: "treeitem",
-      "aria-level": r.lane,
+      "aria-level": depth.get(r.id) ?? 1,
       "aria-selected": selected,
       tabIndex: selected ? 0 : -1,
       style: { paddingInlineStart: `${layout.lanes * LANE_W + 8}px` },

@@ -30,7 +30,8 @@ export function TreeCommands({ extras }: { readonly extras: KobeThreadExtras }) 
   const { controller, projection, state } = extras;
   const leaf = state.summary?.leafEntryId ?? null;
   const leafNode = leaf === null ? undefined : projection.nodeOfEntry.get(leaf);
-  const readOnly = state.summary?.readOnly === true;
+  // A reader cannot send; a thread in Trash takes no message (as the hover action and the menu).
+  const readOnly = state.summary?.readOnly === true || state.summary?.deletedAt != null;
   const pick = (ok: (m: Shown) => boolean): Shown | undefined => {
     const focused = messages.find((m) => m.id === data?.focusedMessage.current);
     return focused !== undefined && ok(focused) ? focused : messages.findLast(ok);

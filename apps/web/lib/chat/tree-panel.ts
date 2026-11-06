@@ -26,9 +26,6 @@ export const COMPACTED_TEXT = "compacted above";
 export const LABEL_SAVED = "Label saved";
 export const LABEL_REMOVED = "Label removed";
 
-/** The narrow list's breakpoint (CT18): the panels' full-screen sheet under 820 px. */
-export const TREE_NARROW_QUERY = "(max-width: 819.98px)";
-
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** "N branches · M forks" (branches = junctions, CT12; forks = the lineage's forks). */
@@ -315,7 +312,8 @@ export const LABEL_BAD_CHARS = "A label is one line of plain text.";
 export function checkLabel(text: string): LabelCheck {
   const trimmed = text.trim();
   if (trimmed === "") return { ok: false, message: LABEL_EMPTY };
-  if ([...trimmed].length > BRANCH_LABEL_MAX_CHARS) return { ok: false, message: LABEL_TOO_LONG };
+  // The schema's own rule: string length (UTF-16 units), so an emoji counts as two.
+  if (trimmed.length > BRANCH_LABEL_MAX_CHARS) return { ok: false, message: LABEL_TOO_LONG };
   const parsed = branchLabelSchema.safeParse(trimmed);
   return parsed.success
     ? { ok: true, label: parsed.data }
@@ -327,6 +325,7 @@ const LABEL_ERRORS: Readonly<Record<string, string>> = {
   label_limit: "This conversation has as many labels as it can hold. Remove one first.",
   thread_in_trash: "This conversation is in Trash. Restore it to label it.",
   test_thread: "Test conversations can't be labelled.",
+  read_only: "Only the conversation's owner can label it.",
   forbidden: "Only the conversation's owner can label it.",
   rate_limited: "Too many label changes. Try again in a few minutes.",
   thread_not_found: "This conversation is gone.",
