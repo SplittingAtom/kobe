@@ -1,6 +1,6 @@
 # KOBE-545: Tree projection, lane layout, badges and lane tokens (web, pure)
 
-- **Status:** in review (not pushed; the coordinator opens the PR)
+- **Status:** in review, review fixes applied (not pushed; the coordinator opens the PR)
 - **Branch / worktree:** `kobe-545-tree-projection` in `../Kobe-wt545` (from `kobe-544-local-head`)
 - **Depends on:** KOBE-544 (local head), KOBE-542 (protocol `threadBranchesResponseSchema`)
 
@@ -17,9 +17,10 @@
 ## Decisions
 
 - **Nodes come from projectThread's items**, not a second walk: ids, parents and turn collapsing are
-  the same by construction (ac-1). `tree.ts` re-exports `projectTree` / `junctionCount` (the module
-  lives in `tree-nodes.ts` because tree.ts is already ~870 lines); `newestBelow` and
-  `isSkippedSummary` are now exported, plus `isAppCardEntry` in entries.ts.
+  the same by construction (ac-1), and the tree reuses projectThread's parsed entries
+  (`Projection.parsed`, optional). Import from `./tree-nodes` (no re-export from tree.ts: it made a
+  cycle); `newestBelow`, `hiddenEntries` (skipped reports + KOBE-290 stale answers, shared with
+  `junctionCount`) and `isSkippedSummary` / `isAppCardEntry` are exported.
 - **Ghosts** (CT5): the topmost `custom` entry (customType `kobe.branch` or none) with no message
   anywhere below it, id `empty:<entry>` (projectThread's id when it is the head), parent = the node
   holding its parent entry (null at the root). Not drawn while the live run's prompt is still on
@@ -35,8 +36,8 @@
 - **Tokens** = Pi's `usage` summed over the answer's assistant steps; input = input + cacheRead +
   cacheWrite (the gauge's prompt size), output = output.
 - **Badges**: files = distinct paths of `write` / `edit` calls (sandbox-agent `TOOL_NAMES`),
-  memories = `remember` calls (`TOOL_REMEMBER`; `recall` only reads); a call whose result is an
-  error does not count. `rule` on the assistant node whose `promptEntryId` has
+  memories = `remember` calls (`TOOL_REMEMBER`; `recall` only reads); only calls with a stored,
+  non-error result count (a failed or cut-off call does not). `rule` on the assistant node whose `promptEntryId` has
   `remembered_rule: true`.
 - **Labels** map an entry to its node via `nodeOfEntry` (or its ghost); a label on the node's own
   first entry wins over one on an inner entry.
@@ -45,17 +46,27 @@
   depth-first, newest sibling first) takes the lowest lane 2–8 free over the closed row interval
   [parent row, last row]; none free → lane 8, `dotted`, no reservation. Fork rows sort right under
   their node and always take their own lane.
-- **Live append**: `createTreeLayout(layout)` caches on (entries, head, forks) identity; pending
-  nodes are appended (parent's lane when the parent ends its lane, else the next lane). Committed
+- **Live append**: `createTreeLayout(layout)` caches on the committed node set (ids, parents,
+  onScreen) and the forks' identity, so a leaf move or a ghost hidden by the live prompt relays;
+  pending nodes are appended (parent's lane when the parent ends its lane, else the next lane;
+  lane 1 in an empty tree). Committed
   row objects are reused (`toBe`), and a spy proves no relayout.
 - **Lane colours**: lane 1 = `var(--kobe-brand-link)` everywhere (the accent as text on the page,
   so Custom follows it); lanes 2–8 per preset and scheme: hues rotated from the accent in 45°
   steps, chroma per preset, lightness until ≥ 3:1 on every surface (all land at ≥ 3.9 light,
   ≥ 5.4 dark). Not mapped in tailwind.css (the SVG reads `var(--kobe-lane-N)`), so CSS snapshots
   are unchanged.
-- **branches read** is wire-cased and zod-validated like the lineage read; failure → null → empty
-  notes (`EMPTY_BRANCHES`), no error box. `useBranches` reads on open, on focus when older than 60 s
-  or failed, and on `refresh()`.
+- **branches read** shares `readWire(route, schema, teamId, fetch)` (`wire-read.ts`) with the
+  lineage read; `useBranches` and `useLineage` share `useFocusReread` (open, focus when older than
+  60 s or failed, `refresh()`; lineage adds its fork/trash signals). A failed branches re-read
+  keeps the last good notes (empty before any); the lineage still clears on failure, as before.
+- **Code review 2026-11-06** (fixes commit after 13d87c1e): memo key, junction count vs stale
+  answers, first pending lane, keep-last-good, uncut calls only, parsed reuse, shared read/hook,
+  no re-export; `projectTree` and `layoutTree` split into named steps under 50 lines.
+- **Modules for KOBE-546**: `lib/chat/tree-nodes.ts` (projectTree, junctionCount, TreeNode,
+  TreeNotes, TreeProjection), `tree-layout.ts` (layoutTree, createTreeLayout, appendPending,
+  TREE_MAX_LANES), `tree-forks.ts` (treeForks), `tree-badges.ts`, `branches.ts` (readThreadBranches,
+  EMPTY_BRANCHES), `use-branches.ts` (useBranches), `lib/theme/presets.ts` (LANE_TOKENS).
 
 ## Open questions (for Chris or the coordinator)
 

@@ -253,6 +253,22 @@ describe("projectTree: notes, model, tokens, badges (CT1, CT6, ac-3)", () => {
     expect(node(tree.nodes, "a2").badges).toEqual({});
   });
 
+  it("leaves out a call with no stored result (the run stopped mid-call)", () => {
+    const entries = [
+      user("u1", null, "go"),
+      assistant(
+        "a1",
+        "u1",
+        toolCall("c1", "write", { path: "done.md" }),
+        toolCall("c2", "write", { path: "cut.md" }),
+        toolCall("c3", "remember", { path: "m.md" }),
+      ),
+      namedResult("t1", "a1", "c1", "write"),
+    ];
+    const tree = projectTree(entries, "t1", "t1", null);
+    expect(node(tree.nodes, "a1").badges).toEqual({ files: 1, paths: ["done.md"] });
+  });
+
   it("puts the remembered rule on the answer to its run's prompt", () => {
     const notes = { labels: [], runs: [{ user_entry_id: "u2", remembered_rule: true }] };
     const tree = projectTree(worked(), "a2", "a2", notes);
@@ -315,6 +331,17 @@ describe("junctionCount (CT12)", () => {
       branchMarker("k1", "r0"),
     ];
     expect(junctionCount(roots)).toBe(1);
+  });
+
+  it("leaves out a stopped answer that was regenerated (KOBE-290), as projectThread does", () => {
+    const entries = [
+      user("u1", null, "q"),
+      entry("a0", "u1", { role: "assistant", content: [], stopReason: "aborted" }),
+      assistant("a1", "u1", text("one")),
+    ];
+    expect(junctionCount(entries)).toBe(0);
+    expect(junctionCount(entries, "a1")).toBe(0);
+    expect(junctionCount(entries, "a0")).toBe(1);
   });
 
   it("leaves out skipped-actions reports and app cards; counts unsent prompts", () => {

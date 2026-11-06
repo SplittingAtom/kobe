@@ -2,7 +2,8 @@
  * Badges of a tree node (CT6, KOBE-545): what an answer's run left behind that branching does not
  * undo. Counted client-side, best effort, from the tool calls in the node's own entries: Pi's
  * `write` and `edit` tools (a shell command that writes is not seen) and the memory agent's
- * `remember` (services/sandbox-agent kobe-tools). A call whose result says it failed is left out.
+ * `remember` (services/sandbox-agent kobe-tools). Only a call with a stored, non-error result
+ * counts: a failed call, or one cut off with no result (the run stopped mid-call), is left out.
  */
 import type { ParsedEntry } from "./entries";
 import type { ThreadEntry } from "./types";
@@ -34,13 +35,13 @@ function pathOf(args: Readonly<Record<string, unknown>>): string | undefined {
 }
 
 /**
- * The files and memories badges of one node. `failed` holds the tool call ids whose result was
- * an error (from every loaded entry: a result can sit past the node's last listed entry).
+ * The files and memories badges of one node. `succeeded` holds the tool call ids with a stored,
+ * non-error result (from every loaded entry: a result can sit past the node's last listed entry).
  */
 export function toolBadges(
   entries: readonly ThreadEntry[],
   parsed: ReadonlyMap<string, ParsedEntry>,
-  failed: ReadonlySet<string>,
+  succeeded: ReadonlySet<string>,
 ): TreeBadges {
   const paths = new Set<string>();
   let writesWithoutPath = 0;
@@ -49,7 +50,7 @@ export function toolBadges(
     const p = parsed.get(entry.entryId);
     if (p?.kind !== "assistant") continue;
     for (const piece of p.pieces) {
-      if (piece.kind !== "toolCall" || failed.has(piece.toolCallId)) continue;
+      if (piece.kind !== "toolCall" || !succeeded.has(piece.toolCallId)) continue;
       if (FILE_WRITE_TOOLS.has(piece.toolName)) {
         const path = pathOf(piece.args);
         if (path === undefined) writesWithoutPath += 1;
@@ -62,6 +63,19 @@ export function toolBadges(
     ...(files > 0 ? { files, paths: [...paths].slice(0, BADGE_PATHS_MAX) } : {}),
     ...(memories > 0 ? { memories } : {}),
   };
+}
+
+/** Tool call ids whose stored result is not an error (what {@link toolBadges} counts). */
+export function succeededToolCalls(
+  entries: readonly ThreadEntry[],
+  parsed: ReadonlyMap<string, ParsedEntry>,
+): ReadonlySet<string> {
+  const ok = new Set<string>();
+  for (const entry of entries) {
+    const p = parsed.get(entry.entryId);
+    if (p?.kind === "toolResult" && !p.isError) ok.add(p.toolCallId);
+  }
+  return ok;
 }
 
 /** Tool call ids whose stored result is an error. */
