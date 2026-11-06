@@ -79,6 +79,8 @@ export const SANDBOX_COMMAND_KINDS = [
   "run.stop",
   "pi.command",
   "thread.compact",
+  // A branch summary run's start (KOBE-548, CT11), delivered like `thread.compact`.
+  "thread.branch_summary",
   // A skill eval's own sandbox only (KOBE-325): fixtures in, workspace snapshot out; the matched
   // outputs' bytes for the judge (KOBE-326).
   "eval.prepare",

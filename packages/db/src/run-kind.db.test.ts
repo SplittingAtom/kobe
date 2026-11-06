@@ -79,6 +79,24 @@ describe("runs.kind", () => {
     expect(row?.kind).toBe("compaction");
   });
 
+  it("accepts a running branch summary without input (KOBE-548)", async () => {
+    const { threadId } = await newThread(teamA);
+    const row = await insertRun(teamA, threadId, { ...running, kind: "branch_summary" });
+    expect(row?.kind).toBe("branch_summary");
+  });
+
+  it("refuses a queued branch summary or one with a message (KOBE-548)", async () => {
+    const { threadId } = await newThread(teamA);
+    expect(
+      await sqlState(
+        insertRun(teamA, threadId, { kind: "branch_summary", status: "queued", queuePos: 1 }),
+      ),
+    ).toBe("23514");
+    expect(
+      await sqlState(insertRun(teamA, threadId, { ...running, kind: "branch_summary", input: "x" })),
+    ).toBe("23514");
+  });
+
   it("refuses an unknown kind", async () => {
     const { threadId } = await newThread(teamA);
     const state = await sqlState(
@@ -140,9 +158,12 @@ describe("runs.kind", () => {
 });
 
 describe("sandbox_commands.kind", () => {
-  it("admits thread.compact", async () => {
+  it.each([
+    ["thread.compact", "compaction"],
+    ["thread.branch_summary", "branch_summary"],
+  ] as const)("admits %s", async (commandKind, runKind) => {
     const { userId, threadId } = await newThread(teamA);
-    const run = await insertRun(teamA, threadId, { ...running, kind: "compaction" });
+    const run = await insertRun(teamA, threadId, { ...running, kind: runKind });
     const state = await sqlState(
       withTeam(app.db, teamA, (tx) =>
         tx.insert(sandboxCommands).values({
@@ -150,7 +171,7 @@ describe("sandbox_commands.kind", () => {
           userId,
           threadId,
           runId: run?.id ?? null,
-          kind: "thread.compact",
+          kind: commandKind,
           frame: { thread_id: threadId },
           requesterReplica: "r1",
           expiresAt: new Date(Date.now() + 60_000),

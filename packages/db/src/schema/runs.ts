@@ -92,9 +92,11 @@ export function readBudgetStopScope(stored: string | null): BudgetStopScope | nu
  * the lease, the run token, budget and usage attribution; it is never queued, retried or shown as
  * a chat turn, carries no input, and is server-only (not in `RunSnapshot`). A `notebook` run
  * (KOBE-464, docs/specs/notebooks.md) is the member running a notebook cell or a `.py` file in the
- * thread's kernel: same shape as a compaction (no input, never queued), and no model.
+ * thread's kernel: same shape as a compaction (no input, never queued), and no model. A
+ * `branch_summary` run (KOBE-548, docs/specs/conversation-tree.md CT11) has Pi summarise the branch
+ * the thread leaves and carry the summary into the branch it enters: a compaction's shape.
  */
-export const RUN_KINDS = ["message", "compaction", "notebook"] as const;
+export const RUN_KINDS = ["message", "compaction", "notebook", "branch_summary"] as const;
 export type RunKind = (typeof RUN_KINDS)[number];
 
 /** Longest message a run carries (`@kobe/protocol` `submitMessageBodySchema.content`). */
