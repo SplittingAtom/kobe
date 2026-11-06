@@ -406,15 +406,20 @@ export const EVENT_PAYLOAD_SCHEMAS = {
       .max(64),
   }),
   /** CE18: the server titled the thread after its first run (never when `title_locked`). */
-  "thread.updated": z.strictObject({
-    thread_id: uuidSchema,
-    title: generatedTitleSchema,
-    /**
-     * KOBE-542 (CT13): the thread's leaf after a leaf move (the route, a send's commit, a branch
-     * summary). Optional on the wire: events from before it, and title-only updates, omit it.
-     */
-    leaf_entry_id: idSchema.optional(),
-  }),
+  "thread.updated": z
+    .strictObject({
+      thread_id: uuidSchema,
+      /** Absent: the title is unchanged (a leaf-only update, KOBE-542; the thread may be untitled). */
+      title: generatedTitleSchema.optional(),
+      /**
+       * KOBE-542 (CT13): the thread's leaf after a leaf move (the route, a send's commit, a branch
+       * summary). Optional on the wire: events from before it, and title-only updates, omit it.
+       */
+      leaf_entry_id: idSchema.optional(),
+    })
+    .refine((p) => p.title !== undefined || p.leaf_entry_id !== undefined, {
+      message: "thread.updated needs a title or a leaf_entry_id",
+    }),
   /** CE21: follow-ups for the composer, shown until the next send. */
   "thread.suggestions": z.strictObject({
     thread_id: uuidSchema,

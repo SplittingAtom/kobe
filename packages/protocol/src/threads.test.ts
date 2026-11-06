@@ -17,6 +17,7 @@ import {
   branchSummaryFocusSchema,
   branchSummaryRequestSchema,
   CAPABILITY_THREAD_BRANCH_SUMMARY,
+  LABEL_WRITE_RATE,
   LEAF_RATE,
   RUN_KIND_BRANCH_SUMMARY,
   setLabelBodySchema,
@@ -556,6 +557,12 @@ describe("thread branches response (CT2)", () => {
 describe("leaf move rate (CT3)", () => {
   it("is 120 per 10 minutes, in the server's rate-limit rule shape", () => {
     expect(LEAF_RATE).toEqual({ windowMs: 10 * 60_000, max: 120 });
+  });
+});
+
+describe("label write rate (CT9)", () => {
+  it("is 60 per 10 minutes, in the server's rate-limit rule shape", () => {
+    expect(LABEL_WRITE_RATE).toEqual({ windowMs: 10 * 60_000, max: 60 });
   });
 });
 

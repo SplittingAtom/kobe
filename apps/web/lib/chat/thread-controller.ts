@@ -515,14 +515,16 @@ export class ThreadController {
   }
 
   /** The server's title for this thread (KOBE-219): the bar shows it at once, the rail reads it. */
-  #retitled(payload: { readonly thread_id: string; readonly title: string }): void {
-    if (payload.thread_id !== this.#state.threadId) return;
+  #retitled(payload: { readonly thread_id: string; readonly title?: string | undefined }): void {
+    // A leaf-only update (KOBE-542) leaves the title alone; KOBE-544 follows `leaf_entry_id`.
+    const { title } = payload;
+    if (title === undefined || payload.thread_id !== this.#state.threadId) return;
     this.#set((s) =>
       s.summary && s.summary.threadId === payload.thread_id
-        ? { ...s, summary: { ...s.summary, title: payload.title } }
+        ? { ...s, summary: { ...s.summary, title } }
         : s,
     );
-    this.#onRetitled?.(payload.thread_id, payload.title);
+    this.#onRetitled?.(payload.thread_id, title);
   }
 
   /**

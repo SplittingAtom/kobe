@@ -23,7 +23,12 @@ branch summary request and errors), `events.ts` (`thread.updated.leaf_entry_id`)
   the protocol. To stay in the protocol the ticket adds `threadCardBranchesSchema`
   `{branches?: 0..1000, branches_capped?: boolean}` (`THREAD_CARD_BRANCHES_MAX` 1000, CT12) for
   the server's card to spread in KOBE-543. Absent fields parse (old cards).
-- **`thread.updated`** gains optional `leaf_entry_id` (idSchema); `title` stays required.
+- **`thread.updated`** gains optional `leaf_entry_id` (idSchema), and `title` becomes optional
+  (coordinator review): absent = title unchanged, so a leaf-only event fits an untitled thread. A
+  refine requires at least one of the two (a bare `{thread_id}` is refused). Web fix:
+  `#retitled` in `apps/web/lib/chat/thread-controller.ts` skips an event without a title
+  (KOBE-544 follows the leaf). The server's builders always send a title and still typecheck.
+- **`LABEL_WRITE_RATE`** `{windowMs: 600000, max: 60}` beside `LEAF_RATE` (CT9, §5 table).
 - **Run kind:** the run kind enum is `RUN_KINDS` in `@kobe/db` with a CHECK constraint, so adding
   `branch_summary` there needs a migration: left to KOBE-548. The protocol names it as
   `RUN_KIND_BRANCH_SUMMARY`.
@@ -38,22 +43,18 @@ to_entry_id, focus?, model, model_limits?, run_token, trace?}`, strict, the comp
   context. Deliberately **not** in `serverToSandboxFrameSchema` (a test pins that): adding it
   means the db command-kind list, frame size entries, router and agent dispatch, which belong
   with its result frame and capability in KOBE-548 (and only if the KOBE-541 spike passes).
-- No compile fallout outside `packages/protocol`.
+- Outside `packages/protocol` only the `#retitled` guard above changed.
 
 ## Open questions (for Chris or the coordinator)
 
-- `thread.updated.title` is still required: a leaf move from the route must send the current
-  title too (or KOBE-543 makes `title` optional, also additive). Untitled threads cannot send a
-  leaf-only event under the current shape.
 - Result frame `thread.branch_summary_result` and an HTTP response schema for the summary are
   left to KOBE-548.
-- The label write rate (§5 table: 60 per 10 min) has no constant yet; add beside `LEAF_RATE` in KOBE-543.
 
 ## Evidence (acceptance criteria → test or command output)
 
 - ac-1: `packages/protocol/src/threads.test.ts` (branch labels, branches response, leaf rate,
   card branches incl. old card, branch summary request and errors),
-  `src/events.test.ts` ("thread.updated leaf_entry_id", old event parses),
+  `src/events.test.ts` ("thread.updated leaf_entry_id": title-only, leaf-only, both; neither refused),
   `src/sandbox-wire/branch-summary-frames.test.ts`. RED first (19 failing), then GREEN.
-- ac-2: `pnpm --filter @kobe/protocol test` 59 files / 1115 tests pass; `pnpm build`,
+- ac-2: `pnpm --filter @kobe/protocol test` 59 files / 1118 tests pass; `pnpm --filter @kobe/web test` green; `pnpm build`,
   `pnpm typecheck`, `pnpm lint` green; `pnpm verify` green (see final commit).

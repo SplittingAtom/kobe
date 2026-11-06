@@ -407,9 +407,18 @@ describe("thread.updated leaf_entry_id", () => {
     expect(schema.parse(old)).toEqual(old);
   });
 
-  it("parses the leaf", () => {
+  it("parses both a title and the leaf", () => {
     const moved = { ...old, leaf_entry_id: "a1b2c3d4" };
     expect(schema.parse(moved)).toEqual(moved);
+  });
+
+  it("parses a leaf-only update (title unchanged, the thread may be untitled)", () => {
+    const leafOnly = { thread_id: EXAMPLE_IDS.thread, leaf_entry_id: "a1b2c3d4" };
+    expect(schema.parse(leafOnly)).toEqual(leafOnly);
+  });
+
+  it("refuses an update with neither a title nor a leaf", () => {
+    expect(schema.safeParse({ thread_id: EXAMPLE_IDS.thread }).success).toBe(false);
   });
 
   it("refuses an empty or non-string leaf and unknown keys", () => {

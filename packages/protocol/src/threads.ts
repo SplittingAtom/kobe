@@ -363,6 +363,9 @@ export const BRANCH_LABELS_MAX = 200;
  */
 export const LEAF_RATE = { windowMs: 10 * 60_000, max: 120 } as const;
 
+/** Label writes per member (CT9, §5): `PUT /v1/threads/{id}/labels/{entryId}`, as `LEAF_RATE`. */
+export const LABEL_WRITE_RATE = { windowMs: 10 * 60_000, max: 60 } as const;
+
 /**
  * A label on any node of the tree (CT9): the folder-name rules (TF4) at 60 characters: trimmed,
  * 1-60 characters, one line, no control or bidi characters. Never model context.
