@@ -863,7 +863,13 @@ out("paused", (await call("GET", "/v1/threads/" + id + "/runs")).json.queue_paus
   (await call("GET", "/v1/runs/" + second.json.run_id)).json.status);
 out("cancel2", (await call("POST", "/v1/runs/" + second.json.run_id + "/cancel")).json.status);
 const events = await call("GET", "/v1/runs/" + first.json.run_id + "/events");
-out("events", (events.text.match(/^event: .*$/gm) || []).map((l) => l.slice(7)).join(","));
+// A leaf-only thread.updated (a commit's leaf move, KOBE-543) is not a title event: left out.
+const sse = events.text.split(/\n\n+/).map((block) => ({
+  type: (block.match(/^event: (.*)$/m) || [])[1],
+  data: (block.match(/^data: (.*)$/m) || [])[1] || "",
+}));
+const leafOnly = (e) => e.type === "thread.updated" && !/"title":/.test(e.data);
+out("events", sse.filter((e) => e.type && !leafOnly(e)).map((e) => e.type).join(","));
 out("retry", (await call("POST", "/v1/runs/" + first.json.run_id + "/retry")).json.code);
 // KOBE-290: a reload still shows the stopped prompt (Pi never had it: the server keeps it), once;
 // the deleted queued message is gone.
@@ -2705,8 +2711,8 @@ JS
     at_epilogue() { # run-id → "title:followups" as announced by its run.completed (true/false each)
       psql_kobe "SELECT coalesce(payload->'epilogue' ? 'title', false)::text || ':' || coalesce(payload->'epilogue' ? 'followups', false)::text FROM run_events WHERE run_id = '$1' AND type = 'run.completed'"
     }
-    at_after() { # run-id → the epilogue events appended to the run after run.completed
-      psql_kobe "SELECT coalesce(string_agg(type, ',' ORDER BY type), '-') FROM run_events WHERE run_id = '$1' AND type IN ('thread.updated', 'thread.suggestions')"
+    at_after() { # run-id → the epilogue events of the run (a leaf-only thread.updated, KOBE-543, is not one)
+      psql_kobe "SELECT coalesce(string_agg(type, ',' ORDER BY type), '-') FROM run_events WHERE run_id = '$1' AND type IN ('thread.updated', 'thread.suggestions') AND NOT (type = 'thread.updated' AND NOT payload ? 'title')"
     }
     at_usage() { # run-id → the run's server-call usage rows as kind:status:no-sandbox
       psql_kobe "SELECT coalesce(string_agg(kind || ':' || status || ':' || (sandbox_id IS NULL), ',' ORDER BY kind), '-') FROM run_usage WHERE team_id = '$E2E_TEAM_ID' AND run_id = '$1' AND kind <> 'run'"
@@ -2722,7 +2728,7 @@ JS
     contains "auto-titles: thread.updated and thread.suggestions follow run.completed" \
       '^thread.suggestions,thread.updated$' "$(wait_for 30 '^thread.suggestions,thread.updated$' at_after "$at_run")"
     contains "auto-titles: the title event carries the saved title" '^fake-openai: First message$' \
-      "$(psql_kobe "SELECT payload->>'title' FROM run_events WHERE run_id = '$at_run' AND type = 'thread.updated'")"
+      "$(psql_kobe "SELECT payload->>'title' FROM run_events WHERE run_id = '$at_run' AND type = 'thread.updated' AND payload ? 'title'")"
     contains "auto-titles: the calls are the run's title and followups usage rows, without a sandbox" \
       '^followups:200:true,title:200:true$' "$(wait_for 30 '^followups:200:true,title:200:true$' at_usage "$at_run")"
     contains "follow-ups: the chips are the fake model's suggestions for the last exchange" \
