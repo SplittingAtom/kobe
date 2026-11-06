@@ -13,10 +13,11 @@ import {
   type GaugeReading,
 } from "../../lib/chat/context-usage";
 import { mayOpenContext } from "../../lib/chat/context-viewer";
-import { initialThreadState } from "../../lib/chat/thread-state";
+import { branchContextTokens, headOf, isBrowsing } from "../../lib/chat/head";
+import { initialThreadState, type ThreadState } from "../../lib/chat/thread-state";
 import { useKobeExtras } from "../chat/kobe-runtime";
 import { useThreadUsageRead } from "../chat/message-footer";
-import { useThreadTeamModels } from "../chat/use-team-models";
+import { useThreadTeamModels, type TeamModelsLoad } from "../chat/use-team-models";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import { useOpenContextViewer } from "./context-viewer";
 import { IconAction } from "./icon-action";
@@ -131,6 +132,39 @@ function counterOf(models: readonly TeamModel[], size: ContextSize): TeamModel |
 }
 
 /**
+ * The model the thread runs with next (the agent's pin, the thread's choice, else the team
+ * default) and its context window: the gauge's scale, and CT16's check on the branch bar.
+ */
+export function threadScale(
+  loaded: TeamModelsLoad,
+  state: ThreadState,
+): { readonly alias: string | null; readonly scale: TeamModel | undefined } {
+  const models = loaded.status === "ready" ? loaded.data.models : [];
+  const teamDefault = loaded.status === "ready" ? loaded.data.default : null;
+  const alias = state.agentModel ?? state.summary?.model ?? teamDefault;
+  return { alias, scale: models.find((m) => m.alias === alias) };
+}
+
+/**
+ * The context size the gauge shows: the newest call's prompt; on a browsed branch (CT3, CT16) the
+ * newest call on that branch, as its entries recorded it (unknown after a compaction there).
+ */
+export function gaugeSize(
+  state: ThreadState,
+  read: ReturnType<typeof useThreadUsageRead>,
+): ContextSize | null {
+  if (isBrowsing(state)) {
+    const tokens = branchContextTokens(state.entries, headOf(state));
+    return typeof tokens === "number" ? { tokens, counter: null } : null;
+  }
+  return newestContextSize(
+    state.live,
+    read && { afterRun: read.afterRun, latestCall: read.usage.latestCall },
+    compactedSinceLastCall(state.entries),
+  );
+}
+
+/**
  * The open thread's gauge, at the end of the row under the composer (KOBE-418). The value is the
  * newest model call's prompt: run_usage on load and after each run, each streamed assistant
  * message during one; unknown (no gauge) before the first call and after a compaction until the
@@ -148,15 +182,9 @@ export function ThreadContextGauge({
   const read = useThreadUsageRead();
   const openViewer = useOpenContextViewer();
   if (!extras || state.threadId === null || state.phase !== "ready") return null;
-  const size = newestContextSize(
-    state.live,
-    read && { afterRun: read.afterRun, latestCall: read.usage.latestCall },
-    compactedSinceLastCall(state.entries),
-  );
+  const size = gaugeSize(state, read);
   const models = loaded.status === "ready" ? loaded.data.models : [];
-  const teamDefault = loaded.status === "ready" ? loaded.data.default : null;
-  const alias = state.agentModel ?? state.summary?.model ?? teamDefault;
-  const scale = models.find((m) => m.alias === alias);
+  const { alias, scale } = threadScale(loaded, state);
   const window = scale?.contextWindow ?? null;
   if (size === null) return null;
   // Owner only (CV2, KOBE-471): a shared reader's gauge offers nothing.

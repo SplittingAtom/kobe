@@ -1,7 +1,7 @@
 "use client";
 
 import { ThreadListPrimitive, useAuiState } from "@assistant-ui/react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
 import type { ApiError } from "../../lib/api/client";
 import { folderPath } from "../../lib/chat/folder-tree";
 import type { FolderView } from "../../lib/chat/folders-api";
@@ -85,6 +85,43 @@ export function FolderNote({ path }: { readonly path: string }) {
   );
 }
 
+/** CT15: "on another branch" under a hit whose message is off its thread's leaf branch. */
+export function HitBranchNote({
+  threadId,
+  entryId,
+}: {
+  readonly threadId: string;
+  readonly entryId: string;
+}) {
+  const hits = useChatSession().searchHits;
+  const off = useSyncExternalStore(
+    hits.subscribe,
+    () => hits.offBranch(threadId, entryId),
+    () => undefined,
+  );
+  if (off !== true) return null;
+  return (
+    <p className={chat.hint} data-kobe-hit-branch="">
+      on another branch
+    </p>
+  );
+}
+
+/**
+ * Opening a hit's row (its title) opens the thread on the hit's branch (CT15): the hit is handed
+ * to the session before assistant-ui switches threads.
+ */
+export function useOpenHit(hits: readonly ThreadSearchHit[]) {
+  const session = useChatSession();
+  return (e: MouseEvent<HTMLElement>) => {
+    const target = e.target as Element;
+    const trigger = target.closest(`.${chat.threadTrigger}, [data-kobe-hit-open]`);
+    const row = trigger?.closest("[data-kobe-thread]");
+    const hit = hits.find((h) => h.threadId === row?.getAttribute("data-kobe-thread"));
+    if (hit?.matchedEntryId) session.openHit(hit.threadId, hit.matchedEntryId);
+  };
+}
+
 function note(hit: ThreadSearchHit, folders: readonly FolderView[]): ReactNode {
   // TF10: a hit in a folder says which, as the match note does.
   const path = folderPath(folders, hit.folderId ?? null);
@@ -108,6 +145,7 @@ function note(hit: ThreadSearchHit, folders: readonly FolderView[]): ReactNode {
           )}
         </p>
       )}
+      {hit.matchedEntryId && <HitBranchNote threadId={hit.threadId} entryId={hit.matchedEntryId} />}
     </>
   );
 }
@@ -130,6 +168,7 @@ export function SearchHits({
   const items = useAuiState((s) => s.threads.threadItems);
   const regular = useAuiState((s) => s.threads.threadIds);
   const trash = useAuiState((s) => s.threads.archivedThreadIds);
+  const openHit = useOpenHit(state.status === "done" ? state.hits : []);
   if (state.status === "idle") return null;
   if (state.status === "searching") {
     return (
@@ -152,7 +191,7 @@ export function SearchHits({
       <p className="sr-only" role="status">
         {state.hits.length === 1 ? "1 thread matches" : `${state.hits.length} threads match`}
       </p>
-      <ul className={chat.threadList} aria-label="Search results">
+      <ul className={chat.threadList} aria-label="Search results" onClickCapture={openHit}>
         {state.hits.map((hit) => {
           const item = items.find((i) => i.remoteId === hit.threadId);
           const inList = item ? regular.indexOf(item.id) : -1;

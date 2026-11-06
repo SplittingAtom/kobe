@@ -19,6 +19,7 @@ import { DraftProjectNote, ProjectBar } from "./project-bar";
 import { OpenThreadContext } from "./fork-dialog";
 import { useKobeExtras, type KobeThreadExtras } from "./kobe-runtime";
 import { LineageStrip } from "./lineage-strip";
+import { BranchBar } from "./branch-bar";
 import { AssistantMessage, EditComposer, UserMessage } from "./messages";
 import { RunNotices } from "./run-notices";
 import { SteeringPanel } from "./steering-panel";
@@ -28,6 +29,7 @@ import { ThreadCommands } from "./thread-commands";
 import { AgentStarters, FollowupChips, useAgentStarters } from "./suggestion-chips";
 import { ThreadTitle } from "./thread-title";
 import { useFollowLatest } from "./use-follow";
+import { useReveal } from "./use-reveal";
 
 interface ThreadStatusCue {
   readonly label: string;
@@ -173,6 +175,7 @@ function MessagesAndComposer({
     state.phase === "ready" && hasMessages,
     state.actionError,
   );
+  useReveal(state, extras.projection);
   return (
     <>
       <div className="relative flex min-h-0 flex-1 flex-col">
@@ -290,6 +293,7 @@ export function ThreadView({
         <OpenThreadContext.Provider value={onOpenThread}>
           <LineageStrip extras={extras} />
         </OpenThreadContext.Provider>
+        <BranchBar extras={extras} />
       </div>
       <ArtifactList />
       {state.phase === "error" && state.loadError && (

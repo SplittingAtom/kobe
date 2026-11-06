@@ -21,6 +21,7 @@ import { NEW_DRAFT } from "../../lib/chat/attachments";
 import { isThreadRunning } from "../../lib/chat/thread-state";
 import { ComposerAttachments } from "./attachment-chips";
 import { ViewingChip } from "./viewing-chip";
+import { isBrowsing } from "../../lib/chat/head";
 import { MentionChips, MentionPicker } from "./mention-picker";
 import { useComposerMentionDrop } from "./composer-mention-drop";
 import { MENTION_FOLDER_REFUSED } from "../../lib/chat/mention-insert";
@@ -323,6 +324,16 @@ export function Composer({
           <AppItemChips draft={draft} />
           <SkillPickChip draft={draft} />
           <ViewingChip />
+          {/* CT3: from a browsed branch, a send continues that branch, which becomes current. */}
+          {isBrowsing(state) && (
+            <p
+              role="note"
+              data-kobe-branch-send=""
+              className="text-muted-foreground m-0 px-2 text-xs"
+            >
+              Sending here makes this branch current
+            </p>
+          )}
           {appInsert.pending && (
             <p
               role="note"
