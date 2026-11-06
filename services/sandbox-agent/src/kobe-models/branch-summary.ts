@@ -112,6 +112,7 @@ export class BranchSummaryCommand {
     let outcome: BranchSummaryOutcome;
     try {
       outcome = await this.#run(ctx, request.from, request.to, request.focus);
+      if (!outcome.ok) await this.#back(ctx, request.from);
     } finally {
       this.#active = false;
     }
@@ -119,6 +120,21 @@ export class BranchSummaryCommand {
       input(BRANCH_SUMMARY_RESULT_UI_TITLE, JSON.stringify(outcome)),
       DIALOG_WAIT_MS,
     );
+  }
+
+  /**
+   * After a failure Pi may sit elsewhere than the thread's leaf (moved to the target without a
+   * summary): back to the old leaf, writing nothing, so the next send continues where the thread
+   * is (review L1). Best effort: a busy Pi refuses and the next run's branch point applies.
+   */
+  async #back(ctx: BranchSummaryContextLike, from: string): Promise<void> {
+    const sessions = ctx.sessionManager;
+    if (sessions.getLeafId() === from || sessions.getEntry(from) === undefined) return;
+    try {
+      await ctx.navigateTree(from, {});
+    } catch (error) {
+      this.warn(`kobe-branch-summary: could not return to the old leaf: ${String(error)}`);
+    }
   }
 
   async #run(

@@ -154,6 +154,8 @@ export async function mirrorEntriesInTx(
   threadId: string,
   data: PiGetEntriesData,
   maxEntries: number,
+  /** False: store the entries but leave `leaf_entry_id` (a branch summary sets it itself, KOBE-548). */
+  options: { readonly moveLeaf?: boolean } = {},
 ): Promise<MirrorResult> {
   const thread = await tx.execute<{ last_entry_seq: number; leaf_entry_id: string | null }>(sql`
     SELECT last_entry_seq, leaf_entry_id FROM threads
@@ -221,7 +223,10 @@ export async function mirrorEntriesInTx(
     );
   }
   const leafId =
-    data.leafId !== null && known.has(data.leafId) && !isServerEntryId(data.leafId)
+    options.moveLeaf !== false &&
+    data.leafId !== null &&
+    known.has(data.leafId) &&
+    !isServerEntryId(data.leafId)
       ? data.leafId
       : null;
   if (leafId !== null || inserted.length > 0) {

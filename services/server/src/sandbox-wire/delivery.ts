@@ -957,7 +957,12 @@ export class CommandDelivery {
    * arrive (or is not a summary under the reported parent) fails the run `summary_failed` and
    * leaves the leaf. Pi's and the sandbox's text is logged, never stored.
    */
-  async #endBranchSummary(runId: string, threadId: string, outcome: CommandOutcome): Promise<void> {
+  async #endBranchSummary(
+    rowId: string,
+    runId: string,
+    threadId: string,
+    outcome: CommandOutcome,
+  ): Promise<void> {
     const { teamId } = this.#host.target;
     if (!outcome.ok) {
       const detail = {
@@ -987,7 +992,11 @@ export class CommandDelivery {
       async (tx) => {
         let code = outcome.ok ? "summary_failed" : outcome.error.code;
         if (reported !== undefined) {
+          const command = await tx.execute<{ to_entry_id: string | null }>(sql`
+            SELECT frame ->> 'to_entry_id' AS to_entry_id FROM sandbox_commands
+             WHERE team_id = ${teamId} AND id = ${rowId}`);
           const mirrored = await mirrorBranchSummaryInTx(tx, {
+            toEntryId: command.rows[0]?.to_entry_id ?? "",
             teamId,
             threadId,
             runId,
@@ -1059,8 +1068,9 @@ export class CommandDelivery {
       );
     }
     if (issued.commandKind === "thread.branch_summary" && issued.runId !== null) {
-      await this.#endBranchSummary(issued.runId, issued.threadId, outcome).catch((err: unknown) =>
-        this.#host.log.error({ err, run_id: issued.runId }, "could not end a branch summary run"),
+      await this.#endBranchSummary(issued.rowId, issued.runId, issued.threadId, outcome).catch(
+        (err: unknown) =>
+          this.#host.log.error({ err, run_id: issued.runId }, "could not end a branch summary run"),
       );
     }
     await withTeam(this.#ctx.db, teamId, (tx) =>

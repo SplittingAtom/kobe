@@ -266,6 +266,37 @@ describe("POST /v1/threads/{id}/branch-summary (KOBE-548)", () => {
     expect((await summaryRuns(w.team, threadId))[0]?.status).toBe("failed");
     const events = await f.events(w.team, frame.run_id);
     expect(events.filter((e) => e.type === "thread.updated")).toEqual([]);
+    // The mirror never moved the leaf (review M1).
+    expect(await leafOf(w.team, threadId)).toBe(a2);
+  });
+
+  it("fails summary_failed when the summary sits elsewhere than the target or its parent (L4)", async () => {
+    const { w, ws, threadId, a1, a2 } = await world();
+    const pending = summarize(w, threadId, { to_entry_id: a1 });
+    const frame = await ws.summarizing();
+    // Pi (or a lying agent) put it under the old leaf instead.
+    const misplaced = { ...frame, to_entry_id: a2 };
+    const id = must(ws.branchSummarized(misplaced, { summary: "S" }), "entry");
+    expectError(await pending, "summary_failed", 502);
+    expect(await leafOf(w.team, threadId)).toBe(a2);
+    expect(id).not.toBe(a2);
+  });
+
+  it("Stop racing a summary that landed: Pi's session wins, the member gets 200 (M2)", async () => {
+    const { w, ws, threadId, a1 } = await world();
+    const pending = summarize(w, threadId, { to_entry_id: a1 });
+    const frame = await ws.summarizing();
+    const stop = await f.on(0, w.owner).post(`/v1/runs/${frame.run_id}/cancel`, {});
+    expect(stop.status, JSON.stringify(stop.json)).toBeLessThan(300);
+    const entryId = must(ws.branchSummarized(frame, { summary: "S" }), "entry");
+    const res = await pending;
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    expect(res.json).toEqual({ thread_id: threadId, entry_id: entryId, leaf_entry_id: entryId });
+    expect(await leafOf(w.team, threadId)).toBe(entryId);
+    expect((await summaryRuns(w.team, threadId))[0]?.status).toBe("cancelled");
+    // The run was closed: no event on its stream; other tabs see it on the focus re-read.
+    const events = await f.events(w.team, frame.run_id);
+    expect(events.filter((e) => e.type === "thread.updated")).toEqual([]);
   });
 
   it("never sends thread.branch_summary to an agent without the capability", async () => {

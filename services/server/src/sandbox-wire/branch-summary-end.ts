@@ -25,15 +25,19 @@ export interface BranchSummaryMirror {
   /** Pi's new entries (undefined: the sync failed). */
   readonly entries: PiGetEntriesData | undefined;
   readonly reported: BranchSummaryReported;
+  /** The node the member chose (`thread.branch_summary.to_entry_id`). */
+  readonly toEntryId: string;
   readonly maxEntries: number;
 }
 
 /**
- * In the run's end transaction (KOBE-548, CT11, CT13): mirror Pi's new entries, then make the
- * reported entry the thread's leaf, but only if it is now a mirrored `branch_summary` of this thread
- * under the reported parent. The run's stream hears the leaf move (`leafMovedEvents`) while the run
- * is still open (`runStillOpen`), as for a compaction. `ok: false` leaves the leaf as the mirror
- * left it; the caller fails the run.
+ * In the run's end transaction (KOBE-548, CT11, CT13): mirror Pi's new entries without moving the
+ * leaf, then make the reported entry the thread's leaf, but only if this mirror stored it as a
+ * `branch_summary` under the reported parent, and that parent is `to_entry_id` or, for a user
+ * message target, its parent (Pi's placement). The run's stream hears the leaf move
+ * (`leafMovedEvents`) while the run is still open (`runStillOpen`); a run already closed (Stop or
+ * the sweep racing it) still gets the leaf, since Pi's session is on the summary, and other tabs see
+ * it on their focus re-read. `ok: false` leaves the leaf; the caller fails the run.
  */
 export async function mirrorBranchSummaryInTx(
   tx: KobeTx,
@@ -44,17 +48,20 @@ export async function mirrorBranchSummaryInTx(
     SELECT leaf_entry_id FROM threads
      WHERE team_id = ${teamId} AND id = ${threadId} FOR NO KEY UPDATE`);
   const leafBefore = before.rows[0]?.leaf_entry_id ?? null;
-  const capped =
-    m.entries === undefined
-      ? false
-      : (await mirrorEntriesInTx(tx, teamId, threadId, m.entries, m.maxEntries)).capped;
-  const entry = await tx.execute<{ type: string; parent_id: string | null }>(sql`
-    SELECT type, parent_id FROM thread_entries
-     WHERE team_id = ${teamId} AND thread_id = ${threadId} AND entry_id = ${reported.entry_id}`);
-  const row = entry.rows[0];
-  if (row?.type !== "branch_summary" || row.parent_id !== reported.parent_id) {
+  if (m.entries === undefined) return { ok: false, capped: false };
+  const mirrored = await mirrorEntriesInTx(tx, teamId, threadId, m.entries, m.maxEntries, {
+    moveLeaf: false,
+  });
+  const capped = mirrored.capped;
+  const stored = mirrored.inserted.find((e) => e.id === reported.entry_id);
+  if (stored?.type !== "branch_summary" || stored.parentId !== reported.parent_id) {
     return { ok: false, capped };
   }
+  const target = await tx.execute<{ parent_id: string | null }>(sql`
+    SELECT parent_id FROM thread_entries
+     WHERE team_id = ${teamId} AND thread_id = ${threadId} AND entry_id = ${m.toEntryId}`);
+  const placed = [m.toEntryId, target.rows[0]?.parent_id ?? null];
+  if (!placed.includes(reported.parent_id)) return { ok: false, capped };
   await tx.execute(sql`
     UPDATE threads SET leaf_entry_id = ${reported.entry_id}, last_activity_at = now()
      WHERE team_id = ${teamId} AND id = ${threadId}`);

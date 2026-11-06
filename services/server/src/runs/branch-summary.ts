@@ -9,6 +9,7 @@ import { sql, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { effectiveModelLimits } from "../models/token-limits.js";
+import { parseBranchSummaryResult } from "../sandbox-wire/branch-summary-end.js";
 import { piSessionEntrySql, treeEntrySql } from "../sandbox-wire/entries.js";
 import { endRunInTx } from "../sandbox-wire/run-state.js";
 import type { CommandOutcome } from "../sandbox-wire/types.js";
@@ -114,9 +115,12 @@ export async function summarizeBranch(
     );
   }
   const code = outcome.ok ? undefined : (HTTP_CODE[outcome.error.code] ?? "summary_failed");
-  const result = await finish(host, actor, started, code, focus !== undefined);
-  if (result.code !== undefined) throw new BranchSummaryError(result.code);
-  return { thread_id: thread.id, entry_id: result.leaf, leaf_entry_id: result.leaf };
+  const reported = outcome.ok ? parseBranchSummaryResult(outcome.data) : undefined;
+  const result = await finish(host, actor, started, code, reported?.entry_id, focus !== undefined);
+  if (result.code !== undefined || reported === undefined) {
+    throw new BranchSummaryError(result.code ?? "summary_failed");
+  }
+  return { thread_id: thread.id, entry_id: reported.entry_id, leaf_entry_id: reported.entry_id };
 }
 
 /** The owner's thread, locked; reader, Trash and test threads refused (CT19). */
@@ -202,16 +206,18 @@ function auditOutcome(status: string | undefined, code: RunEndCode | undefined):
 /**
  * The run ends here unless the delivering replica already ended it (it does on every answer): a
  * command that never reached the sandbox, timed out or lost its connection. A run still leased may
- * be summarising in Pi: it is aborted (durably, like Stop). A success counts only if the delivery
- * completed the run and moved the leaf to the summary. Then the audit row.
+ * be summarising in Pi: it is aborted (durably, like Stop). A success counts when the thread's leaf
+ * is the reported summary (the delivery set it), even if Stop or the sweep closed the run first:
+ * Pi's session is on the summary (review M2). Then the audit row.
  */
 async function finish(
   host: BranchSummaryHost,
   actor: ActorContext,
   started: Started,
   answered: RunEndCode | undefined,
+  reportedEntryId: string | undefined,
   focused: boolean,
-): Promise<{ readonly code: RunEndCode | undefined; readonly leaf: string }> {
+): Promise<{ readonly code: RunEndCode | undefined }> {
   const teamId = actor.team_id;
   const { runId, thread } = started;
   const out = await withAppendTx(host.db, teamId, async (tx) => {
@@ -222,27 +228,35 @@ async function finish(
     // On success the delivery has ended the run already; if it has not, the summary never landed.
     const { ended } = await endRunInTx(tx, teamId, runId, end);
     const run = await getRunRow(tx, teamId, runId);
-    const leaf = await tx.execute<{ leaf_entry_id: string | null }>(sql`
-      SELECT leaf_entry_id FROM threads WHERE team_id = ${teamId} AND id = ${thread.id}`);
+    // The leaf is the reported entry and it is a summary (never an old leaf a sandbox named).
+    const leaf = await tx.execute<{ leaf_entry_id: string | null; type: string | null }>(sql`
+      SELECT t.leaf_entry_id, e.type FROM threads t
+        LEFT JOIN thread_entries e
+          ON e.team_id = t.team_id AND e.thread_id = t.id AND e.entry_id = t.leaf_entry_id
+       WHERE t.team_id = ${teamId} AND t.id = ${thread.id}`);
     const leafId = leaf.rows[0]?.leaf_entry_id ?? null;
-    const code: RunEndCode | undefined =
-      answered ?? (run?.status === "completed" && leafId !== null ? undefined : "summary_failed");
+    const landed =
+      reportedEntryId !== undefined &&
+      leafId === reportedEntryId &&
+      leaf.rows[0]?.type === "branch_summary";
+    const code: RunEndCode | undefined = answered ?? (landed ? undefined : "summary_failed");
     const lease = await tx.execute(sql`
       SELECT 1 FROM sandbox_run_leases WHERE team_id = ${teamId} AND run_id = ${runId}`);
     const abort = ended && code !== undefined && lease.rows.length > 0;
     if (abort) await requestStop(tx, teamId, runId, "abort");
-    const outcome: AuditOutcome = auditOutcome(run?.status, code);
+    const outcome: AuditOutcome =
+      landed && code === undefined ? "completed" : auditOutcome(run?.status, code);
     await recordAudit(tx, {
       action: "thread.branch_summarized",
       actor: { kind: "user", id: actor.user_id },
       teamId,
       target: { threadId: thread.id, runId, outcome, focused },
     });
-    return { ended, abort, code, leaf: leafId ?? "" };
+    return { ended, abort, code };
   });
   if (out.abort) {
     host.abort({ teamId, ownerUserId: thread.ownerUserId, runId, threadId: thread.id });
   }
   if (out.ended) await host.ended(teamId, runId, thread.id);
-  return { code: out.code, leaf: out.leaf };
+  return { code: out.code };
 }

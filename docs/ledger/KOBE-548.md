@@ -1,6 +1,6 @@
 # KOBE-548: Tree: Make it current and carry a summary — run kind branch_summary (CT-7)
 
-- **Status:** steps 1–4 done (server code in 99b08615, described by e068d7f9); web pending
+- **Status:** steps 1–5 done; review fixes in; ready for PR
 - **Branch / worktree:** `kobe-548-branch-summary` in `../Kobe-wt548` (from `kobe-543-tree-server`)
 - **Depends on:** KOBE-541 (spike: both answers yes), KOBE-543 (leaf rules, `leafMovedEvents`),
   KOBE-546 (tree menu and bar hooks, for the web step)
@@ -49,11 +49,35 @@
   (`branch_summary_interrupted`), the gauge's latest call skips `branch_summary` runs' calls.
   `startsRun`/`isSummaryCommand` (sandbox-wire/types.ts) replace the `thread.compact` literals.
 - `runStillOpen` moved from delivery.ts to run-state.ts (used by `branch-summary-end.ts` too).
+- **Review fixes (security review of steps 1–4):**
+  - M1: the end mirror stores Pi's entries with `moveLeaf: false` (`mirrorEntriesInTx` option);
+    the leaf moves only when the summary checks out, so a failed run never moves it.
+  - M2 (decision: follow Pi): Stop or the sweep racing a late success still mirrors and moves the
+    leaf (Pi's session is on the summary) and the member gets 200; the run stays cancelled or
+    failed, no `thread.updated` goes out (the run's stream is closed, there is no thread stream):
+    other tabs see the leaf on their focus re-read. The audit says `completed` then.
+  - L2: the answer names the reported entry, and only when it is the leaf and a `branch_summary`.
+  - L4: the entry must be one this mirror stored, under `to_entry_id` or its parent (Pi's rule for
+    a user-message target); the target is read from the stored command frame.
+  - L1: after a failure that left Pi elsewhere, the command moves Pi back to the old leaf (writes
+    nothing; best effort). Otherwise the next send carries `parent_entry_id` anyway.
+  - L3: interrupt and timeout write two audit rows (system, then the requester's), as compaction.
+  - L5 (decision): the server accepts a target on the leaf's own path (Pi summarises the tail: a
+    "rewind with summary"); the web refuses it (`ON_LEAF_BRANCH`) and never offers it (the menu
+    item needs a node off the leaf's branch; the bar shows another branch only).
+- **Web (step 5):** marker `branch_summary` ("Summary of another branch", folded, Markdown; carried
+  below a junction like the other markers, so it shows only on the branch it entered); the tree
+  row was already KOBE-546's `SUMMARY_TEXT`. Dialog `branch-summary-dialog.tsx`: `carryText(n)`
+  with n = messages on the leaf's branch the target's branch lacks (`messagesDiffer`), CT6's
+  files line, one-line focus, Go; errors are the server's fixed messages. Target: the node's
+  newest entry (`branchLeafOf`, as Make it current), the head from the bar. The bar's ▾ menu
+  ("More ways to make it current" → "and carry a summary") shows for the owner, not on test
+  threads. `controller.carrySummary` posts, clears the head, re-reads the thread, announces "This
+  branch is now current" and tells other tabs (`onLeafMoved`).
 
 ## Open questions (for Chris or the coordinator)
 
-- The server does not refuse a target on the leaf's own path (an ancestor): Pi then summarises the
-  tail between them. CT11 offers the action only off the leaf's branch; the web enforces that.
+- none
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -66,5 +90,8 @@
   queued, reader, outsider, unknown entry, test/Workbench/eval threads, leaf itself, 21st summary,
   model, capability, sandbox codes without their text, a lying result, Stop, sweep; audit rows.
 - ac-3 (budget): same file, "counts against the budget" (429 before anything starts).
+- ac-3 (web): `apps/web/components/chat/branch-summary.test.tsx` (menu → dialog → marker, leaf,
+  tree summary row, announcement; fixed refusal; not offered to readers, test threads or on the
+  leaf's branch; the bar's ▾), `components/chat/markers.test.tsx`, `lib/chat/tree-markers.test.ts`.
 - Unit: `kobe-models/branch-summary.test.ts`, `agent.branch-summary.test.ts`,
   `protocol/.../branch-summary-frames.test.ts`, `packages/db/src/run-kind.db.test.ts`.

@@ -136,6 +136,28 @@ describe("kobe-branch-summary command", () => {
     await new BranchSummaryCommand(() => undefined).handle(f.ctx);
     expect(f.outcome()).toMatchObject({ ok: false, code: "nothing_to_summarize" });
   });
+
+  it("moves Pi back to the old leaf after a failure that left it elsewhere (review L1)", async () => {
+    let leaf = "c";
+    const f = fakeCtx({ answer: armed({ from: "c", to: "b" }) });
+    const ctx = {
+      ...f.ctx,
+      sessionManager: { ...f.ctx.sessionManager, getLeafId: () => leaf },
+      navigateTree: async (target: string, opts?: { summarize?: boolean }) => {
+        f.navigations.push({ target, summarize: opts?.summarize === true });
+        // Pi moved to the target without writing a summary.
+        leaf = target;
+        return { cancelled: false };
+      },
+    };
+    await new BranchSummaryCommand(() => undefined).handle(ctx);
+    expect(f.outcome()).toMatchObject({ ok: false, code: "nothing_to_summarize" });
+    expect(f.navigations).toEqual([
+      { target: "b", summarize: true },
+      { target: "c", summarize: false },
+    ]);
+    expect(leaf).toBe("c");
+  });
 });
 
 describe("branch summary channel parsers", () => {
