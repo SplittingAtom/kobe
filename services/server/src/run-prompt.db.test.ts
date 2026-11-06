@@ -202,7 +202,8 @@ describe("Stop after Pi wrote the prompt", () => {
     await settle();
     // Pi's setup entries and the prompt were committed during the run, then the stop.
     const types = await f.types(w.team, run);
-    expect(types.filter((x) => x !== "entry.committed")).toEqual([
+    // A leaf-only thread.updated follows each commit that moved the leaf (CT13, KOBE-543).
+    expect(types.filter((x) => x !== "entry.committed" && x !== "thread.updated")).toEqual([
       "run.started",
       "run.interrupted",
     ]);
@@ -277,6 +278,7 @@ describe("a prompt Pi never received", () => {
     expect(await f.types(w.team, run)).toEqual([
       "run.started",
       "entry.committed",
+      "thread.updated", // the kept prompt is the leaf (CT13, KOBE-543)
       "run.interrupted",
     ]);
     expect(await reloadedPrompts(w.owner, threadId, "first question")).toEqual([unsent]);
@@ -348,7 +350,12 @@ describe("a prompt Pi never received", () => {
     expect(kept).toHaveLength(1);
     expect(kept[0]).toMatch(/^ku-/);
     expect(await leaf(w.team, threadId)).toBe(kept[0]);
-    expect(await f.types(w.team, run)).toEqual(["run.started", "entry.committed", "run.failed"]);
+    expect(await f.types(w.team, run)).toEqual([
+      "run.started",
+      "entry.committed",
+      "thread.updated",
+      "run.failed",
+    ]);
   });
 
   it("timed out: no sandbox answers run.start", async () => {

@@ -59,5 +59,8 @@
 
 - ac-1: `packages/db` `pnpm test:db` (cross-team probe suite with the new fixture): 100 files,
   1633 tests passed.
+- `services/server` `pnpm test:db`: 202 files, 2428 tests; the 5 failures of the first run were
+  event-sequence expectations gaining the leaf-only `thread.updated` (`runs`, `run-prompt`,
+  `sandbox-wire` db tests, updated; rerun 74/74 passed).
 - ac-2..ac-6: `services/server/src/conversation-tree.db.test.ts` (labels, branches read, card
   junctions and cap, leaf rules and rate limit, send's commit event, export).

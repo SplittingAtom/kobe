@@ -46,6 +46,7 @@ describe("messages start a run or queue behind the active one (D17)", () => {
       "text.delta",
       "entry.committed",
       "entry.committed",
+      "thread.updated", // the commit moved the leaf (CT13, KOBE-543)
       "run.completed",
     ]);
     // The prompt's Pi entry is bound to the run once mirrored.
