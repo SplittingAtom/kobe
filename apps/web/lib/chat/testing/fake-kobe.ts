@@ -272,6 +272,19 @@ export class FakeKobe {
   readonly threadFilesHidden = new Set<string>();
   threadFilesReads = 0;
   /**
+   * `GET /v1/threads/{id}/branches` (CT2, KOBE-545): labels and remembered-rule runs per thread
+   * (empty when unset); a thread in `branchesFailing` answers 500. Reads counted in `branchesReads`.
+   */
+  readonly branches = new Map<
+    string,
+    {
+      readonly labels: readonly { entry_id: string; label: string }[];
+      readonly runs: readonly { user_entry_id: string; remembered_rule: boolean }[];
+    }
+  >();
+  readonly branchesFailing = new Set<string>();
+  branchesReads = 0;
+  /**
    * `GET /v1/threads/{id}/sync-conflicts` (KOBE-492): open conflicts, wire casing, newest first; a
    * thread in `threadFilesHidden` answers 404 (a shared reader). Settles are recorded in
    * `syncConflictActions` and remove the row; reads are counted in `syncConflictReads`.
@@ -1836,6 +1849,11 @@ export class FakeKobe {
     }
     if (action === "card" && method === "GET") return json(200, this.#card(thread));
     if (action === "lineage" && method === "GET") return json(200, this.#lineage(thread));
+    if (action === "branches" && method === "GET") {
+      this.branchesReads += 1;
+      if (this.branchesFailing.has(thread.thread_id)) return error(500, "internal");
+      return json(200, this.branches.get(thread.thread_id) ?? { labels: [], runs: [] });
+    }
     if (action === "files" && method === "GET") {
       this.threadFilesReads += 1;
       if (this.threadFilesHidden.has(thread.thread_id)) {
