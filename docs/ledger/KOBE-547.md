@@ -46,6 +46,22 @@
 - "Comparing versions" is announced through the controller's polite region when it opens.
 - The dialog lives in `TreeHost`, so test threads (builder test, Workbench, eval) get it (CT19).
 
+## Review fixes (coordinator's code review)
+
+- Every entry point is gated on `comparable()` (two committed versions): the picker icon, the
+  tree menu (`TreeMenuContext.comparable` replaces `hasSiblings` and the dead `compare` flag) and
+  the palette. The dialog shows `NO_COMPARE` when it still finds no pair; it never closes itself.
+- "Version k" is the picker's number: the position among all the message's siblings.
+- `promptsDiffer` also compares the skill, app items and files, not just the words.
+- The palette acts on the focused message only (blocker `NO_COMPARE`, no fallback). The focused
+  message became a small subscribable store (`focusedMessageStore`, `.current` kept) so the
+  palette's bindings follow hover/focus without a re-render elsewhere.
+- A version that drops out of the projection mid-view keeps its column ("No answer on this
+  version", Show disabled) until the dropdown picks another (`usePair` snapshots).
+- Titles are "Version k · label" in headings, options and region names.
+- One `MessageProvider` per column (usage footer and answer share it; the prompt nests its own).
+- `CompareDialog` split into `usePair`, `CompareFrame` and `VersionColumn`.
+
 ## Open questions (for Chris or the coordinator)
 
 - Test panes (no `ShellBandProvider`) never go full-screen.

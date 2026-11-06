@@ -1,12 +1,16 @@
 "use client";
 
 import { useAui, useAuiState } from "@assistant-ui/react";
+import { useSyncExternalStore } from "react";
+import { comparable, NO_COMPARE } from "../../lib/chat/compare";
 import { messageMeta } from "../../lib/chat/tree";
 import type { MenuBindings } from "../../lib/shell/menu";
 import { useBindCommands } from "../shell/command-bindings";
 import type { KobeThreadExtras } from "./kobe-runtime";
 import { focusComposerSoon } from "./tree-actions";
 import { useTreeData } from "./tree-context";
+
+const noSubscribe = () => () => {};
 
 export const NO_VERSIONS = "This message has no other versions.";
 export const NO_CONTINUE = "There is no earlier answer to continue from.";
@@ -37,6 +41,12 @@ export function TreeCommands({ extras }: { readonly extras: KobeThreadExtras }) 
     return focused !== undefined && ok(focused) ? focused : messages.findLast(ok);
   };
   const versioned = pick((m) => m.branchCount > 1);
+  const focusedId = useSyncExternalStore(
+    data?.focusedMessage.subscribe ?? noSubscribe,
+    () => data?.focusedMessage.current ?? null,
+    () => null,
+  );
+  const compared = focusedId !== null && comparable(projection, focusedId) ? focusedId : undefined;
   const continuable = (m: Shown) => {
     const meta = messageMeta(m);
     return meta?.kind === "assistant" && !meta.live && meta.appCard !== true && m.id !== leafNode;
@@ -52,12 +62,12 @@ export function TreeCommands({ extras }: { readonly extras: KobeThreadExtras }) 
       blocker: versioned ? null : NO_VERSIONS,
     },
     "next-branch": { onSelect: () => switchTo("next"), blocker: versioned ? null : NO_VERSIONS },
+    // The focused message only (never another one), on the left beside its newest other version.
     "compare-versions": {
       onSelect: () => {
-        // The focused message starts on the left; with none focused, the two newest.
-        if (versioned) data?.compare(versioned.id, versioned.id === data?.focusedMessage.current);
+        if (compared !== undefined) data?.compare(compared, true);
       },
-      blocker: versioned ? null : NO_VERSIONS,
+      blocker: compared === undefined ? NO_COMPARE : null,
     },
     "continue-from-here": {
       onSelect: () => {

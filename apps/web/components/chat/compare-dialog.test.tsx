@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { COMPARING } from "../../lib/chat/compare";
+import { COMPARING, NO_COMPARE } from "../../lib/chat/compare";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { isMacPlatform } from "../../lib/shell/shortcuts";
 import { must } from "../../lib/testing/must";
@@ -180,6 +180,24 @@ describe("opening, choosing and showing (ac-1)", () => {
     await opened(test.t);
     await fromPicker();
     expect(column("Version 3")).toBeTruthy();
+  });
+});
+
+describe("where it is not offered (review)", () => {
+  it("the palette acts on the focused message only: none there, the blocker", async () => {
+    const { t } = versionedThread();
+    await opened(t);
+    // "start" has no other versions; the palette never falls back to another message.
+    fireEvent.pointerOver(await screen.findByText("start"));
+    const mod = isMacPlatform() ? { metaKey: true } : { ctrlKey: true };
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "k", code: "KeyK", ...mod });
+    const palette = await screen.findByRole("dialog", { name: "Command palette" });
+    await userEvent.setup().keyboard("compare versions");
+    expect(
+      await within(palette).findByRole("option", {
+        name: `Compare versions, unavailable: ${NO_COMPARE}`,
+      }),
+    ).toBeTruthy();
   });
 });
 

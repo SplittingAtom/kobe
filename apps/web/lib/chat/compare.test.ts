@@ -61,6 +61,21 @@ describe("versionsOf", () => {
     expect(versionsOf(p, "b1")).toEqual([]);
     expect(versionsOf(p, "nope")).toEqual([]);
   });
+
+  it("numbers versions as the picker does: among all the message's siblings", () => {
+    const entries = [
+      user("u1", null, "q"),
+      assistant("a1", "u1", text("ok")),
+      user("v1", "a1", "one"),
+      assistant("x1", "a1", text("not a version of a prompt")),
+      user("v2", "a1", "two"),
+    ];
+    const versions = versionsOf(projectThread(entries, "v2"), "v1");
+    expect(versions.map((v) => [v.id, v.k])).toEqual([
+      ["v1", 1],
+      ["v2", 3],
+    ]);
+  });
 });
 
 describe("the pair and the dropdowns", () => {
@@ -87,7 +102,7 @@ describe("the pair and the dropdowns", () => {
   it("titles by label, else Version k; prompts show only when they differ", () => {
     const [a, b, c] = versions();
     expect(versionTitle({ k: 2 })).toBe("Version 2");
-    expect(versionTitle({ k: 2 }, "cheaper")).toBe("cheaper");
+    expect(versionTitle({ k: 2 }, "cheaper")).toBe("Version 2 · cheaper");
     const p = projectThread(threeVersions(), "b3");
     expect(promptsDiffer(p, a, b)).toBe(false);
     expect(promptsDiffer(p, b, c)).toBe(true);
@@ -99,5 +114,33 @@ describe("the pair and the dropdowns", () => {
       "a1",
     );
     expect(promptsDiffer(p, answers[0], answers[1])).toBe(false);
+  });
+
+  it("prompts with the same words differ by their skill, items or files", () => {
+    const prompt = (id: string, meta: Record<string, unknown>) => ({
+      parentId: null,
+      deps: [],
+      message: {
+        id,
+        role: "user" as const,
+        content: [],
+        metadata: {
+          custom: { kind: "user", text: "same", parentEntryId: null, pending: false, ...meta },
+        },
+      },
+    });
+    const v = (id: string) => ({ id, k: 1, role: "user" as const, promptId: id });
+    const items = [
+      prompt("p0", {}),
+      prompt("p1", { skill: "sql" }),
+      prompt("p2", { references: [{ app: "a", id: "1" }] }),
+      prompt("p3", { attachments: [{ name: "a.csv", mimeType: "text/csv" }] }),
+      prompt("p4", {}),
+    ];
+    const proj = { items };
+    expect(promptsDiffer(proj, v("p0"), v("p4"))).toBe(false);
+    for (const other of ["p1", "p2", "p3"]) {
+      expect(promptsDiffer(proj, v("p0"), v(other))).toBe(true);
+    }
   });
 });

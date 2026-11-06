@@ -67,7 +67,7 @@ const ctx: TreeMenuContext = {
   testThread: false,
   inTrash: false,
   offLeafBranch: false,
-  hasSiblings: false,
+  comparable: false,
   canEdit: true,
   canRetry: false,
   forkable: true,
@@ -106,9 +106,15 @@ describe("texts", () => {
 describe("the node menu (CT4)", () => {
   it("offers the owner's items in the spec's order", () => {
     const t = tree();
-    expect(
-      treeMenu(nodeOf("v1", t), t, { ...ctx, offLeafBranch: true, hasSiblings: true }),
-    ).toEqual(["show", "make-current", "edit", "label", "remove-label", "fork", "copy"]);
+    expect(treeMenu(nodeOf("v1", t), t, { ...ctx, offLeafBranch: true })).toEqual([
+      "show",
+      "make-current",
+      "edit",
+      "label",
+      "remove-label",
+      "fork",
+      "copy",
+    ]);
     expect(treeMenu(nodeOf("a1", t), t, ctx)).toEqual([
       "show",
       "continue",
@@ -145,9 +151,9 @@ describe("the node menu (CT4)", () => {
 
   it("shows Compare and carry-a-summary only once they ship", () => {
     const t = tree();
-    const off = { ...ctx, offLeafBranch: true, hasSiblings: true };
+    const off = { ...ctx, offLeafBranch: true };
     expect(treeMenu(nodeOf("v1", t), t, off)).not.toContain("compare");
-    const later = treeMenu(nodeOf("v1", t), t, { ...off, compare: true, carrySummary: true });
+    const later = treeMenu(nodeOf("v1", t), t, { ...off, comparable: true, carrySummary: true });
     expect(later).toContain("compare");
     expect(later).toContain("carry-summary");
   });

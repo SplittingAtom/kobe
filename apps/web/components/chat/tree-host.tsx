@@ -15,7 +15,7 @@ import { ChatSessionContext, useKobeExtras } from "./kobe-runtime";
 import { CompareDialog } from "./compare-dialog";
 import { ConversationTreePanel } from "./conversation-tree";
 import { TreeCommands } from "./tree-commands";
-import { TreeContext, type TreeData } from "./tree-context";
+import { TreeContext, focusedMessageStore, type TreeData } from "./tree-context";
 
 export { useTreeData, type TreeData } from "./tree-context";
 
@@ -48,7 +48,7 @@ export function TreeHost({
   const threadId = extras?.state.threadId ?? null;
   const branches = useBranches(threadId, session);
   const lineage = useLineage(threadId, session);
-  const focusedMessage = useRef<string | null>(null);
+  const [focusedMessage] = useState(focusedMessageStore);
   // Compare versions (CT10): the message it compares, on this thread only.
   const [comparing, setComparing] = useState<{
     thread: string;

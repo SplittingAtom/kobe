@@ -3,10 +3,11 @@
 import { fromThreadMessageLike, MessageProvider, type ThreadMessage } from "@assistant-ui/react";
 import { Dialog } from "radix-ui";
 import { XIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   COMPARE_TITLE,
   COMPARING,
+  NO_COMPARE,
   choicesFor,
   initialPair,
   pickVersion,
@@ -14,7 +15,6 @@ import {
   versionTitle,
   versionsOf,
   type CompareVersion,
-  type ComparePair,
 } from "../../lib/chat/compare";
 import type { Projection } from "../../lib/chat/tree";
 import { cn } from "../../lib/utils";
@@ -28,6 +28,7 @@ import styles from "./compare-dialog.module.css";
 
 const COMPLETE = { type: "complete", reason: "unknown" } as const;
 const SIDES = ["left", "right"] as const;
+type Side = 0 | 1;
 
 /** A projected message as assistant-ui's, for a message context of its own (off screen too). */
 function useThreadMessage(projection: Projection, id: string | undefined): ThreadMessage | null {
@@ -35,6 +36,31 @@ function useThreadMessage(projection: Projection, id: string | undefined): Threa
     const item = id === undefined ? undefined : projection.items.find((i) => i.message.id === id);
     return item ? fromThreadMessageLike(item.message, item.message.id, COMPLETE) : null;
   }, [projection, id]);
+}
+
+/**
+ * The two versions shown. Each column keeps the version it was given (a snapshot): one that drops
+ * out of the projection mid-view (another page of entries, a reset) shows as having no answer
+ * until the dropdown picks another, so the dialog never closes on its own.
+ */
+function usePair(versions: readonly CompareVersion[], picked: string | undefined) {
+  const [pair, setPair] = useState<readonly [CompareVersion, CompareVersion] | undefined>(() => {
+    const ids = initialPair(versions, picked);
+    const of = (id: string) => versions.find((v) => v.id === id);
+    const a = ids && of(ids[0]);
+    const b = ids && of(ids[1]);
+    return a && b ? [a, b] : undefined;
+  });
+  const current = (v: CompareVersion): CompareVersion =>
+    versions.find((x) => x.id === v.id) ?? { id: v.id, k: v.k, role: v.role };
+  const shown = pair && ([current(pair[0]), current(pair[1])] as const);
+  const pick = (side: Side, id: string) => {
+    if (!pair) return;
+    const ids = pickVersion([pair[0].id, pair[1].id], side, id);
+    const next = (i: Side) => versions.find((v) => v.id === ids[i]) ?? (pair[i] as CompareVersion);
+    setPair([next(0), next(1)]);
+  };
+  return { shown, pick };
 }
 
 /**
@@ -59,30 +85,67 @@ export function CompareDialog({
 }) {
   const { controller, projection } = extras;
   const versions = useMemo(() => versionsOf(projection, messageId), [projection, messageId]);
-  const [pair, setPair] = useState<ComparePair | undefined>(() =>
-    initialPair(versions, picked ? messageId : undefined),
-  );
-  const band = useShellBand();
-  const sheet = band === "overlay" || band === "single";
+  const { shown, pick } = usePair(versions, picked ? messageId : undefined);
   useEffect(() => {
     controller?.announce(COMPARING);
   }, [controller]);
-  // A version gone from the projection (another page of entries, a reset) starts over.
-  const shown = pair?.map((id) => versions.find((v) => v.id === id));
-  const [left, right] = shown ?? [];
-  useEffect(() => {
-    if (left !== undefined && right !== undefined) return;
-    const next = initialPair(versions);
-    if (next === undefined) onClose();
-    else setPair(next);
-  }, [left, right, versions, onClose]);
-  if (left === undefined || right === undefined || pair === undefined) return null;
-  const withPrompts = promptsDiffer(projection, left, right);
   const show = (version: CompareVersion) => {
     if (version.headEntry !== undefined)
       controller?.showBranch(version.headEntry, version.revealEntry);
     onClose();
   };
+  const titleOf = (v: CompareVersion) =>
+    versionTitle(v, labelOf(v.id) ?? labelOf(v.answerId ?? ""));
+  return (
+    <CompareFrame
+      onClose={onClose}
+      description={
+        shown === undefined
+          ? NO_COMPARE
+          : `${versions.length} versions of this ${shown[0].role === "user" ? "message" : "answer"}. Nothing changes until you choose Show this version.`
+      }
+    >
+      {shown !== undefined && (
+        <div className={styles.columns}>
+          {shown.map((version, i) => {
+            const side: Side = i === 0 ? 0 : 1;
+            const other = shown[1 - side] as CompareVersion;
+            return (
+              <VersionColumn
+                key={SIDES[side]}
+                side={side}
+                version={version}
+                title={titleOf(version)}
+                choices={
+                  versions.length > 2
+                    ? choicesFor(versions, other.id).map((v) => ({ id: v.id, title: titleOf(v) }))
+                    : []
+                }
+                projection={projection}
+                withPrompt={promptsDiffer(projection, shown[0], shown[1])}
+                onPick={(id) => pick(side, id)}
+                onShow={() => show(version)}
+              />
+            );
+          })}
+        </div>
+      )}
+    </CompareFrame>
+  );
+}
+
+/** The dialog itself: title, description, Close; a sheet under 820 px. */
+function CompareFrame({
+  description,
+  onClose,
+  children,
+}: {
+  readonly description: string;
+  readonly onClose: () => void;
+  readonly children: ReactNode;
+}) {
+  const band = useShellBand();
+  const sheet = band === "overlay" || band === "single";
   return (
     <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
       <Dialog.Portal container={chatPortalContainer()}>
@@ -95,10 +158,7 @@ export function CompareDialog({
           <div className={styles.top}>
             <div className={styles.heading}>
               <Dialog.Title className={styles.title}>{COMPARE_TITLE}</Dialog.Title>
-              <Dialog.Description className={styles.description}>
-                {versions.length} versions of this {left.role === "user" ? "message" : "answer"}.
-                Nothing changes until you choose Show this version.
-              </Dialog.Description>
+              <Dialog.Description className={styles.description}>{description}</Dialog.Description>
             </div>
             <Dialog.Close asChild>
               <Button type="button" variant="ghost" size="icon" aria-label="Close">
@@ -106,24 +166,7 @@ export function CompareDialog({
               </Button>
             </Dialog.Close>
           </div>
-          <div className={styles.columns}>
-            {[left, right].map((version, i) => {
-              const side = i === 0 ? 0 : 1;
-              return (
-                <VersionColumn
-                  key={SIDES[side]}
-                  side={side}
-                  version={version}
-                  choices={versions.length > 2 ? choicesFor(versions, pair[1 - side] ?? "") : []}
-                  labelOf={labelOf}
-                  projection={projection}
-                  withPrompt={withPrompts}
-                  onPick={(id) => setPair(pickVersion(pair, side, id))}
-                  onShow={() => show(version)}
-                />
-              );
-            })}
-          </div>
+          {children}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -133,65 +176,69 @@ export function CompareDialog({
 function VersionColumn({
   side,
   version,
+  title,
   choices,
-  labelOf,
   projection,
   withPrompt,
   onPick,
   onShow,
 }: {
-  readonly side: 0 | 1;
+  readonly side: Side;
   readonly version: CompareVersion;
+  /** "Version k" and its label ("Version 3 · cheaper"). */
+  readonly title: string;
   /** The dropdown's versions (more than two in all), else none. */
-  readonly choices: readonly CompareVersion[];
-  readonly labelOf: (messageId: string) => string | undefined;
+  readonly choices: readonly { readonly id: string; readonly title: string }[];
   readonly projection: Projection;
   readonly withPrompt: boolean;
   readonly onPick: (id: string) => void;
   readonly onShow: () => void;
 }) {
-  const label = labelOf(version.id) ?? labelOf(version.answerId ?? "");
-  const title = versionTitle(version, label);
   const answer = useThreadMessage(projection, version.answerId);
   const prompt = useThreadMessage(projection, withPrompt ? version.promptId : undefined);
+  const head = (
+    <div className={styles.columnHead}>
+      <h3 className={styles.columnTitle}>{title}</h3>
+      {choices.length > 0 && (
+        <select
+          aria-label={`Version in the ${SIDES[side]} column`}
+          className={styles.pick}
+          value={version.id}
+          onChange={(e) => onPick(e.target.value)}
+        >
+          {choices.map((v) => (
+            <option key={v.id} value={v.id}>
+              {v.title}
+            </option>
+          ))}
+        </select>
+      )}
+      {answer !== null && <MessageFooter shown />}
+    </div>
+  );
+  const promptView = prompt !== null && (
+    <MessageProvider message={prompt} index={0}>
+      <ReadOnlyPrompt />
+    </MessageProvider>
+  );
   return (
     <section
       role="region"
-      aria-label={label === undefined ? title : `Version ${version.k}, ${label}`}
+      aria-label={title}
       className={styles.column}
       data-kobe-compare-column={SIDES[side]}
     >
-      <div className={styles.columnHead}>
-        <h3 className={styles.columnTitle}>{title}</h3>
-        {choices.length > 0 && (
-          <select
-            aria-label={`Version in the ${SIDES[side]} column`}
-            className={styles.pick}
-            value={version.id}
-            onChange={(e) => onPick(e.target.value)}
-          >
-            {choices.map((v) => (
-              <option key={v.id} value={v.id}>
-                {versionTitle(v, labelOf(v.id) ?? labelOf(v.answerId ?? ""))}
-              </option>
-            ))}
-          </select>
-        )}
-        {answer !== null && (
-          <MessageProvider message={answer} index={0}>
-            <MessageFooter shown />
-          </MessageProvider>
-        )}
-      </div>
-      {prompt !== null && (
-        <MessageProvider message={prompt} index={0}>
-          <ReadOnlyPrompt />
-        </MessageProvider>
-      )}
       {answer === null ? (
-        <p className={styles.empty}>No answer on this version.</p>
+        <>
+          {head}
+          {promptView}
+          <p className={styles.empty}>No answer on this version.</p>
+        </>
       ) : (
+        // One message context per column: the heading's usage and the answer read the same one.
         <MessageProvider message={answer} index={0}>
+          {head}
+          {promptView}
           <ReadOnlyAnswer />
         </MessageProvider>
       )}

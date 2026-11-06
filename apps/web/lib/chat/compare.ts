@@ -13,7 +13,7 @@ export const NO_COMPARE = "This message has no other versions to compare.";
 export interface CompareVersion {
   /** The version's own message (a sibling of the others). */
   readonly id: string;
-  /** Its place among its siblings, 1-based: the picker's "Version k". */
+  /** Its place among all the message's siblings, 1-based: the picker's "Version k of N". */
   readonly k: number;
   readonly role: "user" | "assistant";
   /** The prompt shown above its answer: a version of a prompt. */
@@ -52,11 +52,11 @@ export function versionsOf(
   if (self === undefined) return [];
   const role = self.message.role;
   if (role !== "user" && role !== "assistant") return [];
-  const siblings = items.filter(
-    (i) => i.parentId === self.parentId && i.message.role === role && committed(i),
-  );
+  // The picker counts every sibling (a live or other-role one too): k is that position.
+  const all = items.filter((i) => i.parentId === self.parentId);
+  const siblings = all.filter((i) => i.message.role === role && committed(i));
   if (siblings.length < 2) return [];
-  return siblings.map((item, index) => {
+  return siblings.map((item) => {
     const id = item.message.id;
     const answer =
       role === "assistant"
@@ -69,7 +69,7 @@ export function versionsOf(
     const revealEntry = firstEntryOf(item);
     return {
       id,
-      k: index + 1,
+      k: all.indexOf(item) + 1,
       role,
       ...(role === "user" ? { promptId: id } : {}),
       ...(answerId === undefined ? {} : { answerId }),
@@ -112,25 +112,42 @@ export function choicesFor(
   return versions.filter((v) => v.id !== other);
 }
 
-/** A column's heading: its label (CT9), else "Version k". */
-export function versionTitle(version: Pick<CompareVersion, "k">, label?: string): string {
-  return label ?? `Version ${version.k}`;
+/** Whether a message can be compared (the picker's icon, the tree's menu, the palette). */
+export function comparable(
+  projection: Pick<Projection, "items" | "lastEntryOfNode">,
+  messageId: string,
+): boolean {
+  return versionsOf(projection, messageId).length >= 2;
 }
 
-/** The prompt's text as the member sent it (the projection keeps it in the meta). */
-function promptText(projection: Pick<Projection, "items">, id: string | undefined): string {
+/** A heading, option or region name: "Version k", then its label (CT9) as the picker shows it. */
+export function versionTitle(version: Pick<CompareVersion, "k">, label?: string): string {
+  return label === undefined ? `Version ${version.k}` : `Version ${version.k} · ${label}`;
+}
+
+/** What a prompt sent: its words, skill, app items and files (the projection's meta). */
+function promptSent(projection: Pick<Projection, "items">, id: string | undefined): string {
   if (id === undefined) return "";
   const item = projection.items.find((i) => i.message.id === id);
   const meta = item ? messageMeta(item.message) : undefined;
-  return meta?.kind === "user" ? meta.text : "";
+  if (meta?.kind !== "user") return "";
+  return JSON.stringify([
+    meta.text,
+    meta.skill ?? null,
+    meta.references ?? [],
+    (meta.attachments ?? []).map((f) => [f.name, f.mimeType, f.path ?? null]),
+  ]);
 }
 
-/** Whether the columns show their prompts: versions of a prompt whose texts differ (an edit). */
+/**
+ * Whether the columns show their prompts: versions of a prompt that sent something different (an
+ * edit: other words, skill, items or files); a regenerate sends the same again.
+ */
 export function promptsDiffer(
   projection: Pick<Projection, "items">,
   a: CompareVersion | undefined,
   b: CompareVersion | undefined,
 ): boolean {
   if (a?.promptId === undefined || b?.promptId === undefined) return false;
-  return promptText(projection, a.promptId) !== promptText(projection, b.promptId);
+  return promptSent(projection, a.promptId) !== promptSent(projection, b.promptId);
 }
