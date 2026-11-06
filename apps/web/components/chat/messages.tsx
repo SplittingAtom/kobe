@@ -348,8 +348,8 @@ function AnswerMessage({ meta }: { readonly meta: KobeMessageMeta | undefined })
                 </>
               )}
               <ForkAction meta={meta} />
-              <ContinueAction />
               <AnswerDetailToggle />
+              <ContinueAction />
               <AnswerFeedbackButtons />
               <CompactNowButton />
             </ActionBarPrimitive.Root>

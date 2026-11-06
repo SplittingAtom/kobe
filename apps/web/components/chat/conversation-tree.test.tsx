@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isMacPlatform } from "../../lib/shell/commands";
+import { isMacPlatform } from "../../lib/shell/shortcuts";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { EMPTY_TREE_NOTE, FILES_LEFT_NOTE, TREE_HELP_TEXT } from "../../lib/chat/tree-panel";
 import { must } from "../../lib/testing/must";
@@ -40,12 +40,20 @@ function branchedThread(options: { readOnly?: boolean; test?: boolean } = {}) {
   const u1 = fake.addEntry(t, root, { role: "user", content: "start" });
   const a1 = fake.addEntry(t, u1, { role: "assistant", content: [{ type: "text", text: "a1" }] });
   const u2 = fake.addEntry(t, a1, { role: "user", content: "old question" });
-  const a2 = fake.addEntry(t, u2, {
+  const step = fake.addEntry(t, u2, {
     role: "assistant",
-    content: [
-      { type: "toolCall", id: "c1", name: "write", arguments: { path: "plan.md" } },
-      { type: "text", text: "old answer" },
-    ],
+    content: [{ type: "toolCall", id: "c1", name: "write", arguments: { path: "plan.md" } }],
+  });
+  const result = fake.addEntry(t, step, {
+    role: "toolResult",
+    toolCallId: "c1",
+    toolName: "write",
+    content: [{ type: "text", text: "written" }],
+    isError: false,
+  });
+  const a2 = fake.addEntry(t, result, {
+    role: "assistant",
+    content: [{ type: "text", text: "old answer" }],
   });
   const u2b = fake.addEntry(t, a1, { role: "user", content: "new question" });
   const a2b = fake.addEntry(t, u2b, {
@@ -66,7 +74,8 @@ const row = (text: string | RegExp) =>
   within(tree()).getByRole("treeitem", { name: typeof text === "string" ? new RegExp(text) : text });
 const bar = () => screen.queryByRole("region", { name: "Another branch" });
 const leafPosts = () => chatRequests(fake, "POST").filter((r) => r.path.endsWith("/leaf"));
-const writes = () => fake.requests.filter((r) => r.method !== "GET");
+const writes = () =>
+  fake.requests.filter((r) => r.method !== "GET" && r.path.startsWith("/v1/threads"));
 
 async function openTree() {
   const button = await screen.findByRole("button", { name: /^Conversation tree/ }, WAIT);
@@ -100,7 +109,7 @@ describe("opening and closing (ac-1)", () => {
     expect(within(dialog).getByText("1 branch · 0 forks")).toBeTruthy();
     expect(within(dialog).getByText(TREE_HELP_TEXT)).toBeTruthy();
     // The conversation stays mounted under it.
-    expect(screen.getByText("new answer")).toBeTruthy();
+    expect(must(document.querySelector("[data-kobe-thread-root]")).textContent).toContain("new answer");
     await userEvent.setup().keyboard("{Escape}");
     await waitFor(() => expect(panel()).toBeNull());
     expect(window.location.pathname).toBe("/");
@@ -206,7 +215,7 @@ describe("Continue from here (ac-2)", () => {
     expect(dimmed.some((x) => x?.includes("new question"))).toBe(true);
     expect(dimmed.some((x) => x?.includes("new answer"))).toBe(true);
     expect(screen.getByText("new answer")).toBeTruthy();
-    expect(writes()).toEqual([]);
+    expect(writes().map((r) => r.path)).toEqual([]);
     const input = await composer();
     await waitFor(() => expect(document.activeElement).toBe(input));
     await user.keyboard("{Escape}");

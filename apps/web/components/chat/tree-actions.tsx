@@ -326,7 +326,15 @@ export function NodeMenu({
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal container={chatPortalContainer()}>
-        <DropdownMenu.Content data-kobe-portal align="end" sideOffset={4} className={CONTENT}>
+        {/* Portaled, but React events still bubble to the row: they stop here. */}
+        <DropdownMenu.Content
+          data-kobe-portal
+          align="end"
+          sideOffset={4}
+          className={CONTENT}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
           {items.map((item) => (
             <DropdownMenu.Item key={item} className={ITEM} onSelect={() => onPick(item)}>
               {TREE_MENU_NAMES[item]}

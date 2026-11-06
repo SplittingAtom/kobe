@@ -191,6 +191,7 @@ function TreeGraph({
   const siblings = useMemo(() => siblingsOf(tree.nodes), [tree.nodes]);
   const ids = layout.rows.map((r) => r.id);
   const current = focus !== undefined && ids.includes(focus) ? focus : (tree.headId ?? ids[0]);
+  const currentRow = current;
   useEffect(() => {
     if (!moved.current || current === undefined) return;
     moved.current = false;
@@ -207,6 +208,9 @@ function TreeGraph({
   };
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.target instanceof HTMLInputElement) return;
+    // The row the key was pressed on (focus may not have reached the state yet).
+    const on = (e.target as Element).closest?.("[data-kobe-tree-row]")?.getAttribute("data-kobe-tree-row");
+    const current = on ?? currentRow;
     if (KEYS.has(e.key)) {
       e.preventDefault();
       moved.current = true;

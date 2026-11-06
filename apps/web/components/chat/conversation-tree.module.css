@@ -123,7 +123,7 @@
   flex: none;
   padding: 0 0.375rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--kobe-radius-pill);
   color: var(--foreground);
   font-size: 0.75rem;
 }

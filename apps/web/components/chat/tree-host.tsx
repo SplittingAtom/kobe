@@ -64,18 +64,17 @@ export function TreeHost({
   }, [labels, nodeOfEntry]);
   const labelOf = useCallback((id: string) => byNode.get(id), [byNode]);
   const { show, close, open: isOpen } = at;
-  // Another thread (or none) on screen closes it; coming back does not reopen it.
+  // Another thread (or a new draft) on screen closes it; coming back does not reopen it. Before
+  // the first thread shows (a reload at /tree) there is nothing to compare with.
   const shownAt = useRef<string | null>(null);
   useEffect(() => {
-    if (isOpen && shownAt.current === null) shownAt.current = threadId;
-    if (!isOpen) shownAt.current = null;
-  }, [isOpen, threadId]);
-  const ready = extras?.state.phase === "ready" || extras?.state.phase === "error";
-  useEffect(() => {
-    if (!isOpen) return;
-    const moved = shownAt.current !== null && shownAt.current !== threadId;
-    if (moved || (ready && threadId === null)) close();
-  }, [isOpen, threadId, ready, close]);
+    if (!isOpen) {
+      shownAt.current = null;
+      return;
+    }
+    if (shownAt.current === null) shownAt.current = threadId;
+    else if (shownAt.current !== threadId) close();
+  }, [isOpen, threadId, close]);
   const openThread = useCallback(
     (id: string) => {
       if (route === undefined) local.close();
