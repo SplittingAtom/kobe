@@ -48,6 +48,7 @@ import {
 } from "../../lib/chat/markers";
 import type { KobeMessageMeta } from "../../lib/chat/tree";
 import { cn } from "../../lib/utils";
+import { comparable } from "../../lib/chat/compare";
 import { useTreeData } from "./tree-context";
 import { TreeLink } from "./tree-entry-points";
 import { IconAction } from "../shell/icon-action";
@@ -459,8 +460,18 @@ export function BranchPicker({ className }: { readonly className?: string }) {
       <BranchPickerPrimitive.Next asChild>
         <IconAction command="next-branch" size="sm" />
       </BranchPickerPrimitive.Next>
+      <CompareButton />
     </BranchPickerPrimitive.Root>
   );
+}
+
+/** Compare versions (CT10, KOBE-547): beside the picker's arrows (shown with N ≥ 2). */
+function CompareButton() {
+  const id = useAuiState((s) => s.message.id);
+  const tree = useTreeData();
+  const projection = useKobeExtras()?.projection;
+  if (tree === null || projection === undefined || !comparable(projection, id)) return null;
+  return <IconAction command="compare-versions" size="sm" onClick={() => tree.compare(id)} />;
 }
 
 /** "Forked here": above a message that has other versions, with the picker inline. */

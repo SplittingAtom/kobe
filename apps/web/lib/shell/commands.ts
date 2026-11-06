@@ -1,5 +1,6 @@
 import {
   AppWindowIcon,
+  Columns2Icon,
   ArchiveIcon,
   ArchiveRestoreIcon,
   ArrowLeftIcon,
@@ -492,6 +493,15 @@ const LIST = [
     icon: GitBranchPlusIcon,
     scope: "message",
     palette: true,
+  },
+  // CT10 (KOBE-547): the branch picker's Compare and the tree's "Compare with…".
+  {
+    id: "compare-versions",
+    name: "Compare versions",
+    icon: Columns2Icon,
+    scope: "message",
+    palette: true,
+    readOnlySafe: true,
   },
   // CT4 (KOBE-546): the header's "⑂ Tree"; the palette only, no global chord (Q29).
   {
