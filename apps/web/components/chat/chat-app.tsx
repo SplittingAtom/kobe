@@ -393,23 +393,23 @@ function ChatWorkspace({
                               <RailDrawerButton teamName={teamName} />
                             </ShellSlot>
                             <TreeHost route={treeRoute} onOpenThread={openFromTree}>
-                            <ContextViewerHost>
-                              <WorkspaceGrid
-                                rail={
-                                  <WorkspaceRail
-                                    teamName={teamName || "Workspace"}
-                                    listError={listError}
-                                    filesApi={filesApi}
-                                  />
-                                }
-                                artifact={<ArtifactPanel filesApi={filesApi} />}
-                                conversation={
-                                  <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
-                                    <ThreadView onOpenThread={setThreadId} inShell />
-                                  </main>
-                                }
-                              />
-                            </ContextViewerHost>
+                              <ContextViewerHost>
+                                <WorkspaceGrid
+                                  rail={
+                                    <WorkspaceRail
+                                      teamName={teamName || "Workspace"}
+                                      listError={listError}
+                                      filesApi={filesApi}
+                                    />
+                                  }
+                                  artifact={<ArtifactPanel filesApi={filesApi} />}
+                                  conversation={
+                                    <main id="kobe-chat-main" className={styles.main} tabIndex={-1}>
+                                      <ThreadView onOpenThread={setThreadId} inShell />
+                                    </main>
+                                  }
+                                />
+                              </ContextViewerHost>
                             </TreeHost>
                             {/* The Threads panel (KOBE-453) needs the thread list: it renders in here. */}
                             {threadsPanel !== undefined && (

@@ -1,6 +1,14 @@
 /** KOBE-546 (CT4, CT8, CT9, CT18): the tree panel's pure half. */
 import { beforeEach, describe, expect, it } from "vitest";
-import { assistant, branchMarker, entry, resetEntrySeq, text, toolCall, user } from "./testing/entries";
+import {
+  assistant,
+  branchMarker,
+  entry,
+  resetEntrySeq,
+  text,
+  toolCall,
+  user,
+} from "./testing/entries";
 import { must } from "../testing/must";
 import { projectTree, type TreeNode } from "./tree-nodes";
 import { projectThread } from "./tree";
@@ -46,7 +54,11 @@ const tree = (head = "b2") =>
     labels: [{ entry_id: "v1", label: "try 5% cut" }],
     runs: [],
   });
-const nodeOf = (id: string, t = tree()) => must(t.nodes.find((n) => n.id === id), id);
+const nodeOf = (id: string, t = tree()) =>
+  must(
+    t.nodes.find((n) => n.id === id),
+    id,
+  );
 
 const ctx: TreeMenuContext = {
   owner: true,
@@ -92,10 +104,16 @@ describe("texts", () => {
 describe("the node menu (CT4)", () => {
   it("offers the owner's items in the spec's order", () => {
     const t = tree();
-    expect(treeMenu(nodeOf("v1", t), t, { ...ctx, offLeafBranch: true, hasSiblings: true })).toEqual(
-      ["show", "make-current", "edit", "label", "remove-label", "fork", "copy"],
-    );
-    expect(treeMenu(nodeOf("a1", t), t, ctx)).toEqual(["show", "continue", "label", "fork", "copy"]);
+    expect(
+      treeMenu(nodeOf("v1", t), t, { ...ctx, offLeafBranch: true, hasSiblings: true }),
+    ).toEqual(["show", "make-current", "edit", "label", "remove-label", "fork", "copy"]);
+    expect(treeMenu(nodeOf("a1", t), t, ctx)).toEqual([
+      "show",
+      "continue",
+      "label",
+      "fork",
+      "copy",
+    ]);
   });
 
   it("never offers Continue from here on the leaf's last answer", () => {

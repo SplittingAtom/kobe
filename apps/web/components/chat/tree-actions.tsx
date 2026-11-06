@@ -289,8 +289,7 @@ function LabelEditor({
   );
 }
 
-const CONTENT =
-  "bg-background text-foreground z-50 min-w-48 rounded-lg border p-1 shadow-md";
+const CONTENT = "bg-background text-foreground z-50 min-w-48 rounded-lg border p-1 shadow-md";
 const ITEM =
   "hover:bg-muted focus:bg-muted flex cursor-pointer items-center rounded-md px-2 py-1.5 text-sm outline-none select-none";
 

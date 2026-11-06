@@ -71,7 +71,9 @@ function branchedThread(options: { readOnly?: boolean; test?: boolean } = {}) {
 const panel = () => screen.queryByRole("dialog", { name: "Conversation tree" });
 const tree = () => within(must(panel())).getByRole("tree");
 const row = (text: string | RegExp) =>
-  within(tree()).getByRole("treeitem", { name: typeof text === "string" ? new RegExp(text) : text });
+  within(tree()).getByRole("treeitem", {
+    name: typeof text === "string" ? new RegExp(text) : text,
+  });
 const bar = () => screen.queryByRole("region", { name: "Another branch" });
 const leafPosts = () => chatRequests(fake, "POST").filter((r) => r.path.endsWith("/leaf"));
 const writes = () =>
@@ -90,9 +92,7 @@ async function opened(t: string) {
 
 async function menuOf(text: string) {
   const r = row(text);
-  await userEvent.setup().click(
-    within(r).getByRole("button", { name: /^Actions for/ }),
-  );
+  await userEvent.setup().click(within(r).getByRole("button", { name: /^Actions for/ }));
   return screen.findByRole("menu");
 }
 
@@ -109,7 +109,9 @@ describe("opening and closing (ac-1)", () => {
     expect(within(dialog).getByText("1 branch · 0 forks")).toBeTruthy();
     expect(within(dialog).getByText(TREE_HELP_TEXT)).toBeTruthy();
     // The conversation stays mounted under it.
-    expect(must(document.querySelector("[data-kobe-thread-root]")).textContent).toContain("new answer");
+    expect(must(document.querySelector("[data-kobe-thread-root]")).textContent).toContain(
+      "new answer",
+    );
     await userEvent.setup().keyboard("{Escape}");
     await waitFor(() => expect(panel()).toBeNull());
     expect(window.location.pathname).toBe("/");
@@ -193,7 +195,9 @@ describe("opening and closing (ac-1)", () => {
     await opened(t);
     const dialog = await openTree();
     expect(within(dialog).getByText("1 branch · 1 fork")).toBeTruthy();
-    const fork = within(tree()).getByRole("treeitem", { name: "Fork, Budget 2027 — marketing cut" });
+    const fork = within(tree()).getByRole("treeitem", {
+      name: "Fork, Budget 2027 — marketing cut",
+    });
     await userEvent.setup().click(fork);
     await waitFor(() => expect(new URL(window.location.href).searchParams.get("thread")).toBe(f));
     await waitFor(() => expect(panel()).toBeNull());
@@ -236,7 +240,9 @@ describe("Continue from here (ac-2)", () => {
     await opened(t);
     await openTree();
     const menu = await menuOf("old answer");
-    await userEvent.setup().click(within(menu).getByRole("menuitem", { name: "Continue from here" }));
+    await userEvent
+      .setup()
+      .click(within(menu).getByRole("menuitem", { name: "Continue from here" }));
     await waitFor(() => expect(panel()).toBeNull());
     expect(await screen.findByText(/Continuing from the answer at “old answer”/)).toBeTruthy();
     expect(screen.getByText("old answer")).toBeTruthy();
@@ -249,18 +255,27 @@ describe("labels (ac-3)", () => {
     await opened(t);
     await openTree();
     const user = userEvent.setup();
-    await user.click(within(await menuOf("new question")).getByRole("menuitem", { name: "Label…" }));
+    await user.click(
+      within(await menuOf("new question")).getByRole("menuitem", { name: "Label…" }),
+    );
     const field = await screen.findByRole("textbox", { name: "Label" });
     await user.type(field, "  try 5% cut  {Enter}");
-    await waitFor(() => expect(fake.labelWrites).toEqual([{ threadId: t, entryId: u2b, label: "try 5% cut" }]));
+    await waitFor(() =>
+      expect(fake.labelWrites).toEqual([{ threadId: t, entryId: u2b, label: "try 5% cut" }]),
+    );
     expect(await within(tree()).findByText("try 5% cut")).toBeTruthy();
     await waitFor(() => expect(announcement()).toBe("Label saved"));
     // The filter dims every node whose text or label does not match.
-    await user.type(within(must(panel())).getByRole("searchbox", { name: "Filter the tree" }), "5%");
+    await user.type(
+      within(must(panel())).getByRole("searchbox", { name: "Filter the tree" }),
+      "5%",
+    );
     expect(row("new question").getAttribute("data-dimmed")).toBeNull();
     expect(row("old question").getAttribute("data-dimmed")).toBe("true");
     await user.clear(within(must(panel())).getByRole("searchbox", { name: "Filter the tree" }));
-    await user.click(within(await menuOf("new question")).getByRole("menuitem", { name: "Remove label" }));
+    await user.click(
+      within(await menuOf("new question")).getByRole("menuitem", { name: "Remove label" }),
+    );
     await waitFor(() => expect(fake.labelWrites.at(-1)?.label).toBeNull());
     await waitFor(() => expect(within(tree()).queryByText("try 5% cut")).toBeNull());
   });
@@ -312,7 +327,9 @@ describe("keyboard and accessibility (ac-4)", () => {
     expect(onScreen.getAttribute("aria-current")).toBe("true");
     expect(onScreen.getAttribute("aria-level")).toBe("1");
     expect(row("old question").getAttribute("aria-level")).toBe("2");
-    expect(row("old answer").getAttribute("aria-label")).toMatch(/^Agent, old answer, .*1 file changed$/);
+    expect(row("old answer").getAttribute("aria-label")).toMatch(
+      /^Agent, old answer, .*1 file changed$/,
+    );
     expect(onScreen.textContent).toContain("◀ on screen");
     expect(onScreen.textContent).toContain("leaf");
     const user = userEvent.setup();
@@ -329,7 +346,9 @@ describe("keyboard and accessibility (ac-4)", () => {
     await user.keyboard("{End}");
     expect(document.activeElement).toBe(row("new answer"));
     await user.keyboard("/");
-    expect(document.activeElement).toBe(within(dialog).getByRole("searchbox", { name: "Filter the tree" }));
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole("searchbox", { name: "Filter the tree" }),
+    );
     row("old question").focus();
     fireEvent.keyDown(row("old question"), { key: "ContextMenu" });
     const menu = await screen.findByRole("menu");
@@ -354,7 +373,9 @@ describe("keyboard and accessibility (ac-4)", () => {
     await screen.findByText("old answer", {}, WAIT);
     await openTree();
     const user = userEvent.setup();
-    await user.click(within(await menuOf("new answer")).getByRole("menuitem", { name: "Make it current" }));
+    await user.click(
+      within(await menuOf("new answer")).getByRole("menuitem", { name: "Make it current" }),
+    );
     const group = await screen.findByRole("group", { name: "Make it current" });
     expect(group.textContent).toContain(FILES_LEFT_NOTE);
     await user.click(within(group).getByRole("button", { name: "Make it current" }));
@@ -366,9 +387,11 @@ describe("keyboard and accessibility (ac-4)", () => {
     const { t } = branchedThread();
     await opened(t);
     await openTree();
-    await userEvent.setup().click(
-      within(await menuOf("old question")).getByRole("menuitem", { name: "Edit this message" }),
-    );
+    await userEvent
+      .setup()
+      .click(
+        within(await menuOf("old question")).getByRole("menuitem", { name: "Edit this message" }),
+      );
     await waitFor(() => expect(panel()).toBeNull());
     const editor = await screen.findByDisplayValue("old question", {}, WAIT);
     expect(editor.tagName).toBe("TEXTAREA");

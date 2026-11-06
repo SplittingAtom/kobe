@@ -1232,7 +1232,8 @@ export class ThreadController {
 
   /** Escape, the chip's ✕, another thread: the next send continues the branch on screen again. */
   readonly clearContinue = (): void => {
-    if (this.#state.continueFrom !== undefined) this.#set((s) => ({ ...s, continueFrom: undefined }));
+    if (this.#state.continueFrom !== undefined)
+      this.#set((s) => ({ ...s, continueFrom: undefined }));
   };
 
   /** A line for the chat's polite region (the tree's "Label saved", KOBE-546). */

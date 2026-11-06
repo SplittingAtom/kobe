@@ -28,10 +28,7 @@ export interface TreeRoute {
 /** In memory (a builder test, Workbench or eval pane: no address of its own). */
 function useLocalRoute(): TreeRoute {
   const [open, setOpen] = useState(false);
-  return useMemo(
-    () => ({ open, show: () => setOpen(true), close: () => setOpen(false) }),
-    [open],
-  );
+  return useMemo(() => ({ open, show: () => setOpen(true), close: () => setOpen(false) }), [open]);
 }
 
 export function TreeHost({

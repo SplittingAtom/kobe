@@ -26,4 +26,3 @@ export const TreeContext = createContext<TreeData | null>(null);
 export function useTreeData(): TreeData | null {
   return useContext(TreeContext);
 }
-

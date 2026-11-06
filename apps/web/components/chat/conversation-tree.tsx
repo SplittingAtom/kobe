@@ -83,7 +83,13 @@ export function useTreeModel(extras: KobeThreadExtras, data: TreeData) {
   return { tree, layout, forks, junctions, forkCount: forkList?.length ?? 0 };
 }
 
-function Graph({ layout, nodes }: { readonly layout: TreeLayout; readonly nodes: ReadonlyMap<string, TreeNode> }) {
+function Graph({
+  layout,
+  nodes,
+}: {
+  readonly layout: TreeLayout;
+  readonly nodes: ReadonlyMap<string, TreeNode>;
+}) {
   const x = (lane: number) => (lane - 0.5) * LANE_W;
   const y = (row: number) => row * ROW_H + ROW_H / 2;
   return (
@@ -101,7 +107,9 @@ function Graph({ layout, nodes }: { readonly layout: TreeLayout; readonly nodes:
             d={`M ${x(r.parentLane)} ${y(r.parentRow)} Q ${x(r.lane)} ${y(r.parentRow)} ${x(r.lane)} ${y(r.parentRow) + ROW_H / 2} L ${x(r.lane)} ${y(r.row)}`}
             fill="none"
             strokeWidth={1.5}
-            strokeDasharray={r.kind === "fork" || nodes.get(r.id)?.pending ? "4 3" : r.dotted ? "1 3" : undefined}
+            strokeDasharray={
+              r.kind === "fork" || nodes.get(r.id)?.pending ? "4 3" : r.dotted ? "1 3" : undefined
+            }
             style={{ stroke: `var(--kobe-lane-${r.lane})` }}
           />
         ),
@@ -209,7 +217,9 @@ function TreeGraph({
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.target instanceof HTMLInputElement) return;
     // The row the key was pressed on (focus may not have reached the state yet).
-    const on = (e.target as Element).closest?.("[data-kobe-tree-row]")?.getAttribute("data-kobe-tree-row");
+    const on = (e.target as Element)
+      .closest?.("[data-kobe-tree-row]")
+      ?.getAttribute("data-kobe-tree-row");
     const current = on ?? currentRow;
     if (KEYS.has(e.key)) {
       e.preventDefault();
@@ -247,7 +257,13 @@ function TreeGraph({
     if (fork) {
       const title = fork.title ?? UNTITLED_THREAD;
       return (
-        <div key={r.id} {...common} className={`${styles.row} ${styles.fork}`} aria-label={`Fork, ${title}`} data-kobe-tree-row={r.id}>
+        <div
+          key={r.id}
+          {...common}
+          className={`${styles.row} ${styles.fork}`}
+          aria-label={`Fork, ${title}`}
+          data-kobe-tree-row={r.id}
+        >
           <span className={styles.text}>
             ⑂ {title} <span className={styles.trail}>(fork, another thread)</span>
           </span>

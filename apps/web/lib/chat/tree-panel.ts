@@ -276,7 +276,7 @@ export function junctionGroups(tree: Pick<TreeProjection, "nodes">): readonly Ju
   for (const n of nodes) kids.set(n.parentId, [...(kids.get(n.parentId) ?? []), n]);
   const below = (start: TreeNode): TreeNode[] => {
     const out: TreeNode[] = [];
-    for (let stack = [start]; stack.length > 0; ) {
+    for (let stack = [start]; stack.length > 0;) {
       const n = stack.pop() as TreeNode;
       out.push(n);
       stack.push(...(kids.get(n.id) ?? []));
@@ -305,8 +305,7 @@ export function junctionGroups(tree: Pick<TreeProjection, "nodes">): readonly Ju
 }
 
 export type LabelCheck =
-  | { readonly ok: true; readonly label: string }
-  | { readonly ok: false; readonly message: string };
+  { readonly ok: true; readonly label: string } | { readonly ok: false; readonly message: string };
 
 export const LABEL_EMPTY = "Type a label, or choose Remove label.";
 export const LABEL_TOO_LONG = `A label is at most ${BRANCH_LABEL_MAX_CHARS} characters.`;
@@ -318,7 +317,9 @@ export function checkLabel(text: string): LabelCheck {
   if (trimmed === "") return { ok: false, message: LABEL_EMPTY };
   if ([...trimmed].length > BRANCH_LABEL_MAX_CHARS) return { ok: false, message: LABEL_TOO_LONG };
   const parsed = branchLabelSchema.safeParse(trimmed);
-  return parsed.success ? { ok: true, label: parsed.data } : { ok: false, message: LABEL_BAD_CHARS };
+  return parsed.success
+    ? { ok: true, label: parsed.data }
+    : { ok: false, message: LABEL_BAD_CHARS };
 }
 
 const LABEL_ERRORS: Readonly<Record<string, string>> = {
@@ -351,7 +352,11 @@ export function nodeEntries(
   const item = projection.items.find((i) => i.message.id === nodeId);
   const meta = item ? messageMeta(item.message) : undefined;
   const first =
-    meta?.kind === "user" ? meta.entryId : meta?.kind === "assistant" ? meta.entryIds[0] : undefined;
+    meta?.kind === "user"
+      ? meta.entryId
+      : meta?.kind === "assistant"
+        ? meta.entryIds[0]
+        : undefined;
   const last = projection.lastEntryOfNode.get(nodeId);
   return {
     ...(first === undefined ? {} : { first }),

@@ -14,7 +14,7 @@
    filter, node menu, keyboard moves, junction groups, label rules and error words, node entries,
    files left behind (CT6), the messages dimmed by Continue from here, the chip excerpt.
 2. Controller: `continueFrom(entryId)` / `clearContinue()` (`state.continueFrom`), `showBranch(entry,
-   reveal?)`, `reveal(entry)`, `announce(text)`. API `setThreadLabel` → `PUT …/labels/{entryId}`
+reveal?)`, `reveal(entry)`, `announce(text)`. API `setThreadLabel` → `PUT …/labels/{entryId}`
    (answer re-validated in wire casing, `branches.ts` `writeThreadLabel`); fake route.
 3. UI: `TreeHost` (context: notes, lineage, labels by message, open), panel
    `conversation-tree.tsx` (graph + rows), `tree-list.tsx` (narrow), `tree-actions.tsx` (menu,
@@ -33,7 +33,7 @@
 - `useFocusReread` (545) gained `replace(value)` (bumps the read seq so an older in-flight read
   cannot overwrite a label write's answer); `useBranches` exposes it as `replace`.
 - **Click:** a node on screen only scrolls (`reveal`); off screen `showBranch(last entry, reveal =
-  first entry)` (newest leaf below, CT4). A tip equal to the leaf clears the head.
+first entry)` (newest leaf below, CT4). A tip equal to the leaf clears the head.
 - **Continue from here:** the head stays when the answer is on the path on screen, else moves to
   the newest branch through it; `state.continueFrom` = the answer's last entry. `#send` treats it
   like an edit's explicit parent (`parent_entry_id`, head cleared at a non-queued send), clears it,
