@@ -185,7 +185,7 @@ describe("inline markers on a recorded thread (ac-1, ac-3)", () => {
 });
 
 describe("a carried branch summary (KOBE-548, ac-3)", () => {
-  it("shows a folded \"Summary of another branch\" on the branch it entered only", async () => {
+  it('shows a folded "Summary of another branch" on the branch it entered only', async () => {
     const thread = fake.addThread("Branches");
     const u1 = fake.addEntry(thread, null, ask("Pick a colour"));
     const a1 = fake.addEntry(thread, u1, say("Blue or green?"));
