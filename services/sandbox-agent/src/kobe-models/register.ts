@@ -7,6 +7,7 @@ import {
 } from "./protocol.js";
 import { createKobeProvider, kobeModel, type KobeProviderDeps, type PiAiLike } from "./provider.js";
 import { takeModelFilePath } from "./state-file.js";
+import { withTimeout } from "./timeout.js";
 import { ContextRecorder, takeContextFilePath } from "./context-capture.js";
 import {
   BranchSummaryCommand,
@@ -15,23 +16,6 @@ import {
 } from "./branch-summary.js";
 
 const RUN_TOKEN_WAIT_MS = 5_000;
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => resolve(undefined), ms);
-    timer.unref();
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error instanceof Error ? error : new Error(String(error)));
-      },
-    );
-  });
-}
 
 function sameModelLimits(a: ModelFileModel, b: ModelFileModel): boolean {
   return a.max_output_tokens === b.max_output_tokens && a.context_window === b.context_window;

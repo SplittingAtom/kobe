@@ -286,7 +286,10 @@ export class RunDispatcher {
       return { ended, leased };
     });
     if (!out.ended) return;
-    this.#h.log.warn({ run_id: stale.runId }, "failed a compaction run past its deadline");
+    this.#h.log.warn(
+      { run_id: stale.runId, kind: stale.kind },
+      `failed a ${stale.kind === "branch_summary" ? "branch summary" : "compaction"} run past its deadline`,
+    );
     if (out.leased) this.#h.track(this.sendStop(stale, "abort"));
     await this.#h.advance(stale.teamId, stale.threadId);
   }

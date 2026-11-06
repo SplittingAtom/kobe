@@ -3,7 +3,13 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { DropdownMenu } from "radix-ui";
 import { ChevronDownIcon } from "lucide-react";
-import { branchContextTokens, headOf, isBrowsing, messagesDiffer } from "../../lib/chat/head";
+import {
+  branchContextTokens,
+  carryOffered,
+  headOf,
+  isBrowsing,
+  messagesDiffer,
+} from "../../lib/chat/head";
 import { IconAction } from "../shell/icon-action";
 import { threadScale } from "../shell/context-gauge";
 import { chatPortalContainer } from "../ui/chat-portal";
@@ -86,7 +92,7 @@ function BranchBarBody({
   const scheduled = owner && state.summary?.scheduleId != null;
   const moving = state.busy.includes("leaf");
   // Make it current ▾ · and carry a summary (KOBE-548, CT11): owner, not on test threads.
-  const canCarry = owner && state.summary?.isTest !== true && head !== null;
+  const canCarry = owner && state.summary?.isTest !== true && carryOffered(entries, leaf, head);
   const [carrying, setCarrying] = useState(false);
   const leftBehind = useMemo(
     () => (head === null ? 0 : messagesDiffer(entries, nodeOfEntry, leaf, head)),

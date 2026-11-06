@@ -65,6 +65,13 @@
   - L5 (decision): the server accepts a target on the leaf's own path (Pi summarises the tail: a
     "rewind with summary"); the web refuses it (`ON_LEAF_BRANCH`) and never offers it (the menu
     item needs a node off the leaf's branch; the bar shows another branch only).
+- **Code review fixes:** the old leaf sent to Pi is the thread's leaf or, when that is a server
+  row Pi never had (`ka-` app card, `ku-` unsent prompt), its nearest Pi ancestor (recursive walk,
+  `checkTarget`); a summary under the target's parent is accepted only for a user-message target;
+  the bar's ▾ needs a head off the leaf's path (`carryOffered`); `carrySummary` keeps
+  `thread_busy` in the dialog and never re-reads after a refusal; `lockOwnedThread` reused (the
+  route maps its `read_only` to the contract's message); kobe-models shares `withTimeout`
+  (`timeout.ts`); the sweep's log names the run kind.
 - **Web (step 5):** marker `branch_summary` ("Summary of another branch", folded, Markdown; carried
   below a junction like the other markers, so it shows only on the branch it entered); the tree
   row was already KOBE-546's `SUMMARY_TEXT`. Dialog `branch-summary-dialog.tsx`: `carryText(n)`

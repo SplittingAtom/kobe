@@ -13,12 +13,12 @@ import { parseBranchSummaryResult } from "../sandbox-wire/branch-summary-end.js"
 import { piSessionEntrySql, treeEntrySql } from "../sandbox-wire/entries.js";
 import { endRunInTx } from "../sandbox-wire/run-state.js";
 import type { CommandOutcome } from "../sandbox-wire/types.js";
-import { findThread, type Viewer } from "../threads/repository.js";
+import type { Viewer } from "../threads/repository.js";
+import { lockOwnedThread } from "./access.js";
 import { compactionModel, type CompactionHost } from "./compaction.js";
-import { RunError } from "./errors.js";
 import { failureInfo } from "./failure-codes.js";
 import type { RunModelConfig } from "./models.js";
-import { getRunRow, lockThreadRow, requestStop, threadRunRows, type ThreadRow } from "./store.js";
+import { getRunRow, requestStop, threadRunRows, type ThreadRow } from "./store.js";
 import type { CatalogTokenLimits } from "../models/token-limits.js";
 
 /**
@@ -123,18 +123,53 @@ export async function summarizeBranch(
   return { thread_id: thread.id, entry_id: reported.entry_id, leaf_entry_id: reported.entry_id };
 }
 
-/** The owner's thread, locked; reader, Trash and test threads refused (CT19). */
+/**
+ * The owner's thread, locked (`lockOwnedThread`: 404, reader `read_only`, Trash); builder test,
+ * Workbench and eval threads refused `test_thread` (CT19).
+ */
 async function lockForSummary(tx: KobeTx, viewer: Viewer, threadId: string): Promise<ThreadRow> {
-  const found = await findThread(tx, viewer, threadId, { lock: true });
-  if (!found) throw new RunError("thread_not_found");
-  if (found.access !== "owner") throw new BranchSummaryError("read_only");
-  const thread = await lockThreadRow(tx, viewer.teamId, threadId);
-  if (!thread) throw new RunError("thread_not_found");
-  if (thread.deletedAt !== null) throw new RunError("thread_in_trash");
-  if (found.thread.isTest || thread.skillTest === true || thread.skillEval === true) {
+  const thread = await lockOwnedThread(tx, viewer, threadId, "thread_not_found");
+  const test = await tx.execute<{ is_test: boolean }>(sql`
+    SELECT is_test FROM threads WHERE team_id = ${viewer.teamId} AND id = ${threadId}`);
+  if (test.rows[0]?.is_test === true || thread.skillTest === true || thread.skillEval === true) {
     throw new BranchSummaryError("test_thread");
   }
   return thread;
+}
+
+/**
+ * The target must be a tree node Pi's session has; the old leaf is the thread's leaf, or, when that
+ * is a server-written row Pi never had (an app card `ka-`, a kept unsent prompt `ku-`), its nearest
+ * ancestor Pi has (as `withoutAppCards` does for `run.start`). Null: no such entry.
+ */
+async function checkTarget(
+  tx: KobeTx,
+  teamId: string,
+  thread: ThreadRow,
+  toEntryId: string,
+): Promise<string | null> {
+  const target = await tx.execute(sql`
+    SELECT 1 FROM thread_entries
+     WHERE team_id = ${teamId} AND thread_id = ${thread.id} AND entry_id = ${toEntryId}
+       AND ${piSessionEntrySql} AND ${treeEntrySql()}`);
+  if (target.rows.length === 0) throw new BranchSummaryError("entry_not_found");
+  if (thread.leafEntryId === null) return null;
+  const pi = sql`(${piSessionEntrySql} AND ${treeEntrySql()})`;
+  const from = await tx.execute<{ entry_id: string }>(sql`
+    WITH RECURSIVE up AS (
+      SELECT s.entry_id, s.parent_id, s.pi, 0 AS depth FROM (
+        SELECT entry_id, parent_id, ${pi} AS pi FROM thread_entries
+         WHERE team_id = ${teamId} AND thread_id = ${thread.id}
+           AND entry_id = ${thread.leafEntryId}) s
+      UNION ALL
+      SELECT s.entry_id, s.parent_id, s.pi, up.depth + 1 FROM up CROSS JOIN LATERAL (
+        SELECT entry_id, parent_id, ${pi} AS pi FROM thread_entries
+         WHERE team_id = ${teamId} AND thread_id = ${thread.id}
+           AND entry_id = up.parent_id) s
+       WHERE NOT up.pi AND up.depth < 1000
+    )
+    SELECT entry_id FROM up WHERE pi ORDER BY depth LIMIT 1`);
+  return from.rows[0]?.entry_id ?? null;
 }
 
 async function startInTx(
@@ -153,13 +188,7 @@ async function startInTx(
     isActiveRunStatus(r.status),
   );
   if (active || thread.status !== "idle") throw new BranchSummaryError("thread_busy");
-  // A node of this thread's tree that Pi's session has (not a server-written row).
-  const target = await tx.execute(sql`
-    SELECT 1 FROM thread_entries
-     WHERE team_id = ${teamId} AND thread_id = ${thread.id} AND entry_id = ${toEntryId}
-       AND ${piSessionEntrySql} AND ${treeEntrySql()}`);
-  if (target.rows.length === 0) throw new BranchSummaryError("entry_not_found");
-  const from = thread.leafEntryId;
+  const from = await checkTarget(tx, teamId, thread, toEntryId);
   if (from === null || from === toEntryId) throw new BranchSummaryError("nothing_to_summarize");
   const held = await tx.execute<{ n: number }>(sql`
     SELECT count(*)::int AS n FROM (
@@ -221,11 +250,12 @@ async function finish(
   const teamId = actor.team_id;
   const { runId, thread } = started;
   const out = await withAppendTx(host.db, teamId, async (tx) => {
-    const end =
-      answered === undefined
-        ? ({ status: "failed", error: failureInfo("summary_failed", "start_failed") } as const)
-        : ({ status: "failed", error: failureInfo(answered, "start_failed") } as const);
-    // On success the delivery has ended the run already; if it has not, the summary never landed.
+    // This end only lands when the delivery did not end the run (it does on every answer, and on a
+    // success it completed it): then the summary never landed.
+    const end = {
+      status: "failed",
+      error: failureInfo(answered ?? "summary_failed", "start_failed"),
+    } as const;
     const { ended } = await endRunInTx(tx, teamId, runId, end);
     const run = await getRunRow(tx, teamId, runId);
     // The leaf is the reported entry and it is a summary (never an old leaf a sandbox named).

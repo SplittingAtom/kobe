@@ -1148,7 +1148,7 @@ export class ThreadController {
    * Make it current and carry a summary (KOBE-548, CT11): Pi summarizes the branch the thread
    * leaves and puts the summary under `target` (a node off the leaf's branch: the web refuses one
    * on it); the summary is the new leaf, so the head follows it and the thread is read again. A
-   * refusal (one fixed message per code) shows as the thread's error too, as compaction's does.
+   * refusal shows in the dialog (and, except `thread_busy`, as the thread's error); no re-read.
    */
   readonly carrySummary = async (
     target: string,
@@ -1168,8 +1168,8 @@ export class ThreadController {
       }),
     );
     if (!res.ok) {
-      this.#fail(res.error);
-      await this.refresh();
+      // As Make it current: the dialog shows every refusal; a busy one stays there alone.
+      if (res.error.code !== "thread_busy") this.#fail(res.error);
       return res;
     }
     this.#set((s) => ({ ...s, followups: undefined, head: undefined }));

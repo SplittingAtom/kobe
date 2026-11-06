@@ -55,6 +55,10 @@ export function threadBranchSummaryRoutes(deps: ServerDeps): Hono<{ Variables: T
         if (err.code === "entry_not_found") return c.json(ENTRY_NOT_FOUND, 404);
         return c.json(branchSummaryError(err.code), BRANCH_SUMMARY_ERROR_HTTP_STATUS[err.code]);
       }
+      // A shared reader (`lockOwnedThread`): the contract's own read_only message.
+      if (err instanceof RunError && err.code === "read_only") {
+        return c.json(branchSummaryError("read_only"), BRANCH_SUMMARY_ERROR_HTTP_STATUS.read_only);
+      }
       // A thread row held past the lock timeout: the contract's own busy answer.
       if (err instanceof RunError && err.code === "thread_busy") {
         return c.json(

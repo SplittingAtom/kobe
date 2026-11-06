@@ -6,6 +6,7 @@ import {
   parseBranchSummaryRequest,
   type BranchSummaryOutcome,
 } from "./branch-summary-protocol.js";
+import { withTimeout } from "./timeout.js";
 
 /** The agent answers both dialogs from memory; never hold Pi on one that does not. */
 const DIALOG_WAIT_MS = 5_000;
@@ -36,23 +37,6 @@ export interface BranchSummaryContextLike {
 export interface TreePreparationLike {
   readonly userWantsSummary?: boolean;
   readonly entriesToSummarize?: readonly { readonly type?: unknown }[];
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(undefined), ms);
-    timer.unref();
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      () => {
-        clearTimeout(timer);
-        resolve(undefined);
-      },
-    );
-  });
 }
 
 /** Pi's thrown text as an outcome code (verified Pi 1.4.0 `navigateTree`). */
@@ -100,7 +84,9 @@ export class BranchSummaryCommand {
       return;
     }
     const request = parseBranchSummaryRequest(
-      await withTimeout(input(BRANCH_SUMMARY_REQUEST_UI_TITLE), DIALOG_WAIT_MS),
+      await withTimeout(input(BRANCH_SUMMARY_REQUEST_UI_TITLE), DIALOG_WAIT_MS).catch(
+        () => undefined,
+      ),
     );
     if (request === undefined) {
       // Not armed by the agent: a member typed the command. Nothing is written.

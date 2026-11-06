@@ -57,11 +57,15 @@ export async function mirrorBranchSummaryInTx(
   if (stored?.type !== "branch_summary" || stored.parentId !== reported.parent_id) {
     return { ok: false, capped };
   }
-  const target = await tx.execute<{ parent_id: string | null }>(sql`
-    SELECT parent_id FROM thread_entries
+  // Pi's placement: under the target, or under its parent only when the target is a user message.
+  const target = await tx.execute<{ parent_id: string | null; role: string | null }>(sql`
+    SELECT parent_id, payload -> 'message' ->> 'role' AS role FROM thread_entries
      WHERE team_id = ${teamId} AND thread_id = ${threadId} AND entry_id = ${m.toEntryId}`);
-  const placed = [m.toEntryId, target.rows[0]?.parent_id ?? null];
-  if (!placed.includes(reported.parent_id)) return { ok: false, capped };
+  const row = target.rows[0];
+  const placed =
+    reported.parent_id === m.toEntryId ||
+    (row?.role === "user" && row.parent_id !== null && reported.parent_id === row.parent_id);
+  if (!placed) return { ok: false, capped };
   await tx.execute(sql`
     UPDATE threads SET leaf_entry_id = ${reported.entry_id}, last_activity_at = now()
      WHERE team_id = ${teamId} AND id = ${threadId}`);

@@ -61,7 +61,7 @@ async function world(capabilities: readonly string[] = CAPABLE) {
   const second = await f.message(w.owner, threadId, "second");
   const two = ws.reply(await ws.started(second), "answer two");
   await f.until(w.team, second, "completed");
-  return { w, ws, threadId, a1: one.assistant, a2: two.assistant };
+  return { w, ws, threadId, u1: one.user, a1: one.assistant, u2: two.user, a2: two.assistant };
 }
 
 const summarize = (w: RunWorld, threadId: string, body: object, replica = 0) =>
@@ -391,5 +391,53 @@ describe("POST /v1/threads/{id}/branch-summary (KOBE-548)", () => {
     expect(stop.mode).toBe("abort");
     ws.branchSummarized(frame, { code: "summary_failed", message: "cancelled" });
     expectError(await pending, "summary_failed", 502);
+  });
+
+  it("sends the nearest Pi entry as the old leaf when the leaf is a server row (app card)", async () => {
+    const { w, ws, threadId, a1, a2 } = await world();
+    const card = `ka-${"0".repeat(23)}1`;
+    await f.fx.admin.query(
+      `INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload)
+       VALUES ($1, $2, $3, $4, 'custom_message', $5)`,
+      [w.team, threadId, card, a2, { type: "custom_message", customType: "kobe.app_card" }],
+    );
+    await f.fx.admin.query(`UPDATE threads SET leaf_entry_id = $3 WHERE team_id = $1 AND id = $2`, [
+      w.team,
+      threadId,
+      card,
+    ]);
+    const pending = summarize(w, threadId, { to_entry_id: a1 });
+    const frame = await ws.summarizing();
+    expect(frame.from_leaf_entry_id).toBe(a2);
+    ws.branchSummarized(frame, { summary: "S" });
+    expect((await pending).status).toBe(200);
+    // The summary is the leaf now: carrying into it is nothing to summarise.
+    expectError(
+      await summarize(w, threadId, { to_entry_id: must(await leafOf(w.team, threadId), "leaf") }),
+      "nothing_to_summarize",
+      409,
+    );
+  });
+
+  it("accepts a summary under a user-message target's parent (Pi's rule)", async () => {
+    const { w, ws, threadId, a1, u2 } = await world();
+    const pending = summarize(w, threadId, { to_entry_id: u2 });
+    const frame = await ws.summarizing();
+    const entryId = must(
+      ws.branchSummarized({ ...frame, to_entry_id: a1 }, { summary: "S" }),
+      "entry",
+    );
+    const res = await pending;
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    expect(await leafOf(w.team, threadId)).toBe(entryId);
+  });
+
+  it("refuses a summary under the parent of a target that is not a user message", async () => {
+    const { w, ws, threadId, u1, a1, a2 } = await world();
+    const pending = summarize(w, threadId, { to_entry_id: a1 });
+    const frame = await ws.summarizing();
+    ws.branchSummarized({ ...frame, to_entry_id: u1 }, { summary: "S" });
+    expectError(await pending, "summary_failed", 502);
+    expect(await leafOf(w.team, threadId)).toBe(a2);
   });
 });

@@ -2,7 +2,7 @@
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BRANCH_SUMMARY_ERROR_MESSAGES } from "@kobe/protocol";
+import { BRANCH_SUMMARY_ERROR_MESSAGES, branchSummaryError } from "@kobe/protocol";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { SUMMARY_TEXT } from "../../lib/chat/tree-panel";
 import { must } from "../../lib/testing/must";
@@ -132,6 +132,32 @@ describe("from the tree's node menu (ac-3)", () => {
     expect(
       await within(dialog).findByText(BRANCH_SUMMARY_ERROR_MESSAGES.summary_limit, {}, WAIT),
     ).toBeTruthy();
+  });
+
+  it("a busy refusal shows only in the dialog, and the thread is not read again", async () => {
+    const { t } = branchedThread();
+    await opened(t);
+    await openTree();
+    const user = userEvent.setup();
+    await user.click(
+      within(await menuOf("old answer")).getByRole("menuitem", {
+        name: "Make it current and carry a summary",
+      }),
+    );
+    const dialog = await carryDialog();
+    fake.failNext.set(
+      `POST /v1/threads/${t}/branch-summary`,
+      new Response(JSON.stringify(branchSummaryError("thread_busy")), {
+        status: 409,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const reads = chatRequests(fake, "GET").length;
+    await user.click(within(dialog).getByRole("button", { name: "Go" }));
+    const message = BRANCH_SUMMARY_ERROR_MESSAGES.thread_busy;
+    expect(await within(dialog).findByText(message, {}, WAIT)).toBeTruthy();
+    expect(screen.getAllByText(message)).toHaveLength(1);
+    expect(chatRequests(fake, "GET").length).toBe(reads);
   });
 
   it("is not offered to a reader, on a test thread, or on the leaf's own branch", async () => {
