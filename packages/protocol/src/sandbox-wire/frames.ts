@@ -11,7 +11,11 @@ import {
 } from "../common.js";
 import { connectorNameSchema } from "../tools.js";
 import { runTokenGrantSchema } from "../run-token.js";
-import { threadCompactFocusSchema, threadCompactResultShape } from "../threads.js";
+import {
+  branchSummaryFocusSchema,
+  threadCompactFocusSchema,
+  threadCompactResultShape,
+} from "../threads.js";
 import { SANDBOX_ERROR_CODES, SANDBOX_WIRE_VERSION } from "./connection.js";
 import {
   memoryPutFrameSchema,
@@ -565,6 +569,31 @@ export const threadCompactFrameSchema = frame("thread.compact", {
   trace: wireTraceContextSchema.optional(),
 });
 
+/**
+ * Summarise the branch being left (KOBE-542, CT11, CT20): Pi, through Kobe's Pi extension,
+ * summarises the entries between the common ancestor and `from_leaf_entry_id` and appends a
+ * `branch_summary` entry whose parent is `to_entry_id`. A run of kind `branch_summary`, created and
+ * delivered under the run lock exactly as `thread.compact`, so it carries the same run context.
+ * Not in {@link serverToSandboxFrameSchema} yet: KOBE-548 adds it with its result frame and the
+ * `thread_branch_summary` capability, and only if the CT11 spike (KOBE-541) passes.
+ */
+export const threadBranchSummaryFrameSchema = frame("thread.branch_summary", {
+  command_id: commandId,
+  thread_id: uuidSchema,
+  run_id: uuidSchema,
+  from_leaf_entry_id: idSchema,
+  to_entry_id: idSchema,
+  focus: branchSummaryFocusSchema.optional(),
+  model: z.strictObject({
+    alias: z.string().min(1).max(128),
+    gateway_model: gatewayModelSchema,
+    api: piModelApiSchema,
+  }),
+  model_limits: modelLimitsSchema.optional(),
+  run_token: runTokenGrantSchema,
+  trace: wireTraceContextSchema.optional(),
+});
+
 export const piUiResponseFrameSchema = frame("pi.ui_response", {
   thread_id: uuidSchema,
   response: piExtensionUiResponseSchema,
@@ -726,3 +755,4 @@ export type RunStopFrame = z.infer<typeof runStopFrameSchema>;
 export type CommandResultFrame = z.infer<typeof commandResultFrameSchema>;
 export type ThreadCompactFrame = z.infer<typeof threadCompactFrameSchema>;
 export type ThreadCompactResultFrame = z.infer<typeof threadCompactResultFrameSchema>;
+export type ThreadBranchSummaryFrame = z.infer<typeof threadBranchSummaryFrameSchema>;

@@ -409,6 +409,11 @@ export const EVENT_PAYLOAD_SCHEMAS = {
   "thread.updated": z.strictObject({
     thread_id: uuidSchema,
     title: generatedTitleSchema,
+    /**
+     * KOBE-542 (CT13): the thread's leaf after a leaf move (the route, a send's commit, a branch
+     * summary). Optional on the wire: events from before it, and title-only updates, omit it.
+     */
+    leaf_entry_id: idSchema.optional(),
   }),
   /** CE21: follow-ups for the composer, shown until the next send. */
   "thread.suggestions": z.strictObject({
