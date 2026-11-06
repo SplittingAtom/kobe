@@ -8,6 +8,7 @@ import {
   runEvents,
   runs,
   threadAppResults,
+  threadBranchLabels,
   threadEntries,
   threadFolders,
   threads,
@@ -160,5 +161,32 @@ export const conversationsFixtures: Record<(typeof conversations.team)[number], 
   },
   thread_folders: async (tx, teamId) => {
     await insertFolder(tx, teamId);
+  },
+  thread_branch_labels: async (tx, teamId) => {
+    // A label on a branch's first entry (KOBE-543, CT9), written by the thread's owner.
+    const threadId = await insertThread(tx, teamId);
+    const [thread] = await tx
+      .select({ ownerUserId: threads.ownerUserId })
+      .from(threads)
+      .where(eq(threads.id, threadId));
+    if (!thread) throw new Error("probe: thread vanished");
+    await tx
+      .insert(threadEntries)
+      .values({ teamId, threadId, entryId: "root", type: "session", payload: { probe: true } });
+    await tx.insert(threadEntries).values({
+      teamId,
+      threadId,
+      entryId: "branch",
+      parentId: "root",
+      type: "message",
+      payload: { probe: true },
+    });
+    await tx.insert(threadBranchLabels).values({
+      teamId,
+      threadId,
+      entryId: "branch",
+      label: "probe label",
+      createdBy: thread.ownerUserId,
+    });
   },
 };
