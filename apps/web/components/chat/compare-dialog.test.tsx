@@ -114,15 +114,18 @@ describe("opening, choosing and showing (ac-1)", () => {
     const left = within(column("Version 2")).getByRole("combobox", {
       name: "Version in the left column",
     });
-    expect(within(left).getAllByRole("option").map((o) => o.textContent)).toEqual([
-      "Version 1",
-      "Version 2",
-    ]);
+    expect(
+      within(left)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["Version 1", "Version 2"]);
     await user.selectOptions(left, "Version 1");
     expect(column("Version 1").textContent).toContain("answer one");
     expect(column("Version 3")).toBeTruthy();
     // Show this version: the head moves to that branch, the leaf stays, the dialog closes.
-    await user.click(within(column("Version 1")).getByRole("button", { name: "Show this version" }));
+    await user.click(
+      within(column("Version 1")).getByRole("button", { name: "Show this version" }),
+    );
     await waitFor(() => expect(dialog()).toBeNull());
     expect(await screen.findByText("answer one", {}, WAIT)).toBeTruthy();
     expect(screen.queryByText("answer three")).toBeNull();
@@ -159,7 +162,9 @@ describe("opening, choosing and showing (ac-1)", () => {
     await opened(t);
     await fromPicker();
     const user = userEvent.setup();
-    await user.click(within(column("Version 2")).getByRole("button", { name: "Show this version" }));
+    await user.click(
+      within(column("Version 2")).getByRole("button", { name: "Show this version" }),
+    );
     expect(await screen.findByText("two", { selector: "strong" }, WAIT)).toBeTruthy();
     expect(leafPosts()).toEqual([]);
     expect(fake.threads.get(t)?.leaf_entry_id).toBe(b3);
@@ -209,7 +214,11 @@ describe("the columns (ac-2)", () => {
     await opened(t);
     await fromPicker();
     const user = userEvent.setup();
-    const up = await within(column("Version 2")).findByRole("button", { name: "Good answer" }, WAIT);
+    const up = await within(column("Version 2")).findByRole(
+      "button",
+      { name: "Good answer" },
+      WAIT,
+    );
     await user.click(up);
     await waitFor(() => expect(up.getAttribute("aria-pressed")).toBe("true"));
     expect(fake.feedback.get(must(runs[1]))).toMatchObject({ rating: "up" });

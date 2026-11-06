@@ -74,7 +74,8 @@ export function CompareDialog({
   if (left === undefined || right === undefined || pair === undefined) return null;
   const withPrompts = promptsDiffer(projection, left, right);
   const show = (version: CompareVersion) => {
-    if (version.headEntry !== undefined) controller?.showBranch(version.headEntry, version.revealEntry);
+    if (version.headEntry !== undefined)
+      controller?.showBranch(version.headEntry, version.revealEntry);
     onClose();
   };
   return (
