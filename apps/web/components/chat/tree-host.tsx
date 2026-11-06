@@ -12,9 +12,10 @@ import {
 import { useBranches } from "../../lib/chat/use-branches";
 import { useLineage } from "../../lib/chat/use-lineage";
 import { ChatSessionContext, useKobeExtras } from "./kobe-runtime";
+import { CompareDialog } from "./compare-dialog";
 import { ConversationTreePanel } from "./conversation-tree";
 import { TreeCommands } from "./tree-commands";
-import { TreeContext, type TreeData } from "./tree-context";
+import { TreeContext, focusedMessageStore, type TreeData } from "./tree-context";
 
 export { useTreeData, type TreeData } from "./tree-context";
 
@@ -47,7 +48,20 @@ export function TreeHost({
   const threadId = extras?.state.threadId ?? null;
   const branches = useBranches(threadId, session);
   const lineage = useLineage(threadId, session);
-  const focusedMessage = useRef<string | null>(null);
+  const [focusedMessage] = useState(focusedMessageStore);
+  // Compare versions (CT10): the message it compares, on this thread only.
+  const [comparing, setComparing] = useState<{
+    thread: string;
+    message: string;
+    picked: boolean;
+  } | null>(null);
+  const compare = useCallback(
+    (message: string, picked = false) => {
+      if (threadId !== null) setComparing({ thread: threadId, message, picked });
+    },
+    [threadId],
+  );
+  const stopComparing = useCallback(() => setComparing(null), []);
   const nodeOfEntry = extras?.projection.nodeOfEntry;
   const labels = branches.notes.labels;
   const byNode = useMemo(() => {
@@ -92,9 +106,10 @@ export function TreeHost({
       lineage,
       labelOf,
       open: threadId === null ? null : show,
+      compare,
       focusedMessage,
     }),
-    [branches.notes, branches.replace, lineage, labelOf, threadId, show],
+    [branches.notes, branches.replace, lineage, labelOf, threadId, show, compare],
   );
   return (
     <TreeContext.Provider value={data}>
@@ -106,6 +121,16 @@ export function TreeHost({
           data={data}
           onClose={close}
           onOpenThread={openThread}
+        />
+      )}
+      {comparing !== null && extras !== undefined && comparing.thread === threadId && (
+        <CompareDialog
+          extras={extras}
+          key={`${comparing.message}:${comparing.picked}`}
+          messageId={comparing.message}
+          picked={comparing.picked}
+          labelOf={labelOf}
+          onClose={stopComparing}
         />
       )}
     </TreeContext.Provider>

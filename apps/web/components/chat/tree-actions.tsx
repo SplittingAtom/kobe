@@ -7,6 +7,7 @@ import { useContext, useState, type FormEvent, type ReactNode } from "react";
 import { forkPointOf, type ForkPoint } from "../../lib/chat/fork";
 import { branchLeafOf, messagesDiffer } from "../../lib/chat/head";
 import { isThreadRunning } from "../../lib/chat/thread-state";
+import { comparable } from "../../lib/chat/compare";
 import { branchPointOfMeta, type KobeMessageMeta } from "../../lib/chat/tree";
 import type { TreeNode, TreeProjection } from "../../lib/chat/tree-nodes";
 import {
@@ -87,8 +88,6 @@ export function useTreeActions(
   const owner = summary?.readOnly !== true && controller !== null;
   const testThread = summary?.isTest === true;
   const leafPath = nodePath(tree.nodes, tree.leafId);
-  const parents = new Map<string | null, number>();
-  for (const n of tree.nodes) parents.set(n.parentId, (parents.get(n.parentId) ?? 0) + 1);
 
   const menuOf = (node: TreeNode): readonly TreeMenuItem[] => {
     const { meta } = nodeEntries(projection, node.id);
@@ -97,7 +96,7 @@ export function useTreeActions(
       testThread,
       inTrash: summary?.deletedAt != null,
       offLeafBranch: !leafPath.has(node.id),
-      hasSiblings: (parents.get(node.parentId) ?? 0) > 1,
+      comparable: comparable(projection, node.id),
       canEdit: !isThreadRunning(state) && branchPointOfMeta(projection, meta) !== undefined,
       canRetry: node.empty === true && node.isLeaf && state.interruptedRun != null,
       forkable: forkPointOf(meta) !== undefined,
@@ -206,8 +205,9 @@ export function useTreeActions(
         });
       }
       case "compare":
-        // KOBE-547 adds it; hidden until then (`treeMenu`).
-        return undefined;
+        // The dialog takes the window (CT10); the tree closes under it.
+        onClose();
+        return data.compare(node.id, true);
     }
   };
 
