@@ -24,7 +24,7 @@ const session = () => [
 
 describe("projectThread: root branches (KOBE-214)", () => {
   it("shows the pending prompt of a root edit beside the first message, as the head", () => {
-    const p = projectThread(session(), "c1", {
+    const p = projectThread(session(), "c1", "c1", {
       run: newLiveRun("r1"),
       active: true,
       prompt: { text: "a better start", parentEntryId: "r0" },
@@ -37,7 +37,7 @@ describe("projectThread: root branches (KOBE-214)", () => {
     // The server names a queued message's parent only when its run starts; pending-messages read
     // before that says null. Shown at the root, the thread flashed a one-message branch at the
     // start of every queued run, which re-pinned a list the member had scrolled up (KOBE-415).
-    const p = projectThread(session(), "c1", {
+    const p = projectThread(session(), "c1", "c1", {
       run: newLiveRun("r1"),
       active: true,
       prompt: { text: "queued earlier", parentEntryId: null },
@@ -68,7 +68,7 @@ describe("projectThread: root branches (KOBE-214)", () => {
 
   it("leaves the empty version out while the root edit's prompt is still on screen", () => {
     const entries = [...session(), entry("k1", "r0", null, "custom")];
-    const p = projectThread(entries, "k1", {
+    const p = projectThread(entries, "k1", "k1", {
       run: newLiveRun("r1"),
       active: false,
       prompt: { text: "a better start", parentEntryId: "r0" },
@@ -109,7 +109,7 @@ describe("branchPoint", () => {
   });
 
   it("offers nothing for an answer or a prompt Pi hasn't committed", () => {
-    const p = projectThread(session(), "c1", {
+    const p = projectThread(session(), "c1", "c1", {
       run: newLiveRun("r1"),
       active: true,
       prompt: { text: "next", parentEntryId: "c1" },

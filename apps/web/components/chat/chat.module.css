@@ -478,3 +478,33 @@
   flex: 1;
   min-width: 0;
 }
+
+/* --- the branch bar (CT3, KOBE-544) --------------------------------------------------------- */
+
+.branchBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  margin: 0.25rem 0;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--kobe-radius-md);
+  background: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.branchBarLine {
+  flex: 1 1 auto;
+  margin: 0;
+  color: var(--muted-foreground);
+}
+
+.branchBarAction {
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.branchBarNotes {
+  flex-basis: 100%;
+}

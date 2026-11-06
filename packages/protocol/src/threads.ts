@@ -184,6 +184,8 @@ export const lineageRelativeSchema = z.strictObject({
   title: z.string().nullable(),
   deleted_at: timestampSchema.nullable(),
   owner: z.enum(["me", "other"]),
+  /** The entry the thread was forked at (KOBE-545); absent from older servers. */
+  forked_at_entry_id: idSchema.nullable().optional(),
 });
 export type LineageRelative = z.infer<typeof lineageRelativeSchema>;
 

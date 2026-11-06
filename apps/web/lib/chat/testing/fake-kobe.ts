@@ -182,6 +182,18 @@ export interface FakeArtifact {
 export const FAKE_FRAME_CSP =
   "sandbox allow-scripts allow-forms; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
+/** The newest message entry whose text holds `q` (the fake's content search, CT15). */
+function matchedEntry(thread: FakeThread, q: string): string | null {
+  const needle = q.toLowerCase();
+  const hit = [...thread.entries].reverse().find((e) => {
+    const message = (e.payload as { message?: { content?: unknown } }).message;
+    return JSON.stringify(message?.content ?? "")
+      .toLowerCase()
+      .includes(needle);
+  });
+  return hit?.entry_id ?? null;
+}
+
 export class FakeKobe {
   readonly teamId = uuid(1, 1);
   readonly requests: RecordedRequest[] = [];
@@ -806,6 +818,12 @@ export class FakeKobe {
       const run = this.run(runId);
       this.#thread(run.thread_id).title = title;
       this.emit(runId, "thread.updated", { thread_id: run.thread_id, title });
+    },
+    /** The leaf moved (CT13: the route in another tab, a commit): `thread.updated` on the run. */
+    leafMoved: (runId: string, leafEntryId: string) => {
+      const run = this.run(runId);
+      this.#thread(run.thread_id).leaf_entry_id = leafEntryId;
+      this.emit(runId, "thread.updated", { thread_id: run.thread_id, leaf_entry_id: leafEntryId });
     },
     /** The server's follow-up call answered (KOBE-222): `thread.suggestions` on the run. */
     suggest: (runId: string, suggestions: readonly string[]) => {
@@ -1557,14 +1575,22 @@ export class FakeKobe {
             folder === null ||
             (folder === "none" ? (t.folder_id ?? null) === null : t.folder_id === folder),
         )
-        .filter((t) => q === null || (t.title ?? "").toLowerCase().includes(q.toLowerCase()))
+        .filter(
+          (t) =>
+            q === null ||
+            (t.title ?? "").toLowerCase().includes(q.toLowerCase()) ||
+            matchedEntry(t, q) !== null,
+        )
         .sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at));
       const threads = list.map((t) =>
         q === null
           ? this.#summary(t)
           : {
               ...this.#summary(t),
-              matched_entry_id: null,
+              // Like the server: the matching message, which may be on an inactive branch.
+              matched_entry_id: (t.title ?? "").toLowerCase().includes(q.toLowerCase())
+                ? null
+                : matchedEntry(t, q),
               snippet: [{ text: t.title, highlight: true }],
               score: 1,
             },
@@ -1791,7 +1817,11 @@ export class FakeKobe {
       return json(201, { thread_id: forkId });
     }
     if (action === "leaf") {
-      if (this.activeRun(thread.thread_id)) return error(409, "thread_busy", "The thread is busy.");
+      // Like the server (CT3, KOBE-543): owner only; refused while a run is active or queued.
+      if (thread.read_only)
+        return error(403, "read_only", "This thread is shared with you read-only.");
+      if (this.activeRun(thread.thread_id) || this.#queued(thread.thread_id).length > 0)
+        return error(409, "thread_busy", "The thread is busy.");
       thread.leaf_entry_id = String(body?.entry_id);
       return json(200, this.#summary(thread));
     }

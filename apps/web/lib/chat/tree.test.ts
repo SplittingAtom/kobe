@@ -321,7 +321,7 @@ describe("projectThread with a live run", () => {
         payload: { message_id: "m1", content_index: 0, delta: "lo" },
       },
     ]);
-    const p = projectThread(history(), "a1", {
+    const p = projectThread(history(), "a1", "a1", {
       run,
       active: true,
       prompt: { text: "q2", parentEntryId: "a1" },
@@ -346,7 +346,7 @@ describe("projectThread with a live run", () => {
         { messageId: "m2", parts: [{ kind: "text" as const, contentIndex: 0, text: "step 2" }] },
       ],
     };
-    const p = projectThread(entries, "a1", { run, active: true });
+    const p = projectThread(entries, "a1", "a1", { run, active: true });
     expect(p.headId).toBe("a2");
     expect(content(p, "a2")).toEqual([
       { type: "text", text: "step 1" },

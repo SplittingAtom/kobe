@@ -8030,6 +8030,19 @@
                       "owner": {
                         "type": "string",
                         "enum": ["me", "other"]
+                      },
+                      "forked_at_entry_id": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       }
                     },
                     "required": ["thread_id", "title", "deleted_at", "owner"],
@@ -8110,6 +8123,19 @@
                     "owner": {
                       "type": "string",
                       "enum": ["me", "other"]
+                    },
+                    "forked_at_entry_id": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "required": ["thread_id", "title", "deleted_at", "owner"],
@@ -8159,6 +8185,19 @@
                 "owner": {
                   "type": "string",
                   "enum": ["me", "other"]
+                },
+                "forked_at_entry_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": ["thread_id", "title", "deleted_at", "owner"],

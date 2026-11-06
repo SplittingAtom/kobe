@@ -14,6 +14,7 @@ import type { ThreadSearchHit } from "../../lib/chat/types";
 import { ErrorNotice } from "../admin/error-notice";
 import { useChatSession } from "../chat/kobe-runtime";
 import chatStyles from "../chat/chat.module.css";
+import { HitBranchNote } from "./threads-search";
 import styles from "./shell.module.css";
 
 function SearchResults({
@@ -21,14 +22,14 @@ function SearchResults({
   onOpen,
 }: {
   readonly hits: readonly ThreadSearchHit[];
-  readonly onOpen: (threadId: string) => void;
+  readonly onOpen: (hit: ThreadSearchHit) => void;
 }) {
   if (hits.length === 0) return <p className={chatStyles.hint}>No conversations match.</p>;
   return (
     <ul className={styles.hits} aria-label="Search results">
       {hits.map((hit) => (
         <li key={hit.threadId}>
-          <button type="button" className={styles.hitTitle} onClick={() => onOpen(hit.threadId)}>
+          <button type="button" className={styles.hitTitle} onClick={() => onOpen(hit)}>
             {hit.title ?? "Untitled conversation"}
           </button>
           {/* Archived threads stay searchable (CE19), marked so the member knows where they live. */}
@@ -47,6 +48,9 @@ function SearchResults({
                 ),
               )}
             </p>
+          )}
+          {hit.matchedEntryId && (
+            <HitBranchNote threadId={hit.threadId} entryId={hit.matchedEntryId} />
           )}
         </li>
       ))}
@@ -160,9 +164,11 @@ export function ThreadSearch({ onOpenThread }: { readonly onOpenThread: (id: str
           {search.status === "done" && (
             <SearchResults
               hits={search.hits}
-              onOpen={(id) => {
+              onOpen={(hit) => {
                 clear();
-                onOpenThread(id);
+                // CT15: the thread opens on the hit's branch, scrolled to it.
+                if (hit.matchedEntryId) session.openHit(hit.threadId, hit.matchedEntryId);
+                onOpenThread(hit.threadId);
               }}
             />
           )}

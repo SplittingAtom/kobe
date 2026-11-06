@@ -300,6 +300,18 @@ describe("thread lineage response", () => {
     });
   });
 
+  it("takes forked_at_entry_id on a relative: valid, null, absent; refuses empty", () => {
+    const withAt = { ...full, forks: [{ ...sibling(C), forked_at_entry_id: "c3d4e5f6" }] };
+    expect(threadLineageResponseSchema.parse(withAt)).toEqual(withAt);
+    const withNull = { ...full, forks: [{ ...sibling(C), forked_at_entry_id: null }] };
+    expect(threadLineageResponseSchema.parse(withNull)).toEqual(withNull);
+    expect(threadLineageResponseSchema.parse(full).forks[0]).not.toHaveProperty(
+      "forked_at_entry_id",
+    );
+    const empty = { ...full, forks: [{ ...sibling(C), forked_at_entry_id: "" }] };
+    expect(threadLineageResponseSchema.safeParse(empty).success).toBe(false);
+  });
+
   it("accepts lists at the cap and refuses longer ones", () => {
     const many = Array.from({ length: LINEAGE_MAX_SIBLINGS }, () => sibling(C));
     const atCap = { ...full, forks: many, self: { ...full.self, siblings: many } };
