@@ -20,6 +20,7 @@ import {
   saveResumePoint,
   type ResumeStore,
 } from "./resume";
+import { branchLeafOf, isBrowsing, onBranchOf, settleHead } from "./head";
 import { applyRunEvents, newLiveRun, type CommittedEntry } from "./live";
 import {
   openRunStream,
@@ -105,6 +106,8 @@ export class ThreadController {
   #disposed = false;
   #loadStarted = false;
   #leafVersion = 0;
+  /** A search hit opened before the thread was read (CT15): shown once the entries are in. */
+  #pendingHit: string | undefined;
   #lastStreamedRun: string | undefined;
   /**
    * KOBE-484: per streamed run, the seq this client already counts as history when it first
@@ -192,7 +195,7 @@ export class ThreadController {
 
   #set(change: (state: ThreadState) => ThreadState): void {
     if (this.#disposed) return;
-    const next = settleStop(change(this.#state));
+    const next = settleHead(settleStop(change(this.#state)));
     if (next === this.#state) return;
     this.#state = next;
     for (const listener of this.#listeners) listener();
@@ -263,6 +266,9 @@ export class ThreadController {
       entries: mergeServerEntries(s.entries, entries),
       serverSeq: maxSeq(entries, s.serverSeq),
     }));
+    const hit = this.#pendingHit;
+    this.#pendingHit = undefined;
+    if (hit !== undefined) this.showHit(hit);
     if (await this.#readRuns(threadId)) this.#syncStream();
   }
 
@@ -514,11 +520,27 @@ export class ThreadController {
     );
   }
 
-  /** The server's title for this thread (KOBE-219): the bar shows it at once, the rail reads it. */
-  #retitled(payload: { readonly thread_id: string; readonly title?: string | undefined }): void {
-    // A leaf-only update (KOBE-542) leaves the title alone; KOBE-544 follows `leaf_entry_id`.
-    const { title } = payload;
-    if (title === undefined || payload.thread_id !== this.#state.threadId) return;
+  /**
+   * The server's title for this thread (KOBE-219): the bar shows it at once, the rail reads it.
+   * With `leaf_entry_id` (CT13): the leaf moved (another tab, a send's commit); a head at the old
+   * leaf follows it, a browsed one stays (`settleHead`), and a read on its way keeps this leaf.
+   */
+  #retitled(payload: {
+    readonly thread_id: string;
+    readonly title?: string | undefined;
+    readonly leaf_entry_id?: string | undefined;
+  }): void {
+    const { title, leaf_entry_id: leaf } = payload;
+    if (payload.thread_id !== this.#state.threadId) return;
+    if (leaf !== undefined) {
+      this.#leafVersion += 1;
+      this.#set((s) =>
+        s.summary && s.summary.leafEntryId !== leaf
+          ? { ...s, followups: undefined, summary: { ...s.summary, leafEntryId: leaf } }
+          : s,
+      );
+    }
+    if (title === undefined) return;
     this.#set((s) =>
       s.summary && s.summary.threadId === payload.thread_id
         ? { ...s, summary: { ...s.summary, title } }
@@ -717,10 +739,14 @@ export class ThreadController {
     if (threadId === null || this.#state.sending !== undefined) return false;
     const key = this.#newKey();
     const queues = currentRunId(this.#state) !== undefined;
-    const branchFrom = parentEntryId ?? this.#state.summary?.leafEntryId ?? null;
+    // From a browsed branch (CT3): the message continues the head, which makes it current.
+    const head = this.#state.head;
+    const parent = parentEntryId ?? (isBrowsing(this.#state) ? head : undefined);
+    const branchFrom = parent ?? this.#state.summary?.leafEntryId ?? null;
     const followups = this.#state.followups;
     this.#set((s) => ({
       ...s,
+      head: undefined, // the head follows the leaf this send makes
       sending: { key, text, parentEntryId: branchFrom, queues, files: attach?.files },
       actionError: undefined,
       followups: undefined, // shown until the next send (KOBE-222)
@@ -728,7 +754,7 @@ export class ThreadController {
     }));
     const body = {
       content: text,
-      parentEntryId,
+      parentEntryId: parent,
       fileIds: attach?.fileIds,
       mentions,
       appContext,
@@ -741,7 +767,12 @@ export class ThreadController {
     if (this.#disposed) return res.ok;
     if (!res.ok) {
       // Nothing was sent: the follow-ups come back with the draft (review N2).
-      this.#set((s) => ({ ...s, sending: undefined, followups: s.followups ?? followups }));
+      this.#set((s) => ({
+        ...s,
+        sending: undefined,
+        followups: s.followups ?? followups,
+        head: s.head ?? head,
+      }));
       this.#fail(res.error, text);
       return false;
     }
@@ -1094,22 +1125,95 @@ export class ThreadController {
     const summary = this.#state.summary;
     if (threadId === null || !summary || summary.leafEntryId === entryId) return;
     const previous = summary.leafEntryId;
+    const head = this.#state.head;
     this.#leafVersion += 1;
     // Another branch: the follow-ups were for the answer that is no longer shown (review N1).
     this.#set((s) =>
       s.summary
-        ? { ...s, followups: undefined, summary: { ...s.summary, leafEntryId: entryId } }
+        ? {
+            ...s,
+            followups: undefined,
+            head: undefined,
+            summary: { ...s.summary, leafEntryId: entryId },
+          }
         : s,
     );
     const res = await this.#busy("leaf", () => this.#api.setLeaf(threadId, entryId));
     if (!res.ok) {
       this.#set((s) =>
-        s.summary ? { ...s, summary: { ...s.summary, leafEntryId: previous } } : s,
+        s.summary ? { ...s, head, summary: { ...s.summary, leafEntryId: previous } } : s,
       );
       this.#fail(res.error);
       return;
     }
     this.#set((s) => ({ ...s, summary: res.data }));
+  };
+
+  // --- the local head (CT3, KOBE-544) ----------------------------------------------------------
+
+  /** Moves this tab's head (never the leaf); "Showing another branch" when the bar comes up. */
+  #moveHead(head: string | undefined, reveal?: string): void {
+    const was = isBrowsing(this.#state);
+    this.#set((s) => ({
+      ...s,
+      head,
+      ...(reveal === undefined
+        ? {}
+        : { reveal: { entryId: reveal, seq: (s.reveal?.seq ?? 0) + 1 } }),
+    }));
+    if (!was && isBrowsing(this.#state)) this.#announce("Showing another branch");
+  }
+
+  /** Shows the newest branch at or below an entry (the tree, KOBE-546); the leaf stays. */
+  readonly showBranch = (entryId: string): void => {
+    const tip = branchLeafOf(this.#state.entries, entryId);
+    if (tip !== undefined) this.#moveHead(tip);
+  };
+
+  /** Shows the version a reader's branch picker chose, ending at that entry (never writes). */
+  readonly showVersion = (entryId: string): void => {
+    if (this.#state.entries.some((e) => e.entryId === entryId)) this.#moveHead(entryId);
+  };
+
+  /** ✕ on the bar: back to the leaf's branch. */
+  readonly showLeaf = (): void => this.#moveHead(undefined);
+
+  /**
+   * A search hit opened (CT15): off the leaf's branch, the head moves to the hit's branch; either
+   * way the conversation scrolls to it. Before the thread is read, it waits for the read.
+   */
+  readonly showHit = (entryId: string): void => {
+    const s = this.#state;
+    if (s.phase !== "ready") {
+      this.#pendingHit = entryId;
+      return;
+    }
+    if (!s.entries.some((e) => e.entryId === entryId)) return;
+    const leaf = s.summary?.leafEntryId ?? null;
+    const off = !onBranchOf(s.entries, leaf, entryId);
+    this.#moveHead(off ? branchLeafOf(s.entries, entryId) : undefined, entryId);
+  };
+
+  /**
+   * Make it current (owner): the leaf moves to the head's branch, one `POST /leaf`, never retried.
+   * The answer is the caller's (the bar shows `thread_busy` as its own note); other refusals show
+   * as the thread's error. The follow-ups go, as on any branch switch.
+   */
+  readonly makeCurrent = async (): Promise<ApiResult<ThreadSummary> | undefined> => {
+    const { threadId, summary, head } = this.#state;
+    if (threadId === null || !summary || summary.readOnly === true || !isBrowsing(this.#state)) {
+      return undefined;
+    }
+    if (head === undefined || this.#state.busy.includes("leaf")) return undefined;
+    this.#leafVersion += 1;
+    const res = await this.#busy("leaf", () => this.#api.setLeaf(threadId, head));
+    if (!res.ok) {
+      if (res.error.code !== "thread_busy") this.#fail(res.error);
+      return res;
+    }
+    this.#set((s) => ({ ...s, followups: undefined, summary: res.data }));
+    this.#announce("This branch is now current");
+    return res;
   };
 }
 

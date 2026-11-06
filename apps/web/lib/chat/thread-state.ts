@@ -84,6 +84,14 @@ export interface ThreadState {
    */
   readonly fileEditRequest?:
     { readonly runId: string; readonly toolCallId: string; readonly path: string } | undefined;
+  /**
+   * The local head (CT3, KOBE-544): the entry the conversation on screen ends at, when it is not
+   * the thread's leaf (a branch browsed in this tab). Absent: the head follows the leaf. In memory
+   * only; `settleHead` drops it once the leaf reaches it.
+   */
+  readonly head?: string | undefined;
+  /** A search hit to scroll to (CT15): the entry, and a seq so the same hit twice scrolls twice. */
+  readonly reveal?: { readonly entryId: string; readonly seq: number } | undefined;
   /** Polite status for screen readers ("Message queued", "Run stopped", …). */
   readonly announcement: string;
   /** Bumped per announcement, so the same text twice is announced twice. */
