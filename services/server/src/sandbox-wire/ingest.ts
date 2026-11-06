@@ -7,7 +7,7 @@ import {
   type NewRunEvent,
 } from "../event-stream/append.js";
 import type { WireTuning } from "./constants.js";
-import { entryCommittedEvents, mirrorEntriesInTx } from "./entries.js";
+import { entryCommittedEvents, leafMovedEvents, mirrorEntriesInTx } from "./entries.js";
 import { failureInfo } from "../runs/failure-codes.js";
 import { bindUserEntry, keepRunPromptInTx, type KeepOutcome } from "../runs/run-prompt.js";
 import { endRunInTx } from "./run-state.js";
@@ -325,6 +325,7 @@ export class RunIngest {
           }
           committed.push(
             ...entryCommittedEvents(mirrored.inserted, () => translator.takeCompletedMessageId()),
+            ...leafMovedEvents(threadId, mirrored.leafMovedTo),
           );
         }
         const all = coalesceDeltas([...events, ...committed]);

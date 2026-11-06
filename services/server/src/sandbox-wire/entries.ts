@@ -32,6 +32,21 @@ export interface MirrorResult {
   /** UTF-8 bytes of the inserted payloads. */
   readonly bytes: number;
   readonly leafId: string | null;
+  /** The thread's leaf after this mirror when it moved (CT13), else null. */
+  readonly leafMovedTo: string | null;
+}
+
+/**
+ * `thread.updated` with only `leaf_entry_id` (CT13, KOBE-543): the event every leaf move appends to
+ * the run that moved it, so each open stream of that run (the sender's tab, a reader watching)
+ * re-projects at once; title stays absent (unchanged). The seam for every leaf move a run makes:
+ * a send's commit (ingest, kept prompts), a compaction, and the branch-summary run (KOBE-548),
+ * which appends it from its end transaction as compaction does.
+ */
+export function leafMovedEvents(threadId: string, leafMovedTo: string | null): NewRunEvent[] {
+  return leafMovedTo === null
+    ? []
+    : [{ type: "thread.updated", payload: { thread_id: threadId, leaf_entry_id: leafMovedTo } }];
 }
 
 /**
@@ -124,8 +139,8 @@ export async function mirrorEntriesInTx(
   data: PiGetEntriesData,
   maxEntries: number,
 ): Promise<MirrorResult> {
-  const thread = await tx.execute<{ last_entry_seq: number }>(sql`
-    SELECT last_entry_seq FROM threads
+  const thread = await tx.execute<{ last_entry_seq: number; leaf_entry_id: string | null }>(sql`
+    SELECT last_entry_seq, leaf_entry_id FROM threads
      WHERE team_id = ${teamId} AND id = ${threadId} FOR NO KEY UPDATE`);
   let room = maxEntries - (thread.rows[0]?.last_entry_seq ?? maxEntries);
   let capped = false;
@@ -199,7 +214,9 @@ export async function mirrorEntriesInTx(
          SET leaf_entry_id = COALESCE(${leafId}, leaf_entry_id), last_activity_at = now()
        WHERE team_id = ${teamId} AND id = ${threadId}`);
   }
-  return { inserted, orphans, reserved, existing, leafId, capped, bytes };
+  const before = thread.rows[0]?.leaf_entry_id ?? null;
+  const leafMovedTo = leafId !== null && leafId !== before ? leafId : null;
+  return { inserted, orphans, reserved, existing, leafId, leafMovedTo, capped, bytes };
 }
 
 function isAssistantMessage(entry: PiSessionEntry): boolean {

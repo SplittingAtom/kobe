@@ -24,8 +24,15 @@ import {
   type ServerToSandboxFrame,
   type ThreadCompactFrame,
 } from "@kobe/protocol";
-import { sql, withTeam, type KobeTx, type SandboxCommandKind } from "@kobe/db";
-import { withAppendTx } from "../event-stream/append.js";
+import {
+  ACTIVE_RUN_STATUSES,
+  sql,
+  withTeam,
+  type KobeTx,
+  type RunStatus,
+  type SandboxCommandKind,
+} from "@kobe/db";
+import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { keepRunPromptInTx, type PromptSource } from "../runs/run-prompt.js";
 import { failureInfo } from "../runs/failure-codes.js";
 import type { Logger } from "pino";
@@ -33,6 +40,7 @@ import { completeCommand, markDelivered, pendingCommands, type CommandRow } from
 import type { WireContext } from "./context.js";
 import {
   lastMirroredEntryId,
+  leafMovedEvents,
   mirrorEntriesInTx,
   parseGetEntries,
   restoreParts,
@@ -50,6 +58,14 @@ import {
   type RuntimeTamperReport,
 } from "./runtime-tamper.js";
 import { COMMAND_FAILURES, type CommandOutcome, type SandboxTarget } from "./types.js";
+
+/** The run has no terminal status yet, so it still takes events (KOBE-543). */
+async function runStillOpen(tx: KobeTx, teamId: string, runId: string): Promise<boolean> {
+  const res = await tx.execute<{ status: RunStatus }>(sql`
+    SELECT status FROM runs WHERE team_id = ${teamId} AND id = ${runId}`);
+  const status = res.rows[0]?.status;
+  return status !== undefined && (ACTIVE_RUN_STATUSES as readonly RunStatus[]).includes(status);
+}
 
 /**
  * Whether a stored command still lists image built-ins (`config.builtin_skills`, a run.start queued
@@ -890,6 +906,12 @@ export class CommandDelivery {
         if (mirrored.capped) {
           this.#host.log.warn({ thread_id: threadId }, "thread entry cap reached");
           this.#ctx.auditLimit(this.#host.target, this.#host.sandboxId, "thread_entries");
+        }
+        // CT13: the compaction entry is the new leaf; its stream hears it before the end (a run
+        // that already ended, e.g. cancelled, takes no more events).
+        const moved = leafMovedEvents(threadId, mirrored.leafMovedTo);
+        if (moved.length > 0 && (await runStillOpen(tx, teamId, runId))) {
+          await appendRunEventsInTx(tx, teamId, runId, moved);
         }
       }
       return endRunInTx(tx, teamId, runId, end);

@@ -9,6 +9,7 @@ import { findRunPrompt, type FoundPrompt, type PromptRunRecord } from "./run-pro
 import {
   entryCommittedEvents,
   isUnsentPromptEntryId,
+  leafMovedEvents,
   mirrorEntriesInTx,
   unsentPromptEntryId,
 } from "../sandbox-wire/entries.js";
@@ -202,7 +203,13 @@ async function mirrorPiPrompt(
      WHERE team_id = ${teamId} AND thread_id = ${run.thread_id} AND entry_id = ${prompt.id}`);
   if (stored.rows.length === 0) return { outcome: "skipped", events: [] };
   await setUserEntry(tx, teamId, runId, prompt.id);
-  return { outcome: "kept", events: entryCommittedEvents(mirrored.inserted, () => undefined) };
+  return {
+    outcome: "kept",
+    events: [
+      ...entryCommittedEvents(mirrored.inserted, () => undefined),
+      ...leafMovedEvents(run.thread_id, mirrored.leafMovedTo),
+    ],
+  };
 }
 
 async function writeUnsentPrompt(
@@ -256,7 +263,10 @@ async function writeUnsentPrompt(
       UPDATE threads SET leaf_entry_id = ${entryId}, last_activity_at = now()
        WHERE team_id = ${teamId} AND id = ${run.thread_id}`);
   }
-  return entryCommittedEvents([payload], () => undefined);
+  return [
+    ...entryCommittedEvents([payload], () => undefined),
+    ...leafMovedEvents(run.thread_id, moveLeaf ? entryId : null),
+  ];
 }
 
 /**
