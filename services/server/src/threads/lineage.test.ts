@@ -13,6 +13,7 @@ const member = (over: Partial<LineageMember> = {}): LineageMember => {
     deletedAt: null,
     ownerUserId: "me",
     forkedFromThreadId: null,
+    forkedAtEntryId: null,
     ...over,
   };
 };
@@ -45,7 +46,11 @@ describe("assembleLineage", () => {
     const a = member({ forkedFromThreadId: root.id });
     const b = member({ forkedFromThreadId: root.id, ownerUserId: "other" });
     const self = member({ forkedFromThreadId: a.id, deletedAt: new Date(0) });
-    const fork = member({ forkedFromThreadId: self.id, ownerUserId: "other" });
+    const fork = member({
+      forkedFromThreadId: self.id,
+      forkedAtEntryId: "e7",
+      ownerUserId: "other",
+    });
     const body = assembleLineage({
       viewer,
       self,
@@ -67,7 +72,13 @@ describe("assembleLineage", () => {
     ]);
     expect(body.self.siblings.map((x) => x.deleted_at)).toEqual([new Date(0).toISOString()]);
     expect(body.forks).toEqual([
-      { thread_id: fork.id, title: fork.title, deleted_at: null, owner: "other" },
+      {
+        thread_id: fork.id,
+        title: fork.title,
+        deleted_at: null,
+        owner: "other",
+        forked_at_entry_id: "e7",
+      },
     ]);
   });
 
