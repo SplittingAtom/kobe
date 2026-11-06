@@ -156,15 +156,14 @@ export interface TreeMenuContext {
   readonly inTrash: boolean;
   /** The node is off the leaf's branch (Make it current moves the leaf there). */
   readonly offLeafBranch: boolean;
-  readonly hasSiblings: boolean;
+  /** Compare versions (CT10) has two versions to show here (`comparable`). */
+  readonly comparable: boolean;
   /** The message's own Edit is offered (a branch point above it, no run on). */
   readonly canEdit: boolean;
   /** An interrupted run waits for Retry on this ghost. */
   readonly canRetry: boolean;
   /** Fork to a new thread is possible at this node. */
   readonly forkable: boolean;
-  /** Compare versions (KOBE-547) has shipped. */
-  readonly compare?: boolean;
   /** Make it current and carry a summary (KOBE-548) has shipped. */
   readonly carrySummary?: boolean;
 }
@@ -185,7 +184,7 @@ export function treeMenu(
     writable && node.empty === true && ctx.canRetry && "retry",
     writable && !ctx.testThread && committed && "label",
     writable && !ctx.testThread && committed && node.label !== undefined && "remove-label",
-    ctx.compare === true && ctx.hasSiblings && "compare",
+    ctx.comparable && "compare",
     ctx.carrySummary === true &&
       writable &&
       !ctx.testThread &&

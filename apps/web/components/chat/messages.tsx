@@ -12,7 +12,7 @@ import {
   type TextMessagePartProps,
 } from "@assistant-ui/react";
 import { CheckIcon, CopyIcon, WandSparklesIcon, XIcon } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import { cn } from "../../lib/utils";
 import {
   branchPoint,
@@ -314,31 +314,20 @@ function AnswerMessage({ meta }: { readonly meta: KobeMessageMeta | undefined })
         <AnswerDetailScope>
           <h3 className="sr-only">The agent said</h3>
           <MessageMarkers place="before" className="mb-2" />
-          <div className="text-foreground flex flex-col gap-2 px-2 leading-relaxed wrap-break-word">
-            <MessagePrimitive.Parts components={ASSISTANT_PARTS} />
-            <UsedSkills />
+          <AnswerParts>
             {running && (
               <span className="text-muted-foreground animate-pulse text-sm motion-reduce:animate-none">
                 Working…
               </span>
             )}
-          </div>
+          </AnswerParts>
           <div className="ms-2 flex min-h-7.5 items-center gap-2 pe-2 pt-1.5">
             <ActionBarPrimitive.Root
               hideWhenRunning
               data-kobe-answer-actions
               className="text-muted-foreground animate-in fade-in -ms-1 flex gap-1 duration-200"
             >
-              <ActionBarPrimitive.Copy asChild>
-                <IconAction command="copy" size="sm">
-                  <AuiIf condition={(s) => s.message.isCopied}>
-                    <CheckIcon aria-hidden />
-                  </AuiIf>
-                  <AuiIf condition={(s) => !s.message.isCopied}>
-                    <CopyIcon aria-hidden />
-                  </AuiIf>
-                </IconAction>
-              </ActionBarPrimitive.Copy>
+              <CopyAction />
               {!readOnly && canRegenerate && (
                 <>
                   <ActionBarPrimitive.Reload asChild>
@@ -359,6 +348,73 @@ function AnswerMessage({ meta }: { readonly meta: KobeMessageMeta | undefined })
           <MessageMarkers place="after" className="mt-2" />
         </AnswerDetailScope>
       </AnswerFeedbackScope>
+    </MessagePrimitive.Root>
+  );
+}
+
+/** An answer's Copy (the conversation's action bar and Compare's columns). */
+function CopyAction() {
+  return (
+    <ActionBarPrimitive.Copy asChild>
+      <IconAction command="copy" size="sm">
+        <AuiIf condition={(s) => s.message.isCopied}>
+          <CheckIcon aria-hidden />
+        </AuiIf>
+        <AuiIf condition={(s) => !s.message.isCopied}>
+          <CopyIcon aria-hidden />
+        </AuiIf>
+      </IconAction>
+    </ActionBarPrimitive.Copy>
+  );
+}
+
+/** An answer's parts (markdown, tool cards collapsed, skills), as the conversation shows them. */
+function AnswerParts({ children }: { readonly children?: ReactNode }) {
+  return (
+    <div className="text-foreground flex flex-col gap-2 px-2 leading-relaxed wrap-break-word">
+      <MessagePrimitive.Parts components={ASSISTANT_PARTS} />
+      <UsedSkills />
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Compare versions (CT10, KOBE-547): an answer read-only, rendered as the conversation renders it,
+ * with Copy and the answer's feedback (KOBE-467) and no other action. Needs a message context
+ * (`MessageProvider`), since the version shown may be off the branch on screen.
+ */
+export function ReadOnlyAnswer() {
+  return (
+    <MessagePrimitive.Root data-role="assistant" className="group/answer relative">
+      <AnswerFeedbackScope>
+        <AnswerDetailScope>
+          <AnswerParts />
+          <div
+            data-kobe-answer-actions
+            className="text-muted-foreground ms-2 flex min-h-7.5 items-center gap-1 pe-2 pt-1.5"
+          >
+            <CopyAction />
+            <AnswerFeedbackButtons />
+          </div>
+          <AnswerFeedbackDetails />
+        </AnswerDetailScope>
+      </AnswerFeedbackScope>
+    </MessagePrimitive.Root>
+  );
+}
+
+/** Compare versions (CT10): a prompt as the conversation shows it, without its actions. */
+export function ReadOnlyPrompt() {
+  const meta = useMeta();
+  return (
+    <MessagePrimitive.Root data-role="user" className="flex flex-col items-end gap-1 px-2">
+      {meta?.kind === "user" && meta.attachments && meta.attachments.length > 0 && (
+        <SentAttachments files={meta.attachments} />
+      )}
+      <div className="bg-muted text-foreground max-w-[85%] rounded-2xl px-4 py-2 wrap-break-word whitespace-pre-wrap">
+        <MessagePrimitive.Parts components={{ Text: PlainText }} />
+      </div>
     </MessagePrimitive.Root>
   );
 }
