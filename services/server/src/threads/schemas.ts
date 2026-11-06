@@ -4,6 +4,7 @@ import {
   idSchema,
   scheduleThreadMarkerSchema,
   THREAD_TITLE_MAX,
+  threadCardBranchesSchema,
   threadFolderFilterSchema,
   threadOrganizationSchema,
   threadTitleSchema,
@@ -278,6 +279,8 @@ export const threadCardSchema = z.object({
   message_count: z.number().int().min(0),
   /** The count read only the first 1,000 message entries: the thread holds more ("1,000+"). */
   message_count_capped: z.boolean(),
+  /** Junctions, entries with more than one child (CT12, KOBE-543); capped at 1,000. */
+  ...threadCardBranchesSchema.shape,
 });
 export type ThreadCard = z.infer<typeof threadCardSchema>;
 

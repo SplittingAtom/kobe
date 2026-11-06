@@ -21,10 +21,15 @@ import {
   resolveDraftPin,
 } from "../agents/versions.js";
 import {
+  BRANCH_LABEL_ERROR_HTTP_STATUS,
   fileThreadRequestSchema,
   forkThreadRequestSchema,
+  LABEL_WRITE_RATE,
+  LEAF_RATE,
+  setLabelBodySchema,
   shareThreadRequestSchema,
 } from "@kobe/protocol";
+import { readBranches, setLabel, type LabelError } from "../threads/branches.js";
 import { FORK_RATE, forkThread } from "../threads/fork.js";
 import { readLineage } from "../threads/lineage.js";
 import { hitRateLimit } from "../rate-limit.js";
@@ -129,6 +134,24 @@ type ErrorCode = keyof typeof ERRORS;
 function fail(c: Context, code: ErrorCode) {
   const [status, message] = ERRORS[code];
   return c.json({ code, message }, status);
+}
+
+/** A rate-limited route's 429 (`rate_limited`, as the folder and fork routes answer it). */
+function rateLimited(c: Context, message: string) {
+  return c.json({ code: "rate_limited", message }, 429);
+}
+
+/** The label route's refusals (CT9): its own wording where the shared one says something else. */
+const LABEL_MESSAGES = {
+  entry_not_found: "That entry is not part of this thread.",
+  label_limit: "This thread has the most labels it can have (200). Remove some first.",
+  thread_in_trash: "The thread is in Trash. Restore it first.",
+  test_thread: "A test conversation can't be labelled.",
+} as const satisfies Record<keyof typeof BRANCH_LABEL_ERROR_HTTP_STATUS, string>;
+
+function failLabel(c: Context, code: LabelError) {
+  if (code === "thread_not_found" || code === "read_only") return fail(c, code);
+  return c.json({ code, message: LABEL_MESSAGES[code] }, BRANCH_LABEL_ERROR_HTTP_STATUS[code]);
 }
 
 function parseQuery<T>(c: Context, schema: z.ZodType<T>): T | undefined {
@@ -476,11 +499,48 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     return result.ok ? c.json({ thread_id: result.thread.thread_id }, 201) : fail(c, result.error);
   });
 
+  /**
+   * Make a branch current (CT3): owner only, refused while any run is running, waiting or queued
+   * and in Trash; {@link LEAF_RATE} per member.
+   */
   app.post("/:id/leaf", async (c) => {
     const id = threadIdParam(c);
     const body = await parseBody(c, setLeafBodySchema);
     if (!id || !body) return invalidRequest(c, "Give the entry_id to continue from.");
+    if (!(await hitRateLimit(db, `thread-leaf:${c.get("user").id}`, LEAF_RATE))) {
+      return rateLimited(c, "Too many branch switches. Wait a few minutes and try again.");
+    }
     return change(c, (tx, viewer) => setLeaf(tx, viewer, id, body.entry_id));
+  });
+
+  /** The tree's labels and remembered-rule runs (CT2): for whoever may read the thread. */
+  app.get("/:id/branches", async (c) => {
+    const id = threadIdParam(c);
+    if (!id) return invalidRequest(c);
+    const branches = await asViewer(c, (tx, viewer) => readBranches(tx, viewer, id));
+    return branches ? c.json(branches) : fail(c, "thread_not_found");
+  });
+
+  /** Label a node (CT9): owner only; `null` removes; idempotent, never activity, not audited. */
+  app.put("/:id/labels/:entryId", async (c) => {
+    const id = threadIdParam(c);
+    const entryId = entryIdSchema.safeParse(c.req.param("entryId"));
+    const body = await parseBody(c, setLabelBodySchema);
+    if (!id || !entryId.success || !body) {
+      return invalidRequest(c, "Give label: 1-60 characters on one line, or null to remove it.");
+    }
+    if (!(await hitRateLimit(db, `thread-label:${c.get("user").id}`, LABEL_WRITE_RATE))) {
+      return rateLimited(c, "Too many label changes. Wait a few minutes and try again.");
+    }
+    try {
+      const result = await asViewer(c, (tx, viewer) =>
+        setLabel(tx, viewer, id, entryId.data, body.label),
+      );
+      return result.ok ? c.json(result.branches) : failLabel(c, result.error);
+    } catch (err) {
+      if (isLockTimeout(err)) return fail(c, "thread_busy");
+      throw err;
+    }
   });
 
   app.post("/:id/agent-version", async (c) => {

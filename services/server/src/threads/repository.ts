@@ -814,9 +814,13 @@ function targetScope(
   return visibilityOf(thread) === "project" ? "private" : undefined;
 }
 
+/** A run that holds the thread or will (queued). */
+export const PENDING_RUN_STATUSES: readonly RunStatus[] = ["queued", ...ACTIVE_RUN_STATUSES];
+
 /**
  * Switches the active branch (§6.1 `POST /v1/threads/{id}/leaf`, D15). Refused while a run holds
- * the thread: Pi continues from its own leaf and would diverge from the record.
+ * the thread: Pi continues from its own leaf and would diverge from the record; and while one is
+ * queued (CT3, Q7): the leaf never moves under a queued prompt.
  */
 export async function setLeaf(
   tx: KobeTx,
@@ -827,7 +831,7 @@ export async function setLeaf(
   const locked = await lockForChange(tx, viewer, id);
   if (!locked.ok) return locked;
   if (locked.thread.deletedAt) return { ok: false, error: "thread_in_trash" };
-  if (await hasRunIn(tx, viewer, id, ACTIVE_RUN_STATUSES))
+  if (await hasRunIn(tx, viewer, id, PENDING_RUN_STATUSES))
     return { ok: false, error: "thread_busy" };
   const [entry] = await tx
     .select({ entryId: threadEntries.entryId })
@@ -902,8 +906,6 @@ export async function switchAgentVersion(
   });
   return { ok: true, thread: await summarizeOne(tx, viewer, row) };
 }
-
-export const PENDING_RUN_STATUSES: readonly RunStatus[] = ["queued", ...ACTIVE_RUN_STATUSES];
 
 /**
  * Moves the thread to Trash (D18 soft delete). Refused while it has an active or queued run: Stop

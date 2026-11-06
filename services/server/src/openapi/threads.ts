@@ -1,6 +1,8 @@
 import {
   fileThreadRequestSchema,
   forkThreadRequestSchema,
+  setLabelBodySchema,
+  threadBranchesResponseSchema,
   shareThreadRequestSchema,
   threadLineageResponseSchema,
 } from "@kobe/protocol";
@@ -274,8 +276,10 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         description:
           "CE18 (KOBE-219): read when the card opens. The first user message is cut to 280 " +
           "characters; the count holds the member's messages and the agent's answers on every " +
-          "branch (turns that only called tools are not counted). Readable by whoever may read " +
-          "the thread. Never wakes a sandbox.",
+          "branch (turns that only called tools are not counted). `branches` (CT12, KOBE-543) " +
+          "counts junctions, entries with more than one child (the hidden root entry included), " +
+          "capped at 1,000 with `branches_capped`. Readable by whoever may read the thread. " +
+          "Never wakes a sandbox.",
         parameters: [idParameter, teamHeader],
         responses: {
           "200": json("ThreadCard", "The thread's card."),
@@ -353,12 +357,63 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
       post: {
         operationId: "setThreadLeaf",
         summary: "Switch the active branch to an entry of the thread (owner only)",
+        description:
+          "CT3 (KOBE-543): refused `thread_busy` while a run is running, waiting for approval " +
+          "or queued, and `thread_in_trash` in Trash; at most 120 per 10 minutes per member.",
         parameters: change([idParameter]),
         requestBody: body("SetLeafBody"),
         responses: {
           "200": json("Thread", "The thread with its new leaf."),
           "404": json("Error", "`thread_not_found` or `entry_not_found`."),
           ...ERROR_RESPONSES,
+          "429": json("Error", "`rate_limited`: too many branch switches."),
+        },
+      },
+    },
+    "/v1/threads/{id}/branches": {
+      get: {
+        operationId: "getThreadBranches",
+        summary: "The conversation tree's labels and remembered-rule runs",
+        description:
+          "CT2 (KOBE-543): what the web cannot derive from the entries: every label of the " +
+          "thread (at most 200) and the thread's runs that wrote a remember-rule, by their " +
+          "prompt entry. Readable by whoever may read the thread. Never wakes a sandbox.",
+        parameters: [idParameter, teamHeader],
+        responses: {
+          "200": json("ThreadBranches", "The thread's labels and badge runs."),
+          "404": notFound,
+          ...ERROR_RESPONSES,
+        },
+      },
+    },
+    "/v1/threads/{id}/labels/{entryId}": {
+      put: {
+        operationId: "setThreadBranchLabel",
+        summary: "Label a node of the conversation tree, or remove its label (owner only)",
+        description:
+          "CT9 (KOBE-543): `label` (1-60 characters, one line) or `null` to remove it. " +
+          "Idempotent; never counts as activity; not audited. Refused in Trash and on builder " +
+          "test, Workbench and eval threads; at most 200 labels per thread and 60 writes per " +
+          "10 minutes per member. Answers the `branches` body.",
+        parameters: change([
+          idParameter,
+          {
+            name: "entryId",
+            in: "path",
+            required: true,
+            schema: { type: "string", minLength: 1, maxLength: 128 },
+          },
+        ]),
+        requestBody: body("SetLabelBody"),
+        responses: {
+          "200": json("ThreadBranches", "The thread's labels and badge runs after the change."),
+          "404": json("Error", "`thread_not_found` or `entry_not_found`."),
+          ...ERROR_RESPONSES,
+          "409": json(
+            "Error",
+            "`label_limit`, `thread_in_trash`, `test_thread`, `skill_eval_thread` or `thread_busy`.",
+          ),
+          "429": json("Error", "`rate_limited`: too many label changes."),
         },
       },
     },
@@ -533,6 +588,8 @@ export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
     ThreadDetail: withoutDialect(output(threadDetailSchema)),
     ThreadCard: withoutDialect(output(threadCardSchema)),
     ThreadLineage: withoutDialect(output(threadLineageResponseSchema)),
+    ThreadBranches: withoutDialect(output(threadBranchesResponseSchema)),
+    SetLabelBody: withoutDialect(input(setLabelBodySchema)),
     EntryPage: withoutDialect(output(entryPageSchema)),
     ToolOutput: withoutDialect(output(toolOutputSchema)),
     CreateThreadBody: withoutDialect(input(createThreadBodySchema)),
