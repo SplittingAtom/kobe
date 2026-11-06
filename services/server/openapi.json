@@ -4490,6 +4490,136 @@
         }
       }
     },
+    "/v1/threads/{id}/branch-summary": {
+      "post": {
+        "operationId": "summarizeBranch",
+        "summary": "Make a branch current and carry a summary of the branch left",
+        "description": "The owner switches the idle thread to `to_entry_id` and has Pi summarize the branch being left (CT11), optionally with a one-line `focus`. Runs as a branch summary run (one active run per thread, never queued; budgets and usage apply) in the owner's workspace, woken if needed; answers once Pi wrote the `branch_summary` entry, which is then the thread's leaf (`thread.updated.leaf_entry_id` on the run's stream). At most 20 summaries per thread; never automatic. Each error code has one fixed message.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BranchSummaryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Summarized: the summary entry is the new leaf.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BranchSummaryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: bad id or body (entry, focus).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`read_only` (a shared reader); also `forbidden`, `not_a_team_member` (as `Error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BranchSummaryError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`thread_not_found` (unknown, another user's or team's thread) or `entry_not_found` (`to_entry_id` is not a message of this thread).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`thread_busy`, `nothing_to_summarize`, `summary_limit`, `model_not_configured`, `test_thread`; also `skill_eval_thread`, `thread_in_trash`, `no_active_team`, `team_mismatch` (as `Error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BranchSummaryError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`budget_exhausted`: the member's or team's budget is used up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "`summary_failed`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BranchSummaryError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`sandbox_unavailable`; also `isolation_unavailable` (as `Error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BranchSummaryError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/threads/{id}/context": {
       "get": {
         "operationId": "getThreadContext",
@@ -10101,6 +10231,178 @@
               "message": {
                 "type": "string",
                 "const": "The conversation could not be compacted. Try again in a moment."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "BranchSummaryRequest": {
+        "type": "object",
+        "properties": {
+          "to_entry_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "focus": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "required": ["to_entry_id"],
+        "additionalProperties": false
+      },
+      "BranchSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "thread_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "entry_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "leaf_entry_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          }
+        },
+        "required": ["thread_id", "entry_id", "leaf_entry_id"],
+        "additionalProperties": false
+      },
+      "BranchSummaryError": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "thread_busy"
+              },
+              "message": {
+                "type": "string",
+                "const": "This thread is busy. Wait for the current and queued runs to finish, then switch branches."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "sandbox_unavailable"
+              },
+              "message": {
+                "type": "string",
+                "const": "Your workspace is not available right now. Try again in a moment."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "model_not_configured"
+              },
+              "message": {
+                "type": "string",
+                "const": "No model is enabled for your team yet. Ask a team admin to enable one in the team's model settings."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "nothing_to_summarize"
+              },
+              "message": {
+                "type": "string",
+                "const": "There is nothing to summarize: the branch you are leaving has no messages."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "summary_limit"
+              },
+              "message": {
+                "type": "string",
+                "const": "This thread already has 20 branch summaries. Compact the thread first."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "summary_failed"
+              },
+              "message": {
+                "type": "string",
+                "const": "The branch could not be summarized. Try again in a moment."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "read_only"
+              },
+              "message": {
+                "type": "string",
+                "const": "Only the thread's owner can switch its branch."
+              }
+            },
+            "required": ["code", "message"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "const": "test_thread"
+              },
+              "message": {
+                "type": "string",
+                "const": "Test conversations cannot carry a branch summary."
               }
             },
             "required": ["code", "message"],

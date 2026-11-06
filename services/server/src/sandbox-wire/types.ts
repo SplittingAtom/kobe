@@ -95,6 +95,7 @@ export const COMMAND_FAILURES = {
   skillsUnsupported: "skills_unsupported", // run.start lists skills, the agent can't load them
   queuedBeforeUpgrade: "queued_before_upgrade", // run.start queued before KOBE-317 lists built-ins
   compactUnsupported: "compact_unsupported", // thread.compact to an agent without it or run tokens
+  branchSummaryUnsupported: "branch_summary_unsupported", // KOBE-548, as compactUnsupported
   contextUnsupported: "context_unsupported", // thread.context to an agent without it (KOBE-470)
   kernelStartUnsupported: "kernel_start_unsupported", // notebook.restart op start, no notebook_start
 } as const;
@@ -130,6 +131,35 @@ export interface RunStopRequest {
   readonly threadId: string;
   readonly mode: "abort" | "after_step";
   readonly reason: "user_cancelled" | "budget_exhausted" | "approval_expired";
+}
+
+/**
+ * Commands that start a run (lease, run token, entry sync or restore first): `run.start`, a
+ * compaction's `thread.compact` (KOBE-213) and a branch summary's `thread.branch_summary` (KOBE-548).
+ */
+export function startsRun(kind: string): kind is "run.start" | SummaryCommandKind {
+  return kind === "run.start" || isSummaryCommand(kind);
+}
+
+/** A compaction or branch summary start: no tool calls, never kept across a reconnect. */
+export type SummaryCommandKind = "thread.compact" | "thread.branch_summary";
+export function isSummaryCommand(kind: string): kind is SummaryCommandKind {
+  return kind === "thread.compact" || kind === "thread.branch_summary";
+}
+
+/**
+ * A branch summary run's start (KOBE-548, `thread.branch_summary`): delivered as `thread.compact`
+ * is, answered by `thread.branch_summary_result`. Only to agents announcing
+ * `thread_branch_summary` and `run_token`.
+ */
+export interface ThreadBranchSummaryRequest {
+  readonly runId: string;
+  readonly threadId: string;
+  readonly fromLeafEntryId: string;
+  readonly toEntryId: string;
+  readonly focus?: string;
+  readonly model: ThreadCompactRequest["model"];
+  readonly modelLimits?: ThreadCompactRequest["modelLimits"];
 }
 
 /**
@@ -239,6 +269,12 @@ export interface SandboxRouter {
   compactThread(
     target: SandboxTarget,
     request: ThreadCompactRequest,
+    options?: SendOptions,
+  ): Promise<CommandOutcome>;
+  /** `thread.branch_summary` (KOBE-548); on success `data` is `{entry_id, parent_id}` (untrusted). */
+  branchSummary(
+    target: SandboxTarget,
+    request: ThreadBranchSummaryRequest,
     options?: SendOptions,
   ): Promise<CommandOutcome>;
   /**

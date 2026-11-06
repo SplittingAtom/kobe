@@ -162,6 +162,8 @@ export class FakeSandbox {
     if (!this.autoAnswer || !("command_id" in frame)) return;
     // Answered by a `thread.compact_result` the test sends (KOBE-213), never a command.result.
     if (frame.type === "thread.compact") return;
+    // Likewise `thread.branch_summary_result` (KOBE-548).
+    if (frame.type === "thread.branch_summary") return;
     if (frame.type === "pi.command" && frame.command.type === "get_entries") {
       const since = frame.command.since;
       const at = since === undefined ? -1 : this.session.findIndex((e) => e.id === since);

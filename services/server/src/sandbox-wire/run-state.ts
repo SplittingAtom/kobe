@@ -7,7 +7,14 @@ import {
   type ThreadStatus,
 } from "@kobe/protocol";
 import { VIEWING_RECORD_ONLY } from "../runs/store.js";
-import { SYSTEM_ACTOR, readBudgetStopScope, sql, type KobeTx, type RunKind } from "@kobe/db";
+import {
+  ACTIVE_RUN_STATUSES,
+  SYSTEM_ACTOR,
+  readBudgetStopScope,
+  sql,
+  type KobeTx,
+  type RunKind,
+} from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { auditExpiredApprovals, expireRunApprovalsInTx } from "../approvals/run-end.js";
 import { appendRunEventsInTx, type NewRunEvent } from "../event-stream/append.js";
@@ -146,6 +153,10 @@ export async function endRunInTx(
   if (run.rows[0]?.kind === "compaction" && end.status === "interrupted") {
     end = { status: "failed", error: failureInfo("compaction_interrupted", "start_failed") };
   }
+  // A branch summary (KOBE-548) likewise; the thread's leaf stays where it was.
+  if (run.rows[0]?.kind === "branch_summary" && end.status === "interrupted") {
+    end = { status: "failed", error: failureInfo("branch_summary_interrupted", "start_failed") };
+  }
   // A budget stop is pending (KOBE-30/42): Pi settling after the step ends the run budget_stopped,
   // and so does a run whose next model call the gateway's budget gate refused before the stop
   // reached Pi (`model_budget_exhausted`). Any other failure keeps its own code.
@@ -217,6 +228,14 @@ export async function endRunInTx(
   if (requested.status === "interrupted" && run.rows[0]?.kind === "compaction") {
     await recordAudit(tx, {
       action: "thread.compacted",
+      actor: SYSTEM_ACTOR,
+      teamId,
+      target: { threadId, runId, outcome: "interrupted" },
+    });
+  }
+  if (requested.status === "interrupted" && run.rows[0]?.kind === "branch_summary") {
+    await recordAudit(tx, {
+      action: "thread.branch_summarized",
       actor: SYSTEM_ACTOR,
       teamId,
       target: { threadId, runId, outcome: "interrupted" },
@@ -328,4 +347,14 @@ export async function activeLeasedRuns(
     kind: r.kind,
     startedAt: r.started_at === null ? null : new Date(r.started_at),
   }));
+}
+
+/** The run has no terminal status yet, so it still takes events (KOBE-543); locks the run row. */
+export async function runStillOpen(tx: KobeTx, teamId: string, runId: string): Promise<boolean> {
+  // Locked (thread, then run: the mirror holds the thread), so a Stop cannot end the run between
+  // this read and the append, which would roll back the mirror with it.
+  const res = await tx.execute<{ status: RunStatus }>(sql`
+    SELECT status FROM runs WHERE team_id = ${teamId} AND id = ${runId} FOR NO KEY UPDATE`);
+  const status = res.rows[0]?.status;
+  return status !== undefined && (ACTIVE_RUN_STATUSES as readonly RunStatus[]).includes(status);
 }

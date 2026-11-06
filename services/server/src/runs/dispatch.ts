@@ -224,7 +224,7 @@ export class RunDispatcher {
         UNION ALL
         SELECT 1 FROM sandbox_commands
          WHERE team_id = ${lost.teamId} AND run_id = ${lost.runId}
-           AND kind IN ('run.start', 'thread.compact', 'notebook.execute')
+           AND kind IN ('run.start', 'thread.compact', 'thread.branch_summary', 'notebook.execute')
            AND status IN ('pending', 'delivered')`);
       if (inFlight.rows.length > 0) return undefined;
       // A compaction (KOBE-213) is never re-sent: its requester has given up; it fails.
@@ -267,12 +267,22 @@ export class RunDispatcher {
         SELECT 1 FROM sandbox_run_leases WHERE team_id = ${stale.teamId} AND run_id = ${stale.runId}`);
       const leased = lease.rows.length > 0;
       if (leased) await requestStop(tx, stale.teamId, stale.runId, "abort");
-      await recordAudit(tx, {
-        action: "thread.compacted",
-        actor: SYSTEM_ACTOR,
-        teamId: stale.teamId,
-        target: { threadId: stale.threadId, runId: stale.runId, outcome: "timed_out" },
-      });
+      const target = {
+        threadId: stale.threadId,
+        runId: stale.runId,
+        outcome: "timed_out",
+      } as const;
+      await recordAudit(
+        tx,
+        stale.kind === "branch_summary"
+          ? {
+              action: "thread.branch_summarized",
+              actor: SYSTEM_ACTOR,
+              teamId: stale.teamId,
+              target,
+            }
+          : { action: "thread.compacted", actor: SYSTEM_ACTOR, teamId: stale.teamId, target },
+      );
       return { ended, leased };
     });
     if (!out.ended) return;
