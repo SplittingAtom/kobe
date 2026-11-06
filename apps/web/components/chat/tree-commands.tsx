@@ -19,8 +19,8 @@ interface Shown {
 }
 
 /**
- * The tree's palette entries (CT4, CT8; Q29: the palette only, no global chord): Conversation
- * tree, Previous / Next version and Continue from here on the focused message (the last one
+ * The tree's palette entries (CT4, CT8, CT10; Q29: the palette only, no global chord): Conversation
+ * tree, Previous / Next version, Compare versions and Continue from here on the focused message (the last one
  * focused or hovered in the conversation; else the newest that applies on screen).
  */
 export function TreeCommands({ extras }: { readonly extras: KobeThreadExtras }) {
@@ -51,6 +51,12 @@ export function TreeCommands({ extras }: { readonly extras: KobeThreadExtras }) 
       blocker: versioned ? null : NO_VERSIONS,
     },
     "next-branch": { onSelect: () => switchTo("next"), blocker: versioned ? null : NO_VERSIONS },
+    "compare-versions": {
+      onSelect: () => {
+        if (versioned) data?.compare(versioned.id);
+      },
+      blocker: versioned ? null : NO_VERSIONS,
+    },
     "continue-from-here": {
       onSelect: () => {
         const last = answer && projection.lastEntryOfNode.get(answer.id);

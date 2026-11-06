@@ -90,6 +90,7 @@ export function useTreeActions(
       canEdit: !isThreadRunning(state) && branchPointOfMeta(projection, meta) !== undefined,
       canRetry: node.empty === true && node.isLeaf && state.interruptedRun != null,
       forkable: forkPointOf(meta) !== undefined,
+      compare: true,
     });
   };
 
@@ -178,8 +179,11 @@ export function useTreeActions(
       case "copy":
         return copy(node);
       case "compare":
+        // The dialog takes the window (CT10); the tree closes under it.
+        onClose();
+        return data.compare(node.id);
       case "carry-summary":
-        // KOBE-547 and KOBE-548 add these; hidden until then (`treeMenu`).
+        // KOBE-548 adds this; hidden until then (`treeMenu`).
         return undefined;
     }
   };

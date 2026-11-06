@@ -459,8 +459,17 @@ export function BranchPicker({ className }: { readonly className?: string }) {
       <BranchPickerPrimitive.Next asChild>
         <IconAction command="next-branch" size="sm" />
       </BranchPickerPrimitive.Next>
+      <CompareButton />
     </BranchPickerPrimitive.Root>
   );
+}
+
+/** Compare versions (CT10, KOBE-547): beside the picker's arrows (shown with N ≥ 2). */
+function CompareButton() {
+  const id = useAuiState((s) => s.message.id);
+  const tree = useTreeData();
+  if (tree === null) return null;
+  return <IconAction command="compare-versions" size="sm" onClick={() => tree.compare(id)} />;
 }
 
 /** "Forked here": above a message that has other versions, with the picker inline. */

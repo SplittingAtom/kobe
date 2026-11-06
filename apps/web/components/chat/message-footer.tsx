@@ -5,6 +5,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import type { RunUsage, ThreadUsage } from "../../lib/admin/api/usage";
 import { formatTokens, formatUsd } from "../../lib/admin/usage-format";
 import type { KobeMessageMeta } from "../../lib/chat/tree";
+import { cn } from "../../lib/utils";
 import { useKobeExtras } from "./kobe-runtime";
 
 /** Usage rows land a moment after a run ends (the gateway's flush); read them after this. */
@@ -97,9 +98,10 @@ function clock(iso: string): { readonly short: string; readonly full: string } |
 
 /**
  * An answer's footer (CE12): model, tokens in and out and cost of the run that wrote it
- * (run_usage), and when it was stored. Shown on hover or focus where there is hover.
+ * (run_usage), and when it was stored. Shown on hover or focus where there is hover; `shown`:
+ * always (Compare versions' column headings, CT10).
  */
-export function MessageFooter() {
+export function MessageFooter({ shown = false }: { readonly shown?: boolean } = {}) {
   const meta = useAuiState((s) => s.message.metadata.custom as KobeMessageMeta | undefined);
   const usage = useContext(ThreadUsageContext)?.usage ?? null;
   if (meta?.kind !== "assistant" || meta.live || meta.at === undefined) return null;
@@ -110,7 +112,11 @@ export function MessageFooter() {
     <div
       role="group"
       aria-label="Answer details"
-      className="text-muted-foreground ms-auto flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs tabular-nums [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within/answer:opacity-100 [@media(hover:hover)]:group-hover/answer:opacity-100"
+      className={cn(
+        "text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs tabular-nums",
+        !shown &&
+          "ms-auto [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-focus-within/answer:opacity-100 [@media(hover:hover)]:group-hover/answer:opacity-100",
+      )}
     >
       {[
         ...parts.map((part) => <span key={part}>{part}</span>),
