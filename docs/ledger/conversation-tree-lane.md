@@ -13,7 +13,9 @@
   won't-do with a ledger note) → CT-8 KOBE-549 browser checks and ledger.
 - **Lanes:** two (the cap): after 542, server (543) and web (544 → 545) run side by side; 546
   waits for both. 543 adds the migration; no other migration in flight at the same time.
-- **Status:** filed 2026-11-06, nothing started.
+- **Status:** done 2026-11-06. PRs #446 (docs), #447 (541), #448 (542), #450 (543), #449 (544), #452 (545),
+  #451 (lineage fork point), #453 (546), #454 (547), #455 (548); gate1 at `local-cbaf76e1559a`; KOBE-549
+  specs 10/10 on gate1. Decisions taken in the run are in RUN-LEDGER "Open problems".
 
 ## Kickoff prompt (paste into a new Claude Code session at the repo root)
 
