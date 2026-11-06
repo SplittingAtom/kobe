@@ -411,10 +411,15 @@ function staleStoppedAnswers(
   return stale;
 }
 
-/** The conversation as assistant-ui messages, with the head on the active branch. */
+/**
+ * The conversation as assistant-ui messages, with the head on the branch on screen: `head` is
+ * where it ends (this tab's local head, CT3), `leafEntryId` the thread's leaf, which keeps its own
+ * rules (a stopped answer the member chose, markers ending at the leaf). Default: the leaf.
+ */
 export function projectThread(
   entries: readonly ThreadEntry[],
-  leafEntryId: string | null,
+  head: string | null,
+  leafEntryId: string | null = head,
   live?: LiveOverlay,
 ): Projection {
   const parsed = new Map(entries.map((e) => [e.entryId, parseEntry(e)] as const));
@@ -539,18 +544,18 @@ export function projectThread(
   const items = attachSummaries(built, indexOf, summaries, parsed, nodeOfEntry, treeEntries);
   const loaded: ReadonlySet<string> = new Set(treeEntries.map((e) => e.entryId));
   const place = (entryId: string) => placeIn(entryId, loaded, nodeOfEntry);
-  const leafAt = leafEntryId === null ? undefined : place(leafEntryId);
+  const headAt = head === null ? undefined : place(head);
   let lastOfNode: ReadonlyMap<string, string> = lastEntryOfNode;
   let headId: string | null;
-  if (typeof leafAt === "string") headId = leafAt;
-  else if (leafAt === null && leafEntryId !== null && order.length > 0) {
-    // The leaf is a hidden entry at the root: its branch has no message above it.
-    headId = newestBelow(leafEntryId, treeEntries, order) ?? null;
+  if (typeof headAt === "string") headId = headAt;
+  else if (headAt === null && head !== null && order.length > 0) {
+    // The head is a hidden entry at the root: its branch has no message above it.
+    headId = newestBelow(head, treeEntries, order) ?? null;
     const promptShown = live?.prompt !== undefined && !live.run.promptCommitted;
     if (headId === null && !promptShown) {
-      headId = `${PREFIX_EMPTY}${leafEntryId}`;
+      headId = `${PREFIX_EMPTY}${head}`;
       items.push(emptyVersion(headId));
-      lastOfNode = new Map([...lastEntryOfNode, [headId, leafEntryId]]);
+      lastOfNode = new Map([...lastEntryOfNode, [headId, head]]);
     }
   } else headId = order.at(-1) ?? items.at(-1)?.message.id ?? null;
   if (live) headId = overlayLive(live, items, indexOf, place, lastEntryOfNode, headId);
@@ -570,12 +575,11 @@ function placeIn(
   return nodeOfEntry.get(entryId) ?? null;
 }
 
-/** The newest message below `entryId` (the last in tree order), if any. */
-function newestBelow(
-  entryId: string,
-  entries: readonly ThreadEntry[],
-  order: readonly string[],
-): string | undefined {
+/**
+ * Every entry below `entryId` (not itself): the projection's fallback head and the local head's
+ * branch tip (`branchLeafOf`, CT3) walk the same descendants.
+ */
+export function descendantsOf(entryId: string, entries: readonly ThreadEntry[]): Set<string> {
   const children = new Map<string, string[]>();
   for (const e of entries) {
     if (e.parentId === null) continue;
@@ -591,6 +595,16 @@ function newestBelow(
     below.add(id);
     stack.push(...(children.get(id) ?? []));
   }
+  return below;
+}
+
+/** The newest message below `entryId` (the last in tree order), if any. */
+function newestBelow(
+  entryId: string,
+  entries: readonly ThreadEntry[],
+  order: readonly string[],
+): string | undefined {
+  const below = descendantsOf(entryId, entries);
   return [...order].reverse().find((id) => below.has(id));
 }
 

@@ -26,6 +26,8 @@ import { SentFileCache } from "./sent-files";
 import { xhrUploadTransport, type UploadTransport } from "./uploads";
 import type { EventSourceFactory } from "./stream";
 import { ThreadController } from "./thread-controller";
+import { onBranchOf } from "./head";
+import { SearchHitStore } from "./search-hits";
 import { activityOfState, ThreadActivityStore } from "./thread-activity";
 import { organizeRequest, type OrganizeChange } from "./organize";
 import type { ThreadListSync } from "./thread-list-sync";
@@ -141,6 +143,8 @@ export class ChatSession {
   }
   /** What the threads held open here are doing, live (KOBE-301: the rail's dots, the tab title). */
   readonly activity = new ThreadActivityStore();
+  /** Search hits opened in this tab (CT15): shown on their branch, noted in the rail. */
+  readonly searchHits = new SearchHitStore();
   /** The team's thread folders (KOBE-536, TF7): the tree, Save to folder. */
   readonly folders: ThreadFoldersStore;
   /** The Threads panel's chosen node and fold state, for this tab only (TF12). */
@@ -217,12 +221,26 @@ export class ChatSession {
         for (const listener of this.#retitledListeners) listener(id, title);
       },
       onRunEvents: (id, events) => this.notebookRuns.apply(id, events),
+      // The other tabs re-read the thread: their head follows or their bar updates (CT13).
+      onLeafMoved: (id) => this.#options.listSync?.post(id),
     });
   }
 
   /** Follows a held thread's activity until it is let go. */
   #track(threadId: string, controller: ThreadController): ThreadController {
-    const update = () => this.activity.set(threadId, activityOfState(controller.getState()));
+    let checked: { entries: unknown; leaf: unknown; hit: unknown } | undefined;
+    const update = () => {
+      const state = controller.getState();
+      this.activity.set(threadId, activityOfState(state));
+      // A search hit's place (CT15), once the entries are in; again only when they change.
+      const hit = state.reveal?.entryId;
+      const leaf = state.summary?.leafEntryId ?? null;
+      if (hit === undefined || state.phase !== "ready") return;
+      if (checked?.entries === state.entries && checked.leaf === leaf && checked.hit === hit)
+        return;
+      checked = { entries: state.entries, leaf, hit };
+      this.searchHits.report(threadId, hit, !onBranchOf(state.entries, leaf, hit));
+    };
     update();
     this.#untrack.set(threadId, controller.subscribe(update));
     return controller;
@@ -238,15 +256,28 @@ export class ChatSession {
   acquire(threadId: string | null): ThreadController {
     if (threadId === null) return this.#create(null);
     const held = this.#held.get(threadId);
+    const hit = this.searchHits.take(threadId);
     if (held) {
       held.count += 1;
+      if (hit !== undefined) held.controller.showHit(hit);
       return held.controller;
     }
     const controller = this.#create(threadId);
     this.#held.set(threadId, { controller, count: 1 });
     this.#track(threadId, controller);
+    if (hit !== undefined) controller.showHit(hit); // shown once the read below is in
     void controller.load();
     return controller;
+  }
+
+  /**
+   * A search hit was opened (CT15): its thread shows the hit's branch, scrolled to it. A held
+   * thread shows it at once; another when its controller is acquired.
+   */
+  openHit(threadId: string, entryId: string): void {
+    const held = this.#held.get(threadId);
+    if (held && held.count > 0) held.controller.showHit(entryId);
+    else this.searchHits.open(threadId, entryId);
   }
 
   release(threadId: string | null, controller: ThreadController): void {

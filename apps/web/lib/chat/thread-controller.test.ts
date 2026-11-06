@@ -43,7 +43,12 @@ async function until(controller: ThreadController, check: (s: ThreadState) => bo
 }
 
 function visibleTexts(state: ThreadState): string[] {
-  const p = projectThread(state.entries, state.summary?.leafEntryId ?? null, liveOverlay(state));
+  const p = projectThread(
+    state.entries,
+    state.summary?.leafEntryId ?? null,
+    state.summary?.leafEntryId ?? null,
+    liveOverlay(state),
+  );
   const byId = new Map(p.items.map((i) => [i.message.id, i] as const));
   const path: string[] = [];
   let id = p.headId;

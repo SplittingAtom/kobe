@@ -32,6 +32,7 @@ import {
 } from "react";
 import type { ApiError } from "../../lib/api/client";
 import { NEW_DRAFT } from "../../lib/chat/attachments";
+import { headOf, isBrowsing } from "../../lib/chat/head";
 import type { ChatSession } from "../../lib/chat/session";
 import type { ThreadController } from "../../lib/chat/thread-controller";
 import type { ViewingChoice } from "../../lib/chat/viewing";
@@ -153,12 +154,16 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
   const remoteId = useAuiState((s) => s.threadListItem.remoteId);
   const { controller, state } = useThreadController(session, remoteId);
 
-  const overlay = liveOverlay(state);
+  // The conversation follows this tab's head (CT3); a run streams on the leaf's branch, so a
+  // browsed branch shows without it.
+  const head = headOf(state);
+  const overlay = isBrowsing(state) ? undefined : liveOverlay(state);
   const projection = useMemo(
-    () => projectThread(state.entries, state.summary?.leafEntryId ?? null, overlay),
+    () => projectThread(state.entries, head, state.summary?.leafEntryId ?? null, overlay),
     // `overlay` is rebuilt from these on every render; depend on its sources.
     [
       state.entries,
+      head,
       state.summary?.leafEntryId,
       state.live,
       state.livePrompt,
@@ -304,10 +309,13 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
     setMessages: () => {
       // Branch switches are applied by the runtime and reported through unstable_onBranchChange.
     },
+    // The owner's arrows move the leaf (Q21); a reader's move only this tab's head (CT3).
     unstable_onBranchChange: ({ headId }) => {
       if (headId === null) return;
       const entryId = projectionRef.current.lastEntryOfNode.get(headId);
-      if (entryId !== undefined) void controller?.switchLeaf(entryId);
+      if (entryId === undefined) return;
+      if (controller?.getState().summary?.readOnly === true) controller.showVersion(entryId);
+      else void controller?.switchLeaf(entryId);
     },
     unstable_capabilities: { copy: true },
   });
