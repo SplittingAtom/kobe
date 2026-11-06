@@ -71,6 +71,12 @@ describe("the pair and the dropdowns", () => {
     expect(initialPair(versions().slice(0, 1))).toBeUndefined();
   });
 
+  it("a picked version starts on the left beside the newest other one", () => {
+    expect(initialPair(versions(), "v1")).toEqual(["v1", "v3"]);
+    expect(initialPair(versions(), "v3")).toEqual(["v3", "v2"]);
+    expect(initialPair(versions(), "gone")).toEqual(["v2", "v3"]);
+  });
+
   it("each dropdown lists the others; picking keeps the other column", () => {
     expect(choicesFor(versions(), "v3").map((v) => v.id)).toEqual(["v1", "v2"]);
     expect(pickVersion(["v2", "v3"], 0, "v1")).toEqual(["v1", "v3"]);

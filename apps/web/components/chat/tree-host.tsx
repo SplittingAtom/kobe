@@ -50,10 +50,14 @@ export function TreeHost({
   const lineage = useLineage(threadId, session);
   const focusedMessage = useRef<string | null>(null);
   // Compare versions (CT10): the message it compares, on this thread only.
-  const [comparing, setComparing] = useState<{ thread: string; message: string } | null>(null);
+  const [comparing, setComparing] = useState<{
+    thread: string;
+    message: string;
+    picked: boolean;
+  } | null>(null);
   const compare = useCallback(
-    (message: string) => {
-      if (threadId !== null) setComparing({ thread: threadId, message });
+    (message: string, picked = false) => {
+      if (threadId !== null) setComparing({ thread: threadId, message, picked });
     },
     [threadId],
   );
@@ -122,7 +126,9 @@ export function TreeHost({
       {comparing !== null && extras !== undefined && comparing.thread === threadId && (
         <CompareDialog
           extras={extras}
+          key={`${comparing.message}:${comparing.picked}`}
           messageId={comparing.message}
+          picked={comparing.picked}
           labelOf={labelOf}
           onClose={stopComparing}
         />

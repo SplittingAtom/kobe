@@ -190,7 +190,7 @@ export function useTreeActions(
       case "compare":
         // The dialog takes the window (CT10); the tree closes under it.
         onClose();
-        return data.compare(node.id);
+        return data.compare(node.id, true);
       case "carry-summary":
         // KOBE-548 adds this; hidden until then (`treeMenu`).
         return undefined;

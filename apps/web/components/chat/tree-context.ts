@@ -17,8 +17,11 @@ export interface TreeData {
   readonly labelOf: (messageId: string) => string | undefined;
   /** Opens the panel; null where there is no thread yet (a draft). */
   readonly open: (() => void) | null;
-  /** Opens Compare versions (CT10, KOBE-547) on a message with other versions. */
-  readonly compare: (messageId: string) => void;
+  /**
+   * Opens Compare versions (CT10, KOBE-547) on a message with other versions: `picked` starts
+   * from that message (the tree's menu, the palette's focused message), else the two newest.
+   */
+  readonly compare: (messageId: string, picked?: boolean) => void;
   /** The message the palette's message actions act on: the last one focused or hovered. */
   readonly focusedMessage: { current: string | null };
 }

@@ -54,7 +54,8 @@ export function TreeCommands({ extras }: { readonly extras: KobeThreadExtras }) 
     "next-branch": { onSelect: () => switchTo("next"), blocker: versioned ? null : NO_VERSIONS },
     "compare-versions": {
       onSelect: () => {
-        if (versioned) data?.compare(versioned.id);
+        // The focused message starts on the left; with none focused, the two newest.
+        if (versioned) data?.compare(versioned.id, versioned.id === data?.focusedMessage.current);
       },
       blocker: versioned ? null : NO_VERSIONS,
     },

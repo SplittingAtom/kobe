@@ -24,7 +24,9 @@
 - **A prompt's answer** = its newest committed assistant child (retries under one prompt are rare).
 - **Prompts show** in the columns only when the two compared prompts differ (an edit); a
   regenerate repeats the same text, so only the answers show.
-- **Opens** on the two newest versions (older left) wherever it is opened from; each column's
+- **Opens** from the picker's icon on the two newest versions (older left); from the tree's
+  "Compare with…" or the palette on a focused message (coordinator, after review) with the picked
+  version left and the newest other one right (`initialPair(versions, picked)`). Each column's
   native `<select>` (only with more than two versions) lists every version but the other column's.
 - **Rendering:** each column gets assistant-ui's `MessageProvider` (a message context off the
   branch on screen) over the thread's own context, so the parts, tool cards (collapsed by
@@ -36,8 +38,7 @@
   newest branch through that version, scrolled to it; a tip equal to the leaf clears the head.
   Owner and reader alike; never `POST /leaf`.
 - **Tree menu:** "Compare with…" is live (`compare: true`); picking it closes the tree first
-  (the dialog takes the window). The tree has no "pick the second node" step: the dialog opens on
-  the two newest and the dropdowns choose.
+  (the dialog takes the window) and starts from that node.
 - **Palette:** "Compare versions" (message scope, read-only safe) acts on the focused or hovered
   message with versions, else the newest one; blocker `NO_VERSIONS` otherwise.
 - **Full-screen** under 820 px from `useShellBand()` (overlay/single, as the tree's list);
@@ -47,8 +48,6 @@
 
 ## Open questions (for Chris or the coordinator)
 
-- "Compare with…" on a tree node could preselect that node in one column; today it opens on the
-  two newest like the other entry points (ac-1's wording).
 - Test panes (no `ShellBandProvider`) never go full-screen.
 
 ## Evidence (acceptance criteria → test or command output)

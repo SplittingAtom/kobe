@@ -46,17 +46,22 @@ function useThreadMessage(projection: Projection, id: string | undefined): Threa
 export function CompareDialog({
   extras,
   messageId,
+  picked = false,
   labelOf,
   onClose,
 }: {
   readonly extras: KobeThreadExtras;
   readonly messageId: string;
+  /** Start from this message (left column) rather than the two newest. */
+  readonly picked?: boolean | undefined;
   readonly labelOf: (messageId: string) => string | undefined;
   readonly onClose: () => void;
 }) {
   const { controller, projection } = extras;
   const versions = useMemo(() => versionsOf(projection, messageId), [projection, messageId]);
-  const [pair, setPair] = useState<ComparePair | undefined>(() => initialPair(versions));
+  const [pair, setPair] = useState<ComparePair | undefined>(() =>
+    initialPair(versions, picked ? messageId : undefined),
+  );
   const band = useShellBand();
   const sheet = band === "overlay" || band === "single";
   useEffect(() => {

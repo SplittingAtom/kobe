@@ -85,6 +85,10 @@ function versionedThread(options: { readOnly?: boolean; test?: boolean } = {}) {
 
 const dialog = () => screen.queryByRole("dialog", { name: "Compare versions" });
 const column = (name: string | RegExp) => within(must(dialog())).getByRole("region", { name });
+const regionNames = () =>
+  [...must(dialog()).querySelectorAll("[data-kobe-compare-column]")].map((r) =>
+    r.getAttribute("aria-label"),
+  );
 const leafPosts = () => chatRequests(fake, "POST").filter((r) => r.path.endsWith("/leaf"));
 const bar = () => screen.queryByRole("region", { name: "Another branch" });
 
@@ -140,21 +144,24 @@ describe("opening, choosing and showing (ac-1)", () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: /^Conversation tree/ }, WAIT));
     const panel = await screen.findByRole("dialog", { name: "Conversation tree" }, WAIT);
-    const row = within(within(panel).getByRole("tree")).getByRole("treeitem", {
-      name: /an edited question/,
+    // The picked node (Version 1) on the left, the newest other version on the right.
+    const [row] = within(within(panel).getByRole("tree")).getAllByRole("treeitem", {
+      name: /the question/,
     });
-    await user.click(within(row).getByRole("button", { name: /^Actions for/ }));
+    await user.click(within(must(row)).getByRole("button", { name: /^Actions for/ }));
     await user.click(await screen.findByRole("menuitem", { name: "Compare with…" }));
     expect(await screen.findByRole("dialog", { name: "Compare versions" }, WAIT)).toBeTruthy();
-    expect(column("Version 3")).toBeTruthy();
+    expect(regionNames()).toEqual(["Version 1", "Version 3"]);
     await user.keyboard("{Escape}");
     await waitFor(() => expect(dialog()).toBeNull());
+    fireEvent.pointerOver(await screen.findByText("an edited question"));
     const mod = isMacPlatform() ? { metaKey: true } : { ctrlKey: true };
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "k", code: "KeyK", ...mod });
     await screen.findByRole("dialog", { name: "Command palette" });
     await user.keyboard("compare versions{Enter}");
     expect(await screen.findByRole("dialog", { name: "Compare versions" }, WAIT)).toBeTruthy();
-    expect(column("Version 2")).toBeTruthy();
+    // The focused (hovered) message is the one picked: Version 3, then the newest other.
+    expect(regionNames()).toEqual(["Version 3", "Version 2"]);
   });
 
   it("works for a reader and on a test thread (CT19); a reader's Show moves only the head", async () => {

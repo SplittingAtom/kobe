@@ -82,8 +82,18 @@ export function versionsOf(
 /** Which version each column shows, by message id. */
 export type ComparePair = readonly [string, string];
 
-/** The dialog opens with the two newest versions, older on the left. */
-export function initialPair(versions: readonly CompareVersion[]): ComparePair | undefined {
+/**
+ * The pair the dialog opens with: a picked version (the tree's Compare with…, the palette's
+ * focused message) on the left beside the newest other one; else the two newest, older left.
+ */
+export function initialPair(
+  versions: readonly CompareVersion[],
+  picked?: string,
+): ComparePair | undefined {
+  const newestOther = versions.findLast((v) => v.id !== picked);
+  if (picked !== undefined && newestOther !== undefined && versions.some((v) => v.id === picked)) {
+    return [picked, newestOther.id];
+  }
   const [a, b] = versions.slice(-2);
   return a === undefined || b === undefined ? undefined : [a.id, b.id];
 }
