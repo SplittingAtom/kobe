@@ -73,17 +73,23 @@ export function TreeHost({
   const { show, close, open: isOpen } = at;
   // Another thread (or a new draft) on screen closes it; coming back does not reopen it. Before
   // the first thread shows (a reload at /tree) there is nothing to compare with.
+  // A thread opened from the panel (a fork row, the fork dialog): the opener owns the navigation
+  // (the workspace replaces the address with the fork's), so this effect must not step back too.
   const shownAt = useRef<string | null>(null);
+  const switching = useRef(false);
   useEffect(() => {
     if (!isOpen) {
       shownAt.current = null;
+      switching.current = false;
       return;
     }
-    if (shownAt.current === null) shownAt.current = threadId;
+    if (shownAt.current === null || switching.current) shownAt.current = threadId;
     else if (shownAt.current !== threadId) close();
   }, [isOpen, threadId, close]);
   const openThread = useCallback(
     (id: string) => {
+      switching.current = true;
+      // In memory the panel closes first; at an address the opener's replace closes it.
       if (route === undefined) local.close();
       onOpenThread?.(id);
     },

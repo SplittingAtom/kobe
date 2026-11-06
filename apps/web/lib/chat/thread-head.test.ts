@@ -343,3 +343,21 @@ describe("Continue from here (CT8, KOBE-546)", () => {
     expect(c.getState().continueFrom).toBe(a1);
   });
 });
+
+describe("Make it current at a node (KOBE-546 review)", () => {
+  it("moves the leaf to the newest branch below the entry without browsing first", async () => {
+    const { t, u2, a2 } = branched();
+    const c = await opened(t);
+    const res = await c.makeCurrent(u2);
+    expect(res?.ok).toBe(true);
+    expect(leafCalls().map((r) => r.body)).toEqual([{ entry_id: a2 }]);
+    expect(c.getState().head).toBeUndefined();
+  });
+
+  it("does nothing for the leaf's own branch", async () => {
+    const { t, a2b } = branched();
+    const c = await opened(t);
+    expect(await c.makeCurrent(a2b)).toBeUndefined();
+    expect(leafCalls()).toEqual([]);
+  });
+});

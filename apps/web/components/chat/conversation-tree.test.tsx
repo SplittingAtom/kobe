@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useEffect, useMemo, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isMacPlatform } from "../../lib/shell/shortcuts";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
@@ -198,9 +199,73 @@ describe("opening and closing (ac-1)", () => {
     const fork = within(tree()).getByRole("treeitem", {
       name: "Fork, Budget 2027 — marketing cut",
     });
+    // One path owns the navigation: the address is replaced by the fork's, no Back step after.
+    const go = vi.spyOn(window.history, "go");
+    const replace = vi.spyOn(window.history, "replaceState");
     await userEvent.setup().click(fork);
     await waitFor(() => expect(new URL(window.location.href).searchParams.get("thread")).toBe(f));
     await waitFor(() => expect(panel()).toBeNull());
+    expect(replace.mock.calls.some((c) => String(c[2]).includes(`thread=${f}`))).toBe(true);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(go).not.toHaveBeenCalled();
+    expect(new URL(window.location.href).searchParams.get("thread")).toBe(f);
+  });
+});
+
+/** A router like Next's: push and replace land a tick later, Back by popstate. */
+function RoutedApp({ calls }: { readonly calls: string[] }) {
+  const [pathname, setPathname] = useState(window.location.pathname);
+  useEffect(() => {
+    const follow = () => setPathname(window.location.pathname);
+    window.addEventListener("popstate", follow);
+    return () => window.removeEventListener("popstate", follow);
+  }, []);
+  const route = useMemo(() => {
+    const later = (kind: "push" | "replace", href: string) => {
+      calls.push(`${kind} ${href}`);
+      setTimeout(() => {
+        if (kind === "push") window.history.pushState(null, "", href);
+        else window.history.replaceState(null, "", href);
+        setPathname(window.location.pathname);
+      }, 0);
+    };
+    return {
+      pathname,
+      page: null,
+      push: (href: string) => later("push", href),
+      replace: (href: string) => later("replace", href),
+    };
+  }, [pathname, calls]);
+  return (
+    <ChatApp
+      fetchFn={fake.fetch}
+      eventSource={fake.eventSource}
+      reopenDelayMs={() => 0}
+      route={route}
+    />
+  );
+}
+
+describe("a fork opened from the tree under the router (review 1)", () => {
+  it("replaces the address with the fork's and never steps back after it", async () => {
+    const { t, a1 } = branchedThread();
+    const f = fake.addThread("Budget 2027 — marketing cut");
+    Object.assign(must(fake.threads.get(f)), { forked_from_thread_id: t, forked_at_entry_id: a1 });
+    window.history.replaceState(null, "", `/?thread=${t}`);
+    const calls: string[] = [];
+    render(<RoutedApp calls={calls} />);
+    await screen.findByText("new answer", {}, WAIT);
+    await openTree();
+    const go = vi.spyOn(window.history, "go");
+    calls.length = 0;
+    await userEvent
+      .setup()
+      .click(within(tree()).getByRole("treeitem", { name: "Fork, Budget 2027 — marketing cut" }));
+    await waitFor(() => expect(panel()).toBeNull(), WAIT);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls).toEqual([`replace /?thread=${f}`]);
+    expect(go).not.toHaveBeenCalled();
+    expect(new URL(window.location.href).searchParams.get("thread")).toBe(f);
   });
 });
 
@@ -246,6 +311,21 @@ describe("Continue from here (ac-2)", () => {
     await waitFor(() => expect(panel()).toBeNull());
     expect(await screen.findByText(/Continuing from the answer at “old answer”/)).toBeTruthy();
     expect(screen.getByText("old answer")).toBeTruthy();
+  });
+});
+
+describe("the palette's Continue from here", () => {
+  it("refuses a thread in Trash, as the hover action and the menu do", async () => {
+    const { t } = branchedThread();
+    must(fake.threads.get(t)).deleted_at = new Date().toISOString();
+    await opened(t);
+    expect(screen.queryByRole("button", { name: "Continue from here" })).toBeNull();
+    const mod = isMacPlatform() ? { metaKey: true } : { ctrlKey: true };
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "k", code: "KeyK", ...mod });
+    const dialog = await screen.findByRole("dialog", { name: "Command palette" });
+    await userEvent.setup().keyboard("continue from here");
+    const option = await within(dialog).findByRole("option", { name: /^Continue from here/ });
+    expect(option.getAttribute("aria-disabled")).toBe("true");
   });
 });
 
@@ -297,6 +377,14 @@ describe("labels (ac-3)", () => {
     const menu = await menuOf("new question");
     expect(within(menu).queryByRole("menuitem", { name: "Label…" })).toBeNull();
     expect(within(menu).queryByRole("menuitem", { name: "Make it current" })).toBeNull();
+    // The server refuses a reader's write with read_only, as the fake does.
+    const res = await fake.fetch(`/v1/threads/${t}/labels/${u2b}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", "x-kobe-team": fake.teamId },
+      body: JSON.stringify({ label: "x" }),
+    });
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe("read_only");
   });
 
   it("test threads: no Label, the route refuses; the tree and Continue from here work", async () => {
@@ -325,8 +413,11 @@ describe("keyboard and accessibility (ac-4)", () => {
     expect(svg.getAttribute("aria-hidden")).toBe("true");
     const onScreen = row("new answer");
     expect(onScreen.getAttribute("aria-current")).toBe("true");
-    expect(onScreen.getAttribute("aria-level")).toBe("1");
-    expect(row("old question").getAttribute("aria-level")).toBe("2");
+    // aria-level is the depth: start 1, a1 2, both questions 3, their answers 4.
+    expect(onScreen.getAttribute("aria-level")).toBe("4");
+    expect(row("old question").getAttribute("aria-level")).toBe("3");
+    expect(row("new question").getAttribute("aria-level")).toBe("3");
+    expect(row(/^You, start/).getAttribute("aria-level")).toBe("1");
     expect(row("old answer").getAttribute("aria-label")).toMatch(
       /^Agent, old answer, .*1 file changed$/,
     );

@@ -33,6 +33,9 @@ export type TreeEditing =
   | { readonly kind: "label"; readonly node: TreeNode }
   | { readonly kind: "confirm-current"; readonly node: TreeNode };
 
+/** Make it current found nothing to do (already current, read-only, nothing loaded). */
+export const CANNOT_MAKE_CURRENT = "This branch can't be made current now.";
+
 /** Frames to wait for a message to show before opening its editor. */
 const EDIT_FRAMES = 20;
 
@@ -106,12 +109,18 @@ export function useTreeActions(
 
   const makeCurrent = async (node: TreeNode) => {
     const { last } = nodeEntries(projection, node.id);
-    if (last === undefined || controller === null) return;
     setEditing(null);
-    controller.showBranch(last);
-    const res = await controller.makeCurrent();
-    if (res && !res.ok && res.error.code === "thread_busy") setNote(LEAF_BUSY_NOTE);
-    else if (res?.ok) onClose();
+    if (last === undefined || controller === null) return setNote(CANNOT_MAKE_CURRENT);
+    // The head stays until the leaf moved: a refusal leaves the conversation as it was.
+    const res = await controller.makeCurrent(last);
+    if (res?.ok) return onClose();
+    if (res === undefined && !controller.getState().busy.includes("leaf"))
+      return setNote(CANNOT_MAKE_CURRENT);
+    // Busy (thread_busy, or a move already on its way) keeps the panel open with the note;
+    // other refusals also show as the thread's error notice.
+    setNote(
+      res === undefined || res.error.code === "thread_busy" ? LEAF_BUSY_NOTE : res.error.message,
+    );
   };
 
   const edit = (node: TreeNode) => {
@@ -252,10 +261,9 @@ function LabelEditor({
     const checked = checkLabel(text);
     if (!checked.ok) return setError(checked.message);
     setSaving(true);
-    void onSave(checked.label).then((failed) => {
-      setSaving(false);
-      setError(failed);
-    });
+    onSave(checked.label)
+      .then(setError, () => setError(labelErrorMessage("")))
+      .finally(() => setSaving(false));
   };
   return (
     <form className={styles.editor} onSubmit={submit} data-kobe-label-editor="">

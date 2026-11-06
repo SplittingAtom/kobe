@@ -1979,7 +1979,8 @@ export class FakeKobe {
    * in Trash and on test threads, 404 for an entry not in the thread; answers the `branches` body.
    */
   #setLabel(thread: FakeThread, entryId: string, body: Record<string, unknown> | undefined) {
-    if (thread.read_only) return error(403, "forbidden", "Only the owner can label this thread.");
+    if (thread.read_only)
+      return error(403, "read_only", "This thread is shared with you read-only.");
     if (thread.deleted_at !== null) return error(409, "thread_in_trash", "Restore it first.");
     if (thread.is_test === true) return error(409, "test_thread", "Not on a test thread.");
     if (!thread.entries.some((e) => e.entry_id === entryId))

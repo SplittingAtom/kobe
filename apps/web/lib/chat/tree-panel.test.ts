@@ -200,10 +200,14 @@ describe("labels (CT9)", () => {
     expect(checkLabel("x".repeat(61))).toEqual({ ok: false, message: LABEL_TOO_LONG });
     expect(checkLabel("x".repeat(60)).ok).toBe(true);
     expect(checkLabel("two\nlines")).toEqual({ ok: false, message: LABEL_BAD_CHARS });
+    // The schema counts UTF-16 units: 31 emoji are 62 of them.
+    expect(checkLabel("😀".repeat(31))).toEqual({ ok: false, message: LABEL_TOO_LONG });
+    expect(checkLabel("😀".repeat(30)).ok).toBe(true);
   });
 
   it("says the server's refusals in fixed words", () => {
     expect(labelErrorMessage("test_thread")).toBe("Test conversations can't be labelled.");
+    expect(labelErrorMessage("read_only")).toBe("Only the conversation's owner can label it.");
     expect(labelErrorMessage("whatever")).toBe("The label could not be saved. Try again.");
   });
 });
