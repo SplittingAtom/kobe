@@ -6,6 +6,7 @@
  * of `tree-layout.ts`.
  */
 import { BRANCH_LABEL_MAX_CHARS, branchLabelSchema } from "@kobe/protocol";
+import { messageMeta, type KobeMessageMeta, type Projection } from "./tree";
 import type { TreeBadges } from "./tree-badges";
 import { TOOLS_ONLY_EXCERPT, type TreeNode, type TreeProjection } from "./tree-nodes";
 
@@ -334,4 +335,47 @@ const LABEL_ERRORS: Readonly<Record<string, string>> = {
 /** The server's label refusals as fixed messages (CT9); anything else is a generic one. */
 export function labelErrorMessage(code: string): string {
   return LABEL_ERRORS[code] ?? "The label could not be saved. Try again.";
+}
+
+const GHOST_PREFIX = "empty:";
+
+/** A node's first and last entries (label key; head, fork and continue point), from the chat's projection. */
+export function nodeEntries(
+  projection: Pick<Projection, "items" | "lastEntryOfNode">,
+  nodeId: string,
+): { readonly first?: string; readonly last?: string; readonly meta?: KobeMessageMeta } {
+  if (nodeId.startsWith(GHOST_PREFIX)) {
+    const marker = nodeId.slice(GHOST_PREFIX.length);
+    return { first: marker, last: marker };
+  }
+  const item = projection.items.find((i) => i.message.id === nodeId);
+  const meta = item ? messageMeta(item.message) : undefined;
+  const first =
+    meta?.kind === "user" ? meta.entryId : meta?.kind === "assistant" ? meta.entryIds[0] : undefined;
+  const last = projection.lastEntryOfNode.get(nodeId);
+  return {
+    ...(first === undefined ? {} : { first }),
+    ...(last === undefined ? {} : { last }),
+    ...(meta === undefined ? {} : { meta }),
+  };
+}
+
+export function nodePath(nodes: readonly TreeNode[], id: string | null): Set<string> {
+  const parent = new Map(nodes.map((n) => [n.id, n.parentId] as const));
+  const path = new Set<string>();
+  for (let at = id; at !== null && !path.has(at); at = parent.get(at) ?? null) path.add(at);
+  return path;
+}
+
+/**
+ * CT6: the branch being left (the leaf's, below where it meets `target`'s path) changed files, so
+ * Make it current says the workspace stays as it is.
+ */
+export function filesLeftBehind(
+  tree: Pick<TreeProjection, "nodes" | "leafId">,
+  target: string | null,
+): boolean {
+  const kept = nodePath(tree.nodes, target);
+  const left = nodePath(tree.nodes, tree.leafId);
+  return tree.nodes.some((n) => left.has(n.id) && !kept.has(n.id) && (n.badges.files ?? 0) > 0);
 }

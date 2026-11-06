@@ -1195,10 +1195,19 @@ export class ThreadController {
     if (!was && isBrowsing(this.#state)) this.#announce("Showing another branch");
   }
 
-  /** Shows the newest branch at or below an entry (the tree, KOBE-546); the leaf stays. */
-  readonly showBranch = (entryId: string): void => {
+  /**
+   * Shows the newest branch at or below an entry (the tree, KOBE-546); the leaf stays. `reveal`:
+   * the entry to scroll to once it shows (the tree's node).
+   */
+  readonly showBranch = (entryId: string, reveal?: string): void => {
     const tip = branchLeafOf(this.#state.entries, entryId);
-    if (tip !== undefined) this.#moveHead(tip);
+    const leaf = this.#state.summary?.leafEntryId ?? null;
+    if (tip !== undefined) this.#moveHead(tip === leaf ? undefined : tip, reveal);
+  };
+
+  /** Scrolls the conversation to an entry already on screen (the tree's node, KOBE-546). */
+  readonly reveal = (entryId: string): void => {
+    this.#set((s) => ({ ...s, reveal: { entryId, seq: (s.reveal?.seq ?? 0) + 1 } }));
   };
 
   /** Shows the version a reader's branch picker chose, ending at that entry (never writes). */
@@ -1225,6 +1234,9 @@ export class ThreadController {
   readonly clearContinue = (): void => {
     if (this.#state.continueFrom !== undefined) this.#set((s) => ({ ...s, continueFrom: undefined }));
   };
+
+  /** A line for the chat's polite region (the tree's "Label saved", KOBE-546). */
+  readonly announce = (text: string): void => this.#announce(text);
 
   /** ✕ on the bar: back to the leaf's branch. */
   readonly showLeaf = (): void => this.#moveHead(undefined);

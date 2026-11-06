@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { assistant, branchMarker, entry, resetEntrySeq, text, toolCall, user } from "./testing/entries";
 import { must } from "../testing/must";
 import { projectTree, type TreeNode } from "./tree-nodes";
+import { projectThread } from "./tree";
 import {
   GHOST_TEXT,
   LABEL_BAD_CHARS,
@@ -10,6 +11,8 @@ import {
   LABEL_TOO_LONG,
   badgeTexts,
   checkLabel,
+  filesLeftBehind,
+  nodeEntries,
   headerCounts,
   isContinuable,
   junctionGroups,
@@ -180,5 +183,21 @@ describe("labels (CT9)", () => {
   it("says the server's refusals in fixed words", () => {
     expect(labelErrorMessage("test_thread")).toBe("Test conversations can't be labelled.");
     expect(labelErrorMessage("whatever")).toBe("The label could not be saved. Try again.");
+  });
+});
+
+describe("node entries and files left behind (CT6)", () => {
+  it("finds a node's first and last entries, a ghost's marker", () => {
+    const p = projectThread(twoVersions(), "b2", "b2");
+    expect(nodeEntries(p, "v2")).toMatchObject({ first: "v2", last: "v2" });
+    expect(nodeEntries(p, "b1")).toMatchObject({ first: "b1", last: "b1" });
+    expect(nodeEntries(p, "empty:k9")).toEqual({ first: "k9", last: "k9" });
+  });
+
+  it("says so only when the leaf's branch being left changed files", () => {
+    const fromV1 = projectTree(twoVersions(), "b2", "b1");
+    expect(filesLeftBehind(fromV1, "b2")).toBe(true);
+    expect(filesLeftBehind(fromV1, "b1")).toBe(false);
+    expect(filesLeftBehind(tree(), "b1")).toBe(false);
   });
 });
