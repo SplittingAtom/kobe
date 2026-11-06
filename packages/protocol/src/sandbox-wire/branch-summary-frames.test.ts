@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   BRANCH_SUMMARY_FOCUS_MAX_CHARS,
+  THREAD_BRANCH_SUMMARY_WIRE_ERROR_CODES,
+  branchSummaryResponseSchema,
+  sandboxToServerFrameSchema,
   serverToSandboxFrameSchema,
   threadBranchSummaryFrameSchema,
+  threadBranchSummaryResultFrameSchema,
 } from "../index.js";
 import { EXAMPLE_IDS } from "../testing/index.js";
 
@@ -60,7 +64,60 @@ describe("thread.branch_summary (server → sandbox)", () => {
     }
   });
 
-  it("is not yet a frame the server sends (KOBE-548 adds it with its result and capability)", () => {
-    expect(serverToSandboxFrameSchema.safeParse(summary).success).toBe(false);
+  it("is a frame the server sends (KOBE-548)", () => {
+    expect(serverToSandboxFrameSchema.parse(summary)).toEqual(summary);
+  });
+});
+
+const ok = {
+  v: 1,
+  type: "thread.branch_summary_result",
+  command_id: "c1",
+  thread_id: EXAMPLE_IDS.thread,
+  ok: true,
+  entry_id: "03bd22f9",
+  parent_id: "57913d65",
+};
+
+/** KOBE-548: sandbox → server `thread.branch_summary_result`. */
+describe("thread.branch_summary_result (sandbox → server)", () => {
+  it("parses the appended entry, alone and in the union", () => {
+    expect(threadBranchSummaryResultFrameSchema.parse(ok)).toEqual(ok);
+    expect(sandboxToServerFrameSchema.parse(ok)).toEqual(ok);
+  });
+
+  it("parses every wire error code", () => {
+    for (const code of THREAD_BRANCH_SUMMARY_WIRE_ERROR_CODES) {
+      const err = {
+        v: 1,
+        type: "thread.branch_summary_result",
+        command_id: "c1",
+        thread_id: EXAMPLE_IDS.thread,
+        ok: false,
+        error: { code, message: "x" },
+      };
+      expect(sandboxToServerFrameSchema.parse(err)).toEqual(err);
+    }
+  });
+
+  it("refuses a missing entry, an unknown code and extra keys", () => {
+    const { entry_id: _e, ...noEntry } = ok;
+    const { parent_id: _p, ...noParent } = ok;
+    for (const bad of [
+      noEntry,
+      noParent,
+      { ...ok, summary: "text" },
+      { ...ok, ok: false, error: { code: "nothing_to_compact", message: "x" } },
+    ]) {
+      expect(threadBranchSummaryResultFrameSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+});
+
+describe("POST /v1/threads/{id}/branch-summary response (KOBE-548)", () => {
+  it("names the entry and the new leaf", () => {
+    const body = { thread_id: EXAMPLE_IDS.thread, entry_id: "e1", leaf_entry_id: "e1" };
+    expect(branchSummaryResponseSchema.parse(body)).toEqual(body);
+    expect(branchSummaryResponseSchema.safeParse({ ...body, summary: "x" }).success).toBe(false);
   });
 });

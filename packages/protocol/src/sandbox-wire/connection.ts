@@ -61,6 +61,9 @@
  *   connectors for Pi's per-session MCP config; dropped (not refused) for agents without it.
  *   `thread_compact` ({@link CAPABILITY_THREAD_COMPACT}, threads.ts, KOBE-212): the server may send
  *   `thread.compact` (Pi `compact`), answered by `thread.compact_result`; never sent to agents without it.
+ *   `thread_branch_summary` (`CAPABILITY_THREAD_BRANCH_SUMMARY`, threads.ts, KOBE-548): the server
+ *   may send `thread.branch_summary`, answered by `thread.branch_summary_result`; never sent to agents
+ *   without it.
  *   `trace_spans` ({@link CAPABILITY_TRACE_SPANS}, trace-frames.ts, KOBE-274): `run.start.trace` /
  *   `thread.compact.trace` (sent only to agents with it) and the agent's `trace.spans` frames (a small
  *   frame). Unlike the others, a `trace.spans` frame the server won't take (no capability, no trace
@@ -101,7 +104,7 @@
  *   interrupted by the server (D14: never auto-retried).
  * - Server → sandbox commands are idempotent by `command_id`; the agent remembers recent ids and
  *   ignores duplicates. Every command gets exactly one `command.result` (`thread.compact`: exactly
- *   one `thread.compact_result` instead).
+ *   one `thread.compact_result` instead; `thread.branch_summary`: one `thread.branch_summary_result`).
  * - Outbound `seq` is NOT the Kobe Event Stream `seq`; the server assigns that when it writes
  *   `run_events`.
  */

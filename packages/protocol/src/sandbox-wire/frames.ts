@@ -279,6 +279,53 @@ export const threadCompactResultFrameSchema = z.union([
   }),
 ]);
 
+/**
+ * Error codes of `thread.branch_summary_result` (KOBE-548, CT11). `thread_busy`: Pi is streaming or
+ * compacting, or the thread has another run. `nothing_to_summarize`: the branch left has no entries
+ * to summarise (Pi would only move its leaf). `summary_failed`: any other Pi or extension failure
+ * (Pi's text only in the agent's log, never in `message`). `model_not_configured`: no gateway model.
+ * `runtime_tampered`: as `thread.compact_result`'s.
+ */
+export const THREAD_BRANCH_SUMMARY_WIRE_ERROR_CODES = [
+  "thread_busy",
+  "nothing_to_summarize",
+  "summary_failed",
+  "model_not_configured",
+  "pi_unavailable",
+  "internal",
+  "runtime_tampered",
+] as const;
+
+/** The appended `branch_summary` entry (KOBE-548): its id and the parent Pi put it under. */
+export const threadBranchSummaryResultShape = {
+  entry_id: idSchema,
+  /** `to_entry_id`, or its parent when it is a user message (Pi's placement rule). */
+  parent_id: idSchema,
+};
+
+/**
+ * Sandbox -> server: the one answer to `thread.branch_summary` (instead of `command.result`), for
+ * the same `command_id`. Success names the appended entry; the summary itself reaches the server as
+ * the mirrored entry. Errors carry a code and a short fixed message (never Pi's text).
+ */
+export const threadBranchSummaryResultFrameSchema = z.union([
+  frame("thread.branch_summary_result", {
+    command_id: commandId,
+    thread_id: uuidSchema,
+    ok: z.literal(true),
+    ...threadBranchSummaryResultShape,
+  }),
+  frame("thread.branch_summary_result", {
+    command_id: commandId,
+    thread_id: uuidSchema,
+    ok: z.literal(false),
+    error: z.strictObject({
+      code: z.enum(THREAD_BRANCH_SUMMARY_WIRE_ERROR_CODES),
+      message: z.string().max(2000),
+    }),
+  }),
+]);
+
 /** A thread's Pi process exited (crash or after shutdown). Active runs on it are lost. */
 export const piExitedFrameSchema = frame("pi.exited", {
   thread_id: uuidSchema,
@@ -295,6 +342,7 @@ export const sandboxToServerFrameSchema = z.union([
   policyCheckFrameSchema,
   commandResultFrameSchema,
   threadCompactResultFrameSchema,
+  threadBranchSummaryResultFrameSchema,
   artifactPutFrameSchema,
   fileShareFrameSchema,
   memoryPutFrameSchema,
@@ -574,8 +622,8 @@ export const threadCompactFrameSchema = frame("thread.compact", {
  * summarises the entries between the common ancestor and `from_leaf_entry_id` and appends a
  * `branch_summary` entry whose parent is `to_entry_id`. A run of kind `branch_summary`, created and
  * delivered under the run lock exactly as `thread.compact`, so it carries the same run context.
- * Not in {@link serverToSandboxFrameSchema} yet: KOBE-548 adds it with its result frame and the
- * `thread_branch_summary` capability, and only if the CT11 spike (KOBE-541) passes.
+ * Only to agents whose hello lists `thread_branch_summary` and `run_token` (KOBE-548); answered by
+ * exactly one `thread.branch_summary_result`. The agent refuses `thread_busy` if Pi is not idle.
  */
 export const threadBranchSummaryFrameSchema = frame("thread.branch_summary", {
   command_id: commandId,
@@ -703,6 +751,7 @@ export const serverToSandboxFrameSchema = z.union([
   runStopFrameSchema,
   piCommandFrameSchema,
   threadCompactFrameSchema,
+  threadBranchSummaryFrameSchema,
   evalPrepareFrameSchema,
   evalSnapshotFrameSchema,
   evalReadFrameSchema,
@@ -756,3 +805,4 @@ export type CommandResultFrame = z.infer<typeof commandResultFrameSchema>;
 export type ThreadCompactFrame = z.infer<typeof threadCompactFrameSchema>;
 export type ThreadCompactResultFrame = z.infer<typeof threadCompactResultFrameSchema>;
 export type ThreadBranchSummaryFrame = z.infer<typeof threadBranchSummaryFrameSchema>;
+export type ThreadBranchSummaryResultFrame = z.infer<typeof threadBranchSummaryResultFrameSchema>;
