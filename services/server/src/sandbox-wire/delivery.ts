@@ -14,24 +14,20 @@ import {
   CAPABILITY_SKILL_EVAL,
   CAPABILITY_NOTEBOOKS,
   CAPABILITY_NOTEBOOK_START,
+  CAPABILITY_THREAD_BRANCH_SUMMARY,
   CAPABILITY_THREAD_COMPACT,
   CAPABILITY_THREAD_CONTEXT,
   CAPABILITY_SYNC_CONFLICTS,
   serverToSandboxFrameSchema,
+  threadBranchSummaryFrameSchema,
   threadCompactFrameSchema,
   type PiGetEntriesData,
   type RunStartFrame,
   type ServerToSandboxFrame,
+  type ThreadBranchSummaryFrame,
   type ThreadCompactFrame,
 } from "@kobe/protocol";
-import {
-  ACTIVE_RUN_STATUSES,
-  sql,
-  withTeam,
-  type KobeTx,
-  type RunStatus,
-  type SandboxCommandKind,
-} from "@kobe/db";
+import { sql, withTeam, type KobeTx, type SandboxCommandKind } from "@kobe/db";
 import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { keepRunPromptInTx, type PromptSource } from "../runs/run-prompt.js";
 import { failureInfo } from "../runs/failure-codes.js";
@@ -46,7 +42,8 @@ import {
   restoreParts,
   threadHasConversation,
 } from "./entries.js";
-import { endRunInTx, loadRun } from "./run-state.js";
+import { endRunInTx, loadRun, runStillOpen } from "./run-state.js";
+import { mirrorBranchSummaryInTx, parseBranchSummaryResult } from "./branch-summary-end.js";
 import { buildRunMemory } from "../memory/agent.js";
 import { markTold, untoldNotes, type AgentNotes } from "../sync-conflicts/store.js";
 import { mintRunToken } from "./run-token.js";
@@ -57,17 +54,13 @@ import {
   withTamperAudit,
   type RuntimeTamperReport,
 } from "./runtime-tamper.js";
-import { COMMAND_FAILURES, type CommandOutcome, type SandboxTarget } from "./types.js";
-
-/** The run has no terminal status yet, so it still takes events (KOBE-543); locks the run row. */
-async function runStillOpen(tx: KobeTx, teamId: string, runId: string): Promise<boolean> {
-  // Locked (thread, then run: the mirror holds the thread), so a Stop cannot end the run between
-  // this read and the append, which would roll back the mirror with it.
-  const res = await tx.execute<{ status: RunStatus }>(sql`
-    SELECT status FROM runs WHERE team_id = ${teamId} AND id = ${runId} FOR NO KEY UPDATE`);
-  const status = res.rows[0]?.status;
-  return status !== undefined && (ACTIVE_RUN_STATUSES as readonly RunStatus[]).includes(status);
-}
+import {
+  COMMAND_FAILURES,
+  isSummaryCommand,
+  startsRun,
+  type CommandOutcome,
+  type SandboxTarget,
+} from "./types.js";
 
 /**
  * Whether a stored command still lists image built-ins (`config.builtin_skills`, a run.start queued
@@ -444,21 +437,28 @@ export class CommandDelivery {
   #frameFor(
     row: CommandRow,
     commandId: string,
-  ): ServerToSandboxFrame | Omit<ThreadCompactFrame, "run_token"> | undefined {
+  ):
+    | ServerToSandboxFrame
+    | Omit<ThreadCompactFrame, "run_token">
+    | Omit<ThreadBranchSummaryFrame, "run_token">
+    | undefined {
     const base = { ...row.frame, v: 1, type: row.kind, command_id: commandId };
     const candidate =
       row.kind === "pi.command"
         ? { ...base, command: { ...(row.frame.command as object), id: commandId } }
         : base;
-    // A compaction's run token is minted at delivery (KOBE-213): the stored frame has none yet.
+    // A compaction's (or branch summary's) run token is minted at delivery (KOBE-213, KOBE-548):
+    // the stored frame has none yet.
     const parsed =
       row.kind === "thread.compact"
         ? threadCompactFrameSchema.omit({ run_token: true }).safeParse(candidate)
-        : serverToSandboxFrameSchema.safeParse(candidate);
+        : row.kind === "thread.branch_summary"
+          ? threadBranchSummaryFrameSchema.omit({ run_token: true }).safeParse(candidate)
+          : serverToSandboxFrameSchema.safeParse(candidate);
     if (!parsed.success) return undefined;
     // The stored frame must be about the row's thread and run (defence in depth).
     const f = parsed.data as { thread_id?: string; run_id?: string };
-    if (row.kind === "thread.compact" && row.runId === null) return undefined;
+    if (isSummaryCommand(row.kind) && row.runId === null) return undefined;
     if (f.thread_id !== row.threadId) return undefined;
     if (row.runId !== null && f.run_id !== row.runId) return undefined;
     return parsed.data;
@@ -583,7 +583,25 @@ export class CommandDelivery {
       );
       return;
     }
-    const starts = row.kind === "run.start" || row.kind === "thread.compact";
+    // A branch summary likewise (KOBE-548).
+    if (
+      row.kind === "thread.branch_summary" &&
+      !(
+        ctx.runTokenKey &&
+        this.#host.hasCapability(CAPABILITY_THREAD_BRANCH_SUMMARY) &&
+        this.#host.hasCapability(CAPABILITY_RUN_TOKEN)
+      )
+    ) {
+      await this.#failRunStart(
+        row,
+        failure(
+          COMMAND_FAILURES.branchSummaryUnsupported,
+          "this sandbox's agent can't summarize a branch",
+        ),
+      );
+      return;
+    }
+    const starts = startsRun(row.kind);
     if (starts) {
       const session = await this.#ensureSession(row.threadId);
       if (!session.ok) {
@@ -684,7 +702,7 @@ export class CommandDelivery {
         row.runId,
         row.threadId,
         claimed.cursor,
-        row.kind === "thread.compact",
+        isSummaryCommand(row.kind),
         claimed.startedAt,
       );
     }
@@ -708,6 +726,16 @@ export class CommandDelivery {
       if (claimed.runToken === undefined) throw new Error("compaction delivered without a token");
       this.#host.send({
         ...withoutTrace(frame as ThreadCompactFrame),
+        ...(traced ? { trace: traced } : {}),
+        run_token: claimed.runToken,
+      });
+      return;
+    }
+    if (row.kind === "thread.branch_summary") {
+      if (claimed.runToken === undefined)
+        throw new Error("branch summary delivered without a token");
+      this.#host.send({
+        ...withoutTrace(frame as ThreadBranchSummaryFrame),
         ...(traced ? { trace: traced } : {}),
         run_token: claimed.runToken,
       });
@@ -923,6 +951,79 @@ export class CommandDelivery {
   }
 
   /**
+   * A branch summary answered (KOBE-548, CT11): Pi appended a `branch_summary` entry, fetched and
+   * mirrored like a compaction's; the reported entry becomes the thread's leaf and the run's stream
+   * hears `thread.updated {leaf_entry_id}` before the run ends. A success whose entry did not
+   * arrive (or is not a summary under the reported parent) fails the run `summary_failed` and
+   * leaves the leaf. Pi's and the sandbox's text is logged, never stored.
+   */
+  async #endBranchSummary(
+    rowId: string,
+    runId: string,
+    threadId: string,
+    outcome: CommandOutcome,
+  ): Promise<void> {
+    const { teamId } = this.#host.target;
+    if (!outcome.ok) {
+      const detail = {
+        run_id: runId,
+        code: outcome.error.code,
+        error: outcome.error.message.slice(0, 300),
+      };
+      if (tampered(outcome)) {
+        this.#host.log.warn(
+          { ...detail, sandbox_id: this.#host.sandboxId, security: true },
+          "branch summary stopped: Pi's runtime was tampered with",
+        );
+      } else {
+        this.#host.log.info(detail, "branch summary failed in the sandbox");
+      }
+    }
+    const reported = outcome.ok ? parseBranchSummaryResult(outcome.data) : undefined;
+    if (outcome.ok && reported === undefined) {
+      this.#host.log.warn({ run_id: runId }, "the sandbox sent a malformed branch summary result");
+    }
+    const entries = reported !== undefined ? await this.fetchNewEntries(threadId) : undefined;
+    const { ended, status } = await this.#endTx(
+      outcome,
+      runId,
+      threadId,
+      "branch_summary",
+      async (tx) => {
+        let code = outcome.ok ? "summary_failed" : outcome.error.code;
+        if (reported !== undefined) {
+          const command = await tx.execute<{ to_entry_id: string | null }>(sql`
+            SELECT frame ->> 'to_entry_id' AS to_entry_id FROM sandbox_commands
+             WHERE team_id = ${teamId} AND id = ${rowId}`);
+          const mirrored = await mirrorBranchSummaryInTx(tx, {
+            toEntryId: command.rows[0]?.to_entry_id ?? "",
+            teamId,
+            threadId,
+            runId,
+            entries,
+            reported,
+            maxEntries: this.#ctx.tuning.threadMaxEntries,
+          });
+          if (mirrored.capped) {
+            this.#host.log.warn({ thread_id: threadId }, "thread entry cap reached");
+            this.#ctx.auditLimit(this.#host.target, this.#host.sandboxId, "thread_entries");
+          }
+          if (mirrored.ok) code = "";
+          else this.#host.log.warn({ run_id: runId }, "the branch summary entry was not mirrored");
+        }
+        const end =
+          code === ""
+            ? ({ status: "completed" } as const)
+            : ({ status: "failed", error: failureInfo(code, "start_failed") } as const);
+        const result = await endRunInTx(tx, teamId, runId, end);
+        return { ...result, status: end.status };
+      },
+    );
+    this.#host.endLease(runId);
+    if (ended) this.#ctx.runEnded({ teamId, runId, threadId, status });
+  }
+
+  /**
    * The transaction ending a run (`withAppendTx`). For a tampered runtime it also writes
    * `sandbox.runtime_tampered` as its last write, and the row alone if it cannot commit (KOBE-271).
    */
@@ -966,6 +1067,12 @@ export class CommandDelivery {
         this.#host.log.error({ err, run_id: issued.runId }, "could not end a compaction run"),
       );
     }
+    if (issued.commandKind === "thread.branch_summary" && issued.runId !== null) {
+      await this.#endBranchSummary(issued.rowId, issued.runId, issued.threadId, outcome).catch(
+        (err: unknown) =>
+          this.#host.log.error({ err, run_id: issued.runId }, "could not end a branch summary run"),
+      );
+    }
     await withTeam(this.#ctx.db, teamId, (tx) =>
       completeCommand(tx, this.#ctx.bus, teamId, issued.rowId, outcome, this.#host.id),
     );
@@ -981,7 +1088,9 @@ export class CommandDelivery {
 }
 
 /** A start frame without its trace context (added back only when the agent may take it). */
-function withoutTrace<F extends RunStartFrame | ThreadCompactFrame>(frame: F): Omit<F, "trace"> {
+function withoutTrace<F extends RunStartFrame | ThreadCompactFrame | ThreadBranchSummaryFrame>(
+  frame: F,
+): Omit<F, "trace"> {
   const { trace: _trace, ...rest } = frame;
   return rest;
 }

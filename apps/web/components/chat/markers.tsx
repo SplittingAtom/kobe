@@ -14,6 +14,7 @@ import {
   FoldVerticalIcon,
   FolderInputIcon,
   GitForkIcon,
+  GitMergeIcon,
   ShieldAlertIcon,
   ShieldCheckIcon,
   ShieldXIcon,
@@ -302,8 +303,43 @@ function CompactionMarker({ marker }: { readonly marker: EntryMarker & { kind: "
   );
 }
 
+/** A summary of the branch the thread left, carried into this one (KOBE-548, CT11): folded. */
+function BranchSummaryMarker({
+  marker,
+}: {
+  readonly marker: EntryMarker & { kind: "branch_summary" };
+}) {
+  const { open, setOpen } = useDisclosure();
+  return (
+    <div data-kobe-marker="branch_summary" role="note" className="text-muted-foreground text-xs">
+      <Disclosure
+        open={open}
+        onOpenChange={setOpen}
+        className="flex flex-col items-center"
+        headerClassName="w-auto"
+        bodyClassName="border-border m-2 self-stretch rounded-lg border px-3 py-2 text-sm"
+        summary={
+          <>
+            <GitMergeIcon aria-hidden className="size-3.5 shrink-0" />
+            <span>Summary of another branch</span>
+          </>
+        }
+      >
+        {marker.summary === "" ? (
+          <p className="m-0">The summary is too large to show here.</p>
+        ) : (
+          <div className="text-foreground" data-kobe-summary>
+            <Markdown text={marker.summary} />
+          </div>
+        )}
+      </Disclosure>
+    </div>
+  );
+}
+
 export function EntryMarkerRow({ marker }: { readonly marker: EntryMarker }) {
   if (marker.kind === "compaction") return <CompactionMarker marker={marker} />;
+  if (marker.kind === "branch_summary") return <BranchSummaryMarker marker={marker} />;
   // The branch's first model is the one it started on, not a change (KOBE-280).
   return (
     <MarkerRow kind="model" icon={CpuIcon}>
@@ -316,7 +352,9 @@ export function EntryMarkerRow({ marker }: { readonly marker: EntryMarker }) {
 /** An entry marker inside a turn (a `data-kobe-marker` part). */
 export function MarkerPart({ data }: DataMessagePartProps) {
   const marker = data as EntryMarker | undefined;
-  return marker?.kind === "model" || marker?.kind === "compaction" ? (
+  return marker?.kind === "model" ||
+    marker?.kind === "compaction" ||
+    marker?.kind === "branch_summary" ? (
     <EntryMarkerRow marker={marker} />
   ) : null;
 }

@@ -562,6 +562,9 @@ export class SandboxConnection implements RegisteredConnection {
       case "thread.compact_result":
         this.#onCompactResult(frame);
         return;
+      case "thread.branch_summary_result":
+        this.#onBranchSummaryResult(frame);
+        return;
       case "pi.ui_request":
         this.#onUiRequest(frame);
         return;
@@ -1472,6 +1475,37 @@ export class SandboxConnection implements RegisteredConnection {
         });
       }
       this.#violate("unknown_run", "thread.compact_result");
+      return;
+    }
+    const { v: _v, type: _t, command_id: _c, thread_id: _th, ok, ...rest } = frame;
+    this.#delivery.settle(
+      issued,
+      ok ? { ok: true, data: rest } : { ok: false, error: (rest as { error: ErrorInfo }).error },
+    );
+  }
+
+  /** The one answer to a `thread.branch_summary` (KOBE-548): checked as `#onCompactResult`. */
+  #onBranchSummaryResult(
+    frame: Extract<SandboxToServerFrame, { type: "thread.branch_summary_result" }>,
+  ): void {
+    const issued = this.#delivery.takeIssued(frame.command_id);
+    if (issued === "answered") return;
+    const matches =
+      issued !== undefined &&
+      issued.kind === "row" &&
+      issued.commandKind === "thread.branch_summary" &&
+      issued.threadId === frame.thread_id;
+    if (!matches) {
+      if (issued !== undefined) {
+        this.#delivery.settle(issued, {
+          ok: false,
+          error: {
+            code: "malformed_result",
+            message: "a branch summary result for another command",
+          },
+        });
+      }
+      this.#violate("unknown_run", "thread.branch_summary_result");
       return;
     }
     const { v: _v, type: _t, command_id: _c, thread_id: _th, ok, ...rest } = frame;

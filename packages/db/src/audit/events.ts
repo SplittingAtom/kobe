@@ -928,6 +928,29 @@ export const AUDIT_EVENTS = {
     ]),
     focused: z.boolean().optional(),
   }),
+  /**
+   * The owner made another branch current and carried a summary of the one left (KOBE-548, CT11):
+   * the branch summary run and how it ended. Whether a focus was given, never its text; absent when
+   * the system ended the run (`timed_out`, `interrupted`). Refusals before the run is created
+   * (busy, reader, test thread, the cap) leave no row.
+   */
+  "thread.branch_summarized": event("team", {
+    threadId: id,
+    runId: id,
+    outcome: z.enum([
+      "completed",
+      "cancelled",
+      "budget_stopped",
+      "timed_out",
+      "interrupted",
+      "thread_busy",
+      "sandbox_unavailable",
+      "nothing_to_summarize",
+      "model_not_configured",
+      "summary_failed",
+    ]),
+    focused: z.boolean().optional(),
+  }),
   // ── project: configuration metadata only, never names, instructions or descriptions (KOBE-161, D23) ──
   "project.created": event("team", { projectId: id, membersMode: z.enum(["team", "selected"]) }),
   /** `fields` lists which settings changed (names, not values). */
@@ -1279,7 +1302,7 @@ export const AUDIT_EVENTS = {
     userId: id,
     threadId: id,
     runId: id,
-    runKind: z.enum(["message", "compaction"]),
+    runKind: z.enum(["message", "compaction", "branch_summary"]),
     /** The server replica holding the sandbox's connection. */
     replicaId: id,
   }),

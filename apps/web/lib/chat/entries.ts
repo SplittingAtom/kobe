@@ -70,6 +70,11 @@ export type ParsedEntry =
       readonly firstKeptEntryId: string | null;
       readonly tokensBefore?: number | undefined;
     }
+  /**
+   * Pi's summary of the branch the thread left, carried into this one (KOBE-548, CT11); empty when
+   * the entry's body is in object storage.
+   */
+  | { readonly kind: "branchSummary"; readonly summary: string }
   /** Not a conversation turn: kept in the tree, never rendered. */
   | { readonly kind: "other"; readonly type: string };
 
@@ -178,6 +183,9 @@ function systemEntry(entry: ThreadEntry): ParsedEntry | undefined {
         ? { tokensBefore: tokens }
         : {}),
     };
+  }
+  if (entry.type === "branch_summary") {
+    return { kind: "branchSummary", summary: (str(payload.summary) ?? "").slice(0, MAX_SUMMARY) };
   }
   if (entry.type !== "model_change" || entry.payloadOffloaded) return undefined;
   const model = str(payload.modelId) ?? "";

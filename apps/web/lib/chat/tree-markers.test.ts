@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   assistant,
+  branchSummary,
   compaction,
   entry,
   modelChange,
@@ -64,6 +65,30 @@ describe("projectThread markers", () => {
     });
     expect(meta(p, "a1")).not.toHaveProperty("after");
     expect(p.lastEntryOfNode.get("a2")).toBe("c1");
+  });
+
+  it("marks a branch summary on the branch it entered, not on the branch left (KOBE-548)", () => {
+    const entries = [
+      user("u1", null, "hi"),
+      assistant("a1", "u1", text("hello")),
+      user("u2", "a1", "left behind"),
+      assistant("a2", "u2", text("old answer")),
+      branchSummary("bs1", "a1", "They explored C."),
+      user("u3", "bs1", "carry on"),
+    ];
+    const p = projectThread(entries, "u3");
+    expect(shape(p)).toContainEqual(["u3", "a1", "user"]);
+    // Below a junction it is carried to the entered branch's first message.
+    expect(meta(p, "u3")).toMatchObject({
+      before: [{ kind: "branch_summary", entryId: "bs1", summary: "They explored C." }],
+    });
+    expect(meta(p, "u2")).not.toHaveProperty("before");
+    // On the branch left, no marker.
+    const old = projectThread(entries, "a2");
+    expect(meta(old, "a1")).not.toHaveProperty("after");
+    // The summary as the leaf (just carried, nothing sent yet) still shows.
+    const fresh = projectThread(entries.slice(0, 5), "bs1");
+    expect(meta(fresh, "a1")).toMatchObject({ after: [{ kind: "branch_summary" }] });
   });
 
   it("puts a marker inside the turn where it happened", () => {
@@ -145,7 +170,8 @@ describe("projectThread markers (KOBE-209 review)", () => {
     const entries = [
       user("u1", null, "q"),
       assistant("a1", "u1", text("a")),
-      offloaded("x1", "a1", "branch_summary"),
+      // (An offloaded branch_summary is a marker with an empty summary, as a compaction; KOBE-548.)
+      offloaded("x1", "a1", "label"),
       offloaded("x2", "x1", "custom"),
       offloaded("x3", "x2", "thinking_level_change"),
       offloaded("x4", "x3", "model_change"),

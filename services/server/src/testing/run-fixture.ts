@@ -24,6 +24,7 @@ const WAIT_MS = 25_000;
 
 export type RunStart = Extract<ServerToSandboxFrame, { type: "run.start" }>;
 export type ThreadCompact = Extract<ServerToSandboxFrame, { type: "thread.compact" }>;
+export type ThreadBranchSummary = Extract<ServerToSandboxFrame, { type: "thread.branch_summary" }>;
 
 interface Entry {
   type: string;
@@ -148,6 +149,59 @@ export class FakeWorkspace {
       first_kept_entry_id: entry.firstKeptEntryId,
       tokens_before: 4242,
       estimated_tokens_after: 512,
+    });
+    return entry.id;
+  }
+
+  /** The `thread.branch_summary` frames received (KOBE-548). */
+  branchSummaries(): ThreadBranchSummary[] {
+    return this.sb.frames("thread.branch_summary");
+  }
+
+  async summarizing(timeoutMs = WAIT_MS): Promise<ThreadBranchSummary> {
+    return this.sb.until(() => this.branchSummaries().at(-1), timeoutMs);
+  }
+
+  /**
+   * Pi's kobe-branch-summary command (KOBE-548): on success a `branch_summary` entry is appended
+   * under `to_entry_id` (Pi does not announce it) and the result goes back as
+   * `thread.branch_summary_result`. `report` overrides what the agent reports (a lying sandbox).
+   */
+  branchSummarized(
+    frame: ThreadBranchSummary,
+    outcome: { readonly summary: string } | { readonly code: string; readonly message: string },
+    report?: { readonly entry_id: string; readonly parent_id: string },
+  ): string | undefined {
+    if ("code" in outcome) {
+      this.sb.send({
+        v: 1,
+        type: "thread.branch_summary_result",
+        command_id: frame.command_id,
+        thread_id: frame.thread_id,
+        ok: false,
+        error: { code: outcome.code, message: outcome.message },
+      });
+      return undefined;
+    }
+    const session = this.sessions.get(frame.thread_id) ?? [];
+    const entry: Entry = {
+      type: "branch_summary",
+      id: entryId(),
+      parentId: frame.to_entry_id,
+      timestamp: new Date().toISOString(),
+      fromId: frame.from_leaf_entry_id,
+      summary: outcome.summary,
+      details: { readFiles: [], modifiedFiles: [] },
+      fromHook: false,
+    };
+    this.sessions.set(frame.thread_id, [...session, entry]);
+    this.sb.send({
+      v: 1,
+      type: "thread.branch_summary_result",
+      command_id: frame.command_id,
+      thread_id: frame.thread_id,
+      ok: true,
+      ...(report ?? { entry_id: entry.id, parent_id: frame.to_entry_id }),
     });
     return entry.id;
   }

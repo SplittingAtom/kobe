@@ -35,8 +35,18 @@ import {
   piCompactFailure,
   selectsModel,
   setModelCommand,
+  type CompactErrorCode,
   type CompactReply,
 } from "./compact.js";
+import {
+  branchSummaryFailure,
+  branchSummaryPrompt,
+  branchSummaryReplyOf,
+  branchSummaryRequestOf,
+  branchSummaryThrown,
+  type BranchSummaryErrorCode,
+  type BranchSummaryReply,
+} from "./branch-summary.js";
 import { Thread, type ThreadEnv, type ThreadHooks } from "./thread.js";
 import type { RunModel } from "../models/types.js";
 import { fromCapture, fromSession, readCapture } from "../context/assemble.js";
@@ -377,6 +387,72 @@ export class ThreadManager {
       // Pi may still be summarizing: stop it rather than leave it working without a run.
       if (thread.runId === frame.run_id) await thread.withLock(() => thread.stopProcess());
       return compactThrown(error);
+    } finally {
+      if (thread.runId === frame.run_id) thread.endRun();
+    }
+  }
+
+  /**
+   * `thread.branch_summary` (KOBE-548, CT11): the branch summary run. Shaped like `#compact`: busy
+   * refused under the lock, the run's model selected first (Pi summarises with its current model),
+   * the token held for kobe-models' `session_before_tree`. Then the agent arms the request and
+   * sends the bare `/kobe-branch-summary` prompt; Pi answers it once the command has finished, and
+   * the command has reported its outcome on the armed dialog by then.
+   */
+  branchSummary(frame: Frame<"thread.branch_summary">): Promise<BranchSummaryReply> {
+    return this.#claimed(frame.thread_id, (thread) => this.#branchSummary(thread, frame));
+  }
+
+  async #branchSummary(
+    thread: Thread,
+    frame: Frame<"thread.branch_summary">,
+  ): Promise<BranchSummaryReply> {
+    if (this.#draining) return branchSummaryFailure("pi_unavailable");
+    if (this.#options.models === undefined) return branchSummaryFailure("model_not_configured");
+    const busy =
+      busyFor(thread) ??
+      (await thread.withLock(async () => {
+        const held = busyFor(thread);
+        if (held === undefined) thread.beginRun(frame.run_id, true);
+        return held;
+      }));
+    if (busy !== undefined) return branchSummaryFailure("thread_busy");
+    const model = compactModelOf(frame);
+    try {
+      const ready = await this.#compactReady(thread, model);
+      if (ready !== undefined && !ready.ok) {
+        this.#warn(thread.id, `branch summary not started: ${ready.error.message}`);
+        return branchSummaryFailure(asBranchCode(ready.error.code));
+      }
+      await thread.attachRun(
+        frame.run_id,
+        model,
+        frame.run_token.token,
+        this.#options.traceparentOf?.(frame.run_id) ?? null,
+      );
+      const tampered = await thread.verifyRuntime();
+      if (tampered !== undefined) {
+        await thread.stopTampered(tampered, "branch_summary");
+        return branchSummaryFailure("runtime_tampered");
+      }
+      if (!thread.armBranchSummary(frame.run_id, branchSummaryRequestOf(frame))) {
+        return branchSummaryFailure("internal");
+      }
+      const response = await thread.request(branchSummaryPrompt(), PI_SLOW_REQUEST_TIMEOUT_MS);
+      const outcome = thread.takeBranchSummary(frame.run_id);
+      if (!response.success) {
+        this.#warn(thread.id, `branch summary prompt refused by Pi: ${response.error}`);
+        return branchSummaryFailure("summary_failed");
+      }
+      if (outcome !== undefined && !outcome.ok) {
+        this.#warn(thread.id, `branch summary ${outcome.code}: ${outcome.detail}`);
+      } else if (outcome === undefined) {
+        this.#warn(thread.id, "branch summary: the command reported no outcome");
+      }
+      return branchSummaryReplyOf(outcome);
+    } catch (error) {
+      if (thread.runId === frame.run_id) await thread.withLock(() => thread.stopProcess());
+      return branchSummaryThrown(error);
     } finally {
       if (thread.runId === frame.run_id) thread.endRun();
     }
@@ -950,6 +1026,11 @@ function busyFor(thread: Thread): CompactReply | undefined {
   }
   if (thread.restoring) return compactFailure("thread_busy", "session restore in progress");
   return undefined;
+}
+
+/** A compaction-start failure code as a branch summary's (the same set minus compaction's own). */
+function asBranchCode(code: CompactErrorCode): BranchSummaryErrorCode {
+  return code === "nothing_to_compact" || code === "compaction_failed" ? "summary_failed" : code;
 }
 
 /** A failed Pi start as a `thread.compact_result` code. */

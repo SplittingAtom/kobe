@@ -5,6 +5,7 @@ import { DropdownMenu } from "radix-ui";
 import { EllipsisIcon } from "lucide-react";
 import { useContext, useState, type FormEvent, type ReactNode } from "react";
 import { forkPointOf, type ForkPoint } from "../../lib/chat/fork";
+import { branchLeafOf, messagesDiffer } from "../../lib/chat/head";
 import { isThreadRunning } from "../../lib/chat/thread-state";
 import { comparable } from "../../lib/chat/compare";
 import { branchPointOfMeta, type KobeMessageMeta } from "../../lib/chat/tree";
@@ -24,6 +25,7 @@ import {
 } from "../../lib/chat/tree-panel";
 import { chatPortalContainer } from "../ui/chat-portal";
 import { LEAF_BUSY_NOTE } from "./branch-bar";
+import { BranchSummaryDialog } from "./branch-summary-dialog";
 import { ForkDialog } from "./fork-dialog";
 import { ChatSessionContext, type KobeThreadExtras } from "./kobe-runtime";
 import type { TreeData } from "./tree-context";
@@ -75,6 +77,12 @@ export function useTreeActions(
   const { controller, state, projection } = extras;
   const [editing, setEditing] = useState<TreeEditing | null>(null);
   const [forking, setForking] = useState<ForkPoint | null>(null);
+  /** Make it current and carry a summary (KOBE-548): the branch's newest entry and its counts. */
+  const [carrying, setCarrying] = useState<{
+    readonly target: string;
+    readonly left: number;
+    readonly filesLeft: boolean;
+  } | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const summary = state.summary;
   const owner = summary?.readOnly !== true && controller !== null;
@@ -92,6 +100,7 @@ export function useTreeActions(
       canEdit: !isThreadRunning(state) && branchPointOfMeta(projection, meta) !== undefined,
       canRetry: node.empty === true && node.isLeaf && state.interruptedRun != null,
       forkable: forkPointOf(meta) !== undefined,
+      carrySummary: true,
     });
   };
 
@@ -185,13 +194,20 @@ export function useTreeActions(
       }
       case "copy":
         return copy(node);
+      case "carry-summary": {
+        const target = last === undefined ? undefined : branchLeafOf(state.entries, last);
+        if (target === undefined || controller === null) return setNote(CANNOT_MAKE_CURRENT);
+        const leaf = summary?.leafEntryId ?? null;
+        return setCarrying({
+          target,
+          left: messagesDiffer(state.entries, projection.nodeOfEntry, leaf, target),
+          filesLeft: filesLeftBehind(tree, node.id),
+        });
+      }
       case "compare":
         // The dialog takes the window (CT10); the tree closes under it.
         onClose();
         return data.compare(node.id, true);
-      case "carry-summary":
-        // KOBE-548 adds this; hidden until then (`treeMenu`).
-        return undefined;
     }
   };
 
@@ -224,6 +240,20 @@ export function useTreeActions(
             Cancel
           </button>
         </div>
+      )}
+      {carrying !== null && controller !== null && (
+        <BranchSummaryDialog
+          key={carrying.target}
+          controller={controller}
+          target={carrying.target}
+          left={carrying.left}
+          filesLeft={carrying.filesLeft}
+          open
+          onOpenChange={(open) => {
+            if (!open) setCarrying(null);
+          }}
+          onDone={onClose}
+        />
       )}
       {forking !== null && (
         <ForkDialog

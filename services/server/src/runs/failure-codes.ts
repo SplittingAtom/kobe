@@ -71,6 +71,12 @@ export const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
   compaction_failed: "The conversation could not be compacted.",
   nothing_to_compact: "There was nothing to compact.",
   compaction_interrupted: "The compaction stopped: your workspace was lost before it finished.",
+  // A branch summary run's end (KOBE-548, CT11); seen only in its events, like a compaction's.
+  summary_failed: "The branch could not be summarized.",
+  nothing_to_summarize: "There was nothing to summarize on the branch left.",
+  summary_limit: "This thread already has the most branch summaries it can carry.",
+  branch_summary_interrupted:
+    "The branch summary stopped: your workspace was lost before it finished.",
   runtime_tampered:
     "Another process in your workspace changed Pi's private runtime directory, so the run was stopped. Check what is running in your workspace and try again.",
 };

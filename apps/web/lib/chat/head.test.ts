@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   branchContextTokens,
   branchLeafOf,
+  carryOffered,
   headOf,
   isBrowsing,
   messagesDiffer,
@@ -68,6 +69,16 @@ describe("the local head (CT3)", () => {
     expect(onBranchOf(entries, "a3b", "a1")).toBe(true);
     expect(onBranchOf(entries, "a3b", "u2")).toBe(false);
     expect(onBranchOf(entries, null, "u2")).toBe(false);
+  });
+
+  it("offers a carried summary only for a head off the leaf's branch (KOBE-548)", () => {
+    const entries = forked();
+    expect(carryOffered(entries, "a3b", "a2")).toBe(true);
+    // An ancestor on the leaf's own path (the tree's Show on such a node): no other branch.
+    expect(carryOffered(entries, "a3b", "a1")).toBe(false);
+    expect(carryOffered(entries, "a3b", "a3b")).toBe(false);
+    expect(carryOffered(entries, null, "a2")).toBe(false);
+    expect(carryOffered(entries, "a3b", null)).toBe(false);
   });
 
   it("counts the messages on screen that the leaf's branch does not have", () => {

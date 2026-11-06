@@ -172,7 +172,7 @@ async function startInTx(
  * choice, else the team default), so the summary is written by the conversation's model. An agent
  * that does not resolve does not block a compaction: the conversation's choice applies.
  */
-async function compactionModel(
+export async function compactionModel(
   host: CompactionHost,
   tx: KobeTx,
   teamId: string,
