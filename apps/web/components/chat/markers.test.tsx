@@ -184,6 +184,31 @@ describe("inline markers on a recorded thread (ac-1, ac-3)", () => {
   });
 });
 
+describe("a carried branch summary (KOBE-548, ac-3)", () => {
+  it("shows a folded \"Summary of another branch\" on the branch it entered only", async () => {
+    const thread = fake.addThread("Branches");
+    const u1 = fake.addEntry(thread, null, ask("Pick a colour"));
+    const a1 = fake.addEntry(thread, u1, say("Blue or green?"));
+    const u2 = fake.addEntry(thread, a1, ask("Try green"));
+    fake.addEntry(thread, u2, say("Green it is."));
+    const bs = fake.addSystemEntry(thread, a1, "branch_summary", {
+      summary: "The user tried **green** on another branch.",
+    });
+    const u3 = fake.addEntry(thread, bs, ask("Back to blue"));
+    fake.addEntry(thread, u3, say("Blue, then."));
+    openApp(fake, thread);
+    await screen.findByText("Blue, then.");
+    const row = marker("branch_summary");
+    const toggle = within(row).getByRole("button", { name: /Summary of another branch/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    await userEvent.click(toggle);
+    const body = must(document.getElementById(must(toggle.getAttribute("aria-controls"))));
+    expect(body.hidden).toBe(false);
+    expect(body.textContent).toContain("The user tried green on another branch.");
+    expect(screen.queryByText("Green it is.")).toBeNull();
+  });
+});
+
 /**
  * KOBE-302: on gate1 the e2e click "did not open" the compaction. The trace showed the marker
  * already open (the member's stored Detail toggle was on), so the click closed it; it never

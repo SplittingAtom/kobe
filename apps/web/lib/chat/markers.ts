@@ -35,6 +35,13 @@ export type EntryMarker =
       /** Conversation entries this compaction folded into the summary; unknown if not loaded. */
       readonly folded?: number | undefined;
       readonly tokensBefore?: number | undefined;
+    }
+  | {
+      /** A summary of another branch carried into this one (KOBE-548, CT11). */
+      readonly kind: "branch_summary";
+      readonly entryId: string;
+      /** Pi's summary; empty when its body is in object storage. */
+      readonly summary: string;
     };
 
 /** A run that ended without finishing its answer (`runs.status`); stopped or failed: KOBE-290. */
@@ -204,6 +211,9 @@ export function entryMarker(
       first: branch.model === null,
       from: branch.from,
     };
+  }
+  if (p?.kind === "branchSummary") {
+    return { kind: "branch_summary", entryId: entry.entryId, summary: p.summary };
   }
   if (p?.kind !== "compaction") return undefined;
   const folded =

@@ -142,7 +142,11 @@ export function nodeMarkers(
     ...(after.length > 0 ? { after } : {}),
     deps: [...carried, ...inside, ...tails.flatMap((d) => d.markers)].flatMap((m) => [
       m.entry,
-      ...(m.marker.kind === "compaction" ? [m.marker.folded] : [m.marker.first, m.marker.from]),
+      ...(m.marker.kind === "compaction"
+        ? [m.marker.folded]
+        : m.marker.kind === "branch_summary"
+          ? [m.marker.summary]
+          : [m.marker.first, m.marker.from]),
     ]),
   };
 }
