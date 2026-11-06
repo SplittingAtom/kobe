@@ -1,5 +1,29 @@
 import { describe, expect, it } from "vitest";
 import {
+  BRANCH_LABEL_ERROR_CODES,
+  BRANCH_LABEL_ERROR_HTTP_STATUS,
+  BRANCH_LABEL_MAX_CHARS,
+  BRANCH_LABELS_MAX,
+  BRANCH_SUMMARIES_MAX,
+  BRANCH_SUMMARY_ERROR_CODES,
+  BRANCH_SUMMARY_ERROR_HTTP_STATUS,
+  BRANCH_SUMMARY_ERROR_MESSAGES,
+  BRANCH_SUMMARY_FOCUS_MAX_CHARS,
+  branchLabelErrorCodeSchema,
+  branchLabelSchema,
+  branchSummaryError,
+  branchSummaryErrorCodeSchema,
+  branchSummaryErrorSchema,
+  branchSummaryFocusSchema,
+  branchSummaryRequestSchema,
+  CAPABILITY_THREAD_BRANCH_SUMMARY,
+  LABEL_WRITE_RATE,
+  LEAF_RATE,
+  RUN_KIND_BRANCH_SUMMARY,
+  setLabelBodySchema,
+  THREAD_CARD_BRANCHES_MAX,
+  threadBranchesResponseSchema,
+  threadCardBranchesSchema,
   CAPABILITY_THREAD_COMPACT,
   COMPACT_THREAD_ERROR_CODES,
   COMPACT_THREAD_ERROR_HTTP_STATUS,
@@ -434,5 +458,206 @@ describe("thread folders", () => {
       [...THREAD_FOLDER_ERROR_CODES].sort(),
     );
     expect(threadFolderErrorCodeSchema.safeParse("folder_full").success).toBe(false);
+  });
+});
+
+// --- Conversation tree (KOBE-542, CT2, CT3, CT9, CT11, CT12, CT20) ---------------------------------
+
+describe("branch labels (CT9)", () => {
+  it("sets a trimmed one-line label of 1-60 characters, or clears it with null", () => {
+    expect(setLabelBodySchema.parse({ label: "  try 5% cut " })).toEqual({ label: "try 5% cut" });
+    expect(setLabelBodySchema.parse({ label: null })).toEqual({ label: null });
+    expect(
+      setLabelBodySchema.parse({ label: "x".repeat(BRANCH_LABEL_MAX_CHARS) }).label,
+    ).toHaveLength(BRANCH_LABEL_MAX_CHARS);
+    expect(branchLabelSchema.parse("the good answer")).toBe("the good answer");
+  });
+
+  it("refuses blank, long, multi-line and control or bidi labels, a missing label and extras", () => {
+    for (const label of [
+      "",
+      "   ",
+      "x".repeat(BRANCH_LABEL_MAX_CHARS + 1),
+      "two\nlines",
+      "tab\there",
+      "a b",
+      "rtl‮override",
+      "nul\u0000",
+      42,
+    ]) {
+      expect(setLabelBodySchema.safeParse({ label }).success, JSON.stringify(label)).toBe(false);
+    }
+    expect(setLabelBodySchema.safeParse({}).success).toBe(false);
+    expect(setLabelBodySchema.safeParse({ label: "ok", entry_id: "e1" }).success).toBe(false);
+  });
+
+  it("has the limits and error codes of the spec", () => {
+    expect(BRANCH_LABEL_MAX_CHARS).toBe(60);
+    expect(BRANCH_LABELS_MAX).toBe(200);
+    expect(BRANCH_LABEL_ERROR_HTTP_STATUS).toEqual({
+      entry_not_found: 404,
+      label_limit: 409,
+      thread_in_trash: 409,
+      test_thread: 409,
+    });
+    expect(Object.keys(BRANCH_LABEL_ERROR_HTTP_STATUS).sort()).toEqual(
+      [...BRANCH_LABEL_ERROR_CODES].sort(),
+    );
+    expect(branchLabelErrorCodeSchema.safeParse("entry_not_found").success).toBe(true);
+    expect(branchLabelErrorCodeSchema.safeParse("folder_not_found").success).toBe(false);
+  });
+});
+
+describe("thread branches response (CT2)", () => {
+  const valid = {
+    labels: [{ entry_id: "a1b2c3d4", label: "try 5% cut" }],
+    runs: [
+      { user_entry_id: "a1b2c3d4", remembered_rule: true },
+      { user_entry_id: "e5f6a7b8", remembered_rule: false },
+    ],
+  };
+
+  it("parses labels and runs, and empty lists", () => {
+    expect(threadBranchesResponseSchema.parse(valid)).toEqual(valid);
+    expect(threadBranchesResponseSchema.parse({ labels: [], runs: [] })).toEqual({
+      labels: [],
+      runs: [],
+    });
+  });
+
+  it("caps labels at BRANCH_LABELS_MAX", () => {
+    const label = (i: number) => ({ entry_id: `e${i}`, label: `l${i}` });
+    const at = Array.from({ length: BRANCH_LABELS_MAX }, (_, i) => label(i));
+    expect(threadBranchesResponseSchema.safeParse({ labels: at, runs: [] }).success).toBe(true);
+    expect(
+      threadBranchesResponseSchema.safeParse({
+        labels: [...at, label(BRANCH_LABELS_MAX)],
+        runs: [],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("refuses missing lists, bad items and unknown keys", () => {
+    for (const bad of [
+      { labels: [] },
+      { runs: [] },
+      { ...valid, extra: 1 },
+      { ...valid, labels: [{ entry_id: "a1", label: "" }] },
+      { ...valid, labels: [{ entry_id: "", label: "x" }] },
+      { ...valid, labels: [{ entry_id: "a1", label: "x", by: "me" }] },
+      { ...valid, runs: [{ user_entry_id: "a1" }] },
+      { ...valid, runs: [{ user_entry_id: "a1", remembered_rule: "yes" }] },
+      { ...valid, runs: [{ user_entry_id: "a1", remembered_rule: true, run_id: "r" }] },
+    ]) {
+      expect(threadBranchesResponseSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+});
+
+describe("leaf move rate (CT3)", () => {
+  it("is 120 per 10 minutes, in the server's rate-limit rule shape", () => {
+    expect(LEAF_RATE).toEqual({ windowMs: 10 * 60_000, max: 120 });
+  });
+});
+
+describe("label write rate (CT9)", () => {
+  it("is 60 per 10 minutes, in the server's rate-limit rule shape", () => {
+    expect(LABEL_WRITE_RATE).toEqual({ windowMs: 10 * 60_000, max: 60 });
+  });
+});
+
+describe("hover card branches (CT12)", () => {
+  it("parses a count with its capped flag", () => {
+    expect(threadCardBranchesSchema.parse({ branches: 3, branches_capped: false })).toEqual({
+      branches: 3,
+      branches_capped: false,
+    });
+    expect(
+      threadCardBranchesSchema.parse({ branches: THREAD_CARD_BRANCHES_MAX, branches_capped: true }),
+    ).toEqual({ branches: THREAD_CARD_BRANCHES_MAX, branches_capped: true });
+  });
+
+  it("parses an old card without them", () => {
+    expect(threadCardBranchesSchema.parse({})).toEqual({});
+  });
+
+  it("refuses negative, fractional, over-cap counts and unknown keys", () => {
+    for (const bad of [
+      { branches: -1 },
+      { branches: 1.5 },
+      { branches: THREAD_CARD_BRANCHES_MAX + 1 },
+      { branches: "3" },
+      { branches_capped: "no" },
+      { branches: 1, junctions: 1 },
+    ]) {
+      expect(threadCardBranchesSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+});
+
+describe("branch summary request (CT11)", () => {
+  it("names the run kind and the limits", () => {
+    expect(RUN_KIND_BRANCH_SUMMARY).toBe("branch_summary");
+    expect(BRANCH_SUMMARIES_MAX).toBe(20);
+    expect(BRANCH_SUMMARY_FOCUS_MAX_CHARS).toBe(THREAD_COMPACT_FOCUS_MAX_CHARS);
+    expect(CAPABILITY_THREAD_BRANCH_SUMMARY).toBe("thread_branch_summary");
+  });
+
+  it("parses a target with or without a one-line focus", () => {
+    expect(branchSummaryRequestSchema.parse({ to_entry_id: "a1b2c3d4" })).toEqual({
+      to_entry_id: "a1b2c3d4",
+    });
+    const focused = { to_entry_id: "a1b2c3d4", focus: "Keep the pricing numbers" };
+    expect(branchSummaryRequestSchema.parse(focused)).toEqual(focused);
+  });
+
+  it("refuses a missing target, a bad focus and unknown keys", () => {
+    for (const bad of [
+      {},
+      { to_entry_id: "" },
+      { to_entry_id: "a1", focus: "" },
+      { to_entry_id: "a1", focus: "  " },
+      { to_entry_id: "a1", focus: "two\nlines" },
+      { to_entry_id: "a1", focus: "bidi‮" },
+      { to_entry_id: "a1", focus: "x".repeat(BRANCH_SUMMARY_FOCUS_MAX_CHARS + 1) },
+      { to_entry_id: "a1", from_leaf_entry_id: "b2" },
+    ]) {
+      expect(branchSummaryRequestSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+    expect(branchSummaryFocusSchema.safeParse("ok").success).toBe(true);
+  });
+});
+
+describe("branch summary errors (CT11)", () => {
+  it("has a status and a fixed message per code", () => {
+    expect(BRANCH_SUMMARY_ERROR_HTTP_STATUS).toEqual({
+      thread_busy: 409,
+      sandbox_unavailable: 503,
+      model_not_configured: 409,
+      nothing_to_summarize: 409,
+      summary_limit: 409,
+      summary_failed: 502,
+      read_only: 403,
+      test_thread: 409,
+    });
+    for (const code of BRANCH_SUMMARY_ERROR_CODES) {
+      expect(BRANCH_SUMMARY_ERROR_MESSAGES[code].length).toBeGreaterThan(0);
+      expect(branchSummaryError(code)).toEqual({
+        code,
+        message: BRANCH_SUMMARY_ERROR_MESSAGES[code],
+      });
+    }
+    expect(BRANCH_SUMMARY_ERROR_MESSAGES.summary_limit).toMatch(/Compact the thread first/);
+  });
+
+  it("refuses an unknown code, another message and extras", () => {
+    expect(branchSummaryErrorCodeSchema.safeParse("nothing_to_compact").success).toBe(false);
+    expect(
+      branchSummaryErrorSchema.safeParse({ code: "thread_busy", message: "nope" }).success,
+    ).toBe(false);
+    expect(
+      branchSummaryErrorSchema.safeParse({ ...branchSummaryError("summary_failed"), detail: "x" })
+        .success,
+    ).toBe(false);
   });
 });

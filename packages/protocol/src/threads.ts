@@ -348,3 +348,187 @@ export const THREAD_FOLDER_ERROR_HTTP_STATUS = {
   thread_in_trash: 409,
   test_thread: 409,
 } as const satisfies Record<ThreadFolderErrorCode, number>;
+
+// --- Conversation tree (KOBE-542, docs/specs/conversation-tree.md CT2, CT3, CT9, CT11-CT13, CT20) --
+
+/** Longest branch label, in characters after trimming (CT9). */
+export const BRANCH_LABEL_MAX_CHARS = 60;
+
+/** Most labels per thread (CT9), checked by the server under the thread's row lock. */
+export const BRANCH_LABELS_MAX = 200;
+
+/**
+ * Leaf moves per member (CT3, Q24): `POST /v1/threads/{id}/leaf`, in the server's `RateLimitRule`
+ * shape (`services/server/src/rate-limit.ts`).
+ */
+export const LEAF_RATE = { windowMs: 10 * 60_000, max: 120 } as const;
+
+/** Label writes per member (CT9, §5): `PUT /v1/threads/{id}/labels/{entryId}`, as `LEAF_RATE`. */
+export const LABEL_WRITE_RATE = { windowMs: 10 * 60_000, max: 60 } as const;
+
+/**
+ * A label on any node of the tree (CT9): the folder-name rules (TF4) at 60 characters: trimmed,
+ * 1-60 characters, one line, no control or bidi characters. Never model context.
+ */
+export const branchLabelSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(BRANCH_LABEL_MAX_CHARS)
+  .refine((s) => !FOLDER_NAME_REFUSED_CHARS.test(s), { message: "label has control characters" });
+
+/** `PUT /v1/threads/{id}/labels/{entryId}` (CT9): owner only; null removes the label. */
+export const setLabelBodySchema = z.strictObject({
+  label: branchLabelSchema.nullable(),
+});
+export type SetLabelBody = z.infer<typeof setLabelBodySchema>;
+
+/**
+ * Error codes of the label route (CT9, Q23), next to the usual `thread_not_found` (404) and
+ * `forbidden` (403). `entry_not_found`: the entry is not in the thread; `label_limit`: the thread
+ * already has {@link BRANCH_LABELS_MAX} labels.
+ */
+export const BRANCH_LABEL_ERROR_CODES = [
+  "entry_not_found",
+  "label_limit",
+  "thread_in_trash",
+  "test_thread",
+] as const;
+export const branchLabelErrorCodeSchema = z.enum(BRANCH_LABEL_ERROR_CODES);
+export type BranchLabelErrorCode = z.infer<typeof branchLabelErrorCodeSchema>;
+
+export const BRANCH_LABEL_ERROR_HTTP_STATUS = {
+  entry_not_found: 404,
+  label_limit: 409,
+  thread_in_trash: 409,
+  test_thread: 409,
+} as const satisfies Record<BranchLabelErrorCode, number>;
+
+/**
+ * `GET /v1/threads/{id}/branches` (CT2): what the web cannot derive from the entries. `labels`:
+ * every label of the thread (CT9). `runs`: the thread's runs that wrote a remember-rule
+ * (`approvals.remembered`), by their prompt entry, for the tree's badges.
+ */
+export const threadBranchesResponseSchema = z.strictObject({
+  labels: z
+    .array(z.strictObject({ entry_id: idSchema, label: branchLabelSchema }))
+    .max(BRANCH_LABELS_MAX),
+  runs: z.array(z.strictObject({ user_entry_id: idSchema, remembered_rule: z.boolean() })),
+});
+export type ThreadBranchesResponse = z.infer<typeof threadBranchesResponseSchema>;
+
+/** Where the hover card's junction count stops (CT12), as the message count's 1,000. */
+export const THREAD_CARD_BRANCHES_MAX = 1000;
+
+/**
+ * Fields the hover card (`GET /v1/threads/{id}/card`) gains (CT12): `branches` = junctions,
+ * entries with more than one child, capped at {@link THREAD_CARD_BRANCHES_MAX}; `branches_capped`
+ * says the count stopped there ("1,000+"), as `message_count_capped`. Optional so cards from
+ * servers that don't send them parse; the server's `threadCardSchema` spreads `.shape` (KOBE-543).
+ */
+export const threadCardBranchesSchema = z.strictObject({
+  branches: z.number().int().min(0).max(THREAD_CARD_BRANCHES_MAX).optional(),
+  branches_capped: z.boolean().optional(),
+});
+export type ThreadCardBranches = z.infer<typeof threadCardBranchesSchema>;
+
+/**
+ * The run kind of a branch summary (CT11): Pi summarises the branch left and appends a
+ * `branch_summary` entry under `to_entry_id`. Like a compaction it is a run under the thread lock,
+ * never queued. `RUN_KINDS` (`@kobe/db`, with its CHECK constraint) gains it in KOBE-548.
+ */
+export const RUN_KIND_BRANCH_SUMMARY = "branch_summary";
+
+/** Most branch summaries per thread (CT11, Q14); the next is refused `summary_limit`. */
+export const BRANCH_SUMMARIES_MAX = 20;
+
+/** Longest summary `focus`, in UTF-16 code units, as compaction's. */
+export const BRANCH_SUMMARY_FOCUS_MAX_CHARS = THREAD_COMPACT_FOCUS_MAX_CHARS;
+
+/**
+ * Hello capability: the agent understands `thread.branch_summary` (KOBE-548). The server sends the
+ * command only to agents that announced it and `run_token`.
+ */
+export const CAPABILITY_THREAD_BRANCH_SUMMARY = "thread_branch_summary";
+
+/** What the summary should keep (CT11): one line, kept as sent, not blank. */
+export const branchSummaryFocusSchema = z
+  .string()
+  .min(1)
+  .max(BRANCH_SUMMARY_FOCUS_MAX_CHARS)
+  .refine((s) => /\S/.test(s), { message: "focus is blank" })
+  .refine((s) => !FOLDER_NAME_REFUSED_CHARS.test(s), { message: "focus is not one line of text" });
+
+/** Body of `POST /v1/threads/{id}/branch-summary` (CT11): the node to switch to. */
+export const branchSummaryRequestSchema = z.strictObject({
+  to_entry_id: idSchema,
+  focus: branchSummaryFocusSchema.optional(),
+});
+export type BranchSummaryRequest = z.infer<typeof branchSummaryRequestSchema>;
+
+/**
+ * Error codes of `POST /v1/threads/{id}/branch-summary` (CT11), next to `thread_not_found` (404)
+ * and `forbidden` (403). `thread_busy` also covers queued runs; `nothing_to_summarize`: the branch
+ * left has no message; `read_only`: a shared reader.
+ */
+export const BRANCH_SUMMARY_ERROR_CODES = [
+  "thread_busy",
+  "sandbox_unavailable",
+  "model_not_configured",
+  "nothing_to_summarize",
+  "summary_limit",
+  "summary_failed",
+  "read_only",
+  "test_thread",
+] as const;
+export const branchSummaryErrorCodeSchema = z.enum(BRANCH_SUMMARY_ERROR_CODES);
+export type BranchSummaryErrorCode = z.infer<typeof branchSummaryErrorCodeSchema>;
+
+/** As compaction's: `sandbox_unavailable` is retryable, `summary_failed` is the model call. */
+export const BRANCH_SUMMARY_ERROR_HTTP_STATUS = {
+  thread_busy: 409,
+  sandbox_unavailable: 503,
+  model_not_configured: 409,
+  nothing_to_summarize: 409,
+  summary_limit: 409,
+  summary_failed: 502,
+  read_only: 403,
+  test_thread: 409,
+} as const satisfies Record<BranchSummaryErrorCode, number>;
+
+/** The one message per code; the sandbox's and Pi's text is logged, never relayed. */
+export const BRANCH_SUMMARY_ERROR_MESSAGES = {
+  thread_busy:
+    "This thread is busy. Wait for the current and queued runs to finish, then switch branches.",
+  sandbox_unavailable: COMPACT_THREAD_ERROR_MESSAGES.sandbox_unavailable,
+  model_not_configured: COMPACT_THREAD_ERROR_MESSAGES.model_not_configured,
+  nothing_to_summarize:
+    "There is nothing to summarize: the branch you are leaving has no messages.",
+  summary_limit: `This thread already has ${BRANCH_SUMMARIES_MAX} branch summaries. Compact the thread first.`,
+  summary_failed: "The branch could not be summarized. Try again in a moment.",
+  read_only: "Only the thread's owner can switch its branch.",
+  test_thread: "Test conversations cannot carry a branch summary.",
+} as const satisfies Record<BranchSummaryErrorCode, string>;
+
+const branchSummaryErrorOf = <C extends BranchSummaryErrorCode>(code: C) =>
+  z.strictObject({
+    code: z.literal(code),
+    message: z.literal(BRANCH_SUMMARY_ERROR_MESSAGES[code]),
+  });
+
+/** Error body: a known code with exactly its fixed message. */
+export const branchSummaryErrorSchema = z.discriminatedUnion("code", [
+  branchSummaryErrorOf("thread_busy"),
+  branchSummaryErrorOf("sandbox_unavailable"),
+  branchSummaryErrorOf("model_not_configured"),
+  branchSummaryErrorOf("nothing_to_summarize"),
+  branchSummaryErrorOf("summary_limit"),
+  branchSummaryErrorOf("summary_failed"),
+  branchSummaryErrorOf("read_only"),
+  branchSummaryErrorOf("test_thread"),
+]);
+export type BranchSummaryError = z.infer<typeof branchSummaryErrorSchema>;
+
+/** The error body for `code`. */
+export const branchSummaryError = (code: BranchSummaryErrorCode): BranchSummaryError =>
+  branchSummaryErrorSchema.parse({ code, message: BRANCH_SUMMARY_ERROR_MESSAGES[code] });

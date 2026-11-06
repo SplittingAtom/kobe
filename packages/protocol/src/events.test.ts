@@ -397,3 +397,34 @@ describe("events recorded before the site rename (KOBE-256)", () => {
     expect(EVENT_PAYLOAD_SCHEMAS["policy.denied"].safeParse(old).success).toBe(true);
   });
 });
+
+/** KOBE-542 (CT13): every leaf move tells the thread's streams where the leaf is now. */
+describe("thread.updated leaf_entry_id", () => {
+  const schema = EVENT_PAYLOAD_SCHEMAS["thread.updated"];
+  const old = { thread_id: EXAMPLE_IDS.thread, title: "Quarterly numbers" };
+
+  it("parses an old event without it", () => {
+    expect(schema.parse(old)).toEqual(old);
+  });
+
+  it("parses both a title and the leaf", () => {
+    const moved = { ...old, leaf_entry_id: "a1b2c3d4" };
+    expect(schema.parse(moved)).toEqual(moved);
+  });
+
+  it("parses a leaf-only update (title unchanged, the thread may be untitled)", () => {
+    const leafOnly = { thread_id: EXAMPLE_IDS.thread, leaf_entry_id: "a1b2c3d4" };
+    expect(schema.parse(leafOnly)).toEqual(leafOnly);
+  });
+
+  it("refuses an update with neither a title nor a leaf", () => {
+    expect(schema.safeParse({ thread_id: EXAMPLE_IDS.thread }).success).toBe(false);
+  });
+
+  it("refuses an empty or non-string leaf and unknown keys", () => {
+    for (const leaf_entry_id of ["", 42, null]) {
+      expect(schema.safeParse({ ...old, leaf_entry_id }).success).toBe(false);
+    }
+    expect(schema.safeParse({ ...old, leaf: "a1" }).success).toBe(false);
+  });
+});
