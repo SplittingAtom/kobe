@@ -21,6 +21,7 @@ import { NEW_DRAFT } from "../../lib/chat/attachments";
 import { isThreadRunning } from "../../lib/chat/thread-state";
 import { ComposerAttachments } from "./attachment-chips";
 import { ViewingChip } from "./viewing-chip";
+import { ContinueChip } from "./continue-from";
 import { isBrowsing } from "../../lib/chat/head";
 import { MentionChips, MentionPicker } from "./mention-picker";
 import { useComposerMentionDrop } from "./composer-mention-drop";
@@ -213,6 +214,16 @@ export function Composer({
   const editLast = useBoundCommands()["edit-last-message"];
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (rowDrop.notice !== "") rowDrop.clearNotice();
+    // Escape drops Continue from here (CT8) unless a popover (the @ or / menu) takes it.
+    if (
+      e.key === "Escape" &&
+      state.continueFrom !== undefined &&
+      e.currentTarget.getAttribute("aria-expanded") !== "true"
+    ) {
+      e.preventDefault();
+      controller?.clearContinue();
+      return;
+    }
     if (wantsEditLast(e)) {
       if (editLast?.onSelect && !editLast.blocker) {
         e.preventDefault();
@@ -324,6 +335,7 @@ export function Composer({
           <AppItemChips draft={draft} />
           <SkillPickChip draft={draft} />
           <ViewingChip />
+          <ContinueChip extras={extras} />
           {/* CT3: from a browsed branch, a send continues that branch, which becomes current. */}
           {isBrowsing(state) && (
             <p

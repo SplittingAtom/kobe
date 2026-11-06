@@ -32,6 +32,7 @@ import {
   FolderInputIcon,
   FolderPlusIcon,
   FolderKanbanIcon,
+  GitBranchPlusIcon,
   GitForkIcon,
   InfoIcon,
   GripVerticalIcon,
@@ -467,8 +468,40 @@ const LIST = [
     scope: "message",
     readOnlySafe: true,
   },
-  { id: "previous-branch", name: "Previous version", icon: ChevronLeftIcon, scope: "message" },
-  { id: "next-branch", name: "Next version", icon: ChevronRightIcon, scope: "message" },
+  // The branch picker's arrows; the palette runs them on the focused message (CT4, KOBE-546).
+  {
+    id: "previous-branch",
+    name: "Previous version",
+    icon: ChevronLeftIcon,
+    scope: "message",
+    palette: true,
+    readOnlySafe: true,
+  },
+  {
+    id: "next-branch",
+    name: "Next version",
+    icon: ChevronRightIcon,
+    scope: "message",
+    palette: true,
+    readOnlySafe: true,
+  },
+  // CT8 (KOBE-546): the next message continues from this answer (an answer's hover action).
+  {
+    id: "continue-from-here",
+    name: "Continue from here",
+    icon: GitBranchPlusIcon,
+    scope: "message",
+    palette: true,
+  },
+  // CT4 (KOBE-546): the header's "⑂ Tree"; the palette only, no global chord (Q29).
+  {
+    id: "conversation-tree",
+    name: "Conversation tree",
+    icon: GitForkIcon,
+    scope: "thread",
+    palette: true,
+    readOnlySafe: true,
+  },
   { id: "copy-code", name: "Copy code", icon: CopyIcon, scope: "message" },
   { id: "open-artifact", name: "Open artifact", icon: PanelRightOpenIcon, scope: "message" },
   // Composer. The + menu (KOBE-451) holds Attach files, Connectors, Memory, Skills and Apps.

@@ -90,6 +90,12 @@ export interface ThreadState {
    * only; `settleHead` drops it once the leaf reaches it.
    */
   readonly head?: string | undefined;
+  /**
+   * Continue from here (CT8, KOBE-546): the answer's last entry the next send continues from; the
+   * messages after it on screen are dimmed and the composer shows the branch chip. In memory only;
+   * cleared by the send, Escape, the chip's ✕ and another thread on screen.
+   */
+  readonly continueFrom?: string | undefined;
   /** A search hit to scroll to (CT15): the entry, and a seq so the same hit twice scrolls twice. */
   readonly reveal?: { readonly entryId: string; readonly seq: number } | undefined;
   /** Polite status for screen readers ("Message queued", "Run stopped", …). */

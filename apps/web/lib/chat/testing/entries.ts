@@ -97,3 +97,54 @@ export const compaction = (
   ...entry(id, parent, null, "compaction"),
   payload: { type: "compaction", id, parentId: parent, summary, firstKeptEntryId, tokensBefore },
 });
+
+/** An assistant step with the model it came from and Pi's usage (KOBE-545 tree fixtures). */
+export const answered = (
+  id: string,
+  parent: string,
+  model: string,
+  usage: { input: number; output: number; cacheRead?: number; cacheWrite?: number },
+  ...content: Record<string, unknown>[]
+) => entry(id, parent, { role: "assistant", content, model, usage });
+
+/** The sandbox agent's `kobe.branch` marker: where an edit or a regenerate branches (KOBE-214). */
+export const branchMarker = (id: string, parent: string) => ({
+  ...entry(id, parent, null, "custom"),
+  payload: { type: "custom", id, parentId: parent, customType: "kobe.branch", data: {} },
+});
+
+/** Pi's `branch_summary` entry: the summary of the branch left, carried into this one (CT11). */
+export const branchSummary = (id: string, parent: string, summary: string) => ({
+  ...entry(id, parent, null, "branch_summary"),
+  payload: { type: "branch_summary", id, parentId: parent, summary },
+});
+
+/** A tool result of a named tool (the default `toolResult` says bash). */
+export const namedResult = (
+  id: string,
+  parent: string,
+  toolCallId: string,
+  toolName: string,
+  isError = false,
+) =>
+  entry(id, parent, {
+    role: "toolResult",
+    toolCallId,
+    toolName,
+    content: [{ type: "text", text: isError ? "failed" : "ok" }],
+    isError,
+  });
+
+/** A rail-launched app card (KOBE-440): a server entry, `ka-` and 24 hex characters. */
+export const appCardEntry = (id: string, parent: string) => ({
+  ...entry(id, parent, null, "custom_message"),
+  payload: {
+    type: "custom_message",
+    id,
+    parentId: parent,
+    customType: "kobe.app_card",
+    content: "",
+    display: true,
+    details: { tool: "lake_query" },
+  },
+});

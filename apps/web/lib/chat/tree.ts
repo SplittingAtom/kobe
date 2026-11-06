@@ -118,6 +118,8 @@ export interface Projection {
   readonly lastEntryOfNode: ReadonlyMap<string, string>;
   /** The tree entries loaded here (an older page may not be). */
   readonly loaded: ReadonlySet<string>;
+  /** Every entry as parsed for this projection (the tree reuses it, KOBE-545). */
+  readonly parsed?: ReadonlyMap<string, ParsedEntry> | undefined;
 }
 
 export interface LiveOverlay {
@@ -412,6 +414,21 @@ function staleStoppedAnswers(
 }
 
 /**
+ * Entries that never enter the tree as messages or branches: skipped-actions reports (cards) and
+ * stale stopped answers (KOBE-290). projectThread and the tree's junction count share this rule.
+ */
+export function hiddenEntries(
+  entries: readonly ThreadEntry[],
+  parsed: ReadonlyMap<string, ParsedEntry>,
+  leafEntryId: string | null,
+): { readonly summaries: readonly ThreadEntry[]; readonly hidden: ReadonlySet<string> } {
+  const summaries = entries.filter((e) => parsed.get(e.entryId)?.kind === "skipped");
+  const stale = staleStoppedAnswers(entries, parsed, leafEntryId);
+  if (summaries.length === 0) return { summaries, hidden: stale };
+  return { summaries, hidden: new Set([...stale, ...summaries.map((e) => e.entryId)]) };
+}
+
+/**
  * The conversation as assistant-ui messages, with the head on the branch on screen: `head` is
  * where it ends (this tab's local head, CT3), `leafEntryId` the thread's leaf, which keeps its own
  * rules (a stopped answer the member chose, markers ending at the leaf). Default: the leaf.
@@ -423,13 +440,8 @@ export function projectThread(
   live?: LiveOverlay,
 ): Projection {
   const parsed = new Map(entries.map((e) => [e.entryId, parseEntry(e)] as const));
-  const isSummary = (e: ThreadEntry) => parsed.get(e.entryId)?.kind === "skipped";
-  const summaries = entries.filter(isSummary);
-  const stale = staleStoppedAnswers(entries, parsed, leafEntryId);
-  const treeEntries =
-    summaries.length === 0 && stale.size === 0
-      ? entries
-      : entries.filter((e) => !isSummary(e) && !stale.has(e.entryId));
+  const { summaries, hidden } = hiddenEntries(entries, parsed, leafEntryId);
+  const treeEntries = hidden.size === 0 ? entries : entries.filter((e) => !hidden.has(e.entryId));
   const results = new Map<string, ToolResultInfo>();
   const resultEntries = new Map<string, ThreadEntry>();
   for (const entry of treeEntries) {
@@ -559,7 +571,7 @@ export function projectThread(
     }
   } else headId = order.at(-1) ?? items.at(-1)?.message.id ?? null;
   if (live) headId = overlayLive(live, items, indexOf, place, lastEntryOfNode, headId);
-  return { items, headId, nodeOfEntry, lastEntryOfNode: lastOfNode, loaded };
+  return { items, headId, nodeOfEntry, lastEntryOfNode: lastOfNode, loaded, parsed };
 }
 
 /**
@@ -599,7 +611,7 @@ export function descendantsOf(entryId: string, entries: readonly ThreadEntry[]):
 }
 
 /** The newest message below `entryId` (the last in tree order), if any. */
-function newestBelow(
+export function newestBelow(
   entryId: string,
   entries: readonly ThreadEntry[],
   order: readonly string[],

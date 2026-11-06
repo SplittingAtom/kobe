@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import type { ThreadLineageResponse } from "@kobe/protocol";
 import { LINEAGE_REREAD_MS } from "./lineage";
+import { useFocusReread } from "./use-focus-reread";
 
 /** What the hook needs of the chat session: the read and the signals that make it stale. */
 export interface LineageSource {
@@ -14,6 +14,17 @@ export interface LineageSource {
   /** A thread went to Trash, came back or was deleted forever from the Threads panel. */
   readonly onThreadTrashChanged: (listener: () => void) => () => void;
 }
+
+const readLineage = (source: LineageSource, threadId: string) => source.api.threadLineage(threadId);
+
+const lineageSignals = (source: LineageSource, reread: () => void) => {
+  const offCreated = source.onThreadCreated(reread);
+  const offTrash = source.onThreadTrashChanged(reread);
+  return () => {
+    offCreated();
+    offTrash();
+  };
+};
 
 /**
  * The lineage of the thread on screen (TL4, KOBE-535): read when the thread opens, after a fork,
@@ -27,40 +38,10 @@ export function useLineage(
   source: LineageSource | null,
   now: () => number = Date.now,
 ): ThreadLineageResponse | null {
-  const [lineage, setLineage] = useState<ThreadLineageResponse | null>(null);
-  const last = useRef<{ at: number; ok: boolean } | null>(null);
-  const nowRef = useRef(now);
-  nowRef.current = now;
-
-  useEffect(() => {
-    setLineage(null);
-    last.current = null;
-    if (threadId === null || source === null) return;
-    let alive = true;
-    let seq = 0;
-    const read = () => {
-      const mine = ++seq;
-      void source.api.threadLineage(threadId).then((answer) => {
-        if (!alive || mine !== seq) return;
-        last.current = { at: nowRef.current(), ok: answer !== null };
-        setLineage(answer);
-      });
-    };
-    const onFocus = () => {
-      const prev = last.current;
-      if (prev === null || !prev.ok || nowRef.current() - prev.at >= LINEAGE_REREAD_MS) read();
-    };
-    read();
-    const offCreated = source.onThreadCreated(read);
-    const offTrash = source.onThreadTrashChanged(read);
-    window.addEventListener("focus", onFocus);
-    return () => {
-      alive = false;
-      offCreated();
-      offTrash();
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [threadId, source]);
-
-  return lineage?.thread_id === threadId ? lineage : null;
+  const { value } = useFocusReread(threadId, source, readLineage, {
+    rereadMs: LINEAGE_REREAD_MS,
+    now,
+    subscribe: lineageSignals,
+  });
+  return value?.thread_id === threadId ? value : null;
 }
