@@ -93,7 +93,9 @@ describe("runs.kind", () => {
       ),
     ).toBe("23514");
     expect(
-      await sqlState(insertRun(teamA, threadId, { ...running, kind: "branch_summary", input: "x" })),
+      await sqlState(
+        insertRun(teamA, threadId, { ...running, kind: "branch_summary", input: "x" }),
+      ),
     ).toBe("23514");
   });
 
