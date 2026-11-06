@@ -355,7 +355,8 @@ describe("keyboard and accessibility (ac-4)", () => {
     expect(within(menu).getByRole("menuitem", { name: "Show in conversation" })).toBeTruthy();
     expect(within(menu).getByRole("menuitem", { name: "Make it current" })).toBeTruthy();
     expect(within(menu).getByRole("menuitem", { name: "Edit this message" })).toBeTruthy();
-    expect(within(menu).queryByRole("menuitem", { name: "Compare with…" })).toBeNull();
+    // KOBE-547: live on a node with siblings.
+    expect(within(menu).getByRole("menuitem", { name: "Compare with…" })).toBeTruthy();
     await user.keyboard("{Escape}");
     row("old question").focus();
     await user.keyboard("{Enter}");
