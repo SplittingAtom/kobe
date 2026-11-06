@@ -91,6 +91,16 @@ describe("useBranches", () => {
     await waitFor(() => expect(s.calls).toHaveLength(3));
   });
 
+  it("keeps the last good notes when a re-read fails", async () => {
+    const s = source([answer, null]);
+    const { result } = renderHook(() => useBranches(T, s));
+    await waitFor(() => expect(result.current.notes).toEqual(answer));
+    act(() => result.current.refresh());
+    await waitFor(() => expect(s.calls).toHaveLength(2));
+    await act(async () => {});
+    expect(result.current.notes).toEqual(answer);
+  });
+
   it("drops an answer for a thread no longer on screen", async () => {
     let release: (v: ThreadBranchesResponse) => void = () => {};
     const slow = {

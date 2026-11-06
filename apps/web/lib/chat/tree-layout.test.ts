@@ -199,3 +199,47 @@ describe("createTreeLayout: memoised (CT4 Performance, ac-2)", () => {
     expect(spy).toHaveBeenCalledTimes(3);
   });
 });
+
+describe("createTreeLayout: relaid when the committed nodes change (review)", () => {
+  const live = (parentEntryId: string | null) => ({
+    run: newLiveRun("r1"),
+    active: true,
+    prompt: { text: "again", parentEntryId },
+  });
+
+  it("drops a ghost under the head once the run's prompt shows", () => {
+    const entries = [
+      user("u1", null, "q"),
+      assistant("a1", "u1", text("one")),
+      branchMarker("k2", "a1"),
+    ];
+    const layout = createTreeLayout();
+    expect(layout(entries, "k2", projectTree(entries, "k2", "k2", null)).byId.has("empty:k2")).toBe(
+      true,
+    );
+    const sending = layout(entries, "k2", projectTree(entries, "k2", "k2", null, live("a1")));
+    expect(sending.byId.has("empty:k2")).toBe(false);
+    expect(sending.byId.has("prompt:r1")).toBe(true);
+  });
+
+  it("follows a leaf move (thread.updated) with the same entries array", () => {
+    const entries = [
+      user("u1", null, "q"),
+      entry("a0", "u1", { role: "assistant", content: [], stopReason: "aborted" }),
+      assistant("a1", "u1", text("one")),
+    ];
+    const layout = createTreeLayout();
+    expect(layout(entries, "a1", projectTree(entries, "a1", "a1", null)).byId.has("a0")).toBe(
+      false,
+    );
+    expect(layout(entries, "a1", projectTree(entries, "a1", "a0", null)).byId.has("a0")).toBe(true);
+  });
+
+  it("puts a new thread's first pending prompt in lane 1", () => {
+    const layout = createTreeLayout();
+    const tree = projectTree([], null, null, null, live(null));
+    const result = layout([], null, tree);
+    expect(row(result, "prompt:r1")).toMatchObject({ lane: 1, row: 0, dotted: false });
+    expect(result.lanes).toBe(1);
+  });
+});

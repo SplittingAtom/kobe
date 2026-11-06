@@ -8,21 +8,17 @@
  * `compacted` tick of the node it sits in. Pure; the panel (KOBE-546) draws it.
  */
 import type { ThreadBranchesResponse } from "@kobe/protocol";
-import {
-  isAppCardEntry,
-  isSkippedSummary,
-  parseEntry,
-  recordedModel,
-  type ParsedEntry,
-} from "./entries";
+import { isAppCardEntry, parseEntry, recordedModel, type ParsedEntry } from "./entries";
 import type { AgentMarker } from "./markers";
-import { failedToolCalls, toolBadges, type TreeBadges } from "./tree-badges";
+import { succeededToolCalls, toolBadges, type TreeBadges } from "./tree-badges";
 import {
+  hiddenEntries,
   messageMeta,
   newestBelow,
   projectThread,
   type LiveOverlay,
   type ProjectedItem,
+  type Projection,
 } from "./tree";
 import type { ThreadEntry } from "./types";
 
@@ -193,7 +189,7 @@ function itemText(item: ProjectedItem): { text: string; tools: boolean } {
 interface Context {
   readonly parsed: ReadonlyMap<string, ParsedEntry>;
   readonly byId: ReadonlyMap<string, ThreadEntry>;
-  readonly failed: ReadonlySet<string>;
+  readonly succeeded: ReadonlySet<string>;
   readonly modelAt: (entryId: string) => string | null;
   readonly rules: ReadonlySet<string>;
   readonly agents: ReadonlyMap<string, number>;
@@ -221,7 +217,7 @@ function nodeOfItem(item: ProjectedItem, ctx: Context): Draft {
   const live = meta?.kind === "assistant" ? meta.live : meta?.pending === true;
   const agent = first === undefined ? undefined : ctx.agents.get(first.entryId);
   const prompt = meta?.kind === "assistant" ? meta.promptEntryId : undefined;
-  const files = role === "assistant" ? toolBadges(own, ctx.parsed, ctx.failed) : {};
+  const files = role === "assistant" ? toolBadges(own, ctx.parsed, ctx.succeeded) : {};
   return {
     id,
     parentId: item.parentId,
@@ -268,6 +264,109 @@ function pathUp(start: string | null, parentOf: ReadonlyMap<string, string | nul
   return path;
 }
 
+type Drafts = Map<string, Draft>;
+type Extras = Partial<Pick<TreeNode, "compacted" | "summary" | "label">>;
+
+function contextOf(
+  tree: readonly ThreadEntry[],
+  parsed: ReadonlyMap<string, ParsedEntry>,
+  notes: TreeNotes | null,
+  live: LiveOverlay | undefined,
+): Context {
+  return {
+    parsed,
+    byId: new Map(tree.map((e) => [e.entryId, e] as const)),
+    succeeded: succeededToolCalls(tree, parsed),
+    modelAt: modelChain(tree, parsed),
+    rules: new Set(notes?.runs.filter((r) => r.remembered_rule).map((r) => r.user_entry_id)),
+    agents: new Map(notes?.agents?.map((a) => [a.userEntryId ?? "", a.toVersion] as const)),
+    agentName: notes?.agentName ?? "Agent",
+    live,
+  };
+}
+
+/** A draft per projected message (an empty version becomes its ghost). */
+function itemDrafts(projection: Projection, ctx: Context): Drafts {
+  const drafts: Drafts = new Map();
+  for (const item of projection.items) {
+    if (item.message.id.startsWith(PREFIX_SKIPPED)) continue;
+    const draft = nodeOfItem(item, ctx);
+    const empty = item.message.id.startsWith(PREFIX_EMPTY);
+    const marker = empty ? ctx.byId.get(item.message.id.slice(PREFIX_EMPTY.length)) : undefined;
+    drafts.set(draft.id, marker ? ghostNode(marker, draft.parentId, ctx) : draft);
+  }
+  return drafts;
+}
+
+/** Adds every ghost (CT5) to `drafts`; returns marker entry → ghost id. */
+function addGhosts(
+  drafts: Drafts,
+  tree: readonly ThreadEntry[],
+  nodeOfEntry: ReadonlyMap<string, string>,
+  head: string | null,
+  ctx: Context,
+): ReadonlyMap<string, string> {
+  const live = ctx.live;
+  const promptShown = live?.prompt !== undefined && !live.run.promptCommitted;
+  const skip = (e: ThreadEntry) =>
+    promptShown && (e.entryId === head || e.parentId === live?.prompt?.parentEntryId);
+  const ghosts = new Map<string, string>();
+  for (const marker of ghostEntries(tree, ctx.parsed, skip)) {
+    const id = `${PREFIX_EMPTY}${marker.entryId}`;
+    ghosts.set(marker.entryId, id);
+    if (drafts.has(id)) continue;
+    const parent = marker.parentId === null ? null : (nodeOfEntry.get(marker.parentId) ?? null);
+    drafts.set(id, ghostNode(marker, parent, ctx));
+  }
+  return ghosts;
+}
+
+/** Compaction ticks, folded branch summaries and labels, by node. */
+function nodeExtras(
+  tree: readonly ThreadEntry[],
+  nodeOfEntry: ReadonlyMap<string, string>,
+  nodeOf: (entryId: string) => string | undefined,
+  notes: TreeNotes | null,
+): ReadonlyMap<string, Extras> {
+  const extras = new Map<string, Extras>();
+  const add = (id: string | undefined, extra: Extras) => {
+    if (id !== undefined) extras.set(id, { ...extras.get(id), ...extra });
+  };
+  for (const e of tree) {
+    if (e.type === "compaction") add(nodeOfEntry.get(e.entryId), { compacted: true });
+    if (e.type === "branch_summary")
+      add(nodeOfEntry.get(e.entryId), { summary: { entryId: e.entryId } });
+  }
+  for (const { entry_id, label } of notes?.labels ?? []) {
+    const id = nodeOf(entry_id);
+    if (id === undefined) continue;
+    // A label on the node's own first entry wins over one on an entry inside it.
+    const exact = id === entry_id || id === `${PREFIX_EMPTY}${entry_id}`;
+    if (exact || extras.get(id)?.label === undefined) add(id, { label });
+  }
+  return extras;
+}
+
+/** The head's and the leaf's nodes (a ghost when the head or leaf is its marker). */
+function headAndLeaf(
+  projection: Projection,
+  drafts: Drafts,
+  nodeOf: (entryId: string) => string | undefined,
+  ghosts: ReadonlyMap<string, string>,
+  tree: readonly ThreadEntry[],
+  head: string | null,
+  leaf: string | null,
+): { headId: string | null; leafId: string | null } {
+  const pending = (id: string | null) => id !== null && drafts.get(id)?.pending === true;
+  const headGhost = head === null ? undefined : ghosts.get(head);
+  const headId =
+    headGhost !== undefined && !pending(projection.headId) ? headGhost : projection.headId;
+  if (leaf === null) return { headId, leafId: null };
+  const committed = projection.items.flatMap((i) => (pending(i.message.id) ? [] : [i.message.id]));
+  const below = projection.loaded.has(leaf) ? newestBelow(leaf, tree, committed) : undefined;
+  return { headId, leafId: nodeOf(leaf) ?? below ?? null };
+}
+
 /**
  * The tree of the thread: `head` is this tab's local head (CT3), `leaf` the thread's leaf, `notes`
  * the `branches` read (null when absent or failed: no labels, no rule badges), `live` the run on
@@ -283,65 +382,13 @@ export function projectTree(
   const projection = projectThread(entries, head, leaf, live);
   const { nodeOfEntry, loaded } = projection;
   const tree = entries.filter((e) => loaded.has(e.entryId));
-  const parsed = new Map(tree.map((e) => [e.entryId, parseEntry(e)] as const));
-  const ctx: Context = {
-    parsed,
-    byId: new Map(tree.map((e) => [e.entryId, e] as const)),
-    failed: failedToolCalls(tree, parsed),
-    modelAt: modelChain(tree, parsed),
-    rules: new Set(notes?.runs.filter((r) => r.remembered_rule).map((r) => r.user_entry_id)),
-    agents: new Map(notes?.agents?.map((a) => [a.userEntryId ?? "", a.toVersion] as const)),
-    agentName: notes?.agentName ?? "Agent",
-    live,
-  };
-
-  const drafts = new Map<string, Draft>();
-  for (const item of projection.items) {
-    if (item.message.id.startsWith(PREFIX_SKIPPED)) continue;
-    const draft = nodeOfItem(item, ctx);
-    const empty = item.message.id.startsWith(PREFIX_EMPTY);
-    const marker = empty ? ctx.byId.get(item.message.id.slice(PREFIX_EMPTY.length)) : undefined;
-    drafts.set(draft.id, marker ? ghostNode(marker, draft.parentId, ctx) : draft);
-  }
-  const promptShown = live?.prompt !== undefined && !live.run.promptCommitted;
-  const skip = (e: ThreadEntry) =>
-    promptShown && (e.entryId === head || e.parentId === live?.prompt?.parentEntryId);
-  const ghosts = new Map<string, string>();
-  for (const marker of ghostEntries(tree, parsed, skip)) {
-    const id = `${PREFIX_EMPTY}${marker.entryId}`;
-    ghosts.set(marker.entryId, id);
-    if (drafts.has(id)) continue;
-    const parent = marker.parentId === null ? null : (nodeOfEntry.get(marker.parentId) ?? null);
-    drafts.set(id, ghostNode(marker, parent, ctx));
-  }
-
+  const parsed = projection.parsed ?? new Map(tree.map((e) => [e.entryId, parseEntry(e)] as const));
+  const ctx = contextOf(tree, parsed, notes, live);
+  const drafts = itemDrafts(projection, ctx);
+  const ghosts = addGhosts(drafts, tree, nodeOfEntry, head, ctx);
   const nodeOf = (entryId: string) => ghosts.get(entryId) ?? nodeOfEntry.get(entryId);
-  const extras = new Map<string, Partial<Pick<TreeNode, "compacted" | "summary" | "label">>>();
-  const add = (id: string | undefined, extra: Partial<Pick<TreeNode, "compacted" | "summary">>) => {
-    if (id !== undefined) extras.set(id, { ...extras.get(id), ...extra });
-  };
-  for (const e of tree) {
-    if (e.type === "compaction") add(nodeOfEntry.get(e.entryId), { compacted: true });
-    if (e.type === "branch_summary")
-      add(nodeOfEntry.get(e.entryId), { summary: { entryId: e.entryId } });
-  }
-  for (const { entry_id, label } of notes?.labels ?? []) {
-    const id = nodeOf(entry_id);
-    if (id === undefined) continue;
-    const exact = id === entry_id || id === `${PREFIX_EMPTY}${entry_id}`;
-    if (exact || extras.get(id)?.label === undefined) extras.set(id, { ...extras.get(id), label });
-  }
-
-  const committed = projection.items.flatMap((i) =>
-    drafts.get(i.message.id)?.pending === true ? [] : [i.message.id],
-  );
-  const headGhost = head === null ? undefined : ghosts.get(head);
-  const headPending = projection.headId !== null && drafts.get(projection.headId)?.pending === true;
-  const headId = headGhost !== undefined && !headPending ? headGhost : projection.headId;
-  const leafId =
-    leaf === null
-      ? null
-      : (nodeOf(leaf) ?? (loaded.has(leaf) ? (newestBelow(leaf, tree, committed) ?? null) : null));
+  const extras = nodeExtras(tree, nodeOfEntry, nodeOf, notes);
+  const { headId, leafId } = headAndLeaf(projection, drafts, nodeOf, ghosts, tree, head, leaf);
   const parentOf = new Map([...drafts.values()].map((d) => [d.id, d.parentId] as const));
   const onScreen = pathUp(headId, parentOf);
   const nodes = [...drafts.values()]
@@ -357,14 +404,17 @@ export function projectTree(
 
 /**
  * The thread's branches (CT12): entries with more than one child, the root's hidden settings
- * entry counting (two first messages are one junction). Server-written entries that never enter
- * the tree do not count: skipped-actions reports (`ks-`) and app cards (`ka-`); an unsent prompt
- * (`ku-`) is a real branch. The server's hover card counts the same way.
+ * entry counting (two first messages are one junction). Entries that never enter the tree do not
+ * count: skipped-actions reports (`ks-`), app cards (`ka-`) and the stopped answers projectThread
+ * hides (KOBE-290, {@link hiddenEntries}, so `leaf` as projectThread takes it); an unsent prompt
+ * (`ku-`) is a real branch. The server's hover card leaves out the same server entries.
  */
-export function junctionCount(entries: readonly ThreadEntry[]): number {
+export function junctionCount(entries: readonly ThreadEntry[], leaf: string | null = null): number {
+  const parsed = new Map(entries.map((e) => [e.entryId, parseEntry(e)] as const));
+  const { hidden } = hiddenEntries(entries, parsed, leaf);
   const kids = new Map<string, number>();
   for (const e of entries) {
-    if (e.parentId === null || isSkippedSummary(e) || isAppCardEntry(e)) continue;
+    if (e.parentId === null || hidden.has(e.entryId) || isAppCardEntry(e)) continue;
     kids.set(e.parentId, (kids.get(e.parentId) ?? 0) + 1);
   }
   let count = 0;

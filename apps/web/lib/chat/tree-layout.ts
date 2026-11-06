@@ -7,8 +7,8 @@
  * it after its last node. Past {@link TREE_MAX_LANES} a branch is drawn in the last lane, dotted.
  * The panel draws `<svg>` lines from (parentLane, parentRow) to (lane, row).
  *
- * Performance (CT4): {@link createTreeLayout} lays out the committed nodes once per entries array
- * and head; the live run's pending nodes are appended to that layout, never relaid.
+ * Performance (CT4): {@link createTreeLayout} lays out the committed nodes once per committed node
+ * set; the live run's pending nodes are appended to that layout, never relaid.
  */
 import type { TreeFork } from "./tree-forks";
 import type { TreeNode, TreeProjection } from "./tree-nodes";
@@ -101,61 +101,11 @@ export function layoutTree(
     nodes.filter((n) => n.pending !== true),
     forks,
   );
-  const rowOf = new Map(items.map((item, i) => [item.id, i] as const));
-  const lastRow = (chain: readonly Item[]) => rowOf.get(chain.at(-1)?.id ?? "") ?? 0;
-  const children = new Map<string | null, Item[]>();
-  for (const item of items) {
-    const key = item.parentId !== null && rowOf.has(item.parentId) ? item.parentId : null;
-    children.set(key, [...(children.get(key) ?? []), item]);
-  }
-  /** The child that continues its parent's lane: the path's on the path, else the oldest node. */
-  const continuing = (item: Item): Item | undefined => {
-    const kids = (children.get(item.id) ?? []).filter((k) => k.kind === "node");
-    return item.onScreen ? kids.find((k) => k.onScreen) : kids[0];
-  };
-  const chainOf = (start: Item): Item[] => {
-    const chain = [start];
-    for (let next = continuing(start); next !== undefined; next = continuing(next))
-      chain.push(next);
-    return chain;
-  };
-
-  const roots = children.get(null) ?? [];
-  const main = roots.find((r) => r.onScreen) ?? roots[0];
-  const laneOf = new Map<string, { lane: number; dotted: boolean }>();
-  const lanes = new FreeLanes();
-  // Chains still to place, top of the stack first: other roots (newest first), then lane 1's
-  // branches top-down, each branch's own branches before its next sibling (depth-first).
-  const stack: Item[] = [];
-  const branchesOf = (chain: readonly Item[]): Item[] => {
-    const inChain = new Set(chain.map((c) => c.id));
-    return chain.flatMap((c) =>
-      (children.get(c.id) ?? []).filter((k) => !inChain.has(k.id)).reverse(),
-    );
-  };
-  const place = (chain: readonly Item[], lane: number, dotted: boolean) => {
-    for (const c of chain) laneOf.set(c.id, { lane, dotted });
-    stack.push(...branchesOf(chain).reverse());
-  };
-  if (main !== undefined) {
-    const chain = chainOf(main);
-    lanes.take(1, 0, lastRow(chain));
-    place(chain, 1, false);
-    stack.push(...roots.filter((r) => r !== main));
-  }
-  for (let start = stack.pop(); start !== undefined; start = stack.pop()) {
-    const chain = chainOf(start);
-    const parentRow = start.parentId === null ? undefined : rowOf.get(start.parentId);
-    const from = parentRow ?? rowOf.get(start.id) ?? 0;
-    const to = lastRow(chain);
-    const lane = lanes.free(from, to);
-    if (lane !== null) lanes.take(lane, from, to);
-    place(chain, lane ?? TREE_MAX_LANES, lane === null);
-  }
-
+  const graph = graphOf(items);
+  const laneOf = assignLanes(graph);
   const rows = items.map((item, row): TreeRow => {
     const { lane, dotted } = laneOf.get(item.id) ?? { lane: TREE_MAX_LANES, dotted: true };
-    const parentRow = item.parentId === null ? undefined : rowOf.get(item.parentId);
+    const parentRow = item.parentId === null ? undefined : graph.rowOf.get(item.parentId);
     const parent = parentRow === undefined ? undefined : laneOf.get(item.parentId as string);
     return {
       id: item.id,
@@ -168,6 +118,75 @@ export function layoutTree(
     };
   });
   return withIndex(rows);
+}
+
+interface Graph {
+  readonly rowOf: ReadonlyMap<string, number>;
+  readonly children: ReadonlyMap<string | null, readonly Item[]>;
+}
+
+/** Row indices and children lists (a parent not laid out counts as the root). */
+function graphOf(items: readonly Item[]): Graph {
+  const rowOf = new Map(items.map((item, i) => [item.id, i] as const));
+  const children = new Map<string | null, Item[]>();
+  for (const item of items) {
+    const key = item.parentId !== null && rowOf.has(item.parentId) ? item.parentId : null;
+    const list = children.get(key);
+    if (list) list.push(item);
+    else children.set(key, [item]);
+  }
+  return { rowOf, children };
+}
+
+/** A node and the children that continue its lane: the path's on the path, else the oldest. */
+function chainOf(graph: Graph, start: Item): Item[] {
+  const continuing = (item: Item): Item | undefined => {
+    const kids = (graph.children.get(item.id) ?? []).filter((k) => k.kind === "node");
+    return item.onScreen ? kids.find((k) => k.onScreen) : kids[0];
+  };
+  const chain = [start];
+  for (let next = continuing(start); next !== undefined; next = continuing(next)) chain.push(next);
+  return chain;
+}
+
+/** The branches off a chain, top-down, newest sibling first at each node. */
+function branchesOf(graph: Graph, chain: readonly Item[]): Item[] {
+  const inChain = new Set(chain.map((c) => c.id));
+  return chain.flatMap((c) =>
+    (graph.children.get(c.id) ?? []).filter((k) => !inChain.has(k.id)).reverse(),
+  );
+}
+
+/** The depth-first lane walk: lane 1 for root → head, the lowest free lane for every branch. */
+function assignLanes(graph: Graph): ReadonlyMap<string, { lane: number; dotted: boolean }> {
+  const lastRow = (chain: readonly Item[]) => graph.rowOf.get(chain.at(-1)?.id ?? "") ?? 0;
+  const roots = graph.children.get(null) ?? [];
+  const main = roots.find((r) => r.onScreen) ?? roots[0];
+  const laneOf = new Map<string, { lane: number; dotted: boolean }>();
+  const lanes = new FreeLanes();
+  // Chains still to place, top of the stack first: other roots (newest first), then lane 1's
+  // branches top-down, each branch's own branches before its next sibling (depth-first).
+  const stack: Item[] = [];
+  const place = (chain: readonly Item[], lane: number, dotted: boolean) => {
+    for (const c of chain) laneOf.set(c.id, { lane, dotted });
+    stack.push(...branchesOf(graph, chain).reverse());
+  };
+  if (main !== undefined) {
+    const chain = chainOf(graph, main);
+    lanes.take(1, 0, lastRow(chain));
+    place(chain, 1, false);
+    stack.push(...roots.filter((r) => r !== main));
+  }
+  for (let start = stack.pop(); start !== undefined; start = stack.pop()) {
+    const chain = chainOf(graph, start);
+    const parentRow = start.parentId === null ? undefined : graph.rowOf.get(start.parentId);
+    const from = parentRow ?? graph.rowOf.get(start.id) ?? 0;
+    const to = lastRow(chain);
+    const lane = lanes.free(from, to);
+    if (lane !== null) lanes.take(lane, from, to);
+    place(chain, lane ?? TREE_MAX_LANES, lane === null);
+  }
+  return laneOf;
 }
 
 function withIndex(rows: readonly TreeRow[]): TreeLayout {
@@ -192,7 +211,8 @@ export function appendPending(base: TreeLayout, pending: readonly LayoutNode[]):
     const parent = node.parentId === null ? undefined : byId.get(node.parentId);
     const row = rows.length;
     const keeps = parent !== undefined && lastInLane.get(parent.lane) === parent.row;
-    const next = Math.max(1, ...lastInLane.keys()) + 1;
+    // A new lane right of those in use; lane 1 in an empty tree (a new thread's first prompt).
+    const next = lastInLane.size === 0 ? 1 : Math.max(...lastInLane.keys()) + 1;
     const lane = keeps ? parent.lane : Math.min(next, TREE_MAX_LANES);
     const r: TreeRow = {
       id: node.id,
@@ -211,28 +231,31 @@ export function appendPending(base: TreeLayout, pending: readonly LayoutNode[]):
 }
 
 /**
- * A memoised layout for one panel: recomputed only when the committed entries array, the head or
- * the forks change (by identity); the live run's pending nodes are appended to the last layout.
+ * What a base layout depends on: the committed nodes' ids, parents and path (the entries, the
+ * head, the leaf's stale answers and a ghost hidden by the live prompt all show up here).
+ */
+function committedKey(nodes: readonly LayoutNode[]): string {
+  return nodes.map((n) => `${n.id}<${n.parentId ?? ""}${n.onScreen ? "*" : ""}`).join("\n");
+}
+
+/**
+ * A memoised layout for one panel: recomputed only when the committed node set (ids, parents, the
+ * path on screen) or the forks change; the live run's pending nodes are appended to the last
+ * layout. `entries` and `head` are kept in the signature for callers; the key is the nodes.
  */
 export function createTreeLayout(layout: typeof layoutTree = layoutTree) {
-  let last:
-    | {
-        entries: readonly ThreadEntry[];
-        head: string | null;
-        forks: readonly TreeFork[];
-        base: TreeLayout;
-      }
-    | undefined;
+  let last: { key: string; forks: readonly TreeFork[]; base: TreeLayout } | undefined;
   const none: readonly TreeFork[] = [];
   return (
-    entries: readonly ThreadEntry[],
-    head: string | null,
+    _entries: readonly ThreadEntry[],
+    _head: string | null,
     tree: TreeProjection,
     forks: readonly TreeFork[] = none,
   ): TreeLayout => {
-    if (last?.entries !== entries || last.head !== head || last.forks !== forks) {
-      const committed = tree.nodes.filter((n) => n.pending !== true);
-      last = { entries, head, forks, base: layout(committed, forks) };
+    const committed = tree.nodes.filter((n) => n.pending !== true);
+    const key = committedKey(committed);
+    if (last?.key !== key || last.forks !== forks) {
+      last = { key, forks, base: layout(committed, forks) };
     }
     return appendPending(
       last.base,
