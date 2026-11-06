@@ -7,6 +7,7 @@ import {
   resetEntrySeq,
   text,
   toolCall,
+  toolResult,
   user,
 } from "./testing/entries";
 import { must } from "../testing/must";
@@ -44,6 +45,7 @@ const twoVersions = (): ThreadEntry[] => [
   assistant("a1", "u1", text("ok")),
   user("v1", "a1", "first version"),
   assistant("b1", "v1", toolCall("c1", "write", { path: "plan.md" })),
+  toolResult("t1", "b1", "c1", "written"),
   branchMarker("k2", "a1"),
   user("v2", "k2", "second version"),
   assistant("b2", "v2", text("answer two")),
@@ -210,7 +212,7 @@ describe("node entries and files left behind (CT6)", () => {
   it("finds a node's first and last entries, a ghost's marker", () => {
     const p = projectThread(twoVersions(), "b2", "b2");
     expect(nodeEntries(p, "v2")).toMatchObject({ first: "v2", last: "v2" });
-    expect(nodeEntries(p, "b1")).toMatchObject({ first: "b1", last: "b1" });
+    expect(nodeEntries(p, "b1")).toMatchObject({ first: "b1", last: "t1" });
     expect(nodeEntries(p, "empty:k9")).toEqual({ first: "k9", last: "k9" });
   });
 
