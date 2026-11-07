@@ -37,6 +37,17 @@ body:has([data-kobe-chat]) {
     display: block;
   }
 
+  /* A button that carries a data-slot (the shadcn Button, an IconAction through its tooltip
+     trigger) is styled by its utilities alone: no browser border, face or padding (KOBE-558; the
+     bell, the theme toggle and the composer's + showed the user agent's outset border while the
+     area links, being links, did not). */
+  [data-kobe-chat]
+    :where(button[data-slot]):where(:not([data-kobe-console], [data-kobe-console] *)) {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
   /* The artifact sheet at 768–820 px ends above the composer box: the steering panel (Stop,
      queue) and the input, not the footer's notices or welcome space (KOBE-269, shell.module.css). */
   [data-kobe-chat] [data-kobe-composer-box] {

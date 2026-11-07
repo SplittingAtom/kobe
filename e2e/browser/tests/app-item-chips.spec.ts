@@ -2,6 +2,7 @@ import type { FrameLocator, Page } from "@playwright/test";
 import { expect, test } from "./support/chat.js";
 import { RUN_TIMEOUT_MS } from "./support/constants.js";
 import { pageApi } from "./support/gate5.js";
+import { launchFromPlusMenu } from "./support/plus-apps.js";
 
 /**
  * KOBE-490 (ac-1..ac-4, ac-5's browser spec): an MCP App's `ui/message` with resource_links puts
@@ -36,16 +37,7 @@ function frameOf(page: Page, app: App): FrameLocator {
 }
 
 async function launch(page: Page, app: App): Promise<void> {
-  const tab = page
-    .getByRole("tablist", { name: "Files and apps" })
-    .getByRole("tab", { name: "Apps", exact: true });
-  if ((await tab.getAttribute("aria-selected")) !== "true") await tab.click();
-  await page
-    .getByRole("tabpanel", { name: "Apps", exact: true })
-    .getByTitle(`Open ${app.title} from ${app.connectorName} in a new conversation`, {
-      exact: true,
-    })
-    .click();
+  await launchFromPlusMenu(page, app);
 }
 
 const chipRow = (page: Page) =>

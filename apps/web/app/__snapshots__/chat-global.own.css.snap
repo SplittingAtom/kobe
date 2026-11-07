@@ -21,6 +21,12 @@ body:has([data-kobe-chat]) {
   [data-kobe-chat] :where(svg):where(:not([data-kobe-console], [data-kobe-console] *)) {
     display: block;
   }
+  [data-kobe-chat]
+    :where(button[data-slot]):where(:not([data-kobe-console], [data-kobe-console] *)) {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
   [data-kobe-chat] [data-kobe-composer-box] {
     anchor-name: --kobe-composer;
   }
