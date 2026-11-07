@@ -40,6 +40,7 @@ import { ThreadUsageProvider } from "./message-footer";
 import { ThreadOnScreenContext } from "./thread-on-screen";
 import { TeamModelsProvider } from "./use-team-models";
 import { ThreadMarkersProvider } from "./markers";
+import { FrameDragGhost } from "../apps/frame-drag-ghost";
 import { ThreadAppsProvider } from "../apps/thread-apps";
 import { OpenPanelContext, useOpenPanel } from "../shell/panel-close";
 import { TreeHost, type TreeRoute } from "./tree-host";
@@ -537,6 +538,8 @@ export function ChatApp({
   } else if (session) {
     body = (
       <ChatSessionContext.Provider value={session}>
+        {/* The ghost chip of a pointer drag out of an app frame (KOBE-553). */}
+        <FrameDragGhost />
         <ChatWorkspace
           key={session.teamId}
           session={session}

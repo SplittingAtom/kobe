@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import type { ModelContext } from "../../lib/apps/bridge-schema";
-import type { AppMessage } from "../../lib/apps/host-bridge";
+import { frameDragRelay } from "../../lib/apps/frame-drag";
+import type { AppMessage, BridgeDragEvent } from "../../lib/apps/host-bridge";
 import { NEW_DRAFT } from "../../lib/chat/attachments";
 import type { ChatSession } from "../../lib/chat/session";
 import { useChatSession, useKobeExtras } from "../chat/kobe-runtime";
@@ -17,6 +18,9 @@ import { useChatSession, useKobeExtras } from "../chat/kobe-runtime";
  * A rail picker (KOBE-460) has no thread of its own: it uses the conversation on screen, and
  * with `newConversation` the new-conversation draft when none is (its chip goes with that
  * conversation's first message). `active: false` refuses both (the picker is not on screen).
+ *
+ * A pointer drag out of the frame (KOBE-553) goes to the session's `frameDrag` with the app's
+ * title as `from`; the composer on screen takes the drop. A frame with no composer starts none.
  */
 export function useAppComposer(
   app: {
@@ -56,7 +60,12 @@ export function useAppComposer(
       }),
     [session, threadId, appId, connectorId, templateSha256, title],
   );
-  return { onMessage, onModelContext };
+  const relay = useMemo(() => frameDragRelay(session.frameDrag), [session]);
+  const onDrag = useCallback(
+    (event: BridgeDragEvent) => relay(event, threadId === null ? null : title),
+    [relay, threadId, title],
+  );
+  return { onMessage, onModelContext, onDrag };
 }
 
 /**

@@ -585,8 +585,12 @@ it because Catalyst does not mark it `"app"`-visible. Kobe does not hard-code th
   accept native HTML5 drags started in an app frame that carry
   `application/x-catalyst-lakehouse+json`; the result equals `ui/message` with the same
   `resource_link`. Kobe accepts them on a writable composer only (not read-only, not in Trash).
-  The frame, its sandbox and its CSP are unchanged: the browser carries the drag across
-  documents. The drag contract (Catalyst's Lakehouse Picker builds to it):
+  The frame, its sandbox and its CSP are unchanged: Firefox carries the drag across documents.
+  Chromium does not (found 2026-11-07, KOBE-553): it refuses native drags between cross-origin
+  frames of one page (crbug.com/59081, `WebContentsViewDragSecurityInfo::IsValidDragTarget` and
+  Blink's drag-initiator origin check), and an app frame's opaque origin is cross-origin to the
+  page, so in Chrome the frame sees `dragstart` and `dragend` and the page nothing. Pointer drags
+  (next paragraph) are the path for Chromium; this one stays for Firefox and other hosts. The drag contract (Catalyst's Lakehouse Picker builds to it):
   - `effectAllowed = "copy"`; `text/plain` is the backticked identifier (`` `mlb.lahman.batting` ``);
   - `application/x-catalyst-lakehouse+json` is `{kind: "catalog"|"namespace"|"table"|"view",
 catalog, namespace?, name?, identifier: "<catalog>[.<ns>[.<name>]]",
@@ -605,6 +609,36 @@ identifier, title: last segment, _meta: {"io.kobe/item-kind": kind}}`) and goes 
   replace the text); the member's text, caret and focus are untouched. An invalid item is refused with a note under the composer; nothing is inserted and the
   `text/plain` copy is never used instead. The drop is always taken whole, so the browser never
   also inserts the `text/plain` copy.
+
+- **Host extension: pointer drags from an app frame** (KOBE-553, coordinator 2026-11-07; the
+  shared contract with Catalyst's picker, CAT-247). The app drives the drag with captured pointer
+  events inside its frame (pointer capture keeps delivering `pointermove` and `pointerup` to the
+  frame while the pointer is outside it, in frame-relative CSS pixels, in Chromium and Firefox)
+  and tells the host over the bridge with four JSON-RPC notifications, a Kobe extension under
+  `kobe/` (not part of MCP Apps): `kobe/notifications/drag-start {item, x, y}` (after 6 CSS px of
+  movement from a `pointerdown` on a pick row), `drag-move {x, y}` (at most one per animation
+  frame and 30 per second), `drag-end {x, y}` (the `pointerup`) and `drag-cancel {}`. `x`, `y` are
+  the pointer in the frame's viewport, finite, possibly negative or beyond the frame; `item` is
+  the object of the native drag's `application/x-catalyst-lakehouse+json` above. The bridge
+  takes them only from the bound frame (source window and `"null"` origin, like every message),
+  parses them with zod (`item` a plain object of at most 8 KiB serialized, `x` and `y` finite)
+  and drops anything else; a move, end or cancel without a live start from that frame is
+  ignored, a second start replaces the live one, and a frame removed mid-drag cancels it. The
+  per-frame budget (40 messages per second, 64 KiB each) applies; over it, messages are dropped.
+
+  Kobe maps each point to the page with the iframe's bounding rect, read again on every
+  notification (any placement: card, rail, artifact column), and keeps one live drag per session
+  (item, the app's title as `from`, the point). A ghost chip (the item's kind icon and
+  identifier, the composer's chip look) follows the point, `pointer-events: none` and
+  `aria-hidden`, rendered once at the chat shell. While the point is over a writable composer's
+  panel, the panel shows the native drop's cue ("Drop to insert this item"), cleared when it
+  leaves, on end and on cancel. `drag-end` inside that panel inserts the item through the native
+  drop's chain (its validation above, then `appMessageOf` and `applyAppMessage`): exactly the
+  click's state, the chip from the app's title; an invalid item gets the same refusal note, a
+  full chip row its note; a release anywhere else, or over a read-only or Trash conversation
+  (which has no composer panel), inserts nothing and says nothing. A press or Escape in the page
+  ends a drag whose end never arrived. The app gains no power it lacks (it can insert the chip
+  with `ui/message`); the coordinates only choose whether the composer is the target.
 
 - **`ui/update-model-context`** stores the latest `{content, structuredContent}` per open app
   (capped at 8 KiB serialized; anything larger is refused with an error to the app). The composer
