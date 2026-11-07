@@ -1,6 +1,6 @@
 # KOBE-555: Catalyst look: ship Outfit and JetBrains Mono (SIL OFL 1.1), allow OFL in the licence check
 
-- **Status:** in review (PR #TBD)
+- **Status:** in review (PR #464)
 - **Branch / worktree:** `kobe-555-catalyst-fonts` in `../Kobe-wt555`
 - **Depends on:** KOBE-550 (Catalyst preset)
 
