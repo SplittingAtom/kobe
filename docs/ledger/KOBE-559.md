@@ -16,8 +16,9 @@ bottom. I only want to see the picker that is selected."
   Apps with chat or artifact placement are launched from the composer's + menu (KOBE-451), which
   inserts the same card; the rail-launch unit tests that duplicated the + menu's (KOBE-455,
   KOBE-458: `plus-menu.test.tsx`) were removed, the artifact-placement one moved to the + menu.
-- Browser specs `app-placement` and `app-item-chips` launch through
-  `support/plus-apps.ts` (`launchFromPlusMenu`).
+- Browser specs `app-placement`, `app-item-chips` and `gate-apps/explorer` launch through
+  `support/plus-apps.ts` (`launchFromPlusMenu`); `gate-apps/picker` asserts the list is gone
+  (the first CI run's gate-apps job caught both).
 - Spec MA3 amended 2026-11-07 (docs/specs/mcp-apps-host.md).
 
 ## Open questions (for Chris or the coordinator)
