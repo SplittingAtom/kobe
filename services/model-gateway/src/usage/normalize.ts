@@ -23,13 +23,14 @@ export type PartialCounts = { -readonly [K in keyof TokenCounts]?: number } & {
 
 const num = (v: unknown): number | undefined =>
   typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
-const obj = (v: unknown): Record<string, unknown> | undefined =>
+/** The value as a plain JSON object, or undefined (shared with meter.ts). */
+export const obj = (v: unknown): Record<string, unknown> | undefined =>
   v !== null && typeof v === "object" && !Array.isArray(v)
     ? (v as Record<string, unknown>)
     : undefined;
 
 function defined(counts: {
-  readonly [K in keyof PartialCounts]-?: number | undefined;
+  readonly [K in keyof PartialCounts]?: number | undefined;
 }): PartialCounts | undefined {
   const out: PartialCounts = {};
   for (const [k, v] of Object.entries(counts) as [keyof PartialCounts, number | undefined][]) {
@@ -55,13 +56,15 @@ export function normalizeOpenAi(usage: unknown): PartialCounts | undefined {
   return defined({
     input: prompt === undefined ? undefined : Math.max(0, prompt - cached),
     cacheRead: prompt === undefined ? undefined : Math.min(cached, prompt),
-    cacheWrite: undefined,
     output,
     reasoning: num(outDetails?.reasoning_tokens),
   });
 }
 
-/** Anthropic Messages: `input_tokens` already excludes cache reads and cache writes. */
+/**
+ * Anthropic Messages: `input_tokens` already excludes cache reads and cache writes. Thinking is
+ * billed as output without a split (meter.ts estimates it from the stream).
+ */
 export function normalizeAnthropic(usage: unknown): PartialCounts | undefined {
   const u = obj(usage);
   if (!u) return undefined;
@@ -70,8 +73,6 @@ export function normalizeAnthropic(usage: unknown): PartialCounts | undefined {
     output: num(u.output_tokens),
     cacheRead: num(u.cache_read_input_tokens),
     cacheWrite: num(u.cache_creation_input_tokens),
-    // Anthropic bills thinking as output without a split (estimated from the stream, meter.ts).
-    reasoning: undefined,
   });
 }
 
@@ -90,7 +91,6 @@ export function normalizeGemini(usage: unknown): PartialCounts | undefined {
   return defined({
     input: prompt === undefined ? undefined : Math.max(0, prompt - cached) + toolPrompt,
     cacheRead: prompt === undefined ? undefined : Math.min(cached, prompt),
-    cacheWrite: undefined,
     output:
       candidates === undefined && thoughts === undefined
         ? undefined

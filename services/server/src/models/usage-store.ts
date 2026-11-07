@@ -110,16 +110,17 @@ const EMPTY: UsageTotals = {
   reasoning_tokens: 0,
 };
 
-/** The aggregate columns every breakdown selects (same names as {@link UsageTotals}). */
-const TOTALS = sql.raw(`count(*)::bigint AS calls,
+/** The aggregate columns every breakdown selects, but reasoning (same names as {@link UsageTotals}). */
+const CALL_TOTALS = sql.raw(`count(*)::bigint AS calls,
   COALESCE(sum(u.input_tokens), 0)::bigint AS input_tokens,
   COALESCE(sum(u.output_tokens), 0)::bigint AS output_tokens,
   COALESCE(sum(u.cache_read_tokens), 0)::bigint AS cache_read_tokens,
   COALESCE(sum(u.cache_write_tokens), 0)::bigint AS cache_write_tokens,
   COALESCE(sum(u.cost_usd), 0)::numeric(30,10)::text AS cost_usd,
   count(*) FILTER (WHERE u.cost_usd IS NULL)::bigint AS unpriced_calls,
-  count(*) FILTER (WHERE u.usage_source = 'estimated')::bigint AS estimated_calls,
-  COALESCE(sum(u.reasoning_tokens), 0)::bigint AS reasoning_tokens`);
+  count(*) FILTER (WHERE u.usage_source = 'estimated')::bigint AS estimated_calls`);
+/** {@link CALL_TOTALS} and the reasoning tokens (calls without a count add 0). */
+const TOTALS = sql`${CALL_TOTALS}, COALESCE(sum(u.reasoning_tokens), 0)::bigint AS reasoning_tokens`;
 const ORDER = sql.raw(
   `ORDER BY COALESCE(sum(u.cost_usd), 0) DESC, sum(u.input_tokens + u.output_tokens) DESC`,
 );
@@ -128,6 +129,10 @@ type Row = Record<string, unknown>;
 
 function totalsOf(r: Row | undefined): UsageTotals {
   if (!r) return EMPTY;
+  return { ...callTotalsOf(r), reasoning_tokens: Number(r.reasoning_tokens ?? 0) };
+}
+
+function callTotalsOf(r: Row): Omit<UsageTotals, "reasoning_tokens"> {
   const exact = unitsToCostText(r.cost_usd);
   return {
     calls: Number(r.calls ?? 0),
@@ -139,7 +144,6 @@ function totalsOf(r: Row | undefined): UsageTotals {
     cost_usd_exact: exact,
     unpriced_calls: Number(r.unpriced_calls ?? 0),
     estimated_calls: Number(r.estimated_calls ?? 0),
-    reasoning_tokens: Number(r.reasoning_tokens ?? 0),
   };
 }
 
@@ -331,8 +335,8 @@ async function runsUsageIn(tx: KobeTx, teamId: string, of: UsageOf): Promise<Run
     "runId" in of ? sql`u.run_id = ${of.runId}::uuid` : sql`u.thread_id = ${of.threadId}::uuid`;
   const res = await tx.execute<Row>(sql`
     SELECT u.run_id, r.user_entry_id, r.thinking_level,
-           array_agg(DISTINCT u.model ORDER BY u.model) AS models, ${TOTALS},
-           sum(u.reasoning_tokens)::bigint AS run_reasoning_tokens,
+           array_agg(DISTINCT u.model ORDER BY u.model) AS models, ${CALL_TOTALS},
+           sum(u.reasoning_tokens)::bigint AS reasoning_tokens,
            COALESCE(bool_or(u.reasoning_estimated) FILTER (WHERE u.reasoning_tokens IS NOT NULL), false)
              AS run_reasoning_estimated
       FROM run_usage u
@@ -344,8 +348,8 @@ async function runsUsageIn(tx: KobeTx, teamId: string, of: UsageOf): Promise<Run
     user_entry_id: typeof r.user_entry_id === "string" ? r.user_entry_id : null,
     models: (r.models as string[] | null) ?? [],
     thinking_level: thinkingLevelSchema.safeParse(r.thinking_level).data ?? null,
-    ...totalsOf(r),
-    reasoning_tokens: r.run_reasoning_tokens == null ? null : Number(r.run_reasoning_tokens),
+    ...callTotalsOf(r),
+    reasoning_tokens: r.reasoning_tokens == null ? null : Number(r.reasoning_tokens),
     reasoning_estimated: r.run_reasoning_estimated === true,
   }));
 }

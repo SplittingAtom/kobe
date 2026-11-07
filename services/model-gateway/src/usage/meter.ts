@@ -2,7 +2,7 @@ import { StringDecoder } from "node:string_decoder";
 import type { RouteKind } from "../routes.js";
 import { chargedOutput } from "./charge.js";
 import { JsonUsageScanner, type FoundUsage } from "./json-scan.js";
-import { usageOf, type PartialCounts, type TokenCounts } from "./normalize.js";
+import { obj, usageOf, type PartialCounts, type TokenCounts } from "./normalize.js";
 
 /**
  * Measures one forwarded model call's token usage from the upstream response as it streams to
@@ -24,9 +24,9 @@ export interface UsageReading {
   readonly counts: TokenCounts;
   readonly source: "reported" | "estimated";
   /**
-   * Reasoning tokens within `counts.output` (KOBE-557), absent when unknown: the provider's split
-   * when it reported one, else an estimate from the streamed thinking text (ceil(UTF-8 bytes / 4),
-   * `estimated`). Never more than the output count.
+   * Reasoning tokens within `counts.output` (KOBE-557), absent when unknown: the provider's
+   * non-zero split when it reported one, else an estimate from the streamed thinking text
+   * (ceil(characters / 4), `estimated`). Never more than the output count.
    */
   readonly reasoning?: { readonly tokens: number; readonly estimated: boolean };
 }
@@ -68,21 +68,27 @@ function textChars(value: unknown, depth = 0): number {
   return total;
 }
 
-const BYTES_PER_TOKEN = 4;
 const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
-const rec = (v: unknown): Record<string, unknown> | undefined =>
-  v !== null && typeof v === "object" && !Array.isArray(v)
-    ? (v as Record<string, unknown>)
-    : undefined;
 const list = (v: unknown): readonly unknown[] => (Array.isArray(v) ? v : []);
+const rec = obj;
 
 /**
- * The thinking text one decoded stream event carried (KOBE-557), in UTF-8 bytes: OpenAI-compatible
- * `choices[].delta.reasoning` / `reasoning_content` (Ollama, DeepSeek, vLLM), Responses
+ * Marks of a thinking event in an SSE line too long to decode (its text still counts as thinking).
+ * Matched on the raw JSON, so a Gemini part's `"thought": true` after a long text is seen too.
+ */
+const THINKING_MARK =
+  /"(?:reasoning_content|reasoning|thinking)"\s*:\s*"|"thought"\s*:\s*true|"thinking_delta"|"response\.reasoning(?:_summary)?_text\.delta"/;
+/** Characters kept across chunks of a long line so a mark split between them still matches. */
+const MARK_OVERLAP = 64;
+
+/**
+ * The thinking text one decoded stream event carried (KOBE-557), in characters (the unit of the
+ * output estimate, so the two compare): OpenAI-compatible `choices[].delta.reasoning_content`, else
+ * `reasoning` (Ollama, DeepSeek, vLLM; one per delta, some servers send both), Responses
  * `response.reasoning_text.delta` / `response.reasoning_summary_text.delta`, Anthropic
  * `thinking_delta`, Gemini parts marked `thought: true`.
  */
-export function thinkingBytes(kind: RouteKind, value: unknown): number {
+export function thinkingChars(kind: RouteKind, value: unknown): number {
   const v = rec(value);
   if (!v) return 0;
   let text = "";
@@ -101,7 +107,7 @@ export function thinkingBytes(kind: RouteKind, value: unknown): number {
   } else {
     for (const c of list(v.choices)) {
       const delta = rec(rec(c)?.delta);
-      text += (str(delta?.reasoning) ?? "") + (str(delta?.reasoning_content) ?? "");
+      text += str(delta?.reasoning_content) ?? str(delta?.reasoning) ?? "";
     }
     if (
       v.type === "response.reasoning_text.delta" ||
@@ -110,21 +116,25 @@ export function thinkingBytes(kind: RouteKind, value: unknown): number {
       text += str(v.delta) ?? "";
     }
   }
-  return text === "" ? 0 : Buffer.byteLength(text, "utf8");
+  return text.length;
 }
 
 /**
- * The reasoning split of a call (KOBE-557): a reported count wins; else the thinking text / 4,
- * flagged estimated; neither: unknown. Clamped to the output count.
+ * The reasoning split of a call (KOBE-557): a reported non-zero count wins; else the thinking
+ * text's characters / 4, flagged estimated (a reported 0 is often a proxy's placeholder, so it
+ * does not silence thinking text the stream carried); a reported 0 without thinking text stays 0;
+ * neither: unknown. Clamped to the output count.
  */
 export function reasoningOf(
   reported: number | undefined,
   thinking: number,
   output: number,
 ): UsageReading["reasoning"] {
-  if (reported !== undefined) return { tokens: Math.min(reported, output), estimated: false };
+  if (reported !== undefined && (reported > 0 || thinking <= 0)) {
+    return { tokens: Math.min(reported, output), estimated: false };
+  }
   if (thinking <= 0) return undefined;
-  return { tokens: Math.min(Math.ceil(thinking / BYTES_PER_TOKEN), output), estimated: true };
+  return { tokens: Math.min(Math.ceil(thinking / CHARS_PER_TOKEN), output), estimated: true };
 }
 
 const promptOf = (c: PartialCounts) => (c.input ?? 0) + (c.cacheRead ?? 0) + (c.cacheWrite ?? 0);
@@ -180,8 +190,12 @@ export class UsageMeter {
   private sawFinal = false;
   private chars = 0;
   private bytes = 0;
-  /** UTF-8 bytes of thinking text the stream carried (the reasoning estimate, KOBE-557). */
+  /** Characters of thinking text the stream carried (the reasoning estimate, KOBE-557). */
   private thinking = 0;
+  /** A skipped long line: its characters, whether it is a thinking event, its last characters. */
+  private longChars = 0;
+  private longThinking = false;
+  private longTail = "";
 
   constructor(private readonly options: MeterOptions) {
     const type = (options.contentType ?? "").toLowerCase();
@@ -273,6 +287,7 @@ export class UsageMeter {
   private append(part: string): void {
     if (this.skippingLine) {
       this.chars += part.length;
+      this.markLong(part);
       this.longLine?.write(Buffer.from(part, "utf8"));
       return;
     }
@@ -280,6 +295,10 @@ export class UsageMeter {
       // Too long to decode whole: count it as generated text and scan it for its usage member.
       const head = this.line + part;
       this.chars += head.length;
+      this.longChars = 0;
+      this.longThinking = false;
+      this.longTail = "";
+      this.markLong(head);
       this.line = "";
       this.skippingLine = true;
       this.longLine = head.startsWith("data:") ? new JsonUsageScanner() : undefined;
@@ -289,7 +308,21 @@ export class UsageMeter {
     this.line += part;
   }
 
+  /** Counts a part of a skipped long line and looks for a thinking mark in it. */
+  private markLong(part: string): void {
+    this.longChars += part.length;
+    if (!this.longThinking) {
+      const window = this.longTail + part;
+      this.longThinking = THINKING_MARK.test(window);
+      this.longTail = window.slice(-MARK_OVERLAP);
+    }
+  }
+
   private endLongLine(): void {
+    if (this.longThinking) this.thinking += this.longChars;
+    this.longChars = 0;
+    this.longThinking = false;
+    this.longTail = "";
     for (const found of this.longLine?.values ?? []) {
       this.take(usageOf(this.options.kind, eventOf(found)));
     }
@@ -309,7 +342,7 @@ export class UsageMeter {
       return;
     }
     this.chars += textChars(value);
-    this.thinking += thinkingBytes(this.options.kind, value);
+    this.thinking += thinkingChars(this.options.kind, value);
     this.take(usageOf(this.options.kind, value));
   }
 }

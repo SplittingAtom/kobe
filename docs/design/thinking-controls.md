@@ -114,12 +114,17 @@ model gateway (`services/model-gateway/src/usage/`):
 - **Reported** when the provider reports a split: OpenAI Chat Completions
   `usage.completion_tokens_details.reasoning_tokens`, Responses
   `usage.output_tokens_details.reasoning_tokens`, Gemini `usageMetadata.thoughtsTokenCount`.
-  Anthropic reports none. A reported count always wins.
-- **Estimated** when no split was reported but the stream carried thinking text: OpenAI-compatible
-  `choices[].delta.reasoning` / `reasoning_content` (Ollama, DeepSeek, vLLM), Responses
+  Anthropic reports none. A reported non-zero count always wins. A reported 0 is often a proxy's
+  placeholder (Bifrost and others send `reasoning_tokens: 0`), so it stands only when the stream
+  carried no thinking text; otherwise the estimate below is recorded.
+- **Estimated** when no non-zero split was reported but the stream carried thinking text:
+  OpenAI-compatible `choices[].delta.reasoning_content`, else `reasoning` (one per delta; some
+  servers send both) (Ollama, DeepSeek, vLLM), Responses
   `response.reasoning_text.delta` / `response.reasoning_summary_text.delta`, Anthropic
-  `thinking_delta`, Gemini parts with `thought: true`. The estimate is **ceil(UTF-8 bytes / 4)** of
-  that text, and `reasoning_estimated` is true. Non-streamed (JSON) responses are not estimated.
+  `thinking_delta`, Gemini parts with `thought: true`. The estimate is **ceil(characters / 4)** of
+  that text, the same unit as the gateway's output estimate (so non-ASCII thinking is not clamped
+  to all of the output), and `reasoning_estimated` is true. A thinking event on an SSE line too long
+  to decode counts with its whole line. Non-streamed (JSON) responses are not estimated.
 - Never more than the call's output tokens (reasoning is part of output). Neither: null.
 
 Reads: the per-run usage (`GET /v1/threads/{id}/usage`, `GET /v1/runs/{id}/usage`) returns

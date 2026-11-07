@@ -318,16 +318,45 @@ describe("UsageMeter: reasoning tokens (KOBE-557)", () => {
     expect(meter("openai", SSE, body).reasoning).toEqual({ tokens: 12, estimated: false });
   });
 
-  it("OpenAI-compatible delta.reasoning / reasoning_content (Ollama, DeepSeek): UTF-8 bytes / 4", () => {
-    // "é" is two bytes: 2 × 3 + 1 = 7 bytes, plus 6 = 13 bytes → ceil(13 / 4) = 4.
+  it("OpenAI-compatible delta.reasoning / reasoning_content (Ollama, DeepSeek): characters / 4, one field per delta", () => {
+    // 4 characters, then 6 sent in both fields (counted once): ceil(10 / 4) = 3.
     const body =
       data({ choices: [{ delta: { reasoning: "ééé!" } }] }) +
-      data({ choices: [{ delta: { reasoning_content: "think." } }] }) +
+      data({ choices: [{ delta: { reasoning_content: "think.", reasoning: "think." } }] }) +
       data({ choices: [{ delta: { content: "answer" } }] }) +
       data({ choices: [], usage });
     const reading = meter("openai", SSE, body, 3);
     expect(reading.source).toBe("reported");
-    expect(reading.reasoning).toEqual({ tokens: 4, estimated: true });
+    expect(reading.reasoning).toEqual({ tokens: 3, estimated: true });
+  });
+
+  it("a reported 0 (a proxy's placeholder) does not silence the thinking text; with none it stays 0", () => {
+    const zero = { ...usage, completion_tokens_details: { reasoning_tokens: 0 } };
+    const thought =
+      data({ choices: [{ delta: { reasoning_content: "x".repeat(40) } }] }) +
+      data({ choices: [], usage: zero });
+    expect(meter("openai", SSE, thought).reasoning).toEqual({ tokens: 10, estimated: true });
+    const plain =
+      data({ choices: [{ delta: { content: "hi" } }] }) + data({ choices: [], usage: zero });
+    expect(meter("openai", SSE, plain).reasoning).toEqual({ tokens: 0, estimated: false });
+  });
+
+  it("counts a thinking event too long to decode toward the thinking text", () => {
+    const line = `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "y".repeat(300) } }] })}`;
+    const body =
+      `${line}\n\n` + data({ choices: [], usage: { prompt_tokens: 1, completion_tokens: 1_000 } });
+    const m = new UsageMeter({
+      kind: "openai",
+      contentType: SSE,
+      contentEncoding: undefined,
+      maxLineBytes: 64,
+    });
+    const bytes = Buffer.from(body, "utf8");
+    for (let i = 0; i < bytes.length; i += 9) m.write(bytes.subarray(i, i + 9));
+    expect(m.finish(true, 400).reasoning).toEqual({
+      tokens: Math.ceil(line.length / 4),
+      estimated: true,
+    });
   });
 
   it("Anthropic thinking_delta is estimated (Anthropic reports no split)", () => {

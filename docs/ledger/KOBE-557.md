@@ -1,6 +1,6 @@
 # KOBE-557: Usage: reasoning tokens per call (reported or estimated) and thinking budgets per level
 
-- **Status:** in review (PR 1 #469 migration; PR 2 feature, stacked)
+- **Status:** PR 1 #469 merged (98561f26); PR 2 #471 in review
 - **Branch / worktree:** `kobe-557-reasoning-usage` (PR 1), `kobe-557-reasoning-usage-feature` (PR 2, stacked) in `../Kobe-wt557`
 - **Depends on:** none; KOBE-556 consumes `thinkingBudget` and the per-run `reasoning_tokens` / `reasoning_estimated`
 
@@ -16,10 +16,14 @@
   table lock (0099 avoided that with NOT VALID); the gateway and `recordModelUsage` clamp to 0..output instead.
 - Both ALTERs are metadata-only on Postgres 11+ (nullable column; constant default), so no rewrite.
 - Gateway: `UsageReading.reasoning` is optional (absent = unknown → `null` in the row), so the
-  other readings (`unanswered`, `NO_TOKENS`) need no change. Thinking text is counted from decoded
-  SSE events only; JSON (non-streamed) bodies and over-long SSE lines are not estimated.
-- A reported split wins even when it is 0; both reported and estimated counts are clamped to output
-  (also again in `recordModelUsage`). `reasoning_estimated` is false whenever the count is null.
+  other readings (`unanswered`, `NO_TOKENS`) need no change. Thinking text is counted from SSE
+  events only (JSON bodies are not estimated); an over-long SSE line with a thinking mark counts whole.
+- Review (PR #471): a reported **non-zero** split wins; a reported 0 (proxy placeholder) gives way
+  to the estimate when the stream carried thinking text. Counts are clamped to output (again in
+  `recordModelUsage`). `reasoning_estimated` is false whenever the count is null.
+- Review: the estimate is ceil(**characters** / 4), not UTF-8 bytes as ac-3 says, so it uses the
+  same unit as the output estimate (bytes clamped non-ASCII thinking to 100% of output). One field
+  per OpenAI-compatible delta (`reasoning_content`, else `reasoning`).
 - Per-run `reasoning_tokens` = `sum()` over the run's calls (null when no call had a count);
   `reasoning_estimated` = `bool_or` over counted calls. Team/site/thread totals: `COALESCE(sum, 0)`.
 - The ticket's "run.usage event" is `usageSchema` (used by `run.completed.usage`): it gains optional
