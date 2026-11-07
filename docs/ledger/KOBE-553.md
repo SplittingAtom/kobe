@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR #TBD)
+- **Status:** in review (PR #463)
 - **Branch / worktree:** `kobe-553-frame-drag` in `../Kobe-wt553`
 - **Depends on:** KOBE-551 (native drop path, unchanged); Catalyst CAT-247 (the picker side,
   built in parallel to the shared `DRAG-CONTRACT.md`)
