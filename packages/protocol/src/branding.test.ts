@@ -47,7 +47,7 @@ describe("theme settings (TH2, TH9-TH11)", () => {
       for (const font of FONT_STACKS)
         expect(themeSettingsSchema.safeParse({ ...custom, corners, font }).success).toBe(true);
     expect(CORNER_STYLES).toEqual(["sharp", "soft", "round"]);
-    expect(FONT_STACKS).toEqual(["system", "humanist", "grotesk", "serif"]);
+    expect(FONT_STACKS).toEqual(["system", "humanist", "grotesk", "serif", "catalyst"]);
   });
 
   it.each(["1a73e8", "#1A73E8", "#1a73e", "#1a73e8ff", "#fff", "#gggggg", " #1a73e8", "#1a73e8\n"])(

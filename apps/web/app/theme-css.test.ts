@@ -381,6 +381,32 @@ describe("tokenization guard (KOBE-498)", () => {
     expect(tsFonts).toEqual([]);
   });
 
+  /** KOBE-555 (ac-1): faces are self-hosted (app/faces.ts); nothing fetches a font at run time. */
+  it("fonts are self-hosted: no font service, remote @import or @font-face outside app/faces.ts", () => {
+    const sources = [...css, ...ts, ...sourceFiles("lib", [".tsx", ".ts"])];
+    // A font service's host anywhere, an `@import` of an http(s) or protocol-relative URL in either
+    // form (`@import "https://…"`, `@import url(https://…)`), or a remote `url()` in a stylesheet.
+    const FONT_HOST =
+      /next\/font\/google|fonts\.(?:googleapis|gstatic)\.com|use\.typekit\.net|fonts\.bunny\.net/;
+    const REMOTE_IMPORT = /@import\s+(?:url\(\s*)?["']?(?:https?:)?\/\//i;
+    const REMOTE_URL = /url\(\s*["']?(?:https?:)?\/\//i;
+    expect(
+      sources.filter((f) => {
+        const text = readRaw(f);
+        return FONT_HOST.test(text) || REMOTE_IMPORT.test(text);
+      }),
+    ).toEqual([]);
+    expect(css.filter((f) => /@font-face/i.test(read(f)) || REMOTE_URL.test(read(f)))).toEqual([]);
+    expect(ts.filter((f) => readRaw(f).includes("next/font/local"))).toEqual([
+      join("app", "faces.ts"),
+    ]);
+    // The patterns themselves catch both @import forms and the hosts.
+    expect(REMOTE_IMPORT.test('@import "https://fonts.example/x.css";')).toBe(true);
+    expect(REMOTE_IMPORT.test("@import url(//cdn.example/x.css);")).toBe(true);
+    expect(REMOTE_IMPORT.test('@import "./tailwind.css";')).toBe(false);
+    expect(FONT_HOST.test("https://fonts.googleapis.com/css2?family=Outfit")).toBe(true);
+  });
+
   it("corners come from the radius tokens", () => {
     const ok = /^(?:var\(--kobe-radius-[\w-]+\)|0|50%|inherit)$/;
     expect(

@@ -2,6 +2,7 @@ import type { SiteBranding } from "@kobe/protocol";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_BRANDING } from "../lib/theme/branding-defaults";
+import { FACE_VARIABLES } from "../lib/theme/presets";
 
 /** KOBE-282 (ac-2): the root layout reads the theme cookie, so the first paint is in that theme. */
 let cookie: string | undefined;
@@ -40,6 +41,12 @@ afterEach(() => {
 });
 
 describe("root layout theme (KOBE-282)", () => {
+  /** KOBE-555 (ac-1): the shipped faces' variables are declared on <html> for every theme. */
+  it("puts the face classes on <html>", async () => {
+    // vitest.setup.ts stands in for next/font/local: a face's class is its variable name.
+    expect((await html()).props.className).toBe(Object.values(FACE_VARIABLES).join(" "));
+  });
+
   it("sets <html data-theme> from a saved choice", async () => {
     cookie = "dark";
     expect((await html()).props["data-theme"]).toBe("dark");
