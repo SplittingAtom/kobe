@@ -1,6 +1,6 @@
 # KOBE-560: Shell: no line between the utility bar and the columns below
 
-- **Status:** in review (PR #, group with KOBE-558 and KOBE-559)
+- **Status:** in review (PR #465, group with KOBE-558 and KOBE-559)
 - **Branch / worktree:** `kobe-558-icon-border` in `../Kobe-wt558`
 - **Depends on:** none
 

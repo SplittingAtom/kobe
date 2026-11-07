@@ -1,6 +1,6 @@
 # KOBE-559: Rail Apps tab: only the chosen picker, no list of MCP apps under it
 
-- **Status:** in review (PR #, group with KOBE-558 and KOBE-560)
+- **Status:** in review (PR #465, group with KOBE-558 and KOBE-560)
 - **Branch / worktree:** `kobe-558-icon-border` in `../Kobe-wt558`
 - **Depends on:** none
 

@@ -1,6 +1,6 @@
 # KOBE-558: Icon actions: no browser border on the bell, theme toggle and composer +
 
-- **Status:** in review (PR #, group with KOBE-559 and KOBE-560)
+- **Status:** in review (PR #465, group with KOBE-559 and KOBE-560)
 - **Branch / worktree:** `kobe-558-icon-border` in `../Kobe-wt558`
 - **Depends on:** none
 
