@@ -70,3 +70,12 @@ inserts the item through the native drop's chain.
   "Host extension: pointer drags from an app frame"); `docs/ledger/KOBE-551.md` follow-up
 - ac-7: `e2e/browser/tests/frame-drag.spec.ts` (typechecks; run by the coordinator)
 - ac-8: `pnpm verify` green; PR CI (see PR)
+
+## Real-browser evidence after merge (coordinator, 2026-11-07)
+
+- gate1 `local-2777b6872b1a` (main 2777b687), the frame route intercepted to serve the CAT-247
+  picker build (`a22b2cf5…`, not yet deployed on Catalyst): `frame-drag.spec.ts` passed in
+  Chromium and in Firefox (`KOBE_ALL_BROWSERS=1 --project firefox`). A real `page.mouse` drag
+  from a picker row to the composer: ghost, cue, the chip from "Lakehouse Picker", no text, the
+  send's `references`. Firefox keeps the keyboard focus in the picker's frame after a captured
+  drag until the page is clicked, so the spec clicks the composer before Enter (as a member does).
