@@ -111,17 +111,15 @@ const uiMessage = (text: string) => ({
 });
 
 describe("the Pickers section (KOBE-460 ac-1, ac-2)", () => {
-  it("is absent when the team has no live picker; the app list is unchanged", async () => {
+  it("is absent when the team has no live picker; the tab lists no apps (KOBE-559)", async () => {
     fake.teamApps = [EXPLORER, NAMED_PICKER];
     openApp(fake, answered());
     const section = await appsTab();
     expect(within(section).queryByRole("combobox", { name: "Picker" })).toBeNull();
-    expect(
-      within(section).getByRole("button", { name: "Open Lakehouse Explorer in this conversation" }),
-    ).toBeTruthy();
+    expect(within(section).queryByRole("button", { name: /^Open / })).toBeNull();
   });
 
-  it("sits above the list, offers None and the apps placed in the rail; the list keeps every app", async () => {
+  it("offers None and the apps placed in the rail; no app list under it (KOBE-559)", async () => {
     fake.teamApps = [EXPLORER, PICKER, QUERY_PICKER, NAMED_PICKER];
     fake.preferences = { rail_picker: null };
     openApp(fake, answered());
@@ -133,18 +131,7 @@ describe("the Pickers section (KOBE-460 ac-1, ac-2)", () => {
       "query picker",
     ]);
     expect(select.value).toBe("");
-    const list = must(section.querySelector("ul"));
-    expect(select.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    for (const name of [
-      "Lakehouse Explorer",
-      "Lakehouse Picker",
-      "query picker",
-      "Column Picker",
-    ]) {
-      expect(
-        within(list).getByRole("button", { name: `Open ${name} in this conversation` }),
-      ).toBeTruthy();
-    }
+    expect(within(section).queryByRole("button", { name: /^Open / })).toBeNull();
     expect(screen.queryByTitle(PICKER_FRAME)).toBeNull();
   });
 

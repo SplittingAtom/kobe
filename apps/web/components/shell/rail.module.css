@@ -611,30 +611,6 @@ button.teamIcon {
   cursor: pointer;
 }
 
-.appRow {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  width: 100%;
-  min-width: 0;
-  padding: 0.25rem 0.5rem 0.25rem 0.75rem;
-  font-size: 0.85rem;
-  text-align: start;
-  background: none;
-  border: 0;
-  border-radius: var(--kobe-radius-md);
-  cursor: pointer;
-}
-
-.appRow:hover:not(:disabled) {
-  background: var(--admin-hover);
-}
-
-.appRow:disabled {
-  cursor: progress;
-  opacity: 0.7;
-}
-
 .appHint {
   display: flex;
   gap: 0.5rem;
@@ -642,11 +618,5 @@ button.teamIcon {
   min-width: 0;
   padding: 0.25rem 0.5rem 0.25rem 0.75rem;
   color: var(--admin-muted);
-  font-size: 0.8rem;
-}
-
-.appsError {
-  margin: 0 0.5rem 0.25rem 1rem;
-  color: var(--admin-danger);
   font-size: 0.8rem;
 }

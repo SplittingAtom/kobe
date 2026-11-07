@@ -128,15 +128,21 @@ describe("app placement in the conversation (KOBE-531 ac-5)", () => {
     expect(within(card).getByRole("button", { name: "Expand" })).toBeTruthy();
   });
 
-  it("a rail launch of an artifacts app opens its tab at once (the card is the stub)", async () => {
+  it("a + menu launch of an artifacts app opens its tab at once (the card is the stub)", async () => {
     fake.teamApps = [QUERY];
     const t = answered();
     openApp(fake, t);
-    fireEvent.click(await screen.findByRole("tab", { name: "Apps" }));
-    const section = await screen.findByRole("tabpanel", { name: "Apps" });
-    await userEvent
-      .setup()
-      .click(within(section).getByRole("button", { name: "Open Lake Query in this conversation" }));
+    // The rail lists no apps since KOBE-559: launches go through the composer's + menu.
+    const user = userEvent.setup();
+    (await screen.findByRole("button", { name: "Add to your message" })).focus();
+    await user.keyboard("{Enter}");
+    const menu = await screen.findByRole("menu", {}, { timeout: 4_000 });
+    within(menu).getByRole("menuitem", { name: /^Apps/ }).focus();
+    await user.keyboard("{ArrowRight}");
+    const sub = await screen.findByRole("menu", { name: "Apps" }, { timeout: 4_000 });
+    await user.click(
+      await within(sub).findByRole("menuitem", { name: /Lake Query/ }, { timeout: 4_000 }),
+    );
     await waitFor(() => expect(tabNames()).toEqual(["Lake Query*"]), { timeout: 4_000 });
     const card = await waitFor(() => must(cards()[0]));
     await within(card).findByText("Opened in the side column");

@@ -4,9 +4,7 @@
 
 /* --- bar (CE3) ---------------------------------------------------------------------------- */
 
-.bar {
-  border-bottom: 1px solid var(--admin-border);
-}
+/* The bar has no rule under it (KOBE-560, Chris 2026-11-07): the columns start right below. */
 
 .rowOne {
   display: flex;
