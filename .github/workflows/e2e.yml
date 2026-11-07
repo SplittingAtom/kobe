@@ -186,7 +186,9 @@ jobs:
     runs-on: ${{ (github.event.pull_request.head.repo.fork && 'ubuntu-24.04') || vars.KOBE_RUNNER || 'ubuntu-24.04' }}
     # Healthy shards take about 10 min; under peak load the self-hosted runners' Docker data
     # (Longhorn on the nodes' HDDs) is far slower (ci/runners/README.md).
-    timeout-minutes: 45
+    # The executor shard (the whole suite with the paired tool uid, plus e2e/executor/) ran 45 min
+    # while the merge queue was busy on 2026-11-07 and was cut mid-run; 60 leaves room (KOBE-552).
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
