@@ -57,3 +57,12 @@ body:has([data-kobe-console]) {
     transition: none;
   }
 }
+
+/* Forced colours drop the halo and force the resting border to a system colour, so a hovered
+   panel (the shell's columns and the console's sidebar and page among them, KOBE-554) shows its
+   hover with the highlight colour instead. */
+@media (forced-colors: active) {
+  [data-kobe-console] .kobe-panel:hover {
+    border-color: Highlight;
+  }
+}

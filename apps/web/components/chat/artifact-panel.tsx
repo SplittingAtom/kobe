@@ -379,10 +379,7 @@ export function ArtifactPanel({
       aria-modal={modal || undefined}
       aria-labelledby={artifactTitleId(active)}
       onKeyDown={onKeyDown}
-      className={cn(
-        "bg-background flex min-h-96 min-w-0 flex-col border-s outline-none",
-        className,
-      )}
+      className={cn("bg-card flex min-h-96 min-w-0 flex-col border-s outline-none", className)}
     >
       <div className="flex shrink-0 items-center border-b">
         {sheet && <IconAction command="artifact-back" onClick={panel.hideSheet} />}

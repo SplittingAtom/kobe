@@ -26,12 +26,20 @@ export const RAIL_PX = {
 } as const;
 
 /**
- * The widest the expanded rail may be in a `grid` px wide shell: the conversation keeps its floor,
- * and the artifact column its own while it is a column. Never under `RAIL_PX.min`.
+ * The columns are floating cards (KOBE-554, after Catalyst's query tool): a page gutter around the
+ * grid and a gap between the cards, both 16 px at every band (`--kobe-shell-gutter`,
+ * `--kobe-shell-gap` in shell.module.css). Layout, not theme tokens (docs/theming.md §9).
  */
-export function maxRailWidth(grid: number, artifactColumn: boolean): number {
+export const SHELL_SPACING_PX = { gutter: 16, gap: 16 } as const;
+
+/**
+ * The widest the expanded rail may be when the columns share `columns` px (the grid's width less
+ * its gutters and gaps): the conversation keeps its floor, and the artifact column its own while
+ * it is a column. Never under `RAIL_PX.min`.
+ */
+export function maxRailWidth(columns: number, artifactColumn: boolean): number {
   const room = CONVERSATION_FLOOR_PX + (artifactColumn ? ARTIFACT_FLOOR_PX : 0);
-  return Math.max(RAIL_PX.min, Math.min(RAIL_PX.max, Math.round(grid) - room));
+  return Math.max(RAIL_PX.min, Math.min(RAIL_PX.max, Math.round(columns) - room));
 }
 
 /**
@@ -113,19 +121,23 @@ export function layoutAt({
 }: LayoutInput): ShellLayout {
   const band = bandFor(width);
   const artifactMode = artifactModeOf(band, artifactOpen);
+  const column = artifactMode === "column";
+  // The grid's content box, then the gaps between the cards it holds.
+  const content = width - 2 * SHELL_SPACING_PX.gutter;
+  const gaps = band === "single" ? 0 : (column ? 2 : 1) * SHELL_SPACING_PX.gap;
   // min(var(--kobe-rail-expanded-width, 280px), 100% - var(--kobe-rail-room))
-  const expanded = Math.min(
-    railWidth ?? RAIL_PX.expanded,
-    maxRailWidth(width, artifactMode === "column"),
-  );
+  const expanded = Math.min(railWidth ?? RAIL_PX.expanded, maxRailWidth(content - gaps, column));
   const rail =
     band === "single" ? 0 : railDocked(band) && !railCollapsed ? expanded : RAIL_PX.collapsed;
-  const space = width - rail;
-  if (artifactMode !== "column") {
+  const space = content - gaps - rail;
+  if (!column) {
     return { band, rail, artifactMode, artifact: 0, conversation: space };
   }
-  // minmax(360px, min(var(--kobe-artifact-width), 100% - rail - 400px)) minmax(400px, 1fr)
+  // minmax(min(360px, room), min(var(--kobe-artifact-width), room)) minmax(400px, 1fr), where
+  // room = 100% - rail - gaps - 400px: the column yields to the conversation's floor when the
+  // gutters leave less than both floors (820–871 px).
+  const room = space - CONVERSATION_FLOOR_PX;
   const wanted = artifactWidth ?? space / 2;
-  const artifact = Math.max(ARTIFACT_FLOOR_PX, Math.min(wanted, space - CONVERSATION_FLOOR_PX));
+  const artifact = Math.max(Math.min(ARTIFACT_FLOOR_PX, room), Math.min(wanted, room));
   return { band, rail, artifactMode, artifact, conversation: space - artifact };
 }

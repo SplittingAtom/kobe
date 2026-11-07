@@ -1,7 +1,7 @@
 "use client";
 
 import { maxRailWidth, RAIL_PX } from "../../lib/shell/layout";
-import { shellGrid } from "../../lib/shell/preferences";
+import { shellGrid, spaceRightOfRail } from "../../lib/shell/preferences";
 import { RAIL_STEP_PX, RAIL_WIDTH_VAR } from "../../lib/shell/rail-width";
 import styles from "./shell.module.css";
 import { useSplitter, type SplitterRange } from "./use-splitter";
@@ -23,10 +23,12 @@ function regions(handle: HTMLElement | null) {
 function measure(handle: HTMLElement | null): SplitterRange | null {
   const { rail, grid, artifact } = regions(handle);
   const width = rail?.getBoundingClientRect().width ?? 0;
-  const space = grid?.getBoundingClientRect().width ?? 0;
-  if (width <= 0 || space <= 0) return null;
+  // The columns' own widths: the grid's gutters and the gaps between the cards (KOBE-554) are
+  // nobody's room.
+  const right = spaceRightOfRail(grid) ?? 0;
+  if (width <= 0 || right <= 0) return null;
   const column = (artifact?.getBoundingClientRect().width ?? 0) > 0;
-  return { value: width, min: RAIL_PX.min, max: maxRailWidth(space, column) };
+  return { value: width, min: RAIL_PX.min, max: maxRailWidth(width + right, column) };
 }
 
 /** The artifact column too: opening or closing it moves the maximum without resizing the rail. */

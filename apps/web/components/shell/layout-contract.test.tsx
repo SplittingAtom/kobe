@@ -32,8 +32,11 @@ function rules(source: string, selector: string): string[] {
   return out;
 }
 
+/** One line, no padding inside parentheses: the formatter may wrap a long value. */
+const flatCss = (s: string) => s.replace(/\s+/g, " ").replace(/\(\s+/g, "(").replace(/\s+\)/g, ")");
+
 const declares = (source: string, selector: string, declaration: string) =>
-  rules(source, selector).some((body) => body.includes(declaration));
+  rules(source, selector).some((body) => flatCss(body).includes(flatCss(declaration)));
 
 describe("CSS contract", () => {
   it("the chat is exactly as tall as the window and never scrolls the page", () => {
@@ -63,12 +66,18 @@ describe("CSS contract", () => {
   });
 
   it("the artifact column: half by default, a dragged width within both floors, none when empty (KOBE-200)", () => {
-    const flat = (bodies: string[]) => bodies.map((b) => b.replace(/\s+/g, " "));
+    const flat = (bodies: string[]) => bodies.map(flatCss);
     expect(
-      declares(SHELL, ".grid", "--kobe-artifact-width: calc((100% - var(--kobe-rail-width)) / 2);"),
+      declares(
+        SHELL,
+        ".grid",
+        "--kobe-artifact-width: calc((100% - var(--kobe-rail-width) - 2 * var(--kobe-shell-gap)) / 2);",
+      ),
     ).toBe(true);
+    // The two gaps come out of the room first; the column yields to the conversation's 400 px
+    // at the medium band's lower edge, where the gutters leave less than both floors (KOBE-554).
     const floors =
-      "minmax(360px, min(var(--kobe-artifact-width), 100% - var(--kobe-rail-width) - 400px)) minmax(400px, 1fr);";
+      "minmax(min(360px, var(--kobe-artifact-room)), min(var(--kobe-artifact-width), var(--kobe-artifact-room))) minmax(400px, 1fr);";
     expect(
       flat(rules(SHELL, ".grid:has(> .artifact:not(:empty):not([data-hidden]))")).some((b) =>
         b.includes(floors),
@@ -79,6 +88,62 @@ describe("CSS contract", () => {
     expect(declares(SHELL, ".artifact[data-hidden]", "display: none;")).toBe(true);
     // The resize handle has its own strip, off the column's scrollbar (review round 1).
     expect(declares(SHELL, ".artifact", "padding-inline-end: 6px;")).toBe(true);
+  });
+});
+
+describe("floating cards (KOBE-554)", () => {
+  it("the grid has a 16 px page gutter and a 16 px gap between the columns at every width", () => {
+    expect(declares(SHELL, ".grid", "--kobe-shell-gutter: 16px;")).toBe(true);
+    expect(declares(SHELL, ".grid", "--kobe-shell-gap: 16px;")).toBe(true);
+    expect(declares(SHELL, ".grid", "padding: var(--kobe-shell-gutter);")).toBe(true);
+    expect(declares(SHELL, ".grid", "column-gap: var(--kobe-shell-gap);")).toBe(true);
+    // The rail's room counts the gaps beside the floors.
+    expect(declares(SHELL, ".grid", "--kobe-rail-room: calc(400px + var(--kobe-shell-gap));")).toBe(
+      true,
+    );
+  });
+
+  it("rail, artifact column and conversation are cards: card colour, border, panel radius", () => {
+    for (const region of [".rail", ".artifact", ".conversation"]) {
+      expect(declares(SHELL, region, "background: var(--card);"), region).toBe(true);
+      expect(declares(SHELL, region, "border: 1px solid var(--border);"), region).toBe(true);
+      expect(declares(SHELL, region, "border-radius: var(--kobe-radius-lg);"), region).toBe(true);
+    }
+    // No edge borders left from the edge-to-edge layout: the card's border replaces them.
+    expect(RAIL).not.toMatch(/border-inline-end/);
+    expect(declares(SHELL, ".artifact", "border-inline-end: 1px solid var(--admin-border);")).toBe(
+      false,
+    );
+    // The rail's own surface is the card's, so the card colour shows to its rounded edge.
+    expect(declares(RAIL, ".rail", "background: var(--card);")).toBe(true);
+  });
+
+  it("the rail's handle sits in the gap between the rail card and the next card", () => {
+    const wide = media(SHELL, "(width >= 1100px)");
+    expect(
+      declares(
+        wide,
+        ".railHandle",
+        "inset-inline-start: calc(var(--kobe-shell-gutter) + var(--kobe-rail-width) + (var(--kobe-shell-gap) - 6px) / 2);",
+      ),
+    ).toBe(true);
+    expect(declares(wide, ".railHandle", "inset-block: var(--kobe-shell-gutter);")).toBe(true);
+  });
+
+  it("the drawer and the overlay sheet keep the 16 px gutters", () => {
+    expect(
+      declares(RAIL, ".rail[data-drawer]", "inset-block: var(--kobe-shell-gutter, 16px);"),
+    ).toBe(true);
+    expect(
+      declares(RAIL, ".rail[data-drawer]", "inset-inline-start: var(--kobe-shell-gutter, 16px);"),
+    ).toBe(true);
+    expect(declares(RAIL, ".rail[data-drawer]", "border-radius: var(--kobe-radius-lg);")).toBe(
+      true,
+    );
+    const sheet = media(SHELL, "(768px <= width < 820px)").replace(/\s+/g, " ");
+    expect(sheet).toContain("inset-block: var(--kobe-shell-gutter);");
+    expect(sheet).toContain("bottom: anchor(--kobe-composer top, var(--kobe-shell-gutter));");
+    expect(sheet).toContain("inset-inline-end: var(--kobe-shell-gutter);");
   });
 });
 
@@ -129,9 +194,12 @@ describe("breakpoints (KOBE-201, CE7, CE8)", () => {
   });
 
   it("from 820 px the artifact column sits beside the conversation, within both floors", () => {
-    const column = media(SHELL, from(BREAKPOINTS.medium)).replace(/\s+/g, " ");
+    const column = flatCss(media(SHELL, from(BREAKPOINTS.medium)));
     expect(column).toContain(
-      "minmax(360px, min(var(--kobe-artifact-width), 100% - var(--kobe-rail-width) - 400px)) minmax(400px, 1fr);",
+      "minmax(min(360px, var(--kobe-artifact-room)), min(var(--kobe-artifact-width), var(--kobe-artifact-room))) minmax(400px, 1fr);",
+    );
+    expect(column).toContain(
+      "--kobe-artifact-room: calc(100% - var(--kobe-rail-width) - 2 * var(--kobe-shell-gap) - 400px);",
     );
     expect(declares(column, ".resizeHandle", "display: block;")).toBe(true);
   });
@@ -140,15 +208,25 @@ describe("breakpoints (KOBE-201, CE7, CE8)", () => {
     const overlay = media(SHELL, between(BREAKPOINTS.overlay, BREAKPOINTS.medium));
     expect(declares(overlay, ".artifact", "position: absolute;")).toBe(true);
     expect(
-      declares(overlay, ".artifact", "width: clamp(360px, 50%, 100% - var(--kobe-rail-width));"),
+      declares(
+        overlay,
+        ".artifact",
+        "width: clamp(360px, 50%, 100% - var(--kobe-rail-width) - 2 * var(--kobe-shell-gutter) - var(--kobe-shell-gap));",
+      ),
     ).toBe(true);
     expect(declares(overlay, ".artifact:not([data-sheet-open])", "display: none;")).toBe(true);
     // Not a grid column there: the conversation keeps everything right of the 48 px rail.
     expect(overlay).not.toContain("grid-template-columns");
     // KOBE-269: the sheet ends above the composer, so Send stays reachable (anchor positioning).
-    // No anchor on screen (loading, error): the fallback keeps it full height; no anchor
-    // positioning at all: the declaration drops, with the same result.
-    expect(declares(overlay, ".artifact", "bottom: anchor(--kobe-composer top, 0px);")).toBe(true);
+    // No anchor on screen (loading, error): the fallback keeps it full height (inside the
+    // gutter, KOBE-554); no anchor positioning at all: the declaration drops, with the same result.
+    expect(
+      declares(
+        overlay,
+        ".artifact",
+        "bottom: anchor(--kobe-composer top, var(--kobe-shell-gutter));",
+      ),
+    ).toBe(true);
     expect(
       declares(
         GLOBAL,
@@ -191,7 +269,9 @@ describe("breakpoints (KOBE-201, CE7, CE8)", () => {
     const flat = (s: string) => s.replace(/\s+/g, " ");
     // 280 px unless dragged, never leaving the conversation (and an open artifact column) less
     // than its floor.
-    expect(declares(SHELL, ".grid", "--kobe-rail-room: 400px;")).toBe(true);
+    expect(declares(SHELL, ".grid", "--kobe-rail-room: calc(400px + var(--kobe-shell-gap));")).toBe(
+      true,
+    );
     expect(
       declares(
         SHELL,
@@ -204,7 +284,7 @@ describe("breakpoints (KOBE-201, CE7, CE8)", () => {
       declares(
         column,
         ".grid:has(> .artifact:not(:empty):not([data-hidden]))",
-        "--kobe-rail-room: 760px;",
+        "--kobe-rail-room: calc(760px + 2 * var(--kobe-shell-gap));",
       ),
     ).toBe(true);
     // Collapsed and narrower bands keep 48 px whatever was dragged.
@@ -215,8 +295,13 @@ describe("breakpoints (KOBE-201, CE7, CE8)", () => {
     const wide = media(SHELL, from(BREAKPOINTS.wide));
     expect(declares(wide, ".railHandle", "display: block;")).toBe(true);
     expect(declares(wide, ".railHandle", "cursor: col-resize;")).toBe(true);
+    // In the gap between the rail card and the next (KOBE-554).
     expect(
-      declares(wide, ".railHandle", "inset-inline-start: calc(var(--kobe-rail-width) - 2px);"),
+      declares(
+        wide,
+        ".railHandle",
+        "inset-inline-start: calc(var(--kobe-shell-gutter) + var(--kobe-rail-width) + (var(--kobe-shell-gap) - 6px) / 2);",
+      ),
     ).toBe(true);
     expect(declares(wide, ".railHandle:focus-visible", "background: var(--admin-accent);")).toBe(
       true,
@@ -225,9 +310,9 @@ describe("breakpoints (KOBE-201, CE7, CE8)", () => {
     expect(declares(wide, ".railHandle:focus-visible", "outline: 2px solid transparent;")).toBe(
       true,
     );
-    expect(declares(wide, ".railHandle::before", "inset-inline: -2px -4px;")).toBe(true);
+    expect(declares(wide, ".railHandle::before", "inset-inline: -5px;")).toBe(true); // the 16 px gap
     const touch = media(SHELL, "(width >= 1100px) and (pointer: coarse)");
-    expect(declares(touch, ".railHandle::before", "inset-inline: -4px -14px;")).toBe(true); // 4 + 6 + 14
+    expect(declares(touch, ".railHandle::before", "inset-inline: -9px;")).toBe(true); // 9 + 6 + 9
   });
 });
 

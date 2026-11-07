@@ -2,6 +2,7 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { must } from "../../../lib/testing/must";
 import { ConsoleLayout, ConsoleMain, ConsoleWho } from "./layout";
 import { SideNav, SideNavGroup, SideNavLink } from "./side-nav";
 
@@ -92,6 +93,33 @@ describe("ConsoleLayout", () => {
     expect(grid(container)).not.toContain("md:grid-cols-[15rem_minmax(0,1fr)]");
     unmount();
     expect(grid(renderConsole(true).container)).toContain("md:grid-cols-[15rem_minmax(0,1fr)]");
+  });
+
+  it("lays the sidebar and the page out as cards with a 16 px gap and gutter (KOBE-554)", () => {
+    const { container } = renderConsole(true);
+    const grid = must(container.querySelector<HTMLElement>("header + div"));
+    expect(grid.className).toContain("gap-4");
+    expect(grid.className).toContain("p-4");
+    const cards = [...grid.children] as HTMLElement[];
+    expect(cards.map((c) => c.getAttribute("data-console-region"))).toEqual(["nav", "content"]);
+    for (const card of cards) {
+      for (const cls of ["kobe-panel", "bg-card", "border", "rounded-lg"]) {
+        expect(card.classList.contains(cls), cls).toBe(true);
+      }
+    }
+    expect(within(cards[0] as HTMLElement).getByRole("navigation")).toBeTruthy();
+    expect(within(cards[1] as HTMLElement).getByRole("main")).toBeTruthy();
+    // The sidebar's own edge borders and panel colour went: the card draws the edge.
+    const nav = screen.getByRole("navigation");
+    expect(nav.className).not.toMatch(/border-r|border-b|bg-console-panel/);
+  });
+
+  it("without a section navigation, the page alone is a card", () => {
+    const { container } = renderConsole(false);
+    const grid = must(container.querySelector<HTMLElement>("header + div"));
+    expect([...grid.children].map((c) => c.getAttribute("data-console-region"))).toEqual([
+      "content",
+    ]);
   });
 });
 
