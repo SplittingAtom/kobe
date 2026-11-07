@@ -18,7 +18,9 @@ const GROUP = { name: "Thinking level for this conversation" } as const;
 function teamModels(thinking: TeamModel["thinkingInTeam"]): TeamModels {
   return {
     default: "glm",
-    models: [{ alias: "glm", enabled: true, isDefault: true, thinkingInTeam: thinking } as TeamModel],
+    models: [
+      { alias: "glm", enabled: true, isDefault: true, thinkingInTeam: thinking } as TeamModel,
+    ],
   };
 }
 
@@ -57,9 +59,18 @@ describe("ThinkingPicker as Reasoning effort pills (KOBE-556)", () => {
   });
 
   it.each([
-    [["off", "low", "medium", "high"], ["Off", "Low", "Medium", "High"]],
-    [["low", "medium"], ["Low", "Medium"]],
-    [["off", "low"], ["Off", "Low"]],
+    [
+      ["off", "low", "medium", "high"],
+      ["Off", "Low", "Medium", "High"],
+    ],
+    [
+      ["low", "medium"],
+      ["Low", "Medium"],
+    ],
+    [
+      ["off", "low"],
+      ["Off", "Low"],
+    ],
   ] as const)("one pill per allowed level: %j", (levels, labels) => {
     const { group } = renderPicker({ levels, fallback: levels[0] });
     expect(pills(group).map((b) => b.textContent)).toEqual(labels);
@@ -93,7 +104,9 @@ describe("ThinkingPicker as Reasoning effort pills (KOBE-556)", () => {
   it("disabled (no thread yet, read-only): the pills don't choose", async () => {
     const { onChoose, group } = renderPicker({ disabled: true });
     for (const pill of pills(group)) expect(pill).toHaveProperty("disabled", true);
-    await userEvent.setup().click(within(group as HTMLElement).getByRole("button", { name: "Off" }));
+    await userEvent
+      .setup()
+      .click(within(group as HTMLElement).getByRole("button", { name: "Off" }));
     expect(onChoose).not.toHaveBeenCalled();
   });
 

@@ -179,11 +179,11 @@ describe("narrow composers fold the selectors into one menu (ac-2)", { timeout: 
     const pills = await within(menu).findByRole("group", {
       name: "Thinking level for this conversation",
     });
-    expect(within(pills).getAllByRole("button").map((b) => b.textContent)).toEqual([
-      "Off",
-      "Low",
-      "Medium",
-    ]);
+    expect(
+      within(pills)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["Off", "Low", "Medium"]);
     expect(button.getAttribute("aria-expanded")).toBe("true");
     within(menu).getByRole("combobox", { name: "Model for this conversation" }).focus();
     await user.keyboard("{Escape}");

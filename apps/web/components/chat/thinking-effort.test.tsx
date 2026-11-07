@@ -68,7 +68,8 @@ describe("ThinkingEffort (KOBE-556)", () => {
 
   it("disabled: every pill is disabled and nothing is chosen", async () => {
     const { onSelect, group } = renderEffort({ disabled: true });
-    for (const pill of within(group).getAllByRole("button")) expect(pill).toHaveProperty("disabled", true);
+    for (const pill of within(group).getAllByRole("button"))
+      expect(pill).toHaveProperty("disabled", true);
     await userEvent.setup().click(within(group).getByRole("button", { name: "Off" }));
     expect(onSelect).not.toHaveBeenCalled();
   });

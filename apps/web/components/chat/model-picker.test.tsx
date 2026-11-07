@@ -176,8 +176,7 @@ describe("model picker", () => {
 describe("thinking level per conversation (KOBE-260, pills since KOBE-556)", () => {
   const thinkingPicker = () =>
     screen.findByRole("group", { name: "Thinking level for this conversation" });
-  const pill = async (name: string) =>
-    within(await thinkingPicker()).getByRole("button", { name });
+  const pill = async (name: string) => within(await thinkingPicker()).getByRole("button", { name });
   const pressed = async () =>
     within(await thinkingPicker())
       .getAllByRole("button")
@@ -194,7 +193,9 @@ describe("thinking level per conversation (KOBE-260, pills since KOBE-556)", () 
     const t = fake.addThread("Budget");
     openApp(fake, t);
     await picker();
-    expect(screen.queryByRole("group", { name: "Thinking level for this conversation" })).toBeNull();
+    expect(
+      screen.queryByRole("group", { name: "Thinking level for this conversation" }),
+    ).toBeNull();
     await userEvent.setup().selectOptions(await picker(), "glm");
     const pills = within(await thinkingPicker()).getAllByRole("button");
     expect(pills.map((b) => b.textContent)).toEqual(["Off", "Low", "Medium"]);
