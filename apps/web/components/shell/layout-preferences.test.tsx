@@ -134,7 +134,8 @@ describe("saving", () => {
     space = { artifact: 360, conversation: 300 };
     resizeHandle().focus();
     await userEvent.setup().keyboard("{ArrowRight}");
-    expect(gridWidth()).toBe("360px");
+    // The column yields to the conversation's 400 px (KOBE-554): 660 − 400.
+    expect(gridWidth()).toBe("260px");
     await new Promise((r) => setTimeout(r, 900));
     expect(puts()).toHaveLength(0);
   });

@@ -1,6 +1,6 @@
 /* The workspace rail (CE5, KOBE-198): its top line, then Apps and Files (the threads are a panel
    over the workspace since KOBE-453; the group styles below serve it). The grid gives it 280 px,
-   or 48 px collapsed (shell.module.css). */
+   or 48 px collapsed (shell.module.css), in a card whose colour it shares (KOBE-554). */
 
 .rail {
   position: relative; /* the drop overlay covers exactly the rail (KOBE-199) */
@@ -9,8 +9,7 @@
   min-width: 0;
   min-height: 0;
   overflow-x: clip; /* never wider than its column (KOBE-267); no scroll container */
-  background: var(--admin-panel);
-  border-bottom: 1px solid var(--admin-border);
+  background: var(--card);
 }
 
 .rail[data-collapsed] {
@@ -18,14 +17,18 @@
 }
 
 /* Below 1100 px an expanded rail is a drawer over the shell (CE7, CE8, KOBE-201); its shadow is
-   the scrim. Under 768 px the rail shows only as the drawer. */
+   the scrim. Under 768 px the rail shows only as the drawer. From 768 px (the grid holds it) a
+   card inside the page's 16 px gutters, like the columns (KOBE-554); under 768 px full height. */
 .rail[data-drawer] {
   position: absolute;
   z-index: 40;
-  inset-block: 0;
-  inset-inline-start: 0;
+  inset-block: var(--kobe-shell-gutter, 16px);
+  inset-inline-start: var(--kobe-shell-gutter, 16px);
+  box-sizing: border-box;
   width: min(280px, 85vw);
   height: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--kobe-radius-lg);
   box-shadow: 0 0 0 100vmax var(--kobe-scrim);
   outline: none;
 }
@@ -38,6 +41,15 @@
 @media (width < 768px) {
   .rail:not([data-drawer]) {
     display: none;
+  }
+
+  /* Here `.app` holds the drawer (the grid leaves the layout), so the gutters would measure from
+     over the bar: the drawer covers the full height at the window's edge, as before KOBE-554. */
+  .rail[data-drawer] {
+    inset-block: 0;
+    inset-inline-start: 0;
+    border-width: 0;
+    border-radius: 0;
   }
 }
 
@@ -80,8 +92,6 @@
 @media (width >= 768px) {
   .rail {
     height: 100%;
-    border-bottom: 0;
-    border-inline-end: 1px solid var(--admin-border);
   }
 
   .rail[data-collapsed] {

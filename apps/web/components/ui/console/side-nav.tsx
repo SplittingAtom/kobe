@@ -11,7 +11,7 @@ const CloseContext = createContext<() => void>(() => undefined);
 /**
  * A console's section navigation. Narrow screens fold the list behind a toggle (so the page comes
  * first) that names the current section; wide screens show it as a sidebar. Following a link
- * folds it again.
+ * folds it again. Its card (edge, colour) is the console layout's (KOBE-554).
  */
 export function SideNav({
   label,
@@ -29,10 +29,7 @@ export function SideNav({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <nav
-      aria-label={label}
-      className="box-border border-0 border-b border-console-border bg-console-panel px-4 pt-2 pb-4 md:min-h-[calc(100vh-3.5rem)] md:border-r md:border-b-0"
-    >
+    <nav aria-label={label} className="box-border px-4 pt-2 pb-4">
       <Button
         className="mt-2 md:hidden"
         aria-expanded={open}

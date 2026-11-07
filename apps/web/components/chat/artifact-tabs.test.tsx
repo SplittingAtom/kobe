@@ -176,6 +176,21 @@ describe("resize (ac-2)", () => {
     expect(handle.getAttribute("aria-valuemin")).toBe("360");
   });
 
+  it("820–871 px: the floor is what the conversation's 400 px leaves (KOBE-554)", async () => {
+    const { handle, width } = await withColumn();
+    // 708 px right of the rail at 820 px: the column renders 308 px, as `layoutAt` and the CSS.
+    vi.spyOn(region("artifact"), "getBoundingClientRect").mockReturnValue(box(48, 308));
+    vi.spyOn(region("conversation"), "getBoundingClientRect").mockReturnValue(box(356, 400));
+    handle.focus();
+    const user = userEvent.setup();
+    await user.keyboard("{Home}");
+    expect(handle.getAttribute("aria-valuemin")).toBe("308");
+    expect(handle.getAttribute("aria-valuemax")).toBe("308");
+    expect(width()).toBe("308px");
+    await user.keyboard("{ArrowRight}");
+    expect(width()).toBe("308px");
+  });
+
   it("drags within the floors and commits on release", async () => {
     const { handle, width } = await withColumn();
     fireEvent.pointerDown(handle, { clientX: 780, button: 0, pointerId: 1 });

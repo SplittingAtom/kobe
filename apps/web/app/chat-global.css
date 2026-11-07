@@ -176,8 +176,10 @@ body:has([data-kobe-chat]) {
     box-shadow 300ms ease;
 }
 
+/* One halo at a time: a panel holding the hovered panel (the shell's columns, the console's page
+   around its cards, KOBE-554) keeps its resting border and shadow. */
 @media (hover: hover) {
-  [data-kobe-chat] .kobe-panel:hover {
+  [data-kobe-chat] .kobe-panel:hover:not(:has(.kobe-panel:hover)) {
     border-color: var(--kobe-panel-border-hover);
     box-shadow: var(--kobe-glow-panel);
   }
@@ -186,5 +188,14 @@ body:has([data-kobe-chat]) {
 @media (prefers-reduced-motion: reduce) {
   [data-kobe-chat] .kobe-panel {
     transition: none;
+  }
+}
+
+/* Forced colours drop the halo and force the resting border to a system colour, so a hovered
+   panel (the shell's columns and the console's sidebar and page among them, KOBE-554) shows its
+   hover with the highlight colour instead. */
+@media (forced-colors: active) {
+  [data-kobe-chat] .kobe-panel:hover:not(:has(.kobe-panel:hover)) {
+    border-color: Highlight;
   }
 }

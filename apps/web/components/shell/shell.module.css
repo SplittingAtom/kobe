@@ -242,24 +242,35 @@
    Beside the artifact column the conversation never gets under 400 px, the column never under
    360 px. Each column scrolls on its own and the page never does (KOBE-205): the grid fills the
    height under the bar, the rail and the artifact column scroll, and the conversation leaves
-   scrolling to its message list so the composer stays put. */
+   scrolling to its message list so the composer stays put.
+   The columns are floating cards (KOBE-554, after Catalyst's query tool): a 16 px page gutter
+   around the grid and a 16 px gap between the cards, with the page (and a preset's ambient wash,
+   on `.app`) showing between them. Plain layout, not theme tokens (docs/theming.md §9); the
+   numbers are `SHELL_SPACING_PX` in lib/shell/layout.ts. */
 .grid {
+  --kobe-shell-gutter: 16px;
+  --kobe-shell-gap: 16px;
+  /* The drag handles' visible line (the rail's, the artifact column's). */
+  --kobe-handle-width: 6px;
   display: grid;
   flex: 1;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
+  column-gap: var(--kobe-shell-gap);
   min-height: 0;
+  padding: var(--kobe-shell-gutter);
 }
 
 /* The workspace rail is 280 px, 48 px while collapsed (CE5); on wide windows a dragged width
    (inline `--kobe-rail-expanded-width`, KOBE-305) replaces the 280, within the room the columns
    right of it need: the conversation's 400 px, plus the artifact column's 360 px while it is a
-   column (below). The artifact column defaults to half the space right of the rail (CE6); a
-   dragged width (inline, KOBE-200) replaces it. */
+   column (below), and the gaps beside them. The artifact column defaults to half the space right
+   of the rail (CE6); a dragged width (inline, KOBE-200) replaces it. `100%` is the grid's content
+   box, inside the gutters. */
 .grid {
-  --kobe-rail-room: 400px;
+  --kobe-rail-room: calc(400px + var(--kobe-shell-gap));
   --kobe-rail-width: min(var(--kobe-rail-expanded-width, 280px), 100% - var(--kobe-rail-room));
-  --kobe-artifact-width: calc((100% - var(--kobe-rail-width)) / 2);
+  --kobe-artifact-width: calc((100% - var(--kobe-rail-width) - 2 * var(--kobe-shell-gap)) / 2);
 }
 
 .grid:has(> .rail > [data-collapsed]) {
@@ -272,6 +283,19 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+}
+
+/* Each column is a card (KOBE-554): the card colour, a 1 px border and the panel radius, and the
+   class `kobe-panel` (shell-grid.tsx) so it glows on hover like the cards inside it (KOBE-550,
+   app/chat-global.css; forced colours keep the border). Its overflow clips the content to the
+   rounded corners. */
+.rail,
+.artifact,
+.conversation {
+  box-sizing: border-box;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--kobe-radius-lg);
 }
 
 .rail,
@@ -334,10 +358,6 @@
     position: relative; /* the drawer and the overlay sheet lie over the grid, under the bar */
     grid-template-columns: var(--kobe-rail-width) minmax(0, 1fr);
   }
-
-  .artifact {
-    border-inline-end: 1px solid var(--admin-border);
-  }
 }
 
 /* The rail yields first: below 1100 px it keeps 48 px, collapsed or open as a drawer over it. */
@@ -350,16 +370,20 @@
 /* 768–820: the artifact column is a sheet over the conversation, which keeps the width. The sheet
    ends above the composer box, so Stop and Send stay reachable while it is open (KOBE-269): anchor
    positioning on `[data-kobe-composer-box]` (chat-global.css). With no composer on screen the
-   fallback keeps it full height; where unsupported, the declaration drops, with the same result. */
+   fallback keeps it full height; where unsupported, the declaration drops, with the same result.
+   A card inside the gutters like the columns (KOBE-554); `100%` is the grid's padding box here. */
 @media (768px <= width < 820px) {
   .artifact {
     position: absolute;
     z-index: 20;
-    inset-block: 0;
-    bottom: anchor(--kobe-composer top, 0px);
-    inset-inline-end: 0;
-    width: clamp(360px, 50%, 100% - var(--kobe-rail-width));
-    background: var(--admin-bg);
+    inset-block: var(--kobe-shell-gutter);
+    bottom: anchor(--kobe-composer top, var(--kobe-shell-gutter));
+    inset-inline-end: var(--kobe-shell-gutter);
+    width: clamp(
+      360px,
+      50%,
+      100% - var(--kobe-rail-width) - 2 * var(--kobe-shell-gutter) - var(--kobe-shell-gap)
+    );
     box-shadow: var(--kobe-shadow-drawer);
   }
 
@@ -395,18 +419,24 @@
    column ≥ 360 px, the conversation ≥ 400 px. A dragged width holds while it fits and comes back
    when the window widens again. */
 @media (width >= 820px) {
+  /* The room beside the conversation's floor; under 872 px the gutters leave less than 360 px,
+     and the column takes that (the conversation keeps its 400 px; KOBE-554). */
   .grid:has(> .artifact:not(:empty):not([data-hidden])) {
-    --kobe-rail-room: 760px;
+    --kobe-rail-room: calc(760px + 2 * var(--kobe-shell-gap));
+    --kobe-artifact-room: calc(100% - var(--kobe-rail-width) - 2 * var(--kobe-shell-gap) - 400px);
     grid-template-columns:
       var(--kobe-rail-width)
-      minmax(360px, min(var(--kobe-artifact-width), 100% - var(--kobe-rail-width) - 400px))
+      minmax(
+        min(360px, var(--kobe-artifact-room)),
+        min(var(--kobe-artifact-width), var(--kobe-artifact-room))
+      )
       minmax(400px, 1fr);
   }
 
   /* The handle gets its own strip at the column's edge, so it never covers the scrollbar. */
   .artifact {
     position: relative;
-    padding-inline-end: 6px;
+    padding-inline-end: var(--kobe-handle-width);
   }
 
   .resizeHandle {
@@ -415,7 +445,7 @@
     inset-block: 0;
     inset-inline-end: 0;
     display: block;
-    width: 6px;
+    width: var(--kobe-handle-width);
     cursor: col-resize;
     touch-action: none;
   }
@@ -428,20 +458,31 @@
 }
 
 /* The drag handle on the expanded rail's right edge (KOBE-305): wide windows only (the component
-   renders it there, while the rail is expanded). It is laid out against the grid, so it neither
-   scrolls with the rail nor covers more than 2 px of it (its border and a sliver). */
+   renders it there, while the rail is expanded). It is laid out against the grid, so it never
+   scrolls with the rail; it sits in the middle of the gap between the rail card and the next one
+   (KOBE-554), as tall as the cards. Positioned, its `100%` is the grid's padding box, not the
+   content box the columns' `--kobe-rail-width` resolves against: it repeats that clamp less the
+   two gutters, so a clamped rail (dragged wide, artifact column open) keeps the handle in the gap. */
 .railHandle {
   display: none;
 }
 
 @media (width >= 1100px) {
   .railHandle {
+    --kobe-rail-handle-track: min(
+      var(--kobe-rail-expanded-width, 280px),
+      100% - 2 * var(--kobe-shell-gutter) - var(--kobe-rail-room)
+    );
     position: absolute;
     z-index: 10;
-    inset-block: 0;
-    inset-inline-start: calc(var(--kobe-rail-width) - 2px);
+    inset-block: var(--kobe-shell-gutter);
+    inset-inline-start: calc(
+      var(--kobe-shell-gutter) + var(--kobe-rail-handle-track) +
+        (var(--kobe-shell-gap) - var(--kobe-handle-width)) / 2
+    );
     display: block;
-    width: 6px;
+    width: var(--kobe-handle-width);
+    border-radius: var(--kobe-radius-pill);
     cursor: col-resize;
     touch-action: none;
   }
@@ -452,18 +493,18 @@
     outline: 2px solid transparent; /* forced colours draw it; elsewhere the background shows */
   }
 
-  /* An invisible hit area around the 6 px line: 12 px for a mouse, 24 px for touch (WCAG 2.5.8),
-     mostly outside the rail so the rail's scrollbars stay reachable. */
+  /* An invisible hit area around the line: the whole gap for a mouse, 8 px more for touch (24 px
+     with the 16 px gap, WCAG 2.5.8), 4 px into each card, so the rail's scrollbars stay reachable. */
   .railHandle::before {
     position: absolute;
     inset-block: 0;
-    inset-inline: -2px -4px;
+    inset-inline: calc((var(--kobe-handle-width) - var(--kobe-shell-gap)) / 2);
     content: "";
   }
 }
 
 @media (width >= 1100px) and (pointer: coarse) {
   .railHandle::before {
-    inset-inline: -4px -14px;
+    inset-inline: calc((var(--kobe-handle-width) - var(--kobe-shell-gap)) / 2 - 4px);
   }
 }

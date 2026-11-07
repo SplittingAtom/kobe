@@ -3,6 +3,13 @@ import { cn } from "../../../lib/utils";
 import { FOCUS_RING } from "./focus";
 
 /**
+ * The sidebar and the page are floating cards with a 16 px gap and gutter (KOBE-554, after
+ * Catalyst's query tool), like the chat's columns: the card colour, the console's border, the
+ * panel radius, and `kobe-panel` so they glow on hover (app/admin/admin-global.css).
+ */
+const CARD = "kobe-panel box-border min-w-0 rounded-lg border border-console-border bg-card";
+
+/**
  * The frame of the Site console, the Team console and the My area (KOBE-294): a skip link, a
  * header (brand and switcher at the start, who is signed in and the theme toggle at the end), the
  * optional section navigation and the page. `data-kobe-console` marks the root: the console
@@ -60,12 +67,18 @@ export function ConsoleLayout({
       )}
       <div
         className={cn(
-          "grid grid-cols-[minmax(0,1fr)]",
+          "box-border grid grid-cols-[minmax(0,1fr)] gap-4 p-4",
           nav !== undefined && "md:grid-cols-[15rem_minmax(0,1fr)]",
         )}
       >
-        {nav}
-        {children}
+        {nav !== undefined && (
+          <div data-console-region="nav" className={`${CARD} md:self-start`}>
+            {nav}
+          </div>
+        )}
+        <div data-console-region="content" className={CARD}>
+          {children}
+        </div>
       </div>
     </div>
   );

@@ -3,7 +3,7 @@
 import {
   ARTIFACT_FLOOR_PX,
   ARTIFACT_WIDTH_VAR,
-  maxArtifactWidth,
+  CONVERSATION_FLOOR_PX,
 } from "../../lib/chat/artifact-tabs";
 import { spaceRightOfRail } from "../../lib/shell/preferences";
 import styles from "./shell.module.css";
@@ -29,11 +29,11 @@ function measure(handle: HTMLElement | null): SplitterRange | null {
   const { column, grid } = regions(handle);
   const available = spaceRightOfRail(grid);
   if (!column || available === null) return null;
-  return {
-    value: column.getBoundingClientRect().width,
-    min: ARTIFACT_FLOOR_PX,
-    max: maxArtifactWidth(available),
-  };
+  // Where the page gutters leave less than both floors (820–871 px, KOBE-554) the column yields to
+  // the conversation's 400 px, as the CSS and `layoutAt` do: its floor is then what is left.
+  const room = Math.round(available) - CONVERSATION_FLOOR_PX;
+  const min = Math.max(0, Math.min(ARTIFACT_FLOOR_PX, room));
+  return { value: column.getBoundingClientRect().width, min, max: Math.max(min, room) };
 }
 
 function observe(handle: HTMLElement | null): readonly Element[] {

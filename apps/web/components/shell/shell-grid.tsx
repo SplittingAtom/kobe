@@ -14,6 +14,9 @@ import styles from "./shell.module.css";
  *   `artifactWidth` is the dragged width in px (null: half the space right of the rail);
  * - breakpoints (CE7, CE8, KOBE-201, `lib/shell/layout.ts`): under 820 px the artifact column is a
  *   sheet, shown while `artifactSheet` (the member opened an artifact); under 768 px one column.
+ *
+ * Each region is a floating card (KOBE-554, after Catalyst's query tool) with `kobe-panel`, so it
+ * glows on hover like the cards inside it (KOBE-550); the card itself is in shell.module.css.
  */
 export function ShellGrid({
   rail,
@@ -40,19 +43,21 @@ export function ShellGrid({
   const style = Object.keys(vars).length === 0 ? undefined : (vars as CSSProperties);
   return (
     <div className={styles.grid} style={style}>
-      <div className={styles.rail} data-shell-region="rail">
+      <div className={`${styles.rail} kobe-panel`} data-shell-region="rail">
         {rail}
       </div>
       <div
         id="kobe-artifact-column"
-        className={styles.artifact}
+        // As a sheet (under 820 px) it is an overlay with the drawer's shadow and no scrim, not a
+        // column: the hover glow would replace that elevation, so it has none (KOBE-554).
+        className={artifactSheet ? styles.artifact : `${styles.artifact} kobe-panel`}
         data-shell-region="artifact"
         {...(artifactSheet ? { "data-sheet-open": "" } : {})}
         {...(artifactHidden ? { "data-hidden": "" } : {})}
       >
         {artifact}
       </div>
-      <div className={styles.conversation} data-shell-region="conversation">
+      <div className={`${styles.conversation} kobe-panel`} data-shell-region="conversation">
         {conversation}
       </div>
     </div>

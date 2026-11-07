@@ -8,6 +8,7 @@ import { forgetLastThread, lastThreadHref, rememberLastThread } from "../../lib/
 import { must } from "../../lib/testing/must";
 import { composer, openApp, pressModShift } from "../chat/testing";
 import { ChatReturnLink } from "./chat-return-link";
+import { ShellGrid } from "./shell-grid";
 
 /**
  * KOBE-197 (CE3, CE4, CE7): the utility bar (one row since KOBE-418) over the rail · artifact ·
@@ -163,6 +164,10 @@ describe("grid", () => {
       el.getAttribute("data-shell-region"),
     );
     expect(regions).toEqual(["rail", "artifact", "conversation"]);
+    // Floating cards (KOBE-554): each column glows on hover like the cards inside it.
+    for (const name of regions) {
+      expect(region(must(name)).classList.contains("kobe-panel"), name ?? "").toBe(true);
+    }
     expect(within(region("rail")).getByRole("complementary", { name: "Workspace" })).toBeTruthy();
     expect(region("conversation").querySelector("main#kobe-chat-main")).toBeTruthy();
     // Empty: the conversation takes the remaining width (the column collapses on `:empty`).
@@ -174,6 +179,23 @@ describe("grid", () => {
     const files = within(region("rail")).getByRole("region", { name: "Files" });
     await waitFor(() => expect(document.activeElement).toBe(files));
     expect(region("artifact").childElementCount).toBe(0);
+  });
+});
+
+describe("cards (KOBE-554)", () => {
+  it("the artifact sheet (under 820 px) keeps its drawer shadow: no hover glow there", () => {
+    const { container, rerender } = render(
+      <ShellGrid
+        rail={<p>rail</p>}
+        artifact={<p>tab</p>}
+        conversation={<p>thread</p>}
+        artifactSheet
+      />,
+    );
+    const artifact = must(container.querySelector('[data-shell-region="artifact"]'));
+    expect(artifact.classList.contains("kobe-panel")).toBe(false);
+    rerender(<ShellGrid rail={<p>rail</p>} artifact={<p>tab</p>} conversation={<p>thread</p>} />);
+    expect(artifact.classList.contains("kobe-panel")).toBe(true);
   });
 });
 
