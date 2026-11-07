@@ -617,6 +617,21 @@ sections:
         link: https://github.com/JetBrains/JetBrainsMono/blob/v2.304/OFL.txt
         images: []
 
+  - id: vendored
+    title: Vendored source
+    intro: >-
+      Third-party source copied into Kobe's own code (shadcn style: added as source, not published
+      as a package), modified, and kept with its license notice at the top of the file.
+    rows:
+      - id: assistant-ui-reasoning-effort
+        component: assistant-ui Reasoning effort element (with its `field` surface and range helpers)
+        version: 208cc81de222 (main, 2026-10-08)
+        license: MIT
+        use: bundled (vendored, modified; web image)
+        where: apps/web/components/chat/thinking-effort.tsx (KOBE-556)
+        link: https://github.com/assistant-ui/assistant-ui/blob/main/LICENSE
+        images: []
+
 # Every top-level key of charts/kobe/values.yaml: "first-party" (Kobe's own components),
 # "site-provided" (a service the site operates; Kobe ships nothing) or the inventory rows it
 # brings in. A new key fails the check until it is classified here.

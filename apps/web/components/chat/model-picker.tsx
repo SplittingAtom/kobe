@@ -189,8 +189,9 @@ export function useModelPicker({
 }
 
 /**
- * The model and thinking `<select>`s, in the composer's toolbar (KOBE-418), like assistant-ui's
- * model selector: native selects, so keyboard and screen readers come for free. The hints stay
+ * The model `<select>` and the thinking level, in the composer's toolbar (KOBE-418). The model is
+ * a native select, like assistant-ui's model selector, so keyboard and screen readers come for
+ * free; the thinking level is assistant-ui's Reasoning effort pills (KOBE-556). The hints stay
  * short there: a pinned model says so in its description and tooltip.
  */
 export function ModelSelects({

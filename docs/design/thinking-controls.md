@@ -28,6 +28,20 @@ one provider model, the strictest of their policies applies, on the server and t
 (`strictestThinkingPolicy`), so the recorded level is the one on the wire. Same rules on the
 server (`runThinkingLevel`) and the gateway (`callThinkingLevel`); the database checks the shapes.
 
+## In the composer
+
+The conversation's level sits beside the model picker, shown only when the model lets members
+choose (`thinking_in_team.levels` not empty). Since KOBE-556 it is assistant-ui's Reasoning effort
+control, vendored as `apps/web/components/chat/thinking-effort.tsx` (MIT notice kept): one pill
+per allowed level (Off, Low, Medium, High) in a group named "Thinking level for this
+conversation", `aria-pressed` on the conversation's choice as runs get it, else on the default's
+pill (titled "Model's default"; choosing it stores null, so the conversation keeps following the
+default). It replaced KOBE-260's `<select>`; storage is unchanged (`PATCH /v1/threads/{id}`
+`thinking_level`, or the new conversation's draft). It folds into the "Agent and model" menu on a
+narrow composer (KOBE-418) and is the compact pills on the line below it (KOBE-450). The readout
+("spent / budget", ≈ for an estimate) and the bar in the brand accent appear only when the latest
+run's reasoning tokens and the level's budget are known (KOBE-557; `use-reasoning-spend.ts`).
+
 ## Mapping (gateway)
 
 | Control              | Route (refused on any other)             | `off`                                                                          | `low` / `medium` / `high`                                                                                                                                                                  |

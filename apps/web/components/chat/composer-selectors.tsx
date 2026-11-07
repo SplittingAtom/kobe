@@ -24,7 +24,8 @@ import { ModelSelects, useModelPicker, type ModelPickerData } from "./model-pick
 /**
  * Under this composer width the Agent, Model and Thinking selectors no longer fit on the toolbar's
  * one line beside Attach, Dictate and Send: they fold into one menu. Room for Attach, a 12rem
- * agent chip, a 12rem model and a thinking select, Dictate and Send.
+ * agent chip, a model select (it shrinks first), the thinking pills (about 11rem for four levels,
+ * KOBE-556), Dictate and Send.
  */
 export const FOLD_SELECTORS_BELOW_PX = 640;
 
