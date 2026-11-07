@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import type { ModelContext } from "../../lib/apps/bridge-schema";
 import type { AppMessage } from "../../lib/apps/host-bridge";
 import { NEW_DRAFT } from "../../lib/chat/attachments";
+import type { ChatSession } from "../../lib/chat/session";
 import { useChatSession, useKobeExtras } from "../chat/kobe-runtime";
 
 /**
@@ -34,16 +35,7 @@ export function useAppComposer(
   const onMessage = useCallback(
     ({ text, items, dropped }: AppMessage) => {
       if (threadId === null) return false;
-      // Items become chips in the thread's chip row and replace the text (KOBE-490).
-      if (items.length > 0) {
-        return session.appItems.add(
-          threadId,
-          items.map((item) => ({ ...item, from: title })),
-        );
-      }
-      if (text !== "") return session.composerInserts.request(threadId, text, title);
-      if (dropped > 0) session.appItems.refused(threadId, title);
-      return false;
+      return applyAppMessage(session, threadId, { text, items, dropped }, title);
     },
     [session, threadId, title],
   );
@@ -65,4 +57,26 @@ export function useAppComposer(
     [session, threadId, appId, connectorId, templateSha256, title],
   );
   return { onMessage, onModelContext };
+}
+
+/**
+ * A `ui/message` (as `appMessageOf` reads it) into the composer of `draft`: its items as chips,
+ * which replace the text (KOBE-490), else its text at the caret. False when the composer took
+ * nothing. Also how a dropped Lakehouse Picker item gets its chip (KOBE-551).
+ */
+export function applyAppMessage(
+  session: ChatSession,
+  draft: string,
+  { text, items, dropped }: AppMessage,
+  from: string,
+): boolean {
+  if (items.length > 0) {
+    return session.appItems.add(
+      draft,
+      items.map((item) => ({ ...item, from })),
+    );
+  }
+  if (text !== "") return session.composerInserts.request(draft, text, from);
+  if (dropped > 0) session.appItems.refused(draft, from);
+  return false;
 }

@@ -455,6 +455,8 @@ export function Composer({
           >
             {rowDrop.rowDrop === "file" ? (
               "Drop to mention this file"
+            ) : rowDrop.rowDrop === "item" ? (
+              "Drop to insert this item"
             ) : rowDrop.rowDrop === "folder" ? (
               <span role="status">{MENTION_FOLDER_REFUSED}</span>
             ) : rowDrop.notice !== "" ? (

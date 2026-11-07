@@ -177,7 +177,7 @@ describe("drop target over focus and run (KOBE-374 review)", () => {
     const running = ".panel[data-running]:focus-within";
     const runningAt = main.indexOf(`${running} {`);
     expect(runningAt).toBeGreaterThan(0);
-    for (const kind of ["file", "folder"]) {
+    for (const kind of ["file", "item", "folder"]) {
       const drop = `.panel[data-mention-drop="${kind}"]:focus-within`;
       const at = main.indexOf(`${drop} {`);
       expect(at, drop).toBeGreaterThan(runningAt); // later, so it wins a tie
@@ -201,6 +201,7 @@ describe("forced colours (KOBE-374 review)", () => {
     );
     expect(forced).toMatch(/\.panel:focus-within,\s*\.panel\[data-running\]:focus-within \{/);
     expect(rule(forced, '.panel[data-mention-drop="file"]:focus-within')).toMatch(/Highlight/);
+    expect(rule(forced, '.panel[data-mention-drop="item"]:focus-within')).toMatch(/Highlight/);
     expect(rule(forced, '.panel[data-mention-drop="folder"]:focus-within')).toMatch(
       /dashed CanvasText/,
     );
