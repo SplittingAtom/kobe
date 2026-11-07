@@ -191,7 +191,11 @@ test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a fil
     await files.getByRole("button", { name: "Refresh files" }).click();
     const tree = files.getByRole("tree", { name: "Files in your workspace" });
     await tree.getByRole("treeitem", { name: dir, exact: true }).click();
-    await tree.getByRole("treeitem", { name: "notes.md", exact: true }).click();
+    // The test's own notes.md: a workspace may hold another one at its root.
+    await tree
+      .getByRole("treeitem", { name: "notes.md", exact: true })
+      .and(page.locator(`[title="${dir}/notes.md"]`))
+      .click();
     await expect(column).toBeVisible();
     await expect(
       page.getByRole("separator", { name: "Resize the artifact column and the conversation" }),

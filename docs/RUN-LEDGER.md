@@ -22,8 +22,24 @@ Hadron via `scripts/hadron.sh`.
   exactly what a picker click adds (the chip and its reference; no text since KOBE-490 — decided
   for parity, recorded in the ticket ledger); a Firefox Playwright project behind
   `KOBE_ALL_BROWSERS=1`. Deployed as `local-02c12b56b386` (rollback `local-a2a89e27b34c`); the
-  `lakehouse-drop` spec passed on gate1 in Chromium and Firefox (synthesized drag; the real picker drag awaits the Catalyst build). Open for Chris: Outfit + JetBrains Mono (TH10),
-  floating shell columns with gaps (§9), whether Catalyst becomes gate1's preset.
+  `lakehouse-drop` spec passed on gate1 in Chromium and Firefox (synthesized drag). Follow-ups the
+  same day: KOBE-553 (PR #463, main 2777b687; Firefox spec fix #466) — Chromium refuses native drags
+  out of a sandboxed app frame (crbug 59081; Firefox allows them), so the picker drag is pointer-driven
+  and told to the host over the bridge (`kobe/notifications/drag-start|move|end|cancel`, validated and
+  rate-limited; the host draws the ghost and the cue and inserts through the KOBE-551 chain; spec §8),
+  with Catalyst's CAT-247 picker build (mcp `0d6e9345`, rollback `9bd7a0d1`; template `a22b2cf5…`
+  approved on gate1 19:53Z). The `frame-drag` spec (a real `page.mouse` drag) passed on gate1 against
+  the live picker in Chromium and Firefox. Chris's decisions on the open points: KOBE-555 (PR #464)
+  ships Outfit + JetBrains Mono for the `catalyst` preset, OFL-1.1 allowed and both fonts inventoried
+  (TH10 amended); KOBE-554 (PR #467) floating shell columns as cards with gaps (docs/theming.md §9);
+  gate1 switched to the Catalyst preset by Chris. KOBE-558/559/560 (PR #465): icon actions without the
+  browser's default border, the rail's Apps tab shows only the picker (MA3 amended; apps launch from
+  the + menu), no line under the top bar. Deployed together as `local-cab5871aa7db` (rollback
+  `local-2777b6872b1a`); gate1 specs: `thread-lineage`, `fork`, `lakehouse-drop`, `frame-drag` (live picker), `app-placement`, `app-item-chips`, `rail-header`, `rail-resize` passed in Chromium, `frame-drag` and `lakehouse-drop` in Firefox; a style probe confirmed no icon borders, no bar line, card columns with 16 px gaps and Outfit in the composer. Open: KOBE-556 (Reasoning effort control), KOBE-557
+  (reasoning tokens and budgets from the gateway), KOBE-562 (themed logo through Appearance), and the
+  820–871 px artifact column question in the KOBE-554 ledger. CI note: the `publish` workflow fails on
+  main since 2026-11-07 on Trivy CVE-2026-109869 (undici) in the sandbox image; the Files-rail
+  delete-cancel unit test flaked once in the merge queue (fixed here: wait for the dialog).
 - **Conversation tree lane (2026-11-06, spec by Chris's decisions of 2026-11-05):**
   `docs/specs/conversation-tree.md` (Hadron spec e8b1281a; docs PR #446). Shipped in per-ticket PRs:
   KOBE-541 spike (#447: a Pi 1.4 extension summarises a branch through `navigateTree`, and

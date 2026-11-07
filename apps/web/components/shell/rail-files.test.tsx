@@ -307,7 +307,8 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
   it("asks before deleting, and deletes on confirm", async () => {
     const { user, panel } = await open();
     await fileAction(user, "report.csv", "Delete");
-    const confirm = within(panel).getByRole("alertdialog");
+    // The confirm mounts after the menu closes: wait for it (flaked once on a loaded runner).
+    const confirm = await within(panel).findByRole("alertdialog");
     expect(confirm.textContent).toMatch(/report\.csv/);
     // The confirm keeps the focus the menu would give back to its button.
     await waitFor(() =>
@@ -326,7 +327,7 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
   it("cancelling the confirmation deletes nothing", async () => {
     const { user, panel } = await open();
     await fileAction(user, "report.csv", "Delete");
-    await user.click(within(panel).getByRole("button", { name: "Cancel" }));
+    await user.click(await within(panel).findByRole("button", { name: "Cancel" }));
     expect(within(panel).queryByRole("alertdialog")).toBeNull();
     // The focus is back on the row (KOBE-304: the tree's row, which owns the tab stop).
     expect(document.activeElement).toBe(
