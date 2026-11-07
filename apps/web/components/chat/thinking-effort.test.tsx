@@ -15,7 +15,7 @@ afterEach(cleanup);
 const LABEL = "Thinking level for this conversation";
 const LEVELS: readonly EffortLevel[] = [
   { key: "off", label: "Off" },
-  { key: "low", label: "Low", title: "Model's default" },
+  { key: "low", label: "Low", hint: "Model's default" },
   { key: "medium", label: "Medium" },
 ];
 
@@ -39,10 +39,10 @@ describe("ThinkingEffort (KOBE-556)", () => {
     const pills = within(group).getAllByRole("button");
     expect(pills.map((b) => b.textContent)).toEqual(["Off", "Low", "Medium"]);
     expect(pills.map((b) => b.getAttribute("aria-pressed"))).toEqual(["false", "true", "false"]);
-    expect(within(group).getByRole("button", { name: "Low" })).toHaveProperty(
-      "title",
-      "Model's default",
-    );
+    // The hint is the pill's tooltip and its accessible description (touch, screen readers).
+    const low = within(group).getByRole("button", { name: "Low", description: "Model's default" });
+    expect(low.title).toBe("Model's default");
+    expect(within(group).getByRole("button", { name: "Off", description: "" })).toBeTruthy();
   });
 
   it("chooses with a click, Enter or Space", async () => {
@@ -89,21 +89,19 @@ describe("ThinkingEffort (KOBE-556)", () => {
     renderEffort({ spent: 2000, budget: 8000 });
     const bar = screen.getByRole("progressbar", { name: "Thinking budget used" });
     expect(bar.getAttribute("aria-valuenow")).toBe("25");
-    expect(bar.getAttribute("aria-valuetext")).toBe("2,000 of 8,000 thinking tokens");
-    expect(screen.getByText("2,000 / 8,000")).toBeTruthy();
+    expect(bar.getAttribute("aria-valuetext")).toBe("2k of 8k thinking tokens");
+    expect(screen.getByText("2k / 8k")).toBeTruthy();
     const fill = must(bar.firstElementChild as HTMLElement | null);
     expect(fill.style.width).toBe("25%");
     expect(fill.className).toMatch(/(^|\s)bg-brand-primary(\s|$)/);
   });
 
   it("an estimate shows ≈ and says so to screen readers; a spend past the budget fills the bar", () => {
-    renderEffort({ spent: 9000, budget: 8000, estimated: true });
+    renderEffort({ spent: 12_000, budget: 8000, estimated: true });
     const bar = screen.getByRole("progressbar");
     expect(bar.getAttribute("aria-valuenow")).toBe("100");
-    expect(bar.getAttribute("aria-valuetext")).toBe(
-      "about 9,000 of 8,000 thinking tokens (estimated)",
-    );
-    expect(screen.getByText("≈9,000 / 8,000")).toBeTruthy();
+    expect(bar.getAttribute("aria-valuetext")).toBe("about 12k of 8k thinking tokens (estimated)");
+    expect(screen.getByText("≈12k / 8k")).toBeTruthy();
   });
 
   it("a zero budget (thinking off) shows no bar", () => {

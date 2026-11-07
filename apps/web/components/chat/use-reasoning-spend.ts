@@ -2,23 +2,52 @@
 
 import type { ThinkingLevel } from "@kobe/protocol";
 import type { RunUsage, ThreadUsage } from "../../lib/admin/api/usage";
+import { useKobeExtras } from "./kobe-runtime";
 import { useThreadUsageRead } from "./message-footer";
 
-// TODO(KOBE-557): KOBE-557 adds these to main: `RunUsage.reasoningTokens` / `reasoningEstimated`
+// TODO(KOBE-557): KOBE-557 adds `RunUsage.reasoningTokens` / `reasoningEstimated`
 // (apps/web/lib/admin/api/usage.ts, from `GET /v1/threads/{id}/usage`) and, in @kobe/protocol
-// thinking.ts, `THINKING_EFFORT_BUDGETS` and `thinkingBudget(control, level)`. Until it lands,
-// the local type and table below stand in under those exact names; replace both with the real
-// imports (and `thinkingBudget` with the model's control once the team models carry it).
+// thinking.ts, `thinkingBudget(control, level)` and `THINKING_EFFORT_BUDGETS`. Until this branch
+// is rebased onto it, the run's fields are read through the local type below and the budget is
+// unknown (`levelBudget` returns undefined), so the readout and bar stay hidden.
 type RunReasoning = RunUsage & {
   readonly reasoningTokens?: number | null;
   readonly reasoningEstimated?: boolean;
 };
-const THINKING_EFFORT_BUDGETS: Readonly<Record<ThinkingLevel, number>> = {
-  off: 0,
-  low: 2000,
-  medium: 8000,
-  high: 24000,
-};
+
+/** The budget of the level a run ran with; unknown until KOBE-557's `thinkingBudget` lands. */
+function levelBudget(_level: ThinkingLevel): number | undefined {
+  return undefined;
+}
+
+/** The latest run's reasoning: what it spent at the level it ran with. */
+export interface LatestReasoning {
+  readonly runId: string;
+  readonly spent: number;
+  readonly level: ThinkingLevel;
+  readonly estimated: boolean;
+}
+
+/**
+ * The thread's latest run, chosen by the newest call's time (`latestCall`, the only timestamp the
+ * usage read carries; the runs array is ordered by first call, not by recency), with its reasoning
+ * tokens and recorded level. Null when the read has no call, when the run streamed in this tab
+ * (`liveRunId`) is not that run yet (its usage hasn't landed: never describe the previous run),
+ * or when the run reports no reasoning tokens or ran without a thinking level.
+ */
+export function latestReasoning(
+  usage: ThreadUsage | null,
+  liveRunId: string | null,
+): LatestReasoning | null {
+  const newest = usage?.latestCall?.runId;
+  if (newest === undefined) return null;
+  if (liveRunId !== null && liveRunId !== newest) return null;
+  const run = usage?.runs.find((r) => r.runId === newest) as RunReasoning | undefined;
+  const spent = run?.reasoningTokens;
+  const level = run?.thinkingLevel;
+  if (run === undefined || spent == null || level == null) return null;
+  return { runId: run.runId, spent, level, estimated: run.reasoningEstimated === true };
+}
 
 /** What the Reasoning effort readout shows; empty when the spend or the budget is unknown. */
 export interface ReasoningSpend {
@@ -28,24 +57,22 @@ export interface ReasoningSpend {
 }
 
 /**
- * The thread's latest run's reasoning tokens against the budget of `level` (the level the
- * control shows: the choice as runs get it, else the default). Empty when either is unknown.
+ * "spent / budget" of the latest run, graded against the budget of the level that run ran with
+ * (not the level the pills show: those are about the next run). Empty when either is unknown.
  */
 export function reasoningSpend(
-  usage: ThreadUsage | null,
-  level: ThinkingLevel | null,
+  latest: LatestReasoning | null,
+  budgetOf: (level: ThinkingLevel) => number | undefined = levelBudget,
 ): ReasoningSpend {
-  const run = usage?.runs.at(-1) as RunReasoning | undefined;
-  const spent = run?.reasoningTokens;
-  if (spent == null || level === null) return {};
-  return {
-    spent,
-    budget: THINKING_EFFORT_BUDGETS[level],
-    estimated: run?.reasoningEstimated === true,
-  };
+  if (latest === null) return {};
+  const budget = budgetOf(latest.level);
+  if (budget === undefined) return {};
+  return { spent: latest.spent, budget, estimated: latest.estimated };
 }
 
 /** {@link reasoningSpend} for the open thread (its usage read, KOBE-208); empty outside one. */
-export function useReasoningSpend(level: ThinkingLevel | null): ReasoningSpend {
-  return reasoningSpend(useThreadUsageRead()?.usage ?? null, level);
+export function useReasoningSpend(): ReasoningSpend {
+  const usage = useThreadUsageRead()?.usage ?? null;
+  const liveRunId = useKobeExtras()?.state.live?.runId ?? null;
+  return reasoningSpend(latestReasoning(usage, liveRunId));
 }

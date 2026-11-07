@@ -3,7 +3,7 @@
 import { thinkingRank, type ThinkingLevel } from "@kobe/protocol";
 import type { TeamModels } from "../../lib/admin/api/team/models";
 import { ThinkingEffort } from "./thinking-effort";
-import { useReasoningSpend } from "./use-reasoning-spend";
+import type { ReasoningSpend } from "./use-reasoning-spend";
 
 export const THINKING_LABELS: Readonly<Record<ThinkingLevel, string>> = {
   off: "Thinking off",
@@ -58,8 +58,9 @@ export const MODEL_DEFAULT_TITLE = "Model's default";
  * (thinking-effort.tsx): one pill per level the team allows, the member's choice pressed, else
  * the default's pill (titled "Model's default"; choosing it stores null so the conversation keeps
  * following the team's default). The server clamps every run to the site and team settings, so
- * this only asks; a level the team has since lowered shows as what runs get. The readout and bar
- * appear once the latest run's reasoning spend and the level's budget are known (KOBE-557).
+ * this only asks; a level the team has since lowered shows as what runs get. The pills are about
+ * the next run; the readout and bar describe the latest run (its spend against the budget of the
+ * level it ran with) and appear once both are known (KOBE-557).
  */
 export function ThinkingPicker({
   models,
@@ -68,6 +69,7 @@ export function ThinkingPicker({
   disabled,
   onChoose,
   compact = false,
+  spend = {},
 }: {
   readonly models: TeamModels;
   /** The conversation's effective model alias (the agent's pin, the choice, else the default). */
@@ -77,10 +79,11 @@ export function ThinkingPicker({
   readonly onChoose: (level: ThinkingLevel | null) => void;
   /** The smaller pills on the line below the composer (KOBE-450). */
   readonly compact?: boolean;
+  /** The latest run's reasoning spend and budget (`useReasoningSpend`); empty hides the readout. */
+  readonly spend?: ReasoningSpend;
 }) {
   const { levels, default: fallback } = thinkingChoices(models, alias);
   const shown = shownThinking(chosen, levels) ?? fallback;
-  const spend = useReasoningSpend(shown);
   if (levels.length === 0) return null;
   return (
     <ThinkingEffort
@@ -88,7 +91,7 @@ export function ThinkingPicker({
       levels={levels.map((l) => ({
         key: l,
         label: EFFORT_LABELS[l],
-        ...(l === fallback ? { title: MODEL_DEFAULT_TITLE } : {}),
+        ...(l === fallback ? { hint: MODEL_DEFAULT_TITLE } : {}),
       }))}
       selectedKey={shown}
       disabled={disabled}

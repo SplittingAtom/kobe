@@ -21,16 +21,24 @@
 
 - **Labels** Off/Low/Medium/High (`EFFORT_LABELS`); the /thinking menu and Session info keep
   `THINKING_LABELS` ("Thinking low (default)"), which read alone there.
-- **Default pill** = the policy default level, titled "Model's default"; clicking it stores null.
+- **Default pill** = the policy default level, hinted "Model's default" (tooltip and, review #4,
+  an sr-only `aria-describedby` text, so touch and screen readers get it); clicking it stores null.
   A stored choice equal to the default shows that pill pressed; clicking it again stores null.
+  **Trade-off for Chris:** a member can no longer pin the default level explicitly (the select's
+  separate "Thinking low" vs "Thinking low (default)" is gone): picking that pill always follows
+  the team's default, so a later change of the default moves the conversation with it.
   With no policy default (not reachable while levels exist: the policy requires one) no pill is
   pressed until the member picks.
-- **Readout** is shown only with both `spent` and `budget` known and `budget > 0` (Off has budget
-  0: nothing to fill). An estimate prefixes ≈ and the bar's `aria-valuetext` says "about … (estimated)".
-  The readout text is `aria-hidden`; the progressbar carries it for screen readers.
+- **Readout** describes the latest run, the pills the next one (review #1): spend of the thread's
+  latest run against the budget of the level _that run_ ran with (`RunUsage.thinkingLevel`). The
+  latest run is the one of the newest call (`latestCall.runId`/`at`, the only timestamp in the
+  read; `runs` is ordered by first call); while the run streamed in this tab is not that run, nothing
+  shows (review #2). Shown only with both known and `budget > 0`; ≈ for an estimate, and
+  `aria-valuetext` says "about … (estimated)". Numbers via `formatTokens` ("12k / 24.6k").
 - **Layout**: the group is `inline-flex flex-col`; pills in a `rounded-full` bordered track
-  (`field` surface plus a real border, so forced colours keep it), readout to its right, the 3px
-  bar under it. Toolbar pills `h-6 text-xs` in a 1.75rem track (the select's height); compact
+  (`field` surface plus a real border, so forced colours keep it); under it one line: the 3px bar
+  (flex-1) and the readout (10px mono). The readout never sits beside the pills (review #5), so the
+  control's width is the track's. Toolbar pills `h-6 text-xs` in a 1.75rem track (the select's height); compact
   `h-5 text-[0.7rem]` in 1.5rem. The track never shrinks; the model select shrinks first.
 - **No preflight in the chat**: pills reset the browser button border/fill/font explicitly.
 - **Forced colours**: track border is a real border; the pressed pill gets an outline; the bar
@@ -41,11 +49,11 @@
 ## Readout wiring (KOBE-557)
 
 `use-reasoning-spend.ts` reads the latest run of `GET /v1/threads/{id}/usage` (the existing
-`ThreadUsageProvider` read) for `reasoningTokens` / `reasoningEstimated` and the shown level's
-budget. KOBE-557's exports were not on main when this was built: the hook carries a local type and
-a local `THINKING_EFFORT_BUDGETS` under the agreed names with a `TODO(KOBE-557)`; swap in the
-protocol imports (and `thinkingBudget(control, level)` once team models carry the control) after
-rebasing on 557.
+`ThreadUsageProvider` read) for `reasoningTokens` / `reasoningEstimated` / `thinkingLevel`.
+KOBE-557's exports are not on main yet: the run fields go through a local type and the budget is
+unknown (`levelBudget` returns undefined, `TODO(KOBE-557)`), so the readout stays hidden; no
+invented budget table ships (review #3). After rebasing on KOBE-557 PR 2, `levelBudget` becomes
+`thinkingBudget(control, level)`.
 
 ## Open questions (for Chris or the coordinator)
 
@@ -63,10 +71,12 @@ rebasing on 557.
 - ac-3: `thinking-effort.test.tsx` (hidden without spend or budget, with budget 0; values render
   "2,000 / 8,000", 25% `bg-brand-primary` fill; estimate ≈ and aria-valuetext);
   `use-reasoning-spend.test.ts`.
-- ac-4: headless Chromium harness (compiled `app/tailwind.css` + theme, a 616px toolbar replica
-  with a long agent chip, a long model name and four pills): no overflow at the fold width; the
-  pills take ~179px (the old select up to 192px), the model select shrinks to ~118px; with a
-  readout ~274px and still no overflow; folded menu and compact line fit. Theme-css guard green.
+- ac-4: headless Chromium harness (compiled `app/tailwind.css` + theme; toolbar replicas at 616,
+  680 and 736px, i.e. composer 640-760, with a long agent chip, a long model name, 4 or 2 pills,
+  with and without the worst readout "≈12k / 24.6k"): no overflow and Send inside the line in all
+  12; the control is 179px (4 levels; the old select up to 192px) or 103px either way; with the
+  readout the toolbar line grows 34 → 40px (the bar line), never wider. Folded menu and compact
+  line fit. `FOLD_SELECTORS_BELOW_PX` stays 640. Theme-css guard green.
 - ac-5: MIT notice in `thinking-effort.tsx`; `tools/license-check/inventory.yaml` row
   `assistant-ui-reasoning-effort`; `THIRD_PARTY_LICENSES.md` regenerated;
   `docs/design/thinking-controls.md` "In the composer".

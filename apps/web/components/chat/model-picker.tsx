@@ -21,6 +21,7 @@ import {
   thinkingChoices,
   thinkingDefaultLabel,
 } from "./thinking-picker";
+import { useReasoningSpend } from "./use-reasoning-spend";
 import { useThreadTeamModels } from "./use-team-models";
 import styles from "./chat.module.css";
 
@@ -203,6 +204,7 @@ export function ModelSelects({
   readonly compact?: boolean;
 }) {
   const { id, models, choices, disabled, thinkingChosen, thinkingDisabled } = picker;
+  const spend = useReasoningSpend();
   const pill = compact ? `${styles.modelPicker} ${styles.compactPicker}` : styles.modelPicker;
   const { enabled, chosen, unavailable, pinned } = choices;
 
@@ -227,6 +229,7 @@ export function ModelSelects({
           disabled={thinkingDisabled}
           onChoose={picker.chooseThinking}
           compact={compact}
+          spend={spend}
         />
       </>
     );
@@ -271,6 +274,7 @@ export function ModelSelects({
           disabled={thinkingDisabled}
           onChoose={picker.chooseThinking}
           compact={compact}
+          spend={spend}
         />
       )}
     </>

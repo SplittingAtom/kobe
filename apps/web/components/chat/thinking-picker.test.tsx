@@ -80,9 +80,11 @@ describe("ThinkingPicker as Reasoning effort pills (KOBE-556)", () => {
   it("no choice: the default level is pressed and titled Model's default", () => {
     const { group } = renderPicker();
     expect(pressed(group)).toEqual(["Low"]);
-    expect(within(group as HTMLElement).getByRole("button", { name: "Low" }).title).toBe(
-      "Model's default",
-    );
+    const low = within(group as HTMLElement).getByRole("button", {
+      name: "Low",
+      description: "Model's default",
+    });
+    expect(low.title).toBe("Model's default");
     expect(within(group as HTMLElement).getByRole("button", { name: "Off" }).title).toBe("");
   });
 
@@ -108,6 +110,25 @@ describe("ThinkingPicker as Reasoning effort pills (KOBE-556)", () => {
       .setup()
       .click(within(group as HTMLElement).getByRole("button", { name: "Off" }));
     expect(onChoose).not.toHaveBeenCalled();
+  });
+
+  it("shows the latest run's spend when given, and hides it when empty", () => {
+    render(
+      <ThinkingPicker
+        models={teamModels({ default: "low", levels: ["off", "low"] })}
+        alias={null}
+        chosen={null}
+        disabled={false}
+        onChoose={() => {}}
+        spend={{ spent: 1500, budget: 8000, estimated: false }}
+      />,
+    );
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuetext")).toBe(
+      "1.5k of 8k thinking tokens",
+    );
+    cleanup();
+    renderPicker();
+    expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
   it("compact on the line below the composer (KOBE-450)", () => {

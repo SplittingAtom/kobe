@@ -629,7 +629,7 @@ sections:
         license: MIT
         use: bundled (vendored, modified; web image)
         where: apps/web/components/chat/thinking-effort.tsx (KOBE-556)
-        link: https://github.com/assistant-ui/assistant-ui/blob/main/LICENSE
+        link: https://github.com/assistant-ui/assistant-ui/blob/208cc81de222d85b8c3877445187828cff09feeb/LICENSE
         images: []
 
 # Every top-level key of charts/kobe/values.yaml: "first-party" (Kobe's own components),

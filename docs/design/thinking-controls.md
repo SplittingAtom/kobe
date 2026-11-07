@@ -35,12 +35,13 @@ choose (`thinking_in_team.levels` not empty). Since KOBE-556 it is assistant-ui'
 control, vendored as `apps/web/components/chat/thinking-effort.tsx` (MIT notice kept): one pill
 per allowed level (Off, Low, Medium, High) in a group named "Thinking level for this
 conversation", `aria-pressed` on the conversation's choice as runs get it, else on the default's
-pill (titled "Model's default"; choosing it stores null, so the conversation keeps following the
-default). It replaced KOBE-260's `<select>`; storage is unchanged (`PATCH /v1/threads/{id}`
+pill (described as "Model's default"; choosing it stores null, so the conversation keeps
+following the default and a member cannot pin the default level explicitly). It replaced KOBE-260's `<select>`; storage is unchanged (`PATCH /v1/threads/{id}`
 `thinking_level`, or the new conversation's draft). It folds into the "Agent and model" menu on a
-narrow composer (KOBE-418) and is the compact pills on the line below it (KOBE-450). The readout
-("spent / budget", ≈ for an estimate) and the bar in the brand accent appear only when the latest
-run's reasoning tokens and the level's budget are known (KOBE-557; `use-reasoning-spend.ts`).
+narrow composer (KOBE-418) and is the compact pills on the line below it (KOBE-450). The pills are
+about the next run; under them, the readout ("spent / budget", ≈ for an estimate) and the bar in
+the brand accent describe the latest run against the budget of the level it ran with, and appear
+only when both are known (KOBE-557; `use-reasoning-spend.ts`).
 
 ## Mapping (gateway)
 

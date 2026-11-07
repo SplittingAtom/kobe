@@ -201,6 +201,12 @@ describe("thinking level per conversation (KOBE-260, pills since KOBE-556)", () 
     expect(pills.map((b) => b.textContent)).toEqual(["Off", "Low", "Medium"]);
     expect(await pressed()).toEqual(["Low"]);
     expect((await pill("Low")).title).toBe("Model's default");
+    expect(
+      within(await thinkingPicker()).getByRole("button", {
+        name: "Low",
+        description: "Model's default",
+      }),
+    ).toBeTruthy();
   });
 
   it("is saved on the thread, and back to the model's default", async () => {

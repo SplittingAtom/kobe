@@ -1,17 +1,27 @@
 import { describe, expect, it } from "vitest";
 import type { ThreadUsage } from "../../lib/admin/api/usage";
-import { reasoningSpend } from "./use-reasoning-spend";
+import { latestReasoning, reasoningSpend } from "./use-reasoning-spend";
 
 /**
- * KOBE-556: the readout's wiring: the thread's latest run's reasoning tokens (KOBE-557's
- * `reasoning_tokens`, reported or estimated) and the shown level's budget. Unknown either way:
- * nothing, so the control is the pill row alone.
+ * KOBE-556: the readout's wiring: the thread's latest run (by its newest call's time) with its
+ * reasoning tokens (KOBE-557's `reasoning_tokens`, reported or estimated) and the level it ran
+ * with. Unknown either way: nothing, so the control is the pill row alone.
  */
-function usage(...runs: Record<string, unknown>[]): ThreadUsage {
+function usage(latestRun: string | null, ...runs: Record<string, unknown>[]): ThreadUsage {
   return {
     threadId: "t1",
-    runs: runs.map((r, i) => ({
-      runId: `r${i}`,
+    latestCall:
+      latestRun === null
+        ? null
+        : {
+            runId: latestRun,
+            at: "2026-11-07T10:00:00Z",
+            model: "p/m",
+            inputTokens: 1,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+          },
+    runs: runs.map((r) => ({
       models: [],
       calls: 1,
       inputTokens: 0,
@@ -23,34 +33,62 @@ function usage(...runs: Record<string, unknown>[]): ThreadUsage {
       estimatedCalls: 0,
       ...r,
     })),
-  } as ThreadUsage;
+  } as unknown as ThreadUsage;
 }
 
-describe("reasoningSpend (KOBE-556)", () => {
-  it("nothing without a usage read, a run, or the run's reasoning tokens", () => {
-    expect(reasoningSpend(null, "medium")).toEqual({});
-    expect(reasoningSpend(usage(), "medium")).toEqual({});
-    expect(reasoningSpend(usage({ reasoningTokens: null }), "medium")).toEqual({});
-    expect(reasoningSpend(usage({}), "medium")).toEqual({});
-  });
+const RUNS = [
+  { runId: "newest", reasoningTokens: 1500, thinkingLevel: "medium" },
+  { runId: "older", reasoningTokens: 100, thinkingLevel: "low" },
+];
 
-  it("the latest run's spend against the shown level's budget", () => {
-    const read = usage({ reasoningTokens: 100 }, { reasoningTokens: 1500 });
-    expect(reasoningSpend(read, "medium")).toEqual({
+describe("latestReasoning (KOBE-556)", () => {
+  it("picks the run of the newest call, not the last array entry", () => {
+    expect(latestReasoning(usage("newest", ...RUNS), null)).toEqual({
+      runId: "newest",
       spent: 1500,
-      budget: 8000,
+      level: "medium",
       estimated: false,
     });
-    expect(reasoningSpend(read, "low")).toMatchObject({ budget: 2000 });
-    expect(reasoningSpend(read, "high")).toMatchObject({ budget: 24000 });
+  });
+
+  it("nothing while the run streamed in this tab has no usage yet", () => {
+    expect(latestReasoning(usage("newest", ...RUNS), "just-started")).toBeNull();
+    expect(latestReasoning(usage("newest", ...RUNS), "newest")).toMatchObject({ spent: 1500 });
+  });
+
+  it("nothing without a read, a call, reasoning tokens or a recorded level", () => {
+    expect(latestReasoning(null, null)).toBeNull();
+    expect(latestReasoning(usage(null, ...RUNS), null)).toBeNull();
+    expect(latestReasoning(usage("a", { runId: "a", reasoningTokens: null }), null)).toBeNull();
+    expect(latestReasoning(usage("a", { runId: "a", thinkingLevel: "low" }), null)).toBeNull();
+    expect(latestReasoning(usage("a", { runId: "a", reasoningTokens: 9 }), null)).toBeNull();
   });
 
   it("an estimate says so", () => {
-    const read = usage({ reasoningTokens: 900, reasoningEstimated: true });
-    expect(reasoningSpend(read, "low")).toEqual({ spent: 900, budget: 2000, estimated: true });
+    const read = usage("a", {
+      runId: "a",
+      reasoningTokens: 900,
+      reasoningEstimated: true,
+      thinkingLevel: "low",
+    });
+    expect(latestReasoning(read, null)).toMatchObject({ estimated: true });
+  });
+});
+
+describe("reasoningSpend (KOBE-556)", () => {
+  const latest = { runId: "a", spent: 1500, level: "medium", estimated: true } as const;
+
+  it("grades the run against the budget of the level it ran with", () => {
+    const budgets = { off: 0, low: 1, medium: 8000, high: 3 } as const;
+    expect(reasoningSpend(latest, (l) => budgets[l])).toEqual({
+      spent: 1500,
+      budget: 8000,
+      estimated: true,
+    });
   });
 
-  it("no level shown (no default): no budget, so no readout", () => {
-    expect(reasoningSpend(usage({ reasoningTokens: 900 }), null)).toEqual({});
+  it("hidden until KOBE-557's budgets land: the budget is unknown by default", () => {
+    expect(reasoningSpend(latest)).toEqual({});
+    expect(reasoningSpend(null, () => 8000)).toEqual({});
   });
 });

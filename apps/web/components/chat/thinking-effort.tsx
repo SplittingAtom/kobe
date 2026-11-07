@@ -32,9 +32,8 @@
 "use client";
 
 import { useId } from "react";
+import { formatTokens } from "../../lib/admin/usage-format";
 import { cn } from "../../lib/utils";
-
-const fmt = (n: number) => n.toLocaleString("en-US");
 
 /** `value` as a share of `total`, as a percentage in `0…100` (assistant-ui utils/range). */
 function pct(value: number, total: number): number {
@@ -49,8 +48,11 @@ const announced = (share: number) => Math.round(share * 10) / 10;
 export interface EffortLevel {
   readonly key: string;
   readonly label: string;
-  /** The pill's tooltip, e.g. "Model's default". */
-  readonly title?: string;
+  /**
+   * A note on the pill, e.g. "Model's default": its tooltip and, for screen readers and touch,
+   * its accessible description (an sr-only text the pill names in `aria-describedby`).
+   */
+  readonly hint?: string;
 }
 
 /** The track: assistant-ui's `field` surface, with a real border so forced colours keep it. */
@@ -63,9 +65,11 @@ const PILL =
 
 /**
  * A segmented control of effort levels (assistant-ui's Reasoning effort): one pill button per
- * level, `aria-pressed` on the selected one, inside a group named by an sr-only label. Below the
- * pills, "spent / budget" and a thin bar of the spend over the selected level's budget, only when
- * both are known (a budget of 0 counts as unknown: nothing to fill).
+ * level, `aria-pressed` on the selected one, inside a group named by an sr-only label. Under the
+ * pills, one short line: a thin bar of the spend over the budget and "spent / budget", only when
+ * both are known (a budget of 0 counts as unknown: nothing to fill). The line sits under the
+ * track and never widens the control past it by more than the readout's few characters, so the
+ * toolbar's fold width (KOBE-418) holds with the readout shown.
  */
 export function ThinkingEffort({
   label,
@@ -88,7 +92,7 @@ export function ThinkingEffort({
   readonly disabled?: boolean;
   /** Reasoning tokens spent (the latest run's); undefined: unknown. */
   readonly spent?: number | undefined;
-  /** The selected level's budget in tokens; undefined: unknown. */
+  /** The budget the spend is graded against, in tokens; undefined: unknown. */
   readonly budget?: number | undefined;
   /** The spend is an estimate, not the provider's count. */
   readonly estimated?: boolean | undefined;
@@ -96,7 +100,8 @@ export function ThinkingEffort({
   readonly compact?: boolean;
   readonly className?: string;
 }) {
-  const labelId = useId();
+  const id = useId();
+  const labelId = `${id}-label`;
   const known = spent !== undefined && budget !== undefined && budget > 0;
   const used = known ? pct(spent, budget) : 0;
   const approx = estimated ? "≈" : "";
@@ -106,66 +111,72 @@ export function ThinkingEffort({
       aria-labelledby={labelId}
       data-slot="thinking-effort"
       data-size={compact ? "compact" : "default"}
-      className={cn("inline-flex min-w-0 shrink-0 flex-col gap-[3px]", className)}
+      className={cn("inline-flex min-w-0 shrink-0 flex-col gap-0.5", className)}
     >
       <span id={labelId} className="sr-only">
         {label}
       </span>
-      <div className="flex items-center gap-1.5">
-        <div className={TRACK}>
-          {levels.map((level) => {
-            const active = level.key === selectedKey;
-            return (
-              <button
-                key={level.key}
-                type="button"
-                aria-pressed={active}
-                title={level.title}
-                disabled={disabled}
-                onClick={() => onSelect(level.key)}
-                className={cn(
-                  PILL,
-                  compact ? "h-5 px-1.5 text-[0.7rem]" : "h-6 px-2 text-xs",
-                  !disabled && "active:scale-[0.97]",
-                  active
-                    ? "bg-background text-foreground shadow-xs"
-                    : "text-muted-foreground enabled:hover:text-foreground bg-transparent",
-                )}
-              >
-                {level.label}
-              </button>
-            );
-          })}
-        </div>
-        {known && (
-          <span
-            aria-hidden
-            className="text-muted-foreground font-mono text-[11px] tracking-tight whitespace-nowrap tabular-nums"
-          >
-            {approx}
-            {fmt(spent)} / {fmt(budget)}
+      {levels.map((level) =>
+        level.hint === undefined ? null : (
+          <span key={level.key} id={`${id}-${level.key}-hint`} className="sr-only">
+            {level.hint}
           </span>
-        )}
+        ),
+      )}
+      <div className={TRACK}>
+        {levels.map((level) => {
+          const active = level.key === selectedKey;
+          return (
+            <button
+              key={level.key}
+              type="button"
+              aria-pressed={active}
+              title={level.hint}
+              aria-describedby={level.hint === undefined ? undefined : `${id}-${level.key}-hint`}
+              disabled={disabled}
+              onClick={() => onSelect(level.key)}
+              className={cn(
+                PILL,
+                compact ? "h-5 px-1.5 text-[0.7rem]" : "h-6 px-2 text-xs",
+                !disabled && "active:scale-[0.97]",
+                active
+                  ? "bg-background text-foreground shadow-xs"
+                  : "text-muted-foreground enabled:hover:text-foreground bg-transparent",
+              )}
+            >
+              {level.label}
+            </button>
+          );
+        })}
       </div>
       {known && (
-        <span
-          role="progressbar"
-          aria-label="Thinking budget used"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={announced(used)}
-          aria-valuetext={
-            estimated
-              ? `about ${fmt(spent)} of ${fmt(budget)} thinking tokens (estimated)`
-              : `${fmt(spent)} of ${fmt(budget)} thinking tokens`
-          }
-          className="bg-foreground/[0.06] inset-ring-border block h-[3px] w-full overflow-hidden rounded-full inset-ring forced-colors:outline"
-        >
+        <div className="flex items-center gap-1.5">
           <span
-            className="bg-brand-primary block h-full rounded-full transition-[width] duration-500 forced-color-adjust-none motion-reduce:transition-none"
-            style={{ width: `${used}%` }}
-          />
-        </span>
+            role="progressbar"
+            aria-label="Thinking budget used"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={announced(used)}
+            aria-valuetext={
+              estimated
+                ? `about ${formatTokens(spent)} of ${formatTokens(budget)} thinking tokens (estimated)`
+                : `${formatTokens(spent)} of ${formatTokens(budget)} thinking tokens`
+            }
+            className="bg-foreground/[0.06] inset-ring-border block h-[3px] min-w-6 flex-1 overflow-hidden rounded-full inset-ring forced-colors:outline"
+          >
+            <span
+              className="bg-brand-primary block h-full rounded-full transition-[width] duration-500 forced-color-adjust-none motion-reduce:transition-none"
+              style={{ width: `${used}%` }}
+            />
+          </span>
+          <span
+            aria-hidden
+            className="text-muted-foreground shrink-0 font-mono text-[10px] leading-none tracking-tight whitespace-nowrap tabular-nums"
+          >
+            {approx}
+            {formatTokens(spent)} / {formatTokens(budget)}
+          </span>
+        </div>
       )}
     </div>
   );
