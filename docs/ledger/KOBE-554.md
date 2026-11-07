@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR #TBD)
+- **Status:** in review (PR #467)
 - **Branch / worktree:** `kobe-554-floating-columns` in `../Kobe-wt554`
 - **Depends on:** KOBE-550 (`kobe-panel` glow, `--kobe-page-ambient`)
 
