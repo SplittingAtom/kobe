@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR #461)
+- **Status:** merged (PR #461, main 02c12b56)
 - **Branch / worktree:** `kobe-551-lakehouse-drop` in `../Kobe-wt551`
 - **Depends on:** KOBE-490 (item chips), KOBE-374 (Files-row drop), KOBE-460 (rail picker)
 
@@ -42,6 +42,14 @@
 
 - none (question 1 decided, see Decisions)
 
+## Follow-ups (review of PR #461, low)
+
+- No unit test for the `LAKEHOUSE_DROP_FULL` path (`composer-mention-drop.ts`).
+- The exact 511 / 2047 bounds are untested (only values well over them).
+- No test for kind `table` with a catalog and namespace but no name.
+- A real cross-frame drag from the picker needs the Catalyst-side build; until then the browser
+  spec synthesizes the DataTransfer.
+
 ## Evidence (acceptance criteria → test or command output)
 
 - ac-1: `apps/web/components/chat/composer-lakehouse-drop.test.tsx` (hover + taken dragover,
@@ -58,3 +66,7 @@
 - ac-7: `e2e/browser/tests/lakehouse-drop.spec.ts` (synthesized DataTransfer with both types;
   chromium, and firefox with `KOBE_ALL_BROWSERS=1 --project firefox`). Not run here (no browser
   libraries on the VM, gate1 not on this code): the coordinator runs it after deploy.
+- ac-7: gate1 `local-02c12b56b386` (Helm upgrade with `--reset-values`, reconcile failed:0). The
+  `lakehouse-drop` spec in the Playwright 1.55 container on compute2 against gate1, with the
+  synthesized DataTransfer: `[chromium]` and `[firefox]` both passed (3 passed incl. setup,
+  45.8 s). A drag from the real picker frame awaits the Catalyst-side build.
