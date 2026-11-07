@@ -1,6 +1,7 @@
 import { ACCENT_PATTERN, deriveAccent, type ThemeSettings } from "@kobe/protocol";
 import {
   FONT_STACK_VALUES,
+  MONO_STACK_VALUES,
   PRESET_SCHEME_TOKENS,
   PRESETS,
   RADIUS_SCALES,
@@ -18,7 +19,7 @@ import {
  * and anything else yields "" (the defaults). `{ preset: "default" }` is theme.css itself, so it
  * returns "" too: with nothing configured the page is exactly today's.
  *
- * Declared: the brand tokens, the radius scale and `--kobe-font-sans`; a preset adds its neutral
+ * Declared: the brand tokens, the radius scale and the sans and mono stacks; a preset adds its neutral
  * sets; both point the chat's `--ring` and the composer's outline at the brand focus (TH3).
  */
 
@@ -61,6 +62,7 @@ function shape(theme: ThemeSettings): { light: Declarations; dark: Declarations 
         ...scheme("light"),
         ...RADIUS_TOKENS.map((t) => [t, RADIUS_SCALES[theme.corners][t]] as const),
         ["--kobe-font-sans", FONT_STACK_VALUES[theme.font]],
+        ["--kobe-font-mono", MONO_STACK_VALUES[theme.font]],
       ],
       dark: scheme("dark"),
     };
@@ -72,6 +74,7 @@ function shape(theme: ThemeSettings): { light: Declarations; dark: Declarations 
       ...PRESET_SCHEME_TOKENS.map((t) => [t, preset.light[t]] as const),
       ...RADIUS_TOKENS.map((t) => [t, RADIUS_SCALES[preset.corners][t]] as const),
       ["--kobe-font-sans", FONT_STACK_VALUES[preset.font]],
+      ["--kobe-font-mono", MONO_STACK_VALUES[preset.font]],
     ],
     dark: PRESET_SCHEME_TOKENS.map((t) => [t, preset.dark[t]] as const),
   };

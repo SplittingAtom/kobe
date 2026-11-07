@@ -381,6 +381,21 @@ describe("tokenization guard (KOBE-498)", () => {
     expect(tsFonts).toEqual([]);
   });
 
+  /** KOBE-555 (ac-1): faces are self-hosted (app/faces.ts); nothing fetches a font at run time. */
+  it("fonts are self-hosted: no @font-face, @import or remote font outside app/faces.ts", () => {
+    expect(
+      css.filter((f) => /@font-face|@import\s+url|url\(\s*["']?(?:https?:)?\/\//i.test(read(f))),
+    ).toEqual([]);
+    expect(
+      [...ts, ...sourceFiles("lib", [".tsx", ".ts"])].filter((f) =>
+        /next\/font\/google|fonts\.(?:googleapis|gstatic)\.com/.test(readRaw(f)),
+      ),
+    ).toEqual([]);
+    expect(ts.filter((f) => readRaw(f).includes("next/font/local"))).toEqual([
+      join("app", "faces.ts"),
+    ]);
+  });
+
   it("corners come from the radius tokens", () => {
     const ok = /^(?:var\(--kobe-radius-[\w-]+\)|0|50%|inherit)$/;
     expect(

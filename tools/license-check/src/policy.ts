@@ -19,6 +19,8 @@ export const ALLOWED_LICENSES: ReadonlySet<string> = new Set([
   "Zlib",
   "CC0-1.0",
   "Unlicense",
+  // SIL Open Font License, for fonts only (Outfit, JetBrains Mono): approved by Chris 2026-11-07, KOBE-555.
+  "OFL-1.1",
 ]);
 
 /** SPDX `WITH` exceptions that only add permissions to an already-allowed license. */

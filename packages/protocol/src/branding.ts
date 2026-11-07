@@ -51,8 +51,11 @@ export const PRESET_LABELS: Readonly<Record<PresetId, string>> = {
 export const CORNER_STYLES = ["sharp", "soft", "round"] as const;
 export type CornerStyle = (typeof CORNER_STYLES)[number];
 
-/** System font stacks (TH10); `system` is today's `system-ui`. No font files in v1. */
-export const FONT_STACKS = ["system", "humanist", "grotesk", "serif"] as const;
+/**
+ * Typefaces (TH10): system font stacks, `system` is today's `system-ui`; `catalyst` starts with the
+ * shipped Outfit and JetBrains Mono faces over system fallbacks (TH10 as amended, KOBE-555).
+ */
+export const FONT_STACKS = ["system", "humanist", "grotesk", "serif", "catalyst"] as const;
 export type FontStack = (typeof FONT_STACKS)[number];
 
 /** An accent colour: `#rrggbb`, lowercase hex only (it is written into CSS, so nothing else). */

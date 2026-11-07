@@ -89,6 +89,17 @@ describe("previewCss", () => {
     expect(dark.get("--kobe-console-bg")).toBe(THEME_DARK.get("--kobe-console-bg"));
   });
 
+  /** KOBE-555 (ac-2): the Appearance preview shows Catalyst's faces in both roots. */
+  it("shows the catalyst faces in the light and dark previews; the default keeps system stacks", () => {
+    for (const scheme of ["light", "dark"] as const) {
+      const catalyst = resolve(previewCss({ preset: "catalyst" }), scheme);
+      expect(catalyst.get("--kobe-font-sans")).toMatch(/^var\(--kobe-face-outfit/);
+      expect(catalyst.get("--kobe-font-mono")).toMatch(/^var\(--kobe-face-jetbrains-mono/);
+      const plain = resolve(previewCss({ preset: "default" }), scheme);
+      expect(plain.get("--kobe-font-mono")).toBe(THEME_LIGHT.get("--kobe-font-mono"));
+    }
+  });
+
   it("gives the logo swatches plain light and dark values, whatever the theme", () => {
     const rulesOf = rules(previewCss({ preset: "plum" }));
     const swatch = (scheme: string) =>

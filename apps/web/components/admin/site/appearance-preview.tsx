@@ -72,6 +72,7 @@ function MiniShell({
           <Badge tone="attention">Needs you</Badge>
           <Badge tone="failed">Failed</Badge>
         </div>
+        <code className="font-mono text-sm">const answer = 42; // code</code>
         <Card title="A card" level={4}>
           <TextInput
             aria-label={`Sample field (${scheme})`}

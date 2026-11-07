@@ -105,14 +105,41 @@ export interface Preset {
   readonly dark: SchemeValues;
 }
 
-/** `--kobe-font-sans` per typeface (§5); `system` is today's. All system stacks: no font files. */
+/**
+ * The shipped faces' CSS variables (KOBE-555): next/font/local declares them on <html>
+ * (app/faces.ts). A stack names one as `var(<variable>, <family>)`, so it still reads the face if
+ * the variable is missing.
+ */
+export const FACE_VARIABLES = {
+  outfit: "--kobe-face-outfit",
+  jetbrainsMono: "--kobe-face-jetbrains-mono",
+} as const;
+
+const GROTESK = 'Inter, Roboto, "Helvetica Neue", "Arial Nova", "Nimbus Sans", Arial, sans-serif';
+/** theme.css's `--kobe-font-mono`. */
+const SYSTEM_MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+
+/**
+ * `--kobe-font-sans` per typeface (§5); `system` is today's. System stacks, except `catalyst`,
+ * which starts with the shipped Outfit (TH10 as amended, KOBE-555).
+ */
 export const FONT_STACK_VALUES: Readonly<Record<FontStack, string>> = {
   system:
     '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"',
   humanist:
     'Seravek, "Gill Sans Nova", Ubuntu, Calibri, "DejaVu Sans", source-sans-pro, sans-serif',
-  grotesk: 'Inter, Roboto, "Helvetica Neue", "Arial Nova", "Nimbus Sans", Arial, sans-serif',
+  grotesk: GROTESK,
   serif: 'Charter, "Bitstream Charter", "Sitka Text", Cambria, serif',
+  catalyst: `var(${FACE_VARIABLES.outfit}, Outfit), ${GROTESK}`,
+};
+
+/** `--kobe-font-mono` per typeface (§5): the system stack, `catalyst` starts with JetBrains Mono. */
+export const MONO_STACK_VALUES: Readonly<Record<FontStack, string>> = {
+  system: SYSTEM_MONO,
+  humanist: SYSTEM_MONO,
+  grotesk: SYSTEM_MONO,
+  serif: SYSTEM_MONO,
+  catalyst: `var(${FACE_VARIABLES.jetbrainsMono}, "JetBrains Mono"), ${SYSTEM_MONO}`,
 };
 
 export const RADIUS_TOKENS = [
@@ -569,8 +596,8 @@ const TOKYO_NIGHTS: Preset = {
  * tool's own glow colour per scheme, glow shadows under menus, drawers and panels, and the dark
  * page's ambient wash. Lifted a step to meet the floor (§8): the dark muted text (`#6b7694`) and
  * control borders on its near-black surfaces, and the light page and soft surfaces (`#f0f2f5`,
- * `#e8ecf4`), so the fixed "done" green keeps 4.5:1 on the muted panel. Outfit and JetBrains Mono
- * are not ported (TH10: system stacks, no font files): grotesk is the nearest stack.
+ * `#e8ecf4`), so the fixed "done" green keeps 4.5:1 on the muted panel. Its typefaces, Outfit and
+ * JetBrains Mono, ship with the web app (KOBE-555, TH10 as amended): the `catalyst` stacks.
  */
 const CATALYST_GLOW_SHADOWS = {
   "--kobe-shadow-pop": "0 0 24px var(--kobe-glow-color)",
@@ -582,7 +609,7 @@ const CATALYST: Preset = {
   id: "catalyst",
   label: PRESET_LABELS.catalyst,
   corners: "soft",
-  font: "grotesk",
+  font: "catalyst",
   light: scheme({
     page: "#f3f5f9",
     text: "#0a0e1a",

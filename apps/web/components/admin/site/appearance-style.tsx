@@ -42,6 +42,7 @@ const FONT_LABELS: Readonly<Record<FontStack, string>> = {
   humanist: "Humanist",
   grotesk: "Grotesk",
   serif: "Serif",
+  catalyst: "Outfit (Catalyst)",
 };
 
 function presetAccent(id: PresetId): string {

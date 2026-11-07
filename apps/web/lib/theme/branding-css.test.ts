@@ -31,7 +31,7 @@ function blocks(css: string, scope = ":root") {
 }
 
 const ALLOWED_NAME =
-  /^--(?:kobe-brand-[\w-]+|kobe-radius-[\w-]+|kobe-font-sans|ring|kobe-composer-focus)$/;
+  /^--(?:kobe-brand-[\w-]+|kobe-radius-[\w-]+|kobe-font-sans|kobe-font-mono|ring|kobe-composer-focus)$/;
 const PRESET_NAMES = new Set<string>(PRESET_SCHEME_TOKENS);
 
 describe("brandingCss", () => {
@@ -98,7 +98,25 @@ describe("brandingCss", () => {
     }
     expect(l.get("--kobe-radius-md")).toBe("0");
     expect(l.get("--kobe-font-sans")).toMatch(/^Inter, /);
+    expect(l.get("--kobe-font-mono")).toMatch(/^ui-monospace, /);
     expect(d.has("--kobe-radius-md")).toBe(false);
+  });
+
+  /** KOBE-555 (ac-2): Catalyst's stacks start with the shipped faces (app/faces.ts). */
+  it("the catalyst preset sets the Outfit and JetBrains Mono stacks", () => {
+    const { light, chosenDark } = blocks(brandingCss({ preset: "catalyst" }));
+    const l = new Map(light);
+    expect(l.get("--kobe-font-sans")).toMatch(/^var\(--kobe-face-outfit, Outfit\), Inter, /);
+    expect(l.get("--kobe-font-mono")).toMatch(
+      /^var\(--kobe-face-jetbrains-mono, "JetBrains Mono"\), ui-monospace, /,
+    );
+    expect(new Map(chosenDark).has("--kobe-font-mono")).toBe(false);
+  });
+
+  it("a custom theme may pick the catalyst typeface", () => {
+    const l = new Map(blocks(brandingCss({ ...CUSTOM, font: "catalyst" })).light);
+    expect(l.get("--kobe-font-sans")).toMatch(/^var\(--kobe-face-outfit/);
+    expect(l.get("--kobe-font-mono")).toMatch(/^var\(--kobe-face-jetbrains-mono/);
   });
 
   it("a custom accent emits the derived values over the default neutrals", () => {

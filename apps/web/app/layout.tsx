@@ -11,6 +11,7 @@ import { recordServerTiming } from "../lib/telemetry/server-timing";
 import { brandingCss } from "../lib/theme/branding-css";
 import { getSiteBranding } from "../lib/theme/branding-server";
 import { themeFromCookies } from "../lib/theme/theme";
+import { FACE_CLASSES } from "./faces";
 import "./theme.css";
 
 /**
@@ -42,7 +43,8 @@ export const viewport: Viewport = {
  * mounted while a console or a My area page opens over it. StyleNonce gives Radix's injected
  * scroll-lock style the nonce (KOBE-469). The new-build banner (KOBE-487) offers a reload on every
  * page once the web was redeployed under it. The Web Vitals reporter (KOBE-525) sends every
- * page's vitals and render timings to the server's telemetry.
+ * page's vitals and render timings to the server's telemetry. <html> carries the shipped faces'
+ * variables (app/faces.ts, KOBE-555); only a theme whose stack names them loads them.
  *
  * The site branding (TH5, KOBE-500) is fetched here (cached 30 s, defaults when the server is
  * unreachable): its theme is one nonced `<style>` of token declarations in <head>, rendered only
@@ -60,7 +62,7 @@ export default async function RootLayout({ children }: { readonly children: Reac
   const css = brandingCss(branding.theme);
   const nonce = css === "" ? undefined : (requestHeaders.get("x-nonce") ?? undefined);
   return (
-    <html lang="en" data-theme={theme ?? undefined}>
+    <html lang="en" className={FACE_CLASSES} data-theme={theme ?? undefined}>
       {css !== "" && (
         <head>
           <style nonce={nonce} data-kobe-branding="">

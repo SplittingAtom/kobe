@@ -85,7 +85,7 @@ namespaces and is refused). The Appearance page adds this hint to every SVG refu
 | Preset   | `default`, `slate`, `forest`, `plum`, `ember`, `tokyo-nights`, `catalyst` (§3.1) | A complete set of values for every token marked **preset** below, light and dark, plus its corners and typeface; each preset meets the contrast floor (§8), unit-tested                      |
 | Accent   | One colour (`#rrggbb`, lowercase hex), under Custom                              | The **brand** tokens per scheme (§4.1): primary fill, its hover, its text colour, the link colour and the focus colour; also points `--ring` and `--kobe-composer-focus` at the focus colour |
 | Corners  | `sharp`, `soft` (default), `round`, under Custom                                 | The **radius** tokens (§6)                                                                                                                                                                   |
-| Typeface | `system` (default), `humanist`, `grotesk`, `serif`, under Custom                 | `--kobe-font-sans` (§5); monospace stays the system monospace stack                                                                                                                          |
+| Typeface | `system` (default), `humanist`, `grotesk`, `serif`, `catalyst`, under Custom     | `--kobe-font-sans` and `--kobe-font-mono` (§5); only `catalyst` changes the monospace stack                                                                                                  |
 
 Stored as `branding.theme`: `{"preset":"<id>"}` or
 `{"preset":"custom","accent":"#rrggbb","corners":"…","font":"…"}`. A preset fixes its own corners and
@@ -102,7 +102,7 @@ on the Appearance page starts from the selected preset's corners and typeface.
 | `plum`         | Plum         | soft    | serif    | Violet-tinted neutrals, plum accent (light `#7a3e8a`, dark `#8a4a9c`, dark link `#d7a8e3`)                                                                                                                                                           |
 | `ember`        | Ember        | sharp   | grotesk  | Warm neutrals, burnt-orange accent (light `#b03d12`, link `#a63a10`; dark `#e07a3f` with near-black text, link `#f5a571`)                                                                                                                            |
 | `tokyo-nights` | Tokyo Nights | round   | system   | After the Tokyo Night editor palette: indigo night (dark page `#1a1b26`), periwinkle accent `#7aa2f7`, violet focus `#bb9af7`                                                                                                                        |
-| `catalyst`     | Catalyst     | soft    | grotesk  | After the Catalyst query tool (KOBE-550): its light palette (page `#f3f5f9`, accent `#1565c0`) and its "Rehoboam" dark (page `#06080e`, accent `#4fc3f7`, borders the accent at 12%), its own glow colour, glow shadows and a dark ambient wash (§7) |
+| `catalyst`     | Catalyst     | soft    | catalyst | After the Catalyst query tool (KOBE-550): its light palette (page `#f3f5f9`, accent `#1565c0`) and its "Rehoboam" dark (page `#06080e`, accent `#4fc3f7`, borders the accent at 12%), its own glow colour, glow shadows and a dark ambient wash (§7) |
 
 Every preset value is in `apps/web/lib/theme/presets.ts` (`PRESETS`); the token list a preset sets
 per scheme is `PRESET_SCHEME_TOKENS` (the brand tokens, both neutral sets, `--ring` and
@@ -222,7 +222,7 @@ on every preset's surfaces.
 | Token                          | Used for                                      | Default                                                                                                                                         | Set by            |
 | ------------------------------ | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
 | `--kobe-font-sans`             | Everything (`font-sans`, chat root, consoles) | Tailwind's sans stack (`-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', 'Noto Sans', Arial, sans-serif` + emoji fonts) | typeface / preset |
-| `--kobe-font-mono`             | Code, file editor, context viewer             | `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`                                                                                      | **fixed**         |
+| `--kobe-font-mono`             | Code, file editor, context viewer             | `ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`                                                                                      | typeface / preset |
 | `--kobe-brand-wordmark-size`   | The bar's app name                            | `1.125rem`                                                                                                                                      | **fixed**         |
 | `--kobe-brand-wordmark-weight` | The bar's app name                            | `600`                                                                                                                                           | **fixed**         |
 
@@ -230,9 +230,19 @@ Typeface stacks (`FONT_STACK_VALUES` in `apps/web/lib/theme/presets.ts`): `syste
 Tailwind's sans stack above; `humanist` =
 `Seravek, "Gill Sans Nova", Ubuntu, Calibri, "DejaVu Sans", source-sans-pro, sans-serif`;
 `grotesk` = `Inter, Roboto, "Helvetica Neue", "Arial Nova", "Nimbus Sans", Arial, sans-serif`;
-`serif` = `Charter, "Bitstream Charter", "Sitka Text", Cambria, serif`. All system stacks: no font
-files are loaded (`font-src 'self'` stays and nothing is shipped). Sizes, weights and line heights
-are not themable.
+`serif` = `Charter, "Bitstream Charter", "Sitka Text", Cambria, serif`. These four keep the system
+monospace stack (`MONO_STACK_VALUES`).
+
+TH10 as amended (Chris, 2026-11-07, KOBE-555): system stacks by default; a preset may name a
+shipped face. `catalyst` (the Catalyst preset's typeface; a custom theme may pick it too) is
+`var(--kobe-face-outfit, Outfit), ` + the grotesk stack, and its mono stack
+`var(--kobe-face-jetbrains-mono, "JetBrains Mono"), ` + the system monospace stack. The faces are
+variable WOFF2 files in `apps/web/app/fonts/` (SIL OFL 1.1, each with its `OFL.txt`; provenance in
+`docs/ledger/KOBE-555.md`), loaded with `next/font/local` in `apps/web/app/faces.ts` (`display:
+swap`, no preload) and served from `/_next/static/media`, so `font-src 'self'` is unchanged and no
+font request leaves the page. `faces.ts` only declares the `--kobe-face-*` variables on `<html>`;
+a browser downloads a face only when the page's stack uses it, so other themes load no font files.
+Sizes, weights and line heights are not themable.
 
 ## 6. Corners
 
@@ -322,7 +332,8 @@ Always:
   do not reach them (an app may read `prefers-color-scheme` itself).
 - **Isolation banner and the setup wizard's safety copy**: fixed wording and colours.
 - **Per-team or per-user brand**: one organisation, one brand (TH1); members keep light/dark only.
-- **Custom CSS, token overrides or font files** (v1): see TH2 and TH10 in the plan.
+- **Custom CSS, token overrides or font uploads** (v1): see TH2 and TH10 in the plan; the only font
+  files are the shipped faces (§5).
 
 ## 10. Adding or changing a token
 

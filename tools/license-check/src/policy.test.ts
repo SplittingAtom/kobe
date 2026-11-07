@@ -15,6 +15,11 @@ describe("evaluateLicense", () => {
     },
   );
 
+  /** KOBE-555: Chris approved the SIL Open Font License on 2026-11-07 (Outfit, JetBrains Mono). */
+  it("allows OFL-1.1 (fonts)", () => {
+    expect(evaluateLicense("OFL-1.1").allowed).toBe(true);
+  });
+
   it.each([
     "AGPL-3.0-only",
     "GPL-3.0-or-later",
