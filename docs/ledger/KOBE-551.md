@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR #)
+- **Status:** in review (PR #461)
 - **Branch / worktree:** `kobe-551-lakehouse-drop` in `../Kobe-wt551`
 - **Depends on:** KOBE-490 (item chips), KOBE-374 (Files-row drop), KOBE-460 (rail picker)
 
