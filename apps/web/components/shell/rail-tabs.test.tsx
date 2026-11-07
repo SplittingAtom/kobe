@@ -64,7 +64,8 @@ describe("Files | Apps (ac-1, ac-3)", () => {
     const apps = screen.getByRole("tabpanel", { name: "Apps" });
     expect(apps.hidden).toBe(false);
     expect(files.hidden).toBe(true);
-    expect(within(apps).getByRole("button", { name: /^Open Lakehouse Explorer/ })).toBeTruthy();
+    // No app list under the Pickers section since KOBE-559 (launches go through the + menu).
+    expect(within(apps).queryByRole("button", { name: /^Open Lakehouse Explorer/ })).toBeNull();
     await user.click(tab("Files"));
     // Kept mounted: still listed.
     expect(within(files).getByRole("button", { name: "Refresh files" })).toBeTruthy();

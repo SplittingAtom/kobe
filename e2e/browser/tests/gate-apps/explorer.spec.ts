@@ -2,6 +2,7 @@ import type { FrameLocator, Page, Request, Response } from "@playwright/test";
 import { expect, test } from "../support/chat.js";
 import { RUN_TIMEOUT_MS } from "../support/constants.js";
 import { FAKE_MODEL, longAnswer, pageApi } from "../support/gate5.js";
+import { launchFromPlusMenu } from "../support/plus-apps.js";
 
 /**
  * The Kobe Explorer Gate (KOBE-441, spec §11): an MCP App in the conversation first, then from the
@@ -79,19 +80,8 @@ async function theApp(page: Page): Promise<App> {
  * The rail's button for this app: by its tooltip, which names the connector (two connectors may
  * offer apps with the same title, as on k3d).
  */
-function railButton(page: Page, app: App, where: "this conversation" | "a new conversation") {
-  return page
-    .getByRole("tabpanel", { name: "Apps", exact: true })
-    .getByTitle(`Open ${app.title} from ${app.connectorName} in ${where}`, { exact: true });
-}
-
-/** The rail's Apps tab (KOBE-448: Files | Apps), chosen; the member's choice is kept. */
-async function showAppsTab(page: Page): Promise<void> {
-  const tab = page
-    .getByRole("tablist", { name: "Files and apps" })
-    .getByRole("tab", { name: "Apps", exact: true });
-  if ((await tab.getAttribute("aria-selected")) !== "true") await tab.click();
-}
+// Apps launch from the composer's + menu since KOBE-559 (the rail lists only the picker):
+// support/plus-apps.ts; "this conversation" or "a new conversation" follows from where the member is.
 
 /** The app's frame inside the conversation (the card's), by its host-drawn title. */
 function frameOf(page: Page, app: App): FrameLocator {
@@ -240,8 +230,7 @@ test("from the rail: a click inserts an app card with no run; the next run sees 
   record(page);
   await chat.open();
   const app = await theApp(page);
-  await showAppsTab(page);
-  await railButton(page, app, "a new conversation").click();
+  await launchFromPlusMenu(page, app);
   const threadId = await chat.threadId();
   await expect(page.locator("[data-kobe-app-card-entry]")).toBeVisible({ timeout: RUN_TIMEOUT_MS });
   await expect(
@@ -285,8 +274,7 @@ test("from the rail with no thread open: the new thread has the default agent an
   );
   const preset = (runnable.json.agents ?? []).find((a) => a.default === true);
   expect(preset, "the server marks the new-conversation agent").toBeDefined();
-  await showAppsTab(page);
-  await railButton(page, app, "a new conversation").click();
+  await launchFromPlusMenu(page, app);
   const threadId = await chat.threadId();
   await expect(page.locator("[data-kobe-app-card-entry]")).toBeVisible({ timeout: RUN_TIMEOUT_MS });
   // ac-1: the thread pinned the agent a new conversation gets, and the composer names it.
@@ -350,8 +338,7 @@ test("from the rail during a run: the launch waits as a chip and goes in after t
     longAnswer("Write a numbered list of 40 short facts about tables, one per line."),
   );
   await chat.waitForBusy();
-  await showAppsTab(page);
-  await railButton(page, app, "this conversation").click();
+  await launchFromPlusMenu(page, app);
   const chip = page.getByText(`App: ${app.title} (waits for the run)`);
   await expect(chip).toBeVisible();
   await chat.waitForIdle();
@@ -372,8 +359,7 @@ test("no credential reaches the browser or the frame", async ({ chat, page }) =>
   });
   await chat.open();
   const app = await theApp(page);
-  await showAppsTab(page);
-  await railButton(page, app, "a new conversation").click();
+  await launchFromPlusMenu(page, app);
   await chat.threadId();
   const frame = frameOf(page, app);
   await expect(frame.getByRole(ITEM_ROLE, { name: PATH[0] ?? "", exact: true })).toBeVisible({

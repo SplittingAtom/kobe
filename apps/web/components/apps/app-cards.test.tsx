@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
 import { DESKTOP_WIDTH, resizeWindow } from "../../lib/testing/viewport";
-import { agentChoices, chatRequests, composer, openApp, streaming } from "../chat/testing";
+import { chatRequests, composer, openApp, streaming } from "../chat/testing";
 
 /**
  * KOBE-440 (MA-6, spec MA3, MA8, MA11): the rail's Apps section lists the member's apps and
@@ -64,8 +64,22 @@ async function appsSection(): Promise<HTMLElement> {
   fireEvent.click(await screen.findByRole("tab", { name: "Apps" }));
   return screen.findByRole("tabpanel", { name: "Apps" });
 }
-const launches = () => chatRequests(fake, "POST").filter((r) => r.path.endsWith("/app-cards"));
-const messages = () => chatRequests(fake, "POST").filter((r) => r.path.endsWith("/messages"));
+
+/**
+ * Launches Lakehouse Explorer from the composer's + menu (KOBE-451), the one launcher since the
+ * rail lists no apps (KOBE-559): Add to your message, Apps, the app.
+ */
+async function launchViaPlus(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  (await screen.findByRole("button", { name: "Add to your message" })).focus();
+  await user.keyboard("{Enter}");
+  const menu = await screen.findByRole("menu", {}, { timeout: 4_000 });
+  within(menu).getByRole("menuitem", { name: /^Apps/ }).focus();
+  await user.keyboard("{ArrowRight}");
+  const sub = await screen.findByRole("menu", { name: "Apps" }, { timeout: 4_000 });
+  await user.click(
+    await within(sub).findByRole("menuitem", { name: /Lakehouse Explorer/ }, { timeout: 4_000 }),
+  );
+}
 
 describe("app cards in the conversation (KOBE-440)", () => {
   it("renders a launched card with its app, under a header saying the member opened it", async () => {
@@ -94,36 +108,7 @@ describe("app cards in the conversation (KOBE-440)", () => {
   });
 });
 
-describe("the rail's Apps section (KOBE-440)", () => {
-  it("launches an app into the current thread as a card, with no message and no run (ac-2)", async () => {
-    fake.teamApps = [APP];
-    const t = answered();
-    openApp(fake, t);
-    const section = await appsSection();
-    const user = userEvent.setup();
-    await user.click(
-      within(section).getByRole("button", { name: "Open Lakehouse Explorer in this conversation" }),
-    );
-    await waitFor(() =>
-      expect(launches().map((r) => r.path)).toEqual([`/v1/threads/${t}/app-cards`]),
-    );
-    expect(must(launches()[0]).body).toEqual({ app_id: APP.appId });
-    await waitFor(() => expect(screen.getByTitle(FRAME)).toBeTruthy(), { timeout: 4_000 });
-    expect(messages()).toEqual([]);
-    expect(fake.activeRun(t)).toBeUndefined();
-  });
-
-  it("starts a new thread with the card from the new-thread view (ac-2)", async () => {
-    fake.teamApps = [APP];
-    openApp(fake);
-    const section = await appsSection();
-    await userEvent
-      .setup()
-      .click(within(section).getByRole("button", { name: /Open Lakehouse Explorer/ }));
-    await waitFor(() => expect(launches().map((r) => r.path)).toEqual(["/v1/threads/app-cards"]));
-    await waitFor(() => expect(screen.getByTitle(FRAME)).toBeTruthy(), { timeout: 4_000 });
-  });
-
+describe("the rail's Apps section (KOBE-440; no app list since KOBE-559)", () => {
   it("queues a launch during a run as a removable chip; the run's end inserts it (ac-4)", async () => {
     fake.teamApps = [APP];
     const t = answered();
@@ -133,10 +118,7 @@ describe("the rail's Apps section (KOBE-440)", () => {
     await waitFor(() => expect(fake.activeRun(t)).toBeDefined());
     const runId = must(fake.activeRun(t)).run_id;
     await streaming(fake, runId);
-    const open = within(await appsSection()).getByRole("button", {
-      name: /Open Lakehouse Explorer/,
-    });
-    await user.click(open);
+    await launchViaPlus(user);
     expect(await screen.findByText("App: Lakehouse Explorer (waits for the run)")).toBeTruthy();
     // Removing the chip cancels it.
     await user.click(
@@ -147,7 +129,7 @@ describe("the rail's Apps section (KOBE-440)", () => {
     );
     expect(chatRequests(fake, "DELETE").some((r) => r.path.includes("/app-cards/"))).toBe(true);
     // A second launch waits, and appears as a card when the run ends.
-    await user.click(open);
+    await launchViaPlus(user);
     expect(await screen.findByText("App: Lakehouse Explorer (waits for the run)")).toBeTruthy();
     fake.agent.commitPrompt(runId);
     fake.agent.commit(runId, { role: "assistant", content: [{ type: "text", text: "one" }] });
@@ -170,9 +152,7 @@ describe("the rail's Apps section (KOBE-440)", () => {
     await waitFor(() => expect(fake.activeRun(t)).toBeDefined());
     const runId = must(fake.activeRun(t)).run_id;
     await streaming(fake, runId);
-    await user.click(
-      within(await appsSection()).getByRole("button", { name: /Open Lakehouse Explorer/ }),
-    );
+    await launchViaPlus(user);
     expect(await screen.findByText("App: Lakehouse Explorer (waits for the run)")).toBeTruthy();
     fake.agent.commitPrompt(runId);
     fake.agent.commit(runId, { role: "assistant", content: [{ type: "text", text: "one" }] });
@@ -195,9 +175,7 @@ describe("the rail's Apps section (KOBE-440)", () => {
     await waitFor(() => expect(fake.activeRun(t)).toBeDefined());
     const runId = must(fake.activeRun(t)).run_id;
     await streaming(fake, runId);
-    await user.click(
-      within(await appsSection()).getByRole("button", { name: /Open Lakehouse Explorer/ }),
-    );
+    await launchViaPlus(user);
     expect(await screen.findByText("App: Lakehouse Explorer (waits for the run)")).toBeTruthy();
     fake.agent.commitPrompt(runId);
     fake.agent.commit(runId, { role: "assistant", content: [{ type: "text", text: "one" }] });
@@ -224,72 +202,5 @@ describe("the rail's Apps section (KOBE-440)", () => {
     expect(link.getAttribute("href")).toBe("/me/connectors");
     expect(section.textContent).toContain("Catalyst");
     expect(within(section).queryByRole("button", { name: /Open Lakehouse Explorer/ })).toBeNull();
-  });
-});
-
-/** KOBE-455: the rail launches through useAppLaunch, as the + menu does; its behaviour stays. */
-describe("the rail's launch rule (KOBE-455)", () => {
-  it("from the new-thread view the launch carries the agent chosen there (KOBE-458)", async () => {
-    fake.teamApps = [APP];
-    fake.runnableAgents.push({
-      id: "a-kobe",
-      scope: "gallery",
-      galleryKey: "kobe",
-      default: true,
-      name: "Kobe",
-      model: null,
-    });
-    openApp(fake);
-    const user = userEvent.setup();
-    await waitFor(async () =>
-      expect(
-        (within(await agentChoices()).getByRole("radio", { name: /Kobe/ }) as HTMLInputElement)
-          .checked,
-      ).toBe(true),
-    );
-    await user.click(within(await agentChoices()).getByRole("radio", { name: /No agent/ }));
-    await user.keyboard("{Escape}");
-    await user.click(
-      within(await appsSection()).getByRole("button", {
-        name: "Open Lakehouse Explorer in a new conversation",
-      }),
-    );
-    await waitFor(() => expect(launches()).toHaveLength(1));
-    expect(must(launches()[0]).body).toEqual({ app_id: APP.appId, agent_id: null });
-    await waitFor(() => expect(screen.getByTitle(FRAME)).toBeTruthy(), { timeout: 4_000 });
-  });
-
-  it("shows the server's refusal and stays usable", async () => {
-    fake.teamApps = [APP];
-    openApp(fake, answered());
-    const section = await appsSection();
-    const open = within(section).getByRole("button", { name: /Open Lakehouse Explorer/ });
-    fake.teamApps = [];
-    await userEvent.setup().click(open);
-    expect((await within(section).findByRole("alert")).textContent).toBe(
-      "This app is not available to you.",
-    );
-    expect((open as HTMLButtonElement).disabled).toBe(false);
-  });
-
-  it("closes the rail's drawer after a launch on a narrow screen", async () => {
-    fake.teamApps = [APP];
-    const t = answered();
-    resizeWindow(960);
-    openApp(fake, t);
-    await composer();
-    const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Show files" }));
-    const drawer = await screen.findByRole("dialog", { name: "Workspace" });
-    fireEvent.click(await within(drawer).findByRole("tab", { name: "Apps" }));
-    await user.click(
-      await within(drawer).findByRole("button", {
-        name: "Open Lakehouse Explorer in this conversation",
-      }),
-    );
-    await waitFor(() =>
-      expect(launches().map((r) => r.path)).toEqual([`/v1/threads/${t}/app-cards`]),
-    );
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Workspace" })).toBeNull());
   });
 });

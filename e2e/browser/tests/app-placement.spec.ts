@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "./support/chat.js";
 import { SHELL_TIMEOUT_MS } from "./support/constants.js";
 import { pageApi } from "./support/gate5.js";
+import { launchFromPlusMenu } from "./support/plus-apps.js";
 
 /**
  * KOBE-531 ac-9 (spec MA3 as amended 2026-10-31): with an app placed in the artifact column by a
@@ -54,13 +55,7 @@ test("an app placed in the artifact column opens there from a rail launch; its c
   try {
     // A fresh page reads the apps list (and their placement) again.
     await chat.open();
-    await chat.showBothPanels("apps");
-    await page
-      .getByRole("tabpanel", { name: "Apps", exact: true })
-      .getByTitle(`Open ${app.title} from ${app.connectorName} in a new conversation`, {
-        exact: true,
-      })
-      .click();
+    await launchFromPlusMenu(page, app);
     await chat.threadId();
 
     const tabs = page.getByRole("tablist", { name: "Open artifacts" });

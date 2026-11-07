@@ -130,8 +130,8 @@ test("pick the picker, choose a table: the composer shows the text and nothing i
   const sends = watchSends(page);
   await showApps(page, chat);
   const own = await railWidth(page);
-  // The list below still lists every app, the picker too.
-  await expect(appsPanel(page).getByTitle(new RegExp(`^Open ${app.title} from `))).toBeVisible();
+  // No app list under the picker since KOBE-559: the tab is the Pickers section alone.
+  await expect(appsPanel(page).getByTitle(new RegExp(`^Open ${app.title} from `))).toHaveCount(0);
 
   const frame = await choose(page, app);
   await expect.poll(() => railWidth(page)).toBeGreaterThanOrEqual(Math.max(own, PICKER_PX) - 1);

@@ -239,6 +239,12 @@ live in the section, laid out like the Files tree (it fills the section and scro
 One live picker frame at a time; a picker that stops being live (drift, connector off for the
 team, key gone) falls back to None with a short note.
 
+_Amended 2026-11-07 (Chris, KOBE-559): the Apps tab is the Pickers section alone._ The app list
+that stood under the Pickers section is gone: the tab shows the Pickers dropdown and the chosen
+picker, plus the "Add your key" hints for apps missing only the member's key. Apps with chat or
+artifact placement are launched from the composer's + menu (Apps submenu, KOBE-451), which
+inserts the same app card (MA11). The tab is still hidden when the member has no app.
+
 1. Its `ui/message` inserts into the composer draft of the conversation on screen (or the
    new-conversation draft), with the §8 marker and gate; `ui/update-model-context` attaches its
    chip there. Nothing is sent without the member and nothing is stored in a thread.
