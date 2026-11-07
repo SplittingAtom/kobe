@@ -2,16 +2,32 @@
 
 import { useAui } from "@assistant-ui/react";
 import { useCallback, useEffect, useRef, useState, type DragEvent, type RefObject } from "react";
+import { ITEM_REFERENCES_MAX } from "@kobe/protocol";
+import { appMessageOf } from "../../lib/apps/host-bridge";
+import {
+  carriesLakehouseItem,
+  droppedLakehouseItem,
+  LAKEHOUSE_DROP_FROM,
+  LAKEHOUSE_DROP_REFUSED,
+  lakehouseItemContent,
+} from "../../lib/apps/lakehouse-drop";
 import {
   insertMention,
+  insertToken,
   MENTION_FOLDER_REFUSED,
   mentionRefusal,
 } from "../../lib/chat/mention-insert";
 import { carriesWorkspaceFolder, carriesWorkspaceRow, droppedRowPath } from "../../lib/files/drag";
+import { applyAppMessage } from "../apps/use-app-composer";
 import { useChatSession } from "./kobe-runtime";
 
-/** What a workspace row hovering over the composer would do: be mentioned, or be refused. */
-export type RowDrop = "file" | "folder" | null;
+/**
+ * What a drag hovering over the composer would do: a workspace row is mentioned or refused; a
+ * Lakehouse Picker item (KOBE-551) is inserted.
+ */
+export type RowDrop = "file" | "folder" | "item" | null;
+
+export const LAKEHOUSE_DROP_FULL = `A message can reference at most ${ITEM_REFERENCES_MAX} items.`;
 
 export interface ComposerMentionDrop {
   readonly rowDrop: RowDrop;
@@ -30,6 +46,9 @@ export interface ComposerMentionDrop {
  * the same @file mention as a pick (KOBE-223): the marker at the caret and the path in the draft's
  * picked set, so the send carries it in `mentions[]` and the server validates it. Folders and
  * names the rules refuse are refused here with a reason. Only a writable composer listens.
+ *
+ * A Lakehouse Picker item dragged out of its frame (KOBE-551) is taken first: its chip as a
+ * click on the picker adds it, and its identifier at the caret; an invalid item is refused.
  */
 export function useComposerMentionDrop({
   draft,
@@ -55,6 +74,31 @@ export function useComposerMentionDrop({
       const caret = input.current?.selectionEnd ?? text.length;
       const next = insertMention(text, caret, path);
       session.mentions.add(draft, path);
+      aui.composer.setText(next.text);
+      caretAfter.current = next.caret;
+      return undefined;
+    },
+    [aui, session, draft, text, input],
+  );
+
+  /**
+   * A dropped Lakehouse Picker item (KOBE-551): the click's `ui/message` content through the
+   * bridge's `appMessageOf`, so the same chip; and its backticked identifier at the caret as the
+   * member's own text. The answer is why it was refused, or undefined.
+   */
+  const insertItem = useCallback(
+    (raw: string): string | undefined => {
+      const content = lakehouseItemContent(raw);
+      const message = content === undefined ? undefined : appMessageOf(content);
+      const token = content?.[0]?.["text"];
+      if (message === undefined || message.items.length === 0 || typeof token !== "string") {
+        return LAKEHOUSE_DROP_REFUSED;
+      }
+      if (!applyAppMessage(session, draft, message, LAKEHOUSE_DROP_FROM)) {
+        return LAKEHOUSE_DROP_FULL;
+      }
+      const caret = input.current?.selectionEnd ?? text.length;
+      const next = insertToken(text, caret, token);
       aui.composer.setText(next.text);
       caretAfter.current = next.caret;
       return undefined;
@@ -92,6 +136,13 @@ export function useComposerMentionDrop({
     notice,
     clearNotice: () => setNotice(""),
     over(e) {
+      if (writable && carriesLakehouseItem(e.dataTransfer)) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        setRowDrop("item");
+        setNotice("");
+        return true;
+      }
       if (!carriesWorkspaceRow(e.dataTransfer)) return false;
       const folder = carriesWorkspaceFolder(e.dataTransfer);
       e.preventDefault();
@@ -101,6 +152,13 @@ export function useComposerMentionDrop({
       return true;
     },
     drop(e) {
+      // Taken whole, valid or not: the browser never also drops the text/plain copy.
+      if (writable && carriesLakehouseItem(e.dataTransfer)) {
+        e.preventDefault();
+        setRowDrop(null);
+        setNotice(insertItem(droppedLakehouseItem(e.dataTransfer)) ?? "");
+        return true;
+      }
       if (!carriesWorkspaceRow(e.dataTransfer)) return false;
       e.preventDefault();
       setRowDrop(null);

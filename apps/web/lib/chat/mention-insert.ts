@@ -43,11 +43,24 @@ export function insertMention(
   caret: number,
   path: string,
 ): { readonly text: string; readonly caret: number } {
+  return insertToken(text, caret, mentionMarker(path));
+}
+
+/**
+ * `text` with `token` inserted at `caret` (clamped) as a word of its own: a space before when the
+ * caret follows other text, one after (taking the place of one that was there); and where the
+ * caret ends up. A mention's marker, or a dropped Lakehouse item's identifier (KOBE-551).
+ */
+export function insertToken(
+  text: string,
+  caret: number,
+  token: string,
+): { readonly text: string; readonly caret: number } {
   const at = Math.max(0, Math.min(caret, text.length));
   const before = text.slice(0, at);
   const after = text.slice(at);
   const lead = before === "" || /\s$/u.test(before) ? "" : " ";
-  const marker = `${lead}${mentionMarker(path)} `;
+  const marker = `${lead}${token} `;
   const rest = after.startsWith(" ") ? after.slice(1) : after;
   return { text: `${before}${marker}${rest}`, caret: before.length + marker.length };
 }

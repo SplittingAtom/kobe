@@ -578,6 +578,32 @@ it because Catalyst does not mark it `"app"`-visible. Kobe does not hard-code th
   never send anything themselves: the member's next message names those still shown
   (`references: [{name, kind}]`) and the server appends one fixed line after the member's text,
   ``Referenced: `cat.ns.orders` (table), …``, which history shows as the same chips.
+- **Host extension: native drags from an app frame** (KOBE-551, Chris 2026-11-06). Hosts may
+  accept native HTML5 drags started in an app frame that carry
+  `application/x-catalyst-lakehouse+json`; the result equals `ui/message` with the same
+  `resource_link`. Kobe accepts them on a writable composer only (not read-only, not in Trash).
+  The frame, its sandbox and its CSP are unchanged: the browser carries the drag across
+  documents. The drag contract (Catalyst's Lakehouse Picker builds to it):
+  - `effectAllowed = "copy"`; `text/plain` is the backticked identifier (`` `mlb.lahman.batting` ``);
+  - `application/x-catalyst-lakehouse+json` is `{kind: "catalog"|"namespace"|"table"|"view",
+catalog, namespace?, name?, identifier: "<catalog>[.<ns>[.<name>]]",
+uri: "catalyst://lakehouse/<catalog>[/<ns>[/<name>]]"}`;
+  - while hovering only the types are readable, so the composer recognises the drag by its type
+    name (a hover cue like a Files-tree row's, `dropEffect` copy) and reads the JSON on drop.
+
+  On drop Kobe validates the JSON and never trusts it: the kind is one of the four and has its
+  own segments (a catalog none below it, a namespace no name, a table or view both), every
+  segment matches `^[a-z][a-z0-9_]*$`, `identifier` is the dotted segments and `uri` their
+  `catalyst://lakehouse/` form, at most 511 and 2047 characters. A valid item becomes the content
+  a picker click sends (the backticked identifier as text, then `resource_link {uri, name:
+identifier, title: last segment, _meta: {"io.kobe/item-kind": kind}}`) and goes through the
+  same function as `ui/message` (`appMessageOf`, then the composer's chip): the same chip and
+  the same `references` on send. Because the drop is the member's own act, the identifier also
+  goes in at the caret as their text, the focus returns to the composer and the caret follows
+  it. An invalid item is refused with a note under the composer; nothing is inserted and the
+  `text/plain` copy is never used instead. The drop is always taken whole, so the browser never
+  also inserts the `text/plain` copy.
+
 - **`ui/update-model-context`** stores the latest `{content, structuredContent}` per open app
   (capped at 8 KiB serialized; anything larger is refused with an error to the app). The composer
   shows a chip, "Context from _Lakehouse Explorer_: _one-line summary_", with a remove button and

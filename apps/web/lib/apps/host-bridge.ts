@@ -64,6 +64,23 @@ export interface AppMessage {
   readonly dropped: number;
 }
 
+/**
+ * What a `ui/message`'s content puts in the composer: its resource_links as items, which replace
+ * the text (KOBE-490), else its text blocks (at most {@link MESSAGE_TEXT_MAX}); text "" and no
+ * items when nothing is usable. One function for the bridge and for a Lakehouse Picker item
+ * dropped on the composer (KOBE-551), so both end in the same composer state.
+ */
+export function appMessageOf(content: readonly Record<string, unknown>[]): AppMessage {
+  const { items, dropped } = appItemsOf(content);
+  if (items.length > 0) return { text: "", items, dropped };
+  const text = content
+    .filter((b) => b["type"] === "text" && typeof b["text"] === "string")
+    .map((b) => b["text"] as string)
+    .join("\n");
+  const fits = new TextEncoder().encode(text).length <= MESSAGE_TEXT_MAX;
+  return { text: fits ? text : "", items, dropped };
+}
+
 export type ToolCallAnswer =
   | { readonly ok: true; readonly result: unknown }
   | { readonly ok: false; readonly code: string; readonly message: string };
@@ -214,25 +231,12 @@ export function attachHostBridge(
       case "ui/message": {
         const message = parse(messageParams, params);
         if (!message) return INVALID;
-        // resource_links become chips and replace the text (KOBE-490); text-only is as before.
-        const { items, dropped } = appItemsOf(message.content);
-        const text =
-          items.length > 0
-            ? ""
-            : message.content
-                .filter((b) => b.type === "text" && typeof b["text"] === "string")
-                .map((b) => b["text"] as string)
-                .join("\n");
-        if (
-          items.length === 0 &&
-          (text === "" || new TextEncoder().encode(text).length > MESSAGE_TEXT_MAX)
-        ) {
-          if (dropped > 0) handlers.message({ text: "", items: [], dropped });
+        const appMessage = appMessageOf(message.content);
+        if (appMessage.items.length === 0 && appMessage.text === "") {
+          if (appMessage.dropped > 0) handlers.message(appMessage);
           return INVALID;
         }
-        return handlers.message({ text, items, dropped })
-          ? { result: {} }
-          : { result: { isError: true } };
+        return handlers.message(appMessage) ? { result: {} } : { result: { isError: true } };
       }
       case "ui/update-model-context": {
         const context = parse(modelContextParams, params);
