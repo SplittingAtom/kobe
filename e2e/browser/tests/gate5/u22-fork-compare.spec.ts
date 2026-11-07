@@ -41,11 +41,13 @@ test("U22: the fork's back-link opens the source thread", async ({ chat, page })
     .poll(() => new URL(page.url()).searchParams.get("thread"), { timeout: 60_000 })
     .not.toBe(source);
   await chat.threadId();
-  // The lineage strip's first row (KOBE-535): the source's title, a link back to it.
+  // The lineage chip (KOBE-535; the chip since TL3's amendment of 2026-11-06) names the source;
+  // its menu's first item is the source, which opens in place.
   const strip = page.getByRole("navigation", { name: "Thread lineage" });
-  const back = strip.getByRole("listitem").first().getByRole("link");
-  await expect(back).toHaveAttribute("href", new RegExp(source, "i"), { timeout: 30_000 });
-  await back.click();
+  const chip = strip.getByRole("button", { name: /^Forked from / });
+  await expect(chip).toBeVisible({ timeout: 30_000 });
+  await chip.click();
+  await page.getByRole("menu").getByRole("menuitemcheckbox").first().click();
   await expect
     .poll(() => new URL(page.url()).searchParams.get("thread"), { timeout: 30_000 })
     .toBe(source);
