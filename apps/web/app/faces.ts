@@ -9,7 +9,11 @@ import localFont from "next/font/local";
  *
  * Each face only sets a CSS variable on <html>; a font stack names it (`FACE_VARIABLES` and the
  * `catalyst` stacks in lib/theme/presets.ts), so the faces load only on a page whose theme uses
- * them: no preload, and the stack's own system fallbacks follow (no metric-adjusted Arial).
+ * them (no preload). With `display: swap` the text paints at once in a fallback and swaps when the
+ * face arrives; Outfit's fallback is next/font's Arial with Outfit's metrics (size-adjust, ascent
+ * and descent overrides), so the swap barely moves the layout. next/font only offers Arial and
+ * Times New Roman as metric-matched fallbacks, neither monospaced, so JetBrains Mono keeps the
+ * system monospace stack as its fallback (a narrow shift in code blocks on a cold load).
  * next/font needs literal options, so the variable names are spelled out here and app/faces.test.ts
  * checks them against FACE_VARIABLES.
  */
@@ -20,7 +24,7 @@ const outfit = localFont({
   display: "swap",
   variable: "--kobe-face-outfit",
   preload: false,
-  adjustFontFallback: false,
+  adjustFontFallback: "Arial",
 });
 
 const jetbrainsMono = localFont({

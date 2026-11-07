@@ -11,7 +11,9 @@ such as ISC, 0BSD, BlueOak-1.0.0, Zlib, CC0-1.0 and Unlicense count as part of t
 and source-available licenses are excluded). Fonts may also be SIL OFL 1.1 (`OFL-1.1`, approved by
 Chris on 2026-11-07, KOBE-555): shipped unmodified apart from a TTF-to-WOFF2 conversion, under their
 own names (the OFL's Reserved Font Name clause), with each project's `OFL.txt` beside the files and
-in the web image's `/usr/share/doc/kobe/fonts`, and a row in the inventory's Fonts section. Anything else needs a documented, version-pinned
+in the web image's `/usr/share/doc/kobe/fonts`, and a row in the inventory's Fonts section. The
+check cannot tell a font from other code, so any OFL-1.1 package now passes it; an OFL dependency
+should still be a font. Anything else needs a documented, version-pinned
 entry that Chris decides on, recording **who approved it and when**:
 
 - a package: an entry in the scope's exceptions file with `license`, `versions`, `reason`, and

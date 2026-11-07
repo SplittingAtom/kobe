@@ -98,7 +98,7 @@ describe("brandingCss", () => {
     }
     expect(l.get("--kobe-radius-md")).toBe("0");
     expect(l.get("--kobe-font-sans")).toMatch(/^Inter, /);
-    expect(l.get("--kobe-font-mono")).toMatch(/^ui-monospace, /);
+    expect(l.has("--kobe-font-mono")).toBe(false);
     expect(d.has("--kobe-radius-md")).toBe(false);
   });
 
@@ -142,6 +142,7 @@ describe("brandingCss", () => {
     expect(d.get("--kobe-brand-focus")).toBe(derived.focus.dark);
     expect(l.get("--kobe-radius-lg")).toBe("1rem");
     expect(l.get("--kobe-font-sans")).toMatch(/^Charter, /);
+    expect(l.has("--kobe-font-mono")).toBe(false);
   });
 
   it("emits nothing for a value that slipped past validation", () => {

@@ -36,10 +36,15 @@ Reserved Font Name; names are kept anyway. The build copies the files byte for b
   requires a custom theme to be able to pick it). Older stored themes stay valid.
 - **Variables, not family names:** a stack names `var(--kobe-face-outfit, Outfit)`; next/font
   generates the family name. The `var()` fallback keeps the face name if the class is missing.
-- **No preload, no adjusted fallback:** only Catalyst uses the faces, so other themes download no
-  font; `adjustFontFallback: false` keeps the stack's own system fallbacks after the face.
-- **`--kobe-font-mono` is now preset-set** (was fixed): every non-default theme emits it, with the
-  system stack for all keys but `catalyst`.
+- **No preload:** only Catalyst uses the faces, so other themes download no font.
+- **Fallbacks (review):** Outfit has `adjustFontFallback: "Arial"` (metric-matched Arial, small
+  CLS on swap). JetBrains Mono keeps `false`: next/font offers only Arial and Times New Roman,
+  and a proportional fallback for code would be worse than the system mono stack.
+- **`--kobe-font-mono`** is emitted by the branding CSS only for `catalyst` (review); other
+  themes keep theme.css's value. The preview roots reset it to `SYSTEM_MONO_STACK`.
+- **OFL allow is global** (Chris asked for "allow SIL Open Font License"): the check cannot scope a
+  licence to fonts; policy comment and licensing.md say so.
+- Appearance Typeface hint reworded: system stacks download nothing, Outfit ships two files.
 - **Subsets:** `next/font/local` has no `subsets` option, and subsetting would modify the files.
   Both files cover Latin and Latin Extended-A (Outfit only Latin; JetBrains Mono also Greek,
   Cyrillic, Vietnamese); they ship whole.

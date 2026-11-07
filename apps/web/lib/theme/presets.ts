@@ -116,8 +116,8 @@ export const FACE_VARIABLES = {
 } as const;
 
 const GROTESK = 'Inter, Roboto, "Helvetica Neue", "Arial Nova", "Nimbus Sans", Arial, sans-serif';
-/** theme.css's `--kobe-font-mono`. */
-const SYSTEM_MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+/** theme.css's `--kobe-font-mono` (presets.test.ts checks it), the fallback after JetBrains Mono. */
+export const SYSTEM_MONO_STACK = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
 /**
  * `--kobe-font-sans` per typeface (§5); `system` is today's. System stacks, except `catalyst`,
@@ -133,13 +133,12 @@ export const FONT_STACK_VALUES: Readonly<Record<FontStack, string>> = {
   catalyst: `var(${FACE_VARIABLES.outfit}, Outfit), ${GROTESK}`,
 };
 
-/** `--kobe-font-mono` per typeface (§5): the system stack, `catalyst` starts with JetBrains Mono. */
-export const MONO_STACK_VALUES: Readonly<Record<FontStack, string>> = {
-  system: SYSTEM_MONO,
-  humanist: SYSTEM_MONO,
-  grotesk: SYSTEM_MONO,
-  serif: SYSTEM_MONO,
-  catalyst: `var(${FACE_VARIABLES.jetbrainsMono}, "JetBrains Mono"), ${SYSTEM_MONO}`,
+/**
+ * `--kobe-font-mono` for the typefaces that change it (§5): only `catalyst`, with JetBrains Mono
+ * over theme.css's system stack. The others leave theme.css's value alone, so nothing is emitted.
+ */
+export const MONO_STACK_VALUES: Readonly<Partial<Record<FontStack, string>>> = {
+  catalyst: `var(${FACE_VARIABLES.jetbrainsMono}, "JetBrains Mono"), ${SYSTEM_MONO_STACK}`,
 };
 
 export const RADIUS_TOKENS = [

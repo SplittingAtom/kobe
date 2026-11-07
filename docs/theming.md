@@ -230,8 +230,9 @@ Typeface stacks (`FONT_STACK_VALUES` in `apps/web/lib/theme/presets.ts`): `syste
 Tailwind's sans stack above; `humanist` =
 `Seravek, "Gill Sans Nova", Ubuntu, Calibri, "DejaVu Sans", source-sans-pro, sans-serif`;
 `grotesk` = `Inter, Roboto, "Helvetica Neue", "Arial Nova", "Nimbus Sans", Arial, sans-serif`;
-`serif` = `Charter, "Bitstream Charter", "Sitka Text", Cambria, serif`. These four keep the system
-monospace stack (`MONO_STACK_VALUES`).
+`serif` = `Charter, "Bitstream Charter", "Sitka Text", Cambria, serif`. These four leave
+`--kobe-font-mono` at theme.css's system stack (the branding CSS only emits it for `catalyst`,
+`MONO_STACK_VALUES`).
 
 TH10 as amended (Chris, 2026-11-07, KOBE-555): system stacks by default; a preset may name a
 shipped face. `catalyst` (the Catalyst preset's typeface; a custom theme may pick it too) is
@@ -239,9 +240,14 @@ shipped face. `catalyst` (the Catalyst preset's typeface; a custom theme may pic
 `var(--kobe-face-jetbrains-mono, "JetBrains Mono"), ` + the system monospace stack. The faces are
 variable WOFF2 files in `apps/web/app/fonts/` (SIL OFL 1.1, each with its `OFL.txt`; provenance in
 `docs/ledger/KOBE-555.md`), loaded with `next/font/local` in `apps/web/app/faces.ts` (`display:
-swap`, no preload) and served from `/_next/static/media`, so `font-src 'self'` is unchanged and no
+swap`, no preload, Outfit over a metric-matched Arial fallback) and served from `/_next/static/media`, so `font-src 'self'` is unchanged and no
 font request leaves the page. `faces.ts` only declares the `--kobe-face-*` variables on `<html>`;
 a browser downloads a face only when the page's stack uses it, so other themes load no font files.
+The trade-off for operators choosing the preset: on a cold load (nothing cached) text paints at
+once in the fallback and swaps to the face when it arrives (about 160 KB for both). Outfit's
+fallback is Arial resized to Outfit's metrics, so the page barely moves; next/font has no
+monospaced metric fallback, so code blocks may shift slightly when JetBrains Mono replaces the
+system monospace font. Later loads use the cached files.
 Sizes, weights and line heights are not themable.
 
 ## 6. Corners

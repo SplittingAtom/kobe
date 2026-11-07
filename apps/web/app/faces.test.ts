@@ -17,7 +17,7 @@ const option = (call: string, key: string): string | undefined =>
   new RegExp(`\\b${key}:\\s*("[^"]*"|\\w+)`).exec(call)?.[1]?.replace(/^"|"$/g, "");
 
 describe("shipped faces (KOBE-555)", () => {
-  it("loads both faces with next/font/local, swap, no preload, under FACE_VARIABLES", () => {
+  it("loads both faces with next/font/local, swap, no preload, metric fallback, under FACE_VARIABLES", () => {
     expect(FACES).toMatch(/^import localFont from "next\/font\/local";$/m);
     expect(calls).toHaveLength(2);
     expect(calls.map((c) => option(c, "variable"))).toEqual([
@@ -27,8 +27,10 @@ describe("shipped faces (KOBE-555)", () => {
     for (const call of calls) {
       expect(option(call, "display")).toBe("swap");
       expect(option(call, "preload")).toBe("false");
-      expect(option(call, "adjustFontFallback")).toBe("false");
     }
+    // A metric-matched Arial under Outfit limits the swap's layout shift; next/font has no
+    // monospaced metric fallback, so JetBrains Mono falls back to the system mono stack.
+    expect(calls.map((c) => option(c, "adjustFontFallback"))).toEqual(["Arial", "false"]);
   });
 
   it("ships each file as variable WOFF2 under its own name, with the project's OFL beside it", () => {

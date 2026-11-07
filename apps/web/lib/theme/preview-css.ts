@@ -2,10 +2,10 @@ import type { ThemeSettings } from "@kobe/protocol";
 import { BRANDING_CSS_ALLOWED, brandingCss } from "./branding-css";
 import {
   FONT_STACK_VALUES,
-  MONO_STACK_VALUES,
   PRESETS,
   RADIUS_SCALES,
   RADIUS_TOKENS,
+  SYSTEM_MONO_STACK,
 } from "./presets";
 
 /**
@@ -83,7 +83,7 @@ const schemeDecls = (scheme: "light" | "dark"): Decls => [
 const shared: Decls = [
   ...RADIUS_TOKENS.map((t) => [t, RADIUS_SCALES.soft[t]] as const),
   ["--kobe-font-sans", FONT_STACK_VALUES.system],
-  ["--kobe-font-mono", MONO_STACK_VALUES.system],
+  ["--kobe-font-mono", SYSTEM_MONO_STACK],
   ...ALIASES,
 ];
 

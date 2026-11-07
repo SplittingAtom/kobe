@@ -10,6 +10,7 @@ import {
   PRESETS,
   RADIUS_SCALES,
   RADIUS_TOKENS,
+  SYSTEM_MONO_STACK,
   type PresetSchemeToken,
   type SchemeValues,
 } from "./presets";
@@ -81,7 +82,7 @@ describe("presets", () => {
     for (const preset of Object.values(PRESETS)) {
       if (preset.id === "catalyst") continue;
       expect(FONT_STACK_VALUES[preset.font], preset.id).not.toMatch(shipped);
-      expect(MONO_STACK_VALUES[preset.font], preset.id).toBe(THEME_LIGHT.get("--kobe-font-mono"));
+      expect(MONO_STACK_VALUES[preset.font], preset.id).toBeUndefined();
     }
     expect(PRESETS.slate.font).toBe("grotesk");
     expect(PRESETS.ember.font).toBe("grotesk");
@@ -126,7 +127,9 @@ describe("presets", () => {
       expect(preset.dark[token], `dark ${token}`).toBe(THEME_DARK.get(token));
     }
     expect(FONT_STACK_VALUES[preset.font]).toBe(THEME_LIGHT.get("--kobe-font-sans"));
-    expect(MONO_STACK_VALUES[preset.font]).toBe(THEME_LIGHT.get("--kobe-font-mono"));
+    expect(MONO_STACK_VALUES[preset.font]).toBeUndefined();
+    expect(SYSTEM_MONO_STACK).toBe(THEME_LIGHT.get("--kobe-font-mono"));
+    expect(Object.keys(MONO_STACK_VALUES)).toEqual(["catalyst"]);
     for (const token of RADIUS_TOKENS) {
       expect(RADIUS_SCALES[preset.corners][token], token).toBe(THEME_LIGHT.get(token));
     }
