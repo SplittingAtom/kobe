@@ -3,7 +3,8 @@ import { ALL_PRIVILEGES, defineDomain } from "./types.js";
 /** Models & Budgets (KOBE-40–44). */
 export const models = defineDomain({
   // Team model enablement and each member's gateway virtual key (KOBE-40).
-  // The model usage ledger (KOBE-43), written by the model-gateway shim.
+  // The model usage ledger (KOBE-43), written by the model-gateway shim; KOBE-557 adds the
+  // reasoning split (reasoning_tokens, reasoning_estimated) under the same RLS policy.
   // Run-bound gateway tokens (KOBE-118): minted and revoked by the server, read by the shim.
   team: [
     "team_models",

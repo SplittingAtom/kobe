@@ -83,6 +83,14 @@ export const runUsage = pgTable(
     outputTokens: integer().notNull().default(0),
     cacheReadTokens: integer().notNull().default(0),
     cacheWriteTokens: integer().notNull().default(0),
+    /**
+     * Reasoning (thinking) tokens within `outputTokens` (KOBE-557): the provider's own split when it
+     * reports one, else an estimate from the streamed thinking text (`reasoningEstimated`); null
+     * when the call reported no split and carried no thinking text.
+     */
+    reasoningTokens: integer(),
+    /** `reasoningTokens` is the gateway's estimate (ceil(UTF-8 bytes / 4)), not a provider count. */
+    reasoningEstimated: boolean().notNull().default(false),
     usageSource: text().$type<UsageSource>().notNull(),
     /** Dollars at the catalog's prices when the call was made; null when the model has none. */
     costUsd: numeric({ precision: 20, scale: 10, mode: "number" }),

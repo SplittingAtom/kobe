@@ -56,6 +56,8 @@ export const modelsFixtures: Record<(typeof models.team)[number], ProbeFixture> 
       status: 200,
       inputTokens: 5,
       outputTokens: 3,
+      reasoningTokens: 2,
+      reasoningEstimated: true,
       usageSource: "reported",
       durationMs: 10,
     });

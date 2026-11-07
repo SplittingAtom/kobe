@@ -176,6 +176,39 @@ describe("recordModelUsage", () => {
     expect((del as { cause?: { code?: string } }).cause?.code).toBe("42501");
   });
 
+  it("has the reasoning split columns (KOBE-557): reasoning_tokens null and reasoning_estimated false by default", async () => {
+    const sb = randomUUID();
+    await recordModelUsage(app.db, [record({ sandboxId: sb })]);
+    const [row] = await withTeam(app.db, teamA, (tx) =>
+      tx.select().from(runUsage).where(eq(runUsage.sandboxId, sb)),
+    );
+    expect(row).toMatchObject({ reasoningTokens: null, reasoningEstimated: false });
+    const id = randomUUID();
+    await withTeam(app.db, teamA, (tx) =>
+      tx.insert(runUsage).values({
+        teamId: teamA,
+        id,
+        userId,
+        sandboxId: randomUUID(),
+        route: "openai",
+        model: `kobe-${providerId}/priced`,
+        status: 200,
+        outputTokens: 50,
+        reasoningTokens: 40,
+        reasoningEstimated: true,
+        usageSource: "reported",
+        durationMs: 1,
+      }),
+    );
+    const [set] = await withTeam(app.db, teamA, (tx) =>
+      tx
+        .select()
+        .from(runUsage)
+        .where(and(eq(runUsage.teamId, teamA), eq(runUsage.id, id))),
+    );
+    expect(set).toMatchObject({ reasoningTokens: 40, reasoningEstimated: true });
+  });
+
   it("clamps absurd counts instead of failing the batch", async () => {
     const sb = randomUUID();
     await recordModelUsage(app.db, [
