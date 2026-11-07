@@ -156,10 +156,27 @@ describe("pointer drags from an app frame (KOBE-553 ac-1)", () => {
     t.send(note(END, { x: 6, y: 6 }));
     expect(t.events).toEqual([
       { phase: "start", item: ITEM, x: 1, y: 1 },
+      { phase: "cancel" },
       { phase: "start", item: other, x: 5, y: 5 },
       { phase: "end", x: 6, y: 6 },
     ]);
   });
+
+  it.each([
+    ["an oversized item", { item: { ...ITEM, pad: "a".repeat(9 * 1024) }, x: 1, y: 1 }],
+    ["a non-plain item", { item: [ITEM], x: 1, y: 1 }],
+    ["no point", { item: ITEM }],
+  ])(
+    "a second start with %s still ends the live drag: its moves and end drive nothing",
+    (_l, params) => {
+      const t = setup();
+      t.send(note(START, { item: ITEM, x: 1, y: 1 }));
+      t.send(note(START, params));
+      t.send(note(MOVE, { x: 2, y: 2 }));
+      t.send(note(END, { x: 3, y: 3 }));
+      expect(t.events).toEqual([{ phase: "start", item: ITEM, x: 1, y: 1 }, { phase: "cancel" }]);
+    },
+  );
 
   it("cancels a live drag when the bridge detaches (the frame went away)", () => {
     const t = setup();
@@ -185,6 +202,34 @@ describe("pointer drags from an app frame (KOBE-553 ac-1)", () => {
     t.tick(1_001);
     t.send(note(END, { x: 1, y: 1 }));
     expect(t.events.at(-1)).toEqual({ phase: "end", x: 1, y: 1 });
+  });
+
+  it.each([
+    ["an end", note(END, { x: 7, y: 8 }), { phase: "end", x: 7, y: 8 }],
+    ["a cancel", note(CANCEL, {}), { phase: "cancel" }],
+  ])("%s still clears the drag when the budget is spent", (_l, stop, event) => {
+    const t = setup();
+    t.send(note(START, { item: ITEM, x: 0, y: 0 }));
+    for (let i = 0; i < BRIDGE_LIMITS.messagesPerSecond + 5; i++) {
+      t.send({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: { height: i } });
+    }
+    t.send(note(MOVE, { x: 1, y: 1 }));
+    t.send(stop);
+    expect(t.events).toEqual([{ phase: "start", item: ITEM, x: 0, y: 0 }, event]);
+    // Only the live drag's stop is exempt: a second one is budgeted and ignored.
+    t.send(note(END, { x: 9, y: 9 }));
+    expect(t.events).toHaveLength(2);
+  });
+
+  it("a malformed end over budget is dropped like any message", () => {
+    const t = setup();
+    t.send(note(START, { item: ITEM, x: 0, y: 0 }));
+    for (let i = 0; i < BRIDGE_LIMITS.messagesPerSecond + 5; i++) {
+      t.send(note(END, { x: "bad", y: 0 }));
+    }
+    t.tick(1_001);
+    t.send(note(END, { x: 1, y: 1 }));
+    expect(t.events.map((e) => e.phase)).toEqual(["start", "end"]);
   });
 
   it("a host without a drag handler drops them", () => {

@@ -623,7 +623,7 @@ identifier, title: last segment, _meta: {"io.kobe/item-kind": kind}}`) and goes 
   takes them only from the bound frame (source window and `"null"` origin, like every message),
   parses them with zod (`item` a plain object of at most 8 KiB serialized, `x` and `y` finite)
   and drops anything else; a move, end or cancel without a live start from that frame is
-  ignored, a second start replaces the live one, and a frame removed mid-drag cancels it. The
+  ignored, any start cancels the live one, and a frame removed mid-drag cancels it. The
   per-frame budget (40 messages per second, 64 KiB each) applies; over it, messages are dropped.
 
   Kobe maps each point to the page with the iframe's bounding rect, read again on every
@@ -636,8 +636,11 @@ identifier, title: last segment, _meta: {"io.kobe/item-kind": kind}}`) and goes 
   drop's chain (its validation above, then `appMessageOf` and `applyAppMessage`): exactly the
   click's state, the chip from the app's title; an invalid item gets the same refusal note, a
   full chip row its note; a release anywhere else, or over a read-only or Trash conversation
-  (which has no composer panel), inserts nothing and says nothing. A press or Escape in the page
-  ends a drag whose end never arrived. The app gains no power it lacks (it can insert the chip
+  (which has no composer panel), inserts nothing and says nothing. Escape during a drag is the
+  app's: the focus is in its frame, and it forwards Escape as `drag-cancel`. A valid end or cancel
+  of the live drag is handled outside the message budget, and any `drag-start`, valid or not,
+  cancels the live drag first. As a host-side safeguard a press in the page (which gets no
+  pointer events while the app holds the capture) ends a drag whose end never arrived. The app gains no power it lacks (it can insert the chip
   with `ui/message`); the coordinates only choose whether the composer is the target.
 
 - **`ui/update-model-context`** stores the latest `{content, structuredContent}` per open app

@@ -35,9 +35,15 @@ inserts the item through the native drop's chain.
   session provider: inside the chat root (no React portal, KOBE-282), `position: fixed` at the point (offset 12 px by
   `transform`), `pointer-events: none`, `aria-hidden`; server snapshot null, so never on the
   server render. Its name is bounded (512 chars) before it is drawn.
-- **Stuck-drag guard** (not in the contract, host-only): while a drag is live, a `pointerdown`
-  or Escape in the page cancels it. During capture the page gets no pointer events, so a press
-  there means the app's end was lost (rate limit, crash).
+- **Stuck-drag guard** (host-only, belt and braces): while a drag is live, a `pointerdown` in
+  the page cancels it (during capture the page gets no pointer events, so a press there means the
+  app's end was lost). Escape during a drag is the app's to forward as `drag-cancel` (CAT-247):
+  the focus is in its frame, so the host's own Escape listener only helps when the page has it.
+- **Review of PR #463**: the ghost's kind goes through `itemKindOf` and `itemIcon` reads own
+  keys only (a hostile `kind: "constructor"` crashed the tree); any `drag-start`, valid or not,
+  cancels the live drag first; a valid end or cancel of the live drag skips the 40/s budget (it
+  only clears state); the composer validates the bridge's item object directly
+  (`lakehouseItemContentOf`) instead of stringifying and re-parsing it.
 - `e2e/browser`: `fetchReal` and the guard regex moved from `app-frame.spec.ts` to
   `tests/support/frame-route.ts` for reuse; `frame-drag` added to the Firefox project.
 
@@ -47,6 +53,9 @@ inserts the item through the native drop's chain.
 
 ## Follow-ups
 
+- The bridge still serializes a drag-start twice (whole message, then the item for the 8 KiB
+  cap); small items at most 30 per second, left as is.
+
 - `frame-drag.spec.ts` was not run here (no browser libs on this VM): the coordinator runs it
   against gate1 with `KOBE_PICKER_HTML=<built picker html>` until the CAT-247 build is pinned.
 
@@ -55,7 +64,7 @@ inserts the item through the native drop's chain.
 - ac-1: `apps/web/lib/apps/host-bridge-drag.test.ts`
 - ac-2: `apps/web/components/apps/app-frame-drag.test.tsx`, `apps/web/lib/apps/frame-drag.test.ts`
 - ac-3, ac-4: `apps/web/components/chat/composer-frame-drag.test.tsx` (ghost, cue, drop, outside,
-  cancel, stuck-drag guard, refusal, full row, read-only and Trash)
+  cancel, stuck-drag guard, hostile kinds, refusal, full row, read-only and Trash)
 - ac-5: `apps/web/components/chat/frame-drop-equivalence.test.ts`
 - ac-6: `docs/specs/mcp-apps-host.md` §8 (Chromium finding on the native-drag paragraph; new
   "Host extension: pointer drags from an app frame"); `docs/ledger/KOBE-551.md` follow-up

@@ -11,6 +11,7 @@ import {
   LAKEHOUSE_DROP_FROM,
   LAKEHOUSE_DROP_REFUSED,
   lakehouseItemContent,
+  lakehouseItemContentOf,
 } from "../../lib/apps/lakehouse-drop";
 import {
   insertMention,
@@ -35,15 +36,17 @@ export const LAKEHOUSE_DROP_FULL = `A message can reference at most ${ITEM_REFER
  * A Lakehouse Picker item into the composer of `draft` (KOBE-551, KOBE-553): the click's
  * `ui/message` content through the bridge's `appMessageOf` and the same `applyAppMessage`, so
  * exactly the click's composer state (the chip, `references` on send; no text, the focus stays).
- * The answer is why it was refused.
+ * The item is the dropped JSON (native drop) or the object a bridge drag carried. The answer is
+ * why it was refused.
  */
 export function insertLakehouseItem(
   session: ChatSession,
   draft: string,
-  raw: string,
+  item: string | Readonly<Record<string, unknown>>,
   from: string,
 ): string | undefined {
-  const content = lakehouseItemContent(raw);
+  const content =
+    typeof item === "string" ? lakehouseItemContent(item) : lakehouseItemContentOf(item);
   const message = content === undefined ? undefined : appMessageOf(content);
   if (message === undefined || message.items.length === 0) return LAKEHOUSE_DROP_REFUSED;
   return applyAppMessage(session, draft, message, from) ? undefined : LAKEHOUSE_DROP_FULL;
@@ -107,8 +110,10 @@ export function useComposerMentionDrop({
   );
 
   const insertItem = useCallback(
-    (raw: string, from: string = LAKEHOUSE_DROP_FROM): string | undefined =>
-      insertLakehouseItem(session, draft, raw, from),
+    (
+      item: string | Readonly<Record<string, unknown>>,
+      from: string = LAKEHOUSE_DROP_FROM,
+    ): string | undefined => insertLakehouseItem(session, draft, item, from),
     [session, draft],
   );
   useFrameDrop({
@@ -119,7 +124,7 @@ export function useComposerMentionDrop({
       if (over) setNotice("");
     }, []),
     drop: useCallback(
-      (drag: FrameDrag) => setNotice(insertItem(JSON.stringify(drag.item), drag.from) ?? ""),
+      (drag: FrameDrag) => setNotice(insertItem(drag.item, drag.from) ?? ""),
       [insertItem],
     ),
   });

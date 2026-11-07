@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useSyncExternalStore } from "react";
+import { itemKindOf } from "@kobe/protocol";
 import { useChatSession } from "../chat/kobe-runtime";
 import { ItemChipBody } from "./app-item-chips";
 
@@ -16,8 +17,11 @@ const text = (value: unknown): string =>
  * The ghost chip of a pointer drag out of an app frame (KOBE-553, DRAG-CONTRACT.md): the item's
  * kind icon and identifier in the composer's chip look, fixed at the page point, never a target
  * (`pointer-events: none`) and hidden from assistive technology. Rendered once at the chat
- * shell; nothing on the server (no drag there). A press or Escape in the page ends a drag whose
- * end never arrived (the app's captured pointer gives the page no events until it is released).
+ * shell; nothing on the server (no drag there). The kind goes through the chips' vocabulary
+ * (`itemKindOf`): anything else is the generic icon. Escape is the app's to forward as
+ * `drag-cancel` (the focus is in its frame while it drags); a press in the page, or Escape there
+ * when the page has the focus, ends a drag whose end never arrived (a captured pointer gives the
+ * page no events until it is released).
  */
 export function FrameDragGhost() {
   const store = useChatSession().frameDrag;
@@ -51,7 +55,7 @@ export function FrameDragGhost() {
         zIndex: 1000,
       }}
     >
-      <ItemChipBody kind={text(drag.item["kind"])} name={text(drag.item["identifier"])} />
+      <ItemChipBody kind={itemKindOf(drag.item["kind"])} name={text(drag.item["identifier"])} />
     </div>
   );
 }

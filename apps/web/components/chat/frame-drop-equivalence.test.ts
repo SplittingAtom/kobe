@@ -85,10 +85,7 @@ describe("drag-end and ui/message are equivalent (KOBE-553 ac-5)", () => {
         watchFrameDrop(session.frameDrag, {
           inside: () => true,
           over: () => undefined,
-          drop: (d) =>
-            notices.push(
-              insertLakehouseItem(session, NEW_DRAFT, JSON.stringify(d.item), d.from) ?? "",
-            ),
+          drop: (d) => notices.push(insertLakehouseItem(session, NEW_DRAFT, d.item, d.from) ?? ""),
         }),
       );
       return { drag: (e) => relay(e, FROM) };

@@ -233,6 +233,21 @@ describe("a pointer drag from the picker frame onto the composer (KOBE-553)", ()
     expect(ghost()).toBeNull();
   });
 
+  it.each(["constructor", "__proto__", "toString", "hasOwnProperty", 7])(
+    "a hostile kind %s draws the generic icon and the chat keeps working",
+    async (kind) => {
+      const picker = await openWithPicker(thread());
+      const input = await placedComposer();
+      picker.drag("drag-start", { item: { kind, identifier: "x" }, ...ON_ROW });
+      const g = must(ghost());
+      expect(g.querySelector('[data-kobe-item-icon="generic"]')).not.toBeNull();
+      expect(g.textContent).toContain("x");
+      picker.drag("drag-end", OVER_COMPOSER);
+      await waitFor(() => expect(hint()).toBe(LAKEHOUSE_DROP_REFUSED));
+      expect(input.isConnected).toBe(true);
+    },
+  );
+
   it("an invalid item is refused with the KOBE-551 notice; nothing goes in (ac-4)", async () => {
     const user = userEvent.setup();
     const picker = await openWithPicker(thread());

@@ -53,7 +53,7 @@ function parse(raw: string): Record<string, unknown> | undefined {
 }
 
 /** The item's segments, or undefined when a field is missing, extra or not one segment. */
-function segmentsOf(item: Record<string, unknown>): string[] | undefined {
+function segmentsOf(item: Readonly<Record<string, unknown>>): string[] | undefined {
   const kind = item["kind"];
   if (typeof kind !== "string" || !Object.hasOwn(SHAPES, kind)) return undefined;
   const shape = SHAPES[kind as LakehouseKind];
@@ -81,8 +81,18 @@ function segmentsOf(item: Record<string, unknown>): string[] | undefined {
  */
 export function lakehouseItemContent(raw: string): readonly Record<string, unknown>[] | undefined {
   const item = parse(raw);
-  const segments = item === undefined ? undefined : segmentsOf(item);
-  if (item === undefined || segments === undefined) return undefined;
+  return item === undefined ? undefined : lakehouseItemContentOf(item);
+}
+
+/**
+ * {@link lakehouseItemContent} for an item already parsed, as a pointer drag over the bridge
+ * carries it (KOBE-553; the bridge capped its size).
+ */
+export function lakehouseItemContentOf(
+  item: Readonly<Record<string, unknown>>,
+): readonly Record<string, unknown>[] | undefined {
+  const segments = segmentsOf(item);
+  if (segments === undefined) return undefined;
   const identifier = segments.join(".");
   const uri = URI_PREFIX + segments.join("/");
   if (identifier.length > IDENTIFIER_MAX || uri.length > URI_MAX) return undefined;
