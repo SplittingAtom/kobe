@@ -1,6 +1,6 @@
 # KOBE-550: Catalyst look: panel hover glow in every theme and a Catalyst preset
 
-- **Status:** in progress
+- **Status:** merged (PR #460, main a2a89e27); gate1 `local-a2a89e27b34c`
 - **Branch / worktree:** `kobe-550-catalyst-look` in `../Kobe-wt550`
 - **Depends on:** none (theming lane KOBE-497..503 shipped 2026-10-29)
 
@@ -63,4 +63,11 @@ Added by Chris during the run (2026-11-06), same PR:
   floor in both schemes), `charts/kobe/tests/branding-presets.test.ts`.
 - ac-3: `presets.test.ts` glow/ambient/shadow tests; docs/theming.md §3.1, §7, §9.
 - ac-4: `pnpm verify`, CI on the PR.
-- ac-5: gate1 deploy and browser check (below, when done).
+- ac-5: gate1 `local-a2a89e27b34c` (Helm upgrade with `--reset-values`, reconcile failed:0,
+  branding untouched: "Kaiju", tokyo-nights). Chromium on compute2 against gate1: the focused
+  composer carries `box-shadow: oklab(… / 0.28) 0 0 20px` (the brand glow); the Appearance page
+  lists Catalyst and previews its light and Rehoboam-dark palettes (selected, not saved); the
+  rail's Lakehouse Picker shows no "App from" header. The rewritten `thread-lineage` and `fork`
+  browser specs (the chip's menu navigation over three generations, click-to-rename) passed on
+  gate1: 6 passed, 1 skipped, 1.9 min. Not captured: a hovered tool-call card (no thread with tool
+  calls at hand); the hover rule is pinned by `theme-css.test.ts` and the chat CSS snapshot.

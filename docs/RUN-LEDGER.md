@@ -9,6 +9,21 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Catalyst look lane (2026-11-06/07, Chris's asks during the run):** KOBE-550 (PR #460, main
+  a2a89e27): the Catalyst query tool's look in Kobe — a brand-coloured hover glow on every card-like
+  surface in every theme (`kobe-panel`, glow tokens, docs/theming.md §7), a seventh preset
+  `catalyst` (light + Rehoboam dark, glow shadows, dark ambient), the Used-skill chip's gold icon,
+  click-to-rename on the thread name (no pencil), the lineage strip as one inverted sharp chip (spec
+  TL3 amended), no "App from" header on MCP app frames (T9 amended). Deployed to kobe-gate1 as
+  `local-a2a89e27b34c` (rollback `local-cbaf76e1559a`; `local-688f4360c7f5` pruned), reconcile
+  failed:0; composer glow and the Catalyst preview checked in Chromium; `thread-lineage` and `fork`
+  specs passed on gate1 (6 passed). KOBE-551 (PR #461, main 02c12b56): a Lakehouse Picker item
+  dropped on the composer (`application/x-catalyst-lakehouse+json`, validated, never trusted) adds
+  exactly what a picker click adds (the chip and its reference; no text since KOBE-490 — decided
+  for parity, recorded in the ticket ledger); a Firefox Playwright project behind
+  `KOBE_ALL_BROWSERS=1`. Deployed as `local-02c12b56b386` (rollback `local-a2a89e27b34c`); the
+  `lakehouse-drop` spec passed on gate1 in Chromium and Firefox (synthesized drag; the real picker drag awaits the Catalyst build). Open for Chris: Outfit + JetBrains Mono (TH10),
+  floating shell columns with gaps (§9), whether Catalyst becomes gate1's preset.
 - **Conversation tree lane (2026-11-06, spec by Chris's decisions of 2026-11-05):**
   `docs/specs/conversation-tree.md` (Hadron spec e8b1281a; docs PR #446). Shipped in per-ticket PRs:
   KOBE-541 spike (#447: a Pi 1.4 extension summarises a branch through `navigateTree`, and
