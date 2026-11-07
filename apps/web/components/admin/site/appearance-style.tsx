@@ -37,11 +37,15 @@ const CORNER_LABELS: Readonly<Record<CornerStyle, string>> = {
   soft: "Soft",
   round: "Round",
 };
+/** KOBE-555: only the catalyst typeface downloads anything (app/faces.ts). */
+export const TYPEFACE_HINT =
+  "System font stacks download nothing; Outfit (Catalyst) ships two font files from this server.";
 const FONT_LABELS: Readonly<Record<FontStack, string>> = {
   system: "System",
   humanist: "Humanist",
   grotesk: "Grotesk",
   serif: "Serif",
+  catalyst: "Outfit (Catalyst)",
 };
 
 function presetAccent(id: PresetId): string {
@@ -194,7 +198,7 @@ function CustomFields({
           />
         ))}
       </ChoiceGroup>
-      <ChoiceGroup legend="Typeface" hint="System font stacks: nothing is downloaded.">
+      <ChoiceGroup legend="Typeface" hint={TYPEFACE_HINT}>
         {FONT_STACKS.map((f) => (
           <Radio
             key={f}

@@ -31,6 +31,9 @@ COPY --from=build /repo/apps/web/public ./apps/web/public
 RUN mkdir -p apps/web/.next/cache && chown 1000:1000 apps/web/.next/cache
 # Kobe's license, NOTICE and third-party inventory (Apache-2.0 section 4, KOBE-375).
 COPY LICENSE NOTICE THIRD_PARTY_LICENSES.md /usr/share/doc/kobe/
+# The shipped fonts' licenses (SIL OFL 1.1, KOBE-555); the browser gets the fonts from .next/static.
+COPY apps/web/app/fonts/outfit/OFL.txt /usr/share/doc/kobe/fonts/outfit/OFL.txt
+COPY apps/web/app/fonts/jetbrains-mono/OFL.txt /usr/share/doc/kobe/fonts/jetbrains-mono/OFL.txt
 # Files stay root-owned (read-only to the app); numeric non-root user so runAsNonRoot can verify it.
 USER 1000:1000
 EXPOSE 8080

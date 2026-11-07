@@ -1582,10 +1582,19 @@ From `e2e/browser/package-lock.json`.
 
 ## Assets (icons and fonts)
 
-The web UI ships no font files (it uses the system font stacks) and no images; its icons come from lucide-react (in the npm table). Fonts reach the sandbox image only inside Python packages, which use them to render charts and PDFs.
+The web UI ships no images; its icons come from lucide-react (in the npm table) and its font files are listed under Fonts. Fonts reach the sandbox image only inside Python packages, which use them to render charts and PDFs.
 
 | Component | Version | License (SPDX) | How used | Where | License text | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | Lucide icons (`lucide-react`) | 1.55.0 | ISC | linked, bundled | web image | [license](https://github.com/lucide-icons/lucide/blob/main/LICENSE) | Lucide is ISC; icons derived from Feather are MIT, as its LICENSE states. |
 | Fonts and font metrics in matplotlib (DejaVu, STIX, Computer Modern, PDF core-font metrics) | matplotlib 3.11.2 | Bitstream-Vera AND OFL-1.1 AND LicenseRef-BaKoMa AND APAFML | bundled (data files of a Python package) | sandbox image (matplotlib/mpl-data/fonts) | [license](https://github.com/matplotlib/matplotlib/tree/main/LICENSE) | Font files read by matplotlib to draw charts, shipped unmodified inside its wheel with their license files (LICENSE_DEJAVU, LICENSE_STIX); font licenses cover the fonts, not the charts made with them. Approved by Chris on 2026-10-17 (KOBE-375). |
 | Fonts in reportlab (Bitstream Vera, DarkGarden, Type 1 core-font substitutes) | reportlab 5.0.1 | Bitstream-Vera AND GPL-2.0-or-later WITH Font-exception-2.0 AND BSD-3-Clause | bundled (data files of a Python package) | sandbox image (reportlab/fonts) | [license](https://github.com/MrBitBucket/reportlab-mirror/blob/master/LICENSE) | Font files shipped unmodified inside reportlab's wheel with their license files. The DarkGarden font is GPL with the font exception, so PDFs that embed it are not covered by the GPL; Kobe neither modifies nor links it. Approved by Chris on 2026-10-17 (KOBE-375). |
+
+## Fonts
+
+Typefaces the web image serves to browsers (KOBE-555, theming TH10 as amended): the Catalyst preset's Outfit and JetBrains Mono, self-hosted from apps/web/app/fonts (never fetched from a font service). Each is the project's variable font converted from TTF to WOFF2 and otherwise unmodified, shipped under its own name with its OFL.txt beside it.
+
+| Component | Version | License (SPDX) | How used | Where | License text | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Outfit typeface (variable, `Outfit[wght].woff2`) | 1.1 | OFL-1.1 | bundled (web image, served to browsers) | web image (apps/web/app/fonts/outfit) | [license](https://github.com/Outfitio/Outfit-Fonts/blob/1.1/OFL.txt) | Approved by Chris on 2026-11-07 (KOBE-555). |
+| JetBrains Mono typeface (variable, `JetBrainsMono[wght].woff2`) | 2.304 | OFL-1.1 | bundled (web image, served to browsers) | web image (apps/web/app/fonts/jetbrains-mono) | [license](https://github.com/JetBrains/JetBrainsMono/blob/v2.304/OFL.txt) | Approved by Chris on 2026-11-07 (KOBE-555). |

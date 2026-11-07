@@ -19,6 +19,9 @@ export const ALLOWED_LICENSES: ReadonlySet<string> = new Set([
   "Zlib",
   "CC0-1.0",
   "Unlicense",
+  // SIL Open Font License: allowed because fonts may use it (approved by Chris 2026-11-07,
+  // KOBE-555). The check cannot tell a font from other code, so any OFL package passes.
+  "OFL-1.1",
 ]);
 
 /** SPDX `WITH` exceptions that only add permissions to an already-allowed license. */

@@ -550,8 +550,8 @@ sections:
   - id: assets
     title: Assets (icons and fonts)
     intro: >-
-      The web UI ships no font files (it uses the system font stacks) and no images; its icons
-      come from lucide-react (in the npm table). Fonts reach the sandbox image only inside Python
+      The web UI ships no images; its icons come from lucide-react (in the npm table) and its
+      font files are listed under Fonts. Fonts reach the sandbox image only inside Python
       packages, which use them to render charts and PDFs.
     rows:
       - id: lucide
@@ -589,6 +589,33 @@ sections:
           Font files shipped unmodified inside reportlab's wheel with their license files. The
           DarkGarden font is GPL with the font exception, so PDFs that embed it are not covered by
           the GPL; Kobe neither modifies nor links it.
+
+  - id: fonts
+    title: Fonts
+    intro: >-
+      Typefaces the web image serves to browsers (KOBE-555, theming TH10 as amended): the
+      Catalyst preset's Outfit and JetBrains Mono, self-hosted from apps/web/app/fonts (never
+      fetched from a font service). Each is the project's variable font converted from TTF to
+      WOFF2 and otherwise unmodified, shipped under its own name with its OFL.txt beside it.
+    rows:
+      - id: outfit
+        approval: { by: Chris, on: 2026-11-07, ref: KOBE-555 }
+        component: Outfit typeface (variable, `Outfit[wght].woff2`)
+        version: 1.1
+        license: OFL-1.1
+        use: bundled (web image, served to browsers)
+        where: web image (apps/web/app/fonts/outfit)
+        link: https://github.com/Outfitio/Outfit-Fonts/blob/1.1/OFL.txt
+        images: []
+      - id: jetbrains-mono
+        approval: { by: Chris, on: 2026-11-07, ref: KOBE-555 }
+        component: JetBrains Mono typeface (variable, `JetBrainsMono[wght].woff2`)
+        version: 2.304
+        license: OFL-1.1
+        use: bundled (web image, served to browsers)
+        where: web image (apps/web/app/fonts/jetbrains-mono)
+        link: https://github.com/JetBrains/JetBrainsMono/blob/v2.304/OFL.txt
+        images: []
 
 # Every top-level key of charts/kobe/values.yaml: "first-party" (Kobe's own components),
 # "site-provided" (a service the site operates; Kobe ships nothing) or the inventory rows it

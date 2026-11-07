@@ -1,13 +1,16 @@
 import { contrastRatio, PRESET_IDS, PRESET_LABELS } from "@kobe/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  FACE_VARIABLES,
   FONT_STACK_VALUES,
   LANE_1_VALUE,
+  MONO_STACK_VALUES,
   LANE_TOKENS,
   PRESET_SCHEME_TOKENS,
   PRESETS,
   RADIUS_SCALES,
   RADIUS_TOKENS,
+  SYSTEM_MONO_STACK,
   type PresetSchemeToken,
   type SchemeValues,
 } from "./presets";
@@ -66,6 +69,25 @@ describe("presets", () => {
     }
   });
 
+  /** KOBE-555 (ac-2, TH10 as amended): only Catalyst names the shipped faces, over system stacks. */
+  it("catalyst starts its stacks with Outfit and JetBrains Mono; the others keep system stacks", () => {
+    expect(PRESETS.catalyst.font).toBe("catalyst");
+    expect(FONT_STACK_VALUES.catalyst).toBe(
+      `var(${FACE_VARIABLES.outfit}, Outfit), ${FONT_STACK_VALUES.grotesk}`,
+    );
+    expect(MONO_STACK_VALUES.catalyst).toBe(
+      `var(${FACE_VARIABLES.jetbrainsMono}, "JetBrains Mono"), ${THEME_LIGHT.get("--kobe-font-mono")}`,
+    );
+    const shipped = /var\(--kobe-face-|Outfit|JetBrains/;
+    for (const preset of Object.values(PRESETS)) {
+      if (preset.id === "catalyst") continue;
+      expect(FONT_STACK_VALUES[preset.font], preset.id).not.toMatch(shipped);
+      expect(MONO_STACK_VALUES[preset.font], preset.id).toBeUndefined();
+    }
+    expect(PRESETS.slate.font).toBe("grotesk");
+    expect(PRESETS.ember.font).toBe("grotesk");
+  });
+
   /** KOBE-550: Catalyst's own glow (its tokens' --glow-color), glow shadows and the dark ambient. */
   it("catalyst carries Catalyst's glow, glow shadows and the Rehoboam ambient", () => {
     const { light, dark } = PRESETS.catalyst;
@@ -105,6 +127,9 @@ describe("presets", () => {
       expect(preset.dark[token], `dark ${token}`).toBe(THEME_DARK.get(token));
     }
     expect(FONT_STACK_VALUES[preset.font]).toBe(THEME_LIGHT.get("--kobe-font-sans"));
+    expect(MONO_STACK_VALUES[preset.font]).toBeUndefined();
+    expect(SYSTEM_MONO_STACK).toBe(THEME_LIGHT.get("--kobe-font-mono"));
+    expect(Object.keys(MONO_STACK_VALUES)).toEqual(["catalyst"]);
     for (const token of RADIUS_TOKENS) {
       expect(RADIUS_SCALES[preset.corners][token], token).toBe(THEME_LIGHT.get(token));
     }
@@ -122,6 +147,12 @@ describe("presets", () => {
     );
     expect(FONT_STACK_VALUES.serif).toBe(
       'Charter, "Bitstream Charter", "Sitka Text", Cambria, serif',
+    );
+    expect(FONT_STACK_VALUES.catalyst).toBe(
+      'var(--kobe-face-outfit, Outfit), Inter, Roboto, "Helvetica Neue", "Arial Nova", "Nimbus Sans", Arial, sans-serif',
+    );
+    expect(MONO_STACK_VALUES.catalyst).toBe(
+      'var(--kobe-face-jetbrains-mono, "JetBrains Mono"), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     );
     expect(Object.values(RADIUS_SCALES.sharp)).toEqual(["0", "0", "0", "0", "0"]);
     expect(Object.values(RADIUS_SCALES.round)).toEqual([

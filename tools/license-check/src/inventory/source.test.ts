@@ -37,9 +37,24 @@ describe("parseInventory", () => {
   it("parses the committed inventory", () => {
     const text = readFileSync(new URL("../../inventory.yaml", import.meta.url), "utf8");
     const inventory = parseInventory(text);
-    expect(inventory.sections.map((s) => s.id)).toEqual(["images", "chart", "dev", "assets"]);
+    expect(inventory.sections.map((s) => s.id)).toEqual([
+      "images",
+      "chart",
+      "dev",
+      "assets",
+      "fonts",
+    ]);
     expect(inventory.sections.flatMap((s) => s.rows.map((r) => r.id))).toEqual(
       expect.arrayContaining(["pi", "agent-sandbox", "gvisor", "kata", "cnpg", "postgres"]),
+    );
+    // KOBE-555: the shipped faces, each with Chris's approval of 2026-11-07.
+    const fonts = inventory.sections.find((s) => s.id === "fonts")?.rows ?? [];
+    expect(fonts.map((r) => [r.id, r.license, r.approval])).toEqual(
+      ["outfit", "jetbrains-mono"].map((id) => [
+        id,
+        "OFL-1.1",
+        { by: "Chris", on: "2026-11-07", ref: "KOBE-555" },
+      ]),
     );
   });
 

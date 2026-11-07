@@ -321,6 +321,8 @@ describe("Appearance preview", () => {
       expect(root.querySelector("a")).not.toBeNull();
       expect(root.querySelectorAll('[data-slot="console-badge"]')).toHaveLength(3);
       expect(root.querySelector("input")).not.toBeNull();
+      // KOBE-555: a code sample shows the mono stack (Catalyst's JetBrains Mono) beside the sans.
+      expect(root.querySelector("code.font-mono")).not.toBeNull();
       expect(root.hasAttribute("inert")).toBe(true);
     }
   });

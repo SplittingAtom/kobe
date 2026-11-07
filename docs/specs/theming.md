@@ -152,7 +152,11 @@ Display names: Default, Slate, Forest, Plum, Ember, Tokyo Nights.
 
 **TH10. Typeface choice is a stack, not a file.** `system` (today's `system-ui`), `humanist`,
 `grotesk`, `serif`: four system font stacks. No font uploads in v1 (`font-src 'self'` stays; a
-later ticket may allow WOFF2 uploads through the same asset table).
+later ticket may allow WOFF2 uploads through the same asset table). _Amended 2026-11-07 (Chris,
+KOBE-555): system stacks by default; a preset may name a shipped face._ To give the Catalyst preset
+its own look, Outfit and JetBrains Mono (SIL OFL 1.1) ship self-hosted in the web image as a fifth
+typeface, `catalyst`, whose sans and mono stacks start with them over system fallbacks (theming
+doc §5); `font-src 'self'` is unchanged and no font is fetched from elsewhere.
 
 **TH11. Corners: `sharp`, `soft` (today), `round`.** Three radius scales mapped onto
 `--kobe-radius-*`, which Tailwind's `rounded-*` utilities and the CSS modules both read after T2.
