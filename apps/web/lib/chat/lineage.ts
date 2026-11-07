@@ -174,7 +174,13 @@ export function foldLabel(count: number): string {
   return `… ${count} more`;
 }
 
-/** One item of the phone line's menu: the whole family, in the strip's order. */
+/** The thread's parent (its nearest readable ancestor), which the lineage chip names; else null. */
+export function lineageParent(lineage: ThreadLineageResponse): LineageThread | null {
+  const parent = lineage.ancestors.at(-1);
+  return parent === undefined ? null : named(parent);
+}
+
+/** One item of the family menu: the whole family, in generation order. */
 export interface FamilyItem {
   readonly depth: number;
   /** null: the hidden root (shown muted, not a choice). */

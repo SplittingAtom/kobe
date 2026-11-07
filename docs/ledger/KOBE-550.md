@@ -22,6 +22,17 @@ sheets carry a static glow shadow; the dark page has an ambient radial wash.
 3. Preset `catalyst`: Catalyst's light palette and its "Rehoboam" dark, translucent accent borders,
    its glow colour per scheme, glow shadows, the dark ambient.
 
+Added by Chris during the run (2026-11-06), same PR:
+
+4. The Used-skill chip's icon is gold (the tool badge's gold token).
+5. The conversation header: no pencil; the thread name itself is the rename button ("Rename
+   <title>", `data-command="rename-thread"`; the h2 stays, visually hidden, as the region's label).
+6. The lineage strip is one chip at every width: fork icon first, the parent's title, a chevron;
+   sharp corners, the page's colours inverted (`bg-foreground text-background`); its menu is the
+   former phone-line family menu. Rows, per-row links, siblings dropdowns, the fold and the
+   fork-point excerpt are gone (spec TL3 amended; `lineageRows` and friends stay in the lib for
+   the Conversation tree). `e2e/browser/tests/{fork,thread-lineage}.spec.ts` rewritten for the chip.
+
 ## Decisions
 
 - Glow is a Kobe-wide behaviour, not a preset feature: Chris asked for the look in Kobe, and the

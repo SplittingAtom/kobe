@@ -74,10 +74,10 @@ describe("fork to a new thread from a message (ac-1)", () => {
     // The fork ends at the chosen answer and says where it came from.
     expect(await screen.findByText("Mostly renewals.")).toBeTruthy();
     expect(screen.queryByText("Mostly people.")).toBeNull();
-    // The new thread's lineage strip shows its source above it, without a reload (KOBE-535 ac-4).
+    // The new thread's lineage chip names its source, without a reload (KOBE-535 ac-4; the chip
+    // since the TL3 amendment of 2026-11-06).
     const origin = await screen.findByRole("navigation", { name: "Thread lineage" });
-    expect(within(origin).getByRole("link", { name: "Quarterly plan" })).toBeTruthy();
-    expect(within(origin).getByText("Renewals").tagName).toBe("STRONG");
+    expect(within(origin).getByRole("button", { name: "Forked from Quarterly plan" })).toBeTruthy();
   });
 
   it("keeps the dialog open with the server's refusal", async () => {
@@ -127,14 +127,21 @@ describe("fork to a new thread from a message (ac-1)", () => {
   });
 });
 
-describe("the fork's origin (ac-1, ac-3, ac-6; the lineage strip since KOBE-535)", () => {
-  it("names the source and the message, and links back to the source", async () => {
+describe("the fork's origin (ac-1, ac-3, ac-6; the lineage chip since KOBE-535)", () => {
+  it("names the source on the chip, and its menu opens the source in place", async () => {
     const src = source();
     const fork = forkOf(src, src.a1, true);
     openApp(fake, fork);
     const origin = await screen.findByRole("navigation", { name: "Thread lineage" });
-    expect(origin.textContent).toMatch(/Quarterly plan.*Renewals deep dive at “Mostly renewals\.”/);
-    await userEvent.setup().click(within(origin).getByRole("link", { name: "Quarterly plan" }));
+    const user = userEvent.setup();
+    await user.click(within(origin).getByRole("button", { name: "Forked from Quarterly plan" }));
+    const menu = await screen.findByRole("menu");
+    expect(
+      within(menu)
+        .getAllByRole("menuitemcheckbox")
+        .map((i) => i.textContent),
+    ).toEqual(["Quarterly plan", "Renewals deep dive"]);
+    await user.click(within(menu).getByRole("menuitemcheckbox", { name: "Quarterly plan" }));
     await waitFor(() => expect(window.location.search).toBe(`?thread=${src.id}`));
     expect(await screen.findByText("Mostly people.")).toBeTruthy();
   });
@@ -144,38 +151,10 @@ describe("the fork's origin (ac-1, ac-3, ac-6; the lineage strip since KOBE-535)
     const fork = forkOf(src, src.u1, false);
     openApp(fake, fork);
     const origin = await screen.findByRole("navigation", { name: "Thread lineage" });
-    expect(origin.textContent).toMatch(/a thread you can.t open.*What drives revenue\?/);
+    expect(
+      within(origin).getByRole("button", { name: "Forked from a thread you can't open" }),
+    ).toBeTruthy();
     expect(within(origin).queryByRole("link")).toBeNull();
-  });
-
-  it("leaves a modified click on the source link to the browser (new tab or window)", async () => {
-    const src = source();
-    const fork = forkOf(src, src.a1, true);
-    openApp(fake, fork);
-    const origin = await screen.findByRole("navigation", { name: "Thread lineage" });
-    const link = within(origin).getByRole("link", { name: "Quarterly plan" });
-    expect(link.getAttribute("href")).toBe(`/?thread=${src.id}`);
-    // Record what the app did, then stop happy-dom's own navigation.
-    let prevented: boolean[] = [];
-    const record = (e: Event) => {
-      prevented = [...prevented, e.defaultPrevented];
-      e.preventDefault();
-    };
-    window.addEventListener("click", record);
-    try {
-      for (const mods of [
-        { metaKey: true },
-        { ctrlKey: true },
-        { shiftKey: true },
-        { altKey: true },
-      ]) {
-        link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ...mods }));
-      }
-      link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 1 }));
-    } finally {
-      window.removeEventListener("click", record);
-    }
-    expect(prevented).toEqual([false, false, false, false, false]);
   });
 
   it("shows a copied prompt's attachments by name, though the files stay with the source", async () => {

@@ -14,166 +14,71 @@ import { OpenThreadContext } from "./fork-dialog";
 import { ChatSessionContext, type KobeThreadExtras } from "./kobe-runtime";
 import { LineageStrip, LineageStripView } from "./lineage-strip";
 
-/** KOBE-535 (TL3, TL4): the lineage strip above the conversation. */
+/** KOBE-535 (TL3, TL4): the lineage chip above the conversation (TL3 as amended 2026-11-06). */
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
 
-function view(lineage: ThreadLineageResponse, compact = false, onOpenThread = vi.fn()) {
+function view(lineage: ThreadLineageResponse, onOpenThread = vi.fn()) {
   render(
     <div data-kobe-chat>
-      <LineageStripView
-        lineage={lineage}
-        excerpt="Redo Q3 with the new rates"
-        compact={compact}
-        onOpenThread={onOpenThread}
-      />
+      <LineageStripView lineage={lineage} onOpenThread={onOpenThread} />
     </div>,
   );
   return onOpenThread;
 }
 
 const strip = () => screen.getByRole("navigation", { name: "Thread lineage" });
-const rows = () => within(strip()).getAllByRole("listitem");
+/** The one chip: a menu button. */
+const chip = () => within(strip()).getByRole("button");
 
-async function openMenu(name: string | RegExp) {
-  await userEvent.setup().click(within(strip()).getByRole("button", { name }));
+async function openMenu() {
+  await userEvent.setup().click(chip());
   return screen.findByRole("menu");
 }
 
-describe("the rows (ac-1)", () => {
-  it("a plain fork: its source as a link, then the thread on screen with its fork point", () => {
-    view(lineageOf({ ancestors: [ancestor(1, "Budget 2027")] }));
-    const [root, self] = rows();
-    expect(within(must(root)).getByRole("link", { name: "Budget 2027" }).getAttribute("href")).toBe(
-      `/?thread=${tid(1)}`,
-    );
-    expect(rows()).toHaveLength(2);
-    expect(within(must(self)).queryByRole("link")).toBeNull();
-    expect(within(must(self)).getByText("Try the Q3 numbers").tagName).toBe("STRONG");
-    expect(self?.textContent).toBe("Try the Q3 numbers at “Redo Q3 with the new rates”");
-  });
+/** The menu's choices as [text, checked]. */
+const choices = (menu: HTMLElement) =>
+  within(menu)
+    .getAllByRole("menuitemcheckbox")
+    .map((i) => [i.textContent, i.getAttribute("aria-checked")]);
 
-  it("a family with siblings: '2 of 3', newest first, the one in the path checked", async () => {
-    const sibs = [relative(3, "Sales cut"), relative(2, "Marketing cut"), relative(4, "Ops cut")];
-    const open = view(
-      lineageOf({ ancestors: [ancestor(1, "Budget 2027"), ancestor(2, "Marketing cut", sibs)] }),
-    );
-    expect(within(must(rows()[0])).queryByRole("button")).toBeNull();
-    const menu = await openMenu("Marketing cut · 2 of 3");
-    const items = within(menu).getAllByRole("menuitemradio");
-    expect(items.map((i) => [i.textContent, i.getAttribute("aria-checked")])).toEqual([
-      ["Sales cut", "false"],
-      ["Marketing cut", "true"],
-      ["Ops cut", "false"],
+/** TL3 as amended by Chris (2026-11-06): one chip, the fork icon first, its menu the family. */
+describe("the chip (ac-1)", () => {
+  it("a plain fork: one chip naming the parent, fork icon first, inverted and sharp", async () => {
+    const open = view(lineageOf({ ancestors: [ancestor(1, "Budget 2027")] }));
+    expect(within(strip()).queryAllByRole("listitem")).toEqual([]);
+    expect(within(strip()).queryByRole("link")).toBeNull();
+    const button = chip();
+    expect(button).toBe(within(strip()).getByRole("button", { name: "Forked from Budget 2027" }));
+    expect(button.getAttribute("aria-haspopup")).toBe("menu");
+    expect(button.firstElementChild?.tagName.toLowerCase()).toBe("svg");
+    for (const cls of ["rounded-none", "bg-foreground", "text-background"]) {
+      expect(button.className).toContain(cls);
+    }
+    const menu = await openMenu();
+    expect(choices(menu)).toEqual([
+      ["Budget 2027", "true"],
+      ["Try the Q3 numbers", "true"],
     ]);
     expect(menu.closest("[data-kobe-chat]")).not.toBeNull();
-    await userEvent.setup().click(must(items[0]));
-    expect(open).toHaveBeenCalledWith(tid(3));
+    await userEvent
+      .setup()
+      .click(within(menu).getByRole("menuitemcheckbox", { name: "Budget 2027" }));
+    expect(open).toHaveBeenCalledWith(tid(1));
   });
 
-  it("counts a cut sibling list as 50+", () => {
-    const sibs = [relative(2, "Mine"), relative(3, "Other")];
-    view(
-      lineageOf({
-        ancestors: [ancestor(1, "Root")],
-        selfSiblings: [relative(5, "x"), relative(99, "y")],
-      }),
-    );
-    expect(within(strip()).getByRole("button").textContent).toContain("2 of 2");
-    cleanup();
-    view(
-      lineageOf({ ancestors: [ancestor(1, "Root"), ancestor(2, "Mine", sibs, { more: true })] }),
-    );
-    expect(within(strip()).getByRole("button", { name: "Mine · 1 of 50+" })).toBeTruthy();
-  });
-
-  it("forks of the thread on screen: '2 forks' newest first; one fork is a plain link", async () => {
-    const open = view(lineageOf({ forks: [relative(7, "Newer"), relative(6, "Older")] }));
-    expect(rows()).toHaveLength(2);
-    const menu = await openMenu("2 forks");
-    expect(
-      within(menu)
-        .getAllByRole("menuitem")
-        .map((i) => i.textContent),
-    ).toEqual(["Newer", "Older"]);
-    await userEvent.setup().click(within(menu).getByRole("menuitem", { name: "Older" }));
-    expect(open).toHaveBeenCalledWith(tid(6));
-    cleanup();
-    view(lineageOf({ forks: [relative(7, "Only child")] }));
-    const last = must(rows().at(-1));
-    expect(last.textContent).toBe("1 fork: Only child");
-    expect(within(last).getByRole("link", { name: "Only child" })).toBeTruthy();
-  });
-
-  it("a hidden root: a first muted row that is not a link", () => {
-    view(lineageOf({ rootHidden: true }));
-    const [hidden, self] = rows();
-    expect(hidden?.textContent).toBe("a thread you can't open");
-    expect(within(strip()).queryByRole("link")).toBeNull();
-    expect(self?.textContent).toContain("Try the Q3 numbers at “Redo Q3");
-  });
-
-  it("a purged root: nothing extra, the chain starts lower", () => {
-    view(lineageOf({ ancestors: [ancestor(2, "Middle")] }));
-    expect(rows().map((r) => r.textContent)).toEqual([
-      "Middle",
-      "Try the Q3 numbers at “Redo Q3 with the new rates”",
-    ]);
-    cleanup();
-    // Its only source purged: an ordinary-looking thread, nothing shown.
-    view(lineageOf({ forkedAt: "e-fork" }));
-    expect(screen.queryByRole("navigation")).toBeNull();
-  });
-
-  it("folds at five generations: root, '… 3 more', parent, self", async () => {
-    const open = view(
-      lineageOf({ ancestors: [1, 2, 3, 4, 5].map((n) => ancestor(n, `Gen ${n}`)) }),
-    );
-    expect(rows().map((r) => r.textContent)).toEqual([
-      "Gen 1",
-      "… 3 more",
-      "Gen 5",
-      "Try the Q3 numbers at “Redo Q3 with the new rates”",
-    ]);
-    const menu = await openMenu("… 3 more");
-    expect(
-      within(menu)
-        .getAllByRole("menuitem")
-        .map((i) => i.textContent),
-    ).toEqual(["Gen 2", "Gen 3", "Gen 4"]);
-    await userEvent.setup().click(within(menu).getByRole("menuitem", { name: "Gen 3" }));
-    expect(open).toHaveBeenCalledWith(tid(3));
-  });
-
-  it("marks a thread in Trash, in a row and in a menu", async () => {
-    view(
-      lineageOf({
-        ancestors: [ancestor(1, "Old budget", [], { inTrash: true })],
-        forks: [relative(7, "Gone", true), relative(8, "Here")],
-      }),
-    );
-    expect(rows()[0]?.textContent).toBe("Old budget · In Trash");
-    const menu = await openMenu("2 forks");
-    expect(
-      within(menu)
-        .getAllByRole("menuitem")
-        .map((i) => i.textContent),
-    ).toEqual(["Gone · In Trash", "Here"]);
-  });
-
-  it("is one line under 820 px, its menu holding the whole family in order", async () => {
+  it("a family with siblings: every generation with its siblings, the path checked", async () => {
     const sibs = [relative(5, "Other"), relative(2, "Mid")];
     const open = view(
       lineageOf({
         ancestors: [ancestor(1, "Root"), ancestor(2, "Mid", sibs)],
         forks: [relative(8, "Child")],
       }),
-      true,
     );
-    expect(within(strip()).queryAllByRole("listitem")).toEqual([]);
-    const menu = await openMenu("Forked thread · 4 related");
+    expect(chip().textContent).toBe("Forked from Mid");
+    const menu = await openMenu();
     const items = within(menu).getAllByRole("menuitemcheckbox");
     expect(items.map((i) => [i.textContent, i.getAttribute("aria-checked")])).toEqual([
       ["Root", "true"],
@@ -194,10 +99,78 @@ describe("the rows (ac-1)", () => {
     expect(open).toHaveBeenCalledWith(tid(5));
   });
 
+  it("forks of a root: the chip counts them; the thread on screen stays a checked item", async () => {
+    const open = view(lineageOf({ forks: [relative(7, "Newer"), relative(6, "Older")] }));
+    expect(within(strip()).getByRole("button", { name: "2 forks" })).toBeTruthy();
+    const menu = await openMenu();
+    expect(choices(menu)).toEqual([
+      ["Try the Q3 numbers", "true"],
+      ["Newer", "false"],
+      ["Older", "false"],
+    ]);
+    await userEvent.setup().click(within(menu).getByRole("menuitemcheckbox", { name: "Older" }));
+    expect(open).toHaveBeenCalledWith(tid(6));
+    cleanup();
+    view(lineageOf({ forks: [relative(7, "Only child")] }));
+    expect(within(strip()).getByRole("button", { name: "1 fork" })).toBeTruthy();
+  });
+
+  it("a hidden root: the chip says so; the menu's first item is muted and not a choice", async () => {
+    view(lineageOf({ rootHidden: true }));
+    expect(chip().textContent).toBe("Forked from a thread you can't open");
+    const menu = await openMenu();
+    const hidden = within(menu).getByRole("menuitem", { name: "a thread you can't open" });
+    expect(hidden.getAttribute("aria-disabled")).toBe("true");
+    expect(choices(menu)).toEqual([["Try the Q3 numbers", "true"]]);
+  });
+
+  it("a purged root: the chip names the next ancestor; a thread whose only source is gone shows nothing", () => {
+    view(lineageOf({ ancestors: [ancestor(2, "Middle")] }));
+    expect(chip().textContent).toBe("Forked from Middle");
+    cleanup();
+    view(lineageOf({ forkedAt: "e-fork" }));
+    expect(screen.queryByRole("navigation")).toBeNull();
+  });
+
+  it("a deep family is not folded: the menu lists every generation in order", async () => {
+    const open = view(
+      lineageOf({ ancestors: [1, 2, 3, 4, 5].map((n) => ancestor(n, `Gen ${n}`)) }),
+    );
+    expect(chip().textContent).toBe("Forked from Gen 5");
+    const menu = await openMenu();
+    expect(choices(menu).map(([text]) => text)).toEqual([
+      "Gen 1",
+      "Gen 2",
+      "Gen 3",
+      "Gen 4",
+      "Gen 5",
+      "Try the Q3 numbers",
+    ]);
+    await userEvent.setup().click(within(menu).getByRole("menuitemcheckbox", { name: "Gen 3" }));
+    expect(open).toHaveBeenCalledWith(tid(3));
+  });
+
+  it("marks a thread in Trash, on the chip and in the menu", async () => {
+    view(
+      lineageOf({
+        ancestors: [ancestor(1, "Old budget", [], { inTrash: true })],
+        forks: [relative(7, "Gone", true), relative(8, "Here")],
+      }),
+    );
+    expect(chip().textContent).toBe("Forked from Old budget · In Trash");
+    const menu = await openMenu();
+    expect(choices(menu).map(([text]) => text)).toEqual([
+      "Old budget · In Trash",
+      "Try the Q3 numbers",
+      "Gone · In Trash",
+      "Here",
+    ]);
+  });
+
   it("renders titles as text, never HTML", () => {
     view(lineageOf({ ancestors: [ancestor(1, "<img src=x onerror=alert(1)>")] }));
     expect(strip().querySelector("img")).toBeNull();
-    expect(rows()[0]?.textContent).toBe("<img src=x onerror=alert(1)>");
+    expect(chip().textContent).toBe("Forked from <img src=x onerror=alert(1)>");
   });
 });
 
@@ -258,38 +231,21 @@ function connected(source: LineageSource, openThread = vi.fn(), threadId = SELF)
 }
 
 describe("opening threads (ac-2)", () => {
-  it("opens a linked thread in place through OpenThreadContext", async () => {
+  it("opens a thread chosen in the chip's menu in place through OpenThreadContext", async () => {
     const { source } = fakeSource([lineageOf({ ancestors: [ancestor(1, "Budget 2027")] })]);
     const openThread = connected(source);
-    const link = await screen.findByRole("link", { name: "Budget 2027" });
-    await userEvent.setup().click(link);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Forked from Budget 2027" }));
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: "Budget 2027" }));
     expect(openThread).toHaveBeenCalledWith(tid(1));
   });
 
-  it("leaves a modified or middle click to the browser", async () => {
+  it("choosing the thread on screen opens nothing", async () => {
     const { source } = fakeSource([lineageOf({ ancestors: [ancestor(1, "Budget 2027")] })]);
     const openThread = connected(source);
-    const link = await screen.findByRole("link", { name: "Budget 2027" });
-    let prevented: boolean[] = [];
-    const record = (e: Event) => {
-      prevented = [...prevented, e.defaultPrevented];
-      e.preventDefault();
-    };
-    window.addEventListener("click", record);
-    try {
-      for (const mods of [
-        { metaKey: true },
-        { ctrlKey: true },
-        { shiftKey: true },
-        { altKey: true },
-      ]) {
-        link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ...mods }));
-      }
-      link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 1 }));
-    } finally {
-      window.removeEventListener("click", record);
-    }
-    expect(prevented).toEqual([false, false, false, false, false]);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Forked from Budget 2027" }));
+    await user.click(await screen.findByRole("menuitemcheckbox", { name: "Try the Q3 numbers" }));
     expect(openThread).not.toHaveBeenCalled();
   });
 });
@@ -351,12 +307,12 @@ describe("when it reads (ac-4, TL4)", () => {
     connected(source);
     await waitFor(() => expect(screen.queryByRole("navigation")).toBeNull());
     forked();
-    expect(await screen.findByRole("link", { name: "Quarterly plan" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Forked from Quarterly plan" })).toBeTruthy();
   });
 });
 
 describe("accessibility (ac-5)", () => {
-  it("is a navigation landmark the keyboard walks through, links and menus alike", async () => {
+  it("is a navigation landmark: the chip takes focus, its menu walks with the keys", async () => {
     const sibs = [relative(3, "Sales cut"), relative(2, "Marketing cut")];
     const open = view(
       lineageOf({
@@ -366,26 +322,23 @@ describe("accessibility (ac-5)", () => {
     );
     const user = userEvent.setup();
     await user.tab();
-    expect(document.activeElement).toBe(screen.getByRole("link", { name: "Budget 2027" }));
-    await user.tab();
-    const siblings = screen.getByRole("button", { name: "Marketing cut · 2 of 2" });
-    expect(document.activeElement).toBe(siblings);
-    expect(siblings.getAttribute("aria-haspopup")).toBe("menu");
-    await user.tab();
-    const forks = screen.getByRole("button", { name: "2 forks" });
-    expect(document.activeElement).toBe(forks);
+    const button = screen.getByRole("button", { name: "Forked from Marketing cut" });
+    expect(document.activeElement).toBe(button);
+    expect(button.getAttribute("aria-haspopup")).toBe("menu");
     await user.keyboard("{Enter}");
     const menu = await screen.findByRole("menu");
-    expect(document.activeElement?.textContent).toBe("A");
+    expect(document.activeElement?.textContent).toBe("Budget 2027");
     await user.keyboard("{ArrowDown}");
-    expect(document.activeElement?.textContent).toBe("B");
+    expect(document.activeElement?.textContent).toBe("Sales cut");
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).toBeNull();
-    expect(document.activeElement).toBe(forks);
+    expect(document.activeElement).toBe(button);
     expect(menu.isConnected).toBe(false);
     await user.keyboard("{Enter}");
     await screen.findByRole("menu");
+    await user.keyboard("{End}");
+    expect(document.activeElement?.textContent).toBe("B");
     await user.keyboard("{Enter}");
-    expect(open).toHaveBeenCalledWith(tid(7));
+    expect(open).toHaveBeenCalledWith(tid(8));
   });
 });
