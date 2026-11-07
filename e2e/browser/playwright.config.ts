@@ -63,13 +63,15 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"], ...browserUse, storageState: STORAGE_STATE },
     },
     // KOBE_ALL_BROWSERS=1: the MCP App frame spec also in Firefox and WebKit, to record what each
-    // does with WebRTC (KOBE-437 review MEDIUM-2); the Lakehouse Picker drop (KOBE-551) also in
-    // Firefox. Chromium stays the default project.
+    // does with WebRTC (KOBE-437 review MEDIUM-2); the Lakehouse Picker drop (KOBE-551) and the
+    // pointer drag from the picker frame (KOBE-553) also in Firefox. Chromium stays the default project.
     ...(process.env["KOBE_ALL_BROWSERS"] === "1"
       ? (["firefox", "webkit"] as const).map((name) => ({
           name,
           testMatch:
-            name === "firefox" ? /(app-frame|lakehouse-drop)\.spec\.ts/ : /app-frame\.spec\.ts/,
+            name === "firefox"
+              ? /(app-frame|lakehouse-drop|frame-drag)\.spec\.ts/
+              : /app-frame\.spec\.ts/,
           dependencies: ["setup"],
           use: {
             ...devices[name === "firefox" ? "Desktop Firefox" : "Desktop Safari"],

@@ -11,10 +11,12 @@ import {
 } from "react";
 import { appFrameUrl, callAppTool, listAppTools } from "../../lib/apps/app-api";
 import { APP_FRAME_SANDBOX } from "../../lib/apps/app-frame";
+import { pagePoint } from "../../lib/apps/frame-drag";
 import type { DisplayMode, ModelContext } from "../../lib/apps/bridge-schema";
 import {
   attachHostBridge,
   type AppMessage,
+  type BridgeDragEvent,
   type HostBridge,
   type ToolCallAnswer,
 } from "../../lib/apps/host-bridge";
@@ -65,6 +67,11 @@ export interface AppFrameProps {
   readonly onMessage?: ((message: AppMessage) => boolean) | undefined;
   /** `ui/update-model-context`: the context chip. False when refused. */
   readonly onModelContext?: ((context: ModelContext) => boolean) | undefined;
+  /**
+   * A pointer drag the app drives out of its frame (KOBE-553), each point already on the page:
+   * the iframe's bounding rect is read again for every notification (the frame may have moved).
+   */
+  readonly onDrag?: ((event: BridgeDragEvent) => void) | undefined;
   /** `ui/request-display-mode`: the mode actually shown. */
   readonly onDisplayMode?: ((mode: DisplayMode) => DisplayMode) | undefined;
   readonly fetchFn?: typeof fetch | undefined;
@@ -176,6 +183,13 @@ function FrameInstance(
           const next = Math.min(Math.max(Math.round(wanted), 1), maxHeight(current().placement));
           setHeight(next);
           current().onHeight?.(next);
+        },
+        drag: (event) => {
+          const onDrag = current().onDrag;
+          if (onDrag === undefined) return;
+          if (event.phase === "cancel") return onDrag(event);
+          const rect = frame.current?.getBoundingClientRect() ?? { left: 0, top: 0 };
+          onDrag({ ...event, ...pagePoint(rect, event.x, event.y) });
         },
         initialized: () => {
           const { toolInput, toolResult } = current();

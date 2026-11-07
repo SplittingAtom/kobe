@@ -34,8 +34,12 @@ const ICONS: Readonly<Record<string, LucideIcon>> = {
   document: FileTextIcon,
 };
 
+/** Own keys only: an inherited name ("constructor", "__proto__") is never a component. */
+const knownIcon = (kind: string): LucideIcon | undefined =>
+  Object.hasOwn(ICONS, kind) ? ICONS[kind] : undefined;
+
 export function itemIcon(kind: string): LucideIcon {
-  return ICONS[kind] ?? BoxIcon;
+  return knownIcon(kind) ?? BoxIcon;
 }
 
 const CHIP =
@@ -48,7 +52,7 @@ export function ItemChipBody({ kind, name }: { readonly kind: string; readonly n
     <>
       <Icon
         aria-hidden
-        data-kobe-item-icon={ICONS[kind] ? kind : "generic"}
+        data-kobe-item-icon={knownIcon(kind) ? kind : "generic"}
         className="size-3 shrink-0"
       />
       <span className="sr-only">{kindLabel(kind)} </span>

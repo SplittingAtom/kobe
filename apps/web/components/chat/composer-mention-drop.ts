@@ -3,6 +3,7 @@
 import { useAui } from "@assistant-ui/react";
 import { useCallback, useEffect, useRef, useState, type DragEvent, type RefObject } from "react";
 import { ITEM_REFERENCES_MAX } from "@kobe/protocol";
+import type { FrameDrag } from "../../lib/apps/frame-drag";
 import { appMessageOf } from "../../lib/apps/host-bridge";
 import {
   carriesLakehouseItem,
@@ -10,6 +11,7 @@ import {
   LAKEHOUSE_DROP_FROM,
   LAKEHOUSE_DROP_REFUSED,
   lakehouseItemContent,
+  lakehouseItemContentOf,
 } from "../../lib/apps/lakehouse-drop";
 import {
   insertMention,
@@ -17,7 +19,9 @@ import {
   mentionRefusal,
 } from "../../lib/chat/mention-insert";
 import { carriesWorkspaceFolder, carriesWorkspaceRow, droppedRowPath } from "../../lib/files/drag";
+import type { ChatSession } from "../../lib/chat/session";
 import { applyAppMessage } from "../apps/use-app-composer";
+import { useFrameDrop } from "./composer-frame-drop";
 import { useChatSession } from "./kobe-runtime";
 
 /**
@@ -27,6 +31,26 @@ import { useChatSession } from "./kobe-runtime";
 export type RowDrop = "file" | "folder" | "item" | null;
 
 export const LAKEHOUSE_DROP_FULL = `A message can reference at most ${ITEM_REFERENCES_MAX} items.`;
+
+/**
+ * A Lakehouse Picker item into the composer of `draft` (KOBE-551, KOBE-553): the click's
+ * `ui/message` content through the bridge's `appMessageOf` and the same `applyAppMessage`, so
+ * exactly the click's composer state (the chip, `references` on send; no text, the focus stays).
+ * The item is the dropped JSON (native drop) or the object a bridge drag carried. The answer is
+ * why it was refused.
+ */
+export function insertLakehouseItem(
+  session: ChatSession,
+  draft: string,
+  item: string | Readonly<Record<string, unknown>>,
+  from: string,
+): string | undefined {
+  const content =
+    typeof item === "string" ? lakehouseItemContent(item) : lakehouseItemContentOf(item);
+  const message = content === undefined ? undefined : appMessageOf(content);
+  if (message === undefined || message.items.length === 0) return LAKEHOUSE_DROP_REFUSED;
+  return applyAppMessage(session, draft, message, from) ? undefined : LAKEHOUSE_DROP_FULL;
+}
 
 export interface ComposerMentionDrop {
   readonly rowDrop: RowDrop;
@@ -47,18 +71,23 @@ export interface ComposerMentionDrop {
  * names the rules refuse are refused here with a reason. Only a writable composer listens.
  *
  * A Lakehouse Picker item dragged out of its frame (KOBE-551) is taken first: its chip exactly as
- * a click on the picker adds it; an invalid item is refused.
+ * a click on the picker adds it; an invalid item is refused. So is one an app drags out of its
+ * frame with captured pointer events over the bridge (KOBE-553), released over `panel`; its
+ * chip says the app's title.
  */
 export function useComposerMentionDrop({
   draft,
   text,
   input,
   writable,
+  panel = null,
 }: {
   readonly draft: string;
   readonly text: string;
   readonly input: RefObject<HTMLTextAreaElement | null>;
   readonly writable: boolean;
+  /** The composer panel: the target of a pointer drag out of an app frame (KOBE-553). */
+  readonly panel?: HTMLElement | null;
 }): ComposerMentionDrop {
   const aui = useAui();
   const session = useChatSession();
@@ -80,22 +109,25 @@ export function useComposerMentionDrop({
     [aui, session, draft, text, input],
   );
 
-  /**
-   * A dropped Lakehouse Picker item (KOBE-551): the click's `ui/message` content through the
-   * bridge's `appMessageOf` and the same `applyAppMessage`, so exactly the click's composer state
-   * (the chip, `references` on send; no text, the focus stays). The answer is why it was refused.
-   */
   const insertItem = useCallback(
-    (raw: string): string | undefined => {
-      const content = lakehouseItemContent(raw);
-      const message = content === undefined ? undefined : appMessageOf(content);
-      if (message === undefined || message.items.length === 0) return LAKEHOUSE_DROP_REFUSED;
-      return applyAppMessage(session, draft, message, LAKEHOUSE_DROP_FROM)
-        ? undefined
-        : LAKEHOUSE_DROP_FULL;
-    },
+    (
+      item: string | Readonly<Record<string, unknown>>,
+      from: string = LAKEHOUSE_DROP_FROM,
+    ): string | undefined => insertLakehouseItem(session, draft, item, from),
     [session, draft],
   );
+  useFrameDrop({
+    panel,
+    writable,
+    over: useCallback((over: boolean) => {
+      setRowDrop(over ? "item" : null);
+      if (over) setNotice("");
+    }, []),
+    drop: useCallback(
+      (drag: FrameDrag) => setNotice(insertItem(drag.item, drag.from) ?? ""),
+      [insertItem],
+    ),
+  });
 
   // One subscription per writable composer; it calls the latest `mention` (which reads the text).
   const latest = useRef(mention);

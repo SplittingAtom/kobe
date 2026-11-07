@@ -137,6 +137,7 @@ function LivePicker({
             onCall={answered}
             onMessage={composer.onMessage}
             onModelContext={composer.onModelContext}
+            onDrag={composer.onDrag}
             onDisplayMode={() => "inline"}
           />
         )}

@@ -1,8 +1,12 @@
 import type { z } from "zod";
 import {
   PROTOCOL_VERSION,
+  DRAG_METHODS,
   callToolParams,
   displayModeParams,
+  dragCancelParams,
+  dragPointParams,
+  dragStartParams,
   initializeParams,
   listToolsParams,
   messageParams,
@@ -37,6 +41,11 @@ import { appItemsOf, type LinkedItem } from "./app-items";
  *   `initialized` honoured once.
  * - The bridge binds to the first window `frame()` names; if that changes (a re-used iframe
  *   navigated to another app), or once detached, it neither answers nor posts (review MEDIUM-1).
+ * - Kobe's pointer-drag extension (KOBE-553, DRAG-CONTRACT.md): `kobe/notifications/drag-start`
+ *   (an item of at most {@link DRAG_ITEM_MAX} and a frame-relative point), `drag-move`, `drag-end`
+ *   and `drag-cancel` go to `handlers.drag`; a move, end or cancel without a live start is
+ *   ignored, any start (valid or not) cancels the live one first, and detaching cancels a live
+ *   drag. A valid end or cancel of the live drag is exempt from the message budget.
  * - Replies go only to the frame's `contentWindow`, with target `"*"` (an opaque origin cannot be
  *   named), so a reply never carries anything the app is not entitled to.
  */
@@ -52,6 +61,8 @@ export const BRIDGE_LIMITS = Object.freeze({
 export const MESSAGE_TEXT_MAX = 4 * 1024;
 /** `ui/update-model-context`, serialized (spec §8). */
 export const MODEL_CONTEXT_MAX = 8 * 1024;
+/** A dragged item, serialized (DRAG-CONTRACT.md). */
+export const DRAG_ITEM_MAX = 8 * 1024;
 const HOST_VERSION = "1";
 /** One retry of a call the server's validator had no room for (review LOW-3). */
 const BUSY_RETRY_MS = 250;
@@ -88,6 +99,17 @@ export type ToolListAnswer =
   | { readonly ok: true; readonly tools: readonly unknown[] }
   | { readonly ok: false; readonly code: string; readonly message: string };
 
+/** One phase of a pointer drag the app drives (KOBE-553), in frame-relative CSS pixels. */
+export type BridgeDragEvent =
+  | {
+      readonly phase: "start";
+      readonly item: Readonly<Record<string, unknown>>;
+      readonly x: number;
+      readonly y: number;
+    }
+  | { readonly phase: "move" | "end"; readonly x: number; readonly y: number }
+  | { readonly phase: "cancel" };
+
 export interface HostBridgeHandlers {
   /** `POST /v1/team/apps/:appId/calls` (MA-4); the server decides. */
   callTool(name: string, args: Record<string, unknown>): Promise<ToolCallAnswer>;
@@ -105,6 +127,8 @@ export interface HostBridgeHandlers {
   sizeChanged(size: SizeChanged): void;
   /** The app finished `ui/initialize`: the host sends tool-input and tool-result now. */
   initialized(): void;
+  /** A pointer drag out of the frame (KOBE-553); without it the notifications are dropped. */
+  drag?(event: BridgeDragEvent): void;
 }
 
 export interface HostBridgeOptions {
@@ -163,6 +187,7 @@ export function attachHostBridge(
   let nextId = 1;
   let detached = false;
   let initialized = false;
+  let dragging = false;
   let bound: Window | null = null;
   const pending = new Map<Id, (ok: boolean) => void>();
 
@@ -253,8 +278,58 @@ export function attachHostBridge(
     }
   };
 
+  const handleDrag = (method: string, params: unknown) => {
+    const drag = handlers.drag;
+    if (drag === undefined) return;
+    if (method === DRAG_METHODS.start) {
+      // Any start ends the live drag first, valid or not: the app's next moves and end belong to
+      // the new one, never to the old item (review 2).
+      if (dragging) {
+        dragging = false;
+        drag({ phase: "cancel" });
+      }
+      const start = parse(dragStartParams, params);
+      const size = start ? sizeOf(start.item) : undefined;
+      if (!start || size === undefined || size > DRAG_ITEM_MAX) return;
+      dragging = true;
+      drag({ phase: "start", item: start.item, x: start.x, y: start.y });
+      return;
+    }
+    if (!dragging) return;
+    if (method === DRAG_METHODS.cancel) {
+      if (parse(dragCancelParams, params) === undefined && params !== undefined) return;
+      dragging = false;
+      drag({ phase: "cancel" });
+      return;
+    }
+    const point = parse(dragPointParams, params);
+    if (!point) return;
+    if (method === DRAG_METHODS.end) dragging = false;
+    drag({ phase: method === DRAG_METHODS.end ? "end" : "move", x: point.x, y: point.y });
+  };
+  const isDrag = (method: string) => Object.values<string>(DRAG_METHODS).includes(method);
+  /**
+   * A valid `drag-end` or `drag-cancel` for the live drag, handled outside the message budget:
+   * it only clears state, and losing it to a burst would strand the ghost and the cue (review 3).
+   * At most one per drag, since it ends the drag; anything else takes the budgeted path.
+   */
+  const stopsDrag = (data: unknown): boolean => {
+    if (!dragging || handlers.drag === undefined) return false;
+    if (roughlyTooLarge(data, BRIDGE_LIMITS.messageBytes)) return false;
+    const notification = parse(notificationSchema, data);
+    if (!notification || "id" in (data as object)) return false;
+    const { method, params } = notification;
+    if (method === DRAG_METHODS.end) return parse(dragPointParams, params) !== undefined;
+    if (method === DRAG_METHODS.cancel) {
+      return params === undefined || parse(dragCancelParams, params) !== undefined;
+    }
+    return false;
+  };
+
   const handleNotification = (method: string, params: unknown) => {
-    if (method === "ui/notifications/size-changed") {
+    if (isDrag(method)) {
+      handleDrag(method, params);
+    } else if (method === "ui/notifications/size-changed") {
       const size = parse(sizeChangedParams, params);
       if (size) handlers.sizeChanged(size);
     } else if (method === "ui/notifications/initialized") {
@@ -271,9 +346,14 @@ export function attachHostBridge(
   const onMessage = (event: MessageEvent) => {
     const frame = current();
     if (frame === null || event.source !== frame || event.origin !== "null") return;
-    // Every message counts, before it is measured or parsed (review LOW-1, LOW-2).
-    if (!messages.take()) return;
     const data: unknown = event.data;
+    if (stopsDrag(data)) {
+      const { method, params } = data as { method: string; params?: unknown };
+      handleDrag(method, params);
+      return;
+    }
+    // Every other message counts, before it is measured or parsed (review LOW-1, LOW-2).
+    if (!messages.take()) return;
     if (roughlyTooLarge(data, BRIDGE_LIMITS.messageBytes)) return;
     const size = sizeOf(data);
     const request = parse(requestSchema, data);
@@ -319,7 +399,12 @@ export function attachHostBridge(
       }),
     droppedLogs: () => dropped,
     detach: () => {
+      if (detached) return;
       detached = true;
+      if (dragging) {
+        dragging = false;
+        handlers.drag?.({ phase: "cancel" });
+      }
       target.removeEventListener("message", onMessage);
       for (const settle of [...pending.values()]) settle(false);
     },

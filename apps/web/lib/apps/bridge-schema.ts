@@ -69,6 +69,30 @@ export const sizeChangedParams = z.object({
   height: pixels.optional(),
 });
 
+/**
+ * Kobe's host extension for pointer drags from an app frame (KOBE-553, DRAG-CONTRACT.md): the
+ * pointer in the frame's viewport, CSS pixels, finite (it may be negative or beyond the frame).
+ * The item is only checked to be a plain object here (its size by the bridge); the composer
+ * validates it as it does a native drop.
+ */
+export const DRAG_METHODS = Object.freeze({
+  start: "kobe/notifications/drag-start",
+  move: "kobe/notifications/drag-move",
+  end: "kobe/notifications/drag-end",
+  cancel: "kobe/notifications/drag-cancel",
+});
+const coordinate = z.number().finite();
+const plainObject = z.custom<Record<string, unknown>>(
+  (v) =>
+    typeof v === "object" &&
+    v !== null &&
+    !Array.isArray(v) &&
+    (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null),
+);
+export const dragPointParams = z.object({ x: coordinate, y: coordinate });
+export const dragStartParams = dragPointParams.extend({ item: plainObject });
+export const dragCancelParams = z.object({}).optional();
+
 export type CallToolParams = z.infer<typeof callToolParams>;
 export type ModelContext = z.infer<typeof modelContextParams>;
 export type DisplayMode = z.infer<typeof displayModeParams>["mode"];

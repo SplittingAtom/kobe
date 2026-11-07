@@ -325,6 +325,7 @@ function AppTab({ spec }: { readonly spec: AppTabSpec }) {
         toolResult={spec.toolResult}
         onMessage={composer.onMessage}
         onModelContext={composer.onModelContext}
+        onDrag={composer.onDrag}
       />
     </div>
   );

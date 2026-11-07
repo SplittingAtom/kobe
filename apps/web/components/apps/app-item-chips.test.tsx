@@ -316,3 +316,14 @@ describe("app item chips (KOBE-490)", () => {
     expect(must(posts()[0]).body).toMatchObject({ content: "Count", references: refs });
   });
 });
+
+describe("itemIcon with inherited names (KOBE-553 review)", () => {
+  it.each(["constructor", "__proto__", "toString", "valueOf"])(
+    "%s is the generic icon",
+    async (kind) => {
+      const { itemIcon } = await import("./app-item-chips");
+      const { BoxIcon } = await import("lucide-react");
+      expect(itemIcon(kind)).toBe(BoxIcon);
+    },
+  );
+});

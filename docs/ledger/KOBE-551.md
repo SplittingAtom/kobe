@@ -49,6 +49,11 @@
 - No test for kind `table` with a catalog and namespace but no name.
 - A real cross-frame drag from the picker needs the Catalyst-side build; until then the browser
   spec synthesizes the DataTransfer.
+- 2026-11-07: in Chrome the native drag never reaches the composer: Chromium blocks native drags
+  between cross-origin frames (crbug.com/59081) and the app frame is opaque-origin. KOBE-553
+  (bridge-mediated pointer drag) supersedes this path for Chrome; this one stays for Firefox.
+  (Also covers the first follow-up: `LAKEHOUSE_DROP_FULL` now has a test in KOBE-553's
+  `composer-frame-drag.test.tsx`.)
 
 ## Evidence (acceptance criteria → test or command output)
 

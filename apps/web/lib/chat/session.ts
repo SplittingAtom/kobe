@@ -5,6 +5,7 @@
  */
 import { AppContextStore, ComposerInsertChannel } from "../apps/app-context";
 import { AppItemStore } from "../apps/app-items";
+import { FrameDragStore } from "../apps/frame-drag";
 import { SkillPickStore } from "./skill-picks";
 import { ViewingStore } from "./viewing";
 import { AutoOpenEditsStore, EditDraftStore, FileReviewStore } from "../files/editor-state";
@@ -125,6 +126,8 @@ export class ChatSession {
   readonly appItems = new AppItemStore();
   /** MCP Apps `ui/message` text for the composer on screen (KOBE-439); never sent by itself. */
   readonly composerInserts = new ComposerInsertChannel();
+  /** A pointer drag out of an app frame (KOBE-553): the ghost and the composer on screen follow it. */
+  readonly frameDrag = new FrameDragStore();
   /** A rail launch changed a thread's app cards (KOBE-440): the thread reads them again. */
   readonly appCards = new AppCardSignal();
   /** Size and thumbnail lookups for the chips of sent messages after a reload (KOBE-194). */

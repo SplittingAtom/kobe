@@ -261,6 +261,7 @@ export function LiveApp({
         toolInput={input}
         onMessage={composer.onMessage}
         onModelContext={composer.onModelContext}
+        onDrag={composer.onDrag}
         toolResult={result}
         initialHeight={height}
         onHeight={setHeight}

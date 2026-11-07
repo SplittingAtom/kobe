@@ -150,7 +150,14 @@ export function Composer({
   };
   const readOnly = extras.state.summary?.readOnly === true;
   // A workspace row from the Files tree is a mention (KOBE-374); files from the computer attach.
-  const rowDrop = useComposerMentionDrop({ draft, text, input, writable: !readOnly && !inTrash });
+  // An app frame's pointer drag (KOBE-553) drops on the panel too.
+  const rowDrop = useComposerMentionDrop({
+    draft,
+    text,
+    input,
+    writable: !readOnly && !inTrash,
+    panel,
+  });
   // A new conversation's draft takes a rail picker's text too (KOBE-460).
   const appInsert = useAppInserts(input, text, draft, !readOnly && !inTrash);
   const hasFiles = (e: DragEvent) => e.dataTransfer.types.includes("Files");
