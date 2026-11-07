@@ -1,6 +1,5 @@
 "use client";
 
-import { AppWindow } from "lucide-react";
 import {
   useEffect,
   useImperativeHandle,
@@ -24,8 +23,10 @@ import { buildHostContext, type Placement } from "../../lib/apps/host-context";
 /**
  * An MCP App in a sandboxed frame (KOBE-437, spec T2, T9, MA3, MA10): Kobe's member frame route
  * (header CSP `sandbox allow-scripts`, no network), `sandbox="allow-scripts"`, no `allow`
- * permissions, no referrer, under a host-drawn header the app cannot cover ("App from
- * _connector_"). Kobe's host bridge answers only this frame. MA-9 and MA-6 place it in tool cards
+ * permissions, no referrer, in a bordered card the app cannot cover (the host header line "App
+ * from _connector_" was removed at Chris's request on 2026-11-06, T9 amended; the card's border
+ * and the region's accessible name still say it is an app). Kobe's host bridge answers only this
+ * frame. MA-9 and MA-6 place it in tool cards
  * and app cards (and call `AppFrameHandle.teardown` before they remove a frame); MA-7 wires
  * `onMessage` and `onModelContext` to the composer. KOBE-460 places one picker in the rail
  * (`placement: "rail"`: it fills its section and scrolls inside it), whose calls name the thread
@@ -121,11 +122,6 @@ export function AppFrame(props: AppFrameProps & { readonly ref?: Ref<AppFrameHan
       data-kobe-app-frame={app.appId}
       aria-label={`${app.title}, an app from ${app.connectorName}`}
     >
-      <header className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-sm">
-        <AppWindow aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-        <span className="truncate font-medium">{app.title}</span>
-        <span className="truncate text-muted-foreground">App from {app.connectorName}</span>
-      </header>
       <FrameInstance key={frameKey(app, teamId, cardKey)} {...props} bridgeRef={bridge} />
     </section>
   );

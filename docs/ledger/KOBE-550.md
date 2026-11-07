@@ -33,6 +33,9 @@ Added by Chris during the run (2026-11-06), same PR:
    fork-point excerpt are gone (spec TL3 amended; `lineageRows` and friends stay in the lib for
    the Conversation tree). `e2e/browser/tests/{fork,thread-lineage}.spec.ts` rewritten for the chip.
 
+7. MCP app frames show no header line ("<title> App from <connector>"); T9 amended. The card's
+   border, the region's accessible name and the display-mode rules remain the anti-spoofing cues.
+
 ## Decisions
 
 - Glow is a Kobe-wide behaviour, not a preset feature: Chris asked for the look in Kobe, and the

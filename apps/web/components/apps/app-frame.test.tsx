@@ -69,8 +69,9 @@ describe("AppFrame (KOBE-437)", () => {
     expect(iframe.getAttribute("srcdoc")).toBeNull();
     expect(iframe.getAttribute("allow")).toBeNull();
     expect(iframe.getAttribute("referrerpolicy")).toBe("no-referrer");
-    // The host header sits outside the frame (spec T9).
-    expect(screen.getByText("App from Catalyst")).toBeTruthy();
+    // No host header line (Chris 2026-11-06, T9 amended): the region's name still says what it is.
+    expect(screen.queryByText(/App from/)).toBeNull();
+    expect(screen.queryByRole("banner")).toBeNull();
     expect(
       screen.getByRole("region", { name: "Lakehouse Explorer, an app from Catalyst" }),
     ).toBeTruthy();

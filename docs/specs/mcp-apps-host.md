@@ -122,6 +122,9 @@ style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src 'none'
   outside the iframe ("App from _connector name_", with the connector icon). The app can never
   cover Kobe's chrome: its "fullscreen" display mode means the expanded view in the artifact
   column, never the window. This means the frame can never pass for a Kobe sign-in or approval dialog.
+  _Amended 2026-11-06 (Chris, KOBE-550): the header line is gone; the frame sits in its bordered
+  card (`aria-label` "<title>, an app from <connector>") with no visible "App from" text. The
+  display-mode and chrome rules above are unchanged._
 - **T10. Limits and audit.** Tool arguments are capped at 64 KiB and results at 4 MiB (the
   proxy's existing cap). App calls are rate-limited per member: a burst of 30, then 5 per second.
   Each one is audited as `mcp.app_call` (team scope: connector, tool, user, decision, reason,
