@@ -45,8 +45,10 @@ body:has([data-kobe-console]) {
     box-shadow 300ms ease;
 }
 
+/* One halo at a time: a panel holding the hovered panel (the shell's columns, the console's page
+   around its cards, KOBE-554) keeps its resting border and shadow. */
 @media (hover: hover) {
-  [data-kobe-console] .kobe-panel:hover {
+  [data-kobe-console] .kobe-panel:hover:not(:has(.kobe-panel:hover)) {
     border-color: var(--kobe-panel-border-hover);
     box-shadow: var(--kobe-glow-panel);
   }
@@ -62,7 +64,7 @@ body:has([data-kobe-console]) {
    panel (the shell's columns and the console's sidebar and page among them, KOBE-554) shows its
    hover with the highlight colour instead. */
 @media (forced-colors: active) {
-  [data-kobe-console] .kobe-panel:hover {
+  [data-kobe-console] .kobe-panel:hover:not(:has(.kobe-panel:hover)) {
     border-color: Highlight;
   }
 }

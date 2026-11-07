@@ -630,15 +630,20 @@ describe("panel glow (KOBE-550)", () => {
       ["app/admin/admin-global.css", "[data-kobe-console]"],
     ] as const) {
       const css = read(path);
-      const hover = block(css, `${root} .kobe-panel:hover`);
+      // One halo at a time (KOBE-554): a panel around the hovered one keeps its resting look.
+      const hover = block(css, `${root} .kobe-panel:hover:not(:has(.kobe-panel:hover))`);
       expect(hover, path).toContain("box-shadow: var(--kobe-glow-panel)");
       expect(hover, path).toContain("border-color: var(--kobe-panel-border-hover)");
       expect(block(css, `${root} .kobe-panel`), path).toMatch(/transition:[^;]*box-shadow/);
       expect(css, path).toMatch(/@media \(hover: hover\)/);
+      expect(css, path).not.toMatch(/\.kobe-panel:hover\s*\{/);
       expect(css, path).toMatch(/@media \(prefers-reduced-motion: reduce\)/);
       // Forced colours drop the halo, so the hovered border takes a system colour (KOBE-554).
       expect(
-        block(block(css, "@media (forced-colors: active)"), `${root} .kobe-panel:hover`),
+        block(
+          block(css, "@media (forced-colors: active)"),
+          `${root} .kobe-panel:hover:not(:has(.kobe-panel:hover))`,
+        ),
         path,
       ).toContain("border-color: Highlight");
     }

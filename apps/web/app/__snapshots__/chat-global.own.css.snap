@@ -115,7 +115,7 @@ body:has([data-kobe-chat]) {
     box-shadow 300ms ease;
 }
 @media (hover: hover) {
-  [data-kobe-chat] .kobe-panel:hover {
+  [data-kobe-chat] .kobe-panel:hover:not(:has(.kobe-panel:hover)) {
     border-color: var(--kobe-panel-border-hover);
     box-shadow: var(--kobe-glow-panel);
   }
@@ -126,7 +126,7 @@ body:has([data-kobe-chat]) {
   }
 }
 @media (forced-colors: active) {
-  [data-kobe-chat] .kobe-panel:hover {
+  [data-kobe-chat] .kobe-panel:hover:not(:has(.kobe-panel:hover)) {
     border-color: Highlight;
   }
 }

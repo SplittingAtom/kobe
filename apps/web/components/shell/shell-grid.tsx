@@ -48,7 +48,9 @@ export function ShellGrid({
       </div>
       <div
         id="kobe-artifact-column"
-        className={`${styles.artifact} kobe-panel`}
+        // As a sheet (under 820 px) it is an overlay with the drawer's shadow and no scrim, not a
+        // column: the hover glow would replace that elevation, so it has none (KOBE-554).
+        className={artifactSheet ? styles.artifact : `${styles.artifact} kobe-panel`}
         data-shell-region="artifact"
         {...(artifactSheet ? { "data-sheet-open": "" } : {})}
         {...(artifactHidden ? { "data-hidden": "" } : {})}

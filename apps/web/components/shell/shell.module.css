@@ -252,6 +252,8 @@
 .grid {
   --kobe-shell-gutter: 16px;
   --kobe-shell-gap: 16px;
+  /* The drag handles' visible line (the rail's, the artifact column's). */
+  --kobe-handle-width: 6px;
   display: grid;
   flex: 1;
   grid-template-columns: minmax(0, 1fr);
@@ -436,7 +438,7 @@
   /* The handle gets its own strip at the column's edge, so it never covers the scrollbar. */
   .artifact {
     position: relative;
-    padding-inline-end: 6px;
+    padding-inline-end: var(--kobe-handle-width);
   }
 
   .resizeHandle {
@@ -445,7 +447,7 @@
     inset-block: 0;
     inset-inline-end: 0;
     display: block;
-    width: 6px;
+    width: var(--kobe-handle-width);
     cursor: col-resize;
     touch-action: none;
   }
@@ -460,21 +462,28 @@
 /* The drag handle on the expanded rail's right edge (KOBE-305): wide windows only (the component
    renders it there, while the rail is expanded). It is laid out against the grid, so it never
    scrolls with the rail; it sits in the middle of the gap between the rail card and the next one
-   (KOBE-554), as tall as the cards. */
+   (KOBE-554), as tall as the cards. Positioned, its `100%` is the grid's padding box, not the
+   content box the columns' `--kobe-rail-width` resolves against: it repeats that clamp less the
+   two gutters, so a clamped rail (dragged wide, artifact column open) keeps the handle in the gap. */
 .railHandle {
   display: none;
 }
 
 @media (width >= 1100px) {
   .railHandle {
+    --kobe-rail-handle-track: min(
+      var(--kobe-rail-expanded-width, 280px),
+      100% - 2 * var(--kobe-shell-gutter) - var(--kobe-rail-room)
+    );
     position: absolute;
     z-index: 10;
     inset-block: var(--kobe-shell-gutter);
     inset-inline-start: calc(
-      var(--kobe-shell-gutter) + var(--kobe-rail-width) + (var(--kobe-shell-gap) - 6px) / 2
+      var(--kobe-shell-gutter) + var(--kobe-rail-handle-track) +
+        (var(--kobe-shell-gap) - var(--kobe-handle-width)) / 2
     );
     display: block;
-    width: 6px;
+    width: var(--kobe-handle-width);
     border-radius: var(--kobe-radius-pill);
     cursor: col-resize;
     touch-action: none;
@@ -486,18 +495,18 @@
     outline: 2px solid transparent; /* forced colours draw it; elsewhere the background shows */
   }
 
-  /* An invisible hit area around the 6 px line: the whole 16 px gap for a mouse, 24 px for touch
-     (WCAG 2.5.8), 4 px into each card, so the rail's scrollbars stay reachable. */
+  /* An invisible hit area around the line: the whole gap for a mouse, 8 px more for touch (24 px
+     with the 16 px gap, WCAG 2.5.8), 4 px into each card, so the rail's scrollbars stay reachable. */
   .railHandle::before {
     position: absolute;
     inset-block: 0;
-    inset-inline: -5px;
+    inset-inline: calc((var(--kobe-handle-width) - var(--kobe-shell-gap)) / 2);
     content: "";
   }
 }
 
 @media (width >= 1100px) and (pointer: coarse) {
   .railHandle::before {
-    inset-inline: -9px;
+    inset-inline: calc((var(--kobe-handle-width) - var(--kobe-shell-gap)) / 2 - 4px);
   }
 }

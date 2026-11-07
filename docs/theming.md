@@ -273,8 +273,11 @@ no easing under `prefers-reduced-motion`. The surfaces: tool-call cards, approva
 the notifications panel, the Compare columns, the context viewer's pane, the console `Card`
 primitive, and since KOBE-554 the shell's three columns (rail, artifact column, conversation;
 `components/shell/shell-grid.tsx`) and the console's sidebar and page (`components/ui/console/layout.tsx`);
-the composer glows while it has focus (`components/chat/composer.module.css`). Forced colours drop
-the halo, so a hovered panel's border takes `Highlight` there. The
+the composer glows while it has focus (`components/chat/composer.module.css`). One halo at a time:
+the rule is `.kobe-panel:hover:not(:has(.kobe-panel:hover))`, so a column or console page around a
+hovered card keeps its resting border and shadow while the card glows. The 768–820 px artifact
+sheet is an overlay with the drawer shadow and no scrim, so it carries no `kobe-panel`. Forced
+colours drop the halo, so a hovered panel's border takes `Highlight` there. The
 `catalyst` preset also turns the three shadows into glows and paints an ambient wash on the dark
 page; the other presets keep today's shadows and no ambient (`presets.test.ts`).
 
@@ -324,8 +327,9 @@ Always:
   artifact column and conversation, and the console's sidebar and page, are floating cards
   (`--card`, a 1 px border, the panel radius `--kobe-radius-lg`, class `kobe-panel`) with a 16 px gap
   between them and a 16 px page gutter, so the page colour and a preset's `--kobe-page-ambient`
-  show between them. The rail drawer (below 1100 px) and the 768–820 px artifact sheet are cards
-  inside the same gutters; under 768 px the conversation card keeps 16 px side gutters. A preset
+  show between them. From 768 px the rail drawer (below 1100 px) and the 768–820 px artifact sheet
+  are cards inside the same gutters; under 768 px the drawer covers the full height at the window's
+  edge as before, and the conversation card keeps 16 px gutters. A preset
   themes the cards through those tokens; the gap and gutter are plain layout values
   (`--kobe-shell-gutter`, `--kobe-shell-gap` in `shell.module.css`, `SHELL_SPACING_PX` in
   `lib/shell/layout.ts`, `gap-4 p-4` in the console layout), not theme tokens, until a preset needs

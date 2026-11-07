@@ -4,7 +4,7 @@ import { cleanup, renderHook, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { viewport } from "../../app/layout";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
-import { BAND_QUERIES, BREAKPOINTS } from "../../lib/shell/layout";
+import { BAND_QUERIES, BREAKPOINTS, SHELL_SPACING_PX } from "../../lib/shell/layout";
 import { must } from "../../lib/testing/must";
 import { composer, openApp, openThreads } from "../chat/testing";
 import { useViewportHeight } from "../chat/use-viewport-height";
@@ -37,6 +37,41 @@ const flatCss = (s: string) => s.replace(/\s+/g, " ").replace(/\(\s+/g, "(").rep
 
 const declares = (source: string, selector: string, declaration: string) =>
   rules(source, selector).some((body) => flatCss(body).includes(flatCss(declaration)));
+
+/** The value of `property` in the first rule for `selector` that declares it. */
+function value(source: string, selector: string, property: string): string {
+  for (const body of rules(source, selector)) {
+    const m = new RegExp(`(?:^|[;{\\s])${property}:\\s*([^;]+);`).exec(flatCss(body));
+    if (m?.[1]) return m[1].trim();
+  }
+  throw new Error(`no ${property} in ${selector}`);
+}
+
+/**
+ * A px length from a CSS value made of calc(), min(), var() and px: variables come from `vars`,
+ * `100%` is `percentBase` px. Enough to check the shell's arithmetic without a layout engine.
+ */
+function evaluate(expr: string, vars: Record<string, string>, percentBase: number): number {
+  let out = expr;
+  for (let i = 0; i < 10 && out.includes("var("); i += 1) {
+    out = out.replace(
+      /var\((--[\w-]+)(?:,\s*([^()]+))?\)/g,
+      (_m, name: string, fallback?: string) => {
+        const v = vars[name] ?? fallback;
+        if (v === undefined) throw new Error(`no ${name}`);
+        return `(${v})`;
+      },
+    );
+  }
+  const js = out
+    .replace(/100%/g, `${percentBase}`)
+    .replace(/(\d)px/g, "$1")
+    .replace(/calc\(/g, "(")
+    .replace(/min\(/g, "Math.min(")
+    .replace(/max\(/g, "Math.max(");
+  if (!/^[\d\s+\-*/().,Mathimnx]*$/.test(js)) throw new Error(`cannot evaluate ${js}`);
+  return Number(new Function(`return ${js};`)());
+}
 
 describe("CSS contract", () => {
   it("the chat is exactly as tall as the window and never scrolls the page", () => {
@@ -87,7 +122,9 @@ describe("CSS contract", () => {
     // Hidden by the member (KOBE-225): no column, its previews still mounted.
     expect(declares(SHELL, ".artifact[data-hidden]", "display: none;")).toBe(true);
     // The resize handle has its own strip, off the column's scrollbar (review round 1).
-    expect(declares(SHELL, ".artifact", "padding-inline-end: 6px;")).toBe(true);
+    expect(declares(SHELL, ".artifact", "padding-inline-end: var(--kobe-handle-width);")).toBe(
+      true,
+    );
   });
 });
 
@@ -118,19 +155,53 @@ describe("floating cards (KOBE-554)", () => {
     expect(declares(RAIL, ".rail", "background: var(--card);")).toBe(true);
   });
 
-  it("the rail's handle sits in the gap between the rail card and the next card", () => {
+  it("the rail's handle sits in the middle of the gap, also when the rail is clamped", () => {
     const wide = media(SHELL, "(width >= 1100px)");
-    expect(
-      declares(
-        wide,
-        ".railHandle",
-        "inset-inline-start: calc(var(--kobe-shell-gutter) + var(--kobe-rail-width) + (var(--kobe-shell-gap) - 6px) / 2);",
-      ),
-    ).toBe(true);
+    const column = media(SHELL, "(width >= 820px)");
     expect(declares(wide, ".railHandle", "inset-block: var(--kobe-shell-gutter);")).toBe(true);
+    const vars = {
+      "--kobe-shell-gutter": value(SHELL, ".grid", "--kobe-shell-gutter"),
+      "--kobe-shell-gap": value(SHELL, ".grid", "--kobe-shell-gap"),
+      "--kobe-handle-width": value(SHELL, ".grid", "--kobe-handle-width"),
+      // The artifact column is open: both floors and both gaps are the rail's room.
+      "--kobe-rail-room": value(
+        column,
+        ".grid:has(> .artifact:not(:empty):not([data-hidden]))",
+        "--kobe-rail-room",
+      ),
+      "--kobe-rail-handle-track": value(wide, ".railHandle", "--kobe-rail-handle-track"),
+    };
+    // A 1,100 px window, the rail dragged to 480 px: the clamp gives it 276 px (1,068 − 792).
+    for (const [windowPx, dragged, rail] of [
+      [1100, 480, 276],
+      [1280, 480, 456],
+      [1600, 300, 300],
+    ] as const) {
+      const all = { ...vars, "--kobe-rail-expanded-width": `${dragged}px` };
+      // The columns resolve 100% against the grid's content box, the handle against its padding box.
+      const track = evaluate(value(SHELL, ".grid", "--kobe-rail-width"), all, windowPx - 32);
+      expect(track, `${windowPx}`).toBe(rail);
+      const left = evaluate(value(wide, ".railHandle", "inset-inline-start"), all, windowPx);
+      const width = evaluate("var(--kobe-handle-width)", all, windowPx);
+      // Centred in the gap that starts after the gutter and the rail's track.
+      expect(left + width / 2, `${windowPx}`).toBe(16 + rail + 16 / 2);
+    }
   });
 
-  it("the drawer and the overlay sheet keep the 16 px gutters", () => {
+  it("the 16 px lives in one place: SHELL_SPACING_PX, the grid's variables, the console's gap-4 p-4", () => {
+    expect(value(SHELL, ".grid", "--kobe-shell-gutter")).toBe(`${SHELL_SPACING_PX.gutter}px`);
+    expect(value(SHELL, ".grid", "--kobe-shell-gap")).toBe(`${SHELL_SPACING_PX.gap}px`);
+    // Tailwind's spacing step is 4 px: gap-4 and p-4 are 16 px.
+    const consoleLayout = css("../ui/console/layout.tsx");
+    expect(consoleLayout).toContain(`gap-${SHELL_SPACING_PX.gap / 4}`);
+    expect(consoleLayout).toContain(`p-${SHELL_SPACING_PX.gutter / 4}`);
+  });
+
+  it("the drawer and the overlay sheet keep the 16 px gutters (full height under 768 px)", () => {
+    // Under 768 px `.app` holds the drawer: full height from the window's edge, not over the bar.
+    const single = media(RAIL, "(width < 768px)");
+    expect(declares(single, ".rail[data-drawer]", "inset-block: 0;")).toBe(true);
+    expect(declares(single, ".rail[data-drawer]", "inset-inline-start: 0;")).toBe(true);
     expect(
       declares(RAIL, ".rail[data-drawer]", "inset-block: var(--kobe-shell-gutter, 16px);"),
     ).toBe(true);
@@ -266,7 +337,6 @@ describe("breakpoints (KOBE-201, CE7, CE8)", () => {
   });
 
   it("the rail's dragged width yields to the columns' floors; its handle is wide-only (KOBE-305)", () => {
-    const flat = (s: string) => s.replace(/\s+/g, " ");
     // 280 px unless dragged, never leaving the conversation (and an open artifact column) less
     // than its floor.
     expect(declares(SHELL, ".grid", "--kobe-rail-room: calc(400px + var(--kobe-shell-gap));")).toBe(
@@ -279,7 +349,7 @@ describe("breakpoints (KOBE-201, CE7, CE8)", () => {
         "--kobe-rail-width: min(var(--kobe-rail-expanded-width, 280px), 100% - var(--kobe-rail-room));",
       ),
     ).toBe(true);
-    const column = flat(media(SHELL, from(BREAKPOINTS.medium)));
+    const column = flatCss(media(SHELL, from(BREAKPOINTS.medium)));
     expect(
       declares(
         column,
@@ -295,12 +365,12 @@ describe("breakpoints (KOBE-201, CE7, CE8)", () => {
     const wide = media(SHELL, from(BREAKPOINTS.wide));
     expect(declares(wide, ".railHandle", "display: block;")).toBe(true);
     expect(declares(wide, ".railHandle", "cursor: col-resize;")).toBe(true);
-    // In the gap between the rail card and the next (KOBE-554).
+    // In the gap between the rail card and the next (KOBE-554; geometry in "floating cards").
     expect(
       declares(
         wide,
         ".railHandle",
-        "inset-inline-start: calc(var(--kobe-shell-gutter) + var(--kobe-rail-width) + (var(--kobe-shell-gap) - 6px) / 2);",
+        "inset-inline-start: calc(var(--kobe-shell-gutter) + var(--kobe-rail-handle-track) + (var(--kobe-shell-gap) - var(--kobe-handle-width)) / 2);",
       ),
     ).toBe(true);
     expect(declares(wide, ".railHandle:focus-visible", "background: var(--admin-accent);")).toBe(
@@ -310,9 +380,14 @@ describe("breakpoints (KOBE-201, CE7, CE8)", () => {
     expect(declares(wide, ".railHandle:focus-visible", "outline: 2px solid transparent;")).toBe(
       true,
     );
-    expect(declares(wide, ".railHandle::before", "inset-inline: -5px;")).toBe(true); // the 16 px gap
+    // The hit area: the whole gap for a mouse (−5 px each side), 24 px for touch (−9 px).
+    const vars = {
+      "--kobe-shell-gap": value(SHELL, ".grid", "--kobe-shell-gap"),
+      "--kobe-handle-width": value(SHELL, ".grid", "--kobe-handle-width"),
+    };
+    expect(evaluate(value(wide, ".railHandle::before", "inset-inline"), vars, 0)).toBe(-5);
     const touch = media(SHELL, "(width >= 1100px) and (pointer: coarse)");
-    expect(declares(touch, ".railHandle::before", "inset-inline: -9px;")).toBe(true); // 9 + 6 + 9
+    expect(evaluate(value(touch, ".railHandle::before", "inset-inline"), vars, 0)).toBe(-9);
   });
 });
 

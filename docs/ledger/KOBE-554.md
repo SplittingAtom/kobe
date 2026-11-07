@@ -15,10 +15,15 @@ Catalyst's query tool (`ui/src/components/query/query-tab.tsx`: `flex gap-4`, si
   (`--kobe-shell-gutter`) and a 16 px `column-gap` (`--kobe-shell-gap`); the three regions are cards
   (`background: var(--card)`, `1px solid var(--border)`, `--kobe-radius-lg`) with class `kobe-panel`.
   The rail's room and the artifact column's default width and floors subtract the gaps.
-- Rail (`rail.module.css`): its own edge borders went; background `--card`. The drawer (below
-  1100 px) is a card inset by the gutter. The resize handle sits in the middle of the gap
-  (`gutter + rail width + 5px`), as tall as the cards; its hit area is the whole gap (24 px coarse).
-- Artifact column: the 768–820 sheet is a card inside the gutters (anchor fallback = gutter); the
+- Rail (`rail.module.css`): its own edge borders went; background `--card`. From 768 to 1100 px
+  the drawer is a card inset by the gutter (the grid holds it); under 768 px `.app` holds it, so it
+  stays full height at the window's edge as before. The resize handle sits in the middle of the
+  gap, as tall as the cards; its hit area is the whole gap (24 px coarse), all from the variables
+  (`--kobe-handle-width`, `--kobe-shell-gap`). Positioned, the handle's `100%` is the grid's padding
+  box, so it repeats the rail's clamp less both gutters (`--kobe-rail-handle-track`).
+- Artifact column: the 768–820 sheet is a card inside the gutters (anchor fallback = gutter),
+  without `kobe-panel` (it keeps the drawer shadow; no scrim there); the splitter's floor is
+  `min(360, room)` like `layoutAt`, so 820–871 px no longer snaps to 360; the
   aside and the thread's root/composer strip paint `bg-card` instead of `bg-background` so the card
   colour reaches the rounded edge.
 - Console (`components/ui/console/layout.tsx`): `gap-4 p-4`; the sidebar and the page are each
@@ -29,6 +34,8 @@ Catalyst's query tool (`ui/src/components/query/query-tab.tsx`: `flex gap-4`, si
   so gutters and gaps never count as room.
 - Forced colours: a hovered `kobe-panel` takes `border-color: Highlight` (both global sheets), since
   the halo is dropped there; borders stay visible because they are real borders.
+- One halo at a time: the glow rule is `.kobe-panel:hover:not(:has(.kobe-panel:hover))` in both
+  roots, so a column around a hovered card keeps its resting look (review round 1).
 
 ## Decisions
 
@@ -43,7 +50,11 @@ Catalyst's query tool (`ui/src/components/query/query-tab.tsx`: `flex gap-4`, si
 - The artifact column's own resize handle stays inside its card's 6 px edge strip (unchanged); only
   the rail's handle moved into the gap, as the ticket asks.
 - The chat compiled-CSS snapshot (`app/__snapshots__/chat-global.own.css.snap`) was updated **on
-  purpose**: the only change is the new forced-colours hover rule in `app/chat-global.css`.
+  purpose**: the new forced-colours hover rule and the `:not(:has(.kobe-panel:hover))` hover selector.
+- `layout-preferences.test.tsx` "doesn't save a width chosen where both floors don't fit": the
+  width it shows is now the room (260 px), not 360 px; still nothing is saved.
+- The 16 px lives in `SHELL_SPACING_PX`; a layout-contract test asserts the CSS variables and the
+  console's `gap-4 p-4` agree with it.
 
 ## Open questions (for Chris or the coordinator)
 
@@ -62,8 +73,9 @@ Catalyst's query tool (`ui/src/components/query/query-tab.tsx`: `flex gap-4`, si
   with gutters and gaps); chat CSS snapshot updated.
 - **ac-2** `components/ui/console/layout.test.tsx` (sidebar and page cards, `gap-4 p-4`, no
   sidebar edge borders); console CSS guard scoping still green.
-- **ac-3** `rail-resize.test.tsx`, `breakpoints.test.tsx`, `layout-preferences.test.tsx` unchanged
-  and green; layout-contract checks the handle in the gap, the drawer and sheet inside the gutters.
+- **ac-3** `rail-resize.test.tsx`, `breakpoints.test.tsx` unchanged and green; layout-contract
+  evaluates the handle's position for clamped rails (1,100/1,280/1,600 px) and checks the drawer and
+  sheet; `artifact-tabs.test.tsx` covers the 820–871 px splitter floor.
 - **ac-4** `app/theme-css.test.ts` (glow rule, reduced motion, forced-colours hover border; the
   shell grid and console layout carry `kobe-panel`).
 - **ac-5** `docs/theming.md` §7 (surfaces) and §9 (card/gap rule); this ledger.
