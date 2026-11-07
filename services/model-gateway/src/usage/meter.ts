@@ -23,6 +23,12 @@ import { usageOf, type PartialCounts, type TokenCounts } from "./normalize.js";
 export interface UsageReading {
   readonly counts: TokenCounts;
   readonly source: "reported" | "estimated";
+  /**
+   * Reasoning tokens within `counts.output` (KOBE-557), absent when unknown: the provider's split
+   * when it reported one, else an estimate from the streamed thinking text (ceil(UTF-8 bytes / 4),
+   * `estimated`). Never more than the output count.
+   */
+  readonly reasoning?: { readonly tokens: number; readonly estimated: boolean };
 }
 
 /** Keys whose string values are generated content (deltas and whole messages alike). */
@@ -62,6 +68,65 @@ function textChars(value: unknown, depth = 0): number {
   return total;
 }
 
+const BYTES_PER_TOKEN = 4;
+const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+const rec = (v: unknown): Record<string, unknown> | undefined =>
+  v !== null && typeof v === "object" && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : undefined;
+const list = (v: unknown): readonly unknown[] => (Array.isArray(v) ? v : []);
+
+/**
+ * The thinking text one decoded stream event carried (KOBE-557), in UTF-8 bytes: OpenAI-compatible
+ * `choices[].delta.reasoning` / `reasoning_content` (Ollama, DeepSeek, vLLM), Responses
+ * `response.reasoning_text.delta` / `response.reasoning_summary_text.delta`, Anthropic
+ * `thinking_delta`, Gemini parts marked `thought: true`.
+ */
+export function thinkingBytes(kind: RouteKind, value: unknown): number {
+  const v = rec(value);
+  if (!v) return 0;
+  let text = "";
+  if (kind === "anthropic") {
+    const delta = rec(v.delta);
+    if (v.type === "content_block_delta" && delta?.type === "thinking_delta") {
+      text = str(delta.thinking) ?? "";
+    }
+  } else if (kind === "gemini") {
+    for (const c of list(v.candidates)) {
+      for (const part of list(rec(rec(c)?.content)?.parts)) {
+        const p = rec(part);
+        if (p?.thought === true) text += str(p.text) ?? "";
+      }
+    }
+  } else {
+    for (const c of list(v.choices)) {
+      const delta = rec(rec(c)?.delta);
+      text += (str(delta?.reasoning) ?? "") + (str(delta?.reasoning_content) ?? "");
+    }
+    if (
+      v.type === "response.reasoning_text.delta" ||
+      v.type === "response.reasoning_summary_text.delta"
+    ) {
+      text += str(v.delta) ?? "";
+    }
+  }
+  return text === "" ? 0 : Buffer.byteLength(text, "utf8");
+}
+
+/**
+ * The reasoning split of a call (KOBE-557): a reported count wins; else the thinking text / 4,
+ * flagged estimated; neither: unknown. Clamped to the output count.
+ */
+export function reasoningOf(
+  reported: number | undefined,
+  thinking: number,
+  output: number,
+): UsageReading["reasoning"] {
+  if (reported !== undefined) return { tokens: Math.min(reported, output), estimated: false };
+  if (thinking <= 0) return undefined;
+  return { tokens: Math.min(Math.ceil(thinking / BYTES_PER_TOKEN), output), estimated: true };
+}
+
 const promptOf = (c: PartialCounts) => (c.input ?? 0) + (c.cacheRead ?? 0) + (c.cacheWrite ?? 0);
 
 /**
@@ -81,6 +146,9 @@ export function mergeCounts(before: PartialCounts, report: PartialCounts): Parti
     Object.assign(next, prompt);
   }
   if (report.output !== undefined) next.output = Math.max(before.output ?? 0, report.output);
+  if (report.reasoning !== undefined) {
+    next.reasoning = Math.max(before.reasoning ?? 0, report.reasoning);
+  }
   return next;
 }
 
@@ -112,6 +180,8 @@ export class UsageMeter {
   private sawFinal = false;
   private chars = 0;
   private bytes = 0;
+  /** UTF-8 bytes of thinking text the stream carried (the reasoning estimate, KOBE-557). */
+  private thinking = 0;
 
   constructor(private readonly options: MeterOptions) {
     const type = (options.contentType ?? "").toLowerCase();
@@ -148,7 +218,7 @@ export class UsageMeter {
     }
     const m = this.merged;
     if (complete && this.sawFinal) {
-      return {
+      return this.withReasoning({
         source: "reported",
         counts: {
           input: m.input ?? 0,
@@ -156,12 +226,12 @@ export class UsageMeter {
           cacheRead: m.cacheRead ?? 0,
           cacheWrite: m.cacheWrite ?? 0,
         },
-      };
+      });
     }
     const generated = this.mode === "sse" ? this.chars : this.bytes;
     const promptKnown =
       m.input !== undefined || m.cacheRead !== undefined || m.cacheWrite !== undefined;
-    return {
+    return this.withReasoning({
       source: "estimated",
       counts: {
         input: promptKnown ? (m.input ?? 0) : Math.ceil(requestBytes / CHARS_PER_TOKEN),
@@ -169,7 +239,12 @@ export class UsageMeter {
         cacheRead: m.cacheRead ?? 0,
         cacheWrite: m.cacheWrite ?? 0,
       },
-    };
+    });
+  }
+
+  private withReasoning(reading: UsageReading): UsageReading {
+    const reasoning = reasoningOf(this.merged.reasoning, this.thinking, reading.counts.output);
+    return reasoning ? { ...reading, reasoning } : reading;
   }
 
   private take(found: ReturnType<typeof usageOf>): void {
@@ -234,6 +309,7 @@ export class UsageMeter {
       return;
     }
     this.chars += textChars(value);
+    this.thinking += thinkingBytes(this.options.kind, value);
     this.take(usageOf(this.options.kind, value));
   }
 }

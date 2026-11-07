@@ -209,6 +209,29 @@ describe("recordModelUsage", () => {
     expect(set).toMatchObject({ reasoningTokens: 40, reasoningEstimated: true });
   });
 
+  it("writes the reasoning split (KOBE-557), clamped to the output count; unknown stays null", async () => {
+    const [a, b, c] = [randomUUID(), randomUUID(), randomUUID()];
+    await recordModelUsage(app.db, [
+      record({ sandboxId: a, outputTokens: 100, reasoningTokens: 40, reasoningEstimated: false }),
+      record({ sandboxId: b, outputTokens: 100, reasoningTokens: 900, reasoningEstimated: true }),
+      record({ sandboxId: c, reasoningTokens: null, reasoningEstimated: true }),
+    ]);
+    const rows = await withTeam(app.db, teamA, (tx) =>
+      tx
+        .select({
+          sandboxId: runUsage.sandboxId,
+          reasoningTokens: runUsage.reasoningTokens,
+          reasoningEstimated: runUsage.reasoningEstimated,
+        })
+        .from(runUsage)
+        .where(eq(runUsage.teamId, teamA)),
+    );
+    const of = (sb: string) => rows.find((r) => r.sandboxId === sb);
+    expect(of(a)).toMatchObject({ reasoningTokens: 40, reasoningEstimated: false });
+    expect(of(b)).toMatchObject({ reasoningTokens: 100, reasoningEstimated: true });
+    expect(of(c)).toMatchObject({ reasoningTokens: null, reasoningEstimated: false });
+  });
+
   it("clamps absurd counts instead of failing the batch", async () => {
     const sb = randomUUID();
     await recordModelUsage(app.db, [

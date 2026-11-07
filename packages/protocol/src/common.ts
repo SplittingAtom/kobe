@@ -98,6 +98,12 @@ export const usageSchema = z.object({
   cache_read: z.number().int().nonnegative(),
   cache_write: z.number().int().nonnegative(),
   cost_usd: z.number().nonnegative(),
+  /**
+   * Reasoning (thinking) tokens within `output` (KOBE-557), when known: a live client can show
+   * them before the run's ledger read settles. The ledger (`GET /v1/threads/{id}/usage`) stays
+   * the record and says whether a count is estimated.
+   */
+  reasoning: z.number().int().nonnegative().optional(),
 });
 export type Usage = z.infer<typeof usageSchema>;
 

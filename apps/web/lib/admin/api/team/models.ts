@@ -3,7 +3,7 @@
  * team.models.manage; KOBE-40 API, KOBE-44 UI). The whole site catalog, each with whether the
  * team enabled it and which one is the team's default.
  */
-import type { ThinkingLevel } from "@kobe/protocol";
+import type { ThinkingControl, ThinkingLevel } from "@kobe/protocol";
 import { apiRequest, type ApiResult } from "../../../api/client";
 import type { CatalogModel, ProviderKind } from "../site/models";
 
@@ -20,6 +20,8 @@ export interface TeamModel extends CatalogModel {
    * levels a conversation may pick (empty: no choice). Absent from an older server.
    */
   readonly thinkingInTeam?: {
+    /** KOBE-557: the model's control, for `thinkingBudget(control, level)`; absent on older servers. */
+    readonly control?: ThinkingControl;
     readonly default: ThinkingLevel | null;
     readonly levels: readonly ThinkingLevel[];
   };

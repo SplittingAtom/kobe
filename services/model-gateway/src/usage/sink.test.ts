@@ -35,6 +35,23 @@ describe("usageRecordOf", () => {
     expect(usageRecordOf(call())?.kind).toBeUndefined();
   });
 
+  it("carries the reasoning split (KOBE-557): null and not estimated when unknown", () => {
+    expect(usageRecordOf(call())).toMatchObject({
+      reasoningTokens: null,
+      reasoningEstimated: false,
+    });
+    const counts = { input: 1, output: 9, cacheRead: 0, cacheWrite: 0 };
+    const usage = {
+      source: "reported" as const,
+      counts,
+      reasoning: { tokens: 7, estimated: true },
+    };
+    expect(usageRecordOf(call({ usage }))).toMatchObject({
+      reasoningTokens: 7,
+      reasoningEstimated: true,
+    });
+  });
+
   it("records a server call's kind, its triggering run and no sandbox (KOBE-234)", () => {
     const runId = randomUUID();
     expect(

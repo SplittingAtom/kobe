@@ -460,3 +460,72 @@ describe("usage kinds (KOBE-219 ac-7, KOBE-234 run-less rows)", () => {
     ).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe("reasoning tokens (KOBE-557)", () => {
+  it("per run: the counted calls' sum, estimated when any counted call was; totals sum them", async () => {
+    const db = h.deps.database.db;
+    const before = {
+      team: (await as.alice.get("/v1/team/usage")).json.totals.reasoning_tokens as number,
+      site: (await as.siteAdmin.get("/v1/site/usage")).json.totals.reasoning_tokens as number,
+    };
+    const { thread, counted, uncounted } = await withTeam(db, finance, async (tx) => {
+      const [t] = await tx
+        .insert(threads)
+        .values({ teamId: finance, ownerUserId: ids.bob })
+        .returning({ id: threads.id });
+      if (!t) throw new Error("no thread");
+      const made = await tx
+        .insert(runs)
+        .values(
+          [0, 1].map(() => ({
+            teamId: finance,
+            threadId: t.id,
+            trigger: "user" as const,
+            status: "completed" as const,
+            startedAt: new Date(),
+            endedAt: new Date(),
+          })),
+        )
+        .returning({ id: runs.id });
+      const [a, b] = made;
+      if (!a || !b) throw new Error("no runs");
+      return { thread: t.id, counted: a.id, uncounted: b.id };
+    });
+    await recordModelUsage(db, [
+      usage({ runId: counted, outputTokens: 1_000, reasoningTokens: 300 }),
+      usage({
+        runId: counted,
+        outputTokens: 100,
+        reasoningTokens: 50,
+        reasoningEstimated: true,
+      }),
+      usage({ runId: counted, outputTokens: 10, reasoningTokens: null }),
+      usage({ runId: uncounted, outputTokens: 10, at: new Date(Date.now() + 1_000) }),
+    ]);
+
+    const run = await as.bob.get(`/v1/runs/${counted}/usage`);
+    expect(run.status, JSON.stringify(run.json)).toBe(200);
+    expect(run.json).toMatchObject({ reasoning_tokens: 350, reasoning_estimated: true });
+    const none = await as.bob.get(`/v1/runs/${uncounted}/usage`);
+    expect(none.json).toMatchObject({ reasoning_tokens: null, reasoning_estimated: false });
+
+    const t = await as.bob.get(`/v1/threads/${thread}/usage`);
+    expect(t.status, JSON.stringify(t.json)).toBe(200);
+    const parsed = threadUsageResponseSchema.parse(t.json);
+    expect(parsed.totals.reasoning_tokens).toBe(350);
+    expect(parsed.runs.map((r) => [r.reasoning_tokens, r.reasoning_estimated])).toEqual([
+      [350, true],
+      [null, false],
+    ]);
+
+    const team = await as.alice.get("/v1/team/usage");
+    expect(team.json.totals.reasoning_tokens).toBe(before.team + 350);
+    expect(
+      team.json.by_user.every(
+        (u: { reasoning_tokens: unknown }) => typeof u.reasoning_tokens === "number",
+      ),
+    ).toBe(true);
+    const site = await as.siteAdmin.get("/v1/site/usage");
+    expect(site.json.totals.reasoning_tokens).toBe(before.site + 350);
+  });
+});

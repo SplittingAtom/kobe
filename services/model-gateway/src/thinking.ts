@@ -1,6 +1,8 @@
 import type { GatewayThinkingRow } from "@kobe/db";
 import {
+  ANTHROPIC_BUDGET,
   effectiveThinkingLevel,
+  GEMINI_BUDGET,
   lowestThinking,
   narrowThinkingPolicy,
   strictestThinkingPolicy,
@@ -59,13 +61,7 @@ const CONTROL_ROUTE: Readonly<Record<ThinkingPolicy["control"], Route["kind"] | 
   gemini_budget: "gemini",
 };
 
-/** Anthropic `budget_tokens` per level (the API's minimum is 1,024, below `max_tokens`). */
-export const ANTHROPIC_BUDGET: Readonly<Record<ThinkingLevel, number>> = {
-  off: 0,
-  low: 2_048,
-  medium: 8_192,
-  high: 24_576,
-};
+// Budget tables per level: `@kobe/protocol` thinking.ts (KOBE-557: the chat shows spend against them).
 const ANTHROPIC_MIN_BUDGET = 1_024;
 /**
  * What an Anthropic budget leaves for the answer (review S3): at least 1,024 tokens and at least a
@@ -74,14 +70,6 @@ const ANTHROPIC_MIN_BUDGET = 1_024;
  */
 export const ANSWER_MIN_TOKENS = 1_024;
 export const ANSWER_MIN_SHARE = 0.25;
-/** Gemini `thinkingBudget` per level (0 turns thinking off where the model allows it). */
-export const GEMINI_BUDGET: Readonly<Record<ThinkingLevel, number>> = {
-  off: 0,
-  low: 1_024,
-  medium: 8_192,
-  high: 24_576,
-};
-
 /**
  * Top-level fields that set or shape reasoning in some API or provider extension, removed from
  * every call to a controlled model (compared in folded case). `extra_body` / `extra_params` carry

@@ -12,6 +12,7 @@ import {
   thinkingLevelSchema,
   thinkingLowestSchema,
   thinkingPolicyProblem,
+  type ThinkingControl,
   type ThinkingLevel,
   type ThinkingPolicy,
 } from "@kobe/protocol";
@@ -163,6 +164,8 @@ export const thinkingView = (p: ThinkingPolicy): ThinkingView => ({
 
 /** For the chat: the policy in force for the team, the default level and what members may pick. */
 export interface ChatThinkingView {
+  /** The model's control (KOBE-557: the chat computes the level's budget, `thinkingBudget`). */
+  readonly control: ThinkingControl;
   readonly default: ThinkingLevel | null;
   readonly levels: readonly ThinkingLevel[];
 }
@@ -173,6 +176,7 @@ export function chatThinking(
 ): ChatThinkingView {
   const policy = narrowThinkingPolicy(site, teamMax);
   return {
+    control: policy.control,
     default: effectiveThinkingLevel(policy, null) ?? null,
     levels: selectableThinkingLevels(policy),
   };

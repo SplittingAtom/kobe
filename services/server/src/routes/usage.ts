@@ -108,6 +108,7 @@ const EMPTY: UsageTotals = {
   cost_usd_exact: "0.0000000000",
   unpriced_calls: 0,
   estimated_calls: 0,
+  reasoning_tokens: 0,
 };
 
 async function visible(c: Context, fn: () => Promise<Response>): Promise<Response> {
@@ -137,7 +138,16 @@ export function runUsageRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
       const actor = actorOf(c);
       await deps.runs.getRun(actor, id.data);
       const [usage] = await runsUsage(deps.database.db, actor.team_id, { runId: id.data });
-      return c.json(usage ?? { run_id: id.data, models: [], thinking_level: null, ...EMPTY });
+      return c.json(
+        usage ?? {
+          run_id: id.data,
+          models: [],
+          thinking_level: null,
+          ...EMPTY,
+          reasoning_tokens: null,
+          reasoning_estimated: false,
+        },
+      );
     });
   });
   return app;

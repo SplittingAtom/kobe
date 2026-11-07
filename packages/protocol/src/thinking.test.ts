@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { usageSchema } from "./common.js";
 import { knownThinkingLowest, knownThinkingProblem } from "./thinking-models.js";
 import {
+  ANTHROPIC_BUDGET,
   effectiveThinkingLevel,
+  GEMINI_BUDGET,
+  THINKING_EFFORT_BUDGETS,
+  thinkingBudget,
   strictestThinkingPolicy,
   narrowThinkingPolicy,
   selectableThinkingLevels,
@@ -189,5 +194,35 @@ describe("known model families (review S2)", () => {
     expect(knownThinkingProblem("claude-opus-4-8", budget)).toMatch(/refuses thinking budgets/);
     expect(knownThinkingProblem("claude-haiku-4-5", budget)).toBeUndefined();
     expect(knownThinkingProblem("o3", NONE)).toBeUndefined();
+  });
+});
+
+describe("thinking budgets per level (KOBE-557)", () => {
+  it("keeps the gateway's provider budgets unchanged", () => {
+    expect(ANTHROPIC_BUDGET).toEqual({ off: 0, low: 2_048, medium: 8_192, high: 24_576 });
+    expect(GEMINI_BUDGET).toEqual({ off: 0, low: 1_024, medium: 8_192, high: 24_576 });
+  });
+
+  it("gives the effort controls a display scale", () => {
+    expect(THINKING_EFFORT_BUDGETS).toEqual({ off: 0, low: 2_000, medium: 8_000, high: 24_000 });
+  });
+
+  it("returns the budget of a level for each control; none has no budget", () => {
+    expect(thinkingBudget("anthropic_budget", "medium")).toBe(8_192);
+    expect(thinkingBudget("gemini_budget", "low")).toBe(1_024);
+    expect(thinkingBudget("reasoning_effort", "high")).toBe(24_000);
+    expect(thinkingBudget("anthropic_adaptive", "low")).toBe(2_000);
+    expect(thinkingBudget("anthropic_effort", "medium")).toBe(8_000);
+    expect(thinkingBudget("reasoning_effort", "off")).toBe(0);
+    expect(thinkingBudget("none", "high")).toBeNull();
+  });
+});
+
+describe("run usage carries an optional reasoning count (KOBE-557)", () => {
+  const usage = { input: 10, output: 40, cache_read: 0, cache_write: 0, cost_usd: 0 };
+  it("accepts usage with and without reasoning, refuses a negative count", () => {
+    expect(usageSchema.safeParse(usage).success).toBe(true);
+    expect(usageSchema.parse({ ...usage, reasoning: 30 }).reasoning).toBe(30);
+    expect(usageSchema.safeParse({ ...usage, reasoning: -1 }).success).toBe(false);
   });
 });

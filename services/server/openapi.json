@@ -11432,6 +11432,11 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "reasoning_tokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
               }
             },
             "required": [
@@ -11443,7 +11448,8 @@
               "cost_usd",
               "cost_usd_exact",
               "unpriced_calls",
-              "estimated_calls"
+              "estimated_calls",
+              "reasoning_tokens"
             ],
             "additionalProperties": false
           },
@@ -11518,6 +11524,21 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 9007199254740991
+                },
+                "reasoning_tokens": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "reasoning_estimated": {
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -11533,7 +11554,9 @@
                 "cost_usd",
                 "cost_usd_exact",
                 "unpriced_calls",
-                "estimated_calls"
+                "estimated_calls",
+                "reasoning_tokens",
+                "reasoning_estimated"
               ],
               "additionalProperties": false
             }
@@ -11769,6 +11792,17 @@
                 "thinking_in_team": {
                   "type": "object",
                   "properties": {
+                    "control": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "reasoning_effort",
+                        "anthropic_adaptive",
+                        "anthropic_effort",
+                        "anthropic_budget",
+                        "gemini_budget"
+                      ]
+                    },
                     "default": {
                       "anyOf": [
                         {
@@ -11788,7 +11822,7 @@
                       }
                     }
                   },
-                  "required": ["default", "levels"],
+                  "required": ["control", "default", "levels"],
                   "additionalProperties": false
                 }
               },

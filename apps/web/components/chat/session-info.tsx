@@ -65,7 +65,7 @@ const when = (iso: string | undefined) =>
     ? "—"
     : new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
-function sum(runs: readonly UsageTotals[]): UsageTotals {
+function sum(runs: readonly Omit<UsageTotals, "reasoningTokens">[]): UsageTotals {
   return runs.reduce<UsageTotals>(
     (acc, r) => ({
       calls: acc.calls + r.calls,

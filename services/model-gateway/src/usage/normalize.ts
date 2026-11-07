@@ -12,8 +12,14 @@ export interface TokenCounts {
   readonly cacheWrite: number;
 }
 
-/** Fields a usage report set; a stream may report them in several events. */
-export type PartialCounts = { -readonly [K in keyof TokenCounts]?: number };
+/**
+ * Fields a usage report set; a stream may report them in several events. `reasoning`: the
+ * reasoning (thinking) tokens the provider reported within `output` (KOBE-557), when it reports a
+ * split: OpenAI Chat Completions and Responses, Gemini. Anthropic reports none.
+ */
+export type PartialCounts = { -readonly [K in keyof TokenCounts]?: number } & {
+  reasoning?: number;
+};
 
 const num = (v: unknown): number | undefined =>
   typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
@@ -23,10 +29,10 @@ const obj = (v: unknown): Record<string, unknown> | undefined =>
     : undefined;
 
 function defined(counts: {
-  readonly [K in keyof TokenCounts]?: number | undefined;
+  readonly [K in keyof PartialCounts]-?: number | undefined;
 }): PartialCounts | undefined {
   const out: PartialCounts = {};
-  for (const [k, v] of Object.entries(counts) as [keyof TokenCounts, number | undefined][]) {
+  for (const [k, v] of Object.entries(counts) as [keyof PartialCounts, number | undefined][]) {
     if (v !== undefined) out[k] = v;
   }
   return Object.keys(out).length > 0 ? out : undefined;
@@ -35,7 +41,8 @@ function defined(counts: {
 /**
  * OpenAI-style usage: Chat Completions (`prompt_tokens` includes `cached_tokens`) or Responses
  * (`input_tokens` includes `input_tokens_details.cached_tokens`). Reasoning tokens are part of
- * the output counts in both.
+ * the output counts in both; their split is `completion_tokens_details.reasoning_tokens` (Chat
+ * Completions) or `output_tokens_details.reasoning_tokens` (Responses).
  */
 export function normalizeOpenAi(usage: unknown): PartialCounts | undefined {
   const u = obj(usage);
@@ -44,10 +51,13 @@ export function normalizeOpenAi(usage: unknown): PartialCounts | undefined {
   const output = num(u.completion_tokens) ?? num(u.output_tokens);
   const details = obj(u.prompt_tokens_details) ?? obj(u.input_tokens_details);
   const cached = num(details?.cached_tokens) ?? 0;
+  const outDetails = obj(u.completion_tokens_details) ?? obj(u.output_tokens_details);
   return defined({
     input: prompt === undefined ? undefined : Math.max(0, prompt - cached),
     cacheRead: prompt === undefined ? undefined : Math.min(cached, prompt),
+    cacheWrite: undefined,
     output,
+    reasoning: num(outDetails?.reasoning_tokens),
   });
 }
 
@@ -60,6 +70,8 @@ export function normalizeAnthropic(usage: unknown): PartialCounts | undefined {
     output: num(u.output_tokens),
     cacheRead: num(u.cache_read_input_tokens),
     cacheWrite: num(u.cache_creation_input_tokens),
+    // Anthropic bills thinking as output without a split (estimated from the stream, meter.ts).
+    reasoning: undefined,
   });
 }
 
@@ -78,10 +90,12 @@ export function normalizeGemini(usage: unknown): PartialCounts | undefined {
   return defined({
     input: prompt === undefined ? undefined : Math.max(0, prompt - cached) + toolPrompt,
     cacheRead: prompt === undefined ? undefined : Math.min(cached, prompt),
+    cacheWrite: undefined,
     output:
       candidates === undefined && thoughts === undefined
         ? undefined
         : (candidates ?? 0) + (thoughts ?? 0),
+    reasoning: thoughts,
   });
 }
 
