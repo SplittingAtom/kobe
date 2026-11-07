@@ -20,7 +20,7 @@ import { ChoiceGroup, Field, FOCUS_RING, Radio, TextInput } from "../../ui/conso
 import { contrastLine, failureTexts } from "./appearance-contrast";
 
 /**
- * The style (KOBE-501, TH2/TH9-TH11): one of the six presets, or Custom (an accent, corners and
+ * The style (KOBE-501, TH2/TH9-TH11): one of the seven presets, or Custom (an accent, corners and
  * a typeface). The accent's floor (TH4) is measured live with the server's own checkFloor().
  */
 

@@ -594,6 +594,81 @@ describe("design tokens (KOBE-498)", () => {
   });
 });
 
+/**
+ * KOBE-550 (the Catalyst look): a panel glows on hover in every theme, in the brand's colour. The
+ * glow colour, the panel glow and the hover border are tokens; the class `kobe-panel` on the
+ * card-like surfaces reads them through one rule per root (chat, consoles), guarded by
+ * `(hover: hover)` and reduced motion; the composer glows on focus; a preset may paint an ambient
+ * gradient on the page roots.
+ */
+describe("panel glow (KOBE-550)", () => {
+  const light = new Map(declarations(block(THEME, ":root")));
+  const chosenDark = new Map(declarations(block(THEME, ':root[data-theme="dark"]')));
+  const GLOW = [
+    "--kobe-glow-color",
+    "--kobe-glow-panel",
+    "--kobe-panel-border-hover",
+    "--kobe-page-ambient",
+  ];
+
+  it("the glow reads the brand primary; the panel glow and the hover border read the glow", () => {
+    expect(light.get("--kobe-glow-color")).toBe(
+      "color-mix(in oklab, var(--kobe-brand-primary) 28%, transparent)",
+    );
+    expect(light.get("--kobe-glow-panel")).toBe("0 0 20px var(--kobe-glow-color)");
+    expect(light.get("--kobe-panel-border-hover")).toBe(
+      "color-mix(in oklab, var(--kobe-brand-primary) 35%, var(--border))",
+    );
+    expect(light.get("--kobe-page-ambient")).toBe("none");
+    // One value for both schemes (the brand tokens already differ per scheme).
+    for (const token of GLOW) expect(chosenDark.has(token), token).toBe(false);
+  });
+
+  it("the chat and the consoles glow a hovered panel through the tokens, hover and motion guarded", () => {
+    for (const [path, root] of [
+      ["app/chat-global.css", "[data-kobe-chat]"],
+      ["app/admin/admin-global.css", "[data-kobe-console]"],
+    ] as const) {
+      const css = read(path);
+      const hover = block(css, `${root} .kobe-panel:hover`);
+      expect(hover, path).toContain("box-shadow: var(--kobe-glow-panel)");
+      expect(hover, path).toContain("border-color: var(--kobe-panel-border-hover)");
+      expect(block(css, `${root} .kobe-panel`), path).toMatch(/transition:[^;]*box-shadow/);
+      expect(css, path).toMatch(/@media \(hover: hover\)/);
+      expect(css, path).toMatch(/@media \(prefers-reduced-motion: reduce\)/);
+    }
+  });
+
+  it("the composer glows on focus, and the page roots paint the ambient", () => {
+    expect(block(read("components/chat/composer.module.css"), ".panel:focus-within")).toContain(
+      "box-shadow: var(--kobe-glow-panel)",
+    );
+    expect(block(read("components/chat/chat.module.css"), ".app")).toContain(
+      "background-image: var(--kobe-page-ambient)",
+    );
+    expect(readRaw("components/ui/console/layout.tsx")).toContain(
+      "bg-[image:var(--kobe-page-ambient)]",
+    );
+  });
+
+  it("the card-like surfaces carry the class", () => {
+    for (const path of [
+      "components/chat/tool-call.tsx",
+      "components/ui/console/section.tsx",
+      "components/chat/approval-card.tsx",
+      "components/chat/file-card.tsx",
+      "components/files/file-edit-card.tsx",
+      "components/files/open-file-card.tsx",
+      "components/chat/skill-draft-card.tsx",
+      "components/chat/notification-bell.tsx",
+      "components/chat/compare-dialog.tsx",
+      "components/shell/context-text.tsx",
+    ]) {
+      expect(readRaw(path), path).toContain("kobe-panel");
+    }
+  });
+});
+
 describe("lane tokens (CT7, KOBE-545)", () => {
   const light = new Map(declarations(block(THEME, ":root")));
   const chosenDark = new Map(declarations(block(THEME, ':root[data-theme="dark"]')));

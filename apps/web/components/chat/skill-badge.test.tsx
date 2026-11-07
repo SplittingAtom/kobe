@@ -82,6 +82,9 @@ describe("skill use badges (KOBE-297)", () => {
     expect(plain?.getAttribute("aria-label")).toBe("Tool call read");
     expect(later?.getAttribute("aria-label")).toBe("Tool call read");
     expect(screen.getAllByText(/^Used skill:/)).toHaveLength(1);
+    // The chip's icon is gold (Chris 2026-11-06): the tool badge's gold, AA on cards in both themes.
+    const chip = screen.getByText("Used skill: pretty-html").closest("li");
+    expect(chip?.querySelector("svg")?.getAttribute("class")).toContain("text-tool-badge");
   });
 
   it("shows no badge without skill markers (an older server answers without the list)", async () => {

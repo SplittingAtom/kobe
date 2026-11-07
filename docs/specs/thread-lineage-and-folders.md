@@ -141,6 +141,16 @@ Budget 2027                                  ← root (link)
 - Plain text only (titles are escaped as everywhere), `role="navigation"` labelled "Thread
   lineage", items are real links or menu items, so the keyboard and screen readers get them.
 
+**TL3 amended (Chris, 2026-11-06, KOBE-550).** The rows are gone: the strip is one **chip** at
+every width, the fork icon first, then the parent's title (the nearest readable ancestor; "a thread
+you can't open" for a hidden root; "N forks" on a root that only has forks), then a chevron. The
+chip has sharp corners and the page's colours inverted (the foreground as its fill, the page colour
+as its text) so it contrasts with the page in every theme. Its menu is the phone line's family menu
+of before (every generation with its siblings, indented, the path checked, the forks last; choosing
+another thread opens it in place). The fork-point excerpt and the per-row links are no longer shown
+in the strip; the Conversation tree keeps the fork point. The accessible name is "Forked from
+<parent>" (the "Forked from" is visually hidden).
+
 **TL4. When it reads.** The web reads the lineage when a thread opens (with its summary), when
 the member forks (the fork dialog's success), when a fork is restored or trashed from the panel,
 and on window focus if the last read is older than 60 s. It is never pushed and never stored. A

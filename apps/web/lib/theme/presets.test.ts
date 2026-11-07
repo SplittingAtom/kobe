@@ -13,9 +13,9 @@ import {
 } from "./presets";
 import { asHex, THEME_DARK, THEME_LIGHT } from "./theme-css-source.test-helpers";
 
-/** KOBE-500 (TH9, ac-2): six presets, `default` = theme.css exactly, every one meets the floor. */
+/** KOBE-500 (TH9, ac-2): the presets, `default` = theme.css exactly, every one meets the floor. */
 describe("presets", () => {
-  it("are the protocol's six ids with their display names", () => {
+  it("are the protocol's seven ids with their display names", () => {
     expect(Object.keys(PRESETS)).toEqual([...PRESET_IDS]);
     for (const id of PRESET_IDS) {
       expect(PRESETS[id].id).toBe(id);
@@ -28,7 +28,65 @@ describe("presets", () => {
       "Plum",
       "Ember",
       "Tokyo Nights",
+      "Catalyst",
     ]);
+  });
+
+  /** KOBE-550: the glow, the page ambient and the shadows are preset tokens (docs/theming.md §7). */
+  it("each sets the glow colour, the page ambient and the three shadows", () => {
+    for (const token of [
+      "--kobe-glow-color",
+      "--kobe-page-ambient",
+      "--kobe-shadow-pop",
+      "--kobe-shadow-drawer",
+      "--kobe-shadow-panel",
+    ]) {
+      expect(PRESET_SCHEME_TOKENS).toContain(token);
+    }
+    for (const preset of Object.values(PRESETS)) {
+      for (const values of [preset.light, preset.dark]) {
+        expect(values["--kobe-glow-color"]).toMatch(/^(?:color-mix\(|rgb\()/);
+        expect(values["--kobe-page-ambient"]).toMatch(/^(?:none|radial-gradient\()/);
+      }
+    }
+  });
+
+  it("every preset but catalyst glows in its own brand colour and keeps today's shadows", () => {
+    for (const preset of Object.values(PRESETS)) {
+      if (preset.id === "catalyst") continue;
+      for (const values of [preset.light, preset.dark]) {
+        expect(values["--kobe-glow-color"]).toBe(
+          "color-mix(in oklab, var(--kobe-brand-primary) 28%, transparent)",
+        );
+        expect(values["--kobe-page-ambient"]).toBe("none");
+        expect(values["--kobe-shadow-pop"]).toBe(THEME_LIGHT.get("--kobe-shadow-pop"));
+        expect(values["--kobe-shadow-drawer"]).toBe(THEME_LIGHT.get("--kobe-shadow-drawer"));
+        expect(values["--kobe-shadow-panel"]).toBe(THEME_LIGHT.get("--kobe-shadow-panel"));
+      }
+    }
+  });
+
+  /** KOBE-550: Catalyst's own glow (its tokens' --glow-color), glow shadows and the dark ambient. */
+  it("catalyst carries Catalyst's glow, glow shadows and the Rehoboam ambient", () => {
+    const { light, dark } = PRESETS.catalyst;
+    expect(PRESETS.catalyst.label).toBe("Catalyst");
+    expect(PRESETS.catalyst.corners).toBe("soft");
+    expect(light["--kobe-glow-color"]).toBe("rgb(25 118 210 / 30%)");
+    expect(dark["--kobe-glow-color"]).toBe("rgb(79 195 247 / 25%)");
+    expect(light["--kobe-page-ambient"]).toBe("none");
+    expect(dark["--kobe-page-ambient"]).toMatch(/^radial-gradient\(/);
+    for (const values of [light, dark]) {
+      for (const shadow of [
+        "--kobe-shadow-pop",
+        "--kobe-shadow-drawer",
+        "--kobe-shadow-panel",
+      ] as const) {
+        expect(values[shadow]).toMatch(/^0 0 \d+px var\(--kobe-glow-color\)$/);
+      }
+    }
+    expect(dark["--kobe-brand-primary"]).toBe("#4fc3f7");
+    expect(light["--kobe-brand-primary"]).toBe("#1565c0");
+    expect(dark["--background"]).toBe("#06080e");
   });
 
   it("each sets every preset token in both schemes, with CSS-safe values only", () => {

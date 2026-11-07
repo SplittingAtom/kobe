@@ -38,7 +38,7 @@ export function FileCard({ file }: { readonly file: KobeEventPayload<"file.share
   };
 
   return (
-    <div className={styles.fileCard}>
+    <div className={`${styles.fileCard} kobe-panel`}>
       <FileIcon aria-hidden className="size-4" />
       <div className={styles.fileInfo}>
         <span className={styles.fileName}>{file.name}</span>

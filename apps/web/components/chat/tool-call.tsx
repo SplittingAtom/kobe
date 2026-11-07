@@ -315,7 +315,7 @@ export function ToolCallCard(props: ToolCallMessagePartProps) {
       : formatDuration(timing.completedAt - timing.startedAt);
   return (
     <section
-      className="border-border bg-card text-card-foreground my-1 w-full rounded-lg border text-sm whitespace-normal"
+      className="kobe-panel border-border bg-card text-card-foreground my-1 w-full rounded-lg border text-sm whitespace-normal"
       aria-label={`Tool call ${props.toolName}${skill === undefined ? "" : `: skill ${skill}`}`}
     >
       <Disclosure

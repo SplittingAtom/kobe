@@ -516,7 +516,7 @@ retention:
 branding:
   # The site's name (1-40 characters, plain text on one line). Empty: "Kobe".
   appName: ""
-  # One of default, slate, forest, plum, ember, tokyo-nights. Empty: the built-in default.
+  # One of default, slate, forest, plum, ember, tokyo-nights, catalyst. Empty: the built-in default.
   preset: ""
   # Show the name next to the logo in the header. Only false is seeded (true is the default).
   showName: true

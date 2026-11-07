@@ -19,15 +19,19 @@ test("Fork to a new thread opens a titled copy with its origin note", async ({ c
   const fork = await chat.threadId();
   expect(fork).not.toBe(source);
 
-  // The lineage strip (KOBE-535): the source as a link in the first row, the fork bold in the
-  // current row with its fork point's excerpt.
+  // The lineage chip (KOBE-535, TL3 as amended 2026-11-06): one chip naming the source, whose
+  // menu lists the source (checked) and the fork on screen (checked).
   const strip = page.getByRole("navigation", { name: "Thread lineage" });
-  const rows = strip.getByRole("listitem");
-  await expect(rows).toHaveCount(2, { timeout: 30_000 });
-  await expect(rows.first().getByRole("link")).toHaveAttribute("href", new RegExp(source, "i"));
-  const current = rows.last();
-  await expect(current.locator("strong")).toHaveText(title);
-  await expect(current).toContainText(/ at “.+”/);
+  const chip = strip.getByRole("button", { name: /^Forked from / });
+  await expect(chip).toBeVisible({ timeout: 30_000 });
+  await chip.click();
+  const family = page.getByRole("menu");
+  await expect(family.getByRole("menuitemcheckbox")).toHaveCount(2);
+  await expect(family.getByRole("menuitemcheckbox", { name: title })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await page.keyboard.press("Escape");
   // The conversation up to the fork point came along, and the rail lists the new title.
   await expect(chat.userMessages.first()).toContainText("ALPHA");
   await expect(chat.answers).toHaveCount(1);

@@ -137,7 +137,12 @@ function NotificationPanel({
     onOpenSkill(href);
   };
   return (
-    <section id={id} className={styles.notePanel} aria-label="Notifications" hidden={!open}>
+    <section
+      id={id}
+      className={`${styles.notePanel} kobe-panel`}
+      aria-label="Notifications"
+      hidden={!open}
+    >
       <p className={styles.noteToolbar}>
         <label>
           <input

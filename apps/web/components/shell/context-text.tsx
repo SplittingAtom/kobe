@@ -175,7 +175,7 @@ export function ContextText({
         role="region"
         aria-label="Context text"
         tabIndex={0}
-        className={styles.pane}
+        className={`${styles.pane} kobe-panel`}
         onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
       >
         <div className={styles.spacer} style={{ height: rows.length * ROW_PX }}>

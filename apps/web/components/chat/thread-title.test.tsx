@@ -132,7 +132,17 @@ describe("conversation header name (KOBE-292)", () => {
     expect(screen.queryByRole("textbox", { name: "Conversation name" })).toBeNull();
   });
 
-  it("offers no pencil on a new conversation, a read-only one or one in Trash", async () => {
+  it("the name itself is the rename control: no pencil, the heading hidden behind it", async () => {
+    openApp(fake, fake.addThread("Budget"));
+    const button = within(await header()).getByRole("button", { name: "Rename Budget" });
+    expect(button.textContent).toBe("Budget");
+    expect(button.querySelector("svg")).toBeNull();
+    expect(within(await header()).queryByRole("button", { name: /^Rename/ })).toBe(button);
+    const h2 = within(await header()).getByRole("heading", { level: 2, name: "Budget" });
+    expect(h2.className).toContain("sr-only");
+  });
+
+  it("offers no rename on a new conversation, a read-only one or one in Trash", async () => {
     openApp(fake);
     await composer();
     expect(await screen.findByRole("heading", { level: 2, name: "New conversation" })).toBeTruthy();

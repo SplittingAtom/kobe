@@ -171,7 +171,7 @@ export function FileEditCard({
     panel?.openFile(proposal.path);
   };
   return (
-    <div className={styles.fileCard} data-kobe-file-edit={proposal.path}>
+    <div className={`${styles.fileCard} kobe-panel`} data-kobe-file-edit={proposal.path}>
       <FilePenIcon aria-hidden className="size-4" />
       <div className={styles.fileInfo}>
         <span className={styles.fileName} title={proposal.path}>

@@ -61,7 +61,7 @@ export function OpenFileCard({
   if (path === undefined) return null;
   const name = fileName(path);
   return (
-    <div className={styles.fileCard} data-kobe-opened-file={path}>
+    <div className={`${styles.fileCard} kobe-panel`} data-kobe-opened-file={path}>
       <FileSearchIcon aria-hidden className="size-4" />
       <div className={styles.fileInfo}>
         <span className={styles.fileName} title={path}>

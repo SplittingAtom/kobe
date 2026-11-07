@@ -72,7 +72,7 @@ export function Card({
     <div
       data-slot="console-card"
       className={cn(
-        "box-border rounded-lg border border-console-border bg-console-bg p-3",
+        "kobe-panel box-border rounded-lg border border-console-border bg-console-bg p-3",
         className,
       )}
       {...props}

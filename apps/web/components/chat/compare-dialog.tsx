@@ -225,7 +225,7 @@ function VersionColumn({
     <section
       role="region"
       aria-label={title}
-      className={styles.column}
+      className={`${styles.column} kobe-panel`}
       data-kobe-compare-column={SIDES[side]}
     >
       {answer === null ? (

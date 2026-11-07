@@ -43,7 +43,7 @@ export function SkillDraftCard({
   const draft = useRecordedSave(toolCallId, done);
   if (!draft) return null;
   return (
-    <div className={styles.fileCard}>
+    <div className={`${styles.fileCard} kobe-panel`}>
       <WandSparklesIcon aria-hidden className="size-4" />
       <div className={styles.fileInfo}>
         <span className={styles.fileName}>

@@ -34,7 +34,7 @@ export function ConsoleLayout({
     <div
       data-kobe-console=""
       className={cn(
-        "bg-console-bg font-sans leading-normal text-console-fg",
+        "bg-console-bg bg-[image:var(--kobe-page-ambient)] font-sans leading-normal text-console-fg",
         panel ? "min-h-full" : "min-h-screen",
       )}
     >

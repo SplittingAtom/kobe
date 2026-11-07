@@ -6,7 +6,6 @@ import type { ThreadController } from "../../lib/chat/thread-controller";
 import { renameBlocker } from "../../lib/chat/thread-commands";
 import type { ThreadState } from "../../lib/chat/thread-state";
 import { useBindCommands } from "../shell/command-bindings";
-import { IconAction } from "../shell/icon-action";
 
 const UNTITLED = "Untitled conversation";
 const MAX_TITLE = 200;
@@ -33,12 +32,14 @@ function messageOf(err: unknown): string {
 type Phase = "closed" | "editing" | "saving";
 
 /**
- * The conversation header's name (KOBE-292) with a pencil to rename it in place. Enter, or
+ * The conversation header's name (KOBE-292): a click on the name itself opens the field (Chris
+ * 2026-11-06; the pencil is gone). Enter, or
  * leaving the field, saves a changed name through the thread list's rename (the existing `PATCH
  * /v1/threads/{id}`, which locks the title against auto-titling), so the rail shows it at once;
  * an empty name clears it (unlocked again, "Untitled conversation"). Escape cancels. A refused
- * save keeps the field open with the server's reason. Focus returns to the pencil after Enter or
- * Escape. The heading stays the conversation region's label while the field is open.
+ * save keeps the field open with the server's reason. Focus returns to the name after Enter or
+ * Escape. The heading stays the conversation region's label (visually hidden while the name is
+ * the button, or the field is open); the button is named "Rename <title>".
  */
 export function ThreadTitle({
   state,
@@ -74,18 +75,18 @@ export function ThreadTitle({
     setError(null);
     setDraft(named ?? "");
   };
-  const close = (focusPencil: boolean) => {
+  const close = (focusName: boolean) => {
     phase.current = "closed";
-    returnFocus.current = focusPencil;
+    returnFocus.current = focusName;
     setError(null);
     setDraft(null);
   };
 
   /** Saves a changed name (empty clears it); closes on success, stays open with the reason. */
-  const commit = async (focusPencil: boolean) => {
+  const commit = async (focusName: boolean) => {
     if (phase.current !== "editing") return;
     const next = (draft ?? "").trim().slice(0, MAX_TITLE);
-    if (next === (named ?? "")) return close(focusPencil);
+    if (next === (named ?? "")) return close(focusName);
     phase.current = "saving";
     try {
       await aui.threadListItem.rename(next);
@@ -94,11 +95,11 @@ export function ThreadTitle({
       setError(messageOf(err));
       return;
     }
-    close(focusPencil);
+    close(focusName);
     void controller?.refresh();
   };
 
-  // `/rename` (KOBE-224) opens the same field as the pencil, or says why it can't.
+  // `/rename` (KOBE-224) opens the same field as a click on the name, or says why it can't.
   useBindCommands(
     editable ? { "rename-thread": { onSelect: open, blocker: renameBlocker(state) } } : {},
   );
@@ -108,9 +109,13 @@ export function ThreadTitle({
     void commit(true);
   };
 
+  const renameable = editable && canRename(state);
   return (
     <span ref={wrapper} className="flex min-w-0 flex-wrap items-center gap-1">
-      <h2 id="kobe-thread-title" className={draft === null ? "text-sm font-medium" : "sr-only"}>
+      <h2
+        id="kobe-thread-title"
+        className={draft === null && !renameable ? "text-sm font-medium" : "sr-only"}
+      >
         {title}
       </h2>
       {draft !== null ? (
@@ -141,9 +146,17 @@ export function ThreadTitle({
           )}
         </form>
       ) : (
-        editable &&
-        canRename(state) && (
-          <IconAction command="rename-thread" label={`Rename ${title}`} size="sm" onClick={open} />
+        renameable && (
+          <button
+            type="button"
+            data-command="rename-thread"
+            aria-label={`Rename ${title}`}
+            title="Click to rename"
+            onClick={open}
+            className="hover:bg-muted focus-visible:ring-ring -mx-1 min-w-0 cursor-text rounded-md px-1 text-start text-sm font-medium focus-visible:ring-2 focus-visible:outline-none"
+          >
+            {title}
+          </button>
         )
       )}
     </span>
