@@ -2,6 +2,7 @@ import type { FrameLocator, Page } from "@playwright/test";
 import { expect, test } from "./support/chat.js";
 import { RUN_TIMEOUT_MS } from "./support/constants.js";
 import { pageApi } from "./support/gate5.js";
+import { launchFromPlusMenu } from "./support/plus-apps.js";
 
 /**
  * KOBE-490 (ac-1..ac-4, ac-5's browser spec): an MCP App's `ui/message` with resource_links puts
