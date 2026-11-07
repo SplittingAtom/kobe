@@ -67,4 +67,6 @@ Catalyst's query tool (`ui/src/components/query/query-tab.tsx`: `flex gap-4`, si
 - **ac-4** `app/theme-css.test.ts` (glow rule, reduced motion, forced-colours hover border; the
   shell grid and console layout carry `kobe-panel`).
 - **ac-5** `docs/theming.md` §7 (surfaces) and §9 (card/gap rule); this ledger.
-- **ac-6** `TMPDIR=$HOME/tmp pnpm verify` green before push; PR CI: see PR.
+- **ac-6** `TMPDIR=$HOME/tmp pnpm verify` green before push. First CI run: gate5-a failed on
+  `e2e/browser/tests/rail-resize.spec.ts` (aria-valuemax 520 beside a file tab); with the gutters
+  and gaps the bound is 1,280 − 64 − 760 = 456, so the spec was updated (typechecked).

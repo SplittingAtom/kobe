@@ -198,8 +198,9 @@ test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a fil
     ).toBeVisible();
     await handle.focus();
     await page.keyboard.press("End");
-    await expect(handle).toHaveAttribute("aria-valuemax", "520"); // 1,280 − 400 − 360
-    await expectWidth(rail, 520);
+    // 1,280 − 2 × 16 gutters − 2 × 16 gaps (KOBE-554) − 400 − 360.
+    await expect(handle).toHaveAttribute("aria-valuemax", "456");
+    await expectWidth(rail, 456);
     expect(await width(column)).toBeGreaterThanOrEqual(360 - SLACK_PX);
     expect(await width(conversation)).toBeGreaterThanOrEqual(400 - SLACK_PX);
     await page.screenshot({ path: testInfo.outputPath("rail-resize-with-column.png") });
