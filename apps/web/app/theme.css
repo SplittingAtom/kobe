@@ -182,11 +182,27 @@
   --kobe-radius-pill: 9999px;
 
   /* Shadows and the drawer's scrim (KOBE-498, docs/theming.md §7): today's values, the same in
-     both themes for now (the dark schemes inherit them; T4's presets set dark values). */
+     both themes (the dark schemes inherit them). A preset may set the three shadows (KOBE-550:
+     the Catalyst preset makes them glow); the scrim stays fixed. */
   --kobe-shadow-pop: 0 4px 16px rgb(0 0 0 / 15%);
   --kobe-shadow-drawer: 0 8px 24px rgb(0 0 0 / 12%);
   --kobe-shadow-panel: 0 1.5rem 4rem rgb(0 0 0 / 25%);
   --kobe-scrim: rgb(0 0 0 / 40%);
+
+  /* The glow (KOBE-550, docs/theming.md §7, after the Catalyst query tool): a card-like surface
+     (`kobe-panel` in app/chat-global.css and app/admin/admin-global.css) lights up on hover, its
+     border toward the brand and a soft halo outside it in the brand's colour. The glow colour is
+     the brand primary at 28% (Catalyst's own alpha), so every preset and a custom accent glow in
+     their own colour; a preset may set it outright. The composer glows on focus
+     (components/chat/composer.module.css). One value for both schemes: the brand already differs. */
+  --kobe-glow-color: color-mix(in oklab, var(--kobe-brand-primary) 28%, transparent);
+  --kobe-glow-panel: 0 0 20px var(--kobe-glow-color);
+  --kobe-panel-border-hover: color-mix(in oklab, var(--kobe-brand-primary) 35%, var(--border));
+
+  /* An ambient wash behind the page (KOBE-550): a `background-image` the page roots paint over
+     their background (the chat root, the console root). `none` by default; the Catalyst preset's
+     dark scheme breathes two faint radial gradients of its accent. */
+  --kobe-page-ambient: none;
 
   /* `display` for content shown in one theme only (the toggle's icon). */
   --kobe-when-light: block;

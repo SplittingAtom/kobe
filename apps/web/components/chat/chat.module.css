@@ -18,6 +18,8 @@
   overflow: hidden;
   color: var(--admin-fg);
   background: var(--admin-bg);
+  /* A preset's ambient wash over the page colour (KOBE-550, app/theme.css); none by default. */
+  background-image: var(--kobe-page-ambient);
   font-family: var(--kobe-font-sans);
   line-height: 1.5;
 }

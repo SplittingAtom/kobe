@@ -73,7 +73,7 @@ export function UsedSkills() {
     >
       {names.map((name) => (
         <li key={name} className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5">
-          <SparklesIcon aria-hidden className="size-3" />
+          <SparklesIcon aria-hidden className="text-tool-badge size-3" />
           <span>{`Used skill: ${name}`}</span>
         </li>
       ))}

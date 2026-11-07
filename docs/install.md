@@ -762,7 +762,8 @@ is not fatal: the web serves Kobe's default name and look and logs it at most on
 web replica caches the branding for 30 s.
 
 **Defaults from the values (optional, for GitOps).** `branding.appName` (1-40 characters, plain
-text), `branding.preset` (`default`, `slate`, `forest`, `plum`, `ember` or `tokyo-nights`) and
+text), `branding.preset` (`default`, `slate`, `forest`, `plum`, `ember`, `tokyo-nights` or
+`catalyst`) and
 `branding.showName` (only `false` is passed on; `true` is the default) give a new site its name and
 look. The API server writes each set value into the site settings at start **only while that
 setting is unset**, and records it in the site audit log as the system (`site.branding.updated`).

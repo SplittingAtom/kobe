@@ -21,10 +21,19 @@ import {
 const custom = { preset: "custom", accent: "#1a73e8", corners: "round", font: "serif" } as const;
 
 describe("theme settings (TH2, TH9-TH11)", () => {
-  it("ships the six presets, `default` first", () => {
-    expect(PRESET_IDS).toEqual(["default", "slate", "forest", "plum", "ember", "tokyo-nights"]);
+  it("ships the seven presets, `default` first", () => {
+    expect(PRESET_IDS).toEqual([
+      "default",
+      "slate",
+      "forest",
+      "plum",
+      "ember",
+      "tokyo-nights",
+      "catalyst",
+    ]);
     expect(DEFAULT_THEME).toEqual({ preset: "default" });
     expect(PRESET_LABELS["tokyo-nights"]).toBe("Tokyo Nights");
+    expect(PRESET_LABELS.catalyst).toBe("Catalyst");
     expect(Object.keys(PRESET_LABELS)).toEqual([...PRESET_IDS]);
   });
 

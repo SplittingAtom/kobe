@@ -21,8 +21,19 @@ export const BRANDING_SETTING_KEYS = {
 /** Whether the header shows the app name by default (`branding.show_name` unset). */
 export const DEFAULT_SHOW_NAME = true;
 
-/** Shipped presets (TH9, Chris 2026-10-28); `default` is today's neutral look and the default. */
-export const PRESET_IDS = ["default", "slate", "forest", "plum", "ember", "tokyo-nights"] as const;
+/**
+ * Shipped presets (TH9, Chris 2026-10-28); `default` is today's neutral look and the default.
+ * `catalyst` (KOBE-550, Chris 2026-11-06) carries the Catalyst query tool's palette and glow.
+ */
+export const PRESET_IDS = [
+  "default",
+  "slate",
+  "forest",
+  "plum",
+  "ember",
+  "tokyo-nights",
+  "catalyst",
+] as const;
 export type PresetId = (typeof PRESET_IDS)[number];
 
 /** Display names of the presets (TH9). */
@@ -33,6 +44,7 @@ export const PRESET_LABELS: Readonly<Record<PresetId, string>> = {
   plum: "Plum",
   ember: "Ember",
   "tokyo-nights": "Tokyo Nights",
+  catalyst: "Catalyst",
 };
 
 /** Radius scales (TH11); `soft` is today's. */

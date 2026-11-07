@@ -269,7 +269,7 @@ export function ApprovalCard({
   return (
     <section
       ref={card}
-      className={styles.approval}
+      className={`${styles.approval} kobe-panel`}
       role="group"
       aria-labelledby={`${ids}-title`}
       aria-describedby={`${ids}-why`}

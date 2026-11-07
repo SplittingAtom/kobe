@@ -10,12 +10,15 @@
   outline-offset: 0;
   transition:
     outline-color 120ms ease-out,
-    border-color 120ms ease-out;
+    border-color 120ms ease-out,
+    box-shadow 300ms ease;
 }
 
 .panel:focus-within {
   outline-style: solid;
   outline-color: var(--kobe-composer-focus);
+  /* The glow of a focused panel (KOBE-550, app/theme.css), like a focused Catalyst input. */
+  box-shadow: var(--kobe-glow-panel);
 }
 
 /* The text field has no ring of its own: the panel's outline shows where the focus is. More

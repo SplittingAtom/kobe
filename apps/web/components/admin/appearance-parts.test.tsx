@@ -220,7 +220,7 @@ function Style({ initial }: { initial: StyleDraft }) {
 const theme = () => JSON.parse(screen.getByTestId("theme").textContent ?? "null") as unknown;
 
 describe("Appearance style", () => {
-  it("offers the six presets and Custom as one radio group", async () => {
+  it("offers the seven presets and Custom as one radio group", async () => {
     render(<Style initial={draftOf({ preset: "default" })} />);
     const group = screen.getByRole("group", { name: "Style" });
     const names = within(group)
@@ -233,6 +233,7 @@ describe("Appearance style", () => {
       "Plum",
       "Ember",
       "Tokyo Nights",
+      "Catalyst",
       "Custom",
     ]);
     await userEvent.click(screen.getByRole("radio", { name: "Plum" }));

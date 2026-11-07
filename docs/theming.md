@@ -5,7 +5,7 @@ Every token below is declared in `apps/web/app/theme.css`; the presets are in
 `apps/web/lib/theme/presets.ts`, the accent maths and the contrast floor in
 `packages/protocol/src/theme/accent.ts`, the API in `services/server/src/routes/site-branding.ts`.
 The "Set by" column says what changes a token: **accent** (the admin's accent colour under Custom,
-through `deriveAccent()`), **preset** (one of the six shipped styles), **corners**, **typeface**, or
+through `deriveAccent()`), **preset** (one of the seven shipped styles), **corners**, **typeface**, or
 **fixed** (never themable, with the reason). There are no per-token overrides in this release (the
 optional KOBE-504 would add an allow-list).
 
@@ -80,12 +80,12 @@ namespaces and is refused). The Appearance page adds this hint to every SVG refu
 
 ## 3. Style inputs
 
-| Input    | Choices                                                              | What it sets                                                                                                                                                                                 |
-| -------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Preset   | `default`, `slate`, `forest`, `plum`, `ember`, `tokyo-nights` (§3.1) | A complete set of values for every token marked **preset** below, light and dark, plus its corners and typeface; each preset meets the contrast floor (§8), unit-tested                      |
-| Accent   | One colour (`#rrggbb`, lowercase hex), under Custom                  | The **brand** tokens per scheme (§4.1): primary fill, its hover, its text colour, the link colour and the focus colour; also points `--ring` and `--kobe-composer-focus` at the focus colour |
-| Corners  | `sharp`, `soft` (default), `round`, under Custom                     | The **radius** tokens (§6)                                                                                                                                                                   |
-| Typeface | `system` (default), `humanist`, `grotesk`, `serif`, under Custom     | `--kobe-font-sans` (§5); monospace stays the system monospace stack                                                                                                                          |
+| Input    | Choices                                                                          | What it sets                                                                                                                                                                                 |
+| -------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Preset   | `default`, `slate`, `forest`, `plum`, `ember`, `tokyo-nights`, `catalyst` (§3.1) | A complete set of values for every token marked **preset** below, light and dark, plus its corners and typeface; each preset meets the contrast floor (§8), unit-tested                      |
+| Accent   | One colour (`#rrggbb`, lowercase hex), under Custom                              | The **brand** tokens per scheme (§4.1): primary fill, its hover, its text colour, the link colour and the focus colour; also points `--ring` and `--kobe-composer-focus` at the focus colour |
+| Corners  | `sharp`, `soft` (default), `round`, under Custom                                 | The **radius** tokens (§6)                                                                                                                                                                   |
+| Typeface | `system` (default), `humanist`, `grotesk`, `serif`, under Custom                 | `--kobe-font-sans` (§5); monospace stays the system monospace stack                                                                                                                          |
 
 Stored as `branding.theme`: `{"preset":"<id>"}` or
 `{"preset":"custom","accent":"#rrggbb","corners":"…","font":"…"}`. A preset fixes its own corners and
@@ -94,18 +94,20 @@ on the Appearance page starts from the selected preset's corners and typeface.
 
 ### 3.1 The presets
 
-| Id             | Display name | Corners | Typeface | Look                                                                                                                          |
-| -------------- | ------------ | ------- | -------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `default`      | Default      | soft    | system   | Today's neutral look, theme.css byte for byte (the built-in default; renders no `<style>`)                                    |
-| `slate`        | Slate        | soft    | grotesk  | Cool blue-grey neutrals, slate-blue accent (light `#3d5a80`, dark `#4a6a9e`, dark link `#9db6dc`)                             |
-| `forest`       | Forest       | round   | humanist | Green-tinted neutrals, deep forest accent (light `#2d6a4f`, dark `#2f7353`, dark link `#8fd1ab`)                              |
-| `plum`         | Plum         | soft    | serif    | Violet-tinted neutrals, plum accent (light `#7a3e8a`, dark `#8a4a9c`, dark link `#d7a8e3`)                                    |
-| `ember`        | Ember        | sharp   | grotesk  | Warm neutrals, burnt-orange accent (light `#b03d12`, link `#a63a10`; dark `#e07a3f` with near-black text, link `#f5a571`)     |
-| `tokyo-nights` | Tokyo Nights | round   | system   | After the Tokyo Night editor palette: indigo night (dark page `#1a1b26`), periwinkle accent `#7aa2f7`, violet focus `#bb9af7` |
+| Id             | Display name | Corners | Typeface | Look                                                                                                                                                                                                                                                 |
+| -------------- | ------------ | ------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `default`      | Default      | soft    | system   | Today's neutral look, theme.css byte for byte (the built-in default; renders no `<style>`)                                                                                                                                                           |
+| `slate`        | Slate        | soft    | grotesk  | Cool blue-grey neutrals, slate-blue accent (light `#3d5a80`, dark `#4a6a9e`, dark link `#9db6dc`)                                                                                                                                                    |
+| `forest`       | Forest       | round   | humanist | Green-tinted neutrals, deep forest accent (light `#2d6a4f`, dark `#2f7353`, dark link `#8fd1ab`)                                                                                                                                                     |
+| `plum`         | Plum         | soft    | serif    | Violet-tinted neutrals, plum accent (light `#7a3e8a`, dark `#8a4a9c`, dark link `#d7a8e3`)                                                                                                                                                           |
+| `ember`        | Ember        | sharp   | grotesk  | Warm neutrals, burnt-orange accent (light `#b03d12`, link `#a63a10`; dark `#e07a3f` with near-black text, link `#f5a571`)                                                                                                                            |
+| `tokyo-nights` | Tokyo Nights | round   | system   | After the Tokyo Night editor palette: indigo night (dark page `#1a1b26`), periwinkle accent `#7aa2f7`, violet focus `#bb9af7`                                                                                                                        |
+| `catalyst`     | Catalyst     | soft    | grotesk  | After the Catalyst query tool (KOBE-550): its light palette (page `#f3f5f9`, accent `#1565c0`) and its "Rehoboam" dark (page `#06080e`, accent `#4fc3f7`, borders the accent at 12%), its own glow colour, glow shadows and a dark ambient wash (§7) |
 
 Every preset value is in `apps/web/lib/theme/presets.ts` (`PRESETS`); the token list a preset sets
 per scheme is `PRESET_SCHEME_TOKENS` (the brand tokens, both neutral sets, `--ring` and
-`--kobe-composer-focus`). Presets do not set shadows, the mono stack or the wordmark.
+`--kobe-composer-focus`, the glow, the page ambient and the three shadows of §7). Presets do not
+set the scrim, the mono stack or the wordmark.
 
 ## 4. Colour tokens
 
@@ -245,17 +247,34 @@ are not themable.
 Tailwind's `--radius-sm` … `--radius-xl` map onto these in `apps/web/app/tailwind.css`, so existing
 `rounded-*` utilities follow without edits; `rounded-full` stays Tailwind's (circles).
 
-## 7. Shadows and scrims (fixed)
+## 7. Shadows, the glow and the scrim
 
-| Token                  | Used for                                       | Light and dark                   |
-| ---------------------- | ---------------------------------------------- | -------------------------------- |
-| `--kobe-shadow-pop`    | Menus, pickers, tooltips, the new-build banner | `0 4px 16px rgb(0 0 0 / 15%)`    |
-| `--kobe-shadow-drawer` | The rail drawer and the artifact column edge   | `0 8px 24px rgb(0 0 0 / 12%)`    |
-| `--kobe-shadow-panel`  | Workspace panels over the chat                 | `0 1.5rem 4rem rgb(0 0 0 / 25%)` |
-| `--kobe-scrim`         | The drawer's full-window scrim                 | `rgb(0 0 0 / 40%)`               |
+| Token                       | Used for                                                                 | Light and dark default                                              | Set by |
+| --------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------- | ------ |
+| `--kobe-shadow-pop`         | Menus, pickers, tooltips, the new-build banner                           | `0 4px 16px rgb(0 0 0 / 15%)`                                       | preset |
+| `--kobe-shadow-drawer`      | The rail drawer and the artifact column edge                             | `0 8px 24px rgb(0 0 0 / 12%)`                                       | preset |
+| `--kobe-shadow-panel`       | Workspace panels over the chat                                           | `0 1.5rem 4rem rgb(0 0 0 / 25%)`                                    | preset |
+| `--kobe-scrim`              | The drawer's full-window scrim                                           | `rgb(0 0 0 / 40%)`                                                  | fixed  |
+| `--kobe-glow-color`         | The colour of a glow (KOBE-550)                                          | `color-mix(in oklab, var(--kobe-brand-primary) 28%, transparent)`   | preset |
+| `--kobe-glow-panel`         | The halo of a hovered panel and of the focused composer                  | `0 0 20px var(--kobe-glow-color)`                                   | fixed  |
+| `--kobe-panel-border-hover` | A hovered panel's border                                                 | `color-mix(in oklab, var(--kobe-brand-primary) 35%, var(--border))` | fixed  |
+| `--kobe-page-ambient`       | A `background-image` the page roots (chat, consoles) paint over the page | `none`                                                              | preset |
 
-One value serves both themes (today's rendering); no preset sets them. Stylesheets read them
-through `var(--kobe-shadow-…)`.
+One value serves both schemes (the brand tokens they read already differ per scheme). Stylesheets
+read them through `var(--kobe-shadow-…)` and `var(--kobe-glow-…)`.
+
+**The glow (KOBE-550, after the Catalyst query tool).** A card-like surface carries the class
+`kobe-panel`: when the pointer rests on it, its border eases toward the brand and a halo appears
+outside it, in the brand's colour (every preset and a custom accent glow in their own colour; a
+preset may set `--kobe-glow-color` outright, as `catalyst` does with the tool's own alpha). One rule
+per root (`app/chat-global.css` for the chat, `app/admin/admin-global.css` for the consoles),
+unlayered so it outranks a module's resting border and shadow, under `@media (hover: hover)`, with
+no easing under `prefers-reduced-motion`. The surfaces: tool-call cards, approval and file cards,
+the notifications panel, the Compare columns, the context viewer's pane and the console `Card`
+primitive; the composer glows while it has focus (`components/chat/composer.module.css`). The shell
+columns (rail, conversation, artifact column) are not panels: layout is not themed (§9). The
+`catalyst` preset also turns the three shadows into glows and paints an ambient wash on the dark
+page; the other presets keep today's shadows and no ambient (`presets.test.ts`).
 
 ## 8. Rules every theme must meet
 
@@ -295,7 +314,8 @@ Always:
 
 - **Status, danger, confirm, tool, diff and context-viewer colours** (§4.4): meaning and
   colour-vision safety.
-- **Shadows, the mono stack and the wordmark's type** (§5, §7): fixed in this release.
+- **The scrim, the glow's shape, the mono stack and the wordmark's type** (§5, §7): fixed in this
+  release.
 - **Layout**: rail widths (`--kobe-rail-width`, `--kobe-rail-room`, `--kobe-artifact-width`, declared in `components/shell/shell.module.css`, not theme.css),
   breakpoints, viewport variables, densities. They are behaviour, not style.
 - **Artifact frames and MCP app frames**: sandboxed documents with their own CSP; the host's tokens
@@ -343,7 +363,7 @@ _Site console → System → Appearance_ (`/admin/site/appearance`), for Owner a
 | Site name                      | The name (§2); applied with Save. Save stays off while the name breaks the rules.                                                                                                                   |
 | Show the name next to the logo | `branding.show_name` (default on); applied with Save. Without a logo the name always shows; hidden, it stays the accessible name.                                                                   |
 | Logo, Dark logo, Favicon       | Pick or drop a file; it is uploaded and applied at once (size cap checked in the browser, type and SVG rules by the server, its refusal shown verbatim). Remove deletes it. Dark logo needs a logo. |
-| Style                          | The six presets (swatches) or Custom: accent colour (`#rrggbb` field and colour picker), Corners, Typeface. Applied with Save.                                                                      |
+| Style                          | The seven presets (swatches) or Custom: accent colour (`#rrggbb` field and colour picker), Corners, Typeface. Applied with Save.                                                                    |
 | Contrast line                  | Under Custom: the floor (§8) for the draft; Save stays off with the first failure and its ratio (cut to one decimal, never rounded up). A refused save lists the server's failures.                 |
 | Preview                        | The draft in a light and a dark frame, as every page will show it (inert: a picture, not controls).                                                                                                 |
 | Reset to defaults              | After a confirmation, removes the name, `show_name`, the style and all three files in one transaction, then re-seeds the chart's branding values if any are set (§13).                              |
@@ -374,7 +394,7 @@ Settings (`site_settings`): `branding.app_name` (the trimmed name), `branding.sh
 `logo_dark`, `favicon`). Both are in every backup ([backup-restore.md](backup-restore.md)). An
 unreadable stored value falls back to the default and is logged, never a failed page.
 
-The chart can seed them for GitOps installs: `branding.appName`, `branding.preset` (one of the six
+The chart can seed them for GitOps installs: `branding.appName`, `branding.preset` (one of the seven
 ids) and `branding.showName` (only `false` is passed on) become the server's `KOBE_BRANDING_*`
 environment. At start the API server writes each set value **only while that setting is unset**
 (audited as the system); an admin's change always wins and is never overwritten. Reset returns to

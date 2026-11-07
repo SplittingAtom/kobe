@@ -1068,7 +1068,7 @@
         },
         "preset": {
           "type": "string",
-          "enum": ["", "default", "slate", "forest", "plum", "ember", "tokyo-nights"]
+          "enum": ["", "default", "slate", "forest", "plum", "ember", "tokyo-nights", "catalyst"]
         },
         "showName": {
           "type": "boolean"

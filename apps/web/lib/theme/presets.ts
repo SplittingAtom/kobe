@@ -35,6 +35,29 @@ export type LaneToken = (typeof LANE_TOKENS)[number];
 /** Lane 1 in every preset and scheme: the accent's link colour. */
 export const LANE_1_VALUE = "var(--kobe-brand-link)";
 
+/**
+ * The glow, the page ambient and the shadows (KOBE-550, docs/theming.md §7). Every preset sets
+ * them: all but `catalyst` glow in their own brand colour (the theme.css expression), paint no
+ * ambient and keep today's shadows; `catalyst` carries the Catalyst query tool's own values.
+ */
+export const GLOW_TOKENS = [
+  "--kobe-glow-color",
+  "--kobe-page-ambient",
+  "--kobe-shadow-pop",
+  "--kobe-shadow-drawer",
+  "--kobe-shadow-panel",
+] as const;
+export type GlowToken = (typeof GLOW_TOKENS)[number];
+
+/** theme.css's values: the brand primary at 28%, no ambient, the neutral shadows. */
+export const DEFAULT_GLOW: Readonly<Record<GlowToken, string>> = {
+  "--kobe-glow-color": "color-mix(in oklab, var(--kobe-brand-primary) 28%, transparent)",
+  "--kobe-page-ambient": "none",
+  "--kobe-shadow-pop": "0 4px 16px rgb(0 0 0 / 15%)",
+  "--kobe-shadow-drawer": "0 8px 24px rgb(0 0 0 / 12%)",
+  "--kobe-shadow-panel": "0 1.5rem 4rem rgb(0 0 0 / 25%)",
+};
+
 /** Tokens a preset sets per scheme, in theme.css order. */
 export const PRESET_SCHEME_TOKENS = [
   "--background",
@@ -68,6 +91,7 @@ export const PRESET_SCHEME_TOKENS = [
   "--kobe-console-overlay",
   "--kobe-composer-focus",
   ...LANE_TOKENS,
+  ...GLOW_TOKENS,
 ] as const;
 export type PresetSchemeToken = (typeof PRESET_SCHEME_TOKENS)[number];
 export type SchemeValues = Readonly<Record<PresetSchemeToken, string>>;
@@ -163,6 +187,8 @@ function scheme(v: {
   composerFocus: string;
   /** Lanes 2-8 of the Conversation tree. */
   lanes: Lanes;
+  /** The glow, ambient and shadows (§7); theme.css's unless the preset says otherwise. */
+  glow?: Partial<Record<GlowToken, string>>;
 }): SchemeValues {
   return {
     "--background": v.page,
@@ -196,6 +222,8 @@ function scheme(v: {
     "--kobe-console-overlay": v.overlay,
     "--kobe-composer-focus": v.composerFocus,
     ...laneValues(v.lanes),
+    ...DEFAULT_GLOW,
+    ...v.glow,
   };
 }
 
@@ -237,6 +265,7 @@ const DEFAULT_PRESET: Preset = {
     "--kobe-console-overlay": "rgb(0 0 0 / 50%)",
     "--kobe-composer-focus": "#52525b",
     ...laneValues(["#926e02", "#b54877", "#048872", "#9057b4", "#548508", "#ba4f23", "#03819e"]),
+    ...DEFAULT_GLOW,
   },
   dark: {
     "--background": "oklch(0.145 0 0)",
@@ -270,6 +299,7 @@ const DEFAULT_PRESET: Preset = {
     "--kobe-console-overlay": "rgb(0 0 0 / 70%)",
     "--kobe-composer-focus": "#a1a1aa",
     ...laneValues(["#cea608", "#f67fa5", "#0ec5af", "#cf8bea", "#7ec05b", "#f78953", "#0bbcee"]),
+    ...DEFAULT_GLOW,
   },
 };
 
@@ -533,6 +563,79 @@ const TOKYO_NIGHTS: Preset = {
   }),
 };
 
+/**
+ * The Catalyst query tool's look (KOBE-550, Chris 2026-11-06): its light palette and its dark
+ * "Rehoboam" palette (catalyst-tokens.css), borders that are the accent at 12% in the dark, the
+ * tool's own glow colour per scheme, glow shadows under menus, drawers and panels, and the dark
+ * page's ambient wash. Lifted a step to meet the floor (§8): the dark muted text (`#6b7694`) and
+ * control borders on its near-black surfaces, and the light page and soft surfaces (`#f0f2f5`,
+ * `#e8ecf4`), so the fixed "done" green keeps 4.5:1 on the muted panel. Outfit and JetBrains Mono
+ * are not ported (TH10: system stacks, no font files): grotesk is the nearest stack.
+ */
+const CATALYST_GLOW_SHADOWS = {
+  "--kobe-shadow-pop": "0 0 24px var(--kobe-glow-color)",
+  "--kobe-shadow-drawer": "0 0 32px var(--kobe-glow-color)",
+  "--kobe-shadow-panel": "0 0 40px var(--kobe-glow-color)",
+} as const;
+
+const CATALYST: Preset = {
+  id: "catalyst",
+  label: PRESET_LABELS.catalyst,
+  corners: "soft",
+  font: "grotesk",
+  light: scheme({
+    page: "#f3f5f9",
+    text: "#0a0e1a",
+    card: "#ffffff",
+    fill: "#1565c0",
+    fillText: "#ffffff",
+    soft: "#eff2f7",
+    softText: "#0a0e1a",
+    muted: "#5c6478",
+    border: "#d0d6e2",
+    input: "#bcc3d4",
+    primary: "#1565c0",
+    primaryHover: "#0d47a1",
+    primaryFg: "#ffffff",
+    link: "#1565c0",
+    focus: "#1565c0",
+    consolePanel: "#ffffff",
+    controlBorder: "#6f7a94",
+    overlay: "rgb(10 14 26 / 50%)",
+    composerFocus: "#1565c0",
+    lanes: ["#8a6500", "#ad1457", "#00897b", "#6a1b9a", "#558b2f", "#d84315", "#00838f"],
+    glow: { "--kobe-glow-color": "rgb(25 118 210 / 30%)", ...CATALYST_GLOW_SHADOWS },
+  }),
+  dark: scheme({
+    page: "#06080e",
+    text: "#c8d2e0",
+    card: "#0c0f18",
+    fill: "#4fc3f7",
+    fillText: "#06080e",
+    soft: "#141828",
+    softText: "#c8d2e0",
+    muted: "#7f8aa8",
+    border: "rgb(79 195 247 / 12%)",
+    input: "rgb(79 195 247 / 15%)",
+    primary: "#4fc3f7",
+    primaryHover: "#81d4fa",
+    primaryFg: "#06080e",
+    link: "#4fc3f7",
+    focus: "#4fc3f7",
+    consolePanel: "#10131e",
+    controlBorder: "#56688c",
+    overlay: "rgb(0 0 0 / 70%)",
+    composerFocus: "#4fc3f7",
+    lanes: ["#ffa726", "#f06292", "#66bb6a", "#ab47bc", "#d4e157", "#ff7043", "#26a69a"],
+    glow: {
+      "--kobe-glow-color": "rgb(79 195 247 / 25%)",
+      "--kobe-page-ambient":
+        "radial-gradient(ellipse 80% 60% at 50% -10%, rgb(79 195 247 / 4%) 0%, transparent 60%), radial-gradient(ellipse 60% 40% at 80% 100%, rgb(79 195 247 / 2%) 0%, transparent 50%)",
+      ...CATALYST_GLOW_SHADOWS,
+    },
+  }),
+};
+
 export const PRESETS: Readonly<Record<PresetId, Preset>> = {
   default: DEFAULT_PRESET,
   slate: SLATE,
@@ -540,4 +643,5 @@ export const PRESETS: Readonly<Record<PresetId, Preset>> = {
   plum: PLUM,
   ember: EMBER,
   "tokyo-nights": TOKYO_NIGHTS,
+  catalyst: CATALYST,
 };

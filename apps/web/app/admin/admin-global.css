@@ -33,3 +33,27 @@ body:has([data-kobe-console]) {
     box-sizing: border-box;
   }
 }
+
+/* A panel's glow (KOBE-550, after the Catalyst query tool): a card-like surface with `kobe-panel`
+   eases its border toward the brand and a halo outside it when the pointer rests on it, through
+   the tokens in app/theme.css (every theme glows in its own colour). Unlayered and scoped to the
+   root: it outranks the modules' resting border and shadow, and stays where this root is. Only on
+   devices with a hover pointer; no easing for people who asked for less motion. */
+[data-kobe-console] .kobe-panel {
+  transition:
+    border-color 300ms ease,
+    box-shadow 300ms ease;
+}
+
+@media (hover: hover) {
+  [data-kobe-console] .kobe-panel:hover {
+    border-color: var(--kobe-panel-border-hover);
+    box-shadow: var(--kobe-glow-panel);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-kobe-console] .kobe-panel {
+    transition: none;
+  }
+}
