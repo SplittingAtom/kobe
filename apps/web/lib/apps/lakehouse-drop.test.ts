@@ -200,6 +200,9 @@ describe("a drop is a click (ac-3)", () => {
       const clicked = viaBridge(clickContent(kind, [...segments]));
       const dropped = appMessageOf(lakehouseItemContent(json(payload)) ?? []);
       expect(dropped).toEqual(clicked);
+      // Items replace the text (KOBE-490): neither path puts text in the composer.
+      expect(dropped.text).toBe("");
+      expect(clicked.text).toBe("");
       expect(dropped.items).toEqual([
         { uri: `catalyst://lakehouse/${segments.join("/")}`, name: segments.join("."), kind },
       ]);

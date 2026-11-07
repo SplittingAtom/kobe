@@ -116,7 +116,7 @@ adds Firefox and WebKit projects for this spec (`npx playwright install firefox 
 No tokens; it changes nothing: `npx playwright test app-frame`.
 
 `lakehouse-drop.spec.ts` (KOBE-551) drops a Lakehouse Picker item on the composer (a synthesized
-drag with the picker's two types) and checks the identifier at the caret, the chip, a refused
+drag with the picker's two types) and checks the chip (no text, as for a click), a refused
 invalid item and the `references` of the send; one short model run. In Firefox too with
 `KOBE_ALL_BROWSERS=1 npx playwright test lakehouse-drop --project chromium --project firefox`.
 

@@ -597,10 +597,9 @@ uri: "catalyst://lakehouse/<catalog>[/<ns>[/<name>]]"}`;
   `catalyst://lakehouse/` form, at most 511 and 2047 characters. A valid item becomes the content
   a picker click sends (the backticked identifier as text, then `resource_link {uri, name:
 identifier, title: last segment, _meta: {"io.kobe/item-kind": kind}}`) and goes through the
-  same function as `ui/message` (`appMessageOf`, then the composer's chip): the same chip and
-  the same `references` on send. Because the drop is the member's own act, the identifier also
-  goes in at the caret as their text, the focus returns to the composer and the caret follows
-  it. An invalid item is refused with a note under the composer; nothing is inserted and the
+  same functions as `ui/message` (`appMessageOf`, then `applyAppMessage`), so the composer ends
+  exactly as after the click: the chip, the same `references` on send, and no text (items
+  replace the text); the member's text, caret and focus are untouched. An invalid item is refused with a note under the composer; nothing is inserted and the
   `text/plain` copy is never used instead. The drop is always taken whole, so the browser never
   also inserts the `text/plain` copy.
 

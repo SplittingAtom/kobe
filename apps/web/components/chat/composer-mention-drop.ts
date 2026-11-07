@@ -13,7 +13,6 @@ import {
 } from "../../lib/apps/lakehouse-drop";
 import {
   insertMention,
-  insertToken,
   MENTION_FOLDER_REFUSED,
   mentionRefusal,
 } from "../../lib/chat/mention-insert";
@@ -47,8 +46,8 @@ export interface ComposerMentionDrop {
  * picked set, so the send carries it in `mentions[]` and the server validates it. Folders and
  * names the rules refuse are refused here with a reason. Only a writable composer listens.
  *
- * A Lakehouse Picker item dragged out of its frame (KOBE-551) is taken first: its chip as a
- * click on the picker adds it, and its identifier at the caret; an invalid item is refused.
+ * A Lakehouse Picker item dragged out of its frame (KOBE-551) is taken first: its chip exactly as
+ * a click on the picker adds it; an invalid item is refused.
  */
 export function useComposerMentionDrop({
   draft,
@@ -83,27 +82,19 @@ export function useComposerMentionDrop({
 
   /**
    * A dropped Lakehouse Picker item (KOBE-551): the click's `ui/message` content through the
-   * bridge's `appMessageOf`, so the same chip; and its backticked identifier at the caret as the
-   * member's own text. The answer is why it was refused, or undefined.
+   * bridge's `appMessageOf` and the same `applyAppMessage`, so exactly the click's composer state
+   * (the chip, `references` on send; no text, the focus stays). The answer is why it was refused.
    */
   const insertItem = useCallback(
     (raw: string): string | undefined => {
       const content = lakehouseItemContent(raw);
       const message = content === undefined ? undefined : appMessageOf(content);
-      const token = content?.[0]?.["text"];
-      if (message === undefined || message.items.length === 0 || typeof token !== "string") {
-        return LAKEHOUSE_DROP_REFUSED;
-      }
-      if (!applyAppMessage(session, draft, message, LAKEHOUSE_DROP_FROM)) {
-        return LAKEHOUSE_DROP_FULL;
-      }
-      const caret = input.current?.selectionEnd ?? text.length;
-      const next = insertToken(text, caret, token);
-      aui.composer.setText(next.text);
-      caretAfter.current = next.caret;
-      return undefined;
+      if (message === undefined || message.items.length === 0) return LAKEHOUSE_DROP_REFUSED;
+      return applyAppMessage(session, draft, message, LAKEHOUSE_DROP_FROM)
+        ? undefined
+        : LAKEHOUSE_DROP_FULL;
     },
-    [aui, session, draft, text, input],
+    [session, draft],
   );
 
   // One subscription per writable composer; it calls the latest `mention` (which reads the text).

@@ -16,17 +16,16 @@
 - `components/chat/composer-mention-drop.ts`: the Catalyst branch first in `over`/`drop`
   (writable only), hover state `data-mention-drop="item"` (same tokens as the file hover,
   `composer.module.css`, forced-colours too), hint "Drop to insert this item", refusal notice
-  under the composer. `lib/chat/mention-insert.ts`: `insertToken` (the mention spacing, shared).
+  under the composer.
 
 ## Decisions
 
-- **Text and chip.** Today a picker click (text + resource_link) yields the chip only: KOBE-490
-  says links replace the text, and `ui/message` never moves the focus. The ticket asks for the
-  identifier at the caret with focus and caret after it plus the chip. Implemented: the drop
-  goes through the same `appMessageOf` + `applyAppMessage` as the click (same chip, same
-  `references`), and additionally inserts the backticked identifier at the caret as the member's
-  own text (the drop is a member act, like a Files-row mention). So the composer differs from a
-  click by that text. See open question 1.
+- **Parity with the click** (coordinator decision 2026-11-07, answering open question 1): a drop
+  ends in exactly the composer state a picker click produces today: the chip (from "Lakehouse
+  Picker") and `references` on send, no backticked identifier in the textarea, focus and caret
+  untouched. Chris's requirement text about the caret predates KOBE-490 (links replace the
+  text); naming the item twice in the sent message would be a visible defect. Both paths go
+  through `appMessageOf` + `applyAppMessage`. (The first push also inserted the text; removed.)
 - Kind and segments must agree: catalog = 1 segment, namespace = 2, table/view = 3; nested
   namespaces (dots) are refused by the segment rule anyway. Raw JSON over 8 KiB is refused before
   parsing. A name over 200 chars passes the 511 cap but is dropped by the resource_link rules
@@ -41,9 +40,7 @@
 
 ## Open questions (for Chris or the coordinator)
 
-1. Should a drop insert the identifier text at all? A click inserts only the chip, so the sent
-   message now reads ``Count rows in `mlb.lahman.batting` `` plus the server's `Referenced:`
-   line. Dropping the text is one line in `insertItem` (composer-mention-drop.ts).
+- none (question 1 decided, see Decisions)
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -53,7 +50,8 @@
 - ac-2: `apps/web/lib/apps/lakehouse-drop.test.ts` (validation table) and the component test's
   refusals (notice, nothing inserted, no chip).
 - ac-3: `lakehouse-drop.test.ts` "a drop is a click" (bridge `ui/message` vs drop: same
-  `AppMessage`, same chip store snapshot); component test (caret, focus, chip, `references`).
+  `AppMessage`, no text, same chip store snapshot); component test (chip, text and caret
+  untouched, `references`).
 - ac-4: component test (shared reader, Trash: no drop target, drop not taken).
 - ac-5: `pnpm verify` green; CI on the PR.
 - ac-6: `docs/specs/mcp-apps-host.md` §8, "Host extension: native drags from an app frame".

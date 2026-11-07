@@ -10,9 +10,10 @@ import { composer } from "./testing";
 
 /**
  * KOBE-551: a Lakehouse Picker item dragged out of its frame onto the composer. While hovering
- * the panel lights up as for a file row; on drop a valid item puts its backticked identifier at
- * the caret and the same chip a click on the picker adds (the send carries it in `references`);
- * an invalid one is refused with a note and nothing goes in, the `text/plain` copy neither.
+ * the panel lights up as for a file row; on drop a valid item ends exactly as a click on the
+ * picker: its chip, and the send carries it in `references`; no text goes in (coordinator
+ * decision 2026-11-07: parity with the click). An invalid one is refused with a note and nothing
+ * goes in, the `text/plain` copy neither.
  */
 let fake: FakeKobe;
 
@@ -78,44 +79,36 @@ function dropOnComposer(dt: ReturnType<typeof transfer>) {
 }
 
 describe("drop a Lakehouse Picker item into the composer (KOBE-551)", () => {
-  it("hovers like a file row; the drop inserts the identifier at the caret and the chip; the send carries it (ac-1, ac-3)", async () => {
+  it("hovers like a file row; the drop adds the click's chip and no text; the send carries it (ac-1, ac-3)", async () => {
     const user = userEvent.setup();
     mount(fake.addThread("Work"));
     const input = await composer();
     await user.type(input, "Count rows in");
+    input.setSelectionRange(5, 5);
 
     const { overTaken, dropTaken, hover } = dropOnComposer(item(TABLE));
     expect(overTaken).toBe(true);
     expect(hover).toEqual({ drop: "item", hint: "Drop to insert this item" });
-    // Taken, so the browser's own text/plain insertion never adds a second copy.
+    // Taken, so the browser's own text/plain insertion never adds the identifier.
     expect(dropTaken).toBe(true);
     expect(panel().hasAttribute("data-mention-drop")).toBe(false);
 
-    await waitFor(() => expect(input.value).toBe("Count rows in `mlb.lahman.batting` "));
-    expect(chipLabels()).toEqual(["Table mlb.lahman.batting, from Lakehouse Picker; remove"]);
+    await waitFor(() =>
+      expect(chipLabels()).toEqual(["Table mlb.lahman.batting, from Lakehouse Picker; remove"]),
+    );
     expect(panel().querySelector('[data-kobe-app-item="table"]')).not.toBeNull();
-    await waitFor(() => expect(document.activeElement).toBe(input));
-    expect(input.selectionStart).toBe(input.value.length);
+    // As for a click: the text and its caret are the member's, untouched.
+    expect(input.value).toBe("Count rows in");
+    expect(input.selectionStart).toBe(5);
 
-    await user.keyboard("{Enter}");
+    await user.click(input);
+    await user.keyboard("{End}{Enter}");
     await waitFor(() => expect(posts()).toHaveLength(1));
     expect(posts()[0]).toMatchObject({
-      content: "Count rows in `mlb.lahman.batting`",
+      content: "Count rows in",
       references: [{ name: "mlb.lahman.batting", kind: "table" }],
     });
-  });
-
-  it("inserts at the caret, between the member's words", async () => {
-    const user = userEvent.setup();
-    mount(fake.addThread("Work"));
-    const input = await composer();
-    await user.type(input, "Join with on id");
-    input.setSelectionRange(9, 9);
-    dropOnComposer(item(TABLE));
-    await waitFor(() => expect(input.value).toBe("Join with `mlb.lahman.batting` on id"));
-    await waitFor(() =>
-      expect(input.selectionStart).toBe("Join with `mlb.lahman.batting` ".length),
-    );
+    expect(chips()).toHaveLength(0);
   });
 
   it.each([
@@ -150,8 +143,8 @@ describe("drop a Lakehouse Picker item into the composer (KOBE-551)", () => {
     mount(fake.addThread("Work"));
     const input = await composer();
     dropOnComposer(item(payload));
-    await waitFor(() => expect(input.value).toBe(`\`${payload.identifier}\` `));
-    expect(chipLabels()).toEqual([`${label}, from Lakehouse Picker; remove`]);
+    await waitFor(() => expect(chipLabels()).toEqual([`${label}, from Lakehouse Picker; remove`]));
+    expect(input.value).toBe("");
     expect(panel().querySelector(`[data-kobe-app-item="${kind}"]`)).not.toBeNull();
   });
 
@@ -161,8 +154,8 @@ describe("drop a Lakehouse Picker item into the composer (KOBE-551)", () => {
     dropOnComposer(item(TABLE));
     await waitFor(() => expect(chipLabels()).toHaveLength(1));
     dropOnComposer(item(TABLE));
-    await waitFor(() => expect(input.value).toBe("`mlb.lahman.batting` `mlb.lahman.batting` "));
     expect(chipLabels()).toHaveLength(1);
+    expect(input.value).toBe("");
   });
 
   it.each([

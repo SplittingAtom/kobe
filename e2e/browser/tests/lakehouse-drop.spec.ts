@@ -4,8 +4,8 @@ import { RUN_TIMEOUT_MS } from "./support/constants.js";
 
 /**
  * KOBE-551 (ac-7): a Lakehouse Picker item dragged out of its frame and dropped on the composer
- * ends exactly as a click on the picker: the backticked identifier at the caret, the table's chip,
- * and the send carries it in `references` as a clicked insert does.
+ * ends exactly as a click on the picker: the table's chip and no text (KOBE-490: items replace
+ * the text), and the send carries it in `references` as a clicked insert does.
  *
  * A native drag can't be started inside a cross-origin frame from a test, so the drag is the one
  * the picker starts, synthesized on the composer: a DataTransfer with the drag contract's two
@@ -39,7 +39,7 @@ const panel = (page: Page) => page.locator("[data-kobe-composer-panel]");
 const chipRow = (page: Page) =>
   page.getByRole("list", { name: "Items sent with your next message" });
 
-test("a Lakehouse Picker item dropped on the composer is the clicked insert: identifier at the caret, chip, references on send", async ({
+test("a Lakehouse Picker item dropped on the composer is the clicked insert: chip, no text, references on send", async ({
   chat,
   page,
   browserName,
@@ -60,12 +60,9 @@ test("a Lakehouse Picker item dropped on the composer is the clicked insert: ide
   await expect(page.locator("#kobe-composer-hint")).toHaveText("Drop to insert this item");
   await chat.composer.dispatchEvent("drop", { dataTransfer });
 
-  // Exactly one copy (the browser's text/plain insertion never adds a second), the caret after it.
-  await expect(chat.composer).toHaveValue("Count the rows in `mlb.lahman.batting` ");
-  await expect(chat.composer).toBeFocused();
-  expect(
-    await chat.composer.evaluate((el: HTMLTextAreaElement) => [el.selectionStart, el.value.length]),
-  ).toEqual([39, 39]);
+  // No text from the drop (the browser's text/plain insertion neither): the member's text stays.
+  await expect(chipRow(page).getByRole("listitem")).toHaveCount(1);
+  await expect(chat.composer).toHaveValue("Count the rows in");
   await expect(panel(page)).not.toHaveAttribute("data-mention-drop", /.+/);
   // The chip a click on the picker adds, with the table's icon.
   await expect(chipRow(page).getByRole("listitem")).toHaveCount(1);
@@ -81,7 +78,7 @@ test("a Lakehouse Picker item dropped on the composer is the clicked insert: ide
   await chat.composer.dispatchEvent("dragover", { dataTransfer: bad });
   await chat.composer.dispatchEvent("drop", { dataTransfer: bad });
   await expect(page.locator("#kobe-composer-hint")).toContainText("can't go into a message");
-  await expect(chat.composer).toHaveValue("Count the rows in `mlb.lahman.batting` ");
+  await expect(chat.composer).toHaveValue("Count the rows in");
   await expect(chipRow(page).getByRole("listitem")).toHaveCount(1);
 
   // The send carries the item as `references`, as a clicked insert does.
@@ -91,12 +88,13 @@ test("a Lakehouse Picker item dropped on the composer is the clicked insert: ide
   await expect.poll(() => posts.filter((p) => p.includes('"references"')).length).toBe(1);
   const body = JSON.parse(posts.find((p) => p.includes('"references"')) ?? "{}");
   expect(body).toMatchObject({
-    content: "Count the rows in `mlb.lahman.batting`",
+    content: "Count the rows in",
     references: [{ name: "mlb.lahman.batting", kind: "table" }],
   });
   const sent = chat.userMessages.last().getByRole("list", { name: "Referenced items" });
   await expect(sent.getByText("mlb.lahman.batting", { exact: true })).toBeVisible({
     timeout: RUN_TIMEOUT_MS,
   });
+  await expect(chat.userMessages.last()).not.toContainText("Referenced:");
   await chat.waitForIdle();
 });
