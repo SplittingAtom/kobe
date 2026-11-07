@@ -125,3 +125,8 @@ body:has([data-kobe-chat]) {
     transition: none;
   }
 }
+@media (forced-colors: active) {
+  [data-kobe-chat] .kobe-panel:hover {
+    border-color: Highlight;
+  }
+}

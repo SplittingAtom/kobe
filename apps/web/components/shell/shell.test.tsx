@@ -163,6 +163,10 @@ describe("grid", () => {
       el.getAttribute("data-shell-region"),
     );
     expect(regions).toEqual(["rail", "artifact", "conversation"]);
+    // Floating cards (KOBE-554): each column glows on hover like the cards inside it.
+    for (const name of regions) {
+      expect(region(must(name)).classList.contains("kobe-panel"), name ?? "").toBe(true);
+    }
     expect(within(region("rail")).getByRole("complementary", { name: "Workspace" })).toBeTruthy();
     expect(region("conversation").querySelector("main#kobe-chat-main")).toBeTruthy();
     // Empty: the conversation takes the remaining width (the column collapses on `:empty`).

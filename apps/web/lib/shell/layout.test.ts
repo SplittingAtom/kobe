@@ -7,6 +7,7 @@ import {
   layoutAt,
   maxRailWidth,
   RAIL_PX,
+  SHELL_SPACING_PX,
 } from "./layout";
 
 const open = { railCollapsed: false, artifactOpen: true, artifactWidth: null } as const;
@@ -40,17 +41,24 @@ describe("bands (CE7)", () => {
 });
 
 describe("yield order and floors (CE7)", () => {
+  it("the columns are cards: a 16 px page gutter each side and a 16 px gap between (KOBE-554)", () => {
+    expect(SHELL_SPACING_PX).toEqual({ gutter: 16, gap: 16 });
+    // 1,280 − 2 × 16 gutter − 280 rail − 2 × 16 gaps = 936 for the artifact column and conversation.
+    const l = layoutAt({ ...open, width: 1280 });
+    expect(l.rail + l.artifact + l.conversation).toBe(1280 - 2 * 16 - 2 * 16);
+  });
+
   it("1280: rail 280, artifact half of the rest, conversation the other half", () => {
     const l = layoutAt({ ...open, width: 1280 });
     expect(l).toMatchObject({ band: "wide", rail: 280, artifactMode: "column" });
-    expect(l.artifact).toBe(500);
-    expect(l.conversation).toBe(500);
+    expect(l.artifact).toBe(468);
+    expect(l.conversation).toBe(468);
   });
 
   it("1280: a dragged width is honoured while it fits, clamped to the conversation's floor", () => {
     expect(layoutAt({ ...open, width: 1280, artifactWidth: 450 }).artifact).toBe(450);
     expect(layoutAt({ ...open, width: 1280, artifactWidth: 900 })).toMatchObject({
-      artifact: 600,
+      artifact: 536,
       conversation: 400,
     });
   });
@@ -58,20 +66,23 @@ describe("yield order and floors (CE7)", () => {
   it("960: the rail yields first (48 px), then the artifact column shrinks toward 360", () => {
     const l = layoutAt({ ...open, width: 960, artifactWidth: 700 });
     expect(l).toMatchObject({ band: "medium", rail: RAIL_PX.collapsed, artifactMode: "column" });
-    expect(l.artifact).toBe(512);
+    expect(l.artifact).toBe(448);
     expect(l.conversation).toBe(400);
-    expect(layoutAt({ ...open, width: 820 })).toMatchObject({ artifact: 372, conversation: 400 });
+    // At the band's lower edge the gutters and gaps leave less than both floors: the
+    // conversation keeps its 400 px and the column yields (KOBE-554).
+    expect(layoutAt({ ...open, width: 820 })).toMatchObject({ artifact: 308, conversation: 400 });
+    expect(layoutAt({ ...open, width: 872 })).toMatchObject({ artifact: 360, conversation: 400 });
   });
 
   it("800: the artifact column overlays the conversation, which keeps the whole width", () => {
     const l = layoutAt({ ...open, width: 800 });
     expect(l).toMatchObject({ band: "overlay", rail: 48, artifactMode: "overlay" });
-    expect(l.conversation).toBe(752);
+    expect(l.conversation).toBe(704);
   });
 
   it("390: one column; the rail is a drawer and the artifact a full-screen sheet", () => {
     const l = layoutAt({ ...open, width: 390 });
-    expect(l).toMatchObject({ band: "single", rail: 0, artifactMode: "sheet", conversation: 390 });
+    expect(l).toMatchObject({ band: "single", rail: 0, artifactMode: "sheet", conversation: 358 });
   });
 
   it("the conversation never measures under 400 px from 768 px up", () => {
@@ -83,7 +94,9 @@ describe("yield order and floors (CE7)", () => {
             l.conversation,
             `${width} ${artifactWidth} ${railCollapsed}`,
           ).toBeGreaterThanOrEqual(400);
-          if (l.artifactMode === "column") expect(l.artifact).toBeGreaterThanOrEqual(360);
+          if (l.artifactMode === "column") {
+            expect(l.artifact).toBeGreaterThanOrEqual(width >= 872 ? 360 : 308);
+          }
         }
       }
     }
@@ -92,7 +105,7 @@ describe("yield order and floors (CE7)", () => {
   it("manual choices hold only while they fit and come back when the window grows (ac-2)", () => {
     const chosen = { railCollapsed: false, artifactOpen: true, artifactWidth: 640 } as const;
     expect(layoutAt({ ...chosen, width: 1400 })).toMatchObject({ rail: 280, artifact: 640 });
-    expect(layoutAt({ ...chosen, width: 960 })).toMatchObject({ rail: 48, artifact: 512 });
+    expect(layoutAt({ ...chosen, width: 960 })).toMatchObject({ rail: 48, artifact: 448 });
     expect(layoutAt({ ...chosen, width: 1400 })).toMatchObject({ rail: 280, artifact: 640 });
     const collapsed = { ...chosen, railCollapsed: true };
     expect(layoutAt({ ...collapsed, width: 1400 }).rail).toBe(48);
@@ -103,9 +116,9 @@ describe("yield order and floors (CE7)", () => {
     expect(layoutAt({ ...none, width: 1280 })).toMatchObject({
       artifactMode: "none",
       artifact: 0,
-      conversation: 1000,
+      conversation: 952,
     });
-    expect(layoutAt({ ...none, width: 960 })).toMatchObject({ rail: 48, conversation: 912 });
+    expect(layoutAt({ ...none, width: 960 })).toMatchObject({ rail: 48, conversation: 864 });
   });
 });
 
@@ -123,11 +136,11 @@ describe("the rail's dragged width (KOBE-305)", () => {
     const wide = { railCollapsed: false, artifactOpen: false, artifactWidth: null } as const;
     expect(layoutAt({ ...wide, width: 1280, railWidth: 400 })).toMatchObject({
       rail: 400,
-      conversation: 880,
+      conversation: 832,
     });
-    // With the artifact column open both floors come first: 1,100 − 760 = 340.
+    // With the artifact column open both floors come first: 1,100 − 64 (gutters, gaps) − 760 = 276.
     expect(layoutAt({ ...wide, artifactOpen: true, width: 1100, railWidth: 480 })).toMatchObject({
-      rail: 340,
+      rail: 276,
       artifact: 360,
       conversation: 400,
     });
@@ -150,7 +163,7 @@ describe("the rail's dragged width (KOBE-305)", () => {
           });
           expect(l.conversation, `${width} ${railWidth}`).toBeGreaterThanOrEqual(400);
           expect(l.artifact, `${width} ${railWidth}`).toBeGreaterThanOrEqual(360);
-          expect(l.rail + l.artifact + l.conversation).toBe(width);
+          expect(l.rail + l.artifact + l.conversation).toBe(width - 64);
         }
       }
     }

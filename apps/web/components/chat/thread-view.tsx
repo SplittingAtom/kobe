@@ -230,7 +230,7 @@ function MessagesAndComposer({
         </ThreadPrimitive.Viewport>
         {follow === "unpinned" && hasMessages && <JumpToLatest key={state.threadId ?? ""} />}
       </div>
-      <div data-kobe-composer className={cn("bg-background shrink-0", welcome && "flex-1")}>
+      <div data-kobe-composer className={cn("bg-card shrink-0", welcome && "flex-1")}>
         <div
           data-kobe-composer-column
           className="mx-auto flex w-full max-w-(--thread-max-width) flex-col gap-3 px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-6"
@@ -297,7 +297,7 @@ function ThreadViewBody({
   return (
     <ThreadPrimitive.Root
       data-kobe-thread-root
-      className="bg-background @container flex min-h-0 flex-1 flex-col overflow-hidden"
+      className="bg-card @container flex min-h-0 flex-1 flex-col overflow-hidden"
       style={COMPOSER_VARS}
     >
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-3 pb-2">

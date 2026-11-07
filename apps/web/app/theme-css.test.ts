@@ -636,6 +636,11 @@ describe("panel glow (KOBE-550)", () => {
       expect(block(css, `${root} .kobe-panel`), path).toMatch(/transition:[^;]*box-shadow/);
       expect(css, path).toMatch(/@media \(hover: hover\)/);
       expect(css, path).toMatch(/@media \(prefers-reduced-motion: reduce\)/);
+      // Forced colours drop the halo, so the hovered border takes a system colour (KOBE-554).
+      expect(
+        block(block(css, "@media (forced-colors: active)"), `${root} .kobe-panel:hover`),
+        path,
+      ).toContain("border-color: Highlight");
     }
   });
 
@@ -663,6 +668,9 @@ describe("panel glow (KOBE-550)", () => {
       "components/chat/notification-bell.tsx",
       "components/chat/compare-dialog.tsx",
       "components/shell/context-text.tsx",
+      // The shell's columns and the console's sidebar and page are cards too (KOBE-554).
+      "components/shell/shell-grid.tsx",
+      "components/ui/console/layout.tsx",
     ]) {
       expect(readRaw(path), path).toContain("kobe-panel");
     }
