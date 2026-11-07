@@ -133,6 +133,9 @@ test("a picker row dragged with the pointer onto the composer adds the click's c
   // No text from the drag: the member's text stays as it was.
   await expect(chat.composer).toHaveValue("Count the rows in");
 
+  // After a captured drag the keyboard focus is still in the picker's frame (Firefox keeps it
+  // there until the page is clicked), so send the way a member does: click the box, then Enter.
+  await chat.composer.click();
   await chat.composer.press("Enter");
   await chat.threadId();
   await expect(chipRow(page)).toHaveCount(0);
