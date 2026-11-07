@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR #TBD)
+- **Status:** in review (PR #470)
 - **Branch / worktree:** `kobe-556-reasoning-effort` in `../Kobe-wt556`
 - **Depends on:** KOBE-260 (thinking levels), KOBE-418 (toolbar fold), KOBE-450 (line below);
   readout wiring on KOBE-557 (built in parallel)
