@@ -68,7 +68,8 @@ export const agents = defineDomain({
   ],
   grants: {
     // Personal and gallery agents (KOBE-45): the server confines personal rows to their owner and
-    // gallery writes to site admins. Nothing references them with a cascade.
+    // gallery writes to site admins. Only `agent_transfers` references them with a cascade
+    // (KOBE-568): deleting a never-published personal agent drops its transfer offers, nothing else.
     site_agents: ALL_PRIVILEGES,
     // Published versions (KOBE-46) are immutable: append and read only (a trigger backs this up).
     site_agent_versions: ["SELECT", "INSERT"],

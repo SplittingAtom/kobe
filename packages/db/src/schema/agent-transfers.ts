@@ -16,7 +16,10 @@ import { teams } from "./teams.js";
 // Agent transfers (KOBE-568, spec agents-roster AR10): the owner of a personal agent offers it to
 // another member of a team they share; the recipient accepts or declines, the owner may cancel.
 // Ids and timestamps only. The row belongs to the team the offer was made in (RLS); at most one
-// pending offer per agent site-wide. Decided rows are kept as history.
+// pending offer per agent site-wide. Decided rows are kept as history. The pending unique index
+// spans teams (it is not behind RLS), so an offer while another team holds one fails with 23505:
+// acceptable, because only the agent's owner can offer it and the server answers 409 (cancel the
+// other offer first); it reveals nothing to anyone else.
 
 export const AGENT_TRANSFER_STATES = ["pending", "accepted", "declined", "cancelled"] as const;
 export type AgentTransferState = (typeof AGENT_TRANSFER_STATES)[number];
