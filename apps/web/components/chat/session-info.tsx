@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuiState } from "@assistant-ui/react";
+import type { ThinkingControl } from "@kobe/protocol";
 import { Dialog } from "radix-ui";
 import { useState } from "react";
 import type { TeamModels } from "../../lib/admin/api/team/models";
@@ -16,6 +17,7 @@ import { Button } from "../ui/button";
 import { chatPortalContainer } from "../ui/chat-portal";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { useThreadUsageRead } from "./message-footer";
+import { lastRunLine, thinkingControl, thinkingTokensLine } from "./session-reasoning";
 import {
   THINKING_LABELS,
   shownThinking,
@@ -30,6 +32,8 @@ const DOWNLOAD_FAILED = {
   code: "download_failed",
   message: "The download didn't finish. Try /export again.",
 };
+const THINKING_TOKENS_TITLE =
+  "Part of the output tokens; ≈ means estimated from the reasoning text";
 const ZERO: UsageTotals = {
   calls: 0,
   inputTokens: 0,
@@ -41,11 +45,18 @@ const ZERO: UsageTotals = {
   estimatedCalls: 0,
 };
 
-/** The conversation's model as its picker shows it, and its thinking level. */
+/**
+ * The conversation's model as its picker shows it, its thinking level, and the model's thinking
+ * control (KOBE-584: grades the last run's reasoning spend).
+ */
 function modelLines(
   models: TeamModels,
   state: ThreadState,
-): { readonly model: string; readonly thinking: string } {
+): {
+  readonly model: string;
+  readonly thinking: string;
+  readonly control: ThinkingControl | null;
+} {
   const choices = modelChoices(models, state.summary?.model ?? null, state.agentModel ?? null);
   const alias = choices.pinned ?? choices.chosen;
   const model = alias === null ? teamDefaultLabel(choices) : aliasName(models, alias);
@@ -57,7 +68,7 @@ function modelLines(
       : level === null
         ? thinkingDefaultLabel(fallback)
         : THINKING_LABELS[level];
-  return { model, thinking };
+  return { model, thinking, control: thinkingControl(models, alias) };
 }
 
 const when = (iso: string | undefined) =>
@@ -98,8 +109,10 @@ function SessionInfoDialog({
   const usage = useThreadUsageRead()?.usage;
   const messages = useAuiState((s) => s.thread.messages.length);
   const lines = models.status === "ready" ? modelLines(models.data, state) : null;
-  const totals = sum(usage?.runs ?? []);
-  const rows: readonly (readonly [string, string])[] = [
+  const runs = usage?.runs ?? [];
+  const totals = sum(runs);
+  const liveRunId = state.live?.runId ?? null;
+  const rows: readonly (readonly [term: string, value: string, title?: string])[] = [
     ["Title", summary?.title || "Untitled conversation"],
     ["Agent", summary?.agentName ?? "No agent"],
     ["Model", lines?.model ?? "—"],
@@ -114,6 +127,8 @@ function SessionInfoDialog({
       formatTokens(totals.inputTokens + totals.cacheReadTokens + totals.cacheWriteTokens),
     ],
     ["Output tokens", formatTokens(totals.outputTokens)],
+    ["Thinking tokens", thinkingTokensLine(runs), THINKING_TOKENS_TITLE],
+    ["Last run", lastRunLine(usage ?? null, liveRunId, lines?.control ?? null)],
     [
       "Cost",
       totals.unpricedCalls > 0
@@ -135,10 +150,14 @@ function SessionInfoDialog({
             Its details and what its runs used so far.
           </Dialog.Description>
           <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-            {rows.map(([term, value]) => (
+            {rows.map(([term, value, title]) => (
               <div key={term} className="contents">
-                <dt className="text-muted-foreground">{term}</dt>
-                <dd className="m-0 min-w-0 break-words">{value}</dd>
+                <dt className="text-muted-foreground" title={title}>
+                  {term}
+                </dt>
+                <dd className="m-0 min-w-0 break-words" title={title}>
+                  {value}
+                </dd>
               </div>
             ))}
           </dl>

@@ -31,8 +31,8 @@
 
 ## Open questions (for Chris or the coordinator)
 
-- For Chris: show the latest run's reasoning spend (KOBE-557, usage API) in Session info? Today
-  it is recorded but shown nowhere in the chat (not added in this PR).
+- Answered (Chris, 2026-11-08): yes, the reasoning spend shows in Session info (KOBE-584:
+  "Thinking tokens" and "Last run").
 - Coordinator: check the pills on gate1 in light and dark, toolbar and line below (ac-4).
 
 ## Evidence (acceptance criteria → test or command output)
