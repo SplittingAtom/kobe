@@ -31,6 +31,8 @@ export const agents = defineDomain({
     "skill_promotion_requests",
     // Members' Request for team of a catalog skill (KOBE-338).
     "team_skill_requests",
+    // Personal agents assigned to a team's roster (KOBE-565).
+    "team_agent_roster",
   ],
   siteWide: [
     "skill_blocklist",
@@ -59,6 +61,8 @@ export const agents = defineDomain({
     // Site drafts of catalog skills (KOBE-495).
     "site_skill_drafts",
     "site_skill_draft_files",
+    // Personal agents assigned to the site roster (KOBE-565).
+    "site_agent_roster",
   ],
   grants: {
     // Personal and gallery agents (KOBE-45): the server confines personal rows to their owner and
@@ -101,6 +105,9 @@ export const agents = defineDomain({
     // discarded, their files with them. No team data behind them.
     site_skill_drafts: ALL_PRIVILEGES,
     site_skill_draft_files: ALL_PRIVILEGES,
+    // The site roster (KOBE-565): references to personal agents with a version rule; entries
+    // change state and are removed by site admins and owners (the server decides). No team data.
+    site_agent_roster: ALL_PRIVILEGES,
   },
   teamReferencing: {
     site_skill_settings:
