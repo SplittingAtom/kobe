@@ -46,15 +46,30 @@ Hadron via `scripts/hadron.sh`.
   gate1 switched to the Catalyst preset by Chris. KOBE-558/559/560 (PR #465): icon actions without the
   browser's default border, the rail's Apps tab shows only the picker (MA3 amended; apps launch from
   the + menu), no line under the top bar. Deployed together as `local-cab5871aa7db` (rollback
-  `local-2777b6872b1a`); gate1 specs: `thread-lineage`, `fork`, `lakehouse-drop`, `frame-drag` (live picker), `app-placement`, `app-item-chips`, `rail-header`, `rail-resize` passed in Chromium, `frame-drag` and `lakehouse-drop` in Firefox; a style probe confirmed no icon borders, no bar line, card columns with 16 px gaps and Outfit in the composer. Open: KOBE-556 (Reasoning effort control), KOBE-557
-  (reasoning tokens and budgets from the gateway), KOBE-562 (themed logo through Appearance), and the
-  820–871 px artifact column question in the KOBE-554 ledger. CI note: the `publish` workflow fails on
+  `local-2777b6872b1a`); gate1 specs: `thread-lineage`, `fork`, `lakehouse-drop`, `frame-drag` (live picker), `app-placement`, `app-item-chips`, `rail-header`, `rail-resize` passed in Chromium, `frame-drag` and `lakehouse-drop` in Firefox; a style probe confirmed no icon borders, no bar line, card columns with 16 px gaps and Outfit in the composer. Then KOBE-557 (PRs #469 migration and #471, main 136de5cf): the
+  gateway's usage meter splits reasoning tokens out of output (the provider's non-zero split, else
+  an estimate from the streamed thinking text, chars/4, flagged `reasoning_estimated`; Anthropic has
+  no split), `run_usage.reasoning_tokens`, per-run usage API fields, and `thinkingBudget(control,
+level)` in protocol (`THINKING_EFFORT_BUDGETS` off 0 / low 2000 / medium 8000 / high 24000;
+  docs/design/thinking-controls.md). KOBE-556 (PR #470, main f56dd50b): the thinking level is
+  assistant-ui's Reasoning effort pills (vendored, MIT, inventoried) under the composer, the default
+  pill stores null (a member cannot pin the team default explicitly — trade-off in the ticket
+  ledger), and a "spent / budget" bar under the pills shows the latest run's reasoning against the
+  budget of the level it ran with. Deployed as `local-f56dd50b116a` (rollback `local-40f2d51a1609`,
+  Chris's KOBE-564 build; `local-cab5871aa7db` pruned); `thinking` spec passed on gate1 and a
+  one-off check showed "about 19 of 8k thinking tokens (estimated)" after a Medium run. Open:
+  KOBE-562 (themed logo through Appearance) and the 820–871 px artifact column question in the
+  KOBE-554 ledger. CI note: the `publish` workflow fails on
   main since 2026-11-07 on Trivy CVE-2026-109869 (undici) in the sandbox image; the Files-rail
   delete-cancel unit test flaked once in the merge queue (fixed here: wait for the dialog); the
   executor shard's idle-sandbox hibernation checks fail on slow hosted runners (KOBE-563, two queue
   drops, shard limit raised to 60 min); the KOBE-480 Bifrost pricing-outage exemption matched only one
   wording of the upstream failure and dropped PR #469 when the datasheet download answered 503 and a
-  truncated body (pattern widened to any datasheet load failure from its URL).
+  truncated body (pattern widened to any datasheet load failure from its URL); the sync-conflict
+  "note frame" DB test read the pending note before the handler marked it told (PR #473, polls);
+  two follow-ups DB tests (KOBE-222) crossed requests because the epilogue task starts two round
+  trips after the completion commit, so `settled()` returned early (PR #476, calls scoped by run
+  and awaited).
 - **Conversation tree lane (2026-11-06, spec by Chris's decisions of 2026-11-05):**
   `docs/specs/conversation-tree.md` (Hadron spec e8b1281a; docs PR #446). Shipped in per-ticket PRs:
   KOBE-541 spike (#447: a Pi 1.4 extension summarises a branch through `navigateTree`, and
