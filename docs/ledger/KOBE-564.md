@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR #474)
+- **Status:** in review (PR #474); deployed to gate1 as `local-40f2d51a1609`, both flows passed
 - **Branch / worktree:** `kobe-564-skill-manifest-generate` (main checkout; Chris's direct ask
   on 2026-11-07, no parallel lane)
 - **Depends on:** KOBE-333 (Promote to Site), KOBE-234/326 (server calls), KOBE-322 (forks)
@@ -64,5 +64,11 @@ user wants to promote a skill. Use the currently selected model to create the fi
 - ac-4 route: `services/server/src/skill-manifest.db.test.ts`.
 - ac-5 web: `apps/web/components/admin/skill-promotion.test.tsx` (Create kobe.skill.yaml).
 - ac-6 docs: skill-package.md, design/server-model-calls.md, audit-log.md, this ledger.
-- gate1: `e2e/browser/tests/skill-manifest.spec.ts` (both flows against the real team model; one
-  model call each); deploy and run recorded below once done.
+- gate1 (2026-11-08): deployed as `local-40f2d51a1609` (PR head before the spec commit; Helm rev
+  115; rollback `local-cab5871aa7db`; `local-2777b6872b1a` pruned), reconcile 7/7 failed:0,
+  migration 0192 applied (`run_usage_kind` lists `skill_manifest`). `skill-manifest` spec: 3 passed
+  (18.9 s) in Chromium against the live team model: two `run_usage` rows `kind=skill_manifest`,
+  model `ollama/glm-5.3-flash`, ~490 in / ~64 out tokens, `run_id` and `sandbox_id` NULL; two
+  `skill.manifest.generated` audit rows (`from: model`), the promotion one carrying the personal
+  version, the editor one the draft alone. The personal skill `e2e-manifest-<stamp>` v0.1.0 stays
+  on the owner's account (no delete for versions).

@@ -15,8 +15,11 @@ Hadron via `scripts/hadron.sh`.
   Kobe drafts the manifest in one run-less server call (new purpose `skill_manifest`: token without
   thread/run, gateway skips the run check, `run_usage` row with `run_id` NULL, custom migration 0192) and forks the version into a Workbench draft with the file (`POST
 /v1/skills/promotions/manifest`; also `POST /v1/skills/drafts/:id/manifest`). The reply is
-  cleaned to the package contract; name, version and license are never the model's. Decisions in
-  the ticket ledger; docs in skill-package.md and design/server-model-calls.md.
+  cleaned to the package contract; name, version and license are never the model's. The Workbench
+  editor offers the same under its file tree. Deployed to kobe-gate1 as `local-40f2d51a1609` (Helm
+  rev 115; rollback `local-cab5871aa7db`; `local-2777b6872b1a` pruned), reconcile failed:0; the
+  `skill-manifest` spec passed both flows against the live model (glm-5.3-flash). Decisions in the
+  ticket ledger; docs in skill-package.md and design/server-model-calls.md.
 - **Catalyst look lane (2026-11-06/07, Chris's asks during the run):** KOBE-550 (PR #460, main
   a2a89e27): the Catalyst query tool's look in Kobe — a brand-coloured hover glow on every card-like
   surface in every theme (`kobe-panel`, glow tokens, docs/theming.md §7), a seventh preset
