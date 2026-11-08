@@ -36,13 +36,13 @@ has to take before tickets are filed (as `docs/specs/agents-roster.md` did for t
 
 ## Candidate scope (proposed, not decided)
 
-| Id   | Candidate ticket                                                                                                      | Notes                                                                                          |
-| ---- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| WS-1 | Reader's **Copy to my workspace** on a shared thread's artifact and on its file cards (into `shared/<thread>/…`)      | Server copies the stored bytes (as Edit as file does for the owner); audited; no owner-side change |
-| WS-2 | **Add to project** from a thread: an artifact or workspace file becomes a project file                                 | Owner only; reaches every project member's `projects/` mount; replaces "download then upload"      |
-| WS-3 | **Shared project workspace**: a writable `projects/<name>/` area (any member writes; conflicts as today)               | Big: changes mounts.ts (read-only today), sync, RLS; needs a decision on who may write and how edits collide |
-| WS-4 | **Project file versions**: replace in place with history instead of delete + new file                                  | Pairs with WS-3; today an open tab sees a replacement as a deletion                               |
-| WS-5 | **Team workspace browser**: admins see members' workspace usage (size, last sync) and can reclaim                      | Ops; no content access                                                                          |
+| Id   | Candidate ticket                                                                                                 | Notes                                                                                                        |
+| ---- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| WS-1 | Reader's **Copy to my workspace** on a shared thread's artifact and on its file cards (into `shared/<thread>/…`) | Server copies the stored bytes (as Edit as file does for the owner); audited; no owner-side change           |
+| WS-2 | **Add to project** from a thread: an artifact or workspace file becomes a project file                           | Owner only; reaches every project member's `projects/` mount; replaces "download then upload"                |
+| WS-3 | **Shared project workspace**: a writable `projects/<name>/` area (any member writes; conflicts as today)         | Big: changes mounts.ts (read-only today), sync, RLS; needs a decision on who may write and how edits collide |
+| WS-4 | **Project file versions**: replace in place with history instead of delete + new file                            | Pairs with WS-3; today an open tab sees a replacement as a deletion                                          |
+| WS-5 | **Team workspace browser**: admins see members' workspace usage (size, last sync) and can reclaim                | Ops; no content access                                                                                       |
 
 ## Decisions (Chris, 2026-11-08)
 
