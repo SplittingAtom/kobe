@@ -21,6 +21,10 @@
   not use the agent); no server path changes a thread's owner, so D19 (pins survive removal and
   owner departure) is unaffected. Renames, moves and archives never re-validate.
 
+- **Review decisions (coordinator, 2026-11-08):** a site-wide suspension of a site entry wins over
+  an active team entry (not runnable anywhere, runs refused); schedules of gallery agents also pause
+  `agent_unavailable` when the team suspends them; team-owned agents keep their status rules.
+
 ## Done (server)
 
 - `agents/roster-resolution.ts`: `lendingIn` (pure), `entryUnavailable`, `ownerStates`,
