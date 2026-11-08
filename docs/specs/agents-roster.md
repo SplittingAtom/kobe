@@ -1,8 +1,11 @@
 # Kobe — Agents: Personal, Team and Site rosters
 
-Status: **partly decided by Chris, 2026-11-08** (Q1, Q3 and Q6 in §9: rosters are references with
-a version rule, builders assign directly, team-owned agents stay; the other questions are open and
-AR1–AR16 are proposals where §9 says so). Written 2026-11-08 against main `445af3d9`. Hadron spec: to be registered when the
+Status: **decided by Chris, 2026-11-08** (Q1, Q3 and Q6 explicitly: references with a version
+rule, builders assign directly, team-owned agents stay; for the other questions Chris took the
+proposed answers, so AR1–AR16 are the decisions). Hadron spec
+`4a057ebf-622f-4e43-aa23-7ac7a9e25edb`; tickets filed 2026-11-08: AR-1 KOBE-565, AR-2 KOBE-566,
+AR-3 KOBE-567, AR-4 KOBE-568, AR-5 KOBE-569, AR-6 KOBE-570, AR-7 KOBE-571, AR-8 KOBE-572, AR-9
+KOBE-573 (lane brief: `docs/ledger/agents-roster-lane.md`). Written 2026-11-08 against main `445af3d9`. Hadron spec: to be registered when the
 decisions are taken; tickets in §10 are a proposed split, not filed. Companions:
 `docs/specs/agent-creator.md` (the two-tab editor and Dangerous mode, KOBE-476),
 `docs/specs/gallery-agents.md` (site admins edit gallery agents, KOBE-494), `docs/agent-versions.md`.
@@ -91,7 +94,7 @@ entries), both referencing `site_agents`; team-owned agents keep `team_agents` u
 - Chat: the agent picker lists `runnable` (team, own personal, gallery; active, published, not
   archived, not suspended for this team); the default new-thread agent is the gallery agent Kobe.
 
-## 4. Decisions proposed
+## 4. Decisions
 
 **AR1. One page, three rosters.** `/agents` (nav label **Agents**; `/me/agents*` redirects) with
 tabs **Personal**, **Team**, **Site** (`?tab=`; the last tab is remembered per browser as the
@@ -127,8 +130,7 @@ publishes in Personal; a team admin or site admin never edits an assigned agent 
 pin a version, suspend it, or ask the owner). What a team runs is a **published** version only:
 a draft can be assigned but is not runnable until published; the roster shows "Not published yet".
 
-**AR5. Version rule** (decided by Chris, 2026-11-08: every entry carries one; the default below is
-still proposed, Q2). An entry follows the agent's **latest published version** by default, so
+**AR5. Version rule** (decided by Chris, 2026-11-08). An entry follows the agent's **latest published version** by default, so
 the owner's publish reaches the team at once (threads already started keep their pinned version,
 D19). A team admin or site admin can **pin** the entry to a version; a pinned entry behind the
 owner's latest shows "Update available" with an **Update** action (to latest, or pick a version).
@@ -136,8 +138,8 @@ The owner cannot change another roster's pin. `runnable` and the thread pin reso
 version, not the agent's.
 
 **AR6. Who assigns.** Assign your own personal agent to the **team** roster: `team.agents.build`
-(builders and team admins) directly (decided by Chris, 2026-11-08); whether a `member` may
-**propose** for a team admin to approve or decline (`team.agents.manage`) is open (Q9). Assign to the **site** roster: site admins directly; anyone else proposes
+(builders and team admins) directly (decided by Chris, 2026-11-08); a `member` **proposes** and a
+team admin approves or declines (`team.agents.manage`). Assign to the **site** roster: site admins directly; anyone else proposes
 and a site admin decides. One agent can be on many team rosters and on the site roster at once
 (unless bound, AR8). Only published agents can be proposed to the site. Caps: 200 assigned entries
 per team roster, 200 on the site roster (the existing agent caps stay).
@@ -334,51 +336,44 @@ Agent marketplaces across installations; agents owned by a team being edited by 
 changes to the agent file format, Dangerous mode, policy floors, run execution, or version
 immutability; per-member rosters inside a team; renaming team roles.
 
-## 9. Questions for Chris
+## 9. Questions and Chris's decisions (2026-11-08)
 
-1. **Rosters as references (AR3) or as copies?** _Decided 2026-11-08: references with a version
-   rule._ (A copy would have been simpler and fully walled, but the owner's edits would never reach
-   the team and the agent would exist twice.)
-2. **Default version rule (AR5):** follow latest, or pin at assignment? Proposed: follow latest,
-   admins may pin.
-3. **Who may assign to a team (AR6):** _Decided 2026-11-08: builders assign directly._ Whether
-   members may propose is Q9.
-4. **Who may assign to the site:** site admins only, with proposals from everyone else (proposed),
-   or team admins directly too?
-5. **Binding (AR8):** is "a fork of team content is bound to that team" the right reading of
-   "teams are walls" now that forks land in Personal? Alternative: forbid forking team content
-   into Personal at all (today's rule), offering "Duplicate for the team" instead.
-6. **Keep team-owned agents (AR13)?** _Decided 2026-11-08: keep them_, with "Create for the team"
-   and Adopt (AR10).
-7. **Adopt into the site (AR10):** should a site-owned, non-repository gallery agent exist, or must
-   a site adoption pick a team to own it?
-8. **Transfer (AR10):** accept required by the new owner, or immediate?
-9. **Proposals:** should members (no `build`) be able to propose their agent to the team, and
-   non-site-admins to the site, in this lane, or later?
-10. **Inventory and Gallery pages (AR12):** fold into the tabs with redirects, or keep both?
-11. **Schedules (AR11):** pause with a notice, or fail each run?
-12. **Delete while rostered (§6.3):** refuse, or withdraw automatically?
-13. **Team default agent (§7.7):** in this lane?
-14. **Caps:** 200 assigned per team roster and 200 on the site roster?
-15. **Nav label and route:** `/agents` with redirects from `/me/agents`, or keep `/me/agents` with
-    the new name?
-16. **Picker grouping (AR15):** Personal, Team, Site in that order, or Team first?
-17. **Bound agents and export:** allow export of a bound agent (a deliberate act, as today), or
-    refuse?
-18. **Site admins on the Site tab:** edit gallery agents there (fold the Site Console editor in),
-    or link to the Site Console?
+Chris answered Q1, Q3 and Q6 himself and took the proposed answer for every other question.
 
-## 10. Proposed tickets (not filed)
+1. **Rosters as references (AR3) or as copies?** _References with a version rule._
+2. **Default version rule (AR5):** _Follow the owner's latest published version; team and site
+   admins may pin an entry._
+3. **Who may assign to a team (AR6):** _Builders assign directly; members propose._
+4. **Who may assign to the site:** _Site admins directly; everyone else proposes._
+5. **Binding (AR8):** _A fork of team content lands in Personal, bound to that team._
+6. **Keep team-owned agents (AR13)?** _Yes: "Create for the team" and Adopt (AR10) stay._
+7. **Adopt into the site (AR10):** _Yes: a site-owned gallery agent without a repository key,
+   Customized from the start._
+8. **Transfer (AR10):** _The new owner must accept._
+9. **Proposals:** _In this lane, for the team and for the site._
+10. **Inventory and Gallery pages (AR12):** _Fold into the tabs; the old pages redirect once the
+    tabs carry every action._
+11. **Schedules (AR11):** _Pause with a notice (`agent_unavailable`); resume when the agent is back._
+12. **Delete while rostered (§6.3):** _Refused (`409 agent_rostered`); withdraw first._
+13. **Team default agent (§7.7):** _In this lane, as its own ticket (AR-7)._
+14. **Caps:** _200 assigned entries per team roster, 200 on the site roster._
+15. **Route and label:** _`/agents`, nav label Agents; `/me/agents*` redirect._
+16. **Picker grouping (AR15):** _Personal, Team, Site, in that order._
+17. **Bound agents and export:** _Export allowed (a deliberate act, as today)._
+18. **Site admins on the Site tab:** _They edit gallery agents there: the Site Console editor's
+    actions fold into the tab (AR12)._
 
-| Id   | Ticket                                                                                                                    | Depends on |
-| ---- | ------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| AR-0 | Decisions recorded; spec amended; Hadron spec                                                                             |            |
-| AR-1 | DB: `team_agent_roster`, `site_agent_roster`, `site_agents.bound_team_id`, schedule pause reason; RLS, probes, migrations | AR-0       |
-| AR-2 | Server: roster read, assign/propose/decide/withdraw, pin/update, suspend; `agentAccess` roster rights; audit              | AR-1       |
-| AR-3 | Server: resolution (`runnable`, pins, default agent) roster-driven; owner eligibility; schedules pause/resume             | AR-2       |
-| AR-4 | Server: fork lands in Personal with binding; transfer; adopt                                                              | AR-2       |
-| AR-5 | Web: `/agents` with three tabs, rows, actions, redirects, nav rename; Personal reach column                               | AR-2       |
-| AR-6 | Web: Team admin columns and actions (inventory fold-in), Site admin actions (gallery fold-in), proposals queue            | AR-5       |
-| AR-7 | Web: fork dialog, lineage, version rule UI, picker grouping                                                               | AR-4, AR-5 |
-| AR-8 | Browser specs on gate1: assign and run from another member; propose and approve; fork bound; pin and update; owner leaves | AR-3..7    |
-| AR-9 | Docs: agents roster guide, permission matrix in `docs/`, audit-log rows                                                   | AR-8       |
+## 10. Implementation tickets (filed 2026-11-08 as KOBE-565..573)
+
+| Id (ticket)     | Ticket                                                                                                                    | Depends on |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| AR-0            | Decisions recorded; spec amended; Hadron spec                                                                             |            |
+| AR-1 (KOBE-565) | DB: `team_agent_roster`, `site_agent_roster`, `site_agents.bound_team_id`, schedule pause reason; RLS, probes, migrations | AR-0       |
+| AR-2 (KOBE-566) | Server: roster read, assign/propose/decide/withdraw, pin/update, suspend; `agentAccess` roster rights; audit              | AR-1       |
+| AR-3 (KOBE-567) | Server: resolution (`runnable`, pins, default agent) roster-driven; owner eligibility; schedules pause/resume             | AR-2       |
+| AR-4 (KOBE-568) | Server: fork lands in Personal with binding; transfer; adopt                                                              | AR-2       |
+| AR-5 (KOBE-569) | Web: `/agents` with three tabs, rows, actions, redirects, nav rename; Personal reach column                               | AR-2       |
+| AR-6 (KOBE-570) | Web: Team admin columns and actions (inventory fold-in), Site admin actions (gallery fold-in), proposals queue            | AR-5       |
+| AR-7 (KOBE-571) | Web: fork dialog, lineage, version rule UI, picker grouping                                                               | AR-4, AR-5 |
+| AR-8 (KOBE-572) | Browser specs on gate1: assign and run from another member; propose and approve; fork bound; pin and update; owner leaves | AR-3..7    |
+| AR-9 (KOBE-573) | Docs: agents roster guide, permission matrix in `docs/`, audit-log rows                                                   | AR-8       |
