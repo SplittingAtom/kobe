@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #485)
 - **Branch / worktree:** `kobe-568-fork-transfer-adopt` in `../Kobe-wt568`
 - **Depends on:** KOBE-565 (`site_agents.bound_team_id`), KOBE-566 (roster writes, `assignDecision`).
   Spec `docs/specs/agents-roster.md` AR8, AR10, AR16, §5, §6.7-6.9 (AR-4). No migration.
