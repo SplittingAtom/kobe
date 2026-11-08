@@ -281,8 +281,12 @@ function Builder({
 
   // Publishing is its own right (the server checks `access.publish`), separate from editing.
   const canPublish = agent !== null && !readOnly && agent.canPublish === true;
+  // Someone else's agent viewed from a roster (KOBE-571, AR14): its version in effect, read-only;
+  // the owner's evals, ratings, cases and exports stay theirs.
+  const rosterVersion = agent?.versionInEffect;
+  const rosterView = rosterVersion !== undefined;
   // Exporting needs the right to read the definition, not edit rights (archived agents export too).
-  const canExport = agent !== null && agent.canExport === true;
+  const canExport = agent !== null && agent.canExport === true && !rosterView;
 
   return (
     <>
@@ -291,6 +295,14 @@ function Builder({
         back={<Link href={home.list}>{home.back}</Link>}
         {...(agent?.dangerous ? { actions: <DangerousBadge /> } : {})}
       />
+      {rosterView && (
+        <Notice tone="info">
+          <p>
+            You&apos;re viewing v{rosterVersion}, the version this roster runs. Only its owner edits
+            it; fork it from the Agents page to make your own copy.
+          </p>
+        </Notice>
+      )}
       {agent?.archivedAt && (
         <Notice tone="warn">
           <p>This agent is archived, so it can&apos;t be changed.</p>
@@ -423,7 +435,7 @@ function Builder({
           </span>
         </div>
       )}
-      {agent && !agent.archivedAt && (
+      {agent && !agent.archivedAt && !rosterView && (
         <EvalStatus
           teamId={teamId}
           agentId={agent.id}
@@ -461,8 +473,10 @@ function Builder({
           }}
         />
       )}
-      {agent && <AgentQuality teamId={teamId} agentId={agent.id} />}
-      {agent && <SharedCasesSummary teamId={teamId} agentId={agent.id} scope={scope} />}
+      {agent && !rosterView && <AgentQuality teamId={teamId} agentId={agent.id} />}
+      {agent && !rosterView && (
+        <SharedCasesSummary teamId={teamId} agentId={agent.id} scope={scope} />
+      )}
       {agent && (
         <VersionHistory
           key={historyKey}

@@ -70,7 +70,15 @@ export interface RunnableAgent {
    * Shown as a badge in the picker and composer; whether it applies is decided per call.
    */
   readonly dangerous?: true;
+  /**
+   * The roster the picker groups it under (AR15, KOBE-571): the caller's own agents `personal`,
+   * team-owned agents and team roster entries `team`, gallery agents and site roster entries
+   * `site`.
+   */
+  readonly group: RunnableGroup;
 }
+
+export type RunnableGroup = "personal" | "team" | "site";
 
 export interface RunnablePage {
   readonly agents: readonly RunnableAgent[];
@@ -122,14 +130,22 @@ export async function listRunnableAgents(
     // The team's suspension is part of the effective status, as in `findPinnableAgent`.
     const effective = (a: AgentRecord): AgentRecord =>
       suspended.has(a.id) ? { ...a, status: "suspended" } : a;
+    const lent = await lentAgents(tx, viewer);
+    const lentGroup = new Map(lent.map((l) => [l.record.id, l.lending.entry.target]));
     const all = [
       ...team.flatMap((r) => published(effective(toRecord("team", r)))),
       ...site.flatMap(({ scope, galleryKey: _key, ...r }) =>
         published(effective(toRecord(scope, r))),
       ),
       // Other members' agents lent by the team or site roster, at the entry's version (AR9).
-      ...(await lentAgents(tx, viewer)).flatMap((l) => published(l.record)),
+      ...lent.flatMap((l) => published(l.record)),
     ];
+    const groupOf = (a: AgentRecord): RunnableGroup =>
+      a.scope === "team"
+        ? "team"
+        : a.scope === "gallery"
+          ? "site"
+          : (lentGroup.get(a.id) ?? "personal");
     const records = all
       .filter((p) => afterCursor(p, query.cursor))
       .sort((a, b) =>
@@ -154,7 +170,13 @@ export async function listRunnableAgents(
         : isDefaultNewThreadAgent({ scope: a.scope, galleryKey: galleryKeys.get(a.id) });
     return {
       agents: page.map((p) =>
-        toRunnable(p, details.get(p.agent.id), galleryKeys.get(p.agent.id), isDefault(p.agent)),
+        toRunnable(
+          p,
+          details.get(p.agent.id),
+          galleryKeys.get(p.agent.id),
+          isDefault(p.agent),
+          groupOf(p.agent),
+        ),
       ),
       nextCursor: records.length > limit && last ? `${last.agent.slug}:${last.agent.id}` : null,
     };
@@ -211,6 +233,7 @@ const toRunnable = (
   details: VersionDetails | undefined,
   galleryKey: string | undefined,
   isDefault: boolean,
+  group: RunnableGroup,
 ): RunnableAgent => ({
   id: a.id,
   scope: a.scope,
@@ -224,4 +247,5 @@ const toRunnable = (
   starters: details?.starters ?? [],
   currentVersion: version,
   ...(details?.dangerous ? { dangerous: true as const } : {}),
+  group,
 });

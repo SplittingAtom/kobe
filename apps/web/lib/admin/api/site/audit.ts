@@ -31,6 +31,7 @@ export const AUDIT_CATEGORIES = [
   "schedule",
   "site",
   "skill",
+  "team",
   "thread",
   "thread_folder",
   "workspace",

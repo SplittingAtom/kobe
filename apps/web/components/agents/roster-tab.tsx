@@ -12,6 +12,7 @@ import {
   reachItems,
   rosterStatusLabel,
   updateAvailableLabel,
+  versionHistoryHref,
   versionInEffectLabel,
 } from "../../lib/agents/roster-labels";
 import {
@@ -37,6 +38,7 @@ import { AgentIconGlyph } from "../admin/team/agent-builder/icon-picker";
 import { DangerousBadge } from "../admin/team/agent-builder/dangerous-badge";
 import { CustomizedBadge, UpdateAvailable } from "../admin/site/gallery-customization";
 import { useRosterActions } from "./roster-actions";
+import { ForkedFrom } from "./lineage";
 import { OrbitScore, UsageCells } from "./usage-cells";
 import { useGalleryExtras } from "./use-gallery-extras";
 import { useRosterRows } from "./use-roster-rows";
@@ -199,7 +201,7 @@ function RosterTable({
         <TableRow>
           <TableHeader>Agent</TableHeader>
           <TableHeader>{props.tab === "personal" ? "Reach" : "Owner"}</TableHeader>
-          <TableHeader>Version</TableHeader>
+          <TableHeader>Version in effect</TableHeader>
           <TableHeader>Status</TableHeader>
           {usage && (
             <>
@@ -248,6 +250,7 @@ function RosterRowView({
         {row.description && (
           <div className="text-sm font-normal text-console-muted">{row.description}</div>
         )}
+        {tab === "personal" && row.forkedFrom && <ForkedFrom lineage={row.forkedFrom} />}
       </TableRowHeader>
       <TableCell>
         {tab === "personal" ? (
@@ -257,7 +260,7 @@ function RosterRowView({
         )}
       </TableCell>
       <TableCell>
-        {versionInEffectLabel(row, viewerId)}
+        <VersionLink row={row} label={versionInEffectLabel(row, viewerId)} />
         {pinLabel(row) && <div className="text-sm text-console-muted">{pinLabel(row)}</div>}
       </TableCell>
       <TableCell>
@@ -342,6 +345,21 @@ function OpenLink({ row }: { readonly row: AgentRosterRow }) {
     <Link href={kind === "Edit" ? editHref(row) : agentPageHref(row.agentId)}>
       {kind}
       <span className="sr-only"> {row.name}</span>
+    </Link>
+  );
+}
+
+/**
+ * The version in effect (§6.6), opening the version history: read-only in the View, or the
+ * owner's editor for the owner.
+ */
+function VersionLink({ row, label }: { readonly row: AgentRosterRow; readonly label: string }) {
+  const href = versionHistoryHref(row);
+  if (href === null) return <>{label}</>;
+  return (
+    <Link href={href}>
+      {label}
+      <span className="sr-only">{` (version history of ${row.name})`}</span>
     </Link>
   );
 }

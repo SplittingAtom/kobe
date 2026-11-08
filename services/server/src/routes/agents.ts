@@ -60,6 +60,7 @@ import { mountVersionRoutes } from "../agents/version-routes.js";
 import { AgentRosteredError, refuseIfRostered } from "../agents/roster.js";
 import { pendingTransfer } from "../agents/roster-transfer.js";
 import { findForkSource, forkDefinition } from "../agents/fork.js";
+import { ROSTER_READ_ACCESS, rosterDefinitionRead } from "../agents/roster-read.js";
 import { mountAgentRosterRoutes, rosterError } from "./agent-roster.js";
 import { mountAgentTransferRoutes } from "./agent-transfer.js";
 import { deleteOrArchiveAgent } from "../agents/versions.js";
@@ -232,9 +233,16 @@ export function agentRoutes(
     return agentResponse(c, result.value, agentAccess(actorOf(c), result.value), 201);
   });
 
+  /** Someone else's personal agent read from a roster (KOBE-571, AR14), or null. */
+  async function rosterRead(c: Ctx) {
+    const id = agentIdSchema.safeParse(c.req.param("id"));
+    if (!id.success) return null;
+    return rosterDefinitionRead(db, { ...actorOf(c), teamId: c.get("team").id }, id.data);
+  }
+
   app.get("/:id", async (c) => {
     const agent = await visible(c);
-    if (!agent) return offeredAgent(c);
+    if (!agent) return (await rosterView(c)) ?? offeredAgent(c);
     const access = agentAccess(actorOf(c), agent);
     if (!access.readDefinition) return c.json({ agent: agentSummary(agent, access) });
     if (agent.scope !== "personal") return agentResponse(c, agent, access);
@@ -246,6 +254,22 @@ export function agentRoutes(
       transfer: await pendingTransfer(db, agent.id),
     });
   });
+
+  /**
+   * View from a roster (AR14): the version in effect, read-only, with `versionInEffect` on the
+   * agent so the editor says what it shows.
+   */
+  async function rosterView(c: Ctx): Promise<Response | null> {
+    const read = await rosterRead(c);
+    if (!read) return null;
+    return c.json({
+      agent: {
+        ...agentDetail(read.agent, ROSTER_READ_ACCESS),
+        versionInEffect: read.versionInEffect,
+      },
+      warnings: agentWarnings(read.agent.frontmatter),
+    });
+  }
 
   /** The recipient of a pending transfer reads the offered agent's summary with the offer. */
   async function offeredAgent(c: Ctx): Promise<Response> {
@@ -349,8 +373,13 @@ export function agentRoutes(
     if (!copied)
       return rosterError(c, "agent_not_published", "This agent has no published version yet.");
     const boundTeamId = forkBinding(source.via, source.boundTeamId, caller.teamId);
+    const definition = forkable(c, copied.definition);
+    const named =
+      body.name === undefined
+        ? definition
+        : { ...definition, frontmatter: { ...definition.frontmatter, name: body.name } };
     const result = await createAgent(db, locationFor(c, "personal"), {
-      definition: forkable(c, copied.definition),
+      definition: named,
       slug: body.slug,
       baseSlug: source.agent.slug,
       ownerUserId: actor.userId,
@@ -397,10 +426,17 @@ export function agentRoutes(
       access: agentAccess(actorOf(c), agent),
     };
   };
+  const resolveReadable = async (raw: Context) => {
+    const found = await resolveVersioned(raw);
+    if (found) return found;
+    const read = await rosterRead(raw as Ctx);
+    return read ? { agent: read.agent, location: read.location, access: ROSTER_READ_ACCESS } : null;
+  };
   mountVersionRoutes(app, {
     db,
     limits: deps.agentLimits,
     resolve: resolveVersioned,
+    resolveRead: resolveReadable,
     userId: (c) => (c as Ctx).get("user").id,
     mayUseDangerousMode: (c) => mayDangerous(c as Ctx),
     evals: {

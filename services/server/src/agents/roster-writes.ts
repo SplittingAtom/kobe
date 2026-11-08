@@ -469,9 +469,16 @@ export async function updateEntry(
         await audit(tx, "approved", target, teamId, agent, approved);
         return { ok: true, value: updated };
       }
-      case "declined":
-      case "removed": {
+      case "declined": {
+        // A decline is the decision itself: `decidedAt` equals `removedAt`, which is how the
+        // owner's Reach tells it from a removal or a withdrawal (`isDeclined`, KOBE-571).
         const updated = await write({ state: "removed", removedAt: now, ...decided, ...note });
+        await audit(tx, step, target, teamId, agent);
+        return { ok: true, value: updated };
+      }
+      case "removed": {
+        // Removing an assigned entry keeps the approval's `decidedBy`/`decidedAt` (KOBE-571).
+        const updated = await write({ state: "removed", removedAt: now, ...note });
         await audit(tx, step, target, teamId, agent);
         return { ok: true, value: updated };
       }
