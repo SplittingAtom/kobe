@@ -19,3 +19,4 @@ export { default as webSearch } from "./web-search";
 export { default as memory } from "./memory";
 export { default as schedules } from "./schedules";
 export { default as followUps } from "./follow-ups";
+export { default as defaultAgent } from "./default-agent";

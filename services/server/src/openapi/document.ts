@@ -17,6 +17,10 @@ import { runsOpenApiPaths, runsOpenApiSchemas } from "./runs.js";
 import { threadsOpenApiPaths, threadsOpenApiSchemas } from "./threads.js";
 import { threadFoldersOpenApiPaths, threadFoldersOpenApiSchemas } from "./thread-folders.js";
 import { usageOpenApiPaths, usageOpenApiSchemas } from "./usage.js";
+import {
+  teamDefaultAgentOpenApiPaths,
+  teamDefaultAgentOpenApiSchemas,
+} from "./team-default-agent.js";
 
 /**
  * The server's OpenAPI 3.1 document, committed as `services/server/openapi.json` and checked for
@@ -49,6 +53,7 @@ export function openApiDocument(): Record<string, unknown> {
       ...brandingOpenApiPaths(),
       ...agentRosterOpenApiPaths(),
       ...agentOwnershipOpenApiPaths(),
+      ...teamDefaultAgentOpenApiPaths(),
     },
     components: {
       schemas: {
@@ -67,6 +72,7 @@ export function openApiDocument(): Record<string, unknown> {
         ...evalCasesOpenApiSchemas(),
         ...brandingOpenApiSchemas(),
         ...agentRosterOpenApiSchemas(),
+        ...teamDefaultAgentOpenApiSchemas(),
       },
       securitySchemes: {
         session: { type: "apiKey", in: "cookie", name: "better-auth.session_token" },

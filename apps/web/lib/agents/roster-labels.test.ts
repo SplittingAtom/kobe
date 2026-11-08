@@ -3,10 +3,14 @@ import { entry, row } from "../../components/agents/roster-fixtures";
 import { ME, TEAM } from "../../components/admin/testing";
 import {
   editHref,
+  forkBindingNotice,
+  forkedFromLabel,
+  lineageHref,
   pinLabel,
   reachItems,
   rosterStatusLabel,
   updateAvailableLabel,
+  versionHistoryHref,
   versionInEffectLabel,
 } from "./roster-labels";
 
@@ -98,5 +102,56 @@ describe("roster row labels (KOBE-569, AR1, §6.5, §6.6)", () => {
     expect(editHref(row({}))).toBe("/agents/a-1");
     expect(editHref(row({ kind: "team_owned" }))).toBe("/admin/team/agents/a-1");
     expect(editHref(row({ kind: "gallery" }))).toBe("/admin/site/gallery/a-1");
+  });
+});
+
+describe("fork, lineage and version links (KOBE-571, AR8, §6.6, §6.7)", () => {
+  it("names the team a fork is bound to, or none", () => {
+    expect(forkBindingNotice(row({ forkBoundTeamId: TEAM.id }), TEAM)).toBe(
+      "Bound to Team Finance: usable only there.",
+    );
+    const elsewhere = row({
+      forkBoundTeamId: "t-9",
+      reach: [{ target: "team", teamId: "t-9", teamName: "Ops", state: "active", note: null }],
+    });
+    expect(forkBindingNotice(elsewhere, TEAM)).toBe("Bound to Team Ops: usable only there.");
+    expect(forkBindingNotice(row({ forkBoundTeamId: "t-8" }), TEAM)).toBe(
+      "Bound to Team another team: usable only there.",
+    );
+    expect(forkBindingNotice(row({ forkBoundTeamId: null }), TEAM)).toBeNull();
+    expect(forkBindingNotice(row({}), TEAM)).toBeNull();
+  });
+
+  it("labels and links lineage only where the source is readable", () => {
+    const readable = { agentId: "s 1", version: 3, name: "Src", kind: "team_owned" as const };
+    expect(forkedFromLabel(readable)).toBe("Forked from Src v3");
+    expect(lineageHref(readable)).toBe("/agents/s%201");
+    const draft = { ...readable, version: null };
+    expect(forkedFromLabel(draft)).toBe("Forked from Src");
+    const hidden = { agentId: "x", version: 1, name: null, kind: null };
+    expect(forkedFromLabel(hidden)).toBe("Forked from an agent you can't see v1");
+    expect(lineageHref(hidden)).toBeNull();
+  });
+
+  it("opens the version history in the owner's editor or the View", () => {
+    const own = row({ actions: { edit: true, viewDefinition: true } });
+    expect(versionHistoryHref(own, "team")).toBe("/agents/a-1#history-title");
+    const gallery = row({ kind: "gallery", actions: { edit: true } });
+    expect(versionHistoryHref(gallery, "site")).toBe("/admin/site/gallery/a-1#history-title");
+    expect(versionHistoryHref(row({ actions: { viewDefinition: true } }), "team")).toBe(
+      "/agents/a-1#history-title",
+    );
+    const siteLent = row({
+      entry: entry({ target: "site", teamId: null }),
+      actions: { viewDefinition: true },
+    });
+    expect(versionHistoryHref(siteLent, "site")).toBe("/agents/a-1?from=site#history-title");
+    expect(versionHistoryHref(row({}), "team")).toBeNull();
+    expect(
+      versionHistoryHref(
+        row({ currentVersion: null, versionInEffect: null, actions: { edit: true } }),
+        "personal",
+      ),
+    ).toBeNull();
   });
 });

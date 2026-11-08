@@ -102,7 +102,7 @@ const ORPHAN = row({
   status: "unavailable",
   unavailableReason: "owner_left",
   entry: entry({ agentId: "o-1", assignedBy: "u-gone" }),
-  actions: { remove: true, pin: true },
+  actions: { remove: true, pin: true, adopt: true },
 });
 
 const GALLERY_ROW = row({
@@ -226,7 +226,7 @@ describe("Members see none of the admin columns or actions (ac-1)", () => {
     expect(screen.queryByRole("button", { name: /^Proposed/ })).toBeNull();
     expect(await rowActions("Triage")).toEqual([]);
     await userEvent.click(screen.getByRole("tab", { name: "Site" }));
-    expect(await rowActions("Kobe")).toEqual(["Fork to Personal"]);
+    expect(await rowActions("Kobe")).toEqual(["Fork to Personal…"]);
     expect(screen.queryByText("Customized")).toBeNull();
     expect(summary(calls)).not.toContain("GET /v1/site/gallery/agents");
   });
@@ -273,7 +273,7 @@ describe("Site tab as a site admin: the Gallery page's actions (ac-1)", () => {
     expect(await screen.findByText("repository file")).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Reset to repository/ })).toBeTruthy();
 
-    expect(await rowActions("Kobe")).toEqual(["Run eval…", "Export file", "Fork to Personal"]);
+    expect(await rowActions("Kobe")).toEqual(["Run eval…", "Export file", "Fork to Personal…"]);
     // The Gallery page's team picker: the active team first, any team of the admin's.
     await rowAction("Kobe", "Run eval…");
     const dialog = await screen.findByRole("dialog", { name: "Run an eval of Kobe" });
@@ -427,7 +427,7 @@ describe("Proposals queue (ac-2)", () => {
     expect(
       (within(dialog).getByLabelText("Version rule") as HTMLSelectElement).selectedOptions[0]
         ?.textContent,
-    ).toBe("Latest published version (now v3)");
+    ).toBe("Follow latest (now v3)");
     await userEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
     expect(await screen.findByText("Approved Planner for the site.")).toBeTruthy();
     expect(bodyOf(calls, "PUT", "/v1/site/agent-roster/p-9")).toEqual({ state: "active" });

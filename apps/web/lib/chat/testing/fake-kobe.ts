@@ -105,6 +105,10 @@ export interface FakeRunnableAgent {
   readonly model: string | null;
   /** The current version's starters (KOBE-222); default none. */
   readonly starters?: readonly string[];
+  /** The picker's group (agents-roster AR15, KOBE-571); absent: derived from the scope. */
+  readonly group?: "personal" | "team" | "site";
+  /** An admin's Dangerous agent (KOBE-476). */
+  readonly dangerous?: true;
 }
 
 interface FakeEntry {

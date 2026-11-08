@@ -7,6 +7,7 @@ import {
 } from "@kobe/protocol";
 import { useState } from "react";
 import { listMyTeamsForEval } from "../../lib/admin/api/site/gallery";
+import { listTeamAgentVersions } from "../../lib/admin/api/team/agent-builder";
 import { Button, Dialog, DialogClose, Field, Select, Textarea } from "../ui/console";
 import { ResourceView } from "../admin/parts";
 import { useResource } from "../admin/use-resource";
@@ -22,27 +23,44 @@ export function pinChoices(currentVersion: number | null): number[] {
 const ruleOf = (choice: string): AgentVersionRuleInput =>
   choice === LATEST ? LATEST : Number(choice);
 
-/** "Latest published version" or "Pin to vN", newest first (AR5). */
+/** A version's label in the picker: "Pin to v3 (published 2026-11-01)", or without the date. */
+export function pinLabelFor(version: number, publishedAt?: string): string {
+  return publishedAt
+    ? `Pin to v${version} (published ${publishedAt.slice(0, 10)})`
+    : `Pin to v${version}`;
+}
+
+/**
+ * The entry's version rule (AR5, §6.6): "Follow latest" or "Pin to vN" from the agent's version
+ * history (newest first, with publish dates). The history reads through the roster's read-only
+ * View (KOBE-571); until it loads, or if it can't be read, the numbers alone.
+ */
 function VersionRuleField({
+  teamId,
   row,
   value,
   onChange,
 }: {
+  readonly teamId: string;
   readonly row: AgentRosterRow;
   readonly value: string;
   readonly onChange: (choice: string) => void;
 }) {
+  const { state } = useResource(() => listTeamAgentVersions(teamId, row.agentId));
+  const dates = new Map(
+    state.status === "ready" ? state.data.versions.map((v) => [v.version, v.publishedAt]) : [],
+  );
   return (
     <Field label="Version rule">
       <Select value={value} onChange={(e) => onChange(e.target.value)}>
         <option value={LATEST}>
           {row.currentVersion === null
-            ? "Latest published version"
-            : `Latest published version (now v${row.currentVersion})`}
+            ? "Follow latest"
+            : `Follow latest (now v${row.currentVersion})`}
         </option>
         {pinChoices(row.currentVersion).map((v) => (
           <option key={v} value={String(v)}>
-            {`Pin to v${v}`}
+            {pinLabelFor(v, dates.get(v))}
           </option>
         ))}
       </Select>
@@ -54,6 +72,7 @@ function VersionRuleField({
  * Approve a proposal (§6.4): it follows the latest published version unless the admin pins one.
  */
 export function ApproveDialog({
+  teamId,
   row,
   rosterName,
   returnFocus,
@@ -61,6 +80,7 @@ export function ApproveDialog({
   onClose,
   onApprove,
 }: {
+  readonly teamId: string;
   readonly row: AgentRosterRow;
   readonly rosterName: string;
   readonly returnFocus: HTMLElement | null;
@@ -86,7 +106,7 @@ export function ApproveDialog({
           void onApprove(ruleOf(choice));
         }}
       >
-        <VersionRuleField row={row} value={choice} onChange={setChoice} />
+        <VersionRuleField teamId={teamId} row={row} value={choice} onChange={setChoice} />
         <div className="flex flex-wrap justify-end gap-2">
           <DialogClose asChild>
             <Button type="button">Cancel</Button>
@@ -105,6 +125,7 @@ export function ApproveDialog({
  * Opened from a row's "Pin a version…" by the roster's admins.
  */
 export function PinDialog({
+  teamId,
   row,
   rosterName,
   returnFocus,
@@ -112,6 +133,7 @@ export function PinDialog({
   onClose,
   onPin,
 }: {
+  readonly teamId: string;
   readonly row: AgentRosterRow;
   readonly rosterName: string;
   readonly returnFocus: HTMLElement | null;
@@ -138,7 +160,7 @@ export function PinDialog({
           void onPin(ruleOf(choice));
         }}
       >
-        <VersionRuleField row={row} value={choice} onChange={setChoice} />
+        <VersionRuleField teamId={teamId} row={row} value={choice} onChange={setChoice} />
         <div className="flex flex-wrap justify-end gap-2">
           <DialogClose asChild>
             <Button type="button">Cancel</Button>
