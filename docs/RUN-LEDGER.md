@@ -39,7 +39,11 @@ Hadron via `scripts/hadron.sh`.
   (reasoning tokens and budgets from the gateway), KOBE-562 (themed logo through Appearance), and the
   820–871 px artifact column question in the KOBE-554 ledger. CI note: the `publish` workflow fails on
   main since 2026-11-07 on Trivy CVE-2026-109869 (undici) in the sandbox image; the Files-rail
-  delete-cancel unit test flaked once in the merge queue (fixed here: wait for the dialog).
+  delete-cancel unit test flaked once in the merge queue (fixed here: wait for the dialog); the
+  executor shard's idle-sandbox hibernation checks fail on slow hosted runners (KOBE-563, two queue
+  drops, shard limit raised to 60 min); the KOBE-480 Bifrost pricing-outage exemption matched only one
+  wording of the upstream failure and dropped PR #469 when the datasheet download answered 503 and a
+  truncated body (pattern widened to any datasheet load failure from its URL).
 - **Conversation tree lane (2026-11-06, spec by Chris's decisions of 2026-11-05):**
   `docs/specs/conversation-tree.md` (Hadron spec e8b1281a; docs PR #446). Shipped in per-ticket PRs:
   KOBE-541 spike (#447: a Pi 1.4 extension summarises a branch through `navigateTree`, and

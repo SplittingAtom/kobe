@@ -273,8 +273,11 @@ if [[ "$bifrost_restarts" != 0 ]]; then # KOBE-242: say why it restarted (OOM, f
   # first restart's backoff costs more exits of the same kind, one per kubelet backoff step
   # (2026-10-31, PR #431's queue run: two exits; 2026-11-01, PRs #438 and #440: five and six, all
   # the pricing download, HTTP 5xx), so any number is allowed when the last exit was that failure
-  # and no container was ever OOM-killed; anything else fails.
-  pricing_exit='"level":"fatal".*failed to initialize pricing manager.*failed to download pricing data: HTTP 5[0-9][0-9]'
+  # and no container was ever OOM-killed; anything else fails. The same outage is worded three ways
+  # (2026-11-08, PR #469's queue run: "failed to download model parameters data: HTTP 503" in one
+  # shard and "failed to unmarshal pricing data: unexpected end of JSON input", a truncated body, in
+  # another), so the match is the pricing manager failing to load either datasheet from its URL.
+  pricing_exit='"level":"fatal".*failed to initialize pricing manager: failed to sync (pricing|model parameters) data: failed to load .* from URL'
   bifrost_oom=$($KUBECTL -n "$NS" get pods -l app.kubernetes.io/component=bifrost \
     -o jsonpath='{.items[*].status.containerStatuses[*].lastState.terminated.reason}' 2>/dev/null)
   if [[ "$bifrost_restarts" =~ ^[1-9][0-9]*$ && "$bifrost_oom" != *OOMKilled* ]] &&
