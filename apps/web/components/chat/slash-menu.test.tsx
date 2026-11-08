@@ -104,7 +104,7 @@ describe("the / menu lists the bound actions (ac-1)", { timeout: 30_000 }, () =>
       "/shortcuts, Keyboard shortcuts",
       "/memory, My memory",
       "/schedules, My schedules",
-      "/agents, My agents",
+      "/agents, Agents",
       "/skills, Skills",
     ]);
     // Stop is listed but unavailable while nothing runs.
@@ -465,7 +465,7 @@ describe("navigation actions (S2)", { timeout: 30_000 }, () => {
     await user.type(input, "/agen");
     await menu();
     await user.keyboard("{Enter}");
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/me/agents"));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/agents"));
     expect(screen.getByRole("list", { name: "Attached files" })).toBeTruthy();
   });
 });

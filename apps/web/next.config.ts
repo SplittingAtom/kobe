@@ -4,6 +4,7 @@ import { consoleRedirects } from "./lib/admin/nav/paths";
 import { resolveBuildId } from "./lib/build/build-id";
 import { SECURITY_HEADERS } from "./lib/security/csp";
 import { skillEditorRedirects } from "./lib/skills/redirects";
+import { agentsRedirects } from "./lib/agents/redirects";
 
 // KOBE-487: one id per build. Set back into the environment so build workers that load this file
 // again agree; inlined into client and server code as process.env.KOBE_BUILD_ID (lib/build).
@@ -25,8 +26,9 @@ const nextConfig: NextConfig = {
   },
   // KOBE-257: the install console became the Site console; old /admin/install links and bookmarks still land.
   // KOBE-321: the old skill editors' links land on the Skills page.
+  // KOBE-569: My agents became the Agents page (/agents); /me/agents links still land.
   async redirects() {
-    return [...consoleRedirects(), ...skillEditorRedirects()];
+    return [...consoleRedirects(), ...skillEditorRedirects(), ...agentsRedirects()];
   },
 };
 

@@ -183,8 +183,10 @@ describe("cascade layers (KOBE-294)", () => {
  */
 const CONSOLE_DIRS = [
   "app/admin",
+  "app/agents",
   "app/me",
   "components/admin",
+  "components/agents",
   "components/me",
   "components/memory",
   "components/projects",
@@ -239,6 +241,8 @@ function moduleImports(file: string): string[] {
 const CSS_IMPORTS: Readonly<Record<string, string>> = {
   [join("app", "admin", "layout.tsx")]: "./admin-global.css",
   [join("app", "me", "layout.tsx")]: "../admin/admin-global.css",
+  // The Agents page (KOBE-569) shares the My area's frame.
+  [join("app", "agents", "layout.tsx")]: "../admin/admin-global.css",
   [join("components", "admin", "team", "agent-builder", "test-pane.tsx")]:
     "../../../../app/chat-global.css",
   [join("components", "skills", "test-pane.tsx")]: "../../app/chat-global.css",

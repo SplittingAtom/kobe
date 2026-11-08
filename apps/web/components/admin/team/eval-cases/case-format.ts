@@ -3,9 +3,9 @@ import type { BadgeTone } from "../../../ui/console";
 
 export type AgentScope = "team" | "personal";
 
-/** The agent's page: the Team console's builder for team agents, My agents for personal ones. */
+/** The agent's page: the Team console's builder for team agents, the Agents page for personal ones. */
 export function agentHref(scope: AgentScope, agentId: string): string {
-  const base = scope === "team" ? "/admin/team/agents" : "/me/agents";
+  const base = scope === "team" ? "/admin/team/agents" : "/agents";
   return `${base}/${encodeURIComponent(agentId)}`;
 }
 

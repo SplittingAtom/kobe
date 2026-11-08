@@ -571,7 +571,7 @@ export function ChatApp({
                 {/* No active team yet: activates one (the selector itself is in the rail, KOBE-419). */}
                 <TeamActivation />
                 {body}
-                {/* A console, My agents, Skills or a My area page over the workspace (KOBE-452). */}
+                {/* A console, Agents, Skills or a My area page over the workspace (KOBE-452). */}
                 {panel !== undefined &&
                 panel.id !== "threads" &&
                 panel.id !== "conversation-tree" ? (

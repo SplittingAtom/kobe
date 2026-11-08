@@ -318,8 +318,9 @@ describe("the palette (ac-1)", { timeout: 30_000 }, () => {
     );
     await ready();
     await openPalette();
-    await userEvent.setup().keyboard("my agents{Enter}");
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/me/agents"));
+    await userEvent.setup().keyboard("agents{Enter}");
+    // KOBE-569: "My agents" is the Agents page.
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/agents"));
     // KOBE-452: My memory is a panel over the workspace, at its own address.
     await openPalette();
     await userEvent.setup().keyboard("my memory{Enter}");

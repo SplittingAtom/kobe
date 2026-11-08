@@ -3,7 +3,7 @@ import { expect, test } from "./support/chat.js";
 import { longAnswer } from "./support/gate5.js";
 
 /**
- * KOBE-452: the consoles, My agents and Skills open as a large panel over the workspace instead of
+ * KOBE-452: the consoles, Agents and Skills open as a large panel over the workspace instead of
  * a page of their own, so the member stays in context. `KOBE_USER` must be a team admin of the
  * active team (the Team console on the rail's top line). Runs against gate1 (README.md).
  */
@@ -83,13 +83,13 @@ test("deep links, reload and Back (ac-2)", async ({ chat, page }) => {
   await expect(chat.answers.last()).toContainText("DEEP");
 });
 
-test("My agents and Skills open from the bar as panels; one at a time (ac-1, ac-3)", async ({
+test("Agents and Skills open from the bar as panels; one at a time (ac-1, ac-3)", async ({
   chat,
   page,
 }) => {
   await chat.open();
   await page.locator('[data-command="my-agents"]').click();
-  await expect(page.getByRole("dialog", { name: "My agents" })).toBeVisible({
+  await expect(page.getByRole("dialog", { name: "Agents" })).toBeVisible({
     timeout: SHELL_TIMEOUT_MS,
   });
   await page.keyboard.press("Escape");
@@ -114,10 +114,10 @@ test("My agents and Skills open from the bar as panels; one at a time (ac-1, ac-
 test("on a phone the panel is a full-screen sheet (ac-3, ac-5)", async ({ chat, page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await chat.open();
-  await page.goto("/me/agents");
-  const panel = page.getByRole("dialog", { name: "My agents" });
+  await page.goto("/agents");
+  const panel = page.getByRole("dialog", { name: "Agents" });
   await expect(panel).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
   expect((await panel.boundingBox())?.width).toBe(390);
-  await panel.getByRole("button", { name: "Close My agents" }).click();
+  await panel.getByRole("button", { name: "Close Agents" }).click();
   await expect(chat.composer).toBeVisible();
 });

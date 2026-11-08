@@ -83,12 +83,12 @@ describe("the owner's shared cases list (KOBE-276 ac-2)", () => {
     expect(container.textContent).not.toMatch(/shared by|u-me|Ada/i);
   });
 
-  it("shows an empty state, and the personal agent's links under My agents", async () => {
+  it("shows an empty state, and the personal agent's links under Agents", async () => {
     stubApi({ [`GET ${LIST}`]: [200, { ...LISTED, accepted: 0, cases: [] }] });
     renderTeam(<SharedCasesPage scope="personal" agentId={AGENT} />);
     expect(await screen.findByText("No shared cases yet.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Back to the agent" }).getAttribute("href")).toBe(
-      `/me/agents/${AGENT}`,
+      `/agents/${AGENT}`,
     );
   });
 

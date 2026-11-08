@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { AgentBuilderPage } from "../admin/team/agent-builder/agent-builder-page";
 import { forbidNativeConfirm, TEAM, ME, renderTeam, stubApi } from "../admin/testing";
-import { MyAgentsPage } from "./my-agents-page";
 import { MyAgentsShell } from "./my-agents-shell";
 
 const MINE = {
@@ -46,27 +45,6 @@ afterEach(() => {
 // A plain member: no team.agents.* permission at all.
 const asMember = { role: "member", permissions: ["team.read"] } as const;
 
-describe("My agents list", () => {
-  it("lists only personal agents and links to the builder", async () => {
-    const calls = stubApi({
-      "GET /v1/agents?scope=personal&include_archived=true": [200, { agents: [MINE] }],
-    });
-    renderTeam(<MyAgentsPage />, asMember);
-    const edit = await screen.findByRole("link", { name: /Edit\s+Notes/ });
-    expect(edit.getAttribute("href")).toBe("/me/agents/p-1");
-    expect(screen.getByRole("link", { name: "New agent" }).getAttribute("href")).toBe(
-      "/me/agents/new",
-    );
-    expect(calls.map((c) => c.url)).toEqual(["/v1/agents?scope=personal&include_archived=true"]);
-  });
-
-  it("says so when there are none", async () => {
-    stubApi({ "GET /v1/agents?scope=personal&include_archived=true": [200, { agents: [] }] });
-    renderTeam(<MyAgentsPage />, asMember);
-    expect(await screen.findByText(/no personal agents yet/i)).toBeTruthy();
-  });
-});
-
 describe("Personal agent builder", () => {
   it("creates a personal agent without any admin permission and opens it in my area", async () => {
     const calls = stubApi({
@@ -75,11 +53,11 @@ describe("Personal agent builder", () => {
     });
     renderTeam(<AgentBuilderPage scope="personal" />, asMember);
     expect(screen.getByRole("heading", { name: "New personal agent" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "My agents" }).getAttribute("href")).toBe("/me/agents");
+    expect(screen.getByRole("link", { name: "Agents" }).getAttribute("href")).toBe("/agents");
     await userEvent.type(screen.getByLabelText("Name"), "Notes");
     await userEvent.type(screen.getByLabelText("System prompt"), "Take notes.");
     await userEvent.click(screen.getByRole("button", { name: "Create agent" }));
-    await waitFor(() => expect(assign).toHaveBeenCalledWith("/me/agents/p-9"));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("/agents/p-9"));
     const post = must(calls.find((c) => c.method === "POST"));
     expect(JSON.parse(String(post.body))).toMatchObject({ scope: "personal" });
   });

@@ -17,7 +17,7 @@ type Theme = (typeof THEMES)[number];
 const THEME_COOKIE = "kobe-theme";
 
 const PAGES = [
-  { path: "/me/agents", name: "My Agents" },
+  { path: "/agents", name: "Agents" },
   { path: "/me/skills?tab=workbench", name: "Skills Workbench" },
   { path: "/admin/team/members", name: "a console page" },
 ] as const;
