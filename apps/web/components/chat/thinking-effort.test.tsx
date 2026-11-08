@@ -2,13 +2,11 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { must } from "../../lib/testing/must";
 import { ThinkingEffort, type EffortLevel } from "./thinking-effort";
 
 /**
  * KOBE-556: assistant-ui's Reasoning effort element, vendored and restyled: one pill per level
- * with aria-pressed, the group's sr-only label, and the readout and bar only when both the spend
- * and the budget are known.
+ * with aria-pressed and the group's sr-only label. KOBE-574 removed the spend bar and readout.
  */
 afterEach(cleanup);
 
@@ -74,39 +72,36 @@ describe("ThinkingEffort (KOBE-556)", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it("hides the readout and the bar while the spend or the budget is unknown", () => {
-    renderEffort();
+  it("never renders a progress bar or a spent / budget readout (KOBE-574)", () => {
+    const { group } = renderEffort();
     expect(screen.queryByRole("progressbar")).toBeNull();
-    cleanup();
-    renderEffort({ spent: 1200 });
-    expect(screen.queryByRole("progressbar")).toBeNull();
-    cleanup();
-    renderEffort({ budget: 8000 });
-    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(group.textContent).toBe(`${LABEL}Model's defaultOffLowMedium`);
   });
 
-  it("shows spent / budget and a brand-accent bar when both are known", () => {
-    renderEffort({ spent: 2000, budget: 8000 });
-    const bar = screen.getByRole("progressbar", { name: "Thinking budget used" });
-    expect(bar.getAttribute("aria-valuenow")).toBe("25");
-    expect(bar.getAttribute("aria-valuetext")).toBe("2k of 8k thinking tokens");
-    expect(screen.getByText("2k / 8k")).toBeTruthy();
-    const fill = must(bar.firstElementChild as HTMLElement | null);
-    expect(fill.style.width).toBe("25%");
-    expect(fill.className).toMatch(/(^|\s)bg-brand-primary(\s|$)/);
+  it("the pressed pill is the inverted foreground fill; the others stay transparent (KOBE-574)", () => {
+    const { group } = renderEffort();
+    const low = within(group).getByRole("button", { name: "Low" });
+    const off = within(group).getByRole("button", { name: "Off" });
+    for (const cls of ["bg-foreground", "text-background"]) expect(low.classList).toContain(cls);
+    expect(low.classList).not.toContain("bg-background");
+    expect(low.className).toMatch(/forced-colors:aria-pressed:outline/);
+    expect(off.classList).toContain("bg-transparent");
+    expect(off.classList).toContain("enabled:hover:text-foreground");
+    expect(off.classList).not.toContain("bg-foreground");
   });
 
-  it("an estimate shows ≈ and says so to screen readers; a spend past the budget fills the bar", () => {
-    renderEffort({ spent: 12_000, budget: 8000, estimated: true });
-    const bar = screen.getByRole("progressbar");
-    expect(bar.getAttribute("aria-valuenow")).toBe("100");
-    expect(bar.getAttribute("aria-valuetext")).toBe("about 12k of 8k thinking tokens (estimated)");
-    expect(screen.getByText("≈12k / 8k")).toBeTruthy();
-  });
-
-  it("a zero budget (thinking off) shows no bar", () => {
-    renderEffort({ spent: 0, budget: 0 });
-    expect(screen.queryByRole("progressbar")).toBeNull();
+  it("centres the pill text vertically in both sizes (KOBE-574)", () => {
+    // The line box is as tall as the pill (h-6/leading-6, h-5/leading-5), centred by the flex box.
+    for (const [compact, height, leading] of [
+      [false, "h-6", "leading-6"],
+      [true, "h-5", "leading-5"],
+    ] as const) {
+      const { group } = renderEffort({ compact });
+      for (const pill of within(group).getAllByRole("button"))
+        for (const cls of ["inline-flex", "items-center", "justify-center", height, leading])
+          expect(pill.classList).toContain(cls);
+      cleanup();
+    }
   });
 
   it("the compact variant is the same pills at the smaller size", () => {

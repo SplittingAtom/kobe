@@ -38,10 +38,11 @@ conversation", `aria-pressed` on the conversation's choice as runs get it, else 
 pill (described as "Model's default"; choosing it stores null, so the conversation keeps
 following the default and a member cannot pin the default level explicitly). It replaced KOBE-260's `<select>`; storage is unchanged (`PATCH /v1/threads/{id}`
 `thinking_level`, or the new conversation's draft). It folds into the "Agent and model" menu on a
-narrow composer (KOBE-418) and is the compact pills on the line below it (KOBE-450). The pills are
-about the next run; under them, the readout ("spent / budget", ≈ for an estimate) and the bar in
-the brand accent describe the latest run against the budget of the level it ran with, and appear
-only when both are known (KOBE-557; `use-reasoning-spend.ts`).
+narrow composer (KOBE-418) and is the compact pills on the line below it (KOBE-450). The pressed
+pill is the theme's inversion (`bg-foreground text-background`; forced colours keep its outline)
+and the pill text is centred in both sizes (KOBE-574). The control is the pill track alone: the
+spend bar and "spent / budget" readout of KOBE-556/557 were removed (KOBE-574); the latest run's
+reasoning spend stays in the usage API and Session info.
 
 ## Mapping (gateway)
 
@@ -108,20 +109,19 @@ Which control a model needs is the admin's choice (Site → Models), never guess
 
 ## Budgets and reasoning spend (KOBE-557)
 
-The chat's Reasoning effort control (KOBE-556) shows the latest run's reasoning spend against the
-shown level's budget. Budgets per level live in `@kobe/protocol` thinking.ts; `thinkingBudget(control,
+The chat's Reasoning effort control no longer shows the spend (KOBE-574 removed its bar and
+readout); the data below stays for the usage API and Session info. Budgets per level live in `@kobe/protocol` thinking.ts; `thinkingBudget(control,
 level)` picks the right table (null for `none`), and the team models API carries each model's
 control in `thinking_in_team.control`.
 
-| Control                                                      | Table                     | off | low   | medium | high   | Meaning                     |
-| ------------------------------------------------------------ | ------------------------- | --- | ----- | ------ | ------ | --------------------------- |
-| `anthropic_budget`                                           | `ANTHROPIC_BUDGET`        | 0   | 2,048 | 8,192  | 24,576 | the `budget_tokens` sent    |
-| `gemini_budget`                                              | `GEMINI_BUDGET`           | 0   | 1,024 | 8,192  | 24,576 | the `thinkingBudget` sent   |
-| `reasoning_effort`, `anthropic_adaptive`, `anthropic_effort` | `THINKING_EFFORT_BUDGETS` | 0   | 2,000 | 8,000  | 24,000 | a display scale for the bar |
+| Control                                                      | Table                     | off | low   | medium | high   | Meaning                   |
+| ------------------------------------------------------------ | ------------------------- | --- | ----- | ------ | ------ | ------------------------- |
+| `anthropic_budget`                                           | `ANTHROPIC_BUDGET`        | 0   | 2,048 | 8,192  | 24,576 | the `budget_tokens` sent  |
+| `gemini_budget`                                              | `GEMINI_BUDGET`           | 0   | 1,024 | 8,192  | 24,576 | the `thinkingBudget` sent |
+| `reasoning_effort`, `anthropic_adaptive`, `anthropic_effort` | `THINKING_EFFORT_BUDGETS` | 0   | 2,000 | 8,000  | 24,000 | a display scale           |
 
 The effort budgets are **a display scale, not a provider limit**: these providers take an effort,
-not a token count, so a run may spend more. The bar caps at 100% and the readout shows the real
-count. (The Anthropic budget sent may also be lowered to leave room for the answer, S3.)
+not a token count, so a run may spend more. (The Anthropic budget sent may also be lowered to leave room for the answer, S3.)
 
 **Reasoning tokens per call** (`run_usage.reasoning_tokens`, `reasoning_estimated`), written by the
 model gateway (`services/model-gateway/src/usage/`):

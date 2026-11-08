@@ -112,25 +112,6 @@ describe("ThinkingPicker as Reasoning effort pills (KOBE-556)", () => {
     expect(onChoose).not.toHaveBeenCalled();
   });
 
-  it("shows the latest run's spend when given, and hides it when empty", () => {
-    render(
-      <ThinkingPicker
-        models={teamModels({ default: "low", levels: ["off", "low"] })}
-        alias={null}
-        chosen={null}
-        disabled={false}
-        onChoose={() => {}}
-        spend={{ spent: 1500, budget: 8000, estimated: false }}
-      />,
-    );
-    expect(screen.getByRole("progressbar").getAttribute("aria-valuetext")).toBe(
-      "1.5k of 8k thinking tokens",
-    );
-    cleanup();
-    renderPicker();
-    expect(screen.queryByRole("progressbar")).toBeNull();
-  });
-
   it("compact on the line below the composer (KOBE-450)", () => {
     const { group } = renderPicker({ compact: true });
     expect(group?.getAttribute("data-size")).toBe("compact");
