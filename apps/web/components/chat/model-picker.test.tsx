@@ -251,7 +251,7 @@ describe("thinking level per conversation (KOBE-260, pills since KOBE-556)", () 
     });
   });
 
-  it("KOBE-557: the latest run's reasoning against its level's budget, ≈ when estimated", async () => {
+  it("KOBE-574: no reasoning bar or readout in the composer, even with the latest run's spend known", async () => {
     Object.assign(must(fake.teamModels[1]), {
       thinking_in_team: {
         control: "reasoning_effort",
@@ -286,32 +286,9 @@ describe("thinking level per conversation (KOBE-260, pills since KOBE-556)", () 
       cache_write_tokens: 0,
     });
     openApp(fake, t);
-    const bar = await within(await thinkingPicker()).findByRole("progressbar");
-    // The run ran at medium (8k), though the pills now ask for low.
-    expect(bar.getAttribute("aria-valuetext")).toBe("about 1.5k of 8k thinking tokens (estimated)");
-    expect(await pressed()).toEqual(["Low"]);
-  });
-
-  it("KOBE-557: no readout while the model's control is unknown (older server)", async () => {
-    const t = fake.addThread("Unknown");
-    Object.assign(must(fake.threads.get(t)), { model: "glm" });
-    fake.threadUsage.set(t, [
-      { ...RUN_USAGE, run_id: "r1", thinking_level: "low", reasoning_tokens: 900 },
-    ]);
-    fake.threadLatestCall.set(t, {
-      run_id: "r1",
-      at: "2026-11-07T10:00:00Z",
-      model: "ollama/glm",
-      input_tokens: 10,
-      cache_read_tokens: 0,
-      cache_write_tokens: 0,
-    });
-    openApp(fake, t);
-    await thinkingPicker();
-    await waitFor(() =>
-      expect(chatRequests(fake, "GET").some((r) => r.path.endsWith("/usage"))).toBe(true),
-    );
+    await waitFor(async () => expect(await pressed()).toEqual(["Low"]));
     expect(within(await thinkingPicker()).queryByRole("progressbar")).toBeNull();
+    expect((await thinkingPicker()).textContent).not.toMatch(/1\.5k|8k/);
   });
 
   it("shows a level the team has since lowered as what runs get", async () => {

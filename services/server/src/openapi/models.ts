@@ -62,7 +62,7 @@ export const teamModelResponseSchema = z.strictObject({
    * pick per conversation (empty: the chat offers no choice). Runs are clamped to it.
    */
   thinking_in_team: z.strictObject({
-    /** The model's thinking control (KOBE-557: `thinkingBudget(control, level)` in the chat). */
+    /** The model's thinking control (KOBE-557: clients may compute the level's budget with `thinkingBudget`). */
     control: thinkingControlSchema,
     default: thinkingLevelSchema.nullable(),
     levels: z.array(thinkingLevelSchema),

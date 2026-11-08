@@ -164,7 +164,7 @@ export const thinkingView = (p: ThinkingPolicy): ThinkingView => ({
 
 /** For the chat: the policy in force for the team, the default level and what members may pick. */
 export interface ChatThinkingView {
-  /** The model's control (KOBE-557: the chat computes the level's budget, `thinkingBudget`). */
+  /** The model's control (KOBE-557: clients may compute the level's budget with `thinkingBudget`). */
   readonly control: ThinkingControl;
   readonly default: ThinkingLevel | null;
   readonly levels: readonly ThinkingLevel[];
