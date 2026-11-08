@@ -416,7 +416,15 @@ export const AUDIT_EVENTS = {
    * asset's hex sha256, or `default` when the setting was cleared or reset; never the bytes.
    */
   "site.branding.updated": event("site", {
-    setting: z.enum(["app_name", "show_name", "theme", "logo", "logo_dark", "favicon"]),
+    setting: z.enum([
+      "app_name",
+      "show_name",
+      "theme",
+      "logo",
+      "logo_dark",
+      "favicon",
+      "logo_theme_color",
+    ]),
     value: z.union([z.string().regex(/^[0-9a-f]{64}$/), label]),
   }),
 

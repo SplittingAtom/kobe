@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { BRANDING_ASSET_KINDS, type BrandingAssetKind, type SiteBranding } from "@kobe/protocol";
 import { eq, siteBrandingAssets, type KobeDb, type KobeTx } from "@kobe/db";
 import { readBrandingSettings, type BrandingSettings } from "./settings.js";
+import { themedFaviconSvg, themedLogoSvg, type ThemedSvg } from "./svg-themed.js";
 
 /**
  * Branding storage and the public snapshot (TH6, TH7): the settings and the files, read together
@@ -17,9 +18,30 @@ export interface StoredAsset {
   readonly height: number | null;
 }
 
+/** A file the server derives from an upload (KOBE-562), served like the upload itself. */
+export interface DerivedAsset {
+  readonly bytes: Buffer;
+  readonly contentType: "image/svg+xml";
+  readonly sha256: string;
+}
+
+/** The themed variants in force: only while `logoThemeColor` is on and the upload is an SVG. */
+export interface BrandingVariants {
+  /** The inline-safe logo (`…/assets/logo?inline=1`). */
+  readonly inlineLogo: DerivedAsset | null;
+  /** The favicon in currentColor with its own scheme colours, served instead of the upload. */
+  readonly themedFavicon: DerivedAsset | null;
+}
+
+export const NO_VARIANTS: BrandingVariants = Object.freeze({
+  inlineLogo: null,
+  themedFavicon: null,
+});
+
 export interface BrandingSnapshot {
   readonly settings: BrandingSettings;
   readonly assets: ReadonlyMap<BrandingAssetKind, StoredAsset>;
+  readonly variants: BrandingVariants;
   /** `GET /v1/site/branding`'s body and its strong ETag. */
   readonly body: string;
   readonly etag: string;
@@ -31,9 +53,50 @@ export const sha256Hex = (bytes: Uint8Array | string): string =>
 export const assetUrl = (kind: BrandingAssetKind, sha256: string): string =>
   `/v1/site/branding/assets/${kind}?v=${sha256}`;
 
+export const inlineLogoUrl = (sha256: string): string =>
+  `/v1/site/branding/assets/logo?inline=1&v=${sha256}`;
+
+const SVG = "image/svg+xml";
+/** Derived variants by source sha256 and kind: a pure function of the bytes, kept per replica. */
+const derived = new Map<string, DerivedAsset | null>();
+const DERIVED_MAX = 16;
+
+function derive(
+  asset: StoredAsset | undefined,
+  make: (bytes: Uint8Array) => ThemedSvg,
+): DerivedAsset | null {
+  if (asset?.contentType !== SVG) return null;
+  const key = `${asset.kind}:${asset.sha256}`;
+  const known = derived.get(key);
+  if (known !== undefined) return known;
+  const result = make(asset.bytes);
+  const value: DerivedAsset | null = result.ok
+    ? { bytes: Buffer.from(result.svg, "utf8"), contentType: SVG, sha256: sha256Hex(result.svg) }
+    : null;
+  if (derived.size >= DERIVED_MAX) derived.clear();
+  derived.set(key, value);
+  return value;
+}
+
+/**
+ * The themed variants for these settings and files (KOBE-562). An upload the reader refuses today
+ * (stored under older rules) has no variant: the page keeps showing it as an image.
+ */
+export function brandingVariants(
+  settings: BrandingSettings,
+  assets: ReadonlyMap<BrandingAssetKind, StoredAsset>,
+): BrandingVariants {
+  if (!settings.logoThemeColor) return NO_VARIANTS;
+  return {
+    inlineLogo: derive(assets.get("logo"), themedLogoSvg),
+    themedFavicon: derive(assets.get("favicon"), themedFaviconSvg),
+  };
+}
+
 export function publicBranding(
   settings: BrandingSettings,
   assets: ReadonlyMap<BrandingAssetKind, StoredAsset>,
+  variants: BrandingVariants = NO_VARIANTS,
 ): SiteBranding {
   const url = (kind: BrandingAssetKind) => {
     const asset = assets.get(kind);
@@ -45,8 +108,10 @@ export function publicBranding(
     return asset?.width && asset.height ? { [w]: asset.width, [h]: asset.height } : {};
   };
   const light = url("logo");
-  const dark = url("logo_dark");
-  const favicon = url("favicon");
+  const { inlineLogo, themedFavicon } = variants;
+  // An inline logo takes the theme's colours in both schemes: the dark logo is not used (KOBE-562).
+  const dark = inlineLogo ? undefined : url("logo_dark");
+  const favicon = themedFavicon ? assetUrl("favicon", themedFavicon.sha256) : url("favicon");
   return {
     appName: settings.appName,
     showName: settings.showName,
@@ -58,9 +123,11 @@ export function publicBranding(
             url: light,
             ...size("logo", "width", "height"),
             ...(dark ? { dark, ...size("logo_dark", "darkWidth", "darkHeight") } : {}),
+            ...(inlineLogo ? { inline: inlineLogoUrl(inlineLogo.sha256) } : {}),
           },
     favicon: favicon ?? null,
     theme: settings.theme,
+    logoThemeColor: settings.logoThemeColor,
   };
 }
 
@@ -83,8 +150,9 @@ async function loadSnapshot(db: KobeDb): Promise<BrandingSnapshot> {
     const kind = BRANDING_ASSET_KINDS.find((k) => k === row.kind);
     if (kind) assets.set(kind, { ...row, kind });
   }
-  const body = JSON.stringify(publicBranding(settings, assets));
-  return { settings, assets, body, etag: `"${sha256Hex(body).slice(0, 32)}"` };
+  const variants = brandingVariants(settings, assets);
+  const body = JSON.stringify(publicBranding(settings, assets, variants));
+  return { settings, assets, variants, body, etag: `"${sha256Hex(body).slice(0, 32)}"` };
 }
 
 /**
