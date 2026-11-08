@@ -33,6 +33,8 @@ export const agents = defineDomain({
     "team_skill_requests",
     // Personal agents assigned to a team's roster (KOBE-565).
     "team_agent_roster",
+    // Offers of a personal agent to another member of the team (KOBE-568).
+    "agent_transfers",
   ],
   siteWide: [
     "skill_blocklist",
