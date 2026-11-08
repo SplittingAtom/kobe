@@ -54,9 +54,9 @@ has to take before tickets are filed (as `docs/specs/agents-roster.md` did for t
   from there (the sandbox can read `projects/`).
 - **Add to project (WS-2) is for admins, owners and editors.** Kobe has no "editor" role today (team roles
   member | builder | team_admin; project roles owner | member; threads are read-only to everyone but
-  the owner), so the first cut grants it to team admins, the project's owners and the thread's owner
-  when they are a member of the project, behind one permission function so an editor role or share scope
-  can be added later. Chris to confirm whether "editors" means builders or a future editor share scope.
+  the owner), and Chris confirmed **editors are builders**: team admins, the project's owners, builders who are
+  members of the project, and the content's owner when a member of the project, behind one permission
+  function.
 - **Runs beside the roster lane** (a third lane while roster has two; stagger `pnpm verify` runs, see
   [[kobe-gsd-oom-sessions]]).
 
