@@ -233,7 +233,8 @@ describe("sync conflicts (KOBE-492)", () => {
         conflicts: [conflict("live.md")],
       },
     ]);
-    expect(await takeAgentNotes(owner(w), t.threadId)).toEqual([]);
+    // The handler marks the note told after `send` returns: wait for it (flaked once in CI).
+    await expect.poll(() => takeAgentNotes(owner(w), t.threadId), { timeout: 10_000 }).toEqual([]);
   });
 
   it("a note that could not be sent stays untold", async () => {
