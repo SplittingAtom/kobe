@@ -104,9 +104,9 @@ describe("team_agent_roster", () => {
     ).resolves.toHaveLength(1);
     expect(await sqlState(teamEntry(teamA, { versionRule: "pinned" }))).toBe("23514");
     expect(await sqlState(teamEntry(teamA, { pinnedVersion: 2 }))).toBe("23514");
-    expect(
-      await sqlState(teamEntry(teamA, { versionRule: "pinned", pinnedVersion: 0 })),
-    ).toBe("23514");
+    expect(await sqlState(teamEntry(teamA, { versionRule: "pinned", pinnedVersion: 0 }))).toBe(
+      "23514",
+    );
     expect(await sqlState(teamEntry(teamA, { versionRule: "any" as "latest" }))).toBe("23514");
   });
 
@@ -136,7 +136,12 @@ describe("site_agents.bound_team_id", () => {
   const agent = (values: Partial<typeof siteAgents.$inferInsert> & { slug: string }) =>
     app.db
       .insert(siteAgents)
-      .values({ scope: "personal", ownerUserId: alice, frontmatter: { name: values.slug }, ...values })
+      .values({
+        scope: "personal",
+        ownerUserId: alice,
+        frontmatter: { name: values.slug },
+        ...values,
+      })
       .returning({ id: siteAgents.id, boundTeamId: siteAgents.boundTeamId });
 
   it("is null by default and carried by personal agents only", async () => {
