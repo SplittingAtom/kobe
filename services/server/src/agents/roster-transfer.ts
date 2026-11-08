@@ -1,10 +1,12 @@
 import {
+  agentTransfers,
   and,
   eq,
   inArray,
   isNull,
+  or,
+  scanTeams,
   siteAgents,
-  siteSettings,
   sql,
   teamMembers,
   users,
@@ -13,7 +15,6 @@ import {
   type KobeTx,
 } from "@kobe/db";
 import type { AgentTransfer, AgentTransferList, AgentTransferView } from "@kobe/protocol";
-import { z } from "zod";
 import { recordAudit } from "../audit/record.js";
 import type { RosterActor } from "./access.js";
 import { AGENT_CAPS, lockKey } from "./store.js";
@@ -24,21 +25,10 @@ import { AGENT_CAPS, lockKey } from "./store.js";
  * the agent keeps its id, so its roster entries keep their rows and threads keep their pins; only
  * `site_agents.owner_user_id` moves. A bound agent goes only to a member of its bound team.
  *
- * A pending offer is ids and a timestamp, kept as one `site_settings` row per agent (key
- * `agent_transfer:<agentId>`, JSON value): no new table for a short-lived, at-most-one-per-agent
- * record. Every write runs inside `withTeam()` of the offer's team (membership is read there with
- * `team_id` explicit) and is audited with that team.
+ * Offers live in the team table `agent_transfers` (RLS): every query runs inside `withTeam()` of
+ * the offer's team (or `scanTeams` to find one) and still states `team_id`; at most one pending
+ * offer per agent site-wide. Decided offers stay as history (accepted, declined, cancelled).
  */
-
-const KEY_PREFIX = "agent_transfer:";
-const keyOf = (agentId: string) => `${KEY_PREFIX}${agentId}`;
-
-const storedSchema = z.object({
-  fromUserId: z.uuid(),
-  toUserId: z.uuid(),
-  teamId: z.uuid(),
-  requestedAt: z.iso.datetime({ offset: true }),
-});
 
 export type TransferError =
   | "agent_not_found"
@@ -46,6 +36,7 @@ export type TransferError =
   | "transfer_recipient_invalid"
   | "agent_bound_to_team"
   | "agent_archived"
+  | "invalid_transition"
   | "slug_taken"
   | "limit_reached";
 export type TransferResult<T> = { ok: true; value: T } | { ok: false; error: TransferError };
@@ -75,34 +66,53 @@ async function lockOwned(tx: KobeTx, agentId: string): Promise<OwnedAgent | null
   return row?.ownerUserId ? { ...row, ownerUserId: row.ownerUserId } : null;
 }
 
-const parse = (agentId: string, value: string): AgentTransfer | null => {
-  let json: unknown;
-  try {
-    json = JSON.parse(value);
-  } catch {
-    return null;
-  }
-  const stored = storedSchema.safeParse(json);
-  if (!stored.success) return null;
-  return {
-    agentId,
-    ...stored.data,
-    requestedAt: new Date(stored.data.requestedAt).toISOString(),
-  };
+const OFFER = {
+  id: agentTransfers.id,
+  agentId: agentTransfers.siteAgentId,
+  fromUserId: agentTransfers.fromUserId,
+  toUserId: agentTransfers.toUserId,
+  teamId: agentTransfers.teamId,
+  createdAt: agentTransfers.createdAt,
+};
+type OfferRow = {
+  id: string;
+  agentId: string;
+  fromUserId: string;
+  toUserId: string;
+  teamId: string;
+  createdAt: Date;
 };
 
-/** The agent's pending transfer, if any. */
-export async function pendingTransfer(
-  db: KobeDb | KobeTx,
-  agentId: string,
-  lock = false,
-): Promise<AgentTransfer | null> {
-  const query = db
-    .select({ value: siteSettings.value })
-    .from(siteSettings)
-    .where(eq(siteSettings.key, keyOf(agentId)));
+const view = (r: OfferRow): AgentTransfer => ({
+  agentId: r.agentId,
+  fromUserId: r.fromUserId,
+  toUserId: r.toUserId,
+  teamId: r.teamId,
+  requestedAt: r.createdAt.toISOString(),
+});
+
+/** One team's pending offer of the agent. Call inside `withTeam(db, teamId)`. */
+async function pendingIn(tx: KobeTx, teamId: string, agentId: string, lock = false) {
+  const query = tx
+    .select(OFFER)
+    .from(agentTransfers)
+    .where(
+      and(
+        eq(agentTransfers.teamId, teamId),
+        eq(agentTransfers.siteAgentId, agentId),
+        eq(agentTransfers.state, "pending"),
+      ),
+    );
   const [row] = lock ? await query.for("update") : await query;
-  return row ? parse(agentId, row.value) : null;
+  return row ?? null;
+}
+
+/** The agent's pending transfer, in whichever team it was offered. Not inside a team transaction. */
+export async function pendingTransfer(db: KobeDb, agentId: string): Promise<AgentTransfer | null> {
+  const [row] = await scanTeams(db, "pendingTransfer", (tx, team) =>
+    pendingIn(tx, team.id, agentId).then((r) => r ?? undefined),
+  );
+  return row ? view(row) : null;
 }
 
 /** An active (not deactivated) member of `teamId`. Call inside `withTeam(db, teamId)`. */
@@ -127,9 +137,15 @@ const ref = (agent: OwnedAgent) => ({
   slug: agent.slug,
 });
 
+function pgCode(err: unknown): string | undefined {
+  const e = err as { code?: string; cause?: { code?: string } } | undefined;
+  return e?.cause?.code ?? e?.code;
+}
+
 /**
  * `POST /v1/agents/:id/transfer`: the owner offers their agent to another active member of the
- * active team. A new offer replaces a pending one.
+ * active team. A new offer replaces a pending one in this team (cancelled); one pending in another
+ * team must be cancelled first (`409 invalid_transition`).
  */
 export async function requestTransfer(
   db: KobeDb,
@@ -137,66 +153,76 @@ export async function requestTransfer(
   agentId: string,
   toUserId: string,
 ): Promise<TransferResult<AgentTransfer>> {
-  return withTeam(db, actor.teamId, async (tx) => {
-    const agent = await lockOwned(tx, agentId);
-    if (!agent || agent.ownerUserId !== actor.userId) return fail("agent_not_found");
-    // An archived agent is retired (KOBE-46): unarchive it before handing it over.
-    if (agent.archivedAt !== null) return fail("agent_archived");
-    if (agent.boundTeamId !== null && agent.boundTeamId !== actor.teamId) {
-      return fail("agent_bound_to_team");
-    }
-    if (toUserId === actor.userId || !(await activeMember(tx, actor.teamId, toUserId))) {
-      return fail("transfer_recipient_invalid");
-    }
-    const requestedAt = new Date().toISOString();
-    const value = JSON.stringify({
-      fromUserId: actor.userId,
-      toUserId,
-      teamId: actor.teamId,
-      requestedAt,
+  try {
+    return await withTeam(db, actor.teamId, async (tx) => {
+      const agent = await lockOwned(tx, agentId);
+      if (!agent || agent.ownerUserId !== actor.userId) return fail("agent_not_found");
+      // An archived agent is retired (KOBE-46): unarchive it before handing it over.
+      if (agent.archivedAt !== null) return fail("agent_archived");
+      if (agent.boundTeamId !== null && agent.boundTeamId !== actor.teamId) {
+        return fail("agent_bound_to_team");
+      }
+      if (toUserId === actor.userId || !(await activeMember(tx, actor.teamId, toUserId))) {
+        return fail("transfer_recipient_invalid");
+      }
+      const previous = await pendingIn(tx, actor.teamId, agentId, true);
+      if (previous) {
+        await tx
+          .update(agentTransfers)
+          .set({ state: "cancelled", decidedAt: new Date() })
+          .where(and(eq(agentTransfers.teamId, actor.teamId), eq(agentTransfers.id, previous.id)));
+      }
+      const [row] = await tx
+        .insert(agentTransfers)
+        .values({ teamId: actor.teamId, siteAgentId: agentId, fromUserId: actor.userId, toUserId })
+        .returning(OFFER);
+      if (!row) throw new Error("agent transfer insert returned no row");
+      await recordAudit(tx, {
+        action: "agent.transfer.requested",
+        teamId: actor.teamId,
+        target: { ...ref(agent), fromUserId: actor.userId, toUserId },
+      });
+      return { ok: true, value: view(row) };
     });
-    await tx
-      .insert(siteSettings)
-      .values({ key: keyOf(agentId), value })
-      .onConflictDoUpdate({ target: siteSettings.key, set: { value, updatedAt: new Date() } });
-    await recordAudit(tx, {
-      action: "agent.transfer.requested",
-      teamId: actor.teamId,
-      target: { ...ref(agent), fromUserId: actor.userId, toUserId },
-    });
-    return {
-      ok: true,
-      value: { agentId, fromUserId: actor.userId, toUserId, teamId: actor.teamId, requestedAt },
-    };
-  });
+  } catch (err) {
+    // The one pending offer per agent is in another team.
+    if (pgCode(err) === "23505") return fail("invalid_transition");
+    throw err;
+  }
 }
 
 /**
  * Runs `fn` in the offer's team with the agent and the offer locked; `transfer_not_found` unless
- * `userId` is a party (`as`). A stale offer (the agent changed owner or is gone) is dropped.
+ * `userId` is a party (`as`). A stale offer (the agent changed owner) is cancelled.
  */
 async function withOffer<T>(
   db: KobeDb,
   agentId: string,
   userId: string,
   as: "either" | "recipient",
-  fn: (tx: KobeTx, agent: OwnedAgent, offer: AgentTransfer) => Promise<TransferResult<T>>,
+  fn: (tx: KobeTx, agent: OwnedAgent, offer: OfferRow) => Promise<TransferResult<T>>,
 ): Promise<TransferResult<T>> {
-  const seen = await pendingTransfer(db, agentId);
-  const party = (o: AgentTransfer) =>
+  const party = (o: { fromUserId: string; toUserId: string }) =>
     o.toUserId === userId || (as === "either" && o.fromUserId === userId);
+  const seen = await pendingTransfer(db, agentId);
   if (!seen || !party(seen)) return fail("transfer_not_found");
   return withTeam(db, seen.teamId, async (tx) => {
     const agent = await lockOwned(tx, agentId);
-    const offer = await pendingTransfer(tx, agentId, true);
-    if (!offer || offer.teamId !== seen.teamId || !party(offer)) return fail("transfer_not_found");
+    const offer = await pendingIn(tx, seen.teamId, agentId, true);
+    if (!offer || !party(offer)) return fail("transfer_not_found");
     if (!agent || agent.ownerUserId !== offer.fromUserId) {
-      await tx.delete(siteSettings).where(eq(siteSettings.key, keyOf(agentId)));
+      await decide(tx, offer, "cancelled");
       return fail("transfer_not_found");
     }
     return fn(tx, agent, offer);
   });
 }
+
+const decide = (tx: KobeTx, offer: OfferRow, state: "accepted" | "declined" | "cancelled") =>
+  tx
+    .update(agentTransfers)
+    .set({ state, decidedAt: new Date() })
+    .where(and(eq(agentTransfers.teamId, offer.teamId), eq(agentTransfers.id, offer.id)));
 
 /** `DELETE /v1/agents/:id/transfer`: the owner cancels, or the recipient declines. */
 export async function cancelTransfer(
@@ -205,7 +231,8 @@ export async function cancelTransfer(
   agentId: string,
 ): Promise<TransferResult<AgentTransfer>> {
   return withOffer(db, agentId, userId, "either", async (tx, agent, offer) => {
-    await tx.delete(siteSettings).where(eq(siteSettings.key, keyOf(agentId)));
+    const byOwner = offer.fromUserId === userId;
+    await decide(tx, offer, byOwner ? "cancelled" : "declined");
     await recordAudit(tx, {
       action: "agent.transfer.cancelled",
       teamId: offer.teamId,
@@ -213,10 +240,10 @@ export async function cancelTransfer(
         ...ref(agent),
         fromUserId: offer.fromUserId,
         toUserId: offer.toUserId,
-        by: offer.fromUserId === userId ? "owner" : "recipient",
+        by: byOwner ? "owner" : "recipient",
       },
     });
-    return { ok: true, value: offer };
+    return { ok: true, value: view(offer) };
   });
 }
 
@@ -250,26 +277,32 @@ export async function acceptTransfer(
       .update(siteAgents)
       .set({ ownerUserId: userId, updatedAt: new Date() })
       .where(and(eq(siteAgents.id, agentId), eq(siteAgents.scope, "personal")));
-    await tx.delete(siteSettings).where(eq(siteSettings.key, keyOf(agentId)));
+    await decide(tx, offer, "accepted");
     await recordAudit(tx, {
       action: "agent.transferred",
       teamId: offer.teamId,
       target: { ...ref(agent), fromUserId: offer.fromUserId, toUserId: userId },
     });
-    return { ok: true, value: offer };
+    return { ok: true, value: view(offer) };
   });
 }
 
 /** `GET /v1/agents/transfers`: the caller's pending offers, both ways, with slug and name. */
 export async function listTransfers(db: KobeDb, userId: string): Promise<AgentTransferList> {
-  const rows = await db
-    .select({ key: siteSettings.key, value: siteSettings.value })
-    .from(siteSettings)
-    .where(sql`${siteSettings.key} LIKE ${`${KEY_PREFIX}%`}`);
-  const mine = rows
-    .map((r) => parse(r.key.slice(KEY_PREFIX.length), r.value))
-    .filter((t): t is AgentTransfer => t !== null)
-    .filter((t) => t.fromUserId === userId || t.toUserId === userId);
+  const perTeam = await scanTeams(db, "listTransfers", async (tx, team) => {
+    const rows = await tx
+      .select(OFFER)
+      .from(agentTransfers)
+      .where(
+        and(
+          eq(agentTransfers.teamId, team.id),
+          eq(agentTransfers.state, "pending"),
+          or(eq(agentTransfers.fromUserId, userId), eq(agentTransfers.toUserId, userId)),
+        ),
+      );
+    return rows.length > 0 ? rows : undefined;
+  });
+  const mine = perTeam.flat();
   if (mine.length === 0) return { incoming: [], outgoing: [] };
   const agents = await db
     .select({
@@ -292,10 +325,10 @@ export async function listTransfers(db: KobeDb, userId: string): Promise<AgentTr
   const views: AgentTransferView[] = [];
   for (const t of mine) {
     const agent = byId.get(t.agentId);
-    // A stale offer (the agent changed owner or is gone) is not shown; accept drops it.
+    // A stale offer (the agent changed owner) is not shown; accept or cancel drops it.
     if (!agent || agent.ownerUserId !== t.fromUserId) continue;
     const name = typeof agent.frontmatter.name === "string" ? agent.frontmatter.name : agent.slug;
-    views.push({ ...t, slug: agent.slug, name });
+    views.push({ ...view(t), slug: agent.slug, name });
   }
   const byTime = (a: AgentTransferView, b: AgentTransferView) =>
     a.requestedAt.localeCompare(b.requestedAt);

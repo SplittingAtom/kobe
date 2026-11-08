@@ -372,6 +372,11 @@ describe("transfer (AR10, ac-2)", () => {
     expect((await as.carol.request("DELETE", `/v1/agents/${agent}/transfer`)).status).toBe(204);
     expect((await as.carol.post(`/v1/agents/${agent}/transfer/accept`)).status).toBe(404);
     expect((await audited("agent.transfer.cancelled", agent))[0]?.target.by).toBe("recipient");
+    const [declined] = await sql<{ state: string; team_id: string }>(
+      `SELECT state, team_id FROM agent_transfers WHERE site_agent_id = $1`,
+      [agent],
+    );
+    expect(declined).toEqual({ state: "declined", team_id: finance });
     expect(
       (await as.bob.post(`/v1/agents/${agent}/transfer`, { toUserId: ids.carol })).status,
     ).toBe(201);
@@ -383,6 +388,36 @@ describe("transfer (AR10, ac-2)", () => {
     const clash = await as.carol.post(`/v1/agents/${agent}/transfer/accept`);
     expect(clash.status).toBe(409);
     expect(clash.json.code).toBe("slug_taken");
+  });
+
+  it("keeps one pending offer per agent: replaced in the team, refused from another (409)", async () => {
+    const agent = await personal("alice", "Alice Two Teams");
+    expect(
+      (await as.alice.post(`/v1/agents/${agent}/transfer`, { toUserId: ids.bob })).status,
+    ).toBe(201);
+    // A new offer in the same team replaces the old one (cancelled, kept as history).
+    expect(
+      (await as.alice.post(`/v1/agents/${agent}/transfer`, { toUserId: ids.carol })).status,
+    ).toBe(201);
+    const incoming = async (who: Person) =>
+      ((await as[who].get("/v1/agents/transfers")).json.incoming as { agentId: string }[]).filter(
+        (t) => t.agentId === agent,
+      );
+    expect(await incoming("bob")).toEqual([]);
+    expect(await incoming("carol")).toHaveLength(1);
+    const rows = await sql<{ state: string; to_user_id: string }>(
+      `SELECT state, to_user_id FROM agent_transfers WHERE site_agent_id = $1 ORDER BY created_at`,
+      [agent],
+    );
+    expect(rows.map((r) => r.state)).toEqual(["cancelled", "pending"]);
+    await activate("alice", marketing);
+    try {
+      const other = await as.alice.post(`/v1/agents/${agent}/transfer`, { toUserId: ids.dave });
+      expect(other.status).toBe(409);
+      expect(other.json.code).toBe("invalid_transition");
+    } finally {
+      await activate("alice", finance);
+    }
   });
 
   it("a bound agent goes only to a member of its bound team", async () => {

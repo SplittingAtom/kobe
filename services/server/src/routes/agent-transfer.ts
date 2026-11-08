@@ -48,7 +48,14 @@ export function mountAgentTransferRoutes(
     const id = await begin(c);
     if (id instanceof Response) return id;
     const result = await requestTransfer(db, teamActor(c), id, body.toUserId);
-    return result.ok ? c.json({ transfer: result.value }, 201) : rosterError(c, result.error);
+    if (result.ok) return c.json({ transfer: result.value }, 201);
+    return result.error === "invalid_transition"
+      ? rosterError(
+          c,
+          result.error,
+          "This agent has a pending transfer in another team. Cancel it first.",
+        )
+      : rosterError(c, result.error);
   });
 
   app.post("/:id/transfer/accept", async (c) => {

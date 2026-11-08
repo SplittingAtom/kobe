@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR #485)
+- **Status:** in review (PR #485; migration PR #487 merged)
 - **Branch / worktree:** `kobe-568-fork-transfer-adopt` in `../Kobe-wt568`
 - **Depends on:** KOBE-565 (`site_agents.bound_team_id`), KOBE-566 (roster writes, `assignDecision`).
   Spec `docs/specs/agents-roster.md` AR8, AR10, AR16, §5, §6.7-6.9 (AR-4). No migration.
@@ -33,13 +33,15 @@ exports `lockRoster`, `lockPersonalAgent`, `writeEntry`, `audit` (no behaviour c
   (403), as before; gallery forks are now open to members (personal).
 - **Body:** `scope` accepted (any short string) and ignored; the response's `warnings` gets
   `{path: "scope", …}` (`AGENT_FORK_SCOPE_IGNORED`). Response adds top-level `boundTeamId`.
-- **Transfer storage: no new table.** A pending offer is one `site_settings` row per agent
-  (`agent_transfer:<agentId>`, JSON ids + timestamp): at most one per agent, short-lived, site-wide
-  like the agent. Writes run in `withTeam()` of the offer's team, membership read there with
-  `team_id` explicit. If a reviewer prefers a dedicated table, it is a small expand-only migration
-  after #484; the module is the only reader.
+- **Transfer storage: team table `agent_transfers`** (review decision; migration PR #487, merged
+  before this feature): rows in the team the offer was made in (RLS, FORCE), states
+  pending/accepted/declined/cancelled, decided rows kept as history, one pending offer per agent
+  site-wide (partial unique index across teams). Every query runs in `withTeam()` with `team_id`
+  explicit; finding an agent's offer and the caller's list use `scanTeams` (one query per team, as
+  Reach). No `site_settings` storage remains.
 - **Transfer shape:** `POST /:id/transfer {toUserId}` (owner → another active member of the active
-  team; a new offer replaces the old one), `POST /:id/transfer/accept` (recipient),
+  team; a new offer in the same team replaces the old one (cancelled); one pending in another team
+  → `409 invalid_transition`, cancel it first), `POST /:id/transfer/accept` (recipient),
   `DELETE /:id/transfer` (owner cancels or recipient declines, 204), `GET /v1/agents/transfers`
   (both directions). The owner's `GET /v1/agents/:id` carries `transfer`; the recipient's read of
   that id returns the summary (no definition) + `transfer`. Accept re-checks membership, binding,
@@ -71,8 +73,7 @@ exports `lockRoster`, `lockPersonalAgent`, `writeEntry`, `audit` (no behaviour c
 
 ## Open questions (for Chris or the coordinator)
 
-- Review decision: pending transfers move to a team table `agent_transfers` (own migration PR,
-  `kobe-568-transfers-table`, after #484); `roster-transfer.ts` is reworked onto it afterwards.
+- None open: the review's two decisions (transfers table-backed, adopt publishes v1) are done.
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -82,8 +83,9 @@ exports `lockRoster`, `lockPersonalAgent`, `writeEntry`, `audit` (no behaviour c
   `src/agents/access.test.ts` (`canForkAgent`, `forkBinding`); updated `agents.db.test.ts`,
   `gallery.db.test.ts`, `audit.db.test.ts`.
 - ac-2: `agent-ownership.db.test.ts` "transfer" (acceptance required, both reads and lists, entry
-  row and thread pin kept, new owner withdraws, decline/cancel, slug clash 409, bound → other team
-  422, audit ids only).
+  row and thread pin kept, new owner withdraws, decline/cancel with table states, one pending offer
+  per agent (replaced in team, 409 from another team), slug clash 409, bound → other team 422, audit
+  ids only); `packages/db/src/agent-transfers.db.test.ts` and the probe suite (#487).
 - ac-3: `agent-ownership.db.test.ts` "adopt" (team admin only, 403 builder/member/other team;
   published version copied and published as v1, runnable; entry removed; site adopt → gallery
   without key; audit) and "refusals" (other team's admin 404, adopt twice / proposal / removed 409,
