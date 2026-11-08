@@ -121,7 +121,9 @@ export type AgentRosterKind = z.infer<typeof agentRosterKindSchema>;
 
 /**
  * The row's status for this tab (AR1): `not_published` is a draft (assignable, not runnable,
- * AR4); `suspended_here` is this team's suspension, `suspended_site` a site admin's.
+ * AR4); `suspended_here` is this team's suspension, `suspended_site` a site admin's;
+ * `unavailable` an entry whose owner left the team or was deactivated (AR10, KOBE-567: not
+ * runnable, shown to the roster's admins only, with `unavailableReason`).
  */
 export const agentRosterStatusSchema = z.enum([
   "active",
@@ -129,9 +131,15 @@ export const agentRosterStatusSchema = z.enum([
   "not_published",
   "suspended_here",
   "suspended_site",
+  "unavailable",
   "archived",
 ]);
 export type AgentRosterStatus = z.infer<typeof agentRosterStatusSchema>;
+
+/** Why an entry is Unavailable (AR10): its owner left the team (team entries) or was deactivated. */
+export const AGENT_ROSTER_UNAVAILABLE_REASONS = ["owner_left", "owner_deactivated"] as const;
+export const agentRosterUnavailableReasonSchema = z.enum(AGENT_ROSTER_UNAVAILABLE_REASONS);
+export type AgentRosterUnavailableReason = z.infer<typeof agentRosterUnavailableReasonSchema>;
 
 export const agentRosterRowSchema = z.strictObject({
   agentId: uuidSchema,
@@ -147,6 +155,8 @@ export const agentRosterRowSchema = z.strictObject({
   /** The team a fork of team content is bound to (AR8); null when unbound. */
   boundTeamId: uuidSchema.nullable(),
   status: agentRosterStatusSchema,
+  /** Set with `status = unavailable` (AR10). */
+  unavailableReason: agentRosterUnavailableReasonSchema.optional(),
   /** The agent's latest published version; null when never published. */
   currentVersion: z.number().int().positive().nullable(),
   /** The version this roster runs: the entry's rule resolved; null when nothing is published. */

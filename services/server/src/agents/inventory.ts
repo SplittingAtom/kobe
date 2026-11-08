@@ -1,3 +1,4 @@
+import type { SchedulePausedBy } from "@kobe/protocol";
 import { and, eq, sql, teamAgentSuspensions, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { AGENT_SLUG_MAX } from "@kobe/agent-file";
 import { z } from "zod";
@@ -63,7 +64,7 @@ export interface InventorySchedule {
   readonly ownerName: string;
   readonly status: "active" | "paused";
   /** Why it is paused when the owner did not pause it: a team admin, or deactivation/removal. */
-  readonly pausedBy: "team_admin" | "deactivation" | null;
+  readonly pausedBy: SchedulePausedBy | null;
   readonly nextDueAt: string | null;
 }
 

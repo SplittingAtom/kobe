@@ -6,6 +6,7 @@ import {
   type MarkNotificationsReadResponse,
   type Notification,
   type NotificationKind,
+  type SchedulePausedBy,
 } from "@kobe/protocol";
 import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { z } from "zod";
@@ -57,7 +58,7 @@ type Row = {
   thread_id: string | null;
   run_id: string | null;
   skipped_count: number | null;
-  paused_by: "team_admin" | "deactivation" | null;
+  paused_by: SchedulePausedBy | null;
   skill_id: string | null;
   skill_name: string | null;
   skill_semver: string | null;

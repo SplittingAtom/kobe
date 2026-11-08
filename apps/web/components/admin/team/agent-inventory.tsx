@@ -266,6 +266,7 @@ function TokenCount({ tokens }: { readonly tokens: number }) {
 const PAUSED_BY_LABEL = {
   team_admin: "paused by a team admin",
   deactivation: "paused (owner deactivated or removed)",
+  agent_unavailable: "Paused: agent unavailable",
 } as const;
 
 function scheduleLabel(s: InventorySchedule): string {

@@ -7,6 +7,7 @@ import { RunError } from "../runs/errors.js";
 import type { ServerRunOrchestrator } from "../runs/orchestrator.js";
 import { recordSkip, ScheduleSkip, scheduledFire, type DueSchedule } from "./fire.js";
 import { sweepInactiveOwners } from "./owner-sweep.js";
+import { sweepAgentSchedules } from "../agents/roster-schedules.js";
 
 export interface SchedulerRunnerOptions {
   readonly db: KobeDb;
@@ -97,6 +98,8 @@ export class SchedulerRunner {
           { db: this.#opts.db, runs: this.#opts.runs, log: this.#log },
           teamId,
         );
+        // Schedules of lent agents follow the roster and their owners (KOBE-567, AR11).
+        await sweepAgentSchedules(this.#opts.db, teamId);
       } catch (err) {
         failed += 1;
         this.#log.error({ err, team_id: teamId }, "scheduler pass failed for a team");

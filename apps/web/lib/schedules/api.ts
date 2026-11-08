@@ -2,7 +2,7 @@
  * Schedules over the shared API client (`/v1/schedules`, KOBE-173; contract KOBE-171). Responses
  * arrive camelized; request bodies use the routes' snake_case. Every call sends `X-Kobe-Team`.
  */
-import type { ScheduleRecurrence } from "@kobe/protocol";
+import type { SchedulePausedBy, ScheduleRecurrence } from "@kobe/protocol";
 import { apiRequest, type ApiResult } from "../api/client";
 
 export interface Schedule {
@@ -19,9 +19,11 @@ export interface Schedule {
   readonly lastRunId: string | null;
   /**
    * `team_admin`: only a team admin resumes it. `deactivation`: the owner was deactivated or left
-   * the team; only the owner resumes it, once back. Null on an inactive schedule: the owner paused it.
+   * the team; only the owner resumes it, once back. `agent_unavailable`: its agent left the roster
+   * it ran from, was suspended there or became unavailable; it resumes when the agent is back
+   * (KOBE-567). Null on an inactive schedule: the owner paused it.
    */
-  readonly pausedBy: "team_admin" | "deactivation" | null;
+  readonly pausedBy: SchedulePausedBy | null;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
