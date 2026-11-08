@@ -142,6 +142,21 @@ describe("threads_agent_pin_owner with rosters (KOBE-567)", () => {
     await expect(pin(teamA, agent)).resolves.toHaveLength(1);
   });
 
+  it("refuses the owner's own bound agent in another team (AR8)", async () => {
+    const agent = await alicesAgent(teamA);
+    expect(await sqlState(pin(teamB, agent, alice))).toBe("23514");
+    await expect(pin(teamA, agent, alice)).resolves.toHaveLength(1);
+  });
+
+  it("refuses a site entry suspended site-wide", async () => {
+    const agent = await alicesAgent();
+    await app.db
+      .insert(siteAgentRoster)
+      .values({ siteAgentId: agent, assignedBy: alice, state: "suspended" });
+    expect(await sqlState(pin(teamA, agent))).toBe("23514");
+    await expect(pin(teamA, agent, alice)).resolves.toHaveLength(1);
+  });
+
   it("keeps an existing pin after removal: rename and archive pass, a version switch is re-checked", async () => {
     const agent = await alicesAgent();
     await teamEntry(teamA, agent, "active");
