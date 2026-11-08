@@ -94,6 +94,14 @@ describe("AppFrame (KOBE-437)", () => {
     expect(iframe.style.height).toBe(`${INLINE_MAX_HEIGHT}px`);
   });
 
+  it("is display block, so no baseline gap under it in any placement (KOBE-575)", () => {
+    for (const placement of ["inline", "expanded", "rail"] as const) {
+      const { iframe } = mount({ placement });
+      expect(iframe.classList).toContain("block");
+      cleanup();
+    }
+  });
+
   it("sends the tool input and result once the app has initialized", async () => {
     const { fromApp, posted } = mount({
       toolInput: { table: "t" },
@@ -268,5 +276,82 @@ describe("AppFrame (KOBE-437)", () => {
       method: "ui/resource-teardown",
       params: {},
     });
+  });
+});
+
+describe("AppFrame in the rail (KOBE-575)", () => {
+  /** One fake ResizeObserver per wrapper: `resize()` runs its callback as the browser would. */
+  const observers: { target: Element | null; run: () => void }[] = [];
+  class FakeResizeObserver {
+    private readonly entry: { target: Element | null; run: () => void };
+    constructor(callback: ResizeObserverCallback) {
+      this.entry = { target: null, run: () => callback([], this as unknown as ResizeObserver) };
+      observers.push(this.entry);
+    }
+    observe(target: Element) {
+      this.entry.target = target;
+    }
+    unobserve() {}
+    disconnect() {
+      this.entry.target = null;
+    }
+  }
+
+  afterEach(() => {
+    observers.length = 0;
+    vi.unstubAllGlobals();
+  });
+
+  const size = (height: number) => ({
+    jsonrpc: "2.0",
+    method: "ui/notifications/size-changed",
+    params: { height },
+  });
+
+  /** A rail frame whose scrolling section is `clientHeight` px tall; `resize` changes it. */
+  function mountRail(clientHeight: number) {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const mounted = mount({ placement: "rail" });
+    const wrapper = mounted.iframe.parentElement as HTMLElement;
+    expect(wrapper.hasAttribute("data-kobe-app-scroll")).toBe(true);
+    let height = clientHeight;
+    Object.defineProperty(wrapper, "clientHeight", { get: () => height, configurable: true });
+    const resize = (next: number) =>
+      act(() => {
+        height = next;
+        for (const o of observers) if (o.target === wrapper) o.run();
+      });
+    return { ...mounted, resize };
+  }
+
+  it("fills its section, and a report that fits (rounded up by the SDK) keeps it there", async () => {
+    const { iframe, fromApp } = mountRail(656);
+    expect(iframe.style.height).toBe("100%");
+    await fromApp(size(656));
+    expect(iframe.style.height).toBe("100%");
+    await fromApp(size(657));
+    expect(iframe.style.height).toBe("100%");
+  });
+
+  it("grows past its section when the app's content is taller, so the section scrolls", async () => {
+    const { iframe, fromApp } = mountRail(656);
+    await fromApp(size(658));
+    expect(iframe.style.height).toBe("658px");
+    await fromApp(size(1200));
+    expect(iframe.style.height).toBe("1200px");
+    // Content that fits again goes back to filling the section.
+    await fromApp(size(400));
+    expect(iframe.style.height).toBe("100%");
+  });
+
+  it("follows the section when it shrinks: back to filling it, no stale height", async () => {
+    const { iframe, fromApp, resize } = mountRail(856);
+    await fromApp(size(1000));
+    expect(iframe.style.height).toBe("1000px");
+    await resize(456);
+    expect(iframe.style.height).toBe("100%");
+    // A picker sized by its viewport (100vh) now reports the section's height: still filling.
+    await fromApp(size(456));
+    expect(iframe.style.height).toBe("100%");
   });
 });

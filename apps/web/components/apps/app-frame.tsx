@@ -32,7 +32,8 @@ import { buildHostContext, type Placement } from "../../lib/apps/host-context";
  * and app cards (and call `AppFrameHandle.teardown` before they remove a frame); MA-7 wires
  * `onMessage` and `onModelContext` to the composer. KOBE-460 places one picker in the rail
  * (`placement: "rail"`: it fills its section and scrolls inside it), whose calls name the thread
- * on screen (`threadId`) so the server checks it as it checks a card's thread.
+ * on screen (`threadId`) so the server checks it as it checks a card's thread. There a report only
+ * sets the frame's height when the app's content is taller than the section (KOBE-575).
  */
 export const INLINE_HEIGHT = 360;
 export const INLINE_MAX_HEIGHT = 720;
@@ -143,6 +144,10 @@ function FrameInstance(
   const [height, setHeight] = useState(() =>
     Math.min(props.initialHeight ?? INLINE_HEIGHT, maxHeight(placement)),
   );
+  // The rail (KOBE-575): the scrolling section, and the reported height while it is taller than
+  // the section (null: the frame fills the section).
+  const scroll = useRef<HTMLDivElement>(null);
+  const [railHeight, setRailHeight] = useState<number | null>(null);
   // The latest props for the bridge's handlers, without re-attaching it on every render.
   const latest = useRef(props);
   latest.current = props;
@@ -182,6 +187,9 @@ function FrameInstance(
           if (wanted === undefined) return;
           const next = Math.min(Math.max(Math.round(wanted), 1), maxHeight(current().placement));
           setHeight(next);
+          // The SDK reports Math.ceil(document height): 1 px over the section still fits.
+          const room = scroll.current?.clientHeight;
+          if (room !== undefined) setRailHeight(next > room + 1 ? next : null);
           current().onHeight?.(next);
         },
         drag: (event) => {
@@ -224,6 +232,22 @@ function FrameInstance(
     [],
   );
 
+  // When the rail section changes height the frame fills it again: an app sized by its viewport
+  // (the picker's 100vh) would otherwise re-report the old height and keep a stale scroll. An app
+  // whose content is taller reports again and grows (KOBE-575).
+  useEffect(() => {
+    const element = scroll.current;
+    if (element === null || typeof ResizeObserver === "undefined") return;
+    let last = element.clientHeight;
+    const observer = new ResizeObserver(() => {
+      if (element.clientHeight === last) return;
+      last = element.clientHeight;
+      setRailHeight(null);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [placement]);
+
   useEffect(() => {
     bridge.current?.notify("ui/notifications/host-context-changed", {
       displayMode: placement === "expanded" ? "fullscreen" : "inline",
@@ -237,12 +261,13 @@ function FrameInstance(
       src={fixed.src}
       sandbox={APP_FRAME_SANDBOX}
       referrerPolicy="no-referrer"
-      className="w-full border-0 bg-background"
+      // Block: an inline iframe sits on the text baseline and leaves a gap under it (KOBE-575).
+      className="block w-full border-0 bg-background"
       style={
         placement === "expanded"
           ? { height: "100%", minHeight: height }
           : placement === "rail"
-            ? { height, minHeight: "100%" }
+            ? { height: railHeight ?? "100%" }
             : { height }
       }
     />
@@ -250,7 +275,11 @@ function FrameInstance(
   // In the rail (KOBE-460) the frame fills its section and scrolls inside it, like the Files tree.
   if (placement !== "rail") return iframe;
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" data-kobe-app-scroll>
+    <div
+      ref={scroll}
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      data-kobe-app-scroll
+    >
       {iframe}
     </div>
   );
