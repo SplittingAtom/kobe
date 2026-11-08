@@ -79,15 +79,24 @@ export function AgentBuilderPage({
   agentId,
   scope = "team",
   addSkill,
+  rosterFrom,
 }: {
   readonly agentId?: string;
   readonly scope?: BuilderScope;
   /** A skill page's "Add to agent…" (KOBE-297): the draft opens with this skill added. */
   readonly addSkill?: string | undefined;
+  /** The roster a View was opened from (`?from=site`, KOBE-571): which version in effect shows. */
+  readonly rosterFrom?: "team" | "site" | undefined;
 }) {
   const teamId = useTeamAccess().team.id;
   return agentId ? (
-    <ExistingAgent teamId={teamId} agentId={agentId} scope={scope} addSkill={addSkill} />
+    <ExistingAgent
+      teamId={teamId}
+      agentId={agentId}
+      scope={scope}
+      addSkill={addSkill}
+      rosterFrom={rosterFrom}
+    />
   ) : (
     <Builder teamId={teamId} initial={null} scope={scope} />
   );
@@ -98,13 +107,15 @@ function ExistingAgent({
   agentId,
   scope,
   addSkill,
+  rosterFrom,
 }: {
   readonly teamId: string;
   readonly agentId: string;
   readonly scope: BuilderScope;
   readonly addSkill?: string | undefined;
+  readonly rosterFrom?: "team" | "site" | undefined;
 }) {
-  const { state } = useResource(() => getTeamAgent(teamId, agentId));
+  const { state } = useResource(() => getTeamAgent(teamId, agentId, rosterFrom));
   if (state.status !== "ready") {
     // Loading or refused: the way back stays on the page.
     return (

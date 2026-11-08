@@ -200,21 +200,16 @@ export async function refuseIfRostered(db: KobeDb, agentId: string): Promise<voi
  * team's roster and on the site roster, any state (a removed entry carries a decline's note).
  */
 /**
- * A removed entry an admin declined as a proposal (KOBE-571): the decline writes `decidedAt` and
- * `removedAt` in one step with the same instant; a removal keeps the approval's `decidedAt` and a
- * withdrawal never sets it.
+ * A removed entry an admin declined as a proposal (KOBE-571): only a decline leaves `removedAt`
+ * null with a decision recorded; removals, withdrawals and adopts write `removedAt`. Entries
+ * declined before KOBE-571 carry `removedAt` and can't be told from a removal: not declined.
  */
 export function isDeclined(e: {
   readonly state: string;
   readonly decidedAt: Date | null;
   readonly removedAt: Date | null;
 }): boolean {
-  return (
-    e.state === "removed" &&
-    e.decidedAt !== null &&
-    e.removedAt !== null &&
-    e.decidedAt.getTime() === e.removedAt.getTime()
-  );
+  return e.state === "removed" && e.decidedAt !== null && e.removedAt === null;
 }
 
 export async function reachOf(

@@ -470,15 +470,15 @@ export async function updateEntry(
         return { ok: true, value: updated };
       }
       case "declined": {
-        // A decline is the decision itself: `decidedAt` equals `removedAt`, which is how the
-        // owner's Reach tells it from a removal or a withdrawal (`isDeclined`, KOBE-571).
-        const updated = await write({ state: "removed", removedAt: now, ...decided, ...note });
+        // A decline leaves `removedAt` null (it never was on the roster): with `decidedAt` set,
+        // that is the owner's "Declined" marker (`isDeclined`, KOBE-571). Removals, withdrawals
+        // and adopts always write `removedAt`.
+        const updated = await write({ state: "removed", removedAt: null, ...decided, ...note });
         await audit(tx, step, target, teamId, agent);
         return { ok: true, value: updated };
       }
       case "removed": {
-        // Removing an assigned entry keeps the approval's `decidedBy`/`decidedAt` (KOBE-571).
-        const updated = await write({ state: "removed", removedAt: now, ...note });
+        const updated = await write({ state: "removed", removedAt: now, ...decided, ...note });
         await audit(tx, step, target, teamId, agent);
         return { ok: true, value: updated };
       }

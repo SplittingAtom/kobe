@@ -237,7 +237,9 @@ export function agentRoutes(
   async function rosterRead(c: Ctx) {
     const id = agentIdSchema.safeParse(c.req.param("id"));
     if (!id.success) return null;
-    return rosterDefinitionRead(db, { ...actorOf(c), teamId: c.get("team").id }, id.data);
+    // `?from=site` (the Site tab's View) shows the site entry's version in effect (KOBE-571).
+    const from = c.req.query("from") === "site" ? "site" : "team";
+    return rosterDefinitionRead(db, { ...actorOf(c), teamId: c.get("team").id }, id.data, from);
   }
 
   app.get("/:id", async (c) => {
@@ -265,6 +267,8 @@ export function agentRoutes(
     return c.json({
       agent: {
         ...agentDetail(read.agent, ROSTER_READ_ACCESS),
+        // Read-only: no export of someone else's agent from a View (owner's Orbit export, KOBE-91).
+        canExport: false,
         versionInEffect: read.versionInEffect,
       },
       warnings: agentWarnings(read.agent.frontmatter),

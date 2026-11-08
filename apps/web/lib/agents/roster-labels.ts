@@ -180,9 +180,18 @@ export function lineageHref(lineage: AgentLineage): string | null {
  * Where a row's version opens (§6.6): the version history, read-only, in the owner's editor for
  * the owner (Edit) and in the View for anyone else who may read the definition; null otherwise.
  */
-export function versionHistoryHref(row: AgentRosterRow): string | null {
+export function versionHistoryHref(row: AgentRosterRow, tab: AgentRosterTab): string | null {
   if (row.versionInEffect === null && row.currentVersion === null) return null;
   if (row.actions.edit) return `${editHref(row)}#history-title`;
-  if (row.actions.viewDefinition) return `${agentPageHref(row.agentId)}#history-title`;
+  if (row.actions.viewDefinition) return `${viewHref(row, tab)}#history-title`;
   return null;
+}
+
+/**
+ * The read-only View (AR14): from the Site tab, someone else's agent shows the site roster's
+ * version in effect (`?from=site`); elsewhere the team roster's.
+ */
+export function viewHref(row: AgentRosterRow, tab: AgentRosterTab): string {
+  const lentFromSite = tab === "site" && row.kind === "personal" && row.entry?.target === "site";
+  return `${agentPageHref(row.agentId)}${lentFromSite ? "?from=site" : ""}`;
 }

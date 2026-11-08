@@ -144,7 +144,8 @@ describe("agent roster contract (KOBE-566)", () => {
       }).success,
     ).toBe(true);
     const { adopt: _adopt, ...withoutAdopt } = row.actions;
-    expect(agentRosterRowSchema.safeParse({ ...row, actions: withoutAdopt }).success).toBe(false);
+    // Additive: a row from an older server without `adopt` still parses.
+    expect(agentRosterRowSchema.safeParse({ ...row, actions: withoutAdopt }).success).toBe(true);
     // KOBE-570: team admins get the inventory's usage on the row (additive, optional).
     const usage = {
       runCount: 4,

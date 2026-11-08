@@ -119,8 +119,13 @@ export interface DefinitionBody {
 
 export type { AgentSaved };
 
-export const getTeamAgent = (teamId: string, id: string): Promise<ApiResult<AgentDetailSaved>> =>
-  apiRequest(`/v1/agents/${enc(id)}`, { teamId });
+/** `from: "site"`: a roster View opened from the Site tab (KOBE-571, the site entry's version). */
+export const getTeamAgent = (
+  teamId: string,
+  id: string,
+  from?: "team" | "site",
+): Promise<ApiResult<AgentDetailSaved>> =>
+  apiRequest(`/v1/agents/${enc(id)}${from === "site" ? "?from=site" : ""}`, { teamId });
 
 export const createTeamAgent = (
   teamId: string,

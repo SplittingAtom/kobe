@@ -190,6 +190,7 @@ describe("View from a roster: read-only definition per role (AR14, §5)", () => 
       versionInEffect: 1,
       canEdit: false,
       canPublish: false,
+      canExport: false,
     });
     const versions = await as.alice.get(`/v1/agents/${agent}/versions`);
     expect(versions.status).toBe(200);
@@ -216,6 +217,29 @@ describe("View from a roster: read-only definition per role (AR14, §5)", () => 
     // Withdrawn: nobody else reads it any more.
     expect((await as.bob.delete(`/v1/agents/${agent}/assignments/team`)).status).toBe(200);
     expect((await as.alice.get(`/v1/agents/${agent}`)).status).toBe(404);
+  });
+
+  it("shows the entry of the tab it was opened from; never-rostered agents stay 404", async () => {
+    const agent = await personal("bob", "Bob Both");
+    expect((await assign("bob", agent, "team")).status).toBe(201);
+    expect((await teamPut("alice", agent, { state: "active", versionRule: 1 })).status).toBe(200);
+    expect((await assign("bob", agent, "site")).status).toBe(202);
+    expect((await as.sam.put(`/v1/site/agent-roster/${agent}`, { state: "active" })).status).toBe(
+      200,
+    );
+    await editDraft("bob", agent, "Bob's v2.");
+    await publish_("bob", agent);
+    // Team tab (default): the team entry's pin; Site tab: the site entry's latest.
+    expect((await as.alice.get(`/v1/agents/${agent}`)).json.agent.versionInEffect).toBe(1);
+    const fromSite = await as.alice.get(`/v1/agents/${agent}?from=site`);
+    expect(fromSite.json.agent).toMatchObject({ versionInEffect: 2, prompt: "Bob's v2." });
+    // A member (no build) reads the site entry either way.
+    expect((await as.carol.get(`/v1/agents/${agent}`)).json.agent.versionInEffect).toBe(2);
+
+    const hidden = await personal("carol", "Carol Hidden");
+    expect((await as.alice.get(`/v1/agents/${hidden}`)).status).toBe(404);
+    expect((await as.alice.get(`/v1/agents/${hidden}/versions`)).status).toBe(404);
+    expect((await as.sam.get(`/v1/agents/${hidden}?from=site`)).status).toBe(404);
   });
 
   it("site entry: every member of every team reads it (use)", async () => {
@@ -253,6 +277,18 @@ describe("Declined marker and actions.adopt on rows (§6.4, AR10)", () => {
     expect((await teamPut("alice", approved, { state: "active" })).status).toBe(200);
     expect((await teamPut("alice", approved, { state: "removed" })).status).toBe(200);
     expect((await rowOf("carol", "personal", approved)).reach).toContainEqual(
+      expect.objectContaining({ state: "removed", declined: false }),
+    );
+
+    // A row declined before KOBE-571 (removedAt written) can't be told from a removal: not shown.
+    const legacy = await personal("carol", "Carol Legacy");
+    expect((await assign("carol", legacy, "team")).status).toBe(202);
+    await sql(
+      `UPDATE team_agent_roster SET state = 'removed', decided_by = $2, decided_at = now(),
+              removed_at = now() WHERE site_agent_id = $1`,
+      [legacy, ids.alice],
+    );
+    expect((await rowOf("carol", "personal", legacy)).reach).toContainEqual(
       expect.objectContaining({ state: "removed", declined: false }),
     );
 
@@ -398,6 +434,49 @@ describe("Team default agent (§7.7) and picker groups (AR15)", () => {
       previousAgentId: lent,
     });
     expect((await pinOf("carol", finance))?.agentId).toBe(kobe);
+  });
+
+  it("falls back to the site default when the team default is suspended or archived", async () => {
+    const created = await as.bob.post("/v1/agents", {
+      scope: "team",
+      frontmatter: { name: "Team Default" },
+      prompt: "You help the team.",
+    });
+    expect(created.status, JSON.stringify(created.json)).toBe(201);
+    const owned = created.json.agent.id as string;
+    await publish_("bob", owned);
+    expect((await as.alice.put("/v1/team/default-agent", { agentId: owned })).status).toBe(200);
+    expect((await pinOf("carol", finance))?.agentId).toBe(owned);
+
+    const status = (s: string) =>
+      as.alice.request("PUT", `/v1/agents/${owned}/status`, { status: s }, ANY);
+    expect((await status("suspended")).status).toBe(200);
+    expect((await pinOf("carol", finance))?.agentId).toBe(kobe);
+    expect((await as.carol.get("/v1/team/default-agent")).json.unavailable).toBe(true);
+    expect((await status("active")).status).toBe(200);
+    expect((await pinOf("carol", finance))?.agentId).toBe(owned);
+
+    // Published, so deleting archives it.
+    expect((await as.bob.request("DELETE", `/v1/agents/${owned}`, undefined, ANY)).status).toBe(
+      200,
+    );
+    expect((await pinOf("carol", finance))?.agentId).toBe(kobe);
+    expect((await as.carol.get("/v1/team/default-agent")).json.unavailable).toBe(true);
+    expect((await as.alice.put("/v1/team/default-agent", { agentId: null })).status).toBe(200);
+  });
+
+  it("refuses another team's team-owned agent as the default (422)", async () => {
+    const created = await as.dave.post("/v1/agents", {
+      scope: "team",
+      frontmatter: { name: "Marketing Only" },
+      prompt: "Marketing.",
+    });
+    expect(created.status, JSON.stringify(created.json)).toBe(201);
+    const theirs = created.json.agent.id as string;
+    await publish_("dave", theirs);
+    const res = await as.alice.put("/v1/team/default-agent", { agentId: theirs });
+    expect(res.status).toBe(422);
+    expect(res.json.code).toBe("agent_not_eligible");
   });
 
   it("groups the runnable list Personal, Team, Site", async () => {

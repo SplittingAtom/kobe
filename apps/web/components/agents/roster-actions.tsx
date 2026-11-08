@@ -314,7 +314,7 @@ function lifecycleItems(ctx: Ctx, row: AgentRosterRow): ItemSpec[] {
     },
     {
       // The server offers Adopt on assigned entries to the roster's admins (KOBE-571).
-      when: a.adopt,
+      when: a.adopt === true,
       id: "adopt",
       label: `Adopt into ${ctx.rosterName}`,
       onSelect: (t) => void adopt(ctx, row, t),

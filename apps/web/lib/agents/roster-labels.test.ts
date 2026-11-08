@@ -135,16 +135,22 @@ describe("fork, lineage and version links (KOBE-571, AR8, §6.6, §6.7)", () => 
 
   it("opens the version history in the owner's editor or the View", () => {
     const own = row({ actions: { edit: true, viewDefinition: true } });
-    expect(versionHistoryHref(own)).toBe("/agents/a-1#history-title");
+    expect(versionHistoryHref(own, "team")).toBe("/agents/a-1#history-title");
     const gallery = row({ kind: "gallery", actions: { edit: true } });
-    expect(versionHistoryHref(gallery)).toBe("/admin/site/gallery/a-1#history-title");
-    expect(versionHistoryHref(row({ actions: { viewDefinition: true } }))).toBe(
+    expect(versionHistoryHref(gallery, "site")).toBe("/admin/site/gallery/a-1#history-title");
+    expect(versionHistoryHref(row({ actions: { viewDefinition: true } }), "team")).toBe(
       "/agents/a-1#history-title",
     );
-    expect(versionHistoryHref(row({}))).toBeNull();
+    const siteLent = row({
+      entry: entry({ target: "site", teamId: null }),
+      actions: { viewDefinition: true },
+    });
+    expect(versionHistoryHref(siteLent, "site")).toBe("/agents/a-1?from=site#history-title");
+    expect(versionHistoryHref(row({}), "team")).toBeNull();
     expect(
       versionHistoryHref(
         row({ currentVersion: null, versionInEffect: null, actions: { edit: true } }),
+        "personal",
       ),
     ).toBeNull();
   });

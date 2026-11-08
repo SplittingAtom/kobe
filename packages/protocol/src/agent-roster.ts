@@ -120,9 +120,9 @@ export const agentRosterActionsSchema = z.strictObject({
   resumeSiteWide: z.boolean(),
   /**
    * Adopt an assigned entry into this tab's roster's ownership (KOBE-568 routes, AR10): team admins
-   * on Team, site admins on Site (KOBE-571).
+   * on Team, site admins on Site (KOBE-571). Optional (additive): absent means not offered.
    */
-  adopt: z.boolean(),
+  adopt: z.boolean().optional(),
 });
 export type AgentRosterActions = z.infer<typeof agentRosterActionsSchema>;
 

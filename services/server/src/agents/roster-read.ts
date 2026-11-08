@@ -36,10 +36,18 @@ export interface RosterRead {
 const lends = (e: RosterEntryRecord | null): e is RosterEntryRecord =>
   e !== null && (e.state === "active" || e.state === "suspended");
 
+/**
+ * Which roster the View was opened from: `team` (default) shows the team entry's version in effect
+ * to callers with `build`, `site` the site entry's; either falls back to the other entry the caller
+ * may read.
+ */
+export type RosterReadFrom = "team" | "site";
+
 export async function rosterDefinitionRead(
   db: KobeDb,
   caller: AgentActor & { readonly teamId: string },
   agentId: string,
+  from: RosterReadFrom = "team",
 ): Promise<RosterRead | null> {
   const { teamId } = caller;
   return withTeam(db, teamId, async (tx) => {
@@ -58,12 +66,9 @@ export async function rosterDefinitionRead(
     if (boundTeamId !== null && boundTeamId !== teamId) return null;
     const site = boundTeamId === null ? await siteEntry(tx, agentId) : null;
     const team = await teamEntry(tx, teamId, agentId);
-    const entry =
-      lends(site) && teamRoleAllows(caller.role, "team.agents.use")
-        ? site
-        : lends(team) && teamRoleAllows(caller.role, "team.agents.build")
-          ? team
-          : null;
+    const viaSite = lends(site) && teamRoleAllows(caller.role, "team.agents.use") ? site : null;
+    const viaTeam = lends(team) && teamRoleAllows(caller.role, "team.agents.build") ? team : null;
+    const entry = from === "site" ? (viaSite ?? viaTeam) : (viaTeam ?? viaSite);
     if (!entry) return null;
     const version = resolvedVersion(entry, agentRow.currentVersion);
     if (version === null) return null; // never published: nothing to read (AR4)

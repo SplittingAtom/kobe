@@ -15478,8 +15478,7 @@
                     "suspendHere",
                     "resumeHere",
                     "suspendSiteWide",
-                    "resumeSiteWide",
-                    "adopt"
+                    "resumeSiteWide"
                   ],
                   "additionalProperties": false
                 },

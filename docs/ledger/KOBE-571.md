@@ -28,11 +28,16 @@ version picker in `roster-dialogs.tsx`, version link in `roster-tab.tsx`, picker
   read-only (no edit, publish, status, export, evals, feedback, cases: those keep `resolve`). Team
   reads inside `withTeam()` with `team_id` explicit. Never-published entries stay 404. Two KOBE-568
   tests changed: a team admin/builder now views a team-assigned agent read-only (was 404).
-- **Declined marker (Hadron log b), no migration:** a decline writes `decidedAt` and `removedAt`
-  with the same instant; an admin removal now keeps the approval's `decidedBy/decidedAt` (only
-  `removedAt` + note); withdrawals never set them. `isDeclined()` derives Reach `declined`. Web:
-  "Declined for X" / "Declined for X: note" (target kept: Reach lists several rosters).
-- **`actions.adopt`** (required field): roster admin + assigned entry + a bound agent only in its own
+- **Declined marker (Hadron log b), no migration (review 3):** a decline now writes
+  `removedAt = null` with `decidedBy/decidedAt` set; removals, withdrawals and adopts always
+  write `removedAt`. `isDeclined()` = removed + decided + no `removedAt`. **Limit:** entries
+  declined before this PR carry `removedAt` and can't be told from a removal, so they show no
+  "Declined" (no backfill); a re-proposed entry loses its old `removedAt` when declined again.
+  Web: "Declined for X" / "Declined for X: note" (target kept: Reach lists several rosters).
+- **View source entry (review 2):** `GET /v1/agents/:id` prefers the team entry for callers with
+  `build` (Team tab); `?from=site` (Site tab View links, passed through by `/agents/:id`) prefers the
+  site entry; each falls back to the other readable entry. The View answers `canExport: false`.
+- **`actions.adopt`** (optional in the contract, review 1; the server always sends it): roster admin + assigned entry + a bound agent only in its own
   team (the adopt route's rules). The web shows Adopt from it (no longer only on Unavailable rows).
 - **Fork dialog:** "Fork to Personal…" on every tab where `actions.fork`; name and slug prefilled;
   description "Your copy, in Personal…"; binding note from the new row field `forkBoundTeamId`
@@ -88,5 +93,5 @@ version picker in `roster-dialogs.tsx`, version link in `roster-tab.tsx`, picker
   `components/chat/agent-picker.test.tsx` (groups), `lib/chat/agent-groups.test.ts`,
   `components/admin/team-default-agent-page.test.tsx`; protocol `team-default-agent.test.ts`,
   `agent-roster.test.ts`; `src/openapi/document.test.ts` (route documented, openapi.json regenerated).
-- Declined marker: `agent-roster-views.db.test.ts` (decline vs removal vs approved-then-removed vs
+- Review fixes: `agent-roster-views.db.test.ts` (View from team vs `?from=site`, never-rostered 404, `canExport: false`, default falls back when suspended or archived, other team's agent 422, legacy decline not shown). Declined marker: decline vs removal vs approved-then-removed vs
   withdrawal).
