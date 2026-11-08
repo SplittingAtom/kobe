@@ -5,8 +5,7 @@ rule, builders assign directly, team-owned agents stay; for the other questions 
 proposed answers, so AR1–AR16 are the decisions). Hadron spec
 `4a057ebf-622f-4e43-aa23-7ac7a9e25edb`; tickets filed 2026-11-08: AR-1 KOBE-565, AR-2 KOBE-566,
 AR-3 KOBE-567, AR-4 KOBE-568, AR-5 KOBE-569, AR-6 KOBE-570, AR-7 KOBE-571, AR-8 KOBE-572, AR-9
-KOBE-573 (lane brief: `docs/ledger/agents-roster-lane.md`). Written 2026-11-08 against main `445af3d9`. Hadron spec: to be registered when the
-decisions are taken; tickets in §10 are a proposed split, not filed. Companions:
+KOBE-573 (lane brief: `docs/ledger/agents-roster-lane.md`). Written 2026-11-08 against main `445af3d9`. Companions:
 `docs/specs/agent-creator.md` (the two-tab editor and Dangerous mode, KOBE-476),
 `docs/specs/gallery-agents.md` (site admins edit gallery agents, KOBE-494), `docs/agent-versions.md`.
 
@@ -367,7 +366,6 @@ Chris answered Q1, Q3 and Q6 himself and took the proposed answer for every othe
 
 | Id (ticket)     | Ticket                                                                                                                    | Depends on |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| AR-0            | Decisions recorded; spec amended; Hadron spec                                                                             |            |
 | AR-1 (KOBE-565) | DB: `team_agent_roster`, `site_agent_roster`, `site_agents.bound_team_id`, schedule pause reason; RLS, probes, migrations | AR-0       |
 | AR-2 (KOBE-566) | Server: roster read, assign/propose/decide/withdraw, pin/update, suspend; `agentAccess` roster rights; audit              | AR-1       |
 | AR-3 (KOBE-567) | Server: resolution (`runnable`, pins, default agent) roster-driven; owner eligibility; schedules pause/resume             | AR-2       |
