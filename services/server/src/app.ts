@@ -228,7 +228,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/runs", runFeedbackRoutes(deps));
   api.route("/runs", runEvalCaseRoutes(deps));
   api.route("/eval-cases", evalCaseRoutes(deps));
-  api.route("/projects", projectRoutes(deps));
+  api.route("/projects", projectRoutes(deps, options.workspaceFiles?.sync));
   api.route("/threads", threadRunRoutes(deps));
   api.route("/threads", threadPendingRoutes(deps));
   api.route("/threads", threadCompactRoutes(deps));

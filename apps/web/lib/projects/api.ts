@@ -51,6 +51,18 @@ export interface ProjectFile {
   readonly addedAt: string;
 }
 
+/** Add to project (KOBE-585): what the server copies from its own stored bytes. */
+export type ImportSource =
+  | { readonly kind: "artifact"; readonly artifactId: string; readonly version: number }
+  | { readonly kind: "workspace_file"; readonly path: string };
+
+export interface ImportRequest {
+  readonly source: ImportSource;
+  /** Folder inside the project; "" = root. */
+  readonly folder: string;
+  readonly name: string;
+}
+
 export interface ProjectInput {
   readonly name: string;
   readonly description: string;
@@ -81,6 +93,8 @@ export interface ProjectsApi {
   files(id: string): Promise<ApiResult<readonly ProjectFile[]>>;
   uploadFile(id: string, file: File, folder: string): Promise<ApiResult<ProjectFile>>;
   removeFile(id: string, fileId: string): Promise<ApiResult<void>>;
+  /** Add to project (KOBE-585): 409 `already_exists` on a same-name file. */
+  importFile(id: string, request: ImportRequest): Promise<ApiResult<ProjectFile>>;
   /** Agents a project may default to: the server accepts team and gallery agents only. */
   agents(): Promise<ApiResult<readonly ProjectAgent[]>>;
   /** The project's conversations: the caller's own and those shared to the project. */
@@ -138,6 +152,15 @@ export function createProjectsApi(teamId: string, fetchFn?: typeof fetch): Proje
       return apiRequest(`${base(id)}/files`, { method: "POST", form, teamId, fetchFn });
     },
     removeFile: (id, fileId) => call(`${base(id)}/files/${enc(fileId)}`, "DELETE"),
+    importFile: (id, { source, folder, name }) =>
+      call(`${base(id)}/files/import`, "POST", {
+        source:
+          source.kind === "artifact"
+            ? { kind: "artifact", artifact_id: source.artifactId, version: source.version }
+            : { kind: "workspace_file", path: source.path },
+        ...(folder === "" ? {} : { folder }),
+        name,
+      }),
     agents: async () => {
       const res = await call<{ agents: ProjectAgent[] }>("/v1/agents/runnable?limit=200");
       return res.ok ? { ...res, data: res.data.agents.filter((a) => a.scope !== "personal") } : res;

@@ -7,6 +7,7 @@ import { isLegalHoldViolation, withTeam, type KobeTx } from "@kobe/db";
 import {
   addProjectMemberRequestSchema,
   createProjectRequestSchema,
+  importProjectFileRequestSchema,
   PROJECT_FILE_MAX_BYTES,
   projectFileUploadFieldsSchema,
   projectPermissions,
@@ -17,6 +18,8 @@ import {
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { loadAccess, type ProjectAccess } from "../projects/access.js";
+import { importProjectFile, type ImportRefusal } from "../projects/import.js";
+import type { WorkspaceSync } from "../workspace-sync/service.js";
 import {
   deleteProjectObject,
   listProjectFiles,
@@ -80,6 +83,16 @@ const FILE_ERRORS = {
   storage_failed: [503, "storage_unavailable", "File storage is not available. Try again."],
 } as const satisfies Record<ProjectFileFailure, readonly [number, string, string]>;
 
+/** Add to project (KOBE-585): the refusals before the copy; the rest are {@link FILE_ERRORS}. */
+const IMPORT_ERRORS = {
+  project_not_found: [404, "not_found", "No project with that id is available to you."],
+  source_not_found: [404, "not_found", "No such artifact version or file is available to you."],
+  forbidden: [403, "forbidden", "You can't add that to this project."],
+  invalid_name: [422, "invalid_input", "That is not a valid file name."],
+  content_unavailable: [503, "storage_unavailable", "File storage is not available. Try again."],
+  content_missing: [503, "content_missing", "The file's saved copy is missing; try again shortly."],
+} as const satisfies Record<ImportRefusal, readonly [number, string, string]>;
+
 /** Multipart framing allowed on top of the file itself. */
 const MULTIPART_OVERHEAD = 64 * 1024;
 
@@ -103,7 +116,10 @@ function isSlugConflict(err: unknown): boolean {
  * it. Anyone who may not view a project gets 404, as if it did not exist. Instructions are never
  * written to the audit log. Files and thread sharing are KOBE-162/163.
  */
-export function projectRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
+export function projectRoutes(
+  deps: ServerDeps,
+  sync?: WorkspaceSync,
+): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
   const db = deps.database.db;
   app.use(requireTeam(deps));
@@ -295,6 +311,42 @@ export function projectRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables
     );
     if (!result.ok) return fileFailure(c, result.error);
     await deps.projectMounts.reconcileProject(viewer.teamId, access.project.id);
+    return c.json(result.file, 201);
+  });
+
+  /** Add to project (KOBE-585; `projects/import.ts`): an artifact version or own file, copied. */
+  app.post("/:id/files/import", async (c) => {
+    const id = idParam.safeParse(c.req.param("id"));
+    if (!id.success) return failure(c, "not_found");
+    const body = await parseBody(c, importProjectFileRequestSchema);
+    if (!body) {
+      return invalidRequest(
+        c,
+        "Give source (an artifact version or a workspace path), and optionally folder and name.",
+      );
+    }
+    const settings = deps.uploads ?? DEFAULT_UPLOAD_SETTINGS;
+    const viewer = viewerOf(c);
+    const result = await importProjectFile(
+      {
+        db,
+        blobs: deps.blobs,
+        sync,
+        maxFileBytes: settings.maxFileBytes,
+        teamQuotaDefaultBytes: settings.defaultQuotaBytes,
+      },
+      { ...viewer, teamRole: c.get("team").role },
+      id.data,
+      body,
+    );
+    if (!result.ok) {
+      if (result.error in IMPORT_ERRORS) {
+        const [status, code, message] = IMPORT_ERRORS[result.error as ImportRefusal];
+        return c.json({ code, message }, status);
+      }
+      return fileFailure(c, result.error as ProjectFileFailure);
+    }
+    await deps.projectMounts.reconcileProject(viewer.teamId, id.data);
     return c.json(result.file, 201);
   });
 

@@ -243,6 +243,37 @@ const LANGUAGE_EXTENSIONS: Readonly<Record<string, string>> = {
   r: "r",
 };
 
+/** `title` as a safe ASCII file stem (download names, exports, Edit as file, Add to project). */
+export function artifactFileStem(title: string): string {
+  const s = title
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60)
+    .replace(/-+$/g, "");
+  return s === "" ? "artifact" : s;
+}
+
+/**
+ * The media type an artifact's content is stored as when it becomes a file (Add to project,
+ * KOBE-585): from its kind, and for code from its language's extension; plain text otherwise.
+ */
+export function artifactMimeType(kind: ArtifactKind | string, language: string | null): string {
+  switch (kind) {
+    case "html":
+      return "text/html";
+    case "svg":
+      return "image/svg+xml";
+    case "markdown":
+      return "text/markdown";
+    case "csv":
+      return "text/csv";
+    default:
+      return artifactFileExtension(kind, language) === "json" ? "application/json" : "text/plain";
+  }
+}
+
 /** File extension of an artifact (downloads, exports and Edit as file). */
 export function artifactFileExtension(
   kind: ArtifactKind | string,

@@ -110,6 +110,25 @@ export function projectPermissions(
   };
 }
 
+/**
+ * Add to project (KOBE-585, workspaces lane WS-2): may the caller copy an artifact version or a
+ * workspace file into a project as a read-only project file? Team admins and the project's owners
+ * always (they manage its files); a project member when they are an editor or own the content.
+ * "Editors are builders" (Chris, 2026-11-08): team role `builder`. `contentOwner` = the thread's
+ * owner for an artifact, always true for the caller's own workspace file. A future editor share
+ * scope or project role is added here only.
+ */
+export function canAddToProject(
+  teamRole: z.infer<typeof teamRoleSchema>,
+  projectRole: ProjectRole | undefined,
+  contentOwner: boolean,
+): boolean {
+  const can = projectPermissions(teamRole, projectRole);
+  const member = projectRole !== undefined;
+  const editor = teamRole === "builder";
+  return can.manage || (member && (editor || contentOwner));
+}
+
 // ----------------------------------------------------------------------------- REST: projects
 
 export const PROJECT_MEMBERS_MODES = ["team", "selected"] as const;
@@ -236,6 +255,30 @@ export const projectFileUploadFieldsSchema = z.strictObject({
   path: z.union([z.literal(""), workspacePathSchema]).optional(),
 });
 export const projectFileNameSchema = uploadFileNameSchema;
+
+/** What Add to project copies: an artifact version the caller reads, or their own synced file. */
+export const projectFileImportSourceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("artifact"),
+    artifact_id: uuidSchema,
+    version: z.number().int().positive(),
+  }),
+  z.strictObject({ kind: z.literal("workspace_file"), path: workspacePathSchema }),
+]);
+export type ProjectFileImportSource = z.infer<typeof projectFileImportSourceSchema>;
+
+/**
+ * `POST /v1/projects/:id/files/import` (KOBE-585) -> 201 {@link projectFileSchema}. The server
+ * copies the bytes it stored (never the browser's) under the upload's quotas and name rules;
+ * `folder` absent = root, `name` absent = the artifact's `<slug>.<ext>` or the file's name. Rights:
+ * {@link canAddToProject}. A same-name file answers 409 `already_exists` (no replace in place).
+ */
+export const importProjectFileRequestSchema = z.strictObject({
+  source: projectFileImportSourceSchema,
+  folder: z.union([z.literal(""), workspacePathSchema]).optional(),
+  name: projectFileNameSchema.optional(),
+});
+export type ImportProjectFileRequest = z.infer<typeof importProjectFileRequestSchema>;
 
 // ----------------------------------------------------------------------------- REST: share and fork
 

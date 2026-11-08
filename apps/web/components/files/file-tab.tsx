@@ -45,6 +45,7 @@ import { useOutsideChange, type OutsideChange } from "./use-outside-change";
 import { useRemoteChange } from "./use-remote-change";
 import type { WorkspaceChangeFeed } from "../../lib/files/remote-changes";
 import { IconAction } from "../shell/icon-action";
+import { AddToProject } from "../projects/add-to-project";
 import styles from "../chat/chat.module.css";
 
 // Notebooks and the `.py` Run pane load only when such a file opens (KOBE-465).
@@ -294,6 +295,7 @@ export function FileTabContent({
   kernel,
   changeHint,
   changes,
+  owner = false,
 }: {
   readonly path: string;
   readonly api: FilesApi;
@@ -311,6 +313,8 @@ export function FileTabContent({
   readonly changeHint?: ChangeHint | null | undefined;
   /** The page's change stream (KOBE-496): who changed the file, live. */
   readonly changes?: WorkspaceChangeFeed | undefined;
+  /** The viewer is the conversation's owner: Add to project is offered (KOBE-585). */
+  readonly owner?: boolean | undefined;
 }) {
   const { loaded, reread, saved } = useFilePreview(api, path, reload, onGone);
   // Text files in the editor follow outside changes; notebooks keep today's explicit reload.
@@ -366,6 +370,7 @@ export function FileTabContent({
           label={`Download ${name}`}
           onClick={() => void download()}
         />
+        {owner && <AddToProject source={{ kind: "workspace_file", path }} defaultName={name} />}
       </header>
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {downloadError && <ErrorNotice error={downloadError} />}

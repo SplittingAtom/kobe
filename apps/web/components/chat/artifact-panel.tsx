@@ -43,6 +43,8 @@ import { useModalLayer } from "../shell/use-modal-layer";
 import { ArtifactTabStrip, artifactTabId, artifactTabpanelId } from "./artifact-tab-strip";
 import { ArtifactPanelRequest, useArtifactEventCount, useArtifactPanel } from "./artifact-state";
 import { ArtifactBody } from "./artifact-views";
+import { AddToProject } from "../projects/add-to-project";
+import { artifactProjectFileName } from "../../lib/projects/add-to-project";
 import { useThreadReadOnly } from "./use-thread-read-only";
 import { kobeExtrasOf, useChatSession, useKobeExtras } from "./kobe-runtime";
 
@@ -151,6 +153,16 @@ function PanelContent({
               download
               label={`Download version ${version}`}
             />
+            {!readOnly && (
+              <AddToProject
+                source={{ kind: "artifact", artifactId: artifact.id, version }}
+                defaultName={artifactProjectFileName(
+                  artifact.title,
+                  artifact.kind,
+                  artifact.language,
+                )}
+              />
+            )}
           </>
         )}
       </header>
@@ -295,6 +307,7 @@ function FileTab({
       kernel={kernel}
       changeHint={changeHint}
       changes={session.fileChanges}
+      owner={!readOnly}
     />
   );
 }

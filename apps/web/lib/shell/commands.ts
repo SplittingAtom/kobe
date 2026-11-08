@@ -564,6 +564,8 @@ const LIST = [
   { id: "artifact-next", name: "Next version", icon: ChevronRightIcon, scope: "artifact" },
   { id: "artifact-download", name: "Download", icon: DownloadIcon, scope: "artifact" },
   { id: "artifact-close", name: "Close artifact", icon: XIcon, scope: "artifact" },
+  // Add to project (KOBE-585): the owner copies an artifact or a file into a project.
+  { id: "add-to-project", name: "Add to project…", icon: FolderPlusIcon, scope: "artifact" },
   // A My area page beside the thread (CE4, KOBE-424) closes; the conversation stays.
   { id: "area-close", name: "Close the panel", icon: XIcon, scope: "artifact" },
   // The artifact sheet (under 820 px) goes back to the conversation; its tabs stay open.
