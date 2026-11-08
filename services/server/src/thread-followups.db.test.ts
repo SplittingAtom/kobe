@@ -223,7 +223,27 @@ const epilogueOf = async (team: string, runId: string) =>
 
 const settled = () => f.fx.replica(0).deps.background.idle();
 
-const followupCalls = () => gateway.seen.filter((s) => s.claims?.purpose === "followups");
+/**
+ * The fake gateway's calls for one run. Scoped by run because the epilogue starts late: the
+ * completion transaction commits, the orchestrator binds the prompt entry (a round trip), then
+ * tells the wire, which starts the background task. A test that polls the status sees
+ * `completed` before that, so `settled()` can return with no task in flight and the call lands
+ * during the next test (two tests failed that way in a merge-queue run).
+ */
+const callsFor = (runId: string) => gateway.seen.filter((s) => s.claims?.run_id === runId);
+const followupCallsFor = (runId: string) =>
+  callsFor(runId).filter((s) => s.claims?.purpose === "followups");
+/** Waits for the run's announced calls to reach the gateway, then for its epilogue to finish. */
+async function called(runId: string, purposes: readonly string[]): Promise<void> {
+  await until(
+    async () => {
+      const got = new Set<string | undefined>(callsFor(runId).map((s) => s.claims?.purpose));
+      return purposes.every((purpose) => got.has(purpose));
+    },
+    `the ${purposes.join(" and ")} call of ${runId}`,
+  );
+  await settled();
+}
 
 describe("follow-ups (KOBE-222)", () => {
   it("are off by default; only a team admin turns them on, audited (ac-3)", async () => {
@@ -271,7 +291,7 @@ describe("follow-ups (KOBE-222)", () => {
     const runId = await answered(w, ws, threadId, "What drives our Q3 revenue?");
     await settled();
     expect(await epilogueOf(w.team, runId)).toBeUndefined();
-    expect(gateway.seen).toHaveLength(0);
+    expect(callsFor(runId)).toHaveLength(0);
   });
 
   it("with the switch on: announced, one followups call, three lines as thread.suggestions, a followups usage row (ac-2, ac-5, ac-6)", async () => {
@@ -293,7 +313,8 @@ describe("follow-ups (KOBE-222)", () => {
     });
     expect(await f.status(w.team, runId)).toBe("completed");
 
-    const calls = followupCalls();
+    await called(runId, ["followups"]);
+    const calls = followupCallsFor(runId);
     expect(calls).toHaveLength(1);
     const [call] = calls;
     expect(call?.url).toBe(SERVER_CALL_PATH);
@@ -335,7 +356,12 @@ describe("follow-ups (KOBE-222)", () => {
       const t = await types(w.team, runId);
       return t.includes("thread.updated") && t.includes("thread.suggestions");
     }, "both epilogue events");
-    expect(gateway.seen.map((s) => s.claims?.purpose).sort()).toEqual(["followups", "title"]);
+    await called(runId, ["title", "followups"]);
+    expect(
+      callsFor(runId)
+        .map((s) => s.claims?.purpose)
+        .sort(),
+    ).toEqual(["followups", "title"]);
   });
 
   it("keeps the stream open after run.completed until thread.suggestions arrives", async () => {
@@ -383,19 +409,19 @@ describe("follow-ups (KOBE-222)", () => {
     const threadId = await f.thread(w.owner);
     const first = await answered(w, ws, threadId, "Far under the line");
     expect(await epilogueOf(w.team, first)).toEqual(["followups"]);
-    await settled();
+    await called(first, ["followups"]);
     expect(await spent()).toBe(120);
     await limit(151); // 79.5 %: still asked
     const under = await answered(w, ws, threadId, "Just under the line");
     expect(await epilogueOf(w.team, under)).toEqual(["followups"]);
-    await settled();
+    await called(under, ["followups"]);
     expect(await spent()).toBe(240);
     await limit(300); // exactly 80 %: skipped
     gateway.seen.length = 0;
     const at = await answered(w, ws, threadId, "At the line");
     await settled();
     expect(await epilogueOf(w.team, at)).toBeUndefined();
-    expect(gateway.seen).toHaveLength(0);
+    expect(callsFor(at)).toHaveLength(0);
   });
 
   it("are skipped for a scheduled run (ac-4)", async () => {
@@ -408,7 +434,7 @@ describe("follow-ups (KOBE-222)", () => {
     });
     await settled();
     expect(await epilogueOf(w.team, runId)).toBeUndefined();
-    expect(gateway.seen).toHaveLength(0);
+    expect(callsFor(runId)).toHaveLength(0);
   });
 
   it("a gateway 402 budget_soft_limit writes nothing and never fails the run (ac-4 backstop)", async () => {
@@ -417,8 +443,8 @@ describe("follow-ups (KOBE-222)", () => {
     const { w, ws } = await setUp(true);
     const threadId = await f.thread(w.owner);
     const runId = await answered(w, ws, threadId, "What drives our Q3 revenue?");
-    await settled();
-    expect(followupCalls()).toHaveLength(1);
+    await called(runId, ["followups"]);
+    expect(followupCallsFor(runId)).toHaveLength(1);
     expect(await types(w.team, runId)).not.toContain("thread.suggestions");
     expect(await types(w.team, runId)).not.toContain("run.failed");
     expect(await f.status(w.team, runId)).toBe("completed");
@@ -443,7 +469,7 @@ describe("follow-ups (KOBE-222)", () => {
     });
     await settled();
     expect(await epilogueOf(w.team, runId)).toBeUndefined();
-    expect(gateway.seen).toHaveLength(0);
+    expect(callsFor(runId)).toHaveLength(0);
   });
 
   /** One run asks (spend 120 tokens), then `line` is put at exactly 80 % and the next is skipped. */
@@ -453,13 +479,13 @@ describe("follow-ups (KOBE-222)", () => {
     const threadId = await f.thread(w.owner);
     const first = await answered(w, ws, threadId, "Before the line");
     expect(await epilogueOf(w.team, first)).toEqual(["followups"]);
-    await settled();
+    await called(first, ["followups"]);
     await line(w.team, w.owner.id);
     gateway.seen.length = 0;
     const at = await answered(w, ws, threadId, "At the line");
     await settled();
     expect(await epilogueOf(w.team, at)).toBeUndefined();
-    expect(gateway.seen).toHaveLength(0);
+    expect(callsFor(at)).toHaveLength(0);
     expect(await f.status(w.team, at)).toBe("completed");
   }
 
