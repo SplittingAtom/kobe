@@ -58,7 +58,8 @@ export const MODEL_DEFAULT_TITLE = "Model's default";
  * the default's pill (titled "Model's default"; choosing it stores null so the conversation keeps
  * following the team's default). The server clamps every run to the site and team settings, so
  * this only asks; a level the team has since lowered shows as what runs get. The pills are about
- * the next run; the latest run's reasoning spend is in Session info (KOBE-557), not here (KOBE-574).
+ * the next run; the latest run's reasoning spend is recorded by KOBE-557 (usage API) and no longer
+ * shown in the composer (KOBE-574).
  */
 export function ThinkingPicker({
   models,

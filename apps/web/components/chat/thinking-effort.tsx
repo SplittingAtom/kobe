@@ -48,9 +48,13 @@ export interface EffortLevel {
 const TRACK =
   "flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-foreground/[0.04] p-px dark:bg-foreground/[0.06]";
 
-/** The chat has no preflight: the pills reset the browser's button border, fill and font. */
+/**
+ * The chat has no preflight: `data-slot="thinking-pill"` opts the pills out of the chat's button
+ * rule (KOBE-558: no browser border, face or padding), the font is inherited, and the text is
+ * centred by the flex box in both sizes (KOBE-574).
+ */
 const PILL =
-  "inline-flex cursor-pointer items-center justify-center rounded-full border-0 [font-family:inherit] font-medium whitespace-nowrap transition-[background-color,color,scale] duration-150 motion-reduce:transition-none disabled:cursor-not-allowed disabled:opacity-60 forced-colors:aria-pressed:outline";
+  "inline-flex cursor-pointer items-center justify-center rounded-full [font-family:inherit] font-medium whitespace-nowrap transition-[background-color,color,scale] duration-150 motion-reduce:transition-none disabled:cursor-not-allowed disabled:opacity-60 forced-colors:aria-pressed:outline";
 
 /**
  * A segmented control of effort levels (assistant-ui's Reasoning effort): one pill button per
@@ -104,6 +108,7 @@ export function ThinkingEffort({
             <button
               key={level.key}
               type="button"
+              data-slot="thinking-pill"
               aria-pressed={active}
               title={level.hint}
               aria-describedby={level.hint === undefined ? undefined : `${id}-${level.key}-hint`}
@@ -111,13 +116,11 @@ export function ThinkingEffort({
               onClick={() => onSelect(level.key)}
               className={cn(
                 PILL,
-                // Text centred (KOBE-574): a line box as tall as the pill, centred by the flex box. The
-                // leading goes after the size: tailwind-merge drops a line height set before one.
-                compact ? "h-5 px-1.5 text-[0.7rem] leading-5" : "h-6 px-2 text-xs leading-6",
+                compact ? "h-5 px-1.5 text-[0.7rem]" : "h-6 px-2 text-xs",
                 !disabled && "active:scale-[0.97]",
                 active
                   ? "bg-foreground text-background"
-                  : "text-muted-foreground enabled:hover:text-foreground bg-transparent",
+                  : "text-muted-foreground enabled:hover:text-foreground",
               )}
             >
               {level.label}

@@ -15,22 +15,25 @@
 
 ## Decisions
 
-- **Cause of the off-centre text:** the chat's unlayered-zero-specificity button rule
-  (`app/chat-global.css`, buttons without `data-slot`) gives the pills `padding: 0.25rem` and
-  `line-height: 1.25rem`. In the compact pill (`h-5`, border-box) that leaves a 12px content box
-  under a 20px line box, so the text sat 3-4px low. Fix: `inline-flex items-center
-justify-center` with a line box as tall as the pill (`h-6 leading-6`, `h-5 leading-5`), not
-  `leading-none` (measured 0.6-1.6px off with the 11.2px compact size, see Evidence). The leading
-  sits after the size in the class list: tailwind-merge drops a line height before a font size.
+- **Cause of the off-centre text:** the chat's zero-specificity rule for buttons without a
+  `data-slot` (`app/chat-global.css`) gives the pills `padding: 0.25rem` and `line-height:
+1.25rem`; in the compact pill (`h-5`, border-box) that leaves a 12px content box under a 20px
+  line, so the text sat 4-5px low. Fix (review): `data-slot="thinking-pill"` opts the pills out
+  (KOBE-558 rule: no border, face or padding), and `inline-flex items-center justify-center`
+  centres the inherited line; the `border-0`/`bg-transparent` resets are gone with it.
 - `thinkingControl()` (thinking-picker.tsx) existed only for the readout: removed with it.
-- The inventory row (`assistant-ui-reasoning-effort`) and the MIT notice stay unchanged (the row's
-  component text still says "range helpers"; left as is so THIRD_PARTY_LICENSES.md needs no
-  regeneration); the file's header comment says the bar, readout and helpers were removed.
+- The inventory row (`assistant-ui-reasoning-effort`) and the MIT notice stay; the row no longer
+  names the removed range helpers (`pnpm licenses:update` run); the file's header comment says
+  the bar, readout and helpers were removed.
+- Comments that said the chat computes budgets from `thinking_in_team.control` (web models type,
+  server thinking.ts, openapi models.ts) now say clients may; the API field stays (contract).
 - `thinking.spec.ts` had no progressbar assertion on main; it now asserts the line below has none.
 
 ## Open questions (for Chris or the coordinator)
 
-- None. Coordinator: check the pills on gate1 in light and dark, toolbar and line below (ac-4).
+- For Chris: show the latest run's reasoning spend (KOBE-557, usage API) in Session info? Today
+  it is recorded but shown nowhere in the chat (not added in this PR).
+- Coordinator: check the pills on gate1 in light and dark, toolbar and line below (ac-4).
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -44,13 +47,15 @@ justify-center` with a line box as tall as the pill (`h-6 leading-6`, `h-5 leadi
   Chromium harness (the real component rendered with react-dom/server inside `[data-kobe-chat]`
   with the compiled `app/chat-global.css` + `app/theme.css`; cap box vs pill, DPR 2):
 
-  | font          | row     | track | pill | before: cap top / below baseline | after |
-  | ------------- | ------- | ----- | ---- | -------------------------------- | ----- |
-  | default stack | toolbar | 28    | 24   | 7 / 8                            | 7 / 8 |
-  | default stack | compact | 24    | 20   | 9 / 3 (3px low)                  | 5 / 7 |
-  | Outfit        | toolbar | 28    | 24   | 7 / 8                            | 7 / 8 |
-  | Outfit        | compact | 24    | 20   | 10 / 2 (4px low)                 | 6 / 6 |
+  | font          | row     | track | pill | main: cap top / below baseline | this PR   |
+  | ------------- | ------- | ----- | ---- | ------------------------------ | --------- |
+  | default stack | toolbar | 28    | 24   | 8 / 7                          | 7 / 8     |
+  | default stack | compact | 24    | 20   | 10 / 2 (4px low)               | 4.6 / 7.4 |
+  | Outfit        | toolbar | 28    | 24   | 8 / 7                          | 7 / 8     |
+  | Outfit        | compact | 24    | 20   | 11 / 1 (5px low)               | 5.6 / 6.4 |
 
+  The remaining ≤1.4px is sub-pixel snapping of the 11.2px font (a line box as tall as the pill
+  measured 0-1px; the review preferred the data-slot opt-out).
   Track heights unchanged (toolbar 1.75rem, compact 1.5rem). Harness script, output and light/dark
   screenshots: the agent's scratchpad of the 2026-11-08 run (`pills/final.cjs`, `final.txt`,
   `pills-light.png`, `pills-dark.png`; path in the agent's report to the coordinator).

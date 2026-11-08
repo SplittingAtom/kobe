@@ -3,7 +3,13 @@
 import { createRef } from "react";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AppFrame, INLINE_HEIGHT, INLINE_MAX_HEIGHT, type AppFrameHandle } from "./app-frame";
+import {
+  AppFrame,
+  INLINE_HEIGHT,
+  INLINE_MAX_HEIGHT,
+  RAIL_SETTLE_MS,
+  type AppFrameHandle,
+} from "./app-frame";
 
 /** KOBE-437: the app frame's isolation attributes, host header, sizing and host notifications. */
 const APP = {
@@ -344,14 +350,53 @@ describe("AppFrame in the rail (KOBE-575)", () => {
     expect(iframe.style.height).toBe("100%");
   });
 
-  it("follows the section when it shrinks: back to filling it, no stale height", async () => {
-    const { iframe, fromApp, resize } = mountRail(856);
-    await fromApp(size(1000));
-    expect(iframe.style.height).toBe("1000px");
-    await resize(456);
-    expect(iframe.style.height).toBe("100%");
-    // A picker sized by its viewport (100vh) now reports the section's height: still filling.
-    await fromApp(size(456));
-    expect(iframe.style.height).toBe("100%");
+  it("follows the section when it shrinks: a viewport-sized app re-reports and keeps filling it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { iframe, fromApp, resize } = mountRail(856);
+      await fromApp(size(1000));
+      expect(iframe.style.height).toBe("1000px");
+      await resize(456);
+      expect(iframe.style.height).toBe("100%");
+      // A picker sized by its viewport (100vh) reports the section's height before the tick.
+      await fromApp(size(456));
+      act(() => vi.advanceTimersByTime(RAIL_SETTLE_MS));
+      expect(iframe.style.height).toBe("100%");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a content-sized app's taller height after a section resize that sends no report", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { iframe, fromApp, resize } = mountRail(656);
+      await fromApp(size(1200));
+      expect(iframe.style.height).toBe("1200px");
+      await resize(456);
+      expect(iframe.style.height).toBe("100%");
+      act(() => vi.advanceTimersByTime(RAIL_SETTLE_MS));
+      expect(iframe.style.height).toBe("1200px");
+      // A section taller than the content: the frame fills it.
+      await resize(1300);
+      act(() => vi.advanceTimersByTime(RAIL_SETTLE_MS));
+      expect(iframe.style.height).toBe("100%");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a report while the section has no layout does not pin the frame; it applies once laid out", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { iframe, fromApp, resize } = mountRail(0);
+      await fromApp(size(600));
+      expect(iframe.style.height).toBe("100%");
+      await resize(400);
+      act(() => vi.advanceTimersByTime(RAIL_SETTLE_MS));
+      expect(iframe.style.height).toBe("600px");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

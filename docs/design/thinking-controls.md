@@ -42,7 +42,7 @@ narrow composer (KOBE-418) and is the compact pills on the line below it (KOBE-4
 pill is the theme's inversion (`bg-foreground text-background`; forced colours keep its outline)
 and the pill text is centred in both sizes (KOBE-574). The control is the pill track alone: the
 spend bar and "spent / budget" readout of KOBE-556/557 were removed (KOBE-574); the latest run's
-reasoning spend stays in the usage API and Session info.
+reasoning spend is still recorded (KOBE-557, usage API) but not shown in the composer.
 
 ## Mapping (gateway)
 
@@ -110,7 +110,7 @@ Which control a model needs is the admin's choice (Site → Models), never guess
 ## Budgets and reasoning spend (KOBE-557)
 
 The chat's Reasoning effort control no longer shows the spend (KOBE-574 removed its bar and
-readout); the data below stays for the usage API and Session info. Budgets per level live in `@kobe/protocol` thinking.ts; `thinkingBudget(control,
+readout); the data below is still recorded and served by the usage API. Budgets per level live in `@kobe/protocol` thinking.ts; `thinkingBudget(control,
 level)` picks the right table (null for `none`), and the team models API carries each model's
 control in `thinking_in_team.control`.
 

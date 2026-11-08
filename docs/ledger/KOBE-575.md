@@ -9,10 +9,12 @@
 ## Plan
 
 1. `block` on the iframe (`apps/web/components/apps/app-frame.tsx`).
-2. Rail: a ResizeObserver on `[data-kobe-app-scroll]`; on a height change the frame fills the
-   section again (`height: 100%`); a size report sets an explicit height only when it exceeds the
-   section's clientHeight by more than 1px (the SDK reports `Math.ceil(document height)`), a
-   fitting report goes back to 100%.
+2. Rail: a size report sets an explicit height only when it exceeds the section's clientHeight by
+   more than 1px (the SDK reports `Math.ceil(document height)`) and the section has layout
+   (clientHeight > 0); otherwise the frame fills it (100%). The last report is kept in a ref. A
+   ResizeObserver on `[data-kobe-app-scroll]`: on a height change the frame fills the section,
+   and after `RAIL_SETTLE_MS` (150 ms, cancelled by a new report) the last report is applied
+   again if still taller (a content-sized app sends no new report; a 100vh app re-reports).
 3. gate1 spec `e2e/browser/tests/rail-picker-scroll.spec.ts`.
 
 ## Decisions
@@ -23,14 +25,11 @@
   branch reads the wrapper only when it exists).
 - The observer resets only on a height change of the section (width changes make the app
   re-report on its own); its first callback after `observe` is ignored.
-- The rail frame no longer starts at `initialHeight`/360: it fills the section until a report says
-  the content is taller (the rail has no card height to restore).
+- The rail frame ignores `initialHeight` (documented on the prop) and does not set the cards'
+  height state, so one report is one render.
 
 ## Open questions (for Chris or the coordinator)
 
-- An app with content taller than the section whose document height does not change when its
-  viewport does (no new size report) stays at 100% after a section resize and scrolls inside its
-  own frame until it reports again. The Lakehouse Picker (100vh) is not affected.
 - The gate1 spec has not run yet (no gate1 access from the agent); coordinator runs it (ac-1, ac-4).
 
 ## Evidence (acceptance criteria → test or command output)
@@ -40,8 +39,10 @@
   100%). gate1: `rail-picker-scroll.spec.ts` (1440x900, 700, 1100: scrollHeight == clientHeight,
   iframe `display: block`): to be run by the coordinator.
 - ac-2: `app-frame.test.tsx` "grows past its section when the app's content is taller" (658 in 656
-  grows, 400 goes back to 100%) and "follows the section when it shrinks" (1000px frame, section
-  856 → 456: back to 100%, a 456 report keeps it).
+  grows, 400 goes back to 100%), "follows the section when it shrinks" (1000px, section 856 → 456,
+  the app re-reports 456 within the tick: stays 100%), "keeps a content-sized app's taller
+  height" (1200 in 656 → 456: 100% then 1200px after the tick; section 1300: 100%), "a report
+  while the section has no layout does not pin the frame" (fake timers).
 - ac-3: `components/apps` (app-frame, app-placement, tool-card-app), `shell/rail-pickers` tests
   green (88 tests); no class or style change for inline/expanded besides `block` on a flex item.
 - ac-4: `pnpm verify` and PR CI: see the PR; gate1 spec: coordinator.

@@ -38,6 +38,11 @@ import { buildHostContext, type Placement } from "../../lib/apps/host-context";
 export const INLINE_HEIGHT = 360;
 export const INLINE_MAX_HEIGHT = 720;
 export const EXPANDED_MAX_HEIGHT = 4000;
+/**
+ * The rail (KOBE-575): after its section changes height, how long the frame fills it waiting for
+ * the app to report again before the last taller report is applied again.
+ */
+export const RAIL_SETTLE_MS = 150;
 
 export interface AppFrameApp {
   readonly appId: string;
@@ -76,7 +81,7 @@ export interface AppFrameProps {
   /** `ui/request-display-mode`: the mode actually shown. */
   readonly onDisplayMode?: ((mode: DisplayMode) => DisplayMode) | undefined;
   readonly fetchFn?: typeof fetch | undefined;
-  /** Start at this height (a card coming back keeps its last one, MA10). */
+  /** Start at this height (a card coming back keeps its last one, MA10). Ignored in the rail. */
   readonly initialHeight?: number | undefined;
   /** The app's height after each size change. */
   readonly onHeight?: ((height: number) => void) | undefined;
@@ -84,6 +89,15 @@ export interface AppFrameProps {
 
 const maxHeight = (placement: Placement) =>
   placement === "inline" ? INLINE_MAX_HEIGHT : EXPANDED_MAX_HEIGHT;
+
+/**
+ * The rail frame's explicit height for a report, or null to fill the section: only a report taller
+ * than the section by more than 1 px (the SDK reports Math.ceil(document height)) sets one, and a
+ * section with no layout yet (hidden tab, height 0) never pins the frame (KOBE-575).
+ */
+function railFrameHeight(report: number, room: number): number | null {
+  return room > 0 && report > room + 1 ? report : null;
+}
 
 /** Set on the iframe while Kobe's host bridge listens for it. */
 export const BRIDGE_ATTACHED_ATTR = "data-kobe-app-bridge";
@@ -144,10 +158,13 @@ function FrameInstance(
   const [height, setHeight] = useState(() =>
     Math.min(props.initialHeight ?? INLINE_HEIGHT, maxHeight(placement)),
   );
-  // The rail (KOBE-575): the scrolling section, and the reported height while it is taller than
-  // the section (null: the frame fills the section).
+  // The rail (KOBE-575): the scrolling section, the reported height while it is taller than the
+  // section (null: the frame fills the section), the app's last report, and the pending re-apply
+  // after a section resize.
   const scroll = useRef<HTMLDivElement>(null);
   const [railHeight, setRailHeight] = useState<number | null>(null);
+  const lastReport = useRef<number | null>(null);
+  const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The latest props for the bridge's handlers, without re-attaching it on every render.
   const latest = useRef(props);
   latest.current = props;
@@ -186,10 +203,15 @@ function FrameInstance(
         sizeChanged: ({ height: wanted }) => {
           if (wanted === undefined) return;
           const next = Math.min(Math.max(Math.round(wanted), 1), maxHeight(current().placement));
-          setHeight(next);
-          // The SDK reports Math.ceil(document height): 1 px over the section still fits.
-          const room = scroll.current?.clientHeight;
-          if (room !== undefined) setRailHeight(next > room + 1 ? next : null);
+          const section = scroll.current;
+          if (current().placement === "rail" && section !== null) {
+            lastReport.current = next;
+            if (settle.current !== null) clearTimeout(settle.current);
+            settle.current = null;
+            setRailHeight(railFrameHeight(next, section.clientHeight));
+          } else {
+            setHeight(next);
+          }
           current().onHeight?.(next);
         },
         drag: (event) => {
@@ -233,19 +255,33 @@ function FrameInstance(
   );
 
   // When the rail section changes height the frame fills it again: an app sized by its viewport
-  // (the picker's 100vh) would otherwise re-report the old height and keep a stale scroll. An app
-  // whose content is taller reports again and grows (KOBE-575).
+  // (the picker's 100vh) would otherwise re-report the old height and keep a stale scroll. If no
+  // report arrives within RAIL_SETTLE_MS (a content-sized app whose document did not change),
+  // its last report is applied again when it is still taller than the section (KOBE-575).
   useEffect(() => {
     const element = scroll.current;
     if (element === null || typeof ResizeObserver === "undefined") return;
     let last = element.clientHeight;
+    const cancel = () => {
+      if (settle.current !== null) clearTimeout(settle.current);
+      settle.current = null;
+    };
     const observer = new ResizeObserver(() => {
       if (element.clientHeight === last) return;
       last = element.clientHeight;
       setRailHeight(null);
+      cancel();
+      settle.current = setTimeout(() => {
+        settle.current = null;
+        const report = lastReport.current;
+        if (report !== null) setRailHeight(railFrameHeight(report, element.clientHeight));
+      }, RAIL_SETTLE_MS);
     });
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      cancel();
+    };
   }, [placement]);
 
   useEffect(() => {

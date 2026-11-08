@@ -1605,4 +1605,4 @@ Third-party source copied into Kobe's own code (shadcn style: added as source, n
 
 | Component | Version | License (SPDX) | How used | Where | License text | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| assistant-ui Reasoning effort element (with its `field` surface and range helpers) | 208cc81de222 (main, 2026-10-08) | MIT | bundled (vendored, modified; web image) | apps/web/components/chat/thinking-effort.tsx (KOBE-556) | [license](https://github.com/assistant-ui/assistant-ui/blob/208cc81de222d85b8c3877445187828cff09feeb/LICENSE) |  |
+| assistant-ui Reasoning effort element (with its `field` surface) | 208cc81de222 (main, 2026-10-08) | MIT | bundled (vendored, modified; web image) | apps/web/components/chat/thinking-effort.tsx (KOBE-556) | [license](https://github.com/assistant-ui/assistant-ui/blob/208cc81de222d85b8c3877445187828cff09feeb/LICENSE) |  |

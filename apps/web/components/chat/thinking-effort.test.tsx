@@ -85,21 +85,22 @@ describe("ThinkingEffort (KOBE-556)", () => {
     for (const cls of ["bg-foreground", "text-background"]) expect(low.classList).toContain(cls);
     expect(low.classList).not.toContain("bg-background");
     expect(low.className).toMatch(/forced-colors:aria-pressed:outline/);
-    expect(off.classList).toContain("bg-transparent");
     expect(off.classList).toContain("enabled:hover:text-foreground");
     expect(off.classList).not.toContain("bg-foreground");
   });
 
   it("centres the pill text vertically in both sizes (KOBE-574)", () => {
-    // The line box is as tall as the pill (h-6/leading-6, h-5/leading-5), centred by the flex box.
-    for (const [compact, height, leading] of [
-      [false, "h-6", "leading-6"],
-      [true, "h-5", "leading-5"],
+    // data-slot opts out of the chat's button padding and line height (KOBE-558); flex centres.
+    for (const [compact, height] of [
+      [false, "h-6"],
+      [true, "h-5"],
     ] as const) {
       const { group } = renderEffort({ compact });
-      for (const pill of within(group).getAllByRole("button"))
-        for (const cls of ["inline-flex", "items-center", "justify-center", height, leading])
+      for (const pill of within(group).getAllByRole("button")) {
+        expect(pill.getAttribute("data-slot")).toBe("thinking-pill");
+        for (const cls of ["inline-flex", "items-center", "justify-center", height])
           expect(pill.classList).toContain(cls);
+      }
       cleanup();
     }
   });
