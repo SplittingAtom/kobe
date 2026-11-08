@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #482)
 - **Branch / worktree:** `kobe-566-agent-roster-server` in `../Kobe-wt566`
 - **Depends on:** KOBE-565 (tables, `bound_team_id`). Spec `docs/specs/agents-roster.md` AR3-AR7,
   AR16, §5, §6.3-6.5, §6.8, §6.9 (AR-2).
