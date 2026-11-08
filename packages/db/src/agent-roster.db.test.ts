@@ -110,6 +110,14 @@ describe("team_agent_roster", () => {
     expect(await sqlState(teamEntry(teamA, { versionRule: "any" as "latest" }))).toBe("23514");
   });
 
+  it("sets decided_by and decided_at together", async () => {
+    await expect(
+      teamEntry(teamA, { decidedBy: alice, decidedAt: new Date() }),
+    ).resolves.toHaveLength(1);
+    expect(await sqlState(teamEntry(teamA, { decidedBy: alice }))).toBe("23514");
+    expect(await sqlState(teamEntry(teamA, { decidedAt: new Date() }))).toBe("23514");
+  });
+
   it("refuses an unknown assigner (users are never deleted, so NO ACTION)", async () => {
     expect(await sqlState(teamEntry(teamA, { assignedBy: randomUUID() }))).toBe("23503");
   });
@@ -123,6 +131,7 @@ describe("site_agent_roster", () => {
     expect(await sqlState(siteEntry({ siteAgentId }))).toBe("23505");
     expect(await sqlState(siteEntry({ state: "gone" as "active" }))).toBe("23514");
     expect(await sqlState(siteEntry({ versionRule: "pinned" }))).toBe("23514");
+    expect(await sqlState(siteEntry({ decidedBy: alice }))).toBe("23514");
     expect(await sqlState(siteEntry({ assignedBy: randomUUID() }))).toBe("23503");
     await app.db
       .update(siteAgentRoster)
@@ -161,23 +170,32 @@ describe("site_agents.bound_team_id", () => {
   });
 });
 
+const schedule = (extra: Partial<typeof schedules.$inferInsert>) =>
+  withTeam(app.db, teamA, (tx) =>
+    tx
+      .insert(schedules)
+      .values({
+        teamId: teamA,
+        userId: alice,
+        agentId: randomUUID(),
+        prompt: "Summarise yesterday",
+        recurrence: { kind: "daily", at: "08:00" },
+        tz: "Europe/Berlin",
+        ...extra,
+      })
+      .returning({ pausedBy: schedules.pausedBy }),
+  );
+
 describe("schedules.paused_by agent_unavailable", () => {
   it("accepts agent_unavailable on an inactive schedule", async () => {
-    const [made] = await withTeam(app.db, teamA, (tx) =>
-      tx
-        .insert(schedules)
-        .values({
-          teamId: teamA,
-          userId: alice,
-          agentId: randomUUID(),
-          prompt: "Summarise yesterday",
-          recurrence: { kind: "daily", at: "08:00" },
-          tz: "Europe/Berlin",
-          active: false,
-          pausedBy: "agent_unavailable",
-        })
-        .returning({ pausedBy: schedules.pausedBy }),
-    );
+    const [made] = await schedule({ active: false, pausedBy: "agent_unavailable" });
     expect(made?.pausedBy).toBe("agent_unavailable");
+  });
+
+  it("refuses an unknown value and agent_unavailable on an active schedule", async () => {
+    expect(await sqlState(schedule({ active: false, pausedBy: "gone" as "team_admin" }))).toBe(
+      "23514",
+    );
+    expect(await sqlState(schedule({ active: true, pausedBy: "agent_unavailable" }))).toBe("23514");
   });
 });

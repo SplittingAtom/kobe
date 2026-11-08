@@ -48,7 +48,7 @@ const entryColumns = () => ({
   removedAt: timestamp({ withTimezone: true }),
 });
 
-type EntryTable = Record<"state" | "versionRule" | "pinnedVersion", AnyPgColumn>;
+type EntryTable = Record<"state" | "versionRule" | "pinnedVersion" | "decidedBy" | "decidedAt", AnyPgColumn>;
 
 const entryChecks = (name: string, t: EntryTable) => [
   check(`${name}_state`, sql`${t.state} IN (${list(AGENT_ROSTER_STATES)})`),
@@ -57,6 +57,9 @@ const entryChecks = (name: string, t: EntryTable) => [
     `${name}_pinned_version`,
     sql`(${t.versionRule} = 'pinned') = (${t.pinnedVersion} IS NOT NULL) AND (${t.pinnedVersion} IS NULL OR ${t.pinnedVersion} > 0)`,
   ),
+  check(`${name}_decided`, sql`(${t.decidedBy} IS NULL) = (${t.decidedAt} IS NULL)`),
+  // `removed_at` is deliberately not tied to `state`: an entry re-assigned after removal (AR7)
+  // may keep it as history.
 ];
 
 /** Personal agents assigned (or proposed) to a team's roster. Team table: RLS, FORCE. */

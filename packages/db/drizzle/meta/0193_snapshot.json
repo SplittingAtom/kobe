@@ -1,5 +1,5 @@
 {
-  "id": "3f00d5a3-91f6-43a8-9eb2-1a82b4ef8311",
+  "id": "61711967-8eba-456d-a60f-9864d363ef17",
   "prevId": "0136efeb-f72c-4bce-9f13-1994f6a02eb9",
   "version": "7",
   "dialect": "postgresql",
@@ -21505,6 +21505,10 @@
         "site_agent_roster_pinned_version": {
           "name": "site_agent_roster_pinned_version",
           "value": "(\"site_agent_roster\".\"version_rule\" = 'pinned') = (\"site_agent_roster\".\"pinned_version\" IS NOT NULL) AND (\"site_agent_roster\".\"pinned_version\" IS NULL OR \"site_agent_roster\".\"pinned_version\" > 0)"
+        },
+        "site_agent_roster_decided": {
+          "name": "site_agent_roster_decided",
+          "value": "(\"site_agent_roster\".\"decided_by\" IS NULL) = (\"site_agent_roster\".\"decided_at\" IS NULL)"
         }
       },
       "isRLSEnabled": false
@@ -21664,6 +21668,10 @@
         "team_agent_roster_pinned_version": {
           "name": "team_agent_roster_pinned_version",
           "value": "(\"team_agent_roster\".\"version_rule\" = 'pinned') = (\"team_agent_roster\".\"pinned_version\" IS NOT NULL) AND (\"team_agent_roster\".\"pinned_version\" IS NULL OR \"team_agent_roster\".\"pinned_version\" > 0)"
+        },
+        "team_agent_roster_decided": {
+          "name": "team_agent_roster_decided",
+          "value": "(\"team_agent_roster\".\"decided_by\" IS NULL) = (\"team_agent_roster\".\"decided_at\" IS NULL)"
         }
       },
       "isRLSEnabled": false

@@ -19,10 +19,12 @@ DB only: schema `packages/db/src/schema/agent-roster.ts`, `site_agents.bound_tea
   `schedules.paused_by` column; `agent_unavailable` is a new value of `SCHEDULE_PAUSED_BY`. The
   CHECKs `schedules_paused_by` and `notifications_paused_by` both derive from that list, so
   `schedule.paused` notifications accept it too. **KOBE-567: use `paused_by = 'agent_unavailable'`**
-  and widen the hand-written unions that still list two values (server `agents/inventory.ts`
-  `InventorySchedule.pausedBy`; web `lib/schedules/api.ts`, schedules pages' labels).
-- **No foreign key from either roster to `site_agents`** (coordinator, like
-  `team_agent_suspensions`), although spec AR3 reads "→ site_agents (NO ACTION)". The server must
+  (hand-offs below).
+- CHECK `<table>_decided`: `decided_by` and `decided_at` are set together. `removed_at` is left
+  unconstrained on purpose: an entry re-assigned after removal may keep it as history.
+- **Deviation from spec AR3: no foreign key from `site_agent_id` to `site_agents`** on either
+  roster, matching `team_agent_suspensions` (the ticket asked for that), although AR3 reads
+  "→ site_agents (NO ACTION)". The server must
   enforce 409 `agent_rostered` on delete (KOBE-566/§6.3); a row for a deleted agent is inert.
 - **Version rule as two columns:** `version_rule` (`latest`|`pinned`) and `pinned_version`
   (integer > 0), CHECK `(version_rule = 'pinned') = (pinned_version IS NOT NULL)`.
@@ -43,6 +45,17 @@ DB only: schema `packages/db/src/schema/agent-roster.ts`, `site_agents.bound_tea
   because the server's `schedules/store.ts` maps the DB row straight into `ScheduleResponse` and
   the root typecheck failed without it. No other server or web change.
 
+## Hand-offs for KOBE-567
+
+- Server/web still type `pausedBy` as `"team_admin" | "deactivation"`:
+  `services/server/src/agents/inventory.ts:66`, `apps/web/lib/schedules/api.ts:24`,
+  `apps/web/lib/admin/api/team/agents.ts:64`, `apps/web/lib/notifications/api.ts:18`,
+  `apps/web/components/admin/team/agent-inventory.tsx:266`. Use the protocol type and add a label
+  for `agent_unavailable`.
+- `services/server/src/schedules/offboard.ts:48` and `scheduler/owner-sweep.ts:51` re-pause only
+  schedules that are active or `team_admin`: add `agent_unavailable` to both filters, or a
+  deactivated owner's schedule could be resumed when its agent returns.
+
 ## Open questions (for Chris or the coordinator)
 
 - The protocol enum change sits in this DB PR (parallel-work says contracts change in their own
@@ -50,7 +63,7 @@ DB only: schema `packages/db/src/schema/agent-roster.ts`, `site_agents.bound_tea
 
 ## Evidence (acceptance criteria → test or command output)
 
-- ac-1: `packages/db/src/agent-roster.db.test.ts` (RLS isolation, WITH CHECK, unique, checks);
+- ac-1: `packages/db/src/agent-roster.db.test.ts` (RLS isolation, WITH CHECK, unique, state/rule/decided checks);
   `src/probe.db.test.ts` (cross-team probe incl. the new `team_agent_roster` fixture) green.
-- ac-2: same file, `site_agents.bound_team_id` and `schedules.paused_by agent_unavailable` blocks.
+- ac-2: same file, `site_agents.bound_team_id` and `schedules.paused_by agent_unavailable` blocks (accepted when inactive; unknown value and active+agent_unavailable refused).
 - ac-3: `pnpm --filter @kobe/db db:check` clean after commit; `test:db` full run green; CI `db` job.

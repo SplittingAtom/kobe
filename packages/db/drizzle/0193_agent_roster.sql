@@ -12,7 +12,8 @@ CREATE TABLE "site_agent_roster" (
 	CONSTRAINT "site_agent_roster_site_agent_id_pk" PRIMARY KEY("site_agent_id"),
 	CONSTRAINT "site_agent_roster_state" CHECK ("site_agent_roster"."state" IN ('proposed', 'active', 'removed', 'suspended')),
 	CONSTRAINT "site_agent_roster_version_rule" CHECK ("site_agent_roster"."version_rule" IN ('latest', 'pinned')),
-	CONSTRAINT "site_agent_roster_pinned_version" CHECK (("site_agent_roster"."version_rule" = 'pinned') = ("site_agent_roster"."pinned_version" IS NOT NULL) AND ("site_agent_roster"."pinned_version" IS NULL OR "site_agent_roster"."pinned_version" > 0))
+	CONSTRAINT "site_agent_roster_pinned_version" CHECK (("site_agent_roster"."version_rule" = 'pinned') = ("site_agent_roster"."pinned_version" IS NOT NULL) AND ("site_agent_roster"."pinned_version" IS NULL OR "site_agent_roster"."pinned_version" > 0)),
+	CONSTRAINT "site_agent_roster_decided" CHECK (("site_agent_roster"."decided_by" IS NULL) = ("site_agent_roster"."decided_at" IS NULL))
 );
 --> statement-breakpoint
 CREATE TABLE "team_agent_roster" (
@@ -30,7 +31,8 @@ CREATE TABLE "team_agent_roster" (
 	CONSTRAINT "team_agent_roster_team_id_site_agent_id_pk" PRIMARY KEY("team_id","site_agent_id"),
 	CONSTRAINT "team_agent_roster_state" CHECK ("team_agent_roster"."state" IN ('proposed', 'active', 'removed', 'suspended')),
 	CONSTRAINT "team_agent_roster_version_rule" CHECK ("team_agent_roster"."version_rule" IN ('latest', 'pinned')),
-	CONSTRAINT "team_agent_roster_pinned_version" CHECK (("team_agent_roster"."version_rule" = 'pinned') = ("team_agent_roster"."pinned_version" IS NOT NULL) AND ("team_agent_roster"."pinned_version" IS NULL OR "team_agent_roster"."pinned_version" > 0))
+	CONSTRAINT "team_agent_roster_pinned_version" CHECK (("team_agent_roster"."version_rule" = 'pinned') = ("team_agent_roster"."pinned_version" IS NOT NULL) AND ("team_agent_roster"."pinned_version" IS NULL OR "team_agent_roster"."pinned_version" > 0)),
+	CONSTRAINT "team_agent_roster_decided" CHECK (("team_agent_roster"."decided_by" IS NULL) = ("team_agent_roster"."decided_at" IS NULL))
 );
 --> statement-breakpoint
 ALTER TABLE "schedules" DROP CONSTRAINT "schedules_paused_by";--> statement-breakpoint
