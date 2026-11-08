@@ -9,6 +9,13 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Agents roster lane filed (2026-11-08):** Chris's ask: "My Agents" becomes **Agents** with
+  Personal, Team and Site rosters; forks and new agents land in Personal and are assigned to a team
+  or the site. Spec `docs/specs/agents-roster.md` (PR #475; Hadron spec 4a057ebf): rosters are
+  references with a version rule, builders assign directly, team-owned agents stay, forks of team
+  content are bound to their team, proposals, transfer/adopt, per-roster suspension, schedules pause.
+  Tickets KOBE-565..573 (lane brief `docs/ledger/agents-roster-lane.md`); lane started 2026-11-08 on
+  Chris's "start the agents roster lane": KOBE-565 (DB) first, alone.
 - **Create kobe.skill.yaml at promotion (2026-11-07, Chris's ask; KOBE-564,
   `docs/ledger/KOBE-564.md`):** the Promote panel's `no_manifest` refusal gains "Create
   kobe.skill.yaml": the member picks a team-enabled model (team default preselected) and a license,
