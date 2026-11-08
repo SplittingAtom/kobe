@@ -34,7 +34,7 @@ async function world() {
   const outsider = await f.member(w.team);
   const project = await as(author).post("/v1/projects", {
     name: "Shared",
-    members_mode: "selected",
+    visibility: "restricted",
     member_user_ids: [reader.id],
   });
   expect(project.status, JSON.stringify(project.json)).toBe(201);

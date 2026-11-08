@@ -94,7 +94,7 @@ describe("project files API", () => {
     const outsider = await f.member(w.team);
     const hidden = await create(b, {
       name: "Hidden",
-      members_mode: "selected",
+      visibility: "restricted",
       member_user_ids: [m.id],
     });
 
@@ -157,7 +157,7 @@ describe("project files in members' workspaces", () => {
     const m2 = await f.member(w.team);
     const project = await create(b, {
       name: "Secret Plans",
-      members_mode: "selected",
+      visibility: "restricted",
       member_user_ids: [m1.id],
     });
     expect((await upload(b, project.id, "a.md", "A", "docs")).status).toBe(201);
@@ -211,7 +211,7 @@ describe("project files in members' workspaces", () => {
     // Narrowed to the creator only: the others lose it.
     await as(b).post(`/v1/projects/${project.id}/members`, { user_id: m1.id });
     expect(
-      (await as(b).patch(`/v1/projects/${project.id}`, { members_mode: "selected" })).status,
+      (await as(b).patch(`/v1/projects/${project.id}`, { visibility: "restricted" })).status,
     ).toBe(200);
     expect(await paths(w.team, m1.id)).toHaveLength(1);
     expect(await paths(w.team, b.id)).toHaveLength(1);
@@ -262,7 +262,7 @@ describe("one membership decides files and memory (ac-3)", () => {
     const m = await f.member(w.team);
     const project = await create(b, {
       name: "Shared Brain",
-      members_mode: "selected",
+      visibility: "restricted",
       member_user_ids: [m.id],
     });
     await upload(b, project.id, "k.md", "K");

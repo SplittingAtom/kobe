@@ -8,6 +8,7 @@ import {
   uuidSchema,
 } from "./common.js";
 import { sha256HexSchema, workspacePathSchema } from "./sandbox-wire/workspace-sync.js";
+import { PROJECT_COMMIT_ERROR_CODES, commitProjectToolInputSchema } from "./project-commits.js";
 import { uploadFileNameSchema } from "./uploads.js";
 
 /**
@@ -65,6 +66,7 @@ export const PROJECT_WORKSPACE_DIR = "projects";
 export const projectMountPath = (slug: string): string =>
   `/workspace/${PROJECT_WORKSPACE_DIR}/${slug}`;
 
+const storageCountSchema = z.number().int().nonnegative();
 const nameSchema = z.string().trim().min(1).max(PROJECT_NAME_MAX);
 const descriptionSchema = z.string().max(PROJECT_DESCRIPTION_MAX);
 const instructionsSchema = z
@@ -75,65 +77,73 @@ const instructionsSchema = z
 
 // ----------------------------------------------------------------------------- roles
 
-export const PROJECT_ROLES = ["owner", "member"] as const;
+export const PROJECT_ROLES = ["owner", "editor", "reader"] as const;
 export const projectRoleSchema = z.enum(PROJECT_ROLES);
 export type ProjectRole = z.infer<typeof projectRoleSchema>;
 
+/** Who sees a project beyond its explicit rows (PR2). Default on create: `workspace`. */
+export const PROJECT_VISIBILITIES = ["workspace", "restricted"] as const;
+export const projectVisibilitySchema = z.enum(PROJECT_VISIBILITIES);
+export type ProjectVisibility = z.infer<typeof projectVisibilitySchema>;
+
 export const PROJECT_ACTIONS = [
-  "create",
-  "view",
-  "use", // start threads, share own threads, fork shared ones
-  "manage", // edit name/instructions/agent, manage files, archive/delete
-  "manage_members",
+  "create", // needs team role contributor or team admin
+  "view", // browse files, read history, read shared threads and memory
+  "converse", // start threads, share own threads, fork shared ones (readers too)
+  "edit", // check out, edit, commit, update, discard, upload and remove files, revert
+  "manage", // edit name/instructions/agent, archive/delete
+  "manage_members", // visibility, members, roles, ownership
 ] as const;
 export type ProjectAction = (typeof PROJECT_ACTIONS)[number];
 
+/** Effective project role (PR3): the explicit row, else `reader` when visibility is `workspace`. */
+export function effectiveProjectRole(
+  projectRole: ProjectRole | undefined,
+  visibility: ProjectVisibility,
+): ProjectRole | undefined {
+  return projectRole ?? (visibility === "workspace" ? "reader" : undefined);
+}
+
 /**
- * Who may do what. `projectRole` is the caller's membership (`undefined` = not a member). With
- * `members_mode: "team"` every team member is an implicit `member`; the server resolves that
- * before calling this. Team admins manage all projects of their team; creating needs `builder`
- * (or admin); using needs membership.
+ * Who may do what (PR3 matrix). `projectRole` is the caller's explicit row (`undefined` = none).
+ * Team admins act as owners of every project without being listed. Creating needs team role
+ * contributor or team admin and is independent of the project (pass any visibility).
  */
 export function projectPermissions(
   teamRole: z.infer<typeof teamRoleSchema>,
   projectRole: ProjectRole | undefined,
+  visibility: ProjectVisibility,
 ): Record<ProjectAction, boolean> {
   const admin = teamRole === "team_admin";
-  const owner = projectRole === "owner";
-  const member = projectRole !== undefined;
+  const role = effectiveProjectRole(projectRole, visibility);
+  const owner = admin || role === "owner";
+  const editor = owner || role === "editor";
+  const reader = editor || role === "reader";
   return {
-    create: admin || teamRole === "builder",
-    view: admin || member,
-    use: admin || member,
-    manage: admin || owner,
-    manage_members: admin || owner,
+    create: admin || teamRole === "contributor",
+    view: reader,
+    converse: reader,
+    edit: editor,
+    manage: owner,
+    manage_members: owner,
   };
 }
 
 /**
- * Add to project (KOBE-585, workspaces lane WS-2): may the caller copy an artifact version or a
- * workspace file into a project as a read-only project file? Team admins and the project's owners
- * always (they manage its files); a project member when they are an editor or own the content.
- * "Editors are builders" (Chris, 2026-11-08): team role `builder`. `contentOwner` = the thread's
- * owner for an artifact, always true for the caller's own workspace file. A future editor share
- * scope or project role is added here only.
+ * Add to project (KOBE-585): may the caller copy an artifact version or a scratchspace file into a
+ * project? Editors, owners and team admins (the earlier "builders who are members" reading became
+ * "editor+" with the Workspaces roles; readers never write). Equals {@link projectPermissions}
+ * `edit`, kept as a named rule for the import route.
  */
 export function canAddToProject(
   teamRole: z.infer<typeof teamRoleSchema>,
   projectRole: ProjectRole | undefined,
-  contentOwner: boolean,
+  visibility: ProjectVisibility,
 ): boolean {
-  const can = projectPermissions(teamRole, projectRole);
-  const member = projectRole !== undefined;
-  const editor = teamRole === "builder";
-  return can.manage || (member && (editor || contentOwner));
+  return projectPermissions(teamRole, projectRole, visibility).edit;
 }
 
 // ----------------------------------------------------------------------------- REST: projects
-
-export const PROJECT_MEMBERS_MODES = ["team", "selected"] as const;
-export const projectMembersModeSchema = z.enum(PROJECT_MEMBERS_MODES);
-export type ProjectMembersMode = z.infer<typeof projectMembersModeSchema>;
 
 export const projectSchema = z.strictObject({
   id: uuidSchema,
@@ -144,11 +154,18 @@ export const projectSchema = z.strictObject({
   instructions: instructionsSchema,
   /** Default agent for new threads in the project; null = the team default. */
   default_agent_id: uuidSchema.nullable(),
-  /** `team` = every team member is a member; `selected` = only {@link projectMemberSchema} rows. */
-  members_mode: projectMembersModeSchema,
-  /** The caller's effective role; null = team admin who is not a member. */
+  /** `workspace` = every member is a reader; `restricted` = only {@link projectMemberSchema} rows. */
+  visibility: projectVisibilitySchema,
+  /** The caller's effective role; null = team admin who is not listed. */
   my_role: projectRoleSchema.nullable(),
   file_count: z.number().int().nonnegative(),
+  /** The latest commit (commit shapes: project-commits.ts); null = no commit yet. */
+  head_commit_id: uuidSchema.nullable(),
+  /** Storage (GV2): null until the server fills them (WS-4). History = blobs only old commits hold. */
+  live_bytes: storageCountSchema.nullable(),
+  history_bytes: storageCountSchema.nullable(),
+  live_objects: storageCountSchema.nullable(),
+  history_objects: storageCountSchema.nullable(),
   created_by: uuidSchema,
   created_at: timestampSchema,
   updated_at: timestampSchema,
@@ -158,7 +175,8 @@ export type Project = z.infer<typeof projectSchema>;
 
 /**
  * `POST /v1/projects` -> 201 {@link projectSchema}. The creator becomes `owner`. `slug` absent =
- * derived from the name. `member_user_ids` only with `members_mode: "selected"` (creator implied).
+ * derived from the name. `visibility` absent = `workspace`. `member_user_ids` only with
+ * `visibility: "restricted"` (creator implied) and become editors.
  */
 export const createProjectRequestSchema = z
   .strictObject({
@@ -167,11 +185,11 @@ export const createProjectRequestSchema = z
     description: descriptionSchema.optional(),
     instructions: instructionsSchema.optional(),
     default_agent_id: uuidSchema.nullable().optional(),
-    members_mode: projectMembersModeSchema.optional(),
+    visibility: projectVisibilitySchema.optional(),
     member_user_ids: z.array(uuidSchema).max(PROJECT_MEMBERS_MAX).optional(),
   })
-  .refine((v) => v.member_user_ids === undefined || v.members_mode === "selected", {
-    message: "member_user_ids needs members_mode selected",
+  .refine((v) => v.member_user_ids === undefined || v.visibility === "restricted", {
+    message: "member_user_ids needs visibility restricted",
     path: ["member_user_ids"],
   });
 export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;
@@ -183,7 +201,7 @@ export const updateProjectRequestSchema = z
     description: descriptionSchema.optional(),
     instructions: instructionsSchema.optional(),
     default_agent_id: uuidSchema.nullable().optional(),
-    members_mode: projectMembersModeSchema.optional(),
+    visibility: projectVisibilitySchema.optional(),
     archived: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "empty update" });
@@ -203,9 +221,9 @@ export const projectMemberSchema = z.strictObject({
 });
 export type ProjectMember = z.infer<typeof projectMemberSchema>;
 
-/** `GET /v1/projects/:id/members` -> list (explicit rows; with mode `team` the owners only). */
+/** `GET /v1/projects/:id/members` -> list (all explicit rows). */
 export const projectMembersResponseSchema = z.strictObject({
-  members_mode: projectMembersModeSchema,
+  visibility: projectVisibilitySchema,
   members: z.array(projectMemberSchema).max(PROJECT_MEMBERS_MAX),
 });
 export type ProjectMembersResponse = z.infer<typeof projectMembersResponseSchema>;
@@ -342,9 +360,10 @@ export const PROJECT_ERROR_CODES = [
   "read_only", // 403 write to a shared thread of someone else
   "archived", // 409
   "file_too_large", // 413
-  "quota_exceeded", // 413
+  "quota_exceeded", // 413 (with `limit`: see projectQuotaErrorSchema)
   "invalid_input", // 422
   "project_in_use", // 409 delete refused: threads, project memory or files remain
+  ...PROJECT_COMMIT_ERROR_CODES,
 ] as const;
 export const projectErrorCodeSchema = z.enum(PROJECT_ERROR_CODES);
 export type ProjectErrorCode = z.infer<typeof projectErrorCodeSchema>;
@@ -364,12 +383,17 @@ export const runProjectContextSchema = z.strictObject({
   instructions: instructionsSchema,
   truncated: z.boolean().optional(),
   mount: z.string().min(1).max(100),
+  /**
+   * The viewer's access (CM6): `write` = editor or above, the agent may register `commit_project`;
+   * `read` = reader. Absent = an old server (treated as `read` by a new agent).
+   */
+  access: z.enum(["read", "write"]).optional(),
 });
 export type RunProjectContext = z.infer<typeof runProjectContextSchema>;
 
 // ----------------------------------------------------------------------------- propose_project_file
 
-export const PROJECT_TOOLS = ["propose_project_file"] as const;
+export const PROJECT_TOOLS = ["propose_project_file", "commit_project"] as const;
 export const PROJECT_PROPOSE_REASON_MAX = 500;
 
 /**
@@ -393,6 +417,7 @@ export const proposeProjectFileInputSchema = z.strictObject({
 export type ProposeProjectFileInput = z.infer<typeof proposeProjectFileInputSchema>;
 export const projectToolInputSchema = {
   propose_project_file: proposeProjectFileInputSchema,
+  commit_project: commitProjectToolInputSchema,
 } as const;
 
 /** The pushed workspace entry (same evidence as `share_file`; the server needs it unchanged). */

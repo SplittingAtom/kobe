@@ -17,7 +17,9 @@ import {
 } from "@kobe/protocol";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
+import { toProtocolTeamRole } from "../authz/team-role.js";
 import { loadAccess, type ProjectAccess } from "../projects/access.js";
+import { visibilityOf } from "../projects/compat.js";
 import { importProjectFile, type ImportRefusal } from "../projects/import.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
 import {
@@ -63,6 +65,11 @@ const ERRORS = {
   ],
   archived: [409, "archived", "The project is archived."],
   in_use: [409, "project_in_use", "The project still has content."],
+  role_not_supported_yet: [
+    422,
+    "role_not_supported_yet",
+    "The reader role is not available yet. Use editor or owner.",
+  ],
 } as const satisfies Record<ProjectFailure, readonly [number, string, string]>;
 
 function failure(c: Context, error: ProjectFailure, detail?: string) {
@@ -153,7 +160,8 @@ export function projectRoutes(
     const body = await parseBody(c, createProjectRequestSchema);
     if (!body)
       return invalidRequest(c, "Check the project fields (name, slug, instructions up to 8 KiB).");
-    if (!projectPermissions(c.get("team").role, undefined).create) return failure(c, "forbidden");
+    if (!projectPermissions(toProtocolTeamRole(c.get("team").role), undefined, "workspace").create)
+      return failure(c, "forbidden");
     const viewer = viewerOf(c);
     try {
       return await withTeam(db, viewer.teamId, async (tx) => {
@@ -171,7 +179,11 @@ export function projectRoutes(
   app.get("/", async (c) => {
     const viewer = viewerOf(c);
     const includeArchived = c.req.query("include_archived") === "true";
-    const admin = projectPermissions(c.get("team").role, undefined).manage;
+    const admin = projectPermissions(
+      toProtocolTeamRole(c.get("team").role),
+      undefined,
+      "restricted",
+    ).manage;
     const list = await withTeam(db, viewer.teamId, (tx) =>
       listProjects(tx, viewer, { includeArchived, admin }),
     );
@@ -193,7 +205,7 @@ export function projectRoutes(
       return c.json(await toProject(tx, access.project.teamId, updated.value.row, access.role));
     });
     // A new members mode changes who the files are mounted for.
-    if (res.ok && body.members_mode !== undefined) {
+    if (res.ok && body.visibility !== undefined) {
       await deps.projectMounts.reconcileTeam(viewerOf(c).teamId);
     }
     return res;
@@ -209,7 +221,7 @@ export function projectRoutes(
   app.get("/:id/members", (c) =>
     withProject(c, "view", async (tx, access) =>
       c.json({
-        members_mode: access.project.membersMode,
+        visibility: visibilityOf(access.project.membersMode),
         members: await listMembers(tx, access.project.teamId, access.project.id),
       }),
     ),
@@ -217,11 +229,11 @@ export function projectRoutes(
 
   app.post("/:id/members", async (c) => {
     const body = await parseBody(c, addProjectMemberRequestSchema);
-    if (!body) return invalidRequest(c, "Give user_id and optionally role (owner or member).");
+    if (!body) return invalidRequest(c, "Give user_id and optionally role (owner or editor).");
     const res = await withProject(c, "manage_members", async (tx, access) => {
       const added = await addMember(tx, viewerOf(c), access.project.id, {
         userId: body.user_id,
-        role: body.role ?? "member",
+        role: body.role ?? "editor",
       });
       return added.ok ? c.json(added.value, 201) : failure(c, added.error);
     });
@@ -234,7 +246,7 @@ export function projectRoutes(
   app.patch("/:id/members/:user_id", async (c) => {
     const body = await parseBody(c, updateProjectMemberRequestSchema);
     const user = memberParam(c);
-    if (!body || !user.success) return invalidRequest(c, "Give role (owner or member).");
+    if (!body || !user.success) return invalidRequest(c, "Give role (owner or editor).");
     return withProject(c, "manage_members", async (tx, access) => {
       const changed = await setMemberRole(tx, viewerOf(c), access, user.data, body.role);
       return changed.ok ? c.json(changed.value) : failure(c, changed.error);

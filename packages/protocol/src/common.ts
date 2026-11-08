@@ -63,7 +63,12 @@ export const timestampSchema = z.iso.datetime({ offset: false });
 export const siteRoleSchema = z.enum(["owner", "admin", "user"]);
 export type SiteRole = z.infer<typeof siteRoleSchema>;
 
-export const teamRoleSchema = z.enum(["team_admin", "builder", "member"]);
+/**
+ * Team roles (D8, Workspaces PR1): `contributor` is the former `builder`, same rank and
+ * permissions. This schema is what the API emits; it never contains `builder`.
+ */
+export const TEAM_ROLES = ["team_admin", "contributor", "member"] as const;
+export const teamRoleSchema = z.enum(TEAM_ROLES);
 export type TeamRole = z.infer<typeof teamRoleSchema>;
 
 /** How a run was started (`runs.trigger`, spec §5.4). */

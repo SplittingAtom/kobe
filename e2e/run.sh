@@ -2484,15 +2484,15 @@ const code = (r) => r.status + ":" + (r.json.code ?? "-");
 out("signin", owner.login + ":" + reader.login);
 if (mode === "setup") {
   const marker = "E2E projects " + Date.now();
-  const created = await owner("POST", "/v1/projects", { name: marker, instructions: "Always answer in " + marker, members_mode: "selected", member_user_ids: [] });
+  const created = await owner("POST", "/v1/projects", { name: marker, instructions: "Always answer in " + marker, visibility: "restricted", member_user_ids: [] });
   const id = created.json.id;
   out("project_id", id ?? "-");
-  out("create", created.status + ":" + created.json.my_role + ":" + created.json.members_mode);
-  const hidden = await owner("POST", "/v1/projects", { name: marker + " hidden", members_mode: "selected", member_user_ids: [] });
+  out("create", created.status + ":" + created.json.my_role + ":" + created.json.visibility);
+  const hidden = await owner("POST", "/v1/projects", { name: marker + " hidden", visibility: "restricted", member_user_ids: [] });
   out("hidden_project_id", hidden.json.id ?? "-");
   out("outsider_get", code(await reader("GET", "/v1/projects/" + id)));
   out("outsider_list", (await reader("GET", "/v1/projects")).json.projects.some((p) => p.id === id || p.id === hidden.json.id));
-  out("add_member", (await owner("POST", "/v1/projects/" + id + "/members", { user_id: readerId, role: "member" })).status);
+  out("add_member", (await owner("POST", "/v1/projects/" + id + "/members", { user_id: readerId, role: "editor" })).status);
   const mine = await reader("GET", "/v1/projects/" + id);
   out("member_get", mine.status + ":" + mine.json.my_role + ":" + (mine.json.instructions === "Always answer in " + marker));
   out("member_patch", code(await reader("PATCH", "/v1/projects/" + id, { name: "mine now" })));
@@ -2538,11 +2538,11 @@ JS
     printf '     projects: %s\n' "$(printf '%s' "$pr_out" | tr '\n' ' ' | cut -c1-700)"
     pr_id=$(printf '%s\n' "$pr_out" | sed -n 's/^project_id=//p')
     contains "projects: both users signed in" '^signin=200:200$' "$pr_out"
-    contains "projects: the Owner creates a project and becomes its owner (201)" '^create=201:owner:selected$' "$pr_out"
+    contains "projects: the Owner creates a project and becomes its owner (201)" '^create=201:owner:restricted$' "$pr_out"
     contains "projects: a person outside the project gets 404, not 403" '^outsider_get=404:not_found$' "$pr_out"
     contains "projects: the project is not in the outsider's list" '^outsider_list=false$' "$pr_out"
     contains "projects: the Owner adds the reader as a member (201)" '^add_member=201$' "$pr_out"
-    contains "projects: the member sees the project, its role and instructions" '^member_get=200:member:true$' "$pr_out"
+    contains "projects: the member sees the project, its role and instructions" '^member_get=200:editor:true$' "$pr_out"
     contains "projects: a member cannot change the project (403)" '^member_patch=403:forbidden$' "$pr_out"
     contains "projects: a member cannot manage members (403)" '^member_add=403:forbidden$' "$pr_out"
     contains "projects: another project without the reader stays 404" '^hidden_still_404=404:not_found$' "$pr_out"
@@ -2821,9 +2821,9 @@ const unarchive = await owner("POST", t + "/unarchive");
 out("unarchive", unarchive.status + ":" + (unarchive.json.archived_at === null));
 out("unarchived_lists", (await has(owner, "/v1/threads/archived")) + ":" + (await has(owner, "/v1/threads")));
 // Move into a project and out again; a project share ends with the move.
-const project = await owner("POST", "/v1/projects", { name: "E2E organize " + marker, members_mode: "selected", member_user_ids: [] });
+const project = await owner("POST", "/v1/projects", { name: "E2E organize " + marker, visibility: "restricted", member_user_ids: [] });
 const projectId = project.json.id;
-out("project", project.status + ":" + (await owner("POST", "/v1/projects/" + projectId + "/members", { user_id: readerId, role: "member" })).status);
+out("project", project.status + ":" + (await owner("POST", "/v1/projects/" + projectId + "/members", { user_id: readerId, role: "editor" })).status);
 const moveIn = await owner("POST", t + "/move", { project_id: projectId });
 out("move_in", moveIn.status + ":" + (moveIn.json.project_id === projectId) + ":" + (await has(owner, "/v1/threads?project_id=" + projectId)));
 const pshare = await owner("POST", t + "/share", { visibility: "project" });

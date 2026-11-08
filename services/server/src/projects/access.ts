@@ -1,6 +1,8 @@
 import { and, eq, projectMembers, projects, sql, teamMembers, type KobeTx } from "@kobe/db";
 import { projectPermissions, type ProjectAction, type ProjectRole } from "@kobe/protocol";
 import type { TeamRole } from "@kobe/db";
+import { roleFromDb, type DbProjectRole } from "./compat.js";
+import { toProtocolTeamRole } from "../authz/team-role.js";
 
 export type ProjectRow = typeof projects.$inferSelect;
 
@@ -15,10 +17,10 @@ export interface ProjectAccess {
 /** The effective project role of a team member (explicit row wins; mode `team` implies member). */
 export function effectiveRole(
   mode: ProjectRow["membersMode"],
-  explicit: ProjectRole | undefined,
+  explicit: DbProjectRole | undefined,
 ): ProjectRole | undefined {
-  if (explicit !== undefined) return explicit;
-  return mode === "team" ? "member" : undefined;
+  if (explicit !== undefined) return roleFromDb(explicit);
+  return mode === "team" ? "reader" : undefined;
 }
 
 async function teamRoleOf(tx: KobeTx, teamId: string, userId: string): Promise<TeamRole | null> {
@@ -58,7 +60,8 @@ export async function loadAccess(
       ),
     );
   const role = effectiveRole(project.membersMode, member?.role);
-  const can = projectPermissions(teamRole, role);
+  // The role above already folds the implicit reader in; "restricted" here avoids doing it twice.
+  const can = projectPermissions(toProtocolTeamRole(teamRole), role, "restricted");
   return can.view ? { project, role, can } : undefined;
 }
 

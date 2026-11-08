@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import { notebookRunBodySchema, type ActorContext } from "@kobe/protocol";
+import { toProtocolTeamRole } from "../authz/team-role.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { NOTEBOOK_ERROR_STATUS, NotebookRunError } from "../notebooks/user-run.js";
@@ -64,7 +65,7 @@ function actorOf(c: Ctx): ActorContext {
     user_id: c.get("user").id,
     team_id: team.id,
     site_role: c.get("siteRole") ?? "user",
-    team_role: team.role,
+    team_role: toProtocolTeamRole(team.role),
   };
 }
 

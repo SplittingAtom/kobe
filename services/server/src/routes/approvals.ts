@@ -5,6 +5,7 @@ import {
   approveAllBodySchema,
   type ActorContext,
 } from "@kobe/protocol";
+import { toProtocolTeamRole } from "../authz/team-role.js";
 import { ApprovalError } from "../approvals/index.js";
 import { approvalListQuerySchema } from "../approvals/view.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
@@ -20,7 +21,7 @@ function actorOf(c: ApprovalContext): ActorContext {
     user_id: c.get("user").id,
     team_id: team.id,
     site_role: c.get("siteRole") ?? "user",
-    team_role: team.role,
+    team_role: toProtocolTeamRole(team.role),
   };
 }
 

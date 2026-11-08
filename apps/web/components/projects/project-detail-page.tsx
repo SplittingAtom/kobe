@@ -43,7 +43,11 @@ function ProjectView({
   const mutation = useMutation();
   const navigate = useNavigate();
   const [confirm, confirmDialog] = useConfirm();
-  const can = projectPermissions(access.role, project.myRole ?? undefined);
+  const can = projectPermissions(
+    access.role === "builder" ? "contributor" : access.role,
+    project.myRole === "member" ? "editor" : (project.myRole ?? undefined),
+    "workspace",
+  );
   const archived = project.archivedAt !== null;
   const canEdit = can.manage && !archived;
 
@@ -107,9 +111,9 @@ function ProjectView({
           </>
         }
         actions={
-          (can.use && !archived) || project.myRole !== null ? (
+          (can.converse && !archived) || project.myRole !== null ? (
             <>
-              {can.use && !archived && (
+              {can.converse && !archived && (
                 <Button asChild variant="primary">
                   <Link href={`/?project=${project.id}`}>New conversation in this project</Link>
                 </Button>

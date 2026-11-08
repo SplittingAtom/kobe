@@ -356,7 +356,7 @@ describe("the thread's latest model call (KOBE-211, the context gauge)", () => {
     }
     const project = await as.alice.post("/v1/projects", {
       name: "Usage shared",
-      members_mode: "selected",
+      visibility: "restricted",
       member_user_ids: [reader],
     });
     expect(project.status, JSON.stringify(project.json)).toBe(201);

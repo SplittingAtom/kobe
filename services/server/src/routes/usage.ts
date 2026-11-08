@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { ActorContext } from "@kobe/protocol";
+import { toProtocolTeamRole } from "../authz/team-role.js";
 import type { AuthVariables } from "../auth/session.js";
 import {
   requireSitePermission,
@@ -94,7 +95,7 @@ function actorOf(c: Context<{ Variables: TeamVariables }>): ActorContext {
     user_id: c.get("user").id,
     team_id: team.id,
     site_role: c.get("siteRole") ?? "user",
-    team_role: team.role,
+    team_role: toProtocolTeamRole(team.role),
   };
 }
 

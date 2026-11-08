@@ -23,6 +23,8 @@ import {
   memoryResultFrameSchema,
 } from "./memory-frames.js";
 import {
+  projectCommitFrameSchema,
+  projectCommitResultFrameSchema,
   projectFileProposeFrameSchema,
   projectFileProposeResultFrameSchema,
 } from "./project-frames.js";
@@ -348,6 +350,7 @@ export const sandboxToServerFrameSchema = z.union([
   memoryPutFrameSchema,
   memoryReadFrameSchema,
   projectFileProposeFrameSchema,
+  projectCommitFrameSchema,
   skillDraftSaveFrameSchema,
   fileEditProposeFrameSchema,
   fileOpenFrameSchema,
@@ -763,6 +766,7 @@ export const serverToSandboxFrameSchema = z.union([
   fileShareResultFrameSchema,
   memoryResultFrameSchema,
   projectFileProposeResultFrameSchema,
+  projectCommitResultFrameSchema,
   skillDraftSaveResultFrameSchema,
   fileEditProposeResultFrameSchema,
   fileOpenResultFrameSchema,
@@ -792,6 +796,8 @@ export type ArtifactResultFrame = z.infer<typeof artifactResultFrameSchema>;
 export type FileShareFrame = z.infer<typeof fileShareFrameSchema>;
 export type FileShareResultFrame = z.infer<typeof fileShareResultFrameSchema>;
 export type ProjectFileProposeFrame = z.infer<typeof projectFileProposeFrameSchema>;
+export type ProjectCommitFrame = z.infer<typeof projectCommitFrameSchema>;
+export type ProjectCommitResultFrame = z.infer<typeof projectCommitResultFrameSchema>;
 export type ProjectFileProposeResultFrame = z.infer<typeof projectFileProposeResultFrameSchema>;
 export type WebSearchQueryFrame = z.infer<typeof webSearchQueryFrameSchema>;
 export type WebSearchResultFrame = z.infer<typeof webSearchResultFrameSchema>;

@@ -7,6 +7,7 @@ setup:
       tools:
         - bash
         - codemode
+        - commit_project
         - create_artifact
         - edit
         - find

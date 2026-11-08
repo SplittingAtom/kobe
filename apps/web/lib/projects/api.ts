@@ -103,13 +103,46 @@ export interface ProjectsApi {
 
 const enc = encodeURIComponent;
 
+// Interim (KOBE-576 until KOBE-581): the server speaks `visibility` and owner|editor|reader; the
+// web's types still say membersMode and owner|member. Translate at the edge, both ways.
+type WireRole = "owner" | "editor" | "reader";
+const modeOf = (v: "workspace" | "restricted"): MembersMode =>
+  v === "workspace" ? "team" : "selected";
+const visibilityOf = (m: MembersMode) => (m === "team" ? "workspace" : "restricted");
+const roleOf = (r: WireRole): ProjectRole => (r === "owner" ? "owner" : "member");
+const adaptProject = (
+  p: Omit<Project, "membersMode" | "myRole"> & {
+    readonly visibility: "workspace" | "restricted";
+    readonly myRole: WireRole | null;
+  },
+): Project => {
+  const { visibility, myRole, ...rest } = p;
+  return {
+    ...rest,
+    membersMode: modeOf(visibility),
+    myRole: myRole === null ? null : roleOf(myRole),
+  };
+};
+const adaptMember = (
+  m: Omit<ProjectMember, "role"> & { readonly role: WireRole },
+): ProjectMember => ({
+  ...m,
+  role: roleOf(m.role),
+});
+const wireRole = (r: ProjectRole): WireRole => (r === "owner" ? "owner" : "editor");
+function mapData<W, T>(res: ApiResult<W>, fn: (w: W) => T): ApiResult<T> {
+  return res.ok ? { ...res, data: fn(res.data) } : res;
+}
+type WireProject = Parameters<typeof adaptProject>[0];
+type WireMember = Parameters<typeof adaptMember>[0];
+
 function toBody(input: Partial<ProjectInput> & { archived?: boolean }): Record<string, unknown> {
   return {
     ...(input.name === undefined ? {} : { name: input.name }),
     ...(input.description === undefined ? {} : { description: input.description }),
     ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
     ...(input.defaultAgentId === undefined ? {} : { default_agent_id: input.defaultAgentId }),
-    ...(input.membersMode === undefined ? {} : { members_mode: input.membersMode }),
+    ...(input.membersMode === undefined ? {} : { visibility: visibilityOf(input.membersMode) }),
     ...(input.archived === undefined ? {} : { archived: input.archived }),
   };
 }
@@ -123,23 +156,45 @@ export function createProjectsApi(teamId: string, fetchFn?: typeof fetch): Proje
   const base = (id: string) => `/v1/projects/${enc(id)}`;
   return {
     list: async (includeArchived) => {
-      const res = await call<{ projects: Project[] }>(
+      const res = await call<{ projects: WireProject[] }>(
         `/v1/projects${includeArchived ? "?include_archived=true" : ""}`,
       );
-      return res.ok ? { ...res, data: res.data.projects } : res;
+      return mapData(res, (r) => r.projects.map(adaptProject));
     },
-    get: (id) => call(base(id)),
-    create: (input) =>
-      call("/v1/projects", "POST", {
-        ...toBody(input),
-        ...(input.membersMode === "team" ? {} : { member_user_ids: [] }),
-      }),
-    update: (id, input) => call(base(id), "PATCH", toBody(input)),
+    get: async (id) => mapData(await call<WireProject>(base(id)), adaptProject),
+    create: async (input) =>
+      mapData(
+        await call<WireProject>("/v1/projects", "POST", {
+          ...toBody(input),
+          ...(input.membersMode === "team" ? {} : { member_user_ids: [] }),
+        }),
+        adaptProject,
+      ),
+    update: async (id, input) =>
+      mapData(await call<WireProject>(base(id), "PATCH", toBody(input)), adaptProject),
     remove: (id) => call(base(id), "DELETE"),
-    members: (id) => call(`${base(id)}/members`),
-    addMember: (id, userId, role) => call(`${base(id)}/members`, "POST", { user_id: userId, role }),
-    setMemberRole: (id, userId, role) =>
-      call(`${base(id)}/members/${enc(userId)}`, "PATCH", { role }),
+    members: async (id) =>
+      mapData(
+        await call<{ visibility: "workspace" | "restricted"; members: WireMember[] }>(
+          `${base(id)}/members`,
+        ),
+        (r) => ({ membersMode: modeOf(r.visibility), members: r.members.map(adaptMember) }),
+      ),
+    addMember: async (id, userId, role) =>
+      mapData(
+        await call<WireMember>(`${base(id)}/members`, "POST", {
+          user_id: userId,
+          role: wireRole(role),
+        }),
+        adaptMember,
+      ),
+    setMemberRole: async (id, userId, role) =>
+      mapData(
+        await call<WireMember>(`${base(id)}/members/${enc(userId)}`, "PATCH", {
+          role: wireRole(role),
+        }),
+        adaptMember,
+      ),
     removeMember: (id, userId) => call(`${base(id)}/members/${enc(userId)}`, "DELETE"),
     files: async (id) => {
       const res = await call<{ files: ProjectFile[] }>(`${base(id)}/files`);

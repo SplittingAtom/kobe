@@ -126,6 +126,14 @@ export const BUILTIN_TOOLS: Readonly<Record<string, BuiltinTool>> = {
     open_world: false,
     primary_arg: "/path",
   },
+  /** KOBE-576: commits the member's checked-out project working copy (needs project.access write). */
+  commit_project: {
+    source: "kobe",
+    risk: "write",
+    scope: "kobe",
+    open_world: false,
+    primary_arg: "/message",
+  },
   /** KOBE-442: the member's private Workbench draft from `/workspace/skills/<folder>/`. */
   save_skill_draft: {
     source: "kobe",

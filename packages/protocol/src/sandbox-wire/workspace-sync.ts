@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { uuidSchema } from "../common.js";
 
 /**
  * Workspace sync contract (KOBE-27, spec D12, D13, D15, D23, D26): `/workspace` ↔ S3 through the
@@ -135,6 +136,18 @@ export const workspaceEntrySchema = z.strictObject({
 });
 export type WorkspaceEntry = z.infer<typeof workspaceEntrySchema>;
 
+/** One of the caller's project checkouts (KOBE-576, CM4). */
+export const workspaceCheckoutRefSchema = z.strictObject({
+  project_id: uuidSchema,
+  slug: z
+    .string()
+    .min(1)
+    .max(40)
+    .regex(/^[a-z0-9][a-z0-9-]*$/, "invalid project slug"),
+  base_commit_seq: z.number().int().positive().nullable(),
+});
+export type WorkspaceCheckoutRef = z.infer<typeof workspaceCheckoutRefSchema>;
+
 /**
  * `GET manifest?since=<rev>&limit=<n>`: entries with `rev > since` in revision order (tombstones
  * included). `more` → ask again with `since` = the last entry's rev. 409 `resync_required` when
@@ -144,6 +157,11 @@ export const workspaceManifestPageSchema = z.strictObject({
   head_rev: rev,
   entries: z.array(workspaceEntrySchema).max(WORKSPACE_MAX_BATCH),
   more: z.boolean(),
+  /**
+   * The caller's project checkouts (KOBE-576, CM4): `projects/<slug>/` of each is writable and
+   * pushable; a slug missing from a later pull has ended (relock). Absent (old server) = none.
+   */
+  checkouts: z.array(workspaceCheckoutRefSchema).max(500).default([]),
 });
 export type WorkspaceManifestPage = z.infer<typeof workspaceManifestPageSchema>;
 

@@ -141,6 +141,7 @@ describe("server-side tool registry", () => {
     expect(Object.keys(BUILTIN_TOOLS).sort()).toEqual(
       [
         "bash",
+        "commit_project",
         "codemode",
         "create_artifact",
         "edit",

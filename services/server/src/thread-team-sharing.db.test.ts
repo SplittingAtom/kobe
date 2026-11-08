@@ -141,7 +141,7 @@ describe("team share (ac-1)", () => {
     const member = await f.member(x.w.team);
     const project = await as(x.admin).post("/v1/projects", {
       name: `P${randomBytes(2).toString("hex")}`,
-      members_mode: "selected",
+      visibility: "restricted",
       member_user_ids: [x.author.id, member.id],
     });
     expect(project.status, JSON.stringify(project.json)).toBe(201);
@@ -288,7 +288,7 @@ describe("revocation reaches open streams at once", () => {
       if (how === "narrow") {
         const project = await as(x.admin).post("/v1/projects", {
           name: `N${randomBytes(2).toString("hex")}`,
-          members_mode: "selected",
+          visibility: "restricted",
           member_user_ids: [x.author.id],
         });
         expect(project.status, JSON.stringify(project.json)).toBe(201);
@@ -331,7 +331,7 @@ describe("revocation reaches open streams at once", () => {
       const b = await world();
       const project = await as(b.admin).post("/v1/projects", {
         name: `M${randomBytes(2).toString("hex")}`,
-        members_mode: "selected",
+        visibility: "restricted",
         member_user_ids: [b.author.id, b.reader.id],
       });
       expect(project.status, JSON.stringify(project.json)).toBe(201);
@@ -459,7 +459,7 @@ describe("more read paths (S3)", () => {
     const x = await world();
     const project = await as(x.admin).post("/v1/projects", {
       name: `H${randomBytes(2).toString("hex")}`,
-      members_mode: "selected",
+      visibility: "restricted",
       member_user_ids: [x.author.id],
     });
     expect(project.status, JSON.stringify(project.json)).toBe(201);
@@ -537,7 +537,7 @@ describe("a member who leaves (S2)", () => {
     await share(x.author, x.threadId, "team");
     const project = await as(x.admin).post("/v1/projects", {
       name: `L${randomBytes(2).toString("hex")}`,
-      members_mode: "selected",
+      visibility: "restricted",
       member_user_ids: [x.author.id, x.reader.id],
     });
     expect(project.status, JSON.stringify(project.json)).toBe(201);

@@ -389,7 +389,7 @@ async function projectSetup() {
   const made = await admin.call("POST", "/v1/projects", {
     name: config.name,
     instructions: "Gate 3 project",
-    members_mode: "selected",
+    visibility: "restricted",
     member_user_ids: [],
   });
   out("project_create", `${made.status}:${made.json.my_role ?? made.json.code ?? "-"}`);
@@ -399,7 +399,7 @@ async function projectSetup() {
   for (const userId of config.members) {
     const added = await admin.call("POST", `/v1/projects/${made.json.id}/members`, {
       user_id: userId,
-      role: "member",
+      role: "editor",
     });
     out("member_added", added.status);
   }
