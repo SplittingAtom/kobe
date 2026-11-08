@@ -21,6 +21,8 @@ import {
   teamAgents,
   teamEvalSettings,
   teamAgentRoster,
+  agentTransfers,
+  siteAgents,
   teamAgentSuspensions,
   teamAgentVersions,
   teamSkillReviews,
@@ -129,6 +131,26 @@ export const agentsFixtures: Record<(typeof agents.team)[number], ProbeFixture> 
     await tx
       .insert(teamAgentRoster)
       .values({ teamId, siteAgentId: randomUUID(), assignedBy: userId });
+  },
+  agent_transfers: async (tx, teamId) => {
+    const [from, to] = [randomUUID(), randomUUID()];
+    for (const id of [from, to]) {
+      await tx.insert(users).values({ id, name: "Probe", email: `${id}@probe.test` });
+    }
+    const [agent] = await tx
+      .insert(siteAgents)
+      .values({
+        scope: "personal",
+        ownerUserId: from,
+        slug: `probe-${from.slice(0, 8)}`,
+        frontmatter: { name: "Probe" },
+        prompt: "Probe.",
+      })
+      .returning({ id: siteAgents.id });
+    if (!agent) throw new Error("probe agent insert returned no row");
+    await tx
+      .insert(agentTransfers)
+      .values({ teamId, siteAgentId: agent.id, fromUserId: from, toUserId: to });
   },
   team_skills: async (tx, teamId) => {
     await probeSkill(tx, teamId);
