@@ -74,9 +74,15 @@ function currentUrl(kind: BrandingAssetKind, b: SiteBranding): string | null {
   return b.logo?.dark ?? null;
 }
 
-/** A dark logo stored while there is no logo, which the public branding does not name. */
+/** The logo takes the theme colour (KOBE-562): one drawing for both schemes, the dark file unused. */
+const themedLogo = (b: SiteBranding): boolean => b.logo?.inline !== undefined;
+
+/**
+ * A dark logo the public branding does not name: stored while there is no logo, or unused while
+ * the logo takes the theme colour (KOBE-562).
+ */
 function useDarkLogoAlone(kind: BrandingAssetKind, branding: SiteBranding): string | null {
-  const probe = kind === "logo_dark" && branding.logo === null;
+  const probe = kind === "logo_dark" && (branding.logo === null || themedLogo(branding));
   const [found, setFound] = useState(false);
   useEffect(() => {
     if (!probe) return;
@@ -190,6 +196,12 @@ export function AssetField({
       <p className="m-0 text-sm text-console-muted">
         {HINT[kind]} {formats(kind)}, up to {formatKiB(max)}.
       </p>
+      {kind === "logo_dark" && themedLogo(branding) && (
+        <p className="m-0 text-sm text-console-muted">
+          The logo takes the theme colour, so it serves both themes: a dark logo is kept but not
+          used.
+        </p>
+      )}
       <Current kind={kind} url={current} />
       <div
         data-kobe-drop={kind}

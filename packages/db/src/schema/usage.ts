@@ -44,8 +44,20 @@ export type UsageSource = (typeof USAGE_SOURCES)[number];
  * `eval_judge` for the server's judge call after an eval execution's run (a server call, like
  * titles), and `eval` for an eval sandbox's own calls (a sandbox call, like `run`; written once
  * KOBE-327 bills eval runs apart, until then they are `run`). Migration 0147 widens the CHECKs.
+ * `skill_manifest` (KOBE-564) is the server's call that drafts a `kobe.skill.yaml` for a member:
+ * the one server call a member starts, with no run, so its row names no sandbox and no run
+ * (migration 0192 lets the shape CHECK take it).
  */
-export const USAGE_KINDS = ["run", "title", "followups", "eval", "eval_judge"] as const;
+export const USAGE_KINDS = [
+  "run",
+  "title",
+  "followups",
+  "eval",
+  "eval_judge",
+  "skill_manifest",
+] as const;
+/** Server-call kinds whose rows name no run (`run_id` NULL): started by a member, not a run. */
+export const RUNLESS_USAGE_KINDS = ["skill_manifest"] as const;
 export type UsageKind = (typeof USAGE_KINDS)[number];
 
 /** Longest gateway model id kept (`<gateway provider>/<model>`). */

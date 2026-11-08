@@ -49,6 +49,23 @@ const REFUSED_ATTRIBUTES = new Set(["content", "action", "src", "formaction"]);
 const ANIMATION = new Set(["animate", "set", "animatemotion", "animatetransform", "discard"]);
 const MAX_DEPTH = 256;
 
+/**
+ * What the reader saw, in document order (KOBE-562: the themed variants are derived from the very
+ * reader that enforces this rule, never a second parser). Called while reading: a later refusal
+ * still makes the whole read fail, so a sink's output counts only when the read is accepted.
+ */
+export interface SvgSink {
+  /** An element (lowercase local name) with its attributes as written (qualified names), decoded. */
+  open(
+    element: string,
+    attributes: readonly (readonly [string, string])[],
+    selfClosing: boolean,
+  ): void;
+  close(element: string): void;
+  /** Character data inside the root (entities decoded; CDATA included), outside comments. */
+  text(value: string): void;
+}
+
 class Refused extends Error {}
 
 const refuse = (reason: string): never => {
@@ -141,7 +158,7 @@ interface Reader {
 function readAttributes(
   r: Reader,
   element: string,
-  attributes?: Map<string, string>,
+  attributes: Map<string, string>,
 ): { selfClosing: boolean } {
   const seen = new Set<string>();
   for (;;) {
@@ -174,7 +191,7 @@ function readAttributes(
     seen.add(name);
     const value = decodeEntities(raw);
     checkAttribute(element, name, value);
-    attributes?.set(name, value);
+    attributes.set(name, value);
   }
 }
 
@@ -186,7 +203,7 @@ function skipPast(r: Reader, terminator: string, what: string): string {
   return body;
 }
 
-function walk(src: string): Map<string, string> {
+function walk(src: string, sink?: SvgSink): Map<string, string> {
   const rootAttributes = new Map<string, string>();
   const r: Reader = { src, pos: 0 };
   const stack: string[] = [];
@@ -203,6 +220,7 @@ function walk(src: string): Map<string, string> {
       refuse("it is not well-formed XML (text outside the root).");
     const decoded = decodeEntities(text);
     if (stack.at(-1) === "style") styleText += decoded;
+    if (stack.length > 0 && decoded !== "") sink?.text(decoded);
     if (lt < 0) break;
     r.pos = lt;
     if (src.startsWith("<!--", r.pos)) {
@@ -213,6 +231,7 @@ function walk(src: string): Map<string, string> {
       r.pos += 9;
       const data = skipPast(r, "]]>", "CDATA section");
       if (stack.at(-1) === "style") styleText += data;
+      sink?.text(data);
     } else if (src.startsWith("<!", r.pos)) {
       refuse("it has a DOCTYPE or an entity declaration (not allowed).");
     } else if (src.startsWith("<?", r.pos)) {
@@ -233,6 +252,7 @@ function walk(src: string): Map<string, string> {
         checkCss(styleText, "a <style> element");
         styleText = "";
       }
+      sink?.close(open ?? "");
     } else {
       r.pos += 1;
       const qname = NAME.exec(src.slice(r.pos))?.[0];
@@ -250,10 +270,12 @@ function walk(src: string): Map<string, string> {
       if (element === "foreignobject") refuse("it contains a <foreignObject> element.");
       if (REFUSED_ELEMENTS.has(element)) refuse(`it contains a <${qname}> element (not allowed).`);
       const isRoot = stack.length === 0;
-      const { selfClosing } = readAttributes(r, element, isRoot ? rootAttributes : undefined);
+      const attributes = isRoot ? rootAttributes : new Map<string, string>();
+      const { selfClosing } = readAttributes(r, element, attributes);
       if (isRoot && rootAttributes.get("xmlns") !== SVG_NS) {
         refuse(`its root element is not in the SVG namespace (xmlns="${SVG_NS}").`);
       }
+      sink?.open(element, [...attributes], selfClosing);
       if (!selfClosing) {
         stack.push(element);
         if (stack.length > MAX_DEPTH) refuse("it nests elements too deeply.");
@@ -266,7 +288,7 @@ function walk(src: string): Map<string, string> {
 }
 
 /** A length in user units or px (`120`, `120.5px`); null for %, em and the like. */
-function length(value: string | undefined): number | null {
+export function length(value: string | undefined): number | null {
   const m = /^\s*(\d+(?:\.\d+)?|\.\d+)(?:px)?\s*$/.exec(value ?? "");
   const n = m ? Number(m[1]) : NaN;
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -307,8 +329,11 @@ export function svgSize(attributes: ReadonlyMap<string, string>, max: number): S
   return null;
 }
 
-/** Checks SVG bytes against the TH8 rule; `maxSide` bounds the reported size. */
-export function checkSvg(bytes: Uint8Array, maxSide = 4096): SvgCheck {
+/**
+ * Checks SVG bytes against the TH8 rule; `maxSide` bounds the reported size. A `sink` sees the
+ * document as it is read (its output is valid only when the result is ok).
+ */
+export function checkSvg(bytes: Uint8Array, maxSide = 4096, sink?: SvgSink): SvgCheck {
   let src: string;
   try {
     src = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
@@ -317,7 +342,7 @@ export function checkSvg(bytes: Uint8Array, maxSide = 4096): SvgCheck {
   }
   src = src.replace(/^\s+/, "");
   try {
-    return { ok: true, size: svgSize(walk(src), maxSide) };
+    return { ok: true, size: svgSize(walk(src, sink), maxSide) };
   } catch (err) {
     if (err instanceof Refused) return { ok: false, reason: err.message };
     throw err;

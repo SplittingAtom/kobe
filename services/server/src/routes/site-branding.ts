@@ -7,6 +7,7 @@ import {
   BRANDING_ASSET_MAX_BYTES,
   BRANDING_SETTING_KEYS,
   DEFAULT_APP_NAME,
+  DEFAULT_LOGO_THEME_COLOR,
   DEFAULT_SHOW_NAME,
   DEFAULT_THEME,
   appNameSchema,
@@ -28,7 +29,15 @@ import {
 } from "../branding/settings.js";
 import { auditBrandingDefaults, writeBrandingDefaults } from "../branding/defaults.js";
 import { inspectImage } from "../branding/sniff.js";
-import { brandingCache, deleteAsset, sha256Hex, storeAsset } from "../branding/store.js";
+import {
+  brandingCache,
+  deleteAsset,
+  sha256Hex,
+  storeAsset,
+  type BrandingSnapshot,
+  type DerivedAsset,
+  type StoredAsset,
+} from "../branding/store.js";
 import type { ServerDeps } from "../deps.js";
 import { openUpload } from "../uploads/parse.js";
 
@@ -64,6 +73,21 @@ const fail = (
   extra = {},
 ) => c.json({ code, message, ...extra }, status);
 
+/**
+ * The file `GET /assets/:kind` serves. KOBE-562: while "Logo takes the theme colour" is on, the
+ * inline-safe logo at `?inline=1` and the themed favicon instead of the upload, each by its own
+ * hash and with the same headers; `?inline=1` names nothing otherwise.
+ */
+function servedFile(
+  snapshot: BrandingSnapshot,
+  kind: BrandingAssetKind,
+  inline: boolean,
+): StoredAsset | DerivedAsset | undefined {
+  if (inline) return (kind === "logo" && snapshot.variants.inlineLogo) || undefined;
+  if (kind === "favicon" && snapshot.variants.themedFavicon) return snapshot.variants.themedFavicon;
+  return snapshot.assets.get(kind);
+}
+
 /** `GET /v1/site/branding` and `GET /v1/site/branding/assets/:kind`: public (TH6). */
 export function siteBrandingPublicRoutes(deps: ServerDeps): Hono {
   const app = new Hono();
@@ -83,7 +107,9 @@ export function siteBrandingPublicRoutes(deps: ServerDeps): Hono {
     c.header("X-Content-Type-Options", "nosniff");
     c.header("Content-Security-Policy", ASSET_CSP);
     const kind = brandingAssetKindSchema.safeParse(c.req.param("kind"));
-    const asset = kind.success ? (await cache.get()).assets.get(kind.data) : undefined;
+    const asset = kind.success
+      ? servedFile(await cache.get(), kind.data, c.req.query("inline") === "1")
+      : undefined;
     if (!asset) return fail(c, 404, "not_found", "No such branding file.");
     const etag = `"${asset.sha256}"`;
     c.header("ETag", etag);
@@ -96,19 +122,20 @@ export function siteBrandingPublicRoutes(deps: ServerDeps): Hono {
   return app;
 }
 
-const putSchema = z
+export const brandingPutSchema = z
   .strictObject({
     appName: appNameSchema.optional(),
     showName: z.boolean().optional(),
     theme: themeSettingsSchema.optional(),
+    logoThemeColor: z.boolean().optional(),
   })
-  .refine((v) => v.appName !== undefined || v.showName !== undefined || v.theme !== undefined, {
-    message: "Change at least one of appName, showName and theme.",
+  .refine((v) => Object.values(v).some((field) => field !== undefined), {
+    message: "Change at least one of appName, showName, theme and logoThemeColor.",
   });
 
 const noFields = z.strictObject({});
 
-type Setting = "app_name" | "show_name" | "theme" | BrandingAssetKind;
+type Setting = "app_name" | "show_name" | "theme" | "logo_theme_color" | BrandingAssetKind;
 
 async function audited(tx: KobeTx, setting: Setting, value: string): Promise<void> {
   await recordAudit(tx, { action: "site.branding.updated", target: { setting, value } });
@@ -144,7 +171,7 @@ export function siteBrandingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
   };
 
   app.put("/", async (c) => {
-    const parsed = putSchema.safeParse(await c.req.json().catch(() => null));
+    const parsed = brandingPutSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) {
       return fail(
         c,
@@ -153,7 +180,7 @@ export function siteBrandingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
         parsed.error.issues[0]?.message ?? "Check the fields.",
       );
     }
-    const { appName, showName, theme } = parsed.data;
+    const { appName, showName, theme, logoThemeColor } = parsed.data;
     if (theme?.preset === "custom") {
       const floor = checkFloor(theme);
       if (!floor.ok) {
@@ -181,6 +208,10 @@ export function siteBrandingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
           String(showName),
           String(showName),
         ]);
+      }
+      if (logoThemeColor !== undefined && logoThemeColor !== before.logoThemeColor) {
+        const value = String(logoThemeColor);
+        changes.push(["logo_theme_color", BRANDING_SETTING_KEYS.logoThemeColor, value, value]);
       }
       if (theme !== undefined && JSON.stringify(theme) !== JSON.stringify(before.theme)) {
         changes.push([
@@ -295,6 +326,11 @@ export function siteBrandingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
         ["app_name", BRANDING_SETTING_KEYS.appName, DEFAULT_APP_NAME],
         ["show_name", BRANDING_SETTING_KEYS.showName, String(DEFAULT_SHOW_NAME)],
         ["theme", BRANDING_SETTING_KEYS.theme, themeLabel(DEFAULT_THEME)],
+        [
+          "logo_theme_color",
+          BRANDING_SETTING_KEYS.logoThemeColor,
+          String(DEFAULT_LOGO_THEME_COLOR),
+        ],
       ];
       for (const [setting, key, label] of defaults) {
         if (removedKeys.has(key)) await audited(tx, setting, label);

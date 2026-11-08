@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_LOGO_THEME_COLOR,
   APP_NAME_MAX_LENGTH,
   BRANDING_ASSET_CONTENT_TYPES,
   BRANDING_ASSET_KINDS,
@@ -118,7 +119,9 @@ describe("site_settings keys and asset limits (TH7)", () => {
       appName: "branding.app_name",
       theme: "branding.theme",
       showName: "branding.show_name",
+      logoThemeColor: "branding.logo_theme_color",
     });
+    expect(DEFAULT_LOGO_THEME_COLOR).toBe(false);
   });
 
   it("caps assets per kind", () => {
@@ -174,5 +177,17 @@ describe("public branding (GET /v1/site/branding)", () => {
     expect(siteBrandingSchema.safeParse({ ...ok, css: "x" }).success).toBe(false);
     expect(siteBrandingSchema.safeParse(ok).success).toBe(true);
     expect(siteBrandingSchema.safeParse({ ...ok, showName: "yes" }).success).toBe(false);
+  });
+
+  it("carries the logo theme colour setting (KOBE-562), off when a server leaves it out", () => {
+    const ok = { appName: "Kobe", showName: true, logo: null, favicon: null, theme: DEFAULT_THEME };
+    expect(siteBrandingSchema.parse(ok).logoThemeColor).toBe(false);
+    expect(siteBrandingSchema.parse({ ...ok, logoThemeColor: true }).logoThemeColor).toBe(true);
+    expect(siteBrandingSchema.safeParse({ ...ok, logoThemeColor: "on" }).success).toBe(false);
+    const logo = { url: url("logo"), inline: `${url("logo")}&inline=1` };
+    expect(siteBrandingSchema.parse({ ...ok, logoThemeColor: true, logo }).logo).toEqual(logo);
+    expect(siteBrandingSchema.safeParse({ ...ok, logo: { ...logo, inline: "" } }).success).toBe(
+      false,
+    );
   });
 });

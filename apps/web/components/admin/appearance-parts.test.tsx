@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { must } from "../../lib/testing/must";
 import { brandingCss } from "../../lib/theme/branding-css";
 import { AssetField } from "./site/appearance-asset";
-import { IdentityFields } from "./site/appearance-identity";
+import { IdentityFields, LogoThemeField } from "./site/appearance-identity";
 import { AppearancePreview } from "./site/appearance-preview";
 import { StylePicker, draftOf, floorOf, themeOf, type StyleDraft } from "./site/appearance-style";
 import { previewCss } from "../../lib/theme/preview-css";
@@ -19,6 +19,7 @@ const BRANDING: SiteBranding = {
   logo: null,
   favicon: null,
   theme: { preset: "default" },
+  logoThemeColor: false,
 };
 const WITH_LOGO: SiteBranding = {
   ...BRANDING,
@@ -68,6 +69,44 @@ describe("Appearance identity", () => {
     expect((box as HTMLInputElement).checked).toBe(true);
     await userEvent.click(box);
     expect((box as HTMLInputElement).checked).toBe(false);
+  });
+});
+
+describe("Logo takes the theme colour (KOBE-562)", () => {
+  const THEMED: SiteBranding = {
+    ...WITH_LOGO,
+    logoThemeColor: true,
+    logo: {
+      url: "/v1/site/branding/assets/logo?v=a1",
+      inline: "/v1/site/branding/assets/logo?inline=1&v=d4",
+    },
+  };
+
+  it("is a switch, off by default, that says only an SVG logo can take it", async () => {
+    const onChange = vi.fn();
+    render(<LogoThemeField checked={false} onChange={onChange} saved={BRANDING} />);
+    const box = screen.getByRole("checkbox", { name: /Logo takes the theme colour/ });
+    expect((box as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByText(/Only an SVG logo can take it/)).toBeTruthy();
+    await userEvent.click(box);
+    expect(onChange).toHaveBeenCalledWith(true);
+  });
+
+  it("says so when the saved logo is not an SVG", () => {
+    const raster = { ...WITH_LOGO, logoThemeColor: true };
+    render(<LogoThemeField checked onChange={() => undefined} saved={raster} />);
+    expect(screen.getByText(/This logo is not an SVG/)).toBeTruthy();
+    cleanup();
+    render(<LogoThemeField checked onChange={() => undefined} saved={THEMED} />);
+    expect(screen.queryByText(/This logo is not an SVG/)).toBeNull();
+  });
+
+  it("notes that the dark logo is ignored, not deleted, while the logo takes the colour", async () => {
+    stubApi({ "GET /v1/site/branding/assets/logo_dark": [200, {}] });
+    render(<AssetField kind="logo_dark" branding={THEMED} onApplied={() => undefined} />);
+    expect(screen.getByText(/serves both themes/)).toBeTruthy();
+    // The stored file is still shown, with Remove.
+    expect(await screen.findByRole("button", { name: "Remove the dark logo" })).toBeTruthy();
   });
 });
 

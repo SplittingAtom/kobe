@@ -151,6 +151,32 @@ keys and aliases are refused (`MANIFEST_YAML_OPTIONS` for eemeli/yaml). Unknown 
 
 Nothing in it grants anything: capabilities and any frontmatter never pre-approve tools.
 
+### Created by Kobe on request (KOBE-564)
+
+A version promoted without a manifest is refused (`no_manifest`, SK20). The Promote panel then
+offers **Create kobe.skill.yaml**: the member picks a model the team enables (the team default
+preselected) and their license (`Proprietary`, `Apache-2.0`, `MIT`, `BSD-3-Clause`; the license is
+the author's statement, never the model's), and Kobe asks that model, in one server-originated
+call (purpose `skill_manifest`, [server-model-calls.md](design/server-model-calls.md)), for the
+`summary`, `tags` and `capabilities` from SKILL.md and the file list. The reply is untrusted text:
+the one JSON object in it is read leniently, each field is cleaned to the rules above or dropped
+(`services/server/src/skills/manifest/parse.ts`), `apiVersion`, `name` and `version` come from the
+version and never from the reply, `maintainers`, `compatibility` and `changelog` are not taken, and
+the YAML is read back the way an upload reads it before it is used. A reply with nothing usable
+gives a manifest from SKILL.md's `description` alone (the response says `source: seed`).
+
+A stored version is immutable (its hashes are its identity), so the file cannot be added to it:
+`POST /v1/skills/promotions/manifest {scope, skillId, version, model?, license?}` forks the version
+into a new Workbench draft of the member's with the file in place (one revision; audited as
+`skill.manifest.generated`, metadata only) and the editor opens on it. The member reviews the file,
+saves the next version (a new package hash, so the full evals run again before promotion) and
+promotes that one. `POST /v1/skills/drafts/{id}/manifest {model?, license?}` (with `If-Match`)
+writes one into an open draft the same way (the Workbench editor offers it under the file tree
+while the draft has none); its `version` is a placeholder that Save version overwrites. Both answer 409 `has_manifest` when one exists, 422 `model_not_enabled` for a model the
+team does not enable (never a fallback to another), 502 `call_failed` with the gateway's code when
+the model did not answer, and 503 `model_calls_unavailable` on a server without a model gateway
+for its own calls.
+
 ## provenance.json
 
 Kobe writes it at promotion as canonical JSON (RFC 8785), at most 256 KiB; never author-edited.

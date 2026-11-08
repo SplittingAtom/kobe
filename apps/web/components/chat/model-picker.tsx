@@ -19,8 +19,10 @@ import {
   ThinkingPicker,
   shownThinking,
   thinkingChoices,
+  thinkingControl,
   thinkingDefaultLabel,
 } from "./thinking-picker";
+import { useReasoningSpend } from "./use-reasoning-spend";
 import { useThreadTeamModels } from "./use-team-models";
 import styles from "./chat.module.css";
 
@@ -189,8 +191,9 @@ export function useModelPicker({
 }
 
 /**
- * The model and thinking `<select>`s, in the composer's toolbar (KOBE-418), like assistant-ui's
- * model selector: native selects, so keyboard and screen readers come for free. The hints stay
+ * The model `<select>` and the thinking level, in the composer's toolbar (KOBE-418). The model is
+ * a native select, like assistant-ui's model selector, so keyboard and screen readers come for
+ * free; the thinking level is assistant-ui's Reasoning effort pills (KOBE-556). The hints stay
  * short there: a pinned model says so in its description and tooltip.
  */
 export function ModelSelects({
@@ -202,6 +205,8 @@ export function ModelSelects({
   readonly compact?: boolean;
 }) {
   const { id, models, choices, disabled, thinkingChosen, thinkingDisabled } = picker;
+  // KOBE-557: the latest run's reasoning, graded with the conversation's model's control.
+  const spend = useReasoningSpend(thinkingControl(models, choices.pinned ?? choices.chosen));
   const pill = compact ? `${styles.modelPicker} ${styles.compactPicker}` : styles.modelPicker;
   const { enabled, chosen, unavailable, pinned } = choices;
 
@@ -226,6 +231,7 @@ export function ModelSelects({
           disabled={thinkingDisabled}
           onChoose={picker.chooseThinking}
           compact={compact}
+          spend={spend}
         />
       </>
     );
@@ -270,6 +276,7 @@ export function ModelSelects({
           disabled={thinkingDisabled}
           onChoose={picker.chooseThinking}
           compact={compact}
+          spend={spend}
         />
       )}
     </>

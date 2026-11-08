@@ -17,6 +17,7 @@ const ACME: SiteBranding = {
   },
   favicon: "/v1/site/branding/assets/favicon?v=ef",
   theme: { preset: "forest" },
+  logoThemeColor: false,
 };
 
 const json = (body: unknown, status = 200) =>
@@ -50,6 +51,7 @@ describe("getSiteBranding loader", () => {
       logo: null,
       favicon: null,
       theme: { preset: "default" },
+      logoThemeColor: false,
     });
   });
 
@@ -224,5 +226,52 @@ describe("invalidating the branding (KOBE-501)", () => {
     fail = true;
     await load.invalidate();
     expect(await load()).toEqual(ACME);
+  });
+});
+
+describe("the inline logo (KOBE-562)", () => {
+  const INLINE = "/v1/site/branding/assets/logo?inline=1&v=12";
+  const THEMED: SiteBranding = {
+    ...ACME,
+    logoThemeColor: true,
+    logo: { url: "/v1/site/branding/assets/logo?v=ab", inline: INLINE },
+  };
+  const MARKUP =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" fill="currentColor"><path d="M0 0h1v1z"/></svg>';
+  const svgResponse = (body: string, type = "image/svg+xml") =>
+    new Response(body, { status: 200, headers: { "content-type": type } });
+
+  it("fetches the variant once by its URL and hands its markup to the pages", async () => {
+    const { load, fetchMock, advance } = setup(async (url) =>
+      url.endsWith(INLINE) ? svgResponse(MARKUP) : json(THEMED),
+    );
+    expect(await load()).toEqual({ ...THEMED, logoSvg: MARKUP });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(`http://kobe-server${INLINE}`);
+    advance(BRANDING_CACHE_MS);
+    await load();
+    await flush();
+    // The branding is refetched, the variant (named by its hash) is not.
+    expect(fetchMock.mock.calls.map(([url]) => url).filter((u) => u.endsWith(INLINE))).toHaveLength(
+      1,
+    );
+  });
+
+  it.each([
+    ["a hostile body", svgResponse('<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>')],
+    ["another type", svgResponse(MARKUP, "text/html")],
+    ["a failed request", new Response("", { status: 404 })],
+  ])("shows the logo as an image after %s, logged", async (_name, response) => {
+    const { load, lines } = setup(async (url) => (url.endsWith(INLINE) ? response : json(THEMED)));
+    const branding = await load();
+    expect(branding.logo).toEqual({ url: "/v1/site/branding/assets/logo?v=ab" });
+    expect(branding).not.toHaveProperty("logoSvg");
+    expect(lines[0]).toMatch(/inline logo unavailable/);
+  });
+
+  it("refuses an inline URL that is not a same-origin path", async () => {
+    const { load } = setup(async () =>
+      json({ ...THEMED, logo: { ...THEMED.logo, inline: "https://evil.test/x.svg" } }),
+    );
+    expect(await load()).toEqual(DEFAULT_BRANDING);
   });
 });

@@ -22,3 +22,45 @@
 .logo.whenDark {
   display: var(--kobe-when-dark);
 }
+
+/* The themed logo (KOBE-562, components/shell/logo.tsx): the server's inline-safe SVG in
+   currentColor. Foreground at rest, the brand primary on the brand link's hover or focus, the
+   accent when the link is the current page; one drawing for both schemes, so a theme change
+   recolours it without loading anything. */
+.themed {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  max-width: 160px;
+  color: var(--foreground);
+  transition: color 200ms ease;
+}
+
+.themed > svg {
+  display: block;
+  height: 24px;
+  width: auto;
+  max-width: 160px;
+}
+
+:global(a):hover .themed,
+:global(a):focus-visible .themed {
+  color: var(--kobe-brand-primary);
+}
+
+:global(a[aria-current]) .themed {
+  color: var(--admin-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .themed {
+    transition: none;
+  }
+}
+
+/* Forced colours: the system's text or link colour, which the drawing takes through currentColor. */
+@media (forced-colors: active) {
+  .themed {
+    color: inherit;
+  }
+}

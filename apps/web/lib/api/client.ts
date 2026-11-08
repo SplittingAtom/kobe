@@ -76,6 +76,10 @@ const SHOWN_5XX_CODES: ReadonlySet<string> = new Set([
   "reprobe_failed",
   // Workbench scan preview (KOBE-321): the scan couldn't finish; the page retries.
   "scan_unavailable",
+  // Create kobe.skill.yaml (KOBE-564): Kobe's own sentence naming the model and the gateway's
+  // code, never the model's text; and the server without a gateway for its own calls.
+  "call_failed",
+  "model_calls_unavailable",
 ]);
 
 function fallback(status: number): ApiError {

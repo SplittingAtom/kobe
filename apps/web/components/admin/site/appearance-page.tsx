@@ -15,7 +15,7 @@ import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 import { failureTexts, floorReason } from "./appearance-contrast";
 import { AssetField } from "./appearance-asset";
-import { IdentityFields, nameError } from "./appearance-identity";
+import { IdentityFields, LogoThemeField, nameError } from "./appearance-identity";
 import { AppearancePreview } from "./appearance-preview";
 import { StylePicker, draftOf, floorOf, themeOf, type StyleDraft } from "./appearance-style";
 import { previewCss } from "../../../lib/theme/preview-css";
@@ -58,6 +58,7 @@ function changesOf(
   saved: SiteBranding,
   appName: string,
   showName: boolean,
+  logoThemeColor: boolean,
   draft: StyleDraft,
 ): BrandingChange {
   const name = appName.trim();
@@ -65,6 +66,7 @@ function changesOf(
   return {
     ...(name !== saved.appName ? { appName: name } : {}),
     ...(showName !== saved.showName ? { showName } : {}),
+    ...(logoThemeColor !== saved.logoThemeColor ? { logoThemeColor } : {}),
     ...(theme !== null && JSON.stringify(theme) !== JSON.stringify(saved.theme) ? { theme } : {}),
   };
 }
@@ -93,13 +95,14 @@ function AppearanceEditor({
   const [saved, setSaved] = useState(initial);
   const [appName, setAppName] = useState(initial.appName);
   const [showName, setShowName] = useState(initial.showName);
+  const [logoThemeColor, setLogoThemeColor] = useState(initial.logoThemeColor);
   const [draft, setDraft] = useState(() => draftOf(initial.theme));
   const [refused, setRefused] = useState<readonly FloorFailure[]>([]);
 
   const theme = useMemo(() => themeOf(draft), [draft]);
   const report = useMemo(() => floorOf(theme), [theme]);
   const css = useMemo(() => previewCss(theme ?? saved.theme), [theme, saved.theme]);
-  const change = changesOf(saved, appName, showName, draft);
+  const change = changesOf(saved, appName, showName, logoThemeColor, draft);
   const reason = blocked(appName, theme, report);
   const unchanged = Object.keys(change).length === 0;
   const preview: SiteBranding = {
@@ -167,6 +170,11 @@ function AppearanceEditor({
           onAppName={edited(setAppName)}
           showName={showName}
           onShowName={edited(setShowName)}
+        />
+        <LogoThemeField
+          checked={logoThemeColor}
+          onChange={edited(setLogoThemeColor)}
+          saved={saved}
         />
         <AssetField kind="logo" branding={saved} onApplied={applied} />
         <AssetField kind="logo_dark" branding={saved} onApplied={applied} />

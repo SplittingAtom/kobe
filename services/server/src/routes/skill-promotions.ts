@@ -15,7 +15,14 @@ import {
   type PromoteResult,
 } from "../skills/registry/promote.js";
 import { PostgresSkillStore } from "../skills/skill-store.js";
+import { hitRateLimit } from "../rate-limit.js";
+import {
+  createManifestDraft,
+  type ManifestDraftResult,
+} from "../skills/registry/promote-manifest.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
+import { draftJson } from "./skill-drafts.js";
+import { LICENSE_PATTERN } from "@kobe/protocol";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
@@ -25,6 +32,13 @@ const sourceSchema = z.strictObject({
   version: z.coerce.number().int().positive().max(2147483647),
 });
 const declineSchema = z.strictObject({ note: z.string().trim().min(1).max(1000).optional() });
+/** Create kobe.skill.yaml (KOBE-564): the version, the member's model and their license choice. */
+const manifestSchema = sourceSchema.extend({
+  model: z.string().min(1).max(128).optional(),
+  license: z.string().regex(LICENSE_PATTERN).optional(),
+});
+/** Manifest calls per user: each is one model call on their budget; over it: 429. */
+export const MANIFEST_RATE = { windowMs: 10 * 60_000, max: 20 } as const;
 const idSchema = z.uuid();
 
 /** What leaves the team, for the Workbench dialog and the Team admin's confirmation (SK19). */
@@ -86,6 +100,36 @@ function depsOf(deps: ServerDeps): PromoteDeps | null {
 }
 
 const UNAVAILABLE = { code: "storage_unavailable", message: "Skill storage is not configured." };
+const NO_MODEL_CALLS = {
+  code: "model_calls_unavailable",
+  message: "This server has no model gateway for its own calls; write kobe.skill.yaml yourself.",
+};
+
+/** The status of a refused manifest draft (KOBE-564): what went wrong, never a crash. */
+const MANIFEST_STATUS: Record<Extract<ManifestDraftResult, { ok: false }>["code"], number> = {
+  not_found: 404,
+  forbidden: 403,
+  has_manifest: 409,
+  rate_limited: 429,
+  busy: 409,
+  blocklisted: 422,
+  unavailable: 409,
+  invalid_skill_md: 422,
+  name_mismatch: 422,
+  model_not_enabled: 422,
+  no_model: 422,
+  too_large: 413,
+  call_failed: 502,
+  not_serialisable: 502,
+  stale_revision: 409,
+  invalid_path: 400,
+  name_taken: 409,
+  not_sync_target: 409,
+  too_many_files: 422,
+  draft_limit: 422,
+  draft_too_large: 413,
+  file_too_large: 413,
+};
 
 /**
  * Promote to Site (`/v1/skills/promotions`, KOBE-333, SK19): a preview of what leaves the team
@@ -111,6 +155,47 @@ export function skillPromotionRoutes(
     );
     if (!r.ok) return c.json({ code: r.code, message: r.message }, r.code === "legacy" ? 409 : 404);
     return c.json(planJson(r.plan));
+  });
+
+  /**
+   * Create kobe.skill.yaml for a version without one (KOBE-564): the member's chosen model
+   * drafts it, and the version is forked into a Workbench draft of theirs holding the file.
+   */
+  app.post("/manifest", requireTeamPermission("team.personal.create"), async (c) => {
+    const p = depsOf(deps);
+    if (!p) return c.json(UNAVAILABLE, 503);
+    if (!deps.skillManifests) return c.json(NO_MODEL_CALLS, 503);
+    const body = await parseBody(c, manifestSchema);
+    if (!body)
+      return invalidRequest(c, "Send scope, skillId, version and, optionally, model and license.");
+    const user = c.get("user");
+    const team = c.get("team");
+    const { model, license, ...source } = body;
+    const r = await createManifestDraft(
+      { ...p, generator: deps.skillManifests },
+      { ...source, teamId: team.id },
+      { userId: user.id, role: team.role },
+      {
+        model,
+        license,
+        // Counted only once the version is found and lacks a manifest (review L3).
+        admit: () => hitRateLimit(deps.database.db, `skill-manifest:${user.id}`, MANIFEST_RATE),
+      },
+    );
+    if (!r.ok)
+      return c.json(
+        { code: r.code, message: r.message, ...(r.detail ? { detail: r.detail } : {}) },
+        MANIFEST_STATUS[r.code] as 400,
+      );
+    return c.json(
+      {
+        draft: draftJson(r.draft, user.id),
+        manifest: r.manifest,
+        model: r.model.alias,
+        source: r.source,
+      },
+      201,
+    );
   });
 
   app.post("/", requireTeamPermission("team.personal.create"), async (c) => {

@@ -111,6 +111,7 @@ describe("audit event taxonomy", () => {
     expect(target.safeParse({ setting: "app_name", value: "Acme" }).success).toBe(true);
     expect(target.safeParse({ setting: "theme", value: "tokyo-nights" }).success).toBe(true);
     expect(target.safeParse({ setting: "show_name", value: "false" }).success).toBe(true);
+    expect(target.safeParse({ setting: "logo_theme_color", value: "true" }).success).toBe(true);
     for (const setting of ["logo", "logo_dark", "favicon"])
       expect(target.safeParse({ setting, value: sha }).success).toBe(true);
     expect(target.safeParse({ setting: "css", value: "x" }).success).toBe(false);

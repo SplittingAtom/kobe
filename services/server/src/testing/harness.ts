@@ -45,6 +45,7 @@ export async function openHarness(
     | "auditForwardingDestinations"
     | "auditForwardingSecrets"
     | "brandingDefaults"
+    | "serverCalls"
   > = {},
   /** App options that need the deps (e.g. the Orbit eval runner, KOBE-93). */
   appOptions?: (deps: ServerDeps) => AppOptions,

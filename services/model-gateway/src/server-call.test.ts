@@ -290,6 +290,82 @@ describe("server calls: accepted (KOBE-234)", () => {
   });
 });
 
+describe("server calls: the skill manifest (KOBE-564)", () => {
+  /** A member's own call: the token names no thread or run by contract. */
+  const manifestToken = (over: Partial<ServerCallClaims> = {}) =>
+    serverToken({
+      purpose: "skill_manifest",
+      thread_id: undefined,
+      run_id: undefined,
+      max_output_tokens: 1024,
+      ...over,
+    });
+  const manifestBody = {
+    model: MODEL,
+    messages: [
+      { role: "system", content: "Write the registry metadata of a skill as one JSON object." },
+      { role: "user", content: "---\nname: sales-report\ndescription: Quarterly sales.\n---\n" },
+    ],
+    max_tokens: 1024,
+    temperature: 0.2,
+  };
+
+  it("forwards without a run check and records the call under the member with no run", async () => {
+    const r = await post("/v1/chat/completions", asServer(manifestToken()), manifestBody);
+    expect(r.status).toBe(200);
+    expect(hits[0]?.headers["x-bf-vk"]).toBe(vk);
+    expect(loadedSandboxes).toEqual([undefined]);
+    // Nothing to check against the record: the token names no run (the member is the identity).
+    expect(runChecks).toEqual([]);
+    expect(admitted[0]).toMatchObject({
+      teamId: team,
+      userId: user,
+      sandboxId: undefined,
+      runId: undefined,
+      purpose: "skill_manifest",
+      outputAllowance: 1024,
+    });
+    await expect.poll(() => records.length).toBe(1);
+    expect(records[0]).toMatchObject({
+      purpose: "skill_manifest",
+      sandboxId: undefined,
+      runId: undefined,
+      status: 200,
+    });
+  });
+
+  it("a manifest token cannot name a run, and a run-bound token cannot drop its run", () => {
+    expect(() => manifestToken({ run_id: run, thread_id: thread })).toThrow();
+    expect(() => serverToken({ run_id: undefined, thread_id: undefined })).toThrow();
+    expect(() =>
+      manifestToken({
+        max_output_tokens: SERVER_CALL_LIMITS.skill_manifest.reasoning_max_output_tokens + 1,
+      }),
+    ).toThrow();
+  });
+
+  it("keeps the purpose's own caps: a long SKILL.md fits, more than that does not", async () => {
+    const long = { ...manifestBody, messages: [{ role: "user", content: "x".repeat(110_000) }] };
+    expect((await post("/v1/chat/completions", asServer(manifestToken()), long)).status).toBe(200);
+    const over = {
+      ...manifestBody,
+      messages: [
+        {
+          role: "user",
+          content: "x".repeat(SERVER_CALL_LIMITS.skill_manifest.max_message_chars + 1),
+        },
+      ],
+    };
+    const r = await post("/v1/chat/completions", asServer(manifestToken()), over);
+    expect([r.status, r.code]).toEqual([400, "server_call_body_refused"]);
+    // Still a plain chat completion of the token's model.
+    const tools = { ...manifestBody, tools: [{ type: "function", function: { name: "x" } }] };
+    expect((await post("/v1/chat/completions", asServer(manifestToken()), tools)).code).toBe(
+      "server_call_body_refused",
+    );
+  });
+});
+
 describe("server calls: the eval judge (KOBE-326 ac-2)", () => {
   const judgeToken = (over: Partial<ServerCallClaims> = {}) =>
     serverToken({ purpose: "eval_judge", max_output_tokens: 512, ...over });

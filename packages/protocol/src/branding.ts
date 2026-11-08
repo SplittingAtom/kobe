@@ -16,10 +16,18 @@ export const BRANDING_SETTING_KEYS = {
   theme: "branding.theme",
   /** `"true"`/`"false"`: whether the header shows the name next to the logo (default true). */
   showName: "branding.show_name",
+  /**
+   * `"true"`/`"false"` (KOBE-562): an SVG logo is inlined in `currentColor` and takes the theme's
+   * colours, and an SVG favicon follows the browser's scheme (default false: uploads as uploaded).
+   */
+  logoThemeColor: "branding.logo_theme_color",
 } as const;
 
 /** Whether the header shows the app name by default (`branding.show_name` unset). */
 export const DEFAULT_SHOW_NAME = true;
+
+/** Whether the logo takes the theme colour by default (`branding.logo_theme_color` unset). */
+export const DEFAULT_LOGO_THEME_COLOR = false;
 
 /**
  * Shipped presets (TH9, Chris 2026-10-28); `default` is today's neutral look and the default.
@@ -140,9 +148,16 @@ export const siteBrandingSchema = z.strictObject({
       /** The dark logo's pixel size, likewise. */
       darkWidth: assetSide.optional(),
       darkHeight: assetSide.optional(),
+      /**
+       * The inline-safe variant of an SVG logo (KOBE-562), set only while `logoThemeColor` is on:
+       * the one form of the upload the web may insert into the page. Then `dark` is left out.
+       */
+      inline: assetUrl.optional(),
     })
     .nullable(),
   favicon: assetUrl.nullable(),
   theme: themeSettingsSchema,
+  /** `branding.logo_theme_color` (KOBE-562); a server that predates it means off. */
+  logoThemeColor: z.boolean().default(DEFAULT_LOGO_THEME_COLOR),
 });
 export type SiteBranding = z.infer<typeof siteBrandingSchema>;

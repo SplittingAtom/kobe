@@ -1598,3 +1598,11 @@ Typefaces the web image serves to browsers (KOBE-555, theming TH10 as amended): 
 | --- | --- | --- | --- | --- | --- | --- |
 | Outfit typeface (variable, `Outfit[wght].woff2`) | 1.1 | OFL-1.1 | bundled (web image, served to browsers) | web image (apps/web/app/fonts/outfit) | [license](https://github.com/Outfitio/Outfit-Fonts/blob/1.1/OFL.txt) | Approved by Chris on 2026-11-07 (KOBE-555). |
 | JetBrains Mono typeface (variable, `JetBrainsMono[wght].woff2`) | 2.304 | OFL-1.1 | bundled (web image, served to browsers) | web image (apps/web/app/fonts/jetbrains-mono) | [license](https://github.com/JetBrains/JetBrainsMono/blob/v2.304/OFL.txt) | Approved by Chris on 2026-11-07 (KOBE-555). |
+
+## Vendored source
+
+Third-party source copied into Kobe's own code (shadcn style: added as source, not published as a package), modified, and kept with its license notice at the top of the file.
+
+| Component | Version | License (SPDX) | How used | Where | License text | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| assistant-ui Reasoning effort element (with its `field` surface and range helpers) | 208cc81de222 (main, 2026-10-08) | MIT | bundled (vendored, modified; web image) | apps/web/components/chat/thinking-effort.tsx (KOBE-556) | [license](https://github.com/assistant-ui/assistant-ui/blob/208cc81de222d85b8c3877445187828cff09feeb/LICENSE) |  |

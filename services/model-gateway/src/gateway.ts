@@ -8,7 +8,12 @@ import {
   type ServerResponse,
 } from "node:http";
 import { request as httpsRequest, Agent as HttpsAgent } from "node:https";
-import type { ServerCallClaims, SessionTokenClaims, ThinkingLevel } from "@kobe/protocol";
+import {
+  serverCallBoundToRun,
+  type ServerCallClaims,
+  type SessionTokenClaims,
+  type ThinkingLevel,
+} from "@kobe/protocol";
 import { SessionTokenError, type SessionVerifyKeys } from "@kobe/session-token";
 import {
   contentAttributes,
@@ -233,6 +238,38 @@ const REASONS: Readonly<
   key_unreadable: [503, "model_access_unavailable", "Model access is unavailable; retry later."],
 };
 
+/**
+ * A server call's run attribution (KOBE-234 review L1): the token's run must be a completed run of
+ * its thread leased to its member, else 403. A run-less purpose ({@link serverCallBoundToRun}
+ * false, KOBE-564) carries no run or thread by contract, so there is nothing to check: the call is
+ * the member's own, under their budget lines, and its usage row names no run.
+ */
+async function serverCallAttribution(
+  options: Pick<GatewayOptions, "serverCalls">,
+  claims: ServerCallClaims,
+): Promise<
+  | { readonly ok: true; readonly runId: string | undefined }
+  | { readonly ok: false; readonly status: 403; readonly code: string; readonly message: string }
+> {
+  if (!serverCallBoundToRun(claims.purpose)) return { ok: true, runId: undefined };
+  const matches =
+    claims.run_id !== undefined &&
+    claims.thread_id !== undefined &&
+    (await options.serverCalls?.runMatches({
+      teamId: claims.team_id,
+      runId: claims.run_id,
+      threadId: claims.thread_id,
+      userId: claims.user_id,
+    }));
+  if (matches) return { ok: true, runId: claims.run_id };
+  return {
+    ok: false,
+    status: 403,
+    code: "server_call_run_mismatch",
+    message: "That run is not a completed run of this thread and member.",
+  };
+}
+
 export function createModelGateway(options: GatewayOptions): Server {
   const { logger, settings } = options;
   const target = new URL(options.bifrostUrl);
@@ -454,21 +491,10 @@ export function createModelGateway(options: GatewayOptions): Server {
       // 5. Run attribution: the run token when sent (it must verify, no fallback), else the legacy
       // advisory header, unless enforcement makes the token mandatory (KOBE-118).
       // A server call's run is its token's: the completed run that triggered it, of the token's
-      // thread and member in the record (review L1).
+      // thread and member in the record (review L1). A run-less purpose (KOBE-564: a member's own
+      // request, `skill_manifest`) names no run: its row is attributed to the member alone.
       const attribution = serverCall
-        ? (await options.serverCalls?.runMatches({
-            teamId: serverCall.team_id,
-            runId: serverCall.run_id,
-            threadId: serverCall.thread_id,
-            userId: serverCall.user_id,
-          }))
-          ? ({ ok: true, runId: serverCall.run_id } as const)
-          : ({
-              ok: false,
-              status: 403,
-              code: "server_call_run_mismatch",
-              message: "That run is not a completed run of this thread and member.",
-            } as const)
+        ? await serverCallAttribution(options, serverCall)
         : identity.sandboxId === undefined
           ? NO_SESSION
           : await resolveRunAttribution(options, req.headers, {

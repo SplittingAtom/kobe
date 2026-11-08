@@ -9,6 +9,7 @@ import { MutationStatus } from "../admin/error-notice";
 import { ResourceView } from "../admin/parts";
 import { useMutation, useResource } from "../admin/use-resource";
 import { Button } from "../ui/console";
+import { CreateManifest } from "./create-manifest";
 import { Refusals, WhatLeaves } from "./what-leaves";
 
 /**
@@ -41,6 +42,9 @@ export function PromotePanel({
           <>
             <WhatLeaves preview={preview} />
             <Refusals preview={preview} />
+            {preview.refusals.some((r) => r.code === "no_manifest") && (
+              <CreateManifest teamId={teamId} source={source} />
+            )}
             <div>
               <Button
                 variant="primary"

@@ -16,6 +16,20 @@ characters, 2 MiB body, temperature 0, skipped only at 100 %); it may send exact
 `response_format`, the verdict schema (`SERVER_CALL_RESPONSE_FORMATS`), which the gateway compares.
 Usage rows are `kind = eval_judge` (migration 0147). Details in [skill-evals.md](../skill-evals.md).
 
+**Skill manifest (KOBE-564).** Create kobe.skill.yaml in the Promote panel is a server call too:
+purpose `skill_manifest`, the one purpose a **member starts** rather than a completed run. Its token
+names no `thread_id` or `run_id` (`RUNLESS_SERVER_CALL_PURPOSES`; the claims schema refuses either
+on it, and refuses their absence on every other purpose), the gateway skips the run check for it,
+and its `run_usage` row has `kind = skill_manifest`, no sandbox and a NULL `run_id` (migration
+0192 widens `run_usage_kind_shape` for exactly that kind). The member is the identity: the token
+binds their team and user id, the call runs under their budget lines and virtual key like any
+other, TTL 30 s, single use per replica. Model: the alias the member picked, which must be enabled
+for the team (`resolveRunModel`; never a fallback), else the team default. Limits
+(`SERVER_CALL_LIMITS.skill_manifest`): 1024 / 3072 output tokens, 60 s, messages up to 120 000
+characters (SKILL.md is cut at 60 000 in the prompt), 512 KiB body, temperature 0.2, skipped only at
+100 %. The skill's content travels between per-call nonce delimiters as data, as the judge's does.
+Details in [skill-package.md](../skill-package.md#created-by-kobe-on-request-kobe-564).
+
 ## Decisions
 
 | Topic         | Decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -170,7 +184,7 @@ most two. D18 compaction treats them like any event: deleted with the run's stre
 | Replay      | `jti` unseen on this replica                                                                                                                                                               | 401 `server_call_token_replayed`                                        |
 | Route       | `POST /v1/chat/completions`                                                                                                                                                                | 403 `server_call_route_refused`                                         |
 | Member      | active member with a virtual key (no sandbox check)                                                                                                                                        | as sandbox calls (401 `session_revoked`, 503 pending)                   |
-| Run         | completed run of the token's thread, leased to the token's member                                                                                                                          | 403 `server_call_run_mismatch`                                          |
+| Run         | completed run of the token's thread, leased to the token's member; skipped for a run-less purpose (`skill_manifest`, KOBE-564), whose token names none                                     | 403 `server_call_run_mismatch`                                          |
 | Body        | `serverCallRequestSchema`, model = token's, limit ≤ token's and ≤ the purpose's cap for the model (reasoning headroom and `reasoning_effort` only for a catalog reasoning model), ≤ 64 KiB | 400 `server_call_body_refused`, 413                                     |
 | Model       | enabled for the team                                                                                                                                                                       | 403 `model_not_enabled`                                                 |
 | Budget      | `BudgetGate` (reservation), at `skip_at_percent` of each line for the purpose                                                                                                              | 402 `budget_exhausted` / `budget_below_call` / `budget_soft_limit`, 429 |

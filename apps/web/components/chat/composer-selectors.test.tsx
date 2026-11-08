@@ -88,16 +88,19 @@ describe("the composer's selectors (ac-2)", { timeout: 30_000 }, () => {
       name: "Model for this conversation",
     });
     expect(
-      within(bar).queryByRole("combobox", { name: "Thinking level for this conversation" }),
+      within(bar).queryByRole("group", { name: "Thinking level for this conversation" }),
     ).toBeNull();
     await userEvent.setup().selectOptions(model, "glm");
-    await within(bar).findByRole("combobox", { name: "Thinking level for this conversation" });
+    await within(bar).findByRole("group", { name: "Thinking level for this conversation" });
     const names = controlNames(bar);
-    expect(names.slice(0, 4)).toEqual([
+    // KOBE-556: the thinking level is a row of pills, one per level the team allows.
+    expect(names.slice(0, 6)).toEqual([
       "Add to your message",
       "Chat with: No agent",
       "Model for this conversation",
-      "Thinking level for this conversation",
+      "Off",
+      "Low",
+      "Medium",
     ]);
     expect(names.at(-1)).toBe("Send");
   });
@@ -172,9 +175,15 @@ describe("narrow composers fold the selectors into one menu (ac-2)", { timeout: 
       within(menu).getByRole("combobox", { name: "Model for this conversation" }),
       "glm",
     );
+    // KOBE-556: the pills render inside the folded menu as a row.
+    const pills = await within(menu).findByRole("group", {
+      name: "Thinking level for this conversation",
+    });
     expect(
-      await within(menu).findByRole("combobox", { name: "Thinking level for this conversation" }),
-    ).toBeTruthy();
+      within(pills)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["Off", "Low", "Medium"]);
     expect(button.getAttribute("aria-expanded")).toBe("true");
     within(menu).getByRole("combobox", { name: "Model for this conversation" }).focus();
     await user.keyboard("{Escape}");
@@ -258,8 +267,13 @@ describe(
       const selectors = must(below.querySelector<HTMLElement>('[data-composer-selectors="below"]'));
       expect(controlNames(selectors)).toEqual([
         "Model for this conversation",
-        "Thinking level for this conversation",
+        "Off",
+        "Low",
+        "Medium",
       ]);
+      expect(within(selectors).getByRole("group", THINKING).getAttribute("data-size")).toBe(
+        "compact",
+      );
       expect(within(selectors).getByText("Agent: Ledger Bot")).toBeTruthy();
       // Selectors first, the gauge last (pushed right); the line wraps instead of overflowing.
       const gauge = must(below.querySelector<HTMLElement>("[data-composer-gauge]"));
@@ -277,12 +291,8 @@ describe(
       openApp(fake, t);
       const below = await footer();
       const user = userEvent.setup();
-      const thinking = await within(below).findByRole(
-        "combobox",
-        { name: "Thinking level for this conversation" },
-        WAIT,
-      );
-      await user.selectOptions(thinking, "off");
+      const thinking = await within(below).findByRole("group", THINKING, WAIT);
+      await user.click(within(thinking).getByRole("button", { name: "Off" }));
       await waitFor(() => expect(fake.threads.get(t)?.thinking_level).toBe("off"));
       await user.selectOptions(
         within(below).getByRole("combobox", { name: "Model for this conversation" }),
@@ -302,9 +312,7 @@ describe(
         WAIT,
       );
       expect(model.closest("[hidden]")).toBeNull();
-      expect(
-        within(below).getByRole("combobox", { name: "Thinking level for this conversation" }),
-      ).toBeTruthy();
+      expect(within(below).getByRole("group", THINKING)).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Agent and model" })).toBeNull();
       expect(controlNames(bar)).toEqual(["Add to your message", "Send"]);
     });
@@ -314,13 +322,18 @@ describe(
       const bar = await toolbar();
       const below = await footer();
       const model = await within(below).findByRole("combobox", MODEL, WAIT);
-      const thinking = within(below).getByRole("combobox", THINKING);
+      const [first, second] = within(within(below).getByRole("group", THINKING)).getAllByRole(
+        "button",
+      );
       const user = userEvent.setup();
       within(bar).getByRole("button", { name: "Send" }).focus();
       await user.tab();
       expect(document.activeElement).toBe(model);
+      // KOBE-556: each pill is a button in the Tab order.
       await user.tab();
-      expect(document.activeElement).toBe(thinking);
+      expect(document.activeElement).toBe(first);
+      await user.tab();
+      expect(document.activeElement).toBe(second);
     });
 
     it("ac-5: the agent keeps today's rules after the first prompt: a fixed chip, never a picker", async () => {

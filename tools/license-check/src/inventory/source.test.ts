@@ -43,7 +43,12 @@ describe("parseInventory", () => {
       "dev",
       "assets",
       "fonts",
+      "vendored",
     ]);
+    // KOBE-556: the vendored assistant-ui element, MIT.
+    expect(
+      inventory.sections.find((s) => s.id === "vendored")?.rows.map((r) => [r.id, r.license]),
+    ).toEqual([["assistant-ui-reasoning-effort", "MIT"]]);
     expect(inventory.sections.flatMap((s) => s.rows.map((r) => r.id))).toEqual(
       expect.arrayContaining(["pi", "agent-sandbox", "gvisor", "kata", "cnpg", "postgres"]),
     );

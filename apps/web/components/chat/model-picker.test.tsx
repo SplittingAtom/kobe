@@ -173,11 +173,27 @@ describe("model picker", () => {
   });
 });
 
-describe("thinking level per conversation (KOBE-260)", () => {
+const RUN_USAGE = {
+  models: ["ollama/glm"],
+  calls: 1,
+  input_tokens: 10,
+  output_tokens: 2000,
+  cache_read_tokens: 0,
+  cache_write_tokens: 0,
+  cost_usd: 0,
+  unpriced_calls: 0,
+  estimated_calls: 0,
+};
+
+describe("thinking level per conversation (KOBE-260, pills since KOBE-556)", () => {
   const thinkingPicker = () =>
-    screen.findByRole("combobox", {
-      name: "Thinking level for this conversation",
-    }) as Promise<HTMLSelectElement>;
+    screen.findByRole("group", { name: "Thinking level for this conversation" });
+  const pill = async (name: string) => within(await thinkingPicker()).getByRole("button", { name });
+  const pressed = async () =>
+    within(await thinkingPicker())
+      .getAllByRole("button")
+      .filter((b) => b.getAttribute("aria-pressed") === "true")
+      .map((b) => b.textContent);
   beforeEach(() => {
     // glm lets members choose up to medium in this team; kimi (the default) has no control.
     Object.assign(must(fake.teamModels[1]), {
@@ -190,15 +206,19 @@ describe("thinking level per conversation (KOBE-260)", () => {
     openApp(fake, t);
     await picker();
     expect(
-      screen.queryByRole("combobox", { name: "Thinking level for this conversation" }),
+      screen.queryByRole("group", { name: "Thinking level for this conversation" }),
     ).toBeNull();
     await userEvent.setup().selectOptions(await picker(), "glm");
-    expect(optionNames(await thinkingPicker())).toEqual([
-      "Thinking low (default)",
-      "Thinking off",
-      "Thinking low",
-      "Thinking medium",
-    ]);
+    const pills = within(await thinkingPicker()).getAllByRole("button");
+    expect(pills.map((b) => b.textContent)).toEqual(["Off", "Low", "Medium"]);
+    expect(await pressed()).toEqual(["Low"]);
+    expect((await pill("Low")).title).toBe("Model's default");
+    expect(
+      within(await thinkingPicker()).getByRole("button", {
+        name: "Low",
+        description: "Model's default",
+      }),
+    ).toBeTruthy();
   });
 
   it("is saved on the thread, and back to the model's default", async () => {
@@ -206,14 +226,15 @@ describe("thinking level per conversation (KOBE-260)", () => {
     must(fake.threads.get(t)).model = "glm";
     openApp(fake, t);
     const user = userEvent.setup();
-    await user.selectOptions(await thinkingPicker(), "off");
+    await user.click(await pill("Off"));
     await waitFor(() => expect(fake.threads.get(t)?.thinking_level).toBe("off"));
     expect(chatRequests(fake, "PATCH").at(-1)).toMatchObject({
       path: `/v1/threads/${t}`,
       body: { thinking_level: "off" },
       team: fake.teamId,
     });
-    await user.selectOptions(await thinkingPicker(), "");
+    await waitFor(async () => expect(await pressed()).toEqual(["Off"]));
+    await user.click(await pill("Low"));
     await waitFor(() => expect(fake.threads.get(t)?.thinking_level).toBeNull());
   });
 
@@ -221,7 +242,7 @@ describe("thinking level per conversation (KOBE-260)", () => {
     openApp(fake);
     const user = userEvent.setup();
     await user.selectOptions(await picker(), "glm");
-    await user.selectOptions(await thinkingPicker(), "medium");
+    await user.click(await pill("Medium"));
     await user.type(await composer(), "Think hard{Enter}");
     await waitFor(() => expect(fake.threads.size).toBe(1));
     expect(chatRequests(fake, "POST")[0]).toMatchObject({
@@ -230,10 +251,73 @@ describe("thinking level per conversation (KOBE-260)", () => {
     });
   });
 
+  it("KOBE-557: the latest run's reasoning against its level's budget, ≈ when estimated", async () => {
+    Object.assign(must(fake.teamModels[1]), {
+      thinking_in_team: {
+        control: "reasoning_effort",
+        default: "low",
+        levels: ["off", "low", "medium"],
+      },
+    });
+    const t = fake.addThread("Spent");
+    Object.assign(must(fake.threads.get(t)), { model: "glm", thinking_level: "low" });
+    fake.threadUsage.set(t, [
+      {
+        ...RUN_USAGE,
+        run_id: "r-new",
+        thinking_level: "medium",
+        reasoning_tokens: 1500,
+        reasoning_estimated: true,
+      },
+      {
+        ...RUN_USAGE,
+        run_id: "r-old",
+        thinking_level: "low",
+        reasoning_tokens: 100,
+        reasoning_estimated: false,
+      },
+    ]);
+    fake.threadLatestCall.set(t, {
+      run_id: "r-new",
+      at: "2026-11-07T10:00:00Z",
+      model: "ollama/glm",
+      input_tokens: 10,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+    });
+    openApp(fake, t);
+    const bar = await within(await thinkingPicker()).findByRole("progressbar");
+    // The run ran at medium (8k), though the pills now ask for low.
+    expect(bar.getAttribute("aria-valuetext")).toBe("about 1.5k of 8k thinking tokens (estimated)");
+    expect(await pressed()).toEqual(["Low"]);
+  });
+
+  it("KOBE-557: no readout while the model's control is unknown (older server)", async () => {
+    const t = fake.addThread("Unknown");
+    Object.assign(must(fake.threads.get(t)), { model: "glm" });
+    fake.threadUsage.set(t, [
+      { ...RUN_USAGE, run_id: "r1", thinking_level: "low", reasoning_tokens: 900 },
+    ]);
+    fake.threadLatestCall.set(t, {
+      run_id: "r1",
+      at: "2026-11-07T10:00:00Z",
+      model: "ollama/glm",
+      input_tokens: 10,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+    });
+    openApp(fake, t);
+    await thinkingPicker();
+    await waitFor(() =>
+      expect(chatRequests(fake, "GET").some((r) => r.path.endsWith("/usage"))).toBe(true),
+    );
+    expect(within(await thinkingPicker()).queryByRole("progressbar")).toBeNull();
+  });
+
   it("shows a level the team has since lowered as what runs get", async () => {
     const t = fake.addThread("Lowered");
     Object.assign(must(fake.threads.get(t)), { model: "glm", thinking_level: "high" });
     openApp(fake, t);
-    await waitFor(async () => expect((await thinkingPicker()).value).toBe("medium"));
+    await waitFor(async () => expect(await pressed()).toEqual(["Medium"]));
   });
 });

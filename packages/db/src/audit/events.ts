@@ -416,7 +416,15 @@ export const AUDIT_EVENTS = {
    * asset's hex sha256, or `default` when the setting was cleared or reset; never the bytes.
    */
   "site.branding.updated": event("site", {
-    setting: z.enum(["app_name", "show_name", "theme", "logo", "logo_dark", "favicon"]),
+    setting: z.enum([
+      "app_name",
+      "show_name",
+      "theme",
+      "logo",
+      "logo_dark",
+      "favicon",
+      "logo_theme_color",
+    ]),
     value: z.union([z.string().regex(/^[0-9a-f]{64}$/), label]),
   }),
 
@@ -1747,6 +1755,22 @@ export const AUDIT_EVENTS = {
     fixtures: count,
     fromConversation: z.boolean(),
     requestId: id.optional(),
+  }),
+  /**
+   * Kobe drafted a kobe.skill.yaml for a version without one, with the member's chosen model,
+   * into a new Workbench draft of theirs (KOBE-564); `from` says whether the model's reply was
+   * used or SKILL.md's description alone. Metadata only: never the manifest's text.
+   */
+  "skill.manifest.generated": event("team", {
+    draftId: id,
+    /** The version forked (the Promote panel); absent when written into an open draft. */
+    skillId: id.optional(),
+    scope: z.enum(["team", "personal"]).optional(),
+    version: version.optional(),
+    semver: z.string().max(32).optional(),
+    /** The catalog alias that answered. */
+    model: z.string().max(128),
+    from: z.enum(["model", "seed"]),
   }),
   /** A version was submitted to the Site Registry for review (site log). */
   "registry.submitted": event("site", {

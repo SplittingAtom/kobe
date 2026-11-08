@@ -3,6 +3,11 @@
  * the promotion, and the team's queue of Builders' requests. Responses arrive camelized.
  */
 import { apiRequest, type ApiResult } from "../api/client";
+import {
+  manifestChoiceJson,
+  type ManifestDraftChoice,
+  type ManifestWritten,
+} from "./manifest-choice";
 
 export interface PromoteSource {
   readonly scope: "team" | "personal";
@@ -59,6 +64,32 @@ export function promoteVersion(
   source: PromoteSource,
 ): Promise<ApiResult<PromoteOutcome>> {
   return apiRequest("/v1/skills/promotions", { method: "POST", json: source, teamId });
+}
+
+export {
+  MANIFEST_LICENSES,
+  type ManifestDraftChoice,
+  type ManifestLicense,
+} from "./manifest-choice";
+
+export interface ManifestDraft extends ManifestWritten {
+  readonly draft: { readonly id: string; readonly name: string; readonly rev: number };
+}
+
+/**
+ * Create kobe.skill.yaml for a version without one (KOBE-564): the chosen model drafts it, and
+ * the version is forked into a Workbench draft of the caller's with the file in place.
+ */
+export function createManifestDraft(
+  teamId: string,
+  source: PromoteSource,
+  choice: ManifestDraftChoice,
+): Promise<ApiResult<ManifestDraft>> {
+  return apiRequest("/v1/skills/promotions/manifest", {
+    method: "POST",
+    json: { ...source, ...manifestChoiceJson(choice) },
+    teamId,
+  });
 }
 
 const QUEUE = "/v1/team/skill-promotions";
