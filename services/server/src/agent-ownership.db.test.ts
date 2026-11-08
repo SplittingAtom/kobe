@@ -19,7 +19,7 @@ const ANY = { "if-match": "*" };
 
 type Person = "sam" | "alice" | "bob" | "carol" | "dave";
 // Finance: alice team_admin, bob builder, carol member, sam member (and site admin).
-// Marketing: dave builder, alice builder.
+// Marketing: dave builder, alice team_admin.
 const PEOPLE: readonly Person[] = ["sam", "alice", "bob", "carol", "dave"];
 const ids = {} as Record<Person, string>;
 const as = {} as Record<Person, TestBrowser>;
@@ -68,7 +68,7 @@ beforeAll(async () => {
     [finance, "carol", "member"],
     [finance, "sam", "member"],
     [marketing, "dave", "builder"],
-    [marketing, "alice", "builder"],
+    [marketing, "alice", "team_admin"],
   ];
   for (const [team, who, role] of members) {
     await sql(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, $3)`, [
@@ -422,13 +422,18 @@ describe("adopt (AR10, ac-3)", () => {
     });
     expect(res.json.entry).toMatchObject({ state: "removed", decidedBy: ids.alice });
     const copy = await as.alice.get(`/v1/agents/${res.json.agent.id}`);
+    // Published as v1 in the same transaction: the team keeps running it.
+    expect(res.json.agent.currentVersion).toBe(1);
     expect(copy.json.agent).toMatchObject({
       scope: "team",
       ownerUserId: ids.alice,
       prompt: "Second.",
-      currentVersion: null,
+      currentVersion: 1,
       forkedFrom: { agentId: agent, version: 2 },
     });
+    expect((await audited("agent.published", res.json.agent.id))[0]?.team_id).toBe(finance);
+    const runnable = await as.carol.get("/v1/agents/runnable");
+    expect(runnable.json.agents.map((a: { id: string }) => a.id)).toContain(res.json.agent.id);
     expect(await audited("agent.adopted", res.json.agent.id)).toEqual([
       {
         team_id: finance,
@@ -443,16 +448,20 @@ describe("adopt (AR10, ac-3)", () => {
       },
     ]);
     expect((await audited("agent.roster.removed", agent))[0]?.team_id).toBe(finance);
-    // Gone from the roster: a second adopt finds no entry.
-    expect((await as.alice.post(path)).json.code).toBe("roster_entry_not_found");
+    // Adopting twice: the entry is removed now (409).
+    const twice = await as.alice.post(path);
+    expect(twice.status).toBe(409);
+    expect(twice.json.code).toBe("invalid_transition");
   });
 
   it("a site admin copies a site entry into a gallery agent without a repository key", async () => {
     const agent = await personal("bob", "Bob Site Adopt");
     expect((await assign("bob", agent, "site")).status).toBe(202);
     const path = `/v1/site/agent-roster/${agent}/adopt`;
-    // A proposal is not adopted.
-    expect((await as.sam.post(path)).json.code).toBe("roster_entry_not_found");
+    // A proposal is not adopted (409).
+    const proposed = await as.sam.post(path);
+    expect(proposed.status).toBe(409);
+    expect(proposed.json.code).toBe("invalid_transition");
     expect((await as.sam.put(`/v1/site/agent-roster/${agent}`, { state: "active" })).status).toBe(
       200,
     );
@@ -462,6 +471,7 @@ describe("adopt (AR10, ac-3)", () => {
     expect(res.json.agent).toMatchObject({
       scope: "gallery",
       slug: "bob-site-adopt",
+      currentVersion: 1,
       forkedFrom: { agentId: agent, version: 1 },
     });
     expect(res.json.entry).toMatchObject({ target: "site", state: "removed" });
@@ -481,5 +491,109 @@ describe("adopt (AR10, ac-3)", () => {
       team_id: null,
       target: { scope: "gallery", roster: "site", fromAgentId: agent },
     });
+  });
+});
+
+describe("refusals (review of #485)", () => {
+  it("another team's admin can't adopt this team's entry; a removed entry is 409", async () => {
+    const agent = await personal("bob", "Bob Walled Adopt");
+    expect((await assign("bob", agent, "team")).status).toBe(201);
+    const path = `/v1/team/agent-roster/${agent}/adopt`;
+    expect((await as.dave.post(path)).status).toBe(403);
+    await activate("alice", marketing);
+    try {
+      const other = await as.alice.post(path);
+      expect(other.status).toBe(404);
+      expect(other.json.code).toBe("roster_entry_not_found");
+    } finally {
+      await activate("alice", finance);
+    }
+    expect((await as.bob.request("DELETE", `/v1/agents/${agent}/assignments/team`)).status).toBe(
+      200,
+    );
+    const removed = await as.alice.post(path);
+    expect(removed.status).toBe(409);
+    expect(removed.json.code).toBe("invalid_transition");
+  });
+
+  it("never adopts a bound agent into the site", async () => {
+    const source = await personal("bob", "Bob Bound Adopt Source");
+    expect((await assign("bob", source, "team")).status).toBe(201);
+    const bound = (await fork("alice", source)).json.agent.id as string;
+    await publish_("alice", bound);
+    // The API never puts a bound agent on the site roster; adopt refuses even if one got there.
+    await sql(
+      `INSERT INTO site_agent_roster (site_agent_id, state, assigned_by) VALUES ($1, 'active', $2)`,
+      [bound, ids.alice],
+    );
+    const res = await as.sam.post(`/v1/site/agent-roster/${bound}/adopt`);
+    expect(res.status).toBe(422);
+    expect(res.json.code).toBe("agent_bound_to_team");
+  });
+
+  it("refuses an accept once the recipient left the team, or once the agent is archived", async () => {
+    const agent = await personal("bob", "Bob Leaver");
+    expect((await as.bob.post(`/v1/agents/${agent}/transfer`, { toUserId: ids.sam })).status).toBe(
+      201,
+    );
+    // Sam moves to Marketing and leaves Finance, the offer's team.
+    await sql(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member')`, [
+      marketing,
+      ids.sam,
+    ]);
+    await activate("sam", marketing);
+    await sql(`DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`, [finance, ids.sam]);
+    try {
+      const left = await as.sam.post(`/v1/agents/${agent}/transfer/accept`);
+      expect(left.status, JSON.stringify(left.json)).toBe(422);
+      expect(left.json.code).toBe("transfer_recipient_invalid");
+      const [owner] = await sql<{ owner_user_id: string }>(
+        `SELECT owner_user_id FROM site_agents WHERE id = $1`,
+        [agent],
+      );
+      expect(owner?.owner_user_id).toBe(ids.bob);
+    } finally {
+      await sql(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member')`, [
+        finance,
+        ids.sam,
+      ]);
+      await activate("sam", finance);
+      await sql(`DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`, [
+        marketing,
+        ids.sam,
+      ]);
+    }
+    const archived = await personal("bob", "Bob Archived");
+    expect(
+      (await as.bob.post(`/v1/agents/${archived}/transfer`, { toUserId: ids.carol })).status,
+    ).toBe(201);
+    expect((await as.bob.request("DELETE", `/v1/agents/${archived}`)).status).toBe(200);
+    const accept = await as.carol.post(`/v1/agents/${archived}/transfer/accept`);
+    expect(accept.status).toBe(409);
+    expect(accept.json.code).toBe("agent_archived");
+  });
+
+  it("rate-limits transfer and adopt under the roster key (429)", async () => {
+    const agent = await personal("bob", "Bob Rate");
+    expect((await assign("bob", agent, "team")).status).toBe(201);
+    const exhaust = (who: Person) =>
+      sql(
+        `INSERT INTO rate_limits (key, count, last_request) VALUES ($1, 60, $2)
+           ON CONFLICT (key) DO UPDATE SET count = 60, last_request = $2`,
+        [`kobe:agent-roster:${ids[who]}`, Date.now()],
+      );
+    const reset = (who: Person) =>
+      sql(`DELETE FROM rate_limits WHERE key = $1`, [`kobe:agent-roster:${ids[who]}`]);
+    await exhaust("bob");
+    await exhaust("alice");
+    try {
+      const transfer = await as.bob.post(`/v1/agents/${agent}/transfer`, { toUserId: ids.carol });
+      expect(transfer.status).toBe(429);
+      const adopt = await as.alice.post(`/v1/team/agent-roster/${agent}/adopt`);
+      expect(adopt.status).toBe(429);
+    } finally {
+      await reset("bob");
+      await reset("alice");
+    }
   });
 });

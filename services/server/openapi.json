@@ -7557,7 +7557,7 @@
       "post": {
         "operationId": "adoptTeamAgentRosterEntry",
         "summary": "Adopt an assigned entry's agent into a team-owned agent (team admins, AR10)",
-        "description": "Copies the agent's current published version into a new agent as its draft, with fork provenance, and removes the entry (audited `agent.adopted` and `agent.roster.removed`). Allowed whether or not the owner is still a member. Publishing the copy is a separate step.",
+        "description": "Copies the agent's current published version into a new agent, published as its v1 in the same transaction, with fork provenance, and removes the entry (audited `agent.adopted` and `agent.roster.removed`). Allowed whether or not the owner is still a member. A bound agent is adopted only into its own team.",
         "parameters": [
           {
             "name": "agentId",
@@ -7621,7 +7621,7 @@
             }
           },
           "404": {
-            "description": "`roster_entry_not_found`: no assigned entry on this roster.",
+            "description": "`roster_entry_not_found`: no entry on this roster.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7631,7 +7631,7 @@
             }
           },
           "409": {
-            "description": "`slug_taken` or `limit_reached` (the roster owner's agent cap).",
+            "description": "`invalid_transition` (a proposal, or removed: adopted already), `slug_taken` or `limit_reached` (the roster owner's agent cap).",
             "content": {
               "application/json": {
                 "schema": {
@@ -7641,7 +7641,7 @@
             }
           },
           "422": {
-            "description": "`agent_not_published`.",
+            "description": "`agent_not_published` or `agent_bound_to_team`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7667,7 +7667,7 @@
       "post": {
         "operationId": "adoptSiteAgentRosterEntry",
         "summary": "Adopt an assigned entry's agent into a site-owned gallery agent without a repository key (site admins, AR10)",
-        "description": "Copies the agent's current published version into a new agent as its draft, with fork provenance, and removes the entry (audited `agent.adopted` and `agent.roster.removed`). Allowed whether or not the owner is still a member. Publishing the copy is a separate step.",
+        "description": "Copies the agent's current published version into a new agent, published as its v1 in the same transaction, with fork provenance, and removes the entry (audited `agent.adopted` and `agent.roster.removed`). Allowed whether or not the owner is still a member. A bound agent is adopted only into its own team.",
         "parameters": [
           {
             "name": "agentId",
@@ -7721,7 +7721,7 @@
             }
           },
           "404": {
-            "description": "`roster_entry_not_found`: no assigned entry on this roster.",
+            "description": "`roster_entry_not_found`: no entry on this roster.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7731,7 +7731,7 @@
             }
           },
           "409": {
-            "description": "`slug_taken` or `limit_reached` (the roster owner's agent cap).",
+            "description": "`invalid_transition` (a proposal, or removed: adopted already), `slug_taken` or `limit_reached` (the roster owner's agent cap).",
             "content": {
               "application/json": {
                 "schema": {
@@ -7741,7 +7741,7 @@
             }
           },
           "422": {
-            "description": "`agent_not_published`.",
+            "description": "`agent_not_published` or `agent_bound_to_team`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -16065,6 +16065,11 @@
               "slug": {
                 "type": "string"
               },
+              "currentVersion": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
               "forkedFrom": {
                 "type": "object",
                 "properties": {
@@ -16089,7 +16094,7 @@
                 "additionalProperties": false
               }
             },
-            "required": ["id", "scope", "slug", "forkedFrom"],
+            "required": ["id", "scope", "slug", "currentVersion", "forkedFrom"],
             "additionalProperties": false
           },
           "entry": {

@@ -217,18 +217,23 @@ const adopt = (who: string, operationId: string, into: string, headers: unknown[
     operationId,
     summary: `Adopt an assigned entry's agent into ${into} (${who}, AR10)`,
     description:
-      "Copies the agent's current published version into a new agent as its draft, with fork " +
-      "provenance, and removes the entry (audited `agent.adopted` and `agent.roster.removed`). " +
-      "Allowed whether or not the owner is still a member. Publishing the copy is a separate step.",
+      "Copies the agent's current published version into a new agent, published as its v1 in " +
+      "the same transaction, with fork provenance, and removes the entry (audited " +
+      "`agent.adopted` and `agent.roster.removed`). Allowed whether or not the owner is still a " +
+      "member. A bound agent is adopted only into its own team.",
     parameters: [uuidPath("agentId"), ...headers],
     responses: {
       "201": json("AgentAdoptResult", "The new agent and the removed entry."),
       "400": json("Error", "`invalid_request`."),
       "401": json("Error", "`unauthenticated`: no session."),
       "403": json("Error", `\`forbidden\`: not ${who.replace(/s$/, "")}.`),
-      "404": json("Error", "`roster_entry_not_found`: no assigned entry on this roster."),
-      "409": json("Error", "`slug_taken` or `limit_reached` (the roster owner's agent cap)."),
-      "422": json("Error", "`agent_not_published`."),
+      "404": json("Error", "`roster_entry_not_found`: no entry on this roster."),
+      "409": json(
+        "Error",
+        "`invalid_transition` (a proposal, or removed: adopted already), `slug_taken` or " +
+          "`limit_reached` (the roster owner's agent cap).",
+      ),
+      "422": json("Error", "`agent_not_published` or `agent_bound_to_team`."),
       ...RATE,
     },
   },

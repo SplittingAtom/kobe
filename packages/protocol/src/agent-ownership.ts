@@ -71,13 +71,15 @@ export type AgentTransferAccepted = z.infer<typeof agentTransferAcceptedSchema>;
 
 /**
  * Adopted: a new team-owned (team) or site-owned gallery (site) agent holding the entry's agent's
- * current published version as its draft, with fork provenance; the entry is removed.
+ * current published version, published as its v1 (`currentVersion`), with fork provenance; the
+ * entry is removed.
  */
 export const agentAdoptResponseSchema = z.strictObject({
   agent: z.strictObject({
     id: uuidSchema,
     scope: z.enum(["team", "gallery"]),
     slug: z.string(),
+    currentVersion: z.number().int().positive(),
     forkedFrom: z.strictObject({ agentId: uuidSchema, version: z.number().int().positive() }),
   }),
   entry: agentRosterEntrySchema,

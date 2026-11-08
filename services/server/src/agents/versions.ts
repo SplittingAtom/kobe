@@ -376,6 +376,16 @@ const ref = (location: AgentLocation, agent: AgentRecord) => ({
   slug: agent.slug,
 });
 
+export interface PublishDraftInput {
+  readonly publishedBy: string | null;
+  /** Audit actor when there is no signed-in request (the gallery seeder, KOBE-87). */
+  readonly actor?: AuditActor;
+  readonly expectedRevision: number | undefined;
+  readonly limits?: VersionLimits;
+  /** Runs in the same transaction after a successful publish (KOBE-494: the Customized mark). */
+  readonly afterWrite?: (tx: KobeTx) => Promise<void>;
+}
+
 /**
  * Publishes the agent's draft as its next version (D19). With `expectedRevision`, only if the
  * draft is still that revision (the publisher's If-Match): nobody publishes changes they haven't
@@ -385,50 +395,53 @@ export async function publishAgent(
   db: KobeDb,
   location: AgentLocation,
   id: string,
-  input: {
-    readonly publishedBy: string | null;
-    /** Audit actor when there is no signed-in request (the gallery seeder, KOBE-87). */
-    readonly actor?: AuditActor;
-    readonly expectedRevision: number | undefined;
-    readonly limits?: VersionLimits;
-    /** Runs in the same transaction after a successful publish (KOBE-494: the Customized mark). */
-    readonly afterWrite?: (tx: KobeTx) => Promise<void>;
-  },
+  input: PublishDraftInput,
 ): Promise<Result<Published, PublishError>> {
-  return inLocation(db, location, async (tx) => {
-    const agent = await lockAgent(tx, location, id);
-    if (!agent) return { ok: false, error: "not_found" };
-    if (agent.archivedAt) return { ok: false, error: "archived" };
-    if (input.expectedRevision !== undefined && agent.revision !== input.expectedRevision) {
-      return { ok: false, error: "revision_mismatch" };
-    }
-    const draft = validateAgentDefinition({
-      frontmatter: agent.frontmatter,
-      prompt: agent.prompt,
-    });
-    if (!draft.ok) return { ok: false, error: "invalid_draft" };
-    const inserted = await insertVersion(tx, location, agent, {
-      limits: input.limits ?? DEFAULT_VERSION_LIMITS,
-      definition: draft.definition,
-      publishedBy: input.publishedBy,
-      draftRevision: agent.revision,
-      republishedFrom: null,
-    });
-    if (!inserted.ok) return inserted;
-    const published = inserted.value;
-    await recordAudit(tx, {
-      ...(input.actor ? { actor: input.actor } : {}),
-      action: "agent.published",
-      teamId: auditTeam(location),
-      target: {
-        ...ref(location, agent),
-        version: published.version.version,
-        draftRevision: agent.revision,
-      },
-    });
-    await input.afterWrite?.(tx);
-    return { ok: true, value: published };
+  return inLocation(db, location, (tx) => publishDraftIn(tx, location, id, input));
+}
+
+/**
+ * {@link publishAgent} inside the caller's transaction (KOBE-568: adopt creates the copy and
+ * publishes it as v1 atomically). `tx` must be the location's transaction.
+ */
+export async function publishDraftIn(
+  tx: KobeTx,
+  location: AgentLocation,
+  id: string,
+  input: PublishDraftInput,
+): Promise<Result<Published, PublishError>> {
+  const agent = await lockAgent(tx, location, id);
+  if (!agent) return { ok: false, error: "not_found" };
+  if (agent.archivedAt) return { ok: false, error: "archived" };
+  if (input.expectedRevision !== undefined && agent.revision !== input.expectedRevision) {
+    return { ok: false, error: "revision_mismatch" };
+  }
+  const draft = validateAgentDefinition({
+    frontmatter: agent.frontmatter,
+    prompt: agent.prompt,
   });
+  if (!draft.ok) return { ok: false, error: "invalid_draft" };
+  const inserted = await insertVersion(tx, location, agent, {
+    limits: input.limits ?? DEFAULT_VERSION_LIMITS,
+    definition: draft.definition,
+    publishedBy: input.publishedBy,
+    draftRevision: agent.revision,
+    republishedFrom: null,
+  });
+  if (!inserted.ok) return inserted;
+  const published = inserted.value;
+  await recordAudit(tx, {
+    ...(input.actor ? { actor: input.actor } : {}),
+    action: "agent.published",
+    teamId: auditTeam(location),
+    target: {
+      ...ref(location, agent),
+      version: published.version.version,
+      draftRevision: agent.revision,
+    },
+  });
+  await input.afterWrite?.(tx);
+  return { ok: true, value: published };
 }
 
 /**

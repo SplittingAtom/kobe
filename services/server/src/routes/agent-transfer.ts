@@ -70,6 +70,8 @@ export function mountAgentTransferRoutes(
 
 const ADOPT_ERRORS: Record<AdoptError, AgentRosterErrorCode> = {
   roster_entry_not_found: "roster_entry_not_found",
+  invalid_transition: "invalid_transition",
+  agent_bound_to_team: "agent_bound_to_team",
   agent_not_published: "agent_not_published",
   invalid_agent: "invalid_request",
   slug_taken: "slug_taken",
@@ -77,6 +79,8 @@ const ADOPT_ERRORS: Record<AdoptError, AgentRosterErrorCode> = {
 };
 
 const ADOPT_MESSAGES: Partial<Record<AdoptError, string>> = {
+  invalid_transition:
+    "Only an assigned entry is adopted (not a proposal, not one already removed).",
   agent_not_published: "This agent has no published version to adopt.",
   invalid_agent: "The published version is no longer a valid agent definition.",
   slug_taken: "An agent with that slug already exists here.",
@@ -102,6 +106,7 @@ async function adopt(
         id: agent.id,
         scope: agent.scope,
         slug: agent.slug,
+        currentVersion: agent.currentVersion,
         forkedFrom: { agentId: id.data, version: agent.forkedFromVersion },
       },
       entry: entryView(entry),

@@ -45,6 +45,7 @@ export type TransferError =
   | "transfer_not_found"
   | "transfer_recipient_invalid"
   | "agent_bound_to_team"
+  | "agent_archived"
   | "slug_taken"
   | "limit_reached";
 export type TransferResult<T> = { ok: true; value: T } | { ok: false; error: TransferError };
@@ -55,6 +56,7 @@ interface OwnedAgent {
   readonly slug: string;
   readonly ownerUserId: string;
   readonly boundTeamId: string | null;
+  readonly archivedAt: Date | null;
 }
 
 /** The personal agent, locked for the rest of `tx` (`FOR UPDATE`: ownership is changing). */
@@ -65,6 +67,7 @@ async function lockOwned(tx: KobeTx, agentId: string): Promise<OwnedAgent | null
       slug: siteAgents.slug,
       ownerUserId: siteAgents.ownerUserId,
       boundTeamId: siteAgents.boundTeamId,
+      archivedAt: siteAgents.archivedAt,
     })
     .from(siteAgents)
     .where(and(eq(siteAgents.id, agentId), eq(siteAgents.scope, "personal")))
@@ -137,6 +140,8 @@ export async function requestTransfer(
   return withTeam(db, actor.teamId, async (tx) => {
     const agent = await lockOwned(tx, agentId);
     if (!agent || agent.ownerUserId !== actor.userId) return fail("agent_not_found");
+    // An archived agent is retired (KOBE-46): unarchive it before handing it over.
+    if (agent.archivedAt !== null) return fail("agent_archived");
     if (agent.boundTeamId !== null && agent.boundTeamId !== actor.teamId) {
       return fail("agent_bound_to_team");
     }
@@ -226,6 +231,7 @@ export async function acceptTransfer(
   agentId: string,
 ): Promise<TransferResult<AgentTransfer>> {
   return withOffer(db, agentId, userId, "recipient", async (tx, agent, offer) => {
+    if (agent.archivedAt !== null) return fail("agent_archived");
     if (agent.boundTeamId !== null && agent.boundTeamId !== offer.teamId) {
       return fail("agent_bound_to_team");
     }

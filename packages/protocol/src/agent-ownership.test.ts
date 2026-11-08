@@ -38,7 +38,13 @@ describe("fork, transfer and adopt contract (KOBE-568)", () => {
 
   it("answers an adopt with the new agent's provenance and the removed entry", () => {
     const parsed = agentAdoptResponseSchema.safeParse({
-      agent: { id: ID, scope: "gallery", slug: "x", forkedFrom: { agentId: ID, version: 2 } },
+      agent: {
+        id: ID,
+        scope: "gallery",
+        slug: "x",
+        currentVersion: 1,
+        forkedFrom: { agentId: ID, version: 2 },
+      },
       entry: {
         agentId: ID,
         target: "site",

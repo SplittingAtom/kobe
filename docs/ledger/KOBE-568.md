@@ -47,15 +47,16 @@ exports `lockRoster`, `lockPersonalAgent`, `writeEntry`, `audit` (no behaviour c
   then moves `owner_user_id` only: entries keep their rows (and `assignedBy`), threads their pins.
   All four writes count against `agent-roster:<userId>`. Audit `agent.transfer.requested`,
   `.cancelled` (`by`), `agent.transferred`, all with the offer's team.
-- **Adopt:** allowed whether or not the owner is present (admins may adopt; AR10 only says
-  "can"). Copies the agent's **current** published version (not the entry's pin) as the new agent's
-  **draft** with fork provenance; it is not auto-published, so the team eval gate (KOBE-93) and
-  the gallery console's publish stay the only publish paths. The roster runs nothing of it until
-  then: say if adopt should publish v1 directly. Site copy: `scope = gallery`, no `gallery_key`; the
+- **Adopt (revised after review):** allowed whether or not the owner is present. Copies the agent's
+  **current** published version (not the entry's pin) into the new agent and publishes it as v1 in
+  the same transaction (`publishDraftIn`, extracted from `publishAgent`), so the roster never loses
+  the running agent (AR10); a failed publish rolls the adopt back. Refused: no entry 404; a proposal
+  or a removed entry (adopted already) `409 invalid_transition`; a bound agent into the site or
+  another team `422 agent_bound_to_team`. Site copy: `scope = gallery`, no `gallery_key`; the
   `customized_*` columns stay null (their CHECK requires a repository key), which already means
-  "the seed never touches it". Proposals and removed entries are not adoptable (404). Audit
-  `agent.roster.removed` + `agent.adopted` (new agent id, `fromAgentId`, `fromVersion`);
-  `agent.created` with `source: adopt`.
+  "the seed never touches it". Audit `agent.roster.removed` + `agent.published` + `agent.adopted`
+  (new agent id, `fromAgentId`, `fromVersion`); `agent.created` with `source: adopt`.
+- **Transfer of an archived agent:** offer and accept refuse it (`409 agent_archived`).
 
 ## Open for 571/572
 
@@ -63,15 +64,15 @@ exports `lockRoster`, `lockPersonalAgent`, `writeEntry`, `audit` (no behaviour c
   `scope: "team"` and now gets a personal copy plus the warning). Bound note from the response's
   `boundTeamId`. Transfer UI: `GET /v1/agents/transfers` for the inbox, `transfer` on the agent read;
   adopt buttons on Team/Site rows for admins (no `actions.adopt` on rows yet: render for
-  `remove`-capable admins on assigned entries). After adopt, open the copy's editor to publish.
+  `remove`-capable admins on assigned entries). The copy is already published (v1).
 - **572 (browser):** "fork bound": fork a team-assigned agent as a builder → Personal, assign to
   site → 422. "owner leaves": adopt into team, publish, run. `site-gallery-edit.spec.ts` forks and
   deletes; its fork is now personal (delete still works).
 
 ## Open questions (for Chris or the coordinator)
 
-- Transfer offers live in `site_settings` (no migration). OK, or a dedicated table later?
-- Adopt leaves the copy unpublished (eval gate stays in charge). OK, or publish v1 on adopt?
+- Review decision: pending transfers move to a team table `agent_transfers` (own migration PR,
+  `kobe-568-transfers-table`, after #484); `roster-transfer.ts` is reworked onto it afterwards.
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -84,5 +85,7 @@ exports `lockRoster`, `lockPersonalAgent`, `writeEntry`, `audit` (no behaviour c
   row and thread pin kept, new owner withdraws, decline/cancel, slug clash 409, bound → other team
   422, audit ids only).
 - ac-3: `agent-ownership.db.test.ts` "adopt" (team admin only, 403 builder/member/other team;
-  published version copied with provenance; entry removed; site adopt → gallery without key; audit).
+  published version copied and published as v1, runnable; entry removed; site adopt → gallery
+  without key; audit) and "refusals" (other team's admin 404, adopt twice / proposal / removed 409,
+  bound into site 422, recipient left the team 422, archived 409, 429 on transfer and adopt).
 - Contract/OpenAPI: `packages/protocol/src/agent-ownership.test.ts`, `src/openapi/document.test.ts`.
