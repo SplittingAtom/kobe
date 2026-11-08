@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withTeam } from "@kobe/db";
-import { projectFileSchema } from "@kobe/protocol";
+import { ARTIFACT_CONTENT_MAX_BYTES, projectFileSchema } from "@kobe/protocol";
 import { createApp } from "./app.js";
 import {
   EventStreamFixture,
@@ -19,7 +19,7 @@ import { listLive } from "./workspace-sync/store.js";
  * version or the caller's own synced workspace file into a project from the bytes the server
  * stored. Rights (`canAddToProject`, Chris 2026-11-08 "editors are builders"): team admins, project
  * owners, builder project members, and the content's owner when a project member. A clash is 409
- * `file_exists`; the audit row carries ids only; every project member gets the file read-only under
+ * `already_exists`; the audit row carries ids only; every project member gets the file read-only under
  * `projects/<slug>/`.
  */
 const fx = new EventStreamFixture();
@@ -218,13 +218,13 @@ describe("Add to project: artifacts (KOBE-585)", () => {
     expect(objects.objects.get(must(rows[0], "row").blob_ref)?.toString()).toBe("# v1");
   });
 
-  it("answers 409 file_exists on a clash and takes another name", async () => {
+  it("answers 409 already_exists on a clash and takes another name", async () => {
     const w = await world();
     const id = await artifact(w, "Plan", ["# p"]);
     expect((await importInto(w.as.alice, w.project.id, fromArtifact(id, 1))).status).toBe(201);
     const again = await importInto(w.as.alice, w.project.id, fromArtifact(id, 1));
     expect(again.status).toBe(409);
-    expect(again.json).toMatchObject({ code: "file_exists" });
+    expect(again.json).toMatchObject({ code: "already_exists" });
     const copy = await importInto(
       w.as.alice,
       w.project.id,
@@ -296,7 +296,20 @@ describe("Add to project: artifacts (KOBE-585)", () => {
     expect(await auditRows(w.team)).toEqual([]);
   });
 
-  it("refuses an archived project", async () => {
+  it("answers 404 for a purged version and 413 for one over the artifact cap", async () => {
+    const w = await world();
+    const gone = await artifact(w, "Gone", ["# g"]);
+    objects.objects.delete(`${PREFIX}teams/${w.team}/threads/${w.threadId}/artifacts/${gone}/v1`);
+    const missing = await importInto(w.as.alice, w.project.id, fromArtifact(gone, 1));
+    expect(missing.status).toBe(404);
+    const big = await artifact(w, "Big", ["x".repeat(ARTIFACT_CONTENT_MAX_BYTES + 1)]);
+    const large = await importInto(w.as.alice, w.project.id, fromArtifact(big, 1));
+    expect(large.status).toBe(413);
+    expect(large.json).toMatchObject({ code: "file_too_large" });
+    expect(await auditRows(w.team)).toEqual([]);
+  });
+
+  it("refuses an archived project before reading the source", async () => {
     const w = await world();
     const id = await artifact(w, "Late", ["# l"]);
     expect(
@@ -305,6 +318,9 @@ describe("Add to project: artifacts (KOBE-585)", () => {
     const res = await importInto(w.as.alice, w.project.id, fromArtifact(id, 1));
     expect(res.status).toBe(409);
     expect(res.json).toMatchObject({ code: "archived" });
+    // Not even an unknown source is looked at.
+    const unknown = await importInto(w.as.alice, w.project.id, fromArtifact(randomUUID(), 1));
+    expect(unknown.json).toMatchObject({ code: "archived" });
   });
 });
 
@@ -325,13 +341,12 @@ describe("Add to project: workspace files (KOBE-585)", () => {
         fileId: file.id,
         source: "upload",
         sizeBytes: 13,
-        importedFrom: {
-          kind: "workspace_file",
-          pathSha256: createHash("sha256").update(path).digest("hex"),
-        },
+        importedFrom: { kind: "workspace_file" },
       },
     ]);
+    // No reference to the path at all: not the name, not a hash of it.
     expect(JSON.stringify(audits)).not.toContain("findings");
+    expect(JSON.stringify(audits)).not.toContain(createHash("sha256").update(path).digest("hex"));
     // Bob has no such file in his own workspace: not found (never Alice's copy).
     const bob = await importInto(w.as.bob, w.project.id, {
       source: { kind: "workspace_file", path },

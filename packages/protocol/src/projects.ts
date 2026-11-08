@@ -271,7 +271,7 @@ export type ProjectFileImportSource = z.infer<typeof projectFileImportSourceSche
  * `POST /v1/projects/:id/files/import` (KOBE-585) -> 201 {@link projectFileSchema}. The server
  * copies the bytes it stored (never the browser's) under the upload's quotas and name rules;
  * `folder` absent = root, `name` absent = the artifact's `<slug>.<ext>` or the file's name. Rights:
- * {@link canAddToProject}. A same-name file answers 409 `file_exists` (no replace in place).
+ * {@link canAddToProject}. A same-name file answers 409 `already_exists` (no replace in place).
  */
 export const importProjectFileRequestSchema = z.strictObject({
   source: projectFileImportSourceSchema,
@@ -335,7 +335,6 @@ export const PROJECT_ERROR_CODES = [
   "forbidden", // 403
   "slug_taken", // 409
   "already_exists", // 409 (file or member)
-  "file_exists", // 409 Add to project: the project already has a file with that name
   "last_owner", // 409
   "not_in_team", // 422 member user not in the team
   "not_in_project", // 422 thread has no project

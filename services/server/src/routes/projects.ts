@@ -83,7 +83,7 @@ const FILE_ERRORS = {
   storage_failed: [503, "storage_unavailable", "File storage is not available. Try again."],
 } as const satisfies Record<ProjectFileFailure, readonly [number, string, string]>;
 
-/** Add to project (KOBE-585): the refusals before the copy; a clash is `file_exists` there. */
+/** Add to project (KOBE-585): the refusals before the copy; the rest are {@link FILE_ERRORS}. */
 const IMPORT_ERRORS = {
   project_not_found: [404, "not_found", "No project with that id is available to you."],
   source_not_found: [404, "not_found", "No such artifact version or file is available to you."],
@@ -340,12 +340,6 @@ export function projectRoutes(
       body,
     );
     if (!result.ok) {
-      if (result.error === "already_exists") {
-        return c.json(
-          { code: "file_exists", message: "The project already has a file with that name." },
-          409,
-        );
-      }
       if (result.error in IMPORT_ERRORS) {
         const [status, code, message] = IMPORT_ERRORS[result.error as ImportRefusal];
         return c.json({ code, message }, status);

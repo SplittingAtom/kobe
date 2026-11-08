@@ -1,14 +1,16 @@
-import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import { withTeam, type KobeDb, type TeamRole } from "@kobe/db";
 import {
+  artifactFileExtension,
+  artifactFileStem,
+  artifactMimeType,
   canAddToProject,
   projectFileNameSchema,
   type ImportProjectFileRequest,
   type ProjectFile,
 } from "@kobe/protocol";
 import { findVersionBlob } from "../artifacts/repository.js";
-import { artifactExtension, fileStem, readArtifactBytes } from "../artifacts/serve.js";
+import { readArtifactVersion } from "../artifacts/serve.js";
 import { logger } from "../logger.js";
 import type { BlobStore } from "../retention/blobs.js";
 import { viewerProjectIds } from "../threads/references.js";
@@ -27,14 +29,17 @@ import {
 /**
  * Add to project (KOBE-585, workspaces lane WS-2): copies an artifact version or the caller's own
  * synced workspace file into a project as a read-only project file. The bytes are the ones the
- * server stored (the artifact loader of Edit as file; the workspace store's copy of the caller's
- * file, never another member's and never the browser's) and go through {@link uploadProjectFile},
- * so the size cap, the project's file count, the team storage quota, the name rules and the
- * `project.file_added` audit row (ids only, plus `importedFrom`) are the upload's. The file keeps
- * `source: "upload"`: the `project_files_source` CHECK allows no other value without a migration.
+ * server stored (the artifact version from the thread's object tree, as Edit as file reads it; the
+ * workspace store's copy of the caller's file, never another member's and never the browser's)
+ * and go through {@link uploadProjectFile}, so the size cap, the project's file count, the team
+ * storage quota, the name rules and the `project.file_added` audit row (ids only, plus
+ * `importedFrom`: the artifact id and version, or just the kind for a workspace file) are the
+ * upload's. The file keeps `source: "upload"`: the `project_files_source` CHECK allows no other
+ * value without a migration.
  *
- * Order of refusals: the project (404 when the caller can't view it), the source (404 when the
- * caller can't read it), the right ({@link canAddToProject}, 403), then the copy itself.
+ * Order of refusals: the project (404 when the caller can't view it, 409 when archived), the
+ * source (404 when the caller can't read it), the right ({@link canAddToProject}, 403), the name,
+ * then the copy itself. Nothing is read from storage before every check passed.
  */
 export interface ImportDeps extends ProjectFileDeps {
   readonly db: KobeDb;
@@ -60,13 +65,15 @@ export type ImportOutcome =
   | { readonly ok: true; readonly file: ProjectFile }
   | { readonly ok: false; readonly error: ImportRefusal | ProjectFileFailure };
 
+type Opened = Readable | ImportRefusal | "file_too_large";
+
 interface Source {
   readonly contentOwner: boolean;
   readonly defaultName: string;
   readonly declaredMime: string;
   readonly importedFrom: ImportedFrom;
   /** Opens the bytes once every check passed. */
-  open(): Promise<Readable | ImportRefusal>;
+  open(): Promise<Opened>;
 }
 
 const MIME_BY_EXT: Readonly<Record<string, string>> = {
@@ -86,15 +93,13 @@ const MIME_BY_EXT: Readonly<Record<string, string>> = {
   ipynb: "application/json",
 };
 
-/** A declared type from the name (the bytes' signature still wins, `resolveMime`). */
+/** A workspace file's declared type from its name (the bytes' signature still wins, `resolveMime`). */
 export function mimeForName(name: string): string {
   const dot = name.lastIndexOf(".");
   const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
   // Unknown: let the signature decide (a declared text type would win over a zip's, e.g. docx).
   return MIME_BY_EXT[ext] ?? "application/octet-stream";
 }
-
-const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
 async function artifactSource(
   deps: ImportDeps,
@@ -116,25 +121,25 @@ async function artifactSource(
   );
   if (!found) return undefined;
   const { artifact } = found;
-  const name = `${fileStem(artifact.title)}.${artifactExtension(artifact.kind, artifact.language)}`;
+  const ext = artifactFileExtension(artifact.kind, artifact.language);
   return {
     contentOwner: found.access === "owner",
-    defaultName: name,
-    declaredMime: mimeForName(name),
+    defaultName: `${artifactFileStem(artifact.title)}.${ext}`,
+    declaredMime: artifactMimeType(artifact.kind, artifact.language),
     importedFrom: { kind: "artifact", artifactId, version },
     open: async () => {
       const blobs = deps.blobs;
       if (!blobs) return "content_unavailable";
-      const bytes = await readArtifactBytes(
-        blobs,
-        who.teamId,
-        artifact.thread_id,
-        found.blobRef,
-      ).catch((err: unknown) => {
+      let read: Awaited<ReturnType<typeof readArtifactVersion>>;
+      try {
+        read = await readArtifactVersion(blobs, who.teamId, artifact.thread_id, found.blobRef);
+      } catch (err) {
         logger.error({ err, teamId: who.teamId }, "add to project: artifact unreadable");
-        return undefined;
-      });
-      return bytes ? Readable.from([bytes]) : "content_unavailable";
+        return "content_unavailable";
+      }
+      if (read === "missing") return "source_not_found"; // purged, or outside the thread's tree
+      if (read === "too_large") return "file_too_large";
+      return Readable.from([read]);
     },
   };
 }
@@ -156,7 +161,7 @@ async function workspaceSource(
     contentOwner: true,
     defaultName: name,
     declaredMime: mimeForName(name),
-    importedFrom: { kind: "workspace_file", pathSha256: sha256(path) },
+    importedFrom: { kind: "workspace_file" },
     open: async () => {
       const object = await sync.objects.get(blobKey).catch((err: unknown) => {
         logger.error({ err, teamId: who.teamId }, "add to project: workspace file unreadable");
@@ -181,6 +186,8 @@ export async function importProjectFile(
   const viewer = { teamId: who.teamId, userId: who.userId };
   const access = await withTeam(deps.db, who.teamId, (tx) => loadAccess(tx, viewer, projectId));
   if (!access) return { ok: false, error: "project_not_found" };
+  // Checked again under the project lock when the row is inserted.
+  if (access.project.archivedAt !== null) return { ok: false, error: "archived" };
   const { source: wanted } = request;
   const source =
     wanted.kind === "artifact"
@@ -194,7 +201,7 @@ export async function importProjectFile(
   if (!projectFileNameSchema.safeParse(name).success) return { ok: false, error: "invalid_name" };
   const body = await source.open();
   if (typeof body === "string") return { ok: false, error: body };
-  const result = await uploadProjectFile(
+  return uploadProjectFile(
     deps,
     { teamId: who.teamId, projectId: access.project.id, userId: who.userId },
     {
@@ -205,5 +212,4 @@ export async function importProjectFile(
       importedFrom: source.importedFrom,
     },
   );
-  return result;
 }

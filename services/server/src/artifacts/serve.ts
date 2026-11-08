@@ -1,5 +1,9 @@
 import type { Readable } from "node:stream";
-import { ARTIFACT_CONTENT_MAX_BYTES, artifactFileExtension } from "@kobe/protocol";
+import {
+  ARTIFACT_CONTENT_MAX_BYTES,
+  artifactFileExtension,
+  artifactFileStem,
+} from "@kobe/protocol";
 import { threadKey, type BlobStore } from "../retention/blobs.js";
 
 /** Pure helpers of the artifact routes: file names, the iframe document and its headers. */
@@ -7,17 +11,8 @@ import { threadKey, type BlobStore } from "../retention/blobs.js";
 /** File extension of an artifact (export names, download names, Edit as file): shared with the web. */
 export const artifactExtension = artifactFileExtension;
 
-/** `title` as a safe ASCII file stem (the download name and the export's names). */
-export function fileStem(title: string): string {
-  const s = title
-    .normalize("NFKD")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60)
-    .replace(/-+$/g, "");
-  return s === "" ? "artifact" : s;
-}
+/** `title` as a safe ASCII file stem: shared with the web (Add to project names). */
+export const fileStem = artifactFileStem;
 
 /**
  * The frame route's headers (D-6): an opaque origin (CSP `sandbox` without `allow-same-origin`),
@@ -84,22 +79,33 @@ export async function readCappedBody(
 }
 
 /**
- * The version's bytes from the thread's own object tree, capped at the artifact size limit;
- * undefined when the object is missing, outside the tree or too large (nothing is served then).
+ * The version's bytes from the thread's own object tree, capped at the artifact size limit, or why
+ * not: `missing` (no object, or a key outside the thread's tree) or `too_large`. A storage error
+ * throws.
  */
+export async function readArtifactVersion(
+  blobs: BlobStore,
+  teamId: string,
+  threadId: string,
+  key: string,
+): Promise<Buffer | "missing" | "too_large"> {
+  if (!threadKey(blobs.prefix, teamId, threadId, key)) return "missing";
+  const object = await blobs.objects.get(key);
+  if (!object) return "missing";
+  if (object.size > ARTIFACT_CONTENT_MAX_BYTES) {
+    object.body.destroy();
+    return "too_large";
+  }
+  return readCappedBody(object.body, ARTIFACT_CONTENT_MAX_BYTES);
+}
+
+/** {@link readArtifactVersion}, undefined when nothing is served (missing or too large). */
 export async function readArtifactBytes(
   blobs: BlobStore,
   teamId: string,
   threadId: string,
   key: string,
 ): Promise<Buffer | undefined> {
-  if (!threadKey(blobs.prefix, teamId, threadId, key)) return undefined;
-  const object = await blobs.objects.get(key);
-  if (!object) return undefined;
-  if (object.size > ARTIFACT_CONTENT_MAX_BYTES) {
-    object.body.destroy();
-    return undefined;
-  }
-  const bytes = await readCappedBody(object.body, ARTIFACT_CONTENT_MAX_BYTES);
-  return bytes === "too_large" ? undefined : bytes;
+  const read = await readArtifactVersion(blobs, teamId, threadId, key);
+  return typeof read === "string" ? undefined : read;
 }

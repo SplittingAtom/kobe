@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  artifactFileStem,
+  artifactMimeType,
   canAddToProject,
   importProjectFileRequestSchema,
-  projectErrorCodeSchema,
 } from "./index.js";
 
 const ID = "11111111-1111-4111-8111-111111111111";
@@ -55,8 +56,16 @@ describe("importProjectFileRequestSchema", () => {
     for (const body of bad)
       expect(importProjectFileRequestSchema.safeParse(body).success).toBe(false);
   });
+});
 
-  it("names the clash code", () => {
-    expect(projectErrorCodeSchema.parse("file_exists")).toBe("file_exists");
+describe("artifact file names and types (KOBE-585)", () => {
+  it("derives a safe stem and the stored media type from kind and language", () => {
+    expect(artifactFileStem("Q3 Plan: draft!")).toBe("q3-plan-draft");
+    expect(artifactFileStem("!!!")).toBe("artifact");
+    expect(artifactMimeType("markdown", null)).toBe("text/markdown");
+    expect(artifactMimeType("html", null)).toBe("text/html");
+    expect(artifactMimeType("code", "json")).toBe("application/json");
+    expect(artifactMimeType("code", "python")).toBe("text/plain");
+    expect(artifactMimeType("mermaid", null)).toBe("text/plain");
   });
 });

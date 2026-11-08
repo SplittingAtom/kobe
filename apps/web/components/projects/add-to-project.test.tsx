@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   artifactProjectFileName,
+  firstFreeName,
   numberedName,
   projectFolders,
 } from "../../lib/projects/add-to-project";
@@ -97,6 +98,8 @@ describe("Add to project helpers", () => {
     ]);
     expect(artifactProjectFileName("Q3 Plan: draft!", "markdown", null)).toBe("q3-plan-draft.md");
     expect(artifactProjectFileName("!!!", "code", "python")).toBe("artifact.py");
+    expect(firstFreeName("plan.md", "", new Set(["plan.md", "plan-2.md"]))).toBe("plan-3.md");
+    expect(firstFreeName("plan.md", "docs", new Set(["plan-2.md"]))).toBe("plan-2.md");
   });
 });
 
@@ -152,6 +155,11 @@ describe("Add to project on an artifact (KOBE-585)", () => {
       await within(dialog).findByText("Added to Launch as projects/launch/plan-3.md"),
     ).toBeTruthy();
     expect(must(fake.projectFiles.get(projectId))).toContain("plan-3.md");
+    // One request for the copy: the free name came from the project's file list.
+    expect(imports().map((r) => (r.body as { name: string }).name)).toEqual([
+      "plan.md",
+      "plan-3.md",
+    ]);
   });
 
   it("is absent for a shared reader", async () => {

@@ -987,7 +987,7 @@ export class FakeKobe {
     if (method === "POST" && sub === "import") {
       const folder = typeof body?.folder === "string" ? body.folder : "";
       const path = folder === "" ? String(body?.name) : `${folder}/${String(body?.name)}`;
-      if (held.includes(path)) return error(409, "file_exists");
+      if (held.includes(path)) return error(409, "already_exists");
       this.projectFiles.set(id, [...held, path]);
       return json(201, file(path));
     }

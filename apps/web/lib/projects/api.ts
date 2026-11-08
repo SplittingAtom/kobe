@@ -93,7 +93,7 @@ export interface ProjectsApi {
   files(id: string): Promise<ApiResult<readonly ProjectFile[]>>;
   uploadFile(id: string, file: File, folder: string): Promise<ApiResult<ProjectFile>>;
   removeFile(id: string, fileId: string): Promise<ApiResult<void>>;
-  /** Add to project (KOBE-585): 409 `file_exists` on a same-name file. */
+  /** Add to project (KOBE-585): 409 `already_exists` on a same-name file. */
   importFile(id: string, request: ImportRequest): Promise<ApiResult<ProjectFile>>;
   /** Agents a project may default to: the server accepts team and gallery agents only. */
   agents(): Promise<ApiResult<readonly ProjectAgent[]>>;

@@ -360,7 +360,7 @@ sequenceDiagram
   S->>OS: copy the stored bytes (artifact version, or the workspace store's copy)
   S->>DB: project_files row, quotas, audit project.file_added (ids + importedFrom)
   S->>M: reconcile the project's mounts for every member
-  S-->>W: 201 project file (409 file_exists: Add as copy retries -2, -3)
+  S-->>W: 201 project file (409 already_exists: Add as copy takes the first free -2, -3)
 ```
 
 - **Who may add.** One function, `canAddToProject` in `packages/protocol/src/projects.ts`: team
@@ -369,18 +369,20 @@ sequenceDiagram
   workspace file, since `/v1/workspace` is their own). The web shows the action to the
   conversation's owner only, on the artifact header, the file tab and the `open_file` card;
   readers never see it.
-- **What is copied.** The bytes the server stored: the artifact version through the loader Edit as
-  file uses, or the caller's own synced file through the workspace store (a missing saved copy is
-  503 `content_missing` and the sandbox resends it). The browser sends none, and nobody reads
-  another member's workspace.
+- **What is copied.** The bytes the server stored: the artifact version from the thread's object
+  tree (a purged version is 404, one over the artifact cap 413), stored with the type its kind and
+  language give; or the caller's own synced file through the workspace store (a missing saved copy
+  is 503 `content_missing` and the sandbox resends it). The browser sends none, and nobody reads
+  another member's workspace. An archived project is refused before anything is read.
 - **Rules.** The upload's: `uploadProjectFile` (50 MiB and the site's file cap, 500 files per
   project, the team storage quota, `projectFileNameSchema`, archived projects 409). A file of the
-  same name in the same folder answers 409 `file_exists`: project files are never replaced in
-  place, so the dialog offers Add as copy (`name-2.ext`, `-3` …).
+  same name in the same folder answers 409 `already_exists`: project files are never replaced in
+  place, so the dialog offers Add as copy: the first `name-2.ext`, `-3` … free in the project's
+  file list, in one request (retried only if another add took that name meanwhile).
 - **Record.** The file has `source: "upload"` (the `project_files_source` CHECK allows only
   `upload` and `proposal`; a later migration may add `import`); the audit row
-  `project.file_added` carries `importedFrom` (the artifact id and version, or the sha256 of the
-  workspace path), never a name, path or content. The project page cannot yet label the file
+  `project.file_added` carries `importedFrom` (the artifact id and version, or only the kind
+  `workspace_file`), never a name, a path, a hash of one, or content. The project page cannot yet label the file
   "Imported from <conversation>": that needs a column (follow-up).
 
 ### Where people and policy decide

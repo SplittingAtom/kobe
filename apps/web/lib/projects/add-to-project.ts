@@ -2,23 +2,17 @@
  * Add to project helpers (KOBE-585): pure functions behind the dialog in
  * `components/projects/add-to-project.tsx`.
  */
-import { artifactFileExtension, type ArtifactKind } from "@kobe/protocol";
+import { artifactFileExtension, artifactFileStem, type ArtifactKind } from "@kobe/protocol";
+import { ancestorsOf, joinPath } from "../files/tree";
 import type { Project, ProjectFile } from "./api";
 
-/** The server's default name for an artifact (`artifacts/serve.ts` fileStem + extension). */
+/** The server's default name for an artifact: its stem and extension (`@kobe/protocol`). */
 export function artifactProjectFileName(
   title: string,
   kind: ArtifactKind,
   language: string | null,
 ): string {
-  const stem = title
-    .normalize("NFKD")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60)
-    .replace(/-+$/g, "");
-  return `${stem === "" ? "artifact" : stem}.${artifactFileExtension(kind, language)}`;
+  return `${artifactFileStem(title)}.${artifactFileExtension(kind, language)}`;
 }
 
 /** `plan.md` -> `plan-2.md`; `README` -> `README-2`; `.env` -> `.env-2` ("Add as copy"). */
@@ -30,12 +24,26 @@ export function numberedName(name: string, n: number): string {
 
 /** Every folder the project's files sit in (with their parents), sorted; root is "". */
 export function projectFolders(files: readonly Pick<ProjectFile, "path">[]): string[] {
-  const folders = new Set<string>();
-  for (const f of files) {
-    const parts = f.path.split("/").slice(0, -1);
-    for (let i = 1; i <= parts.length; i += 1) folders.add(parts.slice(0, i).join("/"));
+  return [...new Set(files.flatMap((f) => ancestorsOf(f.path)))].sort();
+}
+
+/** The most numbered names "Add as copy" looks through. */
+export const COPY_NAME_MAX = 1000;
+
+/**
+ * The first `name-2`, `name-3` … not taken in `folder` (paths inside the project), or undefined
+ * when every one up to {@link COPY_NAME_MAX} is.
+ */
+export function firstFreeName(
+  name: string,
+  folder: string,
+  taken: ReadonlySet<string>,
+): string | undefined {
+  for (let n = 2; n <= COPY_NAME_MAX; n += 1) {
+    const candidate = numberedName(name, n);
+    if (!taken.has(joinPath(folder, candidate))) return candidate;
   }
-  return [...folders].sort();
+  return undefined;
 }
 
 /**

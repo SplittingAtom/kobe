@@ -56,7 +56,7 @@ export interface ProjectFileDeps {
 /** Add to project (KOBE-585): what a file was copied from, for the audit row (ids only). */
 export type ImportedFrom =
   | { readonly kind: "artifact"; readonly artifactId: string; readonly version: number }
-  | { readonly kind: "workspace_file"; readonly pathSha256: string };
+  | { readonly kind: "workspace_file" };
 
 export interface FileTarget {
   readonly teamId: string;
