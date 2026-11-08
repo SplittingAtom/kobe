@@ -202,8 +202,11 @@ export type ListSchedulesQuery = z.infer<typeof listSchedulesQuerySchema>;
 
 // --- Responses ----------------------------------------------------------------------------------------
 
-/** Why a schedule is inactive without the owner asking: a team admin, or the owner's deactivation. */
-export const SCHEDULE_PAUSED_BY = ["team_admin", "deactivation"] as const;
+/**
+ * Why a schedule is inactive without the owner asking: a team admin, the owner's deactivation, or
+ * its agent is no longer runnable from the roster it ran from (agents-roster AR11, KOBE-565).
+ */
+export const SCHEDULE_PAUSED_BY = ["team_admin", "deactivation", "agent_unavailable"] as const;
 export const schedulePausedBySchema = z.enum(SCHEDULE_PAUSED_BY);
 
 export const scheduleResponseSchema = z.strictObject({

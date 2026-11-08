@@ -1352,6 +1352,20 @@
       "when": 1794103134598,
       "tag": "0192_run_usage_skill_manifest",
       "breakpoints": true
+    },
+    {
+      "idx": 193,
+      "version": "7",
+      "when": 1794138040148,
+      "tag": "0193_agent_roster",
+      "breakpoints": true
+    },
+    {
+      "idx": 194,
+      "version": "7",
+      "when": 1794138057068,
+      "tag": "0194_agent_roster_rls",
+      "breakpoints": true
     }
   ]
 }

@@ -24,8 +24,15 @@ import { teams } from "./teams.js";
 // threads a schedule created (the "Scheduled" folder); its foreign key (ON DELETE SET NULL
 // (schedule_id), which drizzle cannot express) is added in SQL by migration 0087 (schedules_rls).
 
-export const SCHEDULE_PAUSED_BY = ["team_admin", "deactivation"] as const;
+/**
+ * Why the system paused a schedule: a team admin, the owner's deactivation, or its agent left the
+ * roster it ran from, was suspended there or became unavailable (KOBE-565, agents-roster AR11;
+ * the spec's `paused_reason`).
+ */
+export const SCHEDULE_PAUSED_BY = ["team_admin", "deactivation", "agent_unavailable"] as const;
 export type SchedulePausedBy = (typeof SCHEDULE_PAUSED_BY)[number];
+
+const list = (values: readonly string[]) => sql.raw(values.map((v) => `'${v}'`).join(", "));
 
 export const schedules = pgTable(
   "schedules",
@@ -73,7 +80,7 @@ export const schedules = pgTable(
     check("schedules_prompt", sql`char_length(btrim(${t.prompt})) BETWEEN 1 AND 10000`),
     check("schedules_tz", sql`char_length(${t.tz}) BETWEEN 1 AND 64`),
     check("schedules_mentions", sql`cardinality(${t.mentions}) <= 20`),
-    check("schedules_paused_by", sql`${t.pausedBy} IN ('team_admin', 'deactivation')`),
+    check("schedules_paused_by", sql`${t.pausedBy} IN (${list(SCHEDULE_PAUSED_BY)})`),
     check("schedules_paused_inactive", sql`${t.pausedBy} IS NULL OR NOT ${t.active}`),
     // The runner's due scan, team by team under RLS (active schedules by next occurrence).
     index("schedules_due_idx")

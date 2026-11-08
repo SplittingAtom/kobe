@@ -152,6 +152,12 @@ export const siteAgents = pgTable(
     customizedAt: timestamp({ withTimezone: true }),
     customizedBy: uuid().references(() => users.id),
     customizedFromGeneration: integer(),
+    /**
+     * The team a personal agent is bound to (KOBE-565, agents-roster AR8): a fork of team content
+     * stays runnable and assignable in that team only. Permanent. No foreign key, like fork
+     * provenance: the team may be deleted later (the agent is then unrunnable).
+     */
+    boundTeamId: uuid(),
     ...definitionColumns(),
   },
   (t): PgTableExtraConfigValue[] => [
@@ -182,6 +188,7 @@ export const siteAgents = pgTable(
       "site_agents_customized",
       sql`(${t.customizedAt} IS NULL AND ${t.customizedBy} IS NULL AND ${t.customizedFromGeneration} IS NULL) OR (${t.customizedAt} IS NOT NULL AND ${t.customizedBy} IS NOT NULL AND ${t.customizedFromGeneration} > 0 AND ${t.galleryKey} IS NOT NULL)`,
     ),
+    check("site_agents_bound_team_scope", sql`${t.boundTeamId} IS NULL OR ${t.scope} = 'personal'`),
     check("site_agents_gallery_key_scope", sql`${t.galleryKey} IS NULL OR ${t.scope} = 'gallery'`),
     check(
       "site_agents_fork_version",

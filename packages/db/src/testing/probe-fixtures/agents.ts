@@ -20,6 +20,7 @@ import {
   orbitEvals,
   teamAgents,
   teamEvalSettings,
+  teamAgentRoster,
   teamAgentSuspensions,
   teamAgentVersions,
   teamSkillReviews,
@@ -121,6 +122,13 @@ export const agentsFixtures: Record<(typeof agents.team)[number], ProbeFixture> 
       agentScope: "personal",
       suspendedBy: userId,
     });
+  },
+  team_agent_roster: async (tx, teamId) => {
+    const userId = randomUUID();
+    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
+    await tx
+      .insert(teamAgentRoster)
+      .values({ teamId, siteAgentId: randomUUID(), assignedBy: userId });
   },
   team_skills: async (tx, teamId) => {
     await probeSkill(tx, teamId);
