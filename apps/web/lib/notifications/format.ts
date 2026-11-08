@@ -33,7 +33,9 @@ export function notificationTitle(n: KobeNotification): string {
     case "schedule.paused":
       return n.pausedBy === "team_admin"
         ? "Schedule paused by a team admin"
-        : "Schedule paused (access deactivated)";
+        : n.pausedBy === "agent_unavailable"
+          ? "Paused: agent unavailable"
+          : "Schedule paused (access deactivated)";
     case "skill.deprecated":
       return `${n.skillName ?? "A catalog skill"} was deprecated`;
     case "skill.version.deprecated":

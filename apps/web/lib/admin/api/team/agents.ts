@@ -1,4 +1,5 @@
 /** Team console: team agents (`/v1/agents?scope=team`, KOBE-45/46). Every call names the team. */
+import type { SchedulePausedBy } from "@kobe/protocol";
 import { apiRequest, type ApiResult } from "../../../api/client";
 import type { AgentSaved, AgentSummary, GalleryScore } from "../agents";
 
@@ -61,7 +62,7 @@ export interface InventorySchedule {
   readonly ownerUserId: string;
   readonly ownerName: string;
   readonly status: "active" | "paused";
-  readonly pausedBy: "team_admin" | "deactivation" | null;
+  readonly pausedBy: SchedulePausedBy | null;
   readonly nextDueAt: string | null;
 }
 

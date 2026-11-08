@@ -2,6 +2,7 @@ import {
   SYSTEM_ACTOR,
   and,
   eq,
+  inArray,
   listMemberships,
   or,
   schedules,
@@ -9,6 +10,7 @@ import {
   type KobeDb,
   type KobeTx,
 } from "@kobe/db";
+import { syncAgentSchedules } from "../agents/roster-schedules.js";
 import { recordAudit } from "../audit/record.js";
 import type { ServerRunOrchestrator } from "../runs/orchestrator.js";
 
@@ -45,7 +47,11 @@ export async function pauseOwnerSchedulesInTx(
       and(
         eq(schedules.teamId, teamId),
         eq(schedules.userId, userId),
-        or(eq(schedules.active, true), eq(schedules.pausedBy, "team_admin")),
+        // An agent coming back must never resume a gone owner's schedule (KOBE-567).
+        or(
+          eq(schedules.active, true),
+          inArray(schedules.pausedBy, ["team_admin", "agent_unavailable"]),
+        ),
       ),
     )
     .returning({ id: schedules.id });
@@ -57,6 +63,9 @@ export async function pauseOwnerSchedulesInTx(
       target: { scheduleId: id, by },
     });
   }
+  // Other members' schedules of this user's lent agents pause when the agents become unavailable
+  // here (agents-roster AR10/AR11); deactivation's other teams follow at the next scheduler tick.
+  await syncAgentSchedules(tx, teamId, { agentOwner: userId });
   return paused.map((p) => p.id);
 }
 

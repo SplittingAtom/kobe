@@ -208,6 +208,7 @@ export type ListSchedulesQuery = z.infer<typeof listSchedulesQuerySchema>;
  */
 export const SCHEDULE_PAUSED_BY = ["team_admin", "deactivation", "agent_unavailable"] as const;
 export const schedulePausedBySchema = z.enum(SCHEDULE_PAUSED_BY);
+export type SchedulePausedBy = z.infer<typeof schedulePausedBySchema>;
 
 export const scheduleResponseSchema = z.strictObject({
   schedule_id: uuidSchema,

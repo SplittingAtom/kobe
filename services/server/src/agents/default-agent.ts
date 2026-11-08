@@ -3,7 +3,8 @@ import { KOBE_GALLERY_KEY } from "../gallery/definitions.js";
 import { resolveAgentPin, type AgentPin } from "./versions.js";
 
 /**
- * The agent a new conversation starts with (KOBE-458; KOBE-254 user decision): the gallery agent
+ * The agent a new conversation starts with (KOBE-458; KOBE-254 user decision): the team's default
+ * agent from its roster when it has one (KOBE-567 hook, setting in KOBE-571), else the gallery agent
  * Kobe, when the member can start threads with it in this team (`resolveAgentPin`: visible, active
  * here, not archived, published); otherwise no agent. This is the one rule: the runnable list
  * marks that agent `default` for the composer, and a thread the server starts on the member's
@@ -15,11 +16,26 @@ export const isDefaultNewThreadAgent = (agent: {
   readonly galleryKey?: string | null | undefined;
 }): boolean => agent.scope === "gallery" && agent.galleryKey === KOBE_GALLERY_KEY;
 
+/**
+ * The team's default agent for new threads, chosen from its roster (agents-roster goals, AR9;
+ * KOBE-567 hook). The setting itself is KOBE-571's: until it exists no team has one, and the site
+ * default (Kobe) applies. Whatever it names still goes through `resolveAgentPin`, so a team
+ * default that is not runnable for the member falls back to the site default.
+ */
+export async function teamDefaultAgentId(_tx: KobeTx, _teamId: string): Promise<string | null> {
+  return null;
+}
+
 /** The pin of the agent a new conversation starts with for this member, or null (no agent). */
 export async function defaultNewThreadPin(
   tx: KobeTx,
   viewer: { readonly teamId: string; readonly userId: string },
 ): Promise<AgentPin | null> {
+  const teamDefault = await teamDefaultAgentId(tx, viewer.teamId);
+  if (teamDefault !== null) {
+    const pin = await resolveAgentPin(tx, viewer, teamDefault);
+    if (pin.ok && pin.value !== null) return pin.value;
+  }
   const [kobe] = await tx
     .select({ id: siteAgents.id })
     .from(siteAgents)

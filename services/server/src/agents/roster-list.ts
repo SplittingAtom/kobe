@@ -39,7 +39,10 @@ import {
   updateAvailable,
   type RosterEntryRecord,
 } from "./roster.js";
+import { entryUnavailable, ownerStates, type UnavailableReason } from "./roster-resolution.js";
 import { SITE, siteWhere, TEAM, type Row } from "./store.js";
+
+const GONE = { member: false, deactivated: true } as const;
 
 /**
  * `GET /v1/agents/roster?tab=` (KOBE-566, spec agents-roster AR1, AR2, §6.8): one tab's rows with
@@ -62,6 +65,8 @@ interface Candidate {
   readonly entry: RosterEntryRecord | null;
   readonly subject: RosterSubject;
   readonly reach?: readonly AgentReach[];
+  /** An entry whose owner left the team or was deactivated (AR10, KOBE-567). */
+  readonly unavailable?: UnavailableReason | null;
 }
 
 const SITE_ROW = { ...SITE, boundTeamId: siteAgents.boundTeamId };
@@ -90,6 +95,7 @@ function statusOf(c: Candidate, tab: AgentRosterTab): AgentRosterStatus {
   const { row, entry, subject } = c;
   if (row.archivedAt !== null) return "archived";
   if (entry?.state === "proposed") return "proposed";
+  if (c.unavailable) return "unavailable";
   if (
     tab === "site" &&
     (entry?.state === "suspended" || (c.kind === "gallery" && row.status === "suspended"))
@@ -125,6 +131,9 @@ function toRow(
     ownerName: row.ownerUserId ? (names.get(row.ownerUserId) ?? null) : null,
     boundTeamId: row.boundTeamId,
     status: statusOf(c, tab),
+    ...(c.unavailable && statusOf(c, tab) === "unavailable"
+      ? { unavailableReason: c.unavailable }
+      : {}),
     currentVersion: current,
     versionInEffect: entry ? resolvedVersion(entry, current) : current,
     updateAvailable: entry ? updateAvailable(entry, current) : false,
@@ -147,6 +156,8 @@ function visible(actor: RosterActor, tab: AgentRosterTab, c: Candidate): boolean
         ? actor.siteAdmin
         : rosterAdmin(actor, tab);
   if (c.entry?.state === "removed") return false;
+  // Unavailable entries are for the roster's admins to resolve (AR10): Adopt, remove.
+  if (c.unavailable && c.entry?.state !== "proposed" && !admin) return false;
   if (c.entry?.state === "proposed" && !(own || admin || c.entry.assignedBy === actor.userId))
     return false;
   return c.row.archivedAt === null || own || admin;
@@ -222,6 +233,11 @@ async function entryCandidates(
     return a && a.ownerUserId !== actor.userId && v !== null ? [[e.agentId, v] as const] : [];
   });
   const published = await versionFrontmatter(tx, pairs);
+  const owners = await ownerStates(
+    tx,
+    actor.teamId,
+    agents.flatMap((a) => (a.ownerUserId ? [a.ownerUserId] : [])),
+  );
   return entries.flatMap((entry) => {
     const row = byId.get(entry.agentId);
     if (!row) return []; // an entry of a deleted agent is inert (KOBE-565)
@@ -236,6 +252,9 @@ async function entryCandidates(
         display,
         entry,
         subject: subjectOf("personal", row, states(entry.agentId)),
+        unavailable: row.ownerUserId
+          ? entryUnavailable(entry, owners.get(row.ownerUserId) ?? GONE)
+          : null,
       },
     ];
   });

@@ -15,15 +15,17 @@ import {
 } from "@kobe/db";
 import { z } from "zod";
 import { canPinAgent, siteVisibleTo } from "./versions.js";
-import { isDefaultNewThreadAgent } from "./default-agent.js";
+import { isDefaultNewThreadAgent, teamDefaultAgentId } from "./default-agent.js";
+import { lentAgents, notBoundElsewhere } from "./roster-resolution.js";
 import { SITE, TEAM, toRecord, type AgentRecord } from "./store.js";
 import { manifestIsDangerous } from "./manifest.js";
 
 /**
  * Agents the caller can start a chat with from the active team (KOBE-122): the same set a new
  * thread can pin (`findPinnableAgent` + `unavailable` in `versions.ts`): the team's agents, the
- * caller's own personal agents and the gallery, that are active (not suspended, site-wide or
- * for this team), not archived and published. Read-only, paginated by (slug, id), `team_id`
+ * caller's own personal agents (bound ones only in their team) and the gallery, plus other
+ * members' agents on the team or site roster at the entry's version (KOBE-567, AR9), that are
+ * active (not suspended, site-wide or for this team), not archived, published and available. Read-only, paginated by (slug, id), `team_id`
  * explicit on top of `withTeam()`. The model is the one the *current version* pins, since that is
  * what a new thread gets.
  */
@@ -105,7 +107,7 @@ export async function listRunnableAgents(
     const site = await tx
       .select({ ...SITE, scope: siteAgents.scope, galleryKey: siteAgents.galleryKey })
       .from(siteAgents)
-      .where(siteVisibleTo(viewer.userId));
+      .where(and(siteVisibleTo(viewer.userId), notBoundElsewhere(viewer.teamId)));
     const galleryKeys = new Map(
       site.flatMap((r) => (r.galleryKey === null ? [] : [[r.id, r.galleryKey] as const])),
     );
@@ -125,6 +127,8 @@ export async function listRunnableAgents(
       ...site.flatMap(({ scope, galleryKey: _key, ...r }) =>
         published(effective(toRecord(scope, r))),
       ),
+      // Other members' agents lent by the team or site roster, at the entry's version (AR9).
+      ...(await lentAgents(tx, viewer)).flatMap((l) => published(l.record)),
     ]
       .filter((p) => afterCursor(p, query.cursor))
       .sort((a, b) =>
@@ -139,8 +143,17 @@ export async function listRunnableAgents(
     const page = records.slice(0, limit);
     const last = page.at(-1);
     const details = await versionDetails(tx, page);
+    const teamDefault = await teamDefaultAgentId(tx, viewer.teamId);
+    const defaultId =
+      teamDefault !== null && records.some((p) => p.agent.id === teamDefault) ? teamDefault : null;
+    const isDefault = (a: AgentRecord) =>
+      defaultId !== null
+        ? a.id === defaultId
+        : isDefaultNewThreadAgent({ scope: a.scope, galleryKey: galleryKeys.get(a.id) });
     return {
-      agents: page.map((p) => toRunnable(p, details.get(p.agent.id), galleryKeys.get(p.agent.id))),
+      agents: page.map((p) =>
+        toRunnable(p, details.get(p.agent.id), galleryKeys.get(p.agent.id), isDefault(p.agent)),
+      ),
       nextCursor: records.length > limit && last ? `${last.agent.slug}:${last.agent.id}` : null,
     };
   });
@@ -195,12 +208,13 @@ const toRunnable = (
   { agent: a, version }: Published,
   details: VersionDetails | undefined,
   galleryKey: string | undefined,
+  isDefault: boolean,
 ): RunnableAgent => ({
   id: a.id,
   scope: a.scope,
   slug: a.slug,
   ...(a.scope === "gallery" && galleryKey !== undefined ? { galleryKey } : {}),
-  ...(isDefaultNewThreadAgent({ scope: a.scope, galleryKey }) ? { default: true as const } : {}),
+  ...(isDefault ? { default: true as const } : {}),
   name: a.frontmatter.name,
   ...(a.frontmatter.description !== undefined ? { description: a.frontmatter.description } : {}),
   ...(a.frontmatter.icon !== undefined ? { icon: a.frontmatter.icon } : {}),

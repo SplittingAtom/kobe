@@ -862,11 +862,19 @@ export const AUDIT_EVENTS = {
   "schedule.created": event("team", { scheduleId: id, agentId: id, active: z.boolean() }),
   "schedule.updated": event("team", { scheduleId: id, agentId: id }),
   "schedule.deleted": event("team", { scheduleId: id }),
-  "schedule.activated": event("team", { scheduleId: id, by: z.enum(["owner", "team_admin"]) }),
-  /** `deactivation` / `member_removed`: the owner was deactivated or left the team (KOBE-180, system). */
+  /** `agent_available`: its lent agent is runnable again (KOBE-567, system). */
+  "schedule.activated": event("team", {
+    scheduleId: id,
+    by: z.enum(["owner", "team_admin", "agent_available"]),
+  }),
+  /**
+   * `deactivation` / `member_removed`: the owner was deactivated or left the team (KOBE-180,
+   * system); `agent_unavailable`: its lent agent left the roster, was suspended or became
+   * unavailable (KOBE-567, agents-roster AR11, system).
+   */
   "schedule.deactivated": event("team", {
     scheduleId: id,
-    by: z.enum(["owner", "team_admin", "deactivation", "member_removed"]),
+    by: z.enum(["owner", "team_admin", "deactivation", "member_removed", "agent_unavailable"]),
   }),
 
   // ── thread: lifecycle metadata only, never titles or content (KOBE-34, D18, D23) ──

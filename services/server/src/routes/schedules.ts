@@ -217,6 +217,9 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
         const row = await loadOwn(tx, teamId, userId, id.data);
         if (!row) return NOT_FOUND;
         if (patch.active === true && row.pausedBy === "team_admin") return PAUSED_BY_ADMIN;
+        if (patch.active === true && !(await agentBack(tx, row, patch.agent_id))) {
+          return scheduleError("agent_not_runnable");
+        }
         if (patch.agent_id !== undefined && patch.agent_id !== row.agentId) {
           if (!(await agentRunnable(tx, { teamId, userId }, patch.agent_id))) {
             return scheduleError("agent_not_runnable");
@@ -321,6 +324,7 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
       if (!row || (!own && !(admin && row.pausedBy === "team_admin"))) return NOT_FOUND;
       if (row.active) return { status: 200, json: toResponse(row) };
       if (own && row.pausedBy === "team_admin") return PAUSED_BY_ADMIN;
+      if (!(await agentBack(tx, row))) return scheduleError("agent_not_runnable");
       // An admin never revives a deactivated or removed owner's schedule (KOBE-180 review).
       if (!own && !(await principalActive(tx, teamId, row.userId))) return OWNER_INACTIVE;
       const blocked = await capAnswer(tx, row.userId, teamId, elsewhere, userId);
@@ -339,4 +343,19 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
   });
 
   return app;
+}
+
+/**
+ * A schedule paused because its agent became unavailable (agents-roster AR11, KOBE-567) resumes
+ * only once the agent (or the one the same edit switches to) can start a thread for its owner.
+ */
+async function agentBack(
+  tx: KobeTx,
+  row: { teamId: string; userId: string; agentId: string; pausedBy: string | null },
+  newAgent?: string,
+): Promise<boolean> {
+  if (row.pausedBy !== "agent_unavailable" || (newAgent !== undefined && newAgent !== row.agentId)) {
+    return true;
+  }
+  return agentRunnable(tx, { teamId: row.teamId, userId: row.userId }, row.agentId);
 }

@@ -20,6 +20,7 @@ import { canonicalJson } from "@kobe/protocol";
 import { recordAudit } from "../audit/record.js";
 import { agentAccess, type AgentActor } from "./access.js";
 import { readPublishFloor } from "./floor.js";
+import { isLentAgent, keptLentAgent, lentAgents, notBoundElsewhere } from "./roster-resolution.js";
 import { freezeLocalSkills, type SkillLeftOut } from "./skill-freeze.js";
 import { skillManifestSchema, type SkillManifest } from "../skills/frozen.js";
 import {
@@ -686,11 +687,14 @@ export async function findPinnableAgent(
   const siteQuery = tx
     .select({ ...SITE, scope: siteAgents.scope })
     .from(siteAgents)
-    .where(and(eq(siteAgents.id, agentId), siteVisibleTo(viewer.userId)));
+    .where(
+      and(eq(siteAgents.id, agentId), siteVisibleTo(viewer.userId), notBoundElsewhere(viewer.teamId)),
+    );
   const [own]: (Row & { scope: "personal" | "gallery" })[] = await (options.lock
     ? siteQuery.for("share")
     : siteQuery);
-  if (!own) return null;
+  // Someone else's personal agent: only through the team's or the site's roster (KOBE-567).
+  if (!own) return (await lentAgents(tx, viewer, { agentId, ...options }))[0]?.record ?? null;
   const { scope, ...row } = own;
   const record = toRecord(scope, row);
   // A team can suspend a site-wide agent for itself (KOBE-86): effective status here.
@@ -774,7 +778,9 @@ export async function resolveSwitchPin(
     return { ok: false, error: "agent_unavailable" };
   }
   const target = version ?? agent.currentVersion;
-  if (target !== agent.currentVersion && !(await readVersion(tx, agent.scope, agent.id, target))) {
+  // A lent agent runs only the version its roster entry resolves to (AR5, KOBE-567).
+  const other = target !== agent.currentVersion;
+  if (other && (isLentAgent(agent, viewer) || !(await readVersion(tx, agent.scope, agent.id, target)))) {
     return { ok: false, error: "version_not_found" };
   }
   return { ok: true, value: { agentScope: agent.scope, agentId: agent.id, agentVersion: target } };
@@ -824,7 +830,8 @@ export async function resolvePinnedAgent(
   owner: PinViewer,
   pin: AgentPin,
 ): Promise<PinnedAgent> {
-  const agent = await findPinnableAgent(tx, owner, pin.agentId);
+  // A lent agent's entry may be gone since the thread started: the thread keeps its pin (D19).
+  const agent = (await findPinnableAgent(tx, owner, pin.agentId)) ?? (await keptLentAgent(tx, owner, pin));
   if (!agent || agent.scope !== pin.agentScope) return { ok: false, error: "agent_not_found" };
   if (agent.status === "suspended") return { ok: false, error: "agent_suspended" };
   try {
