@@ -7,6 +7,7 @@ import type { ServerDeps } from "./deps.js";
 import { logger } from "./logger.js";
 import type { IsolationGate } from "./isolation/gate.js";
 import type { EvalRunner } from "./agents/eval/service.js";
+import { siteAgentRosterRoutes, teamAgentRosterRoutes } from "./routes/agent-roster.js";
 import { agentRoutes } from "./routes/agents.js";
 import { teamEvalSettingsRoutes } from "./routes/team-eval-settings.js";
 import { teamSettingsRoutes } from "./routes/team-settings.js";
@@ -219,6 +220,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/skills", teamSkillBlockRoutes(deps));
   api.route("/team/skills", teamSkillUsageRoutes(deps));
   api.route("/team/offboarded", teamOffboardedRoutes(deps));
+  api.route("/team/agent-roster", teamAgentRosterRoutes(deps));
   api.route("/team", teamRoutes(deps));
   api.route("/runs", runEventsRoutes(deps));
   api.route("/runs", runRoutes(deps));
@@ -274,6 +276,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/skills", skillReachRoutes(deps));
   api.route("/approvals", approvalRoutes(deps));
   api.route("/egress/requests", egressRequestRoutes(deps));
+  api.route("/site/agent-roster", siteAgentRosterRoutes(deps));
   api.route("/site/settings", siteSettingsRoutes(deps));
   api.route("/site/branding", siteBrandingRoutes(deps));
   api.route("/site/web-search", siteWebSearchRoutes(deps));

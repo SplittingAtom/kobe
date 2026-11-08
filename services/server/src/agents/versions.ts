@@ -541,11 +541,13 @@ export async function deleteOrArchiveAgent(
   id: string,
   actor?: AuditActor,
   archivedBy: "seed" | null = null,
+  beforeDelete?: () => Promise<void>, // under the row lock; throws to refuse (KOBE-566)
 ): Promise<Removed | null> {
   return inLocation(db, location, async (tx) => {
     const agent = await lockAgent(tx, location, id);
     if (!agent) return null;
     if (agent.currentVersion === null) {
+      await beforeDelete?.();
       if (location.scope === "team") {
         await tx.delete(teamAgents).where(eq(teamAgents.id, id));
       } else {
