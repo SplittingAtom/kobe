@@ -21,8 +21,8 @@ describe("roster row labels (KOBE-569, AR1, §6.5, §6.6)", () => {
       "Suspended site-wide",
     );
     expect(rosterStatusLabel(row({ status: "archived" }), "team")).toBe("Archived");
-    const gone = { ...row({}), status: "unavailable", unavailableReason: "owner_left" };
-    expect(rosterStatusLabel(gone as never, "team")).toBe("Unavailable: its owner left the team");
+    const gone = row({ status: "unavailable", unavailableReason: "owner_left" });
+    expect(rosterStatusLabel(gone, "team")).toBe("Unavailable: its owner left the team");
   });
 
   it("shows the version in effect, Draft for an own unpublished agent, else Not published yet", () => {

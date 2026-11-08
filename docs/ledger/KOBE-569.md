@@ -63,9 +63,8 @@ actions and their flows (`roster-actions.tsx`, dialogs in `roster-dialogs.tsx`);
   `Proposed to X`; `Declined for X: note` (removed entries with a note); withdrawn/removed entries
   without a note are hidden. Entries on another team's roster carry a Withdraw button
   (`DELETE …/assignments/team?teamId=`), for teams the owner left.
-- **`unavailable`** is read defensively (`status as … | "unavailable"`) so the page compiles
-  before and after #489's contract; label "Unavailable: its owner left the team / was
-  deactivated".
+- **`unavailable`** (KOBE-567, #489 merged in): label "Unavailable: its owner left the team /
+  was deactivated" from `unavailableReason`; typed against the protocol enum.
 
 ## Open for 570/571/572
 

@@ -35,7 +35,7 @@ import { DangerousBadge } from "../admin/team/agent-builder/dangerous-badge";
 import { useRosterActions } from "./roster-actions";
 import { useRosterRows } from "./use-roster-rows";
 
-const STATUS_TONE: Readonly<Record<string, BadgeTone>> = {
+const STATUS_TONE: Readonly<Record<AgentRosterRow["status"], BadgeTone>> = {
   active: "done",
   proposed: "attention",
   not_published: "neutral",
@@ -171,7 +171,7 @@ function RosterRowView({
       </TableCell>
       <TableCell>
         <span className="inline-flex flex-wrap items-center gap-1">
-          <Badge tone={STATUS_TONE[row.status] ?? "neutral"}>{rosterStatusLabel(row, tab)}</Badge>
+          <Badge tone={STATUS_TONE[row.status]}>{rosterStatusLabel(row, tab)}</Badge>
           {update && <Badge tone="running">{update}</Badge>}
         </span>
       </TableCell>

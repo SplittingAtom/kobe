@@ -240,13 +240,16 @@ describe("Agents page as a team admin (ac-1)", () => {
       status: "suspended_here",
       actions: { resumeHere: true },
     });
-    const gone = {
-      ...row({ agentId: "u-1", name: "Orphan", ownerName: "Eve", actions: { remove: true } }),
+    const gone = row({
+      agentId: "u-1",
+      name: "Orphan",
+      ownerName: "Eve",
       status: "unavailable",
       unavailableReason: "owner_left",
-    };
+      actions: { remove: true },
+    });
     stubApi({
-      [ROSTER("team")]: [200, page("team", [pinned, proposed, suspended, gone as never])],
+      [ROSTER("team")]: [200, page("team", [pinned, proposed, suspended, gone])],
     });
     renderTeam(<Page search="tab=team" />, TEAM_ADMIN);
     const writer = await rowOf("Writer");

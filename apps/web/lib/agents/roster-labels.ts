@@ -3,22 +3,22 @@
  * the version in effect, where an own agent reaches, and where Edit leads. Pure, so each rule has
  * a unit test; the rights themselves come from the server (`row.actions`).
  */
-import type { AgentReach, AgentRosterRow, AgentRosterTab } from "@kobe/protocol";
+import type {
+  AgentReach,
+  AgentRosterRow,
+  AgentRosterTab,
+  AgentRosterUnavailableReason,
+} from "@kobe/protocol";
 import { agentPageHref } from "./redirects";
 
-/** `unavailable` and its reason arrive with KOBE-567's contract; read them defensively until then. */
-type RowStatus = AgentRosterRow["status"] | "unavailable";
-type RosterRow = AgentRosterRow & { readonly unavailableReason?: string | undefined };
-
-const UNAVAILABLE_REASONS: Readonly<Record<string, string>> = {
+const UNAVAILABLE_REASONS: Readonly<Record<AgentRosterUnavailableReason, string>> = {
   owner_left: "its owner left the team",
   owner_deactivated: "its owner was deactivated",
 };
 
 /** The row's status for its tab (AR1); a draft reads "Draft" on Personal. */
-export function rosterStatusLabel(row: RosterRow, tab: AgentRosterTab): string {
-  const status = row.status as RowStatus;
-  switch (status) {
+export function rosterStatusLabel(row: AgentRosterRow, tab: AgentRosterTab): string {
+  switch (row.status) {
     case "active":
       return "Active";
     case "proposed":
@@ -35,8 +35,6 @@ export function rosterStatusLabel(row: RosterRow, tab: AgentRosterTab): string {
       const reason = row.unavailableReason ? UNAVAILABLE_REASONS[row.unavailableReason] : undefined;
       return reason ? `Unavailable: ${reason}` : "Unavailable";
     }
-    default:
-      return String(status);
   }
 }
 
