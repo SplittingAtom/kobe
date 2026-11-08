@@ -7,5 +7,5 @@ export const metadata: Metadata = { title: "Agents" };
 
 /** The Agents page and the personal agent editor (KOBE-569): the My area's frame. */
 export default function AgentsLayout({ children }: { readonly children: ReactNode }) {
-  return <MyAgentsShell>{children}</MyAgentsShell>;
+  return <MyAgentsShell area="Agents">{children}</MyAgentsShell>;
 }

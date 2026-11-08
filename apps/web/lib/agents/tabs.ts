@@ -47,16 +47,3 @@ export function rememberAgentTab(tab: AgentTab): void {
 export function openingAgentTab(requested: AgentTab | null): AgentTab {
   return requested ?? rememberedAgentTab() ?? DEFAULT_AGENT_TAB;
 }
-
-/** Keeps the tab in the address (a reload or a shared link opens it), without a navigation. */
-export function showAgentTabInAddress(tab: AgentTab): void {
-  try {
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("tab") === tab) return;
-    url.searchParams.set("tab", tab);
-    window.history.replaceState(window.history.state, "", url);
-  } catch (err) {
-    // An address that can't be rewritten only loses the link to the tab; the page still works.
-    console.warn("[kobe] the agents tab could not be put in the address", err);
-  }
-}

@@ -25,9 +25,12 @@ type State =
  */
 export function MyAgentsShell({
   children,
+  area = "My area",
   loadAccess = () => fetchTeamAccess(),
 }: {
   readonly children: ReactNode;
+  /** The header's name for the area after the brand: "My area", or "Agents" (KOBE-569). */
+  readonly area?: string;
   readonly loadAccess?: () => Promise<ApiResult<TeamAccess>>;
 }) {
   const [state, setState] = useState<State>({ status: "loading" });
@@ -77,7 +80,7 @@ export function MyAgentsShell({
           <ChatReturnLink>
             <Brand />
           </ChatReturnLink>{" "}
-          <span aria-hidden="true">/</span> My area
+          <span aria-hidden="true">/</span> {area}
         </>
       }
       headerStart={<TeamSwitcher />}

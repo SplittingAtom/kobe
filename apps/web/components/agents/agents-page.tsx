@@ -1,16 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { NEW_AGENT_HREF } from "../../lib/agents/redirects";
 import {
   AGENT_TABS,
   agentTabParam,
+  DEFAULT_AGENT_TAB,
   openingAgentTab,
   rememberAgentTab,
-  showAgentTabInAddress,
   type AgentTab,
 } from "../../lib/agents/tabs";
+import { showTabInAddress } from "../../lib/shell/tab-address";
 import { Button, PageHeader, Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/console";
 import { useTeamAccess } from "../admin/console-context";
 import { RosterTab } from "./roster-tab";
@@ -32,13 +34,40 @@ const DESCRIPTIONS: Readonly<Record<AgentTab, string>> = {
 const CREATE_FOR_TEAM_HREF = "/admin/team/agents/new";
 
 /**
- * The Agents page (KOBE-569, spec agents-roster AR1): Personal, Team and Site rosters in tabs.
- * The open tab is in the address and remembered in this browser; "New agent" always creates a
- * personal agent, and the Team tab keeps "Create for the team" for builders.
+ * The open tab: `?tab=` (read live, so a link to another tab works while the page is open), else
+ * the last one used in this browser, else Personal. The tab is put in the address on mount and on
+ * every switch, so a copied link opens it.
  */
-export function AgentsPage({ requestedTab = null }: { readonly requestedTab?: AgentTab | null }) {
+function useAgentTab(): readonly [AgentTab, (tab: AgentTab) => void] {
+  const requested = agentTabParam(useSearchParams()?.get("tab") ?? undefined);
+  const [tab, setTab] = useState<AgentTab>(() => openingAgentTab(requested));
+  const choose = (next: AgentTab) => {
+    setTab(next);
+    rememberAgentTab(next);
+    showTabInAddress(next);
+  };
+  useEffect(() => {
+    showTabInAddress(tab);
+    // Once, on mount: later switches write the address themselves.
+  }, []);
+  useEffect(() => {
+    if (requested !== null && requested !== tab) choose(requested);
+    // Only a new `?tab=` (a link, Back) switches; the tab's own changes are already in it.
+  }, [requested]);
+  return [tab, choose];
+}
+
+/**
+ * The Agents page (KOBE-569, spec agents-roster AR1): Personal, Team and Site rosters in tabs.
+ * A tab stays loaded once opened (its rows, pages and notices survive a look at another tab).
+ * "New agent" always creates a personal agent; the Team tab keeps "Create for the team" for
+ * builders.
+ */
+export function AgentsPage() {
   const access = useTeamAccess();
-  const [tab, setTab] = useState<AgentTab>(() => openingAgentTab(requestedTab));
+  const [tab, setTab] = useAgentTab();
+  const [opened, setOpened] = useState<ReadonlySet<AgentTab>>(() => new Set([tab]));
+  if (!opened.has(tab)) setOpened(new Set([...opened, tab]));
   const canBuild = access.permissions.includes("team.agents.build");
   return (
     <>
@@ -63,12 +92,7 @@ export function AgentsPage({ requestedTab = null }: { readonly requestedTab?: Ag
       />
       <Tabs
         value={tab}
-        onValueChange={(value) => {
-          const next = agentTabParam(value) ?? "personal";
-          setTab(next);
-          rememberAgentTab(next);
-          showAgentTabInAddress(next);
-        }}
+        onValueChange={(value) => setTab(agentTabParam(value) ?? DEFAULT_AGENT_TAB)}
       >
         <TabsList label="Agents">
           {AGENT_TABS.map((t) => (
@@ -77,8 +101,8 @@ export function AgentsPage({ requestedTab = null }: { readonly requestedTab?: Ag
             </TabsTrigger>
           ))}
         </TabsList>
-        {AGENT_TABS.map((t) => (
-          <TabsContent key={t} value={t}>
+        {AGENT_TABS.filter((t) => opened.has(t)).map((t) => (
+          <TabsContent key={t} value={t} forceMount hidden={t !== tab}>
             <RosterTab tab={t} />
           </TabsContent>
         ))}

@@ -8,6 +8,7 @@ import { CatalogTab } from "./catalog-tab";
 import { SkillList } from "./skill-list";
 import { MySubmissions } from "./my-submissions";
 import { WorkbenchList } from "./workbench-list";
+import { showTabInAddress } from "../../lib/shell/tab-address";
 import { SKILL_TABS, skillTab, type SkillTab } from "../../lib/skills/tabs";
 
 const LABELS: Readonly<Record<SkillTab, string>> = {
@@ -16,13 +17,6 @@ const LABELS: Readonly<Record<SkillTab, string>> = {
   mine: "Mine",
   workbench: "Workbench",
 };
-
-/** Keeps the open tab in the address (so a reload or a shared link opens it), without a reload. */
-function rememberTab(tab: SkillTab): void {
-  const url = new URL(window.location.href);
-  url.searchParams.set("tab", tab);
-  window.history.replaceState(window.history.state, "", url);
-}
 
 /**
  * The member's Skills page (KOBE-321, spec SK9): every skill they can see in the active team, and
@@ -42,7 +36,7 @@ export function SkillsPage({ initialTab = "team" }: { readonly initialTab?: Skil
         onValueChange={(value) => {
           const next = skillTab(value);
           setTab(next);
-          rememberTab(next);
+          showTabInAddress(next);
         }}
       >
         <TabsList label="Skills">

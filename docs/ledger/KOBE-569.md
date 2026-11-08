@@ -29,9 +29,13 @@ actions and their flows (`roster-actions.tsx`, dialogs in `roster-dialogs.tsx`);
   command registry entry (bar, `/agents` slash item, palette) is renamed "Agents" with href
   `/agents`. Existing gate1 specs that named "My agents" or `/me/agents` were updated to the new
   label/paths (agent-creator, workspace-panels, blue-buttons, consoles); no new browser spec (572).
-- **Tab memory.** `?tab=` wins; otherwise the last tab from localStorage `kobe.agents.tab`, else
-  Personal. Switching writes both the address (`replaceState`, as the Skills page does) and the
-  storage (as the Workbench draft tabs do). Storage failures only lose the memory.
+- **Tab memory (review 1, 4, 6).** The page reads `?tab=` live with `useSearchParams` (Suspense in
+  `app/agents/page.tsx`; no component key), so a link to another tab works after a click;
+  otherwise the last tab from localStorage `kobe.agents.tab`, else Personal. The tab is written to
+  the address on mount and on every switch through the shared `lib/shell/tab-address.ts`
+  (`showTabInAddress`, also used by the Skills page). Storage failures only lose the memory.
+- **Tabs stay loaded (review 3).** A tab mounts on first open and then stays mounted
+  (`forceMount` + `hidden`), so rows, Load more pages and notices survive a look at another tab.
 - **View.** "View" opens `/agents/:id`, the existing builder, which is read-only when the server
   says `canEdit: false` (definition, versions, quality). Edit: own agent → `/agents/:id`,
   team-owned → `/admin/team/agents/:id`, gallery → `/admin/site/gallery/:id` (AR14).
@@ -48,8 +52,13 @@ actions and their flows (`roster-actions.tsx`, dialogs in `roster-dialogs.tsx`);
 - **Toasts.** The console has no toast primitive: success notices use `MutationStatus`
   (`role=status`, announced) above the table, e.g. "Notes is on Finance's roster." (201) vs
   "Proposed Notes to the site: a site admin decides." (202). Errors show the server's message.
-- **Refresh after a write** reloads the tab's first page (a write may move a row or change its
-  actions); later pages load again with Load more.
+- **Refresh after a write (review 2, 5)** (`use-roster-rows.ts`): first page through
+  `useResource`, later pages kept as (cursors, rows, next); a refresh re-reads the first page and
+  every page loaded since, de-duplicating by agent id, so the acted-on row stays in view.
+- **Frame header (review 7):** `MyAgentsShell` takes `area`; the Agents layout passes "Agents".
+- **Menu table-driven (review 10):** `roster-actions.tsx` builds the ⋯ menu from three spec lists
+  (reach, decisions, lifecycle) of `{when, id, label, onSelect}`; flows are module functions over
+  one context; `RosterTab` split into table, row, Reach cell and link components.
 - **Reach column**: Private; `Bound to Team: X`; `Team: X`; `Site`; `… (suspended)`;
   `Proposed to X`; `Declined for X: note` (removed entries with a note); withdrawn/removed entries
   without a note are hidden. Entries on another team's roster carry a Withdraw button

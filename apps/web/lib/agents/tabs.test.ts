@@ -6,7 +6,6 @@ import {
   openingAgentTab,
   rememberAgentTab,
   rememberedAgentTab,
-  showAgentTabInAddress,
 } from "./tabs";
 
 beforeEach(() => localStorage.clear());
@@ -37,11 +36,5 @@ describe("Agents page tabs (KOBE-569, AR1)", () => {
     vi.stubGlobal("localStorage", { getItem: blocked, setItem: blocked });
     expect(() => rememberAgentTab("team")).not.toThrow();
     expect(openingAgentTab(null)).toBe("personal");
-  });
-
-  it("puts the tab in the address without a navigation", () => {
-    window.history.replaceState(null, "", "/agents");
-    showAgentTabInAddress("team");
-    expect(window.location.search).toBe("?tab=team");
   });
 });

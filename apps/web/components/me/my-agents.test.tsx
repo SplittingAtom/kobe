@@ -132,6 +132,22 @@ describe("My agents shell", () => {
     ).toBeTruthy();
   });
 
+  it("names its area in the header: My area by default, Agents on the Agents page", async () => {
+    const ok = async () => ({ ok: true as const, status: 200, data: access });
+    const { unmount } = render(<MyAgentsShell loadAccess={ok}>x</MyAgentsShell>);
+    expect(within(screen.getByRole("banner")).getByText(/My area/)).toBeTruthy();
+    unmount();
+    render(
+      <MyAgentsShell area="Agents" loadAccess={ok}>
+        x
+      </MyAgentsShell>,
+    );
+    const banner = screen.getByRole("banner");
+    expect(within(banner).getByText(/Agents/)).toBeTruthy();
+    expect(within(banner).queryByText(/My area/)).toBeNull();
+    await screen.findByText("x");
+  });
+
   it("explains a failed access check instead of rendering the page", async () => {
     render(
       <MyAgentsShell

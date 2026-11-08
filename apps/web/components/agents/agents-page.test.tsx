@@ -1,10 +1,26 @@
 // @vitest-environment happy-dom
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { SearchParamsContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
+import { act, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forbidNativeConfirm, renderTeam, stubApi, TEAM } from "../admin/testing";
 import { AgentsPage } from "./agents-page";
 import { entry, page, row } from "./roster-fixtures";
+
+/** Navigates the page's `?tab=` as a link or Back would (Next's search params, not a reload). */
+let goTo: (search: string) => void = () => {};
+
+/** The page with Next's search params, as the app router provides them. */
+function Page({ search = "" }: { readonly search?: string }) {
+  const [current, setCurrent] = useState(search);
+  goTo = setCurrent;
+  return (
+    <SearchParamsContext.Provider value={new URLSearchParams(current)}>
+      <AgentsPage />
+    </SearchParamsContext.Provider>
+  );
+}
 
 const ROSTER = (tab: string) => `GET /v1/agents/roster?tab=${tab}`;
 
@@ -108,7 +124,7 @@ describe("Agents page as a member (ac-1)", () => {
       [ROSTER("personal")]: [200, page("personal", [OWN_DRAFT])],
       [ROSTER("team")]: [200, page("team", [TEAM_OWNED, LENT])],
     });
-    renderTeam(<AgentsPage />, MEMBER);
+    renderTeam(<Page />, MEMBER);
     expect(screen.getByRole("heading", { name: "Agents" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Personal" }).getAttribute("aria-selected")).toBe(
       "true",
@@ -146,7 +162,7 @@ describe("Agents page as a member (ac-1)", () => {
 
   it("views and forks a gallery agent from the Site tab", async () => {
     stubApi({ [ROSTER("site")]: [200, page("site", [GALLERY])] });
-    renderTeam(<AgentsPage requestedTab="site" />, MEMBER);
+    renderTeam(<Page search="tab=site" />, MEMBER);
     const kobe = await rowOf("Kobe");
     expect(within(kobe).getByText("Kobe gallery")).toBeTruthy();
     expect(
@@ -178,7 +194,7 @@ describe("Agents page as a builder (ac-1)", () => {
         ]),
       ],
     });
-    renderTeam(<AgentsPage />, BUILDER);
+    renderTeam(<Page />, BUILDER);
     expect(await rowActions("Notes")).toEqual(["Assign to Finance", "Propose to the site"]);
     await userEvent.click(screen.getByRole("tab", { name: "Team" }));
     expect(screen.getByRole("link", { name: "Create for the team" }).getAttribute("href")).toBe(
@@ -232,7 +248,7 @@ describe("Agents page as a team admin (ac-1)", () => {
     stubApi({
       [ROSTER("team")]: [200, page("team", [pinned, proposed, suspended, gone as never])],
     });
-    renderTeam(<AgentsPage requestedTab="team" />, TEAM_ADMIN);
+    renderTeam(<Page search="tab=team" />, TEAM_ADMIN);
     const writer = await rowOf("Writer");
     expect(within(writer).getByText("v1")).toBeTruthy();
     expect(within(writer).getByText("Pinned to v1")).toBeTruthy();
@@ -282,7 +298,7 @@ describe("Agents page as a site admin (ac-1)", () => {
         ]),
       ],
     });
-    renderTeam(<AgentsPage />, SITE_ADMIN);
+    renderTeam(<Page />, SITE_ADMIN);
     expect(await rowActions("Notes")).toEqual(["Propose to Finance", "Assign to the site"]);
     await userEvent.click(screen.getByRole("tab", { name: "Site" }));
     expect(
@@ -318,7 +334,7 @@ describe("Agents page flows (ac-2)", () => {
         ],
       ],
     });
-    renderTeam(<AgentsPage />, BUILDER);
+    renderTeam(<Page />, BUILDER);
     await rowAction("Notes", "Assign to Finance");
     expect(await screen.findByText("Notes is on Finance's roster.")).toBeTruthy();
     expect(bodyOf(calls, "POST", "/v1/agents/p-1/assignments")).toEqual({ target: "team" });
@@ -346,7 +362,7 @@ describe("Agents page flows (ac-2)", () => {
         },
       ],
     });
-    renderTeam(<AgentsPage />, BUILDER);
+    renderTeam(<Page />, BUILDER);
     await rowAction("Notes", "Propose to the site");
     expect(
       await screen.findByText("This agent is bound to Legal: it can't go there."),
@@ -363,7 +379,7 @@ describe("Agents page flows (ac-2)", () => {
         { entry: entry({ teamId: "t-2", state: "removed" }) },
       ],
     });
-    renderTeam(<AgentsPage />, MEMBER);
+    renderTeam(<Page />, MEMBER);
     await rowAction("Notes", "Withdraw from Finance");
     const ask = await screen.findByRole("alertdialog", { name: "Withdraw Notes from Finance?" });
     await userEvent.click(within(ask).getByRole("button", { name: "Withdraw" }));
@@ -390,7 +406,7 @@ describe("Agents page flows (ac-2)", () => {
       [ROSTER("team")]: [200, page("team", [pinnable])],
       "PUT /v1/team/agent-roster/l-1": [200, { entry: entry({ agentId: "l-1" }) }],
     });
-    renderTeam(<AgentsPage requestedTab="team" />, TEAM_ADMIN);
+    renderTeam(<Page search="tab=team" />, TEAM_ADMIN);
     await rowAction("Writer", "Pin a version…");
     const dialog = await screen.findByRole("dialog", { name: "Version of Writer on Finance" });
     const select = within(dialog).getByLabelText("Version rule") as HTMLSelectElement;
@@ -427,7 +443,7 @@ describe("Agents page flows (ac-2)", () => {
       [ROSTER("site")]: [200, page("site", [proposed])],
       "PUT /v1/site/agent-roster/l-1": [200, { entry: entry({ agentId: "l-1" }) }],
     });
-    renderTeam(<AgentsPage requestedTab="site" />, SITE_ADMIN);
+    renderTeam(<Page search="tab=site" />, SITE_ADMIN);
     await rowAction("Writer", "Approve");
     expect(await screen.findByText("Approved Writer for the site.")).toBeTruthy();
     expect(bodyOf(calls, "PUT", "/v1/site/agent-roster/l-1")).toEqual({ state: "active" });
@@ -457,7 +473,7 @@ describe("Agents page flows (ac-2)", () => {
       "PUT /v1/team/agent-roster/g-1": [200, { agentId: "g-1", suspendedHere: true }],
       "PUT /v1/site/agent-roster/s-2": [200, { entry: entry({ agentId: "s-2", target: "site" }) }],
     });
-    renderTeam(<AgentsPage requestedTab="site" />, { ...TEAM_ADMIN, siteAdmin: true });
+    renderTeam(<Page search="tab=site" />, { ...TEAM_ADMIN, siteAdmin: true });
     await rowAction("Kobe", "Suspend here");
     const ask = await screen.findByRole("alertdialog", { name: "Suspend Kobe for Finance?" });
     await userEvent.click(within(ask).getByRole("button", { name: "Suspend" }));
@@ -484,7 +500,7 @@ describe("Agents page flows (ac-2)", () => {
       ],
       "POST /v1/agents/l-1/fork": [201, { agent: { id: "p-9", name: "Writer" } }],
     });
-    renderTeam(<AgentsPage requestedTab="team" />, TEAM_ADMIN);
+    renderTeam(<Page search="tab=team" />, TEAM_ADMIN);
     await rowAction("Writer", "Remove from Finance");
     const ask = await screen.findByRole("alertdialog", { name: "Remove Writer from Finance?" });
     await userEvent.click(within(ask).getByRole("button", { name: "Remove" }));
@@ -500,13 +516,43 @@ describe("Agents page flows (ac-2)", () => {
       [ROSTER("team")]: [200, page("team", [LENT], "c-2")],
       "GET /v1/agents/roster?tab=team&cursor=c-2": [200, page("team", [TEAM_OWNED])],
     });
-    renderTeam(<AgentsPage requestedTab="team" />, MEMBER);
+    renderTeam(<Page search="tab=team" />, MEMBER);
     await rowOf("Writer");
     await userEvent.click(screen.getByRole("button", { name: "Load more" }));
     expect(await rowOf("Triage")).toBeTruthy();
     expect(await rowOf("Writer")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
     expect(calls.map((c) => c.url)).toContain("/v1/agents/roster?tab=team&cursor=c-2");
+  });
+
+  it("refreshes a row on a later page in place after an action", async () => {
+    const later = row({ ...TEAM_OWNED, actions: { suspendHere: true } });
+    const calls = stubApi({
+      [ROSTER("team")]: [200, page("team", [LENT], "c-2")],
+      "GET /v1/agents/roster?tab=team&cursor=c-2": [
+        [200, page("team", [later])],
+        [
+          200,
+          page("team", [
+            {
+              ...later,
+              status: "suspended_here",
+              actions: { ...later.actions, suspendHere: false, resumeHere: true },
+            },
+          ]),
+        ],
+      ],
+      "PUT /v1/team/agent-roster/t-a": [200, { agentId: "t-a", suspendedHere: true }],
+    });
+    renderTeam(<Page search="tab=team" />, TEAM_ADMIN);
+    await rowOf("Writer");
+    await userEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await rowAction("Triage", "Suspend here");
+    const ask = await screen.findByRole("alertdialog", { name: "Suspend Triage for Finance?" });
+    await userEvent.click(within(ask).getByRole("button", { name: "Suspend" }));
+    expect(await within(await rowOf("Triage")).findByText("Suspended here")).toBeTruthy();
+    expect(await rowOf("Writer")).toBeTruthy();
+    expect(calls.filter((c) => c.url.endsWith("cursor=c-2"))).toHaveLength(2);
   });
 });
 
@@ -517,7 +563,7 @@ describe("Agents page tab memory (ac-3)", () => {
       [ROSTER("site")]: [200, page("site", [GALLERY])],
       [ROSTER("team")]: [200, page("team", [])],
     });
-    renderTeam(<AgentsPage />, MEMBER);
+    renderTeam(<Page />, MEMBER);
     expect(screen.getByRole("tab", { name: "Site" }).getAttribute("aria-selected")).toBe("true");
     await rowOf("Kobe");
     await userEvent.click(screen.getByRole("tab", { name: "Team" }));
@@ -530,10 +576,56 @@ describe("Agents page tab memory (ac-3)", () => {
   it("lets ?tab= win over the remembered tab", async () => {
     localStorage.setItem("kobe.agents.tab", "site");
     stubApi({ [ROSTER("personal")]: [200, page("personal", [])] });
-    renderTeam(<AgentsPage requestedTab="personal" />, MEMBER);
+    renderTeam(<Page search="tab=personal" />, MEMBER);
     expect(screen.getByRole("tab", { name: "Personal" }).getAttribute("aria-selected")).toBe(
       "true",
     );
     expect(await screen.findByText("You have no personal agents yet.")).toBeTruthy();
+  });
+
+  it("puts the remembered tab in the address on opening, so a copied link opens it", async () => {
+    localStorage.setItem("kobe.agents.tab", "site");
+    stubApi({ [ROSTER("site")]: [200, page("site", [])] });
+    renderTeam(<Page />, MEMBER);
+    await waitFor(() => expect(window.location.search).toBe("?tab=site"));
+  });
+
+  it("follows a later link to another tab after a tab was clicked", async () => {
+    stubApi({
+      [ROSTER("personal")]: [200, page("personal", [])],
+      [ROSTER("team")]: [200, page("team", [])],
+      [ROSTER("site")]: [200, page("site", [])],
+    });
+    renderTeam(<Page search="tab=personal" />, MEMBER);
+    await userEvent.click(screen.getByRole("tab", { name: "Team" }));
+    // Next's router follows the page's replaceState, then a link names Personal again.
+    act(() => goTo("tab=team"));
+    act(() => goTo("tab=personal"));
+    expect(screen.getByRole("tab", { name: "Personal" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    act(() => goTo("tab=site"));
+    expect(screen.getByRole("tab", { name: "Site" }).getAttribute("aria-selected")).toBe("true");
+    expect(localStorage.getItem("kobe.agents.tab")).toBe("site");
+  });
+
+  it("keeps a tab loaded, with its notice, across a look at another tab", async () => {
+    const calls = stubApi({
+      [ROSTER("personal")]: [200, page("personal", [row({ actions: { assignTeam: "direct" } })])],
+      [ROSTER("team")]: [200, page("team", [])],
+      "POST /v1/agents/a-1/assignments": [201, { entry: entry() }],
+    });
+    renderTeam(<Page />, BUILDER);
+    await rowAction("Notes", "Assign to Finance");
+    expect(await screen.findByText("Notes is on Finance's roster.")).toBeTruthy();
+    const personalReads = () =>
+      calls.filter((c) => c.url === "/v1/agents/roster?tab=personal").length;
+    await waitFor(() => expect(personalReads()).toBe(2));
+    await userEvent.click(screen.getByRole("tab", { name: "Team" }));
+    await screen.findByText("Nothing is on this team's roster yet.");
+    await userEvent.click(screen.getByRole("tab", { name: "Personal" }));
+    expect(screen.getByText("Notes is on Finance's roster.")).toBeTruthy();
+    expect(personalReads()).toBe(2);
+    expect(calls.filter((c) => c.url === "/v1/agents/roster?tab=team")).toHaveLength(1);
   });
 });
