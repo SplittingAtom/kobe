@@ -9,6 +9,17 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Workspaces lane started (2026-11-08):** Chris's kickoff (pasted prompt in
+  `docs/ledger/workspaces-lane.md`): work KOBE-576..582 to completion and stop only at the gate
+  KOBE-583. Spec `docs/specs/workspaces.md` (Hadron b1e23088; decisions in §14 final): Workspace =
+  the team row, Team = people, Scratchspace = the member's volume, Projects with visibility
+  workspace|restricted, roles owner/editor/reader, builder → contributor, Kobe-native versioned
+  commits (checkout, commit, update, discard, history, revert; agent commits via policy + signed
+  approval, refused in auto/scheduled runs), mount-on-conversation, Files panel tree, object budgets,
+  history retention. Order 576 → 577 (the lane's only migrations) → 578→579 ∥ 580→581 → 582, then a
+  fresh kobe-gate1 install (MG0, Chris approved the purge; pg_dump kept) and
+  `docs/gates/gate-workspaces.md`. Earlier small lane KOBE-585 (Add to project, PR #488) is
+  reconciled inside WS-3/WS-4 (notes in the lane brief).
 - **Agents roster lane filed (2026-11-08):** Chris's ask: "My Agents" becomes **Agents** with
   Personal, Team and Site rosters; forks and new agents land in Personal and are assigned to a team
   or the site. Spec `docs/specs/agents-roster.md` (PR #475; Hadron spec 4a057ebf): rosters are
