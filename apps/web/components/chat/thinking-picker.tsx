@@ -1,11 +1,9 @@
 "use client";
 
-import { thinkingRank, type ThinkingLevel } from "@kobe/protocol";
+import { thinkingRank, type ThinkingControl, type ThinkingLevel } from "@kobe/protocol";
 import type { TeamModels } from "../../lib/admin/api/team/models";
-import styles from "./chat.module.css";
-
-/** The `<select>` value of "the model's default level". */
-const DEFAULT = "";
+import { ThinkingEffort } from "./thinking-effort";
+import type { ReasoningSpend } from "./use-reasoning-spend";
 
 export const THINKING_LABELS: Readonly<Record<ThinkingLevel, string>> = {
   off: "Thinking off",
@@ -32,6 +30,15 @@ export function thinkingChoices(
   return { levels: team?.levels ?? [], default: team?.default ?? null };
 }
 
+/**
+ * The control of the conversation's model in this team (KOBE-557: `thinkingBudget(control,
+ * level)` reads it), or null when the model has none or the server is older.
+ */
+export function thinkingControl(models: TeamModels, alias: string | null): ThinkingControl | null {
+  const model = models.models.find((m) => m.alias === (alias ?? models.default));
+  return (model?.enabled ? model.thinkingInTeam?.control : undefined) ?? null;
+}
+
 /** A chosen level as the runs will use it: never above what the team now allows. */
 export function shownThinking(
   chosen: ThinkingLevel | null,
@@ -43,10 +50,26 @@ export function shownThinking(
   return thinkingRank(chosen) > thinkingRank(top) ? top : (levels[0] as ThinkingLevel);
 }
 
+/** The pills' labels (KOBE-556): the level alone, the group says it is thinking. */
+export const EFFORT_LABELS: Readonly<Record<ThinkingLevel, string>> = {
+  off: "Off",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+};
+
+/** The default pill's tooltip (KOBE-556). */
+export const MODEL_DEFAULT_TITLE = "Model's default";
+
 /**
  * The conversation's thinking level (KOBE-260), beside the model picker: shown only when the
- * model lets members choose. The server clamps every run to the site and team settings, so this
- * only asks; a level the team has since lowered shows as what runs get.
+ * model lets members choose. Since KOBE-556 it is assistant-ui's Reasoning effort control
+ * (thinking-effort.tsx): one pill per level the team allows, the member's choice pressed, else
+ * the default's pill (titled "Model's default"; choosing it stores null so the conversation keeps
+ * following the team's default). The server clamps every run to the site and team settings, so
+ * this only asks; a level the team has since lowered shows as what runs get. The pills are about
+ * the next run; the readout and bar describe the latest run (its spend against the budget of the
+ * level it ran with) and appear once both are known (KOBE-557).
  */
 export function ThinkingPicker({
   models,
@@ -55,6 +78,7 @@ export function ThinkingPicker({
   disabled,
   onChoose,
   compact = false,
+  spend = {},
 }: {
   readonly models: TeamModels;
   /** The conversation's effective model alias (the agent's pin, the choice, else the default). */
@@ -62,31 +86,29 @@ export function ThinkingPicker({
   readonly chosen: ThinkingLevel | null;
   readonly disabled: boolean;
   readonly onChoose: (level: ThinkingLevel | null) => void;
-  /** The smaller pill on the line below the composer (KOBE-450). */
+  /** The smaller pills on the line below the composer (KOBE-450). */
   readonly compact?: boolean;
+  /** The latest run's reasoning spend and budget (`useReasoningSpend`); empty hides the readout. */
+  readonly spend?: ReasoningSpend;
 }) {
   const { levels, default: fallback } = thinkingChoices(models, alias);
+  const shown = shownThinking(chosen, levels) ?? fallback;
   if (levels.length === 0) return null;
-  const value = shownThinking(chosen, levels);
   return (
-    <label
-      className={compact ? `${styles.modelPicker} ${styles.compactPicker}` : styles.modelPicker}
-    >
-      <span className={styles.visuallyHidden}>Thinking level for this conversation</span>
-      <select
-        value={value ?? DEFAULT}
-        disabled={disabled}
-        onChange={(e) =>
-          onChoose(e.target.value === DEFAULT ? null : (e.target.value as ThinkingLevel))
-        }
-      >
-        <option value={DEFAULT}>{thinkingDefaultLabel(fallback)}</option>
-        {levels.map((l) => (
-          <option key={l} value={l}>
-            {THINKING_LABELS[l]}
-          </option>
-        ))}
-      </select>
-    </label>
+    <ThinkingEffort
+      label="Thinking level for this conversation"
+      levels={levels.map((l) => ({
+        key: l,
+        label: EFFORT_LABELS[l],
+        ...(l === fallback ? { hint: MODEL_DEFAULT_TITLE } : {}),
+      }))}
+      selectedKey={shown}
+      disabled={disabled}
+      onSelect={(key) => onChoose(key === fallback ? null : (key as ThinkingLevel))}
+      spent={spend.spent}
+      budget={spend.budget}
+      estimated={spend.estimated}
+      compact={compact}
+    />
   );
 }
