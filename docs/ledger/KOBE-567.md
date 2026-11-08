@@ -17,6 +17,16 @@ hand-written migration PR): accept a personal pin also when the agent has an ent
 is bound to another team. The trigger also fires on `UPDATE OF owner_user_id`: decide whether any
 entry state (removed included, D19) is enough there.
 
+## Decisions
+
+- **Thread pin trigger (PR 1/2, `0195_thread_pin_roster`, coordinator-approved 2026-11-08):** a
+  personal pin is valid for the agent's owner, or with an `active` team entry for the thread's team
+  or an `active` site entry, the agent not bound elsewhere. Re-checked on INSERT and on an UPDATE
+  that changes `agent_scope`/`agent_id`/`agent_version` **or `owner_user_id`**: the owner re-check
+  is kept as the existing M2 security behaviour (a pinned thread can't be moved to someone who may
+  not use the agent); no server path changes a thread's owner, so D19 (pins survive removal and
+  owner departure) is unaffected. Renames, moves and archives never re-validate.
+
 ## Done (server, tests green except the three thread-creation tests behind the trigger)
 
 - `agents/roster-resolution.ts`: `lendingIn` (pure), `entryUnavailable`, `ownerStates`,
