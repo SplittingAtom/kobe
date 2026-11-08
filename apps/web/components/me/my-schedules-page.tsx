@@ -201,7 +201,7 @@ export function MySchedulesPage() {
           {({ schedules, activeCount }) =>
             schedules.length === 0 ? (
               <EmptyState title="No schedules yet.">
-                Pick one of your <Link href="/me/agents">agents</Link> and create a schedule for it.
+                Pick one of your <Link href="/agents">agents</Link> and create a schedule for it.
               </EmptyState>
             ) : (
               <div ref={focus.container}>

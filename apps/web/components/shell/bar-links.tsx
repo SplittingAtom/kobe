@@ -36,7 +36,7 @@ function Links({
 }
 
 /**
- * The bar's right side: the member's own areas (My memory, My schedules, My agents, Skills), each
+ * The bar's right side: the member's own areas (My memory, My schedules, Agents, Skills), each
  * a panel over the workspace (KOBE-452).
  */
 export function AreaLinks() {

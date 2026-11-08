@@ -54,7 +54,7 @@ vi.mock("next/link", async () => {
 });
 
 /**
- * KOBE-452: the consoles, My agents, Skills and the My area open as a panel over the workspace,
+ * KOBE-452: the consoles, Agents, Skills and the My area open as a panel over the workspace,
  * at their own addresses, with the chat mounted underneath. The router here stands in for Next's:
  * `push` and `replace` move the address and the page; the Navigation API is a fake that follows
  * `window.history`.
@@ -106,7 +106,7 @@ function TestPage({ path }: { readonly path: string }) {
     );
   }
   if (path === "/admin/team/usage") return <Section title="Usage" />;
-  if (path === "/me/agents") return <EditorSection />;
+  if (path === "/agents") return <EditorSection />;
   if (path.startsWith("/me/skills/drafts/")) return <EditorWidthPage />;
   return (
     <Section title="Members">
@@ -306,10 +306,10 @@ describe("a panel over the workspace (KOBE-452 ac-1, ac-5)", () => {
     await user.click(within(panel).getByRole("link", { name: "Usage" }));
     expect(await within(panel).findByRole("heading", { level: 1, name: "Usage" })).toBeTruthy();
     act(() => {
-      window.history.pushState({}, "", "/me/agents");
+      window.history.pushState({}, "", "/agents");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
-    expect(await dialog("My agents")).toBeTruthy();
+    expect(await dialog("Agents")).toBeTruthy();
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
   });
 
@@ -472,17 +472,17 @@ describe("closing (KOBE-452 ac-3)", () => {
   it("a page's own unsaved edits (useUnsavedChanges) ask too, until saved", async () => {
     await openThread();
     act(() => {
-      window.history.pushState({}, "", "/me/agents");
+      window.history.pushState({}, "", "/agents");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
     const user = userEvent.setup();
-    const panel = await dialog("My agents");
+    const panel = await dialog("Agents");
     await user.click(within(panel).getByRole("button", { name: "Edit the prompt" }));
-    await user.click(within(panel).getByRole("button", { name: "Close My agents" }));
+    await user.click(within(panel).getByRole("button", { name: "Close Agents" }));
     const ask = await screen.findByRole("alertdialog", { name: "Discard your changes?" });
     await user.click(within(ask).getByRole("button", { name: "Keep editing" }));
     await user.click(within(panel).getByRole("button", { name: "Save the prompt" }));
-    await user.click(within(panel).getByRole("button", { name: "Close My agents" }));
+    await user.click(within(panel).getByRole("button", { name: "Close Agents" }));
     await waitFor(() => expect(panelEl()).toBeNull());
   });
 });

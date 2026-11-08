@@ -19,7 +19,7 @@ const tab = (page: Page, name: "Identity" | "Behaviour") =>
   panelOf(page).getByRole("tab", { name, exact: true });
 
 async function openCreator(page: Page): Promise<void> {
-  await page.goto("/me/agents/new");
+  await page.goto("/agents/new");
   await expect(
     panelOf(page).getByRole("heading", { level: 1, name: "New personal agent" }),
   ).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
@@ -97,7 +97,7 @@ test("create an agent across both tabs, deny a tool, save and reload", async ({ 
   expect(res.status()).toBe(201);
   const id = ((await res.json()) as { agent: { id: string } }).agent.id;
   try {
-    await page.waitForURL(`**/me/agents/${id}`, { timeout: SHELL_TIMEOUT_MS });
+    await page.waitForURL(`**/agents/${id}`, { timeout: SHELL_TIMEOUT_MS });
     await page.reload();
     await expect(panel.getByLabel("Name", { exact: true })).toHaveValue(name, {
       timeout: SHELL_TIMEOUT_MS,

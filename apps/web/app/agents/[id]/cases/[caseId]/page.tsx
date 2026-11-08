@@ -1,4 +1,4 @@
-import { SharedCasePage } from "../../../../../../components/admin/team/eval-cases/shared-case-page";
+import { SharedCasePage } from "../../../../../components/admin/team/eval-cases/shared-case-page";
 
 export default async function Page({
   params,

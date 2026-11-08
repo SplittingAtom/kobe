@@ -55,10 +55,10 @@ import { useNavigate } from "../../../shell/use-navigate";
 
 export type BuilderScope = "team" | "personal";
 
-/** Where each scope's builder lives: the admin console for team agents, "My agents" otherwise. */
+/** Where each scope's builder lives: the admin console for team agents, Agents otherwise. */
 const HOME: Readonly<Record<BuilderScope, { base: string; back: string; title: string }>> = {
   team: { base: "/admin/team/agents", back: "All team agents", title: "New team agent" },
-  personal: { base: "/me/agents", back: "My agents", title: "New personal agent" },
+  personal: { base: "/agents", back: "Agents", title: "New personal agent" },
 };
 
 /**

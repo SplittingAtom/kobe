@@ -71,7 +71,7 @@ describe("utility bar", () => {
     ).toEqual([
       ["My memory", "/me/memory"],
       ["My schedules", "/me/schedules"],
-      ["My agents", "/me/agents"],
+      ["Agents", "/agents"],
       ["Skills", "/me/skills"],
     ]);
     const profile = row(1).querySelector('summary[aria-label="Profile"]')?.closest("details");

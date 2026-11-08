@@ -36,8 +36,8 @@ const FIXED_PAGES = [
   "/admin/site",
   "/admin/team",
   "/admin/team/agents/new",
-  "/me/agents",
-  "/me/agents/new",
+  "/agents",
+  "/agents/new",
   "/me/skills",
   "/me/skills?tab=workbench",
   "/me/projects",
@@ -64,7 +64,7 @@ const DETAILS = [
     link: /^\/admin\/team\/skills\/(?!new$)[^/]+$/,
     name: "team-skill",
   },
-  { list: "/me/agents", link: /^\/me\/agents\/(?!new$)[^/]+$/, name: "my-agent" },
+  { list: "/agents", link: /^\/agents\/(?!new$)[^/]+$/, name: "my-agent" },
   // The Workbench editor (KOBE-321) of the first draft listed.
   { list: "/me/skills?tab=workbench", link: /^\/me\/skills\/drafts\/[^/]+$/, name: "skill-draft" },
   { list: "/me/projects", link: /^\/me\/projects\/[^/]+$/, name: "my-project" },
@@ -87,7 +87,7 @@ const MOBILE_PAGES = [
   // Wide tables and the audit filters (KOBE-291).
   "/admin/site/audit",
   "/admin/team/inventory",
-  "/me/agents",
+  "/agents",
 ] as const;
 
 /** Side-by-side choices in a ChoiceGroup sit at most this far apart (review S2: 16 px gap). */

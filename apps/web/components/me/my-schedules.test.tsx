@@ -61,7 +61,7 @@ describe("Schedules page (KOBE-175)", () => {
     renderTeam(<MySchedulesPage />, MEMBER);
     await screen.findByText(/No schedules yet/);
     const link = screen.getByRole("link", { name: /agents/i });
-    expect(link.getAttribute("href")).toBe("/me/agents");
+    expect(link.getAttribute("href")).toBe("/agents");
   });
 
   it("creates a weekly schedule with the browser zone by default (ac-1)", async () => {

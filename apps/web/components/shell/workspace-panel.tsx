@@ -10,7 +10,7 @@ import { useModalLayer } from "./use-modal-layer";
 import styles from "./workspace-panel.module.css";
 
 /**
- * A panel over the workspace (KOBE-452): the consoles, My agents, Skills and the My area open
+ * A panel over the workspace (KOBE-452): the consoles, Agents, Skills and the My area open
  * here, a large centred overlay (about 90% of the window, the workspace dimmed and inert behind
  * it); under 820 px a full-screen sheet. The rail, the artifact column and the conversation stay
  * mounted underneath, so a run keeps streaming and the draft and scroll stay as they were.

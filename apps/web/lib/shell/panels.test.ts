@@ -3,7 +3,7 @@ import { isWorkspacePath, panelOfPath } from "./panels";
 
 /** KOBE-452: which addresses open which panel over the workspace. */
 describe("panelOfPath (KOBE-452)", () => {
-  it("names the consoles, My agents, Skills and the My area pages", () => {
+  it("names the consoles, Agents, Skills and the My area pages", () => {
     const cases: readonly (readonly [string, string])[] = [
       ["/admin/team", "Team console"],
       ["/admin/team/members", "Team console"],
@@ -11,8 +11,9 @@ describe("panelOfPath (KOBE-452)", () => {
       ["/admin/site", "Site console"],
       ["/admin/site/audit", "Site console"],
       ["/admin", "Administration"],
-      ["/me/agents", "My agents"],
-      ["/me/agents/new", "My agents"],
+      ["/agents", "Agents"],
+      ["/agents/new", "Agents"],
+      ["/agents/a-1/cases", "Agents"],
       ["/me/skills", "Skills"],
       ["/me/skills/drafts/d-1", "Skills"],
       ["/me/memory", "My memory"],
@@ -30,6 +31,9 @@ describe("panelOfPath (KOBE-452)", () => {
     expect(panelOfPath("/administer")).toBeUndefined();
     expect(panelOfPath("/admin/teams")?.title).toBe("Administration");
     expect(panelOfPath("/me/skillset")?.title).toBe("My area");
+    expect(panelOfPath("/agentsx")).toBeUndefined();
+    // KOBE-569: the Agents panel keeps the id stored preferences know it by.
+    expect(panelOfPath("/agents")?.id).toBe("my-agents");
     for (const path of ["/", "/sign-in", "/setup", "/invite", "/reset-password", ""]) {
       expect(panelOfPath(path), path).toBeUndefined();
     }
@@ -39,7 +43,7 @@ describe("panelOfPath (KOBE-452)", () => {
     for (const path of ["/me/memory", "/me/approvals", "/me/schedules", "/me/connectors"]) {
       expect(panelOfPath(path)?.embedded, path).toBe(true);
     }
-    for (const path of ["/admin/team", "/me/agents", "/me/skills", "/me/projects"]) {
+    for (const path of ["/admin/team", "/agents", "/me/skills", "/me/projects"]) {
       expect(panelOfPath(path)?.embedded, path).toBe(false);
     }
   });

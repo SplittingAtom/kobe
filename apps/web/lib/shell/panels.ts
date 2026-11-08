@@ -1,5 +1,5 @@
 /**
- * The panels over the workspace (KOBE-452): the Team and Site consoles, My agents, Skills and the
+ * The panels over the workspace (KOBE-452): the Team and Site consoles, Agents, Skills and the
  * rest of the My area open as one large overlay over the chat instead of leaving it. Each keeps
  * its own address (`/admin/team/...`, `/me/skills`, ...), so a link, a reload and Back work; the
  * root layout keeps the workspace mounted under it (components/shell/workspace-host.tsx).
@@ -41,7 +41,8 @@ const PANELS: readonly (Panel & { readonly prefix: string })[] = [
   { prefix: "/admin/team", id: "team-console", title: "Team console", embedded: false },
   { prefix: "/admin/site", id: "site-console", title: "Site console", embedded: false },
   { prefix: "/admin", id: "administration", title: "Administration", embedded: false },
-  { prefix: "/me/agents", id: "my-agents", title: "My agents", embedded: false },
+  // The Agents page (KOBE-569); the id stays "my-agents" for stored preferences (AR15).
+  { prefix: "/agents", id: "my-agents", title: "Agents", embedded: false },
   { prefix: "/me/skills", id: "skills", title: "Skills", embedded: false },
   { prefix: "/me/memory", id: "my-memory", title: "My memory", embedded: true },
   { prefix: "/me/approvals", id: "my-approvals", title: "My approvals", embedded: true },

@@ -170,10 +170,10 @@ const LIST = [
   {
     id: "my-agents",
     group: "areas",
-    name: "My agents",
+    name: "Agents",
     icon: BotIcon,
     scope: "bar",
-    href: "/me/agents",
+    href: "/agents",
     slash: "agents",
     readOnlySafe: true,
   },

@@ -144,7 +144,7 @@ describe("IconAction", () => {
         <IconAction command="my-agents" />
       </Slot.Root>,
     );
-    const link = screen.getByRole("link", { name: "My agents" });
+    const link = screen.getByRole("link", { name: "Agents" });
     expect(link.getAttribute("data-command")).toBe("my-agents");
   });
 });
