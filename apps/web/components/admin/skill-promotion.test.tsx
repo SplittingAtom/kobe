@@ -66,6 +66,89 @@ describe("Promote to Site (KOBE-333)", () => {
   });
 });
 
+describe("Create kobe.skill.yaml (KOBE-564)", () => {
+  const MODELS = {
+    models: [
+      { alias: "k2", label: "Kimi K2", enabled: true, isDefault: true },
+      { alias: "glm", label: "GLM Flash", enabled: true, isDefault: false },
+      { alias: "off", label: "Disabled", enabled: false, isDefault: false },
+    ],
+    default: "k2",
+  };
+  const NO_MANIFEST = { code: "no_manifest", message: "The package needs a kobe.skill.yaml." };
+
+  it("is offered only when the Site refuses for a missing manifest", async () => {
+    stubApi({
+      [`GET ${PREVIEW_PATH}`]: [200, preview([{ code: "license", message: "needs a license" }])],
+      ["GET /v1/team/models"]: [200, MODELS],
+    });
+    renderTeam(<PromotePanel teamId={TEAM.id} source={SOURCE} onDone={() => {}} />);
+    await screen.findByRole("group", { name: "Promote to Site" });
+    expect(screen.queryByRole("group", { name: "Create kobe.skill.yaml" })).toBeNull();
+  });
+
+  it("offers the team's enabled models with the default preselected and the author's license, then opens the draft", async () => {
+    const calls = stubApi({
+      [`GET ${PREVIEW_PATH}`]: [200, preview([NO_MANIFEST])],
+      ["GET /v1/team/models"]: [200, MODELS],
+      ["POST /v1/skills/promotions/manifest"]: [
+        201,
+        {
+          draft: { id: "d-9", name: "sales-report", rev: 1 },
+          manifest: { summary: "Sales reports." },
+          model: "glm",
+          source: "model",
+        },
+      ],
+    });
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    renderTeam(<PromotePanel teamId={TEAM.id} source={SOURCE} onDone={() => {}} />);
+    const group = await screen.findByRole("group", { name: "Create kobe.skill.yaml" });
+    const model = (await within(group).findByRole("combobox", {
+      name: "Model for the manifest",
+    })) as HTMLSelectElement;
+    expect(model.options[0]?.textContent).toBe("Team default (Kimi K2)");
+    expect([...model.options].map((o) => o.textContent)).toEqual([
+      "Team default (Kimi K2)",
+      "GLM Flash",
+    ]);
+    const license = within(group).getByRole("combobox", { name: "License" }) as HTMLSelectElement;
+    expect(license.value).toBe("Proprietary");
+    await userEvent.selectOptions(model, "glm");
+    await userEvent.selectOptions(license, "Apache-2.0");
+    await userEvent.click(within(group).getByRole("button", { name: "Create kobe.skill.yaml" }));
+    expect(await screen.findByText(/written by glm/)).toBeTruthy();
+    const post = calls.find((c) => c.method === "POST");
+    expect(JSON.parse(String(post?.body))).toEqual({
+      ...SOURCE,
+      model: "glm",
+      license: "Apache-2.0",
+    });
+    expect(assign).toHaveBeenCalledWith("/me/skills/drafts/d-9");
+    // The version itself still can't be promoted.
+    expect(screen.getByRole("button", { name: "Promote" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("sends no model for the team default and shows the server's refusal", async () => {
+    const calls = stubApi({
+      [`GET ${PREVIEW_PATH}`]: [200, preview([NO_MANIFEST])],
+      ["GET /v1/team/models"]: [200, MODELS],
+      ["POST /v1/skills/promotions/manifest"]: [
+        502,
+        { code: "call_failed", message: "The model k2 did not answer (budget exhausted)." },
+      ],
+    });
+    renderTeam(<PromotePanel teamId={TEAM.id} source={SOURCE} onDone={() => {}} />);
+    const group = await screen.findByRole("group", { name: "Create kobe.skill.yaml" });
+    await within(group).findByRole("combobox", { name: "Model for the manifest" });
+    await userEvent.click(within(group).getByRole("button", { name: "Create kobe.skill.yaml" }));
+    expect(await screen.findByText(/did not answer/)).toBeTruthy();
+    const post = calls.find((c) => c.method === "POST");
+    expect(JSON.parse(String(post?.body))).toEqual({ ...SOURCE, license: "Proprietary" });
+  });
+});
+
 describe("the team's Promote to Site requests (KOBE-333)", () => {
   const REQUEST = {
     id: "r-1",

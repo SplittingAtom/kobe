@@ -47,12 +47,17 @@ export async function placeRequestSpan(
   const { runId, serverCall } = call;
   if (!telemetryState().enabled || runId === undefined) return FRESH;
   if (serverCall) {
+    // A run-bound purpose names its thread (the claims refine says so); the guard is for the type.
+    const threadId = serverCall.thread_id;
     return {
       parent: runParentContext(runId),
-      attributes: {
-        ...idAttributes({ threadId: serverCall.thread_id }),
-        ...sessionAttributes({ threadId: serverCall.thread_id, userId: serverCall.user_id }),
-      },
+      attributes:
+        threadId === undefined
+          ? {}
+          : {
+              ...idAttributes({ threadId }),
+              ...sessionAttributes({ threadId, userId: serverCall.user_id }),
+            },
     };
   }
   if (tracing === undefined) return { parent: runParentContext(runId), attributes: {} };

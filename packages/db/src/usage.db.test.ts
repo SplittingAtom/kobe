@@ -320,6 +320,39 @@ describe("recordModelUsage", () => {
     );
   });
 
+  it("takes a skill_manifest row with no sandbox and no run, and no other kind without a run (KOBE-564)", async () => {
+    const id = randomUUID();
+    await recordModelUsage(app.db, [
+      record({ id, sandboxId: undefined, runId: undefined, kind: "skill_manifest" }),
+    ]);
+    const [row] = await withTeam(app.db, teamA, (tx) =>
+      tx.select().from(runUsage).where(eq(runUsage.id, id)),
+    );
+    expect(row).toMatchObject({
+      kind: "skill_manifest",
+      sandboxId: null,
+      runId: null,
+      threadId: null,
+      userId,
+    });
+    // Budgets count it like any call (its member's lines).
+    expect(row?.costUsd).toBeGreaterThan(0);
+    const shape = async (over: Partial<ModelUsageRecord>) =>
+      (
+        (await recordModelUsage(app.db, [record(over)]).catch((e: unknown) => e)) as {
+          cause?: { constraint?: string };
+        }
+      ).cause?.constraint;
+    // A manifest call never names a run or a sandbox; the run-bound kinds still need their run.
+    expect(await shape({ kind: "skill_manifest", sandboxId: undefined, runId: randomUUID() })).toBe(
+      "run_usage_kind_shape",
+    );
+    expect(await shape({ kind: "skill_manifest", runId: undefined })).toBe("run_usage_kind_shape");
+    expect(await shape({ kind: "title", sandboxId: undefined, runId: undefined })).toBe(
+      "run_usage_kind_shape",
+    );
+  });
+
   it("adds the kind CHECKs NOT VALID: no scan of the ledger under the migration's lock (0099)", async () => {
     const res = await app.db.execute<{ conname: string; convalidated: boolean }>(sql`
       SELECT conname, convalidated FROM pg_constraint

@@ -48,6 +48,11 @@ const gatewayFetch: typeof fetch = async (_url, init) => {
   );
   if (!verified.ok) return new Response("{}", { status: 401 });
   const { claims } = verified;
+  // The judge is run-bound: a token without its run is refused as the gateway would (KOBE-564).
+  if (claims.run_id === undefined || claims.thread_id === undefined)
+    return new Response(JSON.stringify({ error: { code: "server_call_run_mismatch" } }), {
+      status: 403,
+    });
   const matches = await serverCallRunMatches(f.fx.db, {
     teamId: claims.team_id,
     runId: claims.run_id,

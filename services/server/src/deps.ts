@@ -81,6 +81,10 @@ import {
   notifyUnmaintained,
 } from "./skills/registry/maintainers.js";
 import { createServerCallClient } from "./models/gateway-client.js";
+import {
+  createSkillManifestGenerator,
+  type SkillManifestGenerator,
+} from "./skills/manifest/index.js";
 import { NO_SERVER_CALLS, createServerCalls } from "./server-calls/service.js";
 import { createSkillEvalJudge, type SkillEvalJudge } from "./skills/evals/judge.js";
 import { DEFAULT_UPLOAD_SETTINGS, type UploadSettings } from "./uploads/settings.js";
@@ -248,6 +252,11 @@ export interface ServerDeps {
    * calls are not configured (a `judge` check then fails `judge_failed`).
    */
   readonly skillEvalJudge: SkillEvalJudge | undefined;
+  /**
+   * Create kobe.skill.yaml with a model (KOBE-564): a run-less server call through the model
+   * gateway; undefined when server calls are not configured (the routes answer 503).
+   */
+  readonly skillManifests: SkillManifestGenerator | undefined;
   /** Model gateway admin (KOBE-40): seals provider API keys; undefined when not configured. */
   readonly models:
     | {
@@ -391,6 +400,14 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
         db: database.db,
         client: serverCallClient,
         log: logger.child({ component: "skill-eval-judge" }),
+      })
+    : undefined;
+  // Create kobe.skill.yaml with the member's chosen model (KOBE-564): a server call too.
+  const skillManifests = serverCallClient
+    ? createSkillManifestGenerator({
+        db: database.db,
+        client: serverCallClient,
+        log: logger.child({ component: "skill-manifests" }),
       })
     : undefined;
   // Project files in members' workspaces (KOBE-162); `index.ts` binds the workspace store later.
@@ -554,6 +571,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     runs,
     runAgents,
     skillEvalJudge,
+    skillManifests,
     mcp,
     connectorUrlPolicy,
     connectorProbe: options.connectorProbe ?? NO_PROBE,

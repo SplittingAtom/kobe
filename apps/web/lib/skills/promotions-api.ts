@@ -61,6 +61,45 @@ export function promoteVersion(
   return apiRequest("/v1/skills/promotions", { method: "POST", json: source, teamId });
 }
 
+/** The author's license for a generated manifest (KOBE-564); `Proprietary` is the contract's own. */
+export const MANIFEST_LICENSES = ["Proprietary", "Apache-2.0", "MIT", "BSD-3-Clause"] as const;
+export type ManifestLicense = (typeof MANIFEST_LICENSES)[number];
+
+export interface ManifestDraftChoice {
+  /** The catalog alias; undefined: the team default. */
+  readonly model?: string | undefined;
+  readonly license?: ManifestLicense | undefined;
+}
+
+export interface ManifestDraft {
+  readonly draft: { readonly id: string; readonly name: string; readonly rev: number };
+  readonly manifest: { readonly summary: string; readonly tags?: readonly string[] };
+  /** The catalog alias that answered. */
+  readonly model: string;
+  /** `model`: fields from the reply; `seed`: SKILL.md's description alone. */
+  readonly source: "model" | "seed";
+}
+
+/**
+ * Create kobe.skill.yaml for a version without one (KOBE-564): the chosen model drafts it, and
+ * the version is forked into a Workbench draft of the caller's with the file in place.
+ */
+export function createManifestDraft(
+  teamId: string,
+  source: PromoteSource,
+  choice: ManifestDraftChoice,
+): Promise<ApiResult<ManifestDraft>> {
+  return apiRequest("/v1/skills/promotions/manifest", {
+    method: "POST",
+    json: {
+      ...source,
+      ...(choice.model === undefined ? {} : { model: choice.model }),
+      ...(choice.license === undefined ? {} : { license: choice.license }),
+    },
+    teamId,
+  });
+}
+
 const QUEUE = "/v1/team/skill-promotions";
 
 export async function listPromotionRequests(

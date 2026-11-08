@@ -1748,6 +1748,22 @@ export const AUDIT_EVENTS = {
     fromConversation: z.boolean(),
     requestId: id.optional(),
   }),
+  /**
+   * Kobe drafted a kobe.skill.yaml for a version without one, with the member's chosen model,
+   * into a new Workbench draft of theirs (KOBE-564); `from` says whether the model's reply was
+   * used or SKILL.md's description alone. Metadata only: never the manifest's text.
+   */
+  "skill.manifest.generated": event("team", {
+    draftId: id,
+    /** The version forked (the Promote panel); absent when written into an open draft. */
+    skillId: id.optional(),
+    scope: z.enum(["team", "personal"]).optional(),
+    version: version.optional(),
+    semver: z.string().max(32).optional(),
+    /** The catalog alias that answered. */
+    model: z.string().max(128),
+    from: z.enum(["model", "seed"]),
+  }),
   /** A version was submitted to the Site Registry for review (site log). */
   "registry.submitted": event("site", {
     registryVersionId: id,

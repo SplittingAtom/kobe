@@ -42,10 +42,32 @@ export const SERVER_CALL_PURPOSES = ["title", "followups"] as const;
 export const serverCallPurposeSchema = z.enum(SERVER_CALL_PURPOSES);
 /** An epilogue purpose (what `run.completed.epilogue` may announce). */
 export type ServerCallPurpose = z.infer<typeof serverCallPurposeSchema>;
-/** Every purpose a server-call token may carry: the epilogue's and the eval judge's. */
-export const SERVER_CALL_TOKEN_PURPOSES = [...SERVER_CALL_PURPOSES, "eval_judge"] as const;
+/**
+ * Every purpose a server-call token may carry: the epilogue's, the eval judge's, and the skill
+ * manifest's (`skill_manifest`, KOBE-564: a member asks Kobe to write a version's
+ * `kobe.skill.yaml` with the model they chose; the only purpose a member starts, so it names no
+ * thread or run: {@link RUNLESS_SERVER_CALL_PURPOSES}).
+ */
+export const SERVER_CALL_TOKEN_PURPOSES = [
+  ...SERVER_CALL_PURPOSES,
+  "eval_judge",
+  "skill_manifest",
+] as const;
 export const serverCallTokenPurposeSchema = z.enum(SERVER_CALL_TOKEN_PURPOSES);
 export type ServerCallTokenPurpose = z.infer<typeof serverCallTokenPurposeSchema>;
+
+/**
+ * Purposes a member starts from the UI rather than a completed run (KOBE-564): their token names
+ * no `thread_id` or `run_id`, the gateway skips the run check, and the usage row has a NULL
+ * `run_id` (its `kind` is the purpose). Every other purpose is bound to a completed run.
+ */
+export const RUNLESS_SERVER_CALL_PURPOSES = ["skill_manifest"] as const;
+export type RunlessServerCallPurpose = (typeof RUNLESS_SERVER_CALL_PURPOSES)[number];
+
+/** Whether a purpose's token must name the completed run (and thread) that triggered the call. */
+export function serverCallBoundToRun(purpose: ServerCallTokenPurpose): boolean {
+  return !(RUNLESS_SERVER_CALL_PURPOSES as readonly string[]).includes(purpose);
+}
 
 export const SERVER_CALL_TOKEN_HEADER = "x-kobe-server-call";
 /** The signed JWS `typ` of a server-call token (KOBE-521): never `JWT` or `krt2`. */
@@ -116,6 +138,17 @@ export const SERVER_CALL_LIMITS = {
     max_body_bytes: 2 * 1024 * 1024,
     temperature: 0,
   },
+  // KOBE-564: a `kobe.skill.yaml` drafted from SKILL.md (up to 100 KiB) and the file list; the
+  // answer is one small JSON object (summary, tags, capabilities), so the output cap is modest.
+  skill_manifest: {
+    max_output_tokens: 1024,
+    reasoning_max_output_tokens: 3072,
+    timeout_ms: 60_000,
+    skip_at_percent: 100,
+    max_message_chars: 120_000,
+    max_body_bytes: 512 * 1024,
+    temperature: 0.2,
+  },
 } as const satisfies Record<
   ServerCallTokenPurpose,
   {
@@ -181,10 +214,14 @@ export const serverCallClaimsSchema = z
     /**
      * The thread: usage attribution, and the trace's `session.id` (Langfuse sessions group a
      * thread's model calls; KOBE-274 sets it on run calls and, from this claim, on server calls).
+     * Absent only for a run-less purpose ({@link RUNLESS_SERVER_CALL_PURPOSES}).
      */
-    thread_id: uuidSchema,
-    /** The completed run that triggered the call (usage attribution and tracing). */
-    run_id: uuidSchema,
+    thread_id: uuidSchema.optional(),
+    /**
+     * The completed run that triggered the call (usage attribution and tracing). Absent only for
+     * a run-less purpose, where the usage row's `run_id` is NULL.
+     */
+    run_id: uuidSchema.optional(),
     /** `<gateway provider>/<model>`: the thread's resolved model (a pinned agent's model wins). */
     model: gatewayModelSchema,
     max_output_tokens: z.number().int().min(1).max(MAX_OUTPUT_CAP),
@@ -201,7 +238,18 @@ export const serverCallClaimsSchema = z
   .refine((c) => c.max_output_tokens <= serverCallOutputCap(c.purpose, true), {
     message: "max_output_tokens is above the purpose's cap",
     path: ["max_output_tokens"],
-  });
+  })
+  // A run-bound purpose names its thread and run, both; a run-less one names neither (KOBE-564).
+  .refine(
+    (c) =>
+      serverCallBoundToRun(c.purpose)
+        ? c.thread_id !== undefined && c.run_id !== undefined
+        : c.thread_id === undefined && c.run_id === undefined,
+    {
+      message: "thread_id and run_id are both present for a run-bound purpose and absent otherwise",
+      path: ["run_id"],
+    },
+  );
 export type ServerCallClaims = z.infer<typeof serverCallClaimsSchema>;
 
 export type ServerCallTokenFailure = "malformed" | "bad_signature" | "expired" | "not_yet_valid";

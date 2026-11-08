@@ -1345,6 +1345,13 @@
       "when": 1794084486143,
       "tag": "0191_run_usage_reasoning",
       "breakpoints": true
+    },
+    {
+      "idx": 192,
+      "version": "7",
+      "when": 1794103134598,
+      "tag": "0192_run_usage_skill_manifest",
+      "breakpoints": true
     }
   ]
 }
