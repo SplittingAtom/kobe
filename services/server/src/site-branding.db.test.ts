@@ -107,6 +107,7 @@ describe("GET /v1/site/branding (public, TH6)", () => {
       logo: null,
       favicon: null,
       theme: { preset: "default" },
+      logoThemeColor: false,
     });
     expect(siteBrandingSchema.safeParse(res.json).success).toBe(true);
     expect(res.headers.get("cache-control")).toBe("no-cache");
@@ -401,12 +402,91 @@ describe("branding files", () => {
   });
 });
 
+describe("Logo takes the theme colour (KOBE-562)", () => {
+  const SVG_HEADERS = {
+    "content-type": "image/svg+xml",
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+  };
+
+  it("is off by default, stored and audited when changed, and needs the permission", async () => {
+    expect((await as.anon.get("/v1/site/branding")).json.logoThemeColor).toBe(false);
+    expect((await as.alice.put("/v1/site/branding", { logoThemeColor: true })).status).toBe(403);
+    const res = await as.admin.put("/v1/site/branding", { logoThemeColor: true });
+    expect(res.status, JSON.stringify(res.json)).toBe(200);
+    expect(res.json.logoThemeColor).toBe(true);
+    await as.admin.put("/v1/site/branding", { logoThemeColor: true });
+    expect((await as.admin.put("/v1/site/branding", { logoThemeColor: "yes" })).status).toBe(400);
+    expect(await brandingEvents()).toEqual([{ setting: "logo_theme_color", value: "true" }]);
+  });
+
+  it("serves the inline-safe SVG logo by its hash, with the asset headers", async () => {
+    const hostile = svg(
+      "<style>body{display:none}</style>" +
+        '<path id="a" d="M0 0h10v10z" style="fill:#f00"/><use href="#a"/>',
+    );
+    await upload(as.admin, "logo", hostile);
+    await upload(as.admin, "logo_dark", svg());
+    expect((await as.anon.get("/v1/site/branding")).json.logo.inline).toBeUndefined();
+    expect((await as.anon.get("/v1/site/branding/assets/logo?inline=1")).status).toBe(404);
+    await as.admin.put("/v1/site/branding", { logoThemeColor: true });
+    const branding = (await as.anon.get("/v1/site/branding")).json;
+    expect(siteBrandingSchema.safeParse(branding).success).toBe(true);
+    expect(branding.logo.dark).toBeUndefined();
+    expect(branding.logo.url).toBe(`/v1/site/branding/assets/logo?v=${sha(hostile)}`);
+    const inlineUrl: string = branding.logo.inline;
+    expect(inlineUrl).toMatch(/^\/v1\/site\/branding\/assets\/logo\?inline=1&v=[0-9a-f]{64}$/);
+    const served = await as.anon.get(inlineUrl);
+    expect(served.status).toBe(200);
+    for (const [name, value] of Object.entries(SVG_HEADERS)) {
+      expect(served.headers.get(name), name).toBe(value);
+    }
+    expect(served.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    const markup = Buffer.from(served.bytes).toString();
+    expect(sha(served.bytes)).toBe(inlineUrl.split("v=")[1]);
+    expect(markup).not.toMatch(/style|#f00|body/);
+    expect(markup).toContain('<path id="kobe-logo-a" d="M0 0h10v10z" fill="currentColor"/>');
+    // The upload itself is still served as uploaded.
+    const raw = await as.anon.get(branding.logo.url);
+    expect(Buffer.from(raw.bytes).equals(Buffer.from(hostile))).toBe(true);
+    expect((await as.anon.get("/v1/site/branding/assets/favicon?inline=1")).status).toBe(404);
+  });
+
+  it("keeps a raster logo and its dark logo as images", async () => {
+    await upload(as.admin, "logo", png());
+    await upload(as.admin, "logo_dark", png());
+    await as.admin.put("/v1/site/branding", { logoThemeColor: true });
+    const { logo } = (await as.anon.get("/v1/site/branding")).json;
+    expect(logo.inline).toBeUndefined();
+    expect(logo.dark).toBe(`/v1/site/branding/assets/logo_dark?v=${sha(png())}`);
+    expect((await as.anon.get("/v1/site/branding/assets/logo?inline=1")).status).toBe(404);
+  });
+
+  it("serves an SVG favicon with the scheme style when on; PNG unchanged", async () => {
+    await upload(as.admin, "favicon", svg());
+    await as.admin.put("/v1/site/branding", { logoThemeColor: true });
+    const url: string = (await as.anon.get("/v1/site/branding")).json.favicon;
+    expect(url).not.toBe(`/v1/site/branding/assets/favicon?v=${sha(svg())}`);
+    const served = await as.anon.get(url);
+    expect(served.headers.get("content-type")).toBe("image/svg+xml");
+    expect(served.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    const markup = Buffer.from(served.bytes).toString();
+    expect(markup).toContain("@media (prefers-color-scheme: dark){svg{color:#ffffff}}");
+    expect(markup).toContain('fill="currentColor"');
+    await upload(as.admin, "favicon", png(32, 32));
+    expect((await as.anon.get("/v1/site/branding")).json.favicon).toBe(
+      `/v1/site/branding/assets/favicon?v=${sha(png(32, 32))}`,
+    );
+  });
+});
+
 describe("POST /v1/site/branding/reset (TH12)", () => {
   it("removes the name, files and style, audited per setting", async () => {
     await as.admin.put("/v1/site/branding", {
       appName: "Acme",
       showName: false,
       theme: { preset: "forest" },
+      logoThemeColor: true,
     });
     for (const [kind, data] of [
       ["logo", png()],
@@ -424,11 +504,13 @@ describe("POST /v1/site/branding/reset (TH12)", () => {
       logo: null,
       favicon: null,
       theme: { preset: "default" },
+      logoThemeColor: false,
     });
     expect((await brandingEvents()).slice(before)).toEqual([
       { setting: "app_name", value: "Kobe" },
       { setting: "show_name", value: "true" },
       { setting: "theme", value: "theme:default" },
+      { setting: "logo_theme_color", value: "false" },
       { setting: "logo", value: "removed" },
       { setting: "logo_dark", value: "removed" },
       { setting: "favicon", value: "removed" },
@@ -436,7 +518,7 @@ describe("POST /v1/site/branding/reset (TH12)", () => {
     expect((await h.admin.query(`SELECT 1 FROM site_branding_assets`)).rowCount).toBe(0);
     // Nothing left to reset: nothing audited.
     await as.owner.post("/v1/site/branding/reset");
-    expect((await brandingEvents()).length).toBe(before + 6);
+    expect((await brandingEvents()).length).toBe(before + 7);
   });
 
   it("leaves every other site setting untouched", async () => {

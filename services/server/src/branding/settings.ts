@@ -1,6 +1,7 @@
 import {
   BRANDING_SETTING_KEYS,
   DEFAULT_APP_NAME,
+  DEFAULT_LOGO_THEME_COLOR,
   DEFAULT_SHOW_NAME,
   DEFAULT_THEME,
   appNameSchema,
@@ -11,7 +12,8 @@ import { eq, inArray, siteSettings, type KobeDb, type KobeTx } from "@kobe/db";
 import { logger } from "../logger.js";
 
 /**
- * The branding's `site_settings` keys (§4.1): the name, whether the header shows it, the theme.
+ * The branding's `site_settings` keys (§4.1): the name, whether the header shows it, the theme,
+ * whether the logo takes the theme colour (KOBE-562).
  * An unreadable stored value falls back to the default and is logged, never a failed request.
  */
 
@@ -19,12 +21,14 @@ export interface BrandingSettings {
   readonly appName: string;
   readonly showName: boolean;
   readonly theme: ThemeSettings;
+  readonly logoThemeColor: boolean;
 }
 
 export const BRANDING_KEYS = [
   BRANDING_SETTING_KEYS.appName,
   BRANDING_SETTING_KEYS.showName,
   BRANDING_SETTING_KEYS.theme,
+  BRANDING_SETTING_KEYS.logoThemeColor,
 ] as const;
 
 function fallback<T>(key: string, value: T): T {
@@ -38,10 +42,10 @@ function parseAppName(raw: string | undefined): string {
   return parsed.success ? parsed.data : fallback(BRANDING_SETTING_KEYS.appName, DEFAULT_APP_NAME);
 }
 
-function parseShowName(raw: string | undefined): boolean {
-  if (raw === undefined) return DEFAULT_SHOW_NAME;
+function parseFlag(key: string, fallbackValue: boolean, raw: string | undefined): boolean {
+  if (raw === undefined) return fallbackValue;
   if (raw === "true" || raw === "false") return raw === "true";
-  return fallback(BRANDING_SETTING_KEYS.showName, DEFAULT_SHOW_NAME);
+  return fallback(key, fallbackValue);
 }
 
 function parseTheme(raw: string | undefined): ThemeSettings {
@@ -55,7 +59,7 @@ function parseTheme(raw: string | undefined): ThemeSettings {
   return fallback(BRANDING_SETTING_KEYS.theme, DEFAULT_THEME);
 }
 
-/** The three settings, each defaulted when unset or unreadable. */
+/** The four settings, each defaulted when unset or unreadable. */
 export async function readBrandingSettings(db: KobeDb | KobeTx): Promise<BrandingSettings> {
   const rows = await db
     .select({ key: siteSettings.key, value: siteSettings.value })
@@ -64,8 +68,17 @@ export async function readBrandingSettings(db: KobeDb | KobeTx): Promise<Brandin
   const value = (key: string) => rows.find((r) => r.key === key)?.value;
   return {
     appName: parseAppName(value(BRANDING_SETTING_KEYS.appName)),
-    showName: parseShowName(value(BRANDING_SETTING_KEYS.showName)),
+    showName: parseFlag(
+      BRANDING_SETTING_KEYS.showName,
+      DEFAULT_SHOW_NAME,
+      value(BRANDING_SETTING_KEYS.showName),
+    ),
     theme: parseTheme(value(BRANDING_SETTING_KEYS.theme)),
+    logoThemeColor: parseFlag(
+      BRANDING_SETTING_KEYS.logoThemeColor,
+      DEFAULT_LOGO_THEME_COLOR,
+      value(BRANDING_SETTING_KEYS.logoThemeColor),
+    ),
   };
 }
 

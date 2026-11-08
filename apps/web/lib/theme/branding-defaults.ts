@@ -1,5 +1,6 @@
 import {
   DEFAULT_APP_NAME,
+  DEFAULT_LOGO_THEME_COLOR,
   DEFAULT_SHOW_NAME,
   DEFAULT_THEME,
   type SiteBranding,
@@ -15,4 +16,5 @@ export const DEFAULT_BRANDING: SiteBranding = Object.freeze({
   logo: null,
   favicon: null,
   theme: DEFAULT_THEME,
+  logoThemeColor: DEFAULT_LOGO_THEME_COLOR,
 });

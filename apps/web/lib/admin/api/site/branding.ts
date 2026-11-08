@@ -11,6 +11,7 @@ export interface BrandingChange {
   readonly appName?: string;
   readonly showName?: boolean;
   readonly theme?: ThemeSettings;
+  readonly logoThemeColor?: boolean;
 }
 
 /** A save's answer; a refused accent (422 `contrast_floor`) carries the server's failures. */

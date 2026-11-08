@@ -35,12 +35,13 @@ Kobe's defaults and logs at most once a minute. So the first paint is already th
 
 ## 2. Site identity
 
-| Element       | Where it shows                                                                                                                                                                                      | Rules                                                                                                                                                                                                           |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Site name     | Bar wordmark (top-left, D9); the brand link of the Site console, Team console and My area; browser titles (`<page> · <name>`); sign-in, setup, invite, forgot-password copy; the Appearance preview | 1–40 characters (code points), trimmed, plain text on one line (no control, format or line/paragraph separator characters). Default "Kobe". Never enters CSS. Setting `branding.app_name`.                      |
-| Logo          | Left of the name in the bar and the console headers (24 px tall, at most 160 px wide, scaled to fit); the Appearance preview                                                                        | PNG, JPEG, WebP or SVG, ≤ 512 KiB, raster ≤ 4096 px a side. Optional **dark logo** (same rules) shown when the dark theme is on; otherwise the one logo serves both. A dark logo needs a logo. SVG rules: §2.1. |
-| Favicon       | Browser tab, bookmarks, history                                                                                                                                                                     | PNG, SVG or ICO, ≤ 256 KiB. Default: the shipped `apps/web/app/icon.svg`. The browser picks the size from the one file.                                                                                         |
-| Wordmark text | Hidden when a logo carries the name on its own ("Show the name next to the logo" off, setting `branding.show_name`); the name stays the accessible name of the link; without a logo it always shows | `--kobe-brand-wordmark-size` / `-weight` decide its type (fixed in this release: no preset sets them)                                                                                                           |
+| Element           | Where it shows                                                                                                                                                                                      | Rules                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Site name         | Bar wordmark (top-left, D9); the brand link of the Site console, Team console and My area; browser titles (`<page> · <name>`); sign-in, setup, invite, forgot-password copy; the Appearance preview | 1–40 characters (code points), trimmed, plain text on one line (no control, format or line/paragraph separator characters). Default "Kobe". Never enters CSS. Setting `branding.app_name`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Logo              | Left of the name in the bar and the console headers (24 px tall, at most 160 px wide, scaled to fit); the Appearance preview                                                                        | PNG, JPEG, WebP or SVG, ≤ 512 KiB, raster ≤ 4096 px a side. Optional **dark logo** (same rules) shown when the dark theme is on; otherwise the one logo serves both. A dark logo needs a logo. SVG rules: §2.1.                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Favicon           | Browser tab, bookmarks, history                                                                                                                                                                     | PNG, SVG or ICO, ≤ 256 KiB. Default: the shipped `apps/web/app/icon.svg`. The browser picks the size from the one file. With the logo theme colour on, an SVG favicon is served in `currentColor` with its own light/dark colours (§2.1).                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Logo theme colour | The logo everywhere it shows (bar, console headers, Appearance preview) and an SVG favicon (KOBE-562)                                                                                               | `branding.logo_theme_color`, default off (uploads as uploaded). On, an **SVG** logo is inlined from the server's inline-safe variant (§2.1) by `components/shell/logo.tsx` (`<Logo>`, class `.logo`, decorative beside the name): `var(--foreground)` at rest, `var(--kobe-brand-primary)` on the brand link's hover or focus, `var(--admin-accent)` when the link is the current page, `transition: color 200ms` (none under `prefers-reduced-motion`; forced colours inherit the system colour). One drawing for both schemes, so a theme change recolours it without loading anything; the dark logo is then ignored (kept, not deleted). Raster logos stay images. |
+| Wordmark text     | Hidden when a logo carries the name on its own ("Show the name next to the logo" off, setting `branding.show_name`); the name stays the accessible name of the link; without a logo it always shows | `--kobe-brand-wordmark-size` / `-weight` decide its type (fixed in this release: no preset sets them)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 The file type is detected from the bytes (magic numbers; SVG parsed as XML), never from the
 upload's declared type; raster sizes are read from the file and capped. Files are stored in Postgres
@@ -49,7 +50,9 @@ upload's declared type; raster sizes are read from the file and capped. Files ar
 `Cache-Control: public, max-age=31536000, immutable`, otherwise `no-cache` with an `ETag`; always
 `X-Content-Type-Options: nosniff` and
 `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox`. A change is seen on
-the next page load everywhere (other web replicas within 30 s).
+the next page load everywhere (other web replicas within 30 s). With the logo theme colour on, the
+inline logo is served at `/v1/site/branding/assets/logo?inline=1&v=<sha256 of the variant>` and the
+themed favicon at `/v1/site/branding/assets/favicon?v=<sha256 of the variant>`, with the same headers.
 
 ### 2.1 SVG rules
 
@@ -74,6 +77,27 @@ Refused:
 
 `url(#id)` references inside the image (gradients, clip paths, masks, markers) are allowed. The
 image's box comes from the root's `width`/`height`, else its `viewBox`.
+
+**Inline variant (KOBE-562).** With the logo theme colour on, the server derives two variants from
+the reader's own walk (`services/server/src/branding/svg-themed.ts`; §2.1's refusals apply first,
+and the variant is rebuilt, never patched): the **inline logo**, the only form of an upload the
+web inserts into the page (it checks the markup again, `apps/web/lib/theme/inline-logo.ts`), and
+the **themed favicon**. Both keep only an allowlist:
+
+- elements: shapes, `g`, `defs`, `use`, `symbol`, `clipPath`, `mask`, `text`, `tspan` (`a` and
+  `switch` become `g`); everything else is dropped with its content: `<style>`, gradients,
+  patterns, filters, images, animation, `title`, metadata;
+- attributes: geometry and presentation only; no `style`, `class`, `on*`, `color`. A `style`
+  attribute's allowlisted declarations become attributes (they win, as in CSS); the rest goes;
+- every `fill` and `stroke` becomes `currentColor` (`none` and `transparent` stay none; `url(#…)`
+  paints too: one colour is the point); the root gets `fill="currentColor"` unless it sets one;
+- ids are prefixed (`kobe-logo-`, `kobe-favicon-`) with their `url(#…)` and `href="#…"`
+  references; an id or reference that is not a plain name is dropped; `href` only on `use`;
+- the root's width and height are dropped (the page sizes it); a missing viewBox comes from them.
+
+The themed favicon adds `<style>svg{color:#1b1b1f}@media (prefers-color-scheme: dark){svg{color:#ffffff}}</style>`
+(external favicons never see the page's CSS), so it is visible in light and dark tabs. PNG and ICO
+favicons, raster logos and a stored SVG the reader now refuses keep being served as uploaded.
 
 **Inkscape:** save as **Plain SVG** (Inkscape's own format carries `sodipodi:`/`inkscape:`
 namespaces and is refused). The Appearance page adds this hint to every SVG refusal.
@@ -391,15 +415,16 @@ _Site console → System → Appearance_ (`/admin/site/appearance`), for Owner a
 `site.settings.manage`). Every change is one `site.branding.updated` site audit event per setting
 ([audit-log.md](audit-log.md)).
 
-| Control                        | What it does                                                                                                                                                                                        |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Site name                      | The name (§2); applied with Save. Save stays off while the name breaks the rules.                                                                                                                   |
-| Show the name next to the logo | `branding.show_name` (default on); applied with Save. Without a logo the name always shows; hidden, it stays the accessible name.                                                                   |
-| Logo, Dark logo, Favicon       | Pick or drop a file; it is uploaded and applied at once (size cap checked in the browser, type and SVG rules by the server, its refusal shown verbatim). Remove deletes it. Dark logo needs a logo. |
-| Style                          | The seven presets (swatches) or Custom: accent colour (`#rrggbb` field and colour picker), Corners, Typeface. Applied with Save.                                                                    |
-| Contrast line                  | Under Custom: the floor (§8) for the draft; Save stays off with the first failure and its ratio (cut to one decimal, never rounded up). A refused save lists the server's failures.                 |
-| Preview                        | The draft in a light and a dark frame, as every page will show it (inert: a picture, not controls).                                                                                                 |
-| Reset to defaults              | After a confirmation, removes the name, `show_name`, the style and all three files in one transaction, then re-seeds the chart's branding values if any are set (§13).                              |
+| Control                        | What it does                                                                                                                                                                                                                                                |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Site name                      | The name (§2); applied with Save. Save stays off while the name breaks the rules.                                                                                                                                                                           |
+| Show the name next to the logo | `branding.show_name` (default on); applied with Save. Without a logo the name always shows; hidden, it stays the accessible name.                                                                                                                           |
+| Logo, Dark logo, Favicon       | Pick or drop a file; it is uploaded and applied at once (size cap checked in the browser, type and SVG rules by the server, its refusal shown verbatim). Remove deletes it. Dark logo needs a logo.                                                         |
+| Logo takes the theme colour    | `branding.logo_theme_color` (default off, §2); applied with Save, shown in the preview once saved. The hint says only an SVG logo can take it; with it on and a raster logo the page says so. The Dark logo field notes that its file is kept but not used. |
+| Style                          | The seven presets (swatches) or Custom: accent colour (`#rrggbb` field and colour picker), Corners, Typeface. Applied with Save.                                                                                                                            |
+| Contrast line                  | Under Custom: the floor (§8) for the draft; Save stays off with the first failure and its ratio (cut to one decimal, never rounded up). A refused save lists the server's failures.                                                                         |
+| Preview                        | The draft in a light and a dark frame, as every page will show it (inert: a picture, not controls).                                                                                                                                                         |
+| Reset to defaults              | After a confirmation, removes the name, `show_name`, the style and all three files in one transaction, then re-seeds the chart's branding values if any are set (§13).                                                                                      |
 
 Save sends only the settings that changed. After every save, upload, removal and reset the page
 calls the web's `POST /api/branding/refresh` (same-origin only; 204), which drops that web
@@ -409,21 +434,22 @@ up within 30 seconds** (their cache), and the server reads the database on every
 
 ### API
 
-| Route                                   | Who                    | What                                                                                                                                                |
-| --------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /v1/site/branding`                 | public                 | `{appName, showName, logo: {url, dark?, width?, height?, darkWidth?, darkHeight?} \| null, favicon, theme}` with `ETag`, `Cache-Control: no-cache`  |
-| `GET /v1/site/branding/assets/:kind`    | public                 | The file (§2 headers); 404 when none                                                                                                                |
-| `PUT /v1/site/branding`                 | `site.settings.manage` | `{appName?, showName?, theme?}`, at least one; 400 invalid, 422 `contrast_floor`                                                                    |
-| `PUT /v1/site/branding/assets/:kind`    | `site.settings.manage` | `multipart/form-data` with exactly one file; 411 without `Content-Length`, 413 over the cap, 415 not multipart or wrong type, 422 refused image/SVG |
-| `DELETE /v1/site/branding/assets/:kind` | `site.settings.manage` | Removes the file; 404 when none                                                                                                                     |
-| `POST /v1/site/branding/reset`          | `site.settings.manage` | Reset as above                                                                                                                                      |
+| Route                                   | Who                    | What                                                                                                                                                                                                                                                                |
+| --------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/site/branding`                 | public                 | `{appName, showName, logo: {url, dark?, width?, height?, darkWidth?, darkHeight?, inline?} \| null, favicon, theme, logoThemeColor}` with `ETag`, `Cache-Control: no-cache`; `inline` (and no `dark`) only while the logo theme colour is on and the logo is an SVG |
+| `GET /v1/site/branding/assets/:kind`    | public                 | The file (§2 headers); `?inline=1` the inline logo variant (logo only); the themed favicon instead of the upload while on; 404 when none                                                                                                                            |
+| `PUT /v1/site/branding`                 | `site.settings.manage` | `{appName?, showName?, theme?, logoThemeColor?}`, at least one; 400 invalid, 422 `contrast_floor`                                                                                                                                                                   |
+| `PUT /v1/site/branding/assets/:kind`    | `site.settings.manage` | `multipart/form-data` with exactly one file; 411 without `Content-Length`, 413 over the cap, 415 not multipart or wrong type, 422 refused image/SVG                                                                                                                 |
+| `DELETE /v1/site/branding/assets/:kind` | `site.settings.manage` | Removes the file; 404 when none                                                                                                                                                                                                                                     |
+| `POST /v1/site/branding/reset`          | `site.settings.manage` | Reset as above                                                                                                                                                                                                                                                      |
 
 Writes return the new `GET /v1/site/branding` body and pass the API's CSRF origin check.
 
 ## 13. Settings and chart-seeded defaults
 
 Settings (`site_settings`): `branding.app_name` (the trimmed name), `branding.show_name` (`"true"` or
-`"false"`; unset = true), `branding.theme` (JSON, §3). Files: `site_branding_assets` (`logo`,
+`"false"`; unset = true), `branding.theme` (JSON, §3), `branding.logo_theme_color` (`"true"` or
+`"false"`; unset = false; not chart-seeded). Files: `site_branding_assets` (`logo`,
 `logo_dark`, `favicon`). Both are in every backup ([backup-restore.md](backup-restore.md)). An
 unreadable stored value falls back to the default and is logged, never a failed page.
 

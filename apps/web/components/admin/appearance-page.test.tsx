@@ -12,6 +12,7 @@ const BRANDING = {
   logo: null,
   favicon: null,
   theme: { preset: "default" },
+  logoThemeColor: false,
 };
 
 beforeEach(forbidNativeConfirm);
@@ -49,6 +50,23 @@ describe("site Appearance page (KOBE-501)", () => {
     expect(
       screen.getByText("Other web replicas pick the change up within 30 seconds."),
     ).toBeTruthy();
+  });
+
+  it("saves the logo theme colour switch on its own (KOBE-562)", async () => {
+    const calls = stubApi({
+      "GET /v1/site/branding": [200, BRANDING],
+      "PUT /v1/site/branding": [200, { ...BRANDING, logoThemeColor: true }],
+      "POST /api/branding/refresh": [204],
+    });
+    renderSite(<AppearancePage reloadPage={vi.fn()} />);
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: /Logo takes the theme colour/ }),
+    );
+    expect(screen.getByText("Save to see it in the preview.")).toBeTruthy();
+    await userEvent.click(save());
+    await screen.findByText("Saved. Reloading…");
+    const put = must(calls.find((c) => c.method === "PUT"));
+    expect(JSON.parse(String(put.body))).toEqual({ logoThemeColor: true });
   });
 
   it("keeps Save off with the ratio while the accent is under the floor", async () => {
