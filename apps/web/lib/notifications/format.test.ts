@@ -27,8 +27,8 @@ describe("notification words (KOBE-181)", () => {
       { skippedCount: 3 },
       "Scheduled run finished; 3 actions were skipped",
     ],
-    ["schedule.paused", { pausedBy: "team_admin" }, "Schedule paused by a team admin"],
-    ["schedule.paused", { pausedBy: "deactivation" }, "Schedule paused (access deactivated)"],
+    ["schedule.paused", { pausedBy: "team_admin" }, "Paused by a team admin"],
+    ["schedule.paused", { pausedBy: "deactivation" }, "Paused: owner deactivated or removed"],
   ] as const)("%s %o → %s", (kind, extra, words) => {
     expect(notificationTitle({ ...base, kind, ...extra })).toBe(words);
   });

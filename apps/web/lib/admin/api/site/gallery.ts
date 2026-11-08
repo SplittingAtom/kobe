@@ -1,6 +1,6 @@
 /** Site console: gallery agents (`/v1/site`, site.gallery.manage). Responses arrive camelized. */
 import { apiRequest, type ApiResult } from "../../../api/client";
-import { revisionTag, type AgentSummary, type GalleryScore } from "../agents";
+import { revisionTag, type AgentSummary } from "../agents";
 import type { AgentDetail, DefinitionBody } from "../team/agent-builder";
 import type { TeamConnector } from "../team/connectors";
 import type { TeamModels } from "../team/models";
@@ -113,12 +113,6 @@ export const getGalleryBuilderOptions = (): Promise<ApiResult<GalleryBuilderOpti
 
 export function galleryExportHref(id: string): string {
   return `${GALLERY_PATH}/${enc(id)}/export`;
-}
-
-/** Published Orbit scores of the current versions (KOBE-94). */
-export async function listGalleryScores(): Promise<ApiResult<readonly GalleryScore[]>> {
-  const res = await apiRequest<{ scores: GalleryScore[] }>(`${GALLERY_PATH}/scores`);
-  return res.ok ? { ...res, data: res.data.scores } : res;
 }
 
 /** Starts the eval of an agent's current version in `teamId` (a team the caller belongs to); 202. */

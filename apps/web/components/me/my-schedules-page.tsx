@@ -10,6 +10,7 @@ import {
   type ScheduleDraft,
 } from "../../lib/schedules/api";
 import { describeRecurrence, formatInZone } from "../../lib/schedules/format";
+import { pausedByLabel } from "../../lib/schedules/paused-by";
 import { useTeamAccess } from "../admin/console-context";
 import { MutationStatus } from "../admin/error-notice";
 import { ResourceView } from "../admin/parts";
@@ -40,10 +41,7 @@ type Editing = { readonly mode: "new" } | { readonly mode: "edit"; readonly sche
 
 function statusOf(s: Schedule): string {
   if (s.active) return "Active";
-  if (s.pausedBy === "team_admin") return "Paused by a team admin";
-  if (s.pausedBy === "deactivation") return "Paused (your access was deactivated)";
-  if (s.pausedBy === "agent_unavailable") return "Paused: agent unavailable";
-  return "Paused";
+  return s.pausedBy === null ? "Paused" : pausedByLabel(s.pausedBy);
 }
 
 function Row({

@@ -85,8 +85,18 @@ export interface InventoryPage {
   readonly nextCursor: string | null;
 }
 
-type InventoryRow = {
+/** The usage columns (`USAGE_COLUMNS`) of one agent, as raw SQL returns them. */
+type UsageRow = {
   id: string;
+  run_count: string;
+  last_run_at: Date | string | null;
+  tokens: string;
+  score_status: string | null;
+  score_rate: number | null;
+  score_at: Date | string | null;
+};
+
+type InventoryRow = UsageRow & {
   scope: InventoryItem["scope"];
   slug: string;
   name: string | null;
@@ -95,12 +105,6 @@ type InventoryRow = {
   status: InventoryItem["status"];
   archived_at: Date | string | null;
   current_version: number | null;
-  run_count: string;
-  last_run_at: Date | string | null;
-  tokens: string;
-  score_status: string | null;
-  score_rate: number | null;
-  score_at: Date | string | null;
 };
 
 const SCORE_STATUS: Readonly<Record<string, InventoryScore["status"]>> = {
@@ -114,6 +118,26 @@ const SCORE_STATUS: Readonly<Record<string, InventoryScore["status"]>> = {
 /** Raw SQL returns timestamps as the driver parses them (Date or text). */
 const iso = (v: Date | string | null): string | null =>
   v === null ? null : new Date(v).toISOString();
+
+export type InventoryUsage = Pick<
+  InventoryItem,
+  "runCount" | "lastRunAt" | "tokens" | "schedules" | "orbitScore"
+>;
+
+/** An agent's usage in the team: the inventory's and the Agents page's columns (KOBE-570). */
+export function toUsage(r: UsageRow, schedules: readonly InventorySchedule[] = []): InventoryUsage {
+  return {
+    runCount: Number(r.run_count),
+    lastRunAt: iso(r.last_run_at),
+    tokens: Number(r.tokens),
+    schedules,
+    orbitScore: {
+      status: (r.score_status && SCORE_STATUS[r.score_status]) || "none",
+      attackSuccessRate: r.score_rate,
+      at: iso(r.score_at),
+    },
+  };
+}
 
 export function toInventoryItem(
   r: InventoryRow,
@@ -130,15 +154,7 @@ export function toInventoryItem(
     archivedAt: iso(r.archived_at),
     currentVersion: r.current_version,
     versionCount: r.current_version ?? 0,
-    runCount: Number(r.run_count),
-    lastRunAt: iso(r.last_run_at),
-    tokens: Number(r.tokens),
-    schedules,
-    orbitScore: {
-      status: (r.score_status && SCORE_STATUS[r.score_status]) || "none",
-      attackSuccessRate: r.score_rate,
-      at: iso(r.score_at),
-    },
+    ...toUsage(r, schedules),
   };
 }
 
@@ -163,18 +179,12 @@ const inventoryRows = (teamId: string) => sql`
     LEFT JOIN team_agent_suspensions s ON s.team_id = ${teamId} AND s.agent_id = i.id
    WHERE i.id IN (${usedSiteAgentIds(teamId)})`;
 
-export async function listInventory(
-  db: KobeDb,
-  teamId: string,
-  query: z.infer<typeof inventoryQuerySchema>,
-): Promise<InventoryPage> {
-  const limit = query.limit ?? INVENTORY_PAGE_DEFAULT;
-  const match = query.cursor ? CURSOR.exec(query.cursor) : null;
-  const after = match ? sql`WHERE (inv.slug, inv.id) > (${match[1]}, ${match[2]}::uuid)` : sql``;
-  const { more, pageRows, scheduled } = await withTeam(db, teamId, async (tx) => {
-    const result = await tx.execute<InventoryRow>(sql`
-      WITH inv AS (${inventoryRows(teamId)}),
-      page AS (SELECT inv.* FROM inv ${after} ORDER BY inv.slug, inv.id LIMIT ${limit + 1}),
+/**
+ * Usage of the agents in a `page` CTE (`id`, `scope`, `current_version`) in this team: runs of the
+ * team's threads, tokens, and the latest Orbit score (KOBE-86, KOBE-94). Every query states
+ * `team_id`. Shared by the inventory and the Agents page's admin columns (KOBE-570).
+ */
+const usageCtes = (teamId: string) => sql`
       thread_runs AS (
         SELECT page.id AS agent_id, count(r.id) AS run_count, max(r.created_at) AS last_run_at
           FROM page
@@ -203,17 +213,35 @@ export async function listInventory(
           FROM gallery_agent_scores g
           JOIN page ON page.id = g.agent_id AND page.scope = 'gallery'
                    AND page.current_version = g.version
-         ORDER BY g.agent_id, g.evaluated_at DESC)
-      SELECT page.*, u.name AS owner_name, coalesce(tr.run_count, 0) AS run_count,
+         ORDER BY g.agent_id, g.evaluated_at DESC)`;
+
+const USAGE_COLUMNS = sql`coalesce(tr.run_count, 0) AS run_count,
              tr.last_run_at, coalesce(usage.tokens, 0) AS tokens,
              coalesce(ts.status, gs.status) AS score_status,
-             coalesce(ts.rate, gs.rate) AS score_rate, coalesce(ts.at, gs.at) AS score_at
-        FROM page
-        LEFT JOIN users u ON u.id = page.owner_user_id
-        LEFT JOIN thread_runs tr ON tr.agent_id = page.id
+             coalesce(ts.rate, gs.rate) AS score_rate, coalesce(ts.at, gs.at) AS score_at`;
+
+const USAGE_JOINS = sql`LEFT JOIN thread_runs tr ON tr.agent_id = page.id
         LEFT JOIN usage ON usage.agent_id = page.id
         LEFT JOIN team_score ts ON ts.agent_id = page.id
-        LEFT JOIN gallery_score gs ON gs.agent_id = page.id
+        LEFT JOIN gallery_score gs ON gs.agent_id = page.id`;
+
+export async function listInventory(
+  db: KobeDb,
+  teamId: string,
+  query: z.infer<typeof inventoryQuerySchema>,
+): Promise<InventoryPage> {
+  const limit = query.limit ?? INVENTORY_PAGE_DEFAULT;
+  const match = query.cursor ? CURSOR.exec(query.cursor) : null;
+  const after = match ? sql`WHERE (inv.slug, inv.id) > (${match[1]}, ${match[2]}::uuid)` : sql``;
+  const { more, pageRows, scheduled } = await withTeam(db, teamId, async (tx) => {
+    const result = await tx.execute<InventoryRow>(sql`
+      WITH inv AS (${inventoryRows(teamId)}),
+      page AS (SELECT inv.* FROM inv ${after} ORDER BY inv.slug, inv.id LIMIT ${limit + 1}),
+      ${usageCtes(teamId)}
+      SELECT page.*, u.name AS owner_name, ${USAGE_COLUMNS}
+        FROM page
+        LEFT JOIN users u ON u.id = page.owner_user_id
+        ${USAGE_JOINS}
        ORDER BY page.slug, page.id`);
     const pageRows = result.rows.slice(0, limit);
     const scheduled = await schedulesOf(
@@ -228,6 +256,42 @@ export async function listInventory(
     agents: pageRows.map((r) => toInventoryItem(r, scheduled.get(r.id))),
     nextCursor: more && last ? `${last.slug}:${last.id}` : null,
   };
+}
+
+/** An agent whose usage `usageOf` reads: its id, inventory scope and current version. */
+export interface UsageSubject {
+  readonly id: string;
+  readonly scope: InventoryItem["scope"];
+  readonly currentVersion: number | null;
+}
+
+/**
+ * The inventory's usage columns for the given agents in this team (KOBE-570: the Agents page's
+ * Team and Site tabs show them to team admins, AR12). Inside the caller's `withTeam()`; every
+ * query states `team_id`.
+ */
+export async function usageOf(
+  tx: KobeTx,
+  teamId: string,
+  agents: readonly UsageSubject[],
+): Promise<ReadonlyMap<string, InventoryUsage>> {
+  if (agents.length === 0) return new Map();
+  const values = sql.join(
+    agents.map((a) => sql`(${a.id}::uuid, ${a.scope}::text, ${a.currentVersion}::int)`),
+    sql`, `,
+  );
+  const result = await tx.execute<UsageRow>(sql`
+      WITH page(id, scope, current_version) AS (VALUES ${values}),
+      ${usageCtes(teamId)}
+      SELECT page.id, ${USAGE_COLUMNS}
+        FROM page
+        ${USAGE_JOINS}`);
+  const scheduled = await schedulesOf(
+    tx,
+    teamId,
+    agents.map((a) => a.id),
+  );
+  return new Map(result.rows.map((r) => [r.id, toUsage(r, scheduled.get(r.id))] as const));
 }
 
 type ScheduleRow = {

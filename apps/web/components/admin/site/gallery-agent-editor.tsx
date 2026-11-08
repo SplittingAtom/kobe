@@ -10,6 +10,7 @@ import {
   saveGalleryAgent,
   type GalleryAgentDetail,
 } from "../../../lib/admin/api/site/gallery";
+import { SITE_TAB_HREF } from "../../../lib/agents/redirects";
 import {
   firstTabWithError,
   fromFrontmatter,
@@ -49,7 +50,8 @@ import { IdentityFields } from "../team/agent-builder/identity-fields";
 import { useMutation, useResource } from "../use-resource";
 import { CustomizedBadge, UpdateAvailable } from "./gallery-customization";
 
-const HOME = "/admin/site/gallery";
+/** The gallery list is the Agents page's Site tab (KOBE-570). */
+const HOME = SITE_TAB_HREF;
 const NO_SKILLS: ApiResult<SkillChoices> = {
   ok: true,
   status: 200,

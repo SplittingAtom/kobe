@@ -37,6 +37,10 @@ describe("console overview", () => {
       "Audit view",
       "Break-glass access",
     ]);
+    // The list and the Inventory moved to the Agents page's Team tab (KOBE-570).
+    expect(screen.getByRole("link", { name: "Team agents" }).getAttribute("href")).toBe(
+      "/agents?tab=team",
+    );
   });
 });
 

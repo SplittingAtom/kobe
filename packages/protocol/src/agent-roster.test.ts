@@ -4,6 +4,7 @@ import {
   AGENT_ROSTER_ERROR_CODES,
   AGENT_ROSTER_ERROR_STATUS,
   AGENT_ROSTER_WRITE_RATE,
+  agentRosterPageSchema,
   agentRosterQuerySchema,
   agentRosterRowSchema,
   assignAgentRequestSchema,
@@ -40,6 +41,24 @@ describe("agent roster contract (KOBE-566)", () => {
     expect(parse({ state: "removed", note: "Not for us" })).toBe(true);
     expect(parse({ state: "proposed" })).toBe(false);
     expect(parse({ state: "removed", note: "x".repeat(501) })).toBe(false);
+  });
+
+  it("carries the roster's pending proposal count for its admins (KOBE-570)", () => {
+    expect(
+      agentRosterPageSchema.safeParse({ tab: "team", rows: [], nextCursor: null }).success,
+    ).toBe(true);
+    expect(
+      agentRosterPageSchema.safeParse({ tab: "team", rows: [], nextCursor: null, proposedCount: 3 })
+        .success,
+    ).toBe(true);
+    expect(
+      agentRosterPageSchema.safeParse({
+        tab: "team",
+        rows: [],
+        nextCursor: null,
+        proposedCount: -1,
+      }).success,
+    ).toBe(false);
   });
 
   it("parses the query with a coerced limit", () => {
@@ -99,5 +118,27 @@ describe("agent roster contract (KOBE-566)", () => {
       },
     };
     expect(agentRosterRowSchema.safeParse(row).success).toBe(true);
+    // KOBE-570: team admins get the inventory's usage on the row (additive, optional).
+    const usage = {
+      runCount: 4,
+      lastRunAt: NOW,
+      tokens: 1200,
+      schedules: [
+        {
+          scheduleId: ID,
+          ownerUserId: ID,
+          ownerName: "Ann",
+          status: "paused",
+          pausedBy: "agent_unavailable",
+          nextDueAt: null,
+        },
+      ],
+      orbitScore: { status: "passed", attackSuccessRate: 0.1, at: NOW },
+      canExport: true,
+    };
+    expect(agentRosterRowSchema.safeParse({ ...row, usage }).success).toBe(true);
+    expect(
+      agentRosterRowSchema.safeParse({ ...row, usage: { ...usage, runCount: -1 } }).success,
+    ).toBe(false);
   });
 });

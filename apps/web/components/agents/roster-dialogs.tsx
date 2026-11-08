@@ -6,7 +6,10 @@ import {
   type AgentVersionRuleInput,
 } from "@kobe/protocol";
 import { useState } from "react";
+import { listMyTeamsForEval } from "../../lib/admin/api/site/gallery";
 import { Button, Dialog, DialogClose, Field, Select, Textarea } from "../ui/console";
+import { ResourceView } from "../admin/parts";
+import { useResource } from "../admin/use-resource";
 
 const LATEST = "latest";
 
@@ -14,6 +17,87 @@ const LATEST = "latest";
 export function pinChoices(currentVersion: number | null): number[] {
   if (currentVersion === null) return [];
   return Array.from({ length: currentVersion }, (_, i) => currentVersion - i);
+}
+
+const ruleOf = (choice: string): AgentVersionRuleInput =>
+  choice === LATEST ? LATEST : Number(choice);
+
+/** "Latest published version" or "Pin to vN", newest first (AR5). */
+function VersionRuleField({
+  row,
+  value,
+  onChange,
+}: {
+  readonly row: AgentRosterRow;
+  readonly value: string;
+  readonly onChange: (choice: string) => void;
+}) {
+  return (
+    <Field label="Version rule">
+      <Select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value={LATEST}>
+          {row.currentVersion === null
+            ? "Latest published version"
+            : `Latest published version (now v${row.currentVersion})`}
+        </option>
+        {pinChoices(row.currentVersion).map((v) => (
+          <option key={v} value={String(v)}>
+            {`Pin to v${v}`}
+          </option>
+        ))}
+      </Select>
+    </Field>
+  );
+}
+
+/**
+ * Approve a proposal (§6.4): it follows the latest published version unless the admin pins one.
+ */
+export function ApproveDialog({
+  row,
+  rosterName,
+  returnFocus,
+  pending,
+  onClose,
+  onApprove,
+}: {
+  readonly row: AgentRosterRow;
+  readonly rosterName: string;
+  readonly returnFocus: HTMLElement | null;
+  readonly pending: boolean;
+  readonly onClose: () => void;
+  readonly onApprove: (rule: AgentVersionRuleInput) => Promise<void>;
+}) {
+  const [choice, setChoice] = useState<string>(LATEST);
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      title={`Approve ${row.name} for ${rosterName}?`}
+      description="Members can then start it here. It follows each new publish unless you pin a version."
+      returnFocus={() => returnFocus}
+    >
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void onApprove(ruleOf(choice));
+        }}
+      >
+        <VersionRuleField row={row} value={choice} onChange={setChoice} />
+        <div className="flex flex-wrap justify-end gap-2">
+          <DialogClose asChild>
+            <Button type="button">Cancel</Button>
+          </DialogClose>
+          <Button type="submit" variant="primary" loading={pending}>
+            Approve
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
 }
 
 /**
@@ -37,7 +121,6 @@ export function PinDialog({
 }) {
   const pinned = row.entry?.versionRule === "pinned" ? row.entry.pinnedVersion : null;
   const [choice, setChoice] = useState<string>(pinned === null ? LATEST : String(pinned));
-  const versions = pinChoices(row.currentVersion);
   return (
     <Dialog
       open
@@ -52,23 +135,10 @@ export function PinDialog({
         className="flex flex-col gap-4"
         onSubmit={(e) => {
           e.preventDefault();
-          void onPin(choice === LATEST ? LATEST : Number(choice));
+          void onPin(ruleOf(choice));
         }}
       >
-        <Field label="Version rule">
-          <Select value={choice} onChange={(e) => setChoice(e.target.value)}>
-            <option value={LATEST}>
-              {row.currentVersion === null
-                ? "Latest published version"
-                : `Latest published version (now v${row.currentVersion})`}
-            </option>
-            {versions.map((v) => (
-              <option key={v} value={String(v)}>
-                {`Pin to v${v}`}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        <VersionRuleField row={row} value={choice} onChange={setChoice} />
         <div className="flex flex-wrap justify-end gap-2">
           <DialogClose asChild>
             <Button type="button">Cancel</Button>
@@ -132,6 +202,75 @@ export function DeclineDialog({
           </Button>
         </div>
       </form>
+    </Dialog>
+  );
+}
+
+/**
+ * Run a gallery agent's Orbit eval (KOBE-94) in a team the site admin belongs to: its sandbox
+ * runtime and model budget. The active team comes first; the Gallery page's picker (KOBE-570).
+ */
+export function EvalDialog({
+  row,
+  activeTeamId,
+  returnFocus,
+  pending,
+  onClose,
+  onRun,
+}: {
+  readonly row: AgentRosterRow;
+  readonly activeTeamId: string;
+  readonly returnFocus: HTMLElement | null;
+  readonly pending: boolean;
+  readonly onClose: () => void;
+  readonly onRun: (team: { readonly id: string; readonly name: string }) => Promise<void>;
+}) {
+  const { state } = useResource(listMyTeamsForEval);
+  const [choice, setChoice] = useState<string | null>(null);
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      title={`Run an eval of ${row.name}`}
+      description="The eval runs in a team you belong to (its sandbox runtime and model budget) and takes several minutes; the score appears here when it finishes."
+      returnFocus={() => returnFocus}
+    >
+      <ResourceView state={state} label="your teams">
+        {({ teams }) => {
+          const fallback = teams.find((t) => t.id === activeTeamId) ?? teams[0];
+          const teamId = choice ?? fallback?.id ?? "";
+          const team = teams.find((t) => t.id === teamId);
+          return (
+            <form
+              className="flex flex-col gap-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (team) void onRun({ id: team.id, name: team.name });
+              }}
+            >
+              <Field label="Run in team">
+                <Select value={teamId} onChange={(e) => setChoice(e.target.value)}>
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <div className="flex flex-wrap justify-end gap-2">
+                <DialogClose asChild>
+                  <Button type="button">Cancel</Button>
+                </DialogClose>
+                <Button type="submit" variant="primary" loading={pending} disabled={!team}>
+                  Run eval
+                </Button>
+              </div>
+            </form>
+          );
+        }}
+      </ResourceView>
     </Dialog>
   );
 }

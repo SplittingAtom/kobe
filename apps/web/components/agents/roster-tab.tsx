@@ -2,6 +2,9 @@
 
 import type { AgentRosterRow, AgentRosterTab } from "@kobe/protocol";
 import Link from "next/link";
+import { useState } from "react";
+import type { GalleryAgentSummary } from "../../lib/admin/api/site/gallery";
+import { proposalCount, shownRows } from "../../lib/agents/proposals";
 import { agentPageHref } from "../../lib/agents/redirects";
 import {
   editHref,
@@ -32,7 +35,10 @@ import { DateTime, ResourceView } from "../admin/parts";
 import { useMutation } from "../admin/use-resource";
 import { AgentIconGlyph } from "../admin/team/agent-builder/icon-picker";
 import { DangerousBadge } from "../admin/team/agent-builder/dangerous-badge";
+import { CustomizedBadge, UpdateAvailable } from "../admin/site/gallery-customization";
 import { useRosterActions } from "./roster-actions";
+import { OrbitScore, UsageCells } from "./usage-cells";
+import { useGalleryExtras } from "./use-gallery-extras";
 import { useRosterRows } from "./use-roster-rows";
 
 const STATUS_TONE: Readonly<Record<AgentRosterRow["status"], BadgeTone>> = {
@@ -57,6 +63,13 @@ function caption(tab: AgentRosterTab, teamName: string): string {
 }
 
 type WithdrawElsewhere = ReturnType<typeof useRosterActions>["withdrawElsewhere"];
+type Extras = ReturnType<typeof useGalleryExtras>;
+
+/** Whether the viewer decides this tab's proposals: team admins on Team, site admins on Site. */
+function decidesProposals(tab: AgentRosterTab, access: ReturnType<typeof useTeamAccess>): boolean {
+  if (tab === "team") return access.permissions.includes("team.agents.manage");
+  return tab === "site" && access.siteAdmin === true;
+}
 
 /**
  * One tab of the Agents page (KOBE-569, spec agents-roster AR1, AR2): the roster's rows with the
@@ -64,27 +77,54 @@ type WithdrawElsewhere = ReturnType<typeof useRosterActions>["withdrawElsewhere"
  * rights itself.
  */
 export function RosterTab({ tab }: { readonly tab: AgentRosterTab }) {
-  const team = useTeamAccess().team;
+  const access = useTeamAccess();
+  const team = access.team;
   const roster = useRosterRows(team.id, tab);
+  const extras = useGalleryExtras(team.id, tab, access.siteAdmin === true);
   const mutation = useMutation();
+  const [onlyProposals, setOnlyProposals] = useState(false);
   const actions = useRosterActions({
     teamId: team.id,
     teamName: team.name,
     tab,
     mutation,
     onChanged: () => void roster.refresh(),
+    gallery: extras.gallery,
   });
+  const queue = decidesProposals(tab, access);
+  const rows = shownRows(roster.rows, queue && onlyProposals);
   return (
     <>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
+      {queue && roster.state.status === "ready" && (
+        <p className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            aria-pressed={onlyProposals}
+            variant={onlyProposals ? "primary" : "secondary"}
+            onClick={() => setOnlyProposals(!onlyProposals)}
+          >
+            {`Proposed (${roster.proposedCount ?? proposalCount(roster.rows)})`}
+          </Button>
+        </p>
+      )}
+      <GalleryNotices
+        gallery={roster.state.status === "ready" ? extras.gallery : null}
+        rows={rows}
+        onReset={() => {
+          extras.reloadGallery();
+          void roster.refresh();
+        }}
+      />
       <ResourceView state={roster.state} label="agents">
         {() =>
-          roster.rows.length === 0 ? (
-            <EmptyState title={EMPTY[tab]} />
+          rows.length === 0 ? (
+            <EmptyState title={onlyProposals && queue ? "No proposals are waiting." : EMPTY[tab]} />
           ) : (
             <RosterTable
               tab={tab}
-              rows={roster.rows}
+              rows={rows}
+              extras={extras}
               itemsFor={actions.itemsFor}
               withdrawElsewhere={actions.withdrawElsewhere}
               busy={mutation.pending}
@@ -105,15 +145,54 @@ export function RosterTab({ tab }: { readonly tab: AgentRosterTab }) {
   );
 }
 
+/**
+ * The Gallery page's notice per customized agent whose repository definition moved on: Compare
+ * and Reset to repository (KOBE-494), for site admins on the Site tab, for the rows on screen once
+ * the table has loaded.
+ */
+function GalleryNotices({
+  gallery,
+  rows,
+  onReset,
+}: {
+  readonly gallery: ReadonlyMap<string, GalleryAgentSummary> | null;
+  /** The rows the table shows: notices only for those. */
+  readonly rows: readonly AgentRosterRow[];
+  readonly onReset: () => void;
+}) {
+  if (gallery === null) return null;
+  const shown = rows.flatMap((r) => gallery.get(r.agentId) ?? []);
+  return (
+    <>
+      {shown.map((a) => (
+        <UpdateAvailable
+          key={a.id}
+          agentId={a.id}
+          name={a.name}
+          gallery={a.gallery}
+          onReset={onReset}
+        />
+      ))}
+    </>
+  );
+}
+
 interface RowProps {
   readonly tab: AgentRosterTab;
+  readonly extras: Extras;
+  /** Team admins: the Inventory's columns (the rows carry `usage`). */
+  readonly usage: boolean;
   readonly itemsFor: (row: AgentRosterRow) => RowMenuItem[];
   readonly withdrawElsewhere: WithdrawElsewhere;
   readonly busy: boolean;
 }
 
-function RosterTable({ rows, ...props }: RowProps & { readonly rows: readonly AgentRosterRow[] }) {
+function RosterTable({
+  rows,
+  ...props
+}: Omit<RowProps, "usage"> & { readonly rows: readonly AgentRosterRow[] }) {
   const team = useTeamAccess().team;
+  const usage = rows.some((r) => r.usage !== undefined);
   return (
     <Table caption={caption(props.tab, team.name)}>
       <TableHead>
@@ -122,6 +201,15 @@ function RosterTable({ rows, ...props }: RowProps & { readonly rows: readonly Ag
           <TableHeader>{props.tab === "personal" ? "Reach" : "Owner"}</TableHeader>
           <TableHeader>Version</TableHeader>
           <TableHeader>Status</TableHeader>
+          {usage && (
+            <>
+              <TableHeader numeric>Runs</TableHeader>
+              <TableHeader>Last run</TableHeader>
+              <TableHeader numeric>Tokens</TableHeader>
+              <TableHeader>Schedules</TableHeader>
+            </>
+          )}
+          {(usage || props.tab === "site") && <TableHeader>Orbit score</TableHeader>}
           <TableHeader>Updated</TableHeader>
           <TableHeader>
             <span className="sr-only">Actions</span>
@@ -130,7 +218,7 @@ function RosterTable({ rows, ...props }: RowProps & { readonly rows: readonly Ag
       </TableHead>
       <TableBody>
         {rows.map((row) => (
-          <RosterRowView key={row.agentId} row={row} {...props} />
+          <RosterRowView key={row.agentId} row={row} usage={usage} {...props} />
         ))}
       </TableBody>
     </Table>
@@ -140,6 +228,8 @@ function RosterTable({ rows, ...props }: RowProps & { readonly rows: readonly Ag
 function RosterRowView({
   row,
   tab,
+  extras,
+  usage,
   itemsFor,
   withdrawElsewhere,
   busy,
@@ -153,6 +243,7 @@ function RosterRowView({
           {row.icon && <AgentIconGlyph name={row.icon} />}
           {row.name}
           {row.dangerous && <DangerousBadge />}
+          <CustomizedBadge gallery={extras.gallery?.get(row.agentId)?.gallery} />
         </span>
         {row.description && (
           <div className="text-sm font-normal text-console-muted">{row.description}</div>
@@ -175,6 +266,12 @@ function RosterRowView({
           {update && <Badge tone="running">{update}</Badge>}
         </span>
       </TableCell>
+      {usage && <UsageCells row={row} />}
+      {(usage || tab === "site") && (
+        <TableCell>
+          <OrbitScore row={row} galleryScores={extras.scores} />
+        </TableCell>
+      )}
       <TableCell>
         <DateTime value={row.updatedAt} compact />
       </TableCell>

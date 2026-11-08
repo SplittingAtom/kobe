@@ -52,13 +52,22 @@ import { leftOutText, SkillUpdates } from "./skill-updates";
 import { AgentTestPane } from "./test-pane";
 import { VersionHistory } from "./version-history";
 import { useNavigate } from "../../../shell/use-navigate";
+import { TEAM_TAB_HREF } from "../../../../lib/agents/redirects";
 
 export type BuilderScope = "team" | "personal";
 
 /** Where each scope's builder lives: the admin console for team agents, Agents otherwise. */
-const HOME: Readonly<Record<BuilderScope, { base: string; back: string; title: string }>> = {
-  team: { base: "/admin/team/agents", back: "All team agents", title: "New team agent" },
-  personal: { base: "/agents", back: "Agents", title: "New personal agent" },
+const HOME: Readonly<
+  Record<BuilderScope, { base: string; list: string; back: string; title: string }>
+> = {
+  // The list of team agents is the Agents page's Team tab (KOBE-570); the builder stays here.
+  team: {
+    base: "/admin/team/agents",
+    list: TEAM_TAB_HREF,
+    back: "All team agents",
+    title: "New team agent",
+  },
+  personal: { base: "/agents", list: "/agents", back: "Agents", title: "New personal agent" },
 };
 
 /**
@@ -114,7 +123,7 @@ function BackLink({ scope }: { readonly scope: BuilderScope }) {
   const home = HOME[scope];
   return (
     <p className="m-0 mb-1 text-sm">
-      <Link href={home.base}>{home.back}</Link>
+      <Link href={home.list}>{home.back}</Link>
     </p>
   );
 }
@@ -279,7 +288,7 @@ function Builder({
     <>
       <PageHeader
         title={agent ? agent.name : home.title}
-        back={<Link href={home.base}>{home.back}</Link>}
+        back={<Link href={home.list}>{home.back}</Link>}
         {...(agent?.dangerous ? { actions: <DangerousBadge /> } : {})}
       />
       {agent?.archivedAt && (

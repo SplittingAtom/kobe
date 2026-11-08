@@ -6,6 +6,7 @@
 import type { ScheduleRecurrence } from "@kobe/protocol";
 import type { KobeNotification } from "./api";
 import { describeRecurrence } from "../schedules/format";
+import { pausedByLabel } from "../schedules/paused-by";
 
 export interface ScheduleWhen {
   readonly recurrence: ScheduleRecurrence;
@@ -31,11 +32,8 @@ export function notificationTitle(n: KobeNotification): string {
     case "schedule.run.skipped_actions":
       return `Scheduled run finished; ${skipped(n.skippedCount ?? 0)}`;
     case "schedule.paused":
-      return n.pausedBy === "team_admin"
-        ? "Schedule paused by a team admin"
-        : n.pausedBy === "agent_unavailable"
-          ? "Paused: agent unavailable"
-          : "Schedule paused (access deactivated)";
+      // A paused notification always names why (the owner pausing sends none).
+      return pausedByLabel(n.pausedBy ?? "deactivation");
     case "skill.deprecated":
       return `${n.skillName ?? "A catalog skill"} was deprecated`;
     case "skill.version.deprecated":

@@ -104,7 +104,7 @@ describe("registry contents", () => {
 
   // Derived from the filesystem, so a ticket that builds a section edits no shared test list.
   it.each(["site", "team"] as const)(
-    "%s: a READY section has its page; a placeholder has none and names its ticket",
+    "%s: a READY section has its page; a moved or placeholder one has none",
     (kind) => {
       for (const s of sectionsOf(kind)) {
         const page = existsSync(
@@ -115,6 +115,10 @@ describe("registry contents", () => {
             page,
             `${s.id} is READY: add app/admin/${CONSOLE_SEGMENTS[kind]}/${s.id}/page.tsx`,
           ).toBe(true);
+        } else if (s.status.kind === "moved") {
+          // KOBE-570: the list moved out of the console (a redirect there); no console page.
+          expect(page, `${s.id} moved to ${s.status.href}: remove its console page`).toBe(false);
+          expect(sectionHref(s)).toBe(s.status.href);
         } else {
           expect(page, `${s.id} has a page: mark it READY`).toBe(false);
           expect(s.status.ticket).toMatch(/^KOBE-\d+$/);
@@ -248,6 +252,8 @@ describe("registry contents", () => {
       "skill-review",
       "retention",
       "inventory",
+      // The team's agents: the Agents page's Team tab (KOBE-570, AR12).
+      "agents",
       "audit",
     ]) {
       expect(teamIds).toContain(id);

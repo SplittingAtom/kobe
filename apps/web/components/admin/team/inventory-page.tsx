@@ -8,6 +8,7 @@ import {
 } from "../../../lib/admin/api/team/connectors";
 import { listSkills, type SkillSummary } from "../../../lib/admin/api/team/skills";
 import { consoleHref } from "../../../lib/admin/nav/registry";
+import { TEAM_TAB_HREF } from "../../../lib/agents/redirects";
 import {
   Badge,
   EmptyState,
@@ -24,14 +25,13 @@ import {
 import { useTeamAccess } from "../console-context";
 import { DateTime, ResourceView } from "../parts";
 import { useResource } from "../use-resource";
-import { AgentInventory } from "./agent-inventory";
 
 const TEAM = consoleHref("team");
 
 /**
- * The team's inventory for team admins (spec D19, D32; KOBE-48): every agent used in the team with
- * owner, scope, status, versions, usage, schedules and Orbit score (suspend from here), then the
- * team's skills and the connectors enabled for it. Each list comes from the API its own page uses.
+ * The team's inventory for team admins (spec D19, D32; KOBE-48): the team's skills and the
+ * connectors enabled for it, each from the API its own page uses. The agents (usage, schedules,
+ * Orbit scores, suspension) moved to the Agents page's Team tab (KOBE-570, AR12).
  */
 export function TeamInventoryPage() {
   const access = useTeamAccess();
@@ -40,9 +40,19 @@ export function TeamInventoryPage() {
     <>
       <PageHeader
         title="Inventory"
-        description={`Everything ${access.team.name}'s agents run with: the agents, their schedules and Orbit scores, the team's skills and its connectors.`}
+        description={`Everything ${access.team.name}'s agents run with: the team's skills and its connectors.`}
       />
-      <AgentInventory teamId={teamId} canSuspend />
+      <Section
+        id="inventory-heading"
+        title="Agents"
+        description={
+          <>
+            The agents, with their usage, schedules and Orbit scores, moved to the{" "}
+            <Link href={TEAM_TAB_HREF}>Agents page, Team tab</Link>: suspend, approve and pin them
+            there.
+          </>
+        }
+      />
       <SkillsInventory teamId={teamId} />
       <ConnectorsInventory teamId={teamId} />
     </>

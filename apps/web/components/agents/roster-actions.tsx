@@ -3,7 +3,10 @@
 import type { AgentRosterRow, AgentRosterTab, AgentRosterTarget } from "@kobe/protocol";
 import { useState, type ReactNode } from "react";
 import { agentPageHref } from "../../lib/agents/redirects";
+import { galleryExportHref, runGalleryEval } from "../../lib/admin/api/site/gallery";
+import type { GalleryAgentSummary } from "../../lib/admin/api/site/gallery";
 import {
+  adoptRosterEntry,
   assignAgent,
   forkToPersonal,
   updateRosterEntry,
@@ -13,10 +16,12 @@ import type { ApiResult } from "../../lib/api/client";
 import { useConfirm, type Confirm, type RowMenuItem } from "../ui/console";
 import { useNavigate } from "../shell/use-navigate";
 import type { Mutation } from "../admin/use-resource";
-import { DeclineDialog, PinDialog } from "./roster-dialogs";
+import { downloadOrbitExport } from "../admin/team/agent-builder/orbit-export-button";
+import { ApproveDialog, DeclineDialog, EvalDialog, PinDialog } from "./roster-dialogs";
 
 type Trigger = HTMLElement | null;
-type OpenDialog = (kind: "pin" | "decline", row: AgentRosterRow, trigger: Trigger) => void;
+type DialogKind = "pin" | "decline" | "approve" | "eval";
+type OpenDialog = (kind: DialogKind, row: AgentRosterRow, trigger: Trigger) => void;
 
 /** What every flow needs: the team, the tab's roster, and the page's mutation and dialogs. */
 interface Ctx {
@@ -30,6 +35,8 @@ interface Ctx {
   readonly navigate: (href: string) => void;
   readonly openDialog: OpenDialog;
   readonly onChanged: () => void;
+  /** Site admins on the Site tab: the Gallery page's state per gallery agent (else null). */
+  readonly gallery: ReadonlyMap<string, GalleryAgentSummary> | null;
 }
 
 const where = (ctx: Ctx, target: AgentRosterTarget) =>
@@ -181,14 +188,8 @@ function decisionItems(ctx: Ctx, row: AgentRosterRow): ItemSpec[] {
     {
       when: a.decide,
       id: "approve",
-      label: "Approve",
-      onSelect: () =>
-        void put(
-          ctx,
-          row,
-          { state: "active" },
-          () => `Approved ${row.name} for ${ctx.rosterName}.`,
-        ),
+      label: "Approve…",
+      onSelect: (t) => ctx.openDialog("approve", row, t),
     },
     {
       when: a.decide,
@@ -219,7 +220,66 @@ function decisionItems(ctx: Ctx, row: AgentRosterRow): ItemSpec[] {
   ];
 }
 
-/** Suspend and resume (§6.5), remove (AR7) and fork (AR8). */
+/** Hands a same-origin file (a gallery agent's definition) to the browser as a download. */
+function download(href: string, filename: string): void {
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = filename;
+  link.click();
+}
+
+/**
+ * The Inventory's Export to Orbit (team admins, readable published agents) and the Gallery
+ * page's Run eval and Export (site admins, gallery rows), KOBE-570 AR12.
+ */
+function consoleItems(ctx: Ctx, row: AgentRosterRow): ItemSpec[] {
+  const version = row.currentVersion;
+  const gallery = row.kind === "gallery" ? ctx.gallery?.get(row.agentId) : undefined;
+  return [
+    {
+      when: row.usage?.canExport === true && version !== null,
+      id: "export-orbit",
+      label: "Export to Orbit",
+      onSelect: () => {
+        if (version !== null) {
+          void ctx.mutation.run(() =>
+            downloadOrbitExport(ctx.teamId, row.agentId, row.slug, version),
+          );
+        }
+      },
+    },
+    {
+      when: gallery !== undefined && version !== null,
+      id: "run-eval",
+      label: "Run eval…",
+      onSelect: (t) => ctx.openDialog("eval", row, t),
+    },
+    {
+      when: gallery !== undefined,
+      id: "export-file",
+      label: "Export file",
+      onSelect: () => download(galleryExportHref(row.agentId), `${row.slug}.md`),
+    },
+  ];
+}
+
+/** Adopt an Unavailable entry into the roster's ownership (AR10, KOBE-568). */
+function adopt(ctx: Ctx, row: AgentRosterRow, trigger: Trigger) {
+  const owner = ctx.roster === "site" ? "the site" : ctx.teamName;
+  return confirmed(
+    ctx,
+    trigger,
+    {
+      title: `Adopt ${row.name} into ${owner}?`,
+      description: `Its published version becomes ${ctx.roster === "site" ? "a gallery agent" : "a team agent"} that ${owner} owns and edits; this entry leaves the roster.`,
+      confirmLabel: "Adopt",
+    },
+    () => adoptRosterEntry(ctx.teamId, ctx.roster, row.agentId),
+    () => `Adopted ${row.name}: ${owner} now owns a copy.`,
+  );
+}
+
+/** Suspend and resume (§6.5), adopt (AR10), remove (AR7) and fork (AR8). */
 function lifecycleItems(ctx: Ctx, row: AgentRosterRow): ItemSpec[] {
   const a = row.actions;
   const resume = (siteWide: boolean) =>
@@ -265,6 +325,12 @@ function lifecycleItems(ctx: Ctx, row: AgentRosterRow): ItemSpec[] {
       onSelect: () => resume(true),
     },
     {
+      when: row.status === "unavailable" && a.remove && row.entry?.state !== "proposed",
+      id: "adopt",
+      label: `Adopt into ${ctx.rosterName}`,
+      onSelect: (t) => void adopt(ctx, row, t),
+    },
+    {
       when: a.remove,
       id: "remove",
       label: `Remove from ${ctx.rosterName}`,
@@ -277,18 +343,23 @@ function lifecycleItems(ctx: Ctx, row: AgentRosterRow): ItemSpec[] {
 
 /** The row's ⋯ menu, from the row's `actions` only (the server's §5 decisions). */
 export function rosterMenuItems(ctx: Ctx, row: AgentRosterRow): RowMenuItem[] {
-  return [...reachItems(ctx, row), ...decisionItems(ctx, row), ...lifecycleItems(ctx, row)]
+  return [
+    ...reachItems(ctx, row),
+    ...decisionItems(ctx, row),
+    ...consoleItems(ctx, row),
+    ...lifecycleItems(ctx, row),
+  ]
     .filter((spec) => spec.when)
     .map(({ when: _when, ...item }) => ({ ...item, disabled: ctx.mutation.pending }));
 }
 
 type Dialog = {
-  readonly kind: "pin" | "decline";
+  readonly kind: DialogKind;
   readonly row: AgentRosterRow;
   readonly trigger: Trigger;
 } | null;
 
-/** Pin and Decline dialogs for the row that opened them. */
+/** Approve, Pin, Decline and Run eval dialogs for the row that opened them. */
 function RosterDialogs({
   ctx,
   dialog,
@@ -307,6 +378,44 @@ function RosterDialogs({
     pending: ctx.mutation.pending,
     onClose,
   };
+  if (dialog.kind === "eval") {
+    return (
+      <EvalDialog
+        row={row}
+        activeTeamId={ctx.teamId}
+        returnFocus={trigger}
+        pending={ctx.mutation.pending}
+        onClose={onClose}
+        onRun={async (team) => {
+          onClose();
+          await ctx.mutation.run(
+            () => runGalleryEval(row.agentId, team.id),
+            () =>
+              `Evaluating ${row.name} in ${team.name}. The score appears here when it finishes.`,
+          );
+        }}
+      />
+    );
+  }
+  if (dialog.kind === "approve") {
+    return (
+      <ApproveDialog
+        {...common}
+        onApprove={async (versionRule) => {
+          onClose();
+          await put(
+            ctx,
+            row,
+            versionRule === "latest" ? { state: "active" } : { state: "active", versionRule },
+            () =>
+              versionRule === "latest"
+                ? `Approved ${row.name} for ${ctx.rosterName}.`
+                : `Approved ${row.name} for ${ctx.rosterName}, pinned to v${versionRule}.`,
+          );
+        }}
+      />
+    );
+  }
   return dialog.kind === "pin" ? (
     <PinDialog
       {...common}
@@ -347,6 +456,7 @@ export function useRosterActions(props: {
   readonly tab: AgentRosterTab;
   readonly mutation: Mutation;
   readonly onChanged: () => void;
+  readonly gallery: ReadonlyMap<string, GalleryAgentSummary> | null;
 }): {
   readonly itemsFor: (row: AgentRosterRow) => RowMenuItem[];
   /** Withdraws from another team's roster (Reach column): one the owner may have left. */
