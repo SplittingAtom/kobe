@@ -48,7 +48,10 @@ const entryColumns = () => ({
   removedAt: timestamp({ withTimezone: true }),
 });
 
-type EntryTable = Record<"state" | "versionRule" | "pinnedVersion" | "decidedBy" | "decidedAt", AnyPgColumn>;
+type EntryTable = Record<
+  "state" | "versionRule" | "pinnedVersion" | "decidedBy" | "decidedAt",
+  AnyPgColumn
+>;
 
 const entryChecks = (name: string, t: EntryTable) => [
   check(`${name}_state`, sql`${t.state} IN (${list(AGENT_ROSTER_STATES)})`),
