@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR #TBD)
+- **Status:** in review (PR #495)
 - **Branch / worktree:** `kobe-571-fork-dialog-picker` in `../Kobe-wt571`
 - **Depends on:** KOBE-568 (fork/adopt routes), KOBE-569/570 (Agents page), KOBE-567 (default agent
   hook). Spec `docs/specs/agents-roster.md` AR5, AR8, AR14, AR15, §6.4, §6.6, §6.7, §7.5, §7.7 (AR-7).
