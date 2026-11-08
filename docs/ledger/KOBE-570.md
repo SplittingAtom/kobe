@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #493)
 - **Branch / worktree:** `kobe-570-admin-fold-in` in `../Kobe-wt570`
 - **Depends on:** KOBE-569 (Agents page, merged), KOBE-566 (roster routes), KOBE-567 (Unavailable),
   KOBE-568 (adopt routes). Spec `docs/specs/agents-roster.md` AR12, §6.4, §6.5 (AR-6).
