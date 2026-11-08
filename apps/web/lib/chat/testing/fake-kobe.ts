@@ -966,6 +966,34 @@ export class FakeKobe {
     });
     return id;
   }
+  /** Project files by project id (Add to project, KOBE-585): paths only. */
+  readonly projectFiles = new Map<string, string[]>();
+
+  #projectFiles(method: string, id: string, sub: string | undefined, body: Json | undefined) {
+    if (!this.projects.some((p) => p.id === id)) return error(404, "not_found");
+    const held = this.projectFiles.get(id) ?? [];
+    const file = (path: string) => ({
+      id: uuid(11, held.indexOf(path) + 1),
+      project_id: id,
+      path,
+      size_bytes: 1,
+      sha256: "a".repeat(64),
+      mime_type: "text/plain",
+      source: "upload",
+      added_by: uuid(3, 1),
+      added_at: NOW,
+    });
+    if (method === "GET" && sub === undefined) return json(200, { files: held.map(file) });
+    if (method === "POST" && sub === "import") {
+      const folder = typeof body?.folder === "string" ? body.folder : "";
+      const path = folder === "" ? String(body?.name) : `${folder}/${String(body?.name)}`;
+      if (held.includes(path)) return error(409, "file_exists");
+      this.projectFiles.set(id, [...held, path]);
+      return json(201, file(path));
+    }
+    return error(404, "not_found");
+  }
+
   /** Answers the next organize call with this refusal instead (once). */
   refuseOrganize: {
     readonly status: number;
@@ -1260,6 +1288,7 @@ export class FakeKobe {
       url.pathname.startsWith("/v1/approvals") ||
       url.pathname === "/v1/team/retention" ||
       url.pathname === "/v1/projects" ||
+      url.pathname.startsWith("/v1/projects/") ||
       url.pathname === "/v1/skills/drafts/saves" ||
       url.pathname.startsWith("/v1/egress/requests");
     if (!scoped) return error(404, "not_found");
@@ -1408,6 +1437,8 @@ export class FakeKobe {
     if (area === "projects" && id === undefined && method === "GET") {
       return json(200, { projects: this.projects });
     }
+    if (area === "projects" && id && action === "files")
+      return this.#projectFiles(method, id, sub, body);
     if (area === "runs" && id && action === "eval-case")
       return this.#evalCase(method, id, sub, body);
     if (area === "runs" && id) return this.#runRoute(method, id, action, body);

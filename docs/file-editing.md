@@ -333,6 +333,56 @@ sequenceDiagram
 The browser sends no bytes: the server copies the version it stored. The copy goes through the
 browser upload path, so the same size limit and quotas apply.
 
+### 3f. Sharing with a project (Add to project)
+
+A shared conversation gives readers the conversation only: they open files from their own
+workspace, where the owner's files do not exist. To hand an artifact or a workspace file to other
+people, its owner adds it to a project (KOBE-585). Every member of the project then has a
+read-only copy under `projects/<slug>/` in their own workspace (the server-owned mount of
+`services/server/src/projects/mounts.ts`), and the agent of any member's run can read it there.
+A member who wants to change it asks their agent to copy it out of `projects/` first.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor O as Owner
+  participant W as Web (artifact header, file tab, file card)
+  participant S as Server
+  participant DB as Postgres
+  participant OS as Object storage
+  participant M as Members' workspaces
+
+  O->>W: Add to project…: project, folder, name
+  W->>S: POST /v1/projects/:id/files/import {source, folder, name}
+  S->>S: project visible? else 404
+  S->>S: artifact readable / own synced file? else 404
+  S->>S: canAddToProject? else 403
+  S->>OS: copy the stored bytes (artifact version, or the workspace store's copy)
+  S->>DB: project_files row, quotas, audit project.file_added (ids + importedFrom)
+  S->>M: reconcile the project's mounts for every member
+  S-->>W: 201 project file (409 file_exists: Add as copy retries -2, -3)
+```
+
+- **Who may add.** One function, `canAddToProject` in `packages/protocol/src/projects.ts`: team
+  admins and the project's owners; a project member who is an editor (team role `builder`, Chris
+  2026-11-08) or owns the content (the thread's owner for an artifact; always the caller for a
+  workspace file, since `/v1/workspace` is their own). The web shows the action to the
+  conversation's owner only, on the artifact header, the file tab and the `open_file` card;
+  readers never see it.
+- **What is copied.** The bytes the server stored: the artifact version through the loader Edit as
+  file uses, or the caller's own synced file through the workspace store (a missing saved copy is
+  503 `content_missing` and the sandbox resends it). The browser sends none, and nobody reads
+  another member's workspace.
+- **Rules.** The upload's: `uploadProjectFile` (50 MiB and the site's file cap, 500 files per
+  project, the team storage quota, `projectFileNameSchema`, archived projects 409). A file of the
+  same name in the same folder answers 409 `file_exists`: project files are never replaced in
+  place, so the dialog offers Add as copy (`name-2.ext`, `-3` …).
+- **Record.** The file has `source: "upload"` (the `project_files_source` CHECK allows only
+  `upload` and `proposal`; a later migration may add `import`); the audit row
+  `project.file_added` carries `importedFrom` (the artifact id and version, or the sha256 of the
+  workspace path), never a name, path or content. The project page cannot yet label the file
+  "Imported from <conversation>": that needs a column (follow-up).
+
 ### Where people and policy decide
 
 - **Server decides every tool call.** Each Pi tool call, nested ones included, goes through

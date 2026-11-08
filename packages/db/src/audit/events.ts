@@ -983,6 +983,19 @@ export const AUDIT_EVENTS = {
     fileId: id,
     source: z.enum(["upload", "proposal"]),
     sizeBytes: z.number().int().nonnegative(),
+    /**
+     * Add to project (KOBE-585): what was copied, by id only. An artifact version, or the caller's
+     * own workspace file named by the sha256 of its path (never the path).
+     */
+    importedFrom: z
+      .discriminatedUnion("kind", [
+        z.strictObject({ kind: z.literal("artifact"), artifactId: id, version: count }),
+        z.strictObject({
+          kind: z.literal("workspace_file"),
+          pathSha256: z.string().regex(/^[0-9a-f]{64}$/),
+        }),
+      ])
+      .optional(),
   }),
   "project.file_removed": event("team", { projectId: id, fileId: id }),
   "project.member_role_changed": event("team", {

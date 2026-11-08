@@ -6,7 +6,8 @@
  * owner gets that file's tab opened and focused once: text files in the editor, other types in
  * their viewers (the file tab decides). After a reload nothing opens by itself; Open again does.
  * A member reading a shared thread sees the card without Open again: the file tab reads the
- * viewer's own workspace, never the owner's.
+ * viewer's own workspace, never the owner's. The owner also gets Add to project (KOBE-585); a
+ * reader does not (the file is the owner's).
  */
 import { FileSearchIcon } from "lucide-react";
 import { useEffect } from "react";
@@ -14,6 +15,7 @@ import { workspaceToolPath, type KobeEventPayload } from "@kobe/protocol";
 import { fileName } from "../../lib/files/preview";
 import { useArtifactPanel } from "../chat/artifact-state";
 import { useKobeExtras } from "../chat/kobe-runtime";
+import { AddToProject } from "../projects/add-to-project";
 import styles from "../chat/chat.module.css";
 
 /** Requests this page already acted on (`<run>:<tool call>`): a remounted card never reopens. */
@@ -77,6 +79,9 @@ export function OpenFileCard({
         >
           Open again
         </button>
+      )}
+      {!readOnly && (
+        <AddToProject source={{ kind: "workspace_file", path }} defaultName={name} size="sm" />
       )}
     </div>
   );

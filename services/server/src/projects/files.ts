@@ -53,6 +53,11 @@ export interface ProjectFileDeps {
   readonly teamQuotaDefaultBytes: number;
 }
 
+/** Add to project (KOBE-585): what a file was copied from, for the audit row (ids only). */
+export type ImportedFrom =
+  | { readonly kind: "artifact"; readonly artifactId: string; readonly version: number }
+  | { readonly kind: "workspace_file"; readonly pathSha256: string };
+
 export interface FileTarget {
   readonly teamId: string;
   readonly projectId: string;
@@ -134,6 +139,7 @@ export async function insertProjectFile(
     readonly mime: string;
     readonly blobRef: string;
     readonly source: "upload" | "proposal";
+    readonly importedFrom?: ImportedFrom | undefined;
   },
 ): Promise<ProjectFile> {
   const { teamId, projectId, userId } = target;
@@ -183,7 +189,13 @@ export async function insertProjectFile(
     action: "project.file_added",
     actor: { kind: "user", id: userId },
     teamId,
-    target: { projectId, fileId: file.id, source: file.source, sizeBytes: file.size },
+    target: {
+      projectId,
+      fileId: file.id,
+      source: file.source,
+      sizeBytes: file.size,
+      ...(file.importedFrom === undefined ? {} : { importedFrom: file.importedFrom }),
+    },
   });
   return toProjectFile(row);
 }
@@ -233,6 +245,8 @@ export interface IncomingProjectFile {
   readonly name: string;
   readonly declaredMime: string;
   readonly body: Readable;
+  /** Set by Add to project (KOBE-585); the file is still `source: "upload"`. */
+  readonly importedFrom?: ImportedFrom | undefined;
 }
 
 /** A person's upload: stream, hash, copy to the file's key, then the row (see module header). */
@@ -286,6 +300,7 @@ export async function uploadProjectFile(
     mime,
     blobRef: key,
     source: "upload",
+    importedFrom: incoming.importedFrom,
   });
 }
 
