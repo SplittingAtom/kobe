@@ -1,7 +1,8 @@
 # Kobe — Agents: Personal, Team and Site rosters
 
-Status: **proposal for Chris's decisions** (Q1–Q18 in §9; AR1–AR16 below are the proposed
-answers). Written 2026-11-08 against main `445af3d9`. Hadron spec: to be registered when the
+Status: **partly decided by Chris, 2026-11-08** (Q1, Q3 and Q6 in §9: rosters are references with
+a version rule, builders assign directly, team-owned agents stay; the other questions are open and
+AR1–AR16 are proposals where §9 says so). Written 2026-11-08 against main `445af3d9`. Hadron spec: to be registered when the
 decisions are taken; tickets in §10 are a proposed split, not filed. Companions:
 `docs/specs/agent-creator.md` (the two-tab editor and Dangerous mode, KOBE-476),
 `docs/specs/gallery-agents.md` (site admins edit gallery agents, KOBE-494), `docs/agent-versions.md`.
@@ -110,7 +111,8 @@ available), updated, and the actions the viewer has (§5).
   personal agents (`site_agent_roster`). Pending proposals show to their proposer and to site
   admins.
 
-**AR3. Rosters are references.** A roster entry never copies a definition. New tables:
+**AR3. Rosters are references** (decided by Chris, 2026-11-08). A roster entry never copies a
+definition. New tables:
 
 | Table               | Columns                                                                                                                                                                                                                                                                             |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -125,7 +127,8 @@ publishes in Personal; a team admin or site admin never edits an assigned agent 
 pin a version, suspend it, or ask the owner). What a team runs is a **published** version only:
 a draft can be assigned but is not runnable until published; the roster shows "Not published yet".
 
-**AR5. Version rule.** An entry follows the agent's **latest published version** by default, so
+**AR5. Version rule** (decided by Chris, 2026-11-08: every entry carries one; the default below is
+still proposed, Q2). An entry follows the agent's **latest published version** by default, so
 the owner's publish reaches the team at once (threads already started keep their pinned version,
 D19). A team admin or site admin can **pin** the entry to a version; a pinned entry behind the
 owner's latest shows "Update available" with an **Update** action (to latest, or pick a version).
@@ -133,8 +136,8 @@ The owner cannot change another roster's pin. `runnable` and the thread pin reso
 version, not the agent's.
 
 **AR6. Who assigns.** Assign your own personal agent to the **team** roster: `team.agents.build`
-(builders and team admins) directly; a `member` **proposes** and a team admin approves or declines
-(`team.agents.manage`). Assign to the **site** roster: site admins directly; anyone else proposes
+(builders and team admins) directly (decided by Chris, 2026-11-08); whether a `member` may
+**propose** for a team admin to approve or decline (`team.agents.manage`) is open (Q9). Assign to the **site** roster: site admins directly; anyone else proposes
 and a site admin decides. One agent can be on many team rosters and on the site roster at once
 (unless bound, AR8). Only published agents can be proposed to the site. Caps: 200 assigned entries
 per team roster, 200 on the site roster (the existing agent caps stay).
@@ -185,10 +188,10 @@ schedules, suspension) and actions inline; `/admin/team/inventory` and `/admin/t
 redirect to `/agents?tab=team` once the tab carries them all. Site admins get the Gallery page's
 actions (Customized, Compare, Reset, edit) on the Site tab; `/admin/site/gallery` redirects.
 
-**AR13. Creating.** **New agent** on every tab creates a personal agent (as asked). The Team tab
-keeps **Create for the team** for builders (a team-owned agent, today's behaviour), because a
-team-owned agent outlives its creator's membership and is what a team wants for shared, long-lived
-assistants; Chris may prefer to retire it (Q6).
+**AR13. Creating** (decided by Chris, 2026-11-08: team-owned agents stay). **New agent** on every
+tab creates a personal agent (as asked). The Team tab keeps **Create for the team** for builders (a
+team-owned agent, today's behaviour), because a team-owned agent outlives its creator's membership
+and is what a team wants for shared, long-lived assistants.
 
 **AR14. Editing from a roster.** "Edit" on a Team or Site row opens the owner's editor only for the
 owner (and, for team-owned agents, for the rules today: creator or team admin; for gallery agents,
@@ -333,23 +336,25 @@ immutability; per-member rosters inside a team; renaming team roles.
 
 ## 9. Questions for Chris
 
-1. **Rosters as references (AR3) or as copies?** A copy ("assign" publishes a team-owned snapshot)
-   is simpler and keeps teams fully walled, but the owner's later edits never reach the team and
-   the agent exists twice. Proposed: references with a version rule.
+1. **Rosters as references (AR3) or as copies?** _Decided 2026-11-08: references with a version
+   rule._ (A copy would have been simpler and fully walled, but the owner's edits would never reach
+   the team and the agent would exist twice.)
 2. **Default version rule (AR5):** follow latest, or pin at assignment? Proposed: follow latest,
    admins may pin.
-3. **Who may assign to a team (AR6):** builders directly and members propose, or team admins only?
+3. **Who may assign to a team (AR6):** _Decided 2026-11-08: builders assign directly._ Whether
+   members may propose is Q9.
 4. **Who may assign to the site:** site admins only, with proposals from everyone else (proposed),
    or team admins directly too?
 5. **Binding (AR8):** is "a fork of team content is bound to that team" the right reading of
    "teams are walls" now that forks land in Personal? Alternative: forbid forking team content
    into Personal at all (today's rule), offering "Duplicate for the team" instead.
-6. **Keep team-owned agents (AR13)?** Keep "Create for the team" and adopt, or retire team
-   ownership and have every agent be someone's personal agent on rosters?
+6. **Keep team-owned agents (AR13)?** _Decided 2026-11-08: keep them_, with "Create for the team"
+   and Adopt (AR10).
 7. **Adopt into the site (AR10):** should a site-owned, non-repository gallery agent exist, or must
    a site adoption pick a team to own it?
 8. **Transfer (AR10):** accept required by the new owner, or immediate?
-9. **Proposals:** needed in this lane, or later?
+9. **Proposals:** should members (no `build`) be able to propose their agent to the team, and
+   non-site-admins to the site, in this lane, or later?
 10. **Inventory and Gallery pages (AR12):** fold into the tabs with redirects, or keep both?
 11. **Schedules (AR11):** pause with a notice, or fail each run?
 12. **Delete while rostered (§6.3):** refuse, or withdraw automatically?
