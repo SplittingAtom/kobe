@@ -331,12 +331,16 @@ describe("version rules (AR5)", () => {
 });
 
 describe("removal and suspension (AR7, §6.5)", () => {
-  it("team admins suspend and resume an entry for the team (team_agent_suspensions), then remove it", async () => {
+  it("team admins suspend and resume an entry for the team (team_agent_suspensions only), then remove it", async () => {
     const agent = await personal("bob", "Bob Suspend");
     expect((await assign("bob", agent, "team")).status).toBe(201);
     expect((await teamPut("bob", agent, { state: "suspended" })).status).toBe(403);
     const suspended = await teamPut("alice", agent, { state: "suspended" });
-    expect(suspended.json.entry.state).toBe("suspended");
+    expect(suspended.json).toEqual({ agentId: agent, suspendedHere: true });
+    // The entry stays active: the team's suspension row is the one record (§6.5).
+    expect(
+      await sql(`SELECT state FROM team_agent_roster WHERE site_agent_id = $1`, [agent]),
+    ).toEqual([{ state: "active" }]);
     expect(
       await sql(`SELECT 1 FROM team_agent_suspensions WHERE team_id = $1 AND agent_id = $2`, [
         finance,
@@ -347,8 +351,12 @@ describe("removal and suspension (AR7, §6.5)", () => {
       status: "suspended_here",
       actions: expect.objectContaining({ suspendHere: false, resumeHere: true }),
     });
+    // The inventory's resume clears the same fact.
+    expect(
+      (await as.alice.put(`/v1/agents/inventory/${agent}/status`, { status: "active" })).status,
+    ).toBe(404); // not used by a thread yet: the inventory doesn't list it
     const resumed = await teamPut("alice", agent, { state: "active" });
-    expect(resumed.json.entry.state).toBe("active");
+    expect(resumed.json).toEqual({ agentId: agent, suspendedHere: false });
     expect(
       await sql(`SELECT 1 FROM team_agent_suspensions WHERE agent_id = $1`, [agent]),
     ).toHaveLength(0);
@@ -394,6 +402,82 @@ describe("removal and suspension (AR7, §6.5)", () => {
     expect((await sitePut("sam", agent, { state: "removed" })).json.entry.state).toBe("removed");
     // Unknown on the site roster.
     expect((await sitePut("sam", randomUUID(), { state: "active" })).status).toBe(404);
+  });
+});
+
+describe("review fixes", () => {
+  it("a site admin without a team admin role can't decide team entries (403)", async () => {
+    const agent = await personal("carol", "Carol For Sam");
+    expect((await assign("carol", agent, "team")).status).toBe(202);
+    const res = await teamPut("sam", agent, { state: "active" });
+    expect(res.status).toBe(403);
+    expect(res.json.code).toBe("forbidden");
+  });
+
+  it("a builder assigning or proposing a bound agent of another team gets 422", async () => {
+    const agent = await personal("bob", "Bob Bound Elsewhere");
+    await sql(`UPDATE site_agents SET bound_team_id = $1 WHERE id = $2`, [marketing, agent]);
+    expect((await assign("bob", agent, "team")).json.code).toBe("agent_bound_to_team");
+    expect((await assign("bob", agent, "site")).json.code).toBe("agent_bound_to_team");
+  });
+
+  it("only roster admins pin on assign (422 version_rule_not_allowed)", async () => {
+    const bobs = await personal("bob", "Bob Wants Pin");
+    const res = await assign("bob", bobs, "team", 1);
+    expect(res.status).toBe(422);
+    expect(res.json.code).toBe("version_rule_not_allowed");
+    expect((await assign("bob", bobs, "team", "latest")).status).toBe(201);
+    const alices = await personal("alice", "Alice Pins");
+    const pinned = await assign("alice", alices, "team", 1);
+    expect(pinned.status).toBe(201);
+    expect(pinned.json.entry).toMatchObject({ versionRule: "pinned", pinnedVersion: 1 });
+  });
+
+  it("refuses to approve a proposal of an archived agent", async () => {
+    const agent = await personal("carol", "Carol Archived");
+    expect((await assign("carol", agent, "team")).status).toBe(202);
+    await sql(`UPDATE site_agents SET archived_at = now() WHERE id = $1`, [agent]);
+    const res = await teamPut("alice", agent, { state: "active" });
+    expect(res.status).toBe(409);
+    expect(res.json.code).toBe("agent_archived");
+  });
+
+  it("an owner who left a team withdraws from its roster (?teamId), then can delete", async () => {
+    await sql(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'builder')`, [
+      finance,
+      ids.dave,
+    ]);
+    expect((await as.dave.put("/v1/me/teams/active", { teamId: finance })).status).toBe(200);
+    as.dave.team = finance;
+    const draft = await personal("dave", "Dave Leaver", false);
+    expect((await assign("dave", draft, "team")).status).toBe(201);
+    expect((await as.dave.put("/v1/me/teams/active", { teamId: marketing })).status).toBe(200);
+    as.dave.team = marketing;
+    await sql(`DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`, [finance, ids.dave]);
+    expect((await as.dave.request("DELETE", `/v1/agents/${draft}`)).json.code).toBe(
+      "agent_rostered",
+    );
+    const reach = rowOf(await roster("dave", "personal"), draft)?.reach;
+    expect(reach).toEqual([expect.objectContaining({ teamName: "Finance", state: "active" })]);
+    // Without teamId it means the active team, where the agent isn't.
+    expect((await withdraw("dave", draft, "team")).status).toBe(404);
+    expect(
+      (await as.dave.request("DELETE", `/v1/agents/${draft}/assignments/site?teamId=${finance}`))
+        .status,
+    ).toBe(400);
+    const out = await as.dave.request(
+      "DELETE",
+      `/v1/agents/${draft}/assignments/team?teamId=${finance}`,
+    );
+    expect(out.status, JSON.stringify(out.json)).toBe(200);
+    expect(out.json.entry).toMatchObject({ teamId: finance, state: "removed" });
+    expect((await audited("agent.roster.withdrawn", draft))[0]?.team_id).toBe(finance);
+    // Someone else can't withdraw it.
+    expect(
+      (await as.bob.request("DELETE", `/v1/agents/${draft}/assignments/team?teamId=${finance}`))
+        .status,
+    ).toBe(404);
+    expect((await as.dave.request("DELETE", `/v1/agents/${draft}`)).status).toBe(204);
   });
 });
 
@@ -481,17 +565,21 @@ describe("the roster read (AR1, AR2, §6.8)", () => {
   });
 
   it("Personal lists only the caller's own agents with their actions", async () => {
+    const carols = await personal("carol", "Carol Fresh");
+    const bobs = await personal("bob", "Bob Fresh");
     const rows = await roster("carol", "personal");
-    expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((r) => r.kind === "personal")).toBe(true);
-    const row = rows.find((r) => r.reach?.length === 0);
-    expect(row?.actions).toMatchObject({
-      edit: true,
-      assignTeam: "propose",
-      assignSite: "propose",
+    expect(rowOf(rows, bobs)).toBeUndefined();
+    expect(rowOf(rows, carols)).toMatchObject({
+      reach: [],
+      actions: expect.objectContaining({
+        edit: true,
+        assignTeam: "propose",
+        assignSite: "propose",
+      }),
     });
-    expect(
-      (await roster("bob", "personal")).find((r) => r.reach?.length === 0)?.actions,
-    ).toMatchObject({ assignTeam: "direct" });
+    expect(rowOf(await roster("bob", "personal"), bobs)?.actions).toMatchObject({
+      assignTeam: "direct",
+    });
   });
 });

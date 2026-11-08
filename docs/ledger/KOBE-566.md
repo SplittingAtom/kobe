@@ -30,15 +30,14 @@ withdrawTeam/Site, decide, remove, pin, suspendHere/resumeHere, suspendSiteWide/
 - **§5 "builder (reference, any team)" implemented:** a builder may put someone else's
   _site-assigned_ (active) agent on their team roster directly (`assignedBy` = builder). Members
   can't. Someone else's agent not on the site roster is 404 (no oracle).
-- **Suspension (§6.5 / AR9), where each mechanism is used:**
-  - Team roster, team-assigned entry: `state = suspended` **and** this team's
-    `team_agent_suspensions` row (resume clears both). The suspensions row is the one fact run start,
-    pinning and `runnable` already check, and it also covers an agent that is both team- and
-    site-assigned.
-  - Team roster, no team entry: gallery agents and site entries → `team_agent_suspensions` only
-    (`{agentId, suspendedHere}` response); team-owned → their `status` (`setAgentStatus`, audited as
-    `agent.status_changed` as before).
-  - Site roster: site admins `state = suspended` site-wide, resumable. No suspensions row.
+- **Suspension (§6.5 / AR9; coordinator's review decision):** for the **team** roster,
+  `team_agent_suspensions` is the only record of "suspended here": a team PUT `{state: suspended}`
+  or `{state: active}` (no `versionRule`) writes or deletes that row and leaves a team entry
+  `active` (response `{agentId, suspendedHere}`); the read derives "Suspended here" from the row.
+  Same for gallery agents and site entries; team-owned agents use their `status`
+  (`agent.status_changed`). The Inventory's suspend of a used personal agent writes the same row
+  and still logs `agent.status_changed` (noted in `docs/audit-log.md`). `state = suspended` is used
+  only on `site_agent_roster` (site admins, site-wide, resumable).
 - **Caps:** 200 `active|suspended` entries per roster (checked on assign and on approve) and,
   separately, 200 pending proposals per roster (so proposals can't block builders and vice versa).
   Writes serialize per roster with an advisory lock.
@@ -50,12 +49,21 @@ withdrawTeam/Site, decide, remove, pin, suspendHere/resumeHere, suspendSiteWide/
   admins; archived agents to owner and roster admins. Someone else's personal agent shows its
   **version in effect** (name/description from `site_agent_versions`), never the owner's draft; a
   never-published one shows its slug and `not_published`.
-- **Delete while rostered (§6.3):** `deleteOrArchiveAgent` gained an optional `refuseDelete`
-  check run under the agent's `FOR UPDATE` lock; roster writes take `FOR SHARE` on the agent, so an
+- **Delete while rostered (§6.3):** `deleteOrArchiveAgent` gained an optional `beforeDelete`
+  guard (2 lines; `refuseIfRostered` in `roster.ts` throws `AgentRosteredError`) run under the
+  agent's `FOR UPDATE` lock; roster writes take `FOR SHARE` on the agent, so an
   assignment can't slip in between. `isRostered` scans every team (`scanTeams`): entries outlive
   membership. Only never-published personal agents are affected (published ones archive).
 - **Reach** scans every team's roster for the owner's agents (team name included); fine at site
   scale, one query per team.
+- **Withdraw from a left team:** `DELETE /v1/agents/:id/assignments/team?teamId=` lets the owner
+  withdraw from any team roster the agent is on (membership not required; Reach lists them),
+  else a departed owner's agent could never be deleted.
+- **Pins on assign:** only the roster's admins (team admin / site admin) may send a numeric
+  `versionRule`; anyone else gets `422 version_rule_not_allowed` (owners and builders assign
+  following latest). Approve refuses an archived agent (`409 agent_archived`).
+- **Site PUT actor:** `SiteRosterActor {userId, siteAdmin}` (no team); `updateEntry` takes
+  `RosterActor | SiteRosterActor`.
 - **Rate:** one key `agent-roster:<userId>`, 60 per 10 min, for every roster write (assign,
   propose, withdraw, every admin PUT).
 - **Audit** (`packages/db/src/audit/events.ts`, documented in `docs/audit-log.md`):
@@ -69,8 +77,9 @@ resumed}`, target `{agentId, scope, slug, roster}` (+ `versionRule, pinnedVersio
 
 - **567 (resolution):** use `activeTeamEntries(tx, teamId)`, `activeSiteEntries(db)`,
   `resolvedVersion(entry, currentVersion)` and `teamEntry`/`siteEntry` from `agents/roster.ts`.
-  A team's suspension of any site-wide agent stays `team_agent_suspensions` (already checked);
-  a suspended team entry is not active. Bound agents: `site_agents.bound_team_id` (not yet on
+  "Suspended here" for any site-wide agent, team entries included, is only
+  `team_agent_suspensions` (already checked by run start and pinning); team entries never hold
+  `suspended`. Site entries may be `suspended` (site-wide): not runnable anywhere. Bound agents: `site_agents.bound_team_id` (not yet on
   `AgentRecord`; `roster-list.ts` reads it with `SITE_ROW`). Entries of deleted agents are inert:
   skip rows whose agent is missing. Schedules: `paused_by = 'agent_unavailable'` (KOBE-565).
 - **568 (fork/transfer/adopt):** `assignDecision` already refuses bound agents outside their team
@@ -94,7 +103,9 @@ resumed}`, target `{agentId, scope, slug, roster}` (+ `versionRule, pinnedVersio
 - ac-1: `services/server/src/agents/roster-access.test.ts` (matrix per role: member, builder,
   team admin, site admin; assign/propose/bound/archived), `src/agent-roster.db.test.ts` (every
   route; 403s per role on team and site PUT; tab reads, paging, cross-team isolation),
-  `src/openapi/document.test.ts` (documented = mounted).
+  `src/openapi/document.test.ts` (documented = mounted); "review fixes" block (site admin without
+  team admin role 403, builder + bound agent 422, pin on assign 422, archived approve 409,
+  withdraw from a left team then delete).
 - ac-2: `agent-roster.db.test.ts` "a member proposes (202)…", "team admins approve or decline…",
   "site: site admins assign directly…".
 - ac-3: `agent-roster.db.test.ts` "caps…", "rate-limits…", "refuses to delete… 409

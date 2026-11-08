@@ -178,6 +178,23 @@ export async function isRostered(db: KobeDb, agentId: string): Promise<boolean> 
   return teams.length > 0;
 }
 
+/** Thrown by {@link refuseIfRostered}: the route answers 409 `agent_rostered`. */
+export class AgentRosteredError extends Error {
+  constructor(agentId: string) {
+    super(`agent ${agentId} is on a roster`);
+    this.name = "AgentRosteredError";
+  }
+}
+
+/**
+ * `deleteOrArchiveAgent`'s guard (§6.3), run under the agent's `FOR UPDATE` lock: roster writes
+ * lock the agent `FOR SHARE`, so an assignment either committed before this check or waits and
+ * then finds no agent.
+ */
+export async function refuseIfRostered(db: KobeDb, agentId: string): Promise<void> {
+  if (await isRostered(db, agentId)) throw new AgentRosteredError(agentId);
+}
+
 /**
  * Where the owner's agents reach (the Personal tab's Reach column, AR2): their entries on every
  * team's roster and on the site roster, any state (a removed entry carries a decline's note).

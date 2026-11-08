@@ -122,7 +122,11 @@ export function agentRosterOpenApiPaths(): Record<string, Record<string, unknown
             "`already_on_roster`, `agent_archived`, `roster_limit`, `no_active_team` or " +
               "`team_mismatch`.",
           ),
-          "422": json("Error", "`agent_bound_to_team` or `agent_not_published`."),
+          "422": json(
+            "Error",
+            "`agent_bound_to_team`, `agent_not_published`, or `version_rule_not_allowed` (a " +
+              "numeric versionRule from someone who is not the roster's admin).",
+          ),
           ...RATE,
         },
       },
@@ -138,6 +142,15 @@ export function agentRosterOpenApiPaths(): Record<string, Record<string, unknown
             in: "path",
             required: true,
             schema: { type: "string", enum: ["team", "site"] },
+          },
+          {
+            name: "teamId",
+            in: "query",
+            required: false,
+            description:
+              "Target team only: a team roster other than the active team (e.g. one the owner " +
+              "has left). Membership is not required; the agent must be the caller's.",
+            schema: { type: "string", format: "uuid" },
           },
           teamHeader(true),
         ],
@@ -156,7 +169,8 @@ export function agentRosterOpenApiPaths(): Record<string, Record<string, unknown
         ...adminPut(
           "team admins",
           "updateTeamAgentRosterEntry",
-          "Without a team entry, `suspended`/`active` suspends or resumes for the team a " +
+          "`suspended` / `active` without `versionRule` suspends or resumes the agent for this " +
+            "team only (`team_agent_suspensions`; a team entry stays `active`), also for a " +
             "team-owned agent or a site-wide agent (gallery or site roster).",
         ),
         parameters: [uuidPath("agentId"), teamHeader(true)],
@@ -167,7 +181,8 @@ export function agentRosterOpenApiPaths(): Record<string, Record<string, unknown
           "404": json("Error", "`roster_entry_not_found` or `version_not_found`."),
           "409": json(
             "Error",
-            "`invalid_transition`, `roster_limit`, `no_active_team` or `team_mismatch`.",
+            "`invalid_transition`, `roster_limit`, `agent_archived` (approve), `no_active_team` " +
+              "or `team_mismatch`.",
           ),
           ...RATE,
         },
@@ -183,7 +198,7 @@ export function agentRosterOpenApiPaths(): Record<string, Record<string, unknown
           "401": json("Error", "`unauthenticated`: no session."),
           "403": json("Error", "`forbidden`: not a site admin."),
           "404": json("Error", "`roster_entry_not_found` or `version_not_found`."),
-          "409": json("Error", "`invalid_transition` or `roster_limit`."),
+          "409": json("Error", "`invalid_transition`, `roster_limit` or `agent_archived`."),
           ...RATE,
         },
       },

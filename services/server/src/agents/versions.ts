@@ -527,10 +527,7 @@ export async function rollbackAgent(
 }
 
 export type Removed =
-  | { readonly kind: "deleted" }
-  | { readonly kind: "archived"; readonly agent: AgentRecord }
-  /** `refuseDelete` said no (an agent on a roster, KOBE-566 §6.3): nothing changed. */
-  | { readonly kind: "refused" };
+  { readonly kind: "deleted" } | { readonly kind: "archived"; readonly agent: AgentRecord };
 
 /**
  * Deletes an agent that was never published (nothing can reference it) or archives one that was
@@ -544,15 +541,13 @@ export async function deleteOrArchiveAgent(
   id: string,
   actor?: AuditActor,
   archivedBy: "seed" | null = null,
-  refuseDelete?: () => Promise<boolean>,
+  beforeDelete?: () => Promise<void>, // under the row lock; throws to refuse (KOBE-566)
 ): Promise<Removed | null> {
   return inLocation(db, location, async (tx) => {
     const agent = await lockAgent(tx, location, id);
     if (!agent) return null;
     if (agent.currentVersion === null) {
-      // Checked under the row lock: a roster write locks the agent too (FOR SHARE), so an
-      // assignment either committed before this check or waits and then finds no agent.
-      if (refuseDelete && (await refuseDelete())) return { kind: "refused" };
+      await beforeDelete?.();
       if (location.scope === "team") {
         await tx.delete(teamAgents).where(eq(teamAgents.id, id));
       } else {

@@ -6744,7 +6744,7 @@
             }
           },
           "422": {
-            "description": "`agent_bound_to_team` or `agent_not_published`.",
+            "description": "`agent_bound_to_team`, `agent_not_published`, or `version_rule_not_allowed` (a numeric versionRule from someone who is not the roster's admin).",
             "content": {
               "application/json": {
                 "schema": {
@@ -6787,6 +6787,16 @@
             "schema": {
               "type": "string",
               "enum": ["team", "site"]
+            }
+          },
+          {
+            "name": "teamId",
+            "in": "query",
+            "required": false,
+            "description": "Target team only: a team roster other than the active team (e.g. one the owner has left). Membership is not required; the agent must be the caller's.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           },
           {
@@ -6878,7 +6888,7 @@
       "put": {
         "operationId": "updateTeamAgentRosterEntry",
         "summary": "Approve, decline, pin, update, remove, suspend or resume an entry (team admins)",
-        "description": "On an entry: `active` approves a proposal (following latest unless `versionRule` is given), resumes a suspended entry, or with `versionRule` pins or updates it; `removed` declines a proposal (with an optional `note` shown to the proposer) or removes an entry; `suspended` suspends it. Without a team entry, `suspended`/`active` suspends or resumes for the team a team-owned agent or a site-wide agent (gallery or site roster).",
+        "description": "On an entry: `active` approves a proposal (following latest unless `versionRule` is given), resumes a suspended entry, or with `versionRule` pins or updates it; `removed` declines a proposal (with an optional `note` shown to the proposer) or removes an entry; `suspended` suspends it. `suspended` / `active` without `versionRule` suspends or resumes the agent for this team only (`team_agent_suspensions`; a team entry stays `active`), also for a team-owned agent or a site-wide agent (gallery or site roster).",
         "requestBody": {
           "required": true,
           "content": {
@@ -6962,7 +6972,7 @@
             }
           },
           "409": {
-            "description": "`invalid_transition`, `roster_limit`, `no_active_team` or `team_mismatch`.",
+            "description": "`invalid_transition`, `roster_limit`, `agent_archived` (approve), `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7062,7 +7072,7 @@
             }
           },
           "409": {
-            "description": "`invalid_transition` or `roster_limit`.",
+            "description": "`invalid_transition`, `roster_limit` or `agent_archived`.",
             "content": {
               "application/json": {
                 "schema": {

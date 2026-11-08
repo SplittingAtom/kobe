@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { z } from "zod";
 import {
   AGENT_ROSTER_ERROR_STATUS,
   AGENT_ROSTER_WRITE_RATE,
@@ -8,12 +9,12 @@ import {
   updateAgentRosterEntryRequestSchema,
   type AgentRosterErrorCode,
 } from "@kobe/protocol";
-import type { RosterActor, RosterTarget } from "../agents/access.js";
+import type { RosterActor, RosterTarget, SiteRosterActor } from "../agents/access.js";
 import { entryView } from "../agents/roster.js";
 import { decodeCursor, listRoster } from "../agents/roster-list.js";
 import {
   assignAgent,
-  setSiteAgentSuspendedHere,
+  setTeamSuspension,
   updateEntry,
   withdrawAgent,
   type AdminUpdate,
@@ -37,6 +38,8 @@ import { parseBody } from "../teams/http.js";
 
 type TeamCtx = Context<{ Variables: TeamVariables }>;
 
+const uuidQuery = z.uuid().optional();
+
 const MESSAGES: Record<AgentRosterErrorCode, string> = {
   invalid_request: "Check the request and try again.",
   forbidden: "You can't change this roster entry.",
@@ -50,6 +53,7 @@ const MESSAGES: Record<AgentRosterErrorCode, string> = {
   agent_rostered: "This agent is on a roster or proposed to one. Withdraw it first.",
   agent_bound_to_team: "This agent is bound to its team: it can't be assigned elsewhere.",
   agent_not_published: "Publish the agent before proposing it to the site.",
+  version_rule_not_allowed: "Only the roster's admins pin a version. Assign it following latest.",
   rate_limited: "Too many roster changes. Try again in a few minutes.",
 };
 
@@ -121,9 +125,21 @@ export function mountAgentRosterRoutes(
     const id = agentIdSchema.safeParse(c.req.param("id"));
     const target = agentRosterTargetSchema.safeParse(c.req.param("target"));
     if (!target.success) return rosterError(c, "invalid_request", "target must be team or site.");
+    // The owner may withdraw from another team's roster (one they left): `?teamId=`.
+    const teamId = uuidQuery.safeParse(c.req.query("teamId"));
+    if (!teamId.success || (teamId.data && target.data === "site")) {
+      return rosterError(c, "invalid_request", "teamId must be a team id, for target team only.");
+    }
     if (!id.success) return rosterError(c, "agent_not_found");
     if (!(await withinRate(deps, c.get("user").id))) return rosterError(c, "rate_limited");
-    const result = await withdrawAgent(db, teamActor(c), id.data, target.data);
+    const actor = teamActor(c);
+    const result = await withdrawAgent(
+      db,
+      actor,
+      id.data,
+      target.data,
+      teamId.data ?? actor.teamId,
+    );
     if (!result.ok) return rosterError(c, result.error);
     return c.json({ entry: entryView(result.value) });
   });
@@ -191,7 +207,7 @@ export function teamAgentRosterRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
       );
       return c.json({ agentId: owned.id, suspendedHere: suspended });
     }
-    const here = await setSiteAgentSuspendedHere(db, actor, update.agentId, suspended);
+    const here = await setTeamSuspension(db, actor, update.agentId, suspended);
     if (here.ok) return c.json(here.value);
     // Neither an entry of this roster nor a site-wide agent the team runs.
     return rosterError(c, here.error === "agent_not_found" ? "roster_entry_not_found" : here.error);
@@ -209,13 +225,7 @@ export function siteAgentRosterRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
   app.put("/:agentId", async (c) => {
     const update = await readAdminUpdate(c, deps, "site");
     if (update instanceof Response) return update;
-    // The site roster has no team: the actor's team fields are unused on this path.
-    const actor: RosterActor = {
-      userId: c.get("user").id,
-      role: "member",
-      teamId: "",
-      siteAdmin: true,
-    };
+    const actor: SiteRosterActor = { userId: c.get("user").id, siteAdmin: true };
     const result = await updateEntry(db, actor, update);
     if (!result) return rosterError(c, "roster_entry_not_found");
     return result.ok ? c.json({ entry: entryView(result.value) }) : rosterError(c, result.error);

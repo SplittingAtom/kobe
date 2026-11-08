@@ -108,6 +108,12 @@ export interface RosterActor extends AgentActor {
   readonly siteAdmin: boolean;
 }
 
+/** A site admin acting on the site roster, outside any team (`PUT /v1/site/agent-roster`). */
+export interface SiteRosterActor {
+  readonly userId: string;
+  readonly siteAdmin: true;
+}
+
 /** What the rules need to know about an agent on a roster (ids and states only). */
 export interface RosterSubject {
   readonly kind: "personal" | "team_owned" | "gallery";

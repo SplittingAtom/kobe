@@ -11,7 +11,8 @@ import { timestampSchema, uuidSchema } from "./common.js";
  * - `GET /v1/agents/roster?tab=personal|team|site[&cursor&limit]` → {@link agentRosterPageSchema}
  * - `POST /v1/agents/{id}/assignments` {@link assignAgentRequestSchema} → 201 (active) or
  *   202 (proposed) with {@link agentRosterEntryResponseSchema}
- * - `DELETE /v1/agents/{id}/assignments/{target}` → 200 with the withdrawn entry (owner)
+ * - `DELETE /v1/agents/{id}/assignments/{target}[?teamId]` → 200 with the withdrawn entry (owner;
+ *   `teamId` names a team roster other than the active team, e.g. one the owner has left)
  * - `PUT /v1/team/agent-roster/{agentId}` and `PUT /v1/site/agent-roster/{agentId}`
  *   {@link updateAgentRosterEntryRequestSchema} → 200 {@link agentRosterUpdateResponseSchema}
  *
@@ -178,7 +179,10 @@ export const agentRosterPageSchema = z.strictObject({
 });
 export type AgentRosterPage = z.infer<typeof agentRosterPageSchema>;
 
-/** `POST /v1/agents/{id}/assignments`: the team is the active team. */
+/**
+ * `POST /v1/agents/{id}/assignments`: the team is the active team. A numeric `versionRule` (a pin)
+ * is for the roster's admins only (`422 version_rule_not_allowed` otherwise, AR5).
+ */
 export const assignAgentRequestSchema = z.strictObject({
   target: agentRosterTargetSchema,
   versionRule: agentVersionRuleInputSchema.optional(),
@@ -188,8 +192,10 @@ export type AssignAgentRequest = z.infer<typeof assignAgentRequestSchema>;
 /**
  * `PUT /v1/team|site/agent-roster/{agentId}` (roster admins). On an entry: `active` approves a
  * proposal or resumes, `removed` declines a proposal or removes an entry, `suspended` suspends;
- * `versionRule` with `active` pins or updates. On the team roster, `suspended`/`active` of a
- * site-wide agent without a team entry suspends or resumes it for the team.
+ * `versionRule` with `active` pins or updates. On the team roster `suspended` / `active` (without
+ * `versionRule`) suspends or resumes the agent for the team only (`team_agent_suspensions`; the
+ * entry stays `active`), also for a team-owned agent or a site-wide one without a team entry.
+ * `suspended` as an entry state exists only on the site roster (site-wide).
  */
 export const updateAgentRosterEntryRequestSchema = z.strictObject({
   state: z.enum(["active", "removed", "suspended"]),
@@ -227,6 +233,7 @@ export const AGENT_ROSTER_ERROR_CODES = [
   "agent_rostered",
   "agent_bound_to_team",
   "agent_not_published",
+  "version_rule_not_allowed",
   "rate_limited",
 ] as const;
 export const agentRosterErrorCodeSchema = z.enum(AGENT_ROSTER_ERROR_CODES);
@@ -246,5 +253,6 @@ export const AGENT_ROSTER_ERROR_STATUS = {
   agent_rostered: 409,
   agent_bound_to_team: 422,
   agent_not_published: 422,
+  version_rule_not_allowed: 422,
   rate_limited: 429,
 } as const satisfies Record<AgentRosterErrorCode, number>;
