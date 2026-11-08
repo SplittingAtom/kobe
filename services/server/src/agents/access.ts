@@ -95,3 +95,172 @@ export const GALLERY_ADMIN_ACCESS: AgentAccess = {
   publish: false,
   setStatus: false,
 };
+
+// ── Roster rights (KOBE-566, spec agents-roster §5, AR6, AR7, §6.5) ───────────────────────────────
+
+export type RosterTab = "personal" | "team" | "site";
+export type RosterTarget = "team" | "site";
+export type RosterEntryState = "proposed" | "active" | "removed" | "suspended";
+
+/** The caller in the active team, and whether they are a site admin (`site.gallery.manage`). */
+export interface RosterActor extends AgentActor {
+  readonly teamId: string;
+  readonly siteAdmin: boolean;
+}
+
+/** What the rules need to know about an agent on a roster (ids and states only). */
+export interface RosterSubject {
+  readonly kind: "personal" | "team_owned" | "gallery";
+  /** The owner of a personal agent, the creator of a team-owned one; null for gallery agents. */
+  readonly ownerUserId: string | null;
+  readonly boundTeamId: string | null;
+  readonly published: boolean;
+  readonly archived: boolean;
+  /** A team-owned agent's own status is `suspended`. */
+  readonly suspended: boolean;
+  /** Its entry on the active team's roster, and on the site roster (null: none). */
+  readonly teamEntry: RosterEntryState | null;
+  readonly siteEntry: RosterEntryState | null;
+  /** The active team suspended this site-wide agent (`team_agent_suspensions`). */
+  readonly suspendedHere: boolean;
+}
+
+export interface RosterActions {
+  readonly view: boolean;
+  readonly viewDefinition: boolean;
+  readonly edit: boolean;
+  readonly fork: boolean;
+  readonly assignTeam: "direct" | "propose" | null;
+  readonly assignSite: "direct" | "propose" | null;
+  readonly withdrawTeam: boolean;
+  readonly withdrawSite: boolean;
+  readonly decide: boolean;
+  readonly remove: boolean;
+  readonly pin: boolean;
+  readonly suspendHere: boolean;
+  readonly resumeHere: boolean;
+  readonly suspendSiteWide: boolean;
+  readonly resumeSiteWide: boolean;
+}
+
+export type AssignError =
+  | "forbidden"
+  | "agent_archived"
+  | "agent_bound_to_team"
+  | "already_on_roster"
+  | "agent_not_published";
+
+export type AssignDecision =
+  { ok: true; mode: "direct" | "propose" } | { ok: false; error: AssignError };
+
+/** An entry that holds a place on its roster (anything but `removed`). */
+export const liveEntry = (state: RosterEntryState | null): boolean =>
+  state !== null && state !== "removed";
+/** An assigned entry an admin can pin, remove or suspend (not a proposal). */
+const assignedEntry = (state: RosterEntryState | null): boolean =>
+  state === "active" || state === "suspended";
+
+const isOwn = (actor: AgentActor, s: RosterSubject) =>
+  s.kind === "personal" && s.ownerUserId === actor.userId;
+
+/** Who decides, removes and pins on a roster: team admins (team), site admins (site). */
+export function rosterAdmin(actor: RosterActor, target: RosterTarget): boolean {
+  return target === "team" ? teamRoleAllows(actor.role, "team.agents.manage") : actor.siteAdmin;
+}
+
+/**
+ * Whether `POST /v1/agents/:id/assignments` lands directly or as a proposal, or why it is refused
+ * (AR6, AR8). The owner assigns their own personal agent; a builder may also put someone else's
+ * site-assigned agent on the team roster (§5 "builder (reference, any team)").
+ */
+export function assignDecision(
+  actor: RosterActor,
+  s: RosterSubject,
+  target: RosterTarget,
+): AssignDecision {
+  if (s.kind !== "personal") return { ok: false, error: "forbidden" };
+  const builder = teamRoleAllows(actor.role, "team.agents.build");
+  const own = isOwn(actor, s);
+  const byReference = !own && target === "team" && builder && s.siteEntry === "active";
+  if (!own && !byReference) return { ok: false, error: "forbidden" };
+  if (s.archived) return { ok: false, error: "agent_archived" };
+  if (s.boundTeamId !== null && (target === "site" || s.boundTeamId !== actor.teamId)) {
+    return { ok: false, error: "agent_bound_to_team" };
+  }
+  if (liveEntry(target === "team" ? s.teamEntry : s.siteEntry)) {
+    return { ok: false, error: "already_on_roster" };
+  }
+  if (target === "team") return { ok: true, mode: builder ? "direct" : "propose" };
+  if (actor.siteAdmin) return { ok: true, mode: "direct" };
+  // Only published agents can be proposed to the site (AR6).
+  return s.published ? { ok: true, mode: "propose" } : { ok: false, error: "agent_not_published" };
+}
+
+/** Reading the definition from a roster row (§5 "View definition"). */
+function rosterReadsDefinition(actor: RosterActor, s: RosterSubject, tab: RosterTab): boolean {
+  if (isOwn(actor, s)) return true;
+  if (tab === "team") return teamRoleAllows(actor.role, "team.agents.build");
+  if (tab === "site") return teamRoleAllows(actor.role, "team.agents.use");
+  return false;
+}
+
+function rosterEdits(actor: RosterActor, s: RosterSubject): boolean {
+  if (s.kind === "personal") return isOwn(actor, s) && agentAccess(actor, toRef(s)).edit;
+  if (s.kind === "team_owned") return agentAccess(actor, toRef(s)).edit;
+  return actor.siteAdmin; // gallery agents: the Site Console editor (KOBE-494)
+}
+
+const toRef = (s: RosterSubject): AgentRef => ({
+  scope: s.kind === "team_owned" ? "team" : s.kind,
+  ownerUserId: s.ownerUserId,
+});
+
+/** "Suspended here" (team admins): which way the toggle goes on this row, if offered. */
+function hereToggle(actor: RosterActor, s: RosterSubject, tab: RosterTab) {
+  const none = { suspendHere: false, resumeHere: false };
+  if (!teamRoleAllows(actor.role, "team.agents.suspend")) return none;
+  let suspended: boolean;
+  if (tab === "team" && s.kind === "team_owned") suspended = s.suspended;
+  else if (tab === "team" && s.kind === "personal" && assignedEntry(s.teamEntry))
+    suspended = s.suspendedHere;
+  else if (tab === "site" && (s.kind === "gallery" || assignedEntry(s.siteEntry)))
+    suspended = s.suspendedHere;
+  else return none;
+  return { suspendHere: !suspended, resumeHere: suspended };
+}
+
+/**
+ * The actions a roster row offers the caller (§5). The server enforces the same rules on every
+ * write; this is what lets the web render a row's buttons without its own rulebook.
+ */
+export function rosterActions(actor: RosterActor, s: RosterSubject, tab: RosterTab): RosterActions {
+  const own = isOwn(actor, s);
+  const use = teamRoleAllows(actor.role, "team.agents.use");
+  const view = tab === "personal" ? own : use || own;
+  const readDefinition = view && rosterReadsDefinition(actor, s, tab);
+  const assign = (target: RosterTarget) => {
+    const d = assignDecision(actor, s, target);
+    return d.ok ? d.mode : null;
+  };
+  const rosterTarget: RosterTarget | null = tab === "personal" ? null : tab;
+  const entry =
+    rosterTarget === "team" ? s.teamEntry : rosterTarget === "site" ? s.siteEntry : null;
+  const admin = rosterTarget !== null && s.kind === "personal" && rosterAdmin(actor, rosterTarget);
+  const siteWide = tab === "site" && actor.siteAdmin && s.kind === "personal";
+  return {
+    view,
+    viewDefinition: readDefinition,
+    edit: view && rosterEdits(actor, s),
+    fork: readDefinition,
+    assignTeam: assign("team"),
+    assignSite: assign("site"),
+    withdrawTeam: own && liveEntry(s.teamEntry),
+    withdrawSite: own && liveEntry(s.siteEntry),
+    decide: admin && entry === "proposed",
+    remove: admin && assignedEntry(entry),
+    pin: admin && assignedEntry(entry),
+    ...hereToggle(actor, s, tab),
+    suspendSiteWide: siteWide && s.siteEntry === "active",
+    resumeSiteWide: siteWide && s.siteEntry === "suspended",
+  };
+}

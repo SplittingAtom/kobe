@@ -15,6 +15,13 @@ import { threadContextRoutes } from "../routes/thread-context.js";
 import { threadRoutes } from "../routes/threads.js";
 import { threadFolderRoutes } from "../routes/thread-folders.js";
 import { threadUsageRoutes } from "../routes/usage.js";
+import { Hono } from "hono";
+import {
+  mountAgentRosterRoutes,
+  siteAgentRosterRoutes,
+  teamAgentRosterRoutes,
+} from "../routes/agent-roster.js";
+import type { TeamVariables } from "../authz/middleware.js";
 import { openApiDocument } from "./document.js";
 
 // Regenerate after changing routes or schemas:
@@ -79,6 +86,20 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
   it("describes exactly the thread folder routes the server mounts (KOBE-534)", () => {
     expect(documented("/v1/thread-folders")).toEqual(
       mountedOperations("/v1/thread-folders", threadFolderRoutes(fakeDeps)),
+    );
+  });
+
+  it("describes exactly the agent roster routes the server mounts (KOBE-566)", () => {
+    const agents = new Hono<{ Variables: TeamVariables }>();
+    mountAgentRosterRoutes(agents, fakeDeps);
+    expect(
+      documented("/v1/agents").filter((op) => op.includes("roster") || op.includes("assignments")),
+    ).toEqual(mountedOperations("/v1/agents", agents));
+    expect(documented("/v1/team/agent-roster")).toEqual(
+      mountedOperations("/v1/team/agent-roster", teamAgentRosterRoutes(fakeDeps)),
+    );
+    expect(documented("/v1/site/agent-roster")).toEqual(
+      mountedOperations("/v1/site/agent-roster", siteAgentRosterRoutes(fakeDeps)),
     );
   });
 

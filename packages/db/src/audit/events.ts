@@ -105,6 +105,13 @@ const agentScope = z.enum(["team", "personal", "gallery"]);
 const agentRef = { agentId: id, scope: agentScope, slug };
 /** A published agent version number (or a draft revision): a positive integer. */
 const version = z.number().int().positive();
+/** An agent on a roster (KOBE-566): the team's roster (`teamId` set) or the site's. */
+const rosterRef = { ...agentRef, roster: z.enum(["team", "site"]) };
+/** A roster entry's version rule: follow the latest published version, or a pin (AR5). */
+const versionRuleRef = {
+  versionRule: z.enum(["latest", "pinned"]),
+  pinnedVersion: version.nullable(),
+};
 const isolationState = z.enum(["checking", "verified", "missing"]);
 /** A tool rule (KOBE-35) by its policy metadata; never its free-text note or arg values. */
 const toolRule = {
@@ -1592,6 +1599,23 @@ export const AUDIT_EVENTS = {
   /** An agent with versions retired instead of deleted (pinned threads keep their version). */
   "agent.archived": event("any", agentRef),
   "agent.unarchived": event("any", agentRef),
+  // Rosters (KOBE-566, agents-roster §6.9): a personal agent lent to a team or the site by
+  // reference. Team entries in the team view (`teamId` = the roster's team), site entries
+  // site-only. Ids, slug, scope, roster and version rule only; never a definition or a note.
+  "agent.roster.assigned": event("any", { ...rosterRef, ...versionRuleRef }),
+  "agent.roster.proposed": event("any", rosterRef),
+  "agent.roster.approved": event("any", { ...rosterRef, ...versionRuleRef }),
+  "agent.roster.declined": event("any", rosterRef),
+  /** An admin pinned a following entry to a version (AR5). */
+  "agent.roster.pinned": event("any", { ...rosterRef, ...versionRuleRef }),
+  /** An admin moved a pinned entry: to another version or back to latest (AR5 "Update"). */
+  "agent.roster.updated": event("any", { ...rosterRef, ...versionRuleRef }),
+  "agent.roster.removed": event("any", rosterRef),
+  /** The owner withdrew their agent (or their proposal) from a roster (AR7). */
+  "agent.roster.withdrawn": event("any", rosterRef),
+  /** Team roster: suspended for that team; site roster: suspended site-wide (§6.5). */
+  "agent.roster.suspended": event("any", rosterRef),
+  "agent.roster.resumed": event("any", rosterRef),
 
   // ── skill: uploaded bundles (KOBE-78); team skills in the team view, personal site-only ──
   /** A skill bundle was uploaded as a new immutable version (never the bundle's contents). */

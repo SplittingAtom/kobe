@@ -1,3 +1,4 @@
+import { agentRosterOpenApiPaths, agentRosterOpenApiSchemas } from "./agent-roster.js";
 import { approvalsOpenApiPaths, approvalsOpenApiSchemas } from "./approvals.js";
 import { brandingOpenApiPaths, brandingOpenApiSchemas } from "./branding.js";
 import { compactOpenApiPaths, compactOpenApiSchemas } from "./compact.js";
@@ -42,6 +43,7 @@ export function openApiDocument(): Record<string, unknown> {
       ...feedbackOpenApiPaths(),
       ...evalCasesOpenApiPaths(),
       ...brandingOpenApiPaths(),
+      ...agentRosterOpenApiPaths(),
     },
     components: {
       schemas: {
@@ -59,6 +61,7 @@ export function openApiDocument(): Record<string, unknown> {
         ...feedbackOpenApiSchemas(),
         ...evalCasesOpenApiSchemas(),
         ...brandingOpenApiSchemas(),
+        ...agentRosterOpenApiSchemas(),
       },
       securitySchemes: {
         session: { type: "apiKey", in: "cookie", name: "better-auth.session_token" },

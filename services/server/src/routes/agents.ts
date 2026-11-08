@@ -48,6 +48,8 @@ import { mountOrbitExport } from "../agents/orbit/routes.js";
 import { inventoryQuerySchema, listInventory, setInventoryStatus } from "../agents/inventory.js";
 import { listRunnableAgents, runnableQuerySchema } from "../agents/runnable.js";
 import { mountVersionRoutes } from "../agents/version-routes.js";
+import { isRostered } from "../agents/roster.js";
+import { mountAgentRosterRoutes, rosterError } from "./agent-roster.js";
 import { deleteOrArchiveAgent, getVersion } from "../agents/versions.js";
 import { recordAuditAfter } from "../audit/record.js";
 import { DANGEROUS_FORBIDDEN, mayUseDangerousMode } from "../policy/dangerous-mode.js";
@@ -136,6 +138,9 @@ export function agentRoutes(
     const viewer = { teamId: c.get("team").id, userId: c.get("user").id };
     return c.json(await listRunnableAgents(db, viewer, query.data));
   });
+
+  // Rosters (KOBE-566): `/roster` before "/:id"; assignments under "/:id/assignments".
+  mountAgentRosterRoutes(app, deps);
 
   // Published Orbit scores of gallery agents (KOBE-94): before "/:id".
   app.get("/gallery-scores", async (c) => {
@@ -261,8 +266,18 @@ export function agentRoutes(
     if (!agent) return notFound(c);
     const access = agentAccess(actorOf(c), agent);
     if (!access.edit) return forbidden(c);
-    const removed = await deleteOrArchiveAgent(db, locationFor(c, agent.scope), agent.id);
+    // A never-published personal agent on a roster (or proposed) is not deleted (§6.3).
+    const refuse = agent.scope === "personal" ? () => isRostered(db, agent.id) : undefined;
+    const removed = await deleteOrArchiveAgent(
+      db,
+      locationFor(c, agent.scope),
+      agent.id,
+      undefined,
+      null,
+      refuse,
+    );
     if (!removed) return notFound(c);
+    if (removed.kind === "refused") return rosterError(c, "agent_rostered");
     return removed.kind === "deleted" ? c.body(null, 204) : agentResponse(c, removed.agent, access);
   });
 
