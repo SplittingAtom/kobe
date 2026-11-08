@@ -93,7 +93,7 @@ async function world(): Promise<World> {
   ) as World["as"];
   const created = await as.carol.post("/v1/projects", {
     name: `Launch ${randomBytes(2).toString("hex")}`,
-    members_mode: "selected",
+    visibility: "restricted",
     member_user_ids: [alice.id, bob.id, dave.id],
   });
   expect(created.status, JSON.stringify(created.json)).toBe(201);
@@ -241,11 +241,10 @@ describe("Add to project: artifacts (KOBE-585)", () => {
     expect((await importInto(w.as.bob, w.project.id, fromArtifact(id, 1))).status).toBe(404);
     expect((await importInto(w.as.dave, w.project.id, fromArtifact(id, 1))).status).toBe(404);
     await shareToTeam(w);
-    // Bob now reads it but neither owns it nor is an editor (builder) or project owner.
-    const bob = await importInto(w.as.bob, w.project.id, fromArtifact(id, 1));
-    expect(bob.status).toBe(403);
-    expect(bob.json).toMatchObject({ code: "forbidden" });
-    // Dave is a builder project member: editors are builders.
+    // Bob is a listed member, which reads as editor now (KOBE-576): he may add.
+    const bob = await importInto(w.as.bob, w.project.id, fromArtifact(id, 1, { name: "b.md" }));
+    expect(bob.status, JSON.stringify(bob.json)).toBe(201);
+    // Dave is a builder project member: also an editor.
     const dave = await importInto(w.as.dave, w.project.id, fromArtifact(id, 1, { name: "d.md" }));
     expect(dave.status, JSON.stringify(dave.json)).toBe(201);
     // Carol owns the project; the team admin manages every project without being a member.
@@ -263,7 +262,7 @@ describe("Add to project: artifacts (KOBE-585)", () => {
     // A team-wide project Alice is not an explicit member of, then made selected without her.
     const other = await w.as.carol.post("/v1/projects", {
       name: `Other ${randomBytes(2).toString("hex")}`,
-      members_mode: "selected",
+      visibility: "restricted",
       member_user_ids: [w.people.bob.id],
     });
     expect(other.status).toBe(201);

@@ -27,5 +27,5 @@ export async function canCreateInProject(
   projectId: string,
 ): Promise<boolean> {
   const access = await loadAccess(tx, viewer, projectId);
-  return access !== undefined && access.project.archivedAt === null && access.can.use;
+  return access !== undefined && access.project.archivedAt === null && access.can.converse;
 }

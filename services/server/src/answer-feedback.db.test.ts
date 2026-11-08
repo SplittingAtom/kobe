@@ -286,7 +286,7 @@ describe("who rates (ac-1)", () => {
     const outsider = await f.member(x.w.team);
     const project = await as(x.w.owner).post("/v1/projects", {
       name: `P ${randomUUID().slice(0, 6)}`,
-      members_mode: "selected",
+      visibility: "restricted",
       member_user_ids: [x.author.id, x.reader.id],
     });
     expect(project.status, JSON.stringify(project.json)).toBe(201);

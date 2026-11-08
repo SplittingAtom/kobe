@@ -51,7 +51,7 @@ test("Add to project: the owner adds an artifact; another member reads it under 
     page,
     "POST",
     "/v1/projects",
-    { name: `KOBE-585 ${stem}`, members_mode: "team" },
+    { name: `KOBE-585 ${stem}`, visibility: "workspace" },
   );
   expect(created.status, JSON.stringify(created.json)).toBe(201);
   projectId = created.json.id;

@@ -45,7 +45,7 @@ describe("projects API", () => {
     expect(project).toMatchObject({
       slug: "q3-planning-budget",
       my_role: "owner",
-      members_mode: "team",
+      visibility: "workspace",
       instructions: "Be brief.",
       file_count: 0,
     });
@@ -57,8 +57,8 @@ describe("projects API", () => {
     expect((await as(b).post("/v1/projects", { name: "x", instructions: tooLong })).status).toBe(
       400,
     );
-    // Default mode `team`: every team member is an implicit member.
-    expect((await as(m).get(`/v1/projects/${project.id}`)).json.my_role).toBe("member");
+    // Default visibility `workspace`: every team member is an implicit reader.
+    expect((await as(m).get(`/v1/projects/${project.id}`)).json.my_role).toBe("reader");
   });
 
   it("hides selected-mode projects from non-members (404, not listed); admins manage all", async () => {
@@ -68,7 +68,7 @@ describe("projects API", () => {
     const outside = await f.member(w.team);
     const project = await create(b, {
       name: "Secret",
-      members_mode: "selected",
+      visibility: "restricted",
       member_user_ids: [inside.id],
     });
     expect((await as(inside).get(`/v1/projects/${project.id}`)).status).toBe(200);
@@ -105,27 +105,31 @@ describe("projects API", () => {
     expect((await as(b).post(`${url}/members`, { user_id: stranger.id })).status).toBe(422);
     const added = await as(b).post(`${url}/members`, { user_id: m1.id });
     expect(added.status).toBe(201);
-    expect(added.json.role).toBe("member");
+    expect(added.json.role).toBe("editor");
+    // `reader` is not storable until KOBE-577.
+    expect((await as(b).post(`${url}/members`, { user_id: m2.id, role: "reader" })).json.code).toBe(
+      "role_not_supported_yet",
+    );
     expect((await as(b).post(`${url}/members`, { user_id: m1.id })).status).toBe(409);
     // Last owner stays; promote, then demote the first.
-    expect((await as(b).patch(`${url}/members/${b.id}`, { role: "member" })).json.code).toBe(
+    expect((await as(b).patch(`${url}/members/${b.id}`, { role: "editor" })).json.code).toBe(
       "last_owner",
     );
     expect((await as(b).delete(`${url}/members/${b.id}`)).json.code).toBe("last_owner");
     expect((await as(b).patch(`${url}/members/${m1.id}`, { role: "owner" })).status).toBe(200);
     expect((await as(m1).patch(url, { description: "by new owner" })).status).toBe(200);
-    expect((await as(b).patch(`${url}/members/${b.id}`, { role: "member" })).status).toBe(200);
+    expect((await as(b).patch(`${url}/members/${b.id}`, { role: "editor" })).status).toBe(200);
     // Mode team: an implicit member without a row can be promoted (gets a row).
     expect((await as(m1).patch(`${url}/members/${m2.id}`, { role: "owner" })).status).toBe(200);
     // Mode selected: only rows count; removing a row removes access.
-    expect((await as(m1).patch(url, { members_mode: "selected" })).status).toBe(200);
+    expect((await as(m1).patch(url, { visibility: "restricted" })).status).toBe(200);
     const third = await f.member(w.team);
     expect((await as(third).get(url)).status).toBe(404);
     expect((await as(m1).delete(`${url}/members/${randomUUID()}`)).status).toBe(404);
     expect((await as(m1).delete(`${url}/members/${b.id}`)).status).toBe(204);
     expect((await as(b).get(url)).status).toBe(404);
     const list = await as(m1).get(`${url}/members`);
-    expect(list.json.members_mode).toBe("selected");
+    expect(list.json.visibility).toBe("restricted");
     expect(list.json.members.map((x: { user_id: string }) => x.user_id).sort()).toEqual(
       [m1.id, m2.id].sort(),
     );
@@ -220,7 +224,7 @@ describe("threads in a project", () => {
     const w = await f.world();
     const b = await builder(w.team);
     const outside = await f.member(w.team);
-    const project = await create(b, { name: "Mine", members_mode: "selected" });
+    const project = await create(b, { name: "Mine", visibility: "restricted" });
     expect((await as(outside).post("/v1/threads", { project_id: project.id })).status).toBe(404);
     expect((await as(b).post("/v1/threads", { project_id: project.id })).status).toBe(201);
     await as(b).patch(`/v1/projects/${project.id}`, { archived: true });
@@ -234,7 +238,7 @@ describe("threads in a project", () => {
     const outside = await f.member(w.team);
     const project = await create(b, {
       name: "Shared",
-      members_mode: "selected",
+      visibility: "restricted",
       member_user_ids: [m.id],
     });
     const made = await as(b).post("/v1/threads", { title: "zebra plan", project_id: project.id });
@@ -301,7 +305,7 @@ describe("instructions reach project runs", () => {
     const p3 = await create(w3.owner, {
       name: "Left",
       instructions: "x",
-      members_mode: "selected",
+      visibility: "restricted",
     });
     const t3 = await as(w3.owner).post("/v1/threads", { project_id: p3.id });
     await f.fx.admin.query(`DELETE FROM project_members WHERE team_id = $1`, [w3.team]);

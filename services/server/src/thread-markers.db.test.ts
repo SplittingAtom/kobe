@@ -149,7 +149,7 @@ describe("GET /v1/threads/{id}/markers", () => {
     const reader = await f.member(w.team);
     const project = await as(w.owner).post("/v1/projects", {
       name: "Shared",
-      members_mode: "selected",
+      visibility: "restricted",
       member_user_ids: [reader.id],
     });
     expect(project.status, JSON.stringify(project.json)).toBe(201);
@@ -173,7 +173,7 @@ describe("GET /v1/threads/{id}/markers", () => {
     const member = await f.member(w.team);
     const project = await as(w.owner).post("/v1/projects", {
       name: "Unshared",
-      members_mode: "selected",
+      visibility: "restricted",
       member_user_ids: [member.id],
     });
     expect(project.status, JSON.stringify(project.json)).toBe(201);

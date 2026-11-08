@@ -157,7 +157,7 @@ describe("who may organize", () => {
     const w = await f.world();
     const reader = await f.member(w.team);
     const projectId = await project(w.owner, "Shared", {
-      members_mode: "selected",
+      visibility: "restricted",
       member_user_ids: [reader.id],
     });
     const made = await as(w.owner).post("/v1/threads", { project_id: projectId, title: "x" });
@@ -213,7 +213,7 @@ describe("move to project", () => {
     const w = await f.world();
     const member = await f.member(w.team);
     const a = await f.thread(member);
-    const closed = await project(w.owner, "Closed", { members_mode: "selected" });
+    const closed = await project(w.owner, "Closed", { visibility: "restricted" });
     const old = await project(w.owner, "Old");
     expect((await as(w.owner).patch(`/v1/projects/${old}`, { archived: true })).status).toBe(200);
 
@@ -368,7 +368,7 @@ describe("move to project", () => {
     await as(member).post(`/v1/threads/${a}/move`, { project_id: open });
     // The member then loses the project (it becomes selected-mode without them).
     expect(
-      (await as(w.owner).patch(`/v1/projects/${open}`, { members_mode: "selected" })).status,
+      (await as(w.owner).patch(`/v1/projects/${open}`, { visibility: "restricted" })).status,
     ).toBe(200);
     const run = await f.message(member, a, "hi");
     ws.reply(await ws.started(run), "ok");

@@ -16,7 +16,7 @@ const project = (over: Record<string, unknown> = {}) => ({
   description: "The Q4 launch",
   instructions: "Answer in French.",
   default_agent_id: null,
-  members_mode: "selected",
+  visibility: "restricted",
   my_role: "owner",
   file_count: 1,
   created_by: "u-me",
@@ -25,7 +25,7 @@ const project = (over: Record<string, unknown> = {}) => ({
   archived_at: null,
   ...over,
 });
-const member = (user_id: string, role = "member") => ({
+const member = (user_id: string, role = "editor") => ({
   user_id,
   role,
   added_at: "2026-10-02T10:00:00Z",
@@ -78,7 +78,7 @@ const base = (over: Record<string, unknown> = {}) => ({
   [`GET /v1/projects/${P}`]: [200, project(over)] as const,
   [`GET /v1/projects/${P}/members`]: [
     200,
-    { members_mode: "selected", members: [member("u-me", "owner"), member("u-bob")] },
+    { visibility: "restricted", members: [member("u-me", "owner"), member("u-bob")] },
   ] as const,
   [`GET /v1/projects/${P}/files`]: [200, { files: [file()] }] as const,
   [`GET /v1/threads?project_id=${P}`]: [200, { threads: [], next_cursor: null }] as const,
@@ -136,7 +136,7 @@ describe("projects list and create (KOBE-164, ac-1)", () => {
       description: "",
       instructions: "Answer in French.",
       default_agent_id: "a-team",
-      members_mode: "selected",
+      visibility: "restricted",
       member_user_ids: [],
     });
     expect(post.headers.get("x-kobe-team")).toBe("t-1");
@@ -250,7 +250,7 @@ describe("project detail (KOBE-164, ac-1)", () => {
   });
 
   it("hides management from a plain member but keeps reading", async () => {
-    stubApi(base({ my_role: "member" }));
+    stubApi(base({ my_role: "editor" }));
     renderTeam(<ProjectDetailPage projectId={P} />, { role: "member" });
     expect(await screen.findByText(/Only the project's owners and team admins/)).toBeTruthy();
     await screen.findByText("brief.md");
@@ -332,11 +332,11 @@ describe("project members (KOBE-164, ac-1)", () => {
         [
           200,
           {
-            members_mode: "selected",
+            visibility: "restricted",
             members: [member("u-me", "owner"), member("u-bob"), member("u-cy")],
           },
         ],
-        [200, { members_mode: "selected", members: [member("u-me", "owner"), member("u-cy")] }],
+        [200, { visibility: "restricted", members: [member("u-me", "owner"), member("u-cy")] }],
       ],
       [`DELETE /v1/projects/${P}/members/u-bob`]: [204],
     });
@@ -368,10 +368,10 @@ describe("project members (KOBE-164, ac-1)", () => {
 
   it("says that in team mode only owners are listed", async () => {
     stubApi({
-      ...base({ members_mode: "team" }),
+      ...base({ visibility: "workspace" }),
       [`GET /v1/projects/${P}/members`]: [
         200,
-        { members_mode: "team", members: [member("u-me", "owner")] },
+        { visibility: "workspace", members: [member("u-me", "owner")] },
       ],
     });
     renderTeam(<ProjectDetailPage projectId={P} />, { role: "builder" });
