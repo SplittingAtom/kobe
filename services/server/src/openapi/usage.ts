@@ -24,6 +24,8 @@ const usageTotals = {
   cost_usd_exact: z.string(),
   unpriced_calls: count,
   estimated_calls: count,
+  /** Reasoning (thinking) tokens within `output_tokens` (KOBE-557); calls without a split count 0. */
+  reasoning_tokens: count,
 };
 
 const runUsageSchema = z.strictObject({
@@ -34,6 +36,13 @@ const runUsageSchema = z.strictObject({
   /** The run's thinking level (KOBE-260); null: its model has no thinking control. */
   thinking_level: thinkingLevelSchema.nullable(),
   ...usageTotals,
+  /**
+   * The run's reasoning tokens (KOBE-557): reported by the provider or estimated from the streamed
+   * thinking text (UTF-8 bytes / 4); null when no call of the run had a count.
+   */
+  reasoning_tokens: count.nullable(),
+  /** True when any counted call's reasoning was estimated. */
+  reasoning_estimated: z.boolean(),
 });
 
 export const threadUsageResponseSchema = z.strictObject({

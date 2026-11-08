@@ -93,12 +93,19 @@ describe("thinking settings on the server (KOBE-260)", () => {
   });
 
   it("tells the chat the team's default and the levels to offer", () => {
+    const effort = "reasoning_effort";
     expect(chatThinking(EFFORT, null)).toEqual({
+      control: effort,
       default: "medium",
       levels: ["off", "low", "medium", "high"],
     });
-    expect(chatThinking(EFFORT, "low")).toEqual({ default: "low", levels: ["off", "low"] });
-    expect(chatThinking(EFFORT, "off")).toEqual({ default: "off", levels: [] });
-    expect(chatThinking(NO_THINKING, null)).toEqual({ default: null, levels: [] });
+    expect(chatThinking(EFFORT, "low")).toEqual({
+      control: effort,
+      default: "low",
+      levels: ["off", "low"],
+    });
+    expect(chatThinking(EFFORT, "off")).toEqual({ control: effort, default: "off", levels: [] });
+    // KOBE-557: the control lets the chat compute the level's budget (thinkingBudget).
+    expect(chatThinking(NO_THINKING, null)).toEqual({ control: "none", default: null, levels: [] });
   });
 });

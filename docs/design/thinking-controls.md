@@ -91,6 +91,48 @@ Which control a model needs is the admin's choice (Site → Models), never guess
 - Reasoning tokens are output tokens: the KOBE-259 output limit and budget reservations apply as
   before.
 
+## Budgets and reasoning spend (KOBE-557)
+
+The chat's Reasoning effort control (KOBE-556) shows the latest run's reasoning spend against the
+shown level's budget. Budgets per level live in `@kobe/protocol` thinking.ts; `thinkingBudget(control,
+level)` picks the right table (null for `none`), and the team models API carries each model's
+control in `thinking_in_team.control`.
+
+| Control                                                      | Table                     | off | low   | medium | high   | Meaning                     |
+| ------------------------------------------------------------ | ------------------------- | --- | ----- | ------ | ------ | --------------------------- |
+| `anthropic_budget`                                           | `ANTHROPIC_BUDGET`        | 0   | 2,048 | 8,192  | 24,576 | the `budget_tokens` sent    |
+| `gemini_budget`                                              | `GEMINI_BUDGET`           | 0   | 1,024 | 8,192  | 24,576 | the `thinkingBudget` sent   |
+| `reasoning_effort`, `anthropic_adaptive`, `anthropic_effort` | `THINKING_EFFORT_BUDGETS` | 0   | 2,000 | 8,000  | 24,000 | a display scale for the bar |
+
+The effort budgets are **a display scale, not a provider limit**: these providers take an effort,
+not a token count, so a run may spend more. The bar caps at 100% and the readout shows the real
+count. (The Anthropic budget sent may also be lowered to leave room for the answer, S3.)
+
+**Reasoning tokens per call** (`run_usage.reasoning_tokens`, `reasoning_estimated`), written by the
+model gateway (`services/model-gateway/src/usage/`):
+
+- **Reported** when the provider reports a split: OpenAI Chat Completions
+  `usage.completion_tokens_details.reasoning_tokens`, Responses
+  `usage.output_tokens_details.reasoning_tokens`, Gemini `usageMetadata.thoughtsTokenCount`.
+  Anthropic reports none. A reported non-zero count always wins. A reported 0 is often a proxy's
+  placeholder (Bifrost and others send `reasoning_tokens: 0`), so it stands only when the stream
+  carried no thinking text; otherwise the estimate below is recorded.
+- **Estimated** when no non-zero split was reported but the stream carried thinking text:
+  OpenAI-compatible `choices[].delta.reasoning_content`, else `reasoning` (one per delta; some
+  servers send both) (Ollama, DeepSeek, vLLM), Responses
+  `response.reasoning_text.delta` / `response.reasoning_summary_text.delta`, Anthropic
+  `thinking_delta`, Gemini parts with `thought: true`. The estimate is **ceil(characters / 4)** of
+  that text, the same unit as the gateway's output estimate (so non-ASCII thinking is not clamped
+  to all of the output), and `reasoning_estimated` is true. A thinking event on an SSE line too long
+  to decode counts with its whole line. Non-streamed (JSON) responses are not estimated.
+- Never more than the call's output tokens (reasoning is part of output). Neither: null.
+
+Reads: the per-run usage (`GET /v1/threads/{id}/usage`, `GET /v1/runs/{id}/usage`) returns
+`reasoning_tokens` (the sum over calls with a count; null when none had one) and
+`reasoning_estimated` (true when any counted call was estimated); the team and site usage totals
+carry `reasoning_tokens` (calls without a split count 0). `run.completed`'s `usage` may carry an
+optional `reasoning` count for a live client; the ledger stays the record.
+
 ## Known limits
 
 - `anthropic_adaptive` and `anthropic_effort` keep only `format` of the caller's `output_config`.

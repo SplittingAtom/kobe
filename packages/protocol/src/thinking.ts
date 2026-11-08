@@ -215,3 +215,55 @@ export function strictestThinkingPolicy(
   for (const p of policies) if (out === undefined || ceiling(p) < ceiling(out)) out = p;
   return out;
 }
+
+/**
+ * Anthropic `budget_tokens` per level for `anthropic_budget` (the API's minimum is 1,024, below
+ * `max_tokens`); the gateway writes it (services/model-gateway/src/thinking.ts, KOBE-260).
+ */
+export const ANTHROPIC_BUDGET: Readonly<Record<ThinkingLevel, number>> = {
+  off: 0,
+  low: 2_048,
+  medium: 8_192,
+  high: 24_576,
+};
+
+/** Gemini `thinkingBudget` per level for `gemini_budget` (0 turns thinking off where allowed). */
+export const GEMINI_BUDGET: Readonly<Record<ThinkingLevel, number>> = {
+  off: 0,
+  low: 1_024,
+  medium: 8_192,
+  high: 24_576,
+};
+
+/**
+ * Reasoning tokens per level for the effort controls (`reasoning_effort`, `anthropic_adaptive`,
+ * `anthropic_effort`; KOBE-557): a **display scale** for the chat's reasoning bar, not a provider
+ * limit. These providers take an effort, not a token count, so a call may spend more; the bar caps
+ * at 100% and the readout shows the real count (docs/design/thinking-controls.md).
+ */
+export const THINKING_EFFORT_BUDGETS: Readonly<Record<ThinkingLevel, number>> = {
+  off: 0,
+  low: 2_000,
+  medium: 8_000,
+  high: 24_000,
+};
+
+/**
+ * The reasoning budget of `level` under `control` (KOBE-557): the token budget the gateway writes
+ * for the budget controls, the display scale ({@link THINKING_EFFORT_BUDGETS}) for the effort
+ * controls, null for a model without a control.
+ */
+export function thinkingBudget(control: ThinkingControl, level: ThinkingLevel): number | null {
+  switch (control) {
+    case "none":
+      return null;
+    case "anthropic_budget":
+      return ANTHROPIC_BUDGET[level];
+    case "gemini_budget":
+      return GEMINI_BUDGET[level];
+    case "reasoning_effort":
+    case "anthropic_adaptive":
+    case "anthropic_effort":
+      return THINKING_EFFORT_BUDGETS[level];
+  }
+}

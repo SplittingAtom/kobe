@@ -31,7 +31,17 @@ export interface UsageTotals {
   readonly unpriced_calls: number;
   /** Calls whose tokens the gateway estimated (no usage report from the provider). */
   readonly estimated_calls: number;
+  /**
+   * Reasoning (thinking) tokens within `output_tokens` (KOBE-557), reported or estimated; calls
+   * without a split count 0.
+   */
+  readonly reasoning_tokens: number;
 }
+
+/** Totals whose reasoning count may be unknown (a run's: null when no call had a split). */
+type SummableTotals = Omit<UsageTotals, "reasoning_tokens"> & {
+  readonly reasoning_tokens: number | null;
+};
 
 export interface SeriesPoint extends UsageTotals {
   readonly t: string;
@@ -97,10 +107,11 @@ const EMPTY: UsageTotals = {
   cost_usd_exact: ZERO_COST,
   unpriced_calls: 0,
   estimated_calls: 0,
+  reasoning_tokens: 0,
 };
 
-/** The aggregate columns every breakdown selects (same names as {@link UsageTotals}). */
-const TOTALS = sql.raw(`count(*)::bigint AS calls,
+/** The aggregate columns every breakdown selects, but reasoning (same names as {@link UsageTotals}). */
+const CALL_TOTALS = sql.raw(`count(*)::bigint AS calls,
   COALESCE(sum(u.input_tokens), 0)::bigint AS input_tokens,
   COALESCE(sum(u.output_tokens), 0)::bigint AS output_tokens,
   COALESCE(sum(u.cache_read_tokens), 0)::bigint AS cache_read_tokens,
@@ -108,6 +119,8 @@ const TOTALS = sql.raw(`count(*)::bigint AS calls,
   COALESCE(sum(u.cost_usd), 0)::numeric(30,10)::text AS cost_usd,
   count(*) FILTER (WHERE u.cost_usd IS NULL)::bigint AS unpriced_calls,
   count(*) FILTER (WHERE u.usage_source = 'estimated')::bigint AS estimated_calls`);
+/** {@link CALL_TOTALS} and the reasoning tokens (calls without a count add 0). */
+const TOTALS = sql`${CALL_TOTALS}, COALESCE(sum(u.reasoning_tokens), 0)::bigint AS reasoning_tokens`;
 const ORDER = sql.raw(
   `ORDER BY COALESCE(sum(u.cost_usd), 0) DESC, sum(u.input_tokens + u.output_tokens) DESC`,
 );
@@ -116,6 +129,10 @@ type Row = Record<string, unknown>;
 
 function totalsOf(r: Row | undefined): UsageTotals {
   if (!r) return EMPTY;
+  return { ...callTotalsOf(r), reasoning_tokens: Number(r.reasoning_tokens ?? 0) };
+}
+
+function callTotalsOf(r: Row): Omit<UsageTotals, "reasoning_tokens"> {
   const exact = unitsToCostText(r.cost_usd);
   return {
     calls: Number(r.calls ?? 0),
@@ -130,7 +147,7 @@ function totalsOf(r: Row | undefined): UsageTotals {
   };
 }
 
-export function addTotals(a: UsageTotals, b: UsageTotals): UsageTotals {
+export function addTotals(a: UsageTotals, b: SummableTotals): UsageTotals {
   const exact = addCosts(a.cost_usd_exact, b.cost_usd_exact);
   return {
     calls: a.calls + b.calls,
@@ -142,6 +159,7 @@ export function addTotals(a: UsageTotals, b: UsageTotals): UsageTotals {
     cost_usd_exact: exact,
     unpriced_calls: a.unpriced_calls + b.unpriced_calls,
     estimated_calls: a.estimated_calls + b.estimated_calls,
+    reasoning_tokens: a.reasoning_tokens + (b.reasoning_tokens ?? 0),
   };
 }
 
@@ -294,13 +312,20 @@ export async function siteUsage(db: KobeDb, range: UsageRange): Promise<SiteUsag
   };
 }
 
-export interface RunUsage extends UsageTotals {
+export interface RunUsage extends Omit<UsageTotals, "reasoning_tokens"> {
   readonly run_id: string;
   /** The run's prompt entry (`runs.user_entry_id`): the chat shows usage under its answer. */
   readonly user_entry_id: string | null;
   readonly models: readonly string[];
   /** The run's effective thinking level (KOBE-260); null: its model has no thinking control. */
   readonly thinking_level: ThinkingLevel | null;
+  /**
+   * The run's reasoning tokens (KOBE-557): the sum over its calls that had a count (reported or
+   * estimated); null when none had one.
+   */
+  readonly reasoning_tokens: number | null;
+  /** True when any counted call's reasoning was estimated (the chat marks it ≈). */
+  readonly reasoning_estimated: boolean;
 }
 
 type UsageOf = { readonly runId: string } | { readonly threadId: string };
@@ -310,7 +335,10 @@ async function runsUsageIn(tx: KobeTx, teamId: string, of: UsageOf): Promise<Run
     "runId" in of ? sql`u.run_id = ${of.runId}::uuid` : sql`u.thread_id = ${of.threadId}::uuid`;
   const res = await tx.execute<Row>(sql`
     SELECT u.run_id, r.user_entry_id, r.thinking_level,
-           array_agg(DISTINCT u.model ORDER BY u.model) AS models, ${TOTALS}
+           array_agg(DISTINCT u.model ORDER BY u.model) AS models, ${CALL_TOTALS},
+           sum(u.reasoning_tokens)::bigint AS reasoning_tokens,
+           COALESCE(bool_or(u.reasoning_estimated) FILTER (WHERE u.reasoning_tokens IS NOT NULL), false)
+             AS run_reasoning_estimated
       FROM run_usage u
       LEFT JOIN runs r ON r.team_id = u.team_id AND r.id = u.run_id
      WHERE u.team_id = ${teamId}::uuid AND ${filter} AND u.kind IN ('run', 'eval')
@@ -320,7 +348,9 @@ async function runsUsageIn(tx: KobeTx, teamId: string, of: UsageOf): Promise<Run
     user_entry_id: typeof r.user_entry_id === "string" ? r.user_entry_id : null,
     models: (r.models as string[] | null) ?? [],
     thinking_level: thinkingLevelSchema.safeParse(r.thinking_level).data ?? null,
-    ...totalsOf(r),
+    ...callTotalsOf(r),
+    reasoning_tokens: r.reasoning_tokens == null ? null : Number(r.reasoning_tokens),
+    reasoning_estimated: r.run_reasoning_estimated === true,
   }));
 }
 

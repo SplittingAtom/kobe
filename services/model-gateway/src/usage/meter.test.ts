@@ -66,6 +66,7 @@ describe("UsageMeter: streams (usage in the final events)", () => {
     expect(meter("openai", SSE, body, 5)).toEqual({
       source: "reported",
       counts: { input: 40, output: 9, cacheRead: 10, cacheWrite: 0 },
+      reasoning: { tokens: 4, estimated: false },
     });
   });
 
@@ -108,6 +109,7 @@ describe("UsageMeter: streams (usage in the final events)", () => {
     expect(meter("gemini", SSE, body)).toEqual({
       source: "reported",
       counts: { input: 20, output: 12, cacheRead: 60, cacheWrite: 0 },
+      reasoning: { tokens: 5, estimated: false },
     });
   });
 
@@ -300,5 +302,122 @@ describe("chargedOutput (KOBE-43 re-review)", () => {
     expect(chargedOutput(100, 4)).toBe(400);
     expect(chargedOutput(undefined, 2)).toBe(2 * DEFAULT_CHARGED_OUTPUT_TOKENS);
     expect(chargedOutput(100, 4, true)).toBe(0);
+  });
+});
+
+describe("UsageMeter: reasoning tokens (KOBE-557)", () => {
+  const usage = { prompt_tokens: 10, completion_tokens: 50 };
+
+  it("keeps a reported count and never overrides it with the thinking text", () => {
+    const body =
+      data({ choices: [{ delta: { reasoning_content: "x".repeat(400) } }] }) +
+      data({
+        choices: [],
+        usage: { ...usage, completion_tokens_details: { reasoning_tokens: 12 } },
+      });
+    expect(meter("openai", SSE, body).reasoning).toEqual({ tokens: 12, estimated: false });
+  });
+
+  it("OpenAI-compatible delta.reasoning / reasoning_content (Ollama, DeepSeek): characters / 4, one field per delta", () => {
+    // 4 characters, then 6 sent in both fields (counted once): ceil(10 / 4) = 3.
+    const body =
+      data({ choices: [{ delta: { reasoning: "ééé!" } }] }) +
+      data({ choices: [{ delta: { reasoning_content: "think.", reasoning: "think." } }] }) +
+      data({ choices: [{ delta: { content: "answer" } }] }) +
+      data({ choices: [], usage });
+    const reading = meter("openai", SSE, body, 3);
+    expect(reading.source).toBe("reported");
+    expect(reading.reasoning).toEqual({ tokens: 3, estimated: true });
+  });
+
+  it("a reported 0 (a proxy's placeholder) does not silence the thinking text; with none it stays 0", () => {
+    const zero = { ...usage, completion_tokens_details: { reasoning_tokens: 0 } };
+    const thought =
+      data({ choices: [{ delta: { reasoning_content: "x".repeat(40) } }] }) +
+      data({ choices: [], usage: zero });
+    expect(meter("openai", SSE, thought).reasoning).toEqual({ tokens: 10, estimated: true });
+    const plain =
+      data({ choices: [{ delta: { content: "hi" } }] }) + data({ choices: [], usage: zero });
+    expect(meter("openai", SSE, plain).reasoning).toEqual({ tokens: 0, estimated: false });
+  });
+
+  it("counts a thinking event too long to decode toward the thinking text", () => {
+    const line = `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: "y".repeat(300) } }] })}`;
+    const body =
+      `${line}\n\n` + data({ choices: [], usage: { prompt_tokens: 1, completion_tokens: 1_000 } });
+    const m = new UsageMeter({
+      kind: "openai",
+      contentType: SSE,
+      contentEncoding: undefined,
+      maxLineBytes: 64,
+    });
+    const bytes = Buffer.from(body, "utf8");
+    for (let i = 0; i < bytes.length; i += 9) m.write(bytes.subarray(i, i + 9));
+    expect(m.finish(true, 400).reasoning).toEqual({
+      tokens: Math.ceil(line.length / 4),
+      estimated: true,
+    });
+  });
+
+  it("Anthropic thinking_delta is estimated (Anthropic reports no split)", () => {
+    const body =
+      event("message_start", {
+        type: "message_start",
+        message: { usage: { input_tokens: 12, output_tokens: 1 } },
+      }) +
+      event("content_block_delta", {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: "a".repeat(41) },
+      }) +
+      event("content_block_delta", {
+        type: "content_block_delta",
+        index: 1,
+        delta: { type: "text_delta", text: "b".repeat(100) },
+      }) +
+      event("message_delta", {
+        type: "message_delta",
+        delta: { stop_reason: "end_turn" },
+        usage: { output_tokens: 60 },
+      });
+    expect(meter("anthropic", SSE, body).reasoning).toEqual({ tokens: 11, estimated: true });
+  });
+
+  it("Gemini parts marked thought: estimated when thoughtsTokenCount is absent", () => {
+    const body =
+      data({ candidates: [{ content: { parts: [{ text: "c".repeat(16), thought: true }] } }] }) +
+      data({ candidates: [{ content: { parts: [{ text: "answer" }] } }] }) +
+      data({ usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 20 } });
+    expect(meter("gemini", SSE, body).reasoning).toEqual({ tokens: 4, estimated: true });
+  });
+
+  it("Gemini thoughtsTokenCount is reported", () => {
+    const body =
+      data({ candidates: [{ content: { parts: [{ text: "c".repeat(16), thought: true }] } }] }) +
+      data({
+        usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 20, thoughtsTokenCount: 30 },
+      });
+    expect(meter("gemini", SSE, body).reasoning).toEqual({ tokens: 30, estimated: false });
+  });
+
+  it("clamps the estimate to the output count", () => {
+    const body =
+      data({ choices: [{ delta: { reasoning: "z".repeat(4_000) } }] }) +
+      data({ choices: [], usage: { prompt_tokens: 1, completion_tokens: 20 } });
+    expect(meter("openai", SSE, body).reasoning).toEqual({ tokens: 20, estimated: true });
+  });
+
+  it("a stream with neither a split nor thinking text has no reasoning count", () => {
+    const body =
+      data({ choices: [{ delta: { content: "plain" } }] }) + data({ choices: [], usage });
+    expect(meter("openai", SSE, body)).not.toHaveProperty("reasoning");
+  });
+
+  it("estimates the thinking of a stream cut short", () => {
+    const body = data({ choices: [{ delta: { reasoning: "r".repeat(40) } }] });
+    expect(meter("openai", SSE, body, 7, false).reasoning).toEqual({
+      tokens: 10,
+      estimated: true,
+    });
   });
 });

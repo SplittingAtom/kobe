@@ -32,6 +32,12 @@ export interface ModelUsageRecord {
   readonly cacheReadTokens: number;
   readonly cacheWriteTokens: number;
   readonly usageSource: UsageSource;
+  /**
+   * Reasoning tokens within `outputTokens` (KOBE-557): reported, or estimated from the streamed
+   * thinking text (`reasoningEstimated`); null or absent when unknown. Clamped to `outputTokens`.
+   */
+  readonly reasoningTokens?: number | null;
+  readonly reasoningEstimated?: boolean;
   readonly durationMs: number;
   readonly ttfbMs: number | undefined;
   readonly aborted: boolean;
@@ -77,6 +83,11 @@ export async function recordModelUsage(
       cache_read_tokens: tokens(r.cacheReadTokens),
       cache_write_tokens: tokens(r.cacheWriteTokens),
       usage_source: r.usageSource,
+      reasoning_tokens:
+        r.reasoningTokens == null
+          ? null
+          : Math.min(tokens(r.reasoningTokens), tokens(r.outputTokens)),
+      reasoning_estimated: r.reasoningTokens != null && r.reasoningEstimated === true,
       duration_ms: millis(r.durationMs),
       ttfb_ms: r.ttfbMs === undefined ? null : millis(r.ttfbMs),
       aborted: r.aborted,
@@ -85,11 +96,11 @@ export async function recordModelUsage(
       const res = await tx.execute(sql`
         INSERT INTO run_usage (team_id, id, at, user_id, sandbox_id, kind, run_id, thread_id, agent_id,
           route, model, status, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-          usage_source, cost_usd, duration_ms, ttfb_ms, aborted)
+          usage_source, reasoning_tokens, reasoning_estimated, cost_usd, duration_ms, ttfb_ms, aborted)
         SELECT ${teamId}::uuid, v.id, v.at, v.user_id, v.sandbox_id, v.kind, v.run_id, r.thread_id,
                t.agent_id,
                v.route, v.model, v.status, v.input_tokens, v.output_tokens, v.cache_read_tokens,
-               v.cache_write_tokens, v.usage_source,
+               v.cache_write_tokens, v.usage_source, v.reasoning_tokens, v.reasoning_estimated,
                CASE WHEN price.input IS NULL OR price.output IS NULL THEN NULL ELSE
                  (v.input_tokens * price.input + v.output_tokens * price.output
                   + v.cache_read_tokens * COALESCE(price.cache_read, price.input)
@@ -100,7 +111,7 @@ export async function recordModelUsage(
                  id uuid, user_id uuid, sandbox_id uuid, kind text, run_id uuid, at timestamptz, route text,
                  model text, status smallint, input_tokens integer, output_tokens integer,
                  cache_read_tokens integer, cache_write_tokens integer, usage_source text,
-                 duration_ms integer, ttfb_ms integer, aborted boolean)
+                 reasoning_tokens integer, reasoning_estimated boolean, duration_ms integer, ttfb_ms integer, aborted boolean)
           LEFT JOIN runs r ON r.team_id = ${teamId}::uuid AND r.id = v.run_id
           LEFT JOIN threads t ON t.team_id = ${teamId}::uuid AND t.id = r.thread_id
           LEFT JOIN LATERAL (

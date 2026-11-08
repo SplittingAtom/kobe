@@ -54,6 +54,8 @@ export function usageRecordOf(call: CallRecord): ModelUsageRecord | undefined {
     cacheReadTokens: counts.cacheRead,
     cacheWriteTokens: counts.cacheWrite,
     usageSource: source,
+    reasoningTokens: call.usage.reasoning?.tokens ?? null,
+    reasoningEstimated: call.usage.reasoning?.estimated ?? false,
     durationMs: call.durationMs,
     ttfbMs: call.ttfbMs,
     aborted: call.aborted,
