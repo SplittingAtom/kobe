@@ -171,8 +171,8 @@ into a new Workbench draft of the member's with the file in place (one revision;
 `skill.manifest.generated`, metadata only) and the editor opens on it. The member reviews the file,
 saves the next version (a new package hash, so the full evals run again before promotion) and
 promotes that one. `POST /v1/skills/drafts/{id}/manifest {model?, license?}` (with `If-Match`)
-writes one into an open draft the same way; its `version` is a placeholder that Save version
-overwrites. Both answer 409 `has_manifest` when one exists, 422 `model_not_enabled` for a model the
+writes one into an open draft the same way (the Workbench editor offers it under the file tree
+while the draft has none); its `version` is a placeholder that Save version overwrites. Both answer 409 `has_manifest` when one exists, 422 `model_not_enabled` for a model the
 team does not enable (never a fallback to another), 502 `call_failed` with the gateway's code when
 the model did not answer, and 503 `model_calls_unavailable` on a server without a model gateway
 for its own calls.

@@ -24,9 +24,10 @@ user wants to promote a skill. Use the currently selected model to create the fi
   contract, YAML round-tripped through `readManifest`), `registry/promote-manifest.ts` (version
   files → generate → `startFork` with the file as an extra start file → audit),
   `POST /v1/skills/promotions/manifest`, `POST /v1/skills/drafts/:id/manifest`, `deps.skillManifests`.
-- **Web:** `CreateManifest` under the Promote panel's refusals when `no_manifest`: model select
-  (team default preselected, enabled models only), license select (Proprietary preselected), then
-  the Workbench opens on the new draft.
+- **Web:** `ManifestChoiceForm` (model select with the team default preselected, enabled models
+  only; license select with Proprietary preselected) used by `CreateManifest` under the Promote
+  panel's refusals when `no_manifest` (then the Workbench opens on the new draft) and by
+  `DraftManifest` under the editor's file tree while the draft has no manifest.
 
 ## Decisions
 
@@ -48,8 +49,9 @@ user wants to promote a skill. Use the currently selected model to create the fi
 
 ## Open questions (for Chris or the coordinator)
 
-- Should the draft editor itself (Define tab) also show "Create kobe.skill.yaml"? The route
-  `POST /v1/skills/drafts/:id/manifest` exists; no editor button yet.
+- ~~Should the draft editor itself show "Create kobe.skill.yaml"?~~ Chris asked for it
+  (2026-11-07): `DraftManifest` under the file tree while the draft has none, through the
+  editor's change queue (pending edits first, `If-Match` the author's revision).
 - A tags vocabulary with many entries: the prompt lists up to 200 slugs.
 
 ## Evidence (acceptance criteria → test or command output)

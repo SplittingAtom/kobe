@@ -3,6 +3,11 @@
  * the promotion, and the team's queue of Builders' requests. Responses arrive camelized.
  */
 import { apiRequest, type ApiResult } from "../api/client";
+import {
+  manifestChoiceJson,
+  type ManifestDraftChoice,
+  type ManifestWritten,
+} from "./manifest-choice";
 
 export interface PromoteSource {
   readonly scope: "team" | "personal";
@@ -61,23 +66,14 @@ export function promoteVersion(
   return apiRequest("/v1/skills/promotions", { method: "POST", json: source, teamId });
 }
 
-/** The author's license for a generated manifest (KOBE-564); `Proprietary` is the contract's own. */
-export const MANIFEST_LICENSES = ["Proprietary", "Apache-2.0", "MIT", "BSD-3-Clause"] as const;
-export type ManifestLicense = (typeof MANIFEST_LICENSES)[number];
+export {
+  MANIFEST_LICENSES,
+  type ManifestDraftChoice,
+  type ManifestLicense,
+} from "./manifest-choice";
 
-export interface ManifestDraftChoice {
-  /** The catalog alias; undefined: the team default. */
-  readonly model?: string | undefined;
-  readonly license?: ManifestLicense | undefined;
-}
-
-export interface ManifestDraft {
+export interface ManifestDraft extends ManifestWritten {
   readonly draft: { readonly id: string; readonly name: string; readonly rev: number };
-  readonly manifest: { readonly summary: string; readonly tags?: readonly string[] };
-  /** The catalog alias that answered. */
-  readonly model: string;
-  /** `model`: fields from the reply; `seed`: SKILL.md's description alone. */
-  readonly source: "model" | "seed";
 }
 
 /**
@@ -91,11 +87,7 @@ export function createManifestDraft(
 ): Promise<ApiResult<ManifestDraft>> {
   return apiRequest("/v1/skills/promotions/manifest", {
     method: "POST",
-    json: {
-      ...source,
-      ...(choice.model === undefined ? {} : { model: choice.model }),
-      ...(choice.license === undefined ? {} : { license: choice.license }),
-    },
+    json: { ...source, ...manifestChoiceJson(choice) },
     teamId,
   });
 }

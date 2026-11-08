@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiError, ApiResult } from "../../lib/api/client";
 import { teamDraftClient, type DraftClient } from "../../lib/skills/draft-client";
 import type { Changed, DraftFileInfo, DraftSummary } from "../../lib/skills/drafts-api";
+import type { ManifestDraftChoice, ManifestWritten } from "../../lib/skills/manifest-choice";
 import { SKILL_MD } from "../../lib/skills/skill-md";
 import { useScanPreview, type ScanState } from "./use-scan-preview";
 
@@ -24,6 +25,12 @@ export const SAVE_MAX_WAIT_MS = 1200;
 
 export type SaveStatus = "saved" | "pending" | "saving" | "error" | "conflict";
 
+export type ManifestOutcome =
+  ({ readonly ok: true } & ManifestWritten) | { readonly ok: false; readonly error: ApiError };
+
+/** The manifest's path (the package contract's reserved root name). */
+export const MANIFEST = "kobe.skill.yaml";
+
 export interface DraftEditor {
   readonly draft: DraftSummary;
   readonly files: readonly DraftFileInfo[];
@@ -38,6 +45,11 @@ export interface DraftEditor {
   readonly open: (path: string) => Promise<ApiError | null>;
   /** Adds a text file (empty unless `text` is given), by the same write as an autosave. */
   readonly addFile: (path: string, text?: string) => Promise<ApiError | null>;
+  /**
+   * Create kobe.skill.yaml with a model (KOBE-564): the file appears in the tree (open it to
+   * read the text); the notice says which model wrote it. Absent where the client offers none.
+   */
+  readonly createManifest?: (choice: ManifestDraftChoice) => Promise<ManifestOutcome>;
   readonly removeFile: (path: string) => Promise<ApiError | null>;
   /** Shares the draft with the team's Builders and Team admins, or stops (author only). */
   readonly share: (shared: boolean) => Promise<ApiError | null>;
@@ -278,6 +290,38 @@ function useEditorState(
     [api, id, change, changed],
   );
 
+  const manifestApi = api.manifest?.bind(api);
+  const createManifest = useMemo(
+    () =>
+      manifestApi === undefined
+        ? undefined
+        : async (choice: ManifestDraftChoice): Promise<ManifestOutcome> => {
+            let made: ManifestWritten | undefined;
+            const err = await change(
+              (r) => manifestApi(id, r, choice),
+              (data) => {
+                changed(data);
+                made = data;
+                const info: DraftFileInfo = {
+                  path: MANIFEST,
+                  size: 0,
+                  kind: "text",
+                  updatedAt: data.draft.updatedAt,
+                };
+                setFiles((fs) =>
+                  [...fs.filter((f) => f.path !== MANIFEST), info].sort((a, b) =>
+                    a.path.localeCompare(b.path),
+                  ),
+                );
+              },
+            );
+            if (err) return { ok: false, error: err };
+            if (!made) return { ok: false, error: UNSAVED };
+            return { ok: true, ...made };
+          },
+    [manifestApi, id, change, changed],
+  );
+
   const removeFile = useCallback(
     (path: string) => {
       pending.current.delete(path);
@@ -316,6 +360,7 @@ function useEditorState(
     edit,
     open,
     addFile,
+    ...(createManifest ? { createManifest } : {}),
     removeFile,
     share,
     flush,

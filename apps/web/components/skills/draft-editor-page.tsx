@@ -24,6 +24,7 @@ import { ErrorNotice, MutationStatus } from "../admin/error-notice";
 import { useMutation } from "../admin/use-resource";
 import { LintPanel, ScanPanel } from "./feedback";
 import { FileTree } from "./file-tree";
+import { DraftManifest } from "./draft-manifest";
 import { NewFileEditor } from "./new-file-editor";
 import { SaveVersionDialog } from "./save-version-dialog";
 import { SkillMdEditor } from "./skill-md-editor";
@@ -205,15 +206,22 @@ function Editor({ editor, tab }: { readonly editor: DraftEditor; readonly tab: D
           t === "define" ? (
             <DefineLayout
               tree={
-                <FileTree
-                  files={files}
-                  folders={emptyFolders}
-                  selected={selected}
-                  onSelect={(path) => void select(path)}
-                  onAdd={editor.addFile}
-                  onCreate={(folder) => void startNewFile(folder)}
-                  onAddFolder={(folder) => setFolders((fs) => [...fs, folder])}
-                />
+                <>
+                  <FileTree
+                    files={files}
+                    folders={emptyFolders}
+                    selected={selected}
+                    onSelect={(path) => void select(path)}
+                    onAdd={editor.addFile}
+                    onCreate={(folder) => void startNewFile(folder)}
+                    onAddFolder={(folder) => setFolders((fs) => [...fs, folder])}
+                  />
+                  <DraftManifest
+                    teamId={teamId}
+                    editor={editor}
+                    onCreated={(path) => void select(path)}
+                  />
+                </>
               }
             >
               {creating === null ? (

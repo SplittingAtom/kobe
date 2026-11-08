@@ -301,6 +301,96 @@ describe("Workbench editor: files", () => {
   });
 });
 
+describe("Workbench editor: Create kobe.skill.yaml (KOBE-564)", () => {
+  const MODELS = {
+    models: [
+      { alias: "k2", label: "Kimi K2", enabled: true, isDefault: true },
+      { alias: "glm", label: "GLM Flash", enabled: true, isDefault: false },
+    ],
+    default: "k2",
+  };
+  const YAML =
+    "apiVersion: kobe.dev/skill/v1\nname: report-writer\nversion: 0.1.0\nsummary: Reports.\nlicense: MIT\n";
+
+  it("offers it under the tree while the draft has no manifest; the file is written at the author's revision and opens", async () => {
+    const calls = await opened({
+      ...BASE,
+      "GET /v1/team/models": [200, MODELS],
+      "POST /v1/skills/drafts/d-1/manifest": [
+        201,
+        {
+          rev: 4,
+          draft: DRAFT(4),
+          manifest: { summary: "Reports." },
+          model: "glm",
+          source: "model",
+        },
+      ],
+      "GET /v1/skills/drafts/d-1/files/kobe.skill.yaml": [200, bytes(YAML)],
+    });
+    const group = screen.getByRole("group", { name: "Create kobe.skill.yaml" });
+    const model = (await within(group).findByRole("combobox", {
+      name: "Model for the manifest",
+    })) as HTMLSelectElement;
+    expect([...model.options].map((o) => o.textContent)).toEqual([
+      "Team default (Kimi K2)",
+      "GLM Flash",
+    ]);
+    await userEvent.selectOptions(model, "glm");
+    await userEvent.selectOptions(within(group).getByRole("combobox", { name: "License" }), "MIT");
+    await userEvent.click(within(group).getByRole("button", { name: "Create kobe.skill.yaml" }));
+    expect(await screen.findByText("kobe.skill.yaml written by glm.")).toBeDefined();
+    const post = must(calls.find((c) => c.method === "POST"));
+    expect([post.url, post.headers.get("if-match")]).toEqual([
+      "/v1/skills/drafts/d-1/manifest",
+      '"3"',
+    ]);
+    expect(JSON.parse(String(post.body))).toEqual({ model: "glm", license: "MIT" });
+    const tree = within(screen.getByRole("navigation", { name: "Files" }));
+    expect(tree.getByRole("button", { name: "kobe.skill.yaml" })).toBeDefined();
+    expect(
+      ((await screen.findByLabelText("Contents of kobe.skill.yaml")) as HTMLTextAreaElement).value,
+    ).toBe(YAML);
+    // Once there, the offer is gone.
+    await waitFor(() =>
+      expect(screen.queryByRole("group", { name: "Create kobe.skill.yaml" })).toBeNull(),
+    );
+  });
+
+  it("is not offered when the draft already has one, and shows the server's refusal otherwise", async () => {
+    await opened({
+      ...BASE,
+      "GET /v1/skills/drafts/d-1": [
+        200,
+        {
+          draft: DRAFT(3),
+          files: [...FILES, { path: "kobe.skill.yaml", size: 80, kind: "text", updated_at: "x" }],
+        },
+      ],
+      "GET /v1/team/models": [200, MODELS],
+    });
+    expect(screen.queryByRole("group", { name: "Create kobe.skill.yaml" })).toBeNull();
+    cleanup();
+    await opened({
+      ...BASE,
+      "GET /v1/team/models": [200, MODELS],
+      "POST /v1/skills/drafts/d-1/manifest": [
+        502,
+        { code: "call_failed", message: "The model k2 did not answer (budget exhausted)." },
+      ],
+    });
+    const group = screen.getByRole("group", { name: "Create kobe.skill.yaml" });
+    await within(group).findByRole("combobox", { name: "Model for the manifest" });
+    await userEvent.click(within(group).getByRole("button", { name: "Create kobe.skill.yaml" }));
+    expect(await screen.findByText(/did not answer/)).toBeDefined();
+    expect(
+      within(screen.getByRole("navigation", { name: "Files" })).queryByRole("button", {
+        name: "kobe.skill.yaml",
+      }),
+    ).toBeNull();
+  });
+});
+
 describe("Workbench editor: Save version (ac-3)", () => {
   const SAVED = {
     skill: {

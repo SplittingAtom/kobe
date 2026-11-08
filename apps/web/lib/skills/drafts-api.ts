@@ -5,6 +5,11 @@
  */
 import type { SkillImportOrigin, SkillImportRequest } from "@kobe/protocol";
 import { apiRequest, apiTextFile, type ApiResult } from "../api/client";
+import {
+  manifestChoiceJson,
+  type ManifestDraftChoice,
+  type ManifestWritten,
+} from "./manifest-choice";
 import type { SkillSaved } from "../admin/api/team/skills";
 
 const enc = encodeURIComponent;
@@ -224,6 +229,24 @@ export function deleteDraftFile(
 ): Promise<ApiResult<Changed>> {
   return apiRequest(`${BASE}/${enc(id)}/files/${filePath(path)}`, {
     method: "DELETE",
+    ifMatch: etag(rev),
+    teamId,
+  });
+}
+
+/**
+ * Create kobe.skill.yaml in an open draft (KOBE-564): the chosen model drafts it from the
+ * draft's SKILL.md and files; written at `rev` like any file (the server's `If-Match`).
+ */
+export function createDraftManifest(
+  teamId: string,
+  id: string,
+  rev: number,
+  choice: ManifestDraftChoice,
+): Promise<ApiResult<Changed & ManifestWritten>> {
+  return apiRequest(`${BASE}/${enc(id)}/manifest`, {
+    method: "POST",
+    json: manifestChoiceJson(choice),
     ifMatch: etag(rev),
     teamId,
   });
