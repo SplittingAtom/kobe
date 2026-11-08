@@ -329,15 +329,16 @@ describe("tracing (KOBE-274 ac-6)", () => {
     try {
       reply = ok("A title");
       const call = input();
+      const runId = call.runId ?? "";
       await createServerCallClient({ url: base, key: KEY }).complete(call);
       const span = exporter.getFinishedSpans().find((s) => s.name === "server_call.title");
-      expect(span?.spanContext().traceId).toBe(runTraceId(call.runId));
-      expect(span?.parentSpanContext?.spanId).toBe(runRootSpanId(call.runId));
+      expect(span?.spanContext().traceId).toBe(runTraceId(runId));
+      expect(span?.parentSpanContext?.spanId).toBe(runRootSpanId(runId));
       expect(span?.attributes).toMatchObject({
         "session.id": call.threadId,
         "user.id": call.userId,
       });
-      expect(String(seen[0]?.headers.traceparent)).toContain(runTraceId(call.runId));
+      expect(String(seen[0]?.headers.traceparent)).toContain(runTraceId(runId));
     } finally {
       await telemetry.shutdown();
     }

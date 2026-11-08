@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   EPILOGUE_EVENT_TYPES,
   MAX_SERVER_CALL_TOKEN_TTL_SECONDS,
+  RUNLESS_SERVER_CALL_PURPOSES,
   SERVER_CALL_AUDIENCE,
   SERVER_CALL_EPILOGUE_MARGIN_MS,
   SERVER_CALL_EPILOGUE_MAX_MS,
@@ -16,6 +17,7 @@ import {
   epilogueOpen,
   generatedTitleSchema,
   parseEventPayload,
+  serverCallBoundToRun,
   serverCallClaimsSchema,
   serverCallRequestSchema,
   type KobeEventType,
@@ -118,7 +120,12 @@ describe("server-call token", () => {
   it("carries the eval judge's purpose, never announced in an epilogue (KOBE-326)", () => {
     const parse = (over: Partial<ServerCallClaims>) =>
       serverCallClaimsSchema.safeParse({ ...CLAIMS, ...over }).success;
-    expect(SERVER_CALL_TOKEN_PURPOSES).toEqual(["title", "followups", "eval_judge"]);
+    expect(SERVER_CALL_TOKEN_PURPOSES).toEqual([
+      "title",
+      "followups",
+      "eval_judge",
+      "skill_manifest",
+    ]);
     expect(parse({ purpose: "eval_judge", max_output_tokens: 512 })).toBe(true);
     expect(
       parse({
@@ -136,6 +143,53 @@ describe("server-call token", () => {
       timeout_ms: 60_000,
       skip_at_percent: 100,
     });
+    expect(SERVER_CALL_EPILOGUE_MAX_MS).toBe(30_000);
+  });
+
+  it("carries the skill manifest's purpose without a run or thread, and only that one (KOBE-564)", () => {
+    const parse = (claims: Record<string, unknown>) =>
+      serverCallClaimsSchema.safeParse(claims).success;
+    const { thread_id: _t, run_id: _r, ...runless } = CLAIMS;
+    expect(RUNLESS_SERVER_CALL_PURPOSES).toEqual(["skill_manifest"]);
+    expect(serverCallBoundToRun("skill_manifest")).toBe(false);
+    for (const p of ["title", "followups", "eval_judge"] as const) {
+      expect(serverCallBoundToRun(p)).toBe(true);
+      // A run-bound purpose always names both.
+      expect(parse({ ...runless, purpose: p })).toBe(false);
+      expect(parse({ ...CLAIMS, purpose: p, run_id: undefined })).toBe(false);
+      expect(parse({ ...CLAIMS, purpose: p, thread_id: undefined })).toBe(false);
+    }
+    // The manifest call names neither (a member's request, not a run's epilogue).
+    expect(parse({ ...runless, purpose: "skill_manifest" })).toBe(true);
+    expect(parse({ ...CLAIMS, purpose: "skill_manifest" })).toBe(false);
+    expect(parse({ ...runless, purpose: "skill_manifest", run_id: CLAIMS.run_id })).toBe(false);
+    expect(parse({ ...runless, purpose: "skill_manifest", thread_id: CLAIMS.thread_id })).toBe(
+      false,
+    );
+    expect(
+      parse({
+        ...runless,
+        purpose: "skill_manifest",
+        max_output_tokens: SERVER_CALL_LIMITS.skill_manifest.reasoning_max_output_tokens,
+      }),
+    ).toBe(true);
+    expect(
+      parse({
+        ...runless,
+        purpose: "skill_manifest",
+        max_output_tokens: SERVER_CALL_LIMITS.skill_manifest.reasoning_max_output_tokens + 1,
+      }),
+    ).toBe(false);
+    // Never announced in an epilogue; its own caps: one small JSON object from a long SKILL.md.
+    expect(() =>
+      parseEventPayload("run.completed", { leaf_entry_id: null, epilogue: ["skill_manifest"] }),
+    ).toThrow();
+    expect(SERVER_CALL_LIMITS.skill_manifest).toMatchObject({
+      max_output_tokens: 1024,
+      timeout_ms: 60_000,
+      skip_at_percent: 100,
+    });
+    expect(SERVER_CALL_LIMITS.skill_manifest.max_message_chars).toBeGreaterThanOrEqual(100 * 1024);
     expect(SERVER_CALL_EPILOGUE_MAX_MS).toBe(30_000);
   });
 });

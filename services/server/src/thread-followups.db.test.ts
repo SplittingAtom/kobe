@@ -47,6 +47,7 @@ const REPLIES = {
   title: "Q3 revenue drivers",
   followups: "1. Chart it by region\n2. What about Q4?\n3. Compare with last year\n4. A fourth",
   eval_judge: '{"passed": true, "reason": "unused here"}',
+  skill_manifest: '{"summary": "unused here"}',
 };
 
 const gateway = {

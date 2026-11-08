@@ -4,7 +4,9 @@
  * revisions, autosave and scan preview behind other routes.
  */
 import type { ApiResult } from "../api/client";
+import type { ManifestDraftChoice, ManifestWritten } from "./manifest-choice";
 import {
+  createDraftManifest,
   deleteDraftFile,
   getDraft,
   putDraftFile,
@@ -24,6 +26,12 @@ export interface DraftClient {
   remove(id: string, path: string, rev: number): Promise<ApiResult<Changed>>;
   share(id: string, rev: number, shared: boolean): Promise<ApiResult<DraftSummary>>;
   scan(id: string, signal?: AbortSignal): Promise<ApiResult<ScanPreview>>;
+  /** Create kobe.skill.yaml with a model (KOBE-564); absent where the server offers none. */
+  manifest?(
+    id: string,
+    rev: number,
+    choice: ManifestDraftChoice,
+  ): Promise<ApiResult<Changed & ManifestWritten>>;
 }
 
 /** The active team's Workbench drafts (`/v1/skills/drafts`). */
@@ -35,5 +43,6 @@ export function teamDraftClient(teamId: string): DraftClient {
     remove: (id, path, rev) => deleteDraftFile(teamId, id, path, rev),
     share: (id, rev, shared) => shareDraft(teamId, id, rev, shared),
     scan: (id, signal) => scanDraft(teamId, id, signal),
+    manifest: (id, rev, choice) => createDraftManifest(teamId, id, rev, choice),
   };
 }

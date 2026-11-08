@@ -106,11 +106,12 @@ export interface ServerCallInput {
   /** Titles, follow-ups (KOBE-234), or the skill eval judge (KOBE-326). */
   readonly purpose: ServerCallTokenPurpose;
   readonly teamId: string;
-  /** The member whose run triggered the call (budget line and virtual key). */
+  /** The member whose run triggered the call, or who asked for it (budget line and virtual key). */
   readonly userId: string;
-  readonly threadId: string;
-  /** The completed run that triggered the call. */
-  readonly runId: string;
+  /** The thread and its completed run that triggered the call; neither for a run-less purpose. */
+  readonly threadId?: string;
+  /** The completed run that triggered the call (absent only for `RUNLESS_SERVER_CALL_PURPOSES`). */
+  readonly runId?: string;
   /** `<gateway provider>/<model>`: the thread's resolved model. */
   readonly model: string;
   /**
@@ -150,8 +151,10 @@ function mintToken(key: SessionSigningKey, input: ServerCallInput, now: Date): s
     purpose: input.purpose,
     team_id: input.teamId,
     user_id: input.userId,
-    thread_id: input.threadId,
-    run_id: input.runId,
+    // Both or neither: the claims schema refuses a run-bound purpose without them and a run-less
+    // one with them (KOBE-564), so a caller's mistake fails here, before anything is sent.
+    ...(input.threadId === undefined ? {} : { thread_id: input.threadId }),
+    ...(input.runId === undefined ? {} : { run_id: input.runId }),
     model: input.model,
     max_output_tokens: serverCallOutputCap(input.purpose, input.reasoning),
     iat,
@@ -265,17 +268,20 @@ export function createServerCallClient(options: ServerCallClientOptions): Server
         runId: input.runId,
       };
       // In the triggering run's trace and the thread's session (KOBE-274 ac-6); the gateway's
-      // span for the call hangs under the run's root too.
+      // span for the call hangs under the run's root too. A run-less call (KOBE-564) starts its
+      // own trace, under the member's id only.
       const cause = trace.getActiveSpan()?.spanContext();
       return withSpan(
         `server_call.${input.purpose}`,
         {
           kind: SpanKind.CLIENT,
-          parent: runParentContext(input.runId),
+          ...(input.runId === undefined ? {} : { parent: runParentContext(input.runId) }),
           ...(cause && trace.isSpanContextValid(cause) ? { links: [{ context: cause }] } : {}),
           attributes: {
             ...idAttributes(ids),
-            ...sessionAttributes({ threadId: input.threadId, userId: input.userId }),
+            ...(input.threadId === undefined
+              ? {}
+              : sessionAttributes({ threadId: input.threadId, userId: input.userId })),
             "kobe.usage_kind": input.purpose,
           },
         },

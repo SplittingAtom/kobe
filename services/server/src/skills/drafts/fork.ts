@@ -199,6 +199,11 @@ export async function startFork(
   deps: { readonly store: SkillStore; readonly blobs: BlobStore },
   source: ForkSource,
   name?: string,
+  /**
+   * Files written over the copy in the same start (KOBE-564: the `kobe.skill.yaml` Kobe drafted
+   * for a version without one), so the draft begins at one revision with them in place.
+   */
+  extraFiles?: ReadonlyMap<string, Uint8Array>,
 ): Promise<ForkResult> {
   const copy =
     source.kind === "catalog"
@@ -210,6 +215,27 @@ export async function startFork(
   const original = nameIn(copy.files);
   const target = name ?? original;
   if (!target) return { ok: false, error: "source_unavailable" };
-  const files = target === original ? copy.files : renamed(copy.files, target);
+  const files = new Map(target === original ? copy.files : renamed(copy.files, target));
+  for (const [path, bytes] of extraFiles ?? []) files.set(path, bytes);
   return createDraft(ctx, { name: target, startedFrom: "fork", parentRef: copy.parentRef, files });
+}
+
+/**
+ * The files of a team or personal version the caller may copy (KOBE-564): what a fork of it
+ * would start from, before anything is written. `blocklisted` and the not-found cases as a fork.
+ */
+export async function versionFiles(
+  ctx: DraftContext,
+  store: SkillStore,
+  source: Extract<ForkSource, { kind: "team" | "personal" }>,
+): Promise<
+  | { readonly ok: true; readonly files: ReadonlyMap<string, Uint8Array> }
+  | {
+      readonly ok: false;
+      readonly error: "source_not_found" | "source_unavailable" | "blocklisted";
+    }
+> {
+  const copy = await copyLocal(ctx, store, source);
+  if (typeof copy === "string") return { ok: false, error: copy };
+  return { ok: true, files: copy.files };
 }
