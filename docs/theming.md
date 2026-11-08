@@ -86,7 +86,8 @@ the **themed favicon**. Both keep only an allowlist:
 
 - elements: shapes, `g`, `defs`, `use`, `symbol`, `clipPath`, `mask`, `text`, `tspan` (`a` and
   `switch` become `g`); everything else is dropped with its content: `<style>`, gradients,
-  patterns, filters, images, animation, `title`, metadata;
+  patterns, filters, images, animation, `title`, metadata, and a nested `<svg>` (the page
+  wants one root);
 - attributes: geometry and presentation only; no `style`, `class`, `on*`, `color`. A `style`
   attribute's allowlisted declarations become attributes (they win, as in CSS); the rest goes;
 - every `fill` and `stroke` becomes `currentColor` (`none` and `transparent` stay none; `url(#…)`

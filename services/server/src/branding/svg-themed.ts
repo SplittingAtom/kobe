@@ -9,7 +9,7 @@ import { checkSvg, length, type SvgSink } from "./svg.js";
  *
  * - elements: shapes, `g`/`defs`/`use`/`symbol`/`clipPath`/`mask`, `text`/`tspan` (`a` and `switch`
  *   become a plain `g`); anything else (style, gradients, patterns, filters, images, animation,
- *   title, metadata, ...) is dropped with its content;
+ *   title, metadata, a nested `svg`, ...) is dropped with its content;
  * - attributes: geometry and presentation only; no `style`, `class`, `on*` or `color`. `style`
  *   declarations of allowlisted properties become attributes (they win, as in CSS) and the
  *   attribute is dropped;
@@ -163,8 +163,10 @@ class Builder implements SvgSink {
       else if (lower === "id") {
         if (ID.test(value)) kept.set("id", `${this.prefix}${value}`);
       } else if (lower === "href" || lower === "xlink:href") {
-        const id = value.trim().slice(1);
-        if (element === "use" && ID.test(id)) kept.set("href", `#${this.prefix}${id}`);
+        const v = value.trim();
+        if (element === "use" && v.startsWith("#") && ID.test(v.slice(1))) {
+          kept.set("href", `#${this.prefix}${v.slice(1)}`);
+        }
       } else if (GEOMETRY.has(lower)) {
         if (!(element === "svg" && this.stack.length === 0 && ROOT_DROPPED.has(lower))) {
           kept.set(GEOMETRY.get(lower) ?? lower, value);
@@ -177,7 +179,9 @@ class Builder implements SvgSink {
 
   open(element: string, raw: readonly (readonly [string, string])[], selfClosing: boolean): void {
     const isRoot = this.stack.length === 0;
-    const name = this.dropped() ? null : (ELEMENTS.get(element) ?? null);
+    // A nested <svg> is dropped with its content: the web's check wants one root (inline-logo.ts).
+    const nested = element === "svg" && !isRoot;
+    const name = this.dropped() || nested ? null : (ELEMENTS.get(element) ?? null);
     if (name === null) {
       if (!selfClosing) this.stack.push({ name: null, empty: true });
       return;

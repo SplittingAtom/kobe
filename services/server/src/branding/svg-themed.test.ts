@@ -144,6 +144,20 @@ describe("themedLogoSvg (KOBE-562, inline-safe variant)", () => {
     );
   });
 
+  it("drops a nested <svg> with its content, so the page gets one root", () => {
+    expect(
+      inline(doc('<svg viewBox="0 0 1 1"><rect width="1" height="1"/></svg><circle r="1"/>')),
+    ).toBe(`<svg ${NS} viewBox="0 0 10 10" fill="currentColor"><circle r="1"/></svg>`);
+  });
+
+  it("never turns a use href that is not a #fragment into a reference", () => {
+    // §2.1 refuses it first; the builder also keeps href only in the #fragment form.
+    expect(themedLogoSvg(doc('<use href="abc"/>')).ok).toBe(false);
+    expect(inline(doc('<use href="#abc"/><use xlink:href=" #abc "/>'))).toContain(
+      '<use href="#kobe-logo-abc"/><use href="#kobe-logo-abc"/>',
+    );
+  });
+
   it("keeps text inside text elements only, escaped", () => {
     const markup = inline(
       doc(

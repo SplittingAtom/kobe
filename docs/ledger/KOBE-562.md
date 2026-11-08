@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #479)
 - **Branch / worktree:** `kobe-562-themed-logo` in `../Kobe-wt562`
 - **Depends on:** none. **Supersedes KOBE-561** (no shipped monster artwork; Chris 2026-11-07):
   the uploaded logo takes the theme colour instead.
@@ -27,6 +27,8 @@
   per replica by source sha256, 16 entries), so no migration and no stored copy to keep in step;
   its URL carries the variant's own sha256 (a code change to the derivation changes the URL, so the
   immutable cache never serves a stale variant).
+- **Review fixes (coordinator):** a nested `<svg>` is dropped with its content on the server
+  (the web check wants one root, so both sides agree); `use` keeps `href` only in `#fragment` form.
 - **`a`/`switch` become `g`** (content kept, link dropped); `title`/`desc` are dropped (the logo
   is decorative beside the name). Root width/height dropped; viewBox derived from them if missing.
 - **Defence in depth on the web:** `lib/theme/inline-logo.ts` refuses markup that is not the
