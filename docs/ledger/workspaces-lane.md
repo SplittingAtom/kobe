@@ -44,7 +44,23 @@ has to take before tickets are filed (as `docs/specs/agents-roster.md` did for t
 | WS-4 | **Project file versions**: replace in place with history instead of delete + new file                                  | Pairs with WS-3; today an open tab sees a replacement as a deletion                               |
 | WS-5 | **Team workspace browser**: admins see members' workspace usage (size, last sync) and can reclaim                      | Ops; no content access                                                                          |
 
-## Questions for Chris
+## Decisions (Chris, 2026-11-08)
+
+- **Goal: take a copy**, not a shared working space. WS-3 and WS-4 are deferred (nothing in this lane
+  blocks them); WS-5 is deferred.
+- **A reader's copy is read-only and lives in the project**: readers do not copy agent-written files or
+  artifacts into their own workspace themselves (WS-1 dropped). What reaches them is the project's
+  read-only mount under `projects/<name>/`; a reader who wants to work on a copy has the agent copy it
+  from there (the sandbox can read `projects/`).
+- **Add to project (WS-2) is for admins, owners and editors.** Kobe has no "editor" role today (team roles
+  member | builder | team_admin; project roles owner | member; threads are read-only to everyone but
+  the owner), so the first cut grants it to team admins, the project's owners and the thread's owner
+  when they are a member of the project, behind one permission function so an editor role or share scope
+  can be added later. Chris to confirm whether "editors" means builders or a future editor share scope.
+- **Runs beside the roster lane** (a third lane while roster has two; stagger `pnpm verify` runs, see
+  [[kobe-gsd-oom-sessions]]).
+
+## Questions for Chris (answered above; kept for the record)
 
 1. Is the goal "a reader can take a copy" (WS-1/WS-2, small) or "people work in one shared space"
    (WS-3/WS-4, a design change: who writes, how collisions resolve, retention of shared files)?
@@ -56,7 +72,10 @@ has to take before tickets are filed (as `docs/specs/agents-roster.md` did for t
 
 ## Order and lanes
 
-To be set once the questions above are answered and tickets filed.
+1. **KOBE-585** (WS-2) Add to project: server import routes (artifact version, workspace file → project
+   file through `uploadProjectFile`, quotas and audit), the web action with project and folder picker,
+   the gate1 spec (owner adds, member2 sees it read-only under `projects/`), docs. One lane, one PR.
+2. Later, if asked: WS-4 (replace in place with history), WS-3, WS-5.
 
 ## Rules the agents must keep
 
