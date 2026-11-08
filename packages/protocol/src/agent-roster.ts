@@ -25,7 +25,7 @@ export const AGENT_ROSTER_CAP = 200;
 export const AGENT_ROSTER_PROPOSALS_CAP = 200;
 /** Rows per roster page; the tab is paginated by (name, id) above this (§6.8). */
 export const AGENT_ROSTER_PAGE_MAX = 200;
-/** Assign, propose, decide, withdraw: per user per 10 minutes (§6.8). */
+/** Assign, propose, decide, withdraw, transfer, adopt: per user per 10 minutes (§6.8). */
 export const AGENT_ROSTER_WRITE_RATE = { windowMs: 10 * 60_000, max: 60 } as const;
 /** A decision's note (decline reason), in characters. */
 export const AGENT_ROSTER_NOTE_MAX = 500;
@@ -235,6 +235,11 @@ export const AGENT_ROSTER_ERROR_CODES = [
   "agent_not_published",
   "version_rule_not_allowed",
   "rate_limited",
+  // Fork, transfer and adopt (KOBE-568, agent-ownership.ts).
+  "transfer_not_found",
+  "transfer_recipient_invalid",
+  "slug_taken",
+  "limit_reached",
 ] as const;
 export const agentRosterErrorCodeSchema = z.enum(AGENT_ROSTER_ERROR_CODES);
 export type AgentRosterErrorCode = z.infer<typeof agentRosterErrorCodeSchema>;
@@ -255,4 +260,8 @@ export const AGENT_ROSTER_ERROR_STATUS = {
   agent_not_published: 422,
   version_rule_not_allowed: 422,
   rate_limited: 429,
+  transfer_not_found: 404,
+  transfer_recipient_invalid: 422,
+  slug_taken: 409,
+  limit_reached: 409,
 } as const satisfies Record<AgentRosterErrorCode, number>;

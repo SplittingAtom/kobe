@@ -1547,9 +1547,12 @@ export const AUDIT_EVENTS = {
   "agent.created": event("any", {
     ...agentRef,
     // "seed": a gallery agent created from the repo's definitions at install or upgrade (KOBE-87).
-    source: z.enum(["json", "import", "fork", "seed"]),
+    // "adopt": a team or site admin adopted a roster entry's agent (KOBE-568, agents-roster AR10).
+    source: z.enum(["json", "import", "fork", "seed", "adopt"]),
     forkedFrom: id.optional(),
     forkedFromVersion: version.optional(),
+    /** A fork's binding (KOBE-568, AR8): the team a fork of team content stays in, or null. */
+    boundTeamId: id.nullable().optional(),
   }),
   "agent.updated": event("any", {
     ...agentRef,
@@ -1616,6 +1619,29 @@ export const AUDIT_EVENTS = {
   /** Team roster: suspended for that team; site roster: suspended site-wide (§6.5). */
   "agent.roster.suspended": event("any", rosterRef),
   "agent.roster.resumed": event("any", rosterRef),
+  // Transfer and adopt (KOBE-568, agents-roster AR10, §6.9): ids only. A transfer belongs to the
+  // team both members were in when it was offered (`teamId`); adopting into the site is site-only.
+  /** The owner offered their personal agent to another member of the team. */
+  "agent.transfer.requested": event("any", { ...agentRef, fromUserId: id, toUserId: id }),
+  /** The owner cancelled the offer, or the recipient declined it. */
+  "agent.transfer.cancelled": event("any", {
+    ...agentRef,
+    fromUserId: id,
+    toUserId: id,
+    by: z.enum(["owner", "recipient"]),
+  }),
+  /** The recipient accepted: the agent and its roster entries now belong to them. */
+  "agent.transferred": event("any", { ...agentRef, fromUserId: id, toUserId: id }),
+  /**
+   * An admin copied a roster entry's agent (`fromAgentId` at `fromVersion`) into a new team-owned
+   * (team roster) or site-owned gallery (site roster) agent, named by `agentId`; the entry is removed.
+   */
+  "agent.adopted": event("any", {
+    ...agentRef,
+    roster: z.enum(["team", "site"]),
+    fromAgentId: id,
+    fromVersion: version,
+  }),
 
   // ── skill: uploaded bundles (KOBE-78); team skills in the team view, personal site-only ──
   /** A skill bundle was uploaded as a new immutable version (never the bundle's contents). */

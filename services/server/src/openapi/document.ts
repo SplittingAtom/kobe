@@ -1,4 +1,8 @@
-import { agentRosterOpenApiPaths, agentRosterOpenApiSchemas } from "./agent-roster.js";
+import {
+  agentOwnershipOpenApiPaths,
+  agentRosterOpenApiPaths,
+  agentRosterOpenApiSchemas,
+} from "./agent-roster.js";
 import { approvalsOpenApiPaths, approvalsOpenApiSchemas } from "./approvals.js";
 import { brandingOpenApiPaths, brandingOpenApiSchemas } from "./branding.js";
 import { compactOpenApiPaths, compactOpenApiSchemas } from "./compact.js";
@@ -44,6 +48,7 @@ export function openApiDocument(): Record<string, unknown> {
       ...evalCasesOpenApiPaths(),
       ...brandingOpenApiPaths(),
       ...agentRosterOpenApiPaths(),
+      ...agentOwnershipOpenApiPaths(),
     },
     components: {
       schemas: {

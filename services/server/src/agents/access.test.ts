@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { TeamRole } from "@kobe/db";
-import { agentAccess, canCreateAgent, canForkAgent, type AgentRef } from "./access.js";
+import {
+  agentAccess,
+  canCreateAgent,
+  canForkAgent,
+  forkBinding,
+  type AgentRef,
+  type ForkVia,
+} from "./access.js";
 
 const ME = "11111111-1111-4111-8111-111111111111";
 const OTHER = "22222222-2222-4222-8222-222222222222";
@@ -84,17 +91,28 @@ describe("creating and forking", () => {
     expect(canCreateAgent("member", "personal")).toBe(true);
   });
 
-  it("forks gallery agents into the team (builders) or personal scope (anyone)", () => {
-    expect(canForkAgent({ userId: ME, role: "member" }, gallery, "personal")).toBe(true);
-    expect(canForkAgent({ userId: ME, role: "member" }, gallery, "team")).toBe(false);
-    expect(canForkAgent({ userId: ME, role: "builder" }, gallery, "team")).toBe(true);
+  it("forks from where the caller reads the definition (KOBE-568, §5)", () => {
+    const fork = (role: TeamRole, via: ForkVia) => canForkAgent({ userId: ME, role }, via);
+    for (const role of ROLES) {
+      expect(fork(role, "own")).toBe(true);
+      expect(fork(role, "gallery")).toBe(true);
+      expect(fork(role, "site_entry")).toBe(true);
+    }
+    expect(fork("member", "team_owned")).toBe(false);
+    expect(fork("member", "team_entry")).toBe(false);
+    expect(fork("builder", "team_owned")).toBe(true);
+    expect(fork("builder", "team_entry")).toBe(true);
+    expect(fork("team_admin", "team_entry")).toBe(true);
   });
 
-  it("brings a personal agent into the team, but never copies team content out to personal", () => {
-    expect(canForkAgent({ userId: ME, role: "builder" }, personal(), "team")).toBe(true);
-    expect(canForkAgent({ userId: ME, role: "builder" }, team(), "team")).toBe(true);
-    expect(canForkAgent({ userId: ME, role: "team_admin" }, team(ME), "personal")).toBe(false);
-    expect(canForkAgent({ userId: ME, role: "member" }, team(), "team")).toBe(false);
-    expect(canForkAgent({ userId: ME, role: "builder" }, personal(OTHER), "team")).toBe(false);
+  it("binds forks of team content to the team, keeps a bound source's binding (AR8)", () => {
+    const T = "33333333-3333-4333-8333-333333333333";
+    const U = "44444444-4444-4444-8444-444444444444";
+    expect(forkBinding("team_owned", null, T)).toBe(T);
+    expect(forkBinding("team_entry", null, T)).toBe(T);
+    expect(forkBinding("site_entry", null, T)).toBeNull();
+    expect(forkBinding("gallery", null, T)).toBeNull();
+    expect(forkBinding("own", null, T)).toBeNull();
+    expect(forkBinding("own", U, T)).toBe(U);
   });
 });

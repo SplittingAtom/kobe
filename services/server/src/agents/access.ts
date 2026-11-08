@@ -75,13 +75,44 @@ export function canCreateAgent(role: TeamRole, scope: CreatableScope): boolean {
 }
 
 /**
- * Forking copies a definition into a new team or personal agent. Team agents never fork into
- * personal scope: personal agents follow the user into other teams (D9), so that would carry one
- * team's content into another ("teams are walls"). Exporting a file stays a deliberate human act.
+ * How the caller reaches the agent they fork (KOBE-568, agents-roster AR8, §5): their own personal
+ * agent, the active team's own agent, someone else's agent on the active team's roster or on the
+ * site roster, or a gallery agent.
  */
-export function canForkAgent(actor: AgentActor, source: AgentRef, target: CreatableScope): boolean {
-  if (source.scope === "team" && target === "personal") return false;
-  return agentAccess(actor, source).readDefinition && canCreateAgent(actor.role, target);
+export type ForkVia = "own" | "team_owned" | "team_entry" | "site_entry" | "gallery";
+
+/**
+ * Forking copies a definition into a new personal agent of the caller's (AR8): offered to anyone
+ * who may read the definition from where they see it (§5: `build` for team-owned and team-assigned
+ * agents, `use` for site-assigned and gallery agents, and the owner). Teams stay walls through
+ * binding ({@link forkBinding}), not by refusing the copy.
+ */
+export function canForkAgent(actor: AgentActor, via: ForkVia): boolean {
+  if (!teamRoleAllows(actor.role, "team.personal.create")) return false;
+  switch (via) {
+    case "own":
+      return true;
+    case "team_owned":
+    case "team_entry":
+      return teamRoleAllows(actor.role, "team.agents.build");
+    case "site_entry":
+    case "gallery":
+      return teamRoleAllows(actor.role, "team.agents.use");
+  }
+}
+
+/**
+ * The team a fork is bound to (AR8): a fork of a bound agent keeps its binding (permanent, a copy
+ * of a copy stays bound); a fork of team content (a team-owned agent or a team-assigned entry) is
+ * bound to that team; gallery, site-assigned and unbound personal agents fork unbound.
+ */
+export function forkBinding(
+  via: ForkVia,
+  sourceBoundTeamId: string | null,
+  activeTeamId: string,
+): string | null {
+  if (sourceBoundTeamId !== null) return sourceBoundTeamId;
+  return via === "team_owned" || via === "team_entry" ? activeTeamId : null;
 }
 
 /**

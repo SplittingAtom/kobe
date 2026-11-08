@@ -436,13 +436,14 @@ describe("team events", () => {
     expect(rows.map((r) => [r.action, r.team_id, r.target.source ?? null])).toEqual([
       ["agent.created", finance, "json"],
       ["agent.created", null, "import"],
-      ["agent.created", finance, "fork"],
+      // A fork is a personal agent (KOBE-568): site-level, bound to the team.
+      ["agent.created", null, "fork"],
       ["agent.updated", finance, "json"],
       ["agent.status_changed", finance, null],
       ["agent.exported", finance, null],
       ["agent.deleted", finance, null],
     ]);
-    expect(rows[2]?.target.forkedFrom).toBe(id);
+    expect(rows[2]?.target).toMatchObject({ forkedFrom: id, boundTeamId: finance });
     expect(rows[3]?.target.revision).toBe(2);
     expect(JSON.stringify(rows)).not.toContain(PROMPT);
   });

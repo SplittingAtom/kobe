@@ -1,19 +1,27 @@
 import { Hono, type Context } from "hono";
-import { isDangerousMode, slugFromName, type AgentDefinition } from "@kobe/agent-file";
+import {
+  agentWarnings,
+  isDangerousMode,
+  slugFromName,
+  type AgentDefinition,
+} from "@kobe/agent-file";
+import { AGENT_FORK_SCOPE_IGNORED } from "@kobe/protocol";
 import {
   agentAccess,
   canCreateAgent,
   canForkAgent,
+  forkBinding,
   type AgentActor,
   type AgentScope,
 } from "../agents/access.js";
 import {
   agentBodyLimit,
-  agentDefinitionOf,
+  agentDetail,
   agentResponse,
   agentSummary,
   archivedConflict,
   createError,
+  etag,
   exportResponse,
   forbidden,
   invalidRequest,
@@ -32,6 +40,7 @@ import {
 } from "../agents/schemas.js";
 import {
   createAgent,
+  findAgent,
   findVisibleAgent,
   listAgents,
   setAgentStatus,
@@ -49,8 +58,11 @@ import { inventoryQuerySchema, listInventory, setInventoryStatus } from "../agen
 import { listRunnableAgents, runnableQuerySchema } from "../agents/runnable.js";
 import { mountVersionRoutes } from "../agents/version-routes.js";
 import { AgentRosteredError, refuseIfRostered } from "../agents/roster.js";
+import { pendingTransfer } from "../agents/roster-transfer.js";
+import { findForkSource, forkDefinition } from "../agents/fork.js";
 import { mountAgentRosterRoutes, rosterError } from "./agent-roster.js";
-import { deleteOrArchiveAgent, getVersion } from "../agents/versions.js";
+import { mountAgentTransferRoutes } from "./agent-transfer.js";
+import { deleteOrArchiveAgent } from "../agents/versions.js";
 import { recordAuditAfter } from "../audit/record.js";
 import { DANGEROUS_FORBIDDEN, mayUseDangerousMode } from "../policy/dangerous-mode.js";
 import { teamRoleAllows } from "../authz/permissions.js";
@@ -59,6 +71,15 @@ import type { ServerDeps } from "../deps.js";
 import { parseBody } from "../teams/http.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
+
+/** What the recipient of a transfer may do with the offered agent before accepting: look. */
+const NO_ACCESS = {
+  see: true,
+  readDefinition: false,
+  edit: false,
+  publish: false,
+  setStatus: false,
+};
 
 const actorOf = (c: Ctx): AgentActor => ({ userId: c.get("user").id, role: c.get("team").role });
 
@@ -141,6 +162,8 @@ export function agentRoutes(
 
   // Rosters (KOBE-566): `/roster` before "/:id"; assignments under "/:id/assignments".
   mountAgentRosterRoutes(app, deps);
+  // Transfers (KOBE-568): `/transfers` before "/:id"; offers under "/:id/transfer".
+  mountAgentTransferRoutes(app, deps);
 
   // Published Orbit scores of gallery agents (KOBE-94): before "/:id".
   app.get("/gallery-scores", async (c) => {
@@ -211,11 +234,32 @@ export function agentRoutes(
 
   app.get("/:id", async (c) => {
     const agent = await visible(c);
-    if (!agent) return notFound(c);
+    if (!agent) return offeredAgent(c);
     const access = agentAccess(actorOf(c), agent);
     if (!access.readDefinition) return c.json({ agent: agentSummary(agent, access) });
-    return agentResponse(c, agent, access);
+    if (agent.scope !== "personal") return agentResponse(c, agent, access);
+    // The owner sees a pending transfer of their agent (KOBE-568, AR10).
+    c.header("ETag", etag(agent));
+    return c.json({
+      agent: agentDetail(agent, access),
+      warnings: agentWarnings(agent.frontmatter),
+      transfer: await pendingTransfer(db, agent.id),
+    });
   });
+
+  /** The recipient of a pending transfer reads the offered agent's summary with the offer. */
+  async function offeredAgent(c: Ctx): Promise<Response> {
+    const id = agentIdSchema.safeParse(c.req.param("id"));
+    const transfer = id.success ? await pendingTransfer(db, id.data) : null;
+    if (!transfer || transfer.toUserId !== c.get("user").id) return notFound(c);
+    const offered = await findAgent(
+      db,
+      { scope: "personal", ownerUserId: transfer.fromUserId },
+      transfer.agentId,
+    );
+    if (!offered) return notFound(c);
+    return c.json({ agent: agentSummary(offered, NO_ACCESS), transfer });
+  }
 
   app.get("/:id/export", async (c) => {
     const agent = await visible(c);
@@ -286,30 +330,49 @@ export function agentRoutes(
     return removed.kind === "deleted" ? c.body(null, 204) : agentResponse(c, removed.agent, access);
   });
 
+  /**
+   * Fork (KOBE-568, agents-roster AR8, §6.7): always a personal agent of the caller's, from the
+   * source's published version (or the draft of their own unpublished agent), with fork provenance
+   * and, for team content, bound to that team.
+   */
   app.post("/:id/fork", async (c) => {
-    const source = await visible(c);
-    if (!source) return notFound(c);
+    const id = agentIdSchema.safeParse(c.req.param("id"));
+    if (!id.success) return notFound(c);
     const body = await parseBody(c, forkSchema);
-    if (!body) return invalidRequest(c, "Give scope (team or personal) and optionally a slug.");
-    if (!canForkAgent(actorOf(c), source, body.scope)) {
-      return forbidden(c, "You can't copy this agent there.");
-    }
-    // A gallery agent forks from what it published, not from the curators' work in progress.
-    const published =
-      source.scope === "gallery" && source.currentVersion !== null
-        ? await getVersion(db, { scope: "gallery" }, source.id, source.currentVersion)
-        : null;
-    const result = await createAgent(db, locationFor(c, body.scope), {
-      definition: forkable(c, published?.definition ?? agentDefinitionOf(source)),
+    if (!body) return invalidRequest(c, "Give optionally a slug.");
+    const actor = actorOf(c);
+    const caller = { teamId: c.get("team").id, userId: actor.userId };
+    const source = await findForkSource(db, caller, id.data);
+    if (!source) return notFound(c);
+    if (!canForkAgent(actor, source.via)) return forbidden(c, "You can't copy this agent.");
+    const copied = await forkDefinition(db, source);
+    if (!copied)
+      return rosterError(c, "agent_not_published", "This agent has no published version yet.");
+    const boundTeamId = forkBinding(source.via, source.boundTeamId, caller.teamId);
+    const result = await createAgent(db, locationFor(c, "personal"), {
+      definition: forkable(c, copied.definition),
       slug: body.slug,
-      baseSlug: source.slug,
-      ownerUserId: c.get("user").id,
+      baseSlug: source.agent.slug,
+      ownerUserId: actor.userId,
       source: "fork",
-      forkedFrom: source.id,
-      forkedFromVersion: published?.version ?? null,
+      forkedFrom: source.agent.id,
+      forkedFromVersion: copied.version,
+      boundTeamId,
     });
     if (!result.ok) return createError(c, result.error);
-    return agentResponse(c, result.value, agentAccess(actorOf(c), result.value), 201);
+    const fork = result.value;
+    c.header("ETag", etag(fork));
+    return c.json(
+      {
+        agent: agentDetail(fork, agentAccess(actor, fork)),
+        boundTeamId,
+        warnings: [
+          ...agentWarnings(fork.frontmatter),
+          ...(body.scope === undefined ? [] : [AGENT_FORK_SCOPE_IGNORED]),
+        ],
+      },
+      201,
+    );
   });
 
   app.put("/:id/status", async (c) => {

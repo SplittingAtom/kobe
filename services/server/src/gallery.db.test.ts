@@ -321,14 +321,14 @@ describe("visible and usable in every team", () => {
   });
 });
 
-describe("fork to team (ac-2)", () => {
-  it("copies the published version into an editable team agent, with provenance", async () => {
+describe("fork (ac-2; into Personal since KOBE-568)", () => {
+  it("copies the published version into an editable personal agent, with provenance", async () => {
     const id = await galleryId();
     const res = await as.bob.post(`/v1/agents/${id}/fork`, { scope: "team" });
     expect(res.status, json(res)).toBe(201);
     const fork = res.json.agent;
     expect(fork).toMatchObject({
-      scope: "team",
+      scope: "personal",
       slug: "fixture-analyst",
       ownerUserId: ids.bob,
       currentVersion: null,
@@ -342,8 +342,8 @@ describe("fork to team (ac-2)", () => {
     const created = await audited("agent.created", fork.id);
     expect(created).toMatchObject([
       {
-        team_id: finance,
-        target: { source: "fork", forkedFrom: id, forkedFromVersion: 2 },
+        team_id: null,
+        target: { source: "fork", forkedFrom: id, forkedFromVersion: 2, boundTeamId: null },
       },
     ]);
     const edited = await as.bob.put(
@@ -360,14 +360,15 @@ describe("fork to team (ac-2)", () => {
       name: "Fixture Analyst",
       currentVersion: 2,
     });
-    // The fork stays in its team.
+    // The fork is Bob's own.
     expect((await as.erin.get(`/v1/agents/${fork.id}`)).status).toBe(404);
   });
 
-  it("needs team.agents.build: members and other roles' refusals are 403", async () => {
+  it("is open to every member (team.agents.use)", async () => {
     const id = await galleryId();
     const member = await as.carol.post(`/v1/agents/${id}/fork`, { scope: "team" });
-    expect(member).toMatchObject({ status: 403, json: { code: "forbidden" } });
+    expect(member.status, json(member)).toBe(201);
+    expect(member.json.agent).toMatchObject({ scope: "personal", ownerUserId: ids.carol });
     const other = await as.erin.post(`/v1/agents/${id}/fork`, { scope: "team" });
     expect(other.status, json(other)).toBe(201);
     expect(other.json.agent.forkedFrom).toMatchObject({ agentId: id });

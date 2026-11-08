@@ -67,7 +67,7 @@ interface PersonalAgent {
 }
 
 /** Locks the personal agent against deletion for this transaction (`FOR SHARE`). */
-async function lockPersonalAgent(tx: KobeTx, id: string): Promise<PersonalAgent | null> {
+export async function lockPersonalAgent(tx: KobeTx, id: string): Promise<PersonalAgent | null> {
   const [row] = await tx
     .select({
       id: siteAgents.id,
@@ -84,7 +84,11 @@ async function lockPersonalAgent(tx: KobeTx, id: string): Promise<PersonalAgent 
 }
 
 /** Serializes writes to one roster, so caps and re-assignments can't race. */
-async function lockRoster(tx: KobeTx, target: RosterTarget, teamId: string | null): Promise<void> {
+export async function lockRoster(
+  tx: KobeTx,
+  target: RosterTarget,
+  teamId: string | null,
+): Promise<void> {
   const key = target === "team" ? `agent-roster:team:${teamOf(teamId)}` : "agent-roster:site";
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
 }
@@ -161,7 +165,7 @@ type EntryChange = Partial<{
   removedAt: Date | null;
 }>;
 
-async function writeEntry(
+export async function writeEntry(
   tx: KobeTx,
   target: RosterTarget,
   rosterTeam: string | null,
@@ -212,7 +216,7 @@ type RosterAction =
   | "suspended"
   | "resumed";
 
-function audit(
+export function audit(
   tx: KobeTx,
   action: RosterAction,
   target: RosterTarget,
