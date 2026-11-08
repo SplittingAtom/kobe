@@ -57,9 +57,16 @@ level)` in protocol (`THINKING_EFFORT_BUDGETS` off 0 / low 2000 / medium 8000 / 
   ledger), and a "spent / budget" bar under the pills shows the latest run's reasoning against the
   budget of the level it ran with. Deployed as `local-f56dd50b116a` (rollback `local-40f2d51a1609`,
   Chris's KOBE-564 build; `local-cab5871aa7db` pruned); `thinking` spec passed on gate1 and a
-  one-off check showed "about 19 of 8k thinking tokens (estimated)" after a Medium run. Open:
-  KOBE-562 (themed logo through Appearance) and the 820–871 px artifact column question in the
-  KOBE-554 ledger. CI note: the `publish` workflow fails on
+  one-off check showed "about 19 of 8k thinking tokens (estimated)" after a Medium run. KOBE-562 (PR #479, main
+  0f2efcea; supersedes KOBE-561): "Logo takes the theme colour" (`branding.logo_theme_color`,
+  default off) serves an inline-safe variant of an SVG logo (rebuilt from the §2.1 reader's parse
+  through an element/attribute allowlist, paints to `currentColor`, ids prefixed, nested `svg`
+  dropped; by its own hash at `…/assets/logo?inline=1`) that the web inlines after a second check,
+  and an SVG favicon in `currentColor` with its own light/dark style; raster logos and the `<img>`
+  path unchanged; the dark logo is not used while the setting is on. Deployed as
+  `local-0f2efcea3bbe` (rollback `local-f56dd50b116a`; `local-40f2d51a1609` pruned), reconcile
+  failed:0, branding unchanged (setting off). Open: the ac-6 light/dark check once Chris turns the
+  setting on with his logo, and the 820–871 px artifact column question in the KOBE-554 ledger. CI note: the `publish` workflow fails on
   main since 2026-11-07 on Trivy CVE-2026-109869 (undici) in the sandbox image; the Files-rail
   delete-cancel unit test flaked once in the merge queue (fixed here: wait for the dialog); the
   executor shard's idle-sandbox hibernation checks fail on slow hosted runners (KOBE-563, two queue
