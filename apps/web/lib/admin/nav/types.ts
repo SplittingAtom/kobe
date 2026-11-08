@@ -24,6 +24,8 @@ export type TicketId = `KOBE-${number}`;
 
 export type SectionStatus =
   | { readonly kind: "ready" }
+  /** Its page moved out of the console (KOBE-570): the entry links there; no console page. */
+  | { readonly kind: "moved"; readonly href: string }
   | {
       readonly kind: "placeholder";
       readonly ticket: TicketId;
@@ -115,6 +117,11 @@ export function onHold(ticket: OpenTicket, reason: string): SectionStatus {
 }
 
 export const READY: SectionStatus = { kind: "ready" };
+
+/** A section whose list now lives outside the console, at `href` (an app page). */
+export function movedTo(href: string): SectionStatus {
+  return { kind: "moved", href };
+}
 
 export interface CurrentUser {
   readonly id: string;

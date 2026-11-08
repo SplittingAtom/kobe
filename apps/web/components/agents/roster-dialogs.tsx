@@ -16,6 +16,87 @@ export function pinChoices(currentVersion: number | null): number[] {
   return Array.from({ length: currentVersion }, (_, i) => currentVersion - i);
 }
 
+const ruleOf = (choice: string): AgentVersionRuleInput =>
+  choice === LATEST ? LATEST : Number(choice);
+
+/** "Latest published version" or "Pin to vN", newest first (AR5). */
+function VersionRuleField({
+  row,
+  value,
+  onChange,
+}: {
+  readonly row: AgentRosterRow;
+  readonly value: string;
+  readonly onChange: (choice: string) => void;
+}) {
+  return (
+    <Field label="Version rule">
+      <Select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value={LATEST}>
+          {row.currentVersion === null
+            ? "Latest published version"
+            : `Latest published version (now v${row.currentVersion})`}
+        </option>
+        {pinChoices(row.currentVersion).map((v) => (
+          <option key={v} value={String(v)}>
+            {`Pin to v${v}`}
+          </option>
+        ))}
+      </Select>
+    </Field>
+  );
+}
+
+/**
+ * Approve a proposal (§6.4): it follows the latest published version unless the admin pins one.
+ */
+export function ApproveDialog({
+  row,
+  rosterName,
+  returnFocus,
+  pending,
+  onClose,
+  onApprove,
+}: {
+  readonly row: AgentRosterRow;
+  readonly rosterName: string;
+  readonly returnFocus: HTMLElement | null;
+  readonly pending: boolean;
+  readonly onClose: () => void;
+  readonly onApprove: (rule: AgentVersionRuleInput) => Promise<void>;
+}) {
+  const [choice, setChoice] = useState<string>(LATEST);
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      title={`Approve ${row.name} for ${rosterName}?`}
+      description="Members can then start it here. It follows each new publish unless you pin a version."
+      returnFocus={() => returnFocus}
+    >
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void onApprove(ruleOf(choice));
+        }}
+      >
+        <VersionRuleField row={row} value={choice} onChange={setChoice} />
+        <div className="flex flex-wrap justify-end gap-2">
+          <DialogClose asChild>
+            <Button type="button">Cancel</Button>
+          </DialogClose>
+          <Button type="submit" variant="primary" loading={pending}>
+            Approve
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
 /**
  * Pin a roster entry to a published version, or let it follow the latest (AR5, version rule).
  * Opened from a row's "Pin a version…" by the roster's admins.
@@ -37,7 +118,6 @@ export function PinDialog({
 }) {
   const pinned = row.entry?.versionRule === "pinned" ? row.entry.pinnedVersion : null;
   const [choice, setChoice] = useState<string>(pinned === null ? LATEST : String(pinned));
-  const versions = pinChoices(row.currentVersion);
   return (
     <Dialog
       open
@@ -52,23 +132,10 @@ export function PinDialog({
         className="flex flex-col gap-4"
         onSubmit={(e) => {
           e.preventDefault();
-          void onPin(choice === LATEST ? LATEST : Number(choice));
+          void onPin(ruleOf(choice));
         }}
       >
-        <Field label="Version rule">
-          <Select value={choice} onChange={(e) => setChoice(e.target.value)}>
-            <option value={LATEST}>
-              {row.currentVersion === null
-                ? "Latest published version"
-                : `Latest published version (now v${row.currentVersion})`}
-            </option>
-            {versions.map((v) => (
-              <option key={v} value={String(v)}>
-                {`Pin to v${v}`}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        <VersionRuleField row={row} value={choice} onChange={setChoice} />
         <div className="flex flex-wrap justify-end gap-2">
           <DialogClose asChild>
             <Button type="button">Cancel</Button>

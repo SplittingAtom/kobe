@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { timestampSchema, uuidSchema } from "./common.js";
+import { schedulePausedBySchema } from "./schedules.js";
 
 /**
  * Agent rosters contract (KOBE-566, spec `docs/specs/agents-roster.md` AR1-AR7, AR16, §5, §6.4,
@@ -141,6 +142,39 @@ export const AGENT_ROSTER_UNAVAILABLE_REASONS = ["owner_left", "owner_deactivate
 export const agentRosterUnavailableReasonSchema = z.enum(AGENT_ROSTER_UNAVAILABLE_REASONS);
 export type AgentRosterUnavailableReason = z.infer<typeof agentRosterUnavailableReasonSchema>;
 
+/** One of the active team's schedules of the agent, as the team inventory shows it (KOBE-180). */
+export const agentRosterScheduleSchema = z.strictObject({
+  scheduleId: uuidSchema,
+  ownerUserId: uuidSchema,
+  ownerName: z.string(),
+  status: z.enum(["active", "paused"]),
+  /** Why it is paused when its owner did not pause it. */
+  pausedBy: schedulePausedBySchema.nullable(),
+  nextDueAt: timestampSchema.nullable(),
+});
+export type AgentRosterSchedule = z.infer<typeof agentRosterScheduleSchema>;
+
+/**
+ * The team inventory's columns for one agent in the active team (KOBE-86, KOBE-570, AR12): runs of
+ * the team's threads, the last one, tokens, the team's schedules and the latest Orbit score. Only
+ * team admins get it (Team and Site tabs).
+ */
+export const agentRosterUsageSchema = z.strictObject({
+  runCount: z.number().int().nonnegative(),
+  lastRunAt: timestampSchema.nullable(),
+  /** Input plus output tokens of the team's model calls; no money. */
+  tokens: z.number().int().nonnegative(),
+  schedules: z.array(agentRosterScheduleSchema),
+  orbitScore: z.strictObject({
+    status: z.enum(["none", "evaluating", "passed", "blocked", "errored"]),
+    attackSuccessRate: z.number().nullable(),
+    at: timestampSchema.nullable(),
+  }),
+  /** The caller may read the definition, which Export to Orbit needs (KOBE-91). */
+  canExport: z.boolean(),
+});
+export type AgentRosterUsage = z.infer<typeof agentRosterUsageSchema>;
+
 export const agentRosterRowSchema = z.strictObject({
   agentId: uuidSchema,
   kind: agentRosterKindSchema,
@@ -170,6 +204,8 @@ export const agentRosterRowSchema = z.strictObject({
   archivedAt: timestampSchema.nullable(),
   updatedAt: timestampSchema,
   actions: agentRosterActionsSchema,
+  /** Team admins on the Team and Site tabs: the inventory's usage in the active team (AR12). */
+  usage: agentRosterUsageSchema.optional(),
 });
 export type AgentRosterRow = z.infer<typeof agentRosterRowSchema>;
 

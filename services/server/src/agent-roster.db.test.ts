@@ -582,4 +582,41 @@ describe("the roster read (AR1, AR2, §6.8)", () => {
       assignTeam: "direct",
     });
   });
+
+  it("gives team admins the inventory's usage on Team and Site rows, nobody else (KOBE-570, AR12)", async () => {
+    const created = await as.bob.post("/v1/agents", {
+      scope: "team",
+      frontmatter: { name: "Usage Team" },
+      prompt: "x",
+    });
+    expect(created.status).toBe(201);
+    const teamAgent = created.json.agent.id as string;
+    await as.bob.request("POST", `/v1/agents/${teamAgent}/publish`, {}, ANY);
+    const lent = await personal("bob", "Usage Lent");
+    expect((await assign("bob", lent, "team")).status).toBe(201);
+    const thread = await as.bob.post("/v1/threads", { agent_id: teamAgent });
+    expect(thread.status, JSON.stringify(thread.json)).toBe(201);
+    await sql(
+      `INSERT INTO runs (team_id, thread_id, trigger) VALUES ($1, $2, 'user'), ($1, $2, 'user')`,
+      [finance, thread.json.thread_id],
+    );
+    const usage = (rows: Row[], id: string) =>
+      (rowOf(rows, id) as (Row & { usage?: Record<string, unknown> }) | undefined)?.usage;
+    const team = await roster("alice", "team");
+    expect(usage(team, teamAgent)).toMatchObject({
+      runCount: 2,
+      schedules: [],
+      orbitScore: { status: "none" },
+      canExport: true,
+    });
+    expect(usage(team, teamAgent)?.lastRunAt).toEqual(expect.any(String));
+    // Someone else's personal agent: usage, but not the admin's to export (as the inventory).
+    expect(usage(team, lent)).toMatchObject({ runCount: 0, tokens: 0, canExport: false });
+    const site = await roster("alice", "site");
+    expect(site.every((r) => usage(site, r.agentId) !== undefined)).toBe(true);
+    // Builders, members and the Personal tab never carry it.
+    expect((await roster("bob", "team")).some((r) => usage([r], r.agentId))).toBe(false);
+    expect((await roster("carol", "site")).some((r) => usage([r], r.agentId))).toBe(false);
+    expect((await roster("alice", "personal")).some((r) => usage([r], r.agentId))).toBe(false);
+  });
 });

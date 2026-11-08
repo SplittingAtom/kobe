@@ -99,5 +99,27 @@ describe("agent roster contract (KOBE-566)", () => {
       },
     };
     expect(agentRosterRowSchema.safeParse(row).success).toBe(true);
+    // KOBE-570: team admins get the inventory's usage on the row (additive, optional).
+    const usage = {
+      runCount: 4,
+      lastRunAt: NOW,
+      tokens: 1200,
+      schedules: [
+        {
+          scheduleId: ID,
+          ownerUserId: ID,
+          ownerName: "Ann",
+          status: "paused",
+          pausedBy: "agent_unavailable",
+          nextDueAt: null,
+        },
+      ],
+      orbitScore: { status: "passed", attackSuccessRate: 0.1, at: NOW },
+      canExport: true,
+    };
+    expect(agentRosterRowSchema.safeParse({ ...row, usage }).success).toBe(true);
+    expect(
+      agentRosterRowSchema.safeParse({ ...row, usage: { ...usage, runCount: -1 } }).success,
+    ).toBe(false);
   });
 });

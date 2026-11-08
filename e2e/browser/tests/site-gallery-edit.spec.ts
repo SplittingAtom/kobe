@@ -4,22 +4,24 @@ import { panelOf } from "./support/panel.js";
 
 /**
  * KOBE-494: a site admin (KOBE_USER, the gate1 Owner) edits a gallery agent in the Site Console.
- * Gallery agents → Edit opens the two-tab agent creator; the spec adds a marker to the system
+ * The Agents page's Site tab (the gallery list since KOBE-570) → Edit opens the two-tab agent creator; the spec adds a marker to the system
  * prompt, saves the draft (the agent is now Customized), publishes a new version, sees the
  * Customized badge in the list, and checks that a fork made now copies the new version. At the end
  * it deletes the fork and resets the agent to the repository definition (asked first), which
  * publishes the repository definition again. Spends no model tokens. Run on gate1:
  * `npx playwright test site-gallery-edit`.
  */
-const GALLERY = "/admin/site/gallery";
+/** The gallery list: the Agents page's Site tab (KOBE-570); the editor stays in the console. */
+const GALLERY = "/agents?tab=site";
+const EDITOR = "/admin/site/gallery";
 const AGENT = process.env["KOBE_GALLERY_AGENT"] ?? "Kobe";
 const TEAM_KEY = "kobe.lastTeamId";
 
 async function openGallery(page: Page): Promise<void> {
   await page.goto(GALLERY);
-  await expect(
-    panelOf(page).getByRole("heading", { level: 1, name: "Gallery agents" }),
-  ).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  await expect(panelOf(page).getByRole("heading", { level: 1, name: "Agents" })).toBeVisible({
+    timeout: SHELL_TIMEOUT_MS,
+  });
 }
 
 /** Forks the gallery agent into a personal agent through the API; returns its id and prompt. */
@@ -87,7 +89,9 @@ test("a site admin edits a gallery agent, publishes it and resets it to the repo
 
     // The list shows it Customized.
     await openGallery(page);
-    const row = panel.getByRole("row").filter({ hasText: AGENT });
+    const row = panel
+      .getByRole("row")
+      .filter({ has: page.getByRole("rowheader", { name: new RegExp(`^${AGENT}\\b`) }) });
     await expect(row.getByText("Customized", { exact: true })).toBeVisible();
 
     // A team forking it now gets the new version.
@@ -97,7 +101,7 @@ test("a site admin edits a gallery agent, publishes it and resets it to the repo
   } finally {
     if (forkId) await deleteAgent(page, forkId);
     // Restore: Reset to repository, asked first, from the editor.
-    await page.goto(`${GALLERY}/${encodeURIComponent(agentId)}`);
+    await page.goto(`${EDITOR}/${encodeURIComponent(agentId)}`);
     const reset = panel.getByRole("button", { name: `Reset to repository (${AGENT})` });
     await expect(reset).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
     await reset.click();

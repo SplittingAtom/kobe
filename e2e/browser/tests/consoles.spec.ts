@@ -31,7 +31,9 @@ const FIXED_PAGES = [
   "/admin/site/audit",
   "/admin/site/backup",
   "/admin/site/appearance",
-  "/admin/team/inventory",
+  // The Inventory and the Gallery list are the Agents page's Team and Site tabs (KOBE-570).
+  "/agents?tab=team",
+  "/agents?tab=site",
   "/admin",
   "/admin/site",
   "/admin/team",
@@ -55,7 +57,7 @@ const CONSOLE_NAVS = [
 /** Detail pages: the first link on `list` whose path matches `link`, shot as `name`. */
 const DETAILS = [
   {
-    list: "/admin/team/agents",
+    list: "/agents?tab=team",
     link: /^\/admin\/team\/agents\/(?!new$)[^/]+$/,
     name: "team-agent",
   },
@@ -86,7 +88,7 @@ const MOBILE_PAGES = [
   "/admin/team/members",
   // Wide tables and the audit filters (KOBE-291).
   "/admin/site/audit",
-  "/admin/team/inventory",
+  "/agents?tab=team",
   "/agents",
 ] as const;
 

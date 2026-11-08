@@ -1,41 +1,23 @@
 // @vitest-environment happy-dom
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { SearchParamsContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
-import { act, useState } from "react";
+import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forbidNativeConfirm, renderTeam, stubApi, TEAM } from "../admin/testing";
-import { AgentsPage } from "./agents-page";
 import { entry, page, row } from "./roster-fixtures";
-
-/** Navigates the page's `?tab=` as a link or Back would (Next's search params, not a reload). */
-let goTo: (search: string) => void = () => {};
-
-/** The page with Next's search params, as the app router provides them. */
-function Page({ search = "" }: { readonly search?: string }) {
-  const [current, setCurrent] = useState(search);
-  goTo = setCurrent;
-  return (
-    <SearchParamsContext.Provider value={new URLSearchParams(current)}>
-      <AgentsPage />
-    </SearchParamsContext.Provider>
-  );
-}
-
-const ROSTER = (tab: string) => `GET /v1/agents/roster?tab=${tab}`;
-
-const MEMBER = { role: "member", permissions: ["team.agents.use"] } as const;
-const BUILDER = { role: "builder", permissions: ["team.agents.use", "team.agents.build"] } as const;
-const TEAM_ADMIN = {
-  role: "team_admin",
-  permissions: [
-    "team.agents.use",
-    "team.agents.build",
-    "team.agents.manage",
-    "team.agents.suspend",
-  ],
-} as const;
-const SITE_ADMIN = { ...MEMBER, siteAdmin: true } as const;
+import {
+  bodyOf,
+  BUILDER,
+  goTo,
+  MEMBER,
+  Page,
+  ROSTER,
+  rowAction,
+  rowActions,
+  rowOf,
+  SITE_ADMIN,
+  TEAM_ADMIN,
+} from "./roster-testing";
 
 beforeEach(() => {
   forbidNativeConfirm();
@@ -46,37 +28,6 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
-
-/** The labels in the row's ⋯ menu (none when the row offers no action), closing it again. */
-async function rowActions(agent: string): Promise<string[]> {
-  await screen.findByRole("rowheader", { name: new RegExp(agent) });
-  const button = screen.queryByRole("button", { name: `Actions for ${agent}` });
-  if (!button) return [];
-  await userEvent.click(button);
-  const menu = await screen.findByRole("menu");
-  const labels = within(menu)
-    .getAllByRole("menuitem")
-    .map((i) => i.textContent ?? "");
-  await userEvent.keyboard("{Escape}");
-  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
-  return labels;
-}
-
-async function rowAction(agent: string, action: string) {
-  await userEvent.click(await screen.findByRole("button", { name: `Actions for ${agent}` }));
-  await userEvent.click(await screen.findByRole("menuitem", { name: action }));
-}
-
-const rowOf = async (agent: string) =>
-  must((await screen.findByRole("rowheader", { name: new RegExp(agent) })).closest("tr"));
-
-function must<T>(v: T | null | undefined): T {
-  if (v === null || v === undefined) throw new Error("missing");
-  return v;
-}
-
-const bodyOf = (calls: ReturnType<typeof stubApi>, method: string, url: string) =>
-  JSON.parse(String(must(calls.find((c) => c.method === method && c.url === url)).body));
 
 // The rows each role gets from the server (KOBE-566 `actions`, spec §5).
 const OWN_DRAFT = row({
@@ -263,7 +214,7 @@ describe("Agents page as a team admin (ac-1)", () => {
       "Remove from Finance",
     ]);
     expect(within(await rowOf("Planner")).getByText("Proposed")).toBeTruthy();
-    expect(await rowActions("Planner")).toEqual(["Approve", "Decline…"]);
+    expect(await rowActions("Planner")).toEqual(["Approve…", "Decline…"]);
     expect(within(await rowOf("Triage")).getByText("Suspended here")).toBeTruthy();
     expect(await rowActions("Triage")).toEqual(["Resume here"]);
     expect(
@@ -447,7 +398,9 @@ describe("Agents page flows (ac-2)", () => {
       "PUT /v1/site/agent-roster/l-1": [200, { entry: entry({ agentId: "l-1" }) }],
     });
     renderTeam(<Page search="tab=site" />, SITE_ADMIN);
-    await rowAction("Writer", "Approve");
+    await rowAction("Writer", "Approve…");
+    const approve = await screen.findByRole("dialog", { name: "Approve Writer for the site?" });
+    await userEvent.click(within(approve).getByRole("button", { name: "Approve" }));
     expect(await screen.findByText("Approved Writer for the site.")).toBeTruthy();
     expect(bodyOf(calls, "PUT", "/v1/site/agent-roster/l-1")).toEqual({ state: "active" });
     await rowAction("Writer", "Decline…");

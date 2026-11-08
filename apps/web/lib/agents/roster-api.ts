@@ -4,6 +4,7 @@
  * rows say what the viewer may do (`row.actions`); the server checks every write again.
  */
 import type {
+  AgentAdoptResponse,
   AgentRosterEntryResponse,
   AgentRosterPage,
   AgentRosterTab,
@@ -81,6 +82,21 @@ export function forkToPersonal(teamId: string, agentId: string): Promise<ApiResu
   return apiRequest(`/v1/agents/${enc(agentId)}/fork`, {
     method: "POST",
     json: { scope: "personal" },
+    teamId,
+  });
+}
+
+/**
+ * A roster admin adopts an entry (KOBE-568, AR10): the published version becomes a team-owned
+ * agent (team roster) or a site-owned gallery agent (site roster); the entry is removed.
+ */
+export function adoptRosterEntry(
+  teamId: string,
+  roster: AgentRosterTarget,
+  agentId: string,
+): Promise<ApiResult<AgentAdoptResponse>> {
+  return apiRequest(`/v1/${roster}/agent-roster/${enc(agentId)}/adopt`, {
+    method: "POST",
     teamId,
   });
 }

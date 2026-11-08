@@ -5,7 +5,8 @@ import { panelOf } from "./support/panel.js";
 
 /**
  * The console sections that were "coming soon" although their tickets were done (KOBE-291): the
- * Site audit log, Site backup and restore, and the Team inventory. Read-only: it applies a filter
+ * Site audit log, Site backup and restore, and the Team inventory (the Agents page's Team tab
+ * since KOBE-570). Read-only: it applies a filter
  * and clears it, nothing else. `KOBE_USER` must be the site Owner (or an Admin) and a team admin
  * of the active team. Spends no tokens. Run on gate1: `npx playwright test console-sections`.
  */
@@ -73,24 +74,29 @@ test("Site backup and restore: status and steps", async ({ page }) => {
   await expect(panelOf(page).getByLabel("Restore a backup")).toContainText("kobe restore --from");
 });
 
-test("Team inventory: agents, skills and connectors", async ({ page }) => {
-  await open(page, "/admin/team/inventory", "Inventory");
-  for (const name of ["Agents", "Skills", "Connectors"]) {
-    await expect(panelOf(page).getByRole("region", { name })).toBeVisible();
-  }
-  const agents = panelOf(page).getByRole("region", { name: "Agents" });
+// The Inventory folded into the Agents page's Team tab (KOBE-570, AR12): its columns for team admins.
+const TEAM_TABLE = /^Agents of /;
+
+test("Team tab: the Inventory's columns for team admins", async ({ page }) => {
+  await open(page, "/agents?tab=team", "Agents");
+  const table = panelOf(page).getByRole("table", { name: TEAM_TABLE });
   await expect(
-    agents.getByRole("table", { name: "Agent inventory" }).or(agents.getByText("No agents yet.")),
+    table.or(panelOf(page).getByText("Nothing is on this team's roster yet.")),
   ).toBeVisible();
+  if ((await table.count()) > 0) {
+    for (const column of ["Runs", "Last run", "Tokens", "Schedules", "Orbit score"]) {
+      await expect(table.getByRole("columnheader", { name: column, exact: true })).toBeVisible();
+    }
+  }
   // Not panelOf(page).getByRole("alert"): Next's route announcer is one, empty or naming the page.
   await expect(pageAlerts(page)).toHaveCount(0);
 });
 
-/** How far the table captioned `name`'s scroll box, and the page, are wider than their views. */
+/** How far the table whose caption starts with `name`: its scroll box, and the page, are wider than their views. */
 async function overflow(page: Page, name: string) {
   return page.evaluate((caption) => {
     const wrapper = [...document.querySelectorAll<HTMLElement>('[data-slot="console-table"]')].find(
-      (w) => w.querySelector("caption")?.textContent === caption,
+      (w) => w.querySelector("caption")?.textContent?.startsWith(caption),
     );
     const root = document.documentElement;
     return {
@@ -107,11 +113,11 @@ async function overflow(page: Page, name: string) {
  * stay compact (dates on one line, the ⋯ button the only action control).
  */
 async function checkAgentTable(page: Page): Promise<void> {
-  const table = panelOf(page).getByRole("table", { name: "Agent inventory" });
-  const scroll = await overflow(page, "Agent inventory");
+  const table = panelOf(page).getByRole("table", { name: TEAM_TABLE });
+  const scroll = await overflow(page, "Agents of ");
   expect(scroll.page).toBe(0);
   if (scroll.table > 0) {
-    await expect(panelOf(page).getByRole("region", { name: "Agent inventory" })).toBeVisible();
+    await expect(panelOf(page).getByRole("region", { name: TEAM_TABLE })).toBeVisible();
   }
   await expect(table.getByRole("button", { name: /to Orbit$|^Suspend|^Reactivate/ })).toHaveCount(
     0,
@@ -127,16 +133,17 @@ async function checkAgentTable(page: Page): Promise<void> {
   }
 }
 
-test("Team inventory: the agent table scrolls in its box, never the page, at 1280 and 390 px", async ({
+test("Team tab: the agent table scrolls in its box, never the page, at 1280 and 390 px", async ({
   page,
 }) => {
-  await open(page, "/admin/team/inventory", "Inventory");
-  const agents = panelOf(page).getByRole("region", { name: "Agents" });
-  const table = agents.getByRole("table", { name: "Agent inventory" });
-  await expect(table.or(agents.getByText("No agents yet."))).toBeVisible();
+  await open(page, "/agents?tab=team", "Agents");
+  const table = panelOf(page).getByRole("table", { name: TEAM_TABLE });
+  await expect(
+    table.or(panelOf(page).getByText("Nothing is on this team's roster yet.")),
+  ).toBeVisible();
   // Rows are the team's own; with none there is no table to lay out (the page check still runs).
   if ((await table.count()) === 0) {
-    expect((await overflow(page, "Agent inventory")).page).toBe(0);
+    expect((await overflow(page, "Agents of ")).page).toBe(0);
     return;
   }
   await checkAgentTable(page);

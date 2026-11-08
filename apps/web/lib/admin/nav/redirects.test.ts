@@ -15,6 +15,8 @@ describe("Site console URLs", () => {
   it("links only to /admin/site, never to the old path", () => {
     expect(consoleHref("site")).toBe("/admin/site");
     for (const section of SITE_SECTIONS) {
+      // A list that moved out of the console (KOBE-570) links to its new page instead.
+      if (section.status.kind === "moved") continue;
       expect(sectionHref(section)).toBe(`/admin/site/${section.id}`);
     }
   });

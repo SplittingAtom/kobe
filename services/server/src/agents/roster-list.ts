@@ -24,6 +24,7 @@ import type {
 } from "@kobe/protocol";
 import { AGENT_ROSTER_PAGE_MAX } from "@kobe/protocol";
 import {
+  agentAccess,
   rosterActions,
   rosterAdmin,
   type RosterActor,
@@ -41,6 +42,8 @@ import {
 } from "./roster.js";
 import { entryUnavailable, ownerStates, type UnavailableReason } from "./roster-resolution.js";
 import { SITE, siteWhere, TEAM, type Row } from "./store.js";
+import { teamRoleAllows } from "../authz/permissions.js";
+import { usageOf, type UsageSubject } from "./inventory.js";
 
 const GONE = { member: false, deactivated: true } as const;
 
@@ -355,6 +358,45 @@ async function siteCandidates(db: KobeDb, actor: RosterActor): Promise<Candidate
   });
 }
 
+const INVENTORY_SCOPE: Readonly<Record<AgentRosterKind, UsageSubject["scope"]>> = {
+  personal: "personal",
+  team_owned: "team",
+  gallery: "gallery",
+};
+
+/**
+ * Team admins see the inventory's columns on the Team and Site tabs (KOBE-570, AR12): runs, last
+ * run, tokens, schedules and Orbit score of each row's agent in the active team, with the same
+ * right the inventory route asks (`team.agents.suspend`). Read in `withTeam()`, team explicit.
+ */
+async function withUsage(
+  db: KobeDb,
+  actor: RosterActor,
+  tab: AgentRosterTab,
+  rows: AgentRosterRow[],
+): Promise<AgentRosterRow[]> {
+  if (tab === "personal" || rows.length === 0) return rows;
+  if (!teamRoleAllows(actor.role, "team.agents.suspend")) return rows;
+  const usage = await withTeam(db, actor.teamId, (tx) =>
+    usageOf(
+      tx,
+      actor.teamId,
+      rows.map((r) => ({
+        id: r.agentId,
+        scope: INVENTORY_SCOPE[r.kind],
+        currentVersion: r.currentVersion,
+      })),
+    ),
+  );
+  return rows.map((r) => {
+    const u = usage.get(r.agentId);
+    if (!u) return r;
+    const scope = INVENTORY_SCOPE[r.kind];
+    const canExport = agentAccess(actor, { scope, ownerUserId: r.ownerUserId }).readDefinition;
+    return { ...r, usage: { ...u, schedules: [...u.schedules], canExport } };
+  });
+}
+
 export async function listRoster(
   db: KobeDb,
   actor: RosterActor,
@@ -379,7 +421,7 @@ export async function listRoster(
   const after = query.cursor;
   const rest = after ? rows.filter((r) => compare([r.name, r.agentId], after) > 0) : rows;
   const limit = query.limit ?? ROSTER_PAGE_DEFAULT;
-  const page = rest.slice(0, limit);
+  const page = await withUsage(db, actor, tab, rest.slice(0, limit));
   const last = page.at(-1);
   return {
     tab,

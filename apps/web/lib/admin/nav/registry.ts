@@ -64,6 +64,7 @@ export function findSection(kind: ConsoleKind, id: string): ConsoleSection | und
 }
 
 export function sectionHref(section: ConsoleSection): string {
+  if (section.status.kind === "moved") return section.status.href;
   return `${consoleHref(section.console)}/${section.id}`;
 }
 
