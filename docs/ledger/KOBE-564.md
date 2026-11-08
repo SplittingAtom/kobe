@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR #474); deployed to gate1 as `local-40f2d51a1609`, both flows passed
+- **Status:** merged (PR #474, main 714431529a89, 2026-11-08); deployed to gate1 as `local-40f2d51a1609`, both flows passed
 - **Branch / worktree:** `kobe-564-skill-manifest-generate` (main checkout; Chris's direct ask
   on 2026-11-07, no parallel lane)
 - **Depends on:** KOBE-333 (Promote to Site), KOBE-234/326 (server calls), KOBE-322 (forks)
