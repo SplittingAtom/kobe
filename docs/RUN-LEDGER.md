@@ -9,6 +9,12 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Agents roster lane filed (2026-11-08):** Chris's ask: "My Agents" becomes **Agents** with
+  Personal, Team and Site rosters; forks and new agents land in Personal and are assigned to a team
+  or the site. Spec `docs/specs/agents-roster.md` (PR #475; Hadron spec 4a057ebf): rosters are
+  references with a version rule, builders assign directly, team-owned agents stay, forks of team
+  content are bound to their team, proposals, transfer/adopt, per-roster suspension, schedules pause.
+  Tickets KOBE-565..573 in backlog (lane brief `docs/ledger/agents-roster-lane.md`); not started.
 - **Catalyst look lane (2026-11-06/07, Chris's asks during the run):** KOBE-550 (PR #460, main
   a2a89e27): the Catalyst query tool's look in Kobe — a brand-coloured hover glow on every card-like
   surface in every theme (`kobe-panel`, glow tokens, docs/theming.md §7), a seventh preset

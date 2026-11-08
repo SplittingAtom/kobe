@@ -366,7 +366,7 @@ Chris answered Q1, Q3 and Q6 himself and took the proposed answer for every othe
 
 | Id (ticket)     | Ticket                                                                                                                    | Depends on |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| AR-1 (KOBE-565) | DB: `team_agent_roster`, `site_agent_roster`, `site_agents.bound_team_id`, schedule pause reason; RLS, probes, migrations | AR-0       |
+| AR-1 (KOBE-565) | DB: `team_agent_roster`, `site_agent_roster`, `site_agents.bound_team_id`, schedule pause reason; RLS, probes, migrations |            |
 | AR-2 (KOBE-566) | Server: roster read, assign/propose/decide/withdraw, pin/update, suspend; `agentAccess` roster rights; audit              | AR-1       |
 | AR-3 (KOBE-567) | Server: resolution (`runnable`, pins, default agent) roster-driven; owner eligibility; schedules pause/resume             | AR-2       |
 | AR-4 (KOBE-568) | Server: fork lands in Personal with binding; transfer; adopt                                                              | AR-2       |
