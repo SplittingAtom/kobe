@@ -56,13 +56,14 @@ export function entryUnavailable(
 export interface Lending {
   readonly entry: RosterEntryRecord;
   readonly unavailable: UnavailableReason | null;
-  /** The site entry it runs through is suspended site-wide (§6.5). */
+  /** Its site entry is suspended site-wide (§6.5): not runnable in any team. */
   readonly suspendedSiteWide: boolean;
 }
 
 /**
  * How team `teamId` gets an agent from its entries (pure): an eligible active team entry first,
- * then an eligible site entry (active, else suspended site-wide). With entries but no eligible
+ * then an eligible site entry (active, else suspended site-wide). A site-wide suspension marks
+ * the agent suspended whichever entry is picked (§6.5: it wins over a team entry). With entries but no eligible
  * owner the first live entry is returned Unavailable. Null: not lent to this team at all (no live
  * entry, or bound to another team; a bound agent's site entry is ignored).
  */
@@ -82,11 +83,12 @@ export function lendingIn(
   ].filter((e): e is RosterEntryRecord => e !== null);
   const [first] = live;
   if (!first) return null;
+  // A site admin's site-wide suspension stops the agent in every team, team entries included.
+  const suspendedSiteWide = live.some((e) => e.target === "site" && e.state === "suspended");
   const eligible = live.filter((e) => entryUnavailable(e, owner) === null);
   const pick = eligible.find((e) => e.state === "active") ?? eligible[0];
-  if (pick)
-    return { entry: pick, unavailable: null, suspendedSiteWide: pick.state === "suspended" };
-  return { entry: first, unavailable: entryUnavailable(first, owner), suspendedSiteWide: false };
+  if (pick) return { entry: pick, unavailable: null, suspendedSiteWide };
+  return { entry: first, unavailable: entryUnavailable(first, owner), suspendedSiteWide };
 }
 
 /**
@@ -106,6 +108,31 @@ export const isLentAgent = (agent: AgentRecord, viewer: { readonly userId: strin
 /** Site-wide agents bound to another team (AR8) are never visible from `teamId`. */
 export const notBoundElsewhere = (teamId: string) =>
   sql`(${siteAgents.boundTeamId} IS NULL OR ${siteAgents.boundTeamId} = ${teamId}::uuid)`;
+
+/** Site-wide agents a user sees: the gallery and their own personal agents. */
+export const siteVisibleTo = (userId: string) =>
+  sql`(${siteAgents.scope} = 'gallery' OR (${siteAgents.scope} = 'personal' AND ${siteAgents.ownerUserId} = ${userId}::uuid))`;
+
+/** {@link siteVisibleTo} from a team: an own agent bound to another team is not (AR8). */
+export const siteVisibleIn = (viewer: { readonly teamId: string; readonly userId: string }) =>
+  and(siteVisibleTo(viewer.userId), notBoundElsewhere(viewer.teamId));
+
+/**
+ * The version a thread switch targets (`resolveSwitchPin`): `version`, else the one in effect; a
+ * lent agent only ever its version in effect (AR5), so another number yields 0, never published.
+ */
+export const switchTarget = (lent: boolean, inEffect: number, version: number | undefined) =>
+  lent && version !== undefined && version !== inEffect ? 0 : (version ?? inEffect);
+
+/** `findPinnableAgent`'s fallback: someone else's personal agent, only through a roster. */
+export async function lentAgent(
+  tx: KobeTx,
+  viewer: { readonly teamId: string; readonly userId: string },
+  agentId: string,
+  options: { readonly lock?: boolean } = {},
+): Promise<AgentRecord | null> {
+  return (await lentAgents(tx, viewer, { agentId, ...options }))[0]?.record ?? null;
+}
 
 /** Membership in `teamId` and deactivation of the given owners. Inside `withTeam(teamId)`. */
 export async function ownerStates(

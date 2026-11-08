@@ -14,9 +14,9 @@ import {
   type KobeDb,
 } from "@kobe/db";
 import { z } from "zod";
-import { canPinAgent, siteVisibleTo } from "./versions.js";
+import { canPinAgent } from "./versions.js";
 import { isDefaultNewThreadAgent, teamDefaultAgentId } from "./default-agent.js";
-import { lentAgents, notBoundElsewhere } from "./roster-resolution.js";
+import { lentAgents, siteVisibleIn } from "./roster-resolution.js";
 import { SITE, TEAM, toRecord, type AgentRecord } from "./store.js";
 import { manifestIsDangerous } from "./manifest.js";
 
@@ -107,7 +107,7 @@ export async function listRunnableAgents(
     const site = await tx
       .select({ ...SITE, scope: siteAgents.scope, galleryKey: siteAgents.galleryKey })
       .from(siteAgents)
-      .where(and(siteVisibleTo(viewer.userId), notBoundElsewhere(viewer.teamId)));
+      .where(siteVisibleIn(viewer));
     const galleryKeys = new Map(
       site.flatMap((r) => (r.galleryKey === null ? [] : [[r.id, r.galleryKey] as const])),
     );
@@ -122,14 +122,15 @@ export async function listRunnableAgents(
     // The team's suspension is part of the effective status, as in `findPinnableAgent`.
     const effective = (a: AgentRecord): AgentRecord =>
       suspended.has(a.id) ? { ...a, status: "suspended" } : a;
-    const records = [
+    const all = [
       ...team.flatMap((r) => published(effective(toRecord("team", r)))),
       ...site.flatMap(({ scope, galleryKey: _key, ...r }) =>
         published(effective(toRecord(scope, r))),
       ),
       // Other members' agents lent by the team or site roster, at the entry's version (AR9).
       ...(await lentAgents(tx, viewer)).flatMap((l) => published(l.record)),
-    ]
+    ];
+    const records = all
       .filter((p) => afterCursor(p, query.cursor))
       .sort((a, b) =>
         a.agent.slug !== b.agent.slug
@@ -144,8 +145,9 @@ export async function listRunnableAgents(
     const last = page.at(-1);
     const details = await versionDetails(tx, page);
     const teamDefault = await teamDefaultAgentId(tx, viewer.teamId);
+    // Checked against every runnable agent, not this page: never a second default across pages.
     const defaultId =
-      teamDefault !== null && records.some((p) => p.agent.id === teamDefault) ? teamDefault : null;
+      teamDefault !== null && all.some((p) => p.agent.id === teamDefault) ? teamDefault : null;
     const isDefault = (a: AgentRecord) =>
       defaultId !== null
         ? a.id === defaultId

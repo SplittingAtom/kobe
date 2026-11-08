@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withTeam } from "@kobe/db";
+import { serializeAgentFile } from "@kobe/agent-file";
 import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/testing";
 import { resolvePinnedAgent } from "./agents/versions.js";
 import { sweepAgentSchedules } from "./agents/roster-schedules.js";
 import { pauseOwnerSchedulesInTx } from "./schedules/offboard.js";
 import { createApp } from "./app.js";
+import { seedGalleryAgents } from "./gallery/seed.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { waitForAppSessionsToClose } from "./testing/app-sessions.js";
 import { TestBrowser } from "./testing/browser.js";
@@ -278,6 +280,18 @@ describe("assigned agents run at the entry's version (AR5, AR9, §6.2, ac-1)", (
     await sitePut("sam", agent, { state: "active" });
     expect(await runnableOf("dave", agent)).toBeDefined();
 
+    // Site-wide suspension wins over an active team entry too (§6.5).
+    await assign("bob", agent, "team");
+    await sitePut("sam", agent, { state: "suspended" });
+    expect(await runnableOf("carol", agent)).toBeUndefined();
+    expect((await startThread("carol", agent)).status).toBe(409);
+    expect(await runResolves(finance, "carol", agent, 1)).toMatchObject({
+      ok: false,
+      error: "agent_suspended",
+    });
+    await sitePut("sam", agent, { state: "active" });
+    expect(await runnableOf("carol", agent)).toBeDefined();
+
     // A team's own suspension ("Suspended here") applies only there.
     await teamPut("alice", agent, { state: "suspended" });
     expect(await runnableOf("carol", agent)).toBeUndefined();
@@ -429,6 +443,39 @@ describe("schedules follow the roster (AR11, ac-3)", () => {
     await sitePut("sam", agent, { state: "active" });
     expect(await state(finance1)).toMatchObject({ active: true });
     expect(await state(marketing1)).toMatchObject({ active: true });
+  });
+
+  it("pauses on a gallery agent's suspension here and resumes when lifted (AR11)", async () => {
+    const [seeded] = await seedGalleryAgents(deps.database.db, [
+      {
+        key: "resolution-gallery",
+        generation: 1,
+        file: serializeAgentFile({ frontmatter: { name: "Gallery Sched" }, prompt: "Hi." }),
+      },
+    ]);
+    const gallery = seeded?.agentId ?? "";
+    const id = await schedule("carol", gallery);
+    await teamPut("alice", gallery, { state: "suspended" });
+    expect(await state(id)).toMatchObject({ active: false, paused_by: "agent_unavailable" });
+    await teamPut("alice", gallery, { state: "active" });
+    expect(await state(id)).toMatchObject({ active: true, paused_by: null });
+  });
+
+  it("never resumes the schedule of an owner who is deactivated, even when the agent is back", async () => {
+    const agent = await personal("bob", "Guard Bot");
+    await assign("bob", agent, "team");
+    const id = await schedule("carol", agent);
+    await teamPut("alice", agent, { state: "removed" });
+    expect(await state(id)).toMatchObject({ paused_by: "agent_unavailable" });
+    // Deactivated without the lifecycle hook: only the sync's owner check stands in the way.
+    await sql(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [ids.carol]);
+    try {
+      await assign("bob", agent, "team");
+      await sweepAgentSchedules(deps.database.db, finance);
+      expect(await state(id)).toMatchObject({ active: false, paused_by: "agent_unavailable" });
+    } finally {
+      await sql(`UPDATE users SET deactivated_at = NULL WHERE id = $1`, [ids.carol]);
+    }
   });
 
   it("owner leaves: paused at removal, resumed by the tick once back; a gone schedule owner is never resumed", async () => {

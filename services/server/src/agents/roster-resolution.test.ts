@@ -76,12 +76,12 @@ describe("lendingIn (AR9, §6.2)", () => {
     });
   });
 
-  it("a site entry suspended site-wide lends a suspended agent, unless the team runs it itself", () => {
+  it("a site entry suspended site-wide lends a suspended agent, team entry or not (§6.5)", () => {
     expect(lendingIn(T, unbound, null, site({ state: "suspended" }), member)).toMatchObject({
       suspendedSiteWide: true,
     });
     expect(lendingIn(T, unbound, team(), site({ state: "suspended" }), member)).toMatchObject({
-      suspendedSiteWide: false,
+      suspendedSiteWide: true,
       entry: { target: "team" },
     });
   });

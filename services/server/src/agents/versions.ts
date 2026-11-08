@@ -7,7 +7,6 @@ import {
   siteAgents,
   siteAgentVersions,
   lt,
-  sql,
   teamAgents,
   teamAgentVersions,
   teamMembers,
@@ -20,7 +19,13 @@ import { canonicalJson } from "@kobe/protocol";
 import { recordAudit } from "../audit/record.js";
 import { agentAccess, type AgentActor } from "./access.js";
 import { readPublishFloor } from "./floor.js";
-import { isLentAgent, keptLentAgent, lentAgents, notBoundElsewhere } from "./roster-resolution.js";
+import {
+  isLentAgent,
+  keptLentAgent,
+  lentAgent,
+  siteVisibleIn,
+  switchTarget,
+} from "./roster-resolution.js";
 import { freezeLocalSkills, type SkillLeftOut } from "./skill-freeze.js";
 import { skillManifestSchema, type SkillManifest } from "../skills/frozen.js";
 import {
@@ -687,18 +692,11 @@ export async function findPinnableAgent(
   const siteQuery = tx
     .select({ ...SITE, scope: siteAgents.scope })
     .from(siteAgents)
-    .where(
-      and(
-        eq(siteAgents.id, agentId),
-        siteVisibleTo(viewer.userId),
-        notBoundElsewhere(viewer.teamId),
-      ),
-    );
+    .where(and(eq(siteAgents.id, agentId), siteVisibleIn(viewer)));
   const [own]: (Row & { scope: "personal" | "gallery" })[] = await (options.lock
     ? siteQuery.for("share")
     : siteQuery);
-  // Someone else's personal agent: only through the team's or the site's roster (KOBE-567).
-  if (!own) return (await lentAgents(tx, viewer, { agentId, ...options }))[0]?.record ?? null;
+  if (!own) return lentAgent(tx, viewer, agentId, options);
   const { scope, ...row } = own;
   const record = toRecord(scope, row);
   // A team can suspend a site-wide agent for itself (KOBE-86): effective status here.
@@ -712,10 +710,6 @@ export function agentStatusOf(agent: AgentRecord): "active" | "suspended" | "arc
   if (agent.archivedAt !== null) return "archived";
   return agent.status === "suspended" ? "suspended" : "active";
 }
-
-/** Site-wide agents a user sees: the gallery and their own personal agents. */
-export const siteVisibleTo = (userId: string) =>
-  sql`(${siteAgents.scope} = 'gallery' OR (${siteAgents.scope} = 'personal' AND ${siteAgents.ownerUserId} = ${userId}::uuid))`;
 
 /** Why an agent can't be pinned by a new thread or a switch, if it can't. */
 function unavailable(agent: AgentRecord): boolean {
@@ -781,13 +775,8 @@ export async function resolveSwitchPin(
   if (unavailable(agent) || agent.currentVersion === null) {
     return { ok: false, error: "agent_unavailable" };
   }
-  const target = version ?? agent.currentVersion;
-  // A lent agent runs only the version its roster entry resolves to (AR5, KOBE-567).
-  const other = target !== agent.currentVersion;
-  if (
-    other &&
-    (isLentAgent(agent, viewer) || !(await readVersion(tx, agent.scope, agent.id, target)))
-  ) {
+  const target = switchTarget(isLentAgent(agent, viewer), agent.currentVersion, version);
+  if (target !== agent.currentVersion && !(await readVersion(tx, agent.scope, agent.id, target))) {
     return { ok: false, error: "version_not_found" };
   }
   return { ok: true, value: { agentScope: agent.scope, agentId: agent.id, agentVersion: target } };
@@ -837,7 +826,6 @@ export async function resolvePinnedAgent(
   owner: PinViewer,
   pin: AgentPin,
 ): Promise<PinnedAgent> {
-  // A lent agent's entry may be gone since the thread started: the thread keeps its pin (D19).
   const agent =
     (await findPinnableAgent(tx, owner, pin.agentId)) ?? (await keptLentAgent(tx, owner, pin));
   if (!agent || agent.scope !== pin.agentScope) return { ok: false, error: "agent_not_found" };

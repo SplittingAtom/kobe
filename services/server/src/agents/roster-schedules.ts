@@ -8,6 +8,7 @@ import {
   schedules,
   siteAgents,
   sql,
+  teamAgentSuspensions,
   withTeam,
   type KobeDb,
   type KobeTx,
@@ -15,12 +16,13 @@ import {
 import { recordAudit } from "../audit/record.js";
 import { atCap, countActiveHere, nextDueAt } from "../schedules/store.js";
 import type { ScheduleRecurrence } from "@kobe/protocol";
-import { ownerStates } from "./roster-resolution.js";
-import { canPinAgent, findPinnableAgent } from "./versions.js";
+import { lentAgents, ownerStates } from "./roster-resolution.js";
+import { SITE, toRecord } from "./store.js";
+import { canPinAgent } from "./versions.js";
 
 /**
  * Schedules follow the roster (KOBE-567, spec agents-roster AR11). A schedule that runs someone
- * else's personal agent (lent by the team or site roster) is paused with
+ * else's personal agent (lent by the team or site roster) or a gallery agent is paused with
  * `paused_by = agent_unavailable` when that agent can no longer start a thread for the schedule's
  * owner in the team: removed or withdrawn from the roster, suspended there, archived, or its
  * owner left or was deactivated. The owner is told (`schedule.paused`). It resumes once the agent
@@ -36,14 +38,15 @@ export interface AgentScheduleChanges {
   readonly resumed: readonly string[];
 }
 
-/** Which lent agents to look at: some agents, an owner's agents, or every lent agent. */
+/** Which agents to look at: some agents, an owner's agents, or every site-wide agent. */
 export type AgentScheduleFilter =
   | { readonly agentIds: readonly string[] }
   | { readonly agentOwner: string }
   | Record<string, never>;
 
 /**
- * Pauses or resumes the team's schedules of lent agents (see above), inside `withTeam(teamId)`.
+ * Pauses or resumes the team's schedules of lent and gallery agents (see above), inside
+ * `withTeam(teamId)`. Team-owned agents keep their own status rules (AR9).
  * Rows a fire or an owner edit holds are skipped (`SKIP LOCKED`): the next tick retries.
  */
 export async function syncAgentSchedules(
@@ -67,7 +70,6 @@ export async function syncAgentSchedules(
       and(
         eq(schedules.teamId, teamId),
         or(eq(schedules.active, true), eq(schedules.pausedBy, "agent_unavailable")),
-        eq(siteAgents.scope, "personal"),
         sql`${siteAgents.ownerUserId} IS DISTINCT FROM ${schedules.userId}`,
         "agentIds" in filter ? inArray(schedules.agentId, [...filter.agentIds]) : undefined,
         "agentOwner" in filter ? eq(siteAgents.ownerUserId, filter.agentOwner) : undefined,
@@ -80,13 +82,13 @@ export async function syncAgentSchedules(
     teamId,
     rows.map((r) => r.userId),
   );
+  const startable = await startableHere(tx, teamId, [...new Set(rows.map((r) => r.agentId))]);
   const paused: string[] = [];
   const resumed: string[] = [];
   for (const row of rows) {
     const owner = owners.get(row.userId);
     if (!owner?.member || owner.deactivated) continue;
-    const agent = await findPinnableAgent(tx, { teamId, userId: row.userId }, row.agentId);
-    const runnable = agent !== null && canPinAgent(agent);
+    const runnable = startable.has(row.agentId);
     if (row.active && !runnable) {
       await pause(tx, teamId, row);
       paused.push(row.id);
@@ -95,6 +97,42 @@ export async function syncAgentSchedules(
     }
   }
   return { paused, resumed };
+}
+
+/** Nobody's id: `lentAgents` then excludes no owner (schedules of own agents are not synced). */
+const NOBODY = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * Which of `agentIds` can start a thread in the team for a member who does not own them, computed
+ * once per call: lent personal agents (`lentAgents`, at their version in effect) and gallery
+ * agents, active here (team and site-wide suspensions), not archived, published.
+ */
+async function startableHere(
+  tx: KobeTx,
+  teamId: string,
+  agentIds: readonly string[],
+): Promise<ReadonlySet<string>> {
+  const wanted = new Set(agentIds);
+  const lent = (await lentAgents(tx, { teamId, userId: NOBODY }))
+    .map((l) => l.record)
+    .filter((r) => wanted.has(r.id));
+  const gallery = await tx
+    .select(SITE)
+    .from(siteAgents)
+    .where(and(inArray(siteAgents.id, [...wanted]), eq(siteAgents.scope, "gallery")));
+  const here = new Set(
+    (
+      await tx
+        .select({ id: teamAgentSuspensions.agentId })
+        .from(teamAgentSuspensions)
+        .where(eq(teamAgentSuspensions.teamId, teamId))
+    ).map((r) => r.id),
+  );
+  const galleryRecords = gallery.map((r) => {
+    const record = toRecord("gallery", r);
+    return here.has(record.id) ? { ...record, status: "suspended" as const } : record;
+  });
+  return new Set([...lent, ...galleryRecords].filter(canPinAgent).map((r) => r.id));
 }
 
 interface ScheduleRow {

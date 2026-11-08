@@ -15,7 +15,7 @@ import {
   type TeamRole,
 } from "@kobe/db";
 import { agentAccess, type AgentScope } from "../agents/access.js";
-import { siteVisibleTo } from "../agents/versions.js";
+import { siteVisibleTo } from "../agents/roster-resolution.js";
 import { setTeamSkillAccess } from "./access.js";
 import { approvedTeamSkills } from "./review.js";
 
