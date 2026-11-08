@@ -1,6 +1,6 @@
 # KOBE-584: Session info shows the conversation's reasoning spend
 
-- **Status:** in review (PR #TBD)
+- **Status:** in review (PR #491)
 - **Branch / worktree:** `kobe-584-session-reasoning` in `../Kobe-wt584`
 - **Depends on:** KOBE-557 (reasoning tokens in the usage API), KOBE-574 (removed composer readout)
 
