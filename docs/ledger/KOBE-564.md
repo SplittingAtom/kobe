@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in progress
+- **Status:** in review (PR #474)
 - **Branch / worktree:** `kobe-564-skill-manifest-generate` (main checkout; Chris's direct ask
   on 2026-11-07, no parallel lane)
 - **Depends on:** KOBE-333 (Promote to Site), KOBE-234/326 (server calls), KOBE-322 (forks)
