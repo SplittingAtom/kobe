@@ -688,7 +688,11 @@ export async function findPinnableAgent(
     .select({ ...SITE, scope: siteAgents.scope })
     .from(siteAgents)
     .where(
-      and(eq(siteAgents.id, agentId), siteVisibleTo(viewer.userId), notBoundElsewhere(viewer.teamId)),
+      and(
+        eq(siteAgents.id, agentId),
+        siteVisibleTo(viewer.userId),
+        notBoundElsewhere(viewer.teamId),
+      ),
     );
   const [own]: (Row & { scope: "personal" | "gallery" })[] = await (options.lock
     ? siteQuery.for("share")
@@ -780,7 +784,10 @@ export async function resolveSwitchPin(
   const target = version ?? agent.currentVersion;
   // A lent agent runs only the version its roster entry resolves to (AR5, KOBE-567).
   const other = target !== agent.currentVersion;
-  if (other && (isLentAgent(agent, viewer) || !(await readVersion(tx, agent.scope, agent.id, target)))) {
+  if (
+    other &&
+    (isLentAgent(agent, viewer) || !(await readVersion(tx, agent.scope, agent.id, target)))
+  ) {
     return { ok: false, error: "version_not_found" };
   }
   return { ok: true, value: { agentScope: agent.scope, agentId: agent.id, agentVersion: target } };
@@ -831,7 +838,8 @@ export async function resolvePinnedAgent(
   pin: AgentPin,
 ): Promise<PinnedAgent> {
   // A lent agent's entry may be gone since the thread started: the thread keeps its pin (D19).
-  const agent = (await findPinnableAgent(tx, owner, pin.agentId)) ?? (await keptLentAgent(tx, owner, pin));
+  const agent =
+    (await findPinnableAgent(tx, owner, pin.agentId)) ?? (await keptLentAgent(tx, owner, pin));
   if (!agent || agent.scope !== pin.agentScope) return { ok: false, error: "agent_not_found" };
   if (agent.status === "suspended") return { ok: false, error: "agent_suspended" };
   try {

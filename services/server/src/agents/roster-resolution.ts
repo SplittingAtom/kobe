@@ -84,7 +84,8 @@ export function lendingIn(
   if (!first) return null;
   const eligible = live.filter((e) => entryUnavailable(e, owner) === null);
   const pick = eligible.find((e) => e.state === "active") ?? eligible[0];
-  if (pick) return { entry: pick, unavailable: null, suspendedSiteWide: pick.state === "suspended" };
+  if (pick)
+    return { entry: pick, unavailable: null, suspendedSiteWide: pick.state === "suspended" };
   return { entry: first, unavailable: entryUnavailable(first, owner), suspendedSiteWide: false };
 }
 

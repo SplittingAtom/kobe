@@ -205,10 +205,16 @@ describe("assigned agents run at the entry's version (AR5, AR9, §6.2, ac-1)", (
     expect((await startThread("carol", agent)).status).toBe(404);
 
     await assign("bob", agent, "team");
-    expect(await runnableOf("carol", agent)).toMatchObject({ name: "Ledger One", currentVersion: 1 });
+    expect(await runnableOf("carol", agent)).toMatchObject({
+      name: "Ledger One",
+      currentVersion: 1,
+    });
     // The owner's publish reaches the team at once (latest)...
     await publish("bob", agent, "Ledger Two");
-    expect(await runnableOf("carol", agent)).toMatchObject({ name: "Ledger Two", currentVersion: 2 });
+    expect(await runnableOf("carol", agent)).toMatchObject({
+      name: "Ledger Two",
+      currentVersion: 2,
+    });
     const atLatest = await startThread("carol", agent);
     expect(atLatest).toMatchObject({ status: 201, version: 2 });
     // ...the owner's unpublished draft never does.
@@ -223,7 +229,10 @@ describe("assigned agents run at the entry's version (AR5, AR9, §6.2, ac-1)", (
 
     // A team admin pins v1: runnable and new threads take the pin, behind latest.
     await teamPut("alice", agent, { state: "active", versionRule: 1 });
-    expect(await runnableOf("carol", agent)).toMatchObject({ name: "Ledger One", currentVersion: 1 });
+    expect(await runnableOf("carol", agent)).toMatchObject({
+      name: "Ledger One",
+      currentVersion: 1,
+    });
     const atPin = await startThread("carol", agent);
     expect(atPin).toMatchObject({ status: 201, version: 1 });
     // Switching a thread is limited to the version in effect.
@@ -261,7 +270,7 @@ describe("assigned agents run at the entry's version (AR5, AR9, §6.2, ac-1)", (
 
     await sitePut("sam", agent, { state: "suspended" });
     expect(await runnableOf("dave", agent)).toBeUndefined();
-    expect((await startThread("dave", agent)).status).toBe(422);
+    expect((await startThread("dave", agent)).status).toBe(409);
     expect(await runResolves(marketing, "dave", agent, 1)).toMatchObject({
       ok: false,
       error: "agent_suspended",
@@ -309,7 +318,7 @@ describe("owner eligibility (AR10, ac-2)", () => {
     await sql(`DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`, [finance, ids.bob]);
     try {
       expect(await runnableOf("carol", agent)).toBeUndefined();
-      expect((await startThread("carol", agent)).status).toBe(422);
+      expect((await startThread("carol", agent)).status).toBe(409);
       const admin = (await roster("alice", "team")).find((r) => r.agentId === agent);
       expect(admin).toMatchObject({ status: "unavailable", unavailableReason: "owner_left" });
       expect((await roster("carol", "team")).map((r) => r.agentId)).not.toContain(agent);
@@ -413,7 +422,10 @@ describe("schedules follow the roster (AR11, ac-3)", () => {
 
     await sitePut("sam", agent, { state: "suspended" });
     expect(await state(finance1)).toMatchObject({ active: false, paused_by: "agent_unavailable" });
-    expect(await state(marketing1)).toMatchObject({ active: false, paused_by: "agent_unavailable" });
+    expect(await state(marketing1)).toMatchObject({
+      active: false,
+      paused_by: "agent_unavailable",
+    });
     await sitePut("sam", agent, { state: "active" });
     expect(await state(finance1)).toMatchObject({ active: true });
     expect(await state(marketing1)).toMatchObject({ active: true });

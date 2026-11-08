@@ -44,8 +44,9 @@ describe("lendingIn (AR9, §6.2)", () => {
   it("is null without a live entry: proposed, removed or no entry at all", () => {
     expect(lendingIn(T, unbound, null, null, member)).toBeNull();
     expect(lendingIn(T, unbound, team({ state: "proposed" }), null, member)).toBeNull();
-    expect(lendingIn(T, unbound, team({ state: "removed" }), site({ state: "removed" }), member))
-      .toBeNull();
+    expect(
+      lendingIn(T, unbound, team({ state: "removed" }), site({ state: "removed" }), member),
+    ).toBeNull();
     expect(lendingIn(T, unbound, null, site({ state: "proposed" }), member)).toBeNull();
   });
 
@@ -53,7 +54,7 @@ describe("lendingIn (AR9, §6.2)", () => {
     const pinned = team({ versionRule: "pinned", pinnedVersion: 2 });
     const got = lendingIn(T, unbound, pinned, site(), member);
     expect(got).toEqual({ entry: pinned, unavailable: null, suspendedSiteWide: false });
-    expect(resolvedVersion(got!.entry, 5)).toBe(2);
+    expect(resolvedVersion(got?.entry ?? pinned, 5)).toBe(2);
   });
 
   it("falls back to the site entry when the team entry's owner left", () => {
@@ -99,7 +100,8 @@ describe("isLentAgent", () => {
   it("is someone else's personal agent only", () => {
     expect(isLentAgent(agent({}) as AgentRecord, { userId: "me" })).toBe(true);
     expect(isLentAgent(agent({ ownerUserId: "me" }) as AgentRecord, { userId: "me" })).toBe(false);
-    expect(isLentAgent(agent({ scope: "gallery", ownerUserId: null }) as AgentRecord, { userId: "me" }))
-      .toBe(false);
+    expect(
+      isLentAgent(agent({ scope: "gallery", ownerUserId: null }) as AgentRecord, { userId: "me" }),
+    ).toBe(false);
   });
 });

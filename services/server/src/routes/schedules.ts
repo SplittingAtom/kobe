@@ -354,7 +354,10 @@ async function agentBack(
   row: { teamId: string; userId: string; agentId: string; pausedBy: string | null },
   newAgent?: string,
 ): Promise<boolean> {
-  if (row.pausedBy !== "agent_unavailable" || (newAgent !== undefined && newAgent !== row.agentId)) {
+  if (
+    row.pausedBy !== "agent_unavailable" ||
+    (newAgent !== undefined && newAgent !== row.agentId)
+  ) {
     return true;
   }
   return agentRunnable(tx, { teamId: row.teamId, userId: row.userId }, row.agentId);

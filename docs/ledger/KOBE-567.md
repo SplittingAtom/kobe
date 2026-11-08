@@ -2,20 +2,14 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** blocked: needs a migration (see Blocker). Work committed on the branch, not pushed.
+- **Status:** in review (PR 2/2); the trigger change landed first as PR 1/2 #484.
 - **Branch / worktree:** `kobe-567-roster-resolution` in `../Kobe-wt567`
 - **Depends on:** KOBE-565, KOBE-566. Spec `docs/specs/agents-roster.md` AR5, AR8-AR11, §6.2, §6.5.
 
-## Blocker
+## Blocker (resolved)
 
-The DB trigger `threads_agent_pin_owner` (0020, recreated in 0091) refuses a thread pin to a
-personal agent unless `site_agents.owner_user_id = threads.owner_user_id`
-(`23514 thread pin: agent … is not a personal agent available to the thread owner`). Roster
-resolution pins someone else's personal agent, so `POST /v1/threads` answers 500. Needed (own
-hand-written migration PR): accept a personal pin also when the agent has an entry for
-`NEW.team_id` on `team_agent_roster` (active) or on `site_agent_roster` (active), and not when it
-is bound to another team. The trigger also fires on `UPDATE OF owner_user_id`: decide whether any
-entry state (removed included, D19) is enough there.
+`threads_agent_pin_owner` refused pins of someone else's personal agent; fixed by #484
+(`0195_thread_pin_roster`, see Decisions).
 
 ## Decisions
 
@@ -27,7 +21,7 @@ entry state (removed included, D19) is enough there.
   not use the agent); no server path changes a thread's owner, so D19 (pins survive removal and
   owner departure) is unaffected. Renames, moves and archives never re-validate.
 
-## Done (server, tests green except the three thread-creation tests behind the trigger)
+## Done (server)
 
 - `agents/roster-resolution.ts`: `lendingIn` (pure), `entryUnavailable`, `ownerStates`,
   `lentAgents` (other members' agents lent by team/site roster at the resolved version, frontmatter
@@ -51,13 +45,21 @@ entry state (removed included, D19) is enough there.
 
 ## Evidence
 
-- Unit: `services/server/src/agents/roster-resolution.test.ts` (8 pass).
-- DB: `services/server/src/agent-roster-resolution.db.test.ts`: schedules (ac-3, 3 tests), site
-  deactivated owner, bound agent pass; ac-1 (2) and ac-2 owner-left fail only at thread creation
-  (trigger).
+- Unit: `services/server/src/agents/roster-resolution.test.ts` (`lendingIn`, `entryUnavailable`,
+  `isLentAgent`).
+- DB: `services/server/src/agent-roster-resolution.db.test.ts` (8): ac-1 latest → pin → thread
+  keeps its pin after removal, switch limited to the version in effect, other team isolated; site
+  entry and suspensions; bound agent. ac-2 owner left (Unavailable + reason for admins, hidden for
+  members, thread still runs) and site owner deactivated. ac-3 pause/notify/resume on removal,
+  suspension here and site-wide, owner leaving and rejoining (tick), gone schedule owner never
+  resumed. Trigger: `packages/db/src/thread-pin-roster.db.test.ts` (#484).
+- `pnpm verify` steps green (format, lint, typecheck, unit, `test:db`, license, hygiene, wording);
+  three load timeouts in untouched packages (db upgrade, mcp-proxy probe, model-gateway gateway)
+  pass alone. `openapi.json` regenerated (roster status `unavailable`, `unavailableReason`).
 
 ## Open for 568/569/571/572
 
 - 571: implement `teamDefaultAgentId` (setting) — runnable and `defaultNewThreadPin` already use it.
 - 569/570: render `status: unavailable` with `unavailableReason`.
-- Not yet run: `pnpm verify`, full `test:db`.
+- 572: browser spec "owner leaves" can assert the Unavailable row and the paused schedule label.
+- Email for `schedule.paused` is not rendered by the notifier (in-app only), as before.
