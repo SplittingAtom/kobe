@@ -64,3 +64,5 @@ user wants to promote a skill. Use the currently selected model to create the fi
 - ac-4 route: `services/server/src/skill-manifest.db.test.ts`.
 - ac-5 web: `apps/web/components/admin/skill-promotion.test.tsx` (Create kobe.skill.yaml).
 - ac-6 docs: skill-package.md, design/server-model-calls.md, audit-log.md, this ledger.
+- gate1: `e2e/browser/tests/skill-manifest.spec.ts` (both flows against the real team model; one
+  model call each); deploy and run recorded below once done.
