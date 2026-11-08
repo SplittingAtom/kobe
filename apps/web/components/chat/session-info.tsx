@@ -16,6 +16,7 @@ import { Button } from "../ui/button";
 import { chatPortalContainer } from "../ui/chat-portal";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { useThreadUsageRead } from "./message-footer";
+import { lastRun, pendingRunId, thinkingTokensLine } from "./session-reasoning";
 import {
   THINKING_LABELS,
   shownThinking,
@@ -30,6 +31,8 @@ const DOWNLOAD_FAILED = {
   code: "download_failed",
   message: "The download didn't finish. Try /export again.",
 };
+const THINKING_TOKENS_TITLE =
+  "Part of the output tokens; ≈ means estimated from the reasoning text";
 const ZERO: UsageTotals = {
   calls: 0,
   inputTokens: 0,
@@ -95,11 +98,18 @@ function SessionInfoDialog({
   const { state } = extras;
   const summary = state.summary;
   const models = useThreadTeamModels();
-  const usage = useThreadUsageRead()?.usage;
+  const usageRead = useThreadUsageRead();
+  const usage = usageRead?.usage;
   const messages = useAuiState((s) => s.thread.messages.length);
   const lines = models.status === "ready" ? modelLines(models.data, state) : null;
-  const totals = sum(usage?.runs ?? []);
-  const rows: readonly (readonly [string, string])[] = [
+  const runs = usage?.runs ?? [];
+  const totals = sum(runs);
+  const last = lastRun(
+    usage ?? null,
+    pendingRunId(state.live, usageRead?.afterRun ?? null),
+    models.status === "ready" ? models.data : null,
+  );
+  const rows: readonly (readonly [term: string, value: string, title?: string | undefined])[] = [
     ["Title", summary?.title || "Untitled conversation"],
     ["Agent", summary?.agentName ?? "No agent"],
     ["Model", lines?.model ?? "—"],
@@ -114,6 +124,8 @@ function SessionInfoDialog({
       formatTokens(totals.inputTokens + totals.cacheReadTokens + totals.cacheWriteTokens),
     ],
     ["Output tokens", formatTokens(totals.outputTokens)],
+    ["Thinking tokens", thinkingTokensLine(runs), THINKING_TOKENS_TITLE],
+    ["Last run", last.value, last.title],
     [
       "Cost",
       totals.unpricedCalls > 0
@@ -135,10 +147,14 @@ function SessionInfoDialog({
             Its details and what its runs used so far.
           </Dialog.Description>
           <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-            {rows.map(([term, value]) => (
+            {rows.map(([term, value, title]) => (
               <div key={term} className="contents">
-                <dt className="text-muted-foreground">{term}</dt>
-                <dd className="m-0 min-w-0 break-words">{value}</dd>
+                <dt className="text-muted-foreground" title={title}>
+                  {term}
+                </dt>
+                <dd className="m-0 min-w-0 break-words" title={title}>
+                  {value}
+                </dd>
               </div>
             ))}
           </dl>
