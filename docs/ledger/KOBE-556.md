@@ -48,17 +48,18 @@
 
 ## Readout wiring (KOBE-557)
 
-`use-reasoning-spend.ts` reads the latest run of `GET /v1/threads/{id}/usage` (the existing
-`ThreadUsageProvider` read) for `reasoningTokens` / `reasoningEstimated` / `thinkingLevel`.
-KOBE-557's exports are not on main yet: the run fields go through a local type and the budget is
-unknown (`levelBudget` returns undefined, `TODO(KOBE-557)`), so the readout stays hidden; no
-invented budget table ships (review #3). After rebasing on KOBE-557 PR 2, `levelBudget` becomes
-`thinkingBudget(control, level)`.
+Wired after rebasing on main 136de5cf (KOBE-557 PR #471). `use-reasoning-spend.ts` reads the
+latest run of `GET /v1/threads/{id}/usage` (the existing `ThreadUsageProvider` read):
+`reasoningTokens ?? null`, `reasoningEstimated ?? false`, `thinkingLevel`; the budget is
+`thinkingBudget(control, run's level)` from @kobe/protocol, the control being the conversation's
+model's `thinking_in_team.control` (`thinkingControl` in thinking-picker.tsx; the run's gateway
+model name can't be mapped back to an alias, so a model changed since the run grades with the
+current model's control). Hidden while the control is unknown (older server), `none`, or the
+budget is 0 (Off).
 
 ## Open questions (for Chris or the coordinator)
 
-- `thinkingBudget(control, level)` needs the model's control, which `/v1/team/models` does not
-  expose to the web today; until it does the hook uses the effort table for every model.
+- After a model change, the latest run is graded with the new model's control (see above).
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -70,7 +71,9 @@ invented budget table ships (review #3). After rebasing on KOBE-557 PR 2, `level
   menu row, compact below, Tab order through the pills); e2e `thinking.spec.ts` updated to pills.
 - ac-3: `thinking-effort.test.tsx` (hidden without spend or budget, with budget 0; values render
   "2,000 / 8,000", 25% `bg-brand-primary` fill; estimate ≈ and aria-valuetext);
-  `use-reasoning-spend.test.ts`.
+  `use-reasoning-spend.test.ts` (newest call's run, live run without usage, budgets per control,
+  estimate, hidden without control); `model-picker.test.tsx` KOBE-557 cases (readout from the fake
+  thread usage graded at the run's medium while the pills ask for low; none on an older server).
 - ac-4: headless Chromium harness (compiled `app/tailwind.css` + theme; toolbar replicas at 616,
   680 and 736px, i.e. composer 640-760, with a long agent chip, a long model name, 4 or 2 pills,
   with and without the worst readout "≈12k / 24.6k"): no overflow and Send inside the line in all

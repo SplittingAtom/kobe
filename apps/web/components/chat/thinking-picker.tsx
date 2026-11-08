@@ -1,6 +1,6 @@
 "use client";
 
-import { thinkingRank, type ThinkingLevel } from "@kobe/protocol";
+import { thinkingRank, type ThinkingControl, type ThinkingLevel } from "@kobe/protocol";
 import type { TeamModels } from "../../lib/admin/api/team/models";
 import { ThinkingEffort } from "./thinking-effort";
 import type { ReasoningSpend } from "./use-reasoning-spend";
@@ -28,6 +28,15 @@ export function thinkingChoices(
   const model = models.models.find((m) => m.alias === (alias ?? models.default));
   const team = model?.enabled ? model.thinkingInTeam : undefined;
   return { levels: team?.levels ?? [], default: team?.default ?? null };
+}
+
+/**
+ * The control of the conversation's model in this team (KOBE-557: `thinkingBudget(control,
+ * level)` reads it), or null when the model has none or the server is older.
+ */
+export function thinkingControl(models: TeamModels, alias: string | null): ThinkingControl | null {
+  const model = models.models.find((m) => m.alias === (alias ?? models.default));
+  return (model?.enabled ? model.thinkingInTeam?.control : undefined) ?? null;
 }
 
 /** A chosen level as the runs will use it: never above what the team now allows. */

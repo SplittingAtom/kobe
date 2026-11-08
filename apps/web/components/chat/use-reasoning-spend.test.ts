@@ -75,20 +75,38 @@ describe("latestReasoning (KOBE-556)", () => {
   });
 });
 
-describe("reasoningSpend (KOBE-556)", () => {
-  const latest = { runId: "a", spent: 1500, level: "medium", estimated: true } as const;
+describe("reasoningSpend (KOBE-556 on KOBE-557)", () => {
+  const latest = { runId: "a", spent: 1500, level: "medium", estimated: false } as const;
 
-  it("grades the run against the budget of the level it ran with", () => {
-    const budgets = { off: 0, low: 1, medium: 8000, high: 3 } as const;
-    expect(reasoningSpend(latest, (l) => budgets[l])).toEqual({
+  it("grades the run against its level's budget in its control's form", () => {
+    expect(reasoningSpend(latest, "reasoning_effort")).toEqual({
       spent: 1500,
       budget: 8000,
+      estimated: false,
+    });
+    expect(reasoningSpend({ ...latest, level: "high" }, "anthropic_adaptive")).toMatchObject({
+      budget: 24000,
+    });
+    expect(reasoningSpend({ ...latest, level: "low" }, "anthropic_effort")).toMatchObject({
+      budget: 2000,
+    });
+  });
+
+  it("an estimate keeps its marker", () => {
+    expect(reasoningSpend({ ...latest, estimated: true }, "reasoning_effort")).toMatchObject({
       estimated: true,
     });
   });
 
-  it("hidden until KOBE-557's budgets land: the budget is unknown by default", () => {
-    expect(reasoningSpend(latest)).toEqual({});
-    expect(reasoningSpend(null, () => 8000)).toEqual({});
+  it("hidden while the budget is unknown: no control, control none, or no run", () => {
+    expect(reasoningSpend(latest, null)).toEqual({});
+    expect(reasoningSpend(latest, "none")).toEqual({});
+    expect(reasoningSpend(null, "reasoning_effort")).toEqual({});
+  });
+
+  it("thinking off grades against a zero budget (the control hides the bar)", () => {
+    expect(reasoningSpend({ ...latest, level: "off" }, "reasoning_effort")).toMatchObject({
+      budget: 0,
+    });
   });
 });
