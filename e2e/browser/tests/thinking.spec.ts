@@ -62,9 +62,13 @@ test("thinking off: the answer has no reasoning block and the run records off", 
   );
   expect(recorded).toEqual({ chosen: "off", runs: ["off"] });
   // After the first prompt the selectors sit below the composer (KOBE-450), still on off.
-  await expect(
-    (await chat.selectors())
-      .getByRole("group", { name: "Thinking level for this conversation" })
-      .getByRole("button", { name: "Off", exact: true }),
-  ).toHaveAttribute("aria-pressed", "true");
+  const below = (await chat.selectors()).getByRole("group", {
+    name: "Thinking level for this conversation",
+  });
+  await expect(below.getByRole("button", { name: "Off", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  // KOBE-574: the pills alone, no spend bar or readout once a run has spent.
+  await expect(below.getByRole("progressbar")).toHaveCount(0);
 });

@@ -624,7 +624,7 @@ sections:
       as a package), modified, and kept with its license notice at the top of the file.
     rows:
       - id: assistant-ui-reasoning-effort
-        component: assistant-ui Reasoning effort element (with its `field` surface and range helpers)
+        component: assistant-ui Reasoning effort element (with its `field` surface)
         version: 208cc81de222 (main, 2026-10-08)
         license: MIT
         use: bundled (vendored, modified; web image)

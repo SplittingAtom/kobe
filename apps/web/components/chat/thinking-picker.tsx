@@ -1,9 +1,8 @@
 "use client";
 
-import { thinkingRank, type ThinkingControl, type ThinkingLevel } from "@kobe/protocol";
+import { thinkingRank, type ThinkingLevel } from "@kobe/protocol";
 import type { TeamModels } from "../../lib/admin/api/team/models";
 import { ThinkingEffort } from "./thinking-effort";
-import type { ReasoningSpend } from "./use-reasoning-spend";
 
 export const THINKING_LABELS: Readonly<Record<ThinkingLevel, string>> = {
   off: "Thinking off",
@@ -28,15 +27,6 @@ export function thinkingChoices(
   const model = models.models.find((m) => m.alias === (alias ?? models.default));
   const team = model?.enabled ? model.thinkingInTeam : undefined;
   return { levels: team?.levels ?? [], default: team?.default ?? null };
-}
-
-/**
- * The control of the conversation's model in this team (KOBE-557: `thinkingBudget(control,
- * level)` reads it), or null when the model has none or the server is older.
- */
-export function thinkingControl(models: TeamModels, alias: string | null): ThinkingControl | null {
-  const model = models.models.find((m) => m.alias === (alias ?? models.default));
-  return (model?.enabled ? model.thinkingInTeam?.control : undefined) ?? null;
 }
 
 /** A chosen level as the runs will use it: never above what the team now allows. */
@@ -68,8 +58,8 @@ export const MODEL_DEFAULT_TITLE = "Model's default";
  * the default's pill (titled "Model's default"; choosing it stores null so the conversation keeps
  * following the team's default). The server clamps every run to the site and team settings, so
  * this only asks; a level the team has since lowered shows as what runs get. The pills are about
- * the next run; the readout and bar describe the latest run (its spend against the budget of the
- * level it ran with) and appear once both are known (KOBE-557).
+ * the next run; the latest run's reasoning spend is recorded by KOBE-557 (usage API) and no longer
+ * shown in the composer (KOBE-574).
  */
 export function ThinkingPicker({
   models,
@@ -78,7 +68,6 @@ export function ThinkingPicker({
   disabled,
   onChoose,
   compact = false,
-  spend = {},
 }: {
   readonly models: TeamModels;
   /** The conversation's effective model alias (the agent's pin, the choice, else the default). */
@@ -88,8 +77,6 @@ export function ThinkingPicker({
   readonly onChoose: (level: ThinkingLevel | null) => void;
   /** The smaller pills on the line below the composer (KOBE-450). */
   readonly compact?: boolean;
-  /** The latest run's reasoning spend and budget (`useReasoningSpend`); empty hides the readout. */
-  readonly spend?: ReasoningSpend;
 }) {
   const { levels, default: fallback } = thinkingChoices(models, alias);
   const shown = shownThinking(chosen, levels) ?? fallback;
@@ -105,9 +92,6 @@ export function ThinkingPicker({
       selectedKey={shown}
       disabled={disabled}
       onSelect={(key) => onChoose(key === fallback ? null : (key as ThinkingLevel))}
-      spent={spend.spent}
-      budget={spend.budget}
-      estimated={spend.estimated}
       compact={compact}
     />
   );
