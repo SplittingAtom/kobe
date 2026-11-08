@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR #TBD)
+- **Status:** in review (PR #490)
 - **Branch / worktree:** `kobe-569-agents-page-tabs` in `../Kobe-wt569`
 - **Depends on:** KOBE-566 (roster routes, `@kobe/protocol` `agent-roster.ts`), KOBE-567 (row status
   `unavailable`). Spec `docs/specs/agents-roster.md` AR1, AR2, AR5–AR7, AR13–AR16, §5, §6.4–6.6 (AR-5).
