@@ -112,10 +112,15 @@ Which control a model needs is the admin's choice (Site → Models), never guess
 **Where the spend shows:** Session info (`/session`, KOBE-584), from `GET /v1/threads/{id}/usage`.
 "Thinking tokens" is the sum of the runs' `reasoning_tokens` (runs without a count add nothing; ≈
 when any counted run was estimated; "—" when none has a count); it is part of Output tokens, as
-its tooltip says. "Last run" is "<spent> of <budget> at <Level>" for the run of the newest call
-(the run streaming in this tab is skipped until its usage lands), the budget being
-`thinkingBudget(control, run level)` with the conversation model's `thinking_in_team.control`;
-"—" without a count, a level or a control, or at budget 0 (Off). No bar: the composer's Reasoning
+its tooltip says. "Last run" is the run of the newest call (the run streaming in this tab is
+skipped only until the usage read after it lands, so a run that ended without a model call does
+not hide the previous one), graded with the control of **the model that run used** (its call's
+gateway model in the team's list; not the conversation's current model). With `anthropic_budget` or
+`gemini_budget`, whose budget is a real request field, it reads "<spent> of <budget> at <Level>".
+With `reasoning_effort`, `anthropic_adaptive` or `anthropic_effort` it reads "<spent> at <Level>"
+and its tooltip says "Level <X> is a typical scale of about <N> tokens, not a limit" (N from
+`THINKING_EFFORT_BUDGETS`). At Off, or when the run's model is not in the list, it reads
+"<spent> at <Level>"; "—" only without a count or a level. No bar: the composer's Reasoning
 effort control no longer shows the spend (KOBE-574). Budgets per level live in `@kobe/protocol` thinking.ts; `thinkingBudget(control,
 level)` picks the right table (null for `none`), and the team models API carries each model's
 control in `thinking_in_team.control`.

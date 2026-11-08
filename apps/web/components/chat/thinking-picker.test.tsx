@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ThinkingLevel } from "@kobe/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TeamModel, TeamModels } from "../../lib/admin/api/team/models";
-import { ThinkingPicker, shownThinking } from "./thinking-picker";
+import { ThinkingPicker, shownThinking, thinkingChoices } from "./thinking-picker";
 
 /**
  * KOBE-556 (on KOBE-260's rules): the conversation's thinking level as Reasoning effort pills:
@@ -124,5 +124,17 @@ describe("shownThinking (KOBE-260 clamping)", () => {
     expect(shownThinking("high", ["off", "low"])).toBe("low");
     expect(shownThinking("off", ["low", "medium"])).toBe("low");
     expect(shownThinking(null, ["low"])).toBeNull();
+  });
+});
+
+describe("thinkingChoices", () => {
+  it("returns the model's control beside its levels and default (KOBE-584)", () => {
+    const models = teamModels({ control: "anthropic_budget", default: "low", levels: ["low"] });
+    expect(thinkingChoices(models, null)).toEqual({
+      levels: ["low"],
+      default: "low",
+      control: "anthropic_budget",
+    });
+    expect(thinkingChoices(teamModels({ default: null, levels: [] }), null).control).toBeNull();
   });
 });

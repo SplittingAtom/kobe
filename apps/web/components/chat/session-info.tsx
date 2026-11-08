@@ -1,7 +1,6 @@
 "use client";
 
 import { useAuiState } from "@assistant-ui/react";
-import type { ThinkingControl } from "@kobe/protocol";
 import { Dialog } from "radix-ui";
 import { useState } from "react";
 import type { TeamModels } from "../../lib/admin/api/team/models";
@@ -17,7 +16,7 @@ import { Button } from "../ui/button";
 import { chatPortalContainer } from "../ui/chat-portal";
 import { useChatSession, type KobeThreadExtras } from "./kobe-runtime";
 import { useThreadUsageRead } from "./message-footer";
-import { lastRunLine, thinkingControl, thinkingTokensLine } from "./session-reasoning";
+import { lastRun, pendingRunId, thinkingTokensLine } from "./session-reasoning";
 import {
   THINKING_LABELS,
   shownThinking,
@@ -45,18 +44,11 @@ const ZERO: UsageTotals = {
   estimatedCalls: 0,
 };
 
-/**
- * The conversation's model as its picker shows it, its thinking level, and the model's thinking
- * control (KOBE-584: grades the last run's reasoning spend).
- */
+/** The conversation's model as its picker shows it, and its thinking level. */
 function modelLines(
   models: TeamModels,
   state: ThreadState,
-): {
-  readonly model: string;
-  readonly thinking: string;
-  readonly control: ThinkingControl | null;
-} {
+): { readonly model: string; readonly thinking: string } {
   const choices = modelChoices(models, state.summary?.model ?? null, state.agentModel ?? null);
   const alias = choices.pinned ?? choices.chosen;
   const model = alias === null ? teamDefaultLabel(choices) : aliasName(models, alias);
@@ -68,7 +60,7 @@ function modelLines(
       : level === null
         ? thinkingDefaultLabel(fallback)
         : THINKING_LABELS[level];
-  return { model, thinking, control: thinkingControl(models, alias) };
+  return { model, thinking };
 }
 
 const when = (iso: string | undefined) =>
@@ -106,13 +98,18 @@ function SessionInfoDialog({
   const { state } = extras;
   const summary = state.summary;
   const models = useThreadTeamModels();
-  const usage = useThreadUsageRead()?.usage;
+  const usageRead = useThreadUsageRead();
+  const usage = usageRead?.usage;
   const messages = useAuiState((s) => s.thread.messages.length);
   const lines = models.status === "ready" ? modelLines(models.data, state) : null;
   const runs = usage?.runs ?? [];
   const totals = sum(runs);
-  const liveRunId = state.live?.runId ?? null;
-  const rows: readonly (readonly [term: string, value: string, title?: string])[] = [
+  const last = lastRun(
+    usage ?? null,
+    pendingRunId(state.live, usageRead?.afterRun ?? null),
+    models.status === "ready" ? models.data : null,
+  );
+  const rows: readonly (readonly [term: string, value: string, title?: string | undefined])[] = [
     ["Title", summary?.title || "Untitled conversation"],
     ["Agent", summary?.agentName ?? "No agent"],
     ["Model", lines?.model ?? "—"],
@@ -128,7 +125,7 @@ function SessionInfoDialog({
     ],
     ["Output tokens", formatTokens(totals.outputTokens)],
     ["Thinking tokens", thinkingTokensLine(runs), THINKING_TOKENS_TITLE],
-    ["Last run", lastRunLine(usage ?? null, liveRunId, lines?.control ?? null)],
+    ["Last run", last.value, last.title],
     [
       "Cost",
       totals.unpricedCalls > 0

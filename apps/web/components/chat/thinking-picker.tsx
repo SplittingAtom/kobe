@@ -1,6 +1,6 @@
 "use client";
 
-import { thinkingRank, type ThinkingLevel } from "@kobe/protocol";
+import { thinkingRank, type ThinkingControl, type ThinkingLevel } from "@kobe/protocol";
 import type { TeamModels } from "../../lib/admin/api/team/models";
 import { ThinkingEffort } from "./thinking-effort";
 
@@ -18,15 +18,24 @@ export function thinkingDefaultLabel(fallback: ThinkingLevel | null): string {
 
 /**
  * The levels the conversation's model offers in this team (KOBE-260), or none: its team
- * settings say what members may pick (site settings narrowed by the team).
+ * settings say what members may pick (site settings narrowed by the team), and its control
+ * (KOBE-557; null when unknown).
  */
 export function thinkingChoices(
   models: TeamModels,
   alias: string | null,
-): { readonly levels: readonly ThinkingLevel[]; readonly default: ThinkingLevel | null } {
+): {
+  readonly levels: readonly ThinkingLevel[];
+  readonly default: ThinkingLevel | null;
+  readonly control: ThinkingControl | null;
+} {
   const model = models.models.find((m) => m.alias === (alias ?? models.default));
   const team = model?.enabled ? model.thinkingInTeam : undefined;
-  return { levels: team?.levels ?? [], default: team?.default ?? null };
+  return {
+    levels: team?.levels ?? [],
+    default: team?.default ?? null,
+    control: team?.control ?? null,
+  };
 }
 
 /** A chosen level as the runs will use it: never above what the team now allows. */

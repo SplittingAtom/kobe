@@ -12,13 +12,18 @@ usage API already carries `reasoningTokens`, `reasoningEstimated`, `thinkingLeve
 ## Decisions
 
 - Helpers live in `apps/web/components/chat/session-reasoning.ts` as plain functions:
-  `thinkingControl`, `latestReasoning` and `reasoningSpend` restored from before PR #483, plus
-  `reasoningTotal`, `thinkingTokensLine`, `lastRunLine`. `sum()` in session-info.tsx stays typed
-  without `reasoningTokens`, so the reasoning sum stays separate from the output sum.
-- `reasoningSpend` now also returns null at budget 0 (Off), so "Last run" reads "—" there.
+  `latestReasoning` restored from before PR #483, plus `reasoningTotal`, `thinkingTokensLine`,
+  `runControl`, `pendingRunId`, `lastRun`. `sum()` in session-info.tsx stays typed without
+  `reasoningTokens`, so the reasoning sum stays separate from the output sum.
 - A counted 0 is a count ("0"), not unknown; ≈ only follows counted runs.
-- Level reads "Off/Low/Medium/High" in "Last run" (the Thinking row keeps "Thinking medium").
-- The tooltip (`title`) sits on the Thinking tokens term and value.
+- Code review (PR #491), all fixed: "Last run" uses the control of the run's model
+  (`latestCall.model` against the team list's `gatewayModel`, falling back to the site policy for a
+  disabled model; unmapped: "<spent> at <Level>"). "of <budget>" only for anthropic_budget /
+  gemini_budget; effort controls show "<spent> at <Level>" with a "typical scale … not a limit"
+  title. A counted run at Off reads "<spent> at Off". The live run hides the row only while open
+  or until the read after it lands. `thinkingChoices` returns `control`; the duplicate
+  `thinkingControl` was dropped. Test fixtures are typed.
+- The tooltip (`title`) sits on the row's term and value.
 
 ## Open questions (for Chris or the coordinator)
 
