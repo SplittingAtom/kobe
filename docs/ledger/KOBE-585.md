@@ -1,6 +1,6 @@
 # KOBE-585: Add to project: an artifact version or a workspace file becomes a read-only project file
 
-- **Status:** in review (PR pending)
+- **Status:** in review (PR #488)
 - **Branch / worktree:** `kobe-585-add-to-project` in `../Kobe-wt585`
 - **Depends on:** none (workspaces lane WS-2; lane brief on `docs/workspaces-lane`, PR #486)
 
