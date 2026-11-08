@@ -14,7 +14,7 @@ import { pauseOwnerSchedulesInTx, type ScheduleStopCause } from "../schedules/of
  * again once its owner came back.
  *
  * Each scheduler tick, per team: owners who are deactivated or no longer members but still have
- * an active (or team-admin-paused) schedule or an in-flight scheduled run get both steps again,
+ * an active (or team-admin- or agent-paused) schedule or an in-flight scheduled run get both steps again,
  * as the system. Idempotent: what is done no longer matches, so a later tick finds nothing.
  */
 export interface OwnerSweepDeps {
@@ -48,7 +48,10 @@ async function inactiveOwners(db: KobeDb, teamId: string): Promise<InactiveOwner
       .where(
         and(
           eq(schedules.teamId, teamId),
-          or(eq(schedules.active, true), eq(schedules.pausedBy, "team_admin")),
+          or(
+            eq(schedules.active, true),
+            inArray(schedules.pausedBy, ["team_admin", "agent_unavailable"]),
+          ),
         ),
       );
     const live = await tx.execute<{ thread_id: string }>(sql`

@@ -14330,8 +14330,13 @@
                     "not_published",
                     "suspended_here",
                     "suspended_site",
+                    "unavailable",
                     "archived"
                   ]
+                },
+                "unavailableReason": {
+                  "type": "string",
+                  "enum": ["owner_left", "owner_deactivated"]
                 },
                 "currentVersion": {
                   "anyOf": [

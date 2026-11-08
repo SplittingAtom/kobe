@@ -42,6 +42,7 @@ function statusOf(s: Schedule): string {
   if (s.active) return "Active";
   if (s.pausedBy === "team_admin") return "Paused by a team admin";
   if (s.pausedBy === "deactivation") return "Paused (your access was deactivated)";
+  if (s.pausedBy === "agent_unavailable") return "Paused: agent unavailable";
   return "Paused";
 }
 

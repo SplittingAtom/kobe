@@ -3,7 +3,7 @@
  * Responses arrive camelized; request bodies use the route's snake_case. Every call sends
  * `X-Kobe-Team`: notifications belong to the active team.
  */
-import type { NotificationKind } from "@kobe/protocol";
+import type { NotificationKind, SchedulePausedBy } from "@kobe/protocol";
 import { apiRequest, type ApiResult } from "../api/client";
 
 export interface KobeNotification {
@@ -15,7 +15,7 @@ export interface KobeNotification {
   readonly threadId: string | null;
   readonly runId: string | null;
   readonly skippedCount?: number | undefined;
-  readonly pausedBy?: "team_admin" | "deactivation" | undefined;
+  readonly pausedBy?: SchedulePausedBy | undefined;
   readonly skillId?: string | undefined;
   readonly skillName?: string | undefined;
   /** The retired version (`skill.version.*`, KOBE-340). */

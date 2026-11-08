@@ -7,7 +7,6 @@ import {
   siteAgents,
   siteAgentVersions,
   lt,
-  sql,
   teamAgents,
   teamAgentVersions,
   teamMembers,
@@ -20,6 +19,13 @@ import { canonicalJson } from "@kobe/protocol";
 import { recordAudit } from "../audit/record.js";
 import { agentAccess, type AgentActor } from "./access.js";
 import { readPublishFloor } from "./floor.js";
+import {
+  isLentAgent,
+  keptLentAgent,
+  lentAgent,
+  siteVisibleIn,
+  switchTarget,
+} from "./roster-resolution.js";
 import { freezeLocalSkills, type SkillLeftOut } from "./skill-freeze.js";
 import { skillManifestSchema, type SkillManifest } from "../skills/frozen.js";
 import {
@@ -686,11 +692,11 @@ export async function findPinnableAgent(
   const siteQuery = tx
     .select({ ...SITE, scope: siteAgents.scope })
     .from(siteAgents)
-    .where(and(eq(siteAgents.id, agentId), siteVisibleTo(viewer.userId)));
+    .where(and(eq(siteAgents.id, agentId), siteVisibleIn(viewer)));
   const [own]: (Row & { scope: "personal" | "gallery" })[] = await (options.lock
     ? siteQuery.for("share")
     : siteQuery);
-  if (!own) return null;
+  if (!own) return lentAgent(tx, viewer, agentId, options);
   const { scope, ...row } = own;
   const record = toRecord(scope, row);
   // A team can suspend a site-wide agent for itself (KOBE-86): effective status here.
@@ -704,10 +710,6 @@ export function agentStatusOf(agent: AgentRecord): "active" | "suspended" | "arc
   if (agent.archivedAt !== null) return "archived";
   return agent.status === "suspended" ? "suspended" : "active";
 }
-
-/** Site-wide agents a user sees: the gallery and their own personal agents. */
-export const siteVisibleTo = (userId: string) =>
-  sql`(${siteAgents.scope} = 'gallery' OR (${siteAgents.scope} = 'personal' AND ${siteAgents.ownerUserId} = ${userId}::uuid))`;
 
 /** Why an agent can't be pinned by a new thread or a switch, if it can't. */
 function unavailable(agent: AgentRecord): boolean {
@@ -773,7 +775,7 @@ export async function resolveSwitchPin(
   if (unavailable(agent) || agent.currentVersion === null) {
     return { ok: false, error: "agent_unavailable" };
   }
-  const target = version ?? agent.currentVersion;
+  const target = switchTarget(isLentAgent(agent, viewer), agent.currentVersion, version);
   if (target !== agent.currentVersion && !(await readVersion(tx, agent.scope, agent.id, target))) {
     return { ok: false, error: "version_not_found" };
   }
@@ -824,7 +826,8 @@ export async function resolvePinnedAgent(
   owner: PinViewer,
   pin: AgentPin,
 ): Promise<PinnedAgent> {
-  const agent = await findPinnableAgent(tx, owner, pin.agentId);
+  const agent =
+    (await findPinnableAgent(tx, owner, pin.agentId)) ?? (await keptLentAgent(tx, owner, pin));
   if (!agent || agent.scope !== pin.agentScope) return { ok: false, error: "agent_not_found" };
   if (agent.status === "suspended") return { ok: false, error: "agent_suspended" };
   try {

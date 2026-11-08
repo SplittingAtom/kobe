@@ -27,7 +27,9 @@ import {
   type RosterEntryState,
   type RosterTarget,
 } from "./access.js";
+import { logger } from "../logger.js";
 import { siteEntry, teamEntry, type RosterEntryRecord } from "./roster.js";
+import { syncAgentSchedules, syncAgentSchedulesEverywhere } from "./roster-schedules.js";
 
 /**
  * Roster writes (KOBE-566, spec agents-roster AR5-AR7, §6.4, §6.5): assign or propose, withdraw,
@@ -97,6 +99,33 @@ function inRoster<T>(
   fn: (tx: KobeTx) => Promise<T>,
 ) {
   return target === "team" ? withTeam(db, teamOf(teamId), fn) : db.transaction(fn);
+}
+
+/**
+ * {@link inRoster} for a write that may change whether `agentId` runs (AR11): a team roster's
+ * schedules of it are paused or resumed in the same transaction; after a site roster write every
+ * team's are, once it committed (a failure is left to the next scheduler tick).
+ */
+async function inRosterSynced<T extends { ok: boolean } | null>(
+  db: KobeDb,
+  target: RosterTarget,
+  teamId: string | null,
+  agentId: string,
+  fn: (tx: KobeTx) => Promise<T>,
+): Promise<T> {
+  const result = await inRoster(db, target, teamId, async (tx) => {
+    const r = await fn(tx);
+    if (target === "team" && r?.ok) {
+      await syncAgentSchedules(tx, teamOf(teamId), { agentIds: [agentId] });
+    }
+    return r;
+  });
+  if (target === "site" && result?.ok) {
+    await syncAgentSchedulesEverywhere(db, agentId).catch((err: unknown) => {
+      logger.error({ err, agent_id: agentId }, "schedules not synced after a site roster write");
+    });
+  }
+  return result;
 }
 
 /** The team of a team-roster write; a site-only actor never reaches a team branch. */
@@ -246,7 +275,7 @@ export async function assignAgent(
   input: AssignInput,
 ): Promise<RosterResult<{ entry: RosterEntryRecord; mode: "direct" | "propose" }>> {
   const { target, agentId } = input;
-  return inRoster(db, target, actor.teamId, async (tx) => {
+  return inRosterSynced(db, target, actor.teamId, agentId, async (tx) => {
     await lockRoster(tx, target, actor.teamId);
     const agent = await lockPersonalAgent(tx, agentId);
     if (!agent) return fail("agent_not_found");
@@ -321,7 +350,7 @@ export async function withdrawAgent(
   target: RosterTarget,
   teamId: string = actor.teamId,
 ): Promise<RosterResult<RosterEntryRecord>> {
-  return inRoster(db, target, teamId, async (tx) => {
+  return inRosterSynced(db, target, teamId, agentId, async (tx) => {
     await lockRoster(tx, target, teamId);
     const agent = await lockPersonalAgent(tx, agentId);
     if (!agent || agent.ownerUserId !== actor.userId) return fail("agent_not_found");
@@ -409,7 +438,7 @@ export async function updateEntry(
   const admin =
     target === "team" ? "teamId" in actor && rosterAdmin(actor, "team") : actor.siteAdmin;
   if (!admin) return fail("forbidden");
-  return inRoster(db, target, teamId, async (tx) => {
+  return inRosterSynced(db, target, teamId, agentId, async (tx) => {
     await lockRoster(tx, target, teamId);
     const agent = await lockPersonalAgent(tx, agentId);
     const entry = agent ? await entryOf(tx, target, teamId, agentId) : null;
@@ -510,6 +539,7 @@ export async function setTeamSuspension(
     const scope = agent.scope === "gallery" ? "gallery" : "personal";
     await setSuspendedHere(tx, actor, agentId, scope, suspended);
     await audit(tx, suspended ? "suspended" : "resumed", "team", actor.teamId, { ...agent, scope });
+    await syncAgentSchedules(tx, actor.teamId, { agentIds: [agentId] });
     return { ok: true, value: { agentId, suspendedHere: suspended } };
   });
 }
