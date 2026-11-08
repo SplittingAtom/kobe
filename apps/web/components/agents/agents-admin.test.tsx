@@ -163,8 +163,8 @@ describe("Team tab as a team admin: the Inventory's columns and actions (ac-1)",
     expect(within(triage).getByText("1,234")).toBeTruthy();
     expect(within(triage).getByText("1,200,000 tokens")).toBeTruthy();
     expect(within(triage).getByText("Ann: Paused: agent unavailable")).toBeTruthy();
-    expect(within(triage).getByText("Bo: paused by a team admin")).toBeTruthy();
-    expect(within(triage).getByText("Cy: active")).toBeTruthy();
+    expect(within(triage).getByText("Bo: Paused by a team admin")).toBeTruthy();
+    expect(within(triage).getByText("Cy: Active")).toBeTruthy();
     expect(within(triage).getByText("4% (passed)")).toBeTruthy();
     expect(await rowActions("Triage")).toEqual(["Export to Orbit", "Suspend here"]);
   });
@@ -247,6 +247,17 @@ describe("Site tab as a site admin: the Gallery page's actions (ac-1)", () => {
         },
       ],
       "POST /v1/site/gallery/agents/g-1/eval": [202, { message: "Evaluating" }],
+      "GET /v1/me/teams": [
+        200,
+        {
+          activeTeamId: "t-1",
+          lastTeamId: "t-1",
+          teams: [
+            { id: "t-1", slug: "fin", name: "Finance", role: "member", registry: false },
+            { id: "t-2", slug: "ops", name: "Ops", role: "team_admin", registry: false },
+          ],
+        },
+      ],
     });
     renderTeam(<Page search="tab=site" />, SITE_ADMIN);
     const kobe = await rowOf("Kobe");
@@ -262,14 +273,38 @@ describe("Site tab as a site admin: the Gallery page's actions (ac-1)", () => {
     expect(await screen.findByText("repository file")).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Reset to repository/ })).toBeTruthy();
 
-    expect(await rowActions("Kobe")).toEqual(["Run eval", "Export file", "Fork to Personal"]);
-    await rowAction("Kobe", "Run eval");
+    expect(await rowActions("Kobe")).toEqual(["Run eval…", "Export file", "Fork to Personal"]);
+    // The Gallery page's team picker: the active team first, any team of the admin's.
+    await rowAction("Kobe", "Run eval…");
+    const dialog = await screen.findByRole("dialog", { name: "Run an eval of Kobe" });
+    const team = (await within(dialog).findByLabelText("Run in team")) as HTMLSelectElement;
+    expect(team.value).toBe("t-1");
+    await userEvent.selectOptions(team, "Ops");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Run eval" }));
     expect(
-      await screen.findByText(
-        "Evaluating Kobe in Finance. The score appears here when it finishes.",
-      ),
+      await screen.findByText("Evaluating Kobe in Ops. The score appears here when it finishes."),
     ).toBeTruthy();
-    expect(bodyOf(calls, "POST", "/v1/site/gallery/agents/g-1/eval")).toEqual({ teamId: "t-1" });
+    expect(bodyOf(calls, "POST", "/v1/site/gallery/agents/g-1/eval")).toEqual({ teamId: "t-2" });
+  });
+
+  it("shows Compare and Reset only for gallery rows on screen, once the table has loaded", async () => {
+    const other = {
+      ...GALLERY_ADMIN_LIST[1].agents[0],
+      id: "g-2",
+      slug: "other",
+      name: "Other",
+    };
+    stubApi({
+      [ROSTER("site")]: [200, page("site", [GALLERY_ROW, SITE_PROPOSAL])],
+      "GET /v1/site/gallery/agents": [200, { agents: [GALLERY_ADMIN_LIST[1].agents[0], other] }],
+    });
+    renderTeam(<Page search="tab=site" />, SITE_ADMIN);
+    await within(await rowOf("Kobe")).findByText("Customized");
+    expect(screen.getByText(/A newer repository version of Kobe/)).toBeTruthy();
+    // "Other" is in the gallery list but not on the tab (archived, filtered): no notice.
+    expect(screen.queryByText(/A newer repository version of Other/)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /^Proposed/ }));
+    expect(screen.queryByText(/A newer repository version of Kobe/)).toBeNull();
   });
 
   it("resets a customized agent to the repository after asking, then refreshes the tab", async () => {
@@ -337,6 +372,17 @@ describe("Proposals queue (ac-2)", () => {
     expect(screen.getByRole("rowheader", { name: /Drafter/ })).toBeTruthy();
     await userEvent.click(filter);
     expect(await rowOf("Triage")).toBeTruthy();
+  });
+
+  it("counts the server's pending proposals for the whole roster, not only the loaded page", async () => {
+    stubApi({
+      [ROSTER("team")]: [200, { ...page("team", [TRIAGE, PLANNER], "c-2"), proposedCount: 7 }],
+    });
+    renderTeam(<Page search="tab=team" />, TEAM_ADMIN);
+    await rowOf("Triage");
+    await userEvent.click(screen.getByRole("button", { name: "Proposed (7)" }));
+    expect(screen.getByRole("rowheader", { name: /^Planner/ })).toBeTruthy();
+    expect(screen.queryByRole("rowheader", { name: /^Triage/ })).toBeNull();
   });
 
   it("says when no proposal waits", async () => {

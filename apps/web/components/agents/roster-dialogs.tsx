@@ -6,7 +6,10 @@ import {
   type AgentVersionRuleInput,
 } from "@kobe/protocol";
 import { useState } from "react";
+import { listMyTeamsForEval } from "../../lib/admin/api/site/gallery";
 import { Button, Dialog, DialogClose, Field, Select, Textarea } from "../ui/console";
+import { ResourceView } from "../admin/parts";
+import { useResource } from "../admin/use-resource";
 
 const LATEST = "latest";
 
@@ -199,6 +202,75 @@ export function DeclineDialog({
           </Button>
         </div>
       </form>
+    </Dialog>
+  );
+}
+
+/**
+ * Run a gallery agent's Orbit eval (KOBE-94) in a team the site admin belongs to: its sandbox
+ * runtime and model budget. The active team comes first; the Gallery page's picker (KOBE-570).
+ */
+export function EvalDialog({
+  row,
+  activeTeamId,
+  returnFocus,
+  pending,
+  onClose,
+  onRun,
+}: {
+  readonly row: AgentRosterRow;
+  readonly activeTeamId: string;
+  readonly returnFocus: HTMLElement | null;
+  readonly pending: boolean;
+  readonly onClose: () => void;
+  readonly onRun: (team: { readonly id: string; readonly name: string }) => Promise<void>;
+}) {
+  const { state } = useResource(listMyTeamsForEval);
+  const [choice, setChoice] = useState<string | null>(null);
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      title={`Run an eval of ${row.name}`}
+      description="The eval runs in a team you belong to (its sandbox runtime and model budget) and takes several minutes; the score appears here when it finishes."
+      returnFocus={() => returnFocus}
+    >
+      <ResourceView state={state} label="your teams">
+        {({ teams }) => {
+          const fallback = teams.find((t) => t.id === activeTeamId) ?? teams[0];
+          const teamId = choice ?? fallback?.id ?? "";
+          const team = teams.find((t) => t.id === teamId);
+          return (
+            <form
+              className="flex flex-col gap-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (team) void onRun({ id: team.id, name: team.name });
+              }}
+            >
+              <Field label="Run in team">
+                <Select value={teamId} onChange={(e) => setChoice(e.target.value)}>
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <div className="flex flex-wrap justify-end gap-2">
+                <DialogClose asChild>
+                  <Button type="button">Cancel</Button>
+                </DialogClose>
+                <Button type="submit" variant="primary" loading={pending} disabled={!team}>
+                  Run eval
+                </Button>
+              </div>
+            </form>
+          );
+        }}
+      </ResourceView>
     </Dialog>
   );
 }

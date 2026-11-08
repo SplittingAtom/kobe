@@ -17,10 +17,10 @@ import { useConfirm, type Confirm, type RowMenuItem } from "../ui/console";
 import { useNavigate } from "../shell/use-navigate";
 import type { Mutation } from "../admin/use-resource";
 import { downloadOrbitExport } from "../admin/team/agent-builder/orbit-export-button";
-import { ApproveDialog, DeclineDialog, PinDialog } from "./roster-dialogs";
+import { ApproveDialog, DeclineDialog, EvalDialog, PinDialog } from "./roster-dialogs";
 
 type Trigger = HTMLElement | null;
-type DialogKind = "pin" | "decline" | "approve";
+type DialogKind = "pin" | "decline" | "approve" | "eval";
 type OpenDialog = (kind: DialogKind, row: AgentRosterRow, trigger: Trigger) => void;
 
 /** What every flow needs: the team, the tab's roster, and the page's mutation and dialogs. */
@@ -251,13 +251,8 @@ function consoleItems(ctx: Ctx, row: AgentRosterRow): ItemSpec[] {
     {
       when: gallery !== undefined && version !== null,
       id: "run-eval",
-      label: "Run eval",
-      onSelect: () =>
-        void ctx.mutation.run(
-          () => runGalleryEval(row.agentId, ctx.teamId),
-          () =>
-            `Evaluating ${row.name} in ${ctx.teamName}. The score appears here when it finishes.`,
-        ),
+      label: "Run eval…",
+      onSelect: (t) => ctx.openDialog("eval", row, t),
     },
     {
       when: gallery !== undefined,
@@ -364,7 +359,7 @@ type Dialog = {
   readonly trigger: Trigger;
 } | null;
 
-/** Approve, Pin and Decline dialogs for the row that opened them. */
+/** Approve, Pin, Decline and Run eval dialogs for the row that opened them. */
 function RosterDialogs({
   ctx,
   dialog,
@@ -383,6 +378,25 @@ function RosterDialogs({
     pending: ctx.mutation.pending,
     onClose,
   };
+  if (dialog.kind === "eval") {
+    return (
+      <EvalDialog
+        row={row}
+        activeTeamId={ctx.teamId}
+        returnFocus={trigger}
+        pending={ctx.mutation.pending}
+        onClose={onClose}
+        onRun={async (team) => {
+          onClose();
+          await ctx.mutation.run(
+            () => runGalleryEval(row.agentId, team.id),
+            () =>
+              `Evaluating ${row.name} in ${team.name}. The score appears here when it finishes.`,
+          );
+        }}
+      />
+    );
+  }
   if (dialog.kind === "approve") {
     return (
       <ApproveDialog

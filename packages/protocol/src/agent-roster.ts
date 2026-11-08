@@ -222,6 +222,11 @@ export const agentRosterPageSchema = z.strictObject({
   rows: z.array(agentRosterRowSchema).max(AGENT_ROSTER_PAGE_MAX),
   /** Ordered by (name, id); null on the last page. */
   nextCursor: z.string().nullable(),
+  /**
+   * The tab's admins (team admins on Team, site admins on Site): proposals waiting for their
+   * decision on the whole roster, not only this page (§6.4, KOBE-570).
+   */
+  proposedCount: z.number().int().nonnegative().optional(),
 });
 export type AgentRosterPage = z.infer<typeof agentRosterPageSchema>;
 

@@ -5,8 +5,8 @@ import { panelOf } from "./support/panel.js";
 
 /**
  * The console sections that were "coming soon" although their tickets were done (KOBE-291): the
- * Site audit log, Site backup and restore, and the Team inventory (the Agents page's Team tab
- * since KOBE-570). Read-only: it applies a filter
+ * Site audit log, Site backup and restore, and the Team inventory (its agents on the Agents
+ * page's Team tab since KOBE-570). Read-only: it applies a filter
  * and clears it, nothing else. `KOBE_USER` must be the site Owner (or an Admin) and a team admin
  * of the active team. Spends no tokens. Run on gate1: `npx playwright test console-sections`.
  */
@@ -74,8 +74,19 @@ test("Site backup and restore: status and steps", async ({ page }) => {
   await expect(panelOf(page).getByLabel("Restore a backup")).toContainText("kobe restore --from");
 });
 
-// The Inventory folded into the Agents page's Team tab (KOBE-570, AR12): its columns for team admins.
+// The Inventory's agents moved to the Agents page's Team tab (KOBE-570, AR12): its columns there.
 const TEAM_TABLE = /^Agents of /;
+
+test("Team inventory: skills and connectors, and a pointer for the agents", async ({ page }) => {
+  await open(page, "/admin/team/inventory", "Inventory");
+  for (const name of ["Agents", "Skills", "Connectors"]) {
+    await expect(panelOf(page).getByRole("region", { name })).toBeVisible();
+  }
+  await expect(
+    panelOf(page).getByRole("link", { name: "Agents page, Team tab", exact: true }),
+  ).toHaveAttribute("href", "/agents?tab=team");
+  await expect(pageAlerts(page)).toHaveCount(0);
+});
 
 test("Team tab: the Inventory's columns for team admins", async ({ page }) => {
   await open(page, "/agents?tab=team", "Agents");

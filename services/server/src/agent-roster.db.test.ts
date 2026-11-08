@@ -619,4 +619,31 @@ describe("the roster read (AR1, AR2, §6.8)", () => {
     expect((await roster("carol", "site")).some((r) => usage([r], r.agentId))).toBe(false);
     expect((await roster("alice", "personal")).some((r) => usage([r], r.agentId))).toBe(false);
   });
+
+  it("counts every pending proposal for the roster's admins, not just the page (KOBE-570, §6.4)", async () => {
+    const one = await personal("carol", "Zz Count One");
+    const two = await personal("carol", "Zz Count Two");
+    for (const id of [one, two]) expect((await assign("carol", id, "team")).status).toBe(202);
+    const all = await as.alice.get("/v1/agents/roster?tab=team");
+    const pending = (all.json.rows as Row[]).filter(
+      (r) => r.status === "proposed" && r.actions.decide === true,
+    ).length;
+    expect(pending).toBeGreaterThanOrEqual(2);
+    const first = await as.alice.get("/v1/agents/roster?tab=team&limit=1");
+    expect(first.json.rows).toHaveLength(1);
+    expect(first.json.proposedCount).toBe(pending);
+    // Not for members or builders (they decide nothing); the site count is for site admins.
+    expect((await as.carol.get("/v1/agents/roster?tab=team")).json).not.toHaveProperty(
+      "proposedCount",
+    );
+    expect((await as.bob.get("/v1/agents/roster?tab=team")).json).not.toHaveProperty(
+      "proposedCount",
+    );
+    expect((await as.sam.get("/v1/agents/roster?tab=site")).json.proposedCount).toEqual(
+      expect.any(Number),
+    );
+    expect((await as.alice.get("/v1/agents/roster?tab=site")).json).not.toHaveProperty(
+      "proposedCount",
+    );
+  });
 });

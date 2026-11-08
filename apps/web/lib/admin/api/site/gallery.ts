@@ -4,6 +4,7 @@ import { revisionTag, type AgentSummary } from "../agents";
 import type { AgentDetail, DefinitionBody } from "../team/agent-builder";
 import type { TeamConnector } from "../team/connectors";
 import type { TeamModels } from "../team/models";
+import type { MyTeams } from "../../../teams";
 
 const enc = encodeURIComponent;
 
@@ -120,4 +121,9 @@ export function runGalleryEval(
   teamId: string,
 ): Promise<ApiResult<{ message: string }>> {
   return apiRequest(`${GALLERY_PATH}/${enc(id)}/eval`, { method: "POST", json: { teamId } });
+}
+
+/** The teams the caller may run an eval in. */
+export function listMyTeamsForEval(): Promise<ApiResult<MyTeams>> {
+  return apiRequest("/v1/me/teams");
 }

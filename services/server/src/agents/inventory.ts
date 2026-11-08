@@ -85,8 +85,18 @@ export interface InventoryPage {
   readonly nextCursor: string | null;
 }
 
-type InventoryRow = {
+/** The usage columns (`USAGE_COLUMNS`) of one agent, as raw SQL returns them. */
+type UsageRow = {
   id: string;
+  run_count: string;
+  last_run_at: Date | string | null;
+  tokens: string;
+  score_status: string | null;
+  score_rate: number | null;
+  score_at: Date | string | null;
+};
+
+type InventoryRow = UsageRow & {
   scope: InventoryItem["scope"];
   slug: string;
   name: string | null;
@@ -95,12 +105,6 @@ type InventoryRow = {
   status: InventoryItem["status"];
   archived_at: Date | string | null;
   current_version: number | null;
-  run_count: string;
-  last_run_at: Date | string | null;
-  tokens: string;
-  score_status: string | null;
-  score_rate: number | null;
-  score_at: Date | string | null;
 };
 
 const SCORE_STATUS: Readonly<Record<string, InventoryScore["status"]>> = {
@@ -114,6 +118,26 @@ const SCORE_STATUS: Readonly<Record<string, InventoryScore["status"]>> = {
 /** Raw SQL returns timestamps as the driver parses them (Date or text). */
 const iso = (v: Date | string | null): string | null =>
   v === null ? null : new Date(v).toISOString();
+
+export type InventoryUsage = Pick<
+  InventoryItem,
+  "runCount" | "lastRunAt" | "tokens" | "schedules" | "orbitScore"
+>;
+
+/** An agent's usage in the team: the inventory's and the Agents page's columns (KOBE-570). */
+export function toUsage(r: UsageRow, schedules: readonly InventorySchedule[] = []): InventoryUsage {
+  return {
+    runCount: Number(r.run_count),
+    lastRunAt: iso(r.last_run_at),
+    tokens: Number(r.tokens),
+    schedules,
+    orbitScore: {
+      status: (r.score_status && SCORE_STATUS[r.score_status]) || "none",
+      attackSuccessRate: r.score_rate,
+      at: iso(r.score_at),
+    },
+  };
+}
 
 export function toInventoryItem(
   r: InventoryRow,
@@ -130,15 +154,7 @@ export function toInventoryItem(
     archivedAt: iso(r.archived_at),
     currentVersion: r.current_version,
     versionCount: r.current_version ?? 0,
-    runCount: Number(r.run_count),
-    lastRunAt: iso(r.last_run_at),
-    tokens: Number(r.tokens),
-    schedules,
-    orbitScore: {
-      status: (r.score_status && SCORE_STATUS[r.score_status]) || "none",
-      attackSuccessRate: r.score_rate,
-      at: iso(r.score_at),
-    },
+    ...toUsage(r, schedules),
   };
 }
 
@@ -249,11 +265,6 @@ export interface UsageSubject {
   readonly currentVersion: number | null;
 }
 
-export type InventoryUsage = Pick<
-  InventoryItem,
-  "runCount" | "lastRunAt" | "tokens" | "schedules" | "orbitScore"
->;
-
 /**
  * The inventory's usage columns for the given agents in this team (KOBE-570: the Agents page's
  * Team and Site tabs show them to team admins, AR12). Inside the caller's `withTeam()`; every
@@ -269,12 +280,10 @@ export async function usageOf(
     agents.map((a) => sql`(${a.id}::uuid, ${a.scope}::text, ${a.currentVersion}::int)`),
     sql`, `,
   );
-  const result = await tx.execute<InventoryRow>(sql`
+  const result = await tx.execute<UsageRow>(sql`
       WITH page(id, scope, current_version) AS (VALUES ${values}),
       ${usageCtes(teamId)}
-      SELECT page.id, page.scope, page.id::text AS slug, NULL AS name, NULL AS owner_user_id,
-             NULL AS owner_name, 'active' AS status, NULL AS archived_at, page.current_version,
-             ${USAGE_COLUMNS}
+      SELECT page.id, ${USAGE_COLUMNS}
         FROM page
         ${USAGE_JOINS}`);
   const scheduled = await schedulesOf(
@@ -282,15 +291,7 @@ export async function usageOf(
     teamId,
     agents.map((a) => a.id),
   );
-  return new Map(
-    result.rows.map((r) => {
-      const { runCount, lastRunAt, tokens, schedules, orbitScore } = toInventoryItem(
-        r,
-        scheduled.get(r.id),
-      );
-      return [r.id, { runCount, lastRunAt, tokens, schedules, orbitScore }] as const;
-    }),
-  );
+  return new Map(result.rows.map((r) => [r.id, toUsage(r, scheduled.get(r.id))] as const));
 }
 
 type ScheduleRow = {

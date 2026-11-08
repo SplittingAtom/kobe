@@ -4,6 +4,7 @@ import type { AgentRosterRow, AgentRosterSchedule } from "@kobe/protocol";
 import type { GalleryScore } from "../../lib/admin/api/agents";
 import { scoreLabel } from "../../lib/admin/orbit-score";
 import { formatTokens } from "../../lib/admin/usage-format";
+import { pausedByLabel } from "../../lib/schedules/paused-by";
 import { GalleryScoreCell } from "../admin/gallery-score";
 import { DateTime } from "../admin/parts";
 import { TableCell } from "../ui/console";
@@ -85,15 +86,9 @@ function TokenCount({ tokens }: { readonly tokens: number }) {
   );
 }
 
-const PAUSED_BY_LABEL: Readonly<Record<NonNullable<AgentRosterSchedule["pausedBy"]>, string>> = {
-  team_admin: "paused by a team admin",
-  deactivation: "paused (owner deactivated or removed)",
-  agent_unavailable: "Paused: agent unavailable",
-};
-
-export function scheduleLabel(s: AgentRosterSchedule): string {
-  if (s.status === "active") return "active";
-  return s.pausedBy === null ? "paused" : PAUSED_BY_LABEL[s.pausedBy];
+function scheduleLabel(s: AgentRosterSchedule): string {
+  if (s.status === "active") return "Active";
+  return s.pausedBy === null ? "Paused by its owner" : pausedByLabel(s.pausedBy);
 }
 
 /** Owner and status of each of the team's schedules of the agent. */

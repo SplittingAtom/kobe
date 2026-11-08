@@ -24,7 +24,8 @@ dialog in `roster-dialogs.tsx`; the queue in `lib/agents/proposals.ts`; redirect
   `pausedBy`), `orbitScore`, `canExport` (definition readable, as the Inventory's `canExport`).
   The Inventory's SQL was split into shared fragments (`usageCtes`, `USAGE_COLUMNS`,
   `USAGE_JOINS` in `agents/inventory.ts`); `usageOf()` reads them for the page's rows only, in
-  `withTeam()` with `team_id` explicit (team-filter guard green). Protocol
+  the same `withTeam()` transaction as the tab's rows (one snapshot, review 5) with `team_id`
+  explicit (team-filter guard green). Shared `toUsage()` builds the usage for both (review 8). Protocol
   `agentRosterUsageSchema` (optional field, so older clients ignore it); OpenAPI regenerated.
   Columns are the Inventory's, not the spec's wording: Runs, Last run, Tokens, Schedules, Orbit
   score (spec "threads, last used" = the Inventory's runs and last run).
@@ -41,30 +42,39 @@ dialog in `roster-dialogs.tsx`; the queue in `lib/agents/proposals.ts`; redirect
   repository (shared `UpdateAvailable`); Edit is the row's Edit link (`actions.edit` →
   `/admin/site/gallery/:id`); row items Run eval (in the active team: the old page's team picker
   is dropped) and Export file (the same download URL). Reset reloads the gallery state and the tab.
+  Run eval… opens a team picker (`listMyTeamsForEval`, active team first; review 2). Compare/Reset
+  notices only for gallery rows on screen, after the table loaded (review 3).
 - **Adopt** (KOBE-568 routes): "Adopt into <roster>" on Unavailable rows for the roster's admins
   (`actions.remove`, not a proposal), confirm first, then refresh. Rows have no `actions.adopt`
   yet (568 hand-off), so this is the documented stand-in.
 - **Proposals queue.** For the tab's deciders (Team: `team.agents.manage`; Site: site admin) a
-  toggle button `Proposed (n)` (`aria-pressed`) above the table; n = loaded rows with status
-  `proposed` and `actions.decide`; pressed shows only those ("No proposals are waiting." when
+  toggle button `Proposed (n)` (`aria-pressed`) above the table; n = the response's additive
+  `proposedCount` (all pending proposals the caller decides on the whole roster, admins only;
+  review 4), else the loaded rows with status `proposed` and `actions.decide`; the filter itself
+  works on loaded rows; pressed shows only those ("No proposals are waiting." when
   none). Approve is now "Approve…": a dialog with the version rule (latest by default, or
   `Pin to vN`); latest sends `{state: "active"}` as before, a pin adds `versionRule`. Decline
   keeps 569's note dialog; the proposer's Personal row shows "Declined for Team: X: <note>"
   (569's Reach wording, kept; a decline without a note is not distinguishable from a removal on
   the reach item, so it just disappears).
-- **Redirects** (307, not permanent): `/admin/team/agents` and `/admin/team/inventory` →
-  `/agents?tab=team`, `/admin/site/gallery` → `/agents?tab=site`. Exact paths only: the builder
+- **Redirects** (307, not permanent): `/admin/team/agents` → `/agents?tab=team`,
+  `/admin/site/gallery` → `/agents?tab=site`. **Deviation from AR12** (coordinator, review 1):
+  `/admin/team/inventory` does not redirect; it stays as the team's Skills and Connectors
+  inventory, its Agents section a pointer to the Team tab, because the spec folded only the agent
+  columns into the tab. Exact paths only: the builder
   (`/admin/team/agents/new`, `/:id`, `/:id/cases…`) and the gallery editor (`/admin/site/gallery/:id`)
   stay. Their back links now point at the tabs.
 - **Console nav.** New section status `movedTo(href)` (`lib/admin/nav/types.ts`): the entry stays
   in the console nav and overview but links to the tab; the registry test requires no console page
-  for it. Team "Team agents" → `/agents?tab=team`; Site "Gallery agents" → `/agents?tab=site`; the
-  separate "Inventory" entry is gone. Command palette already had "Agents" (569): unchanged.
+  for it. Team "Team agents" → `/agents?tab=team`; Site "Gallery agents" → `/agents?tab=site`;
+  "Inventory" stays (skills and connectors). Command palette already had "Agents" (569): unchanged.
 - **Removed:** the list pages and components (`team/agents-page`, `team/gallery-agents`,
-  `team/inventory-page`, `team/agent-inventory`, `site/gallery-page`), their tests, and API helpers
-  only they used (`listAgentInventory`, `setInventoryAgentStatus`, team `listGalleryAgents`,
-  `forkGalleryAgent`, site `listGalleryScores`, `listMyTeamsForEval`). The Inventory's skills and
-  connectors sections are not carried over: their own pages (Skills, Connectors) list them.
+  `team/agent-inventory`, `site/gallery-page`), their tests, and API helpers only they used
+  (`listAgentInventory`, `setInventoryAgentStatus`, team `listGalleryAgents`, `forkGalleryAgent`,
+  site `listGalleryScores`).
+- **One paused wording** (review 6): `lib/schedules/paused-by.ts` `pausedByLabel()` for the team
+  and personal schedule lists, the Schedules column and the paused notification ("Paused by a team
+  admin", "Paused: owner deactivated or removed", "Paused: agent unavailable").
 - **Browser specs** (existing ones that opened the old pages) point at the tabs:
   `consoles.spec.ts`, `console-sections.spec.ts` (Team tab columns and table layout),
   `site-gallery-edit.spec.ts` (list on the Site tab, editor unchanged). Not run (gate1, KOBE-572).
@@ -92,9 +102,10 @@ dialog in `roster-dialogs.tsx`; the queue in `lib/agents/proposals.ts`; redirect
   site admin: Customized, Compare, Reset, Edit, Run eval, Export file);
   `lib/agents/redirects.test.ts` (rules, next.config, deep links untouched);
   `lib/admin/nav/registry.test.ts`, `lib/admin/nav/redirects.test.ts` (moved sections);
-  server `src/agent-roster.db.test.ts` "gives team admins the inventory's usage…",
+  server `src/agent-roster.db.test.ts` "gives team admins the inventory's usage…" and "counts
+  every pending proposal…", `team-inventory-page.test.tsx` (skills, connectors, pointer),
   `src/agent-inventory.db.test.ts` (unchanged, still green), protocol `agent-roster.test.ts`.
-- ac-2: `agents-admin.test.tsx` "Proposals queue" (count and filter, empty state, approve with a
+- ac-2: `agents-admin.test.tsx` "Proposals queue" (server count, count and filter, empty state, approve with a
   pin, approve latest, decline with note and the proposer's Personal row, no queue for members);
   `lib/agents/proposals.test.ts`.
 - Checks: see PR (format, lint, typecheck, web tests, server tests incl. db, license, hygiene,

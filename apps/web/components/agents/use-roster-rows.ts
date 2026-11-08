@@ -70,6 +70,8 @@ export function useRosterRows(teamId: string, tab: AgentRosterTab) {
 
   return {
     state: first.state,
+    /** The roster's pending proposals for its admins (all pages), from the first page. */
+    proposedCount: first.state.status === "ready" ? first.state.data.proposedCount : undefined,
     rows: merged(firstRows, more.rows),
     nextCursor,
     loadMore,

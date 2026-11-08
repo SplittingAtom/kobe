@@ -20,13 +20,11 @@ import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
+import { pausedByLabel } from "../../../lib/schedules/paused-by";
 
 function statusOf(s: Schedule): string {
   if (s.active) return "Active";
-  if (s.pausedBy === "team_admin") return "Paused by a team admin";
-  if (s.pausedBy === "deactivation") return "Paused: owner deactivated or removed";
-  if (s.pausedBy === "agent_unavailable") return "Paused: agent unavailable";
-  return "Paused by its owner";
+  return s.pausedBy === null ? "Paused by its owner" : pausedByLabel(s.pausedBy);
 }
 
 /** Why Resume is off for a paused schedule (admins resume only what an admin paused, KOBE-173). */

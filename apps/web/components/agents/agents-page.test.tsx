@@ -8,7 +8,7 @@ import { entry, page, row } from "./roster-fixtures";
 import {
   bodyOf,
   BUILDER,
-  goTo,
+  type Navigator,
   MEMBER,
   Page,
   ROSTER,
@@ -552,7 +552,9 @@ describe("Agents page tab memory (ac-3)", () => {
       [ROSTER("team")]: [200, page("team", [])],
       [ROSTER("site")]: [200, page("site", [])],
     });
-    renderTeam(<Page search="tab=personal" />, MEMBER);
+    const navigator: Navigator = { current: null };
+    const goTo = (search: string) => navigator.current?.(search);
+    renderTeam(<Page search="tab=personal" navigator={navigator} />, MEMBER);
     await userEvent.click(screen.getByRole("tab", { name: "Team" }));
     // Next's router follows the page's replaceState, then a link names Personal again.
     act(() => goTo("tab=team"));

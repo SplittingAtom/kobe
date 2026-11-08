@@ -183,7 +183,10 @@ const subjectOf = (
 });
 
 /** Names of the given users (owners on the rows). */
-async function namesOf(db: KobeDb, ids: readonly string[]): Promise<ReadonlyMap<string, string>> {
+async function namesOf(
+  db: KobeDb | KobeTx,
+  ids: readonly string[],
+): Promise<ReadonlyMap<string, string>> {
   const unique = [...new Set(ids)];
   if (unique.length === 0) return new Map();
   const rows = await db
@@ -295,67 +298,60 @@ async function personalCandidates(db: KobeDb, actor: RosterActor): Promise<Candi
   });
 }
 
-async function teamCandidates(db: KobeDb, actor: RosterActor): Promise<Candidate[]> {
+/** Inside the read's `withTeam(actor.teamId)`; every team query states `team_id`. */
+async function teamCandidates(tx: KobeTx, actor: RosterActor): Promise<Candidate[]> {
   const teamId = actor.teamId;
-  return withTeam(db, teamId, async (tx) => {
-    const owned = await tx.select(TEAM).from(teamAgents).where(eq(teamAgents.teamId, teamId));
-    const entries = await teamEntries(tx, teamId);
-    const here = await suspendedIn(tx, teamId);
-    const ids = entries.map((e) => e.agentId);
-    const site =
-      ids.length === 0
-        ? []
-        : await tx
-            .select({ id: siteAgentRoster.siteAgentId, state: siteAgentRoster.state })
-            .from(siteAgentRoster)
-            .where(inArray(siteAgentRoster.siteAgentId, ids));
-    const siteState = new Map(site.map((s) => [s.id, s.state]));
-    const teamState = new Map(entries.map((e) => [e.agentId, e.state]));
-    const assigned = await entryCandidates(tx, actor, entries, (id) => ({
-      team: teamState.get(id) ?? null,
-      site: siteState.get(id) ?? null,
-      here: here.has(id),
-    }));
-    const ownedCandidates = owned.map((r) => {
-      const row = { ...r, boundTeamId: null };
-      return {
-        row,
-        kind: "team_owned" as const,
-        display: r.frontmatter as AgentFrontmatter,
-        entry: null,
-        subject: subjectOf("team_owned", row, { team: null, site: null, here: false }),
-      };
-    });
-    return [...ownedCandidates, ...assigned];
+  const owned = await tx.select(TEAM).from(teamAgents).where(eq(teamAgents.teamId, teamId));
+  const entries = await teamEntries(tx, teamId);
+  const here = await suspendedIn(tx, teamId);
+  const ids = entries.map((e) => e.agentId);
+  const site =
+    ids.length === 0
+      ? []
+      : await tx
+          .select({ id: siteAgentRoster.siteAgentId, state: siteAgentRoster.state })
+          .from(siteAgentRoster)
+          .where(inArray(siteAgentRoster.siteAgentId, ids));
+  const siteState = new Map(site.map((s) => [s.id, s.state]));
+  const teamState = new Map(entries.map((e) => [e.agentId, e.state]));
+  const assigned = await entryCandidates(tx, actor, entries, (id) => ({
+    team: teamState.get(id) ?? null,
+    site: siteState.get(id) ?? null,
+    here: here.has(id),
+  }));
+  const ownedCandidates = owned.map((r) => {
+    const row = { ...r, boundTeamId: null };
+    return {
+      row,
+      kind: "team_owned" as const,
+      display: r.frontmatter as AgentFrontmatter,
+      entry: null,
+      subject: subjectOf("team_owned", row, { team: null, site: null, here: false }),
+    };
   });
+  return [...ownedCandidates, ...assigned];
 }
 
-async function siteCandidates(db: KobeDb, actor: RosterActor): Promise<Candidate[]> {
-  return withTeam(db, actor.teamId, async (tx) => {
-    const gallery = await tx
-      .select(SITE_ROW)
-      .from(siteAgents)
-      .where(eq(siteAgents.scope, "gallery"));
-    const entries = await siteEntries(tx);
-    const here = await suspendedIn(tx, actor.teamId);
-    const siteState = new Map(entries.map((e) => [e.agentId, e.state]));
-    const teamState = new Map(
-      (await teamEntries(tx, actor.teamId)).map((e) => [e.agentId, e.state]),
-    );
-    const assigned = await entryCandidates(tx, actor, entries, (id) => ({
-      team: teamState.get(id) ?? null,
-      site: siteState.get(id) ?? null,
-      here: here.has(id),
-    }));
-    const galleryCandidates = gallery.map((row) => ({
-      row,
-      kind: "gallery" as const,
-      display: row.frontmatter as AgentFrontmatter,
-      entry: null,
-      subject: subjectOf("gallery", row, { team: null, site: null, here: here.has(row.id) }),
-    }));
-    return [...galleryCandidates, ...assigned];
-  });
+/** Inside the read's `withTeam(actor.teamId)` (this team's suspensions and entries). */
+async function siteCandidates(tx: KobeTx, actor: RosterActor): Promise<Candidate[]> {
+  const gallery = await tx.select(SITE_ROW).from(siteAgents).where(eq(siteAgents.scope, "gallery"));
+  const entries = await siteEntries(tx);
+  const here = await suspendedIn(tx, actor.teamId);
+  const siteState = new Map(entries.map((e) => [e.agentId, e.state]));
+  const teamState = new Map((await teamEntries(tx, actor.teamId)).map((e) => [e.agentId, e.state]));
+  const assigned = await entryCandidates(tx, actor, entries, (id) => ({
+    team: teamState.get(id) ?? null,
+    site: siteState.get(id) ?? null,
+    here: here.has(id),
+  }));
+  const galleryCandidates = gallery.map((row) => ({
+    row,
+    kind: "gallery" as const,
+    display: row.frontmatter as AgentFrontmatter,
+    entry: null,
+    subject: subjectOf("gallery", row, { team: null, site: null, here: here.has(row.id) }),
+  }));
+  return [...galleryCandidates, ...assigned];
 }
 
 const INVENTORY_SCOPE: Readonly<Record<AgentRosterKind, UsageSubject["scope"]>> = {
@@ -367,26 +363,23 @@ const INVENTORY_SCOPE: Readonly<Record<AgentRosterKind, UsageSubject["scope"]>> 
 /**
  * Team admins see the inventory's columns on the Team and Site tabs (KOBE-570, AR12): runs, last
  * run, tokens, schedules and Orbit score of each row's agent in the active team, with the same
- * right the inventory route asks (`team.agents.suspend`). Read in `withTeam()`, team explicit.
+ * right the inventory route asks (`team.agents.suspend`). Read in the tab's own transaction (same
+ * snapshot as the rows), team explicit.
  */
 async function withUsage(
-  db: KobeDb,
+  tx: KobeTx,
   actor: RosterActor,
-  tab: AgentRosterTab,
   rows: AgentRosterRow[],
 ): Promise<AgentRosterRow[]> {
-  if (tab === "personal" || rows.length === 0) return rows;
-  if (!teamRoleAllows(actor.role, "team.agents.suspend")) return rows;
-  const usage = await withTeam(db, actor.teamId, (tx) =>
-    usageOf(
-      tx,
-      actor.teamId,
-      rows.map((r) => ({
-        id: r.agentId,
-        scope: INVENTORY_SCOPE[r.kind],
-        currentVersion: r.currentVersion,
-      })),
-    ),
+  if (rows.length === 0 || !teamRoleAllows(actor.role, "team.agents.suspend")) return rows;
+  const usage = await usageOf(
+    tx,
+    actor.teamId,
+    rows.map((r) => ({
+      id: r.agentId,
+      scope: INVENTORY_SCOPE[r.kind],
+      currentVersion: r.currentVersion,
+    })),
   );
   return rows.map((r) => {
     const u = usage.get(r.agentId);
@@ -397,20 +390,25 @@ async function withUsage(
   });
 }
 
-export async function listRoster(
-  db: KobeDb,
+type RosterQuery = {
+  tab: AgentRosterTab;
+  cursor?: readonly [string, string] | null;
+  limit?: number;
+};
+
+/**
+ * The caller's rows of the tab, one page, with the count of proposals waiting for the caller's
+ * decision across the whole roster (§6.4) for the tab's admins.
+ */
+async function pageOf(
+  conn: KobeDb | KobeTx,
   actor: RosterActor,
-  query: { tab: AgentRosterTab; cursor?: readonly [string, string] | null; limit?: number },
-): Promise<AgentRosterPage> {
+  query: RosterQuery,
+  candidates: readonly Candidate[],
+): Promise<{ page: AgentRosterRow[]; rest: number; proposedCount?: number }> {
   const { tab } = query;
-  const candidates =
-    tab === "personal"
-      ? await personalCandidates(db, actor)
-      : tab === "team"
-        ? await teamCandidates(db, actor)
-        : await siteCandidates(db, actor);
   const names = await namesOf(
-    db,
+    conn,
     candidates.flatMap((c) => (c.row.ownerUserId ? [c.row.ownerUserId] : [])),
   );
   const rows = candidates
@@ -421,11 +419,37 @@ export async function listRoster(
   const after = query.cursor;
   const rest = after ? rows.filter((r) => compare([r.name, r.agentId], after) > 0) : rows;
   const limit = query.limit ?? ROSTER_PAGE_DEFAULT;
-  const page = await withUsage(db, actor, tab, rest.slice(0, limit));
-  const last = page.at(-1);
+  const decides = tab !== "personal" && rosterAdmin(actor, tab);
+  return {
+    page: rest.slice(0, limit),
+    rest: rest.length,
+    ...(decides
+      ? { proposedCount: rows.filter((r) => r.status === "proposed" && r.actions.decide).length }
+      : {}),
+  };
+}
+
+export async function listRoster(
+  db: KobeDb,
+  actor: RosterActor,
+  query: RosterQuery,
+): Promise<AgentRosterPage> {
+  const { tab } = query;
+  const limit = query.limit ?? ROSTER_PAGE_DEFAULT;
+  const result =
+    tab === "personal"
+      ? await pageOf(db, actor, query, await personalCandidates(db, actor))
+      : await withTeam(db, actor.teamId, async (tx) => {
+          const candidates =
+            tab === "team" ? await teamCandidates(tx, actor) : await siteCandidates(tx, actor);
+          const read = await pageOf(tx, actor, query, candidates);
+          return { ...read, page: await withUsage(tx, actor, read.page) };
+        });
+  const last = result.page.at(-1);
   return {
     tab,
-    rows: page,
-    nextCursor: rest.length > limit && last ? encodeCursor(last.name, last.agentId) : null,
+    rows: result.page,
+    nextCursor: result.rest > limit && last ? encodeCursor(last.name, last.agentId) : null,
+    ...(result.proposedCount === undefined ? {} : { proposedCount: result.proposedCount }),
   };
 }

@@ -251,7 +251,8 @@ describe("registry contents", () => {
       "policy",
       "skill-review",
       "retention",
-      // The Inventory folded into the Agents page's Team tab (KOBE-570, AR12), linked as "agents".
+      "inventory",
+      // The team's agents: the Agents page's Team tab (KOBE-570, AR12).
       "agents",
       "audit",
     ]) {

@@ -31,9 +31,10 @@ const FIXED_PAGES = [
   "/admin/site/audit",
   "/admin/site/backup",
   "/admin/site/appearance",
-  // The Inventory and the Gallery list are the Agents page's Team and Site tabs (KOBE-570).
+  // The agents of the Inventory and the Gallery list are the Agents page's tabs (KOBE-570).
   "/agents?tab=team",
   "/agents?tab=site",
+  "/admin/team/inventory",
   "/admin",
   "/admin/site",
   "/admin/team",

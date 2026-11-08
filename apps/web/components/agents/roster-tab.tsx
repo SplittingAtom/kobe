@@ -104,12 +104,13 @@ export function RosterTab({ tab }: { readonly tab: AgentRosterTab }) {
             variant={onlyProposals ? "primary" : "secondary"}
             onClick={() => setOnlyProposals(!onlyProposals)}
           >
-            {`Proposed (${proposalCount(roster.rows)})`}
+            {`Proposed (${roster.proposedCount ?? proposalCount(roster.rows)})`}
           </Button>
         </p>
       )}
       <GalleryNotices
-        gallery={extras.gallery}
+        gallery={roster.state.status === "ready" ? extras.gallery : null}
+        rows={rows}
         onReset={() => {
           extras.reloadGallery();
           void roster.refresh();
@@ -146,19 +147,24 @@ export function RosterTab({ tab }: { readonly tab: AgentRosterTab }) {
 
 /**
  * The Gallery page's notice per customized agent whose repository definition moved on: Compare
- * and Reset to repository (KOBE-494), for site admins on the Site tab.
+ * and Reset to repository (KOBE-494), for site admins on the Site tab, for the rows on screen once
+ * the table has loaded.
  */
 function GalleryNotices({
   gallery,
+  rows,
   onReset,
 }: {
   readonly gallery: ReadonlyMap<string, GalleryAgentSummary> | null;
+  /** The rows the table shows: notices only for those. */
+  readonly rows: readonly AgentRosterRow[];
   readonly onReset: () => void;
 }) {
   if (gallery === null) return null;
+  const shown = rows.flatMap((r) => gallery.get(r.agentId) ?? []);
   return (
     <>
-      {[...gallery.values()].map((a) => (
+      {shown.map((a) => (
         <UpdateAvailable
           key={a.id}
           agentId={a.id}

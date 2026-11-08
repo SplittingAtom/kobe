@@ -3,19 +3,33 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SearchParamsContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { expect } from "vitest";
 import type { stubApi } from "../admin/testing";
 import { AgentsPage } from "./agents-page";
 
 /** Navigates the page's `?tab=` as a link or Back would (Next's search params, not a reload). */
-let navigate: (search: string) => void = () => {};
-export const goTo = (search: string) => navigate(search);
+export type Navigator = { current: ((search: string) => void) | null };
 
-/** The page with Next's search params, as the app router provides them. */
-export function Page({ search = "" }: { readonly search?: string }) {
+/**
+ * The page with Next's search params, as the app router provides them. A test that follows links
+ * passes `navigator` (a ref it owns) and calls `navigator.current?.(search)`.
+ */
+export function Page({
+  search = "",
+  navigator,
+}: {
+  readonly search?: string;
+  readonly navigator?: Navigator;
+}) {
   const [current, setCurrent] = useState(search);
-  navigate = setCurrent;
+  useEffect(() => {
+    if (!navigator) return;
+    navigator.current = setCurrent;
+    return () => {
+      navigator.current = null;
+    };
+  }, [navigator]);
   return (
     <SearchParamsContext.Provider value={new URLSearchParams(current)}>
       <AgentsPage />
@@ -43,7 +57,7 @@ export const SITE_ADMIN = { ...MEMBER, siteAdmin: true } as const;
 
 /** The labels in the row's ⋯ menu (none when the row offers no action), closing it again. */
 export async function rowActions(agent: string): Promise<string[]> {
-  await screen.findByRole("rowheader", { name: new RegExp(agent) });
+  await screen.findByRole("rowheader", { name: startsWith(agent) });
   const button = screen.queryByRole("button", { name: `Actions for ${agent}` });
   if (!button) return [];
   await userEvent.click(button);
@@ -62,7 +76,11 @@ export async function rowAction(agent: string, action: string) {
 }
 
 export const rowOf = async (agent: string) =>
-  must((await screen.findByRole("rowheader", { name: new RegExp(agent) })).closest("tr"));
+  must((await screen.findByRole("rowheader", { name: startsWith(agent) })).closest("tr"));
+
+/** A row header's accessible name starts with the agent's name (then badges, description). */
+export const startsWith = (name: string): RegExp =>
+  new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
 
 export function must<T>(v: T | null | undefined): T {
   if (v === null || v === undefined) throw new Error("missing");

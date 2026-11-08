@@ -14,7 +14,6 @@ describe("Agents redirects (KOBE-569, AR1/AR15)", () => {
   it("sends the console's agent lists to the tabs that carry their actions (KOBE-570, AR12)", () => {
     expect(agentsRedirects().filter((r) => r.source.startsWith("/admin"))).toEqual([
       { source: "/admin/team/agents", destination: "/agents?tab=team", permanent: false },
-      { source: "/admin/team/inventory", destination: "/agents?tab=team", permanent: false },
       { source: "/admin/site/gallery", destination: "/agents?tab=site", permanent: false },
     ]);
   });
@@ -25,9 +24,10 @@ describe("Agents redirects (KOBE-569, AR1/AR15)", () => {
     expect(rules.filter((r) => ours.has(r.source))).toEqual(agentsRedirects());
   });
 
-  it("keeps the editors and detail pages under the old lists working", async () => {
+  it("keeps the Inventory (skills and connectors) and the editors under the old lists", async () => {
     const rules = (await nextConfig.redirects?.()) ?? [];
     for (const deep of [
+      "/admin/team/inventory",
       "/admin/team/agents/new",
       "/admin/team/agents/a-1",
       "/admin/team/agents/a-1/cases",

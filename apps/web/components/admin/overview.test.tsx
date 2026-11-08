@@ -33,6 +33,7 @@ describe("console overview", () => {
       "Members and roles",
       "Invitations",
       "Team agents",
+      "Inventory",
       "Audit view",
       "Break-glass access",
     ]);
