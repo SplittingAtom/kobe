@@ -103,8 +103,8 @@ export function siteWhere(location: Exclude<AgentLocation, { scope: "team" }>) {
   return and(eq(siteAgents.scope, "personal"), eq(siteAgents.ownerUserId, location.ownerUserId));
 }
 
-/** How a definition arrived (audit): a JSON body, an imported agent file, or a fork. */
-export type AgentSource = "json" | "import" | "fork";
+/** How a definition arrived (audit): a JSON body, an imported agent file, a fork, or an adopt. */
+export type AgentSource = "json" | "import" | "fork" | "adopt";
 
 /** The team an agent's audit events belong to: team agents only (D6); others are site-level. */
 export const auditTeam = (location: AgentLocation) =>
@@ -187,6 +187,8 @@ export interface NewAgent {
   readonly forkedFrom?: string;
   /** The published version of `forkedFrom` that was copied (null: it had none). */
   readonly forkedFromVersion?: number | null;
+  /** A personal fork of team content stays in that team (KOBE-568, agents-roster AR8). */
+  readonly boundTeamId?: string | null;
 }
 
 export async function createAgent(
@@ -195,60 +197,71 @@ export async function createAgent(
   input: NewAgent,
 ): Promise<Result<AgentRecord, CreateError>> {
   try {
-    return await inLocation(db, location, async (tx) => {
-      // Serializes creates per location, so the cap and the picked slug can't race.
-      await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey(location)}, 0))`,
-      );
-      const existing = await takenSlugs(tx, location);
-      const taken = new Set(existing.map((r) => r.slug));
-      // Archived agents keep their slug (exports and history name it) but not a slot (KOBE-46).
-      const live = existing.filter((r) => r.archivedAt === null).length;
-      if (live >= AGENT_CAPS[location.scope]) return { ok: false, error: "limit_reached" };
-      const slug = input.slug ?? pickSlug(taken, input.baseSlug);
-      if (slug === null || taken.has(slug)) return { ok: false, error: "slug_taken" };
-      const values = {
-        slug,
-        frontmatter: input.definition.frontmatter,
-        prompt: input.definition.prompt,
-        forkedFromAgentId: input.forkedFrom ?? null,
-        forkedFromVersion: input.forkedFromVersion ?? null,
-      };
-      const [row] =
-        location.scope === "team"
-          ? await tx
-              .insert(teamAgents)
-              .values({ ...values, teamId: location.teamId, ownerUserId: requireOwner(input) })
-              .returning(TEAM)
-          : await tx
-              .insert(siteAgents)
-              .values({
-                ...values,
-                scope: location.scope,
-                ownerUserId: location.scope === "personal" ? location.ownerUserId : null,
-              })
-              .returning(SITE);
-      if (!row) throw new Error("agent insert returned no row");
-      await auditDangerousChange(tx, location, row, false, input.definition);
-      await recordAudit(tx, {
-        action: "agent.created",
-        teamId: auditTeam(location),
-        target: {
-          agentId: row.id,
-          scope: location.scope,
-          slug: row.slug,
-          source: input.source ?? "json",
-          ...(input.forkedFrom ? { forkedFrom: input.forkedFrom } : {}),
-          ...(input.forkedFromVersion ? { forkedFromVersion: input.forkedFromVersion } : {}),
-        },
-      });
-      return { ok: true, value: toRecord(location.scope, row) };
-    });
+    return await inLocation(db, location, (tx) => insertAgent(tx, location, input));
   } catch (err) {
     // Defensive: creates are serialized per location, so this needs a racing non-create write.
     if (pgCode(err) === "23505") return { ok: false, error: "slug_taken" };
     throw err;
   }
+}
+
+/**
+ * {@link createAgent} inside the caller's transaction (KOBE-568: adopt creates the agent and removes
+ * the roster entry atomically). `tx` must be the location's transaction (`withTeam` for team agents).
+ */
+export async function insertAgent(
+  tx: KobeTx,
+  location: AgentLocation,
+  input: NewAgent,
+): Promise<Result<AgentRecord, CreateError>> {
+  // Serializes creates per location, so the cap and the picked slug can't race.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey(location)}, 0))`);
+  const existing = await takenSlugs(tx, location);
+  const taken = new Set(existing.map((r) => r.slug));
+  // Archived agents keep their slug (exports and history name it) but not a slot (KOBE-46).
+  const live = existing.filter((r) => r.archivedAt === null).length;
+  if (live >= AGENT_CAPS[location.scope]) return { ok: false, error: "limit_reached" };
+  const slug = input.slug ?? pickSlug(taken, input.baseSlug);
+  if (slug === null || taken.has(slug)) return { ok: false, error: "slug_taken" };
+  const values = {
+    slug,
+    frontmatter: input.definition.frontmatter,
+    prompt: input.definition.prompt,
+    forkedFromAgentId: input.forkedFrom ?? null,
+    forkedFromVersion: input.forkedFromVersion ?? null,
+  };
+  const boundTeamId = location.scope === "personal" ? (input.boundTeamId ?? null) : null;
+  const [row] =
+    location.scope === "team"
+      ? await tx
+          .insert(teamAgents)
+          .values({ ...values, teamId: location.teamId, ownerUserId: requireOwner(input) })
+          .returning(TEAM)
+      : await tx
+          .insert(siteAgents)
+          .values({
+            ...values,
+            scope: location.scope,
+            ownerUserId: location.scope === "personal" ? location.ownerUserId : null,
+            boundTeamId,
+          })
+          .returning(SITE);
+  if (!row) throw new Error("agent insert returned no row");
+  await auditDangerousChange(tx, location, row, false, input.definition);
+  await recordAudit(tx, {
+    action: "agent.created",
+    teamId: auditTeam(location),
+    target: {
+      agentId: row.id,
+      scope: location.scope,
+      slug: row.slug,
+      source: input.source ?? "json",
+      ...(input.forkedFrom ? { forkedFrom: input.forkedFrom } : {}),
+      ...(input.forkedFromVersion ? { forkedFromVersion: input.forkedFromVersion } : {}),
+      ...(input.source === "fork" ? { boundTeamId } : {}),
+    },
+  });
+  return { ok: true, value: toRecord(location.scope, row) };
 }
 
 /** `agent.dangerous_mode.changed` (AC1) when a write turns Dangerous mode on or off. */
@@ -268,7 +281,7 @@ async function auditDangerousChange(
   });
 }
 
-function lockKey(location: AgentLocation): string {
+export function lockKey(location: AgentLocation): string {
   if (location.scope === "team") return `kobe.agents.team:${location.teamId}`;
   if (location.scope === "personal") return `kobe.agents.personal:${location.ownerUserId}`;
   return "kobe.agents.gallery";
@@ -301,7 +314,7 @@ export async function updateAgent(
   id: string,
   definition: AgentDefinition,
   expectedRevision?: number,
-  source: Exclude<AgentSource, "fork"> = "json",
+  source: Exclude<AgentSource, "fork" | "adopt"> = "json",
   /** Runs in the same transaction after a successful update (KOBE-494: the Customized mark). */
   afterWrite?: (tx: KobeTx) => Promise<void>,
 ): Promise<Result<AgentRecord, UpdateError>> {

@@ -1,5 +1,10 @@
 import {
   AGENT_ROSTER_PAGE_MAX,
+  agentAdoptResponseSchema,
+  agentTransferAcceptedSchema,
+  agentTransferListSchema,
+  agentTransferResponseSchema,
+  transferAgentRequestSchema,
   agentRosterEntryResponseSchema,
   agentRosterPageSchema,
   agentRosterUpdateResponseSchema,
@@ -9,8 +14,9 @@ import {
 import { z } from "zod";
 
 /**
- * OpenAPI for agent rosters (KOBE-566, spec agents-roster AR16 without fork, transfer and adopt;
- * `routes/agent-roster.ts`), generated from the protocol schemas the routes validate with.
+ * OpenAPI for agent rosters (KOBE-566, spec agents-roster AR16; `routes/agent-roster.ts`), and
+ * fork, transfer and adopt (KOBE-568; `routes/agent-transfer.ts`), generated from the protocol
+ * schemas the routes validate with.
  */
 
 type JsonSchema = Record<string, unknown>;
@@ -206,6 +212,140 @@ export function agentRosterOpenApiPaths(): Record<string, Record<string, unknown
   };
 }
 
+const adopt = (who: string, operationId: string, into: string, headers: unknown[]) => ({
+  post: {
+    operationId,
+    summary: `Adopt an assigned entry's agent into ${into} (${who}, AR10)`,
+    description:
+      "Copies the agent's current published version into a new agent, published as its v1 in " +
+      "the same transaction, with fork provenance, and removes the entry (audited " +
+      "`agent.adopted` and `agent.roster.removed`). Allowed whether or not the owner is still a " +
+      "member. A bound agent is adopted only into its own team.",
+    parameters: [uuidPath("agentId"), ...headers],
+    responses: {
+      "201": json("AgentAdoptResult", "The new agent and the removed entry."),
+      "400": json("Error", "`invalid_request`."),
+      "401": json("Error", "`unauthenticated`: no session."),
+      "403": json("Error", `\`forbidden\`: not ${who.replace(/s$/, "")}.`),
+      "404": json("Error", "`roster_entry_not_found`: no entry on this roster."),
+      "409": json(
+        "Error",
+        "`invalid_transition` (a proposal, or removed: adopted already), `slug_taken` or " +
+          "`limit_reached` (the roster owner's agent cap).",
+      ),
+      "422": json("Error", "`agent_not_published` or `agent_bound_to_team`."),
+      ...RATE,
+    },
+  },
+});
+
+/** Fork, transfer and adopt (KOBE-568, agents-roster AR8, AR10, AR16). */
+export function agentOwnershipOpenApiPaths(): Record<string, Record<string, unknown>> {
+  return {
+    "/v1/agents/{id}/fork": {
+      post: {
+        operationId: "forkAgent",
+        summary: "Copy an agent into a new personal agent of the caller's (AR8)",
+        description:
+          "Offered to whoever may read the definition: `build` for team-owned and team-assigned " +
+          "agents, `use` for site-assigned and gallery agents, and the owner. Copies the published " +
+          "version (the draft of the caller's own or the team's unpublished agent). A fork of team " +
+          "content or of a bound agent is bound to that team (`boundTeamId`): assignable there " +
+          "only. A `scope` in the body is ignored with a warning.",
+        parameters: [uuidPath("id"), teamHeader(true)],
+        requestBody: body("ForkAgentBody"),
+        responses: {
+          "201": json("ForkAgentResult", "The personal copy, its binding and warnings."),
+          ...TEAM_ERRORS,
+          "403": json("Error", "`forbidden` (may not read the definition) or `not_a_team_member`."),
+          "404": json("Error", "`agent_not_found`."),
+          "409": json(
+            "Error",
+            "`slug_taken`, `limit_reached`, `no_active_team` or `team_mismatch`.",
+          ),
+          "422": json("Error", "`agent_not_published`: someone else's agent with no version yet."),
+        },
+      },
+    },
+    "/v1/agents/transfers": {
+      get: {
+        operationId: "listAgentTransfers",
+        summary: "The caller's pending agent transfers, offered to them and by them (AR10)",
+        parameters: [teamHeader(false)],
+        responses: {
+          "200": json("AgentTransferList", "Pending transfers, oldest first."),
+          ...TEAM_ERRORS,
+          "403": json("Error", "`not_a_team_member`."),
+        },
+      },
+    },
+    "/v1/agents/{id}/transfer": {
+      post: {
+        operationId: "transferAgent",
+        summary: "The owner offers their personal agent to another member of the active team",
+        description:
+          "The recipient must accept. A bound agent goes only to a member of its bound team. A " +
+          "new offer replaces a pending one. The owner's and the recipient's agent reads show it.",
+        parameters: [uuidPath("id"), teamHeader(true)],
+        requestBody: body("TransferAgentBody"),
+        responses: {
+          "201": json("AgentTransferResult", "The pending transfer."),
+          ...TEAM_ERRORS,
+          "403": json("Error", "`not_a_team_member`."),
+          "404": json("Error", "`agent_not_found`: not the caller's personal agent."),
+          "409": json("Error", "`no_active_team` or `team_mismatch`."),
+          "422": json(
+            "Error",
+            "`transfer_recipient_invalid` (not another active member) or `agent_bound_to_team`.",
+          ),
+          ...RATE,
+        },
+      },
+      delete: {
+        operationId: "cancelAgentTransfer",
+        summary: "The owner cancels a pending transfer, or the recipient declines it",
+        parameters: [uuidPath("id"), teamHeader(true)],
+        responses: {
+          "204": { description: "Cancelled or declined." },
+          ...TEAM_ERRORS,
+          "404": json("Error", "`transfer_not_found`."),
+          ...RATE,
+        },
+      },
+    },
+    "/v1/agents/{id}/transfer/accept": {
+      post: {
+        operationId: "acceptAgentTransfer",
+        summary: "The recipient accepts: the agent, its roster entries and pins become theirs",
+        parameters: [uuidPath("id"), teamHeader(true)],
+        responses: {
+          "200": json("AgentTransferAccepted", "The agent's new owner."),
+          ...TEAM_ERRORS,
+          "404": json("Error", "`transfer_not_found`."),
+          "409": json("Error", "`slug_taken` or `limit_reached` (the recipient's)."),
+          "422": json(
+            "Error",
+            "`transfer_recipient_invalid` (no longer a member) or `agent_bound_to_team`.",
+          ),
+          ...RATE,
+        },
+      },
+    },
+    "/v1/team/agent-roster/{agentId}/adopt": adopt(
+      "team admins",
+      "adoptTeamAgentRosterEntry",
+      "a team-owned agent",
+      [teamHeader(true)],
+    ),
+    "/v1/site/agent-roster/{agentId}/adopt": adopt(
+      "site admins",
+      "adoptSiteAgentRosterEntry",
+      "a site-owned gallery agent without a repository key",
+      [],
+    ),
+  };
+}
+
 export function agentRosterOpenApiSchemas(): Record<string, JsonSchema> {
   return {
     AgentRosterPage: schemaOf(agentRosterPageSchema, "output"),
@@ -213,5 +353,34 @@ export function agentRosterOpenApiSchemas(): Record<string, JsonSchema> {
     UpdateAgentRosterEntryBody: schemaOf(updateAgentRosterEntryRequestSchema, "input"),
     AgentRosterEntryResult: schemaOf(agentRosterEntryResponseSchema, "output"),
     AgentRosterUpdateResult: schemaOf(agentRosterUpdateResponseSchema, "output"),
+    ForkAgentBody: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        slug: { type: "string" },
+        scope: { type: "string", description: "Ignored (a fork is always personal)." },
+      },
+    },
+    ForkAgentResult: {
+      type: "object",
+      required: ["agent", "boundTeamId", "warnings"],
+      properties: {
+        agent: { type: "object", description: "The new personal agent with its draft." },
+        boundTeamId: { type: ["string", "null"], format: "uuid" },
+        warnings: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["path", "message"],
+            properties: { path: { type: "string" }, message: { type: "string" } },
+          },
+        },
+      },
+    },
+    TransferAgentBody: schemaOf(transferAgentRequestSchema, "input"),
+    AgentTransferResult: schemaOf(agentTransferResponseSchema, "output"),
+    AgentTransferList: schemaOf(agentTransferListSchema, "output"),
+    AgentTransferAccepted: schemaOf(agentTransferAcceptedSchema, "output"),
+    AgentAdoptResult: schemaOf(agentAdoptResponseSchema, "output"),
   };
 }

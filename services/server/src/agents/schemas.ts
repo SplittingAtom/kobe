@@ -17,8 +17,12 @@ export const galleryCreateMetaSchema = z.object({ slug: agentSlugSchema.optional
 /** Replacing a draft takes no meta: slugs are immutable. */
 export const updateMetaSchema = z.object({}).strict();
 
+/**
+ * `POST /v1/agents/:id/fork` (KOBE-568, AR16): a fork is always a personal agent of the caller's;
+ * a `scope` (older clients send one) is accepted and ignored with a warning.
+ */
 export const forkSchema = z
-  .object({ scope: creatableScope, slug: agentSlugSchema.optional() })
+  .object({ scope: z.string().max(32).optional(), slug: agentSlugSchema.optional() })
   .strict();
 
 export const agentStatusSchema = z.object({ status: z.enum(agentStatus.enumValues) }).strict();

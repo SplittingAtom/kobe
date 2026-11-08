@@ -504,7 +504,7 @@ describe("gallery (D19, D21)", () => {
     ).toBe(403);
   });
 
-  it("forks into personal scope for members and into the team for builders", async () => {
+  it("forks into the forker's Personal, whatever scope is asked (KOBE-568, AR8)", async () => {
     const path = `/v1/agents/${galleryId}/fork`;
     const personal = await as.carol.post(path, { scope: "personal" });
     expect(personal.status).toBe(201);
@@ -514,16 +514,21 @@ describe("gallery (D19, D21)", () => {
       ownerUserId: ids.carol,
       name: "Release Notes Writer",
     });
-    expect((await as.carol.post(path, { scope: "team" })).status).toBe(403);
-    const team = await as.bob.post(path, { scope: "team", slug: "notes" });
-    expect(team.json.agent).toMatchObject({ scope: "team", slug: "notes", ownerUserId: ids.bob });
+    const asked = await as.bob.post(path, { scope: "team", slug: "notes" });
+    expect(asked.status).toBe(201);
+    expect(asked.json.agent).toMatchObject({
+      scope: "personal",
+      slug: "notes",
+      ownerUserId: ids.bob,
+    });
+    expect(asked.json.warnings).toContainEqual(expect.objectContaining({ path: "scope" }));
   });
 
-  it("never forks a team agent into personal scope", async () => {
+  it("forks a team agent into Personal, bound to the team (KOBE-568, AR8)", async () => {
     const created = await as.bob.post("/v1/agents", { scope: "team", ...definition("Walled") });
-    const res = await as.bob.post(`/v1/agents/${created.json.agent.id}/fork`, {
-      scope: "personal",
-    });
-    expect(res.status).toBe(403);
+    const res = await as.bob.post(`/v1/agents/${created.json.agent.id}/fork`, {});
+    expect(res.status).toBe(201);
+    expect(res.json.agent.scope).toBe("personal");
+    expect(res.json.boundTeamId).toBe(finance);
   });
 });

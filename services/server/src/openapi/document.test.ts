@@ -21,6 +21,7 @@ import {
   siteAgentRosterRoutes,
   teamAgentRosterRoutes,
 } from "../routes/agent-roster.js";
+import { mountAgentTransferRoutes } from "../routes/agent-transfer.js";
 import type { TeamVariables } from "../authz/middleware.js";
 import { openApiDocument } from "./document.js";
 
@@ -89,12 +90,17 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
     );
   });
 
-  it("describes exactly the agent roster routes the server mounts (KOBE-566)", () => {
+  it("describes exactly the agent roster, transfer and adopt routes the server mounts (KOBE-566, KOBE-568)", () => {
     const agents = new Hono<{ Variables: TeamVariables }>();
     mountAgentRosterRoutes(agents, fakeDeps);
-    expect(
-      documented("/v1/agents").filter((op) => op.includes("roster") || op.includes("assignments")),
-    ).toEqual(mountedOperations("/v1/agents", agents));
+    mountAgentTransferRoutes(agents, fakeDeps);
+    const ours = (op: string) =>
+      ["roster", "assignments", "transfer"].some((word) => op.includes(word));
+    expect(documented("/v1/agents").filter(ours)).toEqual(mountedOperations("/v1/agents", agents));
+    // The fork route lives with the agent routes (KOBE-568): documented once.
+    expect(documented("/v1/agents").filter((op) => op.endsWith("/fork"))).toEqual([
+      "post /v1/agents/{id}/fork",
+    ]);
     expect(documented("/v1/team/agent-roster")).toEqual(
       mountedOperations("/v1/team/agent-roster", teamAgentRosterRoutes(fakeDeps)),
     );

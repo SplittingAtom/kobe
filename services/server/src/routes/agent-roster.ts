@@ -27,6 +27,7 @@ import { siteRoleAllows, teamRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
 import { hitRateLimit } from "../rate-limit.js";
 import { parseBody } from "../teams/http.js";
+import { mountSiteAdopt, mountTeamAdopt } from "./agent-transfer.js";
 
 /**
  * Agent roster routes (KOBE-566, spec agents-roster AR16 without fork, transfer and adopt):
@@ -55,6 +56,10 @@ const MESSAGES: Record<AgentRosterErrorCode, string> = {
   agent_not_published: "Publish the agent before proposing it to the site.",
   version_rule_not_allowed: "Only the roster's admins pin a version. Assign it following latest.",
   rate_limited: "Too many roster changes. Try again in a few minutes.",
+  transfer_not_found: "There is no pending transfer of this agent for you.",
+  transfer_recipient_invalid: "Transfer the agent to another active member of this team.",
+  slug_taken: "The new owner already has an agent with that slug.",
+  limit_reached: "The new owner has reached the agent limit. Delete an agent first.",
 };
 
 export function rosterError(c: Context, code: AgentRosterErrorCode, message?: string) {
@@ -63,7 +68,7 @@ export function rosterError(c: Context, code: AgentRosterErrorCode, message?: st
 
 const siteAdmin = (c: TeamCtx) => siteRoleAllows(c.get("siteRole"), "site.gallery.manage");
 
-const teamActor = (c: TeamCtx): RosterActor => ({
+export const teamActor = (c: TeamCtx): RosterActor => ({
   userId: c.get("user").id,
   role: c.get("team").role,
   teamId: c.get("team").id,
@@ -71,7 +76,7 @@ const teamActor = (c: TeamCtx): RosterActor => ({
 });
 
 /** One roster write per call against the user's budget; false once over it (429). */
-const withinRate = (deps: ServerDeps, userId: string) =>
+export const withinRate = (deps: ServerDeps, userId: string) =>
   hitRateLimit(deps.database.db, `agent-roster:${userId}`, AGENT_ROSTER_WRITE_RATE);
 
 /** Roster reads and the owner's assignments, mounted inside `agentRoutes` before `/:id`. */
@@ -213,6 +218,8 @@ export function teamAgentRosterRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
     return rosterError(c, here.error === "agent_not_found" ? "roster_entry_not_found" : here.error);
   });
 
+  // Adopt an entry into a team-owned agent (KOBE-568, AR10).
+  mountTeamAdopt(app, deps);
   return app;
 }
 
@@ -231,5 +238,7 @@ export function siteAgentRosterRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
     return result.ok ? c.json({ entry: entryView(result.value) }) : rosterError(c, result.error);
   });
 
+  // Adopt an entry into a site-owned gallery agent (KOBE-568, AR10).
+  mountSiteAdopt(app, deps);
   return app;
 }
