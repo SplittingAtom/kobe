@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (PR pending)
+- **Status:** in review
 - **Branch / worktree:** `kobe-565-agent-roster-db` in `../Kobe-wt565`
 - **Depends on:** none (spec `docs/specs/agents-roster.md` §4 AR3/AR5/AR8/AR11, §6.1; the migration
   PR every other roster ticket, KOBE-566..573, builds on)
