@@ -142,7 +142,7 @@ function batchStatus(batch: Batch): DropStatus {
   if (batch.pending > 0) {
     return {
       busy: true,
-      notice: `Adding ${plural(batch.pending)} to your workspace…`,
+      notice: `Adding ${plural(batch.pending)} to My files…`,
       errors: batch.errors,
     };
   }
@@ -227,7 +227,7 @@ export function RailDropOverlay() {
   return (
     <div className={styles.dropOverlay} data-rail-drop-overlay="">
       <UploadIcon aria-hidden className="size-5 shrink-0" />
-      <p className={styles.dropText}>Drop to add to your workspace</p>
+      <p className={styles.dropText}>Drop to add to your files</p>
     </div>
   );
 }

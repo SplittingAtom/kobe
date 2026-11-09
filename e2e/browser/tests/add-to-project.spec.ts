@@ -5,9 +5,9 @@ import { pageApi, toolTurn } from "./support/gate5.js";
 
 /**
  * KOBE-585 (workspaces lane WS-2): the owner asks the agent for a small markdown artifact and adds
- * it to a new project (members mode "team", so the second member belongs to it) with Add to
+ * it to a new project (workspace visibility, so the second member can read it) with Add to
  * project on the artifact header. The second member signs in (KOBE_USER2 / KOBE_PW2, as the
- * KOBE-221 sharing spec), finds the file under projects/<slug>/ in Files, opens it read-only and
+ * KOBE-221 sharing spec), finds the file in the Projects tree of Files, opens it read-only and
  * cannot save over it (403). afterEach archives the project. One short model turn.
  */
 const SECOND_USER = process.env["KOBE_USER2"];
@@ -90,22 +90,23 @@ test("Add to project: the owner adds an artifact; another member reads it under 
 
   const second = await signInSecond(browser);
   try {
-    // The project's files are mounted for every member: Files lists projects/<slug>/<file>.
+    // A conversation brings the project into the member's Files panel: Projects tree, project, file.
     await new Chat(second).open();
     const files = filesSection(second);
     await files.getByRole("button", { name: "Refresh files" }).click({ timeout: SHELL_TIMEOUT_MS });
-    const tree = files.getByRole("tree", { name: "Files in your workspace" });
+    const tree = files.getByRole("tree", { name: "Projects" });
     const row = (name: string) => tree.getByRole("treeitem", { name, exact: true });
-    await row("projects").click();
-    await row(slug).click();
+    await row(projectName).click({ timeout: SHELL_TIMEOUT_MS });
     await row(`${stem}.md`).click();
     // Opened read-only: the editor says so and offers no Save.
     const tab = second
       .getByRole("tabpanel")
       .filter({ has: second.getByRole("heading", { name: `${stem}.md` }) });
-    await expect(tab.getByText("Project files and thread uploads are read-only.")).toBeVisible({
-      timeout: SHELL_TIMEOUT_MS,
-    });
+    await expect(
+      tab.getByText(
+        /Project files are read-only until you check the project out|You can read this project, not change it/,
+      ),
+    ).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
     await expect(tab.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
     // The server agrees: the bytes are there, a write is refused.
     const read = await second.evaluate(async (path) => {

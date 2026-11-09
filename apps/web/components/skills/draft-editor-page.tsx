@@ -362,7 +362,7 @@ function DraftSettings({
     <div className="flex flex-wrap items-center gap-4">
       <Switch
         label="Share with team builders"
-        hint="Builders and Team admins can see and edit it; saves still check who changed what."
+        hint="Contributors and Team admins can see and edit it; saves still check who changed what."
         checked={draft.shared}
         disabled={mutation.pending}
         onCheckedChange={(shared) =>

@@ -3,11 +3,14 @@
  * `/v1/threads`, KOBE-163). Responses arrive camelized; request bodies use the routes' snake_case.
  * Every call sends `X-Kobe-Team`. The server decides who may do what: the UI only hides controls.
  */
-import { apiRequest, type ApiResult } from "../api/client";
+import { apiDownload, apiRequest, type ApiResult } from "../api/client";
 import type { ThreadPage } from "../chat/types";
 
-export type ProjectRole = "owner" | "member";
-export type MembersMode = "team" | "selected";
+/** Project roles (PR3): owners manage, editors change files and commit, readers read and converse. */
+export type ProjectRole = "owner" | "editor" | "reader";
+export const PROJECT_ROLES: readonly ProjectRole[] = ["owner", "editor", "reader"];
+/** `workspace`: every member of the workspace is a reader; `restricted`: only the listed people (PR2). */
+export type ProjectVisibility = "workspace" | "restricted";
 
 export interface Project {
   readonly id: string;
@@ -17,10 +20,17 @@ export interface Project {
   readonly description: string;
   readonly instructions: string;
   readonly defaultAgentId: string | null;
-  readonly membersMode: MembersMode;
-  /** The caller's effective role; null = a team admin who is not a member. */
+  readonly visibility: ProjectVisibility;
+  /** The caller's effective role; null = a team admin who is not listed (acts as owner). */
   readonly myRole: ProjectRole | null;
   readonly fileCount: number;
+  /** The latest commit; null = no commit yet (absent on older answers). */
+  readonly headCommitId?: string | null | undefined;
+  /** Storage (GV2): null until the server fills them. */
+  readonly liveBytes?: number | null | undefined;
+  readonly historyBytes?: number | null | undefined;
+  readonly liveObjects?: number | null | undefined;
+  readonly historyObjects?: number | null | undefined;
   readonly createdBy: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -34,7 +44,7 @@ export interface ProjectMember {
 }
 
 export interface ProjectMembers {
-  readonly membersMode: MembersMode;
+  readonly visibility: ProjectVisibility;
   readonly members: readonly ProjectMember[];
 }
 
@@ -68,7 +78,7 @@ export interface ProjectInput {
   readonly description: string;
   readonly instructions: string;
   readonly defaultAgentId: string | null;
-  readonly membersMode: MembersMode;
+  readonly visibility: ProjectVisibility;
 }
 
 export interface ProjectAgent {
@@ -77,8 +87,20 @@ export interface ProjectAgent {
   readonly scope: "team" | "personal" | "gallery";
 }
 
+/** `POST /v1/projects/:id/owner` (PR5): who owns it now, and who handed it over (null: an admin assigned). */
+export interface OwnerTransfer {
+  readonly projectId: string;
+  readonly ownerUserId: string;
+  readonly previousOwnerUserId: string | null;
+}
+
 export interface ProjectsApi {
   list(includeArchived: boolean): Promise<ApiResult<readonly Project[]>>;
+  /** Team admins: projects without an owner row (PR5, "No owner: assign one"). */
+  noOwner(): Promise<ApiResult<readonly Project[]>>;
+  transferOwner(id: string, userId: string): Promise<ApiResult<OwnerTransfer>>;
+  /** The project's latest files as a zip (`GET /v1/projects/:id/download`, GV5; readers too). */
+  downloadHead(id: string): Promise<ApiResult<Uint8Array>>;
   get(id: string): Promise<ApiResult<Project>>;
   create(input: ProjectInput): Promise<ApiResult<Project>>;
   update(
@@ -103,38 +125,9 @@ export interface ProjectsApi {
 
 const enc = encodeURIComponent;
 
-// Interim (KOBE-576 until KOBE-581): the server speaks `visibility` and owner|editor|reader; the
-// web's types still say membersMode and owner|member. Translate at the edge, both ways.
-type WireRole = "owner" | "editor" | "reader";
-const modeOf = (v: "workspace" | "restricted"): MembersMode =>
-  v === "workspace" ? "team" : "selected";
-const visibilityOf = (m: MembersMode) => (m === "team" ? "workspace" : "restricted");
-const roleOf = (r: WireRole): ProjectRole => (r === "owner" ? "owner" : "member");
-const adaptProject = (
-  p: Omit<Project, "membersMode" | "myRole"> & {
-    readonly visibility: "workspace" | "restricted";
-    readonly myRole: WireRole | null;
-  },
-): Project => {
-  const { visibility, myRole, ...rest } = p;
-  return {
-    ...rest,
-    membersMode: modeOf(visibility),
-    myRole: myRole === null ? null : roleOf(myRole),
-  };
-};
-const adaptMember = (
-  m: Omit<ProjectMember, "role"> & { readonly role: WireRole },
-): ProjectMember => ({
-  ...m,
-  role: roleOf(m.role),
-});
-const wireRole = (r: ProjectRole): WireRole => (r === "owner" ? "owner" : "editor");
 function mapData<W, T>(res: ApiResult<W>, fn: (w: W) => T): ApiResult<T> {
   return res.ok ? { ...res, data: fn(res.data) } : res;
 }
-type WireProject = Parameters<typeof adaptProject>[0];
-type WireMember = Parameters<typeof adaptMember>[0];
 
 function toBody(input: Partial<ProjectInput> & { archived?: boolean }): Record<string, unknown> {
   return {
@@ -142,7 +135,7 @@ function toBody(input: Partial<ProjectInput> & { archived?: boolean }): Record<s
     ...(input.description === undefined ? {} : { description: input.description }),
     ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
     ...(input.defaultAgentId === undefined ? {} : { default_agent_id: input.defaultAgentId }),
-    ...(input.membersMode === undefined ? {} : { visibility: visibilityOf(input.membersMode) }),
+    ...(input.visibility === undefined ? {} : { visibility: input.visibility }),
     ...(input.archived === undefined ? {} : { archived: input.archived }),
   };
 }
@@ -155,46 +148,30 @@ export function createProjectsApi(teamId: string, fetchFn?: typeof fetch): Proje
   ) => apiRequest<T>(path, { method, json, teamId, fetchFn });
   const base = (id: string) => `/v1/projects/${enc(id)}`;
   return {
-    list: async (includeArchived) => {
-      const res = await call<{ projects: WireProject[] }>(
-        `/v1/projects${includeArchived ? "?include_archived=true" : ""}`,
-      );
-      return mapData(res, (r) => r.projects.map(adaptProject));
-    },
-    get: async (id) => mapData(await call<WireProject>(base(id)), adaptProject),
-    create: async (input) =>
+    list: async (includeArchived) =>
       mapData(
-        await call<WireProject>("/v1/projects", "POST", {
-          ...toBody(input),
-          ...(input.membersMode === "team" ? {} : { member_user_ids: [] }),
-        }),
-        adaptProject,
-      ),
-    update: async (id, input) =>
-      mapData(await call<WireProject>(base(id), "PATCH", toBody(input)), adaptProject),
-    remove: (id) => call(base(id), "DELETE"),
-    members: async (id) =>
-      mapData(
-        await call<{ visibility: "workspace" | "restricted"; members: WireMember[] }>(
-          `${base(id)}/members`,
+        await call<{ projects: Project[] }>(
+          `/v1/projects${includeArchived ? "?include_archived=true" : ""}`,
         ),
-        (r) => ({ membersMode: modeOf(r.visibility), members: r.members.map(adaptMember) }),
+        (r) => r.projects,
       ),
-    addMember: async (id, userId, role) =>
-      mapData(
-        await call<WireMember>(`${base(id)}/members`, "POST", {
-          user_id: userId,
-          role: wireRole(role),
-        }),
-        adaptMember,
-      ),
-    setMemberRole: async (id, userId, role) =>
-      mapData(
-        await call<WireMember>(`${base(id)}/members/${enc(userId)}`, "PATCH", {
-          role: wireRole(role),
-        }),
-        adaptMember,
-      ),
+    noOwner: async () =>
+      mapData(await call<{ projects: Project[] }>("/v1/projects/no-owner"), (r) => r.projects),
+    downloadHead: (id) => apiDownload(`${base(id)}/download`, { teamId, fetchFn }),
+    transferOwner: (id, userId) => call(`${base(id)}/owner`, "POST", { user_id: userId }),
+    get: (id) => call<Project>(base(id)),
+    create: (input) =>
+      call<Project>("/v1/projects", "POST", {
+        ...toBody(input),
+        ...(input.visibility === "workspace" ? {} : { member_user_ids: [] }),
+      }),
+    update: (id, input) => call<Project>(base(id), "PATCH", toBody(input)),
+    remove: (id) => call(base(id), "DELETE"),
+    members: (id) => call<ProjectMembers>(`${base(id)}/members`),
+    addMember: (id, userId, role) =>
+      call<ProjectMember>(`${base(id)}/members`, "POST", { user_id: userId, role }),
+    setMemberRole: (id, userId, role) =>
+      call<ProjectMember>(`${base(id)}/members/${enc(userId)}`, "PATCH", { role }),
     removeMember: (id, userId) => call(`${base(id)}/members/${enc(userId)}`, "DELETE"),
     files: async (id) => {
       const res = await call<{ files: ProjectFile[] }>(`${base(id)}/files`);
@@ -231,7 +208,13 @@ export function describeProjectError(error: {
   readonly message: string;
 }): string {
   if (error.code === "slug_taken") return "Another project already uses that web name.";
-  if (error.code === "last_owner") return "A project keeps at least one owner.";
+  if (error.code === "last_owner") {
+    return "A project keeps at least one owner: make someone else an owner first.";
+  }
+  if (error.code === "not_in_team") return "That person is not in this workspace.";
+  if (error.code === "read_only") return "You can read this project, not change it.";
+  if (error.code === "checkout_required") return "Check out the project to change its files.";
+  if (error.code === "too_many_mounts") return error.message;
   if (error.code === "already_exists") return "That is already there.";
   if (error.code === "archived") return "This project is archived, so it cannot change.";
   if (error.code === "file_too_large") return "That file is too large (50 MiB at most).";

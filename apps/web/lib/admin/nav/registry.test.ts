@@ -262,7 +262,7 @@ describe("registry contents", () => {
 
   it("orders by group then order, regardless of barrel line order", () => {
     expect(SITE_SECTIONS.slice(0, 3).map((s) => s.id)).toEqual(["users", "invites", "roles"]);
-    expect(TEAM_SECTIONS.slice(0, 3).map((s) => s.id)).toEqual(["members", "invites", "agents"]);
+    expect(TEAM_SECTIONS.slice(0, 3).map((s) => s.id)).toEqual(["members", "invites", "models"]);
   });
 });
 

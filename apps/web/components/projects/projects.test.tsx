@@ -127,7 +127,7 @@ describe("projects list and create (KOBE-164, ac-1)", () => {
     const agent = screen.getByLabelText("Default agent");
     expect(within(agent).queryByText("Mine")).toBeNull();
     await user.selectOptions(agent, "Analyst");
-    await user.selectOptions(screen.getByLabelText("Members"), "Selected people only");
+    await user.selectOptions(screen.getByLabelText("Visibility"), "Only the people listed");
     await user.click(screen.getByRole("button", { name: "Create project" }));
     await screen.findByText("Created Launch.");
     const post = must(calls.find((c) => c.method === "POST"));
@@ -244,13 +244,13 @@ describe("project detail (KOBE-164, ac-1)", () => {
     expect(screen.queryByRole("form", { name: "Add a file" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Remove/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Delete brief/ })).toBeNull();
-    expect(screen.queryByRole("link", { name: "New conversation in this project" })).toBeNull();
+    expect(screen.queryByRole("link", { name: /^Open/ })).toBeNull();
     // Restoring stays possible for an admin.
     expect(screen.getByRole("button", { name: "Restore project" })).toBeTruthy();
   });
 
   it("hides management from a plain member but keeps reading", async () => {
-    stubApi(base({ my_role: "editor" }));
+    stubApi(base({ my_role: "reader" }));
     renderTeam(<ProjectDetailPage projectId={P} />, { role: "member" });
     expect(await screen.findByText(/Only the project's owners and team admins/)).toBeTruthy();
     await screen.findByText("brief.md");
@@ -259,9 +259,9 @@ describe("project detail (KOBE-164, ac-1)", () => {
     expect(screen.queryByRole("form", { name: "Add a member" })).toBeNull();
     expect(screen.queryByRole("form", { name: "Add a file" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Delete brief/ })).toBeNull();
-    expect(
-      screen.getByRole("link", { name: "New conversation in this project" }).getAttribute("href"),
-    ).toBe(`/?project=${P}`);
+    expect(screen.getByRole("link", { name: "Open to mount" }).getAttribute("href")).toBe(
+      `/?project=${P}`,
+    );
     expect(screen.getByRole("link", { name: "Project memory" }).getAttribute("href")).toBe(
       `/me/memory?project=${P}`,
     );
@@ -363,10 +363,10 @@ describe("project members (KOBE-164, ac-1)", () => {
       .setup()
       .click(within(await memberRow("Ada (you)")).getByRole("button", { name: /Remove/ }));
     await answerConfirm(/from this project\?$/, "Remove");
-    expect(await screen.findByText("A project keeps at least one owner.")).toBeTruthy();
+    expect(await screen.findByText(/A project keeps at least one owner/)).toBeTruthy();
   });
 
-  it("says that in team mode only owners are listed", async () => {
+  it("says that everyone in the workspace reads a workspace-visible project", async () => {
     stubApi({
       ...base({ visibility: "workspace" }),
       [`GET /v1/projects/${P}/members`]: [
@@ -375,7 +375,7 @@ describe("project members (KOBE-164, ac-1)", () => {
       ],
     });
     renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
-    expect(await screen.findByText(/Everyone in the team is a member/)).toBeTruthy();
+    expect(await screen.findByText(/everyone who is not listed is a reader/)).toBeTruthy();
   });
 });
 
@@ -404,7 +404,7 @@ describe("project files (KOBE-164, ac-1)", () => {
     expect(screen.getByText("2.0 KiB")).toBeTruthy();
     expect(screen.getAllByText("Proposed by an agent, approved")).toHaveLength(1);
     expect(
-      screen.getByText(/added only after the person in that conversation approves it/),
+      screen.getByText(/Files an agent proposed and a person approved are marked below/),
     ).toBeTruthy();
   });
 

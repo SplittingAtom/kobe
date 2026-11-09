@@ -52,6 +52,23 @@ export interface TreeActions {
   onMove(dragging: Dragging, folder: string): void;
   /** Files from the computer dropped onto a folder. */
   onUpload(folder: string, items: DroppedItems): void;
+  /** Slugs of the projects the member checked out: their folders are writable (CM3). */
+  readonly checkedOut?: ReadonlySet<string> | undefined;
+  /** A row shown differently (a mounted project: its name, role chip, editing mark; FP1). */
+  decorate?(entry: FileEntry): RowDecoration | undefined;
+  /** Why files dropped onto `folder` are refused (a read-only project, FP1), else undefined. */
+  dropRefusal?(folder: string): string | undefined;
+  /** Files were dragged onto a folder that refuses them: say why. */
+  onRefusedDrop?(reason: string): void;
+}
+
+/** How a decorated row reads (FP1): its label, hover text and chips after the name. */
+export interface RowDecoration {
+  readonly label: string;
+  readonly title: string;
+  readonly chips: ReactNode;
+  /** Words for screen readers after the kind ("reader", "editing"). */
+  readonly description: string;
 }
 
 /** What the tree reports up: the focused row's folder (uploads go there) and the drag target. */
@@ -67,11 +84,20 @@ const isEntry = (row: TreeRow | undefined): row is Extract<TreeRow, { kind: "ent
 const dropFolderOf = (row: Extract<TreeRow, { kind: "entry" }>) =>
   row.entry.type === "dir" ? row.entry.path : parentPath(row.entry.path);
 
-function describe(entry: FileEntry): string {
+function describe(
+  entry: FileEntry,
+  checkedOut: ReadonlySet<string> | undefined,
+  decoration: RowDecoration | undefined,
+): string {
   const parts = [
-    entry.type === "dir" ? "Folder" : FILE_KIND_LABELS[fileKind(entry.name)],
+    entry.type === "dir"
+      ? decoration
+        ? "Project"
+        : "Folder"
+      : FILE_KIND_LABELS[fileKind(entry.name)],
     ...(entry.sizeBytes === null ? [] : [formatBytes(entry.sizeBytes)]),
-    ...(isReadOnlyPath(entry.path) ? ["read-only"] : []),
+    ...(decoration ? [decoration.description] : []),
+    ...(!decoration && isReadOnlyPath(entry.path, checkedOut) ? ["read-only"] : []),
   ];
   return parts.join(", ");
 }
@@ -114,8 +140,8 @@ interface RowProps {
 
 interface DragHandlers {
   start(e: DragEvent, row: Extract<TreeRow, { kind: "entry" }>): void;
-  over(e: DragEvent, folder: string, takesFiles: boolean): void;
-  drop(e: DragEvent, folder: string, takesFiles: boolean): void;
+  over(e: DragEvent, folder: string, takesFiles: boolean, refusal?: string): void;
+  drop(e: DragEvent, folder: string, takesFiles: boolean, refusal?: string): void;
   end(): void;
 }
 
@@ -133,13 +159,17 @@ function EntryRow({
 }: RowProps) {
   const { entry, level, expanded } = row;
   const dir = entry.type === "dir";
-  const readOnly = isReadOnlyPath(entry.path);
-  const Icon = dir
-    ? folderIcon(expanded, isProjectMount(entry.path))
-    : fileKindIcon(fileKind(entry.name));
+  const { checkedOut } = actions;
+  const readOnly = isReadOnlyPath(entry.path, checkedOut);
+  const decoration = actions.decorate?.(entry);
   const folder = dropFolderOf(row);
-  const takesFiles = dir && canUploadInto(entry.path);
-  const badge = isProjectMount(entry.path) || entry.path === WORKSPACE_DROP_FOLDER;
+  const takesFiles = dir && canUploadInto(entry.path, checkedOut);
+  // A project's folder shows a lock unless it is checked out (writable inside, CM3).
+  const Icon = dir
+    ? folderIcon(expanded, isProjectMount(entry.path) && !takesFiles)
+    : fileKindIcon(fileKind(entry.name));
+  const refusal = dir && !takesFiles ? actions.dropRefusal?.(entry.path) : undefined;
+  const badge = !decoration && (isProjectMount(entry.path) || entry.path === WORKSPACE_DROP_FOLDER);
   return (
     <li
       ref={register}
@@ -151,16 +181,16 @@ function EntryRow({
       aria-expanded={dir ? expanded : undefined}
       aria-selected={active}
       aria-busy={row.loading || undefined}
-      aria-label={entry.name}
+      aria-label={decoration?.label ?? entry.name}
       aria-describedby={`${id}-d`}
       tabIndex={active ? 0 : -1}
       data-file={entry.name}
       data-path={entry.path}
       {...(dropHere ? { "data-drop-target": "" } : {})}
-      {...(takesFiles ? { [DROP_FOLDER_ATTR]: "" } : {})}
+      {...(takesFiles || refusal !== undefined ? { [DROP_FOLDER_ATTR]: "" } : {})}
       // Read-only files still drag, to be mentioned in the composer (KOBE-374); never moved.
       draggable={!readOnly || !dir}
-      title={entry.path}
+      title={decoration?.title ?? entry.path}
       className={cn(
         "group/row relative flex h-6.5 cursor-default items-center gap-1 rounded-sm pe-0.5 text-sm outline-none select-none",
         "hover:bg-muted focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-inset",
@@ -181,8 +211,8 @@ function EntryRow({
         else actions.onOpenFile?.(entry);
       }}
       onDragStart={(e) => drag.start(e, row)}
-      onDragOver={(e) => drag.over(e, folder, takesFiles)}
-      onDrop={(e) => drag.drop(e, folder, takesFiles)}
+      onDragOver={(e) => drag.over(e, folder, takesFiles, refusal)}
+      onDrop={(e) => drag.drop(e, folder, takesFiles, refusal)}
       onDragEnd={drag.end}
     >
       <Guides level={level} />
@@ -195,7 +225,8 @@ function EntryRow({
         <span aria-hidden className="size-3.5 shrink-0" />
       )}
       <Icon aria-hidden className="text-muted-foreground size-4 shrink-0" />
-      <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+      <span className="min-w-0 flex-1 truncate">{decoration?.label ?? entry.name}</span>
+      {decoration?.chips}
       {row.loading && (
         <LoaderCircleIcon aria-hidden className="text-muted-foreground size-3 animate-spin" />
       )}
@@ -207,7 +238,7 @@ function EntryRow({
       )}
       <ActionMenu
         trigger="file-row-actions"
-        label={`Actions for ${entry.name}`}
+        label={`Actions for ${decoration?.label ?? entry.name}`}
         scope="file-menu"
         size="sm"
         tabIndex={-1}
@@ -216,7 +247,7 @@ function EntryRow({
         bindings={actions.bindings(entry)}
       />
       <span id={`${id}-d`} className="sr-only">
-        {describe(entry)}
+        {describe(entry, checkedOut, decoration)}
       </span>
     </li>
   );
@@ -281,17 +312,17 @@ function useDrag(actions: TreeActions) {
   }, []);
   const handlers: DragHandlers = {
     start(e, row) {
-      const readOnly = isReadOnlyPath(row.entry.path);
+      const readOnly = isReadOnlyPath(row.entry.path, actions.checkedOut);
       if (readOnly && row.entry.type === "dir") return e.preventDefault();
       dragging.current = { path: row.entry.path, type: row.entry.type };
       // A drop on the composer mentions it (copy); on a folder here it moves (canMoveInto
       // refuses read-only sources).
       startRowDrag(e.dataTransfer, dragging.current, !readOnly);
     },
-    over(e, folder, takesFiles) {
+    over(e, folder, takesFiles, refusal) {
       const own = dragging.current;
       if (own && carriesWorkspaceRow(e.dataTransfer)) {
-        if (!canMoveInto(own.path, own.type, folder)) {
+        if (!canMoveInto(own.path, own.type, folder, actions.checkedOut)) {
           e.dataTransfer.dropEffect = "none";
           return setTarget(null);
         }
@@ -303,14 +334,30 @@ function useDrag(actions: TreeActions) {
         e.preventDefault();
         e.dataTransfer.dropEffect = "copy";
         setTarget(folder);
+        return;
+      }
+      if (refusal !== undefined && carriesFiles(e.dataTransfer)) {
+        // A read-only project (FP1): nothing lands, and the panel says why.
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "none";
+        setTarget(null);
+        actions.onRefusedDrop?.(refusal);
       }
     },
-    drop(e, folder, takesFiles) {
+    drop(e, folder, takesFiles, refusal) {
       const own = dragging.current;
       if (own && carriesWorkspaceRow(e.dataTransfer)) {
         e.preventDefault();
         end();
-        if (canMoveInto(own.path, own.type, folder)) actions.onMove(own, folder);
+        if (canMoveInto(own.path, own.type, folder, actions.checkedOut)) {
+          actions.onMove(own, folder);
+        }
+        return;
+      }
+      if (refusal !== undefined && carriesFiles(e.dataTransfer)) {
+        e.preventDefault();
+        end();
+        actions.onRefusedDrop?.(refusal);
         return;
       }
       if (takesFiles && carriesFiles(e.dataTransfer)) {
@@ -339,7 +386,10 @@ export function FileTreeView({
   focusRequest,
   onFocusChange,
   header,
+  idPrefix = "kobe-files-row",
 }: {
+  /** Row ids start with this (two trees on one page: Projects and My files). */
+  readonly idPrefix?: string;
   readonly tree: FileTree;
   readonly label: string;
   readonly actions: TreeActions;
@@ -439,11 +489,11 @@ export function FileTreeView({
           else actions.onOpenFile?.(row.entry);
         });
       case "F2":
-        if (isEntry(row) && !isReadOnlyPath(row.entry.path))
+        if (isEntry(row) && !isReadOnlyPath(row.entry.path, actions.checkedOut))
           handled(() => actions.onRename(row.entry));
         return;
       case "Delete":
-        if (isEntry(row) && !isReadOnlyPath(row.entry.path))
+        if (isEntry(row) && !isReadOnlyPath(row.entry.path, actions.checkedOut))
           handled(() => actions.onDelete(row.entry));
         return;
       case "ContextMenu":
@@ -488,7 +538,7 @@ export function FileTreeView({
             if (el) elements.current.set(key, el);
             else elements.current.delete(key);
           };
-          const id = `kobe-files-row-${i}`;
+          const id = `${idPrefix}-${i}`;
           return row.kind === "entry" ? (
             <EntryRow
               key={key}

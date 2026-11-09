@@ -113,7 +113,7 @@ test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a fil
   // Screenshots with the Files tree, light and dark.
   const files = filesSection(page);
   // Attached, not visible: an empty workspace's tree has no rows, so no height.
-  await expect(files.getByRole("tree", { name: "Files in your workspace" })).toBeAttached();
+  await expect(files.getByRole("tree", { name: "My files" })).toBeAttached();
   for (const theme of ["light", "dark"] as const) {
     await context.addCookies([{ name: THEME_COOKIE, value: theme, url: baseURL ?? "" }]);
     await page.reload();
@@ -146,7 +146,7 @@ test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a fil
   // The team name (or menu) ends before the first action (New conversation since KOBE-453):
   // nothing overlaps (review S1).
   const slot = await chat.railHeader
-    .getByRole("navigation", { name: "Teams" })
+    .getByRole("navigation", { name: "Workspace" })
     .or(chat.railHeader.getByRole("heading", { level: 2 }))
     .boundingBox();
   const firstToggle = await chat.railHeader
@@ -189,7 +189,7 @@ test("rail resize: drag, reload, keys, Mod+B, reset, narrow widths, beside a fil
   expect(await api(page, "POST", `${dir}/notes.md`)).toBe(201);
   try {
     await files.getByRole("button", { name: "Refresh files" }).click();
-    const tree = files.getByRole("tree", { name: "Files in your workspace" });
+    const tree = files.getByRole("tree", { name: "My files" });
     await tree.getByRole("treeitem", { name: dir, exact: true }).click();
     // The test's own notes.md: a workspace may hold another one at its root.
     await tree

@@ -31,7 +31,7 @@ export function PromotionRequestsSection() {
       <ResourceView state={state} label="promotion requests">
         {(requests) =>
           requests.length === 0 ? (
-            <EmptyState title="No Builder waits for a promotion." />
+            <EmptyState title="No contributor waits for a promotion." />
           ) : (
             <ul className="m-0 flex flex-col gap-3">
               {requests.map((r) => (
@@ -103,7 +103,7 @@ function RequestDetail({
                 Confirm
               </Button>
             </div>
-            <Field label="Note to the Builder (optional)">
+            <Field label="Note to the contributor (optional)">
               <TextInput value={note} maxLength={1000} onChange={(e) => setNote(e.target.value)} />
             </Field>
             <div>

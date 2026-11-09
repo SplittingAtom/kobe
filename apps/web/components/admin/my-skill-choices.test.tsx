@@ -64,7 +64,7 @@ describe("Catalog settings", () => {
     });
     renderTeam(<CatalogSwitchesSection />, { permissions: ["team.skills.review"] });
     const builders = (await screen.findByRole("checkbox", {
-      name: /Builders may install catalog skills/,
+      name: /Contributors may install catalog skills/,
     })) as HTMLInputElement;
     await userEvent.click(builders);
     await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));

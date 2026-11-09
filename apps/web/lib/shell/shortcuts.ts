@@ -42,7 +42,7 @@ export const COMPOSER_KEYS: readonly { readonly keys: string; readonly name: str
   { keys: "Shift+Enter", name: "New line" },
   { keys: "↑", name: "Edit your last message, from an empty message box" },
   { keys: "/", name: "Actions, at the start of the message box" },
-  { keys: "@", name: "Mention a workspace file" },
+  { keys: "@", name: "Mention one of your files" },
 ];
 
 /** macOS (and iPadOS, which reports itself as a Mac): `Mod` is Cmd there. */

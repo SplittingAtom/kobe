@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FolderIcon, UploadIcon } from "lucide-react";
 import { WORKSPACE_DROP_FOLDER } from "@kobe/protocol";
 import type { ApiError } from "../../lib/api/client";
@@ -8,15 +8,24 @@ import type { FileEntry, FilesApi } from "../../lib/files/api";
 import { saveBytes } from "../../lib/files/save";
 import { describeFileError, isReadOnlyPath, parentPath } from "../../lib/files/format";
 import { folderError, type DroppedItems } from "../../lib/files/drop";
-import { baseName, expandedKey, joinPath } from "../../lib/files/tree";
+import {
+  baseName,
+  canUploadInto,
+  expandedKey,
+  joinPath,
+  splitProjectRows,
+} from "../../lib/files/tree";
 import { ErrorNotice } from "../admin/error-notice";
-import { IconAction } from "../shell/icon-action";
 import { copyText } from "../../lib/clipboard";
 import type { MenuBindings } from "../../lib/shell/menu";
 import { cn } from "../../lib/utils";
 import { ConfirmDelete, MoveForm, RenameForm } from "./file-dialogs";
 import { DROP_FOLDER_ATTR, FileTreeView, type Dragging, type TreeFocus } from "./file-tree";
 import { useFileTree, type FileTree } from "./use-file-tree";
+import { NoProjects, ProjectsHeader, useProjectsInTree, WorkspaceHeader } from "./workspace-tree";
+import { ProjectWorkPanel, type ProjectRef, type WorkAction } from "../projects/project-work";
+import { isProjectFolder, projectSlugOf } from "../../lib/projects/workspace";
+import { useNavigate } from "../shell/use-navigate";
 
 const COPY_FAILED = {
   status: 0,
@@ -58,7 +67,7 @@ function useWake(api: FilesApi, reload: () => void, refreshMs: number, key: numb
 
 type Dialog = { readonly kind: "delete" | "rename" | "move"; readonly entry: FileEntry } | null;
 
-const where = (folder: string) => (folder === "" ? "the workspace root" : folder);
+const where = (folder: string) => (folder === "" ? "My files" : folder);
 
 /**
  * A row's ⋯ menu (KOBE-292, KOBE-304): Open, Mention in message (files, KOBE-374), Download,
@@ -66,6 +75,7 @@ const where = (folder: string) => (folder === "" ? "the workspace root" : folder
  */
 function rowBindings(
   entry: FileEntry,
+  checkedOut: ReadonlySet<string> | undefined,
   handlers: {
     readonly onOpen: (() => void) | undefined;
     readonly onMention: (() => void) | undefined;
@@ -76,7 +86,7 @@ function rowBindings(
     readonly onDelete: () => void;
   },
 ): MenuBindings {
-  const readOnly = isReadOnlyPath(entry.path);
+  const readOnly = isReadOnlyPath(entry.path, checkedOut);
   const change = (onSelect: () => void, destructive = false) => ({
     onSelect,
     movesFocus: true,
@@ -98,21 +108,21 @@ function rowBindings(
 }
 
 /**
- * The top-level row: the workspace's name, a drop target for the top level, Upload, and Refresh
- * files (KOBE-461; it was in the rail section's header).
+ * My files' top row (Workspaces FP1; the member's scratchspace): a drop target for its top level
+ * and Upload (into the focused folder).
  */
 function RootHeader({
   drag,
   folder,
   busy,
+  checkedOut,
   onUpload,
-  onRefresh,
 }: {
   readonly drag: Parameters<Parameters<typeof FileTreeView>[0]["header"]>[0];
   readonly folder: string;
   readonly busy: boolean;
+  readonly checkedOut: ReadonlySet<string> | undefined;
   onUpload(files: FileList | null): void;
-  readonly onRefresh: (() => void) | undefined;
 }) {
   const label = `Upload a file to ${where(folder)}`;
   return (
@@ -127,8 +137,8 @@ function RootHeader({
       onDrop={(e) => drag.handlers.drop(e, "", true)}
     >
       <FolderIcon aria-hidden className="text-muted-foreground size-4 shrink-0" />
-      <span className="min-w-0 flex-1 truncate">Workspace</span>
-      {!isReadOnlyPath(folder) && (
+      <span className="min-w-0 flex-1 truncate">My files</span>
+      {takesUploads(folder, checkedOut) && (
         <label
           className={cn(
             "hover:bg-muted flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md",
@@ -150,32 +160,40 @@ function RootHeader({
           />
         </label>
       )}
-      {onRefresh && (
-        <IconAction
-          command="refresh-files"
-          size="sm"
-          side="right"
-          variant="ghost"
-          className="text-foreground shrink-0"
-          onClick={onRefresh}
-        />
-      )}
     </div>
   );
 }
 
-function FolderNote({ folder }: { readonly folder: string }) {
-  if (!isReadOnlyPath(folder)) return null;
+/**
+ * Whether Upload may target `folder`: inside a project, whether it takes files (a checked-out
+ * project's own folder does, CM3); elsewhere today's read-only rule.
+ */
+function takesUploads(folder: string, checkedOut: ReadonlySet<string> | undefined): boolean {
+  return projectSlugOf(folder) !== undefined
+    ? canUploadInto(folder, checkedOut)
+    : !isReadOnlyPath(folder);
+}
+
+function FolderNote({
+  folder,
+  checkedOut,
+}: {
+  readonly folder: string;
+  readonly checkedOut: ReadonlySet<string> | undefined;
+}) {
+  if (takesUploads(folder, checkedOut)) return null;
   return (
     <p className="text-muted-foreground m-0 text-xs">
       {folder === WORKSPACE_DROP_FOLDER
         ? "Drop files on the rail to add them here. Files your threads attached are read-only."
-        : "This folder is read-only: files here cannot be uploaded or deleted."}
+        : projectSlugOf(folder) !== undefined
+          ? "This project is read-only here: check it out to change its files."
+          : "This folder is read-only: files here cannot be uploaded or deleted."}
     </p>
   );
 }
 
-function Status({ tree }: { readonly tree: FileTree }) {
+function Status({ tree, empty }: { readonly tree: FileTree; readonly empty: boolean }) {
   const { root } = tree;
   if (root.loading && root.entries.length === 0 && !root.error) {
     return (
@@ -184,8 +202,8 @@ function Status({ tree }: { readonly tree: FileTree }) {
       </p>
     );
   }
-  if (!root.loading && !root.error && root.entries.length === 0) {
-    return <p className="text-muted-foreground m-0 text-xs">Your workspace is empty.</p>;
+  if (!root.loading && !root.error && empty) {
+    return <p className="text-muted-foreground m-0 text-xs">No files yet.</p>;
   }
   return null;
 }
@@ -218,6 +236,7 @@ function FolderErrors({ tree }: { readonly tree: FileTree }): ReactNode {
  */
 export function FileBrowser({
   api,
+  workspaceName = "",
   refreshAfterWakeMs = DEFAULT_REFRESH_AFTER_WAKE_MS,
   wakeKey = 0,
   showFolder = null,
@@ -227,6 +246,8 @@ export function FileBrowser({
   onRefresh,
 }: {
   readonly api: FilesApi;
+  /** The active workspace's name (the switcher's): the tree's top row (FP1). */
+  readonly workspaceName?: string | undefined;
   /** Refresh files in the top row (KOBE-461): wakes and lists again (a new `wakeKey`). Absent: none. */
   readonly onRefresh?: (() => void) | undefined;
   /**
@@ -254,6 +275,35 @@ export function FileBrowser({
   const [focusRequest, setFocusRequest] = useState<{ path: string; seq: number } | null>(null);
   const shownSeq = useRef(showFolder?.seq ?? 0);
   const { reveal, moved } = tree;
+  const work = useProjectsInTree(tree);
+  const { checkedOut } = work;
+  const split = useMemo(() => splitProjectRows(tree.rows), [tree.rows]);
+  const projectsTree = useMemo(() => ({ ...tree, rows: split.projects }), [tree, split]);
+  const myTree = useMemo(() => ({ ...tree, rows: split.mine }), [tree, split]);
+  const [projectAction, setProjectAction] = useState<{
+    readonly project: ProjectRef;
+    readonly action: WorkAction;
+  } | null>(null);
+  const navigate = useNavigate();
+  // Two trees report focus. Only the one holding the focus (DOM focus moved into it last) sets
+  // the Upload target and the folder note; the other's reports are kept for when it is entered.
+  const focusSource = useRef<"projects" | "mine">("mine");
+  const lastFocus = useRef<Record<"projects" | "mine", TreeFocus>>({
+    projects: { path: null, folder: "" },
+    mine: { path: null, folder: "" },
+  });
+  const focusFrom = useMemo(() => {
+    const from = (which: "projects" | "mine") => (next: TreeFocus) => {
+      lastFocus.current[which] = next;
+      if (focusSource.current === which) setFocus(next);
+    };
+    return { projects: from("projects"), mine: from("mine") };
+  }, []);
+  const enterTree = (which: "projects" | "mine") => () => {
+    if (focusSource.current === which) return;
+    focusSource.current = which;
+    setFocus(lastFocus.current[which]);
+  };
 
   const focusRow = useCallback(
     (path: string) => setFocusRequest((prev) => ({ path, seq: (prev?.seq ?? 0) + 1 })),
@@ -366,7 +416,7 @@ export function FileBrowser({
   const actions = {
     onOpenFile,
     bindings: (entry: FileEntry) =>
-      rowBindings(entry, {
+      rowBindings(entry, checkedOut, {
         onOpen:
           entry.type === "dir"
             ? () => {
@@ -386,6 +436,39 @@ export function FileBrowser({
     onMove: (dragging: Dragging, folder: string) =>
       void move(dragging.path, joinPath(folder, baseName(dragging.path)), "Moved"),
     onUpload: (folder: string, items: DroppedItems) => void uploadInto(folder, items),
+    checkedOut,
+    dropRefusal: work.dropRefusal,
+    onRefusedDrop: (reason: string) => {
+      setActionError(null);
+      setNotice(reason);
+    },
+  };
+  const projectActions = {
+    ...actions,
+    decorate: work.decorate,
+    bindings: (entry: FileEntry) => {
+      const own = actions.bindings(entry);
+      const project = isProjectFolder(entry.path) ? work.projectOf(entry.path) : undefined;
+      if (!project) return own;
+      const ref = { id: project.project.id, name: project.project.name };
+      const act = (action: WorkAction) => ({
+        onSelect: () => setProjectAction({ project: ref, action }),
+        movesFocus: true,
+      });
+      return {
+        ...own,
+        ...(project.kind === "checked_out"
+          ? {
+              "commit-project": act("commit"),
+              "update-project": act("update"),
+              "discard-project": { ...act("discard"), destructive: true },
+            }
+          : project.kind === "editable"
+            ? { "checkout-project": act("checkout") }
+            : {}),
+        "open-project-page": { onSelect: () => navigate(`/me/projects/${project.project.id}`) },
+      };
+    },
   };
 
   return (
@@ -397,26 +480,57 @@ export function FileBrowser({
       )}
       <FolderErrors tree={tree} />
       {actionError && <ErrorNotice error={actionError} />}
-      <FileTreeView
-        tree={tree}
-        label="Files in your workspace"
-        actions={actions}
-        focusRequest={focusRequest}
-        onFocusChange={setFocus}
-        header={(drag) => (
-          <RootHeader
-            drag={drag}
-            folder={focus.folder}
-            busy={busy}
-            onUpload={(files) =>
-              void uploadInto(focus.folder, { files: Array.from(files ?? []), folders: [] })
-            }
-            onRefresh={onRefresh}
-          />
-        )}
-      />
-      <Status tree={tree} />
-      <FolderNote folder={focus.folder} />
+      <WorkspaceHeader name={workspaceName} onRefresh={onRefresh} />
+      {work.failed && (
+        <p role="alert" className="m-0 text-xs">
+          Your projects could not be read, so none shows as checked out.{" "}
+          <button type="button" className="underline" onClick={work.retry}>
+            Try again
+          </button>
+        </p>
+      )}
+      <div className="contents" onFocusCapture={enterTree("projects")}>
+        <FileTreeView
+          tree={projectsTree}
+          label="Projects"
+          idPrefix="kobe-projects-row"
+          actions={projectActions}
+          focusRequest={focusRequest}
+          onFocusChange={focusFrom.projects}
+          header={() => <ProjectsHeader total={work.total} />}
+        />
+      </div>
+      {split.projects.length === 0 && <NoProjects ready={work.ready} />}
+      {projectAction && (
+        <ProjectWorkPanel
+          key={`${projectAction.project.id}:${projectAction.action}`}
+          project={projectAction.project}
+          action={projectAction.action}
+          onClose={() => setProjectAction(null)}
+        />
+      )}
+      <div className="contents" onFocusCapture={enterTree("mine")}>
+        <FileTreeView
+          tree={myTree}
+          label="My files"
+          actions={actions}
+          focusRequest={focusRequest}
+          onFocusChange={focusFrom.mine}
+          header={(drag) => (
+            <RootHeader
+              drag={drag}
+              folder={focus.folder}
+              busy={busy}
+              checkedOut={checkedOut}
+              onUpload={(files) =>
+                void uploadInto(focus.folder, { files: Array.from(files ?? []), folders: [] })
+              }
+            />
+          )}
+        />
+      </div>
+      <Status tree={tree} empty={split.mine.length === 0} />
+      <FolderNote folder={focus.folder} checkedOut={checkedOut} />
       {dialog?.kind === "delete" && (
         <ConfirmDelete
           entry={dialog.entry}
@@ -438,6 +552,7 @@ export function FileBrowser({
       {dialog?.kind === "move" && (
         <MoveForm
           entry={dialog.entry}
+          checkedOut={checkedOut}
           folders={tree.knownFolders}
           busy={busy}
           onMove={(folder) =>

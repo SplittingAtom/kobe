@@ -198,13 +198,14 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     expect(rootListings()).toBe(1);
   });
 
-  it("puts Refresh files in the file browser's top row beside Upload, not the section header (KOBE-461 ac-3)", async () => {
+  it("puts Refresh files in the file browser's top row (the workspace's), not the section header (KOBE-461 ac-3, FP1)", async () => {
     const { user, panel } = await open();
     await waitFor(() => expect(wakes()).toBe(1));
-    const upload = within(panel).getByLabelText("Upload a file to the workspace root");
-    const row = must(upload.closest("[data-kobe-drop-folder]"));
-    const refresh = within(row as HTMLElement).getByRole("button", { name: "Refresh files" });
+    const upload = within(panel).getByLabelText("Upload a file to My files");
+    expect(upload.closest("[data-kobe-drop-folder]")).not.toBeNull();
+    const refresh = within(panel).getByRole("button", { name: "Refresh files" });
     expect(within(panel).getAllByRole("button", { name: "Refresh files" })).toEqual([refresh]);
+    expect(must(refresh.closest("div")).textContent).toMatch(/^Workspace/);
     await user.click(refresh);
     await waitFor(() => expect(wakes()).toBe(2));
     expect(rootListings()).toBe(2);
@@ -404,7 +405,7 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
       Response.json({ code: "already_exists", message: "up.txt already exists." }, { status: 409 });
     const { user, panel } = await open();
     await user.upload(
-      within(panel).getByLabelText("Upload a file to the workspace root"),
+      within(panel).getByLabelText("Upload a file to My files"),
       new File(["x"], "up.txt"),
     );
     expect((await within(panel).findByRole("alert")).textContent).toMatch(/already exists/);

@@ -77,7 +77,7 @@ export interface LiveRun {
   /** From `run.started`: when it started and the model alias it uses (the steering panel, CE10). */
   readonly startedAt?: string | undefined;
   readonly model?: string | undefined;
-  /** `sandbox.waking` until the first sign of work (D14 "Waking your workspace…"). */
+  /** `sandbox.waking` until the first sign of work (D14 "Waking your sandbox…"). */
   readonly waking?: Payload<"sandbox.waking">["reason"] | undefined;
   readonly terminal?: TerminalEvent | undefined;
   /** Entries this run committed, in order. */

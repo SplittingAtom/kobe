@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import type { Project } from "../projects/api";
 import { editBlockReason, editorLanguage, isTextPreview, sha256Hex } from "./editor";
 import { previewOf } from "./preview";
 
@@ -30,6 +31,40 @@ describe("which files the editor opens (KOBE-463)", () => {
     expect(editBlockReason("uploads/0b7e3c2a-1111-4222-8333-444455556666/a.md", false)).toMatch(
       /read-only/,
     );
+  });
+
+  it("a project file's reason follows what the member may do (CM3, FP3)", () => {
+    const project = (slug: string, over: Partial<Project> = {}): Project => ({
+      id: `p-${slug}`,
+      teamId: "t",
+      slug,
+      name: slug,
+      description: "",
+      instructions: "",
+      defaultAgentId: null,
+      visibility: "workspace",
+      myRole: "editor",
+      fileCount: 0,
+      createdBy: "u",
+      createdAt: "2026-11-01T00:00:00Z",
+      updatedAt: "2026-11-01T00:00:00Z",
+      archivedAt: null,
+      ...over,
+    });
+    const bySlug = new Map([
+      ["budget", project("budget")],
+      ["deck", project("deck", { myRole: "reader" })],
+      ["old", project("old", { archivedAt: "2026-11-02T00:00:00Z" })],
+    ]);
+    const projects = { bySlug, checkedOut: new Set(["budget", "old"]) };
+    expect(editBlockReason("projects/budget/plan.md", false, projects)).toBeUndefined();
+    expect(
+      editBlockReason("projects/budget/plan.md", false, { bySlug, checkedOut: new Set() }),
+    ).toMatch(/check the project out/);
+    expect(editBlockReason("projects/deck/a.md", false, projects)).toBe(
+      "You can read this project, not change it.",
+    );
+    expect(editBlockReason("projects/old/a.md", false, projects)).toMatch(/archived/);
   });
 
   it("picks a language mode for md, json, csv, python, js, ts and yaml; plain text otherwise", () => {

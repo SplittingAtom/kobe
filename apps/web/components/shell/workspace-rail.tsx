@@ -263,6 +263,7 @@ function useListWhenShown(rail: RailApi, showing: boolean) {
 function RailFiles({
   rail,
   api,
+  workspaceName,
   drop,
   showFolder,
   clearDrop,
@@ -271,6 +272,8 @@ function RailFiles({
 }: {
   readonly rail: RailApi;
   readonly api: FilesApi;
+  /** The active workspace's name: the top row of Files (FP1). */
+  readonly workspaceName: string;
   readonly drop: DropStatus;
   readonly showFolder: { readonly path: string; readonly seq: number } | null;
   /** A Files action (open, refresh) clears the last drop's notice and errors. */
@@ -321,6 +324,7 @@ function RailFiles({
       {rail.filesRequests > 0 && (
         <FileBrowser
           api={api}
+          workspaceName={workspaceName}
           wakeKey={rail.filesRequests}
           onRefresh={refresh}
           showFolder={showFolder}
@@ -440,6 +444,7 @@ export function WorkspaceRail({
             <RailFiles
               rail={rail}
               api={filesApi}
+              workspaceName={teamName}
               drop={drop.status}
               showFolder={drop.showFolder}
               clearDrop={drop.clear}

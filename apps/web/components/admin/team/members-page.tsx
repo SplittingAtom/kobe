@@ -103,8 +103,8 @@ export function MembersPage() {
         title="Members and roles"
         description={
           <>
-            Team admins run the team, builders publish agents and skills, members chat. A team
-            always keeps at least one team admin.{" "}
+            Team admins run the team and the workspace's settings, contributors publish agents and
+            skills and create projects, members chat. A team always keeps at least one team admin.{" "}
             <Link href="/admin/team/invites">Invite someone</Link>.
           </>
         }

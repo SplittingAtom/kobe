@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { projectPermissions } from "@kobe/protocol";
 import { worded, type ProjectInput } from "../../lib/projects/api";
 import { useTeamAccess } from "../admin/console-context";
@@ -25,7 +25,7 @@ import {
 import { EMPTY_PROJECT, ProjectForm } from "./project-form";
 import { useProjectAgents, useProjectsApi } from "./use-projects";
 
-const MODE_LABEL = { team: "Whole team", selected: "Selected people" } as const;
+const VISIBILITY_LABEL = { workspace: "Whole workspace", restricted: "Restricted" } as const;
 
 /** Projects of the active team (`/v1/projects`, KOBE-161): the ones you can see, and create. */
 export function ProjectsPage() {
@@ -83,7 +83,12 @@ export function ProjectsPage() {
         checked={archived}
         onChange={(e) => setArchived(e.target.checked)}
       />
-      <ProjectList key={`${archived}:${listKey}`} archived={archived} canCreate={canCreate} />
+      <ProjectList
+        key={`${archived}:${listKey}`}
+        archived={archived}
+        canCreate={canCreate}
+        teamAdmin={access.role === "team_admin"}
+      />
     </>
   );
 }
@@ -91,12 +96,16 @@ export function ProjectsPage() {
 function ProjectList({
   archived,
   canCreate,
+  teamAdmin,
 }: {
   readonly archived: boolean;
   readonly canCreate: boolean;
+  /** Team admins see the projects that lost their last owner (PR5, "No owner: assign one"). */
+  readonly teamAdmin: boolean;
 }) {
   const api = useProjectsApi();
   const { state } = useResource(() => api.list(archived));
+  const ownerless = useOwnerless(teamAdmin);
   return (
     <ResourceView state={state} label="projects">
       {(projects) =>
@@ -110,7 +119,7 @@ function ProjectList({
               <TableRow>
                 <TableHeader>Project</TableHeader>
                 <TableHeader>Your role</TableHeader>
-                <TableHeader>People</TableHeader>
+                <TableHeader>Visibility</TableHeader>
                 <TableHeader numeric>Files</TableHeader>
                 <TableHeader>Updated</TableHeader>
               </TableRow>
@@ -121,12 +130,19 @@ function ProjectList({
                   <TableRowHeader>
                     <Link href={`/me/projects/${p.id}`}>{p.name}</Link>
                     {p.archivedAt !== null && " (archived)"}
+                    {ownerless.has(p.id) && (
+                      <div className="text-sm font-normal">
+                        <Link href={`/me/projects/${p.id}#project-owner`}>
+                          No owner: assign one
+                        </Link>
+                      </div>
+                    )}
                     {p.description && (
                       <div className="text-sm font-normal text-console-muted">{p.description}</div>
                     )}
                   </TableRowHeader>
                   <TableCell>{p.myRole ?? "Team admin"}</TableCell>
-                  <TableCell>{MODE_LABEL[p.membersMode]}</TableCell>
+                  <TableCell>{VISIBILITY_LABEL[p.visibility]}</TableCell>
                   <TableCell numeric>{p.fileCount}</TableCell>
                   <TableCell>
                     <DateTime value={p.updatedAt} />
@@ -139,4 +155,21 @@ function ProjectList({
       }
     </ResourceView>
   );
+}
+
+/** Ids of the projects without an owner (team admins only; nothing when it cannot be read). */
+function useOwnerless(teamAdmin: boolean): ReadonlySet<string> {
+  const api = useProjectsApi();
+  const [ids, setIds] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    if (!teamAdmin) return;
+    let current = true;
+    void api.noOwner().then((res) => {
+      if (current && res.ok) setIds(new Set(res.data.map((p) => p.id)));
+    });
+    return () => {
+      current = false;
+    };
+  }, [api, teamAdmin]);
+  return ids;
 }

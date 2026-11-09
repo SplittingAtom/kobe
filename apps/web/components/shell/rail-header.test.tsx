@@ -134,14 +134,14 @@ describe("the team selector (ac-2)", { timeout: 30_000 }, () => {
     openApp(fake);
     await composer();
     const line = await header();
-    const teams = await within(line).findByRole("navigation", { name: "Teams" }, WAIT);
-    expect(within(bar()).queryByRole("navigation", { name: "Teams" })).toBeNull();
+    const teams = await within(line).findByRole("navigation", { name: "Workspace" }, WAIT);
+    expect(within(bar()).queryByRole("navigation", { name: "Workspace" })).toBeNull();
     const trigger = within(teams).getByRole("button", { name: /Finance/ });
     expect(trigger.textContent).toContain("Finance");
     expect(trigger.textContent).toContain("Member");
     expect(trigger.getAttribute("title")).toBe("Finance");
     await userEvent.setup().click(trigger);
-    const list = await screen.findByRole("list", { name: "Your teams" });
+    const list = await screen.findByRole("list", { name: "Your workspaces" });
     const finance = within(list).getByRole("button", { name: /Finance/ });
     expect(finance.getAttribute("aria-current")).toBe("true");
     expect((finance as HTMLButtonElement).disabled).toBe(true);
@@ -153,14 +153,14 @@ describe("the team selector (ac-2)", { timeout: 30_000 }, () => {
     openApp(fake);
     await composer();
     const line = await header();
-    const teams = await within(line).findByRole("navigation", { name: "Teams" }, WAIT);
+    const teams = await within(line).findByRole("navigation", { name: "Workspace" }, WAIT);
     const trigger = within(teams).getByRole("button", { name: /Finance/ });
     const slot = must(trigger.closest<HTMLElement>("[class*='teamSlot']"));
-    expect(screen.queryByRole("list", { name: "Your teams" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Your workspaces" })).toBeNull();
     const user = userEvent.setup();
     trigger.focus();
     await user.keyboard("{Enter}");
-    const list = await screen.findByRole("list", { name: "Your teams" });
+    const list = await screen.findByRole("list", { name: "Your workspaces" });
     expect(document.body.contains(list)).toBe(true);
     expect(slot.contains(list)).toBe(false);
     expect(
@@ -169,7 +169,7 @@ describe("the team selector (ac-2)", { timeout: 30_000 }, () => {
         .map((b) => b.textContent),
     ).toEqual(["Finance Member", "Operations Member"]);
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("list", { name: "Your teams" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("list", { name: "Your workspaces" })).toBeNull());
     expect(document.activeElement).toBe(trigger);
   });
 
@@ -185,10 +185,14 @@ describe("the team selector (ac-2)", { timeout: 30_000 }, () => {
     } as Location);
     openApp(fake);
     await composer();
-    const teams = await within(await header()).findByRole("navigation", { name: "Teams" }, WAIT);
+    const teams = await within(await header()).findByRole(
+      "navigation",
+      { name: "Workspace" },
+      WAIT,
+    );
     const user = userEvent.setup();
     await user.click(within(teams).getByRole("button", { name: /Finance/ }));
-    const list = await screen.findByRole("list", { name: "Your teams" });
+    const list = await screen.findByRole("list", { name: "Your workspaces" });
     await user.click(within(list).getByRole("button", { name: /Operations/ }));
     await waitFor(() =>
       expect(
@@ -258,11 +262,11 @@ describe("the team selector (ac-2)", { timeout: 30_000 }, () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Show the workspace" }));
     const drawer = await screen.findByRole("dialog", { name: "Workspace" });
-    const teams = await within(drawer).findByRole("navigation", { name: "Teams" }, WAIT);
+    const teams = await within(drawer).findByRole("navigation", { name: "Workspace" }, WAIT);
     await user.click(within(teams).getByRole("button", { name: /Finance/ }));
-    expect(await screen.findByRole("list", { name: "Your teams" })).toBeTruthy();
+    expect(await screen.findByRole("list", { name: "Your workspaces" })).toBeTruthy();
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(screen.queryByRole("list", { name: "Your teams" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("list", { name: "Your workspaces" })).toBeNull());
     expect(screen.getByRole("dialog", { name: "Workspace" })).toBeTruthy();
   });
 
@@ -274,8 +278,8 @@ describe("the team selector (ac-2)", { timeout: 30_000 }, () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Show the workspace" }));
     const drawer = await screen.findByRole("dialog", { name: "Workspace" });
     const line = must(drawer.querySelector<HTMLElement>("[data-rail-header]"));
-    expect(await within(line).findByRole("navigation", { name: "Teams" }, WAIT)).toBeTruthy();
-    expect(within(bar()).queryByRole("navigation", { name: "Teams" })).toBeNull();
+    expect(await within(line).findByRole("navigation", { name: "Workspace" }, WAIT)).toBeTruthy();
+    expect(within(bar()).queryByRole("navigation", { name: "Workspace" })).toBeNull();
   });
 });
 
@@ -286,7 +290,11 @@ describe("the collapsed rail's team (KOBE-419 review S2)", { timeout: 30_000 }, 
     openApp(fake);
     await composer();
     await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(true));
-    const team = await within(rail()).findByRole("button", { name: "Team: Finance, Member" }, WAIT);
+    const team = await within(rail()).findByRole(
+      "button",
+      { name: "Workspace: Finance, Member" },
+      WAIT,
+    );
     expect(team.textContent).toBe("F");
     const buttons = within(rail())
       .getAllByRole("button")
@@ -294,7 +302,7 @@ describe("the collapsed rail's team (KOBE-419 review S2)", { timeout: 30_000 }, 
     expect(buttons[0]).toBe(team);
     const user = userEvent.setup();
     await user.click(team);
-    const list = await screen.findByRole("list", { name: "Your teams" });
+    const list = await screen.findByRole("list", { name: "Your workspaces" });
     const finance = within(list).getByRole("button", { name: /Finance/ });
     expect((finance as HTMLButtonElement).disabled).toBe(true);
     expect(finance.getAttribute("aria-current")).toBe("true");
@@ -313,7 +321,11 @@ describe("the collapsed rail's team (KOBE-419 review S2)", { timeout: 30_000 }, 
     openApp(fake);
     await composer();
     await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(true));
-    const team = await within(rail()).findByRole("img", { name: "Team: Finance, Member" }, WAIT);
+    const team = await within(rail()).findByRole(
+      "img",
+      { name: "Workspace: Finance, Member" },
+      WAIT,
+    );
     expect(team.textContent).toBe("F");
     expect(within(rail()).queryByRole("button", { name: /^Team:/ })).toBeNull();
   });

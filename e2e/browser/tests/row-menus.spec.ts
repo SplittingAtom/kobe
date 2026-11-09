@@ -98,16 +98,16 @@ test("thread and file row menus in light and dark; header rename; Copy as Markdo
   await expect(trashIcon).toHaveCSS("opacity", "1");
   await chat.closeThreads();
 
-  // A file of our own in the workspace root, for its row's menu.
+  // A file of our own at the top of My files, for its row's menu.
   const files = filesSection(page);
-  await files.getByLabel("Upload a file to the workspace root").setInputFiles({
+  await files.getByLabel("Upload a file to My files").setInputFiles({
     name: fileName,
     mimeType: "text/plain",
     buffer: Buffer.from("KOBE-292 row menu check\n"),
   });
   // Since KOBE-304 the panel is an ARIA tree: the file is a treeitem named after it.
   const fileRow = files
-    .getByRole("tree", { name: "Files in your workspace" })
+    .getByRole("tree", { name: "My files" })
     .getByRole("treeitem", { name: fileName, exact: true });
   await expect(fileRow).toHaveCount(1, { timeout: 30_000 });
 

@@ -262,13 +262,13 @@ describe("streaming a run (D16)", () => {
     expect(screen.getAllByText("two steps")).toHaveLength(1);
   });
 
-  it("shows Waking your workspace in the steering panel until the agent starts working (D14)", async () => {
+  it("shows Waking your sandbox in the steering panel until the agent starts working (D14)", async () => {
     const { t } = threadWithHistory();
     openApp(fake, t);
     const { runId } = await sendAndStart("hello", t);
     fake.emit(runId, "sandbox.waking", { reason: "hibernated" });
     const phase = () => document.querySelector("[data-phase]")?.textContent;
-    await waitFor(() => expect(phase()).toBe("Waking your workspace…"));
+    await waitFor(() => expect(phase()).toBe("Waking your sandbox…"));
     fake.agent.delta(runId, "m1", "Hi");
     await waitFor(() => expect(phase()).toBe("Thinking"));
   });

@@ -24,7 +24,7 @@ export function ErrorNotice({ error }: { readonly error: ApiError }) {
       )}
       {kind === "chooseTeam" && (
         <p>
-          <Link href="/">Choose a team</Link> with the team switcher, then come back.
+          <Link href="/">Choose a workspace</Link> with the workspace switcher, then come back.
         </p>
       )}
       {kind === "reload" && (

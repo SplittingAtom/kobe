@@ -137,7 +137,7 @@ test("drag a workspace file onto the composer: an @file chip (ac-4)", async ({ c
     const files = filesSection(page);
     // Listed when Files came on screen (KOBE-461); list again for the files just written.
     await files.getByRole("button", { name: "Refresh files" }).click();
-    const tree = files.getByRole("tree", { name: "Files in your workspace" });
+    const tree = files.getByRole("tree", { name: "My files" });
     const row = (name: string) => tree.getByRole("treeitem", { name, exact: true });
     await row(dir).click();
     await row("notes.txt").dragTo(panelOf(page));

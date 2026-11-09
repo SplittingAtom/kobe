@@ -120,16 +120,26 @@ export const isProjectMount = (path: string): boolean =>
  * level): not read-only on either side, not into itself or below, and somewhere new. Only a file
  * may go into uploads/ (it becomes a member's drop). The server checks again.
  */
-export function canMoveInto(path: string, type: "file" | "dir", folder: string): boolean {
-  if (isReadOnlyPath(path) || isWithin(folder, path) || parentPath(path) === folder) return false;
+export function canMoveInto(
+  path: string,
+  type: "file" | "dir",
+  folder: string,
+  checkedOut?: ReadonlySet<string>,
+): boolean {
+  if (isReadOnlyPath(path, checkedOut) || isWithin(folder, path) || parentPath(path) === folder) {
+    return false;
+  }
   const target = joinPath(folder, baseName(path));
   if (folder === WORKSPACE_DROP_FOLDER) return type === "file" && isMemberDropPath(target);
-  return !isReadOnlyPath(target);
+  return !isReadOnlyPath(target, checkedOut);
 }
 
-/** Whether files from the computer may be uploaded into `folder` (uploads/ takes drops). */
-export const canUploadInto = (folder: string): boolean =>
-  folder === "" || folder === WORKSPACE_DROP_FOLDER || !isReadOnlyPath(`${folder}/x`);
+/**
+ * Whether files from the computer may be uploaded into `folder` (uploads/ takes drops; so does
+ * the inside of a checked-out project, CM3).
+ */
+export const canUploadInto = (folder: string, checkedOut?: ReadonlySet<string>): boolean =>
+  folder === "" || folder === WORKSPACE_DROP_FOLDER || !isReadOnlyPath(`${folder}/x`, checkedOut);
 
 // ----------------------------------------------------------------------------- remembered state
 
@@ -161,4 +171,43 @@ export function writeExpanded(key: string, expanded: ReadonlySet<string>): void 
   } catch {
     // Storage blocked or full: the tree remembers for this page only.
   }
+}
+
+// ----------------------------------------------------------------------------- Workspace tree
+
+/** `projects`, where the mounted projects are (Workspaces FP1). */
+const PROJECTS = "projects";
+
+/**
+ * The Files panel's two trees (Workspaces FP1): Projects (the mounted projects, one level up so a
+ * project is a top row) and My files (everything else; never the projects/ folder itself).
+ */
+export function splitProjectRows(rows: readonly TreeRow[]): {
+  readonly projects: readonly TreeRow[];
+  readonly mine: readonly TreeRow[];
+} {
+  const projects: TreeRow[] = [];
+  const mine: TreeRow[] = [];
+  for (const row of rows) {
+    const path = row.kind === "entry" ? row.entry.path : row.folder;
+    if (path === PROJECTS && row.kind === "entry") continue;
+    if (isWithin(path, PROJECTS)) projects.push({ ...row, level: row.level - 1 });
+    else mine.push(row);
+  }
+  // My files' top level counts without the projects folder (aria-posinset/setsize).
+  const top = rows.find((r) => r.kind === "entry" && r.level === 1 && r.entry.path === PROJECTS);
+  if (top?.kind !== "entry") return { projects, mine };
+  const after = top.posinset;
+  return {
+    projects,
+    mine: mine.map((r) =>
+      r.kind === "entry" && r.level === 1
+        ? {
+            ...r,
+            setsize: r.setsize - 1,
+            posinset: r.posinset > after ? r.posinset - 1 : r.posinset,
+          }
+        : r,
+    ),
+  };
 }

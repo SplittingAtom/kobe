@@ -60,8 +60,8 @@ describe("utility bar", () => {
     await composer();
     const one = within(row(1));
     // The team selector is on the rail's top line (KOBE-419).
-    expect(await screen.findByRole("navigation", { name: "Teams" })).toBeTruthy();
-    expect(one.queryByRole("navigation", { name: "Teams" })).toBeNull();
+    expect(await screen.findByRole("navigation", { name: "Workspace" })).toBeTruthy();
+    expect(one.queryByRole("navigation", { name: "Workspace" })).toBeNull();
     expect(one.getByRole("heading", { level: 1, name: "Kobe" })).toBeTruthy();
     expect(await one.findByRole("search")).toBeTruthy();
     expect(one.getByLabelText("Search conversations")).toBeTruthy();
@@ -134,7 +134,7 @@ describe("utility bar", () => {
     await composer();
     const bar = [row(1)];
     // Icons, not content: the team switcher, the search and open menus stay text.
-    const content = '[aria-label="Teams"], [role="search"], details ul, section';
+    const content = '[aria-label="Workspace"], [role="search"], details ul, section';
     const icons = bar
       .flatMap((r) => [...r.querySelectorAll<HTMLElement>("a, button, summary")])
       .filter((el) => el.closest(content) === null || el.hasAttribute("data-command"));
@@ -356,8 +356,8 @@ describe("bar menus", () => {
     ) as HTMLDetailsElement;
   /** The rail's team selector (KOBE-538: a popover, not a disclosure). */
   const teamTrigger = async () =>
-    within(await screen.findByRole("navigation", { name: "Teams" })).getByRole("button");
-  const teamList = () => screen.queryByRole("list", { name: "Your teams" });
+    within(await screen.findByRole("navigation", { name: "Workspace" })).getByRole("button");
+  const teamList = () => screen.queryByRole("list", { name: "Your workspaces" });
 
   it("closes the profile menu on a click outside and on Escape", async () => {
     openApp(fake);

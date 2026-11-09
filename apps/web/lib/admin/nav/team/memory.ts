@@ -4,8 +4,8 @@ export default defineTeamSection({
   id: "memory",
   label: "Memory",
   description: "Let the team's agents remember and recall notes, personal and per project.",
-  group: "Agents and skills",
-  order: 46,
+  group: "Workspace settings",
+  order: 70,
   permission: "team.memory.manage",
   status: READY,
 });

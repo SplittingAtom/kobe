@@ -4,7 +4,7 @@ export default defineTeamSection({
   id: "follow-ups",
   label: "Follow-ups",
   description: "Suggest three follow-up messages after each answer (a short model call per run).",
-  group: "Models and spend",
+  group: "Workspace settings",
   order: 15,
   permission: "team.models.manage",
   status: READY,

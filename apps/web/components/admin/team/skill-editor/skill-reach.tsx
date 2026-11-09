@@ -97,7 +97,7 @@ function TeamReach({ skill }: { readonly skill: SkillSummary }) {
               ))}
             </Select>
           </Field>
-          {!canSet && <p className={HINT}>Only builders and team admins can change this.</p>}
+          {!canSet && <p className={HINT}>Only contributors and team admins can change this.</p>}
           {canSet && !isAdmin && <p className={HINT}>Only team admins set or change Required.</p>}
           <MutationStatus error={mutation.error} notice={mutation.notice} />
           {!state.data.approved && (

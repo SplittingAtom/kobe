@@ -177,7 +177,7 @@ describe("context viewer", () => {
       { status: 200, body: contextOf(SECTIONS, { thread_id: t }) },
     ]);
     const { dialog } = await openViewer(t);
-    await within(dialog).findByText(/Waking your workspace/);
+    await within(dialog).findByText(/Waking your sandbox/);
     await within(dialog).findByText(/System prompt · preamble/, undefined, { timeout: 4_000 });
     expect(contextReads(t)).toHaveLength(2);
   });

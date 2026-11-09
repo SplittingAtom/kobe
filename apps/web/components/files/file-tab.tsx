@@ -46,6 +46,7 @@ import { useRemoteChange } from "./use-remote-change";
 import type { WorkspaceChangeFeed } from "../../lib/files/remote-changes";
 import { IconAction } from "../shell/icon-action";
 import { AddToProject } from "../projects/add-to-project";
+import { ProjectFileBar } from "../projects/project-file-bar";
 import styles from "../chat/chat.module.css";
 
 // Notebooks and the `.py` Run pane load only when such a file opens (KOBE-465).
@@ -372,6 +373,7 @@ export function FileTabContent({
         />
         {owner && <AddToProject source={{ kind: "workspace_file", path }} defaultName={name} />}
       </header>
+      <ProjectFileBar path={path} version={loaded.status === "text" ? loaded.sha256 : undefined} />
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {downloadError && <ErrorNotice error={downloadError} />}
         <FileBody loaded={loaded} path={path} teamId={teamId} editor={editor} />
@@ -387,7 +389,7 @@ export function FileGoneNotice() {
   if (!panel || gone === null) return null;
   return (
     <div className={styles.dismissibleBanner} role="status">
-      <p>{`${fileName(gone)} is no longer in your workspace (moved, renamed or deleted), so its tab was closed.`}</p>
+      <p>{`${fileName(gone)} is no longer in your files (moved, renamed or deleted), so its tab was closed.`}</p>
       <IconAction
         command="dismiss-notice"
         label="Dismiss file notice"

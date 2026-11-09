@@ -1,7 +1,12 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import type { MembersMode, Project, ProjectAgent, ProjectInput } from "../../lib/projects/api";
+import type {
+  Project,
+  ProjectAgent,
+  ProjectInput,
+  ProjectVisibility,
+} from "../../lib/projects/api";
 import { Button, Field, FormRow, Select, TextInput, Textarea } from "../ui/console";
 
 /** Mirrors `PROJECT_*` in `@kobe/protocol` (the server checks again). */
@@ -12,12 +17,20 @@ export const INSTRUCTIONS_MAX_BYTES = 8 * 1024;
 const encoder = new TextEncoder();
 const bytes = (text: string): number => encoder.encode(text).length;
 
+/** What each visibility means (PR2), under the choice and on the project page. */
+export const VISIBILITY_HINTS: Readonly<Record<ProjectVisibility, string>> = {
+  workspace:
+    "Every member of the workspace can read it and start conversations in it; owners and editors are listed.",
+  restricted:
+    "Only the people listed can see it; to everyone else it does not exist. Team admins see every project.",
+};
+
 export const EMPTY_PROJECT: ProjectInput = {
   name: "",
   description: "",
   instructions: "",
   defaultAgentId: null,
-  membersMode: "team",
+  visibility: "workspace",
 };
 
 export function inputOf(project: Project): ProjectInput {
@@ -26,12 +39,12 @@ export function inputOf(project: Project): ProjectInput {
     description: project.description,
     instructions: project.instructions,
     defaultAgentId: project.defaultAgentId,
-    membersMode: project.membersMode,
+    visibility: project.visibility,
   };
 }
 
 /**
- * Name, description, instructions, default agent and members mode. Everything typed or shown is
+ * Name, description, instructions, default agent and visibility (PR2). Everything typed or shown is
  * plain text (inputs and a textarea, never HTML). `disabled` shows the values read-only.
  */
 export function ProjectForm({
@@ -124,14 +137,14 @@ export function ProjectForm({
             ))}
           </Select>
         </Field>
-        <Field label="Members">
+        <Field label="Visibility" hint={VISIBILITY_HINTS[draft.visibility]}>
           <Select
-            value={draft.membersMode}
+            value={draft.visibility}
             disabled={disabled}
-            onChange={(e) => set({ membersMode: e.target.value as MembersMode })}
+            onChange={(e) => set({ visibility: e.target.value as ProjectVisibility })}
           >
-            <option value="team">Everyone in the team</option>
-            <option value="selected">Selected people only</option>
+            <option value="workspace">Everyone in the workspace</option>
+            <option value="restricted">Only the people listed</option>
           </Select>
         </Field>
         {!disabled && (

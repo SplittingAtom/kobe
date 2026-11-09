@@ -49,30 +49,30 @@ export function CatalogSwitchesSection() {
               }
             />
             <Checkbox
-              label="Builders may install catalog skills"
-              hint="Builders never install a version as Required, and never a deprecated one."
+              label="Contributors may install catalog skills"
+              hint="Contributors never install a version as Required, and never a deprecated one."
               checked={s.buildersMayInstallCatalog}
               disabled={!isAdmin || mutation.pending}
               onChange={(e) =>
                 change(
                   { buildersMayInstallCatalog: e.target.checked },
                   e.target.checked
-                    ? "Builders may install catalog skills."
+                    ? "Contributors may install catalog skills."
                     : "Only team admins install catalog skills.",
                 )
               }
             />
             <Checkbox
-              label="Builders may promote without confirmation"
-              hint="Off: a Builder's Promote to Site waits for a team admin, who sees what leaves the team."
+              label="Contributors may promote without confirmation"
+              hint="Off: a contributor's Promote to Site waits for a team admin, who sees what leaves the team."
               checked={s.buildersMayPromote}
               disabled={!isAdmin || mutation.pending}
               onChange={(e) =>
                 change(
                   { buildersMayPromote: e.target.checked },
                   e.target.checked
-                    ? "Builders promote to the Site without confirmation."
-                    : "Builders' promotions wait for a team admin.",
+                    ? "Contributors promote to the Site without confirmation."
+                    : "Contributors' promotions wait for a team admin.",
                 )
               }
             />

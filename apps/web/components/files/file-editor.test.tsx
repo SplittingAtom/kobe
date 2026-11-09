@@ -164,7 +164,7 @@ describe("Rendered and Raw (ac-1)", () => {
     await user.click(await screen.findByRole("button", { name: "Raw" }));
     const view = await editorView("Edit readme.md");
     expect(view.state.readOnly).toBe(true);
-    expect(screen.getByText("Project files and thread uploads are read-only.")).toBeTruthy();
+    expect(screen.getByText("Project files are read-only here.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
 });

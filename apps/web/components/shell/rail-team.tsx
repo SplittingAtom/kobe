@@ -8,7 +8,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 import styles from "./rail.module.css";
 
 /**
- * The rail's team selector (KOBE-419; the bar's top-left switcher before): the active team's name,
+ * The rail's Workspace switcher (KOBE-419; Workspaces WS5, KOBE-581): the active workspace's name
+ * and the member's role chip; before WS5 the "team selector" (the bar's top-left switcher): the active team's name,
  * a menu of the member's teams with their roles when they are in more than one (switching sets the
  * active team and reloads), its plain name otherwise. The name truncates, with all of it as the
  * tooltip, so the line's buttons never wrap or clip. The slot clips (KOBE-419 review S1), so the
@@ -28,10 +29,10 @@ export function RailTeam({
     const active = my.teams.find((t) => t.id === my.activeTeamId);
     return (
       <div className={styles.teamSlot}>
-        <nav aria-label="Teams" className={styles.teamMenu}>
+        <nav aria-label="Workspace" className={styles.teamMenu}>
           <Popover.Root>
             <Popover.Trigger className={styles.teamSummary} title={active?.name}>
-              <span className={styles.team}>{active ? active.name : "Choose a team"}</span>
+              <span className={styles.team}>{active ? active.name : "Choose a workspace"}</span>
               {active && <small> · {roleLabel(active.role)}</small>}
             </Popover.Trigger>
             <Popover.Portal container={chatPortalContainer()}>
@@ -41,7 +42,7 @@ export function RailTeam({
                 sideOffset={4}
                 className={styles.teamPopover}
               >
-                <TeamList my={my} switchTo={switchTo} label="Your teams" />
+                <TeamList my={my} switchTo={switchTo} label="Your workspaces" />
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
@@ -49,11 +50,15 @@ export function RailTeam({
       </div>
     );
   }
+  const only = my?.teams.find((t) => t.id === my.activeTeamId);
   return (
     <div className={styles.teamSlot}>
-      <h2 className={styles.team} title={teamName}>
-        {teamName}
-      </h2>
+      <div className={styles.teamStatic}>
+        <h2 className={styles.team} title={teamName}>
+          {teamName}
+        </h2>
+        {only && <small> · {roleLabel(only.role)}</small>}
+      </div>
     </div>
   );
 }
@@ -74,7 +79,7 @@ export function RailTeamIcon({
   const active = my?.teams.find((t) => t.id === my.activeTeamId);
   const name = active?.name ?? teamName;
   if (name === "") return null;
-  const label = active ? `Team: ${name}, ${roleLabel(active.role)}` : `Team: ${name}`;
+  const label = active ? `Workspace: ${name}, ${roleLabel(active.role)}` : `Workspace: ${name}`;
   const face = teamInitials(name);
   if (my === null || my.teams.length < 2) {
     return (
@@ -100,7 +105,7 @@ export function RailTeamIcon({
       </Tooltip>
       <Popover.Portal container={chatPortalContainer()}>
         <Popover.Content side="right" align="start" sideOffset={6} className={styles.teamPopover}>
-          <TeamList my={my} switchTo={switchTo} label="Your teams" />
+          <TeamList my={my} switchTo={switchTo} label="Your workspaces" />
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

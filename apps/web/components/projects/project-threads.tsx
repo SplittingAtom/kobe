@@ -1,18 +1,23 @@
 "use client";
 
 import Link from "next/link";
+import type { ThreadPage } from "../../lib/chat/types";
 import type { Project } from "../../lib/projects/api";
 import { useTeamAccess } from "../admin/console-context";
 import { DateTime, ResourceView } from "../admin/parts";
-import { useResource } from "../admin/use-resource";
+import type { ResourceState } from "../admin/use-resource";
 import { EmptyState, Section } from "../ui/console";
-import { useProjectsApi, useRoster } from "./use-projects";
+import { useRoster } from "./use-projects";
 
 /** The project's conversations: your own and the ones members shared (opened read-only). */
-export function ProjectThreads({ project }: { readonly project: Project }) {
-  const api = useProjectsApi();
+export function ProjectThreads({
+  state,
+}: {
+  readonly project: Project;
+  /** The project's threads, read once by the page (it also tells whether the project is mounted). */
+  readonly state: ResourceState<ThreadPage>;
+}) {
   const me = useTeamAccess().user.id;
-  const { state } = useResource(() => api.threads(project.id));
   const roster = useRoster();
   return (
     <Section title="Conversations">

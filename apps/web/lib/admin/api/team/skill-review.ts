@@ -89,7 +89,7 @@ export async function putPersonalSkillsDisabled(
 export interface CatalogSwitches {
   readonly membersMayAddCatalog: boolean;
   readonly buildersMayInstallCatalog: boolean;
-  /** "Builders may promote without confirmation" (KOBE-333, SK19, default off). */
+  /** "Contributors may promote without confirmation" (KOBE-333, SK19, default off). */
   readonly buildersMayPromote: boolean;
 }
 

@@ -10,6 +10,7 @@ import {
   isProjectMount,
   movedPath,
   readExpanded,
+  splitProjectRows,
   visibleRows,
   writeExpanded,
   type FolderLoad,
@@ -120,5 +121,68 @@ describe("remembered expansion (KOBE-304)", () => {
     expect(readExpanded(key).size).toBe(EXPANDED_MAX);
     writeExpanded(key, new Set());
     expect(localStorage.getItem(key)).toBeNull();
+  });
+});
+
+describe("the Workspace tree (Workspaces FP1)", () => {
+  it("splits mounted projects from My files, a level up, without the projects folder", () => {
+    const entry = (path: string, type: "file" | "dir" = "dir") => ({
+      name: path.slice(path.lastIndexOf("/") + 1),
+      path,
+      type,
+      sizeBytes: null,
+      mtime: "2026-11-01T00:00:00Z",
+      source: "synced" as const,
+      area: "workspace" as const,
+    });
+    const folders = new Map([
+      [
+        "",
+        {
+          entries: [entry("analysis"), entry("projects"), entry("uploads")],
+          nextCursor: null,
+          loading: false,
+          error: null,
+        },
+      ],
+      [
+        "projects",
+        { entries: [entry("projects/budget")], nextCursor: null, loading: false, error: null },
+      ],
+      [
+        "projects/budget",
+        {
+          entries: [entry("projects/budget/a.csv", "file")],
+          nextCursor: null,
+          loading: false,
+          error: null,
+        },
+      ],
+    ]);
+    const rows = visibleRows(folders, new Set(["projects", "projects/budget"]), new Map());
+    const { projects, mine } = splitProjectRows(rows);
+    expect(projects.map((r) => (r.kind === "entry" ? [r.entry.path, r.level] : r))).toEqual([
+      ["projects/budget", 1],
+      ["projects/budget/a.csv", 2],
+    ]);
+    expect(mine.map((r) => (r.kind === "entry" ? r.entry.path : r))).toEqual([
+      "analysis",
+      "uploads",
+    ]);
+  });
+});
+
+describe("moves and uploads inside a checked-out project (CM3)", () => {
+  const mine = new Set(["budget"]);
+  it("takes uploads and moves inside the checkout only", () => {
+    expect(canUploadInto("projects/budget")).toBe(false);
+    expect(canUploadInto("projects/budget", mine)).toBe(true);
+    expect(canUploadInto("projects/budget/data", mine)).toBe(true);
+    expect(canUploadInto("projects/other", mine)).toBe(false);
+    expect(canMoveInto("projects/budget/a.csv", "file", "projects/budget/data", mine)).toBe(true);
+    expect(canMoveInto("notes.md", "file", "projects/budget", mine)).toBe(true);
+    expect(canMoveInto("projects/budget/a.csv", "file", "projects/other", mine)).toBe(false);
+    // The project folder itself never moves.
+    expect(canMoveInto("projects/budget", "dir", "notes", mine)).toBe(false);
   });
 });

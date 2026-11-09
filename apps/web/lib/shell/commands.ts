@@ -34,6 +34,7 @@ import {
   FolderPlusIcon,
   FolderKanbanIcon,
   GitBranchPlusIcon,
+  GitCommitHorizontalIcon,
   GitForkIcon,
   InfoIcon,
   GripVerticalIcon,
@@ -64,6 +65,7 @@ import {
   ThumbsDownIcon,
   ThumbsUpIcon,
   Trash2Icon,
+  Undo2Icon,
   UsersIcon,
   WandSparklesIcon,
   XIcon,
@@ -428,6 +430,18 @@ const LIST = [
   { id: "move-file", name: "Move to…", icon: FolderInputIcon, scope: "file-menu" },
   { id: "copy-file-path", name: "Copy path", icon: ClipboardCopyIcon, scope: "file-menu" },
   { id: "delete-file", name: "Delete", icon: Trash2Icon, scope: "file-menu" },
+  // A project's work (Workspaces CM8, FP1, FP4; KOBE-581): on a mounted project's row in Files
+  // and on a project's header in the Threads panel, for editors and up.
+  { id: "checkout-project", name: "Check out to edit", icon: PencilIcon, scope: "file-menu" },
+  { id: "commit-project", name: "Commit…", icon: GitCommitHorizontalIcon, scope: "file-menu" },
+  { id: "update-project", name: "Update", icon: RefreshCwIcon, scope: "file-menu" },
+  { id: "discard-project", name: "Discard", icon: Undo2Icon, scope: "file-menu" },
+  {
+    id: "open-project-page",
+    name: "Open project page",
+    icon: FolderKanbanIcon,
+    scope: "file-menu",
+  },
   // The conversation's chrome. Rename: the pencil beside the header's title (KOBE-292).
   { id: "rename-thread", name: "Rename", icon: PencilIcon, scope: "thread", slash: "rename" },
   { id: "open-project", name: "Project", icon: FolderKanbanIcon, scope: "thread" },

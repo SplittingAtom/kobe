@@ -17,7 +17,7 @@ export const EMPTY_TREE_NOTE =
 export const TREE_HELP_TEXT = "Memories and approval rules written on a branch stay in force.";
 /** CT6: the Make-it-current confirmation when the branch being left changed files. */
 export const FILES_LEFT_NOTE =
-  "Files changed on the branch you are leaving stay changed; the workspace is shared by every branch.";
+  "Files changed on the branch you are leaving stay changed; your files are shared by every branch.";
 /** CT5: a ghost node's text. */
 export const GHOST_TEXT = "no answer (run interrupted)";
 /** CT11: a folded branch summary's row. */

@@ -47,7 +47,7 @@ export function folderError(folders: readonly string[]): ApiError {
   return {
     status: 400,
     code: "folder_dropped",
-    message: `Folders can't be added to your workspace (${folders.join(", ")}). Drop the files inside them instead.`,
+    message: `Folders can't be added to your files (${folders.join(", ")}). Drop the files inside them instead.`,
   };
 }
 

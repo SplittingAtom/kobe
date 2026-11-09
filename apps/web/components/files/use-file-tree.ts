@@ -17,6 +17,8 @@ import {
 export interface FileTree {
   readonly rows: readonly TreeRow[];
   readonly root: FolderLoad;
+  /** Every folder's listing so far, by path ("" = the root). */
+  readonly folders: ReadonlyMap<string, FolderLoad>;
   /** Folders whose last load failed (the root's error is `root.error`). */
   readonly errors: readonly { readonly folder: string; readonly load: FolderLoad }[];
   readonly expanded: ReadonlySet<string>;
@@ -186,6 +188,7 @@ export function useFileTree(api: FilesApi, storageKey: string): FileTree {
   return {
     rows,
     root: folders.get("") ?? EMPTY,
+    folders,
     errors,
     expanded,
     knownFolders,

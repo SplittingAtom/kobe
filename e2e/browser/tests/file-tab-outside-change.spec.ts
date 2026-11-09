@@ -48,7 +48,7 @@ test("file tab: picks up the agent's write when clean, shows the banner and Comp
   try {
     const files = filesSection(page);
     await files.getByRole("button", { name: "Refresh files" }).click();
-    const tree = files.getByRole("tree", { name: "Files in your workspace" });
+    const tree = files.getByRole("tree", { name: "My files" });
     await tree.getByRole("treeitem", { name: dir, exact: true }).click();
     // By path, not name: a member's workspace may hold another notes.md (gate1 does).
     await tree.locator(`[role="treeitem"][data-path="${path}"]`).click();
@@ -134,7 +134,7 @@ test("file tab: follows the agent's mv to the new path instead of closing", asyn
   try {
     const files = filesSection(page);
     await files.getByRole("button", { name: "Refresh files" }).click();
-    const tree = files.getByRole("tree", { name: "Files in your workspace" });
+    const tree = files.getByRole("tree", { name: "My files" });
     await tree.getByRole("treeitem", { name: dir, exact: true }).click();
     await tree.locator(`[role="treeitem"][data-path="${dir}/notes.md"]`).click();
     await expect(page.getByRole("tab", { name: "notes.md", selected: true })).toBeVisible();
@@ -145,7 +145,7 @@ test("file tab: follows the agent's mv to the new path instead of closing", asyn
       timeout: RUN_TIMEOUT_MS,
     });
     await expect(page.getByRole("tab", { name: "notes.md" })).toHaveCount(0);
-    await expect(page.getByText(/is no longer in your workspace/)).toHaveCount(0);
+    await expect(page.getByText(/is no longer in your files/)).toHaveCount(0);
   } finally {
     await workspace(page, "DELETE", dir);
   }

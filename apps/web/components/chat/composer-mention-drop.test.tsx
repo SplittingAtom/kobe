@@ -174,7 +174,7 @@ describe("drag a workspace file into the composer (KOBE-374 ac-4)", () => {
   it("a project file is mentioned (read-only, never moved); a folder is refused", async () => {
     const t = fake.addThread("Work");
     const { user } = await openFiles(t);
-    await user.click(row("projects"));
+    // A mounted project is a top row of the Projects tree (Workspaces FP1).
     await user.click(await screen.findByRole("treeitem", { name: PROJECT }));
     const plan = await screen.findByRole("treeitem", { name: "plan.md" });
     expect(plan.getAttribute("draggable")).toBe("true");

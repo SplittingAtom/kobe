@@ -44,9 +44,9 @@ test("the top line: team, Threads, Files, Team console (admins), collapse (ac-1,
   await expect(line.getByRole("button", { name: "Collapse the rail" })).toBeVisible();
   // The selector (a menu with several teams, the name with one) is here, not in the bar.
   await expect(
-    line.getByRole("navigation", { name: "Teams" }).or(line.getByRole("heading", { level: 2 })),
+    line.getByRole("navigation", { name: "Workspace" }).or(line.getByRole("heading", { level: 2 })),
   ).toBeVisible();
-  await expect(bar.getByRole("navigation", { name: "Teams" })).toHaveCount(0);
+  await expect(bar.getByRole("navigation", { name: "Workspace" })).toHaveCount(0);
   // Team console is never in the bar any more; a team admin has it on the line.
   await expect(bar.getByRole("link", { name: "Team console" })).toHaveCount(0);
   // The gate1 owner is the team's admin: the link is on the line.
@@ -79,7 +79,7 @@ test("the top line: team, Threads, Files, Team console (admins), collapse (ac-1,
 
 /** The rail line's team selector trigger (several teams): the active team's name and role. */
 function teamTrigger(line: Locator): Locator {
-  return line.getByRole("navigation", { name: "Teams" }).getByRole("button");
+  return line.getByRole("navigation", { name: "Workspace" }).getByRole("button");
 }
 
 /** The active team's name: the trigger's title (its text also carries the role). */
@@ -95,7 +95,7 @@ async function teamName(button: Locator): Promise<string> {
 /** Opens the selector and picks the team named `name`, waiting for the reload under it. */
 async function switchTeam(page: Page, line: Locator, name: string): Promise<void> {
   await teamTrigger(line).click();
-  const list = page.getByRole("list", { name: "Your teams" });
+  const list = page.getByRole("list", { name: "Your workspaces" });
   await expect(list).toBeVisible();
   const buttons = list.getByRole("button");
   let target: Locator | undefined;
@@ -110,7 +110,7 @@ async function switchTeam(page: Page, line: Locator, name: string): Promise<void
 test("switching teams from the top line (KOBE-538)", async ({ chat, page }) => {
   await chat.open();
   const line = chat.railHeader;
-  const nav = line.getByRole("navigation", { name: "Teams" });
+  const nav = line.getByRole("navigation", { name: "Workspace" });
   const heading = line.getByRole("heading", { level: 2 });
   await expect(nav.or(heading)).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
   if ((await nav.count()) === 0) {
@@ -127,7 +127,7 @@ test("switching teams from the top line (KOBE-538)", async ({ chat, page }) => {
   try {
     // The list opens outside the clipped slot, every team visible; the active one disabled.
     await trigger.click();
-    const list = page.getByRole("list", { name: "Your teams" });
+    const list = page.getByRole("list", { name: "Your workspaces" });
     await expect(list).toBeVisible();
     const buttons = await list.getByRole("button").all();
     expect(buttons.length).toBeGreaterThanOrEqual(2);
@@ -231,7 +231,7 @@ test("a phone: the drawer is headed by the team selector (ac-2)", async ({ chat,
   await expect(drawer).toBeVisible();
   const line = drawer.locator("[data-rail-header]");
   await expect(
-    line.getByRole("navigation", { name: "Teams" }).or(line.getByRole("heading", { level: 2 })),
+    line.getByRole("navigation", { name: "Workspace" }).or(line.getByRole("heading", { level: 2 })),
   ).toBeVisible();
   await expect(line.getByRole("button", { name: FILES_TOGGLE })).toBeVisible();
   await shoot(page, "rail-header-phone", drawer);

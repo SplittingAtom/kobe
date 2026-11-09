@@ -30,7 +30,7 @@ export function skillInstallNotice(name: string, r: SkillInstallResult): string 
 
 /**
  * Change an install's version, pin mode and access (KOBE-316): Team admins, and Builders while
- * "Builders may install catalog skills" is on. Builders get no Required option; the server also
+ * "Contributors may install catalog skills" is on. Builders get no Required option; the server also
  * refuses them deprecated versions and installs a Team admin or the Site default made.
  */
 export function SkillInstallChangeForm({
