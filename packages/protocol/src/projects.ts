@@ -71,14 +71,18 @@ const instructionsSchema = z
 
 // ----------------------------------------------------------------------------- roles
 
+/** Effective project roles (PR3). Every workspace member is at least a `reader` (RV1). */
 export const PROJECT_ROLES = ["owner", "editor", "reader"] as const;
 export const projectRoleSchema = z.enum(PROJECT_ROLES);
 export type ProjectRole = z.infer<typeof projectRoleSchema>;
 
-/** Who sees a project beyond its explicit rows (PR2). Default on create: `workspace`. */
-export const PROJECT_VISIBILITIES = ["workspace", "restricted"] as const;
-export const projectVisibilitySchema = z.enum(PROJECT_VISIBILITIES);
-export type ProjectVisibility = z.infer<typeof projectVisibilitySchema>;
+/**
+ * Roles an explicit member row holds (RV1, KOBE-587): owners and editors. Readers are never listed:
+ * restricted visibility is gone, so every workspace member reads every project of the workspace.
+ */
+export const PROJECT_MEMBER_ROLES = ["owner", "editor"] as const;
+export const projectMemberRoleSchema = z.enum(PROJECT_MEMBER_ROLES);
+export type ProjectMemberRole = z.infer<typeof projectMemberRoleSchema>;
 
 export const PROJECT_ACTIONS = [
   "create", // needs team role contributor or team admin
@@ -86,30 +90,27 @@ export const PROJECT_ACTIONS = [
   "converse", // start threads, share own threads, fork shared ones (readers too)
   "edit", // check out, edit, commit, update, discard, upload and remove files, revert
   "manage", // edit name/instructions/agent, archive/delete
-  "manage_members", // visibility, members, roles, ownership
+  "manage_members", // members, roles, ownership
 ] as const;
 export type ProjectAction = (typeof PROJECT_ACTIONS)[number];
 
-/** Effective project role (PR3): the explicit row, else `reader` when visibility is `workspace`. */
-export function effectiveProjectRole(
-  projectRole: ProjectRole | undefined,
-  visibility: ProjectVisibility,
-): ProjectRole | undefined {
-  return projectRole ?? (visibility === "workspace" ? "reader" : undefined);
+/** Effective project role of a workspace member (RV1): the explicit row, else `reader`. */
+export function effectiveProjectRole(projectRole: ProjectRole | undefined): ProjectRole {
+  return projectRole ?? "reader";
 }
 
 /**
- * Who may do what (PR3 matrix). `projectRole` is the caller's explicit row (`undefined` = none).
- * Team admins act as owners of every project without being listed. Creating needs team role
- * contributor or team admin and is independent of the project (pass any visibility).
+ * Who may do what (PR3 matrix) for a member of the project's workspace. `projectRole` is the
+ * caller's explicit row (`undefined` = none: an implicit reader, RV1). Team admins act as owners
+ * of every project without being listed. Creating needs team role contributor or team admin and
+ * is independent of the project.
  */
 export function projectPermissions(
   teamRole: z.infer<typeof teamRoleSchema>,
   projectRole: ProjectRole | undefined,
-  visibility: ProjectVisibility,
 ): Record<ProjectAction, boolean> {
   const admin = teamRole === "team_admin";
-  const role = effectiveProjectRole(projectRole, visibility);
+  const role = effectiveProjectRole(projectRole);
   const owner = admin || role === "owner";
   const editor = owner || role === "editor";
   const reader = editor || role === "reader";
@@ -132,9 +133,8 @@ export function projectPermissions(
 export function canAddToProject(
   teamRole: z.infer<typeof teamRoleSchema>,
   projectRole: ProjectRole | undefined,
-  visibility: ProjectVisibility,
 ): boolean {
-  return projectPermissions(teamRole, projectRole, visibility).edit;
+  return projectPermissions(teamRole, projectRole).edit;
 }
 
 // ----------------------------------------------------------------------------- REST: projects
@@ -148,9 +148,7 @@ export const projectSchema = z.strictObject({
   instructions: instructionsSchema,
   /** Default agent for new threads in the project; null = the team default. */
   default_agent_id: uuidSchema.nullable(),
-  /** `workspace` = every member is a reader; `restricted` = only {@link projectMemberSchema} rows. */
-  visibility: projectVisibilitySchema,
-  /** The caller's effective role; null = team admin who is not listed. */
+  /** The caller's effective role (every workspace member reads, RV1); null = team admin who is not listed. */
   my_role: projectRoleSchema.nullable(),
   file_count: z.number().int().nonnegative(),
   /** The latest commit (commit shapes: project-commits.ts); null = no commit yet. */
@@ -169,23 +167,17 @@ export type Project = z.infer<typeof projectSchema>;
 
 /**
  * `POST /v1/projects` -> 201 {@link projectSchema}. The creator becomes `owner`. `slug` absent =
- * derived from the name. `visibility` absent = `workspace`. `member_user_ids` only with
- * `visibility: "restricted"` (creator implied) and become editors.
+ * derived from the name. `member_user_ids` (creator implied) become editors; every other workspace
+ * member reads the project (RV1).
  */
-export const createProjectRequestSchema = z
-  .strictObject({
-    name: nameSchema,
-    slug: projectSlugSchema.optional(),
-    description: descriptionSchema.optional(),
-    instructions: instructionsSchema.optional(),
-    default_agent_id: uuidSchema.nullable().optional(),
-    visibility: projectVisibilitySchema.optional(),
-    member_user_ids: z.array(uuidSchema).max(PROJECT_MEMBERS_MAX).optional(),
-  })
-  .refine((v) => v.member_user_ids === undefined || v.visibility === "restricted", {
-    message: "member_user_ids needs visibility restricted",
-    path: ["member_user_ids"],
-  });
+export const createProjectRequestSchema = z.strictObject({
+  name: nameSchema,
+  slug: projectSlugSchema.optional(),
+  description: descriptionSchema.optional(),
+  instructions: instructionsSchema.optional(),
+  default_agent_id: uuidSchema.nullable().optional(),
+  member_user_ids: z.array(uuidSchema).max(PROJECT_MEMBERS_MAX).optional(),
+});
 export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;
 
 /** `PATCH /v1/projects/:id` -> {@link projectSchema}; absent key = unchanged; owners and admins. */
@@ -195,7 +187,6 @@ export const updateProjectRequestSchema = z
     description: descriptionSchema.optional(),
     instructions: instructionsSchema.optional(),
     default_agent_id: uuidSchema.nullable().optional(),
-    visibility: projectVisibilitySchema.optional(),
     archived: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "empty update" });
@@ -210,14 +201,13 @@ export type ProjectListResponse = z.infer<typeof projectListResponseSchema>;
 
 export const projectMemberSchema = z.strictObject({
   user_id: uuidSchema,
-  role: projectRoleSchema,
+  role: projectMemberRoleSchema,
   added_at: timestampSchema,
 });
 export type ProjectMember = z.infer<typeof projectMemberSchema>;
 
-/** `GET /v1/projects/:id/members` -> list (all explicit rows). */
+/** `GET /v1/projects/:id/members` -> list (all explicit rows: owners and editors). */
 export const projectMembersResponseSchema = z.strictObject({
-  visibility: projectVisibilitySchema,
   members: z.array(projectMemberSchema).max(PROJECT_MEMBERS_MAX),
 });
 export type ProjectMembersResponse = z.infer<typeof projectMembersResponseSchema>;
@@ -225,12 +215,15 @@ export type ProjectMembersResponse = z.infer<typeof projectMembersResponseSchema
 /** `POST /v1/projects/:id/members` (user must be in the team) -> 201 {@link projectMemberSchema}. */
 export const addProjectMemberRequestSchema = z.strictObject({
   user_id: uuidSchema,
-  role: projectRoleSchema.optional(),
+  role: projectMemberRoleSchema.optional(),
 });
 export type AddProjectMemberRequest = z.infer<typeof addProjectMemberRequestSchema>;
 
-/** `PATCH /v1/projects/:id/members/:user_id`; `DELETE` same path -> 204. The last owner stays (`last_owner`). */
-export const updateProjectMemberRequestSchema = z.strictObject({ role: projectRoleSchema });
+/**
+ * `PATCH /v1/projects/:id/members/:user_id` (a workspace member without a row gets one); `DELETE`
+ * same path -> 204 (back to an implicit reader). The last owner stays (`last_owner`).
+ */
+export const updateProjectMemberRequestSchema = z.strictObject({ role: projectMemberRoleSchema });
 export type UpdateProjectMemberRequest = z.infer<typeof updateProjectMemberRequestSchema>;
 
 // ----------------------------------------------------------------------------- REST: files

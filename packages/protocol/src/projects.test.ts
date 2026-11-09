@@ -21,7 +21,9 @@ import {
   runStartFrameSchema,
   shareThreadRequestSchema,
   threadProjectFieldsSchema,
+  updateProjectMemberRequestSchema,
   updateProjectRequestSchema,
+  projectMembersResponseSchema,
 } from "./index.js";
 
 const ID = "11111111-1111-4111-8111-111111111111";
@@ -32,71 +34,54 @@ const v = SANDBOX_WIRE_VERSION;
 
 describe("roles", () => {
   type Role = "reader" | "editor" | "owner" | undefined;
-  const row = (
-    teamRole: "team_admin" | "contributor" | "member",
-    r: Role,
-    vis: "workspace" | "restricted",
-  ) => projectPermissions(teamRole, r, vis);
+  const row = (teamRole: "team_admin" | "contributor" | "member", r: Role) =>
+    projectPermissions(teamRole, r);
 
-  it("workspace visibility makes every member a reader", () => {
-    const can = row("member", undefined, "workspace");
-    expect(can).toEqual({
-      create: false,
-      view: true,
-      converse: true,
-      edit: false,
-      manage: false,
-      manage_members: false,
-    });
-  });
-
-  it("restricted visibility hides the project from anyone without a row", () => {
-    const can = row("contributor", undefined, "restricted");
-    expect(can.view || can.converse || can.edit || can.manage).toBe(false);
-    expect(can.create).toBe(true);
-  });
-
-  it("readers read and converse; editors edit; owners manage", () => {
-    for (const vis of ["workspace", "restricted"] as const) {
-      expect(row("member", "reader", vis)).toMatchObject({
+  it("every workspace member is at least a reader (RV1)", () => {
+    for (const teamRole of ["member", "contributor"] as const) {
+      expect(row(teamRole, undefined)).toEqual({
+        create: teamRole === "contributor",
         view: true,
         converse: true,
         edit: false,
         manage: false,
-      });
-      expect(row("member", "editor", vis)).toMatchObject({
-        edit: true,
-        manage: false,
         manage_members: false,
       });
-      expect(row("member", "owner", vis)).toMatchObject({
-        edit: true,
-        manage: true,
-        manage_members: true,
-      });
     }
   });
 
-  it("an explicit role is never lower than the implicit reader", () => {
-    expect(row("member", "editor", "workspace").view).toBe(true);
+  it("readers read and converse; editors edit; owners manage", () => {
+    expect(row("member", "reader")).toMatchObject({
+      view: true,
+      converse: true,
+      edit: false,
+      manage: false,
+    });
+    expect(row("member", "editor")).toMatchObject({
+      edit: true,
+      manage: false,
+      manage_members: false,
+    });
+    expect(row("member", "owner")).toMatchObject({
+      edit: true,
+      manage: true,
+      manage_members: true,
+    });
   });
 
-  it("team admins act as owners without a row, in both modes", () => {
-    for (const vis of ["workspace", "restricted"] as const) {
-      const can = row("team_admin", undefined, vis);
-      expect(Object.values(can).every(Boolean)).toBe(true);
-    }
+  it("team admins act as owners without a row", () => {
+    expect(Object.values(row("team_admin", undefined)).every(Boolean)).toBe(true);
   });
 
   it("creating needs contributor or team admin, whatever the project", () => {
-    expect(row("contributor", undefined, "workspace").create).toBe(true);
-    expect(row("member", "owner", "workspace").create).toBe(false);
+    expect(row("contributor", undefined).create).toBe(true);
+    expect(row("member", "owner").create).toBe(false);
   });
 
-  it("effective role", () => {
-    expect(effectiveProjectRole(undefined, "workspace")).toBe("reader");
-    expect(effectiveProjectRole(undefined, "restricted")).toBeUndefined();
-    expect(effectiveProjectRole("editor", "restricted")).toBe("editor");
+  it("effective role: the explicit row, else reader", () => {
+    expect(effectiveProjectRole(undefined)).toBe("reader");
+    expect(effectiveProjectRole("editor")).toBe("editor");
+    expect(effectiveProjectRole("owner")).toBe("owner");
   });
 });
 
@@ -109,7 +94,6 @@ describe("project API", () => {
     description: "",
     instructions: "Be terse.",
     default_agent_id: null,
-    visibility: "workspace",
     my_role: null,
     file_count: 0,
     head_commit_id: null,
@@ -136,30 +120,24 @@ describe("project API", () => {
       }).success,
     ).toBe(true);
   });
-  it("refuses members_mode, the old member role and a missing visibility", () => {
-    const { visibility: _v, ...noVisibility } = project;
-    expect(projectSchema.safeParse(noVisibility).success).toBe(false);
+  it("refuses members_mode, visibility (KOBE-587) and the old member role", () => {
     expect(projectSchema.safeParse({ ...project, members_mode: "team" }).success).toBe(false);
     expect(projectSchema.safeParse({ ...project, my_role: "member" }).success).toBe(false);
-    expect(projectSchema.safeParse({ ...project, visibility: "private" }).success).toBe(false);
+    expect(projectSchema.safeParse({ ...project, visibility: "workspace" }).success).toBe(false);
   });
   it("slugs", () => {
     expect(projectSlugSchema.safeParse("a-b1").success).toBe(true);
     for (const bad of ["", "-a", "A", "a/b", "..", "a".repeat(41)])
       expect(projectSlugSchema.safeParse(bad).success).toBe(false);
   });
-  it("create: minimal, selected members, bounded instructions", () => {
+  it("create: minimal, editors, no visibility, bounded instructions", () => {
     expect(createProjectRequestSchema.safeParse({ name: "P" }).success).toBe(true);
-    expect(
-      createProjectRequestSchema.safeParse({
-        name: "P",
-        visibility: "restricted",
-        member_user_ids: [ID],
-      }).success,
-    ).toBe(true);
     expect(createProjectRequestSchema.safeParse({ name: "P", member_user_ids: [ID] }).success).toBe(
-      false,
+      true,
     );
+    for (const visibility of ["workspace", "restricted"]) {
+      expect(createProjectRequestSchema.safeParse({ name: "P", visibility }).success).toBe(false);
+    }
     expect(
       createProjectRequestSchema.safeParse({
         name: "P",
@@ -171,12 +149,34 @@ describe("project API", () => {
   it("update: partial, not empty", () => {
     expect(updateProjectRequestSchema.safeParse({ default_agent_id: null }).success).toBe(true);
     expect(updateProjectRequestSchema.safeParse({}).success).toBe(false);
+    expect(updateProjectRequestSchema.safeParse({ visibility: "restricted" }).success).toBe(false);
   });
-  it("members", () => {
+  it("members: explicit rows are owner or editor only (RV3)", () => {
     expect(addProjectMemberRequestSchema.safeParse({ user_id: ID }).success).toBe(true);
+    for (const role of ["owner", "editor"]) {
+      expect(addProjectMemberRequestSchema.safeParse({ user_id: ID, role }).success).toBe(true);
+      expect(updateProjectMemberRequestSchema.safeParse({ role }).success).toBe(true);
+    }
     expect(addProjectMemberRequestSchema.safeParse({ user_id: ID, role: "reader" }).success).toBe(
-      true,
+      false,
     );
+    expect(updateProjectMemberRequestSchema.safeParse({ role: "reader" }).success).toBe(false);
+    expect(
+      projectMembersResponseSchema.safeParse({
+        members: [{ user_id: ID, role: "editor", added_at: TS }],
+      }).success,
+    ).toBe(true);
+    expect(
+      projectMembersResponseSchema.safeParse({
+        visibility: "workspace",
+        members: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      projectMembersResponseSchema.safeParse({
+        members: [{ user_id: ID, role: "reader", added_at: TS }],
+      }).success,
+    ).toBe(false);
     expect(addProjectMemberRequestSchema.safeParse({ user_id: ID, role: "member" }).success).toBe(
       false,
     );
