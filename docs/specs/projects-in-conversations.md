@@ -1,9 +1,9 @@
 # Kobe — Projects in conversations (Workspaces follow-up)
 
-Status: **draft, questions open** (§9). Requested by Chris, 2026-11-09; items marked _(Chris)_ are
-his, the rest are proposals within them. Written against main `3a893e08` (gate1
+Status: **decided, tickets to file** (§10: every question answered by Chris on 2026-11-09).
+Requested by Chris, 2026-11-09; items marked _(Chris)_ are his, the rest are proposals within them. Written against main `3a893e08` (gate1
 `local-3a893e08156a`), on top of [`workspaces.md`](workspaces.md) (gate KOBE-583). No tickets
-filed yet (§10).
+filed yet (§11).
 
 Request (Chris, 2026-11-09): when a new conversation starts with a project selected, the top of the
 conversation pane says **New conversation in &lt;ProjectName&gt;**, with an icon to unmount the
@@ -12,7 +12,10 @@ project or switch to a different one. Once the conversation starts, its name are
 workspace shows under Projects**; projects not in the current conversation are greyed out, and the
 project in the current conversation is not greyed and has a **green dot** to show it is active. A
 member whose role lets them edit a project can have an **agent propose edits** to a file in the
-project, and accepting a proposal **commits** it.
+project, and accepting a proposal **commits** it. Answers to the questions (2026-11-09): every
+member of a workspace reads every project, so the **restricted** option is removed; until the
+conversation starts the member picks its project; agents propose edits to the conversation's
+project **and to the member's My files**.
 
 ## 1. Summary
 
@@ -22,10 +25,12 @@ project, and accepting a proposal **commits** it.
 | Conversation title      | "&lt;Project&gt; / &lt;conversation name&gt;" for a conversation in a project; the slash is the separator _(Chris)_                                                              |
 | Files panel, Projects   | Every project the member may view; greyed unless it is the current conversation's; the current one has a green dot; role chip and "editing" mark stay                            |
 | Agent edits             | `propose_file_edit` accepts files of the conversation's project when the member can edit it; **Accept commits** the change as a new project commit _(Chris)_, no checkout needed |
+| Visibility              | **Restricted projects are removed** _(Chris)_: every workspace member is at least a reader of every project; existing restricted projects become workspace-visible (§7)          |
 | Mounting                | Unchanged (workspaces MT1): a project mounts when the member has a conversation in it or a checkout; listing a project in the panel does not mount it                            |
 
-Nothing here changes roles (workspaces PR1–PR6), the commit model (CM1–CM10) or the
-one-project-per-conversation rule (SS2).
+Nothing here changes team or project roles (workspaces PR1, PR3–PR6), the commit model
+(CM1–CM10) or the one-project-per-conversation rule (SS2). It **replaces workspaces PR2** (the
+`restricted` visibility, §7).
 
 ## 2. Today (verified on main `3a893e08`)
 
@@ -65,18 +70,19 @@ one-project-per-conversation rule (SS2).
 &lt;ProjectName&gt;"** when a project is selected, else "New conversation" as today _(Chris)_. The
 project name is truncated with an ellipsis before the leading words are (full name in the
 tooltip). The `DraftProjectNote` banner goes; its privacy sentence ("It stays private until you
-share it.") moves to the project control's tooltip and menu header (Q8).
+share it.") moves to the project control's tooltip _(Chris)_.
 
 **NC2. Project control.** An icon button next to the title (`FolderKanban`-style project icon,
 command `draft-project`, label "Project for this conversation") opens a menu _(Chris: unmount or
 switch)_:
 
-- the projects the member may **converse in** (every project they may view: readers converse,
-  workspace PR3), the selected one checked, filtered by typing when there are more than 8;
+- every project of the workspace that is not archived (every member reads and so converses in
+  every project, §7 and workspace PR3), the selected one checked, filtered by typing when there are
+  more than 8;
 - **Remove project** (when one is selected): the conversation will be a My files conversation.
 
-Shown on every new conversation, including one with no project (then it reads "Add to a project")
-(Q2). Read-only and keyboard reachable like the other header actions; the command is in the
+Shown on every new conversation until it starts, including one with no project (then it reads
+"Add to a project") _(Chris: until the conversation starts the member can pick its project)_. Read-only and keyboard reachable like the other header actions; the command is in the
 command palette ("Choose the project for this conversation").
 
 **NC3. Mounting does not move.** Choosing or removing a project only changes `draftProjectId`;
@@ -113,18 +119,16 @@ header is "&lt;ProjectName&gt; / &lt;conversation name&gt;"; the rename button k
 
 **TT3. Moving after the start.** "Move to project…" in the project menu is the existing move
 (`POST /v1/threads/{id}/move`, same rules) offered from the header as well as the thread menu,
-including "Move out of the project" (Q3). Shared readers and Trash see the title without menus.
+including "Move out of the project" _(Chris)_. Shared readers and Trash see the title without menus.
 
 **TT4. Elsewhere.** The browser tab title follows TT1. The Threads panel keeps project groups as
 today (the project is already the group header there, so rows keep the bare name).
 
 ## 5. Files panel: all projects, current one active
 
-**FP1. List.** Projects lists **every project the member may view** in the active workspace
-(workspace-visible projects and restricted projects they hold a role in), not archived, sorted by
-name, with the current conversation's project first _(Chris: all projects show)_. Team admins see
-the projects they may view by the same rule plus restricted projects they are not in only on the
-All projects page (Q1). "All projects (N) →" becomes "Manage projects →" (the page stays for
+**FP1. List.** Projects lists **every project of the active workspace** that is not archived,
+sorted by name, with the current conversation's project first _(Chris: all projects show; every
+member reads every project, §7)_. Members and team admins see the same list. "All projects (N) →" becomes "Manage projects →" (the page stays for
 creating, archiving and members). Data: the provider's existing `GET /v1/projects` list; no new
 route.
 
@@ -142,7 +146,7 @@ normal colour so a pending working copy is never hidden.
 
 **FP4. Opening a greyed project.** Expanding a greyed project shows its files read-only: from the
 member's mount when it is mounted (another conversation), else from the project's head
-(`GET /v1/projects/{id}/files`, readers) without mounting (Q4). Its menu: **New conversation in
+(`GET /v1/projects/{id}/files`, readers) without mounting _(Chris)_. Its menu: **New conversation in
 this project** (sets the draft project, NC4), **Move this conversation here** (when the current
 conversation is the member's own and the move rules allow it), **Open project**. Dragging a file
 from a greyed, unmounted project onto the composer is refused with "Start a conversation in
@@ -165,10 +169,16 @@ that allows editing)_. Readers' runs: the tool refuses project paths with "You c
 &lt;Project&gt; but not change it." Scheduled and `auto` runs: as `propose_file_edit` today (the
 proposal waits for the member).
 
-**PE2. Which files.** Paths under `/workspace/projects/<slug>/` where `<slug>` is the
-**conversation's own project** (Q5), existing files and new files (Q7), within the project path
-rules, `PROJECT_FILES_MAX` and `PROJECT_FILE_MAX_BYTES`. Other projects' paths keep the read-only
-refusal.
+**PE2. Which files.** _(Chris)_ Two places:
+
+- the **conversation's own project**: paths under `/workspace/projects/<slug>/`, existing files
+  and new files, within the project path rules, `PROJECT_FILES_MAX` and `PROJECT_FILE_MAX_BYTES`;
+  accepting commits (PE4);
+- the member's **My files** (their scratchspace outside `projects/` and `uploads/`), as
+  `propose_file_edit` does today, extended to new files; accepting writes the file there (the
+  existing accept path, FE8), no commit.
+
+Other projects' paths keep the read-only refusal, and so do thread uploads.
 
 **PE3. The proposal.** `propose_file_edit { path, content, reason }` is unchanged for the agent;
 `reason` (≤ 500 chars) becomes the commit message. For a project path the server
@@ -186,7 +196,7 @@ checked again at accept time) under the project row lock:
   the server writes a new commit whose tree is the head tree with that one file replaced or added
   (CM1 snapshot, blob copied into the project prefix, hashes verified), `author_kind user` (the
   member who accepted), `thread_id`, `run_id`, message = the proposal's `reason` (editable in the
-  card before Accept, Q6), and answers `committed { seq }`; audited `project.committed` with
+  card before Accept _(Chris)_), and answers `committed { seq }`; audited `project.committed` with
   `source: "proposal"`;
 - if the file changed since the proposal, **409 `proposal_stale`** with the head's `seq`; the card
   says "This file changed after the agent proposed the edit. Ask it to propose again." Nothing is
@@ -212,61 +222,87 @@ today). Legal holds do not block commits (only pruning, GV3).
 
 **PE7. The agent's view.** The project access line (CM6) adds, for `write`: "To change a project
 file, call propose_file_edit; the member accepts it and that commits it." `commit_project` stays
-for working in a checkout.
+for working in a checkout. The tool description says it works for the member's own files and the
+conversation's project.
 
-## 7. Security and governance
+## 7. Every member reads every project
+
+_(Chris, 2026-11-09: "All members of a Workspace have at least read access to a project.")_ This
+replaces workspaces PR2's `restricted` option.
+
+**RV1. Rule.** Every member of a workspace is at least a **reader** of every project in it.
+Explicit rows name **owners and editors** only; the effective role is the explicit row, else
+reader (workspaces PR3 without the visibility branch). Team admins act as owners as today.
+
+**RV2. Migration.** One migration: every `restricted` project becomes readable by all (the
+`visibility` column is dropped with its check), explicit `reader` rows are deleted (they no longer
+change anything) and `project_members.role` is checked `IN ('owner','editor')`. Before it runs on
+a site, a dry-run lists the restricted projects and their members so an admin sees what becomes
+visible; on gate1 the list goes in the gate doc. The upgrade test proves it on a populated
+database (restricted project with readers and editors → readable by all, readers gone, editors
+kept), FORCE RLS kept, probe suite green.
+
+**RV3. API and web.** `visibility` leaves the project create, update and read shapes;
+`POST /members` and `PATCH /members/{user}` accept `owner | editor`; the visibility control, its
+"Restricted" badge and the reader option in the members dialog go from the project page.
+`project.visibility_changed` is no longer written (existing audit rows stay; the audit log doc
+marks it retired). Checks that returned 404 for a restricted project now return the project to
+every member. `workspaces.spec.ts` changes its restricted-project scenario to a project where
+member2 is a reader by default.
+
+**RV4. What it means.** Nothing in a project is hidden from a workspace member any more:
+confidential work belongs in a separate workspace (the tenant boundary, workspaces WS1) or in a
+member's My files. The help text says so where projects are created.
+
+## 8. Security and governance
 
 No new tenant tables; the accept route and the proposal fields live in team tables already under
 RLS (`run_events`, `project_commits`, `project_tree_entries`). The listing (FP1) returns only what
-`GET /v1/projects` returns to the caller today; restricted projects stay invisible to non-members
-(404). The probe suite covers the new route's queries.
+`GET /v1/projects` returns, which after RV1 is every project of the caller's workspace; other
+workspaces' projects stay invisible (RLS, 404). The probe suite covers the new route's queries and
+the RV2 migration.
 
-## 8. Tests
+## 9. Tests
 
 - Web unit: header text and project control (select, switch, remove, New conversation clears),
   title format and menus, Files list greyed/active/dot states and accessible names, proposal card
   for project files (Accept → commit, stale, not allowed).
 - Server: accept route (role at accept time, stale base, new file, limits, idempotency, audit
-  row, reconcile), proposal checks for project paths (reader refused, other project refused).
+  row, reconcile), proposal checks for project paths (reader refused, other project refused), My files proposals for new files; the RV2 upgrade test
+  and the RV3 route shapes.
 - Browser spec on gate1 (`projects-in-conversations.spec.ts`): owner drafts a new conversation in a
   project, switches project, removes it, sends; title shows "Project / name"; Files shows every
   project with the active dot; the agent proposes an edit to a project file; Accept; History shows
-  the commit; member2 (reader) gets the refusal.
+  the commit; member2 (a reader by default, RV1) sees every project and gets the refusal.
 
-## 9. Questions for Chris
+## 10. Decisions (Chris, 2026-11-09)
 
-1. **Admins and restricted projects (FP1).** Should team admins see every project of the workspace
-   in the Files list, including restricted projects they are not a member of? Proposal: no, only
-   on the All projects page, so the list matches what an admin actually works in.
-2. **Project control on a plain new conversation (NC2).** Show it on every new conversation as
-   "Add to a project"? Proposal: yes.
-3. **Moving after the start (TT3).** Offer Move to project… and Move out of the project from the
-   title's project menu? Proposal: yes (same rules as the thread menu).
-4. **Browsing a greyed project (FP4).** Expand an unmounted project to its files read-only without
-   mounting it? Proposal: yes.
-5. **Which projects can be edited by proposal (PE2).** Only the conversation's own project?
-   Proposal: yes; other mounted projects stay read-only to the agent.
-6. **Commit message (PE4).** The agent's reason, editable in the card before Accept? Proposal: yes,
-   prefilled and editable.
-7. **New files (PE2).** May the agent propose a new file in the project? Proposal: yes.
-8. **The privacy sentence (NC1).** Keep "It stays private until you share it." somewhere?
-   Proposal: in the project control's tooltip and menu header.
+1. **Every workspace member reads every project**, so the restricted option is removed (§7).
+2. **The project control shows on every new conversation until it starts**, including as
+   "Add to a project" (NC2).
+3. **Move to project… and Move out of the project from the title's project menu**: yes (TT3).
+4. **Browse a greyed project's files read-only without mounting**: yes (FP4).
+5. **Proposals go to the conversation's own project and to the member's My files** (PE2).
+6. **The commit message is the agent's reason, editable before Accept** (PE4).
+7. **New files may be proposed** (PE2).
+8. **The privacy sentence goes in the project control's tooltip** (NC1).
 
-## 10. Implementation tickets (proposed; filed after §9 is answered)
+## 11. Implementation tickets (proposed)
 
-| Id   | Scope                                                                                                                                     | Areas                           |
-| ---- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| PC-1 | New conversation header: title, project control (switch, remove, add), NC4 draft lifetime, NC5 errors                                     | web                             |
-| PC-2 | Conversation title "Project / name", project menu (Open project, Move to project…), tab title                                             | web                             |
-| PC-3 | Files panel: all viewable projects, active dot, greyed rows, read-only browse of unmounted projects, scale and filter                     | web                             |
-| PC-4 | Proposals for project files: protocol fields, server checks in `file-edit-propose.ts`, accept-commits route, audit, reconcile, agent line | protocol, server, sandbox-agent |
-| PC-5 | Proposal card for project files: project label, diff vs head, editable message, Accept commits, stale and not-allowed states              | web                             |
-| PC-6 | Browser spec, docs (`docs/files.md`, user help), gate                                                                                     | e2e, docs                       |
+| Id   | Scope                                                                                                                                                            | Areas                           |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| PC-1 | New conversation header: title, project control (switch, remove, add), NC4 draft lifetime, NC5 errors                                                            | web                             |
+| PC-2 | Conversation title "Project / name", project menu (Open project, Move to project…), tab title                                                                    | web                             |
+| PC-3 | Files panel: all viewable projects, active dot, greyed rows, read-only browse of unmounted projects, scale and filter                                            | web                             |
+| PC-0 | Remove restricted visibility: RV2 migration with dry-run list, upgrade test, RV3 API, project page and members dialog, audit doc, `workspaces.spec.ts`           | db, protocol, server, web, e2e  |
+| PC-4 | Proposals for project files and new My files files: protocol fields, server checks in `file-edit-propose.ts`, accept-commits route, audit, reconcile, agent line | protocol, server, sandbox-agent |
+| PC-5 | Proposal card for project files: project label, diff vs head, editable message, Accept commits, stale and not-allowed states                                     | web                             |
+| PC-6 | Browser spec, docs (`docs/files.md`, user help), gate                                                                                                            | e2e, docs                       |
 
-Order: PC-1 → PC-2 → PC-3 (web only, can run in parallel with PC-4), PC-4 → PC-5, then PC-6 and a
-gate1 deploy.
+Order: PC-0 first (it changes the list rules the others read), then PC-1 → PC-2 → PC-3 (web) in
+parallel with PC-4 → PC-5, then PC-6 and a gate1 deploy.
 
-## 11. Out of scope
+## 12. Out of scope
 
 - More than one project per conversation (SS2 stands).
 - Mounting a project for its creator at once and promoting a folder to a project (KOBE-586). FP1
