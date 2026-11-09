@@ -20,6 +20,7 @@ import type { FileShareDeps } from "../files/share.js";
 import type { MemoryAgentDeps } from "../memory/agent.js";
 import type { ProjectMounts } from "../projects/mounts.js";
 import type { ProposeDeps } from "../projects/proposals.js";
+import type { ProjectCommitDeps } from "./project-commit.js";
 import type { SkillDraftTool } from "../skills/drafts/tool.js";
 import type { PolicyCheckDeps } from "./policy-check.js";
 import type {
@@ -117,6 +118,8 @@ export interface WireContext {
   readonly projectMounts?: ProjectMounts;
   /** Storage, approvals and membership for `project.file_propose` (KOBE-162). */
   readonly projectFiles: ProposeDeps;
+  /** Commits, approvals and limits for `project.commit` (KOBE-579). */
+  readonly projectCommits: ProjectCommitDeps;
   /** Runs `web_search.query` (KOBE-114). */
   readonly webSearch: WebSearchService;
   /** `skill.draft_save` (KOBE-442); absent: refused as storage unavailable. */

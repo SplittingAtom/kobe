@@ -4,6 +4,7 @@ import {
   inArray,
   projectFiles,
   projects,
+  projectTreeEntries,
   sql,
   withTeam,
   type KobeDb,
@@ -39,6 +40,8 @@ export interface ProjectMounts {
   /** Binds the workspace store once it exists (it is built after the server deps). */
   use(sync: WorkspaceSync): void;
   readonly enabled: boolean;
+  /** The bound workspace store (KOBE-579: a commit repoints the committer's rows), if any. */
+  readonly workspace: WorkspaceSync | undefined;
   /** The reconcile methods resolve true only when every workspace was brought in line. */
   reconcileUser(teamId: string, userId: string): Promise<boolean>;
   reconcileUsers(teamId: string, userIds: readonly string[]): Promise<boolean>;
@@ -54,6 +57,8 @@ interface Desired {
   readonly size: number;
   readonly blobKey: string;
   readonly mtimeMs: number;
+  /** The head tree's bit (KOBE-579): a mount matches the tree a checkout diffs against. */
+  readonly executable: boolean;
 }
 
 const AREA = `${PROJECT_WORKSPACE_DIR}/`;
@@ -159,11 +164,20 @@ async function desiredFor(tx: KobeTx, teamId: string, userId: string): Promise<M
       size: projectFiles.sizeBytes,
       blobRef: projectFiles.blobRef,
       addedAt: projectFiles.addedAt,
+      executable: projectTreeEntries.executable,
     })
     .from(projectFiles)
     .innerJoin(
       projects,
       and(eq(projects.teamId, projectFiles.teamId), eq(projects.id, projectFiles.projectId)),
+    )
+    .leftJoin(
+      projectTreeEntries,
+      and(
+        eq(projectTreeEntries.teamId, projectFiles.teamId),
+        eq(projectTreeEntries.commitId, projects.headCommitId),
+        eq(projectTreeEntries.path, projectFiles.path),
+      ),
     )
     .where(and(eq(projectFiles.teamId, teamId), inArray(projectFiles.projectId, mounted)));
   for (const r of rows) {
@@ -172,6 +186,7 @@ async function desiredFor(tx: KobeTx, teamId: string, userId: string): Promise<M
       size: r.size,
       blobKey: r.blobRef,
       mtimeMs: r.addedAt.getTime(),
+      executable: r.executable ?? false,
     });
   }
   return { wanted, working };
@@ -186,7 +201,11 @@ async function diff(tx: KobeTx, teamId: string, userId: string) {
   );
   const puts = [...wanted].filter(([path, want]) => {
     const have = current.get(path);
-    return have?.sha256 !== want.sha256 || have.blobKey !== want.blobKey;
+    return (
+      have?.sha256 !== want.sha256 ||
+      have.blobKey !== want.blobKey ||
+      have.executable !== want.executable
+    );
   });
   const deletes = [...current.keys()].filter((path) => !wanted.has(path));
   return { puts, deletes };
@@ -209,7 +228,14 @@ async function reconcile(
     await sync.putServerFile(
       tx,
       owner,
-      { path, sha256: want.sha256, size: want.size, blobKey: want.blobKey, mtimeMs: want.mtimeMs },
+      {
+        path,
+        sha256: want.sha256,
+        size: want.size,
+        blobKey: want.blobKey,
+        mtimeMs: want.mtimeMs,
+        executable: want.executable,
+      },
       "projects",
     );
   }
@@ -262,6 +288,9 @@ export function createProjectMounts(db: KobeDb, log: Pick<Logger, "warn">): Proj
     },
     get enabled() {
       return sync !== undefined;
+    },
+    get workspace() {
+      return sync;
     },
     reconcileUsers,
     reconcileUser: (teamId, userId) => reconcileUsers(teamId, [userId]),

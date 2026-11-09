@@ -63,6 +63,7 @@ export const BUILTIN_INPUT_SCHEMAS: Readonly<Record<string, z.ZodType<unknown>>>
   create_artifact: artifactToolInputSchema.create_artifact,
   update_artifact: artifactToolInputSchema.update_artifact,
   propose_project_file: projectToolInputSchema.propose_project_file,
+  commit_project: projectToolInputSchema.commit_project,
   save_skill_draft: skillDraftToolInputSchema.save_skill_draft,
   propose_file_edit: fileEditToolInputSchema.propose_file_edit,
   open_file: fileOpenToolInputSchema.open_file,

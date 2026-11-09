@@ -27,6 +27,11 @@ import type { ObjectStore } from "../workspace-sync/object-store.js";
  * queued that way before their bytes are written and cleared when their rows commit, so a
  * crash in between leaves a leftover this pass deletes once it is due, while an upload in
  * flight is never deleted under the writer.
+ * Project objects (KOBE-579, GV3) use the same queue: `thread_id` then carries the project id and
+ * the key must lie in that project's own tree (`<prefix>teams/<team>/projects/<project>/`); such a
+ * key goes only while no legal hold covers the team at all (project history's rule) and no
+ * project tree, head file or workspace row still names it (members' mounts and working copies
+ * point at project objects).
  * Keys failing the last check are dropped from the queue without touching the bucket. The object
  * delete runs inside the transaction, so an approval of a hold waits for it (bounded: one batch).
  */
@@ -64,6 +69,43 @@ export function threadKey(prefix: string, teamId: string, threadId: string, key:
     .some((p) => p === "" || p === "." || p === "..");
 }
 
+/** Whether `key` lies in the project's own object tree (`projects/tree.ts isProjectKey`). */
+export function projectTreeKey(
+  prefix: string,
+  teamId: string,
+  projectId: string,
+  key: string,
+): boolean {
+  if (!UUID.test(teamId) || !UUID.test(projectId)) return false;
+  const tree = `${prefix}teams/${teamId}/projects/${projectId}/`;
+  if (!key.startsWith(tree)) return false;
+  return !key
+    .slice(tree.length)
+    .split("/")
+    .some((p) => p === "" || p === "." || p === "..");
+}
+
+/** Project keys among `keys` that a project tree, head file or workspace row still names. */
+async function projectReferenced(
+  tx: KobeTx,
+  teamId: string,
+  keys: readonly string[],
+): Promise<Set<string>> {
+  if (keys.length === 0) return new Set();
+  const list = sql`ARRAY[${sql.join(
+    keys.map((k) => sql`${k}`),
+    sql`, `,
+  )}]::text[]`;
+  const res = await tx.execute<{ key: string }>(sql`
+    SELECT blob_ref AS key FROM project_tree_entries WHERE team_id = ${teamId} AND blob_ref = ANY(${list})
+    UNION SELECT blob_ref FROM project_files WHERE team_id = ${teamId} AND blob_ref = ANY(${list})
+    UNION SELECT blob_key FROM workspace_files
+           WHERE team_id = ${teamId} AND NOT deleted AND blob_key = ANY(${list})
+    UNION SELECT blob_key FROM workspace_file_hold_history
+           WHERE team_id = ${teamId} AND blob_key = ANY(${list})`);
+  return new Set(res.rows.map((r) => r.key));
+}
+
 /** Keys among `keys` that a thread-owned column of the team still references (another thread). */
 async function stillReferenced(
   tx: KobeTx,
@@ -71,6 +113,7 @@ async function stillReferenced(
   keys: readonly string[],
 ): Promise<Set<string>> {
   const referenced = new Set<string>();
+  if (keys.length === 0) return referenced;
   const list = sql`ARRAY[${sql.join(
     keys.map((k) => sql`${k}`),
     sql`, `,
@@ -97,20 +140,39 @@ export async function deleteBlobBatchInTx(
 ): Promise<BlobDeletionCounts & { readonly more: boolean }> {
   await tx.execute(sql.raw(`SET LOCAL lock_timeout = '5s'`));
   await lockLegalHolds(tx);
+  const projectRoot = `${store.prefix}teams/${teamId}/projects/`;
   const queued = await tx.execute<{ key: string; thread_id: string }>(sql`
     SELECT q.key, q.thread_id FROM retention_blob_deletions q
      WHERE q.team_id = ${teamId}
        AND q.enqueued_at <= now()
        AND NOT public.legal_hold_covers(q.team_id, q.owner_user_id)
+       AND (NOT starts_with(q.key, ${projectRoot})
+            OR NOT public.memory_legal_hold_covers(q.team_id, NULL))
      ORDER BY q.enqueued_at, q.key
      LIMIT ${limit}
      FOR UPDATE SKIP LOCKED`);
   const keys = queued.rows.map((r) => r.key);
   if (keys.length === 0) return { blobs: 0, kept: 0, more: false };
-  const referenced = await stillReferenced(tx, teamId, keys);
-  const doomed = queued.rows
-    .filter((r) => !referenced.has(r.key) && threadKey(store.prefix, teamId, r.thread_id, r.key))
-    .map((r) => r.key);
+  const projectRows = queued.rows.filter((r) =>
+    projectTreeKey(store.prefix, teamId, r.thread_id, r.key),
+  );
+  const threadRows = queued.rows.filter((r) => !projectRows.includes(r));
+  const referenced = await stillReferenced(
+    tx,
+    teamId,
+    threadRows.map((r) => r.key),
+  );
+  const projectHeld = await projectReferenced(
+    tx,
+    teamId,
+    projectRows.map((r) => r.key),
+  );
+  const doomed = [
+    ...threadRows
+      .filter((r) => !referenced.has(r.key) && threadKey(store.prefix, teamId, r.thread_id, r.key))
+      .map((r) => r.key),
+    ...projectRows.filter((r) => !projectHeld.has(r.key)).map((r) => r.key),
+  ];
   // Bounded and abortable: the transaction holds the legal-hold lock shared, and an approval
   // waits for it; on timeout the delete is aborted and settled before the lock is released.
   if (doomed.length > 0)

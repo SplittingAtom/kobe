@@ -16,7 +16,17 @@ import {
   type StoredEntry,
 } from "../workspace-sync/store.js";
 import { WRITE_SPAN, lockWaitSpan, s3PutSpan, writeTxSpan } from "../workspace-sync/write-spans.js";
-import { fail, QUOTA, resultOutcome, storeBlob, type Failure } from "./upload.js";
+import {
+  fail,
+  OBJECTS,
+  QUOTA,
+  READ_ONLY,
+  resultOutcome,
+  storeBlob,
+  type Failure,
+} from "./upload.js";
+import { checkoutsHold } from "../workspace-sync/checkouts.js";
+import { teamObjectsAllow } from "../uploads/quota.js";
 
 /** The version a save found instead of its base: null when the file no longer exists. */
 export type SaveConflict = {
@@ -104,6 +114,9 @@ export async function saveWorkspaceFile(
       if (sha256 === request.baseSha256 && current) return { unchanged: current };
       const held = await blobState(tx, owner, sha256);
       if (held !== "absent") return held;
+      if (!(await teamObjectsAllow(tx, owner.teamId, sync.teamMaxObjects))) {
+        return "over_objects" as const;
+      }
       const ok = await reserveUpload(tx, owner, size, resolveLimits(sync.limits));
       return ok ? ("reserved" as const) : ("over_quota" as const);
     });
@@ -115,6 +128,7 @@ export async function saveWorkspaceFile(
   }
   if (typeof pre === "object") return pre;
   if (pre === "over_quota") return QUOTA;
+  if (pre === "over_objects") return OBJECTS;
   if (pre === "deleting") {
     return fail(503, "sandbox_unavailable", "That content is being cleaned up; try again shortly.");
   }
@@ -150,6 +164,8 @@ async function saveManifest(
   blob: { readonly sha256: string; readonly blobKey: string; readonly size: number },
 ): Promise<SaveResult> {
   const state = await lockWaitSpan("save", "workspace", () => lockWorkspace(tx, owner));
+  // KOBE-579: a path in a project folder needs the checkout still, under the lock.
+  if (!(await checkoutsHold(tx, owner, [request.path]))) return READ_ONLY;
   // Under the workspace lock: the base check is atomic with the write.
   const current = await currentEntry(tx, owner, request.path);
   const mismatch = baseMismatch(current, request.baseSha256);

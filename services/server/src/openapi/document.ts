@@ -13,6 +13,7 @@ import { feedbackOpenApiPaths, feedbackOpenApiSchemas } from "./feedback.js";
 import { markersOpenApiPaths, markersOpenApiSchemas } from "./markers.js";
 import { modelsOpenApiPaths, modelsOpenApiSchemas } from "./models.js";
 import { pendingOpenApiPaths, pendingOpenApiSchemas } from "./pending.js";
+import { projectCommitsOpenApiPaths, projectCommitsOpenApiSchemas } from "./project-commits.js";
 import { runsOpenApiPaths, runsOpenApiSchemas } from "./runs.js";
 import { threadsOpenApiPaths, threadsOpenApiSchemas } from "./threads.js";
 import { threadFoldersOpenApiPaths, threadFoldersOpenApiSchemas } from "./thread-folders.js";
@@ -49,6 +50,7 @@ export function openApiDocument(): Record<string, unknown> {
       ...brandingOpenApiPaths(),
       ...agentRosterOpenApiPaths(),
       ...agentOwnershipOpenApiPaths(),
+      ...projectCommitsOpenApiPaths(),
     },
     components: {
       schemas: {
@@ -67,6 +69,7 @@ export function openApiDocument(): Record<string, unknown> {
         ...evalCasesOpenApiSchemas(),
         ...brandingOpenApiSchemas(),
         ...agentRosterOpenApiSchemas(),
+        ...projectCommitsOpenApiSchemas(),
       },
       securitySchemes: {
         session: { type: "apiKey", in: "cookie", name: "better-auth.session_token" },

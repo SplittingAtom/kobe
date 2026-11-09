@@ -8,6 +8,7 @@ import { folderPaths } from "./export-folders.js";
 import { readOffloadedJson } from "../threads/offloaded-body.js";
 import { logger } from "../logger.js";
 import { personalMemoryForExport } from "../memory/export.js";
+import { readableProjectsForExport, projectObject } from "./export-projects.js";
 import {
   entryMarkdown,
   entryPlainText,
@@ -39,6 +40,8 @@ import { artifactExtension, readArtifactBytes } from "../artifacts/serve.js";
  *  - `artifacts/<artifact id>/v<n>.<ext>`: every version of the thread's artifacts (KOBE-129);
  *  - `files/<file id>/<name>`: the thread's uploaded and shared files (KOBE-143), streamed;
  *  - `memory/<path>`: the user's personal memory files, current versions (KOBE-155);
+ *  - `projects/<slug>/commits.json` and `projects/<slug>/head/<path>`: each project the user
+ *    may read, its commit list and head files (KOBE-579, GV5; `export-projects.ts`);
  *  - `feedback.json`: the user's own answer ratings in this team (KOBE-275), with their comments,
  *    on their threads and on threads shared with them (ids and the rating only, no thread content);
  *  - `eval-cases.json`: the eval cases the user shared in this team (KOBE-276), with their copies;
@@ -363,6 +366,8 @@ This archive holds the conversations you own in one Kobe team.
   message where it leaves the transcript (only for conversations with more than one branch).
 - \`artifacts/<artifact id>/v<n>.<ext>\`: every version of the artifacts the assistant made.
 - \`memory/<path>\`: your personal memory files (current versions).
+- \`projects/<slug>/\`: each project you can read: \`commits.json\` (its history, newest first) and
+  \`head/\` (its current files).
 - \`files/<file id>/<name>\`: the files you uploaded to the conversation or the assistant shared.
 - \`feedback.json\`: your thumbs up and down on answers in this team, with your reasons and
   comments (on your conversations and on ones shared with you).
@@ -568,6 +573,21 @@ export async function* exportZip(
     for await (const m of personalMemoryForExport(db, viewer, blobs)) {
       text(`memory/${m.path}`, m.content);
       yield* drain();
+    }
+    // GV5 (KOBE-579): the projects the viewer may read, their commit list and head files.
+    for await (const p of readableProjectsForExport(db, viewer)) {
+      text(`projects/${p.slug}/commits.json`, `${JSON.stringify(p.meta, null, 2)}\n`);
+      for (const f of p.files) {
+        const object = await projectObject(blobs, viewer.teamId, p.meta.id, f.blobRef);
+        if (!object) continue;
+        const entry = file(`projects/${p.slug}/head/${f.path}`);
+        for await (const chunk of object.body) {
+          entry.push(new Uint8Array(chunk as Buffer));
+          yield* drain();
+        }
+        entry.push(new Uint8Array(0), true);
+        yield* drain();
+      }
     }
   }
   const feedback = file("feedback.json");

@@ -92,6 +92,11 @@ import { teamSkillBlockRoutes } from "./routes/team-skill-blocks.js";
 import { skillUsageRoutes, teamSkillUsageRoutes } from "./routes/skill-usage.js";
 import { teamRoutes } from "./routes/team.js";
 import { projectRoutes } from "./routes/projects.js";
+import {
+  myCheckoutRoutes,
+  projectCommitRoutes,
+  teamStorageRoutes,
+} from "./routes/project-commits.js";
 import { threadPendingRoutes } from "./routes/thread-pending.js";
 import { threadCompactRoutes } from "./routes/thread-compact.js";
 import { threadBranchSummaryRoutes } from "./routes/thread-branch-summary.js";
@@ -200,6 +205,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/me/invites", myInvitesRoutes(deps));
   api.route("/me/connector-notices", meConnectorNoticesRoutes(deps));
   api.route("/me/skills", meSkillEnablementRoutes(deps));
+  api.route("/me/checkouts", myCheckoutRoutes(deps));
   api.route("/me", meRoutes(deps));
   api.route("/team/policy", teamPolicyRoutes(deps));
   api.route("/team/invites", teamInvitesRoutes(deps));
@@ -215,6 +221,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/retention", teamRetentionRoutes(deps));
   api.route("/team/eval-settings", teamEvalSettingsRoutes(deps));
   api.route("/team/settings", teamSettingsRoutes(deps));
+  api.route("/team/storage", teamStorageRoutes(deps));
   api.route("/team/skill-review", teamSkillReviewRoutes(deps));
   api.route("/team/skills", teamSkillInstallRoutes(deps));
   api.route("/team/skills", teamSkillBlockRoutes(deps));
@@ -229,6 +236,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/runs", runEvalCaseRoutes(deps));
   api.route("/eval-cases", evalCaseRoutes(deps));
   api.route("/projects", projectRoutes(deps, options.workspaceFiles?.sync));
+  api.route("/projects", projectCommitRoutes(deps, options.workspaceFiles?.sync));
   api.route("/threads", threadRunRoutes(deps));
   api.route("/threads", threadPendingRoutes(deps));
   api.route("/threads", threadCompactRoutes(deps));

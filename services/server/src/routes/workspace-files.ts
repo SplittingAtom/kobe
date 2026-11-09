@@ -45,7 +45,8 @@ import { searchFiles } from "../workspace-files/search.js";
 import { uploadToWorkspace } from "../workspace-files/upload.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
 import { CONTENT_MISSING, reportMissingContent } from "../workspace-sync/lost.js";
-import { currentEntry } from "../workspace-sync/store.js";
+import { currentEntry, lockWorkspace } from "../workspace-sync/store.js";
+import { checkoutSlugs, checkoutsHold } from "../workspace-sync/checkouts.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 type ErrStatus = 400 | 403 | 404 | 409 | 411 | 413 | 415 | 422 | 502 | 503 | 507;
@@ -102,6 +103,11 @@ export function workspaceFileRoutes(
   const { sync, waker } = options;
   const pageSize = options.listPageSize ?? LIST_MAX_ENTRIES;
   const ownerOf = (c: Ctx) => ({ teamId: c.get("team").id, userId: c.get("user").id });
+  /** The caller's checked-out project slugs: writable here (KOBE-579, CM3). */
+  const checkoutsOf = (c: Ctx) => {
+    const owner = ownerOf(c);
+    return withTeam(db, owner.teamId, (tx) => checkoutSlugs(tx, owner));
+  };
 
   app.get("/files", async (c) => {
     const query = workspaceListQuerySchema.safeParse(queryOf(c));
@@ -219,14 +225,22 @@ export function workspaceFileRoutes(
     if (folder === WORKSPACE_DROP_FOLDER && isThreadFolderName(upload.name)) {
       return refuse(fail(c, 400, "invalid_path", "That name is kept for thread uploads."));
     }
-    if (isReadOnlyPath(target)) return refuse(readOnly(c));
+    if (isReadOnlyPath(target, await checkoutsOf(c))) return refuse(readOnly(c));
     const result = await uploadToWorkspace(db, sync, ownerOf(c), target, {
       body: upload.file,
       limitBytes: maxBytes,
       teamQuotaDefaultBytes: (deps.uploads ?? DEFAULT_UPLOAD_SETTINGS).defaultQuotaBytes,
       drop: isMemberDropPath(target),
     });
-    if (!result.ok) return fail(c, result.status, result.code, result.message);
+    if (!result.ok) {
+      // GV2: a quota refusal names the object budget when that was the limit.
+      return result.limit === undefined
+        ? fail(c, result.status, result.code, result.message)
+        : c.json(
+            { code: result.code, message: result.message, limit: result.limit },
+            result.status,
+          );
+    }
     return c.json(fileEntry(result.entry), 201);
   });
 
@@ -235,7 +249,7 @@ export function workspaceFileRoutes(
     if (!query.success) return badPath(c);
     const { path } = query.data;
     if (isInternalPath(path)) return badPath(c);
-    if (isReadOnlyPath(path)) return readOnly(c);
+    if (isReadOnlyPath(path, await checkoutsOf(c))) return readOnly(c);
     // A member's drop (KOBE-199) deletes that one file only, never anything under the same name.
     const drop = isMemberDropPath(path);
     const owner = ownerOf(c);
@@ -243,6 +257,9 @@ export function workspaceFileRoutes(
       // Deleting lets the workspace collector free content later: never past a legal hold.
       await lockLegalHolds(tx);
       if (await isUnderLegalHold(tx, owner.teamId, owner.userId)) return "held" as const;
+      // KOBE-579: inside a project folder only while the checkout holds, read under the lock.
+      await lockWorkspace(tx, owner);
+      if (!(await checkoutsHold(tx, owner, [path]))) return "read_only" as const;
       const under = await liveFilesUnder(tx, owner, path, DELETE_MAX_FILES + 1);
       const files = drop ? under.filter((f) => f.path === path) : under;
       if (files.length === 0) return "missing" as const;
@@ -269,6 +286,8 @@ export function workspaceFileRoutes(
         );
       case "missing":
         return notFound(c);
+      case "read_only":
+        return readOnly(c);
       case "too_many":
         return fail(
           c,

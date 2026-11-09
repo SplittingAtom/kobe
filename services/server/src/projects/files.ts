@@ -22,7 +22,9 @@ import { logger } from "../logger.js";
 import type { BlobStore } from "../retention/blobs.js";
 import { resolveMime, SNIFF_BYTES } from "../uploads/mime.js";
 import { UploadMeter, UploadTooLargeError } from "../uploads/meter.js";
-import { lockTeamStorage, storageLimit, storageUsed } from "../uploads/quota.js";
+import { lockTeamStorage } from "../uploads/quota.js";
+import { DEFAULT_TEAM_MAX_OBJECTS, overLimit } from "./storage.js";
+import { commitFiles } from "./tree.js";
 
 /**
  * Project files (KOBE-162, D23): the project's own copy of each file lives in object storage at
@@ -37,6 +39,7 @@ export type ProjectFileFailure =
   | "already_exists"
   | "file_too_large"
   | "quota_exceeded"
+  | "object_budget"
   | "project_full"
   | "archived"
   | "storage_failed";
@@ -51,6 +54,8 @@ export interface ProjectFileDeps {
   /** Site defaults: largest single file and the team storage quota default. */
   readonly maxFileBytes: number;
   readonly teamQuotaDefaultBytes: number;
+  /** Site default of the object budget (GV2); default {@link DEFAULT_TEAM_MAX_OBJECTS}. */
+  readonly teamMaxObjectsDefault?: number;
 }
 
 /** Add to project (KOBE-585): what a file was copied from, for the audit row (ids only). */
@@ -129,7 +134,7 @@ class Refused extends Error {
  */
 export async function insertProjectFile(
   tx: KobeTx,
-  deps: Pick<ProjectFileDeps, "teamQuotaDefaultBytes">,
+  deps: Pick<ProjectFileDeps, "teamQuotaDefaultBytes" | "teamMaxObjectsDefault">,
   target: FileTarget,
   file: {
     readonly id: string;
@@ -167,8 +172,17 @@ export async function insertProjectFile(
     );
   if (taken) throw new Refused("already_exists");
   await lockTeamStorage(tx, teamId);
-  const limit = await storageLimit(tx, teamId, deps.teamQuotaDefaultBytes);
-  if ((await storageUsed(tx, teamId)) + file.size > limit) throw new Refused("quota_exceeded");
+  const over = await overLimit(
+    tx,
+    teamId,
+    {
+      quotaDefaultBytes: deps.teamQuotaDefaultBytes,
+      maxObjectsDefault: deps.teamMaxObjectsDefault ?? DEFAULT_TEAM_MAX_OBJECTS,
+    },
+    file.size,
+    1,
+  );
+  if (over !== undefined) throw new Refused(over === "bytes" ? "quota_exceeded" : "object_budget");
   const [row] = await tx
     .insert(projectFiles)
     .values({
@@ -197,6 +211,8 @@ export async function insertProjectFile(
       ...(file.importedFrom === undefined ? {} : { importedFrom: file.importedFrom }),
     },
   });
+  // Every change of the files is a commit (KOBE-579, CM1): `project_files` stays the head tree.
+  await commitFiles(tx, teamId, projectId, { userId, kind: "user" }, `Add ${file.path}`);
   return toProjectFile(row);
 }
 
@@ -305,10 +321,10 @@ export async function uploadProjectFile(
 }
 
 /**
- * Removes a file's row (audited, in the caller's transaction) and returns its object key, or
- * undefined when there is no such file. The caller deletes the object once the mounts no longer
- * name it (`ProjectMounts.reconcileProject`); a crash in between leaves an unreferenced object,
- * never a dangling row.
+ * Removes a file's row (audited, in the caller's transaction) and records the removal as a commit
+ * (KOBE-579): the object stays, because the previous commit's tree still names it; history
+ * pruning queues it for the blob deleter once no commit does (GV3). Returns the file's object key,
+ * or undefined when there is no such file.
  */
 export async function removeProjectFile(
   tx: KobeTx,
@@ -326,7 +342,7 @@ export async function removeProjectFile(
         eq(projectFiles.id, fileId),
       ),
     )
-    .returning({ blobRef: projectFiles.blobRef });
+    .returning({ blobRef: projectFiles.blobRef, path: projectFiles.path });
   if (!row) return undefined;
   await recordAudit(tx, {
     action: "project.file_removed",
@@ -334,13 +350,6 @@ export async function removeProjectFile(
     teamId,
     target: { projectId, fileId },
   });
+  await commitFiles(tx, teamId, projectId, { userId: actorId, kind: "user" }, `Remove ${row.path}`);
   return row.blobRef;
-}
-
-/** Deletes a project file's object; failures are logged (an orphan object, never a leak of access). */
-export async function deleteProjectObject(
-  blobs: BlobStore | undefined,
-  key: string,
-): Promise<void> {
-  if (blobs) await discard(blobs, key);
 }

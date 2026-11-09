@@ -55,6 +55,14 @@ export function dangerousToolsFor(context: {
   return context.floor === "auto" ? [...(context.dangerousTools ?? [])] : [];
 }
 
+/**
+ * Tools whose approval the server asks itself, over an input it builds (KOBE-579, CM6): the
+ * policy check answers `allow` instead of asking, tells the caller through `onDeferred`, and the
+ * tool's frame handler asks for the signed approval (`sandbox-wire/project-commit.ts`). A rule
+ * that allows the call outright still allows it without any approval.
+ */
+export const SERVER_APPROVED_TOOLS: ReadonlySet<string> = new Set(["commit_project"]);
+
 /** Server-side denials decided before the engine runs (protocol policy.ts: stage `site_deny`). */
 export type ServerDenyCode = "policy_error" | "run_not_active" | "not_a_member" | "unknown_tool";
 
@@ -425,6 +433,7 @@ export async function decidePolicyCheck(
   signal: AbortSignal,
   onPending: (pending: { approvalId: string; expiresAt: string }) => void,
   mayRecordDenied: () => boolean = () => true,
+  onDeferred?: () => void,
 ): Promise<PolicyResultFrame> {
   try {
     const evaluated = await evaluateWithRetry(deps, target, frame);
@@ -552,6 +561,19 @@ export async function decidePolicyCheck(
       await recordDenied(deps, target.teamId, frame, reasons, mayRecordDenied);
       await recordSkipped(deps, target.teamId, frame, decision.risk, reasons);
       return denyFrame(frame, reasons, EVAL_NO_PROMPT.message);
+    }
+    if (SERVER_APPROVED_TOOLS.has(frame.tool) && onDeferred !== undefined) {
+      // CM6: the approval binds the server's canonical input; the frame handler asks for it.
+      onDeferred();
+      return {
+        v: 1,
+        type: "policy.result",
+        request_id: frame.request_id,
+        run_id: frame.run_id,
+        tool_call_id: frame.tool_call_id,
+        decision: "allow",
+        reasons: decision.reasons,
+      } satisfies Allow;
     }
     const outcome = await deps.approvals.request(
       {

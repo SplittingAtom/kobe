@@ -9,6 +9,7 @@ import {
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { endUnreachableThreadRules } from "../policy/user-rules.js";
+import { loadAccess } from "./access.js";
 import type { ProjectMounts } from "./mounts.js";
 
 /**
@@ -42,6 +43,40 @@ export async function endProjectStandingInTx(
   );
   // Remembered approvals in threads they can no longer reach end for good (as a project removal).
   if ((dropped.rowCount ?? 0) > 0) await endUnreachableThreadRules(tx, teamId);
+}
+
+/**
+ * A role change that took away `edit` (an editor made reader, an editor row removed from a
+ * workspace project, a team admin demoted; KOBE-579) ends the member's checkouts of the projects
+ * they may no longer edit, as when they leave (MT4): rows deleted, audited
+ * `project.checkout_discarded {reason: access_lost}`. The caller then reconciles the user's mounts
+ * outside this transaction: the head is written back (or the mount goes if no conversation keeps
+ * it) and the sandbox relocks the folder at its next pull. Returns how many ended.
+ */
+export async function endCheckoutsWithoutEditInTx(
+  tx: KobeTx,
+  teamId: string,
+  userId: string,
+  actor?: AuditActor,
+): Promise<number> {
+  const held = await tx.execute<{ project_id: string }>(sql`
+    SELECT project_id FROM project_checkouts WHERE team_id = ${teamId} AND user_id = ${userId}`);
+  let ended = 0;
+  for (const { project_id: projectId } of held.rows) {
+    const access = await loadAccess(tx, { teamId, userId }, projectId);
+    if (access?.can.edit) continue;
+    await tx.execute(sql`
+      DELETE FROM project_checkouts
+       WHERE team_id = ${teamId} AND project_id = ${projectId} AND user_id = ${userId}`);
+    await recordAudit(tx, {
+      action: "project.checkout_discarded",
+      teamId,
+      target: { projectId, userId, reason: "access_lost" },
+      ...(actor ? { actor } : {}),
+    });
+    ended += 1;
+  }
+  return ended;
 }
 
 /**

@@ -54,7 +54,10 @@ export interface ProposeDeps {
   readonly approvals: ApprovalBroker;
   readonly verifier: ApprovalVerifier | undefined;
   readonly mounts: ProjectMounts | undefined;
-  readonly files: Pick<ProjectFileDeps, "maxFileBytes" | "teamQuotaDefaultBytes">;
+  readonly files: Pick<
+    ProjectFileDeps,
+    "maxFileBytes" | "teamQuotaDefaultBytes" | "teamMaxObjectsDefault"
+  >;
   readonly runMaxEvents: number;
   readonly log: Logger;
 }
@@ -248,6 +251,7 @@ const applied = (req: ProposeRequest, projectId: string, file: ProjectFile): Pro
 const OUTCOME_REFUSALS = {
   already_exists: ["already_exists", "The project already has a file with that name."],
   quota_exceeded: ["quota_exceeded", "Your team has no storage left for this file."],
+  object_budget: ["quota_exceeded", "Your workspace has used up its object budget."],
   project_full: ["quota_exceeded", "The project already holds the most files it can."],
   archived: ["not_allowed", "The project is archived."],
   file_too_large: ["too_large", "This file is larger than a project file may be."],

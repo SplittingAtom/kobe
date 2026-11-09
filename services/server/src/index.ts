@@ -298,6 +298,9 @@ const workspaceSync =
           maxFiles: syncSettings.maxFiles,
         },
         teamStorageDefaultBytes: uploadSettings.defaultQuotaBytes,
+        ...(uploadSettings.defaultMaxObjects === undefined
+          ? {}
+          : { teamMaxObjectsDefault: uploadSettings.defaultMaxObjects }),
         paused: config.retentionPaused,
         log: logger,
       })

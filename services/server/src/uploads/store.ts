@@ -13,7 +13,8 @@ import { threadKey, type BlobStore } from "../retention/blobs.js";
 import { uploadBlobKey } from "./keys.js";
 import { UploadMeter, UploadTooLargeError } from "./meter.js";
 import { resolveMime } from "./mime.js";
-import { storageLimit, storageUsed, teamStorageAllows } from "./quota.js";
+import { storageLimit, storageUsed, teamObjectsAllow, teamStorageAllows } from "./quota.js";
+import { DEFAULT_TEAM_MAX_OBJECTS } from "./settings.js";
 import type { UploadSettings } from "./settings.js";
 
 /**
@@ -63,7 +64,11 @@ export interface UploadInput {
 
 export type StoreResult =
   | { readonly ok: true; readonly file: UploadResponse }
-  | { readonly ok: false; readonly status: 404 | 413 | 403 | 422 | 503; readonly body: ErrorBody };
+  | {
+      readonly ok: false;
+      readonly status: 404 | 413 | 403 | 422 | 503 | 507;
+      readonly body: ErrorBody;
+    };
 
 type ErrorBody = UploadError | { readonly code: string; readonly message: string };
 
@@ -201,6 +206,22 @@ async function discard(deps: UploadDeps, key: string): Promise<void> {
 }
 
 class QuotaError extends Error {}
+/** The team's object budget is used up (Workspaces GV2, KOBE-579). */
+class ObjectBudgetError extends Error {}
+
+/**
+ * 507 `quota_exceeded` naming the object budget. The body stays within `uploadErrorSchema` (a
+ * `limit` field would need a protocol change), so the message says which limit it is.
+ */
+const OBJECT_BUDGET: StoreResult = {
+  ok: false,
+  status: 507,
+  body: {
+    code: "quota_exceeded",
+    message:
+      "Your workspace holds as many stored objects as its budget allows. Delete files or ask a team admin.",
+  },
+};
 
 interface Stored {
   readonly fileId: string;
@@ -228,6 +249,8 @@ async function commit(
     if (!(await teamStorageAllows(tx, teamId, deps.settings.defaultQuotaBytes, s.size))) {
       throw new QuotaError();
     }
+    const maxObjects = deps.settings.defaultMaxObjects ?? DEFAULT_TEAM_MAX_OBJECTS;
+    if (!(await teamObjectsAllow(tx, teamId, maxObjects))) throw new ObjectBudgetError();
     const [row] = await tx
       .insert(files)
       .values({
@@ -333,6 +356,10 @@ export async function storeUpload(
   } catch (err) {
     await discard(deps, key);
     if (err instanceof QuotaError) return refuse(deps, caller, "quota_exceeded", size);
+    if (err instanceof ObjectBudgetError) {
+      await auditRefused(deps, caller, "quota_exceeded", size);
+      return OBJECT_BUDGET;
+    }
     if (pgCode(err) === "23503") return THREAD_NOT_FOUND;
     logger.error({ err, teamId }, "upload could not be recorded");
     return STORAGE_UNAVAILABLE;

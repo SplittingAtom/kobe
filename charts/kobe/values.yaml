@@ -234,6 +234,11 @@ server:
     teamStorageQuotaBytes: 10737418240
     # Hours an upload that never joined a thread is kept (1..720).
     orphanHours: 24
+    # Object budget per workspace (team) when it has none of its own (Workspaces GV2): S3 objects
+    # of scratchspaces, uploads and projects together; pushes beyond it and commits are refused.
+    teamMaxObjects: 2000000
+    # Commits kept per project at most, whatever the workspace's history setting (GV2/GV3).
+    projectHistoryMaxCommits: 1000
   # Extra CA certificates the server trusts for its outgoing TLS (KOBE-182): a syslog or OTLP
   # collector (auditForwarding), an OIDC issuer or S3 endpoint signed by a private CA. Name one
   # Secret or one ConfigMap (not both) and the key holding PEM certificates; the server mounts it

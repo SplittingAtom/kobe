@@ -136,7 +136,7 @@ describe("mount on conversation (MT1)", () => {
 });
 
 describe("losing access and leaving (MT2, MT4)", () => {
-  it("reconciles a stale mounted member before a removed file's object goes", async () => {
+  it("reconciles a stale mounted member when a file is removed", async () => {
     const w = await f.world();
     const c = await contributor(w.team);
     const m = await f.member(w.team);
@@ -157,7 +157,8 @@ describe("losing access and leaving (MT2, MT4)", () => {
     ).rows[0]?.blob_ref as string;
     expect((await as(c).delete(`/v1/projects/${p.id}/files/${files[0]?.id}`)).status).toBe(204);
     expect(await paths(w.team, m.id)).toEqual([]);
-    expect(objects.objects.has(key)).toBe(false);
+    // The object stays: the commit before the removal still names it (KOBE-579, GV3).
+    expect(objects.objects.has(key)).toBe(true);
   });
 
   it("a demoted team admin loses the mounts of restricted projects they are not listed in", async () => {

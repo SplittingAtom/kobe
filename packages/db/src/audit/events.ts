@@ -1033,11 +1033,14 @@ export const AUDIT_EVENTS = {
   }),
   /** CM2: `baseSeq` null for a project with no commit yet. */
   "project.checked_out": event("team", { projectId: id, baseSeq: count.nullable() }),
-  /** CM5 Discard, or the end of a member's checkouts when they leave (PJ3: `reason`). */
+  /**
+   * CM5 Discard, the end of a member's checkouts when they leave (PJ3: `member_removed`), or when a
+   * role change took away `edit` (KOBE-579: `access_lost`).
+   */
   "project.checkout_discarded": event("team", {
     projectId: id,
     userId: id,
-    reason: z.enum(["discarded", "member_removed"]),
+    reason: z.enum(["discarded", "member_removed", "access_lost"]),
   }),
   /** CM5/CM6: a new head. `threadId`/`runId` for an agent's commit_project. */
   "project.committed": event("team", {
@@ -1067,6 +1070,18 @@ export const AUDIT_EVENTS = {
     treeEntries: count,
     blobsQueued: count,
     rule: z.enum(["commits", "days", "hard_cap"]),
+  }),
+  /**
+   * GV2/GV3/MT3 (KOBE-579): a team admin changed the workspace's storage settings; the values in
+   * force afterwards (`maxObjects` null = the site default).
+   */
+  "project.storage_settings_changed": event("team", {
+    historyKeep: z.union([
+      z.strictObject({ mode: z.literal("all") }),
+      z.strictObject({ mode: z.enum(["commits", "days"]), n: count }),
+    ]),
+    maxMountedPerMember: count,
+    maxObjects: count.nullable(),
   }),
   /** The thread's chosen model changed (KOBE-44, D30); null = the team's default. */
   "thread.model_changed": event("team", {

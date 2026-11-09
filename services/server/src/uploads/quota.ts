@@ -28,19 +28,65 @@ export async function storageLimit(
 /**
  * Bytes the team holds. An upload attached to a message (`run_id` set, KOBE-144) is also synced
  * into the workspace (`workspace_sync.live_bytes`), so it counts there only: unattached `files`
- * rows plus all live workspace bytes plus the project files, once each (members' mounts of them
- * are not counted in `live_bytes`, KOBE-162). The thread copy of an attached file stays in S3 until the
+ * rows plus all live workspace bytes plus each project's objects, head and history, once each
+ * (`projects.live_bytes + history_bytes`, KOBE-579 GV2; members' mounts of them are not counted
+ * in `live_bytes`, KOBE-162). The thread copy of an attached file stays in S3 until the
  * thread is purged but is not counted again. MCP Apps results (KOBE-438) count when stored.
  */
 export async function storageUsed(tx: KobeTx, teamId: string): Promise<number> {
   const res = await tx.execute<{ used: string }>(sql`
     SELECT (SELECT COALESCE(SUM(size_bytes), 0) FROM files WHERE team_id = ${teamId} AND run_id IS NULL)
          + (SELECT COALESCE(SUM(live_bytes), 0) FROM workspace_sync WHERE team_id = ${teamId})
-         + (SELECT COALESCE(SUM(size_bytes), 0) FROM project_files WHERE team_id = ${teamId})
+         + (SELECT COALESCE(SUM(live_bytes + history_bytes), 0) FROM projects WHERE team_id = ${teamId})
          + (SELECT COALESCE(SUM(bytes), 0) FROM thread_app_results
              WHERE team_id = ${teamId} AND storage <> 'too_large')
            AS used`);
   return Number(res.rows[0]?.used ?? 0);
+}
+
+/**
+ * Objects the team holds in the object store (Workspaces GV2, KOBE-579): each scratchspace's
+ * distinct blobs plus its uploads in flight (`workspace_sync.blob_count + pending_blobs`), each
+ * stored upload without a thread (`files`), each project's objects, head and history.
+ */
+export async function objectsUsed(tx: KobeTx, teamId: string): Promise<number> {
+  const res = await tx.execute<{ used: string }>(sql`
+    SELECT (SELECT COALESCE(SUM(blob_count + pending_blobs), 0) FROM workspace_sync
+             WHERE team_id = ${teamId})
+         + (SELECT count(*) FROM files WHERE team_id = ${teamId} AND run_id IS NULL)
+         + (SELECT COALESCE(SUM(live_objects + history_objects), 0) FROM projects
+             WHERE team_id = ${teamId})
+           AS used`);
+  return Number(res.rows[0]?.used ?? 0);
+}
+
+/** The team's object budget: its own `max_objects`, else the site default. */
+export async function objectLimit(
+  tx: KobeTx,
+  teamId: string,
+  defaultObjects: number,
+): Promise<number> {
+  const res = await tx.execute<{ max_objects: string | null }>(
+    sql`SELECT max_objects FROM team_storage_quotas WHERE team_id = ${teamId}`,
+  );
+  const own = res.rows[0]?.max_objects;
+  return own === null || own === undefined ? defaultObjects : Number(own);
+}
+
+/**
+ * Whether `delta` more objects fit the team's object budget (GV2): a sync push's new blob, a
+ * scratchspace upload or save of new content. A soft check (no lock): concurrent writers of one
+ * team can pass the budget by the uploads in flight at that moment; commits check under the team
+ * storage lock.
+ */
+export async function teamObjectsAllow(
+  tx: KobeTx,
+  teamId: string,
+  defaultObjects: number,
+  delta = 1,
+): Promise<boolean> {
+  const limit = await objectLimit(tx, teamId, defaultObjects);
+  return (await objectsUsed(tx, teamId)) + delta <= limit;
 }
 
 /**

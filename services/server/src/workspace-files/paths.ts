@@ -6,6 +6,7 @@ import {
   WORKSPACE_SERVER_OWNED_PREFIXES,
   type WorkspaceArea,
 } from "@kobe/protocol";
+import { checkoutOf, NO_CHECKOUTS } from "../workspace-sync/checkouts.js";
 
 /**
  * Path rules of the workspace file browser (KOBE-148). Paths are relative to `/workspace` and are
@@ -25,9 +26,16 @@ export function areaOf(path: string): WorkspaceArea {
 
 /**
  * Read-only in the browser: the server-owned areas (project mounts, thread uploads), except a
- * member's own drop directly in uploads/ (KOBE-199), which they may add and delete.
+ * member's own drop directly in uploads/ (KOBE-199), which they may add and delete, and anything
+ * inside one of the caller's checkouts (`projects/<slug>/…`, KOBE-579 CM3: `checkouts` are the
+ * caller's checked-out slugs, `workspace-sync/checkouts.ts`). Callers without a member (agent
+ * proposals, conflict reports, notebooks) pass none, so project folders stay read-only there.
  */
-export function isReadOnlyPath(path: string): boolean {
+export function isReadOnlyPath(
+  path: string,
+  checkouts: ReadonlySet<string> = NO_CHECKOUTS,
+): boolean {
+  if (checkoutOf(path, checkouts) !== undefined) return false;
   return areaOf(path) !== "workspace" && !isMemberDropPath(path);
 }
 
@@ -124,7 +132,11 @@ export interface MoveRefusal {
  * not found), never read-only on either side (project mounts, thread uploads; a member's drop
  * may move, and a file may become one), and never onto itself or into itself.
  */
-export function moveRefusal(from: string, to: string): MoveRefusal | undefined {
+export function moveRefusal(
+  from: string,
+  to: string,
+  checkouts: ReadonlySet<string> = NO_CHECKOUTS,
+): MoveRefusal | undefined {
   if (isInternalPath(from))
     return { status: 404, code: "not_found", message: "No such file or folder." };
   if (
@@ -156,7 +168,7 @@ export function moveRefusal(from: string, to: string): MoveRefusal | undefined {
   if (to.startsWith(`${from}/`)) {
     return { status: 400, code: "invalid_path", message: "A folder can't move into itself." };
   }
-  if (isReadOnlyPath(from) || isReadOnlyPath(to)) {
+  if (isReadOnlyPath(from, checkouts) || isReadOnlyPath(to, checkouts)) {
     return {
       status: 403,
       code: "read_only",

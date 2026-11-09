@@ -4,6 +4,7 @@ import type { SandboxAuthenticator } from "./auth.js";
 import { collectAll, collectWorkspace, type CollectOptions, type CollectResult } from "./gc.js";
 import type { WorkspaceOwner } from "./keys.js";
 import type { ObjectStore } from "./object-store.js";
+import { DEFAULT_TEAM_MAX_OBJECTS } from "../uploads/settings.js";
 import {
   limitsQuota,
   resolveLimits,
@@ -33,6 +34,8 @@ export interface WorkspaceSyncOptions {
    * uploads use, with this site default) under the team's storage lock. Ignored with `quota`.
    */
   readonly teamStorageDefaultBytes?: number;
+  /** Object budget of a team without its own (GV2, KOBE-579); default 2 000 000. */
+  readonly teamMaxObjectsDefault?: number;
   readonly collect?: Partial<Omit<CollectOptions, "prefix">>;
   readonly log: Pick<Logger, "error" | "warn" | "info">;
   /**
@@ -85,6 +88,8 @@ export interface WorkspaceSync {
   /** This site's limits and quota check, for server writes that must honour them (KOBE-148). */
   readonly limits: WorkspaceLimits;
   readonly quota: QuotaCheck;
+  /** The site default of the team object budget (GV2): pushes and uploads of new content. */
+  readonly teamMaxObjects: number;
 }
 
 export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSync {
@@ -100,6 +105,7 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
       ? Promise.resolve({ blobs: 0, bytes: 0, tombstones: 0 })
       : collectAll(db, objects, collectOptions, log);
   const maxRows = resolveLimits(limits).maxRows;
+  const teamMaxObjects = options.teamMaxObjectsDefault ?? DEFAULT_TEAM_MAX_OBJECTS;
   const kicked = new Map<string, number>();
   let kicking = false;
   let kickRun: Promise<void> = Promise.resolve();
@@ -108,6 +114,7 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
     prefix,
     limits,
     quota,
+    teamMaxObjects,
     putServerFile: (tx, owner, file, area) =>
       putServerFile(tx, owner, file, { prefix, area, maxRows }),
     deleteServerFile: (tx, owner, path) => deleteServerFile(tx, owner, path),
@@ -119,6 +126,7 @@ export function createWorkspaceSync(options: WorkspaceSyncOptions): WorkspaceSyn
         prefix,
         limits,
         quota,
+        teamMaxObjects,
         log,
         ...(options.dbLimits ? { dbLimits: options.dbLimits } : {}),
         onQuotaPressure: (owner) => {
