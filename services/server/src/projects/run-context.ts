@@ -19,9 +19,12 @@ export function truncateUtf8(text: string, maxBytes: number): { text: string; tr
 /**
  * The `run.start.project` context for a run on a thread in a project (KOBE-159 contract): the
  * project's instructions, applied to every run of every thread in it. Only while the thread's
- * owner (whose sandbox runs it) is a member of the project: a removed member's old threads stop
- * receiving the instructions. The create/update API refuses over-long instructions, so
- * truncation (with `truncated: true`) only covers an old over-long row.
+ * owner (whose sandbox runs it) may converse in the project (PR3; team admins included): a removed
+ * member's old threads stop receiving the instructions. `access` (PR3, CM6) is `write` when the
+ * owner may edit the project (editor, owner, team admin) and `read` for a reader; whether a
+ * checkout exists is not part of it (the commit itself checks, KOBE-579/580). The create/update
+ * API refuses over-long instructions, so truncation (with `truncated: true`) only covers an old
+ * over-long row.
  */
 export async function projectRunContext(
   tx: KobeTx,
@@ -30,7 +33,7 @@ export async function projectRunContext(
 ): Promise<RunProjectContext | undefined> {
   if (projectId === null) return undefined;
   const access = await loadAccess(tx, owner, projectId);
-  if (!access || access.role === undefined) return undefined;
+  if (!access?.can.converse) return undefined;
   const { project } = access;
   const cut = truncateUtf8(project.instructions, PROJECT_INSTRUCTIONS_MAX_BYTES);
   return {
@@ -40,6 +43,7 @@ export async function projectRunContext(
     instructions: cut.text,
     ...(cut.truncated ? { truncated: true } : {}),
     mount: projectMountPath(project.slug),
+    access: access.can.edit ? "write" : "read",
   };
 }
 

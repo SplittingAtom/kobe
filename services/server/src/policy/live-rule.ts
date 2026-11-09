@@ -1,4 +1,5 @@
 import { sql, type KobeTx } from "@kobe/db";
+import { viewableBy } from "../projects/access.js";
 
 /**
  * A user rule still holds: not expired; a `thread` rule's thread exists, is not deleted or
@@ -22,13 +23,7 @@ export function threadReachable(teamId: Fragment, threadId: Fragment, userId: Fr
          AND (t.project_id IS NULL OR EXISTS (
            SELECT 1 FROM projects p
             WHERE p.team_id = t.team_id AND p.id = t.project_id
-              AND (p.visibility = 'workspace'
-                   OR EXISTS (SELECT 1 FROM project_members m
-                               WHERE m.team_id = p.team_id AND m.project_id = p.id
-                                 AND m.user_id = ${userId})
-                   OR EXISTS (SELECT 1 FROM team_members tm
-                               WHERE tm.team_id = p.team_id AND tm.user_id = ${userId}
-                                 AND tm.role = 'team_admin')))))`;
+              AND ${viewableBy(userId)})))`;
 }
 
 export function liveUserRule(now: Date) {

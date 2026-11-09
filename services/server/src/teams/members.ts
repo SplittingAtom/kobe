@@ -14,6 +14,7 @@ import {
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { revokeInvitesSentBy } from "../invitations/team-invites.js";
+import { endProjectStandingInTx } from "../projects/offboard.js";
 import { pauseOwnerSchedulesInTx } from "../schedules/offboard.js";
 import { endSharesOf } from "../threads/share-scope.js";
 import { seedDefaultSkillInstalls } from "../skills/default-sync-team.js";
@@ -183,6 +184,9 @@ export async function removeMemberInTx(
   await notifyEgressUserChanged(tx, userId);
   // Their shared threads go private: nobody else could revoke them (KOBE-221).
   await endSharesOf(tx, teamId, userId);
+  // Their checkouts are discarded and their project rows go (Workspaces PJ3/MT4); the caller
+  // reconciles their mounts after the commit.
+  await endProjectStandingInTx(tx, teamId, userId);
   await recordAudit(tx, {
     action: "identity.member.removed",
     teamId,

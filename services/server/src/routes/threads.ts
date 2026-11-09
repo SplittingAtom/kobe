@@ -36,6 +36,7 @@ import { hitRateLimit } from "../rate-limit.js";
 import { findToolOutput, readOffloadedOutput } from "../threads/entry-output.js";
 import { projectDefaultAgent } from "../projects/run-context.js";
 import { canCreateInProject, viewerProjectIds } from "../threads/references.js";
+import { mountCapRefusal } from "../projects/mounts.js";
 import {
   clearTestThreads,
   createThread,
@@ -134,6 +135,21 @@ type ErrorCode = keyof typeof ERRORS;
 function fail(c: Context, code: ErrorCode) {
   const [status, message] = ERRORS[code];
   return c.json({ code, message }, status);
+}
+
+/**
+ * MT3 (KOBE-578): a new project conversation would open more projects than the workspace allows
+ * (`tooManyMountsErrorSchema`: 409 with the limit).
+ */
+function tooManyMounts(c: Context, limit: number) {
+  return c.json(
+    {
+      code: "too_many_mounts",
+      message: `You have ${limit} projects open, the most this workspace allows. Move or trash a conversation in another project first.`,
+      limit,
+    },
+    409,
+  );
 }
 
 /** A rate-limited route's 429 (`rate_limited`, as the folder and fork routes answer it). */
@@ -322,6 +338,9 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
       if (projectId !== null && !(await canCreateInProject(tx, viewer, projectId))) {
         return "project_not_found" as const;
       }
+      // MT3: a conversation in a project that is not open yet opens it, within the cap.
+      const limit = projectId === null ? undefined : await mountCapRefusal(tx, viewer, projectId);
+      if (limit !== undefined) return { tooManyMounts: limit } as const;
       // KOBE-323: a Workbench test chat talks to the Kobe agent about a draft the caller can see.
       const chat =
         draftId === undefined
@@ -362,7 +381,11 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
       await turnOffAtCreation(tx, viewer, created.thread_id, off);
       return created;
     });
-    return typeof result === "string" ? fail(c, result) : c.json(result, 201);
+    if (typeof result === "string") return fail(c, result);
+    if ("tooManyMounts" in result) return tooManyMounts(c, result.tooManyMounts);
+    // MT1: the first conversation in a project mounts it (run start reconciles again).
+    if (body.project_id) await deps.projectMounts.reconcileUser(c.get("team").id, c.get("user").id);
+    return c.json(result, 201);
   });
 
   app.get("/:id", async (c) => {
@@ -496,7 +519,10 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
       title: body.title,
       quotaDefaultBytes: deps.appResults.store.defaultQuotaBytes,
     });
-    return result.ok ? c.json({ thread_id: result.thread.thread_id }, 201) : fail(c, result.error);
+    if (!result.ok) return fail(c, result.error);
+    // A fork into the project keeps it open for the caller (MT1).
+    await deps.projectMounts.reconcileUser(c.get("team").id, c.get("user").id);
+    return c.json({ thread_id: result.thread.thread_id }, 201);
   });
 
   /**
@@ -577,7 +603,20 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const id = threadIdParam(c);
     const body = await parseBody(c, moveThreadBodySchema);
     if (!id || !body) return invalidRequest(c, "Give project_id: a project id, or null.");
-    return change(c, (tx, viewer) => moveThread(tx, viewer, id, body.project_id));
+    let limit: number | undefined;
+    const res = await change(c, async (tx, viewer) => {
+      // MT3: moving into a project that is not open yet opens it, within the cap (the thread no
+      // longer keeps its old project open).
+      if (body.project_id !== null && (await canCreateInProject(tx, viewer, body.project_id))) {
+        limit = await mountCapRefusal(tx, viewer, body.project_id, id);
+        if (limit !== undefined) return { ok: false, error: "project_not_found" };
+      }
+      return moveThread(tx, viewer, id, body.project_id);
+    });
+    if (limit !== undefined) return tooManyMounts(c, limit);
+    // MT1: in or out, the caller's mounts follow their conversations.
+    if (res.ok) await deps.projectMounts.reconcileUser(c.get("team").id, c.get("user").id);
+    return res;
   });
 
   /**
@@ -594,13 +633,19 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
   app.delete("/:id", async (c) => {
     const id = threadIdParam(c);
     if (!id) return invalidRequest(c);
-    return change(c, (tx, viewer) => trashThread(tx, viewer, id));
+    const res = await change(c, (tx, viewer) => trashThread(tx, viewer, id));
+    // MT1: trashing the last conversation in a project unmounts it.
+    if (res.ok) await deps.projectMounts.reconcileUser(c.get("team").id, c.get("user").id);
+    return res;
   });
 
   app.post("/:id/restore", async (c) => {
     const id = threadIdParam(c);
     if (!id) return invalidRequest(c);
-    return change(c, (tx, viewer) => restoreThread(tx, viewer, id));
+    const res = await change(c, (tx, viewer) => restoreThread(tx, viewer, id));
+    // MT1: a restored project conversation mounts its project again (the cap is not re-checked).
+    if (res.ok) await deps.projectMounts.reconcileUser(c.get("team").id, c.get("user").id);
+    return res;
   });
 
   return app;

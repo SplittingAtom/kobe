@@ -32,6 +32,8 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
     if (!userId.success || !body) return invalidRequest(c);
     const result = await setMemberRole(db, c.get("team").id, userId.data, body.role);
     if (!result.ok) return membershipError(c, result.error);
+    // A team admin views every project; a demoted one loses restricted mounts now (MT2).
+    await deps.projectMounts.reconcileUser(c.get("team").id, userId.data);
     return c.json({ userId: userId.data, role: body.role });
   });
 
@@ -52,6 +54,8 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
         "cancelling scheduled runs after member removal failed",
       );
     }
+    // Every project mount leaves their workspace (MT4); never fails the removal (logged inside).
+    await deps.projectMounts.reconcileUser(teamId, userId.data);
     // The removed member's sandbox in this team loses its connection on every replica (KOBE-24).
     await deps.sandboxWire.revalidateUser(userId.data);
     // Their open file change streams end now on every replica, not at the next recheck (KOBE-496).

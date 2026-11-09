@@ -6,25 +6,30 @@ import {
   eq,
   inArray,
   isLegalHoldViolation,
+  isNotNull,
   isNull,
   memoryDocs,
+  sql,
   projectFiles,
   projectMembers,
   projects,
   teamMembers,
   threads,
+  users,
   type KobeTx,
+  type TeamRole,
 } from "@kobe/db";
 import type {
   CreateProjectRequest,
   Project,
   ProjectMember,
   ProjectRole,
+  TransferOwnerResponse,
   UpdateProjectRequest,
 } from "@kobe/protocol";
 import { canPinAgent, findPinnableAgent } from "../agents/versions.js";
 import { recordAudit } from "../audit/record.js";
-import { effectiveRole, type ProjectAccess, type ProjectRow } from "./access.js";
+import { decide, type ProjectAccess, type ProjectRow } from "./access.js";
 import { deriveSlug, slugCandidates } from "./slug.js";
 
 export type ProjectFailure =
@@ -37,7 +42,8 @@ export type ProjectFailure =
   | "forbidden"
   | "archived"
   | "in_use"
-  | "legal_hold";
+  | "legal_hold"
+  | "user_deactivated";
 
 export type Outcome<T> =
   | { readonly ok: true; readonly value: T }
@@ -167,11 +173,14 @@ export async function createProject(
   return { ok: true, value: { row } };
 }
 
-/** Projects the caller can view (members, or every project for a team admin). */
+/**
+ * Projects the caller may view (PR3, PJ2): readers included, every project for a team admin.
+ * `editorOnly` (`?role=editor`) narrows to the projects the caller may edit.
+ */
 export async function listProjects(
   tx: KobeTx,
   viewer: Viewer,
-  options: { includeArchived: boolean; admin: boolean },
+  options: { includeArchived: boolean; teamRole: TeamRole; editorOnly?: boolean },
 ): Promise<Project[]> {
   const rows = await tx
     .select({ project: projects, role: projectMembers.role })
@@ -192,11 +201,38 @@ export async function listProjects(
     )
     .orderBy(asc(projects.name), asc(projects.id));
   const out: Project[] = [];
-  for (const { project, role } of rows) {
-    const mine = effectiveRole(project.visibility, role ?? undefined);
-    if (mine === undefined && !options.admin) continue;
-    out.push(await toProject(tx, viewer.teamId, project, mine));
+  for (const { project, role: explicit } of rows) {
+    const { role, can } = decide(options.teamRole, explicit ?? undefined, project.visibility);
+    if (!can.view || (options.editorOnly === true && !can.edit)) continue;
+    out.push(await toProject(tx, viewer.teamId, project, role));
   }
+  return out;
+}
+
+/**
+ * Projects without an owner row (PR5: the only owner left the workspace), for team admins to
+ * assign one ("No owner: assign one"). Archived ones only with `includeArchived`.
+ */
+export async function listOwnerless(
+  tx: KobeTx,
+  teamId: string,
+  options: { includeArchived: boolean },
+): Promise<Project[]> {
+  const rows = await tx
+    .select()
+    .from(projects)
+    .where(
+      and(
+        eq(projects.teamId, teamId),
+        options.includeArchived ? undefined : isNull(projects.archivedAt),
+        sql`NOT EXISTS (SELECT 1 FROM project_members m
+                         WHERE m.team_id = ${projects.teamId} AND m.project_id = ${projects.id}
+                           AND m.role = 'owner')`,
+      ),
+    )
+    .orderBy(asc(projects.name), asc(projects.id));
+  const out: Project[] = [];
+  for (const row of rows) out.push(await toProject(tx, teamId, row, undefined));
   return out;
 }
 
@@ -459,4 +495,71 @@ export async function removeMember(
     target: { projectId, userId },
   });
   return { ok: true, value: null };
+}
+
+/**
+ * Hands the project to `toUserId` (PR5, `POST /v1/projects/{id}/owner`; owners and team admins,
+ * under the project row lock). The target, who must be in the workspace and active (a deactivated
+ * account is refused `user_deactivated`, 422 `invalid_input`), becomes an owner. When
+ * the caller is an owner handing over to someone else, the caller becomes an editor
+ * (`previous_owner_user_id` = the caller); a team admin who is not an owner assigns an owner and
+ * nobody is demoted (`previous_owner_user_id` null). Audited `project.owner_transferred`.
+ */
+export async function transferOwner(
+  tx: KobeTx,
+  viewer: Viewer,
+  access: ProjectAccess,
+  toUserId: string,
+): Promise<Outcome<TransferOwnerResponse>> {
+  const projectId = access.project.id;
+  if (!(await usersInTeam(tx, viewer.teamId, [toUserId]))) return fail("not_in_team");
+  const [inactive] = await tx
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.id, toUserId), isNotNull(users.deactivatedAt)));
+  if (inactive) return fail("user_deactivated");
+  const callerRole = await currentRole(tx, viewer.teamId, projectId, viewer.userId);
+  const targetRole = await currentRole(tx, viewer.teamId, projectId, toUserId);
+  if (targetRole === undefined) {
+    await tx.insert(projectMembers).values({
+      teamId: viewer.teamId,
+      projectId,
+      userId: toUserId,
+      role: "owner",
+      addedBy: viewer.userId,
+    });
+  } else if (targetRole !== "owner") {
+    await setRole(tx, viewer.teamId, projectId, toUserId, "owner");
+  }
+  const handover = callerRole === "owner" && toUserId !== viewer.userId;
+  if (handover) await setRole(tx, viewer.teamId, projectId, viewer.userId, "editor");
+  const fromUserId = handover ? viewer.userId : null;
+  await recordAudit(tx, {
+    action: "project.owner_transferred",
+    teamId: viewer.teamId,
+    target: { projectId, toUserId, fromUserId },
+  });
+  return {
+    ok: true,
+    value: { project_id: projectId, owner_user_id: toUserId, previous_owner_user_id: fromUserId },
+  };
+}
+
+async function setRole(
+  tx: KobeTx,
+  teamId: string,
+  projectId: string,
+  userId: string,
+  role: ProjectRole,
+): Promise<void> {
+  await tx
+    .update(projectMembers)
+    .set({ role })
+    .where(
+      and(
+        eq(projectMembers.teamId, teamId),
+        eq(projectMembers.projectId, projectId),
+        eq(projectMembers.userId, userId),
+      ),
+    );
 }

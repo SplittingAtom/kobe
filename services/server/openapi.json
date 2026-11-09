@@ -180,7 +180,7 @@
             }
           }
         },
-        "description": "With `agent_id`, the thread pins the agent's current published version (D19). Suspended, archived and never-published agents answer 409 `agent_unavailable`. With `test: true` (needs `agent_id`, no project) it is a builder test thread (KOBE-85): it runs the agent's unpublished draft, needs the right to edit the agent (else 404 `agent_not_found`), and stays out of lists, search and Trash.",
+        "description": "With `agent_id`, the thread pins the agent's current published version (D19). Suspended, archived and never-published agents answer 409 `agent_unavailable`. With `test: true` (needs `agent_id`, no project) it is a builder test thread (KOBE-85): it runs the agent's unpublished draft, needs the right to edit the agent (else 404 `agent_not_found`), and stays out of lists, search and Trash. With `project_id` the caller must be able to converse in the project (every reader, PR3); the first such conversation mounts the project in the caller's scratchspace (MT1). A project that is not mounted yet is refused 409 `too_many_mounts` (with `limit`) once the caller has the workspace's maximum of open projects (default 20, MT3).",
         "responses": {
           "201": {
             "description": "The new thread.",
@@ -233,7 +233,7 @@
             }
           },
           "409": {
-            "description": "`agent_unavailable`, `no_active_team` or `team_mismatch` (stale tab).",
+            "description": "`agent_unavailable`, `too_many_mounts`, `no_active_team` or `team_mismatch` (stale tab).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2552,7 +2552,7 @@
       "post": {
         "operationId": "moveThread",
         "summary": "Move the thread to a project, or out of one (owner only, CE19)",
-        "description": "Allowed where the caller may start a thread in the project. Refused while a run is queued or running. A thread shared to its old project becomes private. The project's context applies from the next run, which is marked (`GET /v1/threads/{id}/markers`).",
+        "description": "Allowed where the caller may start a thread in the project. Refused while a run is queued or running. A thread shared to its old project becomes private. The project's context applies from the next run, which is marked (`GET /v1/threads/{id}/markers`). The caller's project mounts follow (MT1); moving into a project that is not mounted yet is refused 409 `too_many_mounts` (with `limit`) at the workspace's maximum of open projects.",
         "parameters": [
           {
             "name": "id",
@@ -2636,7 +2636,7 @@
             }
           },
           "409": {
-            "description": "`thread_busy`, `thread_in_trash` or `test_thread`.",
+            "description": "`thread_busy`, `thread_in_trash`, `test_thread` or `too_many_mounts`.",
             "content": {
               "application/json": {
                 "schema": {
