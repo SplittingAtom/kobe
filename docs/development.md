@@ -2,6 +2,15 @@
 
 There is no `docker compose`: development runs on k3s, locally via k3d, with Tilt.
 
+## Names in the product and the API
+
+Workspace is the place a team works in and the tenant boundary (one `teams` row, one Kubernetes
+namespace, one RLS context); Team is the people in it and their roles; Scratchspace is one member's
+own volume (`/workspace`); Project is a shared unit of work with versioned files. The API keeps the
+old names: Workspace = the team row, so the routes stay `/v1/team`, `/v1/me/teams` and the
+`x-kobe-team` header, and permission names stay `team.*` (Workspaces spec WS1-WS3,
+`docs/specs/workspaces.md`). The team role `builder` is now `contributor` in the API and the UI.
+
 ## Dev loop
 
 Prerequisites: Docker (local, or remote via `DOCKER_HOST=ssh://user@host`), k3d, kubectl, Helm 3,

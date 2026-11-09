@@ -198,7 +198,7 @@ signed over its own canonical input, marked, announced (`approval.resolved`) and
 (`approval.decided` with `approveAll: true`) on its own, in one transaction that refuses the whole
 set if any one fails. It is not offered, and refused (`approve_all_not_allowed`), when any of them
 is destructive or open-world by the server's own descriptor, writes a project's shared state
-(project memory, `propose_project_file`), or when the team's limits turn it off. If the
+(project memory, `commit_project`), or when the team's limits turn it off. If the
 connection that asked for one of them is gone, that one expires (as for a single decision) and
 nothing is approved. It never writes a remember-rule. Readers of a shared thread get 404, as for a single decision.
 

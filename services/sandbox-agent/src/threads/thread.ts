@@ -169,7 +169,7 @@ export interface ThreadEnv {
   readonly toolsExtension?: string | undefined;
   /** The agent announced the `files` capability: the extension registers `share_file` (KOBE-149). */
   readonly shareFiles?: boolean | undefined;
-  /** The agent announced `projects` (KOBE-162): kobe-tools registers `propose_project_file`. */
+  /** The agent announced `projects` (KOBE-162): kobe-tools registers `commit_project`. */
   readonly projectTools?: boolean | undefined;
   /** The agent announced `skill_drafts` (KOBE-442): kobe-tools registers `save_skill_draft`. */
   readonly skillDraftTools?: boolean | undefined;

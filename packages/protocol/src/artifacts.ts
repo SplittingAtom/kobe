@@ -5,7 +5,6 @@ import {
   projectCommitOkFields,
   projectCommitToolsRequestSchema,
 } from "./project-commits.js";
-import { projectProposeOkFields, projectToolsRequestSchema } from "./projects.js";
 import {
   webSearchOkFields,
   webSearchToolsRequestSchema,
@@ -138,7 +137,6 @@ export const kobeToolsRequestSchema = z.union([
     ...artifactCallShape.update,
   }),
   fileShareToolsRequestSchema, // KOBE-147 (files.ts)
-  projectToolsRequestSchema, // KOBE-159 (projects.ts)
   projectCommitToolsRequestSchema, // KOBE-576 (project-commits.ts)
   webSearchToolsRequestSchema, // KOBE-114 (web-search.ts)
   memoryToolsRequestSchema, // KOBE-157 (memory.ts)
@@ -152,7 +150,6 @@ export type KobeToolsRequest = z.infer<typeof kobeToolsRequestSchema>;
 export const kobeToolsResponseSchema = z.union([
   z.strictObject({ id: idSchema, ...artifactOkFields }),
   z.strictObject({ id: idSchema, ...fileShareOkFields }), // KOBE-147 (files.ts)
-  z.strictObject({ id: idSchema, ...projectProposeOkFields }), // KOBE-159 (projects.ts)
   z.strictObject({ id: idSchema, ...projectCommitOkFields }), // KOBE-576 (project-commits.ts)
   z.strictObject({ id: idSchema, ...projectCommitFailFields }),
   z.strictObject({ id: idSchema, ...webSearchOkFields }), // KOBE-114 (web-search.ts)

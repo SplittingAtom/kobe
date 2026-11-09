@@ -111,7 +111,7 @@ export interface PiLaunchInput {
   readonly toolsFiles?: boolean | undefined;
   /**
    * The agent announced the `projects` capability (KOBE-162): the extension then registers
-   * `propose_project_file`. Meaningful only with {@link toolsExtension}.
+   * `commit_project`. Meaningful only with {@link toolsExtension}.
    */
   readonly toolsProjects?: boolean | undefined;
   /**

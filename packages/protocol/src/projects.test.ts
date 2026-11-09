@@ -16,7 +16,6 @@ import {
   projectPermissions,
   projectSchema,
   projectSlugSchema,
-  proposeProjectFileInputSchema,
   projectErrorCodeSchema,
   runProjectContextSchema,
   runStartFrameSchema,
@@ -248,77 +247,55 @@ describe("run.start project context", () => {
   });
 });
 
-describe("propose_project_file", () => {
-  const input = { path: "/workspace/out/report.md", folder: "reports", reason: "keep" };
-  it("input", () => {
+describe("propose_project_file (removed in WS-7)", () => {
+  it("the tool, its kobe-tools op and its frames no longer decode", () => {
     expect(CAPABILITY_PROJECTS).toBe("projects");
-    expect(proposeProjectFileInputSchema.safeParse(input).success).toBe(true);
-    expect(proposeProjectFileInputSchema.safeParse({ path: "../x" }).success).toBe(false);
-    expect(proposeProjectFileInputSchema.safeParse({ ...input, project_id: ID }).success).toBe(
-      false,
-    );
-  });
-  it("kobe-tools op and response", () => {
-    const req = {
-      id: "r",
-      op: "project.file_propose",
-      tool_call_id: "t",
-      tool: "propose_project_file",
-      input,
-    };
-    expect(kobeToolsRequestSchema.safeParse(req).success).toBe(true);
-    const ok = {
-      id: "r",
-      ok: true,
-      op: "project_file_propose",
-      status: "pending_approval",
-      proposal_id: ID,
-      project_id: ID2,
-      path: "reports/report.md",
-    };
-    expect(kobeToolsResponseSchema.safeParse(ok).success).toBe(true);
+    expect(
+      kobeToolsRequestSchema.safeParse({
+        id: "r",
+        op: "project.file_propose",
+        tool_call_id: "t",
+        tool: "propose_project_file",
+        input: { path: "/workspace/out/report.md" },
+      }).success,
+    ).toBe(false);
     expect(
       kobeToolsResponseSchema.safeParse({
         id: "r",
-        ok: false,
-        error: { code: "not_in_project", message: "m" },
+        ok: true,
+        op: "project_file_propose",
+        status: "pending_approval",
+        proposal_id: ID,
+        project_id: ID2,
+        path: "reports/report.md",
       }).success,
-    ).toBe(true);
-  });
-  it("frames", () => {
-    const frame = {
-      v,
-      type: "project.file_propose",
-      request_id: "q",
-      run_id: ID,
-      thread_id: ID2,
-      tool_call_id: "t",
-      tool: "propose_project_file",
-      input,
-      workspace: { path: "out/report.md", rev: 2, sha256: SHA, size: 5 },
-    };
-    expect(decodeSandboxFrame(JSON.stringify(frame)).ok).toBe(true);
-    expect(decodeSandboxFrame(JSON.stringify({ ...frame, workspace: undefined })).ok).toBe(false);
-    const result = {
-      v,
-      type: "project.file_propose_result",
-      request_id: "q",
-      ok: true,
-      op: "project_file_propose",
-      status: "pending_approval",
-      proposal_id: ID,
-      project_id: ID2,
-      path: "reports/report.md",
-    };
-    expect(decodeServerFrame(JSON.stringify(result)).ok).toBe(true);
-    const fail = {
-      v,
-      type: "project.file_propose_result",
-      request_id: "q",
-      ok: false,
-      error: { code: "future", message: "m" },
-    };
-    expect(decodeServerFrame(JSON.stringify(fail)).ok).toBe(true);
+    ).toBe(false);
+    expect(
+      decodeSandboxFrame(
+        JSON.stringify({
+          v,
+          type: "project.file_propose",
+          request_id: "q",
+          run_id: ID,
+          thread_id: ID2,
+          tool_call_id: "t",
+          tool: "propose_project_file",
+          input: { path: "out/report.md" },
+          workspace: { path: "out/report.md", rev: 2, sha256: SHA, size: 5 },
+        }),
+      ).ok,
+    ).toBe(false);
+    expect(
+      decodeServerFrame(
+        JSON.stringify({
+          v,
+          type: "project.file_propose_result",
+          request_id: "q",
+          ok: false,
+          error: { code: "future", message: "m" },
+        }),
+      ).ok,
+    ).toBe(false);
   });
 });
 

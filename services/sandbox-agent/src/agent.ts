@@ -35,7 +35,6 @@ import type { PiExit, PiRecord } from "./pi/pi-process.js";
 import { PolicyBroker } from "./policy/broker.js";
 import { ArtifactBroker } from "./tools/broker.js";
 import { FileShareBroker } from "./tools/share-broker.js";
-import { ProjectFileBroker } from "./tools/project-broker.js";
 import { ProjectCommitBroker } from "./tools/project-commit-broker.js";
 import { SkillDraftBroker } from "./tools/skill-draft-broker.js";
 import { FileEditBroker } from "./tools/file-edit-broker.js";
@@ -189,7 +188,6 @@ export class Agent {
   readonly #broker: PolicyBroker;
   readonly #artifacts: ArtifactBroker;
   readonly #shares: FileShareBroker;
-  readonly #proposals: ProjectFileBroker;
   readonly #commits: ProjectCommitBroker;
   /** Runs whose `run.start.project.access` is `write` (KOBE-580): only they may commit. */
   readonly #projectWriteRuns = new Set<string>();
@@ -230,11 +228,6 @@ export class Agent {
     }
     const pushPath = deps.workspace?.pushPath?.bind(deps.workspace);
     this.#shares = new FileShareBroker({
-      root: config.workspaceDir,
-      send: (frame) => this.#wire.send(frame),
-      pushPath: pushPath ?? (() => Promise.reject(new Error("workspace sync is not available"))),
-    });
-    this.#proposals = new ProjectFileBroker({
       root: config.workspaceDir,
       send: (frame) => this.#wire.send(frame),
       pushPath: pushPath ?? (() => Promise.reject(new Error("workspace sync is not available"))),
@@ -313,7 +306,6 @@ export class Agent {
           this.#broker.failRun(runId, "run ended");
           this.#artifacts.failRun(runId, "run ended");
           this.#shares.failRun(runId, "run ended");
-          this.#proposals.failRun(runId, "run ended");
           this.#commits.failRun(runId, "run ended");
           this.#projectWriteRuns.delete(runId);
           this.#skillDrafts.failRun(runId, "run ended");
@@ -364,12 +356,6 @@ export class Agent {
               reply(toolsError(request.id, "not_allowed", "project commits are not available"));
             return;
           }
-          if (request.op === "project.file_propose") {
-            if (this.#projectsEnabled()) {
-              this.#proposals.propose(threadId, runId, request, reply);
-            } else reply(toolsError(request.id, "not_allowed", "projects are not available"));
-            return;
-          }
           if (request.op === "notebook.run") {
             if (this.#notebookToolsEnabled()) this.#notebooks.run(threadId, runId, request, reply);
             else reply(toolsError(request.id, "not_allowed", "notebooks are not available"));
@@ -401,7 +387,6 @@ export class Agent {
           logger.debug({ thread_id: threadId, reason }, "tools channel closed");
           this.#artifacts.failThread(threadId, reason);
           this.#shares.failThread(threadId, reason);
-          this.#proposals.failThread(threadId, reason);
           this.#commits.failThread(threadId, reason);
           this.#skillDrafts.failThread(threadId, reason);
           this.#searches.failThread(threadId, reason);
@@ -425,7 +410,6 @@ export class Agent {
         this.#broker.failAll("connection to Kobe server lost");
         this.#artifacts.failAll("connection to Kobe server lost");
         this.#shares.failAll("connection to Kobe server lost");
-        this.#proposals.failAll("connection to Kobe server lost");
         this.#commits.failAll("connection to Kobe server lost");
         this.#skillDrafts.failAll("connection to Kobe server lost");
         this.#searches.failAll("connection to Kobe server lost");
@@ -529,7 +513,7 @@ export class Agent {
     return this.#deps.toolsExtension !== undefined && this.#deps.workspace?.pushPath !== undefined;
   }
 
-  /** `propose_project_file` needs what `share_file` needs (it pushes the file first). */
+  /** `commit_project` needs what `share_file` needs (the tools channel and workspace sync). */
   #projectsEnabled(): boolean {
     return this.#filesEnabled();
   }
@@ -691,9 +675,6 @@ export class Agent {
         return;
       case "file.share_result":
         this.#shares.onResult(frame);
-        return;
-      case "project.file_propose_result":
-        this.#proposals.onResult(frame);
         return;
       case "project.commit_result":
         this.#commits.onResult(frame);

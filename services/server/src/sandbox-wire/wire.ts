@@ -69,7 +69,7 @@ export interface SandboxWireOptions {
   readonly blobs?: BlobStore;
   /** Upload limits and storage quota default, applied to `file.share` too (KOBE-150). */
   readonly uploads?: UploadSettings;
-  /** Project file mounts: refreshed at run start, used by `project.file_propose` (KOBE-162). */
+  /** Project file mounts: refreshed at run start (KOBE-162). */
   readonly projectMounts?: ProjectMounts;
   /** Runs `web_search.query` (KOBE-114); unset: every search answers "not configured". */
   readonly webSearch?: WebSearchService;
@@ -312,22 +312,6 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       log,
     },
     ...(options.projectMounts ? { projectMounts: options.projectMounts } : {}),
-    projectFiles: {
-      db,
-      blobs: options.blobs,
-      approvals,
-      verifier: options.approvalVerifier,
-      mounts: options.projectMounts,
-      files: {
-        maxFileBytes: (options.uploads ?? DEFAULT_UPLOAD_SETTINGS).maxFileBytes,
-        teamQuotaDefaultBytes: (options.uploads ?? DEFAULT_UPLOAD_SETTINGS).defaultQuotaBytes,
-        teamMaxObjectsDefault:
-          (options.uploads ?? DEFAULT_UPLOAD_SETTINGS).defaultMaxObjects ??
-          DEFAULT_TEAM_MAX_OBJECTS,
-      },
-      runMaxEvents: tuning.runMaxEvents,
-      log,
-    },
     projectCommits: {
       commit: {
         db,
@@ -419,24 +403,6 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
         target.teamId,
         {
           action: "sandbox.skill_draft_refused",
-          actor: SYSTEM_ACTOR,
-          teamId: target.teamId,
-          target: {
-            sandboxId,
-            userId: target.userId,
-            reason: refusal.reason,
-            runId: refusal.runId,
-            toolCallId: refusal.toolCallId,
-          },
-        },
-      );
-    },
-    auditProjectFileRefused(target, sandboxId, refusal) {
-      throttledAudit(
-        `${target.teamId}:${target.userId}:project_file:${refusal.reason}`,
-        target.teamId,
-        {
-          action: "sandbox.project_file_refused",
           actor: SYSTEM_ACTOR,
           teamId: target.teamId,
           target: {
