@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { sanitizeRememberInput } from "./memory-tools.js";
-import { TOOL_RECALL, TOOL_REMEMBER } from "./protocol.js";
+import { TOOL_COMMIT_PROJECT, TOOL_RECALL, TOOL_REMEMBER } from "./protocol.js";
 
 /**
  * Per-run memory and project wiring of the kobe-tools extension (KOBE-157, review of #205). The agent writes the
@@ -10,7 +10,9 @@ import { TOOL_RECALL, TOOL_REMEMBER } from "./protocol.js";
  *  - `text`: the run's memory section (already sanitised, capped and fenced by the agent), added
  *    to that run's system prompt only: not part of the launch, not stored in the session;
  *  - `project` and `viewing` (KOBE-245, KOBE-462): the project instructions and the fenced file
- *    the user has open, added the same way.
+ *    the user has open, added the same way;
+ *  - `project_write` (KOBE-580): the viewer may edit the run's project (`run.start.project.access`
+ *    is `write`); `commit_project` is active only then (registerProjectHooks).
  * An unreadable or malformed file means no tools and no text (fail closed).
  */
 export interface MemoryRunFile {
@@ -24,6 +26,8 @@ export interface MemoryRunFile {
   readonly conflicts: string;
   /** Sync conflicts told mid-run (KOBE-492): a custom message before each later model call. */
   readonly conflictsLive: string;
+  /** The viewer may edit the run's project (KOBE-580): `commit_project` is listed. */
+  readonly projectWrite: boolean;
 }
 const OFF: MemoryRunFile = {
   tools: false,
@@ -32,6 +36,7 @@ const OFF: MemoryRunFile = {
   viewing: "",
   conflicts: "",
   conflictsLive: "",
+  projectWrite: false,
 };
 
 const optionalText = (value: unknown): string | undefined | false =>
@@ -54,6 +59,9 @@ export function readMemoryRunFile(
     const conflicts = optionalText(record.conflicts);
     const conflictsLive = optionalText(record.conflicts_live);
     if ([project, viewing, conflicts, conflictsLive].includes(false)) return OFF;
+    // Absent in files from an older agent: no write access (fail closed).
+    const projectWrite = record.project_write ?? false;
+    if (typeof projectWrite !== "boolean") return OFF;
     return {
       tools,
       text: tools ? text : "",
@@ -61,6 +69,7 @@ export function readMemoryRunFile(
       viewing: viewing || "",
       conflicts: conflicts || "",
       conflictsLive: conflictsLive || "",
+      projectWrite,
     };
   } catch {
     return OFF;
@@ -109,6 +118,24 @@ export function installMemoryHooks(
     if (conflictsLive === "") return undefined;
     return { messages: [...event.messages, conflictNoteMessage(conflictsLive)] };
   }) as never);
+}
+
+/**
+ * `commit_project` (KOBE-580) is registered with the `projects` capability but listed to the model
+ * only in runs whose viewer may edit the project: a reader's runs never offer it (spec CM6, PR3).
+ * Re-evaluated at every prompt, like the memory tools; an unreadable run file means not listed.
+ */
+export function registerProjectHooks(
+  pi: MemoryHooksApi,
+  file: string | undefined,
+  read?: (path: string) => string,
+): void {
+  const syncTools = () => {
+    const active = pi.getActiveTools().filter((name) => name !== TOOL_COMMIT_PROJECT);
+    const write = readMemoryRunFile(file, read).projectWrite;
+    pi.setActiveTools(write ? [...active, TOOL_COMMIT_PROJECT] : active);
+  };
+  pi.on("input", syncTools as never);
 }
 
 /** `customType` of the mid-run sync conflict note (KOBE-492). */

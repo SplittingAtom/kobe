@@ -36,6 +36,7 @@ import { PolicyBroker } from "./policy/broker.js";
 import { ArtifactBroker } from "./tools/broker.js";
 import { FileShareBroker } from "./tools/share-broker.js";
 import { ProjectFileBroker } from "./tools/project-broker.js";
+import { ProjectCommitBroker } from "./tools/project-commit-broker.js";
 import { SkillDraftBroker } from "./tools/skill-draft-broker.js";
 import { FileEditBroker } from "./tools/file-edit-broker.js";
 import { FileOpenBroker } from "./tools/file-open-broker.js";
@@ -131,6 +132,11 @@ export interface WorkspaceHooks {
    * has no workspace sync, so it does not announce the `files` capability.
    */
   pushPath?(rel: string): Promise<PushedFile>;
+  /**
+   * Push every local change now (`commit_project`, KOBE-580: the server commits what the
+   * manifest holds). Absent: `commit_project` answers `not_allowed`.
+   */
+  pushAll?(): Promise<unknown>;
   flush(deadlineMs: number): Promise<unknown>;
   /**
    * The member moved files (`workspace.moved`, KOBE-304): replay the server's moves as local
@@ -184,6 +190,9 @@ export class Agent {
   readonly #artifacts: ArtifactBroker;
   readonly #shares: FileShareBroker;
   readonly #proposals: ProjectFileBroker;
+  readonly #commits: ProjectCommitBroker;
+  /** Runs whose `run.start.project.access` is `write` (KOBE-580): only they may commit. */
+  readonly #projectWriteRuns = new Set<string>();
   readonly #skillDrafts: SkillDraftBroker;
   readonly #searches: WebSearchBroker;
   readonly #fileEdits: FileEditBroker;
@@ -229,6 +238,12 @@ export class Agent {
       root: config.workspaceDir,
       send: (frame) => this.#wire.send(frame),
       pushPath: pushPath ?? (() => Promise.reject(new Error("workspace sync is not available"))),
+    });
+    const pushAll = deps.workspace?.pushAll?.bind(deps.workspace);
+    this.#commits = new ProjectCommitBroker({
+      send: (frame) => this.#wire.send(frame),
+      push: pushAll ?? (() => Promise.reject(new Error("workspace sync is not available"))),
+      canCommit: (runId) => this.#projectWriteRuns.has(runId),
     });
     this.#fileOpens = new FileOpenBroker({
       root: config.workspaceDir,
@@ -299,6 +314,8 @@ export class Agent {
           this.#artifacts.failRun(runId, "run ended");
           this.#shares.failRun(runId, "run ended");
           this.#proposals.failRun(runId, "run ended");
+          this.#commits.failRun(runId, "run ended");
+          this.#projectWriteRuns.delete(runId);
           this.#skillDrafts.failRun(runId, "run ended");
           this.#searches.failRun(runId, "run ended");
           this.#fileEdits.failRun(runId, "run ended");
@@ -340,6 +357,13 @@ export class Agent {
             else reply(toolsError(request.id, "not_allowed", "memory is not available"));
             return;
           }
+          if (request.op === "project.commit") {
+            if (this.#projectCommitsEnabled()) {
+              this.#commits.commit(threadId, runId, request, reply);
+            } else
+              reply(toolsError(request.id, "not_allowed", "project commits are not available"));
+            return;
+          }
           if (request.op === "project.file_propose") {
             if (this.#projectsEnabled()) {
               this.#proposals.propose(threadId, runId, request, reply);
@@ -378,6 +402,7 @@ export class Agent {
           this.#artifacts.failThread(threadId, reason);
           this.#shares.failThread(threadId, reason);
           this.#proposals.failThread(threadId, reason);
+          this.#commits.failThread(threadId, reason);
           this.#skillDrafts.failThread(threadId, reason);
           this.#searches.failThread(threadId, reason);
           this.#fileEdits.failThread(threadId, reason);
@@ -401,6 +426,7 @@ export class Agent {
         this.#artifacts.failAll("connection to Kobe server lost");
         this.#shares.failAll("connection to Kobe server lost");
         this.#proposals.failAll("connection to Kobe server lost");
+        this.#commits.failAll("connection to Kobe server lost");
         this.#skillDrafts.failAll("connection to Kobe server lost");
         this.#searches.failAll("connection to Kobe server lost");
         this.#fileEdits.failAll("connection to Kobe server lost");
@@ -506,6 +532,11 @@ export class Agent {
   /** `propose_project_file` needs what `share_file` needs (it pushes the file first). */
   #projectsEnabled(): boolean {
     return this.#filesEnabled();
+  }
+
+  /** `commit_project` (KOBE-580) pushes the whole working copy first: projects plus a full push. */
+  #projectCommitsEnabled(): boolean {
+    return this.#projectsEnabled() && this.#deps.workspace?.pushAll !== undefined;
   }
 
   /** `save_skill_draft` (KOBE-442) pushes the folder first, so it needs what `share_file` needs. */
@@ -664,6 +695,9 @@ export class Agent {
       case "project.file_propose_result":
         this.#proposals.onResult(frame);
         return;
+      case "project.commit_result":
+        this.#commits.onResult(frame);
+        return;
       case "skill.draft_save_result":
         this.#skillDrafts.onResult(frame);
         return;
@@ -723,8 +757,10 @@ export class Agent {
     // Command ids are per connection (connection.ts leasing): a result for a command that arrived
     // on an earlier connection must not be sent on a later one; the server re-issues instead.
     const epoch = this.#wire.epoch;
-    if (frame.type === "run.start")
+    if (frame.type === "run.start") {
       this.#traces.startRun(frame.run_id, frame.thread_id, frame.trace);
+      if (frame.project?.access === "write") this.#projectWriteRuns.add(frame.run_id);
+    }
     if (frame.type === "run.stop") this.#traces.stopRequested(frame.run_id);
     let outcome: CommandOutcome;
     try {
@@ -734,7 +770,10 @@ export class Agent {
       outcome = fail("internal", "command failed in the sandbox agent");
     }
     if (!outcome.ok) logRefusal(this.#deps.logger, frame, outcome);
-    if (frame.type === "run.start" && !outcome.ok) this.#traces.runEnded(frame.run_id);
+    if (frame.type === "run.start" && !outcome.ok) {
+      this.#traces.runEnded(frame.run_id);
+      this.#projectWriteRuns.delete(frame.run_id);
+    }
     if (this.#wire.epoch !== epoch || !this.#wire.ready) {
       this.#deps.logger.debug({ command_id: commandId }, "result dropped: connection changed");
       return;

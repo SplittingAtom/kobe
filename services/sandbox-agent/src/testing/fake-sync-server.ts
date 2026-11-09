@@ -9,6 +9,7 @@ import {
   isServerOwnedPath,
   workspaceCommitRequestSchema,
   type WorkspaceChangeResult,
+  type WorkspaceCheckoutRef,
   type WorkspaceEntry,
   type WorkspaceMoveRecord,
   type WorkspaceRestoreReport,
@@ -39,6 +40,11 @@ export class FakeSyncServer {
   readonly lost = new Set<string>();
   /** Answer `GET blobs/lost` with 404, like a server from before KOBE-475. */
   noLostEndpoint = false;
+  /**
+   * The member's project checkouts (CM4, KOBE-580): listed by every manifest page, and the only
+   * `projects/<slug>/` paths a commit may write (as KOBE-579's push relaxation).
+   */
+  readonly checkouts: WorkspaceCheckoutRef[] = [];
   #server: Server | undefined;
 
   async start(): Promise<string> {
@@ -175,6 +181,7 @@ export class FakeSyncServer {
         head_rev: this.head,
         entries: all.slice(0, limit),
         more: all.length > limit,
+        checkouts: this.checkouts,
       });
     }
     if (req.method === "GET" && route === "/moves") {
@@ -208,7 +215,8 @@ export class FakeSyncServer {
     if (req.method === "POST" && route === "/commit") {
       const { changes } = workspaceCommitRequestSchema.parse(JSON.parse(body.toString()));
       const results: WorkspaceChangeResult[] = changes.map((c) => {
-        if (isServerOwnedPath(c.path) || isExcludedPath(c.path)) {
+        const checkedOut = this.checkouts.some((k) => c.path.startsWith(`projects/${k.slug}/`));
+        if ((isServerOwnedPath(c.path) && !checkedOut) || isExcludedPath(c.path)) {
           return { status: "rejected", path: c.path, code: "read_only" };
         }
         const cur = this.rows.get(c.path);

@@ -21,6 +21,8 @@ export interface MemoryFileContent {
   readonly conflicts?: string;
   /** Sync conflicts told mid-run (KOBE-492): a custom message before each later model call. */
   readonly conflictsLive?: string;
+  /** The viewer may edit the run's project (KOBE-580): kobe-tools lists `commit_project`. */
+  readonly projectWrite?: boolean;
 }
 
 export const isMemoryTemp = (name: string): boolean =>
@@ -46,6 +48,7 @@ export class MemoryContextFile {
       viewing: content.viewing ?? "",
       conflicts: content.conflicts ?? "",
       conflicts_live: content.conflictsLive ?? "",
+      project_write: content.projectWrite === true,
     });
     const next = this.#chain.then(async () => {
       await writeFileAtomic(this.path, text, this.#mode);
