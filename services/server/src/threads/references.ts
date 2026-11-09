@@ -6,7 +6,7 @@ import { loadAccess, memberProjectIds } from "../projects/access.js";
  * caller's `withTeam` transaction.
  *
  * - `viewerProjectIds`: the active team's projects the viewer is a member of (explicitly, or
- *   implicitly while `members_mode` is `team`); threads shared to those projects are readable.
+ *   implicitly while visibility is `workspace`); threads shared to those projects are readable.
  * - `canCreateInProject`: the viewer may use the project (member, or team admin) and it is not
  *   archived. Non-members get the same answer as for a missing project.
  *

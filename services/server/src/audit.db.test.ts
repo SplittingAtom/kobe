@@ -375,9 +375,12 @@ describe("team events", () => {
       const inv = await alice.post("/v1/team/invites", { email: email("carol"), role: "member" });
       expect(inv.status, JSON.stringify(inv.json)).toBe(202);
       await carol.post(`/v1/me/invites/${finance}/accept`);
-      await alice.patch(`/v1/team/members/${ids.carol}`, { role: "builder" });
+      await alice.patch(`/v1/team/members/${ids.carol}`, { role: "contributor" });
       await alice.patch(`/v1/team/members/${ids.alice}`, { role: "member" }); // last admin: refused
-      const other = await alice.post("/v1/team/invites", { email: email("bob"), role: "builder" });
+      const other = await alice.post("/v1/team/invites", {
+        email: email("bob"),
+        role: "contributor",
+      });
       await alice.delete(`/v1/team/invites/${other.json.invitation.id}`);
       await alice.delete(`/v1/team/members/${ids.carol}`);
     });
@@ -396,15 +399,15 @@ describe("team events", () => {
       [
         "identity.member.role_changed",
         ids.alice,
-        { userId: ids.carol, from: "member", to: "builder" },
+        { userId: ids.carol, from: "member", to: "contributor" },
       ],
       [
         "identity.team_invitation.created",
         ids.alice,
-        { invitationId: expect.any(String), role: "builder" },
+        { invitationId: expect.any(String), role: "contributor" },
       ],
       ["identity.team_invitation.revoked", ids.alice, expect.anything()],
-      ["identity.member.removed", ids.alice, { userId: ids.carol, role: "builder" }],
+      ["identity.member.removed", ids.alice, { userId: ids.carol, role: "contributor" }],
     ]);
   });
 
@@ -602,7 +605,10 @@ describe("read APIs", () => {
   it("refuses the team view to non-admins of the team", async () => {
     await alice.patch(`/v1/team/members/${ids.alice}`, { role: "team_admin" });
     const carol = await h.signIn(email("carol"), "a fresh new password");
-    const inv = await alice.post("/v1/team/invites", { email: email("carol"), role: "builder" });
+    const inv = await alice.post("/v1/team/invites", {
+      email: email("carol"),
+      role: "contributor",
+    });
     expect(inv.status).toBe(202);
     await carol.post(`/v1/me/invites/${finance}/accept`);
     await carol.put("/v1/me/teams/active", { teamId: finance });

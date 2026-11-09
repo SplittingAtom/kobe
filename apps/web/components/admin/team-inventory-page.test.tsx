@@ -159,7 +159,7 @@ describe("who may open the Inventory (KOBE-291 review)", () => {
     expect(inventory().status.kind).toBe("ready");
     expect(canSee(inventory(), access("team_admin", ["team.agents.suspend"]))).toBe(true);
     expect(
-      canSee(inventory(), access("builder", ["team.agents.build", "team.agents.publish"])),
+      canSee(inventory(), access("contributor", ["team.agents.build", "team.agents.publish"])),
     ).toBe(false);
     expect(canSee(inventory(), access("member", ["team.read", "team.agents.use"]))).toBe(false);
     expect(canSee(inventory(), access("team_admin", ["team.members.manage"]))).toBe(false);

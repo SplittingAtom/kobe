@@ -50,11 +50,11 @@ describe("messages", () => {
       to: "a@b.test",
       inviterName: "Eve\nX-Evil: 1",
       teamName: "Fin\rance",
-      role: "builder",
+      role: "contributor",
       signInUrl: "https://kobe.test/",
     });
     expect(m.subject).not.toMatch(/[\r\n]/);
-    expect(m.text).toContain("as a builder");
+    expect(m.text).toContain("as a contributor");
   });
 
   it("puts tokens in the link only", () => {

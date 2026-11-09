@@ -10,7 +10,6 @@ import {
   chosenAgentText,
   type AgentLabel,
 } from "../../lib/chat/agent-origin";
-import { groupAgents } from "../../lib/chat/agent-groups";
 import type { RunnableAgent } from "../../lib/chat/types";
 import { cn } from "../../lib/utils";
 import { useChatSession } from "./kobe-runtime";
@@ -115,75 +114,61 @@ function AgentPicker({
       <p id={`${id}-legend`} className="text-muted-foreground text-xs font-medium">
         Chat with
       </p>
-      <div className="flex max-h-56 flex-col gap-1.5 overflow-y-auto">
-        <div className="grid gap-1.5 @md:grid-cols-2">
-          <label className={OPTION}>
-            <input
-              type="radio"
-              name={`${id}-agent`}
-              className="sr-only"
-              checked={chosenId === null}
-              onChange={() => choose(null)}
-            />
-            <span className="font-medium">No agent</span>
-            <span className="text-muted-foreground text-xs">A plain conversation</span>
-          </label>
-        </div>
-        {groupAgents(agents).map((group) => (
-          <div key={group.id} role="group" aria-labelledby={`${id}-${group.id}`}>
-            <p
-              id={`${id}-${group.id}`}
-              className="text-muted-foreground mt-1 mb-1 text-[0.6875rem] font-medium uppercase"
-            >
-              {group.label}
-            </p>
-            <div className="grid gap-1.5 @md:grid-cols-2">
-              {group.agents.map((agent) => {
-                const label = labels.get(agent.id);
-                return (
-                  <label key={agent.id} className={OPTION}>
-                    <input
-                      type="radio"
-                      name={`${id}-agent`}
-                      className="sr-only"
-                      aria-label={`${agentChoiceName(agent, label)}${agent.dangerous ? ", Dangerous" : ""}`}
-                      checked={chosenId === agent.id}
-                      onChange={() => choose(agent)}
-                    />
-                    <span className="flex min-w-0 flex-wrap items-center gap-x-1.5">
-                      <span className="font-medium">{agent.name}</span>
-                      {label && (
-                        <span className="text-muted-foreground rounded border px-1 text-[0.6875rem] leading-4">
-                          {label.origin}
-                        </span>
-                      )}
-                      {label?.slug !== undefined && (
-                        <span className="text-muted-foreground font-mono text-[0.6875rem]">
-                          {label.slug}
-                        </span>
-                      )}
-                      {agent.dangerous && (
-                        <span className="text-destructive border-destructive/40 rounded border px-1 text-[0.6875rem] leading-4 font-medium">
-                          Dangerous
-                        </span>
-                      )}
-                    </span>
-                    {agent.description && (
-                      <span className="text-muted-foreground line-clamp-2 text-xs">
-                        {agent.description}
-                      </span>
-                    )}
-                    {agent.model !== null && (
-                      <span className={cn("text-muted-foreground text-xs")}>
-                        Model: {modelLabel(agent.model)}
-                      </span>
-                    )}
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-        ))}
+      <div className="grid max-h-56 gap-1.5 overflow-y-auto @md:grid-cols-2">
+        <label className={OPTION}>
+          <input
+            type="radio"
+            name={`${id}-agent`}
+            className="sr-only"
+            checked={chosenId === null}
+            onChange={() => choose(null)}
+          />
+          <span className="font-medium">No agent</span>
+          <span className="text-muted-foreground text-xs">A plain conversation</span>
+        </label>
+        {agents.map((agent) => {
+          const label = labels.get(agent.id);
+          return (
+            <label key={agent.id} className={OPTION}>
+              <input
+                type="radio"
+                name={`${id}-agent`}
+                className="sr-only"
+                aria-label={`${agentChoiceName(agent, label)}${agent.dangerous ? ", Dangerous" : ""}`}
+                checked={chosenId === agent.id}
+                onChange={() => choose(agent)}
+              />
+              <span className="flex min-w-0 flex-wrap items-center gap-x-1.5">
+                <span className="font-medium">{agent.name}</span>
+                {label && (
+                  <span className="text-muted-foreground rounded border px-1 text-[0.6875rem] leading-4">
+                    {label.origin}
+                  </span>
+                )}
+                {label?.slug !== undefined && (
+                  <span className="text-muted-foreground font-mono text-[0.6875rem]">
+                    {label.slug}
+                  </span>
+                )}
+                {agent.dangerous && (
+                  <span className="text-destructive border-destructive/40 rounded border px-1 text-[0.6875rem] leading-4 font-medium">
+                    Dangerous
+                  </span>
+                )}
+              </span>
+              {agent.description && (
+                <span className="text-muted-foreground line-clamp-2 text-xs">
+                  {agent.description}
+                </span>
+              )}
+              {agent.model !== null && (
+                <span className={cn("text-muted-foreground text-xs")}>
+                  Model: {modelLabel(agent.model)}
+                </span>
+              )}
+            </label>
+          );
+        })}
       </div>
     </div>
   );

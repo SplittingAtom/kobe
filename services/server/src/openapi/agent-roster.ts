@@ -358,7 +358,6 @@ export function agentRosterOpenApiSchemas(): Record<string, JsonSchema> {
       additionalProperties: false,
       properties: {
         slug: { type: "string" },
-        name: { type: "string", minLength: 1, maxLength: 80, description: "The copy's name." },
         scope: { type: "string", description: "Ignored (a fork is always personal)." },
       },
     },

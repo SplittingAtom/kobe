@@ -59,7 +59,7 @@ async function seedTeam(): Promise<{ teamId: string; goneId: string }> {
     `sweep-${teamId.slice(0, 8)}`,
   ]);
   await admin.query(
-    `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'builder')`,
+    `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'contributor')`,
     [teamId, stays],
   );
   await admin.query(

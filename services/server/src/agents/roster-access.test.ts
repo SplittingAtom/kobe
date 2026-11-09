@@ -4,7 +4,6 @@ import {
   assignDecision,
   rosterActions,
   rosterAdmin,
-  rowForkBinding,
   type RosterActor,
   type RosterSubject,
 } from "./access.js";
@@ -36,7 +35,7 @@ const subject = (over: Partial<RosterSubject> = {}): RosterSubject => ({
 
 describe("assigning (AR6)", () => {
   it("builders and team admins assign their own agent to the team; members propose", () => {
-    expect(assignDecision(actor("builder"), subject(), "team")).toEqual({
+    expect(assignDecision(actor("contributor"), subject(), "team")).toEqual({
       ok: true,
       mode: "direct",
     });
@@ -59,7 +58,7 @@ describe("assigning (AR6)", () => {
       ok: true,
       mode: "propose",
     });
-    expect(assignDecision(actor("builder"), subject({ published: false }), "site")).toEqual({
+    expect(assignDecision(actor("contributor"), subject({ published: false }), "site")).toEqual({
       ok: false,
       error: "agent_not_published",
     });
@@ -67,15 +66,17 @@ describe("assigning (AR6)", () => {
 
   it("refuses a bound agent outside its team (AR8)", () => {
     const bound = subject({ boundTeamId: ELSEWHERE });
-    expect(assignDecision(actor("builder"), bound, "team")).toEqual({
+    expect(assignDecision(actor("contributor"), bound, "team")).toEqual({
       ok: false,
       error: "agent_bound_to_team",
     });
-    expect(assignDecision(actor("builder", true), subject({ boundTeamId: TEAM }), "site")).toEqual({
+    expect(
+      assignDecision(actor("contributor", true), subject({ boundTeamId: TEAM }), "site"),
+    ).toEqual({
       ok: false,
       error: "agent_bound_to_team",
     });
-    expect(assignDecision(actor("builder"), subject({ boundTeamId: TEAM }), "team")).toEqual({
+    expect(assignDecision(actor("contributor"), subject({ boundTeamId: TEAM }), "team")).toEqual({
       ok: true,
       mode: "direct",
     });
@@ -89,23 +90,25 @@ describe("assigning (AR6)", () => {
     expect(
       assignDecision(actor("team_admin", true), subject({ kind: "team_owned" }), "site"),
     ).toEqual({ ok: false, error: "forbidden" });
-    expect(assignDecision(actor("builder"), subject({ archived: true }), "team")).toEqual({
+    expect(assignDecision(actor("contributor"), subject({ archived: true }), "team")).toEqual({
       ok: false,
       error: "agent_archived",
     });
-    expect(assignDecision(actor("builder"), subject({ teamEntry: "proposed" }), "team")).toEqual({
+    expect(
+      assignDecision(actor("contributor"), subject({ teamEntry: "proposed" }), "team"),
+    ).toEqual({
       ok: false,
       error: "already_on_roster",
     });
     // A removed entry can be re-assigned (AR7).
-    expect(assignDecision(actor("builder"), subject({ teamEntry: "removed" }), "team").ok).toBe(
+    expect(assignDecision(actor("contributor"), subject({ teamEntry: "removed" }), "team").ok).toBe(
       true,
     );
   });
 
   it("lets a builder put someone else's site-assigned agent on the team roster (§5)", () => {
     const siteAssigned = subject({ ownerUserId: OTHER, siteEntry: "active" });
-    expect(assignDecision(actor("builder"), siteAssigned, "team")).toEqual({
+    expect(assignDecision(actor("contributor"), siteAssigned, "team")).toEqual({
       ok: true,
       mode: "direct",
     });
@@ -119,15 +122,15 @@ describe("assigning (AR6)", () => {
 describe("roster admins", () => {
   it("team admins run the team roster, site admins the site roster", () => {
     expect(rosterAdmin(actor("team_admin"), "team")).toBe(true);
-    expect(rosterAdmin(actor("builder"), "team")).toBe(false);
-    expect(rosterAdmin(actor("builder", true), "team")).toBe(false);
+    expect(rosterAdmin(actor("contributor"), "team")).toBe(false);
+    expect(rosterAdmin(actor("contributor", true), "team")).toBe(false);
     expect(rosterAdmin(actor("member", true), "site")).toBe(true);
     expect(rosterAdmin(actor("team_admin"), "site")).toBe(false);
   });
 });
 
 describe("row actions per role (§5)", () => {
-  const ROLES: readonly TeamRole[] = ["member", "builder", "team_admin"];
+  const ROLES: readonly TeamRole[] = ["member", "contributor", "team_admin"];
 
   it("own personal agent on the Personal tab: owner edits, forks, assigns or proposes", () => {
     const member = rosterActions(actor("member"), subject(), "personal");
@@ -142,7 +145,7 @@ describe("row actions per role (§5)", () => {
       remove: false,
       suspendHere: false,
     });
-    expect(rosterActions(actor("builder", true), subject(), "personal")).toMatchObject({
+    expect(rosterActions(actor("contributor", true), subject(), "personal")).toMatchObject({
       assignTeam: "direct",
       assignSite: "direct",
     });
@@ -177,7 +180,7 @@ describe("row actions per role (§5)", () => {
       remove: false,
       pin: false,
     });
-    expect(rosterActions(actor("builder"), row, "team").decide).toBe(false);
+    expect(rosterActions(actor("contributor"), row, "team").decide).toBe(false);
     expect(rosterActions(actor("team_admin"), row, "site").decide).toBe(false);
     expect(rosterActions(actor("member", true), row, "site").decide).toBe(true);
   });
@@ -241,41 +244,5 @@ describe("row actions per role (§5)", () => {
       resumeHere: role === "team_admin",
     });
     expect(rosterActions(actor(role, true), row, "site").edit).toBe(true);
-  });
-});
-
-describe("adopt and the fork's binding on rows (KOBE-571)", () => {
-  const theirs = (over: Partial<RosterSubject> = {}) => subject({ ownerUserId: OTHER, ...over });
-
-  it("offers Adopt to the roster's admins on assigned entries, a bound agent only in its team", () => {
-    expect(rosterActions(actor("team_admin"), theirs({ teamEntry: "active" }), "team").adopt).toBe(
-      true,
-    );
-    expect(rosterActions(actor("builder"), theirs({ teamEntry: "active" }), "team").adopt).toBe(
-      false,
-    );
-    expect(
-      rosterActions(actor("team_admin"), theirs({ teamEntry: "proposed" }), "team").adopt,
-    ).toBe(false);
-    expect(
-      rosterActions(actor("member", true), theirs({ siteEntry: "suspended" }), "site").adopt,
-    ).toBe(true);
-    expect(
-      rosterActions(
-        actor("team_admin"),
-        theirs({ teamEntry: "active", boundTeamId: ELSEWHERE }),
-        "team",
-      ).adopt,
-    ).toBe(false);
-  });
-
-  it("binds forks of team content to the active team, keeps a bound agent's team, leaves site content unbound", () => {
-    const a = actor("builder");
-    expect(rowForkBinding(a, subject({ kind: "team_owned", ownerUserId: OTHER }))).toBe(TEAM);
-    expect(rowForkBinding(a, theirs({ teamEntry: "active" }))).toBe(TEAM);
-    expect(rowForkBinding(a, theirs({ teamEntry: "active", siteEntry: "active" }))).toBeNull();
-    expect(rowForkBinding(a, subject({ kind: "gallery", ownerUserId: null }))).toBeNull();
-    expect(rowForkBinding(a, subject())).toBeNull();
-    expect(rowForkBinding(a, subject({ boundTeamId: ELSEWHERE }))).toBe(ELSEWHERE);
   });
 });

@@ -6,7 +6,11 @@ export function oneLine(value: string, max = 100): string {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
-const ROLE_NAMES = { team_admin: "team admin", builder: "builder", member: "member" } as const;
+const ROLE_NAMES = {
+  team_admin: "team admin",
+  contributor: "contributor",
+  member: "member",
+} as const;
 
 /** Every message names the site by its configured name (`readAppName`, theming TH1). */
 interface Branded {

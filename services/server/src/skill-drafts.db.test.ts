@@ -52,7 +52,7 @@ beforeAll(async () => {
   );
   await h.admin.query(
     `INSERT INTO team_members (team_id, user_id, role) VALUES
-       ($1, $2, 'member'), ($1, $3, 'builder'), ($1, $4, 'team_admin'), ($1, $5, 'member'),
+       ($1, $2, 'member'), ($1, $3, 'contributor'), ($1, $4, 'team_admin'), ($1, $5, 'member'),
        ($6, $2, 'member')`,
     [team, authorId, builderId, adminId, memberId, otherTeam],
   );

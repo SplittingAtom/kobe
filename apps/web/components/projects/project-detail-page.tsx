@@ -44,7 +44,7 @@ function ProjectView({
   const navigate = useNavigate();
   const [confirm, confirmDialog] = useConfirm();
   const can = projectPermissions(
-    access.role === "builder" ? "contributor" : access.role,
+    access.role,
     project.myRole === "member" ? "editor" : (project.myRole ?? undefined),
     "workspace",
   );

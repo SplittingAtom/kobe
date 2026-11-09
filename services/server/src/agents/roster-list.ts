@@ -15,7 +15,6 @@ import {
   type KobeTx,
 } from "@kobe/db";
 import type {
-  AgentLineage,
   AgentReach,
   AgentRosterKind,
   AgentRosterPage,
@@ -28,7 +27,6 @@ import {
   agentAccess,
   rosterActions,
   rosterAdmin,
-  rowForkBinding,
   type RosterActor,
   type RosterEntryState,
   type RosterSubject,
@@ -46,7 +44,6 @@ import { entryUnavailable, ownerStates, type UnavailableReason } from "./roster-
 import { SITE, siteWhere, TEAM, type Row } from "./store.js";
 import { teamRoleAllows } from "../authz/permissions.js";
 import { usageOf, type UsageSubject } from "./inventory.js";
-import { lineageOf } from "./lineage.js";
 
 const GONE = { member: false, deactivated: true } as const;
 
@@ -71,8 +68,6 @@ interface Candidate {
   readonly entry: RosterEntryRecord | null;
   readonly subject: RosterSubject;
   readonly reach?: readonly AgentReach[];
-  /** Personal tab: where the agent was forked from (KOBE-571). */
-  readonly forkedFrom?: AgentLineage;
   /** An entry whose owner left the team or was deactivated (AR10, KOBE-567). */
   readonly unavailable?: UnavailableReason | null;
 }
@@ -127,7 +122,6 @@ function toRow(
   const { row, display, entry } = c;
   const fm = display;
   const current = row.currentVersion;
-  const actions = rosterActions(actor, c.subject, tab);
   return {
     agentId: row.id,
     kind: c.kind,
@@ -150,9 +144,7 @@ function toRow(
     ...(c.reach ? { reach: [...c.reach] } : {}),
     archivedAt: row.archivedAt?.toISOString() ?? null,
     updatedAt: row.updatedAt.toISOString(),
-    actions,
-    ...(actions.fork ? { forkBoundTeamId: rowForkBinding(actor, c.subject) } : {}),
-    ...(c.forkedFrom ? { forkedFrom: c.forkedFrom } : {}),
+    actions: rosterActions(actor, c.subject, tab),
   };
 }
 
@@ -291,9 +283,7 @@ async function personalCandidates(db: KobeDb, actor: RosterActor): Promise<Candi
     db,
     own.map((a) => a.id),
   );
-  const lineage = await lineageOf(db, actor, own);
-  return own.map((row): Candidate => {
-    const forkedFrom = lineage.get(row.id);
+  return own.map((row) => {
     const items = reach.get(row.id) ?? [];
     const team = items.find((r) => r.target === "team" && r.teamId === actor.teamId)?.state ?? null;
     const site = items.find((r) => r.target === "site")?.state ?? null;
@@ -304,7 +294,6 @@ async function personalCandidates(db: KobeDb, actor: RosterActor): Promise<Candi
       entry: null,
       subject: subjectOf("personal", row, { team, site, here: false }),
       reach: items,
-      ...(forkedFrom ? { forkedFrom } : {}),
     };
   });
 }

@@ -42,13 +42,13 @@ describe("team permission matrix (spec D8)", () => {
     ["team.agents.manage", false, false, true],
   ])("%s: member=%s builder=%s team_admin=%s", (permission, member, builder, admin) => {
     expect(teamRoleAllows("member", permission)).toBe(member);
-    expect(teamRoleAllows("builder", permission)).toBe(builder);
+    expect(teamRoleAllows("contributor", permission)).toBe(builder);
     expect(teamRoleAllows("team_admin", permission)).toBe(admin);
   });
 
   it("is hierarchical: each role holds every permission of the roles below it", () => {
     const member = teamPermissionsFor("member");
-    const builder = teamPermissionsFor("builder");
+    const builder = teamPermissionsFor("contributor");
     const admin = teamPermissionsFor("team_admin");
     expect(builder).toEqual(expect.arrayContaining([...member]));
     expect(admin).toEqual(expect.arrayContaining([...builder]));

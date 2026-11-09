@@ -41,7 +41,7 @@ const as = (p: Person) => f.on(0, p);
 async function builder(team: string): Promise<Person> {
   const p = await f.member(team);
   await f.fx.admin.query(
-    `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+    `UPDATE team_members SET role = 'contributor' WHERE team_id = $1 AND user_id = $2`,
     [team, p.id],
   );
   return p;

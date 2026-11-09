@@ -4,7 +4,6 @@ import {
   compactThreadError,
   compactThreadRequestSchema,
 } from "@kobe/protocol";
-import { toProtocolTeamRole } from "../authz/team-role.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { CompactionError } from "../runs/compaction.js";
@@ -36,7 +35,7 @@ export function threadCompactRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
           user_id: c.get("user").id,
           team_id: team.id,
           site_role: c.get("siteRole") ?? "user",
-          team_role: toProtocolTeamRole(team.role),
+          team_role: team.role,
         },
         id.data,
         body.focus,

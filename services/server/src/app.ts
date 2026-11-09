@@ -11,7 +11,6 @@ import { siteAgentRosterRoutes, teamAgentRosterRoutes } from "./routes/agent-ros
 import { agentRoutes } from "./routes/agents.js";
 import { teamEvalSettingsRoutes } from "./routes/team-eval-settings.js";
 import { teamSettingsRoutes } from "./routes/team-settings.js";
-import { teamDefaultAgentRoutes } from "./routes/team-default-agent.js";
 import { siteBudgetRoutes, teamBudgetsRoutes } from "./routes/budgets.js";
 import { artifactRoutes } from "./routes/artifacts.js";
 import { scheduleRoutes } from "./routes/schedules.js";
@@ -216,7 +215,6 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/retention", teamRetentionRoutes(deps));
   api.route("/team/eval-settings", teamEvalSettingsRoutes(deps));
   api.route("/team/settings", teamSettingsRoutes(deps));
-  api.route("/team/default-agent", teamDefaultAgentRoutes(deps));
   api.route("/team/skill-review", teamSkillReviewRoutes(deps));
   api.route("/team/skills", teamSkillInstallRoutes(deps));
   api.route("/team/skills", teamSkillBlockRoutes(deps));

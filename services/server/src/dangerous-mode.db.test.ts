@@ -246,7 +246,7 @@ describe("a Dangerous agent's calls (AC1)", () => {
     await pin(w, "team", DANGEROUS);
     expect((await check(w, "bash", { command: "ls" }).result()).decision).toBe("allow");
     await fx.admin.query(
-      `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+      `UPDATE team_members SET role = 'contributor' WHERE team_id = $1 AND user_id = $2`,
       [w.team, w.owner.id],
     );
     await check(w, "bash", { command: "pwd" }).pending();
@@ -258,7 +258,7 @@ describe("a Dangerous agent's calls (AC1)", () => {
     await pin(w, "personal", DANGEROUS);
     expect((await check(w, "bash", { command: "ls" }).result()).decision).toBe("allow");
     await fx.admin.query(
-      `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+      `UPDATE team_members SET role = 'contributor' WHERE team_id = $1 AND user_id = $2`,
       [w.team, w.owner.id],
     );
     await check(w, "bash", { command: "pwd" }).pending();

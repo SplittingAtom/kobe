@@ -60,12 +60,12 @@ beforeAll(async () => {
   );
   const members: [string, Person, string][] = [
     [finance, "admin", "team_admin"],
-    [finance, "bob", "builder"],
+    [finance, "bob", "contributor"],
     [finance, "carol", "member"],
-    [finance, "erin", "builder"],
-    [marketing, "bob", "builder"],
-    [marketing, "dave", "builder"],
-    [marketing, "erin", "builder"],
+    [finance, "erin", "contributor"],
+    [marketing, "bob", "contributor"],
+    [marketing, "dave", "contributor"],
+    [marketing, "erin", "contributor"],
   ];
   for (const [team, who, role] of members) {
     await adminPg.query(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, $3)`, [
@@ -414,7 +414,7 @@ describe("cap of 10 active schedules per user across teams (ac-2)", () => {
     expect(res.json).not.toHaveProperty("active_count");
     expect(res.json).not.toHaveProperty("limit");
     await adminPg.query(
-      `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+      `UPDATE team_members SET role = 'contributor' WHERE team_id = $1 AND user_id = $2`,
       [marketing, ids.erin],
     );
     await adminPg.query(`DELETE FROM schedules WHERE user_id = $1`, [ids.dave]);

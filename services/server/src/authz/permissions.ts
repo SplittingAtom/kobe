@@ -4,7 +4,7 @@ import type { SiteGrant } from "@kobe/protocol";
 /**
  * The fixed role model (spec D8) as one permission matrix. Each permission names the least
  * privileged role that holds it; roles are hierarchical (Owner > Admin > User;
- * team_admin > builder > member). Site and team permissions are separate maps: a site role
+ * team_admin > contributor > member). Site and team permissions are separate maps: a site role
  * never grants a team permission, so site admins reach team content only through break-glass.
  * Custom roles are out of scope for v1.
  */
@@ -15,7 +15,7 @@ export type SiteRole = "owner" | "admin" | null;
 const SITE_RANK = { user: 0, admin: 1, owner: 2 } as const;
 type SiteLevel = keyof typeof SITE_RANK;
 
-const TEAM_RANK: Readonly<Record<TeamRole, number>> = { member: 0, builder: 1, team_admin: 2 };
+const TEAM_RANK: Readonly<Record<TeamRole, number>> = { member: 0, contributor: 1, team_admin: 2 };
 
 export const SITE_PERMISSIONS = {
   "site.settings.manage": "admin",
@@ -58,11 +58,11 @@ export const TEAM_PERMISSIONS = {
   "team.personal.create": "member",
   "team.grants.connect": "member",
   "team.schedules.personal": "member",
-  // Builder: create and publish to the team.
-  "team.agents.build": "builder",
-  "team.agents.publish": "builder",
-  "team.skills.publish": "builder",
-  "team.projects.create": "builder",
+  // Contributor (was builder, Workspaces MG1): create and publish to the team.
+  "team.agents.build": "contributor",
+  "team.agents.publish": "contributor",
+  "team.skills.publish": "contributor",
+  "team.projects.create": "contributor",
   // Team admin: run the team.
   "team.members.manage": "team_admin",
   "team.models.manage": "team_admin",

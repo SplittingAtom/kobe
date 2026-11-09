@@ -6,8 +6,11 @@ import {
   files,
   memoryDocVersions,
   memoryDocs,
+  projectCheckouts,
+  projectCommits,
   projectFiles,
   projectMembers,
+  projectTreeEntries,
   projects,
   runs,
   teamMemorySettings,
@@ -73,6 +76,26 @@ async function insertProject(tx: KobeTx, teamId: string) {
     .returning({ id: projects.id });
   if (!project) throw new Error("probe: project insert returned nothing");
   return { projectId: project.id, userId };
+}
+
+/** A project with commit 1, for tree entries and checkouts to hang off. */
+async function insertCommit(tx: KobeTx, teamId: string) {
+  const { projectId, userId } = await insertProject(tx, teamId);
+  const [commit] = await tx
+    .insert(projectCommits)
+    .values({
+      teamId,
+      projectId,
+      seq: 1,
+      authorUserId: userId,
+      authorKind: "user",
+      message: "Probe",
+      fileCount: 1,
+      bytes: 5,
+    })
+    .returning({ id: projectCommits.id });
+  if (!commit) throw new Error("probe: commit insert returned nothing");
+  return { projectId, userId, commitId: commit.id };
 }
 
 async function insertArtifact(tx: KobeTx, teamId: string) {
@@ -161,5 +184,24 @@ export const workspaceFixtures: Record<(typeof workspace.team)[number], ProbeFix
       blobRef: `teams/${teamId}/projects/${projectId}/files/probe`,
       addedBy: userId,
     });
+  },
+  project_commits: async (tx, teamId) => {
+    await insertCommit(tx, teamId);
+  },
+  project_tree_entries: async (tx, teamId) => {
+    const { projectId, commitId } = await insertCommit(tx, teamId);
+    await tx.insert(projectTreeEntries).values({
+      teamId,
+      commitId,
+      path: "docs/probe.txt",
+      sha256: "0".repeat(64),
+      blobRef: `teams/${teamId}/projects/${projectId}/blobs/${"0".repeat(64)}`,
+      sizeBytes: 5,
+      mimeType: "text/plain",
+    });
+  },
+  project_checkouts: async (tx, teamId) => {
+    const { projectId, userId, commitId } = await insertCommit(tx, teamId);
+    await tx.insert(projectCheckouts).values({ teamId, projectId, userId, baseCommitId: commitId });
   },
 };

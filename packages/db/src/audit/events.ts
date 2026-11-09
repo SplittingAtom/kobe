@@ -19,6 +19,11 @@ import {
 import { BREAK_GLASS_MAX_MINUTES, BREAK_GLASS_NOTIFICATION_EVENTS } from "../schema/break-glass.js";
 import { RETENTION_PERIODS } from "../schema/retention.js";
 import { teamRole } from "../schema/team-members.js";
+import {
+  PROJECT_COMMIT_AUTHOR_KINDS,
+  PROJECT_ROLE_VALUES,
+  PROJECT_VISIBILITY_VALUES,
+} from "../schema/projects.js";
 import { UI_RESOURCE_PLACEMENTS } from "../schema/connector-ui-resources.js";
 import { PI_TOOL_NAME_PATTERN } from "../connectors/snapshot.js";
 import { UI_RESOURCE_FAILURES, UI_RESOURCE_URI_PATTERN } from "../connectors/ui-resources.js";
@@ -85,6 +90,8 @@ const label = z
   .max(200)
   .regex(/^[^\p{Cc}\p{Zl}\p{Zp}]*$/u);
 const role = z.enum(teamRole.enumValues);
+const projectRole = z.enum(PROJECT_ROLE_VALUES);
+const projectVisibility = z.enum(PROJECT_VISIBILITY_VALUES);
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
 /** A thread folder's name (KOBE-534, TF1): trimmed, 1-80 characters. */
 const folderName = z.string().min(1).max(80);
@@ -142,6 +149,8 @@ const rememberLimits = {
 /** An egress domain pattern or host (the `egress_domains` grammar): never a URL or path. */
 const egressDomain = z.string().max(253).regex(new RegExp(DOMAIN_PATTERN_SQL));
 const count = z.number().int().nonnegative();
+/** A project's explicit role set (GV4): how many rows of each role, never who. */
+const projectRoleCounts = z.strictObject({ owner: count, editor: count, reader: count });
 /** A budget amount in dollars (KOBE-42). */
 const usdAmount = z.number().nonnegative().max(MAX_BUDGET_USD);
 /** A token budget (KOBE-42, user decision: token budgets beside dollar budgets). */
@@ -737,14 +746,6 @@ export const AUDIT_EVENTS = {
   /** A team admin turned post-run follow-up suggestions on or off for the team (KOBE-222, CE21). */
   "models.followups.changed": event("team", { enabled: z.boolean() }),
   /**
-   * A team admin chose the team's default agent for new threads from its roster, or went back to
-   * the site default (`agentId` null) (KOBE-571, agents-roster §7.7). Ids only.
-   */
-  "team.default_agent_changed": event("team", {
-    agentId: id.nullable(),
-    previousAgentId: id.nullable(),
-  }),
-  /**
    * A budget or rate limit was set, changed or removed (KOBE-42, D30): the site's (install
    * admins; no team), the team's or one member's (team admins). Amounts in dollars; null = none.
    */
@@ -983,15 +984,11 @@ export const AUDIT_EVENTS = {
     focused: z.boolean().optional(),
   }),
   // ── project: configuration metadata only, never names, instructions or descriptions (KOBE-161, D23) ──
-  "project.created": event("team", { projectId: id, membersMode: z.enum(["team", "selected"]) }),
+  "project.created": event("team", { projectId: id, visibility: projectVisibility }),
   /** `fields` lists which settings changed (names, not values). */
   "project.updated": event("team", { projectId: id, fields: z.array(z.string().max(40)).max(10) }),
   "project.deleted": event("team", { projectId: id }),
-  "project.member_added": event("team", {
-    projectId: id,
-    userId: id,
-    role: z.enum(["owner", "member"]),
-  }),
+  "project.member_added": event("team", { projectId: id, userId: id, role: projectRole }),
   "project.member_removed": event("team", { projectId: id, userId: id }),
   /** A file joined the project (KOBE-162); `source` says whether a person uploaded it or an approved agent proposal added it. Never names or content. */
   "project.file_added": event("team", {
@@ -1011,11 +1008,65 @@ export const AUDIT_EVENTS = {
       .optional(),
   }),
   "project.file_removed": event("team", { projectId: id, fileId: id }),
+  /**
+   * GV4: `roles` is the project's explicit role set after the change (how many owners, editors and
+   * readers; never names). Rows written before KOBE-577 name `member` and carry no `roles`.
+   */
   "project.member_role_changed": event("team", {
     projectId: id,
     userId: id,
-    from: z.enum(["owner", "member"]),
-    to: z.enum(["owner", "member"]),
+    from: projectRole,
+    to: projectRole,
+    roles: projectRoleCounts,
+  }),
+  // ── Workspaces (KOBE-577, GV4): ids, counts and kinds only, never paths, names or messages ──
+  "project.visibility_changed": event("team", {
+    projectId: id,
+    from: projectVisibility,
+    to: projectVisibility,
+  }),
+  /** PR5: an owner or a team admin handed the project to another member (now its owner). */
+  "project.owner_transferred": event("team", {
+    projectId: id,
+    toUserId: id,
+    fromUserId: id.nullable(),
+  }),
+  /** CM2: `baseSeq` null for a project with no commit yet. */
+  "project.checked_out": event("team", { projectId: id, baseSeq: count.nullable() }),
+  /** CM5 Discard, or the end of a member's checkouts when they leave (PJ3: `reason`). */
+  "project.checkout_discarded": event("team", {
+    projectId: id,
+    userId: id,
+    reason: z.enum(["discarded", "member_removed"]),
+  }),
+  /** CM5/CM6: a new head. `threadId`/`runId` for an agent's commit_project. */
+  "project.committed": event("team", {
+    projectId: id,
+    commitId: id,
+    seq: version,
+    authorKind: z.enum(PROJECT_COMMIT_AUTHOR_KINDS),
+    threadId: id.optional(),
+    runId: id.optional(),
+    added: count,
+    modified: count,
+    deleted: count,
+    fileCount: count,
+    bytes: count,
+  }),
+  /** CM7: a new commit (`seq`) whose tree is the tree at `revertedSeq`. */
+  "project.commit_reverted": event("team", {
+    projectId: id,
+    commitId: id,
+    seq: version,
+    revertedSeq: version,
+  }),
+  /** GV3: one retention sweep removed history of this project (counts; never the head). */
+  "project.history_pruned": event("team", {
+    projectId: id,
+    commits: count,
+    treeEntries: count,
+    blobsQueued: count,
+    rule: z.enum(["commits", "days", "hard_cap"]),
   }),
   /** The thread's chosen model changed (KOBE-44, D30); null = the team's default. */
   "thread.model_changed": event("team", {

@@ -66,16 +66,16 @@ describe("Members and roles", () => {
   it("names the active team on every call (reads included)", async () => {
     const calls = stubApi({
       "GET /v1/team/members": [200, MEMBERS],
-      "PATCH /v1/team/members/u-bob": [200, { userId: "u-bob", role: "builder" }],
+      "PATCH /v1/team/members/u-bob": [200, { userId: "u-bob", role: "contributor" }],
     });
     renderTeam(<MembersPage />);
-    await userEvent.selectOptions(await screen.findByLabelText("Role of Bob"), "builder");
+    await userEvent.selectOptions(await screen.findByLabelText("Role of Bob"), "contributor");
     // Choosing alone changes nothing (keyboard users arrow through options).
     expect(calls.some((c) => c.method === "PATCH")).toBe(false);
     await userEvent.click(screen.getByRole("button", { name: "Save role of Bob" }));
-    await screen.findByText("Bob is now Builder.");
+    await screen.findByText("Bob is now Contributor.");
     const patch = must(calls.find((c) => c.method === "PATCH"));
-    expect(JSON.parse(String(patch.body))).toEqual({ role: "builder" });
+    expect(JSON.parse(String(patch.body))).toEqual({ role: "contributor" });
     expect(calls.every((c) => c.headers.get("x-kobe-team") === TEAM.id)).toBe(true);
     await waitFor(() =>
       expect(summary(calls).filter((c) => c === "GET /v1/team/members")).toHaveLength(2),
@@ -176,18 +176,18 @@ describe("Team invitations", () => {
       "GET /v1/team/invites": [200, { invitations: [] }],
       "POST /v1/team/invites": [
         202,
-        { invitation: { id: "i-1", email: "c@x.io", role: "builder" } },
+        { invitation: { id: "i-1", email: "c@x.io", role: "contributor" } },
       ],
     });
     renderTeam(<TeamInvitesPage />);
     await screen.findByText("No open invitations.");
     await userEvent.type(screen.getByLabelText(/Email address/), "c@x.io");
-    await userEvent.selectOptions(screen.getByLabelText("Role"), "builder");
+    await userEvent.selectOptions(screen.getByLabelText("Role"), "contributor");
     await userEvent.click(screen.getByRole("button", { name: "Invite" }));
-    const notice = await screen.findByText(/Invited c@x\.io as Builder/);
+    const notice = await screen.findByText(/Invited c@x\.io as Contributor/);
     expect(notice.textContent).not.toMatch(/account/);
     const post = must(calls.find((c) => c.method === "POST"));
-    expect(JSON.parse(String(post.body))).toEqual({ email: "c@x.io", role: "builder" });
+    expect(JSON.parse(String(post.body))).toEqual({ email: "c@x.io", role: "contributor" });
     expect(post.headers.get("x-kobe-team")).toBe(TEAM.id);
   });
 

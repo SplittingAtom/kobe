@@ -1,13 +1,16 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   check,
   foreignKey,
   index,
+  integer,
   pgTable,
   primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -18,13 +21,30 @@ import { teams } from "./teams.js";
 // Team tables: every key and foreign key includes team_id. File content lives in S3
 // (`project_files.blob_ref`, listed in `blob-refs.ts`), never in Postgres.
 
-/** `owner` manages the project and its members; `member` uses it (protocol `projectRoleSchema`). */
-export const PROJECT_ROLE_VALUES = ["owner", "member"] as const;
+/**
+ * Project roles (KOBE-577, Workspaces PR3; protocol `projectRoleSchema`): `owner` manages the
+ * project and its people, `editor` checks out and commits, `reader` views and converses.
+ */
+export const PROJECT_ROLE_VALUES = ["owner", "editor", "reader"] as const;
 export type ProjectRole = (typeof PROJECT_ROLE_VALUES)[number];
 
-/** `team`: every team member is an implicit member; `selected`: only `project_members` rows. */
-export const PROJECT_MEMBERS_MODE_VALUES = ["team", "selected"] as const;
-export type ProjectMembersMode = (typeof PROJECT_MEMBERS_MODE_VALUES)[number];
+/**
+ * Who sees a project (PR2; protocol `projectVisibilitySchema`): `workspace` = every team member is
+ * an implicit reader; `restricted` = only `project_members` rows (team admins see both).
+ */
+export const PROJECT_VISIBILITY_VALUES = ["workspace", "restricted"] as const;
+export type ProjectVisibility = (typeof PROJECT_VISIBILITY_VALUES)[number];
+
+/** Who wrote a commit (CM1): a person (web, editor) or an agent's `commit_project` call. */
+export const PROJECT_COMMIT_AUTHOR_KINDS = ["user", "agent"] as const;
+export type ProjectCommitAuthorKind = (typeof PROJECT_COMMIT_AUTHOR_KINDS)[number];
+
+/** Protocol `PROJECT_COMMIT_MESSAGE_MAX` (characters). */
+export const PROJECT_COMMIT_MESSAGE_MAX = 500;
+/** Protocol `PROJECT_FILES_MAX`: files per tree. */
+export const PROJECT_TREE_FILES_MAX = 500;
+/** Protocol `PROJECT_FILE_MAX_BYTES`. */
+export const PROJECT_FILE_MAX_BYTES = 50 * 1024 * 1024;
 
 /** `upload`: a person added it; `proposal`: an agent proposed it and an approval granted it. */
 export const PROJECT_FILE_SOURCE_VALUES = ["upload", "proposal"] as const;
@@ -56,7 +76,22 @@ export const projects = pgTable(
     description: text().notNull().default(""),
     instructions: text().notNull().default(""),
     defaultAgentId: uuid(),
-    membersMode: text().$type<ProjectMembersMode>().notNull().default("team"),
+    visibility: text().$type<ProjectVisibility>().notNull().default("workspace"),
+    /**
+     * The current commit (CM1): `project_files` is its tree. Null until the first commit. The
+     * SQL-only key (team_id, id, head_commit_id) -> project_commits (team_id, project_id, id) refuses deleting the head (GV3
+     * pruning never may).
+     */
+    headCommitId: uuid(),
+    /**
+     * Storage attributed to the project (GV2), kept by the server with every commit and prune:
+     * `live_*` = the head tree (`project_files`), `history_*` = the distinct blobs that only older
+     * commits still reference (so live + history = what the project holds in the object store).
+     */
+    liveBytes: bigint({ mode: "number" }).notNull().default(0),
+    liveObjects: integer().notNull().default(0),
+    historyBytes: bigint({ mode: "number" }).notNull().default(0),
+    historyObjects: integer().notNull().default(0),
     createdBy: uuid()
       .notNull()
       .references(() => users.id),
@@ -80,14 +115,22 @@ export const projects = pgTable(
       "projects_instructions",
       sql`octet_length(${t.instructions}) <= ${sql.raw(String(PROJECT_INSTRUCTIONS_MAX_BYTES))}`,
     ),
-    check("projects_members_mode", sql`${t.membersMode} IN ('team', 'selected')`),
+    check("projects_visibility", sql`${t.visibility} IN ('workspace', 'restricted')`),
+    check(
+      "projects_storage_counts",
+      sql`${t.liveBytes} >= 0 AND ${t.liveObjects} >= 0 AND ${t.historyBytes} >= 0 AND ${t.historyObjects} >= 0`,
+    ),
+    // projects_head_commit_fk (team_id, id, head_commit_id) -> project_commits is SQL-only
+    // (`0200_workspaces_rls.sql`): drizzle cannot type a key between two tables that point at
+    // each other.
   ],
 );
 
 /**
- * Explicit project members. With `members_mode = 'team'` the rows only name owners (everyone
- * else is an implicit member); with `selected` they are the whole membership. "The last owner
- * stays" is a server rule. Removing a project removes its member rows.
+ * Explicit project members (PR2, PR3). With `visibility = 'workspace'` everyone else is an
+ * implicit reader, so rows name owners and editors (a reader row changes nothing until the project
+ * is restricted); with `restricted` they are the whole membership. "The last owner stays" is a
+ * server rule. Removing a project removes its member rows.
  */
 export const projectMembers = pgTable(
   "project_members",
@@ -97,7 +140,7 @@ export const projectMembers = pgTable(
     userId: uuid()
       .notNull()
       .references(() => users.id),
-    role: text().$type<ProjectRole>().notNull().default("member"),
+    role: text().$type<ProjectRole>().notNull().default("editor"),
     addedBy: uuid()
       .notNull()
       .references(() => users.id),
@@ -110,9 +153,9 @@ export const projectMembers = pgTable(
       columns: [t.teamId, t.projectId],
       foreignColumns: [projects.teamId, projects.id],
     }).onDelete("cascade"),
-    // "Which projects is this user in" (project list for a selected-mode member).
+    // "Which projects is this user in" (project list for a member of restricted projects).
     index("project_members_user_idx").on(t.teamId, t.userId),
-    check("project_members_role", sql`${t.role} IN ('owner', 'member')`),
+    check("project_members_role", sql`${t.role} IN ('owner', 'editor', 'reader')`),
   ],
 );
 
@@ -160,5 +203,146 @@ export const projectFiles = pgTable(
     ),
     check("project_files_sha256", sql`${t.sha256} ~ '^[0-9a-f]{64}$'`),
     check("project_files_source", sql`${t.source} IN ('upload', 'proposal')`),
+  ],
+);
+
+/**
+ * One commit of a project (KOBE-577, Workspaces CM1). `seq` counts 1, 2, 3... per project
+ * (assigned under the project row lock); `parent_id` is the previous head, null for the first and
+ * cleared when pruning (GV3) removes the parent (SQL-only key with `ON DELETE SET NULL
+ * (parent_id)`, `0200_workspaces_rls.sql`). `author_user_id` is the member who committed, or whose
+ * conversation's agent did (`author_kind agent`, with `thread_id`/`run_id`; both keys SQL-only and
+ * cleared when the thread or run is purged: history outlives its conversation). `file_count` and
+ * `bytes` describe the commit's whole tree. History is append-only: a revert is a new commit.
+ */
+export const projectCommits = pgTable(
+  "project_commits",
+  {
+    teamId: teamRef(),
+    id: uuid().notNull().defaultRandom(),
+    projectId: uuid().notNull(),
+    seq: integer().notNull(),
+    parentId: uuid(),
+    authorUserId: uuid()
+      .notNull()
+      .references(() => users.id),
+    authorKind: text().$type<ProjectCommitAuthorKind>().notNull(),
+    threadId: uuid(),
+    runId: uuid(),
+    message: text().notNull(),
+    fileCount: integer().notNull(),
+    bytes: bigint({ mode: "number" }).notNull(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.teamId, t.id] }),
+    foreignKey({
+      name: "project_commits_project_fk",
+      columns: [t.teamId, t.projectId],
+      foreignColumns: [projects.teamId, projects.id],
+    }).onDelete("cascade"),
+    // The target of every same-project pointer (head, parent, checkout base): a key that includes
+    // project_id, so none of them can name another project's commit.
+    unique("project_commits_project_commit_unique").on(t.teamId, t.projectId, t.id),
+    // One seq per project; also the history page (newest first) and "head's seq" lookups.
+    uniqueIndex("project_commits_seq_unique").on(t.teamId, t.projectId, t.seq.desc()),
+    // The SQL-only SET NULL keys look these up when a thread or run is purged.
+    index("project_commits_thread_idx")
+      .on(t.teamId, t.threadId)
+      .where(sql`${t.threadId} IS NOT NULL`),
+    index("project_commits_run_idx")
+      .on(t.teamId, t.runId)
+      .where(sql`${t.runId} IS NOT NULL`),
+    index("project_commits_parent_idx")
+      .on(t.teamId, t.parentId)
+      .where(sql`${t.parentId} IS NOT NULL`),
+    check("project_commits_seq", sql`${t.seq} >= 1`),
+    check("project_commits_parent", sql`${t.parentId} IS DISTINCT FROM ${t.id}`),
+    check("project_commits_author_kind", sql`${t.authorKind} IN ('user', 'agent')`),
+    check(
+      "project_commits_message",
+      sql`char_length(btrim(${t.message})) BETWEEN 1 AND ${sql.raw(String(PROJECT_COMMIT_MESSAGE_MAX))}`,
+    ),
+    check(
+      "project_commits_counts",
+      sql`${t.fileCount} BETWEEN 0 AND ${sql.raw(String(PROJECT_TREE_FILES_MAX))} AND ${t.bytes} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * The whole tree of a commit (CM1: a snapshot, not a delta), one row per file. `blob_ref` is the
+ * S3 key (listed in `blob-refs.ts`): `files/<id>` keys of imported files (MG4) or the new
+ * content-addressed `teams/<t>/projects/<p>/blobs/<sha256>`, shared between commits. Rows go with
+ * their commit; the legal-hold guard refuses that while a hold covers the team.
+ */
+export const projectTreeEntries = pgTable(
+  "project_tree_entries",
+  {
+    teamId: teamRef(),
+    commitId: uuid().notNull(),
+    path: text().notNull(),
+    sha256: text().notNull(),
+    blobRef: text().notNull(),
+    sizeBytes: bigint({ mode: "number" }).notNull(),
+    mimeType: text().notNull(),
+    executable: boolean().notNull().default(false),
+  },
+  (t) => [
+    primaryKey({ columns: [t.teamId, t.commitId, t.path] }),
+    foreignKey({
+      name: "project_tree_entries_commit_fk",
+      columns: [t.teamId, t.commitId],
+      foreignColumns: [projectCommits.teamId, projectCommits.id],
+    }).onDelete("cascade"),
+    // "Does any remaining commit still reference this blob" (pruning, GV3).
+    index("project_tree_entries_blob_ref_idx").on(t.teamId, t.blobRef),
+    check(
+      "project_tree_entries_path",
+      sql`char_length(${t.path}) BETWEEN 1 AND 1024 AND ${t.path} !~ '(^/|//|/$|\\\\)' AND ${t.path} !~ '(^|/)\\.\\.?(/|$)'`,
+    ),
+    check(
+      "project_tree_entries_size",
+      sql`${t.sizeBytes} BETWEEN 0 AND ${sql.raw(String(PROJECT_FILE_MAX_BYTES))}`,
+    ),
+    check("project_tree_entries_sha256", sql`${t.sha256} ~ '^[0-9a-f]{64}$'`),
+  ],
+);
+
+/**
+ * A member's working copy of a project (CM2): one per (project, member). `base_commit_id` is the
+ * commit the working copy started from (null for a project with no commit yet); its key refuses
+ * deleting a checkout's base (GV3 pruning never may). Ends with Discard, a commit keeps it and
+ * moves the base.
+ */
+export const projectCheckouts = pgTable(
+  "project_checkouts",
+  {
+    teamId: teamRef(),
+    projectId: uuid().notNull(),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id),
+    baseCommitId: uuid(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.teamId, t.projectId, t.userId] }),
+    foreignKey({
+      name: "project_checkouts_project_fk",
+      columns: [t.teamId, t.projectId],
+      foreignColumns: [projects.teamId, projects.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "project_checkouts_base_fk",
+      columns: [t.teamId, t.projectId, t.baseCommitId],
+      foreignColumns: [projectCommits.teamId, projectCommits.projectId, projectCommits.id],
+    }),
+    // A member's checkouts (sync pull, mounts) and the base lookup when pruning.
+    index("project_checkouts_user_idx").on(t.teamId, t.userId),
+    index("project_checkouts_base_idx")
+      .on(t.teamId, t.baseCommitId)
+      .where(sql`${t.baseCommitId} IS NOT NULL`),
   ],
 );

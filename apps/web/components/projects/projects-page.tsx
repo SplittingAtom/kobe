@@ -35,11 +35,7 @@ export function ProjectsPage() {
   const [archived, setArchived] = useState(false);
   const [listKey, setListKey] = useState(0);
   const mutation = useMutation();
-  const canCreate = projectPermissions(
-    access.role === "builder" ? "contributor" : access.role,
-    undefined,
-    "workspace",
-  ).create;
+  const canCreate = projectPermissions(access.role, undefined, "workspace").create;
   const [creating, setCreating] = useState(false);
 
   async function create(input: ProjectInput) {

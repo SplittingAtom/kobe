@@ -123,12 +123,12 @@ async function started(w: World, capabilities: readonly string[] = [CAPABILITY_P
   return sb;
 }
 
-/** The thread's project; `members_mode` selected, so only joined users are members (admins are not). */
+/** The thread's project; visibility `restricted`, so only joined users are members (admins are not). */
 async function inProject(w: World, join = true): Promise<void> {
   const id = randomUUID();
   const slug = `p-${randomBytes(3).toString("hex")}`;
   await fx.admin.query(
-    `INSERT INTO projects (team_id, id, slug, name, created_by, members_mode) VALUES ($1, $2, $3, 'P', $4, 'selected')`,
+    `INSERT INTO projects (team_id, id, slug, name, created_by, visibility) VALUES ($1, $2, $3, 'P', $4, 'restricted')`,
     [w.team, id, slug, w.owner.id],
   );
   await fx.admin.query(`UPDATE threads SET project_id = $3 WHERE team_id = $1 AND id = $2`, [
@@ -138,7 +138,7 @@ async function inProject(w: World, join = true): Promise<void> {
   ]);
   if (join) {
     await fx.admin.query(
-      `INSERT INTO project_members (team_id, project_id, user_id, role, added_by) VALUES ($1, $2, $3, 'member', $3)`,
+      `INSERT INTO project_members (team_id, project_id, user_id, role, added_by) VALUES ($1, $2, $3, 'editor', $3)`,
       [w.team, id, w.owner.id],
     );
   }

@@ -33,7 +33,7 @@ describe("request bodies", () => {
   });
 
   it("accepts only the fixed team roles", () => {
-    for (const role of ["team_admin", "builder", "member"]) {
+    for (const role of ["team_admin", "contributor", "member"]) {
       expect(memberRoleSchema.safeParse({ role }).success).toBe(true);
     }
     expect(memberRoleSchema.safeParse({ role: "owner" }).success).toBe(false);

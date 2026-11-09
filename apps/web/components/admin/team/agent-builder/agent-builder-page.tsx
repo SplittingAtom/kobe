@@ -79,24 +79,15 @@ export function AgentBuilderPage({
   agentId,
   scope = "team",
   addSkill,
-  rosterFrom,
 }: {
   readonly agentId?: string;
   readonly scope?: BuilderScope;
   /** A skill page's "Add to agent…" (KOBE-297): the draft opens with this skill added. */
   readonly addSkill?: string | undefined;
-  /** The roster a View was opened from (`?from=site`, KOBE-571): which version in effect shows. */
-  readonly rosterFrom?: "team" | "site" | undefined;
 }) {
   const teamId = useTeamAccess().team.id;
   return agentId ? (
-    <ExistingAgent
-      teamId={teamId}
-      agentId={agentId}
-      scope={scope}
-      addSkill={addSkill}
-      rosterFrom={rosterFrom}
-    />
+    <ExistingAgent teamId={teamId} agentId={agentId} scope={scope} addSkill={addSkill} />
   ) : (
     <Builder teamId={teamId} initial={null} scope={scope} />
   );
@@ -107,15 +98,13 @@ function ExistingAgent({
   agentId,
   scope,
   addSkill,
-  rosterFrom,
 }: {
   readonly teamId: string;
   readonly agentId: string;
   readonly scope: BuilderScope;
   readonly addSkill?: string | undefined;
-  readonly rosterFrom?: "team" | "site" | undefined;
 }) {
-  const { state } = useResource(() => getTeamAgent(teamId, agentId, rosterFrom));
+  const { state } = useResource(() => getTeamAgent(teamId, agentId));
   if (state.status !== "ready") {
     // Loading or refused: the way back stays on the page.
     return (
@@ -292,12 +281,8 @@ function Builder({
 
   // Publishing is its own right (the server checks `access.publish`), separate from editing.
   const canPublish = agent !== null && !readOnly && agent.canPublish === true;
-  // Someone else's agent viewed from a roster (KOBE-571, AR14): its version in effect, read-only;
-  // the owner's evals, ratings, cases and exports stay theirs.
-  const rosterVersion = agent?.versionInEffect;
-  const rosterView = rosterVersion !== undefined;
   // Exporting needs the right to read the definition, not edit rights (archived agents export too).
-  const canExport = agent !== null && agent.canExport === true && !rosterView;
+  const canExport = agent !== null && agent.canExport === true;
 
   return (
     <>
@@ -306,14 +291,6 @@ function Builder({
         back={<Link href={home.list}>{home.back}</Link>}
         {...(agent?.dangerous ? { actions: <DangerousBadge /> } : {})}
       />
-      {rosterView && (
-        <Notice tone="info">
-          <p>
-            You&apos;re viewing v{rosterVersion}, the version this roster runs. Only its owner edits
-            it; fork it from the Agents page to make your own copy.
-          </p>
-        </Notice>
-      )}
       {agent?.archivedAt && (
         <Notice tone="warn">
           <p>This agent is archived, so it can&apos;t be changed.</p>
@@ -446,7 +423,7 @@ function Builder({
           </span>
         </div>
       )}
-      {agent && !agent.archivedAt && !rosterView && (
+      {agent && !agent.archivedAt && (
         <EvalStatus
           teamId={teamId}
           agentId={agent.id}
@@ -484,10 +461,8 @@ function Builder({
           }}
         />
       )}
-      {agent && !rosterView && <AgentQuality teamId={teamId} agentId={agent.id} />}
-      {agent && !rosterView && (
-        <SharedCasesSummary teamId={teamId} agentId={agent.id} scope={scope} />
-      )}
+      {agent && <AgentQuality teamId={teamId} agentId={agent.id} />}
+      {agent && <SharedCasesSummary teamId={teamId} agentId={agent.id} scope={scope} />}
       {agent && (
         <VersionHistory
           key={historyKey}

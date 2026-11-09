@@ -167,7 +167,7 @@ describe("Catalog detail", () => {
       ],
     });
     renderTeam(<CatalogDetailPage skillId="id-sales-report" />, {
-      role: "builder",
+      role: "contributor",
       permissions: ["team.read", "team.skills.publish"],
     });
     const form = await screen.findByRole("form", { name: "Install in this team" });

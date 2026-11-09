@@ -137,13 +137,13 @@ async function reconcile(
   for (const path of deletes) await sync.deleteServerFile(tx, owner, path);
 }
 
-/** Members of a project right now (explicit rows, or the whole team in mode `team`). */
+/** Members of a project right now (explicit rows, or the whole team while visibility is `workspace`). */
 async function membersOf(tx: KobeTx, teamId: string, projectId: string): Promise<string[]> {
   const res = await tx.execute<{ user_id: string }>(sql`
     SELECT tm.user_id FROM projects p
       JOIN team_members tm ON tm.team_id = p.team_id
      WHERE p.team_id = ${teamId} AND p.id = ${projectId}
-       AND (p.members_mode = 'team'
+       AND (p.visibility = 'workspace'
             OR EXISTS (SELECT 1 FROM project_members m
                         WHERE m.team_id = p.team_id AND m.project_id = p.id
                           AND m.user_id = tm.user_id))`);

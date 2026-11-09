@@ -73,11 +73,6 @@ export interface VersionRouteOptions {
   readonly limits: AgentLimits;
   /** The agent named by `:id` if the caller may see it; null → 404 (no existence oracle). */
   readonly resolve: (c: Context) => Promise<ResolvedAgent | null>;
-  /**
-   * The agent for the read-only version routes (list and one version), when wider than `resolve`:
-   * the team router adds roster readers of someone else's personal agent (KOBE-571, AR14).
-   */
-  readonly resolveRead?: (c: Context) => Promise<ResolvedAgent | null>;
   /** The signed-in user publishing (recorded on the version). */
   readonly userId: (c: Context) => string;
   /**
@@ -132,7 +127,6 @@ export function mountVersionRoutes<E extends { Variables: object }>(
   options: VersionRouteOptions,
 ): void {
   const { db, resolve, limits } = options;
-  const resolveRead = options.resolveRead ?? resolve;
   const afterWrite = (c: Context, found: ResolvedAgent) =>
     options.afterPublish ? { afterWrite: options.afterPublish(c, found) } : {};
 
@@ -146,7 +140,7 @@ export function mountVersionRoutes<E extends { Variables: object }>(
     );
 
   app.get("/:id/versions", async (c) => {
-    const found = await resolveRead(c);
+    const found = await resolve(c);
     if (!found) return notFound(c);
     const query = versionsQuerySchema.safeParse(c.req.query());
     if (!query.success) return invalidRequest(c, "before is a version number; limit is 1–200.");
@@ -181,7 +175,7 @@ export function mountVersionRoutes<E extends { Variables: object }>(
   });
 
   app.get("/:id/versions/:version", async (c) => {
-    const found = await resolveRead(c);
+    const found = await resolve(c);
     if (!found) return notFound(c);
     const version = versionParamSchema.safeParse(c.req.param("version"));
     if (!version.success) return invalidRequest(c, "The version must be a positive number.");

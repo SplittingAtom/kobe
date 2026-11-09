@@ -27,7 +27,8 @@ export function teamInvitesRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
 
   app.post("/", async (c) => {
     const body = await parseBody(c, inviteSchema);
-    if (!body) return invalidRequest(c, "Give an email and a role (team_admin, builder, member).");
+    if (!body)
+      return invalidRequest(c, "Give an email and a role (team_admin, contributor, member).");
     const me = c.get("user");
     const team = c.get("team");
     if (

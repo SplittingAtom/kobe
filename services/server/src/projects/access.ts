@@ -1,26 +1,28 @@
 import { and, eq, projectMembers, projects, sql, teamMembers, type KobeTx } from "@kobe/db";
-import { projectPermissions, type ProjectAction, type ProjectRole } from "@kobe/protocol";
+import {
+  effectiveProjectRole,
+  projectPermissions,
+  type ProjectAction,
+  type ProjectRole,
+} from "@kobe/protocol";
 import type { TeamRole } from "@kobe/db";
-import { roleFromDb, type DbProjectRole } from "./compat.js";
-import { toProtocolTeamRole } from "../authz/team-role.js";
 
 export type ProjectRow = typeof projects.$inferSelect;
 
 /** A caller's standing in one project: the one place `projectPermissions` is fed. */
 export interface ProjectAccess {
   readonly project: ProjectRow;
-  /** Effective role: explicit row, else an implicit `member` (mode `team`), else none. */
+  /** Effective role: explicit row, else an implicit `reader` (visibility `workspace`), else none. */
   readonly role: ProjectRole | undefined;
   readonly can: Record<ProjectAction, boolean>;
 }
 
-/** The effective project role of a team member (explicit row wins; mode `team` implies member). */
+/** The effective project role of a team member (PR3: explicit row wins; `workspace` implies reader). */
 export function effectiveRole(
-  mode: ProjectRow["membersMode"],
-  explicit: DbProjectRole | undefined,
+  visibility: ProjectRow["visibility"],
+  explicit: ProjectRole | undefined,
 ): ProjectRole | undefined {
-  if (explicit !== undefined) return roleFromDb(explicit);
-  return mode === "team" ? "reader" : undefined;
+  return effectiveProjectRole(explicit, visibility);
 }
 
 async function teamRoleOf(tx: KobeTx, teamId: string, userId: string): Promise<TeamRole | null> {
@@ -59,9 +61,8 @@ export async function loadAccess(
         eq(projectMembers.userId, viewer.userId),
       ),
     );
-  const role = effectiveRole(project.membersMode, member?.role);
-  // The role above already folds the implicit reader in; "restricted" here avoids doing it twice.
-  const can = projectPermissions(toProtocolTeamRole(teamRole), role, "restricted");
+  const role = effectiveRole(project.visibility, member?.role);
+  const can = projectPermissions(teamRole, member?.role, project.visibility);
   return can.view ? { project, role, can } : undefined;
 }
 
@@ -69,7 +70,7 @@ export async function loadAccess(
 export const teamRoleFor = teamRoleOf;
 
 /**
- * Active-team projects `userId` is a member of (explicitly, or implicitly in mode `team`).
+ * Active-team projects `userId` is a member of (explicitly, or implicitly while visibility is `workspace`).
  */
 export async function memberProjectIds(
   tx: KobeTx,
@@ -79,7 +80,7 @@ export async function memberProjectIds(
   const res = await tx.execute<{ id: string }>(sql`
     SELECT p.id FROM projects p
      WHERE p.team_id = ${teamId}
-       AND (p.members_mode = 'team'
+       AND (p.visibility = 'workspace'
             OR EXISTS (SELECT 1 FROM project_members m
                         WHERE m.team_id = p.team_id AND m.project_id = p.id
                           AND m.user_id = ${userId}))`);

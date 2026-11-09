@@ -109,17 +109,17 @@ beforeAll(async () => {
   );
   const members: [string, Person, string][] = [
     [finance, "admin", "team_admin"],
-    [finance, "bob", "builder"],
-    [finance, "erin", "builder"],
-    [finance, "carol", "builder"],
-    [finance, "dave", "builder"],
-    [finance, "fred", "builder"],
-    [finance, "gina", "builder"],
-    [finance, "hank", "builder"],
-    [finance, "ivy", "builder"],
+    [finance, "bob", "contributor"],
+    [finance, "erin", "contributor"],
+    [finance, "carol", "contributor"],
+    [finance, "dave", "contributor"],
+    [finance, "fred", "contributor"],
+    [finance, "gina", "contributor"],
+    [finance, "hank", "contributor"],
+    [finance, "ivy", "contributor"],
     [marketing, "madmin", "team_admin"],
-    [marketing, "bob", "builder"],
-    [marketing, "erin", "builder"],
+    [marketing, "bob", "contributor"],
+    [marketing, "erin", "contributor"],
   ];
   for (const [team, who, role] of members) {
     await adminPg.query(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, $3)`, [

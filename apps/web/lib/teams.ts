@@ -1,6 +1,6 @@
 /** Team switcher client logic (spec D9). The server stays authoritative on membership. */
 
-export type TeamRole = "team_admin" | "builder" | "member";
+export type TeamRole = "team_admin" | "contributor" | "member";
 
 export interface TeamOption {
   readonly id: string;
@@ -31,7 +31,7 @@ export const LAST_TEAM_KEY = "kobe.lastTeamId";
 
 const ROLE_LABELS: Readonly<Record<TeamRole, string>> = {
   team_admin: "Team admin",
-  builder: "Builder",
+  contributor: "Contributor",
   member: "Member",
 };
 

@@ -80,11 +80,6 @@ export const agentReachSchema = z.strictObject({
   state: agentRosterEntryStateSchema,
   /** A decision's note (a decline's reason), shown to the owner. */
   note: z.string().nullable(),
-  /**
-   * A removed entry that an admin declined as a proposal (KOBE-571), so the owner can tell a
-   * decline without a note from a withdrawal or a removal. Absent from older servers.
-   */
-  declined: z.boolean().optional(),
 });
 export type AgentReach = z.infer<typeof agentReachSchema>;
 
@@ -118,11 +113,6 @@ export const agentRosterActionsSchema = z.strictObject({
   /** Site admins: suspend or resume a site roster entry for every team (Site tab). */
   suspendSiteWide: z.boolean(),
   resumeSiteWide: z.boolean(),
-  /**
-   * Adopt an assigned entry into this tab's roster's ownership (KOBE-568 routes, AR10): team admins
-   * on Team, site admins on Site (KOBE-571). Optional (additive): absent means not offered.
-   */
-  adopt: z.boolean().optional(),
 });
 export type AgentRosterActions = z.infer<typeof agentRosterActionsSchema>;
 
@@ -185,20 +175,6 @@ export const agentRosterUsageSchema = z.strictObject({
 });
 export type AgentRosterUsage = z.infer<typeof agentRosterUsageSchema>;
 
-/**
- * Where an own agent was forked from (AR8, §6.7 "Forked from <name> vN", KOBE-571). `name` and
- * `kind` are set only when the viewer may read the source from the active team (else the source
- * stays anonymous: no name, no link).
- */
-export const agentLineageSchema = z.strictObject({
-  agentId: uuidSchema,
-  /** The source's version the fork copied; null when it copied an unpublished draft. */
-  version: z.number().int().positive().nullable(),
-  name: z.string().nullable(),
-  kind: agentRosterKindSchema.nullable(),
-});
-export type AgentLineage = z.infer<typeof agentLineageSchema>;
-
 export const agentRosterRowSchema = z.strictObject({
   agentId: uuidSchema,
   kind: agentRosterKindSchema,
@@ -228,13 +204,6 @@ export const agentRosterRowSchema = z.strictObject({
   archivedAt: timestampSchema.nullable(),
   updatedAt: timestampSchema,
   actions: agentRosterActionsSchema,
-  /**
-   * With `actions.fork`: the team a fork from this row would be bound to (AR8: team content and
-   * bound agents), or null when the copy is unbound (KOBE-571, the fork dialog's notice).
-   */
-  forkBoundTeamId: uuidSchema.nullable().optional(),
-  /** Personal tab: where the agent was forked from (KOBE-571). */
-  forkedFrom: agentLineageSchema.optional(),
   /** Team admins on the Team and Site tabs: the inventory's usage in the active team (AR12). */
   usage: agentRosterUsageSchema.optional(),
 });

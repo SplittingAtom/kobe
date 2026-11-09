@@ -305,7 +305,7 @@ describe("team invitations (ac-2)", () => {
   it("can be declined, revoked, and expire", async () => {
     await h.createUser("carol@inv.test");
     const carol = await h.signIn("carol@inv.test");
-    await alice.post("/v1/team/invites", { email: "carol@inv.test", role: "builder" });
+    await alice.post("/v1/team/invites", { email: "carol@inv.test", role: "contributor" });
     expect((await carol.post(`/v1/me/invites/${finance}/decline`)).status).toBe(204);
     expect((await carol.post(`/v1/me/invites/${finance}/accept`)).status).toBe(404);
 
@@ -345,11 +345,11 @@ describe("team invitations (ac-2)", () => {
 
   it("carry a brand-new person from the site invitation into their team (U1)", async () => {
     // The team admin invites the address first; the site admin brings the person in.
-    await alice.post("/v1/team/invites", { email: "newbie@inv.test", role: "builder" });
+    await alice.post("/v1/team/invites", { email: "newbie@inv.test", role: "contributor" });
     const b = h.browser();
     expect((await accept(await invite("newbie@inv.test"), b)).status).toBe(200);
     expect((await b.get("/v1/me/invites")).json.invitations).toEqual([
-      expect.objectContaining({ teamId: finance, role: "builder" }),
+      expect.objectContaining({ teamId: finance, role: "contributor" }),
     ]);
     expect((await b.post(`/v1/me/invites/${finance}/accept`)).status).toBe(200);
     expect((await b.get("/v1/me/teams")).json.teams).toEqual([
@@ -357,7 +357,7 @@ describe("team invitations (ac-2)", () => {
         id: finance,
         slug: "finance",
         name: "Finance",
-        role: "builder",
+        role: "contributor",
         registry: false,
         chatReady: false,
       },

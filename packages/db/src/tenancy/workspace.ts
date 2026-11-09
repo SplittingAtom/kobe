@@ -13,6 +13,10 @@ export const workspace = defineDomain({
     "projects",
     "project_members",
     "project_files",
+    // Workspaces commits (KOBE-577, CM1).
+    "project_commits",
+    "project_tree_entries",
+    "project_checkouts",
   ],
   siteWide: [],
   grants: {},

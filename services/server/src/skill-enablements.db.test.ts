@@ -56,7 +56,7 @@ const audits = async (team: string, action: string) =>
     )
   ).rows.map((r) => r.target as Record<string, unknown>);
 
-async function role(team: string, p: Person, r: "builder" | "member") {
+async function role(team: string, p: Person, r: "contributor" | "member") {
   await admin().query(`UPDATE team_members SET role = $3 WHERE team_id = $1 AND user_id = $2`, [
     team,
     p.id,
@@ -167,7 +167,7 @@ describe("access modes for team skills (ac-2)", () => {
   it("Builders set Available, On by default and Hidden; Required is Team admin only", async () => {
     const w = await f.world();
     const builder = await f.member(w.team);
-    await role(w.team, builder, "builder");
+    await role(w.team, builder, "contributor");
     const slug = `mode-${tag()}`;
     const id = await seed.teamSkill(w.team, w.owner.id, slug);
     const as = (p: Person, access: string) => f.on(0, p).put(`/v1/skills/${id}/access`, { access });
@@ -211,7 +211,7 @@ describe("the team's catalog switches and Builder installs", () => {
     const w = await f.world();
     const reviewer = (await f.world()).owner.id;
     const builder = await f.member(w.team);
-    await role(w.team, builder, "builder");
+    await role(w.team, builder, "contributor");
     const c = await seed.catalogSkill(`bld-${tag()}`, w.owner.id, reviewer, [
       ["1.0.0", "approved"],
       ["1.1.0", "deprecated"],
@@ -316,7 +316,7 @@ describe("review fixes (KOBE-316 review)", () => {
     const w = await f.world();
     const reviewer = (await f.world()).owner.id;
     const builder = await f.member(w.team);
-    await role(w.team, builder, "builder");
+    await role(w.team, builder, "contributor");
     const t = tag();
     const byAdmin = await seed.catalogSkill(`adm-${t}`, w.owner.id, reviewer, [
       ["1.0.0", "approved"],

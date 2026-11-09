@@ -324,8 +324,8 @@ describe("thread scope (this conversation)", () => {
     });
     const project = randomUUID();
     await fx.admin.query(
-      `INSERT INTO projects (team_id, id, slug, name, members_mode, created_by)
-       VALUES ($1, $2, $3, 'Closed', 'selected', $4)`,
+      `INSERT INTO projects (team_id, id, slug, name, visibility, created_by)
+       VALUES ($1, $2, $3, 'Closed', 'restricted', $4)`,
       [w.team, project, `p-${project.slice(0, 8)}`, w.owner.id],
     );
     // The owner is the team's admin (fx.team): demote them so the project is out of reach.

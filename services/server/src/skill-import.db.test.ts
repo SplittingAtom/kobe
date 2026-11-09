@@ -154,7 +154,7 @@ beforeAll(async () => {
   await h.createUser("admin@import.test", "admin");
   await h.admin.query(`INSERT INTO teams (id, slug, name) VALUES ($1, 'imp', 'Imp')`, [team]);
   await h.admin.query(
-    `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'builder'), ($1, $3, 'member'),
+    `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'contributor'), ($1, $3, 'member'),
        ($1, $4, 'team_admin')`,
     [team, ids[0], ids[1], ids[2]],
   );

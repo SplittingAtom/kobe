@@ -367,12 +367,14 @@ describe("team membership via /v1/team (ac-2, ac-4)", () => {
     const res = await as.alice.request(
       "PATCH",
       `/v1/team/members/${ids.bob}`,
-      { role: "builder" },
+      { role: "contributor" },
       { "x-kobe-team": "" },
     );
     expect(res.status).toBe(400);
     as.alice.team = undefined;
-    expect(await as.alice.patch(`/v1/team/members/${ids.bob}`, { role: "builder" })).toMatchObject({
+    expect(
+      await as.alice.patch(`/v1/team/members/${ids.bob}`, { role: "contributor" }),
+    ).toMatchObject({
       status: 400,
       json: { code: "team_header_required" },
     });
@@ -395,24 +397,24 @@ describe("team membership via /v1/team (ac-2, ac-4)", () => {
     expect(
       (await as.bob.post("/v1/team/invites", { email: email("dave"), role: "member" })).status,
     ).toBe(403);
-    expect((await as.bob.patch(`/v1/team/members/${ids.carol}`, { role: "builder" })).status).toBe(
-      403,
-    );
+    expect(
+      (await as.bob.patch(`/v1/team/members/${ids.carol}`, { role: "contributor" })).status,
+    ).toBe(403);
     expect((await as.bob.delete(`/v1/team/members/${ids.carol}`)).status).toBe(403);
   });
 
   it("lets the team admin add, re-role and remove members", async () => {
     const invite = await as.alice.post("/v1/team/invites", {
       email: "DAVE@teams.test",
-      role: "builder",
+      role: "contributor",
     });
     expect(invite).toMatchObject({
       status: 202,
-      json: { invitation: { email: email("dave"), role: "builder" } },
+      json: { invitation: { email: email("dave"), role: "contributor" } },
     });
     expect(await as.dave.post(`/v1/me/invites/${finance}/accept`)).toMatchObject({
       status: 200,
-      json: { teamId: finance, role: "builder" },
+      json: { teamId: finance, role: "contributor" },
     });
     expect(
       (await as.alice.post("/v1/team/invites", { email: email("dave"), role: "member" })).json.code,
@@ -422,9 +424,9 @@ describe("team membership via /v1/team (ac-2, ac-4)", () => {
     ).toBe(400);
 
     expect(
-      (await as.alice.patch(`/v1/team/members/${ids.carol}`, { role: "builder" })).status,
+      (await as.alice.patch(`/v1/team/members/${ids.carol}`, { role: "contributor" })).status,
     ).toBe(200);
-    expect((await as.carol.get("/v1/team")).json.role).toBe("builder");
+    expect((await as.carol.get("/v1/team")).json.role).toBe("contributor");
     expect(
       (await as.alice.patch(`/v1/team/members/${randomUUID()}`, { role: "member" })).status,
     ).toBe(404);
@@ -483,7 +485,7 @@ describe("team membership via /v1/team (ac-2, ac-4)", () => {
     const expected = [
       { slug: "finance", user_id: ids.alice, role: "team_admin" },
       { slug: "finance", user_id: ids.bob, role: "member" },
-      { slug: "finance", user_id: ids.dave, role: "builder" },
+      { slug: "finance", user_id: ids.dave, role: "contributor" },
       { slug: "marketing", user_id: ids.bob, role: "team_admin" },
     ];
     expect(rows).toHaveLength(expected.length);

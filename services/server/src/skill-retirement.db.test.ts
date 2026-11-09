@@ -90,14 +90,14 @@ beforeAll(async () => {
     ]);
   await h.admin.query(
     `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'team_admin'),
-       ($1, $3, 'builder'), ($4, $5, 'team_admin'), ($6, $7, 'team_admin'), ($8, $9, 'member')`,
+       ($1, $3, 'contributor'), ($4, $5, 'team_admin'), ($6, $7, 'team_admin'), ($8, $9, 'member')`,
     [teams.t1, ids.a1, ids.b1, teams.t2, ids.a2, teams.t3, ids.a3, teams.t4, ids.m4],
   );
   // Team 3 also has a member who ran 2.0.0 lately and one whose agent names the skill; team 5's
   // admin (installed later) pins a version that shares a runtime hash.
   await h.admin.query(
     `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member'),
-       ($1, $3, 'builder'), ($4, $5, 'team_admin')`,
+       ($1, $3, 'contributor'), ($4, $5, 'team_admin')`,
     [teams.t3, ids.r3, ids.g3, teams.t5, ids.a5],
   );
   await h.admin.query(

@@ -1,6 +1,5 @@
 import { and, eq, isNull, siteAgents, type AgentScope, type KobeTx } from "@kobe/db";
 import { KOBE_GALLERY_KEY } from "../gallery/definitions.js";
-import { readTeamDefaultAgent } from "./team-default.js";
 import { resolveAgentPin, type AgentPin } from "./versions.js";
 
 /**
@@ -18,13 +17,13 @@ export const isDefaultNewThreadAgent = (agent: {
 }): boolean => agent.scope === "gallery" && agent.galleryKey === KOBE_GALLERY_KEY;
 
 /**
- * The team's default agent for new threads, chosen by a team admin from its roster (agents-roster
- * §7.7; KOBE-567 hook, setting KOBE-571 in `team-default.ts`); null → the site default (Kobe).
- * Whatever it names still goes through `resolveAgentPin`, so a team default that is not runnable
- * for the member falls back to the site default.
+ * The team's default agent for new threads, chosen from its roster (agents-roster goals, AR9;
+ * KOBE-567 hook). The setting itself is KOBE-571's: until it exists no team has one, and the site
+ * default (Kobe) applies. Whatever it names still goes through `resolveAgentPin`, so a team
+ * default that is not runnable for the member falls back to the site default.
  */
-export async function teamDefaultAgentId(tx: KobeTx, teamId: string): Promise<string | null> {
-  return readTeamDefaultAgent(tx, teamId);
+export async function teamDefaultAgentId(_tx: KobeTx, _teamId: string): Promise<string | null> {
+  return null;
 }
 
 /** The pin of the agent a new conversation starts with for this member, or null (no agent). */

@@ -23,7 +23,7 @@ const as = (p: Person) => f.on(0, p);
 async function builder(team: string): Promise<Person> {
   const p = await f.member(team);
   await f.fx.admin.query(
-    `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+    `UPDATE team_members SET role = 'contributor' WHERE team_id = $1 AND user_id = $2`,
     [team, p.id],
   );
   return p;
@@ -88,7 +88,7 @@ describe("projects API", () => {
     expect((await f.on(0, other.owner).get(`/v1/projects/${project.id}`)).status).toBe(404);
   });
 
-  it("enforces owner vs member rules, members_mode, last owner and team membership", async () => {
+  it("enforces owner vs member rules, visibility, last owner and team membership", async () => {
     const w = await f.world();
     const b = await builder(w.team);
     const m1 = await f.member(w.team);
@@ -106,10 +106,9 @@ describe("projects API", () => {
     const added = await as(b).post(`${url}/members`, { user_id: m1.id });
     expect(added.status).toBe(201);
     expect(added.json.role).toBe("editor");
-    // `reader` is not storable until KOBE-577.
-    expect((await as(b).post(`${url}/members`, { user_id: m2.id, role: "reader" })).json.code).toBe(
-      "role_not_supported_yet",
-    );
+    // A reader row is stored as reader (KOBE-577, MG3).
+    const reader = await as(b).post(`${url}/members`, { user_id: m2.id, role: "reader" });
+    expect([reader.status, reader.json.role]).toEqual([201, "reader"]);
     expect((await as(b).post(`${url}/members`, { user_id: m1.id })).status).toBe(409);
     // Last owner stays; promote, then demote the first.
     expect((await as(b).patch(`${url}/members/${b.id}`, { role: "editor" })).json.code).toBe(
@@ -119,9 +118,15 @@ describe("projects API", () => {
     expect((await as(b).patch(`${url}/members/${m1.id}`, { role: "owner" })).status).toBe(200);
     expect((await as(m1).patch(url, { description: "by new owner" })).status).toBe(200);
     expect((await as(b).patch(`${url}/members/${b.id}`, { role: "editor" })).status).toBe(200);
-    // Mode team: an implicit member without a row can be promoted (gets a row).
+    // A reader row is re-roled like any other.
     expect((await as(m1).patch(`${url}/members/${m2.id}`, { role: "owner" })).status).toBe(200);
-    // Mode selected: only rows count; removing a row removes access.
+    // Visibility workspace: an implicit reader without a row can be given a role (gets a row).
+    const implicit = await f.member(w.team);
+    expect((await as(m1).get(url)).json.my_role).toBe("owner");
+    expect((await as(implicit).get(url)).json.my_role).toBe("reader");
+    const given = await as(m1).patch(`${url}/members/${implicit.id}`, { role: "editor" });
+    expect([given.status, given.json.role]).toEqual([200, "editor"]);
+    // Visibility restricted: only rows count; removing a row removes access.
     expect((await as(m1).patch(url, { visibility: "restricted" })).status).toBe(200);
     const third = await f.member(w.team);
     expect((await as(third).get(url)).status).toBe(404);
@@ -131,8 +136,44 @@ describe("projects API", () => {
     const list = await as(m1).get(`${url}/members`);
     expect(list.json.visibility).toBe("restricted");
     expect(list.json.members.map((x: { user_id: string }) => x.user_id).sort()).toEqual(
-      [m1.id, m2.id].sort(),
+      [m1.id, m2.id, implicit.id].sort(),
     );
+  });
+
+  it("refuses deleting a project with history while a legal hold covers the team (409)", async () => {
+    const w = await f.world();
+    const b = await builder(w.team);
+    const project = await create(b, { name: "Held" });
+    const url = `/v1/projects/${project.id}`;
+    // Commit 1 without files left in the head (e.g. the MG4 Imported commit after a removal).
+    const { rows } = await f.fx.admin.query<{ id: string }>(
+      `INSERT INTO project_commits (team_id, project_id, seq, author_user_id, author_kind, message, file_count, bytes)
+       VALUES ($1, $2, 1, $3, 'user', 'Imported', 0, 0) RETURNING id`,
+      [w.team, project.id, b.id],
+    );
+    await f.fx.admin.query(
+      `UPDATE projects SET head_commit_id = $3 WHERE team_id = $1 AND id = $2`,
+      [w.team, project.id, rows[0]?.id],
+    );
+    const [placer, approver] = [
+      await f.fx.person(`hp${randomUUID().slice(0, 4)}`),
+      await f.fx.person(`ha${randomUUID().slice(0, 4)}`),
+    ];
+    for (const p of [placer, approver]) {
+      await f.fx.admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [p.id]);
+    }
+    const hold = await f.fx.admin.query<{ id: string }>(
+      `INSERT INTO legal_holds (team_id, reason, placed_by) VALUES ($1, 'matter', $2) RETURNING id`,
+      [w.team, placer.id],
+    );
+    await f.fx.admin.query(
+      `UPDATE legal_holds SET status = 'active', approved_by = $2 WHERE id = $1`,
+      [hold.rows[0]?.id, approver.id],
+    );
+    const refused = await as(b).delete(url);
+    expect([refused.status, refused.json.code]).toEqual([409, "forbidden"]);
+    expect(refused.json.message).toContain("legal hold");
+    expect((await as(b).get(url)).status).toBe(200);
   });
 
   it("validates the default agent and refuses delete while threads or memory exist", async () => {

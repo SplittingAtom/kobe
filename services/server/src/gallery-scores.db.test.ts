@@ -93,7 +93,7 @@ beforeAll(async () => {
   }
   for (const [team, user, role] of [
     [finance, ownerId, "team_admin"],
-    [finance, builderId, "builder"],
+    [finance, builderId, "contributor"],
     [finance, adminId, "team_admin"],
   ] as const) {
     await h.admin.query(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, $3)`, [

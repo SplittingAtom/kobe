@@ -4,7 +4,11 @@ import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { LEGAL_HOLD_SQLSTATE } from "./legal-hold/index.js";
 import { BREAK_GLASS_ACTOR_SETTING, BREAK_GLASS_GRANT_SETTING } from "./settings.js";
 
-/** KOBE-160: projects, project_members, project_files and the project FKs (probe suite: probe.db.test). */
+/**
+ * KOBE-160: projects, project_members, project_files and the project FKs; KOBE-577 (Workspaces):
+ * visibility, roles owner|editor|reader, project_commits, project_tree_entries, project_checkouts,
+ * the keys between them and the legal-hold guard over history (probe suite: probe.db.test).
+ */
 const admin = new pg.Client({ connectionString: inject("adminUrl") });
 const appClient = new pg.Client({ connectionString: inject("appUrl") });
 let owner = "";
@@ -50,13 +54,13 @@ interface ProjectOpts {
   name?: string;
   instructions?: string;
   description?: string;
-  mode?: string;
+  visibility?: string;
 }
 
 async function project(teamId: string, o: ProjectOpts = {}): Promise<string> {
   const id = o.id ?? randomUUID();
   await admin.query(
-    `INSERT INTO projects (team_id, id, slug, name, description, instructions, members_mode, created_by)
+    `INSERT INTO projects (team_id, id, slug, name, description, instructions, visibility, created_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [
       teamId,
@@ -65,7 +69,7 @@ async function project(teamId: string, o: ProjectOpts = {}): Promise<string> {
       o.name ?? "P",
       o.description ?? "",
       o.instructions ?? "",
-      o.mode ?? "team",
+      o.visibility ?? "workspace",
       owner,
     ],
   );
@@ -123,14 +127,54 @@ afterAll(async () => {
 });
 
 describe("projects", () => {
-  it("accepts a project and defaults to members_mode team", async () => {
+  it("accepts a project with visibility workspace, no head and zero storage by default", async () => {
     const t = await team();
-    const id = await project(t);
+    const id = randomUUID();
+    await admin.query(
+      `INSERT INTO projects (team_id, id, slug, name, created_by) VALUES ($1, $2, $3, 'P', $4)`,
+      [t, id, `d-${id.slice(0, 8)}`, owner],
+    );
     const { rows } = await admin.query(
-      `SELECT members_mode, archived_at, default_agent_id FROM projects WHERE team_id = $1 AND id = $2`,
+      `SELECT visibility, archived_at, default_agent_id, head_commit_id, live_bytes, live_objects,
+              history_bytes, history_objects
+         FROM projects WHERE team_id = $1 AND id = $2`,
       [t, id],
     );
-    expect(rows).toEqual([{ members_mode: "team", archived_at: null, default_agent_id: null }]);
+    expect(rows).toEqual([
+      {
+        visibility: "workspace",
+        archived_at: null,
+        default_agent_id: null,
+        head_commit_id: null,
+        live_bytes: "0",
+        live_objects: 0,
+        history_bytes: "0",
+        history_objects: 0,
+      },
+    ]);
+  });
+
+  it("has no members_mode column any more (MG0)", async () => {
+    expect(
+      await count(
+        `SELECT count(*) AS n FROM information_schema.columns
+          WHERE table_name = 'projects' AND column_name = 'members_mode'`,
+        [],
+      ),
+    ).toBe(0);
+  });
+
+  it("refuses negative storage counters", async () => {
+    const t = await team();
+    const p = await project(t);
+    for (const col of ["live_bytes", "live_objects", "history_bytes", "history_objects"]) {
+      expect(
+        await errorCode(
+          admin.query(`UPDATE projects SET ${col} = -1 WHERE team_id = $1 AND id = $2`, [t, p]),
+        ),
+        col,
+      ).toBe("23514");
+    }
   });
 
   it("keeps the slug unique per team, not across teams", async () => {
@@ -140,7 +184,7 @@ describe("projects", () => {
     expect(await errorCode(project(await team(), { slug: "alpha" }))).toBeUndefined();
   });
 
-  it("refuses slugs, names, descriptions and modes the contract refuses", async () => {
+  it("refuses slugs, names, descriptions and visibilities the contract refuses", async () => {
     const t = await team();
     for (const slug of ["", "-a", "A", "a_b", "a b", "a/b", "a".repeat(41)]) {
       expect(await errorCode(project(t, { slug })), slug).toBe("23514");
@@ -149,8 +193,10 @@ describe("projects", () => {
     expect(await errorCode(project(t, { name: "  " }))).toBe("23514");
     expect(await errorCode(project(t, { name: "n".repeat(101) }))).toBe("23514");
     expect(await errorCode(project(t, { description: "d".repeat(501) }))).toBe("23514");
-    expect(await errorCode(project(t, { mode: "everyone" }))).toBe("23514");
-    expect(await errorCode(project(t, { mode: "selected" }))).toBeUndefined();
+    for (const visibility of ["everyone", "team", "selected"]) {
+      expect(await errorCode(project(t, { visibility })), visibility).toBe("23514");
+    }
+    expect(await errorCode(project(t, { visibility: "restricted" }))).toBeUndefined();
   });
 
   it("caps instructions at 8 KiB of UTF-8 bytes", async () => {
@@ -164,19 +210,34 @@ describe("projects", () => {
 });
 
 describe("project_members", () => {
-  const member = (t: string, p: string, userId: string, role = "member") =>
+  const member = (t: string, p: string, userId: string, role = "editor") =>
     admin.query(
       `INSERT INTO project_members (team_id, project_id, user_id, role, added_by) VALUES ($1, $2, $3, $4, $5)`,
       [t, p, userId, role, owner],
     );
 
-  it("accepts one row per user and project, roles owner|member only", async () => {
+  it("accepts one row per user and project, roles owner|editor|reader only", async () => {
     const t = await team();
     const p = await project(t);
     expect(await errorCode(member(t, p, owner, "owner"))).toBeUndefined();
     expect(await errorCode(member(t, p, owner))).toBe("23505");
-    expect(await errorCode(member(t, p, other, "admin"))).toBe("23514");
-    expect(await errorCode(member(t, p, other))).toBeUndefined();
+    for (const role of ["admin", "member"]) {
+      expect(await errorCode(member(t, p, other, role)), role).toBe("23514");
+    }
+    expect(await errorCode(member(t, p, other, "reader"))).toBeUndefined();
+    const third = await user();
+    expect(await errorCode(member(t, p, third))).toBeUndefined();
+  });
+
+  it("defaults a row's role to editor", async () => {
+    const t = await team();
+    const p = await project(t);
+    await admin.query(
+      `INSERT INTO project_members (team_id, project_id, user_id, added_by) VALUES ($1, $2, $3, $3)`,
+      [t, p, other],
+    );
+    const { rows } = await admin.query(`SELECT role FROM project_members WHERE team_id = $1`, [t]);
+    expect(rows).toEqual([{ role: "editor" }]);
   });
 
   it("refuses a project of another team and goes with its project", async () => {

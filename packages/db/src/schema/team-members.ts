@@ -3,7 +3,7 @@ import { check, pgEnum, pgTable, primaryKey, text, timestamp, uuid } from "drizz
 import { users } from "./auth.js";
 import { teams } from "./teams.js";
 
-export const teamRole = pgEnum("team_role", ["team_admin", "builder", "member"]);
+export const teamRole = pgEnum("team_role", ["team_admin", "contributor", "member"]);
 
 /** Team table: membership and team role (authorization arrives in KOBE-14). */
 export const teamMembers = pgTable(

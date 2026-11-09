@@ -140,7 +140,7 @@ describe("Fork (Edit in Workbench)", () => {
 
 describe("Import (KOBE-344)", () => {
   const BUILDER = {
-    role: "builder",
+    role: "contributor",
     permissions: ["team.personal.create", "team.skills.publish"],
   } as const;
 

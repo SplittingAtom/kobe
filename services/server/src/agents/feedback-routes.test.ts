@@ -20,14 +20,14 @@ function resolved(
 
 describe("mayReadFeedbackTotals (KOBE-275)", () => {
   it.each([
-    ["team", ME, "builder", true],
-    ["team", "other", "builder", false],
+    ["team", ME, "contributor", true],
+    ["team", "other", "contributor", false],
     ["team", "other", "team_admin", true],
     ["team", ME, "member", false],
     ["team", "other", "member", false],
     ["personal", ME, "member", true],
     ["gallery", null, "team_admin", true],
-    ["gallery", null, "builder", false],
+    ["gallery", null, "contributor", false],
     ["gallery", null, "member", false],
   ] as const)("%s agent owned by %s, caller %s → %s", (scope, owner, role, allowed) => {
     expect(mayReadFeedbackTotals(resolved(scope, owner, role), role)).toBe(allowed);

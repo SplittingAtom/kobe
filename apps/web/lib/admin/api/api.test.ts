@@ -155,7 +155,12 @@ describe("site resources call the right routes", () => {
 describe("team resources name the active team on every call", () => {
   it.each([
     ["members", () => members.listTeamMembers("t-1"), "GET /v1/team/members", { members: [] }],
-    ["role", () => members.setMemberRole("t-1", "u2", "builder"), "PATCH /v1/team/members/u2", {}],
+    [
+      "role",
+      () => members.setMemberRole("t-1", "u2", "contributor"),
+      "PATCH /v1/team/members/u2",
+      {},
+    ],
     ["remove", () => members.removeMember("t-1", "u2"), "DELETE /v1/team/members/u2", undefined],
     [
       "invites",

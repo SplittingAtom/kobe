@@ -28,7 +28,7 @@ import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 
-export const TEAM_ROLES: readonly TeamRole[] = ["team_admin", "builder", "member"];
+export const TEAM_ROLES: readonly TeamRole[] = ["team_admin", "contributor", "member"];
 
 /** Team members and roles (spec D8; `/v1/team/members`). People join by accepting an invitation. */
 /** A membership Kobe made for the Skill reviewer grant (KOBE-331 review H1b). */

@@ -321,7 +321,7 @@ describe("reading the audit log", () => {
       action: "identity.member.removed",
       actor,
       teamId,
-      target: { userId: randomUUID(), role: "builder" },
+      target: { userId: randomUUID(), role: "contributor" },
     });
     for (let i = 0; i < 5; i++) await withTeam(app.db, teamA, (tx) => audit(tx, removed(teamA)));
     for (let i = 0; i < 3; i++) await withTeam(app.db, teamB, (tx) => audit(tx, removed(teamB)));

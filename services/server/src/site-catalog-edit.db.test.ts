@@ -138,7 +138,7 @@ beforeAll(async () => {
   await h.admin.query(`INSERT INTO teams (id, slug, name) VALUES ($1, 'sce', 'SCE')`, [team]);
   await h.admin.query(
     `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'team_admin'),
-       ($1, $3, 'builder'), ($1, $4, 'member')`,
+       ($1, $3, 'contributor'), ($1, $4, 'member')`,
     [team, ids.admin, ids.maintainer, ids.member],
   );
   for (const who of Object.keys(ids) as Who[]) {

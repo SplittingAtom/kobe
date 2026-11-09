@@ -64,10 +64,10 @@ beforeAll(async () => {
   );
   const members: [string, Person, string][] = [
     [finance, "alice", "team_admin"],
-    [finance, "bob", "builder"],
+    [finance, "bob", "contributor"],
     [finance, "carol", "member"],
     [finance, "sam", "member"],
-    [marketing, "dave", "builder"],
+    [marketing, "dave", "contributor"],
     [marketing, "alice", "team_admin"],
   ];
   for (const [team, who, role] of members) {
@@ -318,11 +318,7 @@ describe("transfer (AR10, ac-2)", () => {
       expect.objectContaining({ agentId: agent, name: "Bob Transfer", slug: "bob-transfer" }),
     ]);
     expect((await as.bob.get("/v1/agents/transfers")).json.outgoing).toHaveLength(1);
-    // Alice (a team admin) reads it only as the roster's read-only View (KOBE-571), without the offer.
-    const viewed = await as.alice.get(`/v1/agents/${agent}`);
-    expect(viewed.status).toBe(200);
-    expect(viewed.json.agent).toMatchObject({ canEdit: false, versionInEffect: 1 });
-    expect(viewed.json).not.toHaveProperty("transfer");
+    expect((await as.alice.get(`/v1/agents/${agent}`)).status).toBe(404);
     // Nothing moves until the recipient accepts; nobody else can.
     expect((await as.alice.post(`/v1/agents/${agent}/transfer/accept`)).status).toBe(404);
     expect((await as.bob.post(`/v1/agents/${agent}/transfer/accept`)).status).toBe(404);
@@ -334,8 +330,7 @@ describe("transfer (AR10, ac-2)", () => {
     const mine = await as.carol.get(`/v1/agents/${agent}`);
     expect(mine.json.agent).toMatchObject({ ownerUserId: ids.carol, canEdit: true });
     expect(mine.json.transfer).toBeNull();
-    // Bob is no longer its owner: as a builder he only views it from the team roster (KOBE-571).
-    expect((await as.bob.get(`/v1/agents/${agent}`)).json.agent).toMatchObject({ canEdit: false });
+    expect((await as.bob.get(`/v1/agents/${agent}`)).status).toBe(404);
     const [entry] = await sql<{ state: string; assigned_by: string }>(
       `SELECT state, assigned_by FROM team_agent_roster WHERE site_agent_id = $1`,
       [agent],
