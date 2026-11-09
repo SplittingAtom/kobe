@@ -1,6 +1,7 @@
 # Kobe — Workspaces (Team, Scratchspace, Projects)
 
-Status: **decisions by Chris, 2026-11-08** (§14: every question answered; items marked _(Chris)_
+Status: **shipped pending gate** (2026-11-09: KOBE-576..582 merged, gate1 reinstalled fresh; evidence in
+[`docs/gates/gate-workspaces.md`](../gates/gate-workspaces.md), gate KOBE-583). Decisions by Chris, 2026-11-08 (§14: every question answered; items marked _(Chris)_
 are his, the rest are proposals within them). Written against main `71443152`. Hadron spec
 `b1e23088-8dcd-41fa-bee5-4335b9d82e0b`; tickets filed 2026-11-08: WS-1 KOBE-576, WS-2 KOBE-577,
 WS-3 KOBE-578, WS-4 KOBE-579, WS-5 KOBE-580, WS-6 KOBE-581, WS-7 KOBE-582 (§15).
