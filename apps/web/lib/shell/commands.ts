@@ -309,7 +309,15 @@ const LIST = [
   // stays on.
   { id: "rail-threads", name: "Threads panel", icon: MessagesSquareIcon, scope: "rail" },
   { id: "rail-files", name: "Files panel", icon: FolderIcon, scope: "rail" },
-  // The collapsed rail (48 px): new thread (above), threads and files; each expands it.
+  // The collapsed rail (48 px): expand at its top (where the expanded rail's collapse sits), new
+  // thread (above), threads and files; each expands it.
+  {
+    id: "expand-rail",
+    name: "Expand the rail",
+    icon: PanelLeftOpenIcon,
+    scope: "rail",
+    readOnlySafe: true,
+  },
   { id: "show-threads", name: "Show threads", icon: MessagesSquareIcon, scope: "rail" },
   { id: "show-files", name: "Show files", icon: FolderIcon, scope: "rail" },
   // Only when the member has apps (KOBE-440): expands the rail at its Apps section.

@@ -2,13 +2,12 @@
 
 import {
   ComposerPrimitive,
-  useAui,
   useAuiState,
   type TriggerAdapter,
   type TriggerItem,
 } from "@assistant-ui/react";
-import { FileIcon, XIcon } from "lucide-react";
-import { useEffect, useMemo, useState, useSyncExternalStore, type RefObject } from "react";
+import { FileIcon } from "lucide-react";
+import { useEffect, useMemo, useState, type RefObject } from "react";
 import type { FilesApi } from "../../lib/files/api";
 import {
   fileItem,
@@ -16,8 +15,6 @@ import {
   mentionable,
   mentionFormatter,
   mentionQueryAt,
-  mentionsIn,
-  withoutMention,
 } from "../../lib/chat/mentions";
 import { useChatSession } from "./kobe-runtime";
 
@@ -128,44 +125,5 @@ export function MentionPicker({
         }
       </ComposerPrimitive.TriggerPopoverItems>
     </ComposerPrimitive.TriggerPopover>
-  );
-}
-
-const CHIP =
-  "border-foreground/10 bg-background flex min-w-0 max-w-80 items-center gap-1.5 rounded-lg border px-2 py-1 text-xs";
-
-/**
- * The files the draft mentions, as chips above the input: the picked files whose marker is still
- * in the text (so they follow edits, undo and dictation; a typed `@file(...)` is no chip and stays
- * literal). Each chip shows the whole workspace path. Removing a chip removes its marker.
- */
-export function MentionChips({ draft }: { readonly draft: string }) {
-  const aui = useAui();
-  const { mentions: store } = useChatSession();
-  const text = useAuiState((s) => s.composer.text);
-  const picked = useSyncExternalStore(
-    store.subscribe,
-    () => store.get(draft),
-    () => store.get(draft),
-  );
-  const mentions = useMemo(() => mentionsIn(text, picked), [text, picked]);
-  if (mentions.length === 0) return null;
-  return (
-    <ul aria-label="Mentioned files" className="flex flex-wrap gap-1.5 px-1">
-      {mentions.map((m) => (
-        <li key={m.raw} className={CHIP} title={m.sandboxPath}>
-          <FileIcon aria-hidden className="text-muted-foreground size-3.5 shrink-0" />
-          <span className="truncate font-medium">@{m.path}</span>
-          <button
-            type="button"
-            aria-label={`Remove mention of ${m.name}`}
-            className="hover:bg-muted rounded p-0.5"
-            onClick={() => aui.composer.setText(withoutMention(text, m.raw))}
-          >
-            <XIcon aria-hidden className="size-3" />
-          </button>
-        </li>
-      ))}
-    </ul>
   );
 }

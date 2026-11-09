@@ -58,9 +58,8 @@ test("@file mention: pick a workspace file, the agent reads it by its absolute p
     await chat.composer.press("Enter");
     await expect(list).toBeHidden();
     await expect(chat.composer).toHaveValue(`${LEAD} @file(uploads/${name}) `);
-    await expect(
-      page.getByRole("list", { name: "Mentioned files" }).getByText(`@uploads/${name}`),
-    ).toBeVisible();
+    // The marker is the mention: no chip repeats it.
+    await expect(page.getByRole("list", { name: "Mentioned files" })).toHaveCount(0);
     if (!FAKE_MODEL)
       await chat.composer.pressSequentially("and quote its one line. Do nothing else.");
     await chat.composer.press("Enter");
