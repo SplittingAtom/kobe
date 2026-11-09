@@ -18,7 +18,10 @@
 - **Fresh gate1 (Chris, 2026-11-08):** the existing teams, scratchspaces, projects and their S3
   objects may be purged (spec MG0). Take and keep a `pg_dump` first; never delete an existing
   backup.
-- **Status:** started 2026-11-08 ~20:05Z by the kobe-03 coordinator session (Chris pasted the kickoff prompt
+- **Status (2026-11-09):** KOBE-576..582 merged and done (PRs #494 #496 #498 #499 #500 #501 #502;
+  fixes #504 #505); kobe-gate1 reinstalled fresh, then upgraded to main; gate doc
+  [`docs/gates/gate-workspaces.md`](../gates/gate-workspaces.md); waiting for Chris at KOBE-583.
+  Earlier entry: started 2026-11-08 ~20:05Z by the kobe-03 coordinator session (Chris pasted the kickoff prompt
   there). Spec and this brief committed in the docs PR that replaces the earlier small brief below.
 
 ## Earlier small lane (2026-11-08 afternoon, superseded by this spec)

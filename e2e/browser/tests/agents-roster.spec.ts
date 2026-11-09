@@ -227,10 +227,15 @@ test("assign and run: member2 starts the owner's assigned agent from the picker"
   await chat.open();
   await (await chat.selectors()).getByRole("button", { name: /^Chat with:/ }).click();
   const picker = other.getByRole("radiogroup", { name: "Chat with" });
-  const radio = picker
-    .getByRole("group", { name: "Team", exact: true })
-    .getByRole("radio", { name: new RegExp(`^${escapeRegExp(agent.name)}`) });
-  await picker.locator("label").filter({ has: radio }).click();
+  const name = new RegExp(`^${escapeRegExp(agent.name)}`);
+  const teamGroup = picker.getByRole("group", { name: "Team", exact: true });
+  const radio = teamGroup.getByRole("radio", { name });
+  // The radio is visually hidden: its label takes the click. `has` matches inside each label, so
+  // the inner locator names only the radio (not the picker or the group around the label).
+  await teamGroup
+    .locator("label")
+    .filter({ has: other.getByRole("radio", { name }) })
+    .click();
   await expect(radio).toBeChecked();
   await other.keyboard.press("Escape");
   const threadId = await chat.ask("No tools. Reply with the single word ROSTER.");

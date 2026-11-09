@@ -9,6 +9,12 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Workspaces lane at the gate (2026-11-09):** KOBE-576..582 merged (PRs #494 #496 #498 #499
+  #500 #501 #502, fixes #504 #505); kobe-gate1 reinstalled fresh (backup
+  `pre-workspaces-2026-11-09.dump` kept) and upgraded to main; `workspaces.spec.ts` passed; every
+  GV4 audit event on gate1; backup/restore round trip identical; `license:gate` 0 pending. Gate doc
+  `docs/gates/gate-workspaces.md`; **waiting for Chris at KOBE-583**. The KOBE-577 squash had
+  silently reverted KOBE-571 (#495); restored by #504 (see Open problems).
 - **Workspaces lane started (2026-11-08):** Chris's kickoff (pasted prompt in
   `docs/ledger/workspaces-lane.md`): work KOBE-576..582 to completion and stop only at the gate
   KOBE-583. Spec `docs/specs/workspaces.md` (Hadron b1e23088; decisions in §14 final): Workspace =
@@ -288,6 +294,14 @@ level)` in protocol (`THINKING_EFFORT_BUDGETS` off 0 / low 2000 / medium 8000 / 
 
 ## Open problems / decisions
 
+- **Squash trap (2026-11-09):** `git reset --soft origin/main` on a branch that has not merged the
+  latest main makes a squash commit that reverts every PR merged since the branch point. The
+  KOBE-577 squash (89c5195f, #496) reverted KOBE-571 (#495) with CI green; restored by #504. Merge
+  origin/main first (or use a merge commit) and check `git diff origin/main...HEAD --stat`.
+- **Remembered approval vs. other active runs (2026-11-09, open):** the sandbox policy check allows
+  by a thread rule while the MCP proxy (review S1) requires a signed approval because another run of
+  the member is active, so the call is denied with no card (Foundry `create_runtime` on gate1). Fix:
+  the policy check mirrors the proxy and asks. Ticket to file.
 - Dev loop targets Chris's k3s via Tilt; k3d only in GitHub Actions CI (Chris, 2026-10-01).
 - No local Docker engine on the dev Mac: build images with
   `DOCKER_HOST` pointing at the remote Docker host (see `CLAUDE.local.md`).
