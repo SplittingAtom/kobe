@@ -31,3 +31,11 @@ Group branches per `docs/parallel-work.md` (one PR per group); Opus review on 56
 ## Evidence
 
 (filled by the ticket agents: PR numbers, gate1 tags, spec runs)
+
+- **KOBE-572 gate1 spec** `e2e/browser/tests/agents-roster.spec.ts` (Chromium, owner + member2):
+  assign and run (picker Team group, run, thread pin = version in effect); propose and approve
+  (Proposed queue, Approve… pinned to v1); fork bound (owner forks a team-owned agent: Personal,
+  "Bound to Team: …", site assign 422 `agent_bound_to_team`); pin and update (Update available: v2,
+  Update to latest, earlier thread keeps v1); withdraw pauses schedules; threads keep pins (stand-in
+  for "owner leaves", which needs a disposable member: coordinator's call on the fresh install).
+  Result: _(coordinator fills after the gate1 run)_
