@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
@@ -131,5 +131,27 @@ describe("new conversation in a project (KOBE-164)", () => {
     const created = chatRequests(fake, "POST").find((r) => r.path === "/v1/threads");
     expect(created?.body).toMatchObject({ project_id: PROJECT });
     expect([...fake.threads.values()][0]?.project_id).toBe(PROJECT);
+  });
+
+  it("Open to mount from a project page starts the conversation in the project while another is open", async () => {
+    const other = projectThread({ project: null });
+    openApp(fake, other);
+    expect(await screen.findByText("hello from the owner")).toBeTruthy();
+    // The project page is a panel over the chat; its button is a client-side link to /?project=.
+    const go = (href: string) => {
+      act(() => {
+        window.history.pushState(null, "", href);
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      });
+    };
+    go(`/me/projects/${PROJECT}`);
+    go(`/?project=${PROJECT}`);
+    expect(await screen.findByText(/will be in the project/)).toBeTruthy();
+    // Handled once: the address no longer carries it, so a reload starts nothing again.
+    await waitFor(() => expect(window.location.search).not.toContain("project="));
+    await userEvent.setup().type(await screen.findByLabelText("Message"), "Hall of fame{Enter}");
+    await waitFor(() => expect(fake.threads.size).toBe(2));
+    const created = chatRequests(fake, "POST").find((r) => r.path === "/v1/threads");
+    expect(created?.body).toMatchObject({ project_id: PROJECT });
   });
 });

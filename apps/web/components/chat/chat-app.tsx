@@ -290,12 +290,20 @@ function ChatWorkspace({
     () => createThreadListAdapter(session, { onError: setListError }),
     [session],
   );
-  // `/?project=<id>` starts the next new conversation inside that project (KOBE-164).
+  // `/?project=<id>` starts the next new conversation inside that project (KOBE-164): on the first
+  // load and whenever a link brings the chat back with one (a project page's Open to mount or Open
+  // in a conversation is a client-side link from a panel, so this component stays mounted and the
+  // address returns to `/`, which opens a new conversation). Handled once: the parameter is dropped
+  // from the address, so the draft does not follow later threads and a reload starts nothing.
   useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get("project") ?? "";
-    if (UUID.test(id) && threadId === undefined) session.setDraftProject(id.toLowerCase());
-    // Read once per session: the address changes when a thread opens, the draft must not.
-  }, [session]);
+    if (pathname !== "/") return;
+    const url = new URL(window.location.href);
+    const id = url.searchParams.get("project") ?? "";
+    if (!UUID.test(id)) return;
+    if (threadFromUrl() === undefined) session.setDraftProject(id.toLowerCase());
+    url.searchParams.delete("project");
+    window.history.replaceState(window.history.state, "", url);
+  }, [session, pathname]);
   const runtime = useKobeRuntime({ session, adapter, threadId, onThreadIdChange: setThreadId });
   // A thread created by its first message: read the list again for its title.
   useEffect(() => session.onThreadCreated(() => void runtime.threads.reload()), [session, runtime]);
