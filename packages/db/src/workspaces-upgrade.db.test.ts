@@ -17,11 +17,15 @@ import {
  * visibility workspace/restricted and the column is gone; MG3 `member` rows are `editor`; MG4 one
  * "Imported" commit per project with files, its tree equal to project_files, head and live counters
  * set, projects without files keep a null head; the new tables are under FORCE RLS for the app.
+ * It upgrades to the release before KOBE-587, which drops visibility again
+ * (restricted-removal-upgrade.db.test.ts).
  */
 const MARKER = `ALTER TYPE "public"."team_role" RENAME VALUE 'builder' TO 'contributor'`;
+const UNTIL = `ALTER TABLE "projects" DROP COLUMN "visibility"`;
 
 let db: TestDatabase | undefined;
 let older = "";
+let target = "";
 const teamId = randomUUID();
 const otherTeam = randomUUID();
 const admin = randomUUID();
@@ -113,12 +117,18 @@ beforeAll(async () => {
     await projectFile(c, teamId, withFiles, "data/b.csv", 32);
     await projectFile(c, otherTeam, otherWithFile, "x.txt", 7);
   });
-  await runMigrations({ databaseUrl: database().ownerUrl, appRole: database().appRole });
+  target = migrationsBefore(UNTIL);
+  await runMigrations({
+    databaseUrl: database().ownerUrl,
+    appRole: database().appRole,
+    migrationsFolder: target,
+  });
 }, 120_000);
 
 afterAll(async () => {
   await db?.drop();
-  if (older) rmSync(older, { recursive: true, force: true });
+  for (const folder of [older, target])
+    if (folder) rmSync(folder, { recursive: true, force: true });
 });
 
 describe("Workspaces migrations on upgrade (KOBE-577)", () => {

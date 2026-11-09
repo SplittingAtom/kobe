@@ -149,8 +149,11 @@ const rememberLimits = {
 /** An egress domain pattern or host (the `egress_domains` grammar): never a URL or path. */
 const egressDomain = z.string().max(253).regex(new RegExp(DOMAIN_PATTERN_SQL));
 const count = z.number().int().nonnegative();
-/** A project's explicit role set (GV4): how many rows of each role, never who. */
-const projectRoleCounts = z.strictObject({ owner: count, editor: count, reader: count });
+/**
+ * A project's explicit role set (GV4): how many rows of each role, never who. `reader` only on rows
+ * before KOBE-587 (no reader rows since: every member reads every project).
+ */
+const projectRoleCounts = z.strictObject({ owner: count, editor: count, reader: count.optional() });
 /** A budget amount in dollars (KOBE-42). */
 const usdAmount = z.number().nonnegative().max(MAX_BUDGET_USD);
 /** A token budget (KOBE-42, user decision: token budgets beside dollar budgets). */
@@ -992,7 +995,8 @@ export const AUDIT_EVENTS = {
     focused: z.boolean().optional(),
   }),
   // ── project: configuration metadata only, never names, instructions or descriptions (KOBE-161, D23) ──
-  "project.created": event("team", { projectId: id, visibility: projectVisibility }),
+  /** `visibility` only on rows before KOBE-587 removed it (RV2). */
+  "project.created": event("team", { projectId: id, visibility: projectVisibility.optional() }),
   /** `fields` lists which settings changed (names, not values). */
   "project.updated": event("team", { projectId: id, fields: z.array(z.string().max(40)).max(10) }),
   "project.deleted": event("team", { projectId: id }),
@@ -1017,8 +1021,8 @@ export const AUDIT_EVENTS = {
   }),
   "project.file_removed": event("team", { projectId: id, fileId: id }),
   /**
-   * GV4: `roles` is the project's explicit role set after the change (how many owners, editors and
-   * readers; never names). Rows written before KOBE-577 name `member` and carry no `roles`.
+   * GV4: `roles` is the project's explicit role set after the change (how many owners and editors,
+   * and readers on rows before KOBE-587; never names). Rows written before KOBE-577 name `member` and carry no `roles`.
    */
   "project.member_role_changed": event("team", {
     projectId: id,
@@ -1028,6 +1032,7 @@ export const AUDIT_EVENTS = {
     roles: projectRoleCounts,
   }),
   // ── Workspaces (KOBE-577, GV4): ids, counts and kinds only, never paths, names or messages ──
+  /** Retired by KOBE-587 (RV3): no longer written; rows written before it stay. */
   "project.visibility_changed": event("team", {
     projectId: id,
     from: projectVisibility,
