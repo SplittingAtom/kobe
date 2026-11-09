@@ -23,7 +23,7 @@ import { ComposerAttachments } from "./attachment-chips";
 import { ViewingChip } from "./viewing-chip";
 import { ContinueChip } from "./continue-from";
 import { isBrowsing } from "../../lib/chat/head";
-import { MentionChips, MentionPicker } from "./mention-picker";
+import { MentionPicker } from "./mention-picker";
 import { useComposerMentionDrop } from "./composer-mention-drop";
 import { MENTION_FOLDER_REFUSED } from "../../lib/chat/mention-insert";
 import {
@@ -337,7 +337,6 @@ export function Composer({
           <MentionPicker draft={draft} input={input} />
           <SlashMenu input={input} />
           <ComposerAttachments draft={draft} threadId={remoteId} />
-          <MentionChips draft={draft} />
           <AppContextChips draft={draft} />
           <AppItemChips draft={draft} />
           <SkillPickChip draft={draft} />

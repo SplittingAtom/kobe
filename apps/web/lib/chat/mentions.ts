@@ -49,11 +49,6 @@ export function mentionsIn(text: string, picked: ReadonlySet<string>): readonly 
   return out;
 }
 
-/** `text` without every copy of the marker `raw` (and the space the picker put after it). */
-export function withoutMention(text: string, raw: string): string {
-  return text.split(`${raw} `).join("").split(raw).join("");
-}
-
 /**
  * The query of an `@` being typed at `caret`, as assistant-ui's default trigger detection reads
  * it (the `@` starts the text or follows whitespace; no whitespace after it), or null.
