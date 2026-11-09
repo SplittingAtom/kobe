@@ -253,7 +253,7 @@ export const MEMORY_REFUSALS = [
   "approval_denied",
 ] as const;
 
-/** Why the server refused a `project.file_propose` (audit `sandbox.project_file_refused`, KOBE-162). */
+/** Why the server refused a `project.file_propose` (audit `sandbox.project_file_refused`, KOBE-162; no longer emitted since WS-7, kept so old audit rows still read). */
 export const PROJECT_FILE_REFUSALS = [
   "capability_missing",
   "run_not_active",

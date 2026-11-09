@@ -119,13 +119,6 @@ export const BUILTIN_TOOLS: Readonly<Record<string, BuiltinTool>> = {
     open_world: false,
     primary_arg: "/path",
   },
-  propose_project_file: {
-    source: "kobe",
-    risk: "write",
-    scope: "kobe",
-    open_world: false,
-    primary_arg: "/path",
-  },
   /** KOBE-576: commits the member's checked-out project working copy (needs project.access write). */
   commit_project: {
     source: "kobe",

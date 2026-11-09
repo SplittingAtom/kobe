@@ -9,7 +9,7 @@ import type { ApprovalVerifier } from "./verify.js";
 
 /**
  * Shared steps of a server-side write that needs the signed approval of exactly one tool call
- * (project `remember`, KOBE-156; `propose_project_file`, KOBE-162): whether the policy check
+ * (project `remember`, KOBE-156; `commit_project`, KOBE-579): whether the policy check
  * already got an approval, whether the run may ask a person at all (D32), and the verification and
  * consumption of the approval against the canonical input. The caller owns the order of steps.
  */

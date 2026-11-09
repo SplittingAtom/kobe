@@ -19,7 +19,6 @@ export const BOUND_TOOLS = [
   "web_search",
   "remember",
   "recall",
-  "propose_project_file",
   "commit_project",
   "save_skill_draft",
   "propose_file_edit",

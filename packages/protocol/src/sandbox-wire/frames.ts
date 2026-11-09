@@ -22,12 +22,7 @@ import {
   memoryReadFrameSchema,
   memoryResultFrameSchema,
 } from "./memory-frames.js";
-import {
-  projectCommitFrameSchema,
-  projectCommitResultFrameSchema,
-  projectFileProposeFrameSchema,
-  projectFileProposeResultFrameSchema,
-} from "./project-frames.js";
+import { projectCommitFrameSchema, projectCommitResultFrameSchema } from "./project-frames.js";
 import { runMcpContextSchema } from "./mcp-config.js";
 import { webSearchQueryFrameSchema, webSearchResultFrameSchema } from "./web-search-frames.js";
 import { traceSpansFrameSchema, wireTraceContextSchema } from "./trace-frames.js";
@@ -349,7 +344,6 @@ export const sandboxToServerFrameSchema = z.union([
   fileShareFrameSchema,
   memoryPutFrameSchema,
   memoryReadFrameSchema,
-  projectFileProposeFrameSchema,
   projectCommitFrameSchema,
   skillDraftSaveFrameSchema,
   fileEditProposeFrameSchema,
@@ -765,7 +759,6 @@ export const serverToSandboxFrameSchema = z.union([
   artifactResultFrameSchema,
   fileShareResultFrameSchema,
   memoryResultFrameSchema,
-  projectFileProposeResultFrameSchema,
   projectCommitResultFrameSchema,
   skillDraftSaveResultFrameSchema,
   fileEditProposeResultFrameSchema,
@@ -795,10 +788,8 @@ export type ArtifactPutFrame = z.infer<typeof artifactPutFrameSchema>;
 export type ArtifactResultFrame = z.infer<typeof artifactResultFrameSchema>;
 export type FileShareFrame = z.infer<typeof fileShareFrameSchema>;
 export type FileShareResultFrame = z.infer<typeof fileShareResultFrameSchema>;
-export type ProjectFileProposeFrame = z.infer<typeof projectFileProposeFrameSchema>;
 export type ProjectCommitFrame = z.infer<typeof projectCommitFrameSchema>;
 export type ProjectCommitResultFrame = z.infer<typeof projectCommitResultFrameSchema>;
-export type ProjectFileProposeResultFrame = z.infer<typeof projectFileProposeResultFrameSchema>;
 export type WebSearchQueryFrame = z.infer<typeof webSearchQueryFrameSchema>;
 export type WebSearchResultFrame = z.infer<typeof webSearchResultFrameSchema>;
 export type MemoryPutFrame = z.infer<typeof memoryPutFrameSchema>;

@@ -19,6 +19,10 @@ What a member can do today (on `main`):
   **Commit all** or **Discard all**.
 - **The member edits and saves the file** in the editor's Raw mode. A save names the version it
   was based on, so a concurrent change is never overwritten.
+- **The agent commits to a project** (`commit_project`, KOBE-580). In a project the member has
+  checked out, the agent edits the project's folder like any other file and saves it as a commit
+  (section 3g). `propose_project_file`, which used to add one file after an approval, was removed
+  in WS-7 (KOBE-582).
 - **Edit as file** (KOBE-485). A text artifact (markdown, code, csv) is copied into the member's
   workspace as `artifacts/<slug>.<ext>`. That copy can then be edited like any other file.
 
@@ -336,11 +340,12 @@ browser upload path, so the same size limit and quotas apply.
 ### 3f. Sharing with a project (Add to project)
 
 A shared conversation gives readers the conversation only: they open files from their own
-workspace, where the owner's files do not exist. To hand an artifact or a workspace file to other
-people, its owner adds it to a project (KOBE-585). Every member of the project then has a
-read-only copy under `projects/<slug>/` in their own workspace (the server-owned mount of
-`services/server/src/projects/mounts.ts`), and the agent of any member's run can read it there.
-A member who wants to change it asks their agent to copy it out of `projects/` first.
+scratchspace, where the owner's files do not exist. To hand an artifact or a workspace file to other
+people, its owner adds it to a project (KOBE-585). A project is mounted into a member's scratchspace
+at `projects/<slug>/`, read-only, while the member has a conversation in it or a checkout (the
+server-owned mount of `services/server/src/projects/mounts.ts`, at most 20 per member); the agent of
+any member's run can read it there. The Files panel lists mounted projects under Projects, apart
+from My files. A member who wants to change a project's file checks the project out (section 3g).
 
 ```mermaid
 sequenceDiagram
@@ -364,7 +369,7 @@ sequenceDiagram
 ```
 
 - **Who may add.** One function, `canAddToProject` in `packages/protocol/src/projects.ts`: team
-  admins and the project's owners; a project member who is an editor (team role `builder`, Chris
+  admins and the project's owners; a project member who is an editor (team role `contributor`, Chris
   2026-11-08) or owns the content (the thread's owner for an artifact; always the caller for a
   workspace file, since `/v1/workspace` is their own). The web shows the action to the
   conversation's owner only, on the artifact header, the file tab and the `open_file` card;
@@ -379,11 +384,42 @@ sequenceDiagram
   same name in the same folder answers 409 `already_exists`: project files are never replaced in
   place, so the dialog offers Add as copy: the first `name-2.ext`, `-3` … free in the project's
   file list, in one request (retried only if another add took that name meanwhile).
-- **Record.** The file has `source: "upload"` (the `project_files_source` CHECK allows only
-  `upload` and `proposal`; a later migration may add `import`); the audit row
+- **Record.** The file has `source: "upload"` (the `project_files_source` CHECK allows `upload`
+  and `proposal`; `proposal` is a historical value since WS-7, nothing writes it; a later migration
+  may add `import`); the audit row
   `project.file_added` carries `importedFrom` (the artifact id and version, or only the kind
   `workspace_file`), never a name, a path, a hash of one, or content. The project page cannot yet label the file
   "Imported from <conversation>": that needs a column (follow-up).
+
+### 3g. Projects: checkout, edit, commit
+
+Project files are versioned: every change is a commit, a full snapshot tree with a parent, an
+author and a message (Workspaces spec CM1-CM10; `projects/commits.ts`, `routes/project-commits.ts`).
+A project's mounted folder is read-only until the member **checks it out** (editors and owners;
+readers cannot). A checkout makes `projects/<slug>/` writable for that member only (the sandbox
+agent unlocks it to 0664/0775 and workspace sync may push into it; the server accepts a push into
+`projects/<slug>/` only for the caller's own checkout), and records the commit it started from.
+
+- **Check out to edit** on a project file's header (or the project's menu in Files): `POST
+/v1/projects/:id/checkout`. The editor then saves like any workspace file; the bar shows the
+  number of changes against the base.
+- **Commit…** names the change (up to 500 characters): `POST /v1/projects/:id/commit`, a
+  server-side diff of the checkout against its base under the project row lock. If the project
+  moved on (`commit_conflict`) the member presses **Update**, which brings the head's changes into
+  the checkout, and commits again. **Discard** ends the checkout and brings the head back.
+- **The agent commits** with `commit_project` (listed only in runs whose project access is `write`,
+  that is an editor's or owner's). It pushes the working copy, then the server commits on the
+  member's behalf with `authorKind: agent`. Like any project write it needs a policy rule or a
+  signed approval over (project id, base commit, message, hash of the sorted diff), and it is
+  refused in auto and scheduled runs (D32). `propose_project_file` no longer exists.
+- **History** on the project page lists the commits; a commit's diff and files can be opened and
+  downloaded, and **Revert** adds a new commit equal to an earlier tree (history is never
+  rewritten). Retention (all by default, or the last N commits or days per workspace, hard cap 1000)
+  prunes history, never the head, a checkout's base or anything under legal hold.
+- **Audit:** `project.checked_out`, `project.checkout_discarded` (reason `discarded`,
+  `member_removed`, `access_lost`), `project.committed`, `project.commit_reverted` and
+  `project.history_pruned` (see `docs/audit-log.md`). A member demoted to reader, or removed, loses
+  their checkout.
 
 ### Where people and policy decide
 

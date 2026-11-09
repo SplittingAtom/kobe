@@ -105,3 +105,19 @@ the browser spec passed and docs/gates/gate-workspaces.md is written, or when so
 Chris that the spec does not settle. Report at the end with the gate doc's path, the deploy tag,
 and the total cost of the lane.
 ```
+
+## Evidence
+
+Pull requests of the lane (the coordinator fills in the gate1 results after the fresh install):
+
+| PR      | Ticket   | What it shipped                                                                                                                                                                                  |
+| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| #494    | KOBE-576 | Protocol: roles (owner, editor, reader), visibility, checkout and commit shapes, `commit_project`, `project.commit` frames, additive.                                                            |
+| #496    | KOBE-577 | Database: `builder` renamed `contributor`, `visibility` replaces `members_mode`, reader role, commit, tree entry and checkout tables, head commit, object quotas, first-commit backfill, probes. |
+| #498    | KOBE-580 | Sandbox agent: checked-out folders writable and relocked in sync, `commit_project`, project access line in the prompt.                                                                           |
+| #499    | KOBE-578 | Server: the project permission matrix, restricted-visibility 404s, owner transfer, mount-on-conversation with the cap.                                                                           |
+| #500    | KOBE-579 | Server: checkout, commit, update, discard, history, revert, storage quotas in bytes and objects, retention pruning, GV4 audit events.                                                            |
+| #501    | KOBE-581 | Web: Workspace switcher and strings, Files panel tree (Projects, My files), checkout and commit controls, roles and visibility UI, History, Working copies, storage and history settings.        |
+| this PR | KOBE-582 | `propose_project_file` removed end to end, `e2e/browser/tests/workspaces.spec.ts`, older browser specs on the new labels, docs (file-editing 3g, audit log, glossary).                           |
+
+Gate1 results (KOBE-583): _to be filled in by the coordinator_.

@@ -5,7 +5,6 @@ import { ToolsClient, type ToolsClientOptions } from "./client.js";
 import { installMemoryHooks, registerProjectHooks, type MemoryHooksApi } from "./memory-hooks.js";
 import { commitProjectTool } from "./project-commit-tool.js";
 import { recallTool, rememberTool } from "./memory-tools.js";
-import { proposeProjectFileTool } from "./project-tool.js";
 import {
   MEMORY_FILE_ENV,
   TOOLS_FD_ENV,
@@ -136,7 +135,6 @@ export function registerKobeTools(
   pi.registerTool(webSearchTool(transport));
   if (options.files === true) pi.registerTool(shareFileTool(transport));
   if (options.projects === true) {
-    pi.registerTool(proposeProjectFileTool(transport));
     // KOBE-580: listed only while the run's viewer may edit the project. Without Pi's
     // active-tools API it is never registered (fail closed: a reader must not be offered it).
     if (pi.on && pi.getActiveTools && pi.setActiveTools) {

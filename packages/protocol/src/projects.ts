@@ -13,7 +13,7 @@ import { uploadFileNameSchema } from "./uploads.js";
 
 /**
  * Projects contract (KOBE-159 = 57a of KOBE-57, spec D23; notes in docs/ledger/KOBE-159.md).
- * Additive: an agent without {@link CAPABILITY_PROJECTS} never registers `propose_project_file`;
+ * Additive: an agent without {@link CAPABILITY_PROJECTS} never registers `commit_project`;
  * an old `run.start` has no `project` field; no existing shape changes.
  *
  * A project lives inside one team: name, instructions, default agent, files (S3), memory scope
@@ -33,16 +33,10 @@ import { uploadFileNameSchema } from "./uploads.js";
  * the run (after the memory index). Project files are not sent: they are synced read-only into the
  * members' sandboxes at {@link projectMountPath} (workspace area `projects`, origin `server`).
  *
- * Agent-proposed file: `propose_project_file` -> kobe-policy `policy.check` (project write, so a
- * signed approval is required as for project memory) -> kobe-tools `project.file_propose` on fd 4
- * -> frame `project.file_propose`. Push-then-propose, as `share_file` (files.ts): the agent first
- * pushes the file through workspace sync and sends the pushed entry as `workspace`. The server
- * checks the thread is in a project and the entry is unchanged, stores a pending proposal and
- * answers `status: "pending_approval"`; when the approval is granted the blob is copied into the
- * project's files and `project.file_added` is not an event (the file shows up in the project API).
+ * Agent writes: `commit_project` (project-commits.ts); `propose_project_file` was removed in WS-7.
  */
 
-/** `hello.capabilities` entry of an agent that registers `propose_project_file`. */
+/** `hello.capabilities` entry of an agent that registers `commit_project`. */
 export const CAPABILITY_PROJECTS = "projects";
 
 export const PROJECT_NAME_MAX = 100;
@@ -391,91 +385,15 @@ export const runProjectContextSchema = z.strictObject({
 });
 export type RunProjectContext = z.infer<typeof runProjectContextSchema>;
 
-// ----------------------------------------------------------------------------- propose_project_file
-
-export const PROJECT_TOOLS = ["propose_project_file", "commit_project"] as const;
-export const PROJECT_PROPOSE_REASON_MAX = 500;
+// ----------------------------------------------------------------------------- project tools
 
 /**
- * Model-facing input. `path` is a workspace path (absolute `/workspace/...` or relative); the
- * project is the thread's own (never chosen by the model). `name` = file name in the project,
- * default the file's name; `folder` = target folder in the project, default root.
+ * WS-7 (KOBE-582): `propose_project_file` and its frames (`project.file_propose`,
+ * `project.file_propose_result`) were removed; an agent saves project files with `commit_project`
+ * (project-commits.ts) from its own checkout. `project_files.source` keeps `proposal` as a
+ * historical value.
  */
-export const proposeProjectFileInputSchema = z.strictObject({
-  path: z
-    .string()
-    .min(1)
-    .max(1024)
-    // eslint-disable-next-line no-control-regex
-    .refine((p) => !/[\u0000-\u001f\u007f]/u.test(p), "control character in path")
-    .refine((p) => !p.split("/").includes(".."), "path traversal"),
-  name: uploadFileNameSchema.optional(),
-  folder: z.union([z.literal(""), workspacePathSchema]).optional(),
-  /** Shown on the approval card. */
-  reason: z.string().min(1).max(PROJECT_PROPOSE_REASON_MAX).optional(),
-});
-export type ProposeProjectFileInput = z.infer<typeof proposeProjectFileInputSchema>;
+export const PROJECT_TOOLS = ["commit_project"] as const;
 export const projectToolInputSchema = {
-  propose_project_file: proposeProjectFileInputSchema,
   commit_project: commitProjectToolInputSchema,
 } as const;
-
-/** The pushed workspace entry (same evidence as `share_file`; the server needs it unchanged). */
-export const proposeProjectFileWorkspaceRefSchema = z.strictObject({
-  path: workspacePathSchema,
-  rev: z.number().int().positive(),
-  sha256: sha256HexSchema,
-  size: z.number().int().nonnegative(),
-});
-
-/** Open on the sandbox side; known: {@link PROJECT_PROPOSE_ERROR_CODES}. */
-export const PROJECT_PROPOSE_ERROR_CODES = [
-  "not_allowed",
-  "not_in_project",
-  "not_synced",
-  "not_found",
-  "invalid_input",
-  "too_large",
-  "quota_exceeded",
-  "already_exists",
-  "storage_failed",
-] as const;
-export const projectProposeErrorSchema = z.strictObject({
-  code: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
-  message: z.string().max(2000),
-});
-
-/**
- * Success answer (shared by frame and kobe-tools response, flat). `pending_approval` = the proposal
- * is stored and waits for the signed approval; `applied` = approved and added (e.g. auto-approved
- * by policy). `file` is present once applied.
- */
-export const projectProposeOkFields = {
-  ok: z.literal(true),
-  op: z.literal("project_file_propose"),
-  status: z.enum(["pending_approval", "applied"]),
-  proposal_id: uuidSchema,
-  project_id: uuidSchema,
-  path: workspacePathSchema,
-  file: projectFileSchema.optional(),
-} as const;
-export const projectProposeFailFields = {
-  ok: z.literal(false),
-  error: projectProposeErrorSchema,
-} as const;
-
-/** kobe-tools request (fd 4); member of the tools request union via `projectToolsRequestSchema`. */
-export const projectToolsRequestSchema = z.strictObject({
-  id: idSchema,
-  op: z.literal("project.file_propose"),
-  tool_call_id: idSchema,
-  tool: z.literal("propose_project_file"),
-  input: proposeProjectFileInputSchema,
-});
-export type ProjectToolsRequest = z.infer<typeof projectToolsRequestSchema>;
-
-export const projectToolsResponseSchema = z.union([
-  z.strictObject({ id: idSchema, ...projectProposeOkFields }),
-  z.strictObject({ id: idSchema, ...projectProposeFailFields }),
-]);
-export type ProjectToolsResponse = z.infer<typeof projectToolsResponseSchema>;

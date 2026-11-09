@@ -6,7 +6,6 @@
  *
  *   extension → agent   {"id","op":"artifact.put","tool_call_id","tool","input"}
  *                       {"id","op":"file.share","tool_call_id","tool":"share_file","input"}
- *                       {"id","op":"project.file_propose","tool_call_id","tool":"propose_project_file","input"}
  *                       {"id","op":"project.commit","tool_call_id","tool":"commit_project","input"}
  *                       {"id","op":"skill.draft_save","tool_call_id","tool":"save_skill_draft","input"}
  *                       {"id","op":"file.edit_propose","tool_call_id","tool":"propose_file_edit","input"}
@@ -32,7 +31,6 @@ export const TOOLS_TIMEOUT_MS = 30_000;
 
 export const OP_ARTIFACT_PUT = "artifact.put";
 export const OP_FILE_SHARE = "file.share";
-export const OP_PROJECT_FILE_PROPOSE = "project.file_propose";
 export const OP_PROJECT_COMMIT = "project.commit";
 export const OP_WEB_SEARCH = "web_search";
 export const OP_MEMORY_PUT = "memory.put";
@@ -44,7 +42,6 @@ export const OP_NOTEBOOK_RUN = "notebook.run";
 export const OPS = [
   OP_ARTIFACT_PUT,
   OP_FILE_SHARE,
-  OP_PROJECT_FILE_PROPOSE,
   OP_PROJECT_COMMIT,
   OP_WEB_SEARCH,
   OP_MEMORY_PUT,
@@ -82,12 +79,9 @@ export const SHARE_NAME_MAX = 255;
 
 /**
  * Env var set to `1` by an agent that announced the `projects` capability (KOBE-162). Read once,
- * removed. `propose_project_file` is registered only then; the server also checks the capability.
+ * removed. `commit_project` is registered only then; the server also checks the capability.
  */
 export const TOOLS_PROJECTS_ENV = "KOBE_TOOLS_PROJECTS";
-export const TOOL_PROPOSE_PROJECT_FILE = "propose_project_file";
-/** Mirrors packages/protocol `projects.ts` (pinned by a test). */
-export const PROJECT_PROPOSE_REASON_MAX = 500;
 /**
  * KOBE-580 (CM6): registered with the `projects` capability, active only in runs whose
  * `run.start.project.access` is `write` (the agent says so in the run's memory file).
@@ -167,17 +161,6 @@ export interface SharedFileFields {
   readonly scan: string;
   readonly created_at: string;
   readonly sha256: string;
-}
-
-/** `propose_project_file` answer: the proposal waits for a person's approval, or was applied. */
-export interface ProjectProposeAnswer {
-  readonly ok: true;
-  readonly op: "project_file_propose";
-  readonly status: "pending_approval" | "applied";
-  readonly proposal_id: string;
-  readonly project_id: string;
-  readonly path: string;
-  readonly file?: Record<string, unknown>;
 }
 
 /** `commit_project` answer (CM6): what the server did with the commit. */
@@ -277,7 +260,6 @@ export interface MemoryReadAnswer {
 export type ToolsResponse =
   | ({ readonly id: string } & MemoryPutAnswer)
   | ({ readonly id: string } & MemoryReadAnswer)
-  | ({ readonly id: string } & ProjectProposeAnswer)
   | ({ readonly id: string } & ProjectCommitAnswer)
   | ({ readonly id: string } & SkillDraftAnswer)
   | ({ readonly id: string } & FileEditAnswer)
