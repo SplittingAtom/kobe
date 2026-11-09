@@ -1,9 +1,9 @@
 # Kobe — Projects in conversations (Workspaces follow-up)
 
-Status: **decided, tickets to file** (§10: every question answered by Chris on 2026-11-09).
+Status: **decided, tickets to file** (§11: every question answered by Chris on 2026-11-09).
 Requested by Chris, 2026-11-09; items marked _(Chris)_ are his, the rest are proposals within them. Written against main `3a893e08` (gate1
 `local-3a893e08156a`), on top of [`workspaces.md`](workspaces.md) (gate KOBE-583). No tickets
-filed yet (§11).
+filed yet (§12).
 
 Request (Chris, 2026-11-09): when a new conversation starts with a project selected, the top of the
 conversation pane says **New conversation in &lt;ProjectName&gt;**, with an icon to unmount the
@@ -15,7 +15,8 @@ member whose role lets them edit a project can have an **agent propose edits** t
 project, and accepting a proposal **commits** it. Answers to the questions (2026-11-09): every
 member of a workspace reads every project, so the **restricted** option is removed; until the
 conversation starts the member picks its project; agents propose edits to the conversation's
-project **and to the member's My files**.
+project **and to the member's My files**. Chris then folded **KOBE-586** (promote a My files folder
+to a project) into this work (§8).
 
 ## 1. Summary
 
@@ -26,6 +27,7 @@ project **and to the member's My files**.
 | Files panel, Projects   | Every project the member may view; greyed unless it is the current conversation's; the current one has a green dot; role chip and "editing" mark stay                            |
 | Agent edits             | `propose_file_edit` accepts files of the conversation's project when the member can edit it; **Accept commits** the change as a new project commit _(Chris)_, no checkout needed |
 | Visibility              | **Restricted projects are removed** _(Chris)_: every workspace member is at least a reader of every project; existing restricted projects become workspace-visible (§7)          |
+| Promote a folder        | KOBE-586 joins this work _(Chris)_: ⋯ → Promote to project… on a My files folder moves it into a new project as one commit and mounts it for the creator (§8)                    |
 | Mounting                | Unchanged (workspaces MT1): a project mounts when the member has a conversation in it or a checkout; listing a project in the panel does not mount it                            |
 
 Nothing here changes team or project roles (workspaces PR1, PR3–PR6), the commit model
@@ -254,28 +256,62 @@ member2 is a reader by default.
 confidential work belongs in a separate workspace (the tenant boundary, workspaces WS1) or in a
 member's My files. The help text says so where projects are created.
 
-## 8. Security and governance
+## 8. Promote a My files folder to a project (KOBE-586)
+
+_(Chris, 2026-11-09: KOBE-586 is part of this work.)_ Its decisions of 2026-11-09 stand, with the
+visibility choice gone (§7):
+
+**PF1. Entry.** A folder row under **My files** (not `uploads/`, not under Projects) gets
+**Promote to project…** in its ⋯ menu, for team admins and contributors (`team.projects.create`,
+workspaces PR4); hidden for members.
+
+**PF2. Dialog.** One field: the project **name**, prefilled with the folder's name. Description,
+instructions, default agent and members are set later on the project page. Errors show in the
+dialog.
+
+**PF3. Move, atomically.** `POST /v1/projects/from-folder { path, name }` (strict schema): creates
+the project (caller = owner), writes **one** commit "Imported from My files/&lt;path&gt;"
+(`author_kind user`, sub-folders kept as paths, blobs copied server-side and verified), then removes
+the folder from the member's My files (the same path as Delete) and **mounts the project for the
+creator**. On any failure before the commit exists nothing changes; My files is only touched after
+the project and its commit exist.
+
+**PF4. Limits, refused up front.** `PROJECT_FILES_MAX` (500), `PROJECT_FILE_MAX_BYTES`, the team
+object and byte budget (GV2), internal paths (`.kobe/`), names the project path rules refuse, and an
+empty folder ("This folder is empty; create the project from Projects instead").
+
+**PF5. Mount on create.** A project created from the Projects page also mounts for its creator at
+once (KOBE-586 option 1), so a new project is never empty in the creator's Files panel; with FP1 it
+is listed for everyone else (greyed) and mounts for them per MT1.
+
+**PF6. After.** The Files tree reloads, reveals the new project under Projects and, when the
+current conversation is a new one with no project, offers it in the project control (NC2). Audit:
+`project.created` and `project.committed` (plus the workspace delete rows as today).
+
+## 9. Security and governance
 
 No new tenant tables; the accept route and the proposal fields live in team tables already under
 RLS (`run_events`, `project_commits`, `project_tree_entries`). The listing (FP1) returns only what
 `GET /v1/projects` returns, which after RV1 is every project of the caller's workspace; other
 workspaces' projects stay invisible (RLS, 404). The probe suite covers the new route's queries and
-the RV2 migration.
+the RV2 migration. The promote route runs inside `withTeam()` on the caller's own workspace rows
+only (the path is resolved against their manifest, never a path from another member).
 
-## 9. Tests
+## 10. Tests
 
 - Web unit: header text and project control (select, switch, remove, New conversation clears),
   title format and menus, Files list greyed/active/dot states and accessible names, proposal card
   for project files (Accept → commit, stale, not allowed).
 - Server: accept route (role at accept time, stale base, new file, limits, idempotency, audit
   row, reconcile), proposal checks for project paths (reader refused, other project refused), My files proposals for new files; the RV2 upgrade test
-  and the RV3 route shapes.
+  and the RV3 route shapes; the promote route (permission matrix, limits, failure leaves My files
+  intact, one commit, mount for the creator) and mount on create.
 - Browser spec on gate1 (`projects-in-conversations.spec.ts`): owner drafts a new conversation in a
   project, switches project, removes it, sends; title shows "Project / name"; Files shows every
   project with the active dot; the agent proposes an edit to a project file; Accept; History shows
-  the commit; member2 (a reader by default, RV1) sees every project and gets the refusal.
+  the commit; a My files folder is promoted to a project and shows under Projects; member2 (a reader by default, RV1) sees every project and gets the refusal.
 
-## 10. Decisions (Chris, 2026-11-09)
+## 11. Decisions (Chris, 2026-11-09)
 
 1. **Every workspace member reads every project**, so the restricted option is removed (§7).
 2. **The project control shows on every new conversation until it starts**, including as
@@ -286,27 +322,26 @@ the RV2 migration.
 6. **The commit message is the agent's reason, editable before Accept** (PE4).
 7. **New files may be proposed** (PE2).
 8. **The privacy sentence goes in the project control's tooltip** (NC1).
+9. **KOBE-586 (promote a folder) is part of this work**, without the visibility choice (§8).
 
-## 11. Implementation tickets (proposed)
+## 12. Implementation tickets (proposed)
 
-| Id   | Scope                                                                                                                                                            | Areas                           |
-| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| PC-1 | New conversation header: title, project control (switch, remove, add), NC4 draft lifetime, NC5 errors                                                            | web                             |
-| PC-2 | Conversation title "Project / name", project menu (Open project, Move to project…), tab title                                                                    | web                             |
-| PC-3 | Files panel: all viewable projects, active dot, greyed rows, read-only browse of unmounted projects, scale and filter                                            | web                             |
-| PC-0 | Remove restricted visibility: RV2 migration with dry-run list, upgrade test, RV3 API, project page and members dialog, audit doc, `workspaces.spec.ts`           | db, protocol, server, web, e2e  |
-| PC-4 | Proposals for project files and new My files files: protocol fields, server checks in `file-edit-propose.ts`, accept-commits route, audit, reconcile, agent line | protocol, server, sandbox-agent |
-| PC-5 | Proposal card for project files: project label, diff vs head, editable message, Accept commits, stale and not-allowed states                                     | web                             |
-| PC-6 | Browser spec, docs (`docs/files.md`, user help), gate                                                                                                            | e2e, docs                       |
+| Id       | Scope                                                                                                                                                            | Areas                           |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| PC-1     | New conversation header: title, project control (switch, remove, add), NC4 draft lifetime, NC5 errors                                                            | web                             |
+| PC-2     | Conversation title "Project / name", project menu (Open project, Move to project…), tab title                                                                    | web                             |
+| PC-3     | Files panel: all viewable projects, active dot, greyed rows, read-only browse of unmounted projects, scale and filter                                            | web                             |
+| PC-0     | Remove restricted visibility: RV2 migration with dry-run list, upgrade test, RV3 API, project page and members dialog, audit doc, `workspaces.spec.ts`           | db, protocol, server, web, e2e  |
+| KOBE-586 | Promote a My files folder to a project (PF1-PF6), mount on create (PF5)                                                                                          | server, protocol, web           |
+| PC-4     | Proposals for project files and new My files files: protocol fields, server checks in `file-edit-propose.ts`, accept-commits route, audit, reconcile, agent line | protocol, server, sandbox-agent |
+| PC-5     | Proposal card for project files: project label, diff vs head, editable message, Accept commits, stale and not-allowed states                                     | web                             |
+| PC-6     | Browser spec, docs (`docs/files.md`, user help), gate                                                                                                            | e2e, docs                       |
 
-Order: PC-0 first (it changes the list rules the others read), then PC-1 → PC-2 → PC-3 (web) in
+Order: PC-0 first (it changes the list rules the others read), then KOBE-586 and PC-1 → PC-2 → PC-3 (web) in
 parallel with PC-4 → PC-5, then PC-6 and a gate1 deploy.
 
-## 12. Out of scope
+## 13. Out of scope
 
 - More than one project per conversation (SS2 stands).
-- Mounting a project for its creator at once and promoting a folder to a project (KOBE-586). FP1
-  makes a new, empty project visible in the panel (greyed) even before it is mounted, which covers
-  the visibility half of KOBE-586's "mount on create".
 - Server-pushed Files panel refresh (separate item).
 - Multi-file proposals and proposals that delete or rename files.
