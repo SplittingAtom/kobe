@@ -8,6 +8,17 @@ const enc = encodeURIComponent;
 export interface AgentDetail extends AgentSummary {
   readonly frontmatter: Record<string, unknown>;
   readonly prompt: string;
+  /**
+   * Set when someone else's personal agent is read from a roster (KOBE-571, AR14): the definition
+   * shown is this version, the roster's version in effect, read-only.
+   */
+  readonly versionInEffect?: number;
+}
+
+/** One published version with its definition (`GET /v1/agents/:id/versions/:n`). */
+export interface AgentVersionDetail extends AgentVersionSummary {
+  readonly frontmatter: Record<string, unknown>;
+  readonly prompt: string;
 }
 
 export interface AgentDetailSaved {
@@ -108,8 +119,13 @@ export interface DefinitionBody {
 
 export type { AgentSaved };
 
-export const getTeamAgent = (teamId: string, id: string): Promise<ApiResult<AgentDetailSaved>> =>
-  apiRequest(`/v1/agents/${enc(id)}`, { teamId });
+/** `from: "site"`: a roster View opened from the Site tab (KOBE-571, the site entry's version). */
+export const getTeamAgent = (
+  teamId: string,
+  id: string,
+  from?: "team" | "site",
+): Promise<ApiResult<AgentDetailSaved>> =>
+  apiRequest(`/v1/agents/${enc(id)}${from === "site" ? "?from=site" : ""}`, { teamId });
 
 export const createTeamAgent = (
   teamId: string,
@@ -148,6 +164,13 @@ export const listTeamAgentVersions = (
   apiRequest(`/v1/agents/${enc(id)}/versions${before === undefined ? "" : `?before=${before}`}`, {
     teamId,
   });
+
+export const getAgentVersion = (
+  teamId: string,
+  id: string,
+  version: number,
+): Promise<ApiResult<{ readonly version: AgentVersionDetail }>> =>
+  apiRequest(`/v1/agents/${enc(id)}/versions/${version}`, { teamId });
 
 export const rollbackTeamAgent = (
   teamId: string,

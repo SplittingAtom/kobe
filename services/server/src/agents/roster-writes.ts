@@ -469,7 +469,14 @@ export async function updateEntry(
         await audit(tx, "approved", target, teamId, agent, approved);
         return { ok: true, value: updated };
       }
-      case "declined":
+      case "declined": {
+        // A decline leaves `removedAt` null (it never was on the roster): with `decidedAt` set,
+        // that is the owner's "Declined" marker (`isDeclined`, KOBE-571). Removals, withdrawals
+        // and adopts always write `removedAt`.
+        const updated = await write({ state: "removed", removedAt: null, ...decided, ...note });
+        await audit(tx, step, target, teamId, agent);
+        return { ok: true, value: updated };
+      }
       case "removed": {
         const updated = await write({ state: "removed", removedAt: now, ...decided, ...note });
         await audit(tx, step, target, teamId, agent);

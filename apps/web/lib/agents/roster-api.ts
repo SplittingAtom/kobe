@@ -11,6 +11,8 @@ import type {
   AgentRosterTarget,
   AgentRosterUpdateResponse,
   AgentVersionRuleInput,
+  ForkAgentRequest,
+  TeamDefaultAgent,
   UpdateAgentRosterEntryRequest,
 } from "@kobe/protocol";
 import { apiRequest, type ApiResult } from "../api/client";
@@ -77,13 +79,35 @@ export function updateRosterEntry(
   });
 }
 
-/** Today's fork (KOBE-87) aimed at Personal: the copy is the forker's own personal agent (AR8). */
-export function forkToPersonal(teamId: string, agentId: string): Promise<ApiResult<AgentSaved>> {
-  return apiRequest(`/v1/agents/${enc(agentId)}/fork`, {
-    method: "POST",
-    json: { scope: "personal" },
-    teamId,
-  });
+/** What a fork answers: the copy (its draft) and the team it is bound to (AR8), or null. */
+export interface ForkedAgent extends AgentSaved {
+  readonly boundTeamId: string | null;
+}
+
+/**
+ * Fork (KOBE-568 route, KOBE-571 dialog): the copy is always the forker's own personal agent (AR8),
+ * bound to the team when the source is team content. `name` and `slug` are sent only when the
+ * forker changed them (the server picks a free slug from the source's otherwise).
+ */
+export function forkAgent(
+  teamId: string,
+  agentId: string,
+  body: Pick<ForkAgentRequest, "name" | "slug"> = {},
+): Promise<ApiResult<ForkedAgent>> {
+  return apiRequest(`/v1/agents/${enc(agentId)}/fork`, { method: "POST", json: body, teamId });
+}
+
+/** The team's default agent for new threads with the roster's choices (KOBE-571, §7.7). */
+export function getTeamDefaultAgent(teamId: string): Promise<ApiResult<TeamDefaultAgent>> {
+  return apiRequest("/v1/team/default-agent", { teamId });
+}
+
+/** Team admins: choose the default agent from the roster, or null for the site default. */
+export function setTeamDefaultAgent(
+  teamId: string,
+  agentId: string | null,
+): Promise<ApiResult<TeamDefaultAgent>> {
+  return apiRequest("/v1/team/default-agent", { method: "PUT", json: { agentId }, teamId });
 }
 
 /**

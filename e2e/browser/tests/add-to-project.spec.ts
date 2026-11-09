@@ -89,9 +89,19 @@ test("Add to project: the owner adds an artifact; another member reads it under 
   expect(listed.json.files.map((f) => f.path)).toEqual([`${stem}.md`]);
 
   const second = await signInSecond(browser);
+  let secondThreadId: string | null = null;
   try {
-    // A conversation brings the project into the member's Files panel: Projects tree, project, file.
+    // A conversation in the project brings it into the member's Files panel (Workspaces: mount
+    // on conversation): Projects tree, project, file. Made through the API, so no model turn; the
+    // shell opens first so the page knows its team.
     await new Chat(second).open();
+    const thread = await pageApi<{ thread_id: string }>(second, "POST", "/v1/threads", {
+      project_id: projectId,
+    });
+    expect(thread.status, JSON.stringify(thread.json)).toBe(201);
+    secondThreadId = thread.json.thread_id;
+    await second.goto(`/?thread=${thread.json.thread_id}`);
+    await expect(new Chat(second).composer).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
     const files = filesSection(second);
     await files.getByRole("button", { name: "Refresh files" }).click({ timeout: SHELL_TIMEOUT_MS });
     const tree = files.getByRole("tree", { name: "Projects" });
@@ -103,9 +113,11 @@ test("Add to project: the owner adds an artifact; another member reads it under 
       .getByRole("tabpanel")
       .filter({ has: second.getByRole("heading", { name: `${stem}.md` }) });
     await expect(
-      tab.getByText(
-        /Project files are read-only until you check the project out|You can read this project, not change it/,
-      ),
+      tab
+        .getByText(
+          /Project files are read-only until you check the project out|You can read this project, not change it/,
+        )
+        .first(),
     ).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
     await expect(tab.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
     // The server agrees: the bytes are there, a write is refused.
@@ -123,6 +135,7 @@ test("Add to project: the owner adds an artifact; another member reads it under 
     }, where);
     expect(read).toEqual({ get: 200, text: "# Shared plan\n\nFor the whole project.\n", put: 403 });
   } finally {
+    if (secondThreadId) await pageApi(second, "DELETE", `/v1/threads/${secondThreadId}`);
     await second.context().close();
   }
 });

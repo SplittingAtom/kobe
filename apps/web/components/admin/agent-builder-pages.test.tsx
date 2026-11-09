@@ -282,6 +282,31 @@ describe("Agent builder: edit and publish", () => {
     expect(screen.queryByRole("button", { name: "Save draft" })).toBeNull();
   });
 
+  it("views someone else's rostered agent read-only at its version in effect (KOBE-571, AR14)", async () => {
+    const calls = stubApi({
+      ...READ,
+      "GET /v1/agents/a-1": [
+        200,
+        {
+          agent: {
+            ...AGENT,
+            canEdit: false,
+            canPublish: false,
+            canExport: true,
+            versionInEffect: 2,
+          },
+        },
+      ],
+    });
+    renderTeam(<AgentBuilderPage scope="personal" agentId="a-1" />);
+    expect(await screen.findByText(/You're viewing v2, the version this roster runs/)).toBeTruthy();
+    expect((await screen.findByLabelText("Name")).hasAttribute("readonly")).toBe(true);
+    await screen.findByRole("region", { name: "Version history" });
+    // The owner's evals, ratings, shared cases and exports are not read.
+    expect(screen.queryByRole("button", { name: /Export .*Orbit/ })).toBeNull();
+    expect(calls.some((c) => /\/(evals|feedback|cases)/.test(c.url))).toBe(false);
+  });
+
   it("says a suspended agent can't start runs, and stays editable (KOBE-86)", async () => {
     stubApi({ ...READ, "GET /v1/agents/a-1": [200, { agent: { ...AGENT, status: "suspended" } }] });
     renderTeam(<AgentBuilderPage agentId="a-1" />);

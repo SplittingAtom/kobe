@@ -8,7 +8,6 @@ import type { GalleryAgentSummary } from "../../lib/admin/api/site/gallery";
 import {
   adoptRosterEntry,
   assignAgent,
-  forkToPersonal,
   updateRosterEntry,
   withdrawAgent,
 } from "../../lib/agents/roster-api";
@@ -18,9 +17,11 @@ import { useNavigate } from "../shell/use-navigate";
 import type { Mutation } from "../admin/use-resource";
 import { downloadOrbitExport } from "../admin/team/agent-builder/orbit-export-button";
 import { ApproveDialog, DeclineDialog, EvalDialog, PinDialog } from "./roster-dialogs";
+import { ForkDialog } from "./fork-dialog";
+import { canCompareWithSource, CompareWithSourceDialog } from "./lineage";
 
 type Trigger = HTMLElement | null;
-type DialogKind = "pin" | "decline" | "approve" | "eval";
+type DialogKind = "pin" | "decline" | "approve" | "eval" | "fork" | "compare";
 type OpenDialog = (kind: DialogKind, row: AgentRosterRow, trigger: Trigger) => void;
 
 /** What every flow needs: the team, the tab's roster, and the page's mutation and dialogs. */
@@ -126,19 +127,6 @@ function suspend(ctx: Ctx, row: AgentRosterRow, siteWide: boolean, trigger: Trig
       }),
     () => `Suspended ${row.name} for ${scope}.`,
   );
-}
-
-async function fork(ctx: Ctx, row: AgentRosterRow) {
-  let newId: string | null = null;
-  const done = await ctx.mutation.run(
-    async () => {
-      const res = await forkToPersonal(ctx.teamId, row.agentId);
-      if (res.ok) newId = res.data.agent.id;
-      return res;
-    },
-    () => `Forked ${row.name} into your personal agents.`,
-  );
-  if (done && newId !== null) ctx.navigate(agentPageHref(newId));
 }
 
 /** A menu entry, offered when `when` (the row's action flag) holds. */
@@ -279,7 +267,7 @@ function adopt(ctx: Ctx, row: AgentRosterRow, trigger: Trigger) {
   );
 }
 
-/** Suspend and resume (§6.5), adopt (AR10), remove (AR7) and fork (AR8). */
+/** Suspend and resume (§6.5), adopt (AR10), remove (AR7), fork (AR8) and compare (§7.5). */
 function lifecycleItems(ctx: Ctx, row: AgentRosterRow): ItemSpec[] {
   const a = row.actions;
   const resume = (siteWide: boolean) =>
@@ -325,7 +313,8 @@ function lifecycleItems(ctx: Ctx, row: AgentRosterRow): ItemSpec[] {
       onSelect: () => resume(true),
     },
     {
-      when: row.status === "unavailable" && a.remove && row.entry?.state !== "proposed",
+      // The server offers Adopt on assigned entries to the roster's admins (KOBE-571).
+      when: a.adopt === true,
       id: "adopt",
       label: `Adopt into ${ctx.rosterName}`,
       onSelect: (t) => void adopt(ctx, row, t),
@@ -337,7 +326,18 @@ function lifecycleItems(ctx: Ctx, row: AgentRosterRow): ItemSpec[] {
       destructive: true,
       onSelect: remove,
     },
-    { when: a.fork, id: "fork", label: "Fork to Personal", onSelect: () => void fork(ctx, row) },
+    {
+      when: a.fork,
+      id: "fork",
+      label: "Fork to Personal…",
+      onSelect: (t) => ctx.openDialog("fork", row, t),
+    },
+    {
+      when: canCompareWithSource(row),
+      id: "compare-source",
+      label: "Compare with source",
+      onSelect: (t) => ctx.openDialog("compare", row, t),
+    },
   ];
 }
 
@@ -359,7 +359,7 @@ type Dialog = {
   readonly trigger: Trigger;
 } | null;
 
-/** Approve, Pin, Decline and Run eval dialogs for the row that opened them. */
+/** Approve, Pin, Decline, Run eval, Fork and Compare dialogs for the row that opened them. */
 function RosterDialogs({
   ctx,
   dialog,
@@ -372,12 +372,37 @@ function RosterDialogs({
   if (dialog === null) return null;
   const { row, trigger } = dialog;
   const common = {
+    teamId: ctx.teamId,
     row,
     rosterName: ctx.rosterName,
     returnFocus: trigger,
     pending: ctx.mutation.pending,
     onClose,
   };
+  if (dialog.kind === "fork") {
+    return (
+      <ForkDialog
+        row={row}
+        team={{ id: ctx.teamId, name: ctx.teamName }}
+        returnFocus={trigger}
+        onClose={onClose}
+        onForked={(id) => {
+          onClose();
+          ctx.navigate(agentPageHref(id));
+        }}
+      />
+    );
+  }
+  if (dialog.kind === "compare") {
+    return (
+      <CompareWithSourceDialog
+        row={row}
+        teamId={ctx.teamId}
+        returnFocus={trigger}
+        onClose={onClose}
+      />
+    );
+  }
   if (dialog.kind === "eval") {
     return (
       <EvalDialog

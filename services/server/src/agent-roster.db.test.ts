@@ -222,7 +222,14 @@ describe("assigning and proposing (AR6, ac-1, ac-2)", () => {
     expect(rowOf(await roster("alice", "team"), agent)?.actions).toMatchObject({ decide: true });
     const reach = rowOf(await roster("carol", "personal"), agent)?.reach;
     expect(reach).toEqual([
-      { target: "team", teamId: finance, teamName: "Finance", state: "proposed", note: null },
+      {
+        target: "team",
+        teamId: finance,
+        teamName: "Finance",
+        state: "proposed",
+        note: null,
+        declined: false,
+      },
     ]);
     expect((await audited("agent.roster.proposed", agent)).length).toBe(1);
   });
