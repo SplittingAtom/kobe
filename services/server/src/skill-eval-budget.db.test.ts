@@ -321,7 +321,7 @@ describe("skill eval budgets (KOBE-327)", () => {
     const viewer = await f.member(w.team);
     for (const p of [builder, viewer])
       await f.fx.admin.query(
-        `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+        `UPDATE team_members SET role = 'contributor' WHERE team_id = $1 AND user_id = $2`,
         [w.team, p.id],
       );
     const draft = await bench.draftWith(

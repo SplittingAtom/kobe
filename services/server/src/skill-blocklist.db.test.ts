@@ -91,9 +91,9 @@ beforeAll(async () => {
   );
   const members: [string, string, string][] = [
     [finance, "alice", "team_admin"],
-    [finance, "bob", "builder"],
+    [finance, "bob", "contributor"],
     [marketing, "dave", "team_admin"],
-    [marketing, "bob", "builder"],
+    [marketing, "bob", "contributor"],
   ];
   for (const [t, who, role] of members)
     await h.admin.query(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, $3)`, [

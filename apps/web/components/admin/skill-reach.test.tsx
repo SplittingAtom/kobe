@@ -176,7 +176,7 @@ describe("team skill reach (KOBE-297)", () => {
       "GET /v1/skill-evals?scope=team&skill_id=s-1": [200, { evals: [] }],
     });
     renderTeam(<SkillAdminPage skillId="s-1" />, {
-      role: "builder",
+      role: "contributor",
       permissions: ["team.skills.publish"],
     });
     await reachList();

@@ -85,7 +85,7 @@ beforeAll(async () => {
   );
   await h.admin.query(
     `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'team_admin'),
-       ($1, $3, 'builder'), ($4, $5, 'team_admin')`,
+       ($1, $3, 'contributor'), ($4, $5, 'team_admin')`,
     [teamA, ids.adminA, ids.builderA, teamB, ids.adminB],
   );
   for (const who of ["adminA", "builderA", "adminB"] as Who[]) {

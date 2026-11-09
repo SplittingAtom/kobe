@@ -228,7 +228,7 @@ describe("Skill reviewer grant (KOBE-331)", () => {
     expect(
       (
         await actingAs(ids.admin, () =>
-          setMemberRole(h.deps.database.db, registry, ids.early, "builder"),
+          setMemberRole(h.deps.database.db, registry, ids.early, "contributor"),
         )
       ).ok,
     ).toBe(true);
@@ -251,7 +251,7 @@ describe("Skill reviewer grant (KOBE-331)", () => {
 
     expect(await memberOf(registry, ids.late)).toBeUndefined();
     expect(await memberOf(registry, ids.prior)).toMatchObject({ role: "member" });
-    expect(await memberOf(registry, ids.early)).toMatchObject({ role: "builder" });
+    expect(await memberOf(registry, ids.early)).toMatchObject({ role: "contributor" });
     expect(await memberOf(registry, ids.invited)).toMatchObject({ role: "member" });
     expect(
       (await audit("identity.member.removed")).map((a) => [

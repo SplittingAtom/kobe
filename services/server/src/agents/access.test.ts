@@ -11,7 +11,7 @@ import {
 
 const ME = "11111111-1111-4111-8111-111111111111";
 const OTHER = "22222222-2222-4222-8222-222222222222";
-const ROLES: readonly TeamRole[] = ["member", "builder", "team_admin"];
+const ROLES: readonly TeamRole[] = ["member", "contributor", "team_admin"];
 
 const team = (owner = OTHER): AgentRef => ({ scope: "team", ownerUserId: owner });
 const personal = (owner = ME): AgentRef => ({ scope: "personal", ownerUserId: owner });
@@ -26,26 +26,26 @@ describe("team agents (D8, D19)", () => {
 
   it("shows the definition and export to builders and team admins only", () => {
     expect(access("member", team()).readDefinition).toBe(false);
-    expect(access("builder", team()).readDefinition).toBe(true);
+    expect(access("contributor", team()).readDefinition).toBe(true);
     expect(access("team_admin", team()).readDefinition).toBe(true);
   });
 
   it("lets builders edit their own agents and team admins edit any", () => {
     expect(access("member", team(ME)).edit).toBe(false);
-    expect(access("builder", team(ME)).edit).toBe(true);
-    expect(access("builder", team(OTHER)).edit).toBe(false);
+    expect(access("contributor", team(ME)).edit).toBe(true);
+    expect(access("contributor", team(OTHER)).edit).toBe(false);
     expect(access("team_admin", team(OTHER)).edit).toBe(true);
   });
 
   it("lets builders publish their own agents and team admins publish any (D8, KOBE-46)", () => {
     expect(access("member", team(ME)).publish).toBe(false);
-    expect(access("builder", team(ME)).publish).toBe(true);
-    expect(access("builder", team(OTHER)).publish).toBe(false);
+    expect(access("contributor", team(ME)).publish).toBe(true);
+    expect(access("contributor", team(OTHER)).publish).toBe(false);
     expect(access("team_admin", team(OTHER)).publish).toBe(true);
   });
 
   it("lets only team admins suspend", () => {
-    expect(access("builder", team(ME)).setStatus).toBe(false);
+    expect(access("contributor", team(ME)).setStatus).toBe(false);
     expect(access("team_admin", team(OTHER)).setStatus).toBe(true);
   });
 });
@@ -87,7 +87,7 @@ describe("gallery agents (D19, D21)", () => {
 describe("creating and forking", () => {
   it("creates team agents from builder up and personal agents for everyone", () => {
     expect(canCreateAgent("member", "team")).toBe(false);
-    expect(canCreateAgent("builder", "team")).toBe(true);
+    expect(canCreateAgent("contributor", "team")).toBe(true);
     expect(canCreateAgent("member", "personal")).toBe(true);
   });
 
@@ -100,8 +100,8 @@ describe("creating and forking", () => {
     }
     expect(fork("member", "team_owned")).toBe(false);
     expect(fork("member", "team_entry")).toBe(false);
-    expect(fork("builder", "team_owned")).toBe(true);
-    expect(fork("builder", "team_entry")).toBe(true);
+    expect(fork("contributor", "team_owned")).toBe(true);
+    expect(fork("contributor", "team_entry")).toBe(true);
     expect(fork("team_admin", "team_entry")).toBe(true);
   });
 

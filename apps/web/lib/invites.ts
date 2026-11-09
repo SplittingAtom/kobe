@@ -1,6 +1,6 @@
 /** Invitation and password-reset client helpers (KOBE-13). The server stays authoritative. */
 
-export type TeamRole = "team_admin" | "builder" | "member";
+export type TeamRole = "team_admin" | "contributor" | "member";
 
 export interface PendingTeamInvite {
   readonly teamId: string;

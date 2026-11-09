@@ -78,7 +78,7 @@ async function world(): Promise<World> {
     eve,
   ]);
   await fx.admin.query(
-    `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = ANY($2)`,
+    `UPDATE team_members SET role = 'contributor' WHERE team_id = $1 AND user_id = ANY($2)`,
     [team, [carol.id, dave.id]],
   );
   const runId = await fx.run(team, alice);

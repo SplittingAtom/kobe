@@ -494,7 +494,7 @@ describe("totals for agent owners (ac-3)", () => {
   it("doesn't count the caller among the raters, and shows a one-rater agent nothing", async () => {
     const x = await world();
     await f.fx.admin.query(
-      `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+      `UPDATE team_members SET role = 'contributor' WHERE team_id = $1 AND user_id = $2`,
       [x.w.team, x.reader.id],
     );
     const own = await publishedAgent(x.reader);
@@ -528,7 +528,7 @@ describe("totals for agent owners (ac-3)", () => {
   it("is for owners and team admins: members, other builders and other teams are refused", async () => {
     const x = await world();
     await f.fx.admin.query(
-      `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+      `UPDATE team_members SET role = 'contributor' WHERE team_id = $1 AND user_id = $2`,
       [x.w.team, x.reader.id],
     );
     expect((await as(x.author).get(`/v1/agents/${x.agentId}/feedback`)).status).toBe(403);

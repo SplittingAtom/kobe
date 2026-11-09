@@ -59,7 +59,6 @@ describe("audit event taxonomy", () => {
       "schedule",
       "site",
       "skill",
-      "team",
       "thread",
       "thread_folder",
       "workspace",

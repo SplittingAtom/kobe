@@ -22,7 +22,7 @@ export function threadReachable(teamId: Fragment, threadId: Fragment, userId: Fr
          AND (t.project_id IS NULL OR EXISTS (
            SELECT 1 FROM projects p
             WHERE p.team_id = t.team_id AND p.id = t.project_id
-              AND (p.members_mode = 'team'
+              AND (p.visibility = 'workspace'
                    OR EXISTS (SELECT 1 FROM project_members m
                                WHERE m.team_id = p.team_id AND m.project_id = p.id
                                  AND m.user_id = ${userId})

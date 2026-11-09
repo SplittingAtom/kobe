@@ -119,7 +119,7 @@ fi
 ok "fixtures: two teams and their users"
 OWNER_JSON=$(printf '{"email":"%s","password":"%s"}' "$OWNER_EMAIL" "$OWNER_PASSWORD")
 step() { client "$(printf '{"mode":"%s","base":"%s","owner":%s,%s}' "$1" "$BASE" "$OWNER_JSON" "$2")"; }
-contains "gate4-gb has the builder role" '^role=200:builder$' "$(step role "\"admin\":$U_GA,\"userId\":\"$ID_GB\",\"role\":\"builder\"")"
+contains "gate4-gb has the contributor role" '^role=200:contributor$' "$(step role "\"admin\":$U_GA,\"userId\":\"$ID_GB\",\"role\":\"contributor\"")"
 MODELS=0
 if [[ "$(field models_a "$fx")" == 200 ]]; then
   MODELS=1

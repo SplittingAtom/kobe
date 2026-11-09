@@ -4,7 +4,6 @@ import {
   branchSummaryError,
   branchSummaryRequestSchema,
 } from "@kobe/protocol";
-import { toProtocolTeamRole } from "../authz/team-role.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { BranchSummaryError } from "../runs/branch-summary.js";
@@ -44,7 +43,7 @@ export function threadBranchSummaryRoutes(deps: ServerDeps): Hono<{ Variables: T
           user_id: c.get("user").id,
           team_id: team.id,
           site_role: c.get("siteRole") ?? "user",
-          team_role: toProtocolTeamRole(team.role),
+          team_role: team.role,
         },
         id.data,
         body.to_entry_id,

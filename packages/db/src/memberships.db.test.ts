@@ -25,7 +25,7 @@ beforeAll(async () => {
   ]);
   await withTeam(app.db, alpha, (tx) =>
     tx.insert(teamMembers).values([
-      { teamId: alpha, userId: user, role: "builder" },
+      { teamId: alpha, userId: user, role: "contributor" },
       { teamId: alpha, userId: other, role: "team_admin" },
     ]),
   );
@@ -38,7 +38,7 @@ describe("listMemberships (team_members stays behind RLS)", () => {
   it("lists only the user's teams, with their role, sorted by name", async () => {
     const mine = await listMemberships(app.db, user);
     expect(mine.map((m) => [m.name, m.role])).toEqual([
-      ["Alpha", "builder"],
+      ["Alpha", "contributor"],
       ["Gamma", "team_admin"],
     ]);
     expect(mine[0]).toMatchObject({ teamId: alpha, slug: `alpha-${alpha.slice(0, 8)}` });
@@ -69,7 +69,7 @@ describe("listMemberships (team_members stays behind RLS)", () => {
 
 describe("getMembership", () => {
   it("returns the role in that team, or null", async () => {
-    expect(await getMembership(app.db, alpha, user)).toBe("builder");
+    expect(await getMembership(app.db, alpha, user)).toBe("contributor");
     expect(await getMembership(app.db, gamma, user)).toBe("team_admin");
     expect(await getMembership(app.db, beta, user)).toBeNull();
     expect(await getMembership(app.db, randomUUID(), user)).toBeNull();

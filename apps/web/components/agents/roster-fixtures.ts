@@ -22,7 +22,6 @@ export const NO_ACTIONS: AgentRosterActions = {
   resumeHere: false,
   suspendSiteWide: false,
   resumeSiteWide: false,
-  adopt: false,
 };
 
 export function row(

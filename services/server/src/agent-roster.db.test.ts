@@ -66,10 +66,10 @@ beforeAll(async () => {
   );
   const members: [string, Person, string][] = [
     [finance, "alice", "team_admin"],
-    [finance, "bob", "builder"],
+    [finance, "bob", "contributor"],
     [finance, "carol", "member"],
     [finance, "sam", "member"],
-    [marketing, "dave", "builder"],
+    [marketing, "dave", "contributor"],
   ];
   for (const [team, who, role] of members) {
     await sql(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, $3)`, [
@@ -222,14 +222,7 @@ describe("assigning and proposing (AR6, ac-1, ac-2)", () => {
     expect(rowOf(await roster("alice", "team"), agent)?.actions).toMatchObject({ decide: true });
     const reach = rowOf(await roster("carol", "personal"), agent)?.reach;
     expect(reach).toEqual([
-      {
-        target: "team",
-        teamId: finance,
-        teamName: "Finance",
-        state: "proposed",
-        note: null,
-        declined: false,
-      },
+      { target: "team", teamId: finance, teamName: "Finance", state: "proposed", note: null },
     ]);
     expect((await audited("agent.roster.proposed", agent)).length).toBe(1);
   });
@@ -450,7 +443,7 @@ describe("review fixes", () => {
   });
 
   it("an owner who left a team withdraws from its roster (?teamId), then can delete", async () => {
-    await sql(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'builder')`, [
+    await sql(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'contributor')`, [
       finance,
       ids.dave,
     ]);

@@ -279,7 +279,7 @@ describe("refusals, each with its own message", () => {
     const w = await world();
     const builder = await f.member(w.team);
     await f.fx.admin.query(
-      `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+      `UPDATE team_members SET role = 'contributor' WHERE team_id = $1 AND user_id = $2`,
       [w.team, builder.id],
     );
     const d = await draftOf(w.owner, "shared-draft");
@@ -487,7 +487,7 @@ const bundlesOf = (teamId: string, draftId: string) =>
 async function asBuilder(w: World): Promise<Person> {
   const builder = await f.member(w.team);
   await f.fx.admin.query(
-    `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+    `UPDATE team_members SET role = 'contributor' WHERE team_id = $1 AND user_id = $2`,
     [w.team, builder.id],
   );
   return builder;

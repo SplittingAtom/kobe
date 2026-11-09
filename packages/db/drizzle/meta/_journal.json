@@ -1387,6 +1387,34 @@
       "when": 1794157118323,
       "tag": "0197_agent_transfers_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 198,
+      "version": "7",
+      "when": 1794179514518,
+      "tag": "0198_workspaces_role_rename",
+      "breakpoints": true
+    },
+    {
+      "idx": 199,
+      "version": "7",
+      "when": 1794179668468,
+      "tag": "0199_workspaces",
+      "breakpoints": true
+    },
+    {
+      "idx": 200,
+      "version": "7",
+      "when": 1794179701558,
+      "tag": "0200_workspaces_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 201,
+      "version": "7",
+      "when": 1794179719897,
+      "tag": "0201_workspaces_backfill",
+      "breakpoints": true
     }
   ]
 }

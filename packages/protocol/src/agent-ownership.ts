@@ -27,20 +27,6 @@ export const AGENT_FORK_SCOPE_IGNORED = {
   message: "ignored: a fork is always your own agent, in Personal",
 } as const;
 
-/** The copy's display name in a fork request (the agent file's name limit). */
-export const AGENT_FORK_NAME_MAX = 80;
-
-/**
- * `POST /v1/agents/{id}/fork` body: an optional slug and display name for the copy (KOBE-571, the
- * fork dialog); `scope` is accepted and ignored with {@link AGENT_FORK_SCOPE_IGNORED}.
- */
-export const forkAgentRequestSchema = z.strictObject({
-  slug: z.string().min(1).max(64).optional(),
-  name: z.string().trim().min(1).max(AGENT_FORK_NAME_MAX).optional(),
-  scope: z.string().max(32).optional(),
-});
-export type ForkAgentRequest = z.infer<typeof forkAgentRequestSchema>;
-
 /** What a fork's response adds to the agent: the team the copy is bound to (AR8), or null. */
 export const agentForkResultSchema = z.object({ boundTeamId: uuidSchema.nullable() });
 export type AgentForkResult = z.infer<typeof agentForkResultSchema>;

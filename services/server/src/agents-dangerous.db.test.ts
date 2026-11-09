@@ -68,7 +68,7 @@ beforeAll(async () => {
   const roles: [Person, string][] = [
     ["siteAdmin", "member"],
     ["alice", "team_admin"],
-    ["bob", "builder"],
+    ["bob", "contributor"],
     ["carol", "member"],
   ];
   for (const [who, role] of roles) {

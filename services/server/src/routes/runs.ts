@@ -7,7 +7,6 @@ import {
   updateQueuedBodySchema,
   type ActorContext,
 } from "@kobe/protocol";
-import { toProtocolTeamRole } from "../authz/team-role.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { refuseEvalThreadWrites } from "./eval-thread-guard.js";
@@ -26,7 +25,7 @@ function actorOf(c: RunContext): ActorContext {
     user_id: c.get("user").id,
     team_id: team.id,
     site_role: c.get("siteRole") ?? "user",
-    team_role: toProtocolTeamRole(team.role),
+    team_role: team.role,
   };
 }
 

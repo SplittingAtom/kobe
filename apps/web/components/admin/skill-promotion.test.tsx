@@ -57,7 +57,7 @@ describe("Promote to Site (KOBE-333)", () => {
       ["POST /v1/skills/promotions"]: [202, { state: "requested", requestId: "r-1" }],
     });
     renderTeam(<PromotePanel teamId={TEAM.id} source={SOURCE} onDone={() => {}} />, {
-      role: "builder",
+      role: "contributor",
     });
     await userEvent.click(await screen.findByRole("button", { name: "Promote" }));
     expect(await screen.findByText(/Sent to your Team admins/)).toBeTruthy();
@@ -201,7 +201,7 @@ describe("the team's Promote to Site requests (KOBE-333)", () => {
     const post = calls.find((c) => c.url.endsWith("/decline"));
     expect(JSON.parse(String(post?.body))).toEqual({ note: "Not yet" });
     unmount();
-    renderTeam(<PromotionRequestsSection />, { role: "builder", permissions: ["team.read"] });
+    renderTeam(<PromotionRequestsSection />, { role: "contributor", permissions: ["team.read"] });
     expect(screen.queryByText("Promote to Site requests")).toBeNull();
   });
 });

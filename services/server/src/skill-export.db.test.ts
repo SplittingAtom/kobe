@@ -178,7 +178,7 @@ beforeAll(async () => {
     [team, otherTeam],
   );
   await h.admin.query(
-    `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'builder'), ($3, $4, 'builder')`,
+    `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'contributor'), ($3, $4, 'contributor')`,
     [team, builderId, otherTeam, outsiderId],
   );
   builder = await h.signIn("builder@export.test");

@@ -185,7 +185,7 @@ describe("team console", () => {
       <ConsoleShell
         kind="team"
         pathname="/admin/team/agents"
-        loadAccess={team("builder", ["team.read", "team.agents.use", "team.agents.build"])}
+        loadAccess={team("contributor", ["team.read", "team.agents.use", "team.agents.build"])}
       >
         <Page />
       </ConsoleShell>,

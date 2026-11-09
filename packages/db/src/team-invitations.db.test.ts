@@ -24,7 +24,7 @@ beforeAll(async () => {
     withTeam(app.db, teamId, (tx) =>
       tx
         .insert(teamInvitations)
-        .values({ teamId, email: to, role: "builder", invitedBy: inviter, expiresAt }),
+        .values({ teamId, email: to, role: "contributor", invitedBy: inviter, expiresAt }),
     );
   await invite(alpha, email, later());
   await invite(beta, "someone-else@invitee.test", later());
@@ -40,7 +40,7 @@ describe("listTeamInvitationsFor (team_invitations stays behind RLS)", () => {
         teamId: alpha,
         teamSlug: `alpha-${alpha.slice(0, 8)}`,
         teamName: "Alpha",
-        role: "builder",
+        role: "contributor",
         invitedByName: "Inviter",
         expiresAt: expect.any(Date),
       },

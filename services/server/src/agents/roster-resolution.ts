@@ -163,7 +163,7 @@ async function liveSiteEntries(tx: KobeTx, agentId?: string): Promise<RosterEntr
 }
 
 /** The frontmatter and prompt of the given published versions, by agent id. */
-export async function versionContent(
+async function versionContent(
   tx: KobeTx,
   pairs: readonly (readonly [string, number])[],
 ): Promise<ReadonlyMap<string, { frontmatter: AgentFrontmatter; prompt: string }>> {

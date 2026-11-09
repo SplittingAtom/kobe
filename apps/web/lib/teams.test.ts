@@ -75,9 +75,9 @@ describe("teamToActivate", () => {
 
 describe("roleLabel", () => {
   it("names the fixed team roles", () => {
-    expect([roleLabel("team_admin"), roleLabel("builder"), roleLabel("member")]).toEqual([
+    expect([roleLabel("team_admin"), roleLabel("contributor"), roleLabel("member")]).toEqual([
       "Team admin",
-      "Builder",
+      "Contributor",
       "Member",
     ]);
   });

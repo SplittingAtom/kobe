@@ -4,7 +4,6 @@
  * a unit test; the rights themselves come from the server (`row.actions`).
  */
 import type {
-  AgentLineage,
   AgentReach,
   AgentRosterRow,
   AgentRosterTab,
@@ -81,12 +80,8 @@ function reachText(r: AgentReach): string | null {
     case "suspended":
       return `${where} (suspended)`;
     case "removed":
-      // A decline (the server's marker, KOBE-571; older servers: a note) stays visible to the
-      // owner; a withdrawn or removed entry no longer reaches anyone.
-      if (r.declined === true || (r.declined === undefined && r.note)) {
-        return r.note ? `Declined for ${where}: ${r.note}` : `Declined for ${where}`;
-      }
-      return null;
+      // Only a decline carries a note; a withdrawn or removed entry no longer reaches anyone.
+      return r.note ? `Declined for ${where}: ${r.note}` : null;
     default:
       return null;
   }
@@ -137,61 +132,4 @@ export function editHref(row: AgentRosterRow): string {
   if (row.kind === "team_owned") return `/admin/team/agents/${id}`;
   if (row.kind === "gallery") return `/admin/site/gallery/${id}`;
   return agentPageHref(row.agentId);
-}
-
-/** The name of a team a row's agent is bound to: the active team's, its Reach's, or none. */
-function boundTeamName(
-  row: AgentRosterRow,
-  teamId: string,
-  activeTeam: { id: string; name: string },
-): string {
-  if (teamId === activeTeam.id) return activeTeam.name;
-  return row.reach?.find((r) => r.teamId === teamId)?.teamName ?? "another team";
-}
-
-/**
- * The fork dialog's binding notice (AR8, §6.7): "Bound to Team X: usable only there" when the
- * server says a fork from this row is bound (`forkBoundTeamId`); null for an unbound copy.
- */
-export function forkBindingNotice(
-  row: AgentRosterRow,
-  activeTeam: { id: string; name: string },
-): string | null {
-  const teamId = row.forkBoundTeamId ?? null;
-  if (teamId === null) return null;
-  return `Bound to Team ${boundTeamName(row, teamId, activeTeam)}: usable only there.`;
-}
-
-/** "Forked from <name> vN" (§6.7); the source stays unnamed when the viewer can't read it. */
-export function forkedFromLabel(lineage: AgentLineage): string {
-  const name = lineage.name ?? "an agent you can't see";
-  return lineage.version === null
-    ? `Forked from ${name}`
-    : `Forked from ${name} v${lineage.version}`;
-}
-
-/** Where the lineage's source opens (read-only for non-owners), or null when it can't be read. */
-export function lineageHref(lineage: AgentLineage): string | null {
-  if (lineage.kind === null) return null;
-  return agentPageHref(lineage.agentId);
-}
-
-/**
- * Where a row's version opens (§6.6): the version history, read-only, in the owner's editor for
- * the owner (Edit) and in the View for anyone else who may read the definition; null otherwise.
- */
-export function versionHistoryHref(row: AgentRosterRow, tab: AgentRosterTab): string | null {
-  if (row.versionInEffect === null && row.currentVersion === null) return null;
-  if (row.actions.edit) return `${editHref(row)}#history-title`;
-  if (row.actions.viewDefinition) return `${viewHref(row, tab)}#history-title`;
-  return null;
-}
-
-/**
- * The read-only View (AR14): from the Site tab, someone else's agent shows the site roster's
- * version in effect (`?from=site`); elsewhere the team roster's.
- */
-export function viewHref(row: AgentRosterRow, tab: AgentRosterTab): string {
-  const lentFromSite = tab === "site" && row.kind === "personal" && row.entry?.target === "site";
-  return `${agentPageHref(row.agentId)}${lentFromSite ? "?from=site" : ""}`;
 }

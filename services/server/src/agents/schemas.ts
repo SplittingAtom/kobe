@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { agentSlugSchema } from "@kobe/agent-file";
 import { agentStatus } from "@kobe/db";
-import { AGENT_FORK_NAME_MAX } from "@kobe/protocol";
 
 export const agentIdSchema = z.uuid();
 
@@ -20,16 +19,10 @@ export const updateMetaSchema = z.object({}).strict();
 
 /**
  * `POST /v1/agents/:id/fork` (KOBE-568, AR16): a fork is always a personal agent of the caller's;
- * a `scope` (older clients send one) is accepted and ignored with a warning. `name` renames the
- * copy (KOBE-571).
+ * a `scope` (older clients send one) is accepted and ignored with a warning.
  */
 export const forkSchema = z
-  .object({
-    scope: z.string().max(32).optional(),
-    slug: agentSlugSchema.optional(),
-    // The copy's display name (KOBE-571, the fork dialog); the source's name otherwise.
-    name: z.string().trim().min(1).max(AGENT_FORK_NAME_MAX).optional(),
-  })
+  .object({ scope: z.string().max(32).optional(), slug: agentSlugSchema.optional() })
   .strict();
 
 export const agentStatusSchema = z.object({ status: z.enum(agentStatus.enumValues) }).strict();

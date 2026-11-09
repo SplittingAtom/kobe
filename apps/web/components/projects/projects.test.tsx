@@ -48,7 +48,7 @@ const ROSTER = {
       user_id: "u-me",
       name: "Ada",
       email: "ada@x.io",
-      role: "builder",
+      role: "contributor",
       joined_at: "2026-01-01T00:00:00Z",
     },
     {
@@ -118,7 +118,7 @@ describe("projects list and create (KOBE-164, ac-1)", () => {
       "GET /v1/agents/runnable?limit=200": [200, AGENTS],
       "POST /v1/projects": [201, project()],
     });
-    renderTeam(<ProjectsPage />, { role: "builder" });
+    renderTeam(<ProjectsPage />, { role: "contributor" });
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "New project" }));
     await user.type(screen.getByLabelText("Name"), "Launch");
@@ -161,7 +161,7 @@ describe("projects list and create (KOBE-164, ac-1)", () => {
       "GET /v1/projects": [200, { projects: [] }],
       "GET /v1/agents/runnable?limit=200": [200, AGENTS],
     });
-    renderTeam(<ProjectsPage />, { role: "builder" });
+    renderTeam(<ProjectsPage />, { role: "contributor" });
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "New project" }));
     await user.type(screen.getByLabelText("Name"), "Big");
@@ -197,7 +197,7 @@ describe("project detail (KOBE-164, ac-1)", () => {
       ...base(),
       [`PATCH /v1/projects/${P}`]: [200, project({ name: "Launch 2" })],
     });
-    renderTeam(<ProjectDetailPage projectId={P} />, { role: "builder" });
+    renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
     const user = userEvent.setup();
     const name = await screen.findByLabelText("Name");
     await user.clear(name);
@@ -213,7 +213,7 @@ describe("project detail (KOBE-164, ac-1)", () => {
       ...base(),
       [`PATCH /v1/projects/${P}`]: [200, project({ archived_at: "2026-10-03T10:00:00Z" })],
     });
-    renderTeam(<ProjectDetailPage projectId={P} />, { role: "builder" });
+    renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
     await userEvent.setup().click(await screen.findByRole("button", { name: "Archive project" }));
     await answerConfirm("Archive Launch?", "Cancel");
     expect(calls.some((c) => c.method === "PATCH")).toBe(false);
@@ -228,7 +228,7 @@ describe("project detail (KOBE-164, ac-1)", () => {
 
   it("asks before deleting a project and sends nothing on Cancel", async () => {
     const calls = stubApi(base());
-    renderTeam(<ProjectDetailPage projectId={P} />, { role: "builder" });
+    renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
     await userEvent.setup().click(await screen.findByRole("button", { name: "Delete project" }));
     expect(await answerConfirm("Delete Launch for good?", "Cancel")).toMatch(/Archive it instead/);
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
@@ -290,7 +290,7 @@ describe("project members (KOBE-164, ac-1)", () => {
       ...base(),
       [`POST /v1/projects/${P}/members`]: [201, member("u-cy", "owner")],
     });
-    renderTeam(<ProjectDetailPage projectId={P} />, { role: "builder" });
+    renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
     const form = within(await screen.findByRole("form", { name: "Add a member" }));
     const user = userEvent.setup();
     // Bob is already in: only Cy is offered (and Ada, who owns it, is listed already).
@@ -309,7 +309,7 @@ describe("project members (KOBE-164, ac-1)", () => {
       [`PATCH /v1/projects/${P}/members/u-bob`]: [200, member("u-bob", "owner")],
       [`DELETE /v1/projects/${P}/members/u-bob`]: [204],
     });
-    renderTeam(<ProjectDetailPage projectId={P} />, { role: "builder" });
+    renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
     const user = userEvent.setup();
     const row = within(await memberRow("Bob"));
     await user.selectOptions(row.getByLabelText("Project role of Bob"), "owner");
@@ -340,7 +340,7 @@ describe("project members (KOBE-164, ac-1)", () => {
       ],
       [`DELETE /v1/projects/${P}/members/u-bob`]: [204],
     });
-    renderTeam(<ProjectDetailPage projectId={P} />, { role: "builder" });
+    renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
     const user = userEvent.setup();
     await user.click(within(await memberRow("Bob")).getByRole("button", { name: /Remove/ }));
     await answerConfirm("Remove Bob from this project?", "Cancel");
@@ -358,7 +358,7 @@ describe("project members (KOBE-164, ac-1)", () => {
       ...base(),
       [`DELETE /v1/projects/${P}/members/u-me`]: [409, { code: "last_owner", message: "x" }],
     });
-    renderTeam(<ProjectDetailPage projectId={P} />, { role: "builder" });
+    renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
     await userEvent
       .setup()
       .click(within(await memberRow("Ada (you)")).getByRole("button", { name: /Remove/ }));
@@ -374,7 +374,7 @@ describe("project members (KOBE-164, ac-1)", () => {
         { visibility: "workspace", members: [member("u-me", "owner")] },
       ],
     });
-    renderTeam(<ProjectDetailPage projectId={P} />, { role: "builder" });
+    renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
     expect(await screen.findByText(/Everyone in the team is a member/)).toBeTruthy();
   });
 });
@@ -399,7 +399,7 @@ describe("project files (KOBE-164, ac-1)", () => {
         },
       ],
     });
-    renderTeam(<ProjectDetailPage projectId={P} />, { role: "builder" });
+    renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
     await screen.findByRole("rowheader", { name: /notes\/idea\.txt/ });
     expect(screen.getByText("2.0 KiB")).toBeTruthy();
     expect(screen.getAllByText("Proposed by an agent, approved")).toHaveLength(1);
@@ -413,7 +413,7 @@ describe("project files (KOBE-164, ac-1)", () => {
       ...base(),
       [`POST /v1/projects/${P}/files`]: [201, file({ path: "docs/a.txt" })],
     });
-    renderTeam(<ProjectDetailPage projectId={P} />, { role: "builder" });
+    renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
     const form = within(await screen.findByRole("form", { name: "Add a file" }));
     const user = userEvent.setup();
     await user.type(form.getByLabelText("Folder (optional)"), "docs");
@@ -435,7 +435,7 @@ describe("project files (KOBE-164, ac-1)", () => {
       ...base(),
       [`DELETE /v1/projects/${P}/files/f-1`]: [204],
     });
-    renderTeam(<ProjectDetailPage projectId={P} />, { role: "builder" });
+    renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
     await userEvent.setup().click(await screen.findByRole("button", { name: "Delete brief.md" }));
     await answerConfirm("Delete brief.md from this project?", "Cancel");
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
@@ -470,7 +470,7 @@ describe("project files (KOBE-164, ac-1)", () => {
         },
       ],
     });
-    const { container } = renderTeam(<ProjectDetailPage projectId={P} />, { role: "builder" });
+    const { container } = renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
     await screen.findByRole("heading", { name: evil });
     await screen.findByRole("link", { name: evil });
     expect(container.querySelector("img")).toBeNull();
@@ -505,7 +505,7 @@ describe("project conversations (KOBE-164, ac-2)", () => {
         },
       ],
     });
-    renderTeam(<ProjectDetailPage projectId={P} />, { role: "builder" });
+    renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
     expect((await screen.findByRole("link", { name: "Bob's plan" })).getAttribute("href")).toBe(
       "/?thread=th-2",
     );

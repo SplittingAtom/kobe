@@ -75,7 +75,7 @@ describe("Catalog settings", () => {
   it("others see the switches but can't change them", async () => {
     stubApi({ "GET /v1/team/skill-review/settings": [200, SETTINGS] });
     renderTeam(<CatalogSwitchesSection />, {
-      role: "builder",
+      role: "contributor",
       permissions: ["team.skills.publish"],
     });
     const adds = (await screen.findByRole("checkbox", {

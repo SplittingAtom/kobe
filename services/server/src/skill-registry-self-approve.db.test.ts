@@ -28,7 +28,7 @@ beforeAll(async () => {
   ids.reviewer = await h.createUser("reviewer@solo.test");
   await h.admin.query(`INSERT INTO teams (id, slug, name) VALUES ($1, 'solo', 'Solo')`, [team]);
   await h.admin.query(
-    `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'team_admin'), ($1, $3, 'builder')`,
+    `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'team_admin'), ($1, $3, 'contributor')`,
     [team, ids.admin, ids.builder],
   );
   admin = await h.signIn("admin@solo.test");

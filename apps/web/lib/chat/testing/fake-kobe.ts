@@ -105,10 +105,6 @@ export interface FakeRunnableAgent {
   readonly model: string | null;
   /** The current version's starters (KOBE-222); default none. */
   readonly starters?: readonly string[];
-  /** The picker's group (agents-roster AR15, KOBE-571); absent: derived from the scope. */
-  readonly group?: "personal" | "team" | "site";
-  /** An admin's Dangerous agent (KOBE-476). */
-  readonly dangerous?: true;
 }
 
 interface FakeEntry {
@@ -228,7 +224,7 @@ export class FakeKobe {
   /** The member's stored layout preferences (KOBE-202), wire casing; PUTs merge into it. */
   preferences: Json = {};
   /** The caller's role in the active team, as `GET /v1/me/teams` lists it. */
-  teamRole: "team_admin" | "builder" | "member" = "member";
+  teamRole: "team_admin" | "contributor" | "member" = "member";
   /** The caller's other teams (KOBE-419's team selector); `PUT /v1/me/teams/active` is recorded. */
   readonly otherTeams: { id: string; slug: string; name: string; role: string }[] = [];
   /** The session's active team (`GET /v1/me/teams`); null: none yet, the client activates one. */

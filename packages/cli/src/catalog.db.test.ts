@@ -52,9 +52,10 @@ describe("blob-ref columns on an older schema", () => {
     const names = present.map((c) => `${c.table}.${c.column}`);
     // Added after that level: the hold history (KOBE-304), personal_skill_versions (the 0128
     // rename), the skill package keys (KOBE-310), catalog bytes (KOBE-317), eval bundles
-    // (KOBE-325) and MCP App results (KOBE-438).
+    // (KOBE-325), MCP App results (KOBE-438) and project history trees (KOBE-577).
     const later = (c: { table: string; column: string }) =>
       c.table === "workspace_file_hold_history" ||
+      c.table === "project_tree_entries" ||
       c.table === "thread_app_results" ||
       c.table === "skill_eval_runs" ||
       c.table === "personal_skill_versions" ||
@@ -70,5 +71,22 @@ describe("blob-ref columns on an older schema", () => {
     await expect(referencedObjectKeys(conn(), BLOB_REF_COLUMNS)).rejects.toThrow(
       /"(public\.)?(workspace_file_hold_history|thread_app_results)" does not exist/,
     );
+  });
+});
+
+describe("blob-ref columns on the current schema", () => {
+  it("finds every registered column, project history trees included (KOBE-577)", async () => {
+    const db = await createTestDatabase(testServerUrl());
+    const client = new pg.Client({ connectionString: db.adminUrl });
+    await client.connect();
+    try {
+      const present = await existingColumns(client, BLOB_REF_COLUMNS);
+      const names = present.map((c) => `${c.table}.${c.column}`);
+      expect(names).toEqual(BLOB_REF_COLUMNS.map((c) => `${c.table}.${c.column}`));
+      expect(names).toContain("project_tree_entries.blob_ref");
+    } finally {
+      await client.end().catch(() => undefined);
+      await db.drop().catch(() => undefined);
+    }
   });
 });

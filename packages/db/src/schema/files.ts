@@ -99,6 +99,12 @@ export const teamStorageQuotas = pgTable(
   {
     teamId: teamRef(),
     maxBytes: bigint({ mode: "number" }),
+    /**
+     * Object budget (KOBE-577, Workspaces GV2): S3 objects across scratchspaces, uploads and
+     * projects together. Null = the site default (a chart value). A push, upload or commit past it
+     * is refused `quota_exceeded` with `limit: "objects"`.
+     */
+    maxObjects: bigint({ mode: "number" }),
     updatedBy: uuid()
       .notNull()
       .references(() => users.id),
@@ -107,5 +113,6 @@ export const teamStorageQuotas = pgTable(
   (t) => [
     primaryKey({ columns: [t.teamId] }),
     check("team_storage_quotas_max", sql`${t.maxBytes} IS NULL OR ${t.maxBytes} >= 0`),
+    check("team_storage_quotas_max_objects", sql`${t.maxObjects} IS NULL OR ${t.maxObjects} >= 0`),
   ],
 );

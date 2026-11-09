@@ -7762,156 +7762,6 @@
           }
         }
       }
-    },
-    "/v1/team/default-agent": {
-      "get": {
-        "operationId": "getTeamDefaultAgent",
-        "summary": "The team's default agent for new threads, with the roster's choices",
-        "description": "Null when the team uses the site default (the gallery agent Kobe). `unavailable` says the chosen agent is no longer on the roster or runnable here: new threads then start with the site default.",
-        "parameters": [
-          {
-            "name": "X-Kobe-Team",
-            "in": "header",
-            "required": false,
-            "description": "The team the client believes is active. Required on changes; must match.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The setting and the choices.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TeamDefaultAgent"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`unauthenticated`: no session.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`not_a_team_member`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "`no_active_team` or `team_mismatch`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "operationId": "setTeamDefaultAgent",
-        "summary": "Choose the team's default agent from its roster, or go back to the site default",
-        "description": "Team admins. The agent must be team-owned, an active team roster entry, a site roster entry or a gallery agent that is published and active here. Audited `team.default_agent_changed` (ids only).",
-        "parameters": [
-          {
-            "name": "X-Kobe-Team",
-            "in": "header",
-            "required": true,
-            "description": "The team the client believes is active. Required on changes; must match.",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetTeamDefaultAgentBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The new setting and the choices.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TeamDefaultAgent"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "`invalid_request` or `team_header_required`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "`unauthenticated`: no session.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "`forbidden`: not a team admin.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "`no_active_team` or `team_mismatch`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "`agent_not_eligible`: not a choice on the team's roster.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
     }
   },
   "components": {
@@ -15369,9 +15219,6 @@
                       },
                       "note": {
                         "type": ["string", "null"]
-                      },
-                      "declined": {
-                        "type": "boolean"
                       }
                     },
                     "required": ["target", "teamId", "teamName", "state", "note"],
@@ -15458,9 +15305,6 @@
                     },
                     "resumeSiteWide": {
                       "type": "boolean"
-                    },
-                    "adopt": {
-                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -15480,68 +15324,6 @@
                     "suspendSiteWide",
                     "resumeSiteWide"
                   ],
-                  "additionalProperties": false
-                },
-                "forkBoundTeamId": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "allOf": [
-                        {
-                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                        },
-                        {
-                          "pattern": "^[0-9a-f-]+$"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "forkedFrom": {
-                  "type": "object",
-                  "properties": {
-                    "agentId": {
-                      "type": "string",
-                      "allOf": [
-                        {
-                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                        },
-                        {
-                          "pattern": "^[0-9a-f-]+$"
-                        }
-                      ]
-                    },
-                    "version": {
-                      "anyOf": [
-                        {
-                          "type": "integer",
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "name": {
-                      "type": ["string", "null"]
-                    },
-                    "kind": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": ["personal", "team_owned", "gallery"]
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  },
-                  "required": ["agentId", "version", "name", "kind"],
                   "additionalProperties": false
                 },
                 "usage": {
@@ -16094,12 +15876,6 @@
           "slug": {
             "type": "string"
           },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80,
-            "description": "The copy's name."
-          },
           "scope": {
             "type": "string",
             "description": "Ignored (a fork is always personal)."
@@ -16609,95 +16385,6 @@
           }
         },
         "required": ["agent", "entry"],
-        "additionalProperties": false
-      },
-      "TeamDefaultAgent": {
-        "type": "object",
-        "properties": {
-          "agentId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "allOf": [
-                  {
-                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                  },
-                  {
-                    "pattern": "^[0-9a-f-]+$"
-                  }
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "unavailable": {
-            "type": "boolean"
-          },
-          "options": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "agentId": {
-                  "type": "string",
-                  "allOf": [
-                    {
-                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                    },
-                    {
-                      "pattern": "^[0-9a-f-]+$"
-                    }
-                  ]
-                },
-                "name": {
-                  "type": "string"
-                },
-                "slug": {
-                  "type": "string"
-                },
-                "group": {
-                  "type": "string",
-                  "enum": ["team", "site"]
-                },
-                "versionInEffect": {
-                  "type": "integer",
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991
-                }
-              },
-              "required": ["agentId", "name", "slug", "group", "versionInEffect"],
-              "additionalProperties": false
-            }
-          }
-        },
-        "required": ["agentId", "unavailable", "options"],
-        "additionalProperties": false
-      },
-      "SetTeamDefaultAgentBody": {
-        "type": "object",
-        "properties": {
-          "agentId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "allOf": [
-                  {
-                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                  },
-                  {
-                    "pattern": "^[0-9a-f-]+$"
-                  }
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": ["agentId"],
         "additionalProperties": false
       }
     },

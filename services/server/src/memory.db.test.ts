@@ -191,13 +191,13 @@ describe("project memory", () => {
     const w = await world();
     const projectId = randomUUID();
     await fx.admin.query(
-      `INSERT INTO projects (team_id, id, slug, name, created_by, members_mode)
-       VALUES ($1, $2, 'mem2', 'Mem', $3, 'selected')`,
+      `INSERT INTO projects (team_id, id, slug, name, created_by, visibility)
+       VALUES ($1, $2, 'mem2', 'Mem', $3, 'restricted')`,
       [w.team, projectId, w.admin.id],
     );
     await fx.admin.query(
       `INSERT INTO project_members (team_id, project_id, user_id, role, added_by)
-       VALUES ($1, $2, $3, 'member', $3)`,
+       VALUES ($1, $2, $3, 'editor', $3)`,
       [w.team, projectId, w.member.id],
     );
     const write = (p: Person) =>
@@ -220,7 +220,9 @@ describe("project memory", () => {
     expect((await w.other.browser.get(`/v1/memory/${docId}`)).status).toBe(404);
     expect((await w.member.browser.get("/v1/memory?scope=project")).status).toBe(400);
     // Mode team: every team member is an implicit member.
-    await fx.admin.query(`UPDATE projects SET members_mode = 'team' WHERE team_id = $1`, [w.team]);
+    await fx.admin.query(`UPDATE projects SET visibility = 'workspace' WHERE team_id = $1`, [
+      w.team,
+    ]);
     expect((await list(w.other)).status).toBe(200);
   });
 });

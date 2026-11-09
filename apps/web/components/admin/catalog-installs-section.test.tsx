@@ -113,7 +113,7 @@ describe("Changing installs (KOBE-316)", () => {
       "GET /v1/team/skill-review/settings": [200, SWITCHES(true)],
     });
     renderTeam(<CatalogInstallsSection />, {
-      role: "builder",
+      role: "contributor",
       permissions: ["team.skills.publish"],
     });
     const access = await screen.findByRole("combobox", { name: "Access of pdf-kit" });
@@ -130,7 +130,7 @@ describe("Changing installs (KOBE-316)", () => {
       "GET /v1/team/skill-review/settings": [200, SWITCHES(false)],
     });
     renderTeam(<CatalogInstallsSection />, {
-      role: "builder",
+      role: "contributor",
       permissions: ["team.skills.publish"],
     });
     await screen.findByRole("table", { name: "Catalog installs" });

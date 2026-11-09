@@ -135,7 +135,7 @@ beforeAll(async () => {
   ]);
   for (const [id, role] of [
     [adminId, "team_admin"],
-    [builderId, "builder"],
+    [builderId, "contributor"],
     [memberId, "member"],
   ] as const) {
     await h.admin.query(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, $3)`, [
@@ -159,14 +159,14 @@ beforeAll(async () => {
   );
   for (const [who, name] of [
     ["alice", "admin"],
-    ["bob", "builder"],
+    ["bob", "contributor"],
     ["carol", "member"],
   ] as const) {
     const b = await h.signIn(`${who}@eval.test`);
     expect((await b.put("/v1/me/teams/active", { teamId: finance })).status).toBe(200);
     b.team = finance;
     if (name === "admin") admin = b;
-    else if (name === "builder") builder = b;
+    else if (name === "contributor") builder = b;
     else member = b;
   }
 });
@@ -930,7 +930,7 @@ describe("shared eval cases in the gate (KOBE-276)", () => {
       });
     } finally {
       await h.admin.query(
-        `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+        `UPDATE team_members SET role = 'contributor' WHERE team_id = $1 AND user_id = $2`,
         [finance, builderId],
       );
     }

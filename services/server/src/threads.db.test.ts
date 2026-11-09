@@ -142,7 +142,7 @@ beforeAll(async () => {
   marketing = await create("marketing", "dave");
   await activate(as.alice, finance);
   await addMember(as.alice, "bob", "member");
-  await addMember(as.alice, "carol", "builder");
+  await addMember(as.alice, "carol", "contributor");
   await activate(as.dave, marketing);
   await addMember(as.dave, "bob", "member");
   await activate(as.bob, finance);
@@ -346,8 +346,8 @@ describe("shared project threads (D23, data layer)", () => {
   beforeAll(async () => {
     // threads.project_id references projects (KOBE-160): the project row comes first.
     await admin.query(
-      `INSERT INTO projects (team_id, id, slug, name, created_by, members_mode)
-       VALUES ($1, $2, 'plan', 'Plan', $3, 'selected')`,
+      `INSERT INTO projects (team_id, id, slug, name, created_by, visibility)
+       VALUES ($1, $2, 'plan', 'Plan', $3, 'restricted')`,
       [finance, project, ids.alice],
     );
     // Selected mode (KOBE-161): bob is in the team but not in the project.

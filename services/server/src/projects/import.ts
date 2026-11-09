@@ -1,6 +1,5 @@
 import { Readable } from "node:stream";
 import { withTeam, type KobeDb, type TeamRole } from "@kobe/db";
-import { toProtocolTeamRole } from "../authz/team-role.js";
 import {
   artifactFileExtension,
   artifactFileStem,
@@ -195,7 +194,7 @@ export async function importProjectFile(
       ? await artifactSource(deps, who, wanted.artifact_id, wanted.version)
       : await workspaceSource(deps, who, wanted.path);
   if (!source) return { ok: false, error: "source_not_found" };
-  if (!canAddToProject(toProtocolTeamRole(who.teamRole), access.role, "restricted")) {
+  if (!canAddToProject(who.teamRole, access.role, "restricted")) {
     return { ok: false, error: "forbidden" };
   }
   const name = request.name ?? source.defaultName;

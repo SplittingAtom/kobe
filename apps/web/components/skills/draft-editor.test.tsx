@@ -18,7 +18,7 @@ import { DraftEditorPage } from "./draft-editor-page";
  * the bump the server works out and saves the revision the author saw (ac-3).
  */
 const BUILDER = {
-  role: "builder",
+  role: "contributor",
   permissions: ["team.personal.create", "team.skills.publish"],
 } as const;
 const SKILL_MD = [

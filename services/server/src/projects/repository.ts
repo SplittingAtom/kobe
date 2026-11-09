@@ -1,4 +1,3 @@
-import { roleFromDb, roleToDb, membersModeOf, visibilityOf } from "./compat.js";
 import { endUnreachableThreadRules } from "../policy/user-rules.js";
 import {
   and,
@@ -6,6 +5,7 @@ import {
   count,
   eq,
   inArray,
+  isLegalHoldViolation,
   isNull,
   memoryDocs,
   projectFiles,
@@ -37,7 +37,7 @@ export type ProjectFailure =
   | "forbidden"
   | "archived"
   | "in_use"
-  | "role_not_supported_yet";
+  | "legal_hold";
 
 export type Outcome<T> =
   | { readonly ok: true; readonly value: T }
@@ -72,14 +72,14 @@ export async function toProject(
     description: row.description,
     instructions: row.instructions,
     default_agent_id: row.defaultAgentId,
-    visibility: visibilityOf(row.membersMode),
+    visibility: row.visibility,
     my_role: myRole ?? null,
     file_count: files?.n ?? 0,
-    head_commit_id: null,
-    live_bytes: null,
-    history_bytes: null,
-    live_objects: null,
-    history_objects: null,
+    head_commit_id: row.headCommitId,
+    live_bytes: row.liveBytes,
+    history_bytes: row.historyBytes,
+    live_objects: row.liveObjects,
+    history_objects: row.historyObjects,
     created_by: row.createdBy,
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
@@ -138,7 +138,7 @@ export async function createProject(
       description: body.description ?? "",
       instructions: body.instructions ?? "",
       defaultAgentId: body.default_agent_id ?? null,
-      membersMode: membersModeOf(body.visibility ?? "workspace"),
+      visibility: body.visibility ?? "workspace",
       createdBy: viewer.userId,
     })
     .returning();
@@ -155,14 +155,14 @@ export async function createProject(
       teamId: viewer.teamId,
       projectId: row.id,
       userId,
-      role: "member" as const,
+      role: "editor" as const,
       addedBy: viewer.userId,
     })),
   ]);
   await recordAudit(tx, {
     action: "project.created",
     teamId: viewer.teamId,
-    target: { projectId: row.id, membersMode: row.membersMode },
+    target: { projectId: row.id, visibility: row.visibility },
   });
   return { ok: true, value: { row } };
 }
@@ -193,7 +193,7 @@ export async function listProjects(
     .orderBy(asc(projects.name), asc(projects.id));
   const out: Project[] = [];
   for (const { project, role } of rows) {
-    const mine = effectiveRole(project.membersMode, role ?? undefined);
+    const mine = effectiveRole(project.visibility, role ?? undefined);
     if (mine === undefined && !options.admin) continue;
     out.push(await toProject(tx, viewer.teamId, project, mine));
   }
@@ -216,7 +216,7 @@ export async function updateProject(
       ...(body.description === undefined ? {} : { description: body.description }),
       ...(body.instructions === undefined ? {} : { instructions: body.instructions }),
       ...(body.default_agent_id === undefined ? {} : { defaultAgentId: body.default_agent_id }),
-      ...(body.visibility === undefined ? {} : { membersMode: membersModeOf(body.visibility) }),
+      ...(body.visibility === undefined ? {} : { visibility: body.visibility }),
       ...(body.archived === undefined
         ? {}
         : { archivedAt: body.archived ? (access.project.archivedAt ?? new Date()) : null }),
@@ -232,6 +232,13 @@ export async function updateProject(
     teamId: viewer.teamId,
     target: { projectId: row.id, fields: Object.keys(body).sort() },
   });
+  if (row.visibility !== access.project.visibility) {
+    await recordAudit(tx, {
+      action: "project.visibility_changed",
+      teamId: viewer.teamId,
+      target: { projectId: row.id, from: access.project.visibility, to: row.visibility },
+    });
+  }
   return { ok: true, value: { row } };
 }
 
@@ -260,9 +267,17 @@ export async function deleteProject(
   ] as const;
   const held = blockers.filter(([n]) => n > 0).map(([n, what]) => `${n} ${what}`);
   if (held.length > 0) return fail("in_use", held.join(", "));
-  await tx
-    .delete(projects)
-    .where(and(eq(projects.teamId, viewer.teamId), eq(projects.id, projectId)));
+  try {
+    // A savepoint: the hold guard over commit history (0200) refuses the cascade with KH001.
+    await tx.transaction((sp) =>
+      sp
+        .delete(projects)
+        .where(and(eq(projects.teamId, viewer.teamId), eq(projects.id, projectId))),
+    );
+  } catch (err) {
+    if (isLegalHoldViolation(err)) return fail("legal_hold");
+    throw err;
+  }
   await recordAudit(tx, {
     action: "project.deleted",
     teamId: viewer.teamId,
@@ -281,7 +296,7 @@ export async function listMembers(tx: KobeTx, teamId: string, projectId: string)
     .orderBy(asc(projectMembers.addedAt), asc(projectMembers.userId));
   return rows.map((r): ProjectMember => ({
     user_id: r.userId,
-    role: roleFromDb(r.role),
+    role: r.role,
     added_at: r.addedAt.toISOString(),
   }));
 }
@@ -298,6 +313,17 @@ async function ownerCount(tx: KobeTx, teamId: string, projectId: string): Promis
       ),
     );
   return row?.n ?? 0;
+}
+
+/** The project's explicit role set after a change (audit GV4: counts, never who). */
+async function roleCounts(tx: KobeTx, teamId: string, projectId: string) {
+  const rows = await tx
+    .select({ role: projectMembers.role, n: count() })
+    .from(projectMembers)
+    .where(and(eq(projectMembers.teamId, teamId), eq(projectMembers.projectId, projectId)))
+    .groupBy(projectMembers.role);
+  const of = (role: ProjectRole) => rows.find((r) => r.role === role)?.n ?? 0;
+  return { owner: of("owner"), editor: of("editor"), reader: of("reader") };
 }
 
 async function currentRole(tx: KobeTx, teamId: string, projectId: string, userId: string) {
@@ -320,7 +346,6 @@ export async function addMember(
   projectId: string,
   member: { userId: string; role: ProjectRole },
 ): Promise<Outcome<ProjectMember>> {
-  if (member.role === "reader") return fail("role_not_supported_yet");
   if (!(await usersInTeam(tx, viewer.teamId, [member.userId]))) return fail("not_in_team");
   if ((await currentRole(tx, viewer.teamId, projectId, member.userId)) !== undefined) {
     return fail("already_exists");
@@ -331,7 +356,7 @@ export async function addMember(
       teamId: viewer.teamId,
       projectId,
       userId: member.userId,
-      role: roleToDb(member.role),
+      role: member.role,
       addedBy: viewer.userId,
     })
     .returning();
@@ -339,19 +364,19 @@ export async function addMember(
   await recordAudit(tx, {
     action: "project.member_added",
     teamId: viewer.teamId,
-    target: { projectId, userId: member.userId, role: roleToDb(member.role) },
+    target: { projectId, userId: member.userId, role: member.role },
   });
   return {
     ok: true,
     value: {
       user_id: row.userId,
-      role: roleFromDb(row.role),
+      role: row.role,
       added_at: row.addedAt.toISOString(),
     },
   };
 }
 
-/** Sets a role; in mode `team` an implicit member without a row gets one (to be made owner). */
+/** Sets a role; with visibility `workspace` an implicit reader without a row gets one. */
 export async function setMemberRole(
   tx: KobeTx,
   viewer: Viewer,
@@ -359,11 +384,10 @@ export async function setMemberRole(
   userId: string,
   role: ProjectRole,
 ): Promise<Outcome<ProjectMember>> {
-  if (role === "reader") return fail("role_not_supported_yet");
   const projectId = access.project.id;
   const before = await currentRole(tx, viewer.teamId, projectId, userId);
   if (before === undefined) {
-    if (access.project.membersMode !== "team") return fail("not_found");
+    if (access.project.visibility !== "workspace") return fail("not_found");
     const added = await addMember(tx, viewer, projectId, { userId, role });
     return added;
   }
@@ -376,7 +400,7 @@ export async function setMemberRole(
   }
   const [row] = await tx
     .update(projectMembers)
-    .set({ role: roleToDb(role) })
+    .set({ role })
     .where(
       and(
         eq(projectMembers.teamId, viewer.teamId),
@@ -389,13 +413,19 @@ export async function setMemberRole(
   await recordAudit(tx, {
     action: "project.member_role_changed",
     teamId: viewer.teamId,
-    target: { projectId, userId, from: before, to: roleToDb(role) },
+    target: {
+      projectId,
+      userId,
+      from: before,
+      to: role,
+      roles: await roleCounts(tx, viewer.teamId, projectId),
+    },
   });
   return {
     ok: true,
     value: {
       user_id: row.userId,
-      role: roleFromDb(row.role),
+      role: row.role,
       added_at: row.addedAt.toISOString(),
     },
   };

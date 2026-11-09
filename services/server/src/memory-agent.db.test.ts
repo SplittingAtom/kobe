@@ -132,11 +132,11 @@ async function started(w: World, capabilities: readonly string[] = [CAPABILITY_M
   return sb;
 }
 
-/** Puts the world's thread into a new project (rows by SQL, members_mode `selected`: only `join`ed users are members, team admins are not). */
+/** Puts the world's thread into a new project (rows by SQL, visibility `restricted`: only `join`ed users are members, team admins are not). */
 async function inProject(w: World): Promise<string> {
   const id = randomUUID();
   await fx.admin.query(
-    `INSERT INTO projects (team_id, id, slug, name, created_by, members_mode) VALUES ($1, $2, $3, 'P', $4, 'selected')`,
+    `INSERT INTO projects (team_id, id, slug, name, created_by, visibility) VALUES ($1, $2, $3, 'P', $4, 'restricted')`,
     [w.team, id, `p-${randomBytes(3).toString("hex")}`, w.owner.id],
   );
   await fx.admin.query(`UPDATE threads SET project_id = $3 WHERE team_id = $1 AND id = $2`, [
@@ -151,7 +151,7 @@ async function inProject(w: World): Promise<string> {
 async function join(w: World): Promise<void> {
   await fx.admin.query(
     `INSERT INTO project_members (team_id, project_id, user_id, role, added_by)
-     SELECT t.team_id, t.project_id, $3, 'member', $3 FROM threads t
+     SELECT t.team_id, t.project_id, $3, 'editor', $3 FROM threads t
       WHERE t.team_id = $1 AND t.id = $2 AND t.project_id IS NOT NULL`,
     [w.team, w.threadId, w.owner.id],
   );

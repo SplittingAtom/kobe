@@ -71,10 +71,10 @@ beforeAll(async () => {
   );
   const members: [string, Person, string][] = [
     [finance, "alice", "team_admin"],
-    [finance, "bob", "builder"],
+    [finance, "bob", "contributor"],
     [finance, "carol", "member"],
     [finance, "sam", "member"],
-    [marketing, "dave", "builder"],
+    [marketing, "dave", "contributor"],
   ];
   for (const [team, who, role] of members) {
     await sql(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, $3)`, [
@@ -339,10 +339,10 @@ describe("owner eligibility (AR10, ac-2)", () => {
       // The thread keeps its pin and stays readable (and runnable: D19).
       expect(await runResolves(finance, "carol", agent, 1)).toMatchObject({ ok: true });
     } finally {
-      await sql(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'builder')`, [
-        finance,
-        ids.bob,
-      ]);
+      await sql(
+        `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'contributor')`,
+        [finance, ids.bob],
+      );
     }
     expect(await runnableOf("carol", agent)).toBeDefined();
     const back = (await roster("carol", "team")).find((r) => r.agentId === agent);
@@ -486,7 +486,7 @@ describe("schedules follow the roster (AR11, ac-3)", () => {
     const removed = await as.alice.request("DELETE", `/v1/team/members/${ids.bob}`);
     expect(removed.status, JSON.stringify(removed.json)).toBeLessThan(300);
     expect(await state(id)).toMatchObject({ active: false, paused_by: "agent_unavailable" });
-    await sql(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'builder')`, [
+    await sql(`INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'contributor')`, [
       finance,
       ids.bob,
     ]);

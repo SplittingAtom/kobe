@@ -31,7 +31,7 @@ describe("apiRequest", () => {
     const fetchFn = respond(204);
     const res = await apiRequest("/v1/team/members/u1", {
       method: "PATCH",
-      json: { role: "builder" },
+      json: { role: "contributor" },
       teamId: "t-1",
       fetchFn,
     });
@@ -40,7 +40,7 @@ describe("apiRequest", () => {
     const headers = new Headers(init.headers);
     expect(headers.get("content-type")).toBe("application/json");
     expect(headers.get(TEAM_HEADER)).toBe("t-1");
-    expect(init.body).toBe('{"role":"builder"}');
+    expect(init.body).toBe('{"role":"contributor"}');
   });
 
   it("refuses absolute or protocol-relative URLs (API calls stay on this origin)", async () => {

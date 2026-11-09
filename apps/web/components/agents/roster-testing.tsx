@@ -41,7 +41,7 @@ export const ROSTER = (tab: string) => `GET /v1/agents/roster?tab=${tab}`;
 
 export const MEMBER = { role: "member", permissions: ["team.agents.use"] } as const;
 export const BUILDER = {
-  role: "builder",
+  role: "contributor",
   permissions: ["team.agents.use", "team.agents.build"],
 } as const;
 export const TEAM_ADMIN = {

@@ -115,37 +115,9 @@ describe("agent roster contract (KOBE-566)", () => {
         resumeHere: false,
         suspendSiteWide: false,
         resumeSiteWide: false,
-        adopt: true,
       },
     };
     expect(agentRosterRowSchema.safeParse(row).success).toBe(true);
-    // KOBE-571: the fork's binding, lineage and the declined marker (additive).
-    expect(
-      agentRosterRowSchema.safeParse({
-        ...row,
-        forkBoundTeamId: ID,
-        forkedFrom: { agentId: ID, version: 2, name: "Source", kind: "team_owned" },
-        reach: [
-          {
-            target: "team",
-            teamId: ID,
-            teamName: "T",
-            state: "removed",
-            note: null,
-            declined: true,
-          },
-        ],
-      }).success,
-    ).toBe(true);
-    expect(
-      agentRosterRowSchema.safeParse({
-        ...row,
-        forkedFrom: { agentId: ID, version: null, name: null, kind: null },
-      }).success,
-    ).toBe(true);
-    const { adopt: _adopt, ...withoutAdopt } = row.actions;
-    // Additive: a row from an older server without `adopt` still parses.
-    expect(agentRosterRowSchema.safeParse({ ...row, actions: withoutAdopt }).success).toBe(true);
     // KOBE-570: team admins get the inventory's usage on the row (additive, optional).
     const usage = {
       runCount: 4,

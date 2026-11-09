@@ -14,7 +14,7 @@ import { DraftEditorPage } from "./draft-editor-page";
  * written first (ac-4); Eval lists the draft's runs with its saved skill's (ac-5).
  */
 const BUILDER = {
-  role: "builder",
+  role: "contributor",
   permissions: ["team.personal.create", "team.skills.publish"],
 } as const;
 const SKILL_MD =

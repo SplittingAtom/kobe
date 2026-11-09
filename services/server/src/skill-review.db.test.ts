@@ -65,7 +65,7 @@ beforeAll(async () => {
   );
   const members: [string, Person, string][] = [
     [finance, "alice", "team_admin"],
-    [finance, "bob", "builder"],
+    [finance, "bob", "contributor"],
     [finance, "carol", "member"],
     [marketing, "dave", "team_admin"],
   ];

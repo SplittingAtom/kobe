@@ -91,7 +91,7 @@ describe("Agents page as a member (ac-1)", () => {
     expect(await rowActions("Notes")).toEqual([
       "Propose to Finance",
       "Propose to the site",
-      "Fork to Personal…",
+      "Fork to Personal",
     ]);
     expect(screen.getByRole("columnheader", { name: "Reach" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "New agent" }).getAttribute("href")).toBe(
@@ -121,7 +121,7 @@ describe("Agents page as a member (ac-1)", () => {
         .getByRole("link", { name: /View\s+Kobe/ })
         .getAttribute("href"),
     ).toBe("/agents/g-1");
-    expect(await rowActions("Kobe")).toEqual(["Fork to Personal…"]);
+    expect(await rowActions("Kobe")).toEqual(["Fork to Personal"]);
   });
 });
 
@@ -163,7 +163,7 @@ describe("Agents page as a builder (ac-1)", () => {
         .getByRole("link", { name: /View\s+Writer/ })
         .getAttribute("href"),
     ).toBe("/agents/l-1");
-    expect(await rowActions("Writer")).toEqual(["Fork to Personal…"]);
+    expect(await rowActions("Writer")).toEqual(["Fork to Personal"]);
   });
 });
 
@@ -359,39 +359,17 @@ describe("Agents page flows (ac-2)", () => {
     const calls = stubApi({
       [ROSTER("team")]: [200, page("team", [pinnable])],
       "PUT /v1/team/agent-roster/l-1": [200, { entry: entry({ agentId: "l-1" }) }],
-      // The version history, read through the roster's read-only View (KOBE-571).
-      "GET /v1/agents/l-1/versions": [
-        200,
-        {
-          currentVersion: 3,
-          versions: [3, 2, 1].map((v) => ({
-            version: v,
-            publishedAt: `2026-11-0${v}T10:00:00Z`,
-            publishedBy: null,
-            draftRevision: v,
-            republishedFrom: null,
-            score: null,
-          })),
-          nextBefore: null,
-        },
-      ],
     });
     renderTeam(<Page search="tab=team" />, TEAM_ADMIN);
-    const cells = within(await rowOf("Writer")).getAllByRole("cell");
-    expect(cells.some((c) => c.textContent?.includes("Update available: v3"))).toBe(true);
-    expect(cells.some((c) => c.textContent?.includes("Pinned to v1"))).toBe(true);
-    expect(screen.getByRole("columnheader", { name: "Version in effect" })).toBeTruthy();
     await rowAction("Writer", "Pin a version…");
     const dialog = await screen.findByRole("dialog", { name: "Version of Writer on Finance" });
     const select = within(dialog).getByLabelText("Version rule") as HTMLSelectElement;
-    await waitFor(() =>
-      expect([...select.options].map((o) => o.textContent)).toEqual([
-        "Follow latest (now v3)",
-        "Pin to v3 (published 2026-11-03)",
-        "Pin to v2 (published 2026-11-02)",
-        "Pin to v1 (published 2026-11-01)",
-      ]),
-    );
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      "Latest published version (now v3)",
+      "Pin to v3",
+      "Pin to v2",
+      "Pin to v1",
+    ]);
     expect(select.value).toBe("1");
     await userEvent.selectOptions(select, "2");
     await userEvent.click(within(dialog).getByRole("button", { name: "Save version rule" }));
@@ -484,12 +462,9 @@ describe("Agents page flows (ac-2)", () => {
     await userEvent.click(within(ask).getByRole("button", { name: "Remove" }));
     expect(await screen.findByText("Removed Writer from Finance.")).toBeTruthy();
     expect(bodyOf(calls, "PUT", "/v1/team/agent-roster/l-1")).toEqual({ state: "removed" });
-    await rowAction("Writer", "Fork to Personal…");
-    const fork = await screen.findByRole("dialog", { name: "Fork Writer" });
-    await userEvent.click(within(fork).getByRole("button", { name: "Fork and open" }));
+    await rowAction("Writer", "Fork to Personal");
     await waitFor(() => expect(assign).toHaveBeenCalledWith("/agents/p-9"));
-    // Name and slug unchanged: the server names the copy and picks a free slug.
-    expect(bodyOf(calls, "POST", "/v1/agents/l-1/fork")).toEqual({});
+    expect(bodyOf(calls, "POST", "/v1/agents/l-1/fork")).toEqual({ scope: "personal" });
   });
 
   it("loads the next page by cursor above 200 rows", async () => {

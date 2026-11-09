@@ -131,7 +131,7 @@ beforeAll(async () => {
   await activate("alice", finance);
   await activate("dave", marketing);
   await addMember("alice", "bob", "member");
-  await addMember("alice", "carol", "builder");
+  await addMember("alice", "carol", "contributor");
   await addMember("alice", "erin", "member");
   for (const who of ["bob", "carol", "erin"] as const) await activate(who, finance);
 });

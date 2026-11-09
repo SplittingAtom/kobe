@@ -115,8 +115,8 @@ U_M1=$(user_obj m1 "$M1")
 U_M2=$(user_obj m2 "$M2")
 OWNER_JSON=$(printf '{"email":"%s","password":"%s"}' "$OWNER_EMAIL" "$OWNER_PASSWORD")
 step() { client "$(printf '{"mode":"%s","base":"%s","owner":%s,%s}' "$1" "$BASE" "$OWNER_JSON" "$2")"; }
-contains "the Builder has the builder role" '^role=200:builder$' \
-  "$(step role "\"admin\":$U_AD,\"userId\":\"$BD\",\"role\":\"builder\"")"
+contains "the Builder has the contributor role" '^role=200:contributor$' \
+  "$(step role "\"admin\":$U_AD,\"userId\":\"$BD\",\"role\":\"contributor\"")"
 if [[ "$(field models_a "$fx")" == 200 ]]; then
   MODELS=1
   [[ "$MODEL_ALIAS" == fast ]] && ensure_fake_llm

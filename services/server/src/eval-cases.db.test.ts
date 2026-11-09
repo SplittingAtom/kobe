@@ -31,7 +31,7 @@ const as = (p: Person) => f.on(0, p);
 async function builderAgent(team: string): Promise<{ builder: Person; agentId: string }> {
   const builder = await f.member(team);
   await f.fx.admin.query(
-    `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+    `UPDATE team_members SET role = 'contributor' WHERE team_id = $1 AND user_id = $2`,
     [team, builder.id],
   );
   const b = as(builder);
@@ -620,7 +620,7 @@ describe("who reads cases (ac-4)", () => {
     await yesterday(x.w.team);
     const otherBuilder = await f.member(x.w.team);
     await f.fx.admin.query(
-      `UPDATE team_members SET role = 'builder' WHERE team_id = $1 AND user_id = $2`,
+      `UPDATE team_members SET role = 'contributor' WHERE team_id = $1 AND user_id = $2`,
       [x.w.team, otherBuilder.id],
     );
     const paths = [
