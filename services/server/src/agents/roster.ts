@@ -199,6 +199,19 @@ export async function refuseIfRostered(db: KobeDb, agentId: string): Promise<voi
  * Where the owner's agents reach (the Personal tab's Reach column, AR2): their entries on every
  * team's roster and on the site roster, any state (a removed entry carries a decline's note).
  */
+/**
+ * A removed entry an admin declined as a proposal (KOBE-571): only a decline leaves `removedAt`
+ * null with a decision recorded; removals, withdrawals and adopts write `removedAt`. Entries
+ * declined before KOBE-571 carry `removedAt` and can't be told from a removal: not declined.
+ */
+export function isDeclined(e: {
+  readonly state: string;
+  readonly decidedAt: Date | null;
+  readonly removedAt: Date | null;
+}): boolean {
+  return e.state === "removed" && e.decidedAt !== null && e.removedAt === null;
+}
+
 export async function reachOf(
   db: KobeDb,
   agentIds: readonly string[],
@@ -213,6 +226,8 @@ export async function reachOf(
         agentId: teamAgentRoster.siteAgentId,
         state: teamAgentRoster.state,
         note: teamAgentRoster.note,
+        decidedAt: teamAgentRoster.decidedAt,
+        removedAt: teamAgentRoster.removedAt,
       })
       .from(teamAgentRoster)
       .where(
@@ -231,6 +246,7 @@ export async function reachOf(
         teamName: team.name,
         state: r.state,
         note: r.note,
+        declined: isDeclined(r),
       });
     }
   }
@@ -239,11 +255,20 @@ export async function reachOf(
       agentId: siteAgentRoster.siteAgentId,
       state: siteAgentRoster.state,
       note: siteAgentRoster.note,
+      decidedAt: siteAgentRoster.decidedAt,
+      removedAt: siteAgentRoster.removedAt,
     })
     .from(siteAgentRoster)
     .where(inArray(siteAgentRoster.siteAgentId, [...agentIds]));
   for (const r of site) {
-    add(r.agentId, { target: "site", teamId: null, teamName: null, state: r.state, note: r.note });
+    add(r.agentId, {
+      target: "site",
+      teamId: null,
+      teamName: null,
+      state: r.state,
+      note: r.note,
+      declined: isDeclined(r),
+    });
   }
   return reach;
 }

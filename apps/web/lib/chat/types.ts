@@ -131,7 +131,14 @@ export interface RunnableAgent {
   readonly starters?: readonly string[];
   /** The current version is an admin's Dangerous agent (KOBE-476): badged in the picker. */
   readonly dangerous?: true;
+  /**
+   * The roster the picker groups it under (agents-roster AR15, KOBE-571): own agents, the team's
+   * roster, the site's. Absent from older servers (then derived from `scope`).
+   */
+  readonly group?: RunnableGroup;
 }
+
+export type RunnableGroup = "personal" | "team" | "site";
 
 export interface ThreadPage {
   readonly threads: readonly ThreadSummary[];

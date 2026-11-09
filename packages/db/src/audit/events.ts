@@ -746,6 +746,14 @@ export const AUDIT_EVENTS = {
   /** A team admin turned post-run follow-up suggestions on or off for the team (KOBE-222, CE21). */
   "models.followups.changed": event("team", { enabled: z.boolean() }),
   /**
+   * A team admin chose the team's default agent for new threads from its roster, or went back to
+   * the site default (`agentId` null) (KOBE-571, agents-roster §7.7). Ids only.
+   */
+  "team.default_agent_changed": event("team", {
+    agentId: id.nullable(),
+    previousAgentId: id.nullable(),
+  }),
+  /**
    * A budget or rate limit was set, changed or removed (KOBE-42, D30): the site's (install
    * admins; no team), the team's or one member's (team admins). Amounts in dollars; null = none.
    */

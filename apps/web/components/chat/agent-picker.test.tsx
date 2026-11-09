@@ -56,9 +56,9 @@ describe("agent picker", () => {
     const radios = within(await group()).getAllByRole("radio") as HTMLInputElement[];
     expect(radios.map((r) => r.closest("label")?.textContent)).toEqual([
       "No agentA plain conversation",
+      "My HelperPersonal",
       "Ledger BotTeamReconciles books",
       "Pinned BotBuilt-inAlways GLMModel: GLM 5.3",
-      "My HelperPersonal",
     ]);
     expect(radios[0]?.checked).toBe(true);
     const read = fake.requests.find((r) => r.path.startsWith("/v1/agents/runnable"));
@@ -86,11 +86,11 @@ describe("agent picker", () => {
     const radios = within(await group()).getAllByRole("radio") as HTMLInputElement[];
     expect(radios.map((r) => r.closest("label")?.textContent)).toEqual([
       "No agentA plain conversation",
-      "KobeBuilt-in",
+      "KobePersonal",
       "KobeTeamkobe-team1",
       "KobeTeamkobe-ops",
-      "KobePersonal",
       "SoloTeam",
+      "KobeBuilt-in",
     ]);
     // Screen readers hear the origin with the name, and the slug where the origin is shared.
     expect(within(await group()).getByRole("radio", { name: "Kobe, Built-in" })).toBeTruthy();
@@ -102,6 +102,39 @@ describe("agent picker", () => {
     ).toBeTruthy();
     await user.click(within(await group()).getByRole("radio", { name: "Solo, Team" }));
     expect(await screen.findByRole("button", { name: "Chat with: Solo" })).toBeTruthy();
+  });
+
+  it("KOBE-571: groups the agents Personal, Team, Site from the roster, with the Dangerous badge", async () => {
+    fake.runnableAgents.length = 0;
+    fake.runnableAgents.push(
+      { id: "s-lent", scope: "personal", group: "site", name: "Site Lent", model: null },
+      { id: "g-kobe", scope: "gallery", group: "site", name: "Kobe", model: null },
+      {
+        id: "t-lent",
+        scope: "personal",
+        group: "team",
+        name: "Team Lent",
+        model: null,
+        dangerous: true,
+      },
+      { id: "p-own", scope: "personal", group: "personal", name: "Own", model: null },
+      { id: "t-owned", scope: "team", group: "team", name: "Owned", model: null },
+    );
+    openApp(fake);
+    const picker = await group();
+    const groups = within(picker).getAllByRole("group");
+    expect(
+      groups.map((g) => g.getAttribute("aria-labelledby") && g.querySelector("p")?.textContent),
+    ).toEqual(["Personal", "Team", "Site"]);
+    const names = (g: HTMLElement) =>
+      within(g)
+        .getAllByRole("radio")
+        .map((r) => r.getAttribute("aria-label"));
+    expect(names(must(groups[0]))).toEqual(["Own, Personal"]);
+    expect(names(must(groups[1]))).toEqual(["Team Lent, Personal, Dangerous", "Owned, Team"]);
+    expect(names(must(groups[2]))).toEqual(["Site Lent, Personal", "Kobe, Built-in"]);
+    expect(within(picker).getByText("Dangerous")).toBeTruthy();
+    expect(within(picker).queryByText(/Update available/)).toBeNull();
   });
 
   it("starts a plain conversation by default", async () => {

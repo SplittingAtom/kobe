@@ -4,6 +4,7 @@ import {
   assignDecision,
   rosterActions,
   rosterAdmin,
+  rowForkBinding,
   type RosterActor,
   type RosterSubject,
 } from "./access.js";
@@ -244,5 +245,41 @@ describe("row actions per role (§5)", () => {
       resumeHere: role === "team_admin",
     });
     expect(rosterActions(actor(role, true), row, "site").edit).toBe(true);
+  });
+});
+
+describe("adopt and the fork's binding on rows (KOBE-571)", () => {
+  const theirs = (over: Partial<RosterSubject> = {}) => subject({ ownerUserId: OTHER, ...over });
+
+  it("offers Adopt to the roster's admins on assigned entries, a bound agent only in its team", () => {
+    expect(rosterActions(actor("team_admin"), theirs({ teamEntry: "active" }), "team").adopt).toBe(
+      true,
+    );
+    expect(rosterActions(actor("contributor"), theirs({ teamEntry: "active" }), "team").adopt).toBe(
+      false,
+    );
+    expect(
+      rosterActions(actor("team_admin"), theirs({ teamEntry: "proposed" }), "team").adopt,
+    ).toBe(false);
+    expect(
+      rosterActions(actor("member", true), theirs({ siteEntry: "suspended" }), "site").adopt,
+    ).toBe(true);
+    expect(
+      rosterActions(
+        actor("team_admin"),
+        theirs({ teamEntry: "active", boundTeamId: ELSEWHERE }),
+        "team",
+      ).adopt,
+    ).toBe(false);
+  });
+
+  it("binds forks of team content to the active team, keeps a bound agent's team, leaves site content unbound", () => {
+    const a = actor("contributor");
+    expect(rowForkBinding(a, subject({ kind: "team_owned", ownerUserId: OTHER }))).toBe(TEAM);
+    expect(rowForkBinding(a, theirs({ teamEntry: "active" }))).toBe(TEAM);
+    expect(rowForkBinding(a, theirs({ teamEntry: "active", siteEntry: "active" }))).toBeNull();
+    expect(rowForkBinding(a, subject({ kind: "gallery", ownerUserId: null }))).toBeNull();
+    expect(rowForkBinding(a, subject())).toBeNull();
+    expect(rowForkBinding(a, subject({ boundTeamId: ELSEWHERE }))).toBe(ELSEWHERE);
   });
 });

@@ -29,6 +29,7 @@ import {
 import { mountAgentTransferRoutes } from "../routes/agent-transfer.js";
 import type { TeamVariables } from "../authz/middleware.js";
 import { openApiDocument } from "./document.js";
+import { teamDefaultAgentRoutes } from "../routes/team-default-agent.js";
 
 // Regenerate after changing routes or schemas:
 //   UPDATE_OPENAPI=1 pnpm --filter @kobe/server exec vitest run src/openapi && pnpm format
@@ -126,6 +127,12 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
     );
     expect(documented("/v1/team/storage")).toEqual(
       mountedOperations("/v1/team/storage", teamStorageRoutes(fakeDeps)),
+    );
+  });
+
+  it("describes exactly the team default agent routes the server mounts (KOBE-571)", () => {
+    expect(documented("/v1/team/default-agent")).toEqual(
+      mountedOperations("/v1/team/default-agent", teamDefaultAgentRoutes(fakeDeps)),
     );
   });
 

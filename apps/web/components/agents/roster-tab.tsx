@@ -5,14 +5,15 @@ import Link from "next/link";
 import { useState } from "react";
 import type { GalleryAgentSummary } from "../../lib/admin/api/site/gallery";
 import { proposalCount, shownRows } from "../../lib/agents/proposals";
-import { agentPageHref } from "../../lib/agents/redirects";
 import {
   editHref,
   pinLabel,
   reachItems,
   rosterStatusLabel,
   updateAvailableLabel,
+  versionHistoryHref,
   versionInEffectLabel,
+  viewHref,
 } from "../../lib/agents/roster-labels";
 import {
   Badge,
@@ -37,6 +38,7 @@ import { AgentIconGlyph } from "../admin/team/agent-builder/icon-picker";
 import { DangerousBadge } from "../admin/team/agent-builder/dangerous-badge";
 import { CustomizedBadge, UpdateAvailable } from "../admin/site/gallery-customization";
 import { useRosterActions } from "./roster-actions";
+import { ForkedFrom } from "./lineage";
 import { OrbitScore, UsageCells } from "./usage-cells";
 import { useGalleryExtras } from "./use-gallery-extras";
 import { useRosterRows } from "./use-roster-rows";
@@ -199,7 +201,7 @@ function RosterTable({
         <TableRow>
           <TableHeader>Agent</TableHeader>
           <TableHeader>{props.tab === "personal" ? "Reach" : "Owner"}</TableHeader>
-          <TableHeader>Version</TableHeader>
+          <TableHeader>Version in effect</TableHeader>
           <TableHeader>Status</TableHeader>
           {usage && (
             <>
@@ -248,6 +250,7 @@ function RosterRowView({
         {row.description && (
           <div className="text-sm font-normal text-console-muted">{row.description}</div>
         )}
+        {tab === "personal" && row.forkedFrom && <ForkedFrom lineage={row.forkedFrom} />}
       </TableRowHeader>
       <TableCell>
         {tab === "personal" ? (
@@ -257,7 +260,7 @@ function RosterRowView({
         )}
       </TableCell>
       <TableCell>
-        {versionInEffectLabel(row, viewerId)}
+        <VersionLink row={row} tab={tab} label={versionInEffectLabel(row, viewerId)} />
         {pinLabel(row) && <div className="text-sm text-console-muted">{pinLabel(row)}</div>}
       </TableCell>
       <TableCell>
@@ -277,7 +280,7 @@ function RosterRowView({
       </TableCell>
       <TableCell className="py-1 whitespace-nowrap">
         <span className="inline-flex items-center gap-2">
-          <OpenLink row={row} />
+          <OpenLink row={row} tab={tab} />
           <RowMenu label={`Actions for ${row.name}`} items={itemsFor(row)} />
         </span>
       </TableCell>
@@ -335,13 +338,36 @@ function ownerLabel(row: AgentRosterRow): string {
  * Edit for the owner (or, for team-owned and gallery agents, today's editors), View for anyone
  * else who may read the definition (AR14): read-only definition and versions.
  */
-function OpenLink({ row }: { readonly row: AgentRosterRow }) {
+function OpenLink({ row, tab }: { readonly row: AgentRosterRow; readonly tab: AgentRosterTab }) {
   const kind = row.actions.edit ? "Edit" : row.actions.viewDefinition ? "View" : null;
   if (kind === null) return null;
   return (
-    <Link href={kind === "Edit" ? editHref(row) : agentPageHref(row.agentId)}>
+    <Link href={kind === "Edit" ? editHref(row) : viewHref(row, tab)}>
       {kind}
       <span className="sr-only"> {row.name}</span>
+    </Link>
+  );
+}
+
+/**
+ * The version in effect (§6.6), opening the version history: read-only in the View, or the
+ * owner's editor for the owner.
+ */
+function VersionLink({
+  row,
+  tab,
+  label,
+}: {
+  readonly row: AgentRosterRow;
+  readonly tab: AgentRosterTab;
+  readonly label: string;
+}) {
+  const href = versionHistoryHref(row, tab);
+  if (href === null) return <>{label}</>;
+  return (
+    <Link href={href}>
+      {label}
+      <span className="sr-only">{` (version history of ${row.name})`}</span>
     </Link>
   );
 }

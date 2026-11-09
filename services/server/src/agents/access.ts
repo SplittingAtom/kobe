@@ -178,6 +178,7 @@ export interface RosterActions {
   readonly resumeHere: boolean;
   readonly suspendSiteWide: boolean;
   readonly resumeSiteWide: boolean;
+  readonly adopt: boolean;
 }
 
 export type AssignError =
@@ -299,5 +300,31 @@ export function rosterActions(actor: RosterActor, s: RosterSubject, tab: RosterT
     ...hereToggle(actor, s, tab),
     suspendSiteWide: siteWide && s.siteEntry === "active",
     resumeSiteWide: siteWide && s.siteEntry === "suspended",
+    // Adopt (KOBE-568 routes): an assigned entry into the roster's ownership; a bound agent only
+    // into its own team (AR8, AR10).
+    adopt:
+      admin &&
+      assignedEntry(entry) &&
+      (s.boundTeamId === null || (rosterTarget === "team" && s.boundTeamId === actor.teamId)),
   };
+}
+
+/**
+ * The team a fork from this row would be bound to (AR8, KOBE-571: the fork dialog's notice), as
+ * the fork route decides it (`findForkSource` + {@link forkBinding}): the team's own agent and a
+ * team entry bind to the active team, a site entry wins over a team entry (unbound), a bound
+ * agent keeps its team, gallery agents are unbound.
+ */
+export function rowForkBinding(actor: RosterActor, s: RosterSubject): string | null {
+  const via: ForkVia =
+    s.kind === "team_owned"
+      ? "team_owned"
+      : s.kind === "gallery"
+        ? "gallery"
+        : isOwn(actor, s)
+          ? "own"
+          : assignedEntry(s.siteEntry)
+            ? "site_entry"
+            : "team_entry";
+  return forkBinding(via, s.kind === "personal" ? s.boundTeamId : null, actor.teamId);
 }
