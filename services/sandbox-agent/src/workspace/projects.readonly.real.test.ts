@@ -20,7 +20,10 @@ import {
   type PiIdentities,
   type PiIdentity,
 } from "../pi/identities.js";
+import { FakeSyncServer } from "../testing/fake-sync-server.js";
+import { SyncClient } from "./client.js";
 import { ensureParents, lockServerOwned, writeFileAtomic } from "./fs.js";
+import { WorkspaceSync } from "./sync.js";
 
 /**
  * Project files are read-only to tools by uid permissions (KOBE-162, ac-1), with the real helper.
@@ -223,5 +226,88 @@ describe.runIf(HELPER !== undefined)("project files are read-only to tools (KOBE
     expect((await lstat(path.join(root, "projects"))).isDirectory()).toBe(true);
     const aside = (await readdir(root)).find((n) => n.startsWith("projects.replaced-")) ?? "";
     expect((await lstat(path.join(root, aside))).isSymbolicLink()).toBe(true);
+  });
+
+  it("a checked-out project folder is writable by tools; when the checkout ends it is relocked by uid and matches the head (KOBE-580)", async () => {
+    const server = new FakeSyncServer();
+    const url = await server.start();
+    const root = path.join(scratch, `ws-${Math.random().toString(36).slice(2)}`);
+    await mkdir(root);
+    await chown(root, process.getuid?.() ?? 0, WORKSPACE_GID);
+    await chmod(root, 0o2775);
+    await mkdir(path.join(root, "mine"), { mode: 0o2775 });
+    await chmod(path.join(root, "mine"), 0o2775);
+    const sync = new WorkspaceSync({
+      root,
+      client: new SyncClient({ serverUrl: url, readToken: async () => server.token }),
+      logger: { debug() {}, info() {}, warn() {} },
+      intervalMs: 60_000,
+    });
+    try {
+      server.serverWrite("projects/acme/docs/brief.md", BRIEF);
+      server.serverWrite("projects/other/readme.md", "other\n");
+      server.checkouts.push({
+        project_id: "11111111-1111-4111-8111-111111111111",
+        slug: "acme",
+        base_commit_seq: 1,
+      });
+      sync.start();
+      await sync.ready();
+      const id = await identity();
+      const sh = (script: string) =>
+        run([...(identities.command(id, "/bin/sh", []) as string[]), "-c", script]);
+      const p = `${root}/projects`;
+      // Inside the checkout the tool writes like in the free area (an in-place edit, a new file,
+      // a new folder: the last two are the tool uid's own).
+      const write = await sh(
+        `echo edited > ${p}/acme/docs/brief.md && echo new > ${p}/acme/docs/new.md && mkdir ${p}/acme/tooldir && echo t > ${p}/acme/tooldir/t.md`,
+      );
+      expect(write.code).toBe(0);
+      // Everywhere else under projects/ it still cannot.
+      const outside = await sh(
+        [
+          `echo x > ${p}/other/readme.md`,
+          `mkdir ${p}/newproject`,
+          `mv ${p}/acme ${p}/acme2`,
+          `chmod 777 ${p}`,
+        ]
+          .map((cmd, i) => `( ${cmd} ) >/dev/null 2>&1; echo o${i}=$?`)
+          .join("\n"),
+      );
+      for (const i of [0, 1, 2, 3]) expect(outside.stdout).toMatch(new RegExp(`^o${i}=[1-9]`, "m"));
+      await sync.push();
+      expect(server.content("projects/acme/docs/brief.md")).toBe("edited\n");
+      expect(server.content("projects/acme/docs/new.md")).toBe("new\n");
+      expect(server.content("projects/acme/tooldir/t.md")).toBe("t\n");
+
+      // Discard: the server puts the member's rows back to the head and ends the checkout.
+      server.checkouts.splice(0);
+      server.serverWrite("projects/acme/docs/brief.md", BRIEF);
+      server.serverDelete("projects/acme/docs/new.md");
+      server.serverDelete("projects/acme/tooldir/t.md");
+      await sync.pull();
+      expect(await readFile(`${p}/acme/docs/brief.md`, "utf8")).toBe(BRIEF);
+      expect((await readdir(`${p}/acme`)).sort()).toEqual(["docs"]);
+      expect(await readdir(`${p}/acme/docs`)).toEqual(["brief.md"]);
+      // The tool's own folder is not lost, but no longer in the project folder.
+      expect(await readFile(`${root}/kobe-moved/projects/acme/tooldir/t.md`, "utf8")).toBe("t\n");
+      for (const rel of ["acme", "acme/docs", "acme/docs/brief.md"]) {
+        expect((await lstat(`${p}/${rel}`)).uid, rel).toBe(process.getuid?.());
+      }
+      // Read-only by uid again: every attempt of the KOBE-162 list fails.
+      const before = await tree(p);
+      const out = await sh(
+        Object.entries(attempts(root))
+          .map(([name, cmd]) => `( ${cmd} ) >/dev/null 2>&1; echo ${name}=$?`)
+          .join("\n"),
+      );
+      for (const name of Object.keys(attempts(root))) {
+        expect(out.stdout, name).toMatch(new RegExp(`^${name}=[1-9]`, "m"));
+      }
+      expect(await tree(p)).toEqual(before);
+    } finally {
+      await sync.flush(10);
+      await server.stop();
+    }
   });
 });

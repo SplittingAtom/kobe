@@ -2,7 +2,8 @@ import { fstatSync } from "node:fs";
 import net from "node:net";
 import type { Duplex } from "node:stream";
 import { ToolsClient, type ToolsClientOptions } from "./client.js";
-import { installMemoryHooks, type MemoryHooksApi } from "./memory-hooks.js";
+import { installMemoryHooks, registerProjectHooks, type MemoryHooksApi } from "./memory-hooks.js";
+import { commitProjectTool } from "./project-commit-tool.js";
 import { recallTool, rememberTool } from "./memory-tools.js";
 import { proposeProjectFileTool } from "./project-tool.js";
 import {
@@ -134,7 +135,15 @@ export function registerKobeTools(
   // Always listed: the server answers "unavailable" when the site or team has it off.
   pi.registerTool(webSearchTool(transport));
   if (options.files === true) pi.registerTool(shareFileTool(transport));
-  if (options.projects === true) pi.registerTool(proposeProjectFileTool(transport));
+  if (options.projects === true) {
+    pi.registerTool(proposeProjectFileTool(transport));
+    // KOBE-580: listed only while the run's viewer may edit the project. Without Pi's
+    // active-tools API it is never registered (fail closed: a reader must not be offered it).
+    if (pi.on && pi.getActiveTools && pi.setActiveTools) {
+      pi.registerTool(commitProjectTool(transport));
+      registerProjectHooks(pi as MemoryHooksApi, options.memoryFile);
+    }
+  }
   if (options.skillDrafts === true) pi.registerTool(saveSkillDraftTool(transport));
   if (options.fileEdits === true) {
     pi.registerTool(proposeFileEditTool(transport));

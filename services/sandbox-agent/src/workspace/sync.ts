@@ -2,7 +2,6 @@ import {
   FILE_SHARE_MAX_BYTES,
   WORKSPACE_SERVER_OWNED_PREFIXES,
   isExcludedPath,
-  isServerOwnedPath,
   workspacePathIssue,
   type RunStartFrame,
   type WorkspaceChange,
@@ -14,11 +13,15 @@ import { access } from "node:fs/promises";
 import { join } from "node:path";
 import type { WireLogger } from "../wire/client.js";
 import { SyncHttpError, type SyncClient } from "./client.js";
+import { applyCheckouts } from "./checkouts.js";
 import { MoveReplay, type AppliedMove } from "./moves.js";
 import {
+  NO_CHECKOUTS,
   conflictCopyName,
   ensureParents,
+  entryExists,
   hashFile,
+  isLockedPath,
   lockServerOwned,
   openForUpload,
   pruneEmptyParents,
@@ -27,6 +30,7 @@ import {
   scanWorkspace,
   statLocal,
   writeFileAtomic,
+  type Checkouts,
   type LocalFile,
 } from "./fs.js";
 
@@ -41,7 +45,10 @@ import {
  *   reaches Pi before the workspace is back.
  * - **pull** (before every run, and periodically): changes since the last seen revision — server
  *   writes such as uploads (`uploads/<thread>/`, KOBE-53) and project files (`projects/<slug>/`,
- *   KOBE-57), which are server-owned and read-only here.
+ *   KOBE-57), which are server-owned and read-only here — and the member's project checkouts
+ *   (CM4, KOBE-580): a checked-out `projects/<slug>/` is free area (scanned, pushed, 0664/0775)
+ *   while its slug is in the latest pull; when it leaves, the folder is relocked and brought back
+ *   to the head the server sends (the read-only area's restore rule).
  * - **push** (every interval, soon after a run ends, and when stopping for hibernation): local
  *   changes → upload content the server lacks → commit with each path's base revision.
  *
@@ -157,8 +164,8 @@ const sameAs = (local: LocalFile, k: { size: number; mtimeMs: number }) =>
   local.size === k.size && Math.abs(local.mtimeMs - k.mtimeMs) <= 1;
 
 /** Group-writable: every thread's Pi identity shares the workspace through its group (KOBE-71). */
-const modeFor = (path: string, executable: boolean) =>
-  isServerOwnedPath(path) ? 0o444 : executable ? 0o775 : 0o664;
+const modeFor = (locked: boolean, executable: boolean) =>
+  locked ? 0o444 : executable ? 0o775 : 0o664;
 
 /** Runs `fn` over `items`, `limit` at a time; waits for all, then rethrows the first failure. */
 async function parallel<T>(items: readonly T[], limit: number, fn: (item: T) => Promise<void>) {
@@ -218,6 +225,8 @@ export class WorkspaceSync {
   readonly #retry = new Map<string, WorkspaceEntry>();
   /** Server moves replayed as local renames (KOBE-304). */
   readonly #moves: MoveReplay;
+  /** Slugs of the member's project checkouts, as the latest pull listed them (CM4). */
+  #checkouts: Checkouts = NO_CHECKOUTS;
 
   constructor(options: WorkspaceSyncOptions) {
     this.#o = {
@@ -269,6 +278,42 @@ export class WorkspaceSync {
 
   get enabled(): boolean {
     return this.#o.intervalMs > 0 && !this.#unavailable;
+  }
+
+  /** The checked-out project slugs the latest pull listed (tests, diagnostics). */
+  get checkouts(): Checkouts {
+    return this.#checkouts;
+  }
+
+  /** Read-only here: a server-owned area outside the member's checkouts. */
+  #locked(path: string): boolean {
+    return isLockedPath(path, this.#checkouts);
+  }
+
+  /** The checkouts of a pull take effect (CM4, `checkouts.ts`); returns the slugs that left. */
+  async #applyCheckouts(
+    next: Checkouts,
+    everyFolder: boolean,
+    executable: (rel: string) => boolean = (rel) => this.#known.get(rel)?.executable === true,
+  ): Promise<string[]> {
+    const previous = this.#checkouts;
+    this.#checkouts = next;
+    const ended = await applyCheckouts(
+      {
+        root: this.#o.root,
+        executable,
+        known: (rel) => this.#known.has(rel),
+        remove: (rel) => removeFile(this.#o.root, rel, next),
+        evict: (rel) => this.#evict(rel),
+      },
+      previous,
+      next,
+      everyFolder,
+    );
+    if (!everyFolder && ended.length > 0) {
+      this.#o.logger.info({ projects: ended.length }, "project checkout ended: folder relocked");
+    }
+    return ended;
   }
 
   /** Starts the restore (retried until it succeeds) and the periodic push + pull. */
@@ -368,6 +413,26 @@ export class WorkspaceSync {
   }
 
   /**
+   * Pushes every local change now, for `commit_project` (CM6: the manifest must hold the working
+   * copy before the server diffs it). Throws {@link PushPathError} when sync is off, the restore
+   * has not finished, or the push failed; a file the server refused stays out of the commit.
+   */
+  async pushAll(): Promise<PushStats> {
+    if (!this.enabled) throw new PushPathError("workspace sync is not available");
+    await Promise.race([
+      this.ready(),
+      new Promise<void>((resolve) => setTimeout(resolve, this.#o.restoreWaitMs).unref()),
+    ]);
+    if (!this.#restored) throw new PushPathError("the workspace is still being restored");
+    try {
+      return await this.#push();
+    } catch (error) {
+      this.#warn("workspace push for a commit failed", error);
+      throw new PushPathError("the working copy could not be pushed to the Kobe server");
+    }
+  }
+
+  /**
    * Pushes exactly one file now (blob + commit) and returns its entry, for `share_file`: the
    * server shares only a file whose live row has this `rev` and `sha256`. Nothing else is pushed.
    * The file is read without following links (a swapped symlink fails here, not later). Throws
@@ -405,7 +470,7 @@ export class WorkspaceSync {
       if (k && !k.deleted && k.sha256 === hashed.sha256) {
         return { done: { path: rel, rev: k.rev, sha256: hashed.sha256, size: hashed.size } };
       }
-      if (isServerOwnedPath(rel)) {
+      if (this.#locked(rel)) {
         throw new PushPathError(`${rel} is in a read-only area and differs from the server's copy`);
       }
       const change: PlannedChange = {
@@ -532,9 +597,12 @@ export class WorkspaceSync {
    * Entries since a revision; `full` when this is a complete listing (from 0, or the server said
    * our revision is older than its horizon) — then a path missing from it no longer exists.
    */
-  async #manifestSince(
-    since: number,
-  ): Promise<{ head: number; entries: WorkspaceEntry[]; full: boolean }> {
+  async #manifestSince(since: number): Promise<{
+    head: number;
+    entries: WorkspaceEntry[];
+    full: boolean;
+    checkouts: Checkouts;
+  }> {
     const entries: WorkspaceEntry[] = [];
     let cursor = since;
     for (;;) {
@@ -555,7 +623,9 @@ export class WorkspaceSync {
         ),
       );
       if (!page.more || page.entries.length === 0) {
-        return { head: page.head_rev, entries, full: since === 0 };
+        // The last page's checkouts: the state at the end of this pull (absent = none).
+        const checkouts = new Set(page.checkouts.map((c) => c.slug));
+        return { head: page.head_rev, entries, full: since === 0, checkouts };
       }
       cursor = page.entries[page.entries.length - 1]?.rev ?? page.head_rev;
     }
@@ -568,11 +638,16 @@ export class WorkspaceSync {
     const saved = await this.#moves.savedRev();
     const moved = saved > 0 ? await this.#replayMoves(saved) : [];
     const movedHere = (p: string) => moved.some(({ to }) => p === to || p.startsWith(`${to}/`));
+    const { head, entries, checkouts } = await this.#manifestSince(0);
+    // Checkouts first (recomputed, never stored): the scan then sees the folders as they are now.
+    const executables = new Set(
+      entries.filter((e) => e.executable && !e.deleted).map((e) => e.path),
+    );
+    await this.#applyCheckouts(checkouts, true, (rel) => executables.has(rel));
     const local = await scanWorkspace(this.#o.root, {
       skipDirs: this.#o.skipDirs,
       maxFiles: this.#o.maxFiles,
     });
-    const { head, entries } = await this.#manifestSince(0);
     // The newest row per path (a full listing has one per path; be safe anyway).
     const latest = new Map<string, WorkspaceEntry>();
     for (const e of entries) {
@@ -598,7 +673,7 @@ export class WorkspaceSync {
         this.#known.set(e.path, known(e));
         continue;
       }
-      if (!file || isServerOwnedPath(e.path)) {
+      if (!file || this.#locked(e.path)) {
         downloads.push(e);
         continue;
       }
@@ -632,9 +707,9 @@ export class WorkspaceSync {
     });
     // Server-owned areas mirror the server: what it never wrote is moved out (kept, then pushed).
     for (const path of local.files.keys()) {
-      if (isServerOwnedPath(path) && !latest.has(path)) await this.#evict(path);
+      if (this.#locked(path) && !latest.has(path)) await this.#evict(path);
     }
-    await lockServerOwned(this.#o.root, WORKSPACE_SERVER_OWNED_PREFIXES);
+    await lockServerOwned(this.#o.root, WORKSPACE_SERVER_OWNED_PREFIXES, this.#checkouts);
     this.#seenRev = head;
     await this.#moves.save(head);
     const files = this.#restoredFiles;
@@ -654,12 +729,18 @@ export class WorkspaceSync {
       return undefined;
     }
     const { entry, body } = got;
-    await writeFileAtomic(this.#o.root, path, body, {
-      sha256: entry.sha256 ?? "",
-      size: entry.size,
-      mtimeMs: entry.mtime_ms,
-      mode: modeFor(path, entry.executable),
-    });
+    await writeFileAtomic(
+      this.#o.root,
+      path,
+      body,
+      {
+        sha256: entry.sha256 ?? "",
+        size: entry.size,
+        mtimeMs: entry.mtime_ms,
+        mode: modeFor(this.#locked(path), entry.executable),
+      },
+      this.#checkouts,
+    );
     this.#known.set(path, known(entry));
     return { size: entry.size };
   }
@@ -684,15 +765,18 @@ export class WorkspaceSync {
     }
   }
 
-  /** A file in a server-owned area the server never wrote: moved to `kobe-moved/…`, never lost. */
+  /**
+   * A file in a server-owned area the server never wrote (or a tool's folder or link left in an
+   * ended checkout): moved to `kobe-moved/…`, never lost.
+   */
   async #evict(path: string): Promise<void> {
     let target = `${EVICTED_PREFIX}${path}`;
-    if ((await statLocal(this.#o.root, target)) !== undefined) {
+    if (await entryExists(this.#o.root, target)) {
       target = await conflictCopyName(this.#o.root, target, this.#o.now());
     }
     try {
       await ensureParents(this.#o.root, target);
-      await ensureParents(this.#o.root, path); // makes the read-only parent writable
+      await ensureParents(this.#o.root, path, this.#checkouts); // the read-only parent: writable
       await renameWithin(this.#o.root, path, target);
       this.#o.logger.info({}, "moved a file out of a read-only workspace area");
     } catch (error) {
@@ -737,14 +821,15 @@ export class WorkspaceSync {
   async #pull(): Promise<number> {
     // Moves first, as local renames of whole trees (KOBE-304): their rows then find the files.
     this.#rekey((await this.#replayMoves(this.#seenRev)).filter((m) => m.now));
-    const { head, entries, full } = await this.#manifestSince(this.#seenRev);
+    const { head, entries, full, checkouts } = await this.#manifestSince(this.#seenRev);
+    const ended = await this.#applyCheckouts(checkouts, false);
     let applied = 0;
     if (full && this.#seenRev > 0) applied += await this.#dropUnlisted(entries, head);
     for (const [path, e] of [...this.#retry]) {
       if (entries.some((n) => n.path === path)) continue; // a newer row is in this pull
       if (await this.#downloadSafely(e)) applied += 1;
     }
-    const touchedOwned = entries.some((e) => isServerOwnedPath(e.path));
+    const touchedOwned = entries.some((e) => this.#locked(e.path));
     for (const e of entries) {
       const k = this.#known.get(e.path);
       if (k && !k.moved && k.rev >= e.rev) continue; // our own write, or already applied
@@ -753,12 +838,14 @@ export class WorkspaceSync {
         file === undefined
           ? k === undefined || k.deleted
           : k !== undefined && !k.deleted && sameAs(file, k);
-      const owned = isServerOwnedPath(e.path);
+      const owned = this.#locked(e.path);
       if (e.deleted) {
         if (file && (unchanged || owned)) {
-          await removeFile(this.#o.root, e.path);
+          await removeFile(this.#o.root, e.path, this.#checkouts);
           // A server move or delete leaves no empty folders behind (KOBE-304).
-          if (e.origin === "server" && !owned) await pruneEmptyParents(this.#o.root, e.path);
+          if (e.origin === "server" && !owned) {
+            await pruneEmptyParents(this.#o.root, e.path, this.#checkouts);
+          }
         }
         this.#known.set(e.path, known(e));
         applied += 1;
@@ -787,7 +874,11 @@ export class WorkspaceSync {
       }
       if (await this.#downloadSafely(e)) applied += 1;
     }
-    if (touchedOwned) await lockServerOwned(this.#o.root, WORKSPACE_SERVER_OWNED_PREFIXES);
+    // An ended checkout: the restore rule brings the folder back to the head the server sent.
+    for (const slug of ended) await this.#revertFolder(`projects/${slug}`);
+    if (touchedOwned || ended.length > 0) {
+      await lockServerOwned(this.#o.root, WORKSPACE_SERVER_OWNED_PREFIXES, this.#checkouts);
+    }
     this.#seenRev = Math.max(this.#seenRev, head);
     await this.#moves.save(this.#seenRev);
     return applied;
@@ -805,7 +896,7 @@ export class WorkspaceSync {
     for (const [path, k] of [...this.#known]) {
       if (k.deleted || listed.has(path) || this.#retry.has(path)) continue;
       const file = await statLocal(this.#o.root, path);
-      if (file && !sameAs(file, k) && !isServerOwnedPath(path)) {
+      if (file && !sameAs(file, k) && !this.#locked(path)) {
         this.#known.delete(path); // new work: pushed with no base
         continue;
       }
@@ -862,6 +953,38 @@ export class WorkspaceSync {
     };
   }
 
+  /**
+   * The read-only area's rule for one path (`file`: its local state, undefined when missing):
+   * a file the server never wrote is moved out, a local edit or deletion is undone with the
+   * server's version. True when something changed.
+   */
+  async #revertLocal(path: string, file: LocalFile | undefined): Promise<boolean> {
+    const k = this.#known.get(path);
+    if (file !== undefined && (!k || k.deleted)) {
+      await this.#evict(path);
+      return true;
+    }
+    if (k === undefined || k.deleted || (file !== undefined && sameAs(file, k))) return false;
+    await this.#download(path).catch((error: unknown) => this.#warn("revert failed", error));
+    return true;
+  }
+
+  /** {@link #revertLocal} over one folder (an ended checkout): it then matches the head. */
+  async #revertFolder(folder: string): Promise<void> {
+    const scan = await scanWorkspace(this.#o.root, {
+      skipDirs: this.#o.skipDirs,
+      maxFiles: this.#o.maxFiles,
+      from: folder,
+    });
+    for (const [path, file] of scan.files) await this.#revertLocal(path, file);
+    if (scan.truncated || scan.incomplete.length > 0) return; // never infer a missing file
+    for (const [path, k] of [...this.#known]) {
+      if (k.deleted || !path.startsWith(`${folder}/`) || scan.files.has(path)) continue;
+      if (this.#retry.has(path)) continue;
+      await this.#revertLocal(path, undefined);
+    }
+  }
+
   async #plan(): Promise<PushPlan> {
     const scan = await scanWorkspace(this.#o.root, {
       skipDirs: this.#o.skipDirs,
@@ -871,15 +994,8 @@ export class WorkspaceSync {
     let reverted = false;
     for (const [path, file] of scan.files) {
       const k = this.#known.get(path);
-      if (isServerOwnedPath(path)) {
-        // Read-only area: undo local edits and drop files the server never wrote.
-        if (!k || k.deleted) {
-          await this.#evict(path);
-          reverted = true;
-        } else if (!sameAs(file, k)) {
-          await this.#download(path).catch((error: unknown) => this.#warn("revert failed", error));
-          reverted = true;
-        }
+      if (this.#locked(path)) {
+        if (await this.#revertLocal(path, file)) reverted = true;
         continue;
       }
       if (k && !k.deleted && sameAs(file, k) && file.executable === k.executable) continue;
@@ -908,14 +1024,16 @@ export class WorkspaceSync {
       if (k.deleted || scan.files.has(path) || isExcludedPath(path) || unsure(path)) continue;
       if (this.#retry.has(path)) continue; // not restored yet: never a deletion
       if (path.split("/").some((part) => this.#o.skipDirs.has(part))) continue;
-      if (isServerOwnedPath(path)) {
-        await this.#download(path).catch((error: unknown) => this.#warn("revert failed", error));
+      if (this.#locked(path)) {
+        await this.#revertLocal(path, undefined);
         reverted = true;
         continue;
       }
       changes.push({ op: "delete", path, base_rev: k.rev });
     }
-    if (reverted) await lockServerOwned(this.#o.root, WORKSPACE_SERVER_OWNED_PREFIXES);
+    if (reverted) {
+      await lockServerOwned(this.#o.root, WORKSPACE_SERVER_OWNED_PREFIXES, this.#checkouts);
+    }
     const hashes = [...new Set(changes.flatMap((c) => (c.op === "put" ? [c.sha256] : [])))];
     const missing = new Set<string>();
     for (let i = 0; i < hashes.length; i += MISSING_BATCH) {

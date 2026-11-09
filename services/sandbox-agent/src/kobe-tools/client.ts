@@ -1,7 +1,7 @@
 import type { Duplex } from "node:stream";
 import { LineReader } from "./lines.js";
 import { parseMemoryReply } from "./memory-reply.js";
-import { parseProjectReply } from "./project-reply.js";
+import { parseProjectCommitReply, parseProjectReply } from "./project-reply.js";
 import { parseSkillDraftReply } from "./skill-draft-tool.js";
 import { parseFileEditReply } from "./file-edit-tool.js";
 import { parseFileOpenReply } from "./open-file-tool.js";
@@ -18,6 +18,7 @@ import {
   type ToolsResponse,
   type WebSearchAnswer,
   type ProjectProposeAnswer,
+  type ProjectCommitAnswer,
   type SkillDraftAnswer,
   type FileEditAnswer,
   type FileOpenAnswer,
@@ -31,6 +32,7 @@ export type ToolsOutcome =
   | MemoryPutAnswer
   | MemoryReadAnswer
   | ProjectProposeAnswer
+  | ProjectCommitAnswer
   | SkillDraftAnswer
   | NotebookRunAnswer
   | FileEditAnswer
@@ -146,6 +148,7 @@ function parseResponse(line: string): ToolsResponse | undefined {
   if (!isRecord(value) || typeof value.id !== "string") return undefined;
   if (value.ok === true && "file_id" in value) return parseFileReply(value);
   if (value.ok === true && value.op === "project_file_propose") return parseProjectReply(value);
+  if (value.ok === true && value.op === "project_commit") return parseProjectCommitReply(value);
   if (value.ok === true && value.op === "skill_draft_save") return parseSkillDraftReply(value);
   if (value.ok === true && value.op === "file_edit_propose") return parseFileEditReply(value);
   if (value.ok === true && value.op === "file_open") return parseFileOpenReply(value);

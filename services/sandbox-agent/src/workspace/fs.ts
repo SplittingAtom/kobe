@@ -1,11 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
 import { constants as FS, existsSync } from "node:fs";
 import {
-  chmod,
   lstat,
   mkdir,
   open,
   opendir,
+  readdir,
   realpath,
   rename,
   rm,
@@ -17,6 +17,7 @@ import path from "node:path";
 import { openAgentTemp } from "../atomic-file.js";
 import type { Readable } from "node:stream";
 import {
+  PROJECT_WORKSPACE_DIR,
   WORKSPACE_SEGMENT_MAX_BYTES,
   isExcludedPath,
   isServerOwnedPath,
@@ -50,6 +51,45 @@ export interface ScanResult {
 /** Temp files of an interrupted download: never synced. */
 export const TEMP_PREFIX = ".kobe-sync-";
 
+/**
+ * The slugs of the member's project checkouts (CM4, KOBE-580): each `projects/<slug>/` is part of
+ * the free area for scanning, pushing and permissions while its slug is in the latest pull. The
+ * set is recomputed from every pull (never stored), so it survives hibernation by construction.
+ */
+export type Checkouts = ReadonlySet<string>;
+export const NO_CHECKOUTS: Checkouts = new Set<string>();
+export const PROJECTS_PREFIX = `${PROJECT_WORKSPACE_DIR}/`;
+
+/** `projects/<slug>/…` (or the folder `projects/<slug>` itself) → slug; anything else undefined. */
+export function projectSlugOf(rel: string): string | undefined {
+  if (!rel.startsWith(PROJECTS_PREFIX)) return undefined;
+  const slug = rel.slice(PROJECTS_PREFIX.length).split("/")[0];
+  return slug === undefined || slug === "" ? undefined : slug;
+}
+
+/** Inside one of the member's checked-out project folders (the folder itself included). */
+export function inCheckout(rel: string, checkouts: Checkouts): boolean {
+  const slug = projectSlugOf(rel);
+  return slug !== undefined && checkouts.has(slug);
+}
+
+/** Server-owned and read-only here: a server-owned area, except a checked-out project folder. */
+export function isLockedPath(rel: string, checkouts: Checkouts = NO_CHECKOUTS): boolean {
+  return isServerOwnedPath(rel) && !inCheckout(rel, checkouts);
+}
+
+/** The project folders present on the volume (`projects/<name>` directories, no links). */
+export async function localProjectSlugs(root: string): Promise<string[]> {
+  const top = await holdAreaRoot(root, PROJECT_WORKSPACE_DIR, false).catch(() => undefined);
+  if (!top) return [];
+  try {
+    const entries = await readdir(top.dir, { withFileTypes: true }).catch(() => []);
+    return entries.filter((e) => e.isDirectory()).map((e) => e.name);
+  } finally {
+    await top.close();
+  }
+}
+
 export function toLocal(stat: { size: number; mtimeMs: number; mode: number }): LocalFile {
   return {
     size: stat.size,
@@ -60,12 +100,17 @@ export function toLocal(stat: { size: number; mtimeMs: number; mode: number }): 
 }
 
 /**
- * Regular files under `root`, skipping excluded areas (`.kobe/`), directories named in
- * `skipDirs` (anywhere), symlinks, special files and temp files. Stops after `maxFiles`.
+ * Regular files under `root` (or only under its folder `from`), skipping excluded areas
+ * (`.kobe/`), directories named in `skipDirs` (anywhere), symlinks, special files and temp files.
+ * Stops after `maxFiles`.
  */
 export async function scanWorkspace(
   root: string,
-  options: { readonly skipDirs: ReadonlySet<string>; readonly maxFiles: number },
+  options: {
+    readonly skipDirs: ReadonlySet<string>;
+    readonly maxFiles: number;
+    readonly from?: string;
+  },
 ): Promise<ScanResult> {
   const files = new Map<string, LocalFile>();
   const incomplete: string[] = [];
@@ -101,7 +146,9 @@ export async function scanWorkspace(
       }
     }
   };
-  await walk("");
+  if (options.from === undefined || (await parentsAreDirs(root, `${options.from}/x`))) {
+    await walk(options.from ?? "");
+  } else incomplete.push(options.from);
   return { files, incomplete, truncated };
 }
 
@@ -141,6 +188,12 @@ export async function statLocal(root: string, rel: string): Promise<LocalFile | 
   }
 }
 
+/** Whether anything (file, folder, link) is at `rel`; parents must be real directories. */
+export async function entryExists(root: string, rel: string): Promise<boolean> {
+  if (!(await parentsAreDirs(root, rel))) return false;
+  return (await lstat(path.join(root, rel)).catch(() => undefined)) !== undefined;
+}
+
 /** SHA-256 and byte count of a file, read without following a final symlink. */
 export async function hashFile(
   root: string,
@@ -174,7 +227,9 @@ export async function openForUpload(root: string, rel: string): Promise<Readable
 }
 
 /** Owner-only write: the Pi and tool uids hold the workspace group but are not the owner (KOBE-162). */
-const OWNED_DIR_MODE = 0o755;
+export const OWNED_DIR_MODE = 0o755;
+/** The free area's (and a checkout's) folders: every thread's tools write through the group (D13). */
+export const SHARED_DIR_MODE = 0o775;
 
 /**
  * A held top-level server-owned folder (`projects`, `uploads`): opened once with
@@ -188,6 +243,8 @@ const OWNED_DIR_MODE = 0o755;
 export interface HeldRoot {
   readonly dir: string;
   chmod(mode: number): Promise<void>;
+  /** Sets `mode`, keeping the setgid bit (new entries inherit the workspace group). */
+  setMode(mode: number): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -204,8 +261,103 @@ function held(handle: FileHandle, fallback: string): HeldRoot {
   return {
     dir: existsSync(proc) ? proc : fallback,
     chmod: (mode) => handle.chmod(mode),
+    setMode: async (mode) => {
+      const wanted = mode | ((await handle.stat()).mode & 0o2000);
+      await handle.chmod(wanted);
+    },
     close: () => handle.close(),
   };
+}
+
+/** The agent's own (always, without a uid or as root). */
+export function ownedByAgent(info: { readonly uid: number }): boolean {
+  const uid = process.getuid?.();
+  return uid === undefined || uid === 0 || info.uid === uid;
+}
+
+/**
+ * Opens the directory `abs` without following it (`O_NOFOLLOW` on its last part; its parent is
+ * named through a held descriptor by the callers below), only if it is the agent's own and on
+ * the workspace volume. Undefined otherwise: a link, a file, another uid's folder.
+ */
+export async function openOwnedDir(root: string, abs: string): Promise<HeldRoot | undefined> {
+  let handle: FileHandle;
+  try {
+    handle = await open(abs, OPEN_DIR);
+  } catch {
+    return undefined;
+  }
+  try {
+    const info = await handle.stat();
+    if (info.isDirectory() && info.dev === (await volumeDevice(root)) && ownedByAgent(info)) {
+      return held(handle, abs);
+    }
+  } catch {
+    // not usable
+  }
+  await handle.close().catch(() => undefined);
+  return undefined;
+}
+
+/** What {@link walkOwned} does at each entry. */
+export interface OwnedWalk {
+  /** A regular file of the agent's; `abs` goes through its held parent (`/proc/self/fd/N/name`). */
+  file?(abs: string, rel: string): Promise<void>;
+  /** A folder of the agent's, held, before its entries (top down). */
+  enter?(dir: HeldRoot, rel: string): Promise<void>;
+  /** The same folder after its entries (bottom up). */
+  leave?(dir: HeldRoot, rel: string): Promise<void>;
+  /** Another uid's entry, a link or a special file: never followed, never changed. */
+  foreign?(rel: string, kind: "file" | "dir" | "other"): void;
+}
+
+/**
+ * Walks the entries of the held folder `dirPath` (`rel` its workspace path) without ever
+ * following a link: every folder is opened `O_NOFOLLOW` through its held parent and checked to be
+ * the agent's before anything below it is looked at or changed, so a folder swapped for a link
+ * (or made by a tool) is reported, never entered. `skip`: names left alone at this level only.
+ */
+export async function walkOwned(
+  root: string,
+  dirPath: string,
+  rel: string,
+  visit: OwnedWalk,
+  skip: ReadonlySet<string> = NO_CHECKOUTS,
+): Promise<void> {
+  let dir;
+  try {
+    dir = await opendir(dirPath);
+  } catch {
+    return;
+  }
+  for await (const entry of dir) {
+    if (skip.has(entry.name)) continue;
+    const child = path.join(dirPath, entry.name);
+    const childRel = rel === "" ? entry.name : `${rel}/${entry.name}`;
+    const info = await lstat(child).catch(() => undefined);
+    if (!info) continue;
+    const kind = info.isFile() ? "file" : info.isDirectory() ? "dir" : "other";
+    if (kind === "other" || !ownedByAgent(info)) {
+      visit.foreign?.(childRel, kind);
+      continue;
+    }
+    if (kind === "file") {
+      await visit.file?.(child, childRel);
+      continue;
+    }
+    const sub = await openOwnedDir(root, child);
+    if (!sub) {
+      visit.foreign?.(childRel, "dir"); // swapped meanwhile
+      continue;
+    }
+    try {
+      await visit.enter?.(sub, childRel);
+      await walkOwned(root, sub.dir, childRel, visit);
+      await visit.leave?.(sub, childRel);
+    } finally {
+      await sub.close();
+    }
+  }
 }
 
 /**
@@ -263,32 +415,44 @@ export async function holdAreaRoot(
  * symlink or file in the way is removed (those areas mirror the server); elsewhere it is an
  * error (the sandbox's own data is never removed to make room). Directories in server-owned
  * areas are owner-writable only, always (a group bit would let a tool write into a project
- * folder while it is being filled); they are locked read-only by {@link lockServerOwned}.
+ * folder while it is being filled); they are locked read-only by {@link lockServerOwned}. A
+ * checked-out project folder (`checkouts`, CM4) is the exception below `projects/`: its folders
+ * are group-shared (0775) like the free area, and nothing in the way is removed (it is the
+ * member's working copy). `projects/` itself stays the agent's alone.
  */
-export async function ensureParents(root: string, rel: string): Promise<void> {
+export async function ensureParents(
+  root: string,
+  rel: string,
+  checkouts: Checkouts = NO_CHECKOUTS,
+): Promise<void> {
   const parts = rel.split("/").slice(0, -1);
   if (parts.length > 0 && isServerOwnedPath(`${parts[0]}/`)) {
     // Through the held root: a swapped name cannot redirect a mkdir, chmod or rm below it.
     const top = await holdAreaRoot(root, parts[0] as string, true);
     try {
       await top?.chmod(OWNED_DIR_MODE);
-      await ensureBelow(root, top?.dir ?? "", parts.slice(1), true);
+      const below = parts.slice(1);
+      const mode = parts.length > 1 && inCheckout(rel, checkouts) ? "checkout" : "owned";
+      await ensureBelow(root, top?.dir ?? "", below, mode);
     } finally {
       await top?.close();
     }
     return;
   }
-  await ensureBelow(root, root, parts, false);
+  await ensureBelow(root, root, parts, "free");
 }
 
-/** `parts` under `base`; `owned` areas are owner-write only, the rest group-shared (D13). */
+/**
+ * `parts` under `base`. `owned`: owner-write only, anything in the way replaced; `checkout`:
+ * group-shared and existing folders brought to 0775 (unlocked); `free`: group-shared (D13).
+ */
 async function ensureBelow(
   volumeRoot: string,
   base: string,
   parts: readonly string[],
-  owned: boolean,
+  mode: "owned" | "checkout" | "free",
 ): Promise<void> {
-  const dirMode = owned ? OWNED_DIR_MODE : 0o775;
+  const dirMode = mode === "owned" ? OWNED_DIR_MODE : SHARED_DIR_MODE;
   let current = "";
   for (const part of parts) {
     current = current === "" ? part : `${current}/${part}`;
@@ -306,12 +470,12 @@ async function ensureBelow(
       continue;
     }
     if (stat.isDirectory()) {
-      if (owned && (stat.mode & 0o7777 & ~0o2000) !== OWNED_DIR_MODE) {
-        await shareOnVolume(volumeRoot, abs, OWNED_DIR_MODE);
+      if (mode !== "free" && (stat.mode & 0o7777 & ~0o2000) !== dirMode) {
+        await shareOnVolume(volumeRoot, abs, dirMode);
       }
       continue;
     }
-    if (!owned) throw new Error(`a file or link is in the way of directory ${current}`);
+    if (mode !== "owned") throw new Error(`a file or link is in the way of directory ${current}`);
     await rm(abs, { force: true });
     await mkdir(abs, { mode: dirMode });
     await shareOnVolume(volumeRoot, abs, dirMode);
@@ -340,8 +504,9 @@ export async function writeFileAtomic(
     readonly mtimeMs: number;
     readonly mode: number;
   },
+  checkouts: Checkouts = NO_CHECKOUTS,
 ): Promise<void> {
-  await ensureParents(root, rel);
+  await ensureParents(root, rel, checkouts);
   const target = path.join(root, rel);
   const temp = path.join(path.dirname(target), `${TEMP_PREFIX}${randomBytes(12).toString("hex")}`);
   const handle = await openAgentTemp(temp, 0o600);
@@ -376,12 +541,16 @@ export async function writeFileAtomic(
 }
 
 /** Removes a file (never a directory); missing is fine. Its caller prunes emptied parents. */
-export async function removeFile(root: string, rel: string): Promise<void> {
+export async function removeFile(
+  root: string,
+  rel: string,
+  checkouts: Checkouts = NO_CHECKOUTS,
+): Promise<void> {
   if (!(await parentsAreDirs(root, rel))) return;
   const abs = path.join(root, rel);
   const stat = await lstat(abs).catch(() => undefined);
   if (!stat || stat.isDirectory()) return;
-  if (isServerOwnedPath(rel)) await ensureParents(root, rel);
+  if (isServerOwnedPath(rel)) await ensureParents(root, rel, checkouts);
   await unlink(abs).catch(() => {});
 }
 
@@ -390,14 +559,23 @@ export async function removeFile(root: string, rel: string): Promise<void> {
  * deepest first, up to the workspace root. Only real directories (never a symlink) of the agent's
  * own area are touched; `rmdir` refuses a folder that still holds anything, which ends the walk.
  */
-export async function pruneEmptyParents(root: string, rel: string): Promise<number> {
+export async function pruneEmptyParents(
+  root: string,
+  rel: string,
+  checkouts: Checkouts = NO_CHECKOUTS,
+): Promise<number> {
   let removed = 0;
   for (
     let dir = path.posix.dirname(rel);
     dir !== "." && dir !== "";
     dir = path.posix.dirname(dir)
   ) {
-    if (isServerOwnedPath(`${dir}/`) || isExcludedPath(`${dir}/`)) return removed;
+    // Inside a checkout, folders below `projects/<slug>` go like the free area's; the slug
+    // folder itself (and everything locked) stays.
+    const insideCheckout = inCheckout(dir, checkouts) && dir.split("/").length > 2;
+    if ((isServerOwnedPath(`${dir}/`) && !insideCheckout) || isExcludedPath(`${dir}/`)) {
+      return removed;
+    }
     if (!(await parentsAreDirs(root, `${dir}/x`))) return removed;
     try {
       // Right before the rmdir: the folder is really where it should be (a swapped link in
@@ -462,32 +640,33 @@ export async function renameWithin(root: string, from: string, to: string): Prom
  * uids that only hold the workspace group, so these modes are a real barrier: no write, create,
  * delete, rename or chmod in the area. Without identities (development) the tools share the
  * agent's uid and this is a speed bump; either way the server never accepts writes there and the
- * agent reverts local changes on its next sync.
+ * agent reverts local changes on its next sync. The member's checked-out project folders
+ * (`keep`, CM4) are left as they are; `projects/` itself is locked all the same. Nothing is
+ * changed through a link or in another uid's entry (a tool's leftover in an ended checkout): the
+ * walk never follows one (KOBE-580 review).
  */
-export async function lockServerOwned(root: string, areas: readonly string[]): Promise<void> {
+export async function lockServerOwned(
+  root: string,
+  areas: readonly string[],
+  keep: Checkouts = NO_CHECKOUTS,
+): Promise<void> {
   // Each area root is held open without following links (a symlinked `uploads` or `projects`
   // is moved aside, never chmod-ed through), and everything below is reached through it.
-  const lock = async (dirPath: string): Promise<void> => {
-    let dir;
-    try {
-      dir = await opendir(dirPath);
-    } catch {
-      return;
-    }
-    for await (const entry of dir) {
-      const child = path.join(dirPath, entry.name);
-      if (entry.isDirectory()) {
-        await lock(child);
-        await chmod(child, 0o555).catch(() => {});
-      } else if (entry.isFile()) await chmod(child, 0o444).catch(() => {});
-    }
-  };
   for (const area of areas) {
     const name = area.replace(/\/$/, "");
     const top = await holdAreaRoot(root, name, false).catch(() => undefined);
     if (!top) continue;
     try {
-      await lock(top.dir);
+      await walkOwned(
+        root,
+        top.dir,
+        name,
+        {
+          file: (abs) => shareOnVolume(root, abs, 0o444),
+          leave: (dir) => dir.chmod(0o555).catch(() => {}),
+        },
+        name === PROJECT_WORKSPACE_DIR ? keep : NO_CHECKOUTS,
+      );
       await top.chmod(0o555).catch(() => {});
     } finally {
       await top.close();

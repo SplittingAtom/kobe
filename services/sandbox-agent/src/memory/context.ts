@@ -93,6 +93,8 @@ export function memoryRunFileContent(
     project: projectContextText(project) ?? "",
     viewing: viewingContextText(viewing) ?? "",
     ...(note === undefined ? {} : { conflicts: note }),
+    // CM6 (KOBE-580): only an explicit `write` lists `commit_project` (absent = an old server).
+    projectWrite: project?.access === "write",
   };
 }
 

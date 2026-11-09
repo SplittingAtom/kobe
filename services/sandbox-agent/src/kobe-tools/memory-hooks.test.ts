@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CONFLICT_NOTE_TYPE,
   installMemoryHooks,
+  registerProjectHooks,
   readMemoryRunFile,
   type MemoryHooksApi,
 } from "./memory-hooks.js";
@@ -31,6 +32,7 @@ describe("readMemoryRunFile", () => {
       viewing: "",
       conflicts: "",
       conflictsLive: "",
+      projectWrite: false,
     });
     expect(
       readMemoryRunFile("/x", () => {
@@ -43,6 +45,7 @@ describe("readMemoryRunFile", () => {
       viewing: "",
       conflicts: "",
       conflictsLive: "",
+      projectWrite: false,
     });
     expect(readMemoryRunFile("/x", () => "not json")).toEqual({
       tools: false,
@@ -51,6 +54,7 @@ describe("readMemoryRunFile", () => {
       viewing: "",
       conflicts: "",
       conflictsLive: "",
+      projectWrite: false,
     });
     expect(readMemoryRunFile("/x", file({ tools: "yes", text: 1 }))).toEqual({
       tools: false,
@@ -59,6 +63,7 @@ describe("readMemoryRunFile", () => {
       viewing: "",
       conflicts: "",
       conflictsLive: "",
+      projectWrite: false,
     });
   });
   it("gives no text when tools are off", () => {
@@ -69,6 +74,7 @@ describe("readMemoryRunFile", () => {
       viewing: "",
       conflicts: "",
       conflictsLive: "",
+      projectWrite: false,
     });
     expect(readMemoryRunFile("/x", file({ tools: true, text: "idx" }))).toEqual({
       tools: true,
@@ -77,6 +83,7 @@ describe("readMemoryRunFile", () => {
       viewing: "",
       conflicts: "",
       conflictsLive: "",
+      projectWrite: false,
     });
     // Project instructions do not depend on memory being on.
     expect(readMemoryRunFile("/x", file({ tools: false, text: "", project: "P" }))).toEqual({
@@ -86,6 +93,7 @@ describe("readMemoryRunFile", () => {
       viewing: "",
       conflicts: "",
       conflictsLive: "",
+      projectWrite: false,
     });
   });
 });
@@ -162,6 +170,7 @@ describe("viewed file in the run's prompt (KOBE-462)", () => {
       viewing: "",
       conflicts: "",
       conflictsLive: "",
+      projectWrite: false,
     });
   });
 });
@@ -205,6 +214,37 @@ describe("sync conflict notes (KOBE-492)", () => {
       viewing: "",
       conflicts: "",
       conflictsLive: "",
+      projectWrite: false,
     });
+  });
+});
+
+describe("registerProjectHooks (KOBE-580)", () => {
+  it("lists commit_project only for runs whose viewer may edit the project, re-read on every input", () => {
+    let content: unknown = { tools: false, text: "", project_write: true };
+    const pi = fakePi(["read", "commit_project"]);
+    registerProjectHooks(pi.api, "/x", () => JSON.stringify(content));
+    pi.fire("input", {});
+    expect(pi.active()).toContain("commit_project");
+    expect(pi.active()).toContain("read");
+    content = { tools: false, text: "", project_write: false };
+    pi.fire("input", {});
+    expect(pi.active()).not.toContain("commit_project");
+    content = { tools: false, text: "" }; // an older agent's file: no access
+    pi.fire("input", {});
+    expect(pi.active()).not.toContain("commit_project");
+    content = { tools: false, text: "", project_write: "yes" }; // malformed: off
+    pi.fire("input", {});
+    expect(pi.active()).not.toContain("commit_project");
+    content = { tools: false, text: "", project_write: true };
+    pi.fire("input", {});
+    expect(pi.active().filter((n) => n === "commit_project")).toHaveLength(1);
+  });
+
+  it("never lists it without a run file", () => {
+    const pi = fakePi(["read", "commit_project"]);
+    registerProjectHooks(pi.api, undefined);
+    pi.fire("input", {});
+    expect(pi.active()).toEqual(["read"]);
   });
 });
