@@ -66,7 +66,7 @@ async function workspace(page: Page, call: WorkspaceCall): Promise<number> {
 async function openNotes(page: Page, dir: string) {
   const files = filesSection(page);
   await files.getByRole("button", { name: "Refresh files" }).click();
-  const tree = files.getByRole("tree", { name: "Files in your workspace" });
+  const tree = files.getByRole("tree", { name: "My files" });
   await tree.getByRole("treeitem", { name: dir, exact: true }).click();
   await tree.getByRole("treeitem", { name: "notes.md", exact: true }).click();
   const tab = page

@@ -956,9 +956,14 @@ export class FakeKobe {
       description: "",
       instructions: "",
       default_agent_id: null,
-      members_mode: "team",
-      my_role: "member",
+      visibility: "workspace",
+      my_role: "editor",
       file_count: 0,
+      head_commit_id: null,
+      live_bytes: null,
+      history_bytes: null,
+      live_objects: null,
+      history_objects: null,
       created_by: uuid(3, 1),
       created_at: NOW,
       updated_at: NOW,
@@ -966,6 +971,8 @@ export class FakeKobe {
     });
     return id;
   }
+  /** `GET /v1/me/checkouts` (Workspaces CM2). */
+  readonly checkouts: Json[] = [];
   /** Project files by project id (Add to project, KOBE-585): paths only. */
   readonly projectFiles = new Map<string, string[]>();
 
@@ -1289,6 +1296,7 @@ export class FakeKobe {
       url.pathname === "/v1/team/retention" ||
       url.pathname === "/v1/projects" ||
       url.pathname.startsWith("/v1/projects/") ||
+      url.pathname === "/v1/me/checkouts" ||
       url.pathname === "/v1/skills/drafts/saves" ||
       url.pathname.startsWith("/v1/egress/requests");
     if (!scoped) return error(404, "not_found");
@@ -1424,6 +1432,10 @@ export class FakeKobe {
   #route(method: string, url: URL, body: Json | undefined, headers: Headers): Response {
     if (url.pathname === "/v1/team/budgets/status" && method === "GET") {
       return json(200, this.budgetStatus);
+    }
+    // The caller's project checkouts (Workspaces CM2, KOBE-581): none unless a test adds some.
+    if (url.pathname === "/v1/me/checkouts" && method === "GET") {
+      return json(200, { checkouts: this.checkouts });
     }
     if (url.pathname === "/v1/skills/drafts/saves" && method === "GET") {
       return json(200, {

@@ -3,20 +3,41 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { projectPermissions } from "@kobe/protocol";
+import { saveBytes } from "../../lib/files/save";
 import { worded, type Project, type ProjectInput } from "../../lib/projects/api";
 import { useTeamAccess } from "../admin/console-context";
 import { MutationStatus } from "../admin/error-notice";
 import { ResourceView } from "../admin/parts";
 import { useMutation, useResource } from "../admin/use-resource";
-import { Button, Notice, PageHeader, Section, eventTrigger, useConfirm } from "../ui/console";
+import {
+  Badge,
+  Button,
+  Notice,
+  PageHeader,
+  Section,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  eventTrigger,
+  useConfirm,
+} from "../ui/console";
 import { inputOf, ProjectForm } from "./project-form";
 import { ProjectFiles } from "./project-files";
+import { ProjectHistory } from "./project-history";
 import { ProjectMembers } from "./project-members";
+import { ProjectStorage } from "./project-storage";
 import { ProjectThreads } from "./project-threads";
-import { useProjectAgents, useProjectsApi } from "./use-projects";
+import { ProjectWorkingCopies } from "./project-working-copies";
+import { useCommitsApi, useProjectAgents, useProjectsApi } from "./use-projects";
 import { useNavigate } from "../shell/use-navigate";
 
-/** One project: settings, members, files and conversations (`/v1/projects/:id`, KOBE-161/162/163). */
+/**
+ * One project (`/v1/projects/:id`, KOBE-161/162/163; Workspaces KOBE-581): Overview (settings,
+ * visibility and people, files, storage, conversations) and History (commits, diffs, downloads
+ * at a commit, Revert; working copies for owners and admins). "Open to mount" while the project
+ * is not in the member's files (no conversation of theirs in it, no checkout; MT1, FP2).
+ */
 export function ProjectDetailPage({ projectId }: { readonly projectId: string }) {
   const api = useProjectsApi();
   const { state, reload } = useResource(() => api.get(projectId));
@@ -43,11 +64,15 @@ function ProjectView({
   const mutation = useMutation();
   const navigate = useNavigate();
   const [confirm, confirmDialog] = useConfirm();
-  const can = projectPermissions(
-    access.role,
-    project.myRole === "member" ? "editor" : (project.myRole ?? undefined),
-    "workspace",
-  );
+  const can = projectPermissions(access.role, project.myRole ?? undefined, project.visibility);
+  const commits = useCommitsApi();
+  const threads = useResource(() => api.threads(project.id));
+  const checkout = useResource(() => commits.checkoutState(project.id));
+  const me = access.user.id;
+  const mounted =
+    (threads.state.status === "ready" &&
+      threads.state.data.threads.some((t) => t.ownerUserId === me)) ||
+    (checkout.state.status === "ready" && checkout.state.data !== null);
   const archived = project.archivedAt !== null;
   const canEdit = can.manage && !archived;
 
@@ -83,6 +108,16 @@ function ProjectView({
     if (done) onChanged();
   }
 
+  async function downloadZip() {
+    await mutation.run(
+      () => api.downloadHead(project.id),
+      (bytes) => {
+        saveBytes(`${project.slug}.zip`, bytes);
+        return `Downloaded ${project.slug}.zip.`;
+      },
+    );
+  }
+
   async function remove(trigger: HTMLElement | null) {
     const yes = await confirm(
       {
@@ -111,20 +146,23 @@ function ProjectView({
           </>
         }
         actions={
-          (can.converse && !archived) || project.myRole !== null ? (
-            <>
-              {can.converse && !archived && (
-                <Button asChild variant="primary">
-                  <Link href={`/?project=${project.id}`}>New conversation in this project</Link>
-                </Button>
-              )}
-              {project.myRole !== null && (
-                <Button asChild>
-                  <Link href={`/me/memory?project=${project.id}`}>Project memory</Link>
-                </Button>
-              )}
-            </>
-          ) : undefined
+          <>
+            {can.converse && !archived && (
+              <Button asChild variant="primary">
+                <Link href={`/?project=${project.id}`} aria-describedby="project-mount-hint">
+                  {mounted ? "Open in a conversation" : "Open to mount"}
+                </Link>
+              </Button>
+            )}
+            <Button disabled={mutation.pending} onClick={() => void downloadZip()}>
+              Download as zip
+            </Button>
+            {project.myRole !== null && (
+              <Button asChild>
+                <Link href={`/me/memory?project=${project.id}`}>Project memory</Link>
+              </Button>
+            )}
+          </>
         }
       />
       {archived && (
@@ -135,43 +173,69 @@ function ProjectView({
           </p>
         </Notice>
       )}
+      {can.converse && !archived && (
+        <p id="project-mount-hint" className="m-0 mb-2 text-sm text-console-muted">
+          {mounted
+            ? `In your files under projects/${project.slug}.`
+            : `Not in your files yet: open it in a conversation and it appears under projects/${project.slug}.`}
+        </p>
+      )}
+      {!can.edit && (
+        <p className="m-0 mb-2 text-sm">
+          <Badge>reader</Badge> You can read this project and start conversations in it, not change
+          its files.
+        </p>
+      )}
       <MutationStatus error={mutation.error} notice={mutation.notice} />
-      <Section title="Settings">
-        {!can.manage && (
-          <p className="m-0 text-sm text-console-muted">
-            Only the project&apos;s owners and team admins can change these.
-          </p>
-        )}
-        <ProjectForm
-          key={project.updatedAt}
-          initial={inputOf(project)}
-          agents={agents}
-          submitLabel="Save changes"
-          disabled={!canEdit}
-          pending={mutation.pending}
-          onSubmit={(input) => void save(input)}
-        />
-        {can.manage && (
-          <div className="flex flex-wrap gap-2">
-            <Button
-              disabled={mutation.pending}
-              onClick={(e) => void archive(!archived, eventTrigger(e))}
-            >
-              {archived ? "Restore project" : "Archive project"}
-            </Button>
-            <Button
-              variant="danger"
-              disabled={mutation.pending}
-              onClick={(e) => void remove(eventTrigger(e))}
-            >
-              Delete project
-            </Button>
-          </div>
-        )}
-      </Section>
-      <ProjectMembers project={project} canManage={can.manage_members} />
-      <ProjectFiles project={project} canManage={can.manage} />
-      <ProjectThreads project={project} />
+      <Tabs defaultValue="overview" className="mt-2">
+        <TabsList label="Project">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="history">History</TabsTrigger>
+        </TabsList>
+        <TabsContent value="overview">
+          <Section title="Settings">
+            {!can.manage && (
+              <p className="m-0 text-sm text-console-muted">
+                Only the project&apos;s owners and team admins can change these.
+              </p>
+            )}
+            <ProjectForm
+              key={project.updatedAt}
+              initial={inputOf(project)}
+              agents={agents}
+              submitLabel="Save changes"
+              disabled={!canEdit}
+              pending={mutation.pending}
+              onSubmit={(input) => void save(input)}
+            />
+            {can.manage && (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  disabled={mutation.pending}
+                  onClick={(e) => void archive(!archived, eventTrigger(e))}
+                >
+                  {archived ? "Restore project" : "Archive project"}
+                </Button>
+                <Button
+                  variant="danger"
+                  disabled={mutation.pending}
+                  onClick={(e) => void remove(eventTrigger(e))}
+                >
+                  Delete project
+                </Button>
+              </div>
+            )}
+          </Section>
+          <ProjectMembers project={project} canManage={can.manage_members} />
+          <ProjectFiles project={project} canManage={can.edit} />
+          <ProjectStorage project={project} />
+          <ProjectThreads project={project} state={threads.state} />
+        </TabsContent>
+        <TabsContent value="history">
+          <ProjectHistory project={project} canRevert={can.edit} />
+          {can.manage && <ProjectWorkingCopies project={project} />}
+        </TabsContent>
+      </Tabs>
       {confirmDialog}
     </>
   );

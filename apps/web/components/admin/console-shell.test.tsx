@@ -159,7 +159,7 @@ describe("team console", () => {
     );
     expect(await screen.findByRole("heading", { name: "The page" })).toBeTruthy();
     // The switcher names the team and role; the header names the person.
-    expect((await screen.findByRole("navigation", { name: "Teams" })).textContent).toMatch(
+    expect((await screen.findByRole("navigation", { name: "Workspace" })).textContent).toMatch(
       /Finance/,
     );
     expect(
@@ -209,7 +209,7 @@ describe("team console", () => {
         <Page />
       </ConsoleShell>,
     );
-    expect(await screen.findByRole("link", { name: "Choose a team" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Choose a workspace" })).toBeTruthy();
   });
 
   it("does not mount a section the role doesn't cover", async () => {
@@ -266,7 +266,7 @@ describe("fresh session without an active team", () => {
         <Page />
       </ConsoleShell>,
     );
-    expect(await screen.findByRole("link", { name: "Choose a team" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Choose a workspace" })).toBeTruthy();
     window.dispatchEvent(new Event(ACTIVE_TEAM_EVENT));
     expect(await screen.findByRole("heading", { name: "The page" })).toBeTruthy();
     expect(calls).toBe(2);

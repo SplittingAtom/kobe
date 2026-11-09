@@ -9,6 +9,7 @@ import type { GroupKind, ThreadGroup } from "../../lib/chat/thread-groups";
 import { HitNotes } from "../chat/hit-note";
 import { THREAD_ITEM, TRASH_ITEM } from "../chat/thread-item";
 import { InlineLink } from "./text-links";
+import { useProjectGroupMenu } from "../projects/project-group-menu";
 import chat from "../chat/chat.module.css";
 import styles from "./rail.module.css";
 
@@ -67,25 +68,30 @@ function Group({
 }) {
   const listId = useId();
   const drop = useProjectDrop(group, onMove);
+  const projectMenu = useProjectGroupMenu(group.kind === "project" ? group.projectId : undefined);
   return (
     <div className={styles.group} data-group={group.kind}>
-      <h4 className={styles.groupHeading}>
-        <button
-          type="button"
-          className={styles.groupToggle}
-          aria-expanded={open}
-          aria-controls={listId}
-          onClick={onToggle}
-          data-drop-target={drop.over || undefined}
-          {...drop.handlers}
-        >
-          <ChevronRightIcon aria-hidden className={styles.chevron} />
-          <span className={styles.groupLabel}>{group.label}</span>
-          <span aria-hidden className={styles.groupCount}>
-            {group.threads.length}
-          </span>
-        </button>
-      </h4>
+      <div className="group/row flex items-center">
+        <h4 className={`${styles.groupHeading} min-w-0 flex-1`}>
+          <button
+            type="button"
+            className={styles.groupToggle}
+            aria-expanded={open}
+            aria-controls={listId}
+            onClick={onToggle}
+            data-drop-target={drop.over || undefined}
+            {...drop.handlers}
+          >
+            <ChevronRightIcon aria-hidden className={styles.chevron} />
+            <span className={styles.groupLabel}>{group.label}</span>
+            <span aria-hidden className={styles.groupCount}>
+              {group.threads.length}
+            </span>
+          </button>
+        </h4>
+        {projectMenu?.menu}
+      </div>
+      {projectMenu?.panel}
       <div id={listId} hidden={!open}>
         {HINTS[group.kind] && <p className={chat.hint}>{HINTS[group.kind]}</p>}
         <ul className={chat.threadList} aria-label={group.label}>

@@ -55,7 +55,7 @@ test("Files tree: open, keys, icons, light and dark, rename, drag to move, Move 
     const files = filesSection(page);
     // Listed when Files came on screen (KOBE-461); list again for the files just written.
     await files.getByRole("button", { name: "Refresh files" }).click();
-    const tree = files.getByRole("tree", { name: "Files in your workspace" });
+    const tree = files.getByRole("tree", { name: "My files" });
     const row = (name: string) => tree.getByRole("treeitem", { name, exact: true });
     await expect(row(dir)).toBeVisible();
 

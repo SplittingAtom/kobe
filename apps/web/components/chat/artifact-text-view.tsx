@@ -63,7 +63,7 @@ export function ArtifactTextView({
             type="button"
             className={`${BUTTON} ms-auto`}
             disabled={state.status === "copying"}
-            title={`Copy version ${version} into your workspace to edit it`}
+            title={`Copy version ${version} into your files to edit it`}
             onClick={() => void copy()}
           >
             {state.status === "copying" ? "Copying…" : "Edit as file"}

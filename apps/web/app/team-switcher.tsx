@@ -107,10 +107,10 @@ export function TeamMenu({
 }) {
   const active = my.teams.find((t) => t.id === my.activeTeamId);
   return (
-    <nav aria-label="Teams" className={classes.nav}>
+    <nav aria-label="Workspace" className={classes.nav}>
       <details {...barMenuProps}>
         <summary className={classes.summary} title={active?.name}>
-          <span className={classes.name}>{active ? active.name : "Choose a team"}</span>
+          <span className={classes.name}>{active ? active.name : "Choose a workspace"}</span>
           {active && <small> · {roleLabel(active.role)}</small>}
         </summary>
         <TeamList my={my} switchTo={switchTo} className={classes.list} />

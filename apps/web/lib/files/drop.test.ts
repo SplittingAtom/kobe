@@ -66,7 +66,7 @@ describe("rail drop helpers (KOBE-199)", () => {
     expect(out.added).toEqual(["a.txt!"]);
     expect(out.errors.map((e) => e.message)).toEqual([
       "b.txt: That file is too large to upload. file_too_large",
-      "c.txt: Your workspace is full. Delete something and try again.",
+      "c.txt: This workspace's storage is full. Delete something and try again.",
     ]);
   });
 

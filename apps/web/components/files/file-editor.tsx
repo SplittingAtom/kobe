@@ -13,6 +13,7 @@ import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
 import type { OutsideChange } from "./use-outside-change";
 import type { ApiError } from "../../lib/api/client";
 import type { FilesApi } from "../../lib/files/api";
+import { useWorkspaceProjects } from "../projects/workspace-projects";
 import { editBlockReason, editorLanguage, sha256Hex } from "../../lib/files/editor";
 import type { EditDraftStore, FileReviewStore, ProposalView } from "../../lib/files/editor-state";
 import { describeFileError } from "../../lib/files/format";
@@ -169,8 +170,9 @@ export function FileEditor(props: FileEditorProps) {
     props.onSaved(saved, version);
   });
   const outside = useOutsideChoices(props, draft, state, { save, reset });
+  const projects = useWorkspaceProjects() ?? undefined;
   const blocked =
-    editBlockReason(path, truncated) ??
+    editBlockReason(path, truncated, projects) ??
     (sha256 === undefined ? "This file's version is unknown, so it opens read-only." : undefined);
   const current = draft?.text ?? text;
   const base = draft?.baseSha256 ?? sha256;

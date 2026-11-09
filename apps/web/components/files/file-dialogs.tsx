@@ -170,12 +170,15 @@ const TOP = "";
  */
 export function MoveForm({
   entry,
+  checkedOut,
   folders,
   busy,
   onMove,
   onCancel,
 }: {
   readonly entry: FileEntry;
+  /** Checked-out projects' slugs: their folders take moves (CM3). */
+  readonly checkedOut?: ReadonlySet<string> | undefined;
   readonly folders: readonly FileEntry[];
   readonly busy: boolean;
   onMove(folder: string): void;
@@ -185,11 +188,11 @@ export function MoveForm({
   const [filter, setFilter] = useState("");
   const choices = useMemo(() => {
     const paths = [TOP, ...new Set(folders.map((f) => f.path))]
-      .filter((p) => canMoveInto(entry.path, entry.type, p))
+      .filter((p) => canMoveInto(entry.path, entry.type, p, checkedOut))
       .sort((a, b) => a.localeCompare(b));
     const q = filter.trim().toLowerCase();
     return q === "" ? paths : paths.filter((p) => p.toLowerCase().includes(q));
-  }, [folders, entry, filter]);
+  }, [folders, entry, filter, checkedOut]);
   const [choice, setChoice] = useState<string | null>(null);
   const first = useRef<HTMLInputElement>(null);
   useEffect(() => first.current?.focus(), []);
@@ -231,7 +234,7 @@ export function MoveForm({
                   checked={chosen === path}
                   onChange={() => setChoice(path)}
                 />
-                {path === TOP ? "Workspace (top level)" : path}
+                {path === TOP ? "My files (top level)" : path}
               </label>
             ))}
           </fieldset>

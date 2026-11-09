@@ -97,7 +97,7 @@ test("file editor: raw edit and save, conflict notice, viewing chip, proposal co
     // Open the file from the rail's Files tree: Rendered first.
     const files = filesSection(page);
     await files.getByRole("button", { name: "Refresh files" }).click();
-    const tree = files.getByRole("tree", { name: "Files in your workspace" });
+    const tree = files.getByRole("tree", { name: "My files" });
     await tree.getByRole("treeitem", { name: dir, exact: true }).click();
     await tree.getByRole("treeitem", { name: "notes.md", exact: true }).click();
     const tab = page

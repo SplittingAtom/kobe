@@ -17,9 +17,9 @@ export type RunPhase =
   | { readonly kind: "budget" };
 
 const WAKING: Record<NonNullable<LiveRun["waking"]>, string> = {
-  hibernated: "Waking your workspace…",
-  first_start: "Starting your workspace for the first time…",
-  rebuild: "Rebuilding your workspace…",
+  hibernated: "Waking your sandbox…",
+  first_start: "Starting your sandbox for the first time…",
+  rebuild: "Rebuilding your sandbox…",
 };
 
 export function phaseText(phase: RunPhase): string {

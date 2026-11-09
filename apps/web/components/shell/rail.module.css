@@ -170,6 +170,29 @@
   display: none;
 }
 
+/* One workspace: its name and the role chip, no menu (Workspaces WS5); the role yields first,
+   then the name truncates to the slot as before WS5 (no minimum: the rail's top line at 200 px). */
+.teamStatic {
+  display: flex;
+  gap: 0.25rem;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.teamStatic .team {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.teamStatic small {
+  flex-shrink: 100;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--admin-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The name keeps a usable minimum and truncates; the role shrinks first, then hides. */
 .teamSummary .team {
   flex: 0 1 auto;
@@ -195,6 +218,10 @@
 
 @container (width < 7.5rem) {
   .teamSummary small {
+    display: none;
+  }
+
+  .teamStatic small {
     display: none;
   }
 }

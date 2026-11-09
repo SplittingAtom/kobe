@@ -64,7 +64,7 @@ export const PI_BUILTIN_COMMANDS: readonly PiCommand[] = [
     word: "import",
     pi: "Import and resume a session from a JSONL file",
     mapping: no(
-      "It reads a session file from a path outside the workspace into Pi; Kobe keeps every conversation on its server.",
+      "It reads a session file from a path outside your files into Pi; Kobe keeps every conversation on its server.",
     ),
   },
   // Kobe shares within the team (never a public gist); Pi's upload is not offered.

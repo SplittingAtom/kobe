@@ -75,7 +75,7 @@ describe("runPhase and steeringMode", () => {
     };
     const phase = runPhase(early, false);
     expect(phase).toEqual({ kind: "waking", reason: "hibernated" });
-    expect(phaseText(phase ?? { kind: "thinking" })).toBe("Waking your workspace…");
+    expect(phaseText(phase ?? { kind: "thinking" })).toBe("Waking your sandbox…");
     expect(steeringMode(early, phase)).toBe("active");
   });
 

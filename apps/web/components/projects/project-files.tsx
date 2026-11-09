@@ -35,7 +35,10 @@ function size(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
-/** Files of one project: members read them (mounted read-only in sandboxes), managers change them. */
+/**
+ * Files of one project at its latest commit: everyone who can see the project reads them (mounted
+ * read-only in their files while a conversation of theirs is in it); editors and owners change them.
+ */
 export function ProjectFiles({
   project,
   canManage,
@@ -94,7 +97,7 @@ export function ProjectFiles({
     <Section
       id={HEADING}
       title="Files"
-      description={`Members see these files read-only in their workspace under projects/${project.slug}. An agent can propose a file from a conversation, but it is added only after the person in that conversation approves it; approved proposals are marked below.`}
+      description={`The project's files at its latest commit. They appear read-only in your files under projects/${project.slug} while a conversation of yours is in the project; editors check the project out to change them and commit. Files an agent proposed and a person approved are marked below.`}
     >
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="files">

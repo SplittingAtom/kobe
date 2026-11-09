@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { NOTEBOOK_FILE_MAX_BYTES } from "@kobe/protocol";
 import type { FilesApi } from "../../lib/files/api";
+import { useWorkspaceProjects } from "../projects/workspace-projects";
 import { editBlockReason, sha256Hex } from "../../lib/files/editor";
 import type { EditDraftStore, FileReviewStore } from "../../lib/files/editor-state";
 import { decodePreviewText } from "../../lib/files/preview";
@@ -171,8 +172,9 @@ function NotebookBody(
     props.onSaved(saved, version);
   });
   const base = draft?.baseSha256 ?? sha256;
+  const projects = useWorkspaceProjects() ?? undefined;
   const blocked =
-    editBlockReason(path, truncated) ??
+    editBlockReason(path, truncated, projects) ??
     (sha256 === undefined ? "This file's version is unknown, so it opens read-only." : undefined);
   const editable = blocked === undefined && base !== undefined;
   const threadId = k.threadId;

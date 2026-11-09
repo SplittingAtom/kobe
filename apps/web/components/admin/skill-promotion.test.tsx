@@ -176,7 +176,7 @@ describe("the team's Promote to Site requests (KOBE-333)", () => {
     const detail = await screen.findByRole("group", { name: "Request 1.1.0" });
     await within(detail).findByText("SKILL.md (120 B)");
     await userEvent.click(within(detail).getByRole("button", { name: "Confirm" }));
-    expect(await screen.findByText("No Builder waits for a promotion.")).toBeTruthy();
+    expect(await screen.findByText("No contributor waits for a promotion.")).toBeTruthy();
     expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/confirm"))).toBe(true);
   });
 
@@ -193,11 +193,11 @@ describe("the team's Promote to Site requests (KOBE-333)", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Version 1.1.0" }));
     const detail = await screen.findByRole("group", { name: "Request 1.1.0" });
     await userEvent.type(
-      await within(detail).findByLabelText("Note to the Builder (optional)"),
+      await within(detail).findByLabelText("Note to the contributor (optional)"),
       "Not yet",
     );
     await userEvent.click(within(detail).getByRole("button", { name: "Decline" }));
-    await screen.findByText("No Builder waits for a promotion.");
+    await screen.findByText("No contributor waits for a promotion.");
     const post = calls.find((c) => c.url.endsWith("/decline"));
     expect(JSON.parse(String(post?.body))).toEqual({ note: "Not yet" });
     unmount();

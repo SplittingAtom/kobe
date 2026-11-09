@@ -216,7 +216,7 @@ describe("opening again (ac-1, ac-3)", () => {
     files.delete("a.md");
     const opener = within(section).getByRole("treeitem", { name: "a.md" });
     await user.click(opener);
-    expect(await screen.findByText(/a\.md is no longer in your workspace/)).toBeTruthy();
+    expect(await screen.findByText(/a\.md is no longer in your files/)).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("tablist")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(opener));
   });
@@ -232,7 +232,7 @@ describe("opening again (ac-1, ac-3)", () => {
         "The saved copy of mortgage.py is missing; it will be restored from your sandbox at its next sync.",
       ),
     ).toBeTruthy();
-    expect(screen.queryByText(/no longer in your workspace/)).toBeNull();
+    expect(screen.queryByText(/no longer in your files/)).toBeNull();
     expect(tabNames()).toEqual(["mortgage.py*"]);
   });
 
@@ -289,7 +289,7 @@ describe("moved files (KOBE-304, ac-9)", () => {
     await waitFor(() =>
       expect(localStorage.getItem(tabsKey(fake.teamId, threadId))).toContain("file:archive/b.md"),
     );
-    expect(screen.queryByText(/is no longer in your workspace/)).toBeNull();
+    expect(screen.queryByText(/is no longer in your files/)).toBeNull();
   });
 
   it("a held move: the stream names the new path first and the tab follows at once (KOBE-516)", async () => {
@@ -305,7 +305,7 @@ describe("moved files (KOBE-304, ac-9)", () => {
     release();
     await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
     expect(tabNames()).toEqual(["b.md*"]);
-    expect(screen.queryByText(/is no longer in your workspace/)).toBeNull();
+    expect(screen.queryByText(/is no longer in your files/)).toBeNull();
   });
 
   it("the agent's mv in the sandbox: open tabs follow, previews included (KOBE-516, ac-1)", async () => {
@@ -333,7 +333,7 @@ describe("moved files (KOBE-304, ac-9)", () => {
       await within(screen.getByRole("tabpanel")).findByRole("heading", { name: "Kept" }),
     ).toBeTruthy();
     await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
-    expect(screen.queryByText(/is no longer in your workspace/)).toBeNull();
+    expect(screen.queryByText(/is no longer in your files/)).toBeNull();
   });
 
   it("a move from another browser follows; a deletion still closes the tab (KOBE-516, ac-2)", async () => {
@@ -351,11 +351,11 @@ describe("moved files (KOBE-304, ac-9)", () => {
     await waitFor(() => expect(fake.workspaceChanges.open).toEqual([["b.md"]]), {
       timeout: 3_000,
     });
-    expect(screen.queryByText(/is no longer in your workspace/)).toBeNull();
+    expect(screen.queryByText(/is no longer in your files/)).toBeNull();
     // Deleted elsewhere: no new path, so the tab closes with the notice.
     files.delete("b.md");
     await act(() => fake.workspaceChanges.announce("b.md", { kind: "user", name: "Ann" }));
-    expect(await screen.findByText(/b\.md is no longer in your workspace/)).toBeTruthy();
+    expect(await screen.findByText(/b\.md is no longer in your files/)).toBeTruthy();
     expect(tabNames()).toEqual([]);
   });
 });
@@ -391,7 +391,7 @@ describe("a move that fails", () => {
     release();
     await act(() => new Promise((resolve) => setTimeout(resolve, 100)));
     expect(tabNames()).toEqual(["a.md*"]);
-    expect(screen.queryByText(/is no longer in your workspace/)).toBeNull();
+    expect(screen.queryByText(/is no longer in your files/)).toBeNull();
   });
 
   it("Delete the copy of a sync conflict still closes the copy's tab during a move", async () => {
@@ -578,12 +578,12 @@ describe("memory, deleted files and caps (ac-3)", () => {
     mount(t);
     // The active tab's file is gone; its neighbour (a PDF, checked too once shown) is gone too.
     await waitFor(() => expect(tabNames()).toEqual(["kept.md*"]));
-    expect(await screen.findByText(/old\.pdf is no longer in your workspace/)).toBeTruthy();
+    expect(await screen.findByText(/old\.pdf is no longer in your files/)).toBeTruthy();
     expect(await within(screen.getByRole("tabpanel")).findByText("Kept")).toBeTruthy();
     expect(reads.sort()).toEqual(["kept.md", "old.pdf", "old/gone.md"]);
     expect(crushedIconButtons()).toEqual([]); // KOBE-269: the close icon keeps its size
     await userEvent.setup().click(screen.getByRole("button", { name: "Dismiss file notice" }));
-    expect(screen.queryByText(/no longer in your workspace/)).toBeNull();
+    expect(screen.queryByText(/no longer in your files/)).toBeNull();
   });
 
   it("the notice belongs to its thread: another thread on screen clears it", async () => {
@@ -594,12 +594,12 @@ describe("memory, deleted files and caps (ac-3)", () => {
       JSON.stringify({ open: ["file:gone.md"], active: "file:gone.md" }),
     );
     mount(t);
-    expect(await screen.findByText(/gone\.md is no longer in your workspace/)).toBeTruthy();
+    expect(await screen.findByText(/gone\.md is no longer in your files/)).toBeTruthy();
     act(() => {
       window.history.pushState(null, "", `/?thread=${other}`);
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
-    await waitFor(() => expect(screen.queryByText(/no longer in your workspace/)).toBeNull());
+    await waitFor(() => expect(screen.queryByText(/no longer in your files/)).toBeNull());
   });
 
   it("text previews stop at 1 MB with a notice; large images are not fetched", async () => {

@@ -4,8 +4,8 @@ export default defineTeamSection({
   id: "retention",
   label: "Retention",
   description: "How long the team keeps threads, within the site maximum.",
-  group: "Governance",
-  order: 10,
+  group: "Workspace settings",
+  order: 60,
   permission: "team.retention.manage",
   status: READY,
 });

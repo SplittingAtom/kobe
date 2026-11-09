@@ -159,7 +159,7 @@ const leaveTo = (clientX: number, clientY: number) =>
   act(() => {
     document.body.dispatchEvent(new MouseEvent("dragleave", { bubbles: true, clientX, clientY }));
   });
-const overlay = () => screen.queryByText("Drop to add to your workspace");
+const overlay = () => screen.queryByText("Drop to add to your files");
 const filesRegion = () => screen.getByRole("region", { name: "Files" });
 
 describe("rail drop zone: overlay (ac-1)", () => {
@@ -244,7 +244,7 @@ describe("rail drop zone: upload (ac-1)", () => {
     uploadGate = new Promise((resolve) => (release = resolve));
     fireEvent.drop(rail, files(fileOf("a.txt")));
     fireEvent.drop(rail, files(fileOf("b.txt")));
-    expect(await screen.findByText("Adding 2 files to your workspace…")).toBeTruthy();
+    expect(await screen.findByText("Adding 2 files to My files…")).toBeTruthy();
     release();
     expect(await screen.findByText("Added a.txt, b.txt to uploads.")).toBeTruthy();
     expect(uploads.map((u) => u.name)).toEqual(["a.txt", "b.txt"]);
@@ -281,7 +281,7 @@ describe("rail drop zone: upload (ac-1)", () => {
     const rail = await mount();
     fireEvent.drop(rail, items([fileOf("a.txt"), "photos"]));
     const alert = await within(filesRegion()).findByRole("alert");
-    expect(alert.textContent).toContain("Folders can't be added to your workspace (photos)");
+    expect(alert.textContent).toContain("Folders can't be added to your files (photos)");
     expect(await within(filesRegion()).findByText("a.txt")).toBeTruthy();
     expect(uploads.map((u) => u.name)).toEqual(["a.txt"]);
   });
@@ -312,7 +312,7 @@ describe("rail drop zone: errors and touch (ac-3)", () => {
     fireEvent.drop(rail, files(fileOf("big.bin"), fileOf("next.bin")));
     const alert = await within(filesRegion()).findByRole("alert");
     expect(alert.textContent).toContain(
-      "big.bin: Your workspace is full. Delete something and try again.",
+      "big.bin: This workspace's storage is full. Delete something and try again.",
     );
     expect(uploads).toEqual([]);
     expect(wakes).toBe(0); // nothing landed: no wake

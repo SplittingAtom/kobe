@@ -70,7 +70,7 @@ async function workspace(
 async function openNotebook(page: Page, dir: string): Promise<Locator> {
   const files = filesSection(page);
   await files.getByRole("button", { name: "Refresh files" }).click();
-  const tree = files.getByRole("tree", { name: "Files in your workspace" });
+  const tree = files.getByRole("tree", { name: "My files" });
   // The tree remembers an expanded folder across a reload: open it only when it is closed.
   const folder = tree.getByRole("treeitem", { name: dir, exact: true });
   if ((await folder.getAttribute("aria-expanded")) !== "true") await folder.click();

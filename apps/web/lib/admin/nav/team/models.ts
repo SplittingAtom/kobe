@@ -4,7 +4,7 @@ export default defineTeamSection({
   id: "models",
   label: "Models",
   description: "The team's model subset and default model.",
-  group: "Models and spend",
+  group: "Workspace settings",
   order: 10,
   permission: "team.models.manage",
   status: READY,

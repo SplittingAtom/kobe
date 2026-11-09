@@ -4,6 +4,8 @@
  * save names. Pure; the editor is `components/files/file-editor.tsx` (CodeMirror loads lazily).
  */
 import { formatBytes, isReadOnlyPath } from "./format";
+import type { Project } from "../projects/api";
+import { projectFileAccess, projectReadOnlyReason } from "../projects/workspace";
 import { TEXT_PREVIEW_MAX_BYTES, type FilePreview } from "./preview";
 
 const TEXT_KINDS: ReadonlySet<FilePreview["kind"]> = new Set([
@@ -21,11 +23,30 @@ export function isTextPreview(preview: FilePreview): boolean {
 }
 
 /**
- * Why a text file opens read-only, or undefined when it can be edited: project files and thread
- * uploads are read-only (FE2), and a read cut at the preview cap cannot be saved whole.
+ * Why a text file opens read-only, or undefined when it can be edited: thread uploads are
+ * read-only (FE2); a project file is read-only unless the member checked the project out, worded
+ * by what they may do (`projects`: the chat's projects and checkouts; FP3, CM8); and a read cut at
+ * the preview cap cannot be saved whole.
  */
-export function editBlockReason(path: string, truncated: boolean): string | undefined {
-  if (isReadOnlyPath(path)) return "Project files and thread uploads are read-only.";
+export function editBlockReason(
+  path: string,
+  truncated: boolean,
+  projects?: {
+    readonly bySlug: ReadonlyMap<string, Project>;
+    readonly checkedOut: ReadonlySet<string>;
+  },
+): string | undefined {
+  const access = projectFileAccess(
+    path,
+    projects?.bySlug ?? new Map(),
+    projects?.checkedOut ?? new Set(),
+  );
+  if (access.kind !== "none") {
+    const reason = projectReadOnlyReason(access);
+    if (reason !== undefined) return reason;
+  } else if (isReadOnlyPath(path)) {
+    return "Thread uploads are read-only.";
+  }
   if (truncated) {
     return `This file is over ${formatBytes(TEXT_PREVIEW_MAX_BYTES)}, so it opens read-only.`;
   }

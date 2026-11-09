@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { listTeamMembers, type TeamMember } from "../../lib/admin/api/team/members";
 import { createProjectsApi, type ProjectAgent, type ProjectsApi } from "../../lib/projects/api";
+import { createCommitsApi, type ProjectCommitsApi } from "../../lib/projects/commits-api";
 import { useTeamAccess } from "../admin/console-context";
 import { useResource, type ResourceState } from "../admin/use-resource";
 
@@ -10,6 +11,12 @@ import { useResource, type ResourceState } from "../admin/use-resource";
 export function useProjectsApi(): ProjectsApi {
   const teamId = useTeamAccess().team.id;
   return useMemo(() => createProjectsApi(teamId), [teamId]);
+}
+
+/** The project commits API (checkouts, history) of the active team. */
+export function useCommitsApi(): ProjectCommitsApi {
+  const teamId = useTeamAccess().team.id;
+  return useMemo(() => createCommitsApi(teamId), [teamId]);
 }
 
 /** Team people by id, so member lists show names. Failure only means ids are shown instead. */

@@ -64,7 +64,7 @@ test("viewed file: the agent's write to the open file is refused or becomes a pr
     // Open the file from the rail's Files tree: the composer then says it is being viewed.
     const files = filesSection(page);
     await files.getByRole("button", { name: "Refresh files" }).click();
-    const tree = files.getByRole("tree", { name: "Files in your workspace" });
+    const tree = files.getByRole("tree", { name: "My files" });
     await tree.getByRole("treeitem", { name: dir, exact: true }).click();
     await tree.getByRole("treeitem", { name: "notes.md", exact: true }).click();
     await expect(page.locator(`[data-kobe-viewing-chip="${path}"]`)).toBeVisible();

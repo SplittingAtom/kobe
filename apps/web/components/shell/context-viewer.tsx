@@ -31,7 +31,7 @@ import styles from "./context-viewer.module.css";
 
 const PANEL: Panel = { id: "context-viewer", title: "Context", embedded: true };
 
-const TOO_LONG = "Your workspace is taking too long to wake. Try again in a moment.";
+const TOO_LONG = "Your sandbox is taking too long to wake. Try again in a moment.";
 
 type Phase =
   | { readonly status: "loading" }
@@ -84,7 +84,7 @@ function useContextRead(read: () => Promise<ContextRead> | null) {
   return { phase, context, again: () => setAttempt((n) => n + 1) };
 }
 
-/** "Waking your workspace… 6 s", counting while it wakes. */
+/** "Waking your sandbox… 6 s", counting while it wakes. */
 function WakeProgress({ since }: { readonly since: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -95,7 +95,7 @@ function WakeProgress({ since }: { readonly since: number }) {
   return (
     <p className={styles.status} role="status">
       <span className={styles.spinner} aria-hidden="true" />
-      Waking your workspace… {seconds} s
+      Waking your sandbox… {seconds} s
     </p>
   );
 }

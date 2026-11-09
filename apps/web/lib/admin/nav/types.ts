@@ -42,11 +42,14 @@ export const SITE_GROUPS = [
   "System",
 ] as const;
 
+/**
+ * Workspaces WS5 (KOBE-581): "Team" is the people (members, invitations, roles); "Workspace
+ * settings" is the place (models, budgets, connectors, policy, egress, retention, memory, storage).
+ */
 export const TEAM_GROUPS = [
-  "People",
+  "Team",
+  "Workspace settings",
   "Agents and skills",
-  "Models and spend",
-  "Access",
   "Governance",
 ] as const;
 

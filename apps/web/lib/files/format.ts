@@ -3,12 +3,17 @@ import type { ApiError } from "../api/client";
 
 /**
  * Server-owned areas of `/workspace` (D-file-browser): read-only for the user and the agent, except
- * the member's own drops directly in uploads/ (KOBE-199, the protocol's `isMemberDropPath`).
+ * the member's own drops directly in uploads/ (KOBE-199, the protocol's `isMemberDropPath`) and
+ * the inside of a project the member has checked out (`checkedOut`: their slugs; CM3).
  */
 const READ_ONLY_ROOTS: ReadonlySet<string> = new Set(["uploads", "projects"]);
 
-export function isReadOnlyPath(path: string): boolean {
-  return READ_ONLY_ROOTS.has(path.split("/")[0] ?? "") && !isMemberDropPath(path);
+export function isReadOnlyPath(path: string, checkedOut?: ReadonlySet<string>): boolean {
+  const [root, slug, rest] = path.split("/", 3);
+  if (root === "projects" && slug !== undefined && rest !== undefined && checkedOut?.has(slug)) {
+    return false;
+  }
+  return READ_ONLY_ROOTS.has(root ?? "") && !isMemberDropPath(path);
 }
 
 export function parentPath(path: string): string {
@@ -33,7 +38,7 @@ export function formatKiB(bytes: number): string {
   return `${Math.ceil(bytes / 1024)} KiB`;
 }
 
-const LEGAL_HOLD = "Your workspace is under a legal hold, so nothing can be deleted.";
+const LEGAL_HOLD = "This workspace is under a legal hold, so nothing can be deleted.";
 
 /**
  * The words for a file API error. `legal_hold` is the code KOBE-184 introduces; until it lands the
@@ -58,7 +63,10 @@ export function describeFileError(error: ApiError): ApiError {
     return { ...error, message: `That file is too large to upload. ${error.message}` };
   }
   if (error.code === "quota_exceeded") {
-    return { ...error, message: "Your workspace is full. Delete something and try again." };
+    return {
+      ...error,
+      message: "This workspace's storage is full. Delete something and try again.",
+    };
   }
   return error;
 }

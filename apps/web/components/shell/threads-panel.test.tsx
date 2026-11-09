@@ -265,3 +265,42 @@ describe("on a phone (review L7)", () => {
     expect(window.location.search).toBe(`?thread=${t}`);
   });
 });
+
+describe("the project header menu (Workspaces FP4, KOBE-581)", () => {
+  it("offers Check out to an editor; Your threads keeps its label", async () => {
+    const p = fake.addProject("Website");
+    fake.addThread("Site");
+    must(fake.threads.get([...fake.threads.keys()].at(-1) ?? "")).project_id = p;
+    fake.addThread("Mine");
+    const { user, dialog } = await openOn();
+    expect(await within(dialog).findByRole("button", { name: /^Your threads/ }, WAIT)).toBeTruthy();
+    const menuButton = await within(dialog).findByRole(
+      "button",
+      { name: "Actions for project Website" },
+      WAIT,
+    );
+    await user.click(menuButton);
+    const menu = await screen.findByRole("menu", { name: "Actions for project Website" }, WAIT);
+    const items = within(menu)
+      .getAllByRole("menuitem")
+      .map((i) => i.textContent);
+    expect(items).toEqual(["Check out", "Open project page"]);
+  });
+
+  it("offers no work to a reader", async () => {
+    const p = fake.addProject("Website");
+    Object.assign(must(fake.projects.find((x) => x.id === p)), { my_role: "reader" });
+    fake.addThread("Site");
+    must(fake.threads.get([...fake.threads.keys()].at(-1) ?? "")).project_id = p;
+    const { user, dialog } = await openOn();
+    await user.click(
+      await within(dialog).findByRole("button", { name: "Actions for project Website" }, WAIT),
+    );
+    const menu = await screen.findByRole("menu", { name: "Actions for project Website" }, WAIT);
+    expect(
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((i) => i.textContent),
+    ).toEqual(["Open project page"]);
+  });
+});

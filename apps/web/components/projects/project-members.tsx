@@ -2,7 +2,13 @@
 
 import { useState, type FormEvent } from "react";
 import type { ApiResult } from "../../lib/api/client";
-import { worded, type Project, type ProjectMember, type ProjectRole } from "../../lib/projects/api";
+import {
+  PROJECT_ROLES,
+  worded,
+  type Project,
+  type ProjectMember,
+  type ProjectRole,
+} from "../../lib/projects/api";
 import { useTeamAccess } from "../admin/console-context";
 import { MutationStatus } from "../admin/error-notice";
 import { DateTime, ResourceView } from "../admin/parts";
@@ -11,6 +17,7 @@ import { useMutation, useResource } from "../admin/use-resource";
 import {
   Button,
   Field,
+  Notice,
   FormRow,
   Section,
   Select,
@@ -26,12 +33,19 @@ import {
 } from "../ui/console";
 import { useProjectsApi, useRoster } from "./use-projects";
 
-const ROLES: readonly ProjectRole[] = ["owner", "member"];
+const ROLES = PROJECT_ROLES;
+
+/** What each role may do (PR3), shown under the list. */
+const ROLES_NOTE =
+  "Owners manage the project and its people; editors check out, edit and commit its files; readers browse, read history and start conversations in it.";
 
 /** The section's heading: focus lands here when a removal empties the list. */
 const HEADING = "project-members";
 
-/** Members of one project: add, remove and roles for owners and admins; a list for everyone else. */
+/**
+ * People of one project (PR2, PR3): owners, editors and readers; add, re-role and remove for
+ * owners and team admins (the last owner stays, `last_owner`); a list for everyone else.
+ */
 export function ProjectMembers({
   project,
   canManage,
@@ -69,9 +83,10 @@ export function ProjectMembers({
           return (
             <>
               <p className="m-0 mb-2 text-sm text-console-muted">
-                {data.membersMode === "team"
-                  ? "Everyone in the team is a member. Only owners are listed; switch to selected people to choose who is in."
-                  : "Only the people listed here are members."}
+                {data.visibility === "workspace"
+                  ? "Visible to the whole workspace: everyone who is not listed is a reader."
+                  : "Restricted: only the people listed here can see this project."}{" "}
+                {ROLES_NOTE}
               </p>
               <div ref={focus.container}>
                 <Table caption="Project members" hideCaption>
@@ -121,6 +136,15 @@ export function ProjectMembers({
                   </TableBody>
                 </Table>
               </div>
+              {!data.members.some((m) => m.role === "owner") && (
+                <Notice tone="warn" role="note">
+                  <p>
+                    {editable
+                      ? "No owner: assign one below. Team admins manage the project meanwhile."
+                      : "No owner. Team admins manage the project meanwhile."}
+                  </p>
+                </Notice>
+              )}
               {editable && (
                 <AddMember
                   candidates={
@@ -133,6 +157,19 @@ export function ProjectMembers({
                     act(
                       () => api.addMember(project.id, userId, role),
                       `Added ${roster.nameOf(userId)}.`,
+                    )
+                  }
+                />
+              )}
+              {editable && (
+                <TransferOwner
+                  people={roster.state.status === "ready" ? roster.state.data : []}
+                  owners={data.members.filter((m) => m.role === "owner").map((m) => m.userId)}
+                  pending={mutation.pending}
+                  onTransfer={(userId) =>
+                    act(
+                      () => api.transferOwner(project.id, userId),
+                      `${roster.nameOf(userId)} owns ${project.name} now.`,
                     )
                   }
                 />
@@ -234,7 +271,7 @@ function AddMember({
   readonly onAdd: (userId: string, role: ProjectRole) => Promise<unknown>;
 }) {
   const [userId, setUserId] = useState("");
-  const [role, setRole] = useState<ProjectRole>("member");
+  const [role, setRole] = useState<ProjectRole>("editor");
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (userId === "") return;
@@ -263,6 +300,57 @@ function AddMember({
         </Field>
         <Button type="submit" variant="primary" disabled={pending || userId === ""}>
           Add member
+        </Button>
+      </FormRow>
+    </form>
+  );
+}
+
+/**
+ * Ownership transfer (PR5): the person picked becomes an owner; an owner handing over stays an
+ * editor, a team admin assigning one demotes nobody. The server checks they are in the workspace.
+ */
+function TransferOwner({
+  people,
+  owners,
+  pending,
+  onTransfer,
+}: {
+  readonly people: readonly {
+    readonly userId: string;
+    readonly name: string;
+    readonly email: string;
+  }[];
+  readonly owners: readonly string[];
+  readonly pending: boolean;
+  readonly onTransfer: (userId: string) => Promise<unknown>;
+}) {
+  const [userId, setUserId] = useState("");
+  const candidates = people.filter((p) => !owners.includes(p.userId));
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (userId === "") return;
+    await onTransfer(userId);
+    setUserId("");
+  }
+  return (
+    <form id="project-owner" aria-label="Transfer ownership" onSubmit={(e) => void submit(e)}>
+      <FormRow>
+        <Field
+          label="New owner"
+          hint="An owner who hands over stays an editor; a team admin assigning one demotes nobody."
+        >
+          <Select value={userId} onChange={(e) => setUserId(e.target.value)}>
+            <option value="">Choose a person</option>
+            {candidates.map((c) => (
+              <option key={c.userId} value={c.userId}>
+                {c.name} ({c.email})
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Button type="submit" disabled={pending || userId === ""}>
+          Transfer ownership
         </Button>
       </FormRow>
     </form>

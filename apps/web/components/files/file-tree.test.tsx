@@ -132,7 +132,10 @@ function mount(props: Partial<Parameters<typeof FileBrowser>[0]> = {}) {
   );
 }
 
-const tree = () => screen.getByRole("tree", { name: "Files in your workspace" });
+const tree = () => screen.getByRole("tree", { name: "My files" });
+/** The Projects tree (Workspaces FP1): the mounted projects. */
+const projectsTree = () => screen.getByRole("tree", { name: "Projects" });
+const findProject = (name: string) => within(projectsTree()).findByRole("treeitem", { name });
 const item = (name: string) => within(tree()).getByRole("treeitem", { name });
 const findItem = (name: string) => within(tree()).findByRole("treeitem", { name });
 const names = () =>
@@ -206,14 +209,16 @@ describe("the tree (ac-1, ac-5)", () => {
   it("is an ARIA tree: levels, sizes and positions; folders expand in place, lazily", async () => {
     mount();
     await findItem("report.csv");
-    expect(names()).toEqual(["data", "notes", "projects", "uploads", "main.py", "report.csv"]);
+    // projects/ is not in My files: its projects are in the Projects tree.
+    expect(names()).toEqual(["data", "notes", "uploads", "main.py", "report.csv"]);
     const notes = item("notes");
     expect(notes.getAttribute("aria-expanded")).toBe("false");
     expect(notes.getAttribute("aria-level")).toBe("1");
     expect([notes.getAttribute("aria-posinset"), notes.getAttribute("aria-setsize")]).toEqual([
       "2",
-      "6",
+      "5",
     ]);
+    expect(item("uploads").getAttribute("aria-posinset")).toBe("3");
     expect(item("report.csv").hasAttribute("aria-expanded")).toBe(false);
     expect(listed("notes")).toBe(0); // nothing below is read until it opens
     await userEvent.setup().click(notes);
@@ -224,7 +229,6 @@ describe("the tree (ac-1, ac-5)", () => {
       "notes",
       "  2026",
       "  todo.md",
-      "projects",
       "uploads",
       "main.py",
       "report.csv",
@@ -243,7 +247,9 @@ describe("the tree (ac-1, ac-5)", () => {
     await userEvent.setup().click(await findItem("notes"));
     await userEvent.setup().click(await findItem("2026"));
     await findItem("plan.md");
+    // projects/ is always open: the Projects tree lists what is in it.
     expect(JSON.parse(localStorage.getItem(expandedKey(TEAM)) ?? "[]")).toEqual([
+      "projects",
       "notes",
       "notes/2026",
     ]);
@@ -252,7 +258,10 @@ describe("the tree (ac-1, ac-5)", () => {
     mount();
     await findItem("todo.md");
     await waitFor(() =>
-      expect(JSON.parse(localStorage.getItem(expandedKey(TEAM)) ?? "[]")).toEqual(["notes"]),
+      expect(JSON.parse(localStorage.getItem(expandedKey(TEAM)) ?? "[]")).toEqual([
+        "projects",
+        "notes",
+      ]),
     );
   });
 
@@ -314,7 +323,10 @@ describe("compact rows and icons (ac-2, ac-3)", () => {
     mount();
     await findItem("report.csv");
     const box = must(tree().parentElement);
-    const panel = must(box.parentElement);
+    // A `display: contents` wrapper (it tracks which tree holds the focus) lays out as nothing.
+    const wrapper = must(box.parentElement);
+    expect(wrapper.className).toBe("contents");
+    const panel = must(wrapper.parentElement);
     expect(panel.className).toMatch(/\bflex-col\b/);
     expect(panel.className).toMatch(/\boverflow-auto\b/);
     expect(box.className).toMatch(/\bshrink-0\b/);
@@ -323,15 +335,18 @@ describe("compact rows and icons (ac-2, ac-3)", () => {
 });
 
 describe("special roots (ac-4)", () => {
-  it("project mounts are read-only: a lock, a marker, no Rename, Move or Delete, not draggable", async () => {
+  it("project mounts are read-only: a lock, no Rename, Move or Delete, not draggable", async () => {
     mount();
-    const projects = await findItem("projects");
-    expect(projects.querySelector("svg.lucide-folder-lock")).not.toBeNull();
-    expect(within(projects).getByText("Read-only")).toBeTruthy();
-    expect(projects.getAttribute("draggable")).toBe("false");
-    await userEvent.setup().click(projects);
-    const plan = await findItem("plan");
-    expect(within(plan).getByText("Read-only")).toBeTruthy();
+    // The mounted project is a top row of the Projects tree (FP1), never in My files.
+    const plan = await findProject("plan");
+    expect(plan.getAttribute("aria-level")).toBe("1");
+    expect(plan.querySelector("svg.lucide-folder-lock")).not.toBeNull();
+    expect(plan.getAttribute("draggable")).toBe("false");
+    expect(plan.getAttribute("title")).toBe("plan"); // the slug as hover text
+    expect(within(tree()).queryByRole("treeitem", { name: "projects" })).toBeNull();
+    await userEvent.setup().click(plan);
+    const spec = await within(projectsTree()).findByRole("treeitem", { name: "spec.md" });
+    expect(spec.getAttribute("draggable")).toBe("true"); // a read-only file still drags to mention
     await userEvent.setup().click(within(plan).getByRole("button", { name: "Actions for plan" }));
     const menu = await screen.findByRole("menu", { name: "Actions for plan" });
     expect(
@@ -372,20 +387,24 @@ describe("special roots (ac-4)", () => {
     pageSize = 3;
     mount();
     await findItem("data");
-    expect(names()).toEqual(["data", "notes", "projects", "Show more"]);
+    expect(names()).toEqual(["data", "notes", "Show more"]);
     await userEvent.setup().click(item("Show more"));
     await findItem("report.csv");
-    expect(names()).toEqual(["data", "notes", "projects", "uploads", "main.py", "report.csv"]);
+    expect(names()).toEqual(["data", "notes", "uploads", "main.py", "report.csv"]);
   });
 });
 
 describe("keyboard (ac-5)", () => {
+  /** Tabs into My files (past the Projects tree, All projects and Upload). */
+  async function tabToMyFiles(user: ReturnType<typeof userEvent.setup>) {
+    for (let i = 0; i < 6 && document.activeElement !== item("data"); i += 1) await user.tab();
+  }
   async function focused() {
     mount();
     await findItem("report.csv");
+    await findProject("plan");
     const user = userEvent.setup();
-    await user.tab(); // Upload, in the top-level row
-    await user.tab();
+    await tabToMyFiles(user);
     expect(document.activeElement).toBe(item("data"));
     return user;
   }
@@ -425,9 +444,9 @@ describe("keyboard (ac-5)", () => {
     const opened: FileEntry[] = [];
     mount({ onOpenFile: (e) => opened.push(e) });
     await findItem("report.csv");
+    await findProject("plan");
     const user = userEvent.setup();
-    await user.tab();
-    await user.tab();
+    await tabToMyFiles(user);
     await user.keyboard("r");
     expect(active()).toBe("report.csv");
     await user.keyboard("{Enter}");
@@ -474,7 +493,7 @@ describe("keyboard (ac-5)", () => {
   it("read-only rows take no F2 or Delete", async () => {
     const user = await focused();
     await user.keyboard("{ArrowDown}{ArrowDown}");
-    expect(active()).toBe("projects");
+    expect(active()).toBe("uploads");
     await user.keyboard("{F2}{Delete}");
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByRole("alertdialog")).toBeNull();
@@ -527,7 +546,6 @@ describe("moving (ac-7)", () => {
         "  sales.csv",
         "notes",
         "  todo.md",
-        "projects",
         "uploads",
         "main.py",
         "report.csv",
@@ -541,7 +559,7 @@ describe("moving (ac-7)", () => {
     await findItem("todo.md");
     expect(drag(item("main.py"), item("todo.md"))).toBe(true);
     await waitFor(() => expect(moves()).toEqual([{ from: "main.py", to: "notes/main.py" }]));
-    const root = must(screen.getByText("Workspace").parentElement);
+    const root = must(screen.getByText("My files").parentElement);
     await findItem("main.py");
     expect(drag(item("todo.md"), root)).toBe(true);
     await waitFor(() => expect(moves()).toHaveLength(2));
@@ -555,9 +573,10 @@ describe("moving (ac-7)", () => {
     expect(drag(item("notes"), item("2026"))).toBe(false);
     expect(drag(item("notes"), item("notes"))).toBe(false);
     expect(drag(item("todo.md"), item("notes"))).toBe(false); // already there
-    expect(drag(item("report.csv"), item("projects"))).toBe(false);
+    const plan = await findProject("plan");
+    expect(drag(item("report.csv"), plan)).toBe(false);
     expect(drag(item("notes"), item("uploads"))).toBe(false); // only files become drops
-    expect(drag(item("projects"), item("data"))).toBe(false); // not draggable at all
+    expect(drag(plan, item("data"))).toBe(false); // not draggable at all
     expect(moves()).toEqual([]);
   });
 
@@ -623,7 +642,7 @@ describe("moving (ac-7)", () => {
     const notes = await findItem("notes");
     expect(notes.hasAttribute("data-kobe-drop-folder")).toBe(true);
     expect(item("report.csv").hasAttribute("data-kobe-drop-folder")).toBe(false);
-    expect(item("projects").hasAttribute("data-kobe-drop-folder")).toBe(false);
+    expect((await findProject("plan")).hasAttribute("data-kobe-drop-folder")).toBe(false);
     const file = new File(["hello"], "up.txt", { type: "text/plain" });
     const dt = transfer(["Files"], [file]);
     fireEvent.dragOver(notes, { dataTransfer: dt });
