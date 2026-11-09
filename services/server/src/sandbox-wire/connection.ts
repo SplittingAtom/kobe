@@ -52,6 +52,7 @@ import { runLatency, type RunLatency } from "./run-latency-spans.js";
 import { AllowedArtifactCalls } from "../artifacts/allowed.js";
 import { putArtifact } from "../artifacts/put.js";
 import { shareFile } from "../files/share.js";
+import { onProjectCommit } from "./project-commit.js";
 import {
   proposeProjectFile,
   type ProposeRefusal,
@@ -180,6 +181,8 @@ export class SandboxConnection implements RegisteredConnection {
   readonly #policyAnswered = new Set<string>();
   /** Artifact tool calls this connection's policy checks allowed (D-3 of KOBE-55). */
   readonly #allowedArtifacts = new AllowedArtifactCalls();
+  /** Projects with an agent commit waiting for approval on this connection. */
+  readonly #pendingCommits = new Set<string>();
   #artifactPuts = 0;
   #fileShares = 0;
   #webSearches = 0;
@@ -523,6 +526,9 @@ export class SandboxConnection implements RegisteredConnection {
       case "project.file_propose":
         this.#onProjectFilePropose(frame);
         return;
+      case "project.commit":
+        this.#onProjectCommit(frame);
+        return;
       case "skill.draft_save":
         this.#onSkillDraftSave(frame);
         return;
@@ -718,6 +724,7 @@ export class SandboxConnection implements RegisteredConnection {
     const abort = new AbortController();
     this.#policyPending.set(key, abort);
     this.#ctx.metrics.policyChecks += 1;
+    let deferred = false;
     void decidePolicyCheck(
       this.#ctx.policy,
       {
@@ -738,6 +745,9 @@ export class SandboxConnection implements RegisteredConnection {
           expires_at: pending.expiresAt,
         }),
       () => this.#takeDeniedToken(frame.run_id),
+      () => {
+        deferred = true;
+      },
     ).then((result) => {
       this.#policyPending.delete(key);
       remember(this.#policyAnswered, key, POLICY_ANSWERED_MAX);
@@ -749,7 +759,11 @@ export class SandboxConnection implements RegisteredConnection {
       const lease = this.#leases.get(frame.run_id);
       if (result.decision === "allow" && lease && !lease.ended) {
         // D-3: the artifact input the server allowed, by hash, before the call reaches the sandbox.
-        this.#allowedArtifacts.record(frame.run_id, frame.tool_call_id, frame.tool, frame.input);
+        // KOBE-579: "a rule allowed it outright" is a positive mark on the allowance; a deferred
+        // approval (or no entry at all) means the frame handler must ask (fail closed).
+        this.#allowedArtifacts.record(frame.run_id, frame.tool_call_id, frame.tool, frame.input, {
+          ruleAllowed: !deferred,
+        });
       }
       this.send(
         lease?.ended && result.decision === "allow"
@@ -1359,6 +1373,26 @@ export class SandboxConnection implements RegisteredConnection {
     void outcome.reply.then(answer).finally(() => {
       this.#projectProposals -= 1;
     });
+  }
+
+  /** `project.commit` (KOBE-579): checks, approval and commit in `project-commit.ts`. */
+  #onProjectCommit(frame: Extract<SandboxToServerFrame, { type: "project.commit" }>): void {
+    void onProjectCommit(
+      {
+        deps: this.#ctx.projectCommits,
+        target: this.target,
+        connectionId: this.id,
+        hasCapability: this.hasCapability(CAPABILITY_PROJECTS),
+        runCheck: () => this.#checkToolRun(frame.run_id, frame.thread_id, "project.commit"),
+        verdict: () =>
+          this.#allowedArtifacts.check(frame.run_id, frame.tool_call_id, frame.tool, frame.input),
+        ruleAllowed: () => this.#allowedArtifacts.ruleAllowed(frame.run_id, frame.tool_call_id),
+        pending: this.#pendingCommits,
+        signal: this.#memoryAbort.signal,
+        send: (out) => this.send(out),
+      },
+      frame,
+    );
   }
 
   /** `memory.read` (KOBE-156): a read, so no allowed-call binding; same capability and lease rules. */

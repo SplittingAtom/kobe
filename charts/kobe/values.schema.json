@@ -492,7 +492,9 @@
             "maxFileBytes": { "type": "integer", "minimum": 1 },
             "maxMessageBytes": { "type": "integer", "minimum": 1 },
             "teamStorageQuotaBytes": { "type": "integer", "minimum": 1 },
-            "orphanHours": { "type": "integer", "minimum": 1, "maximum": 720 }
+            "orphanHours": { "type": "integer", "minimum": 1, "maximum": 720 },
+            "teamMaxObjects": { "type": "integer", "minimum": 1 },
+            "projectHistoryMaxCommits": { "type": "integer", "minimum": 1, "maximum": 100000 }
           }
         }
       }

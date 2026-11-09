@@ -15,6 +15,7 @@ import type { Logger } from "pino";
 import { recordAudit, type ServerAuditEvent } from "../audit/record.js";
 import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
 import type { SandboxAuthenticator, SandboxCaller } from "./auth.js";
+import { checkoutRefs } from "./checkouts.js";
 import { workspaceBlobKey } from "./keys.js";
 import { movesSince } from "./move-journal.js";
 import {
@@ -26,6 +27,7 @@ import {
 } from "./lost.js";
 import { IntegrityError, verifyingStream, type ObjectStore } from "./object-store.js";
 import { resolveLimits, type QuotaCheck, type WorkspaceLimits } from "./quota.js";
+import { teamObjectsAllow } from "../uploads/quota.js";
 import {
   blobState,
   commitChanges,
@@ -142,6 +144,8 @@ export interface WorkspaceRoutesDeps {
   readonly prefix: string;
   readonly limits: WorkspaceLimits;
   readonly quota: QuotaCheck;
+  /** Site default of the team object budget (GV2); a new blob past it is refused. */
+  readonly teamMaxObjects?: number;
   readonly log: Pick<Logger, "error" | "warn" | "info">;
   readonly limiter?: RateLimiter;
   /** Overrides of {@link WORKSPACE_DB_LIMITS} (tests). */
@@ -329,9 +333,12 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
     if (!Number.isSafeInteger(since) || since < 0 || !Number.isInteger(limit) || limit < 1) {
       return error(c, 400, "invalid_request", "since and limit must be non-negative integers.");
     }
-    const page = await tx(caller, "other", (t) =>
-      manifestPage(t, caller, since, Math.min(limit, WORKSPACE_MAX_BATCH)),
-    );
+    const read = await tx(caller, "other", async (t) => ({
+      page: await manifestPage(t, caller, since, Math.min(limit, WORKSPACE_MAX_BATCH)),
+      // CM4 (KOBE-579): on every page, the caller's checkouts (writable `projects/<slug>/`).
+      checkouts: await checkoutRefs(t, caller),
+    }));
+    const { page } = read;
     if (page.kind === "resync_required") {
       return error(c, 409, "resync_required", "Pull the manifest again from revision 0.");
     }
@@ -339,6 +346,7 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
       head_rev: page.headRev,
       entries: page.entries.map(publicEntry),
       more: page.more,
+      checkouts: read.checkouts,
     });
   });
 
@@ -448,6 +456,13 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
           if (lostSize !== undefined) return lostSize === size ? "lost" : "lost_mismatch";
           const held = await blobState(t, caller, sha.data);
           if (held !== "absent") return held;
+          // GV2 (KOBE-579): a new object past the team's object budget is refused.
+          if (
+            deps.teamMaxObjects !== undefined &&
+            !(await teamObjectsAllow(t, caller.teamId, deps.teamMaxObjects))
+          ) {
+            return "over_objects";
+          }
           return (await reserveUpload(t, caller, size, limits)) ? "reserved" : "over_quota";
         });
       const state = await writeTxSpan(WRITE_SPAN.reserveTx, "blob", reserve, String);
@@ -460,6 +475,16 @@ export function workspaceRoutes(deps: WorkspaceRoutesDeps): Hono<Vars> {
       if (state === "deleting") {
         c.header("Retry-After", "5");
         return error(c, 409, "retry_later", "This content is being collected; upload it later.");
+      }
+      if (state === "over_objects") {
+        return c.json(
+          {
+            code: "quota_exceeded",
+            limit: "objects",
+            message: "The workspace holds as many stored objects as its budget allows.",
+          },
+          507,
+        );
       }
       if (state === "over_quota") {
         auditLimit(caller, "workspace_bytes");

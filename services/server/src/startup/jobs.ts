@@ -177,6 +177,9 @@ function sweepJobs(o: ServerJobsOptions): ServerJob[] {
     pool: deps.database.pool,
     blobs: deps.blobs,
     uploadOrphanHours: o.retention.uploadOrphanHours,
+    ...(deps.uploads?.projectHistoryMaxCommits === undefined
+      ? {}
+      : { projectHistoryMaxCommits: deps.uploads.projectHistoryMaxCommits }),
     hourUtc: o.retention.hourUtc,
     paused: o.retention.paused,
     logger: o.logger,

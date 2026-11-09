@@ -52,3 +52,28 @@ describe("AllowedArtifactCalls (D-3)", () => {
     expect(calls.check("r", "c2", "share_file", { path: "a" })).toBe("ok");
   });
 });
+
+describe("ruleAllowed (KOBE-579, commit_project)", () => {
+  const commit = { message: "m" };
+
+  it("is true only for a call recorded with the rule mark", () => {
+    const calls = new AllowedArtifactCalls();
+    calls.record("run", "rule", "commit_project", commit, { ruleAllowed: true });
+    calls.record("run", "deferred", "commit_project", commit, { ruleAllowed: false });
+    calls.record("run", "plain", "commit_project", commit);
+    expect(calls.ruleAllowed("run", "rule")).toBe(true);
+    expect(calls.ruleAllowed("run", "deferred")).toBe(false);
+    expect(calls.ruleAllowed("run", "plain")).toBe(false);
+    expect(calls.ruleAllowed("run", "unknown")).toBe(false);
+  });
+
+  it("fails closed once the entry is evicted from the capped set", () => {
+    const calls = new AllowedArtifactCalls();
+    calls.record("run", "first", "commit_project", commit, { ruleAllowed: true });
+    for (let i = 0; i < ALLOWED_MAX; i++) {
+      calls.record("run", `c${i}`, "commit_project", commit, { ruleAllowed: true });
+    }
+    expect(calls.ruleAllowed("run", "first")).toBe(false);
+    expect(calls.check("run", "first", "commit_project", commit)).toBe("not_allowed");
+  });
+});

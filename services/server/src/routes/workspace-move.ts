@@ -14,6 +14,8 @@ import type { ServerDeps } from "../deps.js";
 import { hitRateLimit } from "../rate-limit.js";
 import { retargetScheduleMentions } from "../schedules/mention-moves.js";
 import { baseName, moveRefusal } from "../workspace-files/paths.js";
+import { checkoutSlugs, checkoutsHold } from "../workspace-sync/checkouts.js";
+import { lockWorkspace } from "../workspace-sync/store.js";
 import { moveFiles, type MoveOutcome } from "../workspace-sync/move.js";
 import { resolveLimits } from "../workspace-sync/quota.js";
 import { notifyHintInTx } from "../sandbox-wire/bus.js";
@@ -42,8 +44,13 @@ const fail = (
   message: string,
 ) => c.json({ code, message }, status);
 
-function refused(c: Ctx, outcome: Exclude<MoveOutcome, { kind: "moved" }>, to: string) {
+/** A move outcome, or the checkout gone under the lock (KOBE-579). */
+type Outcome = MoveOutcome | { readonly kind: "read_only" };
+
+function refused(c: Ctx, outcome: Exclude<Outcome, { kind: "moved" }>, to: string) {
   switch (outcome.kind) {
+    case "read_only":
+      return fail(c, 403, "read_only", "Project files and thread uploads are read-only here.");
     case "missing":
       return fail(c, 404, "not_found", "No such file or folder.");
     case "taken":
@@ -116,16 +123,23 @@ export function registerWorkspaceMove(
       const body = workspaceMoveRequestSchema.safeParse(await c.req.json().catch(() => undefined));
       if (!body.success) return fail(c, 400, "invalid_path", "That is not a valid workspace path.");
       const { from, to } = body.data;
-      const rule = moveRefusal(from, to);
-      if (rule) return fail(c, rule.status, rule.code, rule.message);
       const owner = { teamId: c.get("team").id, userId: c.get("user").id };
+      // CM3 (KOBE-579): moves inside the caller's own checkouts are allowed.
+      const checkouts = await withTeam(db, owner.teamId, (tx) => checkoutSlugs(tx, owner));
+      const rule = moveRefusal(from, to, checkouts);
+      if (rule) return fail(c, rule.status, rule.code, rule.message);
       if (!(await hitRateLimit(db, `workspace-move:${owner.userId}`, MOVE_RATE_LIMIT))) {
         return fail(c, 429, "rate_limited", "Too many moves. Wait a moment and try again.");
       }
-      let outcome: MoveOutcome;
+      let outcome: Outcome;
       try {
         outcome = await withTeam(db, owner.teamId, async (tx) => {
           await tx.execute(sql`SELECT set_config('lock_timeout', ${`${lockTimeoutMs}ms`}, true)`);
+          // KOBE-579: both sides inside a project folder need the checkout, under the lock.
+          await lockWorkspace(tx, owner);
+          if (!(await checkoutsHold(tx, owner, [from, to]))) {
+            return { kind: "read_only" } as Outcome;
+          }
           const moved = await moveFiles(tx, owner, {
             from,
             to,

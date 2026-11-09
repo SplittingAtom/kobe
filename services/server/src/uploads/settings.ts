@@ -1,10 +1,16 @@
 import { z } from "zod";
-import { UPLOAD_DEFAULT_MAX_FILE_BYTES, UPLOAD_DEFAULT_MAX_MESSAGE_BYTES } from "@kobe/protocol";
+import {
+  PROJECT_HISTORY_MAX_COMMITS,
+  UPLOAD_DEFAULT_MAX_FILE_BYTES,
+  UPLOAD_DEFAULT_MAX_MESSAGE_BYTES,
+} from "@kobe/protocol";
 
 const GIB = 1024 * 1024 * 1024;
 
 /** Default per-team storage quota when the team has none of its own (D26). */
 export const DEFAULT_TEAM_STORAGE_QUOTA_BYTES = 10 * GIB;
+/** Default object budget per team when it has none of its own (Workspaces GV2, KOBE-579). */
+export const DEFAULT_TEAM_MAX_OBJECTS = 2_000_000;
 /** How long an upload that never joined a thread is kept (hours). */
 export const DEFAULT_ORPHAN_HOURS = 24;
 
@@ -43,6 +49,13 @@ const schema = z.object({
   KOBE_TEAM_STORAGE_QUOTA_BYTES: bytes("KOBE_TEAM_STORAGE_QUOTA_BYTES").default(
     DEFAULT_TEAM_STORAGE_QUOTA_BYTES,
   ),
+  KOBE_TEAM_MAX_OBJECTS: bytes("KOBE_TEAM_MAX_OBJECTS").default(DEFAULT_TEAM_MAX_OBJECTS),
+  KOBE_PROJECT_HISTORY_MAX_COMMITS: z.coerce
+    .number({ error: "KOBE_PROJECT_HISTORY_MAX_COMMITS must be a number" })
+    .int("KOBE_PROJECT_HISTORY_MAX_COMMITS must be an integer")
+    .min(1, "KOBE_PROJECT_HISTORY_MAX_COMMITS must be between 1 and 100000")
+    .max(100_000, "KOBE_PROJECT_HISTORY_MAX_COMMITS must be between 1 and 100000")
+    .default(PROJECT_HISTORY_MAX_COMMITS),
   KOBE_UPLOAD_ORPHAN_HOURS: z.coerce
     .number({ error: "KOBE_UPLOAD_ORPHAN_HOURS must be a number" })
     .int("KOBE_UPLOAD_ORPHAN_HOURS must be an integer")
@@ -60,6 +73,10 @@ export interface UploadSettings {
   readonly defaultQuotaBytes: number;
   /** Hours before an upload without a thread is deleted. */
   readonly orphanHours: number;
+  /** Object budget when `team_storage_quotas.max_objects` is null (GV2); default 2 000 000. */
+  readonly defaultMaxObjects?: number;
+  /** Hard cap of commits kept per project (GV2/GV3, `PROJECT_HISTORY_MAX_COMMITS`). */
+  readonly projectHistoryMaxCommits?: number;
   /**
    * clamd to scan every upload with (KOBE-146). Absent: scanning is off (`scan: skipped`). When
    * present the scan fails closed: clamd unreachable = `scan_unavailable`, never an unscanned file.
@@ -72,6 +89,8 @@ export const DEFAULT_UPLOAD_SETTINGS: UploadSettings = {
   maxMessageBytes: UPLOAD_DEFAULT_MAX_MESSAGE_BYTES,
   defaultQuotaBytes: DEFAULT_TEAM_STORAGE_QUOTA_BYTES,
   orphanHours: DEFAULT_ORPHAN_HOURS,
+  defaultMaxObjects: DEFAULT_TEAM_MAX_OBJECTS,
+  projectHistoryMaxCommits: PROJECT_HISTORY_MAX_COMMITS,
 };
 
 /** Upload limits from the environment (Helm); invalid values fail the start, naming the variable. */
@@ -89,6 +108,8 @@ export function loadUploadSettings(
     maxMessageBytes: e.KOBE_UPLOAD_MAX_MESSAGE_BYTES,
     defaultQuotaBytes: e.KOBE_TEAM_STORAGE_QUOTA_BYTES,
     orphanHours: e.KOBE_UPLOAD_ORPHAN_HOURS,
+    defaultMaxObjects: e.KOBE_TEAM_MAX_OBJECTS,
+    projectHistoryMaxCommits: e.KOBE_PROJECT_HISTORY_MAX_COMMITS,
     ...(e.KOBE_CLAMAV_HOST
       ? {
           clamav: {

@@ -28,6 +28,7 @@ import type {
   UpdateProjectRequest,
 } from "@kobe/protocol";
 import { canPinAgent, findPinnableAgent } from "../agents/versions.js";
+import { queueProjectBlobs } from "./tree.js";
 import { recordAudit } from "../audit/record.js";
 import { decide, type ProjectAccess, type ProjectRow } from "./access.js";
 import { deriveSlug, slugCandidates } from "./slug.js";
@@ -305,11 +306,24 @@ export async function deleteProject(
   if (held.length > 0) return fail("in_use", held.join(", "));
   try {
     // A savepoint: the hold guard over commit history (0200) refuses the cascade with KH001.
-    await tx.transaction((sp) =>
-      sp
+    await tx.transaction(async (sp) => {
+      // The history's objects go to the blob deleter (KOBE-579), which deletes each once no row
+      // of the team names it any more; queued with the delete, so a refusal queues nothing.
+      const refs = await sp.execute<{ key: string }>(sql`
+        SELECT DISTINCT e.blob_ref AS key FROM project_tree_entries e
+          JOIN project_commits c ON c.team_id = e.team_id AND c.id = e.commit_id
+         WHERE c.team_id = ${viewer.teamId} AND c.project_id = ${projectId}`);
+      await queueProjectBlobs(
+        sp,
+        viewer.teamId,
+        projectId,
+        viewer.userId,
+        refs.rows.map((r) => r.key),
+      );
+      await sp
         .delete(projects)
-        .where(and(eq(projects.teamId, viewer.teamId), eq(projects.id, projectId))),
-    );
+        .where(and(eq(projects.teamId, viewer.teamId), eq(projects.id, projectId)));
+    });
   } catch (err) {
     if (isLegalHoldViolation(err)) return fail("legal_hold");
     throw err;

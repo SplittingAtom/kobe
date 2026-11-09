@@ -7,6 +7,11 @@ import { evalCaseRoutes, runEvalCaseRoutes } from "../eval-cases/routes.js";
 import { runFeedbackRoutes, threadFeedbackRoutes } from "../routes/feedback.js";
 import { runRoutes, threadRunRoutes } from "../routes/runs.js";
 import { teamModelsRoutes } from "../routes/team-models.js";
+import {
+  myCheckoutRoutes,
+  projectCommitRoutes,
+  teamStorageRoutes,
+} from "../routes/project-commits.js";
 import { threadPendingRoutes } from "../routes/thread-pending.js";
 import { threadMarkerRoutes } from "../routes/thread-markers.js";
 import { threadBranchSummaryRoutes } from "../routes/thread-branch-summary.js";
@@ -106,6 +111,21 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
     );
     expect(documented("/v1/site/agent-roster")).toEqual(
       mountedOperations("/v1/site/agent-roster", siteAgentRosterRoutes(fakeDeps)),
+    );
+  });
+
+  it("describes exactly the project commit, checkout and storage routes (KOBE-579)", () => {
+    const wildcard = (op: string) => op.replace(/\/\*$/, "/{path}");
+    const ours = (op: string) =>
+      ["checkout", "commit", "/download"].some((word) => op.includes(word));
+    expect(documented("/v1/projects").filter(ours)).toEqual(
+      mountedOperations("/v1/projects", projectCommitRoutes(fakeDeps)).map(wildcard).sort(),
+    );
+    expect(documented("/v1/me/checkouts")).toEqual(
+      mountedOperations("/v1/me/checkouts", myCheckoutRoutes(fakeDeps)),
+    );
+    expect(documented("/v1/team/storage")).toEqual(
+      mountedOperations("/v1/team/storage", teamStorageRoutes(fakeDeps)),
     );
   });
 

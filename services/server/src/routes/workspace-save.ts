@@ -6,6 +6,7 @@ import {
   type WorkspaceFileError,
   type WorkspaceSaveConflict,
 } from "@kobe/protocol";
+import { withTeam } from "@kobe/db";
 import type { TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
@@ -13,6 +14,7 @@ import { DEFAULT_UPLOAD_SETTINGS } from "../uploads/settings.js";
 import { fileEntry } from "../workspace-files/browse.js";
 import { isInternalPath, isReadOnlyPath } from "../workspace-files/paths.js";
 import { saveWorkspaceFile } from "../workspace-files/save.js";
+import { checkoutSlugs } from "../workspace-sync/checkouts.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
@@ -55,11 +57,15 @@ export function registerWorkspaceSave(
       }
       const { path, base_sha256: baseSha256 } = query.data;
       if (isInternalPath(path)) return fail(c, 404, "not_found", "No such file or folder.");
-      if (isReadOnlyPath(path)) {
+      const owner = { teamId: c.get("team").id, userId: c.get("user").id };
+      // CM3 (KOBE-579): a path inside the caller's own checkout is writable.
+      const checkouts = await withTeam(deps.database.db, owner.teamId, (tx) =>
+        checkoutSlugs(tx, owner),
+      );
+      if (isReadOnlyPath(path, checkouts)) {
         return fail(c, 403, "read_only", "Project files and thread uploads are read-only here.");
       }
       const content = Buffer.from(await c.req.arrayBuffer());
-      const owner = { teamId: c.get("team").id, userId: c.get("user").id };
       const result = await saveWorkspaceFile(deps.database.db, sync, owner, {
         path,
         baseSha256,
@@ -81,6 +87,9 @@ export function registerWorkspaceSave(
           current: result.current,
         };
         return c.json(body, 409);
+      }
+      if ("limit" in result && result.limit !== undefined) {
+        return c.json({ code: result.code, message: result.message, limit: result.limit }, 507);
       }
       return fail(c, result.status as 413 | 502 | 503 | 507, result.code, result.message);
     },

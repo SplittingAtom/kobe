@@ -17,7 +17,11 @@ import { recordAudit, type ServerAuditEvent } from "../audit/record.js";
 import { BackgroundTasks } from "../background.js";
 import type { ApprovalVerifier } from "../approvals/verify.js";
 import type { BlobStore } from "../retention/blobs.js";
-import { DEFAULT_UPLOAD_SETTINGS, type UploadSettings } from "../uploads/settings.js";
+import {
+  DEFAULT_TEAM_MAX_OBJECTS,
+  DEFAULT_UPLOAD_SETTINGS,
+  type UploadSettings,
+} from "../uploads/settings.js";
 import type { ProjectMounts } from "../projects/mounts.js";
 import { createPolicyEngine } from "../policy/engine.js";
 import { createToolRegistry } from "../policy/registry.js";
@@ -317,7 +321,29 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       files: {
         maxFileBytes: (options.uploads ?? DEFAULT_UPLOAD_SETTINGS).maxFileBytes,
         teamQuotaDefaultBytes: (options.uploads ?? DEFAULT_UPLOAD_SETTINGS).defaultQuotaBytes,
+        teamMaxObjectsDefault:
+          (options.uploads ?? DEFAULT_UPLOAD_SETTINGS).defaultMaxObjects ??
+          DEFAULT_TEAM_MAX_OBJECTS,
       },
+      runMaxEvents: tuning.runMaxEvents,
+      log,
+    },
+    projectCommits: {
+      commit: {
+        db,
+        blobs: options.blobs,
+        mounts: options.projectMounts,
+        limits: {
+          quotaDefaultBytes: (options.uploads ?? DEFAULT_UPLOAD_SETTINGS).defaultQuotaBytes,
+          maxObjectsDefault:
+            (options.uploads ?? DEFAULT_UPLOAD_SETTINGS).defaultMaxObjects ??
+            DEFAULT_TEAM_MAX_OBJECTS,
+          maxFileBytes: (options.uploads ?? DEFAULT_UPLOAD_SETTINGS).maxFileBytes,
+        },
+        log,
+      },
+      approvals,
+      verifier: options.approvalVerifier,
       runMaxEvents: tuning.runMaxEvents,
       log,
     },

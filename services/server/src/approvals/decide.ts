@@ -45,11 +45,12 @@ const STALE_CONNECTION_SECONDS = WIRE_DEFAULTS.staleConnectionMs / 1000;
  *   `running` when nothing else waits, bus hint, audit last.
  */
 /**
- * A write into the project's shared state: a `remember` into project memory (KOBE-156) or a
- * `propose_project_file` (KOBE-162). The server does it only against its approval.
+ * A write into the project's shared state: a `remember` into project memory (KOBE-156), a
+ * `propose_project_file` (KOBE-162) or a `commit_project` (KOBE-579). The server does it only
+ * against its approval, which it verifies and consumes itself.
  */
 export function isProjectWrite(tool: string, input: unknown): boolean {
-  if (tool === "propose_project_file") return true;
+  if (tool === "propose_project_file" || tool === "commit_project") return true;
   return (
     tool === "remember" &&
     typeof input === "object" &&
@@ -265,7 +266,8 @@ export async function allowRowInTx(
   });
   // Sandbox-enforced tools are spent by the decision itself. Two are enforced again by the
   // server and verified-and-consumed there: MCP calls (the proxy) and project writes (project
-  // `remember`, the memory handler, KOBE-156; `propose_project_file`, KOBE-162).
+  // `remember`, the memory handler, KOBE-156; `propose_project_file`, KOBE-162; `commit_project`,
+  // KOBE-579).
   const usedNow = parseMcpToolName(row.tool) === undefined && !isProjectWrite(row.tool, input);
   await tx.execute(sql`
     UPDATE approvals

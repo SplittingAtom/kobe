@@ -140,11 +140,12 @@ describe("project files API", () => {
     ).rows[0]?.blob_ref;
     expect(key).toMatch(new RegExp(`^${PREFIX}teams/${w.team}/projects/${project.id}/files/`));
     expect(objects.objects.get(key ?? "")?.toString()).toBe("# brief\n");
-    // Deleting a project that still has files is refused; removing the file ends the object.
+    // Deleting a project that still has files is refused. Removing the file is a commit (KOBE-579):
+    // the object stays while an older commit names it; history pruning releases it (GV3).
     expect((await as(b).delete(`/v1/projects/${project.id}`)).status).toBe(409);
     expect((await as(b).delete(`/v1/projects/${project.id}/files/${up.json.id}`)).status).toBe(204);
     expect((await as(b).delete(`/v1/projects/${project.id}/files/${up.json.id}`)).status).toBe(404);
-    expect(objects.objects.has(key ?? "")).toBe(false);
+    expect(objects.objects.has(key ?? "")).toBe(true);
     const audits = await f.fx.admin.query<{ action: string; target: Record<string, unknown> }>(
       `SELECT action, target FROM audit_log WHERE team_id = $1 AND action LIKE 'project.file_%' ORDER BY seq`,
       [w.team],

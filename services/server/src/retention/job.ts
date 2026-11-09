@@ -15,6 +15,12 @@ import type { Logger } from "pino";
 import { recordAudit } from "../audit/record.js";
 import { sweepOrphanDraftBundles } from "../skills/drafts/test-holds.js";
 import { deleteReleasedBlobs, type BlobDeletionCounts, type BlobStore } from "./blobs.js";
+import {
+  NO_HISTORY_PRUNE,
+  pruneProjectHistory,
+  type HistoryPruneCounts,
+} from "./project-history.js";
+import { PROJECT_HISTORY_MAX_COMMITS } from "@kobe/protocol";
 import { NO_ORPHANS, sweepOrphanObjects, type OrphanCounts } from "./orphans.js";
 import { expireOrphanUploads, type ExpiredUploads } from "../uploads/expire.js";
 import { DEFAULT_ORPHAN_HOURS } from "../uploads/settings.js";
@@ -51,7 +57,8 @@ import {
  *  3. purge memory (D24, KOBE-188): superseded versions and files deleted longer ago than the
  *     team's window, never a live file (needs object storage);
  *  4. compact the live events of runs that ended more than 7 days ago;
- *  5. delete the object-store keys purges released;
+ *  4a. prune project history past the workspace's rule or the hard cap (KOBE-579, GV3);
+ *  5. delete the object-store keys purges (and history pruning) released;
  *  6. sweep orphaned upload staging objects and fork-copied entry bodies (KOBE-189);
  *  7. purge answer feedback kept for a legal hold once it is released (KOBE-275);
  *  8. purge shared eval cases past the team's window, and their copies kept for a released hold
@@ -83,6 +90,8 @@ export interface TeamPassResult {
   readonly retention: PurgeCounts;
   readonly memory: MemoryPurgeCounts;
   readonly compacted: CompactionCounts;
+  /** Project history past the workspace's rule or the hard cap (KOBE-579, GV3). */
+  readonly projectHistory: HistoryPruneCounts;
   readonly blobs: BlobDeletionCounts;
   /** Uploads without a thread deleted after the orphan window (KOBE-143). */
   readonly uploads: ExpiredUploads;
@@ -120,6 +129,8 @@ export interface PassDeps {
   readonly uploadOrphanHours?: number;
   /** Age before an orphaned staging or fork object is swept (KOBE-189); default 24 h. */
   readonly orphanGraceMs?: number;
+  /** Commits kept per project at most (GV2/GV3); default `PROJECT_HISTORY_MAX_COMMITS`. */
+  readonly projectHistoryMaxCommits?: number;
   readonly logger: Logger;
 }
 
@@ -261,6 +272,15 @@ async function teamPass(
     : await step("compaction", { runs: 0, events: 0 }, () =>
         compactRunEvents(db, teamId, compactionRecorder(teamId), { stop }),
       );
+  const projectHistory = stop()
+    ? NO_HISTORY_PRUNE
+    : await step("project_history", NO_HISTORY_PRUNE, () =>
+        pruneProjectHistory(db, teamId, {
+          maxCommits: deps.projectHistoryMaxCommits ?? PROJECT_HISTORY_MAX_COMMITS,
+          stop,
+        }),
+      );
+  if (projectHistory.commits > 0) logger.info({ teamId, ...projectHistory }, "history pruned");
   const blobs =
     deps.blobs && !stop()
       ? await step("blobs", { blobs: 0, kept: 0 }, () =>
@@ -340,6 +360,7 @@ async function teamPass(
     retention,
     memory,
     compacted,
+    projectHistory,
     blobs,
     uploads,
     orphans,

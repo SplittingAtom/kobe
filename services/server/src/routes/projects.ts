@@ -20,9 +20,9 @@ import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz
 import type { ServerDeps } from "../deps.js";
 import { decide, loadAccess, type ProjectAccess } from "../projects/access.js";
 import { importProjectFile, type ImportRefusal } from "../projects/import.js";
+import { endCheckoutsWithoutEditInTx } from "../projects/offboard.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
 import {
-  deleteProjectObject,
   listProjectFiles,
   removeProjectFile,
   uploadProjectFile,
@@ -44,7 +44,7 @@ import {
 } from "../projects/repository.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 import { openUpload } from "../uploads/parse.js";
-import { DEFAULT_UPLOAD_SETTINGS } from "../uploads/settings.js";
+import { DEFAULT_TEAM_MAX_OBJECTS, DEFAULT_UPLOAD_SETTINGS } from "../uploads/settings.js";
 
 type ProjectContext = Context<{ Variables: TeamVariables }>;
 
@@ -86,8 +86,13 @@ const FILE_ERRORS = {
   invalid_path: [422, "invalid_input", "That is not a valid file name or folder."],
   already_exists: [409, "already_exists", "The project already has a file with that name."],
   file_too_large: [413, "file_too_large", "That file is larger than a project file may be."],
-  quota_exceeded: [413, "quota_exceeded", "Your team has no storage left for this file."],
-  project_full: [413, "quota_exceeded", "The project already holds the most files it can."],
+  quota_exceeded: [507, "quota_exceeded", "Your team has no storage left for this file."],
+  object_budget: [
+    507,
+    "quota_exceeded",
+    "Your workspace holds as many stored objects as its budget allows.",
+  ],
+  project_full: [507, "quota_exceeded", "The project already holds the most files it can."],
   archived: [409, "archived", "The project is archived."],
   storage_failed: [503, "storage_unavailable", "File storage is not available. Try again."],
 } as const satisfies Record<ProjectFileFailure, readonly [number, string, string]>;
@@ -279,10 +284,15 @@ export function projectRoutes(
     const body = await parseBody(c, updateProjectMemberRequestSchema);
     const user = memberParam(c);
     if (!body || !user.success) return invalidRequest(c, "Give role (owner, editor or reader).");
-    return withProject(c, "manage_members", async (tx, access) => {
+    const res = await withProject(c, "manage_members", async (tx, access) => {
       const changed = await setMemberRole(tx, viewerOf(c), access, user.data, body.role);
-      return changed.ok ? c.json(changed.value) : failure(c, changed.error);
+      if (!changed.ok) return failure(c, changed.error);
+      // A reader no longer edits: their checkout ends (KOBE-579), the head comes back below.
+      await endCheckoutsWithoutEditInTx(tx, viewerOf(c).teamId, user.data);
+      return c.json(changed.value);
     });
+    if (res.ok) await deps.projectMounts.reconcileUser(viewerOf(c).teamId, user.data);
+    return res;
   });
 
   app.delete("/:id/members/:user_id", async (c) => {
@@ -290,7 +300,10 @@ export function projectRoutes(
     if (!user.success) return failure(c, "not_found");
     const res = await withProject(c, "manage_members", async (tx, access) => {
       const removed = await removeMember(tx, viewerOf(c), access.project.id, user.data);
-      return removed.ok ? c.body(null, 204) : failure(c, removed.error);
+      if (!removed.ok) return failure(c, removed.error);
+      // An implicit reader (or no one) now: a checkout of theirs ends (KOBE-579).
+      await endCheckoutsWithoutEditInTx(tx, viewerOf(c).teamId, user.data);
+      return c.body(null, 204);
     });
     // No longer a member (restricted) or still an implicit reader (workspace): the user's
     // workspace is brought in line either way (MT2: a restricted project's mount goes).
@@ -302,7 +315,10 @@ export function projectRoutes(
 
   const fileFailure = (c: ProjectContext, error: ProjectFileFailure) => {
     const [status, code, message] = FILE_ERRORS[error];
-    return c.json({ code, message }, status);
+    // GV2: a quota refusal names the limit (bytes or objects).
+    const limit =
+      error === "quota_exceeded" ? "bytes" : error === "object_budget" ? "objects" : undefined;
+    return c.json({ code, message, ...(limit === undefined ? {} : { limit }) }, status);
   };
 
   app.get("/:id/files", (c) =>
@@ -344,6 +360,7 @@ export function projectRoutes(
         blobs: deps.blobs,
         maxFileBytes: settings.maxFileBytes,
         teamQuotaDefaultBytes: settings.defaultQuotaBytes,
+        teamMaxObjectsDefault: settings.defaultMaxObjects ?? DEFAULT_TEAM_MAX_OBJECTS,
       },
       { teamId: viewer.teamId, projectId: access.project.id, userId: viewer.userId },
       {
@@ -378,6 +395,7 @@ export function projectRoutes(
         sync,
         maxFileBytes: settings.maxFileBytes,
         teamQuotaDefaultBytes: settings.defaultQuotaBytes,
+        teamMaxObjectsDefault: settings.defaultMaxObjects ?? DEFAULT_TEAM_MAX_OBJECTS,
       },
       viewer,
       id.data,
@@ -400,12 +418,15 @@ export function projectRoutes(
     let key: string | undefined;
     const res = await withProject(c, "edit", async (tx, access) => {
       try {
-        key = await removeProjectFile(
-          tx,
-          viewerOf(c).userId,
-          access.project.teamId,
-          access.project.id,
-          fileId.data,
+        // A savepoint: the hold guard (KH001) refuses the delete without ending the transaction.
+        key = await tx.transaction((sp) =>
+          removeProjectFile(
+            sp,
+            viewerOf(c).userId,
+            access.project.teamId,
+            access.project.id,
+            fileId.data,
+          ),
         );
       } catch (err) {
         if (isLegalHoldViolation(err)) {
@@ -418,15 +439,9 @@ export function projectRoutes(
       }
       return key === undefined ? failure(c, "not_found") : c.body(null, 204);
     });
+    // The object stays (the previous commit names it; KOBE-579): only the mounts change.
     if (res.ok && key !== undefined) {
-      // Mounts first, so no workspace still names the object when it goes. If any workspace
-      // could not be updated, the object stays: a row never points at a deleted object (the
-      // next run start of that member drops the row; the object is then an unreferenced orphan).
-      const clean = await deps.projectMounts.reconcileProject(
-        viewerOf(c).teamId,
-        c.req.param("id") ?? "",
-      );
-      if (clean) await deleteProjectObject(deps.blobs, key);
+      await deps.projectMounts.reconcileProject(viewerOf(c).teamId, c.req.param("id") ?? "");
     }
     return res;
   });

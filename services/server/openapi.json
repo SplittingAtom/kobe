@@ -7762,6 +7762,1162 @@
           }
         }
       }
+    },
+    "/v1/projects/{id}/checkout": {
+      "post": {
+        "operationId": "checkoutProject",
+        "summary": "Check out a project (editor+)",
+        "description": "The caller's `projects/<slug>/` becomes writable: base = head; idempotent; mounts the project if it was not (MT1). Audited `project.checked_out`.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The checkout.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectCheckout"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, or `forbidden`: the project role doesn't allow it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`archived`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "getProjectCheckout",
+        "summary": "The caller's checkout and its working-copy diff",
+        "description": "Changes of the caller's working copy against the checkout's base (added, modified, deleted, with sizes). 404 when the caller has no checkout.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The checkout and its diff.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectCheckoutWithDiff"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, or `forbidden`: the project role doesn't allow it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "discardProjectCheckout",
+        "summary": "Discard the caller's checkout",
+        "description": "Ends the checkout; the folder goes back to the head (server rows and tombstones) or is unmounted when no conversation keeps it (MT1). Audited `project.checkout_discarded`.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Discarded."
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, or `forbidden`: the project role doesn't allow it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{id}/checkout/update": {
+      "post": {
+        "operationId": "updateProjectCheckout",
+        "summary": "Bring the head's changes into the working copy",
+        "description": "Untouched paths take the head's version; both-changed ones take the head's and keep the member's beside it as `<name>.conflict-<time><ext>` (listed as workspace paths). The base moves to the head.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The new base and the conflict copies.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateCheckoutResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, or `forbidden`: the project role doesn't allow it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`checkout_required`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{id}/checkouts": {
+      "get": {
+        "operationId": "listProjectCheckouts",
+        "summary": "Working copies (owners, team admins)",
+        "description": "Who has a checkout of the project, since when, and its base.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The checkouts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectCheckouts"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, or `forbidden`: the project role doesn't allow it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{id}/commit": {
+      "post": {
+        "operationId": "commitProject",
+        "summary": "Commit the caller's working copy (editor+)",
+        "description": "Diffs the caller's live rows under `projects/<slug>/` against the checkout's base, copies new contents server-side (hash-verified) into the project, writes the commit and its tree, moves the base. Counts against the team byte quota and object budget, attributed to the project. Audited `project.committed`.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommitProjectBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "`committed {seq, commit_id}` or `nothing_to_commit`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommitProjectResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, or `forbidden`: the project role doesn't allow it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`commit_conflict {head_seq}` (Update first), `checkout_required`, `archived`, or `forbidden` under a legal hold.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommitConflict"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`file_too_large`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`invalid_input`: more than 500 files, a bad name, or a `.conflict-` copy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`storage_unavailable`, or `busy` (the working copy kept changing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "507": {
+            "description": "`quota_exceeded {limit: bytes|objects}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectQuotaError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{id}/commits": {
+      "get": {
+        "operationId": "listProjectCommits",
+        "summary": "The project's history (readers)",
+        "description": "Newest first; pass `next_before` as `before` for older ones.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of commits.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectHistory"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, or `forbidden`: the project role doesn't allow it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{id}/commits/{seq}": {
+      "get": {
+        "operationId": "getProjectCommit",
+        "summary": "One commit: its tree and the diff to its parent",
+        "description": "404 `commit_not_found` for an unknown or pruned seq.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "seq",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The commit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectCommitDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, or `forbidden`: the project role doesn't allow it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{id}/commits/{seq}/files/{path}": {
+      "get": {
+        "operationId": "downloadProjectFileAtCommit",
+        "summary": "Download a file as it was at a commit",
+        "description": "`path` is the file's path in the project, each segment URL-encoded, slashes kept.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "seq",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The bytes (attachment).",
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, or `forbidden`: the project role doesn't allow it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{id}/commits/{seq}/revert": {
+      "post": {
+        "operationId": "revertProject",
+        "summary": "Revert to a commit (editor+)",
+        "description": "Writes a new commit whose tree is the tree at `seq` (history stays append-only). Audited `project.commit_reverted`.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "seq",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevertProjectBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "`committed {seq, commit_id}` or `nothing_to_commit`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommitProjectResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, or `forbidden`: the project role doesn't allow it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`commit_conflict {head_seq}` (Update first), `checkout_required`, `archived`, or `forbidden` under a legal hold.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommitConflict"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`file_too_large`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`invalid_input`: more than 500 files, a bad name, or a `.conflict-` copy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`storage_unavailable`, or `busy` (the working copy kept changing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "507": {
+            "description": "`quota_exceeded {limit: bytes|objects}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectQuotaError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{id}/download": {
+      "get": {
+        "operationId": "downloadProjectHead",
+        "summary": "The project's current files as a zip (GV5)",
+        "description": "Readers may download (they can read every file).",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A zip.",
+            "content": {
+              "application/zip": {}
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, or `forbidden`: the project role doesn't allow it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/checkouts": {
+      "get": {
+        "operationId": "listMyCheckouts",
+        "summary": "The caller's checkouts in the active workspace",
+        "description": "Empty list when none.",
+        "parameters": [
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The checkouts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyCheckouts"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, or `forbidden`: the project role doesn't allow it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/team/storage": {
+      "get": {
+        "operationId": "getTeamStorage",
+        "summary": "Workspace storage (team admins)",
+        "description": "Bytes and objects in use, the limits in force, the history and mount settings, and figures per scratchspace and per project (live and history).",
+        "parameters": [
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The storage view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamStorage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, or `forbidden`: the project role doesn't allow it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateTeamStorage",
+        "summary": "Change history retention, the mount cap or the object budget (team admins)",
+        "description": "Any subset of `history_keep`, `max_mounted_per_member`, `max_objects` (null = the site default). Audited `project.storage_settings_changed`.",
+        "parameters": [
+          {
+            "name": "X-Kobe-Team",
+            "in": "header",
+            "required": false,
+            "description": "The team the client believes is active; must match when sent.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamStorageSettings"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The storage view after the change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamStorage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_a_team_member`, or `forbidden`: the project role doesn't allow it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -16385,6 +17541,1179 @@
           }
         },
         "required": ["agent", "entry"],
+        "additionalProperties": false
+      },
+      "ProjectCheckout": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "slug": {
+            "type": "string",
+            "maxLength": 40,
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          },
+          "base_commit_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "base_commit_seq": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "project_id",
+          "slug",
+          "base_commit_id",
+          "base_commit_seq",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "ProjectCheckoutWithDiff": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "slug": {
+            "type": "string",
+            "maxLength": 40,
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          },
+          "base_commit_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "base_commit_seq": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "diff": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "change": {
+                      "type": "string",
+                      "const": "added"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "size_bytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["change", "path", "size_bytes"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "change": {
+                      "type": "string",
+                      "const": "modified"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "size_bytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "previous_size_bytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["change", "path", "size_bytes", "previous_size_bytes"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "change": {
+                      "type": "string",
+                      "const": "deleted"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "previous_size_bytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["change", "path", "previous_size_bytes"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        },
+        "required": [
+          "project_id",
+          "slug",
+          "base_commit_id",
+          "base_commit_seq",
+          "created_at",
+          "updated_at",
+          "diff"
+        ],
+        "additionalProperties": false
+      },
+      "ProjectCheckouts": {
+        "type": "object",
+        "properties": {
+          "checkouts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "project_id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "slug": {
+                  "type": "string",
+                  "maxLength": 40,
+                  "pattern": "^[a-z0-9][a-z0-9-]*$"
+                },
+                "base_commit_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "base_commit_seq": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                },
+                "user_id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "project_id",
+                "slug",
+                "base_commit_id",
+                "base_commit_seq",
+                "created_at",
+                "updated_at",
+                "user_id"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["checkouts"],
+        "additionalProperties": false
+      },
+      "MyCheckouts": {
+        "type": "object",
+        "properties": {
+          "checkouts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "project_id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "slug": {
+                  "type": "string",
+                  "maxLength": 40,
+                  "pattern": "^[a-z0-9][a-z0-9-]*$"
+                },
+                "base_commit_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "base_commit_seq": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                }
+              },
+              "required": [
+                "project_id",
+                "slug",
+                "base_commit_id",
+                "base_commit_seq",
+                "created_at",
+                "updated_at"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["checkouts"],
+        "additionalProperties": false
+      },
+      "UpdateCheckoutResult": {
+        "type": "object",
+        "properties": {
+          "base_commit_seq": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "conflict_paths": {
+            "maxItems": 500,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["base_commit_seq", "conflict_paths"],
+        "additionalProperties": false
+      },
+      "CommitProjectBody": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "required": ["message"],
+        "additionalProperties": false
+      },
+      "CommitProjectResult": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "const": "committed"
+              },
+              "seq": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "commit_id": {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              }
+            },
+            "required": ["status", "seq", "commit_id"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "const": "nothing_to_commit"
+              }
+            },
+            "required": ["status"],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "CommitConflict": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "commit_conflict"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "head_seq": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": ["code", "message", "head_seq"],
+        "additionalProperties": false
+      },
+      "ProjectQuotaError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "quota_exceeded"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "limit": {
+            "type": "string",
+            "enum": ["bytes", "objects"]
+          }
+        },
+        "required": ["code", "message", "limit"],
+        "additionalProperties": false
+      },
+      "ProjectHistory": {
+        "type": "object",
+        "properties": {
+          "commits": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "project_id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "seq": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "parent_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "author_user_id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "author_kind": {
+                  "type": "string",
+                  "enum": ["user", "agent"]
+                },
+                "thread_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "run_id": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "message": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "file_count": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                }
+              },
+              "required": [
+                "id",
+                "project_id",
+                "seq",
+                "parent_id",
+                "author_user_id",
+                "author_kind",
+                "thread_id",
+                "run_id",
+                "message",
+                "file_count",
+                "bytes",
+                "created_at"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "next_before": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": ["commits", "next_before"],
+        "additionalProperties": false
+      },
+      "ProjectCommitDetail": {
+        "type": "object",
+        "properties": {
+          "commit": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              },
+              "project_id": {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              },
+              "seq": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "parent_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "allOf": [
+                      {
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      {
+                        "pattern": "^[0-9a-f-]+$"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "author_user_id": {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              },
+              "author_kind": {
+                "type": "string",
+                "enum": ["user", "agent"]
+              },
+              "thread_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "allOf": [
+                      {
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      {
+                        "pattern": "^[0-9a-f-]+$"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "run_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "allOf": [
+                      {
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      {
+                        "pattern": "^[0-9a-f-]+$"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "file_count": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              }
+            },
+            "required": [
+              "id",
+              "project_id",
+              "seq",
+              "parent_id",
+              "author_user_id",
+              "author_kind",
+              "thread_id",
+              "run_id",
+              "message",
+              "file_count",
+              "bytes",
+              "created_at"
+            ],
+            "additionalProperties": false
+          },
+          "tree": {
+            "maxItems": 500,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "blob_ref": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "size_bytes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "mime_type": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255
+                },
+                "executable": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["path", "sha256", "blob_ref", "size_bytes", "mime_type", "executable"],
+              "additionalProperties": false
+            }
+          },
+          "diff": {
+            "maxItems": 1000,
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "change": {
+                      "type": "string",
+                      "const": "added"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "size_bytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["change", "path", "size_bytes"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "change": {
+                      "type": "string",
+                      "const": "modified"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "size_bytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "previous_size_bytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["change", "path", "size_bytes", "previous_size_bytes"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "change": {
+                      "type": "string",
+                      "const": "deleted"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "previous_size_bytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["change", "path", "previous_size_bytes"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          }
+        },
+        "required": ["commit", "tree", "diff"],
+        "additionalProperties": false
+      },
+      "RevertProjectBody": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "additionalProperties": false
+      },
+      "TeamStorage": {
+        "type": "object",
+        "properties": {
+          "used_bytes": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "used_objects": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "quota_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max_objects": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "default_quota_bytes": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "default_max_objects": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "live_bytes": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "history_bytes": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "live_objects": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "history_objects": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "history_keep": {},
+          "history_max_commits": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "max_mounted_per_member": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "scratchspaces": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "user_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "live_bytes": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "live_files": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "objects": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["user_id", "live_bytes", "live_files", "objects"],
+              "additionalProperties": false
+            }
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "project_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                "slug": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "commits": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "live_bytes": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "history_bytes": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "live_objects": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "history_objects": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "project_id",
+                "slug",
+                "name",
+                "commits",
+                "live_bytes",
+                "history_bytes",
+                "live_objects",
+                "history_objects"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "used_bytes",
+          "used_objects",
+          "quota_bytes",
+          "max_objects",
+          "default_quota_bytes",
+          "default_max_objects",
+          "live_bytes",
+          "history_bytes",
+          "live_objects",
+          "history_objects",
+          "history_keep",
+          "history_max_commits",
+          "max_mounted_per_member",
+          "scratchspaces",
+          "projects"
+        ],
+        "additionalProperties": false
+      },
+      "TeamStorageSettings": {
+        "type": "object",
+        "properties": {
+          "history_keep": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "const": "all"
+                  }
+                },
+                "required": ["mode"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "const": "commits"
+                  },
+                  "n": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000
+                  }
+                },
+                "required": ["mode", "n"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "mode": {
+                    "type": "string",
+                    "const": "days"
+                  },
+                  "n": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 36500
+                  }
+                },
+                "required": ["mode", "n"],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "max_mounted_per_member": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "max_objects": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
         "additionalProperties": false
       }
     },

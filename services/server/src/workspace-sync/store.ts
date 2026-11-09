@@ -8,6 +8,7 @@ import {
 } from "@kobe/protocol";
 import { sql, type KobeTx } from "@kobe/db";
 import { encodeWorkspaceHint, RUN_EVENTS_CHANNEL } from "../event-stream/notify.js";
+import { checkoutOf, checkoutSlugs } from "./checkouts.js";
 import { workspaceBlobKey, type WorkspaceOwner } from "./keys.js";
 import { LIVE_LOST } from "./lost.js";
 import type { QuotaCheck } from "./quota.js";
@@ -421,7 +422,9 @@ export async function roomForRows(
 /**
  * Applies a sandbox's changes (contract `commit`): per-path compare-and-set on `base_rev`, each
  * change with its own result. Server-owned and excluded areas are refused (`read_only`): what the
- * agent does there never reaches S3.
+ * agent does there never reaches S3. The one exception (KOBE-579, CM4): `projects/<slug>/` of a
+ * project this (team, user) has checked out, read under the workspace lock, so a push that waited
+ * behind a Discard sees the checkout gone and is refused.
  */
 export async function commitChanges(
   tx: KobeTx,
@@ -430,6 +433,7 @@ export async function commitChanges(
   ctx: CommitContext,
 ): Promise<{ headRev: number; results: WorkspaceChangeResult[]; refused: string[] }> {
   let state = await lockWorkspace(tx, owner);
+  const checkouts = await checkoutSlugs(tx, owner);
   const results: WorkspaceChangeResult[] = [];
   const refused: string[] = [];
   // The agent's `mv` arrives as a delete and a put of the same content (KOBE-516).
@@ -441,7 +445,8 @@ export async function commitChanges(
       results.push({ status: "rejected", path, code: "invalid_path" });
       continue;
     }
-    if (isServerOwnedPath(path) || isExcludedPath(path)) {
+    const writable = checkoutOf(path, checkouts) !== undefined;
+    if ((isServerOwnedPath(path) && !writable) || isExcludedPath(path)) {
       results.push({ status: "rejected", path, code: "read_only" });
       continue;
     }
@@ -630,7 +635,7 @@ export async function putServerFile(
       liveBytes:
         state.liveBytes -
         (live ? countedBytes(current) : 0) +
-        countedBytes({ path: file.path, origin: "server", size: file.size }),
+        countedBytes({ blobKey: file.blobKey, size: file.size }),
       tombstones: state.tombstones - (current?.deleted === true ? 1 : 0),
     },
     false,
@@ -638,17 +643,22 @@ export async function putServerFile(
   return entry;
 }
 
+/** A project's own object (`<prefix>teams/<team>/projects/<project>/…`), whatever the prefix. */
+const PROJECT_KEY = /(?:^|\/)teams\/[0-9a-f-]{36}\/projects\/[0-9a-f-]{36}\//;
+
 /**
- * Bytes a row adds to `workspace_sync.live_bytes`. Server-written project files (`projects/`) are
- * mounts of one shared object, counted once per project in the team quota (`project_files`), not
- * once per member, and they must not eat the member's own workspace budget (KOBE-162).
+ * Bytes a row adds to `workspace_sync.live_bytes`. A row that names a project's own object (a
+ * mount, or an unchanged file of a checkout) is one shared object, counted once per project in the
+ * team quota (`projects.live_bytes`/`history_bytes`), not once per member, and it must not eat the
+ * member's own workspace budget (KOBE-162). Anything else in a working copy (a push, a save, an
+ * upload) is the member's own content and counts like any file (KOBE-579, GV2). Keyed on the
+ * object, not the path, so a move keeps the bytes unchanged.
  */
 export function countedBytes(row: {
-  readonly path: string;
-  readonly origin: string;
+  readonly blobKey: string | null;
   readonly size: number;
 }): number {
-  return row.origin === "server" && row.path.startsWith("projects/") ? 0 : row.size;
+  return row.blobKey !== null && PROJECT_KEY.test(row.blobKey) ? 0 : row.size;
 }
 
 /** A server-side delete (KOBE-54 file browser, KOBE-57 project file removal). */

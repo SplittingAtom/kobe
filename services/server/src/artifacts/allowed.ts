@@ -20,6 +20,7 @@ export const BOUND_TOOLS = [
   "remember",
   "recall",
   "propose_project_file",
+  "commit_project",
   "save_skill_draft",
   "propose_file_edit",
   "open_file",
@@ -31,6 +32,8 @@ interface Allowed {
   readonly tool: BoundToolName;
   readonly hash: string;
   used: boolean;
+  /** The policy allowed it by a rule, not leaving an approval to the frame handler (KOBE-579). */
+  readonly ruleAllowed: boolean;
 }
 
 export const ALLOWED_MAX = 4096;
@@ -56,7 +59,13 @@ export class AllowedArtifactCalls {
   }
 
   /** Records an allowed call; ignores other tools and inputs without a canonical form. */
-  record(runId: string, toolCallId: string, tool: string, input: unknown): void {
+  record(
+    runId: string,
+    toolCallId: string,
+    tool: string,
+    input: unknown,
+    options: { readonly ruleAllowed?: boolean } = {},
+  ): void {
     if (!isArtifactTool(tool)) return;
     const hash = inputHash(input);
     if (hash === undefined) return;
@@ -66,7 +75,16 @@ export class AllowedArtifactCalls {
       const oldest = this.#calls.keys().next();
       if (!oldest.done) this.#calls.delete(oldest.value);
     }
-    this.#calls.set(key, { tool, hash, used: false });
+    this.#calls.set(key, { tool, hash, used: false, ruleAllowed: options.ruleAllowed === true });
+  }
+
+  /**
+   * Whether the policy allowed this call outright (a rule), so no approval is asked
+   * (`commit_project`, KOBE-579). False for a deferred approval and for a missing or evicted
+   * entry: fail closed.
+   */
+  ruleAllowed(runId: string, toolCallId: string): boolean {
+    return this.#calls.get(this.#key(runId, toolCallId))?.ruleAllowed === true;
   }
 
   check(runId: string, toolCallId: string, tool: string, input: unknown): AllowedVerdict {

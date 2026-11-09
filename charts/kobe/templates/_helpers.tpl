@@ -487,6 +487,10 @@ missing Secret leaves the mirror unable to push rather than the server down), an
   value: {{ printf "%d" (int64 $u.teamStorageQuotaBytes) | quote }}
 - name: KOBE_UPLOAD_ORPHAN_HOURS
   value: {{ printf "%d" (int64 $u.orphanHours) | quote }}
+- name: KOBE_TEAM_MAX_OBJECTS
+  value: {{ printf "%d" (int64 ($u.teamMaxObjects | default 2000000)) | quote }}
+- name: KOBE_PROJECT_HISTORY_MAX_COMMITS
+  value: {{ printf "%d" (int64 ($u.projectHistoryMaxCommits | default 1000)) | quote }}
 {{- if .Values.clamav.enabled }}
 # Scanning on: every upload is streamed to clamd; clamd unreachable refuses uploads (fail closed).
 - name: KOBE_CLAMAV_HOST

@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { withTeam } from "@kobe/db";
+import { endCheckoutsWithoutEditInTx } from "../projects/offboard.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import { teamPermissionsFor } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
@@ -32,7 +34,11 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
     if (!userId.success || !body) return invalidRequest(c);
     const result = await setMemberRole(db, c.get("team").id, userId.data, body.role);
     if (!result.ok) return membershipError(c, result.error);
-    // A team admin views every project; a demoted one loses restricted mounts now (MT2).
+    // A demoted team admin no longer edits projects without a row of their own: those checkouts
+    // end (KOBE-579); a team admin views every project, a demoted one loses restricted mounts (MT2).
+    await withTeam(db, c.get("team").id, (tx) =>
+      endCheckoutsWithoutEditInTx(tx, c.get("team").id, userId.data),
+    );
     await deps.projectMounts.reconcileUser(c.get("team").id, userId.data);
     return c.json({ userId: userId.data, role: body.role });
   });

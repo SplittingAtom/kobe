@@ -5,8 +5,9 @@ import type { WorkspaceFileError } from "@kobe/protocol";
 import { logger } from "../logger.js";
 import { recordAudit } from "../audit/record.js";
 import { UploadMeter, UploadTooLargeError } from "../uploads/meter.js";
-import { lockTeamStorage, storageLimit, storageUsed } from "../uploads/quota.js";
+import { lockTeamStorage, storageLimit, storageUsed, teamObjectsAllow } from "../uploads/quota.js";
 import { workspaceBlobKey, workspacePrefix, type WorkspaceOwner } from "../workspace-sync/keys.js";
+import { checkoutsHold } from "../workspace-sync/checkouts.js";
 import { resolveLimits } from "../workspace-sync/quota.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
 import {
@@ -29,9 +30,11 @@ import { ancestorsOf, copyPath, numberedPath } from "./paths.js";
 
 export type Failure = {
   readonly ok: false;
-  readonly status: 409 | 413 | 502 | 503 | 507;
+  readonly status: 403 | 409 | 413 | 502 | 503 | 507;
   readonly code: WorkspaceFileError["code"];
   readonly message: string;
+  /** Which limit a `quota_exceeded` hit (GV2): the object budget names itself. */
+  readonly limit?: "bytes" | "objects";
 };
 export type UploadResult = { readonly ok: true; readonly entry: StoredEntry } | Failure;
 
@@ -47,6 +50,21 @@ export const fail = (
 });
 const TAKEN = fail(409, "already_exists", "A file or folder with that name already exists.");
 export const QUOTA = fail(507, "quota_exceeded", "Your workspace has no room for this file.");
+/** The checkout ended while the write was on its way (KOBE-579): the folder is read-only again. */
+export const READ_ONLY = fail(
+  403,
+  "read_only",
+  "Project files and thread uploads are read-only here.",
+);
+/** GV2 (KOBE-579): the team's object budget is used up. */
+export const OBJECTS: Failure = {
+  ...fail(
+    507,
+    "quota_exceeded",
+    "Your workspace holds as many stored objects as its budget allows.",
+  ),
+  limit: "objects",
+};
 
 /** The upload being received: its bytes arrive as a stream, size and hash are known at the end. */
 export interface IncomingFile {
@@ -216,12 +234,16 @@ async function commitUpload(
         if (!copies && (await pathIsTaken(tx, owner, path, ancestors))) return "taken" as const;
         const held = await blobState(tx, owner, sha256);
         if (held !== "absent") return held;
+        if (!(await teamObjectsAllow(tx, owner.teamId, sync.teamMaxObjects))) {
+          return "over_objects" as const;
+        }
         const ok = await reserveUpload(tx, owner, size, resolveLimits(limits));
         return ok ? ("reserved" as const) : ("over_quota" as const);
       }),
     String,
   );
   if (reserved === "taken") return TAKEN;
+  if (reserved === "over_objects") return OBJECTS;
   if (reserved === "over_quota") return QUOTA;
   if (reserved === "deleting") {
     return fail(503, "sandbox_unavailable", "That content is being cleaned up; try again shortly.");
@@ -239,6 +261,7 @@ async function commitUpload(
       // Under the workspace lock: the clash check (and a drop's free name) is atomic with the write.
       const target = await freePath(tx, owner, path, ancestors, copyNaming(incoming));
       if (target === undefined) return TAKEN;
+      if (!(await checkoutsHold(tx, owner, [target]))) return READ_ONLY;
       const decision = await sync.quota(tx, {
         owner,
         fileBytes: size,
