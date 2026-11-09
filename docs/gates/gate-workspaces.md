@@ -2,8 +2,7 @@
 
 Ticket: KOBE-583. Spec: [`docs/specs/workspaces.md`](../specs/workspaces.md) (Hadron spec
 `b1e23088`; Chris's decisions of 2026-11-08 in §14). Lane brief:
-[`docs/ledger/workspaces-lane.md`](../ledger/workspaces-lane.md). **Waiting for Chris's review**
-on the gate1 site (see "What to try" below).
+[`docs/ledger/workspaces-lane.md`](../ledger/workspaces-lane.md). **Approved by Chris on 2026-11-09.**
 
 ## What shipped
 
@@ -88,7 +87,8 @@ then upgraded to `local-d955a7f32d0f` (main after #504/#505) the same day.
   Identical on both sides: counts of projects 7, commits 7, tree entries 7, checkouts 1, files 7,
   members 8; md5 of commit history (project, seq, message, parent), of project heads and
   visibility, of checkouts, and of the object counters. The History tab reads exactly these rows.
-- **ac-8:** this document; spec status set to "shipped pending gate". Chris's approval goes here.
+- **ac-8:** this document. **Approved by Chris on 2026-11-09** (gate1 then on `local-3a893e08156a`,
+  main after this doc and #507); KOBE-583 done; spec status set to shipped.
 
 ## Agents roster (KOBE-572) on the same install
 

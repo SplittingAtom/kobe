@@ -1,9 +1,9 @@
 # Kobe — Projects in conversations (Workspaces follow-up)
 
-Status: **decided, tickets to file** (§11: every question answered by Chris on 2026-11-09).
+Status: **in progress** (§11: every question answered by Chris on 2026-11-09; tickets KOBE-587..593
+and KOBE-586, gate KOBE-594, filed 2026-11-09).
 Requested by Chris, 2026-11-09; items marked _(Chris)_ are his, the rest are proposals within them. Written against main `3a893e08` (gate1
-`local-3a893e08156a`), on top of [`workspaces.md`](workspaces.md) (gate KOBE-583). No tickets
-filed yet (§12).
+`local-3a893e08156a`), on top of [`workspaces.md`](workspaces.md) (gate KOBE-583). Tickets in §12.
 
 Request (Chris, 2026-11-09): when a new conversation starts with a project selected, the top of the
 conversation pane says **New conversation in &lt;ProjectName&gt;**, with an icon to unmount the
@@ -324,18 +324,18 @@ only (the path is resolved against their manifest, never a path from another mem
 8. **The privacy sentence goes in the project control's tooltip** (NC1).
 9. **KOBE-586 (promote a folder) is part of this work**, without the visibility choice (§8).
 
-## 12. Implementation tickets (proposed)
+## 12. Implementation tickets (filed 2026-11-09; gate KOBE-594)
 
-| Id       | Scope                                                                                                                                                            | Areas                           |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| PC-1     | New conversation header: title, project control (switch, remove, add), NC4 draft lifetime, NC5 errors                                                            | web                             |
-| PC-2     | Conversation title "Project / name", project menu (Open project, Move to project…), tab title                                                                    | web                             |
-| PC-3     | Files panel: all viewable projects, active dot, greyed rows, read-only browse of unmounted projects, scale and filter                                            | web                             |
-| PC-0     | Remove restricted visibility: RV2 migration with dry-run list, upgrade test, RV3 API, project page and members dialog, audit doc, `workspaces.spec.ts`           | db, protocol, server, web, e2e  |
-| KOBE-586 | Promote a My files folder to a project (PF1-PF6), mount on create (PF5)                                                                                          | server, protocol, web           |
-| PC-4     | Proposals for project files and new My files files: protocol fields, server checks in `file-edit-propose.ts`, accept-commits route, audit, reconcile, agent line | protocol, server, sandbox-agent |
-| PC-5     | Proposal card for project files: project label, diff vs head, editable message, Accept commits, stale and not-allowed states                                     | web                             |
-| PC-6     | Browser spec, docs (`docs/files.md`, user help), gate                                                                                                            | e2e, docs                       |
+| Id            | Scope                                                                                                                                                            | Areas                           |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| PC-1 KOBE-588 | New conversation header: title, project control (switch, remove, add), NC4 draft lifetime, NC5 errors                                                            | web                             |
+| PC-2 KOBE-589 | Conversation title "Project / name", project menu (Open project, Move to project…), tab title                                                                    | web                             |
+| PC-3 KOBE-590 | Files panel: all viewable projects, active dot, greyed rows, read-only browse of unmounted projects, scale and filter                                            | web                             |
+| PC-0 KOBE-587 | Remove restricted visibility: RV2 migration with dry-run list, upgrade test, RV3 API, project page and members dialog, audit doc, `workspaces.spec.ts`           | db, protocol, server, web, e2e  |
+| KOBE-586      | Promote a My files folder to a project (PF1-PF6), mount on create (PF5)                                                                                          | server, protocol, web           |
+| PC-4 KOBE-591 | Proposals for project files and new My files files: protocol fields, server checks in `file-edit-propose.ts`, accept-commits route, audit, reconcile, agent line | protocol, server, sandbox-agent |
+| PC-5 KOBE-592 | Proposal card for project files: project label, diff vs head, editable message, Accept commits, stale and not-allowed states                                     | web                             |
+| PC-6 KOBE-593 | Browser spec, docs (`docs/files.md`, user help), gate                                                                                                            | e2e, docs                       |
 
 Order: PC-0 first (it changes the list rules the others read), then KOBE-586 and PC-1 → PC-2 → PC-3 (web) in
 parallel with PC-4 → PC-5, then PC-6 and a gate1 deploy.
