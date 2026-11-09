@@ -7,6 +7,7 @@ import type { FileEntry, FilesApi } from "../../lib/files/api";
 import { ErrorNotice } from "../admin/error-notice";
 import { useArtifactPanel } from "../chat/artifact-state";
 import { ChatSessionContext } from "../chat/kobe-runtime";
+import { useEndDraftProject } from "../chat/use-draft-project";
 import { mentionRefusal } from "../../lib/chat/mention-insert";
 import { FileBrowser } from "../files/file-browser";
 import { WorkspaceConflictNotices } from "../files/workspace-conflict-notices";
@@ -77,6 +78,7 @@ function CollapsedIcons({
   /** The tab the section opens on: Apps only when the member has apps. */
   readonly tab: RailTab;
 }) {
+  const endDraftProject = useEndDraftProject();
   return (
     <div className={styles.icons} hidden={!rail.collapsed}>
       <IconAction
@@ -92,6 +94,7 @@ function CollapsedIcons({
       <ThreadListPrimitive.New asChild>
         <IconAction
           command="new-thread"
+          onClick={endDraftProject}
           side="right"
           variant={RAIL_ACTION_VARIANT}
           className={RAIL_ACTION}
@@ -146,11 +149,13 @@ function ThreadsButton({
  * New sits immediately left of it.
  */
 function ThreadActions() {
+  const endDraftProject = useEndDraftProject();
   return (
     <>
       <ThreadListPrimitive.New asChild>
         <IconAction
           command="new-thread"
+          onClick={endDraftProject}
           size="sm"
           side="bottom"
           variant={RAIL_ACTION_VARIANT}

@@ -6,6 +6,7 @@ import type { ThreadController } from "../../lib/chat/thread-controller";
 import { renameBlocker } from "../../lib/chat/thread-commands";
 import type { ThreadState } from "../../lib/chat/thread-state";
 import { useBindCommands } from "../shell/command-bindings";
+import { useDraftProjectName, useDraftProjectState } from "./use-draft-project";
 
 const UNTITLED = "Untitled conversation";
 const MAX_TITLE = 200;
@@ -62,7 +63,16 @@ export function ThreadTitle({
   const errorId = useId();
   // The list's title first: a rename updates it at once, the summary on the next read.
   const named = listed || state.summary?.title || null;
-  const title = state.threadId === null ? "New conversation" : (named ?? UNTITLED);
+  const draft_ = state.threadId === null;
+  // NC1: a conversation not created yet says which project it will be in.
+  const { projectId } = useDraftProjectState();
+  const projectName = useDraftProjectName(draft_ ? projectId : null);
+  const inProject = draft_ && projectId !== null;
+  const title = !draft_
+    ? (named ?? UNTITLED)
+    : inProject
+      ? `New conversation in ${projectName ?? "…"}`
+      : "New conversation";
 
   useEffect(() => {
     if (draft !== null || !returnFocus.current) return;
@@ -116,7 +126,19 @@ export function ThreadTitle({
         id="kobe-thread-title"
         className={draft === null && !renameable ? "text-sm font-medium" : "sr-only"}
       >
-        {title}
+        {inProject ? (
+          <>
+            New conversation in{" "}
+            <span
+              className="inline-block max-w-[16ch] truncate align-bottom"
+              title={projectName ?? undefined}
+            >
+              {projectName ?? "…"}
+            </span>
+          </>
+        ) : (
+          title
+        )}
       </h2>
       {draft !== null ? (
         <form onSubmit={submit} className="flex min-w-0 flex-wrap items-center gap-2">

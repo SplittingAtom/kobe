@@ -91,6 +91,12 @@ export interface AppLaunchDraft {
 /** How long the agent list is reused by the picker and the header. */
 export const AGENTS_TTL_MS = 30_000;
 
+/** A send refused because of the draft's project (NC5): no longer usable, or the mount limit. */
+export interface DraftProjectIssue {
+  readonly kind: "unusable" | "too_many_mounts";
+  readonly message: string;
+}
+
 export class ChatSession {
   readonly teamId: string;
   readonly api: ChatApi;
@@ -177,6 +183,8 @@ export class ChatSession {
   /** The user picked (or cleared) the agent for this draft: the default no longer applies. */
   #agentTouched = false;
   readonly #agentListeners = new Set<() => void>();
+  readonly #projectListeners = new Set<() => void>();
+  #projectIssue: DraftProjectIssue | null = null;
   #agents:
     | { readonly at: number; readonly result: Promise<ApiResult<readonly RunnableAgent[]>> }
     | undefined;
@@ -350,15 +358,42 @@ export class ChatSession {
     return this.#nextProjectId;
   }
 
+  /** Picks (or, with null, removes) the draft's project; any earlier refusal is forgotten (NC5). */
   setDraftProject(projectId: string | null): void {
     this.#nextProjectId = projectId;
+    this.#projectIssue = null;
+    this.#notifyDraftProject();
   }
 
   /** The draft's project for the thread being created; the next draft starts without one. */
   takeNextProject(): string | null {
     const id = this.#nextProjectId;
     this.#nextProjectId = null;
+    this.#projectIssue = null;
+    this.#notifyDraftProject();
     return id;
+  }
+
+  /** Why the last send was refused because of the draft's project (NC5), or null. */
+  get draftProjectIssue(): DraftProjectIssue | null {
+    return this.#projectIssue;
+  }
+
+  /** A refused send gives the draft its project back and says why on the project control. */
+  refuseDraftProject(projectId: string, issue: DraftProjectIssue | null): void {
+    this.#nextProjectId = projectId;
+    this.#projectIssue = issue;
+    this.#notifyDraftProject();
+  }
+
+  /** `useSyncExternalStore` subscription to the draft's project and its refusal. */
+  subscribeDraftProject = (listener: () => void): (() => void) => {
+    this.#projectListeners.add(listener);
+    return () => this.#projectListeners.delete(listener);
+  };
+
+  #notifyDraftProject(): void {
+    for (const listener of this.#projectListeners) listener();
   }
 
   /** The model picked for a conversation not created yet (KOBE-44). */

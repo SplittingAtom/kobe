@@ -1,8 +1,7 @@
 "use client";
 
 import { IconAction } from "../shell/icon-action";
-import { useEffect, useState } from "react";
-import { createProjectsApi } from "../../lib/projects/api";
+import { useState } from "react";
 import { isBusy } from "../../lib/chat/thread-state";
 import { SHARED_HINT, sharedBy, visibilityOf } from "../../lib/chat/share";
 import { AgentChips } from "./agent-chips";
@@ -98,30 +97,5 @@ export function ProjectBar({
       </span>
       <IconAction command="open-project" href={`/me/projects/${summary.projectId}`} size="sm" />
     </div>
-  );
-}
-
-/** On a new conversation started from a project: says which project it will belong to. */
-export function DraftProjectNote() {
-  const session = useChatSession();
-  const projectId = session.draftProjectId;
-  const [name, setName] = useState<string | null>(null);
-  useEffect(() => {
-    if (projectId === null) return;
-    let current = true;
-    void createProjectsApi(session.teamId)
-      .get(projectId)
-      .then((res) => {
-        if (current && res.ok) setName(res.data.name);
-      });
-    return () => {
-      current = false;
-    };
-  }, [projectId, session]);
-  if (projectId === null) return null;
-  return (
-    <p className={styles.banner} role="note">
-      This conversation will be in the project {name ?? "…"}. It stays private until you share it.
-    </p>
   );
 }

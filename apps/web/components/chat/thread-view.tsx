@@ -15,7 +15,8 @@ import { ArtifactList } from "./artifact-list";
 import { CompactNowProvider, useCompactNow } from "./compact-now";
 import { Composer } from "./composer";
 import { ComposerDictationProvider } from "./composer-steer";
-import { DraftProjectNote, ProjectBar } from "./project-bar";
+import { DraftProjectControl } from "./draft-project-control";
+import { ProjectBar } from "./project-bar";
 import { OpenThreadContext } from "./fork-dialog";
 import { useKobeExtras, type KobeThreadExtras } from "./kobe-runtime";
 import { LineageStrip } from "./lineage-strip";
@@ -302,6 +303,7 @@ function ThreadViewBody({
     >
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-3 pb-2">
         <ThreadTitle state={state} controller={extras.controller} editable={inShell} />
+        {state.threadId === null && inShell && <DraftProjectControl />}
         {label && (
           <StatusBadge tone={label.tone} pulse={label.pulse}>
             {label.label}
@@ -312,7 +314,6 @@ function ThreadViewBody({
       </header>
       <div className="mx-auto w-full max-w-(--thread-max-width) px-4">
         <ProjectBar extras={extras} onOpenThread={onOpenThread} />
-        {state.threadId === null && <DraftProjectNote />}
         <OpenThreadContext.Provider value={onOpenThread}>
           <LineageStrip extras={extras} />
         </OpenThreadContext.Provider>

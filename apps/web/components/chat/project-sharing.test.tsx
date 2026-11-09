@@ -12,6 +12,8 @@ let fake: FakeKobe;
 beforeEach(() => {
   sessionStorage.clear();
   fake = new FakeKobe();
+  fake.addProject("Alpha");
+  fake.projects[0] = { ...must(fake.projects[0]), id: PROJECT };
   vi.stubGlobal("fetch", fake.fetch);
 });
 afterEach(() => {
@@ -123,7 +125,9 @@ describe("read-only shared thread (KOBE-164, ac-2)", () => {
 describe("new conversation in a project (KOBE-164)", () => {
   it("creates the thread inside the project from /?project=", async () => {
     openApp(fake, undefined, undefined, `?project=${PROJECT}`);
-    expect(await screen.findByText(/will be in the project/)).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "New conversation in Alpha" }),
+    ).toBeTruthy();
     await userEvent
       .setup()
       .type(await screen.findByLabelText("Message"), "Plan the quarter{Enter}");
@@ -146,7 +150,9 @@ describe("new conversation in a project (KOBE-164)", () => {
     };
     go(`/me/projects/${PROJECT}`);
     go(`/?project=${PROJECT}`);
-    expect(await screen.findByText(/will be in the project/)).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "New conversation in Alpha" }),
+    ).toBeTruthy();
     // Handled once: the address no longer carries it, so a reload starts nothing again.
     await waitFor(() => expect(window.location.search).not.toContain("project="));
     await userEvent.setup().type(await screen.findByLabelText("Message"), "Hall of fame{Enter}");
