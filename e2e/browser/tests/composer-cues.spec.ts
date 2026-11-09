@@ -141,12 +141,13 @@ test("drag a workspace file onto the composer: an @file chip (ac-4)", async ({ c
     const row = (name: string) => tree.getByRole("treeitem", { name, exact: true });
     await row(dir).click();
     await row("notes.txt").dragTo(panelOf(page));
-    // Only the text: a dropped file is its @file(...) marker, no chip.
-    await expect(chat.composer).toHaveValue(`@file(${dir}/notes.txt) `);
-    await expect(page.getByRole("list", { name: "Mentioned files" })).toHaveCount(0);
+    // Only the chip: a dropped file's @file(...) marker stays out of the text until the send.
+    const chips = page.getByRole("list", { name: "Mentioned files" });
+    await expect(chips.getByText(`@${dir}/notes.txt`)).toBeVisible();
+    await expect(chat.composer).toHaveValue("");
     // A folder is refused; the file stays where it was (a drop on the composer never moves).
     await row(dir).dragTo(panelOf(page));
-    await expect(chat.composer).toHaveValue(`@file(${dir}/notes.txt) `);
+    await expect(chips.getByRole("listitem")).toHaveCount(1);
     await expect(row("notes.txt")).toHaveAttribute("aria-level", "2");
   } finally {
     await chat.composer.fill("");

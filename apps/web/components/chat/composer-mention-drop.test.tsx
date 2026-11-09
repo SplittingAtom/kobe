@@ -107,11 +107,16 @@ async function openFiles(threadId: string) {
 
 const row = (name: string) => screen.getByRole("treeitem", { name });
 const panel = () => must(document.querySelector<HTMLElement>("[data-kobe-composer-panel]"));
-/** The files the draft mentions, as their text: a mention is its `@file(...)` marker, no chip. */
+/** The files dropped on the draft, as their chips; the text never holds their `@file(...)`. */
 const chips = () => {
-  expect(screen.queryByRole("list", { name: "Mentioned files" })).toBeNull();
   const text = (screen.getByLabelText("Message") as HTMLTextAreaElement).value;
-  return [...text.matchAll(/@file\(([^)]*)\)/g)].map((m) => `@${decodeURIComponent(m[1] ?? "")}`);
+  expect(text).not.toContain("@file(");
+  const list = screen.queryByRole("list", { name: "Mentioned files" });
+  return list === null
+    ? []
+    : within(list)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent);
 };
 const posts = () =>
   fake.requests
@@ -152,7 +157,7 @@ function dragToComposer(from: HTMLElement) {
 }
 
 describe("drag a workspace file into the composer (KOBE-374 ac-4)", () => {
-  it("a file row dropped on the composer is @file text only (no chip) and goes in mentions[]", async () => {
+  it("a file row dropped on the composer is a chip only (no text) and goes in mentions[]", async () => {
     const t = fake.addThread("Work");
     const { user } = await openFiles(t);
     const input = await composer();
@@ -162,7 +167,7 @@ describe("drag a workspace file into the composer (KOBE-374 ac-4)", () => {
     expect(hover).toEqual({ drop: "file", hint: "Drop to mention this file" });
     expect(panel().hasAttribute("data-mention-drop")).toBe(false);
     await waitFor(() => expect(chips()).toEqual(["@report.csv"]));
-    expect(input.value).toBe(`Summarise ${mentionMarker("report.csv")} `);
+    expect(input.value).toBe("Summarise");
     // A drag that ends on the composer is a mention, never a move.
     expect(moves).toBe(0);
     await waitFor(() => expect(document.activeElement).toBe(input));
@@ -170,7 +175,27 @@ describe("drag a workspace file into the composer (KOBE-374 ac-4)", () => {
     await user.keyboard("{Enter}");
     await waitFor(() => expect(posts()).toHaveLength(1));
     expect(posts()[0]?.mentions).toEqual(["report.csv"]);
-    expect(posts()[0]?.content).toBe(`Summarise ${mentionMarker("report.csv")}`);
+    expect(posts()[0]?.content).toBe(`Summarise\n\n${mentionMarker("report.csv")}`);
+    await waitFor(() => expect(chips()).toEqual([]));
+  });
+
+  it("removing a chip drops the mention; a second drop of the same file is one chip", async () => {
+    const t = fake.addThread("Work");
+    const { user } = await openFiles(t);
+    const input = await composer();
+    dragToComposer(row("report.csv"));
+    await waitFor(() => expect(chips()).toEqual(["@report.csv"]));
+    await user.click(screen.getByRole("button", { name: "Remove mention of report.csv" }));
+    expect(chips()).toEqual([]);
+
+    dragToComposer(row("report.csv"));
+    dragToComposer(row("report.csv"));
+    await waitFor(() => expect(chips()).toEqual(["@report.csv"]));
+    await user.type(input, "Read it");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]?.mentions).toEqual(["report.csv"]);
+    expect(posts()[0]?.content).toBe(`Read it\n\n${mentionMarker("report.csv")}`);
   });
 
   it("a project file is mentioned (read-only, never moved); a folder is refused", async () => {

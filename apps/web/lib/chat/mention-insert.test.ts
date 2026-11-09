@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { mentionMarker } from "@kobe/protocol";
 import {
   ComposerMentionChannel,
-  insertMention,
   MENTION_FOLDER_REFUSED,
   MENTION_LIMIT_REFUSED,
   MENTION_NAME_REFUSED,
@@ -40,24 +38,6 @@ describe("mentionRefusal", () => {
     expect(mentionRefusal("new.txt", "file", twenty)).toBe(MENTION_LIMIT_REFUSED);
     expect(mentionRefusal("f3.txt", "file", twenty)).toBeUndefined();
     expect(mentionRefusal("new.txt", "file", twenty.slice(1))).toBeUndefined();
-  });
-});
-
-describe("insertMention", () => {
-  const m = mentionMarker("data/x y.csv");
-
-  it("writes the picker's marker at the caret, spaced from the text around it", () => {
-    expect(insertMention("", 0, "data/x y.csv")).toEqual({ text: `${m} `, caret: m.length + 1 });
-    expect(insertMention("read", 4, "data/x y.csv").text).toBe(`read ${m} `);
-    expect(insertMention("read  please", 5, "data/x y.csv").text).toBe(`read ${m} please`);
-    const mid = insertMention("read please", 4, "data/x y.csv");
-    expect(mid.text).toBe(`read ${m} please`);
-    expect(mid.caret).toBe(`read ${m} `.length);
-  });
-
-  it("clamps a caret outside the text", () => {
-    expect(insertMention("hi", 99, "a.txt").text).toBe(`hi ${mentionMarker("a.txt")} `);
-    expect(insertMention("hi", -3, "a.txt").text).toBe(`${mentionMarker("a.txt")} hi`);
   });
 });
 

@@ -4,6 +4,10 @@
  * a send lists the picked paths whose marker is still in the text (`mentions`), and the server
  * rewrites exactly those markers to absolute `/workspace/...` paths. A typed or pasted
  * `@file(...)` is never picked, so it stays literal text.
+ *
+ * A file dropped from the Files tree (or "Mention in message") is a chip instead: no marker in the
+ * text while composing; the send appends its marker ({@link MentionStore.contentFor}), so the
+ * server sees exactly a pick.
  */
 import type { DirectiveFormatter, DirectiveSegment, TriggerItem } from "@assistant-ui/react";
 import {
@@ -71,6 +75,7 @@ export function mentionable(entry: FileEntry): boolean {
 }
 
 const NO_PICKS: ReadonlySet<string> = new Set();
+const NO_CHIPS: readonly string[] = [];
 
 /**
  * The files picked with `@` per composer draft (the thread id, or the new-thread draft), for this
@@ -78,6 +83,7 @@ const NO_PICKS: ReadonlySet<string> = new Set();
  */
 export class MentionStore {
   #picked = new Map<string, ReadonlySet<string>>();
+  #chips = new Map<string, readonly string[]>();
   readonly #listeners = new Set<() => void>();
 
   readonly subscribe = (listener: () => void): (() => void) => {
@@ -87,37 +93,85 @@ export class MentionStore {
 
   readonly get = (draft: string): ReadonlySet<string> => this.#picked.get(draft) ?? NO_PICKS;
 
+  /** The files dropped on the draft, shown as chips (no marker in the text), in drop order. */
+  readonly chips = (draft: string): readonly string[] => this.#chips.get(draft) ?? NO_CHIPS;
+
   add(draft: string, path: string): void {
     this.#set(draft, new Set([...this.get(draft), path]));
   }
 
-  /** The picked paths whose marker is in `text`: the send's `mentions`. */
+  /** A dropped file: a chip until the send, which appends its marker. */
+  addChip(draft: string, path: string): void {
+    const chips = this.chips(draft);
+    if (chips.includes(path)) return;
+    this.#setChips(draft, [...chips, path]);
+  }
+
+  removeChip(draft: string, path: string): void {
+    const chips = this.chips(draft);
+    if (!chips.includes(path)) return;
+    this.#setChips(
+      draft,
+      chips.filter((p) => p !== path),
+    );
+  }
+
+  /**
+   * The message content a send carries: `text` with the markers of the draft's chips that it does
+   * not already mention appended on a line of their own (blank text sends the markers alone).
+   */
+  contentFor(draft: string, text: string): string {
+    const inText = new Set(mentionsIn(text, new Set(this.chips(draft))).map((m) => m.path));
+    const markers = this.chips(draft)
+      .filter((p) => !inText.has(p))
+      .map((p) => mentionMarker(p));
+    if (markers.length === 0) return text;
+    const body = text.trimEnd();
+    return body === "" ? markers.join(" ") : `${body}\n\n${markers.join(" ")}`;
+  }
+
+  /**
+   * The paths a send lists in `mentions`: the picked or chipped paths whose marker is in `text`
+   * (pass {@link contentFor}'s result to include the chips), or, for a composer text, what it
+   * mentions now (its picks plus its chips).
+   */
   forText(draft: string, text: string): string[] {
-    return mentionsIn(text, this.get(draft)).map((m) => m.path);
+    const all = new Set([...this.get(draft), ...this.chips(draft)]);
+    const marked = mentionsIn(text, all).map((m) => m.path);
+    return [...new Set([...marked, ...this.chips(draft)])];
   }
 
   clear(draft: string): void {
     if (this.#picked.has(draft)) this.#set(draft, undefined);
+    if (this.#chips.has(draft)) this.#setChips(draft, []);
   }
 
   /**
-   * After a send (KOBE-415): drops the picks that went with it, unless the text left in the
-   * composer still mentions them; picks added meanwhile stay.
+   * After a send (KOBE-415): drops the picks and chips that went with it, unless the text left in
+   * the composer still mentions them; picks and chips added meanwhile stay.
    */
   settleSent(draft: string, sent: readonly string[], remaining: string): void {
     const picks = this.get(draft);
     const still = new Set(mentionsIn(remaining, picks).map((m) => m.path));
     const next = new Set([...picks].filter((p) => !sent.includes(p) || still.has(p)));
-    if (next.size === picks.size) return;
-    this.#set(draft, next.size === 0 ? undefined : next);
+    if (next.size !== picks.size) this.#set(draft, next.size === 0 ? undefined : next);
+    const chips = this.chips(draft);
+    const left = chips.filter((p) => !sent.includes(p));
+    if (left.length !== chips.length) this.#setChips(draft, left);
   }
 
   /** A new thread was created by a send that failed: the picks follow the draft to it. */
   move(from: string, to: string): void {
     const picks = this.#picked.get(from);
-    if (picks === undefined) return;
-    this.#set(from, undefined);
-    this.#set(to, picks);
+    if (picks !== undefined) {
+      this.#set(from, undefined);
+      this.#set(to, picks);
+    }
+    const chips = this.#chips.get(from);
+    if (chips !== undefined) {
+      this.#setChips(from, []);
+      this.#setChips(to, chips);
+    }
   }
 
   #set(draft: string, picks: ReadonlySet<string> | undefined): void {
@@ -125,6 +179,18 @@ export class MentionStore {
     if (picks === undefined) next.delete(draft);
     else next.set(draft, picks);
     this.#picked = next;
+    this.#notify();
+  }
+
+  #setChips(draft: string, chips: readonly string[]): void {
+    const next = new Map(this.#chips);
+    if (chips.length === 0) next.delete(draft);
+    else next.set(draft, chips);
+    this.#chips = next;
+    this.#notify();
+  }
+
+  #notify(): void {
     for (const l of this.#listeners) l();
   }
 }

@@ -1,6 +1,5 @@
 "use client";
 
-import { useAui } from "@assistant-ui/react";
 import { useCallback, useEffect, useRef, useState, type DragEvent, type RefObject } from "react";
 import { ITEM_REFERENCES_MAX } from "@kobe/protocol";
 import type { FrameDrag } from "../../lib/apps/frame-drag";
@@ -13,11 +12,7 @@ import {
   lakehouseItemContent,
   lakehouseItemContentOf,
 } from "../../lib/apps/lakehouse-drop";
-import {
-  insertMention,
-  MENTION_FOLDER_REFUSED,
-  mentionRefusal,
-} from "../../lib/chat/mention-insert";
+import { MENTION_FOLDER_REFUSED, mentionRefusal } from "../../lib/chat/mention-insert";
 import { carriesWorkspaceFolder, carriesWorkspaceRow, droppedRowPath } from "../../lib/files/drag";
 import type { ChatSession } from "../../lib/chat/session";
 import { applyAppMessage } from "../apps/use-app-composer";
@@ -66,8 +61,8 @@ export interface ComposerMentionDrop {
 /**
  * Workspace files into the composer (KOBE-374): a row dragged from the Files tree and dropped
  * here, or "Mention in message" in its menu (through the session's `composerMentions`), becomes
- * the same @file mention as a pick (KOBE-223): the marker at the caret and the path in the draft's
- * picked set, so the send carries it in `mentions[]` and the server validates it. Folders and
+ * a file chip above the input (no text); the send appends its @file marker and lists it in
+ * `mentions[]` exactly as a pick (KOBE-223), so the server validates it. Folders and
  * names the rules refuse are refused here with a reason. Only a writable composer listens.
  *
  * A Lakehouse Picker item dragged out of its frame (KOBE-551) is taken first: its chip exactly as
@@ -89,24 +84,20 @@ export function useComposerMentionDrop({
   /** The composer panel: the target of a pointer drag out of an app frame (KOBE-553). */
   readonly panel?: HTMLElement | null;
 }): ComposerMentionDrop {
-  const aui = useAui();
   const session = useChatSession();
   const [rowDrop, setRowDrop] = useState<RowDrop>(null);
   const [notice, setNotice] = useState("");
-  const caretAfter = useRef<number | null>(null);
+  const [focusAfter, setFocusAfter] = useState(0);
 
   const mention = useCallback(
     (path: string): string | undefined => {
       const refused = mentionRefusal(path, "file", session.mentions.forText(draft, text));
       if (refused !== undefined) return refused;
-      const caret = input.current?.selectionEnd ?? text.length;
-      const next = insertMention(text, caret, path);
-      session.mentions.add(draft, path);
-      aui.composer.setText(next.text);
-      caretAfter.current = next.caret;
+      session.mentions.addChip(draft, path);
+      setFocusAfter((n) => n + 1);
       return undefined;
     },
-    [aui, session, draft, text, input],
+    [session, draft, text],
   );
 
   const insertItem = useCallback(
@@ -139,20 +130,13 @@ export function useComposerMentionDrop({
     [session, writable],
   );
 
-  // Once the text holds the mention: the input takes the focus with the caret after it. A frame
-  // later, so a closing rail drawer has given the focus back first.
+  // Once the chip is shown: the input takes the focus, the caret where it was. A frame later, so
+  // a closing rail drawer has given the focus back first.
   useEffect(() => {
-    const caret = caretAfter.current;
-    if (caret === null) return;
-    caretAfter.current = null;
-    const frame = requestAnimationFrame(() => {
-      const el = input.current;
-      if (!el) return;
-      el.focus();
-      el.setSelectionRange(caret, caret);
-    });
+    if (focusAfter === 0) return;
+    const frame = requestAnimationFrame(() => input.current?.focus());
     return () => cancelAnimationFrame(frame);
-  }, [text, input]);
+  }, [focusAfter, input]);
 
   return {
     rowDrop,
