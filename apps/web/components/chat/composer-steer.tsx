@@ -100,8 +100,9 @@ export function useSteer(extras: KobeThreadExtras): Steer {
     if (!controller || unavailable !== undefined) return;
     dictation.stop();
     const draft = remoteId ?? NEW_DRAFT;
-    const mentions = session.mentions.forText(draft, content);
-    if (await controller.steer(content, mentions)) {
+    const message = session.mentions.contentFor(draft, content);
+    const mentions = session.mentions.forText(draft, message);
+    if (await controller.steer(message, mentions)) {
       // Only what went: text and mentions added during the send stay (KOBE-415).
       const remaining = textAfterSend(aui.composer.getState().text, text);
       session.mentions.settleSent(draft, mentions, remaining);

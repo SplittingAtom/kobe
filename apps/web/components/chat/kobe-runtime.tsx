@@ -176,10 +176,12 @@ export function useKobeThreadRuntime(session: ChatSession): AssistantRuntime {
   projectionRef.current = projection;
 
   /** Sends on the thread on screen; a new thread is created first (title = the message). */
-  const send = async (text: string, parentEntryId?: string): Promise<boolean> => {
-    if (text === "") return false;
+  const send = async (typed: string, parentEntryId?: string): Promise<boolean> => {
     let threadId = aui.threadListItem.getState().remoteId;
     const draft = threadId ?? NEW_DRAFT;
+    // Dropped files' chips go as their markers after the text (their marker alone when no text).
+    const text = session.mentions.contentFor(draft, typed);
+    if (text === "") return false;
     const blocker = session.attachments.blocker(draft);
     if (blocker !== undefined) {
       controller?.reportError({ status: 0, code: "files_not_ready", message: blocker }, text);

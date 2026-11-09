@@ -6,8 +6,8 @@ import {
   type TriggerAdapter,
   type TriggerItem,
 } from "@assistant-ui/react";
-import { FileIcon } from "lucide-react";
-import { useEffect, useMemo, useState, type RefObject } from "react";
+import { FileIcon, XIcon } from "lucide-react";
+import { useEffect, useMemo, useState, useSyncExternalStore, type RefObject } from "react";
 import type { FilesApi } from "../../lib/files/api";
 import {
   fileItem,
@@ -16,6 +16,7 @@ import {
   mentionFormatter,
   mentionQueryAt,
 } from "../../lib/chat/mentions";
+import { sandboxPathOf } from "@kobe/protocol";
 import { useChatSession } from "./kobe-runtime";
 
 /** Wait after the last keystroke before asking the server. */
@@ -125,5 +126,44 @@ export function MentionPicker({
         }
       </ComposerPrimitive.TriggerPopoverItems>
     </ComposerPrimitive.TriggerPopover>
+  );
+}
+
+const CHIP =
+  "border-foreground/10 bg-background flex min-w-0 max-w-80 items-center gap-1.5 rounded-lg border px-2 py-1 text-xs";
+
+/**
+ * The files dropped on the draft (from the Files tree, or "Mention in message"), as chips above
+ * the input; their @file markers stay out of the text until the send appends them. Each chip
+ * shows the whole workspace path; removing it drops the mention.
+ */
+export function MentionChips({ draft }: { readonly draft: string }) {
+  const { mentions: store } = useChatSession();
+  const chips = useSyncExternalStore(
+    store.subscribe,
+    () => store.chips(draft),
+    () => store.chips(draft),
+  );
+  if (chips.length === 0) return null;
+  return (
+    <ul aria-label="Mentioned files" className="flex flex-wrap gap-1.5 px-1">
+      {chips.map((path) => {
+        const name = path.slice(path.lastIndexOf("/") + 1);
+        return (
+          <li key={path} className={CHIP} title={sandboxPathOf(path)}>
+            <FileIcon aria-hidden className="text-muted-foreground size-3.5 shrink-0" />
+            <span className="truncate font-medium">@{path}</span>
+            <button
+              type="button"
+              aria-label={`Remove mention of ${name}`}
+              className="hover:bg-muted rounded p-0.5"
+              onClick={() => store.removeChip(draft, path)}
+            >
+              <XIcon aria-hidden className="size-3" />
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

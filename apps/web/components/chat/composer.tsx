@@ -23,7 +23,7 @@ import { ComposerAttachments } from "./attachment-chips";
 import { ViewingChip } from "./viewing-chip";
 import { ContinueChip } from "./continue-from";
 import { isBrowsing } from "../../lib/chat/head";
-import { MentionPicker } from "./mention-picker";
+import { MentionChips, MentionPicker } from "./mention-picker";
 import { useComposerMentionDrop } from "./composer-mention-drop";
 import { MENTION_FOLDER_REFUSED } from "../../lib/chat/mention-insert";
 import {
@@ -181,7 +181,8 @@ export function Composer({
   const queue = async () => {
     if (!controller || empty || blocker !== undefined || piRefusal !== null) return;
     dictation.stop();
-    const mentions = session.mentions.forText(draft, text);
+    const content = session.mentions.contentFor(draft, text.trim());
+    const mentions = session.mentions.forText(draft, content);
     const attach = session.attachments.ready(draft);
     const chips = session.appContexts.forDraft(draft);
     const skill = session.skillPicks.get(draft);
@@ -191,7 +192,7 @@ export function Composer({
     const references = referencesBody(items);
     if (
       await controller.send(
-        text.trim(),
+        content,
         undefined,
         attach,
         mentions,
@@ -337,6 +338,7 @@ export function Composer({
           <MentionPicker draft={draft} input={input} />
           <SlashMenu input={input} />
           <ComposerAttachments draft={draft} threadId={remoteId} />
+          <MentionChips draft={draft} />
           <AppContextChips draft={draft} />
           <AppItemChips draft={draft} />
           <SkillPickChip draft={draft} />
