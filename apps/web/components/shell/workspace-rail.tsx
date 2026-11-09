@@ -60,9 +60,9 @@ function useRevealFocus({ revealed, collapsed }: RailApi) {
 }
 
 /**
- * The icons of the collapsed rail (CE5): New conversation, Threads (the panel, KOBE-453) and one
- * for the Files | Apps section, which opens it on the member's last tab (KOBE-448). New keeps the
- * rail as it is. Hidden, not unmounted, while the rail is expanded, so focus can return to the
+ * The icons of the collapsed rail (CE5): Expand the rail at the top (saved like Mod+B), then New
+ * conversation, Threads (the panel, KOBE-453) and one for the Files | Apps section, which opens it
+ * on the member's last tab (KOBE-448). New keeps the rail as it is. Hidden, not unmounted, while the rail is expanded, so focus can return to the
  * icon that opened a drawer.
  */
 function CollapsedIcons({
@@ -79,6 +79,15 @@ function CollapsedIcons({
 }) {
   return (
     <div className={styles.icons} hidden={!rail.collapsed}>
+      <IconAction
+        command="expand-rail"
+        side="right"
+        variant={RAIL_ACTION_VARIANT}
+        className={RAIL_ACTION}
+        aria-expanded={false}
+        aria-controls="kobe-rail-sections"
+        onClick={() => rail.toggle(false)}
+      />
       <RailTeamIcon teams={teams} teamName={teamName} />
       <ThreadListPrimitive.New asChild>
         <IconAction

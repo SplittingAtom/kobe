@@ -72,7 +72,7 @@ describe("rail (ac-1)", () => {
       within(rail())
         .getAllByRole("button")
         .map((b) => b.getAttribute("aria-label")),
-    ).toEqual(["New conversation", "Show threads", "Show files"]);
+    ).toEqual(["Expand the rail", "New conversation", "Show threads", "Show files"]);
     await user.click(within(rail()).getByRole("button", { name: "New conversation" }));
     expect(rail().hasAttribute("data-collapsed")).toBe(true);
     // Threads opens the Threads panel (KOBE-453); the rail stays collapsed under it.

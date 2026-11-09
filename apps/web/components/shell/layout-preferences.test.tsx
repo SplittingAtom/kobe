@@ -166,6 +166,24 @@ describe("saving", () => {
     await waitFor(() => expect(puts()).toHaveLength(2), { timeout: 3000 });
     expect(puts()[1]?.body).toEqual({ rail_collapsed: false });
   });
+
+  it("expands the collapsed rail from the icon at its top, and saves it", async () => {
+    const user = userEvent.setup();
+    fake.preferences = { rail_collapsed: true };
+    await openShell();
+    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(true));
+    const expand = within(rail()).getByRole("button", { name: "Expand the rail" });
+    // First in the strip, above the team's initials and the icons.
+    const strip = within(rail())
+      .getAllByRole("button")
+      .filter((b) => !b.closest("[hidden]"));
+    expect(strip[0]).toBe(expand);
+    expect(expand.getAttribute("aria-expanded")).toBe("false");
+    await user.click(expand);
+    await waitFor(() => expect(rail().hasAttribute("data-collapsed")).toBe(false));
+    await waitFor(() => expect(puts()).toHaveLength(1), { timeout: 3000 });
+    expect(puts()[0]?.body).toEqual({ rail_collapsed: false });
+  });
 });
 
 describe("values that no longer fit (ac-3)", () => {
