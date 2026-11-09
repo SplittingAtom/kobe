@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "license": "Apache-2.0",
-  "description": "Operator CLI: kobe backup and kobe restore",
+  "description": "Operator CLI: kobe backup, kobe restore and kobe projects restricted",
   "type": "module",
   "bin": {
     "kobe": "./dist/cli.js"

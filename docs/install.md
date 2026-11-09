@@ -828,6 +828,14 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Restricted projects removed (KOBE-587).** Every workspace member now reads every project of
+  the workspace: migration `0202_restricted_removal` makes restricted projects readable by all,
+  drops `projects.visibility` and deletes explicit `reader` rows (owners and editors stay).
+  Confidential work belongs in a separate workspace or in a member's My files. Before upgrading,
+  list what becomes visible with the read-only dry-run
+  `KOBE_BACKUP_DATABASE_URL=<backup role URL> kobe projects restricted` (add `--json` for a
+  machine-readable list; the backup role of [backup and restore](backup-restore.md) has the
+  `BYPASSRLS` it needs) and keep the list with your upgrade record.
 - **Ed25519 run and server-call tokens (KOBE-521).** The server now signs run tokens and
   server-call tokens with the `model-gateway` Ed25519 key, and the gateway verifies them with the
   public key it already reads (see [Session-token keys](#session-token-keys)); it no longer holds
