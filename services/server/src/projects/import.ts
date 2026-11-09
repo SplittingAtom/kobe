@@ -1,10 +1,9 @@
 import { Readable } from "node:stream";
-import { withTeam, type KobeDb, type TeamRole } from "@kobe/db";
+import { withTeam, type KobeDb } from "@kobe/db";
 import {
   artifactFileExtension,
   artifactFileStem,
   artifactMimeType,
-  canAddToProject,
   projectFileNameSchema,
   type ImportProjectFileRequest,
   type ProjectFile,
@@ -38,7 +37,7 @@ import {
  * value without a migration.
  *
  * Order of refusals: the project (404 when the caller can't view it, 409 when archived), the
- * source (404 when the caller can't read it), the right ({@link canAddToProject}, 403), the name,
+ * source (404 when the caller can't read it), the right (`edit`: editors, owners, team admins; 403), the name,
  * then the copy itself. Nothing is read from storage before every check passed.
  */
 export interface ImportDeps extends ProjectFileDeps {
@@ -50,7 +49,6 @@ export interface ImportDeps extends ProjectFileDeps {
 export interface Importer {
   readonly teamId: string;
   readonly userId: string;
-  readonly teamRole: TeamRole;
 }
 
 export type ImportRefusal =
@@ -194,7 +192,7 @@ export async function importProjectFile(
       ? await artifactSource(deps, who, wanted.artifact_id, wanted.version)
       : await workspaceSource(deps, who, wanted.path);
   if (!source) return { ok: false, error: "source_not_found" };
-  if (!canAddToProject(who.teamRole, access.role, "restricted")) {
+  if (!access.can.edit) {
     return { ok: false, error: "forbidden" };
   }
   const name = request.name ?? source.defaultName;

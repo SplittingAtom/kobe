@@ -148,14 +148,21 @@ async function inProject(w: World): Promise<string> {
 }
 
 /** Makes the world's owner an explicit member of the thread's project (real `project_members`). */
-async function join(w: World): Promise<void> {
+async function join(w: World, role: "editor" | "reader" = "editor"): Promise<void> {
   await fx.admin.query(
     `INSERT INTO project_members (team_id, project_id, user_id, role, added_by)
-     SELECT t.team_id, t.project_id, $3, 'editor', $3 FROM threads t
+     SELECT t.team_id, t.project_id, $3, $4, $3 FROM threads t
       WHERE t.team_id = $1 AND t.id = $2 AND t.project_id IS NOT NULL`,
-    [w.team, w.threadId, w.owner.id],
+    [w.team, w.threadId, w.owner.id, role],
   );
 }
+
+/** The world's owner is a plain member, not a team admin (who acts as owner of every project, PR3). */
+const asPlainMember = (w: World) =>
+  fx.admin.query(`UPDATE team_members SET role = 'member' WHERE team_id = $1 AND user_id = $2`, [
+    w.team,
+    w.owner.id,
+  ]);
 
 type Input = Record<string, unknown>;
 let seq = 0;
@@ -544,6 +551,7 @@ describe("run.start.memory", () => {
 
     const w2 = await world();
     await inProject(w2);
+    await asPlainMember(w2); // a team admin would read it (PR3)
     const sb = await started(w2);
     const memory = runMemoryContextSchema.parse(
       (sb.frames("run.start")[0] as { memory?: unknown } | undefined)?.memory,
@@ -783,6 +791,7 @@ describe("project memory", () => {
   it("refuses non-members, threads outside a project and a disabled project scope", async () => {
     const stranger = await world();
     await inProject(stranger); // owner is not in `members`
+    await asPlainMember(stranger);
     const sbS = await started(stranger);
     await check(sbS, stranger, "n1", input);
     expect(errorCode(await result(sbS, sendPut(sbS, stranger, "n1", input)))).toBe("not_allowed");
@@ -810,6 +819,23 @@ describe("project memory", () => {
     expect(errorCode(await result(sbO, sendPut(sbO, off, "n3", input)))).toBe("memory_disabled");
     // Personal memory still works while project memory is off.
     const personal = await put(sbO, off, "n4", { scope: "user", path: "a.md", content: "x" });
+    expect(personal.status).toBe("applied");
+  });
+
+  it("a reader's remember into the project is refused plainly; reading and personal memory work (PR6)", async () => {
+    const w = await world();
+    await inProject(w);
+    await join(w, "reader");
+    await asPlainMember(w);
+    const sb = await started(w);
+    await check(sb, w, "rd1", input);
+    const refused = await result(sb, sendPut(sb, w, "rd1", input));
+    expect(errorCode(refused)).toBe("not_allowed");
+    expect(refused.error.message).toContain("read this project's memory but not change it");
+    await expect.poll(() => refusals(w.team), AUDIT_POLL).toContain("put:not_allowed");
+    expect((await rows(`SELECT 1 FROM approvals WHERE team_id = $1`, [w.team])).length).toBe(0);
+    expect(errorCode(await read(sb, w, { scope: "project" }))).toBeUndefined();
+    const personal = await put(sb, w, "rd2", { scope: "user", path: "a.md", content: "x" });
     expect(personal.status).toBe("applied");
   });
 

@@ -328,6 +328,13 @@ show "project" "$pr"
 PROJECT=$(field project_id "$pr")
 SLUG=$(field project_slug "$pr")
 contains "a project with a file" '^project_file=201:docs/brief.txt$' "$pr"
+# Mount on conversation (Workspaces MT1, KOBE-578): the member's project is mounted only while
+# they have a conversation in it, so they open one before the backup (the restored site mounts it
+# again at the next run start, MG5).
+pt=$(turn "$U_M1" "$(bash_prompt "cat /workspace/projects/$SLUG/docs/brief.txt")" "\"projectId\":\"$PROJECT\",\"title\":\"gate4r project\"")
+show "project conversation" "$pt"
+contains "the member's project conversation completes" '^terminal=run.completed$' "$pt"
+contains "...and its file is mounted in the source sandbox" "$PROJECT_TEXT" "$(said "$pt")"
 sk=$(step skill-upload "\"user\":$U_AD,\"scope\":\"team\",\"name\":\"g4rskill-$NONCE\",\"description\":\"Gate4 restore skill $NONCE\",\"url\":\"https://example.com/gate4r-$NONCE\"")
 show "skill" "$sk"
 SKILL_ID=$(field skill_id "$sk")

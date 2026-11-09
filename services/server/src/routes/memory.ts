@@ -13,7 +13,7 @@ import { recordAudit } from "../audit/record.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
-import { canAccessProject } from "../memory/access.js";
+import { projectMemoryAccess } from "../memory/access.js";
 import { scopeEnabled } from "../memory/switches.js";
 import {
   MemoryStorageError,
@@ -41,6 +41,11 @@ const NOT_FOUND = { code: "memory_not_found", message: "No such memory file." } 
 const DISABLED = {
   code: "memory_disabled",
   message: "Memory is turned off for this scope.",
+} as const;
+/** PR6: a reader of the project reads its memory but does not change it. */
+const READ_ONLY = {
+  code: "read_only",
+  message: "You can read this project's memory but not change it: that needs editor or owner.",
 } as const;
 const STORAGE = { code: "storage_unavailable", message: "Memory storage is unavailable." } as const;
 
@@ -75,8 +80,9 @@ const sourceOf = (v: DocVersion) =>
 /**
  * Memory panel API (`/v1/memory`, KOBE-155; contract `packages/protocol/src/memory.ts`, spec D24).
  * Personal memory is the caller's own: another member's doc is a 404, also for team admins (only
- * break-glass reads it). Project memory needs project membership (`canAccessProject`, a seam
- * until projects exist). Each scope also needs its switches on (`memory_disabled`, 403). Every
+ * break-glass reads it). Project memory is read by every reader of the project and changed by
+ * editors, owners and team admins (`projectMemoryAccess`, PR6: a reader's write is 403
+ * `read_only`). Each scope also needs its switches on (`memory_disabled`, 403). Every
  * query runs under `withTeam`; content comes from the object store; audit events carry ids and
  * versions, never paths or content. Panel edits apply at once (also for `project`).
  */
@@ -105,6 +111,7 @@ export function memoryRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     c: Ctx,
     scope: MemoryScope,
     projectId: string | undefined,
+    write = false,
   ): Promise<Out<MemoryTarget>> => {
     const userId = c.get("user").id;
     let target: MemoryTarget;
@@ -116,8 +123,9 @@ export function memoryRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
       if (projectId === undefined || !uuidSchema.safeParse(projectId).success) {
         return fail(400, { code: "invalid_request", message: "scope=project needs project_id." });
       }
-      if (!(await canAccessProject(tx, c.get("team").id, userId, projectId)))
-        return fail(404, NOT_FOUND);
+      const access = await projectMemoryAccess(tx, c.get("team").id, userId, projectId);
+      if (access === "none") return fail(404, NOT_FOUND);
+      if (write && access !== "write") return fail(403, READ_ONLY);
       target = { scope, projectId };
     }
     if (!(await scopeEnabled(tx, c.get("team").id, scope))) return fail(403, DISABLED);
@@ -125,16 +133,26 @@ export function memoryRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
   };
 
   /** The doc if the caller may use it (own personal doc, project member) and its scope is on. */
-  const resolveDoc = async (tx: KobeTx, c: Ctx, id: string): Promise<Out<DocRow>> => {
+  const resolveDoc = async (
+    tx: KobeTx,
+    c: Ctx,
+    id: string,
+    write = false,
+  ): Promise<Out<DocRow>> => {
     const doc = await findDoc(tx, c.get("team").id, id);
     const userId = c.get("user").id;
-    const allowed =
-      doc !== undefined &&
-      (doc.scope === "user"
-        ? doc.ownerUserId === userId
-        : doc.projectId !== null &&
-          (await canAccessProject(tx, c.get("team").id, userId, doc.projectId)));
-    if (!doc || !allowed) return fail(404, NOT_FOUND);
+    const access =
+      doc === undefined
+        ? "none"
+        : doc.scope === "user"
+          ? doc.ownerUserId === userId
+            ? "write"
+            : "none"
+          : doc.projectId === null
+            ? "none"
+            : await projectMemoryAccess(tx, c.get("team").id, userId, doc.projectId);
+    if (!doc || access === "none") return fail(404, NOT_FOUND);
+    if (write && access !== "write") return fail(403, READ_ONLY);
     if (!(await scopeEnabled(tx, c.get("team").id, doc.scope))) return fail(403, DISABLED);
     return { ok: true, value: doc };
   };
@@ -184,7 +202,7 @@ export function memoryRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const body = parsed.data;
     return run(c, async (tx, blobs) => {
       const teamId = c.get("team").id;
-      const target = await resolveTarget(tx, c, body.scope, c.req.query("project_id"));
+      const target = await resolveTarget(tx, c, body.scope, c.req.query("project_id"), true);
       if (!target.ok) return target;
       const written = await writeMemory(
         tx,
@@ -242,7 +260,7 @@ export function memoryRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const id = uuidSchema.safeParse(c.req.param("id"));
     if (!id.success) return invalidRequest(c);
     const res = await run(c, async (tx) => {
-      const doc = await resolveDoc(tx, c, id.data);
+      const doc = await resolveDoc(tx, c, id.data, true);
       if (!doc.ok) return doc;
       const teamId = c.get("team").id;
       const deleted = await deleteMemory(tx, teamId, id.data);
@@ -262,7 +280,7 @@ export function memoryRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const body = memoryRestoreRequestSchema.safeParse(await c.req.json().catch(() => null));
     if (!id.success || !body.success) return invalidRequest(c);
     return run(c, async (tx, blobs) => {
-      const doc = await resolveDoc(tx, c, id.data);
+      const doc = await resolveDoc(tx, c, id.data, true);
       if (!doc.ok) return doc;
       const teamId = c.get("team").id;
       const restored = await restoreMemory(

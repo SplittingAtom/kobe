@@ -74,6 +74,7 @@ import { BudgetMonitor } from "./budgets/monitor.js";
 import { DB_RUN_BUDGET_GATE } from "./budgets/run-gate.js";
 import type { BlobStore } from "./retention/blobs.js";
 import { createProjectMounts, type ProjectMounts } from "./projects/mounts.js";
+import { endUserProjects } from "./projects/offboard.js";
 import { createSkillDraftTool, type SkillDraftTool } from "./skills/drafts/tool.js";
 import {
   markMaintainedAgain,
@@ -503,6 +504,11 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   lifecycle.on("deactivated", {
     name: "thread-shares",
     run: (userId) => endUserShares(database.db, userId),
+  });
+  // Their checkouts and project rows end and their mounts go (Workspaces MT4, KOBE-578).
+  lifecycle.on("deactivated", {
+    name: "projects",
+    run: (userId) => endUserProjects(database.db, projectMounts, userId),
   });
   // A deactivated user's sandboxes lose their connections on every replica at once (KOBE-13).
   lifecycle.on("deactivated", {

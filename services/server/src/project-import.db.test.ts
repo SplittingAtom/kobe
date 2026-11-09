@@ -17,10 +17,9 @@ import { listLive } from "./workspace-sync/store.js";
 /**
  * Add to project (KOBE-585, ac-1/ac-2): `POST /v1/projects/:id/files/import` copies an artifact
  * version or the caller's own synced workspace file into a project from the bytes the server
- * stored. Rights (`canAddToProject`, Chris 2026-11-08 "editors are builders"): team admins, project
- * owners, builder project members, and the content's owner when a project member. A clash is 409
- * `already_exists`; the audit row carries ids only; every project member gets the file read-only under
- * `projects/<slug>/`.
+ * stored. Rights (`edit`, KOBE-578): team admins, project owners and editors. A clash is 409
+ * `already_exists`; the audit row carries ids only; members with a conversation in the project get
+ * the file read-only under `projects/<slug>/` (MT1).
  */
 const fx = new EventStreamFixture();
 const objects = new MemoryObjects();
@@ -361,8 +360,12 @@ describe("Add to project: workspace files (KOBE-585)", () => {
     ).toBe(404);
   });
 
-  it("mounts the file read-only for every project member and nobody else", async () => {
+  it("mounts the file read-only for members with a conversation in the project, nobody else (MT1)", async () => {
     const w = await world();
+    for (const p of ["bob", "carol", "dave"] as const) {
+      const made = await w.as[p].post("/v1/threads", { project_id: w.project.id });
+      expect(made.status, JSON.stringify(made.json)).toBe(201);
+    }
     const path = await uploadToWorkspace(w.as.alice, "shared.txt", "for all");
     const res = await importInto(w.as.alice, w.project.id, {
       source: { kind: "workspace_file", path },
@@ -371,9 +374,11 @@ describe("Add to project: workspace files (KOBE-585)", () => {
     expect(res.status, JSON.stringify(res.json)).toBe(201);
     const sha = projectFileSchema.parse(res.json).sha256;
     const expected = { [`projects/${w.project.slug}/in/shared.txt`]: sha };
-    for (const p of ["alice", "bob", "carol", "dave"] as const) {
+    for (const p of ["bob", "carol", "dave"] as const) {
       expect(await mounted(w.team, w.people[p].id)).toEqual(expected);
     }
+    // Alice is a member without a conversation in the project; Eve is not listed.
+    expect(await mounted(w.team, w.people.alice.id)).toEqual({});
     expect(await mounted(w.team, w.people.eve.id)).toEqual({});
     // Read-only in the browser for members: the project area refuses writes.
     const put = await w.as.bob.request(

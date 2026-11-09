@@ -17,7 +17,6 @@ import {
 } from "../approvals/server-write.js";
 import type { ApprovalVerifier } from "../approvals/verify.js";
 import { manifestPath } from "../files/share.js";
-import { canAccessProject } from "../memory/access.js";
 import type { BlobStore } from "../retention/blobs.js";
 import type { ApprovalBroker } from "../sandbox-wire/types.js";
 import { resolveMime, SNIFF_BYTES } from "../uploads/mime.js";
@@ -29,6 +28,7 @@ import {
   toProjectFile,
   type ProjectFileDeps,
 } from "./files.js";
+import { loadAccess } from "./access.js";
 import type { ProjectMounts } from "./mounts.js";
 
 /**
@@ -186,9 +186,9 @@ async function gate(tx: KobeTx, deps: ProposeDeps, req: ProposeRequest): Promise
     return refuse("run_not_active", NOT_ACTIVE);
   }
   if (row.project_id === null) return refuse("no_project", NO_PROJECT);
-  if (!(await canAccessProject(tx, req.teamId, req.userId, row.project_id))) {
-    return refuse("not_a_member", NOT_MEMBER);
-  }
+  // PR3 (KOBE-578): adding a file to the project is an edit; readers never write.
+  const access = await loadAccess(tx, req, row.project_id);
+  if (!access?.can.edit) return refuse("not_a_member", NOT_MEMBER);
   return { ok: true, projectId: row.project_id, target: checked.target };
 }
 

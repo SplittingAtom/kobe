@@ -31,7 +31,7 @@ import { recordAudit } from "../audit/record.js";
 import { AppendError, appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import type { BlobStore } from "../retention/blobs.js";
 import type { ApprovalBroker } from "../sandbox-wire/types.js";
-import { canAccessProject } from "./access.js";
+import { canAccessProject, projectMemoryAccess } from "./access.js";
 import {
   MemoryStorageError,
   listMemory,
@@ -56,8 +56,10 @@ import { readSwitches } from "./switches.js";
  *   through the normal broker, the sandbox is answered `pending_approval`, and the write is applied
  *   (and `memory.updated` appended) when it is approved. A denied, expired or ended approval
  *   writes nothing.
- * - The project is the thread's project, never a name the sandbox sends; the user must be a member
- *   (`canAccessProject`). A scope is usable only while both switch levels allow it.
+ * - The project is the thread's project, never a name the sandbox sends; reading needs view access
+ *   (`canAccessProject`), a project write needs edit (PR6: editor, owner, team admin; a reader's
+ *   `remember` into the project is refused `not_allowed` with a plain reason, personal memory
+ *   still works). A scope is usable only while both switch levels allow it.
  * - Idempotent on (run, tool call): a repeat answers the stored version without a second write.
  * - Audit: `memory.written` (ids, versions, sizes) and refusals as `sandbox.memory_refused`
  *   (reason only); never paths or content.
@@ -118,6 +120,11 @@ const fail = (code: string, message: string): MemoryReply => ({
 const NOT_ACTIVE = fail("not_allowed", "The run has ended, so nothing was remembered.");
 const NO_PROJECT = fail("not_allowed", "This conversation is not in a project.");
 const NOT_MEMBER = fail("not_allowed", "You are not a member of this project.");
+const READER = fail(
+  "not_allowed",
+  "You can read this project's memory but not change it: remembering into the project needs " +
+    "editor or owner. Personal memory still works.",
+);
 const DISABLED = (scope: MemoryScope) =>
   fail("memory_disabled", `${scope === "user" ? "Memory" : "Project memory"} is turned off.`);
 const NO_STORAGE = fail("storage_failed", "Memory storage is not available. Try again.");
@@ -157,10 +164,9 @@ async function gate(
   }
   if (scope === "user") return { ok: true, target: { scope, ownerUserId: c.userId } };
   if (run.projectId === null) return { ok: false, reason: "no_project", reply: NO_PROJECT };
-  const access = canAccessProject;
-  if (!(await access(tx, c.teamId, c.userId, run.projectId))) {
-    return { ok: false, reason: "not_a_member", reply: NOT_MEMBER };
-  }
+  const access = await projectMemoryAccess(tx, c.teamId, c.userId, run.projectId);
+  if (access === "none") return { ok: false, reason: "not_a_member", reply: NOT_MEMBER };
+  if (access !== "write") return { ok: false, reason: "not_allowed", reply: READER };
   return { ok: true, target: { scope, projectId: run.projectId } };
 }
 

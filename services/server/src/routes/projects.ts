@@ -8,16 +8,17 @@ import {
   addProjectMemberRequestSchema,
   createProjectRequestSchema,
   importProjectFileRequestSchema,
+  listProjectsQuerySchema,
   PROJECT_FILE_MAX_BYTES,
   projectFileUploadFieldsSchema,
-  projectPermissions,
+  transferOwnerRequestSchema,
   updateProjectMemberRequestSchema,
   updateProjectRequestSchema,
   type ProjectAction,
 } from "@kobe/protocol";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
-import { loadAccess, type ProjectAccess } from "../projects/access.js";
+import { decide, loadAccess, type ProjectAccess } from "../projects/access.js";
 import { importProjectFile, type ImportRefusal } from "../projects/import.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
 import {
@@ -32,10 +33,12 @@ import {
   createProject,
   deleteProject,
   listMembers,
+  listOwnerless,
   listProjects,
   removeMember,
   setMemberRole,
   toProject,
+  transferOwner,
   updateProject,
   type ProjectFailure,
 } from "../projects/repository.js";
@@ -64,6 +67,11 @@ const ERRORS = {
   archived: [409, "archived", "The project is archived."],
   in_use: [409, "project_in_use", "The project still has content."],
   legal_hold: [409, "forbidden", "The team is under a legal hold: the project's history stays."],
+  user_deactivated: [
+    422,
+    "invalid_input",
+    "That account is deactivated; make an active member the owner.",
+  ],
 } as const satisfies Record<ProjectFailure, readonly [number, string, string]>;
 
 function failure(c: Context, error: ProjectFailure, detail?: string) {
@@ -111,11 +119,13 @@ function isSlugConflict(err: unknown): boolean {
 }
 
 /**
- * Projects API (KOBE-161 = 57c of KOBE-57, spec D23; contract `packages/protocol/src/projects.ts`).
- * Roles come from `projectPermissions` only: Builders create (and own what they create), owners
- * manage their project and its members, team admins manage every project of the team, members use
- * it. Anyone who may not view a project gets 404, as if it did not exist. Instructions are never
- * written to the audit log. Files and thread sharing are KOBE-162/163.
+ * Projects API (KOBE-161 = 57c of KOBE-57, spec D23; Workspaces PR1-PR5, KOBE-578; contract
+ * `packages/protocol/src/projects.ts` and `project-commits.ts`). Every decision is
+ * `projectPermissions` through `projects/access.ts` (`decide`, `loadAccess`): contributors and team
+ * admins create (and own what they create); readers view and converse; editors also upload and
+ * remove files; owners manage the project and its people; team admins act as owners everywhere.
+ * Anyone who may not view a project (a restricted one they are not listed in) gets 404, as if it
+ * did not exist. Instructions are never written to the audit log.
  */
 export function projectRoutes(
   deps: ServerDeps,
@@ -154,7 +164,7 @@ export function projectRoutes(
     const body = await parseBody(c, createProjectRequestSchema);
     if (!body)
       return invalidRequest(c, "Check the project fields (name, slug, instructions up to 8 KiB).");
-    if (!projectPermissions(c.get("team").role, undefined, "workspace").create)
+    if (!decide(c.get("team").role, undefined, "workspace").can.create)
       return failure(c, "forbidden");
     const viewer = viewerOf(c);
     try {
@@ -171,11 +181,32 @@ export function projectRoutes(
   });
 
   app.get("/", async (c) => {
+    const query = listProjectsQuerySchema.safeParse(c.req.query());
+    if (!query.success)
+      return invalidRequest(c, "role may only be editor; include_archived true or false.");
     const viewer = viewerOf(c);
-    const includeArchived = c.req.query("include_archived") === "true";
-    const admin = projectPermissions(c.get("team").role, undefined, "restricted").manage;
     const list = await withTeam(db, viewer.teamId, (tx) =>
-      listProjects(tx, viewer, { includeArchived, admin }),
+      listProjects(tx, viewer, {
+        includeArchived: query.data.include_archived ?? false,
+        teamRole: c.get("team").role,
+        editorOnly: query.data.role === "editor",
+      }),
+    );
+    return c.json({ projects: list });
+  });
+
+  /** PR5: projects whose only owner left the workspace, for team admins ("No owner: assign one"). */
+  app.get("/no-owner", async (c) => {
+    if (!decide(c.get("team").role, undefined, "restricted").can.manage_members) {
+      return failure(c, "forbidden");
+    }
+    const query = listProjectsQuerySchema.safeParse(c.req.query());
+    if (!query.success || query.data.role !== undefined) {
+      return invalidRequest(c, "Only include_archived (true or false) is accepted.");
+    }
+    const teamId = viewerOf(c).teamId;
+    const list = await withTeam(db, teamId, (tx) =>
+      listOwnerless(tx, teamId, { includeArchived: query.data.include_archived ?? false }),
     );
     return c.json({ projects: list });
   });
@@ -232,6 +263,16 @@ export function projectRoutes(
     return res;
   });
 
+  /** PR5: hand the project to another member of the workspace (owners and team admins). */
+  app.post("/:id/owner", async (c) => {
+    const body = await parseBody(c, transferOwnerRequestSchema);
+    if (!body) return invalidRequest(c, "Give user_id: the member who becomes owner.");
+    return withProject(c, "manage_members", async (tx, access) => {
+      const moved = await transferOwner(tx, viewerOf(c), access, body.user_id);
+      return moved.ok ? c.json(moved.value) : failure(c, moved.error);
+    });
+  });
+
   const memberParam = (c: ProjectContext) => idParam.safeParse(c.req.param("user_id"));
 
   app.patch("/:id/members/:user_id", async (c) => {
@@ -251,8 +292,8 @@ export function projectRoutes(
       const removed = await removeMember(tx, viewerOf(c), access.project.id, user.data);
       return removed.ok ? c.body(null, 204) : failure(c, removed.error);
     });
-    // No longer a member (mode `selected`) or still an implicit one (mode `team`): the user's
-    // workspace is brought in line either way.
+    // No longer a member (restricted) or still an implicit reader (workspace): the user's
+    // workspace is brought in line either way (MT2: a restricted project's mount goes).
     if (res.ok) await deps.projectMounts.reconcileUser(viewerOf(c).teamId, user.data);
     return res;
   });
@@ -289,7 +330,7 @@ export function projectRoutes(
     if (!id.success) return failure(c, "not_found");
     const access = await withTeam(db, viewer.teamId, (tx) => loadAccess(tx, viewer, id.data));
     if (!access) return failure(c, "not_found");
-    if (!access.can.manage) return failure(c, "forbidden");
+    if (!access.can.edit) return failure(c, "forbidden");
     const opened = await openUpload(
       c.req.header("content-type"),
       Readable.fromWeb(body as WebReadableStream<Uint8Array>),
@@ -338,7 +379,7 @@ export function projectRoutes(
         maxFileBytes: settings.maxFileBytes,
         teamQuotaDefaultBytes: settings.defaultQuotaBytes,
       },
-      { ...viewer, teamRole: c.get("team").role },
+      viewer,
       id.data,
       body,
     );
@@ -357,7 +398,7 @@ export function projectRoutes(
     const fileId = idParam.safeParse(c.req.param("file_id"));
     if (!fileId.success) return failure(c, "not_found");
     let key: string | undefined;
-    const res = await withProject(c, "manage", async (tx, access) => {
+    const res = await withProject(c, "edit", async (tx, access) => {
       try {
         key = await removeProjectFile(
           tx,

@@ -144,14 +144,18 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
           "Suspended, archived and never-published agents answer 409 `agent_unavailable`. " +
           "With `test: true` (needs `agent_id`, no project) it is a builder test thread " +
           "(KOBE-85): it runs the agent's unpublished draft, needs the right to edit the agent " +
-          "(else 404 `agent_not_found`), and stays out of lists, search and Trash.",
+          "(else 404 `agent_not_found`), and stays out of lists, search and Trash. " +
+          "With `project_id` the caller must be able to converse in the project (every reader, " +
+          "PR3); the first such conversation mounts the project in the caller's scratchspace " +
+          "(MT1). A project that is not mounted yet is refused 409 `too_many_mounts` (with " +
+          "`limit`) once the caller has the workspace's maximum of open projects (default 20, MT3).",
         responses: {
           "201": json("Thread", "The new thread."),
           "404": json("Error", "`agent_not_found` or `project_not_found`."),
           ...ERROR_RESPONSES,
           "409": json(
             "Error",
-            "`agent_unavailable`, `no_active_team` or `team_mismatch` (stale tab).",
+            "`agent_unavailable`, `too_many_mounts`, `no_active_team` or `team_mismatch` (stale tab).",
           ),
         },
       },
@@ -509,14 +513,17 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         operationId: "moveThread",
         summary: "Move the thread to a project, or out of one (owner only, CE19)",
         description:
-          "Allowed where the caller may start a thread in the project. Refused while a run is queued or running. A thread shared to its old project becomes private. The project's context applies from the next run, which is marked (`GET /v1/threads/{id}/markers`).",
+          "Allowed where the caller may start a thread in the project. Refused while a run is queued or running. A thread shared to its old project becomes private. The project's context applies from the next run, which is marked (`GET /v1/threads/{id}/markers`). The caller's project mounts follow (MT1); moving into a project that is not mounted yet is refused 409 `too_many_mounts` (with `limit`) at the workspace's maximum of open projects.",
         parameters: change([idParameter]),
         requestBody: body("MoveThreadBody"),
         responses: {
           "200": json("Thread", "The moved thread."),
           "404": json("Error", "`thread_not_found`, or `project_not_found` (also: not allowed)."),
           ...ERROR_RESPONSES,
-          "409": json("Error", "`thread_busy`, `thread_in_trash` or `test_thread`."),
+          "409": json(
+            "Error",
+            "`thread_busy`, `thread_in_trash`, `test_thread` or `too_many_mounts`.",
+          ),
         },
       },
     },

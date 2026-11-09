@@ -11,9 +11,10 @@ import { listLive } from "./workspace-sync/store.js";
 
 /**
  * KOBE-162 (ac-1): the project files API and how files reach members' workspaces. The `projects/`
- * area of a (team, user) workspace must hold exactly the files of the projects that user is a
- * member of, as server writes (read-only to the sandbox, KOBE-27), updated when files or members
- * change and re-checked at every run start.
+ * area of a (team, user) workspace must hold exactly the files of the projects that user has open
+ * (a conversation of their own in it, MT1/KOBE-578) and may view, as server writes (read-only to
+ * the sandbox, KOBE-27), updated when files, members or conversations change and re-checked at
+ * every run start.
  */
 const f = new RunFixture();
 const objects = new MemoryObjects();
@@ -85,8 +86,15 @@ async function mounted(team: string, userId: string): Promise<Record<string, str
 
 const paths = async (team: string, userId: string) => Object.keys(await mounted(team, userId));
 
+/** A conversation in the project: what mounts it for that member (MT1, KOBE-578). */
+async function converse(p: Person, project: string): Promise<string> {
+  const res = await as(p).post("/v1/threads", { project_id: project });
+  expect(res.status, JSON.stringify(res.json)).toBe(201);
+  return res.json.thread_id as string;
+}
+
 describe("project files API", () => {
-  it("lets owners and admins add and remove files; members and outsiders cannot", async () => {
+  it("lets owners and admins add and remove files; readers and outsiders cannot", async () => {
     const w = await f.world();
     const b = await builder(w.team);
     const m = await f.member(w.team);
@@ -109,7 +117,7 @@ describe("project files API", () => {
     });
     expect((await as(m).get(`/v1/projects/${project.id}/files`)).json.files).toHaveLength(1);
     expect((await as(m).get(`/v1/projects/${project.id}`)).json.file_count).toBe(1);
-    // A member uses the files but does not manage them; a non-member of a selected project sees nothing.
+    // A reader uses the files but does not edit them; a non-member of a restricted project sees nothing.
     expect((await upload(m, project.id, "x.md", "x")).status).toBe(403);
     expect((await as(m).delete(`/v1/projects/${project.id}/files/${up.json.id}`)).status).toBe(403);
     expect((await upload(outsider, hidden.id, "x.md", "x")).status).toBe(404);
@@ -150,7 +158,7 @@ describe("project files API", () => {
 });
 
 describe("project files in members' workspaces", () => {
-  it("mounts under projects/<slug>/ for members only and follows adds and removals", async () => {
+  it("mounts under projects/<slug>/ for members with a conversation and follows adds and removals", async () => {
     const w = await f.world();
     const b = await builder(w.team);
     const m1 = await f.member(w.team);
@@ -163,18 +171,23 @@ describe("project files in members' workspaces", () => {
     expect((await upload(b, project.id, "a.md", "A", "docs")).status).toBe(201);
     expect((await upload(b, project.id, "b.md", "B")).status).toBe(201);
     const expected = [`projects/${project.slug}/b.md`, `projects/${project.slug}/docs/a.md`];
+    // Nothing is mounted before a conversation opens the project (MT1).
+    expect(await paths(w.team, m1.id)).toEqual([]);
+    await converse(m1, project.id);
+    await converse(b, project.id);
 
     expect(await paths(w.team, m1.id)).toEqual(expected);
-    // The creator is an owner (explicit row), a non-member of the selected project is not mounted.
     expect(await paths(w.team, b.id)).toEqual(expected);
+    // A non-member of the restricted project cannot open it; a team admin without a conversation has nothing mounted.
+    expect((await as(m2).post("/v1/threads", { project_id: project.id })).status).toBe(404);
     expect(await paths(w.team, m2.id)).toEqual([]);
-    // Team admins manage the project but are not members: nothing is mounted for them.
     expect(await paths(w.team, w.owner.id)).toEqual([]);
 
-    // Adding a member mounts, removing one unmounts (by the next run, no later than the sync pull).
+    // Added, then a conversation: mounted; removing a member unmounts (no later than the sync pull).
     expect(
       await as(b).post(`/v1/projects/${project.id}/members`, { user_id: m2.id }),
     ).toMatchObject({ status: 201 });
+    await converse(m2, project.id);
     expect(await paths(w.team, m2.id)).toEqual(expected);
     expect((await as(b).delete(`/v1/projects/${project.id}/members/${m1.id}`)).status).toBe(204);
     expect(await paths(w.team, m1.id)).toEqual([]);
@@ -198,7 +211,7 @@ describe("project files in members' workspaces", () => {
       expect(p.startsWith(`projects/${project.slug}/`)).toBe(true);
   });
 
-  it("mounts for the whole team in mode team, and un-mounts when the mode narrows", async () => {
+  it("mounts for any reader with a conversation in a workspace project, and un-mounts when it is restricted", async () => {
     const w = await f.world();
     const b = await builder(w.team);
     const m1 = await f.member(w.team);
@@ -206,6 +219,7 @@ describe("project files in members' workspaces", () => {
     const project = await create(b, { name: "Everyone" });
     await upload(b, project.id, "all.md", "all");
     for (const p of [b, m1, m2, w.owner]) {
+      await converse(p, project.id);
       expect(await paths(w.team, p.id)).toEqual([`projects/${project.slug}/all.md`]);
     }
     // Narrowed to the creator only: the others lose it.
@@ -216,7 +230,8 @@ describe("project files in members' workspaces", () => {
     expect(await paths(w.team, m1.id)).toHaveLength(1);
     expect(await paths(w.team, b.id)).toHaveLength(1);
     expect(await paths(w.team, m2.id)).toEqual([]);
-    expect(await paths(w.team, w.owner.id)).toEqual([]);
+    // A team admin still views every project (PR2), so their conversation keeps it mounted.
+    expect(await paths(w.team, w.owner.id)).toHaveLength(1);
   });
 
   it("brings a workspace in line at every run start, and takes everything from a removed member", async () => {
@@ -227,6 +242,7 @@ describe("project files in members' workspaces", () => {
     const [member] = w.others;
     if (!member) throw new Error("member");
     const slugPath = `projects/${project.slug}/r.md`;
+    const thread = await converse(member, project.id);
     expect(await paths(w.team, member.id)).toEqual([slugPath]);
 
     // A missed update: the rows are gone. The next run start restores them before the sandbox pulls.
@@ -240,7 +256,6 @@ describe("project files in members' workspaces", () => {
       owner: member,
       target: { teamId: w.team, userId: member.id },
     });
-    const thread = await f.thread(member);
     const run = await f.message(member, thread, "hello");
     await ws.started(run);
     expect(await paths(w.team, member.id)).toEqual([slugPath]);
@@ -266,6 +281,7 @@ describe("one membership decides files and memory (ac-3)", () => {
       member_user_ids: [m.id],
     });
     await upload(b, project.id, "k.md", "K");
+    await converse(m, project.id);
     const memory = (p: Person) =>
       as(p).put(`/v1/memory?project_id=${project.id}`, {
         scope: "project",
@@ -281,8 +297,8 @@ describe("one membership decides files and memory (ac-3)", () => {
     expect((await memory(m)).status).toBe(404);
     expect((await as(m).get(`/v1/memory?scope=project&project_id=${project.id}`)).status).toBe(404);
     expect(await paths(w.team, m.id)).toEqual([]);
-    // A team admin who is not a member has neither.
-    expect((await memory(w.owner)).status).toBe(404);
+    // A team admin acts as owner (PR3): memory yes; nothing mounted without a conversation (MT1).
+    expect((await memory(w.owner)).status).toBe(200);
     expect(await paths(w.team, w.owner.id)).toEqual([]);
   });
 });
@@ -294,6 +310,7 @@ describe("team storage quota counts project files once (KOBE-162)", () => {
     const project = await create(b, { name: "Big Shared" });
     const members: Person[] = [];
     for (let i = 0; i < 49; i += 1) members.push(await f.member(w.team));
+    for (const m of members) await converse(m, project.id);
     const data = "x".repeat(200_000);
     expect((await upload(b, project.id, "big.bin", data)).status).toBe(201);
     for (const m of members) expect(await paths(w.team, m.id)).toHaveLength(1);
@@ -326,6 +343,7 @@ describe("a failed reconcile never leaves a row pointing at a deleted object", (
     const b = await builder(w.team);
     const m = await f.member(w.team);
     const project = await create(b, { name: "Flaky" });
+    await converse(m, project.id);
     await upload(b, project.id, "f.md", "F");
     const file = (
       (await as(b).get(`/v1/projects/${project.id}/files`)).json.files as { id: string }[]

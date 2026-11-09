@@ -187,7 +187,7 @@ describe("personal memory", () => {
 });
 
 describe("project memory", () => {
-  it("is reachable by project members only; everyone else gets 404 (KOBE-161)", async () => {
+  it("is reachable by those who may view the project; everyone else gets 404 (KOBE-161, PR3)", async () => {
     const w = await world();
     const projectId = randomUUID();
     await fx.admin.query(
@@ -207,10 +207,10 @@ describe("project memory", () => {
         content: "x",
       });
     const list = (p: Person) => p.browser.get(`/v1/memory?scope=project&project_id=${projectId}`);
-    // Not a member: a non-member and a team admin who is not a member get the same 404.
+    // Not listed in a restricted project: 404. A team admin acts as owner (PR3): reads and edits.
     expect((await write(w.other)).status).toBe(404);
     expect((await list(w.other)).status).toBe(404);
-    expect((await write(w.admin)).status).toBe(404);
+    expect((await list(w.admin)).status).toBe(200);
     // Member: reads and edits; the doc is not reachable by id for others.
     const saved = await write(w.member);
     expect(saved.status, saved.text).toBe(200);
@@ -219,11 +219,20 @@ describe("project memory", () => {
     expect((await w.member.browser.get(`/v1/memory/${docId}`)).status).toBe(200);
     expect((await w.other.browser.get(`/v1/memory/${docId}`)).status).toBe(404);
     expect((await w.member.browser.get("/v1/memory?scope=project")).status).toBe(400);
-    // Mode team: every team member is an implicit member.
+    // Visibility workspace: every team member is an implicit reader: reads, does not edit (PR6).
     await fx.admin.query(`UPDATE projects SET visibility = 'workspace' WHERE team_id = $1`, [
       w.team,
     ]);
     expect((await list(w.other)).status).toBe(200);
+    expect((await w.other.browser.get(`/v1/memory/${docId}`)).status).toBe(200);
+    const refused = await write(w.other);
+    expect(refused.status).toBe(403);
+    expect(refused.json.code).toBe("read_only");
+    expect((await w.other.browser.delete(`/v1/memory/${docId}`)).status).toBe(403);
+    expect((await w.other.browser.post(`/v1/memory/${docId}/restore`, { version: 1 })).status).toBe(
+      403,
+    );
+    expect((await write(w.admin)).status).toBe(200);
   });
 });
 

@@ -394,16 +394,28 @@ describe("project.file_propose (ac-2)", () => {
     expect(await refusals(w.team, 1)).toEqual(["capability_missing"]);
   });
 
-  it("is refused for a thread outside a project and for a user who is not a member", async () => {
+  it("is refused for a thread outside a project and for a user who may not edit it", async () => {
     const w = await world();
     const sb = await started(w);
     const ref = await pushed(w, "notes/spec.md", "x");
     await check(sb, w, "n1", input);
     expect(errorCode(await propose(sb, w, "n1", input, ref))).toBe("not_in_project");
-    // In a project the owner (a team admin) did not join: admins manage, they are not members.
+    // A plain member in a restricted project they are not listed in (team admins act as owners).
     await inProject(w, false);
+    await fx.admin.query(
+      `UPDATE team_members SET role = 'member' WHERE team_id = $1 AND user_id = $2`,
+      [w.team, w.owner.id],
+    );
     await check(sb, w, "n2", input);
     expect(errorCode(await propose(sb, w, "n2", input, ref))).toBe("not_allowed");
+    // A reader views the project but never writes into it (PR3).
+    await fx.admin.query(
+      `INSERT INTO project_members (team_id, project_id, user_id, role, added_by) VALUES ($1, $2, $3, 'reader', $3)`,
+      [w.team, w.projectId, w.owner.id],
+    );
+    await check(sb, w, "n3", input);
+    expect(errorCode(await propose(sb, w, "n3", input, ref))).toBe("not_allowed");
+    // One audit row per reason and user per 5 minutes: the reader's refusal shares the row.
     expect(await refusals(w.team, 2)).toEqual(["no_project", "not_a_member"]);
     expect(await approvals(w.team)).toEqual([]);
     expect(await fileRows(w.team)).toEqual([]);

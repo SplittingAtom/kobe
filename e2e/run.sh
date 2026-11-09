@@ -2440,7 +2440,8 @@ JS
       "$(chat_run "tools?" 300000)"
 
     # KOBE-164 (57f of KOBE-57): projects end to end, as the web UI drives them. The Owner (team
-    # admin) creates a project and a second one nobody else is in, adds the reader as a member,
+    # admin) creates a project and a second one nobody else is in, adds the reader (role reader,
+    # Workspaces PR3: views, lists files, converses; cannot upload, change or manage),
     # uploads a file, and starts a conversation in the project (a real run: the fork copies its
     # entries). Then the thread is shared: the reader sees it read-only (reads, lists, cannot
     # post) and forks it into a private thread of their own; unsharing hides it again; an archived
@@ -2492,7 +2493,7 @@ if (mode === "setup") {
   out("hidden_project_id", hidden.json.id ?? "-");
   out("outsider_get", code(await reader("GET", "/v1/projects/" + id)));
   out("outsider_list", (await reader("GET", "/v1/projects")).json.projects.some((p) => p.id === id || p.id === hidden.json.id));
-  out("add_member", (await owner("POST", "/v1/projects/" + id + "/members", { user_id: readerId, role: "editor" })).status);
+  out("add_member", (await owner("POST", "/v1/projects/" + id + "/members", { user_id: readerId, role: "reader" })).status);
   const mine = await reader("GET", "/v1/projects/" + id);
   out("member_get", mine.status + ":" + mine.json.my_role + ":" + (mine.json.instructions === "Always answer in " + marker));
   out("member_patch", code(await reader("PATCH", "/v1/projects/" + id, { name: "mine now" })));
@@ -2541,14 +2542,14 @@ JS
     contains "projects: the Owner creates a project and becomes its owner (201)" '^create=201:owner:restricted$' "$pr_out"
     contains "projects: a person outside the project gets 404, not 403" '^outsider_get=404:not_found$' "$pr_out"
     contains "projects: the project is not in the outsider's list" '^outsider_list=false$' "$pr_out"
-    contains "projects: the Owner adds the reader as a member (201)" '^add_member=201$' "$pr_out"
-    contains "projects: the member sees the project, its role and instructions" '^member_get=200:editor:true$' "$pr_out"
-    contains "projects: a member cannot change the project (403)" '^member_patch=403:forbidden$' "$pr_out"
-    contains "projects: a member cannot manage members (403)" '^member_add=403:forbidden$' "$pr_out"
+    contains "projects: the Owner adds the reader with role reader (201)" '^add_member=201$' "$pr_out"
+    contains "projects: the member sees the project, its role and instructions" '^member_get=200:reader:true$' "$pr_out"
+    contains "projects: a reader cannot change the project (403)" '^member_patch=403:forbidden$' "$pr_out"
+    contains "projects: a reader cannot manage members (403)" '^member_add=403:forbidden$' "$pr_out"
     contains "projects: another project without the reader stays 404" '^hidden_still_404=404:not_found$' "$pr_out"
     contains "projects: the Owner uploads a project file (201, upload, in its folder)" '^upload=201:docs/brief.txt:upload$' "$pr_out"
-    contains "projects: a member cannot upload (403)" '^member_upload=403:forbidden$' "$pr_out"
-    contains "projects: a member lists the file" '^member_files=200:docs/brief.txt$' "$pr_out"
+    contains "projects: a reader cannot upload (403)" '^member_upload=403:forbidden$' "$pr_out"
+    contains "projects: a reader lists the file" '^member_files=200:docs/brief.txt$' "$pr_out"
     contains "projects: the project counts one file" '^owner_list=1$' "$pr_out"
     CHAT_PROJECT="$pr_id"
     pr_chat=$(chat_run "hello-project-$RANDOM" 300000 "" "" "" 1)
@@ -2823,7 +2824,7 @@ out("unarchived_lists", (await has(owner, "/v1/threads/archived")) + ":" + (awai
 // Move into a project and out again; a project share ends with the move.
 const project = await owner("POST", "/v1/projects", { name: "E2E organize " + marker, visibility: "restricted", member_user_ids: [] });
 const projectId = project.json.id;
-out("project", project.status + ":" + (await owner("POST", "/v1/projects/" + projectId + "/members", { user_id: readerId, role: "editor" })).status);
+out("project", project.status + ":" + (await owner("POST", "/v1/projects/" + projectId + "/members", { user_id: readerId, role: "reader" })).status);
 const moveIn = await owner("POST", t + "/move", { project_id: projectId });
 out("move_in", moveIn.status + ":" + (moveIn.json.project_id === projectId) + ":" + (await has(owner, "/v1/threads?project_id=" + projectId)));
 const pshare = await owner("POST", t + "/share", { visibility: "project" });

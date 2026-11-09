@@ -194,7 +194,7 @@ export async function takeGrant(
   db: KobeDb,
   userId: string,
   grant: SiteGrant,
-): Promise<{ readonly changed: boolean }> {
+): Promise<{ readonly changed: boolean; readonly removedFrom?: string }> {
   return inRegistryTx(db, async (tx, team) => {
     const rows = await tx
       .delete(siteGrants)
@@ -207,7 +207,11 @@ export async function takeGrant(
         .select({ addedVia: teamMembers.addedVia })
         .from(teamMembers)
         .where(and(eq(teamMembers.teamId, team), eq(teamMembers.userId, userId)));
-      if (member?.addedVia === VIA_GRANT) await removeMemberInTx(tx, team, userId, VIA_GRANT);
+      if (member?.addedVia === VIA_GRANT) {
+        await removeMemberInTx(tx, team, userId, VIA_GRANT);
+        // The caller reconciles the user's project mounts there after the commit (MT4).
+        return { changed: true, removedFrom: team };
+      }
     }
     return { changed: true };
   });

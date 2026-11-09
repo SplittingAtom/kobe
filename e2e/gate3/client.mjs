@@ -396,6 +396,7 @@ async function projectSetup() {
   out("project_id", made.json.id ?? "-");
   out("project_slug", made.json.slug ?? "-");
   if (!made.json.id) return;
+  // Editors: ac-4 has a member's agent write project memory, which needs editor (Workspaces PR6).
   for (const userId of config.members) {
     const added = await admin.call("POST", `/v1/projects/${made.json.id}/members`, {
       user_id: userId,

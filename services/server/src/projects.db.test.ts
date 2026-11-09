@@ -323,6 +323,7 @@ describe("instructions reach project runs", () => {
       name: "Docs",
       instructions: "Answer in French.",
       mount: "/workspace/projects/docs",
+      access: "write",
     });
     // Edited instructions apply to the next run, not a snapshot of the first.
     await as(w.owner).patch(`/v1/projects/${project.id}`, { instructions: "Answer in German." });
@@ -350,6 +351,8 @@ describe("instructions reach project runs", () => {
     });
     const t3 = await as(w3.owner).post("/v1/threads", { project_id: p3.id });
     await f.fx.admin.query(`DELETE FROM project_members WHERE team_id = $1`, [w3.team]);
+    // A team admin still acts as owner (PR3); a plain member who is no longer listed does not.
+    await f.fx.admin.query(`UPDATE team_members SET role = 'member' WHERE team_id = $1`, [w3.team]);
     expect((await runStart(w3, t3.json.thread_id, ["projects"])).project).toBeUndefined();
   });
 });

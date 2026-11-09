@@ -113,9 +113,11 @@ export function siteRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
     const p = grantParams(c);
     if (!p) return invalidRequest(c, "Name a user and the grant skill_reviewer.");
     if (!(await findUserId(db, { id: p.userId }))) return c.json(userNotFound, 404);
-    const { changed } = await takeGrant(db, p.userId, p.grant);
+    const { changed, removedFrom } = await takeGrant(db, p.userId, p.grant);
     if (!changed)
       return c.json({ code: "not_found", message: "That user doesn't hold that grant." }, 404);
+    // Left the Registry team with the grant: no project stays mounted there (MT4).
+    if (removedFrom !== undefined) await deps.projectMounts.reconcileUser(removedFrom, p.userId);
     return new Response(null, { status: 204 });
   });
 
