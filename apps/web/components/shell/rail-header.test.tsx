@@ -284,7 +284,7 @@ describe("the team selector (ac-2)", { timeout: 30_000 }, () => {
 });
 
 describe("the collapsed rail's team (KOBE-419 review S2)", { timeout: 30_000 }, () => {
-  it("leads the icon strip with the team's initials; several teams open the same selector", async () => {
+  it("leads the icon strip with Expand, then the team's initials; several teams open the same selector", async () => {
     fake.otherTeams.push({ id: "t-2", slug: "ops", name: "Operations", role: "team_admin" });
     fake.preferences = { rail_collapsed: true };
     openApp(fake);
@@ -299,7 +299,8 @@ describe("the collapsed rail's team (KOBE-419 review S2)", { timeout: 30_000 }, 
     const buttons = within(rail())
       .getAllByRole("button")
       .filter((b) => b.closest("[hidden]") === null);
-    expect(buttons[0]).toBe(team);
+    expect(buttons[0]?.getAttribute("aria-label")).toBe("Expand the rail");
+    expect(buttons[1]).toBe(team);
     const user = userEvent.setup();
     await user.click(team);
     const list = await screen.findByRole("list", { name: "Your workspaces" });

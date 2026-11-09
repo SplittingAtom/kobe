@@ -107,10 +107,12 @@ async function openFiles(threadId: string) {
 
 const row = (name: string) => screen.getByRole("treeitem", { name });
 const panel = () => must(document.querySelector<HTMLElement>("[data-kobe-composer-panel]"));
-const chips = () =>
-  within(screen.getByRole("list", { name: "Mentioned files" }))
-    .getAllByRole("listitem")
-    .map((li) => li.textContent);
+/** The files the draft mentions, as their text: a mention is its `@file(...)` marker, no chip. */
+const chips = () => {
+  expect(screen.queryByRole("list", { name: "Mentioned files" })).toBeNull();
+  const text = (screen.getByLabelText("Message") as HTMLTextAreaElement).value;
+  return [...text.matchAll(/@file\(([^)]*)\)/g)].map((m) => `@${decodeURIComponent(m[1] ?? "")}`);
+};
 const posts = () =>
   fake.requests
     .filter((r) => r.method === "POST" && /\/v1\/threads\/[^/]+\/messages$/.test(r.path))
@@ -150,7 +152,7 @@ function dragToComposer(from: HTMLElement) {
 }
 
 describe("drag a workspace file into the composer (KOBE-374 ac-4)", () => {
-  it("a file row dropped on the composer is an @file chip and goes in mentions[]", async () => {
+  it("a file row dropped on the composer is @file text only (no chip) and goes in mentions[]", async () => {
     const t = fake.addThread("Work");
     const { user } = await openFiles(t);
     const input = await composer();
@@ -254,7 +256,7 @@ describe("names (KOBE-374 review)", () => {
       ),
     );
 
-  it("a name that is markup shows as text in the chip, never as an element", async () => {
+  it("a name that is markup stays text, never an element", async () => {
     const t = fake.addThread("Work");
     await openFiles(t);
     await composer();

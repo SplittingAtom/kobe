@@ -3,7 +3,7 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
-import { mentionQueryAt, mentionsIn, withoutMention } from "../../lib/chat/mentions";
+import { mentionQueryAt, mentionsIn } from "../../lib/chat/mentions";
 import { composer, openApp } from "./testing";
 
 /**
@@ -38,7 +38,7 @@ const listed = () => posts().map((b) => b?.mentions);
 const picker = () => screen.findByRole("listbox", { name: "Workspace files" });
 
 describe("the @ picker (ac-1)", () => {
-  it("lists matching files; arrows and Enter pick one; the chip shows; the send carries the marker", async () => {
+  it("lists matching files; arrows and Enter pick one; the marker is the only trace; the send carries it", async () => {
     openApp(fake, fake.addThread("Sales"));
     const user = userEvent.setup();
     const input = await composer();
@@ -58,18 +58,15 @@ describe("the @ picker (ac-1)", () => {
     await user.keyboard("{ArrowUp}{Enter}");
     await waitFor(() => expect(input.value).toBe("Compare @file(data/sales%20q3.csv) "));
     expect(screen.queryByRole("listbox", { name: "Workspace files" })).toBeNull();
-    const chips = screen.getByRole("list", { name: "Mentioned files" });
-    expect(within(chips).getByText("@data/sales q3.csv")).toBeTruthy();
-    expect(within(chips).getByRole("listitem").getAttribute("title")).toBe(
-      "/workspace/data/sales q3.csv",
-    );
+    // The marker in the text is the mention: no chip repeats it.
+    expect(screen.queryByRole("list", { name: "Mentioned files" })).toBeNull();
     await user.type(input, "please{Enter}");
     await waitFor(() => expect(sent()).toEqual(["Compare @file(data/sales%20q3.csv) please"]));
     // The picked path is listed: the server rewrites only listed markers.
     expect(listed()).toEqual([["data/sales q3.csv"]]);
   });
 
-  it("a typed or pasted @file(...) is no chip and goes as literal text, without mentions", async () => {
+  it("a typed or pasted @file(...) goes as literal text, without mentions", async () => {
     openApp(fake, fake.addThread("Code"));
     const user = userEvent.setup();
     const input = await composer();
@@ -97,7 +94,7 @@ describe("the @ picker (ac-1)", () => {
     ]);
   });
 
-  it("Escape closes the list without picking; removing a chip removes its mention", async () => {
+  it("Escape closes the list without picking; deleting a picked marker removes its mention", async () => {
     openApp(fake, fake.addThread("Sales"));
     const user = userEvent.setup();
     const input = await composer();
@@ -112,9 +109,11 @@ describe("the @ picker (ac-1)", () => {
     await user.type(input, "see @sum");
     await user.click(within(await picker()).getByRole("option", { name: /summary\.md/ }));
     await waitFor(() => expect(input.value).toBe("see @file(reports/summary.md) "));
-    await user.click(screen.getByRole("button", { name: "Remove mention of summary.md" }));
-    expect(input.value).toBe("see ");
     expect(screen.queryByRole("list", { name: "Mentioned files" })).toBeNull();
+    await user.clear(input);
+    await user.type(input, "no file{Enter}");
+    await waitFor(() => expect(sent()).toEqual(["no file"]));
+    expect(listed()).toEqual([undefined]);
   });
 
   it("while a run holds the thread, Enter picks from the open list instead of queueing", async () => {
@@ -157,7 +156,7 @@ describe("mention helpers", () => {
     expect(mentionQueryAt("@x then", 2)).toBe("x");
   });
 
-  it("lists distinct picked mentions only, and removes one with its trailing space", () => {
+  it("lists distinct picked mentions only", () => {
     const text = "a @file(x.csv) b @file(d/y%20z.md) c @file(x.csv) @file(cfg) @file(d/y z.md) ";
     const picked = new Set(["x.csv", "d/y z.md"]);
     expect(mentionsIn(text, picked).map((m) => [m.name, m.sandboxPath])).toEqual([
@@ -165,8 +164,5 @@ describe("mention helpers", () => {
       ["y z.md", "/workspace/d/y z.md"],
     ]);
     expect(mentionsIn(text, new Set())).toEqual([]);
-    expect(withoutMention(text, "@file(x.csv)")).toBe(
-      "a b @file(d/y%20z.md) c @file(cfg) @file(d/y z.md) ",
-    );
   });
 });
