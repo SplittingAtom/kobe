@@ -66,6 +66,36 @@ describe("FileEditBroker (KOBE-462)", () => {
     expect(broker.onResult(frame)).toBe(false);
   });
 
+  it("relays a project-file proposal for a new file: no base_sha256 (KOBE-591)", () => {
+    const { broker, sent, replies, reply } = setup();
+    const req: Req = {
+      ...request("kt_7"),
+      input: { ...input, path: "/workspace/projects/p/new.md" },
+    };
+    broker.propose(THREAD, RUN, req, reply);
+    expect(sent[0]).toMatchObject({ input: { path: "/workspace/projects/p/new.md" } });
+    expect(
+      broker.onResult({
+        v: 1,
+        type: "file.edit_propose_result",
+        request_id: sent[0]?.request_id as string,
+        ok: true,
+        op: "file_edit_propose",
+        status: "awaiting_user",
+        path: "projects/p/new.md",
+      }),
+    ).toBe(true);
+    expect(replies).toEqual([
+      {
+        id: "kt_7",
+        ok: true,
+        op: "file_edit_propose",
+        status: "awaiting_user",
+        path: "projects/p/new.md",
+      },
+    ]);
+  });
+
   it("fails closed without a run, without a wire, past the cap and when the run ends", () => {
     const a = setup();
     a.broker.propose(THREAD, undefined, request(), a.reply);

@@ -53,7 +53,7 @@ export function proposeFileEditTool(transport: ToolsTransport): ToolDefinitionLi
     name: TOOL_PROPOSE_FILE_EDIT,
     label: "Propose file edit",
     description:
-      "Propose a new content for a file in /workspace for the user to review as a diff. It writes nothing: the user accepts or rejects each change and commits. Returns the proposal, awaiting the user.",
+      "Propose a new content for a file for the user to review as a diff: one of the user's own files in /workspace, or a file of this conversation's project under /workspace/projects/<slug>/ when you can edit the project (accepting commits it to the project). A new file may be proposed too. It writes nothing: the user accepts or rejects it. Other projects and thread uploads are read-only. Returns the proposal, awaiting the user.",
     promptSnippet: "Propose changes to a workspace file for the user to review and commit",
     promptGuidelines: [
       "When the user has a workspace file open (the viewed-file section) and asks you to change it, use propose_file_edit with the whole new content instead of editing that file with write, edit or bash; the user reviews and commits the change.",
@@ -110,7 +110,11 @@ async function propose(
   if (!("op" in outcome) || outcome.op !== "file_edit_propose") {
     throw new ToolFailure("unexpected answer to propose_file_edit");
   }
-  const record = { status: outcome.status, path: outcome.path, base_sha256: outcome.base_sha256 };
+  const record = {
+    status: outcome.status,
+    path: outcome.path,
+    ...(outcome.base_sha256 === undefined ? {} : { base_sha256: outcome.base_sha256 }),
+  };
   return {
     content: [{ type: "text", text: JSON.stringify({ ...record, next: NEXT }) }],
     details: { ...record },
@@ -123,13 +127,14 @@ const HEX64 = /^[0-9a-f]{64}$/;
 export function parseFileEditReply(value: Record<string, unknown>): ToolsResponse | undefined {
   const { status, path, base_sha256: base } = value;
   if (status !== "awaiting_user" || typeof path !== "string" || path === "") return undefined;
-  if (typeof base !== "string" || !HEX64.test(base)) return undefined;
+  // A new file has no base (KOBE-591); a base that is there must be a SHA-256.
+  if (base !== undefined && (typeof base !== "string" || !HEX64.test(base))) return undefined;
   return {
     id: value.id as string,
     ok: true,
     op: "file_edit_propose",
     status,
     path,
-    base_sha256: base,
+    ...(base === undefined ? {} : { base_sha256: base }),
   };
 }

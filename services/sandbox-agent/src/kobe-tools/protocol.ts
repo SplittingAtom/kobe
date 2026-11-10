@@ -194,7 +194,8 @@ export interface FileEditAnswer {
   readonly op: "file_edit_propose";
   readonly status: "awaiting_user";
   readonly path: string;
-  readonly base_sha256: string;
+  /** Absent for a proposed new file (KOBE-591). */
+  readonly base_sha256?: string;
 }
 
 /** `open_file` answer (KOBE-484): the user's client opens `path`. */

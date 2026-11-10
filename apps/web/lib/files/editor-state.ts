@@ -83,7 +83,8 @@ export function proposalFromEvent(payload: FileEditProposedPayload): ProposalVie
   return {
     toolCallId: payload.tool_call_id,
     path: payload.path,
-    baseSha256: payload.base_sha256,
+    // A proposed new file has no base (KOBE-591); its card arrives with KOBE-592.
+    baseSha256: payload.base_sha256 ?? "",
     content: payload.content,
     summary: payload.summary,
   };
