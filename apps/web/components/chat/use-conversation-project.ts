@@ -3,12 +3,25 @@
 import { useAui } from "@assistant-ui/react";
 import { useContext, useSyncExternalStore } from "react";
 import type { ProjectRef } from "../projects/project-work";
+import { visibilityOf } from "../../lib/chat/share";
 import { isThreadRunning, queuedRuns } from "../../lib/chat/thread-state";
 import { ChatSessionContext, useKobeExtras } from "./kobe-runtime";
 import { ThreadOnScreenContext } from "./thread-on-screen";
 
 const noSubscribe = () => () => {};
 const NOT_MOVABLE = "Wait for the current run to finish: it uses the current project.";
+
+/**
+ * FP3 (amended 2026-11-10): the Files panel shows "editing ●" on project rows only in a
+ * conversation that is in a project and shared (project or team). A private one (no project, or
+ * shared with no one; a new conversation is private until shared) shows none.
+ */
+export function showsEditingMarks(
+  projectId: string | null,
+  summary: Parameters<typeof visibilityOf>[0],
+): boolean {
+  return projectId !== null && visibilityOf(summary) !== "private";
+}
 
 /**
  * What the Files panel needs of the conversation on screen (KOBE-590, FP2, FP4): its project (or
@@ -30,6 +43,7 @@ export function useConversationProject() {
   const onThread = typeof threadId === "string" && summary !== undefined;
   const activeProjectId = typeof threadId === "string" ? (summary?.projectId ?? null) : draft;
   const own = onThread && summary.readOnly !== true;
+  const showEditing = onThread && showsEditingMarks(activeProjectId, summary);
 
   const newConversationIn = session
     ? (project: ProjectRef) => {
@@ -72,5 +86,5 @@ export function useConversationProject() {
       }
     : undefined;
 
-  return { activeProjectId, newConversationIn, moveHere, offerProject };
+  return { activeProjectId, showEditing, newConversationIn, moveHere, offerProject };
 }

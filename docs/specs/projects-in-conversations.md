@@ -144,7 +144,11 @@ active row. One active row at most (one project per conversation, SS2). The dot 
 
 **FP3. Marks that stay.** The role chip (reader / editor / owner) and "editing ●" for a checkout
 stay on every row, greyed or not. A greyed project that is checked out shows "editing" in its
-normal colour so a pending working copy is never hidden.
+normal colour so a pending working copy is never hidden. _Amended 2026-11-10 (Chris):_ in a **private
+conversation** (one with no project, or one in a project that is shared with no one; a new
+conversation is private until shared) no row shows "editing"; the role chip stays. The mark shows
+only in a conversation that is in a project and shared with the project or the team. The checkout
+itself is unchanged.
 
 **FP4. Opening a greyed project.** Expanding a greyed project shows its files read-only: from the
 member's mount when it is mounted (another conversation), else from the project's head

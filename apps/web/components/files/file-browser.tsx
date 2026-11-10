@@ -263,6 +263,7 @@ export function FileBrowser({
   onMention,
   onRefresh,
   activeProjectId = null,
+  showEditing = true,
   onNewConversationIn,
   onMoveHere,
   canCreateProjects = false,
@@ -278,6 +279,8 @@ export function FileBrowser({
   readonly onPromoted?: ((project: ProjectRef) => void) | undefined;
   /** The project of the conversation on screen, or of the new one being drafted (FP2). */
   readonly activeProjectId?: string | null | undefined;
+  /** Whether project rows show "editing ●" for a checkout (false in a private conversation, FP3). */
+  readonly showEditing?: boolean | undefined;
   /** "New conversation in this project" on a greyed project (FP4). Absent: no such item. */
   readonly onNewConversationIn?: ((project: ProjectRef) => void) | undefined;
   /**
@@ -315,7 +318,7 @@ export function FileBrowser({
   const [focusRequest, setFocusRequest] = useState<{ path: string; seq: number } | null>(null);
   const shownSeq = useRef(showFolder?.seq ?? 0);
   const { reveal, moved } = tree;
-  const work = useProjectsInTree(tree, activeProjectId);
+  const work = useProjectsInTree(tree, activeProjectId, showEditing);
   const { checkedOut } = work;
   const split = useMemo(() => splitProjectRows(tree.rows), [tree.rows]);
   const projectsTree = useMemo(() => ({ ...tree, rows: work.rows }), [tree, work.rows]);

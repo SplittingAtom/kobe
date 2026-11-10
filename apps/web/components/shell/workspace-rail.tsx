@@ -356,6 +356,7 @@ function RailFiles({
           onMoved={panel?.moveFiles}
           onMention={mention}
           activeProjectId={conversation.activeProjectId}
+          showEditing={conversation.showEditing}
           onNewConversationIn={conversation.newConversationIn}
           onMoveHere={conversation.moveHere}
           canCreateProjects={createsProjects}

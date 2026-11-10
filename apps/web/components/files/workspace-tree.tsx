@@ -57,7 +57,11 @@ const NO_PROJECTS_ENTRY: FileEntry = {
  * list from its head (`useProjectHeads`). `activeProjectId` is the conversation on screen's
  * project, or the draft's (FP2).
  */
-export function useProjectsInTree(tree: FileTree, activeProjectId: string | null = null) {
+export function useProjectsInTree(
+  tree: FileTree,
+  activeProjectId: string | null = null,
+  showEditing = true,
+) {
   const ctx = useWorkspaceProjects();
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
@@ -152,7 +156,10 @@ export function useProjectsInTree(tree: FileTree, activeProjectId: string | null
     if (!isProjectFolder(entry.path)) return undefined;
     const slug = projectSlugOf(entry.path) ?? entry.name;
     const project = bySlug?.get(slug);
-    const editing = checkedOut.has(slug);
+    // A private conversation (no project, or shared with no one) shows no "editing" mark (FP3 as
+    // amended 2026-11-10); the checkout itself is unchanged.
+    const checked = checkedOut.has(slug);
+    const editing = showEditing && checked;
     const active = project !== undefined && project.id === activeProjectId;
     const greyed = !active;
     const role = project ? ROLE_LABELS[effectiveRole(project)] : undefined;
@@ -164,7 +171,7 @@ export function useProjectsInTree(tree: FileTree, activeProjectId: string | null
       description: [
         greyed ? NOT_IN_CONVERSATION : undefined,
         role,
-        editing ? "editing" : "read-only",
+        editing ? "editing" : checked ? undefined : "read-only",
       ]
         .filter(Boolean)
         .join(", "),

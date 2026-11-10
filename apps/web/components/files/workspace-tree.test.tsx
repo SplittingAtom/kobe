@@ -269,6 +269,14 @@ describe("every project, the conversation's one active (KOBE-590, FP1-FP6)", () 
     expect(within(budget).getByText(/^editing/).className).toContain("text-foreground");
   });
 
+  it("a private conversation hides the editing mark; the role chip stays (FP3, 2026-11-10)", async () => {
+    mount({ activeProjectId: "p-ops", showEditing: false });
+    const budget = await project("Budget plan");
+    expect(within(budget).getByText("editor")).toBeTruthy();
+    expect(budget.textContent).not.toMatch(/editing/);
+    expect(budget.querySelector("[id$='-d']")?.textContent).not.toMatch(/editing|read-only/);
+  });
+
   it("a conversation with no project has no active row", async () => {
     mount({ activeProjectId: null });
     await project("Other plan");
