@@ -57,14 +57,14 @@ describe("title format (TT1)", () => {
   it("the tab title follows it (TT4) and is restored when the thread closes", async () => {
     const view = openApp(fake, inProject("Budget"));
     await heading("Alpha / Budget");
-    await waitFor(() => expect(document.title).toBe("Alpha / Budget"));
+    await waitFor(() => expect(document.title).toBe("Alpha / Budget · Kobe"));
     view.unmount();
     expect(document.title).toBe("Kobe");
   });
 
   it("the tab title is the bare name without a project", async () => {
     openApp(fake, inProject("Plain", null));
-    await waitFor(() => expect(document.title).toBe("Plain"));
+    await waitFor(() => expect(document.title).toBe("Plain · Kobe"));
   });
 });
 
@@ -100,7 +100,7 @@ describe("project part (TT2)", () => {
       body: { project_id: null },
     });
     expect(await heading("Budget")).toBeTruthy();
-    await waitFor(() => expect(document.title).toBe("Budget"));
+    await waitFor(() => expect(document.title).toBe("Budget · Kobe"));
   });
 
   it("Move to project… lists the other projects and moves there", async () => {

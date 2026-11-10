@@ -240,27 +240,27 @@ describe("tab title (ac-5)", () => {
     open(t);
     const runId = await startRun(t);
     await waitFor(async () => expect(await activityOf("Build")).toBe("running"));
-    expect(document.title).toBe("Build"); // a visible tab: no prefix
+    expect(document.title).toBe("Build · Kobe"); // a visible tab: no prefix
 
     setVisibility("hidden");
-    expect(document.title).toBe("● Build");
+    expect(document.title).toBe("● Build · Kobe");
     setVisibility("visible");
-    expect(document.title).toBe("Build");
+    expect(document.title).toBe("Build · Kobe");
 
     setVisibility("hidden");
     fake.agent.toolCall(runId, "tc1", "bash", { command: "ls" }, "m1");
     fake.requestApproval(runId, asked());
-    await waitFor(() => expect(document.title).toBe("(!) Build"));
+    await waitFor(() => expect(document.title).toBe("(!) Build · Kobe"));
     window.dispatchEvent(new Event("focus"));
-    expect(document.title).toBe("(!) Build"); // still hidden: focus alone does not show the tab
+    expect(document.title).toBe("(!) Build · Kobe"); // still hidden: focus alone does not show the tab
     visibility = "visible";
     window.dispatchEvent(new Event("focus"));
-    expect(document.title).toBe("Build");
+    expect(document.title).toBe("Build · Kobe");
 
     setVisibility("hidden");
-    expect(document.title).toBe("(!) Build");
+    expect(document.title).toBe("(!) Build · Kobe");
     fake.agent.complete(runId);
-    await waitFor(() => expect(document.title).toBe("Build")); // the state ended
+    await waitFor(() => expect(document.title).toBe("Build · Kobe")); // the state ended
   });
 
   it("leaves the title alone when the app goes away", async () => {
@@ -268,7 +268,7 @@ describe("tab title (ac-5)", () => {
     const view = open(t);
     await startRun(t);
     setVisibility("hidden");
-    await waitFor(() => expect(document.title).toBe("● Gone"));
+    await waitFor(() => expect(document.title).toBe("● Gone · Kobe"));
     view.unmount();
     expect(document.title).toBe("Kobe");
   });
