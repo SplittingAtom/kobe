@@ -251,6 +251,7 @@ function ToolCardSlots({
         <EgressBlocked
           key={blocked.domain}
           payload={blocked}
+          blockedAt={blocked.blockedAt}
           closeId={
             toolCallId === undefined ? undefined : `tool:${toolCallId}:egress:${blocked.domain}`
           }
