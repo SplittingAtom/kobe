@@ -184,6 +184,16 @@ table and a form. A page that fails to load is reported at the end without stopp
 - `.auth/user.json`: the signed-in session the `setup` project saves for the specs. It holds a
   session cookie: it is gitignored; delete it after a run on a shared machine.
 
+## Egress access (`egress-access.spec.ts`)
+
+KOBE-605. `KOBE_USER` must be a site admin and admin of the active team (`KOBE_TEAM`), `KOBE_USER2`
+an ordinary member. Hosts come from the environment: `KOBE_EGRESS_BLOCKED_HOST` (an external host
+no ceiling pattern covers; member2 requests it and the site admin approves in the Site console),
+`KOBE_EGRESS_INTERNAL_HOST` (a host on the cluster ingress, with `egressProxy.clusterIngress` on and
+no ceiling pattern covering it; approved as Internal from the card) and `KOBE_EGRESS_PRIVATE_HOST`
+(resolves to a private address that is not the ingress; must stay blocked). Each scenario skips
+without its variable. Clean-up removes the ceiling rows and team enablements it added.
+
 ## Writing specs
 
 - Select by role and accessible name, labels and `data-kobe-*` attributes (`data-kobe-steering`,
