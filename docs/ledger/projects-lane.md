@@ -23,5 +23,7 @@
   backup.
 - **One gate:** no mid-lane review. Work every ticket to done, deploy main to gate1, run the
   browser specs, write the gate doc, stop for Chris at KOBE-594.
-- **Status (2026-11-09):** spec, tickets and this brief filed; lane starting with KOBE-587 and
-  KOBE-588.
+- **Waves (Chris, 2026-11-09):** CI only at the end of a wave: one group branch, one PR, one CI
+  run per wave. Wave 1: 587 + 588 + 589. Wave 2: 586 + 590 + 591. Wave 3: 592 + 593, then the gate1
+  deploy and KOBE-594.
+- **Status (2026-11-09):** wave 1 (587, 588, 589) built and reviewed; its PR is open.
