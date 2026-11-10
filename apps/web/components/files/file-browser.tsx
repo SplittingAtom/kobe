@@ -22,6 +22,9 @@ import { cn } from "../../lib/utils";
 import { ConfirmDelete, MoveForm, RenameForm } from "./file-dialogs";
 import { DROP_FOLDER_ATTR, FileTreeView, type Dragging, type TreeFocus } from "./file-tree";
 import { useFileTree, type FileTree } from "./use-file-tree";
+import type { FileLinksApi } from "../../lib/threads/file-links";
+import { threadsUsing, usedInLabel } from "../../lib/threads/file-map";
+import { useFileThreads } from "../shell/use-file-links";
 import { useProjectHeads } from "./project-heads";
 import {
   NoProjects,
@@ -310,8 +313,15 @@ export function FileBrowser({
   canCreateProjects = false,
   onPromoted,
   events,
+  fileLinks,
 }: {
   readonly api: FilesApi;
+  /**
+   * The threads that used each file (KOBE-612, TFM4): "Used in (N threads)" in a file's menu,
+   * read in batches for the files on screen; choosing a thread opens it. Absent: no such item.
+   */
+  readonly fileLinks?:
+    { readonly api: FileLinksApi; openThread(threadId: string): void } | undefined;
   /**
    * The workspace's change hints (KOBE-599): the tree lists again when the member's files or the
    * projects change. Absent: only Refresh lists again.
@@ -386,6 +396,36 @@ export function FileBrowser({
   const { reveal, moved } = tree;
   const work = useProjectsInTree(tree, activeProjectId, showEditing);
   const { checkedOut } = work;
+  const shownFiles = useMemo(
+    () =>
+      fileLinks === undefined
+        ? []
+        : tree.rows.flatMap((r) =>
+            r.kind === "entry" && r.entry.type === "file" ? [r.entry.path] : [],
+          ),
+    [fileLinks, tree.rows],
+  );
+  const fileThreads = useFileThreads(fileLinks?.api ?? null, shownFiles);
+  /** "Used in (N threads)" (TFM4): the threads that read or wrote the file, as a submenu. */
+  const usedIn = (entry: FileEntry): MenuBindings => {
+    if (fileLinks === undefined || entry.type !== "file") return {};
+    const uses = threadsUsing(entry.path, false, new Map(), fileThreads);
+    const count = uses.length + (fileThreads.get(entry.path)?.more ?? 0);
+    if (count === 0) return {};
+    return {
+      "file-used-in":
+        uses.length === 0
+          ? { label: usedInLabel(count), blocker: "Only in threads you can't open." }
+          : {
+              label: usedInLabel(count),
+              choices: uses.map((t) => ({
+                key: t.threadId,
+                label: t.title || "Untitled conversation",
+                onSelect: () => fileLinks.openThread(t.threadId),
+              })),
+            },
+    };
+  };
   const split = useMemo(() => splitProjectRows(tree.rows), [tree.rows]);
   const projectsTree = useMemo(() => ({ ...tree, rows: work.rows }), [tree, work.rows]);
   const myTree = useMemo(() => ({ ...tree, rows: split.mine }), [tree, split]);
@@ -551,27 +591,30 @@ export function FileBrowser({
   const actions = {
     onOpenFile: openHere,
     mentionRefusal: work.mentionRefusal,
-    bindings: (entry: FileEntry) =>
+    bindings: (entry: FileEntry): MenuBindings =>
       entry.type === "file" && notMounted(entry)
         ? ({} as MenuBindings)
-        : rowBindings(entry, checkedOut, {
-            onOpen:
-              entry.type === "dir"
-                ? () => {
-                    tree.expand(entry.path);
-                    focusRow(entry.path);
-                  }
-                : openHere && (() => openHere(entry)),
-            onMention: onMention && (() => mention(entry)),
-            onDownload: () => void download(entry),
-            onRename: () => setDialog({ kind: "rename", entry }),
-            onMove: () => setDialog({ kind: "move", entry }),
-            onCopyPath: () => copyPath(entry),
-            onDelete: () => setDialog({ kind: "delete", entry }),
-            onPromote: offersPromote(entry, canCreateProjects)
-              ? () => setDialog({ kind: "promote", entry })
-              : undefined,
-          }),
+        : {
+            ...usedIn(entry),
+            ...rowBindings(entry, checkedOut, {
+              onOpen:
+                entry.type === "dir"
+                  ? () => {
+                      tree.expand(entry.path);
+                      focusRow(entry.path);
+                    }
+                  : openHere && (() => openHere(entry)),
+              onMention: onMention && (() => mention(entry)),
+              onDownload: () => void download(entry),
+              onRename: () => setDialog({ kind: "rename", entry }),
+              onMove: () => setDialog({ kind: "move", entry }),
+              onCopyPath: () => copyPath(entry),
+              onDelete: () => setDialog({ kind: "delete", entry }),
+              onPromote: offersPromote(entry, canCreateProjects)
+                ? () => setDialog({ kind: "promote", entry })
+                : undefined,
+            }),
+          },
     onRename: (entry: FileEntry) => setDialog({ kind: "rename", entry }),
     onDelete: (entry: FileEntry) => setDialog({ kind: "delete", entry }),
     onMove: (dragging: Dragging, folder: string) =>

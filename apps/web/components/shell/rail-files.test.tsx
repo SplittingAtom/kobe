@@ -362,6 +362,46 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     expect(await within(panel).findByText("Copied the path of todo.md")).toBeTruthy();
   });
 
+  it("a file's menu says which threads used it; choosing one opens that thread (KOBE-612, TFM4)", async () => {
+    const budget = fake.addThread("Budget");
+    overrides["GET /v1/workspace/file-threads"] = () =>
+      Response.json({
+        files: [
+          {
+            path: "report.csv",
+            threads: [
+              {
+                thread_id: budget,
+                title: "Budget",
+                access: "write",
+                last_at: "2026-11-10T10:00:00Z",
+              },
+            ],
+            more: 2,
+          },
+        ],
+      });
+    const { user } = await open();
+    await waitFor(() =>
+      expect(seen.some((s) => s.url.startsWith("/v1/workspace/file-threads?paths="))).toBe(true),
+    );
+    const read = must(seen.find((s) => s.url.startsWith("/v1/workspace/file-threads")));
+    expect(read.url).toBe("/v1/workspace/file-threads?paths=report.csv");
+    const menu = await rowMenu("report.csv");
+    const item = await within(menu).findByRole("menuitem", { name: /Used in \(3 threads\)/ });
+    item.focus();
+    await user.keyboard("{ArrowRight}");
+    const sub = await screen.findByRole("menu", { name: /Used in/ });
+    within(sub).getByRole("menuitem", { name: "Budget" }).focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() =>
+      expect(fake.requests.some((r) => r.path.startsWith(`/v1/threads/${budget}`))).toBe(true),
+    );
+    // A folder offers no such item.
+    await user.keyboard("{Escape}");
+    expect(menuNames(await rowMenu("notes"))).not.toContain("Used in");
+  });
+
   it("opens a file from its menu in the artifact column", async () => {
     const { user } = await open();
     await fileAction(user, "report.csv", "Open");

@@ -5,17 +5,20 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type MouseEvent,
 } from "react";
 import type { ApiError } from "../../lib/api/client";
+import type { FilesApi } from "../../lib/files/api";
 import { threadExportUrl } from "../../lib/chat/api";
 import { folderPath, placeFolders, treeRows, type PanelNode } from "../../lib/chat/folder-tree";
 import { foldersOf } from "../../lib/chat/folders-store";
 import { organizedMessage } from "../../lib/chat/organize";
 import { placementOf, type ThreadGroup } from "../../lib/chat/thread-groups";
 import { ErrorNotice } from "../admin/error-notice";
+import { useArtifactPanel } from "../chat/artifact-state";
 import { useChatSession } from "../chat/kobe-runtime";
 import { filedMessage } from "../chat/save-to-folder-menu";
 import { RailAnnounce } from "../chat/use-organize-menu";
@@ -24,7 +27,10 @@ import { FolderEditor, useFolderActions } from "./folder-node-menu";
 import { FolderPicker } from "./folder-picker";
 import { FolderTree } from "./folder-tree";
 import { IconAction } from "./icon-action";
+import { FileMapLayer, pinKey } from "./file-map-layer";
 import { useShellBand } from "./shell-band";
+import { ThreadFileMap, type ThreadFileMapValue } from "./thread-file-row";
+import { useShownThreads, useThreadLinks } from "./use-file-links";
 import { NodeList } from "./thread-node-list";
 import { useThreadGroups } from "./thread-groups";
 import { FolderNote, SearchHits, useThreadsSearch } from "./threads-search";
@@ -65,26 +71,39 @@ function useTreeModel() {
 }
 
 /**
- * The Threads panel's content (KOBE-453, CE5; two rails since KOBE-536, TF7): the server's search
- * and Export above; at 820 px and wider the folder tree (Current with Archived under it, the
- * team's folders, Deleted) beside the chosen node's threads, below that a dropdown above them.
- * Rows keep the rail's menu, keyboard access and drag onto a project header or a folder. Choosing
- * a thread (its title) calls `onChosen`: the panel closes onto it.
+ * The Threads panel's content (KOBE-453, CE5; two rails since KOBE-536, TF7; three since KOBE-612,
+ * spec thread-file-map): the server's search and Export above; on wide windows (1,100 px and
+ * wider) the folder tree, the chosen node's threads and a read-only workspace rail, with lines
+ * between threads and the files they used; at 820 px and wider the tree beside the threads; below
+ * that a dropdown above them. Rows keep the rail's menu, keyboard access and drag onto a project
+ * header or a folder, and show "Files (N)". Choosing a thread (its title) calls `onChosen`: the
+ * panel closes onto it; a file opens in the artifact column and `onClose` closes the panel.
  */
 export function ThreadsPanelContent({
   listError,
   onChosen,
+  filesApi,
+  workspaceName = "",
+  onClose,
 }: {
   readonly listError: ApiError | null;
   onChosen(threadId: string): void;
+  /** The workspace's files: the third rail at wide widths. Absent: two rails at most. */
+  readonly filesApi?: FilesApi | undefined;
+  readonly workspaceName?: string | undefined;
+  /** Closes the panel (after a file opened in the artifact column). */
+  readonly onClose?: (() => void) | undefined;
 }) {
   const session = useChatSession();
+  const artifactPanel = useArtifactPanel();
   const items = useAuiState((s) => s.threads.threadItems);
   const hasMore = useAuiState((s) => s.threads.hasMore);
   const loading = useAuiState((s) => s.threads.isLoading);
   const { groups, projects, listed, trashIds } = useThreadGroups();
   const band = useShellBand();
   const wide = band === "wide" || band === "medium";
+  // Three rails only where they fit (TFM4: about 1,100 px): the shell's wide band.
+  const threeRails = band === "wide" && filesApi !== undefined;
   useFolderReads();
   const tree = useTreeModel();
   const { memory, node, list, placed } = tree;
@@ -97,6 +116,35 @@ export function ThreadsPanelContent({
     items.find((i) => i.remoteId === threadId)?.title || "Untitled conversation";
   const search = useThreadsSearch(query);
   const searching = query.trim() !== "";
+
+  // Thread–file links (KOBE-612): read for the rows on screen before any hover.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const threadsRef = useRef<HTMLDivElement>(null);
+  const railRef = useRef<HTMLElement>(null);
+  const shownIds = useShownThreads(threadsRef);
+  const shownThreads = useMemo(() => new Set(shownIds), [shownIds]);
+  const links = useThreadLinks(session.api, shownIds);
+  const [pins, setPins] = useState<ReadonlySet<string>>(new Set());
+  const openPanelFile = artifactPanel?.openFile;
+  const fileMap = useMemo<ThreadFileMapValue>(
+    () => ({
+      lines: threeRails,
+      linksOf: (id) => links.get(id),
+      isPinned: (side, key) => pins.has(pinKey(side, key)),
+      togglePin: (side, key) =>
+        setPins((prev) => {
+          const next = new Set(prev);
+          const k = pinKey(side, key);
+          if (!next.delete(k)) next.add(k);
+          return next;
+        }),
+      openFile: (path) => {
+        openPanelFile?.(path);
+        onClose?.();
+      },
+    }),
+    [threeRails, links, pins, openPanelFile, onClose],
+  );
 
   const moveByDrop = (threadId: string, projectId: string) => {
     const change = { action: "move", projectId } as const;
@@ -156,6 +204,17 @@ export function ThreadsPanelContent({
   );
   const chosenPlaced =
     node.kind === "folder" ? placed.find((p) => p.folder.id === node.id) : undefined;
+  /** Where a thread without a row is (spec §5: "3 in Archived"). */
+  const placeOf = (threadId: string): string | null => {
+    const local = items.find((i) => i.remoteId === threadId)?.id;
+    const t = local === undefined ? undefined : listed.find((l) => l.id === local);
+    if (!t) return trashIds.includes(local ?? "") ? "Deleted" : null;
+    const p = placementOf(t.custom);
+    if (p.archived) return "Archived";
+    return p.folderId === null ? "Current" : (folderPath(list, p.folderId) ?? null);
+  };
+  // "Used in" (KOBE-612): the panel closes onto the thread, as for a search hit not yet listed.
+  const openThread = (threadId: string) => onChosen(threadId);
 
   const treeColumn = wide ? (
     <nav aria-label="Folders" className="flex min-w-0 flex-col gap-2">
@@ -193,66 +252,90 @@ export function ThreadsPanelContent({
 
   return (
     <RailAnnounce.Provider value={announce}>
-      <ThreadListPrimitive.Root className="flex min-h-full flex-col gap-2 px-4 py-3">
-        <div className="flex items-center gap-2">
-          <input
-            type="search"
-            aria-label="Search threads"
-            placeholder="Search threads"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm"
-          />
-          <IconAction
-            command="export-threads"
-            href={threadExportUrl(session.teamId)}
-            download
-            description="This team's, as Pi sessions and Markdown in a zip"
-            size="sm"
-            side="left"
-            variant={RAIL_ACTION_VARIANT}
-            className={RAIL_ACTION}
-          />
-        </div>
-        <div
-          className={
-            wide ? "grid min-w-0 grid-cols-[220px_1px_minmax(0,1fr)] gap-3" : "flex flex-col gap-2"
-          }
-          data-kobe-threads-body={wide ? "two-rails" : "dropdown"}
-        >
-          {treeColumn}
-          {wide && <div aria-hidden className="bg-border w-px self-stretch" />}
-          {/* Sees the clicks of the rows' own title buttons (Enter on a button is one). */}
-          <div className="min-w-0" onClick={chooseOnClick}>
-            {listError && <ErrorNotice error={listError} />}
-            {projects.failed && (
-              <p className={chat.hint} role="status">
-                Project names could not be loaded.
+      <ThreadFileMap.Provider value={fileMap}>
+        <ThreadListPrimitive.Root className="flex min-h-full flex-col gap-2 px-4 py-3">
+          <div className="flex items-center gap-2">
+            <input
+              type="search"
+              aria-label="Search threads"
+              placeholder="Search threads"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm"
+            />
+            <IconAction
+              command="export-threads"
+              href={threadExportUrl(session.teamId)}
+              download
+              description="This team's, as Pi sessions and Markdown in a zip"
+              size="sm"
+              side="left"
+              variant={RAIL_ACTION_VARIANT}
+              className={RAIL_ACTION}
+            />
+          </div>
+          <div
+            ref={bodyRef}
+            className={
+              threeRails
+                ? "relative grid min-w-0 grid-cols-[200px_1px_minmax(0,1fr)_1px_minmax(220px,0.8fr)] gap-3"
+                : wide
+                  ? "grid min-w-0 grid-cols-[220px_1px_minmax(0,1fr)] gap-3"
+                  : "flex flex-col gap-2"
+            }
+            data-kobe-threads-body={threeRails ? "three-rails" : wide ? "two-rails" : "dropdown"}
+          >
+            {treeColumn}
+            {wide && <div aria-hidden className="bg-border w-px self-stretch" />}
+            {/* Sees the clicks of the rows' own title buttons (Enter on a button is one). */}
+            <div ref={threadsRef} className="min-w-0" onClick={chooseOnClick}>
+              {listError && <ErrorNotice error={listError} />}
+              {projects.failed && (
+                <p className={chat.hint} role="status">
+                  Project names could not be loaded.
+                </p>
+              )}
+              {searching ? (
+                <SearchHits state={search.state} more={search.more} folders={list} />
+              ) : (
+                <NodeList
+                  node={node}
+                  groups={groups}
+                  archived={archived}
+                  archivedNotes={archivedNotes}
+                  trash={trashIds.map((id, index) => ({ id, index }))}
+                  loading={loading}
+                  hasMore={hasMore && (node.kind === "current" || node.kind === "folder")}
+                  hasSubfolders={(chosenPlaced?.childCount ?? 0) > 0}
+                  isOpen={(g: ThreadGroup) => !memory.flipped(g.key)}
+                  onToggle={(g: ThreadGroup) => memory.flip(g.key)}
+                  onMove={moveByDrop}
+                />
+              )}
+              <p role="status" className="sr-only" data-kobe-rail-status="">
+                {announcement}
               </p>
-            )}
-            {searching ? (
-              <SearchHits state={search.state} more={search.more} folders={list} />
-            ) : (
-              <NodeList
-                node={node}
-                groups={groups}
-                archived={archived}
-                archivedNotes={archivedNotes}
-                trash={trashIds.map((id, index) => ({ id, index }))}
-                loading={loading}
-                hasMore={hasMore && (node.kind === "current" || node.kind === "folder")}
-                hasSubfolders={(chosenPlaced?.childCount ?? 0) > 0}
-                isOpen={(g: ThreadGroup) => !memory.flipped(g.key)}
-                onToggle={(g: ThreadGroup) => memory.flip(g.key)}
-                onMove={moveByDrop}
+            </div>
+            {threeRails && filesApi && (
+              <FileMapLayer
+                filesApi={filesApi}
+                linksApi={session.api}
+                workspaceName={workspaceName}
+                links={links}
+                shownThreads={shownThreads}
+                pins={pins}
+                map={fileMap}
+                bodyRef={bodyRef}
+                threadsRef={threadsRef}
+                railRef={railRef}
+                titleOf={titleOf}
+                placeOf={placeOf}
+                openThread={openThread}
               />
             )}
-            <p role="status" className="sr-only" data-kobe-rail-status="">
-              {announcement}
-            </p>
           </div>
-        </div>
-      </ThreadListPrimitive.Root>
+        </ThreadListPrimitive.Root>
+      </ThreadFileMap.Provider>
     </RailAnnounce.Provider>
   );
 }
