@@ -4,7 +4,7 @@ predates these keys still renders (KOBE-40). Keep in sync with values.yaml.
 */}}
 {{- define "kobe.bifrostValues" -}}
 {{- $defaults := dict
-  "image" (dict "repository" "docker.io/maximhq/bifrost" "tag" "v2.2.5" "digest" "sha256:65854fd1941ba8159f1f98cd69df380f6e8ac8cd374bde632c4e28f822a6f115")
+  "image" (dict "repository" "docker.io/maximhq/bifrost" "tag" "v2.5.1" "digest" "sha256:5ec9873acaf1687556b6e4dd854b92b539d9debf87a5a683b66338648b84d3c8")
   "replicas" 1
   "persistence" (dict "enabled" true "size" "1Gi" "storageClass" "")
   "keysSecret" ""
