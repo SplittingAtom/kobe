@@ -1,6 +1,6 @@
 # Kobe — Threads panel: which files each thread used
 
-Status: **draft, open questions for Chris in §8.** Requested by Chris, 2026-11-10. Written against
+Status: **draft; decisions TFM1–TFM4 by Chris 2026-11-10 (§8), Q4, Q6, Q7 open.** Requested by Chris, 2026-11-10. Written against
 main `d58136f3`. Builds on the Threads panel (KOBE-453, CE5), thread folders (TF7, KOBE-536,
 `docs/specs/thread-lineage-and-folders.md`) and Workspaces (`docs/specs/workspaces.md`).
 
@@ -53,8 +53,8 @@ file) for keyboard and screen-reader users and narrow widths.
   or attachment, on a shared file, on a project file save or accepted proposal from that thread.
 - **Moves and deletes.** A move (`workspace_moves`) rewrites the path; a deleted file keeps its
   links, shown as "deleted" in the thread's list and absent from the rail.
-- **Bash** is not parsed (see Q2).
-- **Backfill** from the threads' stored tool calls (see Q3).
+- **Bash** is not parsed (TFM2).
+- **Backfill** once from the threads' stored tool calls (TFM3), recording the same sources.
 
 ## 4. Reads (API)
 
@@ -70,10 +70,9 @@ file) for keyboard and screen-reader users and narrow widths.
 
 - **Layout (wide band):** folders (as today) | threads (middle) | workspace rail (right, the same
   tree as the Files panel, read-only here: open, no edit, drag a file onto a thread? see Q6).
-  Medium and narrow bands: see Q5.
+  Below about 1,100 px: no workspace rail and no lines, the lists only (TFM4).
 - **Hover a thread** (or focus it with the keyboard): lines from the row's right edge to each linked
-  file in the workspace rail; read links and write links styled differently (solid = written,
-  dashed = read); files not visible (closed folder) link to the nearest visible folder with a
+  file in the workspace rail; written links solid, read links dashed (TFM1); files not visible (closed folder) link to the nearest visible folder with a
   count badge; files scrolled out of view link to an "N more above/below" marker.
 - **Hover a file or folder:** lines to the thread rows that used it; threads in other folders of
   the folder tree are counted on that folder ("3 in Archived").
@@ -97,20 +96,21 @@ file) for keyboard and screen-reader users and narrow widths.
 Lines in the Files panel outside the Threads panel, links to MCP resources or URLs, a graph view of
 the whole workspace, parsing shell commands for paths.
 
-## 8. Open questions for Chris
+## 8. Decisions (Chris, 2026-11-10) and open questions
 
-- **Q1. What counts as "used"?** (a) read and written, styled differently (recommended); (b)
-  written only; (c) read and written, one style.
-- **Q2. Shell commands.** The agent often reads and writes through `bash`. (a) Ignore bash
-  (recommended: exact, no guessing); (b) best-effort: record paths in the sandbox's files that a
-  run's push changed while only that thread was running.
-- **Q3. Existing threads.** (a) Backfill once from the stored tool calls (recommended); (b) only
-  new runs from the release on.
+- **TFM1. Used = read and written**, drawn differently: solid line for a file the thread wrote or
+  changed, dashed for one it only read.
+- **TFM2. Shell commands are ignored.** Links come only from exact sources (file tools, uploads,
+  attachments, shared files, project saves); nothing is guessed from `bash` or from pushes.
+- **TFM3. Backfill once** from the stored tool calls of existing threads, so the lines work on day
+  one.
+- **TFM4. Narrow widths: lists, no lines.** Below the width three rails need (about 1,100 px),
+  there is no workspace rail and no lines; each thread shows "Files (N)" and each file "Used in".
+
+Still open:
+
 - **Q4. Hover vs pin.** Hover alone, or also click-to-pin a thread's lines (useful on touch and for
   following many lines)? Recommended: hover and keyboard focus, plus a pin toggle on the row.
-- **Q5. Narrower widths.** Three rails need about 1,100 px. Below that: (a) the workspace rail
-  becomes a toggle that replaces the folder tree; (b) no lines, only the "Files" and "Used in"
-  lists (recommended for the narrow band).
 - **Q6. Drag between rails.** Out of scope, or drag a file onto a thread to attach it to a new
   message there?
 - **Q7. Which workspace.** The right rail shows the viewer's own workspace (My files and their
