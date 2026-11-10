@@ -80,4 +80,5 @@
   Visibility control, no Restricted text, role options owner/editor, help text on create).
 - **ac-5** `docs/audit-log.md` marks `project.visibility_changed` retired;
   `e2e/browser/tests/workspaces.spec.ts` (member2 a reader by default) and
-  `add-to-project.spec.ts` updated. Full `pnpm verify` not run here (memory limit; coordinator).
+  `add-to-project.spec.ts` updated. Full server `test:db`: 214 files, 2566 passed. `@kobe/web test`
+  green after the fixes (3307 + the 3 fixed files). Full `pnpm verify` not run here (memory limit).
