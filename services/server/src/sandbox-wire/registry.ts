@@ -15,6 +15,8 @@ export interface RegisteredConnection {
   pokeCommands(): void;
   /** The member moved files (KOBE-304): tell an agent that replays moves to do it now. */
   workspaceMoved(): void;
+  /** Refresh in the Files panel (KOBE-599): ask the agent to push now, answering `requestId`. */
+  workspaceSyncNow(requestId: string): void;
 }
 
 const key = sandboxKey;

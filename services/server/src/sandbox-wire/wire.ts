@@ -8,6 +8,7 @@ import {
   type PolicyEngine,
   type ServerCallPurpose,
   type ToolRegistry,
+  type WorkspaceSyncStatus,
 } from "@kobe/protocol";
 import { z } from "zod";
 import { recordRunRootSpan, spanRelay, telemetryState } from "@kobe/telemetry";
@@ -34,6 +35,7 @@ import { newMetrics, type LeaseViolation, type WireContext, type WireMetrics } f
 import { attachSandboxGateway } from "./gateway.js";
 import { DENY_APPROVALS } from "./policy-check.js";
 import { ConnectionRegistry } from "./registry.js";
+import { syncNowRequests, type SyncNowTarget } from "./sync-now.js";
 import type { SkillDraftTool } from "../skills/drafts/tool.js";
 import { CommandRouter } from "./router.js";
 import { RelayBudget } from "./trace-budget.js";
@@ -115,6 +117,11 @@ export interface SandboxWire {
    * caches of "this sandbox's user may act" (workspace sync, KOBE-27) drop their entries.
    */
   onUserRevalidate(listener: (userId: string) => void): () => void;
+  /**
+   * Refresh in the Files panel (KOBE-599): ask the member's running sandbox to push now and wait
+   * for it, at most `timeoutMs` (`sync-now.ts`). Never rejects for sandbox-side problems.
+   */
+  syncWorkspace(target: SyncNowTarget, timeoutMs: number): Promise<WorkspaceSyncStatus>;
   /** One lost-sandbox sweep + command expiry now. */
   sweep(): Promise<SweepResult>;
   metrics(): WireMetrics & { readonly connections: number; readonly waiting: number };
@@ -202,6 +209,13 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       case "mv":
         registry.get(hint.id)?.workspaceMoved();
         return;
+      case "sync":
+        registry.get(hint.id)?.workspaceSyncNow(hint.request);
+        return;
+      case "synced":
+      case "unsynced":
+        syncNow.answered(hint.id, hint.kind === "synced");
+        return;
     }
   };
   const bus = createSandboxBus({
@@ -217,6 +231,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
   });
   // Hints and resyncs only arrive after bus.start() below, when both exist.
   const registry = new ConnectionRegistry(db, bus, replicaId);
+  const syncNow = syncNowRequests(db, bus, tuning.staleConnectionMs);
   const telemetry = telemetryState();
   const traceRelay =
     telemetry.enabled && options.traceSpanKey
@@ -547,6 +562,8 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       userListeners.add(listener);
       return () => userListeners.delete(listener);
     },
+    syncWorkspace: (target, timeoutMs) =>
+      closed ? Promise.resolve("not_synced") : syncNow.request(target, timeoutMs),
     sweep,
     metrics() {
       return { ...metrics, connections: registry.size, waiting: router.waiting };
@@ -557,6 +574,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       if (sweepTimer) clearTimeout(sweepTimer);
       for (const detach of detachers) detach();
       router.close();
+      syncNow.close();
       // Sandboxes reconnect to another replica and resume from their durable cursors.
       for (const c of registry.all()) c.close("internal", "server shutting down");
       // Ended runs' roots now (their grace timers would outlive the replica).

@@ -12,6 +12,7 @@ import {
   CAPABILITY_SYNC_CONFLICTS,
   CAPABILITY_WEB_SEARCH,
   CAPABILITY_WORKSPACE_MOVES,
+  CAPABILITY_WORKSPACE_SYNC_NOW,
   builtinToolDescriptor,
   PI_PINNED_VERSION,
   PI_PREVIOUS_MINORS,
@@ -30,6 +31,7 @@ import {
   type FileEditProposeFrame,
   type FileOpenFrame,
   type WorkspaceConflictFrame,
+  type WorkspaceSyncedFrame,
   type NotebookOutputFrame,
   type NotebookRunFrame,
   type SkillDraftSaveFrame,
@@ -95,6 +97,8 @@ type State = "hello" | "starting" | "ready" | "closed";
 
 const MAX_BUFFERED_BYTES = 32 * 1024 * 1024;
 const POLICY_ANSWERED_MAX = 4_096;
+/** `workspace.sync_now` asks in flight per connection (KOBE-599); more are answered `unsynced`. */
+const MAX_SYNC_REQUESTS = 16;
 /** `{"v":1,"type":"<type>"` at the start of a frame (whitespace tolerated). */
 const FRAME_PREFIX = /^\s*\{\s*"v"\s*:\s*1\s*,\s*"type"\s*:\s*"([a-z._]{1,32})"/;
 /** Ended leases kept to answer late frames with `run_not_active`; older ones are forgotten. */
@@ -198,6 +202,8 @@ export class SandboxConnection implements RegisteredConnection {
   #registered = false;
   /** `hello.capabilities` of the agent on this connection (none from older agents). */
   #capabilities: ReadonlySet<string> = new Set();
+  /** `workspace.sync_now` asks sent here and not answered yet (KOBE-599). */
+  readonly #syncRequests = new Set<string>();
   /** Relayed sandbox spans (KOBE-274): the replica's run state; absent when it does not relay. */
   readonly #traces: TraceIntake | undefined;
   readonly #traceRate: TraceFrameRate | undefined;
@@ -298,6 +304,37 @@ export class SandboxConnection implements RegisteredConnection {
 
   pokeCommands(): void {
     this.#delivery.poke();
+  }
+
+  /**
+   * Refresh in the Files panel (KOBE-599): ask the agent to push now. The answer
+   * (`workspace.synced`) goes back to the requester as a bus hint; an agent that cannot (older, not
+   * ready, too many asks in flight) is answered `unsynced` at once, so the requester lists without
+   * waiting.
+   */
+  workspaceSyncNow(requestId: string): void {
+    const ready = this.#state === "ready" && this.hasCapability(CAPABILITY_WORKSPACE_SYNC_NOW);
+    if (!ready || this.#syncRequests.size >= MAX_SYNC_REQUESTS) {
+      this.#syncAnswered(requestId, false);
+      return;
+    }
+    this.#syncRequests.add(requestId);
+    if (!this.send({ v: 1, type: "workspace.sync_now", request_id: requestId })) {
+      this.#syncRequests.delete(requestId);
+      this.#syncAnswered(requestId, false);
+    }
+  }
+
+  /** Only answers to asks sent on this connection are passed on; anything else is dropped. */
+  #onWorkspaceSynced(frame: WorkspaceSyncedFrame): void {
+    if (!this.#syncRequests.delete(frame.request_id)) return;
+    this.#syncAnswered(frame.request_id, frame.ok);
+  }
+
+  #syncAnswered(requestId: string, ok: boolean): void {
+    this.#ctx.bus
+      .notify(this.#ctx.db, { kind: ok ? "synced" : "unsynced", id: requestId })
+      .catch((err: unknown) => this.log.warn({ err }, "could not pass on a workspace sync answer"));
   }
 
   workspaceMoved(): void {
@@ -531,6 +568,9 @@ export class SandboxConnection implements RegisteredConnection {
         return;
       case "workspace.conflict":
         this.#onWorkspaceConflict(frame);
+        return;
+      case "workspace.synced":
+        this.#onWorkspaceSynced(frame);
         return;
       case "notebook.output":
         this.#onNotebookOutput(frame, bytes);
@@ -1800,6 +1840,9 @@ export class SandboxConnection implements RegisteredConnection {
     this.#timers = [];
     for (const abort of this.#policyPending.values()) abort.abort();
     this.#policyPending.clear();
+    // Waiting Refreshes list now instead of at their timeout.
+    for (const id of this.#syncRequests) this.#syncAnswered(id, false);
+    this.#syncRequests.clear();
     this.#memoryAbort.abort();
     for (const lease of this.#leases.values()) lease.ingest.close();
     this.#delivery.close();

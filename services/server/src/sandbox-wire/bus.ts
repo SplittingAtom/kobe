@@ -25,21 +25,36 @@ export type BusHint =
   /** This approval left `pending` (KOBE-37): the broker waiting on it re-reads the row. */
   | { readonly kind: "apr"; readonly id: string }
   /** The member moved files (KOBE-304): this connection's holder sends `workspace.moved`. */
-  | { readonly kind: "mv"; readonly id: string };
+  | { readonly kind: "mv"; readonly id: string }
+  /**
+   * Refresh in the Files panel (KOBE-599): this connection's holder sends `workspace.sync_now`
+   * with `request` (a random id the requester waits on; two ids, nothing else).
+   */
+  | { readonly kind: "sync"; readonly id: string; readonly request: string }
+  /** The sync asked for by request `id` finished (`synced`) or could not run (`unsynced`). */
+  | { readonly kind: "synced"; readonly id: string }
+  | { readonly kind: "unsynced"; readonly id: string };
 
-const KINDS = new Set(["cmd", "res", "kick", "user", "hib", "apr", "mv"]);
+const KINDS = new Set(["cmd", "res", "kick", "user", "hib", "apr", "mv", "synced", "unsynced"]);
 const uuid = z.uuid();
 
 export function encodeBusHint(hint: BusHint): string {
-  return `${hint.kind}:${hint.id}`;
+  return hint.kind === "sync" ? `sync:${hint.id}:${hint.request}` : `${hint.kind}:${hint.id}`;
 }
 
 /** Never throws; undefined for anything that is not a well-formed hint. */
 export function decodeBusHint(payload: string | undefined): BusHint | undefined {
-  if (payload === undefined || payload.length > 64) return undefined;
+  if (payload === undefined || payload.length > 96) return undefined;
   const sep = payload.indexOf(":");
   const kind = payload.slice(0, sep);
   const id = payload.slice(sep + 1);
+  if (kind === "sync") {
+    const [connection = "", request = "", ...rest] = id.split(":");
+    if (rest.length > 0 || !uuid.safeParse(connection).success) return undefined;
+    if (!uuid.safeParse(request).success) return undefined;
+    return { kind, id: connection.toLowerCase(), request: request.toLowerCase() };
+  }
+  if (payload.length > 64) return undefined;
   if (sep < 0 || !KINDS.has(kind) || !uuid.safeParse(id).success) return undefined;
   return { kind, id: id.toLowerCase() } as BusHint;
 }

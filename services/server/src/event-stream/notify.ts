@@ -60,7 +60,8 @@ export function decodeAccessHint(payload: string | undefined): string | undefine
  * wakes that user's open change streams, which re-read under their own session's team (RLS), so
  * a hint from another team, or a forged one, costs one indexed read and sends nothing.
  */
-const WORKSPACE_PREFIX = "ws:";
+export const WORKSPACE_HINT_PREFIX = "ws:";
+const WORKSPACE_PREFIX = WORKSPACE_HINT_PREFIX;
 
 export function encodeWorkspaceHint(userId: string): string {
   return `${WORKSPACE_PREFIX}${userId}`;

@@ -1,6 +1,6 @@
 import { SERVER_CALL_EPILOGUE_MAX_MS } from "@kobe/protocol";
 import { sql, type KobeDb, type KobeTx } from "@kobe/db";
-import { encodeWorkspaceAccessHint, RUN_EVENTS_CHANNEL } from "./notify.js";
+import { encodeWorkspaceAccessHint, RUN_EVENTS_CHANNEL, WORKSPACE_HINT_PREFIX } from "./notify.js";
 
 /**
  * Live streams follow a run this long after it ended: the epilogue window (KOBE-234) plus a
@@ -40,4 +40,18 @@ export async function notifyWorkspaceAccess(db: KobeDb, userId: string): Promise
   await db.execute(
     sql`SELECT pg_notify(${RUN_EVENTS_CHANNEL}, ${encodeWorkspaceAccessHint(userId)})`,
   );
+}
+
+/**
+ * Tells every member's open Files panels in this team that the workspace's projects changed
+ * (KOBE-599: a commit, revert or file change of a project, which members see in their Projects
+ * rows whether or not they have it mounted; every workspace member reads every project, RV1). One
+ * workspace hint per member: ids only, never the team (`notify.ts`); each stream re-reads under its
+ * own session's team, so a member of several teams learns nothing of the others.
+ */
+export async function notifyTeamWorkspaces(tx: KobeTx, teamId: string): Promise<void> {
+  await tx.execute(sql`
+    SELECT pg_notify(${RUN_EVENTS_CHANNEL}, ${WORKSPACE_HINT_PREFIX} || m.user_id::text)
+      FROM team_members m
+     WHERE m.team_id = ${teamId}`);
 }

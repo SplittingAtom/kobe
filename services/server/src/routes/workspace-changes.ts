@@ -10,14 +10,14 @@ import { isInternalPath } from "../workspace-files/paths.js";
 
 type Ctx = Context<{ Variables: TeamVariables }>;
 
-const SSE_HEADERS = {
+export const SSE_HEADERS = {
   "content-type": "text/event-stream; charset=utf-8",
   "cache-control": "no-cache",
   "x-accel-buffering": "no",
 } as const;
 
 /** Under @hono/node-server, `c.env.outgoing` is the Node response; destroying it drops the socket. */
-function nodeResponseDestroyer(env: unknown): (() => void) | undefined {
+export function nodeResponseDestroyer(env: unknown): (() => void) | undefined {
   const outgoing = (env as { outgoing?: { destroy?: unknown } } | undefined)?.outgoing;
   if (!outgoing || typeof outgoing.destroy !== "function") return undefined;
   return () => (outgoing.destroy as () => void).call(outgoing);
