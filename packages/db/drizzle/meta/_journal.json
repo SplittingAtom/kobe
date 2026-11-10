@@ -1422,6 +1422,13 @@
       "when": 1794267191945,
       "tag": "0202_restricted_removal",
       "breakpoints": true
+    },
+    {
+      "idx": 203,
+      "version": "7",
+      "when": 1794319535101,
+      "tag": "0203_egress_access",
+      "breakpoints": true
     }
   ]
 }

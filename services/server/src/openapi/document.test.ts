@@ -31,6 +31,8 @@ import type { TeamVariables } from "../authz/middleware.js";
 import { openApiDocument } from "./document.js";
 import { teamDefaultAgentRoutes } from "../routes/team-default-agent.js";
 import { projectFromFolderRoutes } from "../routes/project-from-folder.js";
+import { egressRequestRoutes } from "../routes/egress-requests.js";
+import { siteEgressRoutes } from "../routes/site-egress.js";
 
 // Regenerate after changing routes or schemas:
 //   UPDATE_OPENAPI=1 pnpm --filter @kobe/server exec vitest run src/openapi && pnpm format
@@ -128,6 +130,17 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
     );
     expect(documented("/v1/team/storage")).toEqual(
       mountedOperations("/v1/team/storage", teamStorageRoutes(fakeDeps)),
+    );
+  });
+
+  it("describes exactly the request-access routes and the site's request routes (KOBE-602)", () => {
+    expect(documented("/v1/egress/requests")).toEqual(
+      mountedOperations("/v1/egress/requests", egressRequestRoutes(fakeDeps)),
+    );
+    const site = mountedOperations("/v1/site/egress-ceiling", siteEgressRoutes(fakeDeps));
+    expect(documented("/v1/site/egress-ceiling").every((op) => site.includes(op))).toBe(true);
+    expect(site.filter((op) => op.includes("/requests"))).toEqual(
+      documented("/v1/site/egress-ceiling/requests"),
     );
   });
 

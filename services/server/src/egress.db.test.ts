@@ -327,7 +327,7 @@ describe("egress.blocked relay", () => {
     });
     expect(await relayBlockedEvents(h.deps.database.db, finance)).toBe(1);
     expect(await blockedRunEvents(finance, runId)).toEqual([
-      { domain: "pypi.org", request_access: true },
+      { domain: "pypi.org", request_access: true, reason: "not_enabled" },
     ]);
     const { rows } = await h.admin.query(`SELECT status, ref FROM events WHERE id = $1`, [eventId]);
     expect(rows[0]).toMatchObject({ status: "processed", ref: { run_ids: [runId] } });

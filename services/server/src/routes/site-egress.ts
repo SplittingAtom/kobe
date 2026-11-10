@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import type { z } from "zod";
+import { z } from "zod";
 import { EGRESS_PRESETS } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import { requireSitePermission } from "../authz/middleware.js";
@@ -8,16 +8,25 @@ import {
   addCeilingDomain,
   deleteCeilingDomain,
   listCeiling,
-  setCeilingMembership,
+  setCeilingFlags,
   setPresetMembership,
 } from "../egress/ceiling-store.js";
 import {
+  DECISION_BODY_HINT,
+  decideAndRespond,
+  decisionWithPatternBodySchema,
+} from "../egress/decision-http.js";
+import { listSiteEgressRequests } from "../egress/request-store.js";
+import {
   addCeilingBodySchema,
+  ceilingFlagsBodySchema,
   ceilingMembershipBodySchema,
   domainPatternSchema,
   presetSchema,
 } from "../egress/schemas.js";
-import { invalidRequest } from "../teams/http.js";
+import { invalidRequest, parseBody } from "../teams/http.js";
+
+const statusQuerySchema = z.enum(["pending", "approved", "denied", "all"]).default("pending");
 
 /** Parses a JSON body; the 400 names the first problem without echoing input. */
 async function body<T>(c: Context, schema: z.ZodType<T>) {
@@ -38,7 +47,8 @@ const notFound = (c: Context) =>
 
 /**
  * The site egress ceiling (`/v1/site/egress-ceiling`, spec D6, D8, D28): the domains teams
- * may enable for their sandboxes, presets included. Site Owner/Admins only.
+ * may enable for their sandboxes, presets included, each optionally internal (same cluster,
+ * KOBE-602), and the site-scope access requests. Site Owner/Admins only.
  */
 export function siteEgressRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
@@ -79,12 +89,42 @@ export function siteEgressRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
     return c.json({ domains: await listCeiling(db), presets: EGRESS_PRESETS });
   });
 
+  // Site-scope access requests across teams (KOBE-602, EA1): outside the ceiling or internal.
+  app.get("/requests", async (c) => {
+    const status = statusQuerySchema.safeParse(c.req.query("status") ?? undefined);
+    if (!status.success) return invalidRequest(c, "status is pending, approved, denied or all.");
+    return c.json({ requests: await listSiteEgressRequests(db, { status: status.data }) });
+  });
+
+  // The same decision as the card's, as a site admin, for any team's request (EA2, EA3).
+  app.post("/requests/:teamId/:id/decision", async (c) => {
+    const teamId = z.uuid().safeParse(c.req.param("teamId"));
+    const id = z.uuid().safeParse(c.req.param("id"));
+    const parsed = await parseBody(c, decisionWithPatternBodySchema);
+    if (!parsed) return invalidRequest(c, DECISION_BODY_HINT);
+    if (!teamId.success || !id.success) {
+      return c.json({ code: "request_not_found", message: "That request does not exist." }, 404);
+    }
+    return decideAndRespond(c, deps, {
+      teamId: teamId.data,
+      requestId: id.data,
+      adminId: c.get("user").id,
+      decision: parsed.decision,
+      role: "site_admin",
+      pattern: parsed.pattern,
+      internal: parsed.internal,
+    });
+  });
+
   app.put("/:domain", async (c) => {
     const domain = domainPatternSchema.safeParse(c.req.param("domain"));
     if (!domain.success) return notFound(c);
-    const parsed = await body(c, ceilingMembershipBodySchema);
+    const parsed = await body(c, ceilingFlagsBodySchema);
     if (!parsed.ok) return parsed.response;
-    const entry = await setCeilingMembership(db, domain.data, parsed.value.in_ceiling);
+    const entry = await setCeilingFlags(db, domain.data, {
+      inCeiling: parsed.value.in_ceiling,
+      internal: parsed.value.internal,
+    });
     return entry ? c.json({ domain: entry }) : notFound(c);
   });
 

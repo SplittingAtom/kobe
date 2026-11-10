@@ -147,10 +147,8 @@ describe("request access", () => {
     });
   });
 
-  it("refuses hosts outside the ceiling, junk, and other users' or unknown threads", async () => {
-    const outside = await as.bob.post(REQUESTS, { domain: "evil.example.net" });
-    expect(outside.status).toBe(409);
-    expect(outside.json.code).toBe("not_in_ceiling");
+  it("refuses junk and other users' or unknown threads", async () => {
+    // Hosts outside the ceiling make site-scope requests (KOBE-602): egress-access.db.test.ts.
     for (const bad of ["10.0.0.1", "https://pypi.org/simple", "a b", ""]) {
       expect((await as.bob.post(REQUESTS, { domain: bad })).status, bad).toBeGreaterThanOrEqual(
         400,

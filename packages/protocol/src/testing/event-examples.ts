@@ -72,7 +72,7 @@ export const EVENT_PAYLOAD_EXAMPLES: { readonly [T in KobeEventType]: KobeEventP
       { kind: "skill", name: "sql-helper", reason: "blocklisted" },
     ],
   },
-  "egress.blocked": { domain: "pypi.org", request_access: true },
+  "egress.blocked": { domain: "pypi.org", request_access: true, reason: "not_enabled" },
   "steer.applied": { entry_id: "e5f6a7b8", content: "Use a bar chart instead" },
   "memory.updated": {
     scope: "user",

@@ -9,6 +9,7 @@ const TEAM_CONSOLE = "/admin/team";
 export const CONSOLE_PATHS = {
   siteBreakGlass: `${SITE_CONSOLE}/break-glass`,
   siteConnectors: `${SITE_CONSOLE}/connectors`,
+  siteEgress: `${SITE_CONSOLE}/egress`,
   siteUsage: `${SITE_CONSOLE}/usage`,
   teamBreakGlass: `${TEAM_CONSOLE}/break-glass`,
   teamBudgets: `${TEAM_CONSOLE}/budgets`,

@@ -132,6 +132,14 @@ function withinBytes<T extends z.ZodType>(schema: T, max: number): T {
 /** `context.omitted` carries at most this many items (producers truncate). */
 export const CONTEXT_OMITTED_MAX_ITEMS = 100;
 
+/** Why the egress proxy blocked a host (`egress.blocked.reason`, KOBE-602). */
+export const EGRESS_BLOCKED_REASONS = [
+  "not_enabled",
+  "not_in_ceiling",
+  "forbidden_address",
+] as const;
+export type EgressBlockedReason = (typeof EGRESS_BLOCKED_REASONS)[number];
+
 const contextOmissionSchema = z.strictObject({
   kind: z.enum(["skill", "connector", "model"]),
   name: z.string().min(1).max(256),
@@ -277,8 +285,19 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     domain: z.string().min(1).max(253),
     /** The egress proxy sees connections, not tool calls; set only when the server can correlate. */
     tool_call_id: idSchema.optional(),
-    /** Whether the "Request access" action is offered (false when the domain is outside the ceiling). */
+    /**
+     * Whether the "Request access" action is offered: true for every reason a request can fix
+     * (KOBE-602, EA1: in the ceiling but not enabled, outside the ceiling, or an internal address of
+     * a host name); false for an IP literal or anything else a request can't fix.
+     */
     request_access: z.boolean(),
+    /**
+     * Why it was blocked (KOBE-602): `not_enabled` (in the site ceiling, the team admins decide),
+     * `not_in_ceiling` (the site admins decide) or `forbidden_address` (the host resolved to an
+     * internal address; a site admin may mark its pattern internal, EA4). Absent from events
+     * recorded before it existed, and for other reasons.
+     */
+    reason: z.enum(EGRESS_BLOCKED_REASONS).optional(),
   }),
   "steer.applied": z.strictObject({
     /** The user entry Pi recorded for the steering message. */

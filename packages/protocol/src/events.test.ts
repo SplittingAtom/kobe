@@ -115,6 +115,26 @@ describe("context.omitted", () => {
   });
 });
 
+describe("egress.blocked reason (KOBE-602)", () => {
+  const schema = EVENT_PAYLOAD_SCHEMAS["egress.blocked"];
+
+  it("accepts the older payload without a reason and every fixable reason", () => {
+    expect(schema.safeParse({ domain: "pypi.org", request_access: false }).success).toBe(true);
+    for (const reason of ["not_enabled", "not_in_ceiling", "forbidden_address"]) {
+      expect(schema.safeParse({ domain: "pypi.org", request_access: true, reason }).success).toBe(
+        true,
+      );
+    }
+  });
+
+  it("rejects unknown reasons", () => {
+    expect(
+      schema.safeParse({ domain: "pypi.org", request_access: true, reason: "sni_mismatch" })
+        .success,
+    ).toBe(false);
+  });
+});
+
 describe("thread.skill_updated (KOBE-315, CE12)", () => {
   const schema = EVENT_PAYLOAD_SCHEMAS["thread.skill_updated"];
   const change = { name: "xlsx", from: "1.4.2", to: "1.4.3" };

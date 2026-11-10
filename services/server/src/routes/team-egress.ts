@@ -2,11 +2,12 @@ import { injectedHeadersSchema } from "@kobe/db";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
-import { teamRoleAllows } from "../authz/permissions.js";
+import { siteRoleAllows, teamRoleAllows } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
 import { clearTeamDomainHeaders, setTeamDomainHeaders } from "../egress/header-store.js";
 import { deliverEgressRequestNotifications } from "../egress/request-notify.js";
-import { decideEgressRequest, listTeamEgressRequests } from "../egress/request-store.js";
+import { decideAndRespond } from "../egress/decision-http.js";
+import { listTeamEgressRequests } from "../egress/request-store.js";
 import { domainPatternSchema } from "../egress/schemas.js";
 import { disableTeamDomain, enableTeamDomain, listTeamEgress } from "../egress/team-store.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
@@ -145,35 +146,18 @@ export function teamEgressRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
     const id = z.uuid().safeParse(c.req.param("id"));
     const body = await parseBody(c, decisionBodySchema);
     if (!body) return invalidRequest(c, 'Send {"decision": "approve" | "deny"}.');
-    const teamId = c.get("team").id;
-    const result = id.success
-      ? await decideEgressRequest(db, {
-          teamId,
-          requestId: id.data,
-          adminId: c.get("user").id,
-          decision: body.decision,
-        })
-      : { kind: "not_found" as const };
-    if (result.kind === "not_in_ceiling") return notInCeiling(c);
-    if (result.kind === "not_found") {
+    if (!id.success) {
       return c.json({ code: "request_not_found", message: "That request does not exist." }, 404);
     }
-    if (result.kind === "already_decided") {
-      return c.json(
-        {
-          code: "already_decided",
-          message: `That request was already ${result.request.status}.`,
-          request: result.request,
-        },
-        409,
-      );
-    }
-    deps.background.run(
-      "egress request notification failed",
-      () => deliverEgressRequestNotifications(deps, teamId),
-      { team: teamId },
-    );
-    return c.json({ request: result.request, settled: result.settled, enabled: result.enabled });
+    // A team admin decides team-scope requests only (KOBE-602, EA2); a site admin who is also a
+    // team admin decides any, as from the card.
+    return decideAndRespond(c, deps, {
+      teamId: c.get("team").id,
+      requestId: id.data,
+      adminId: c.get("user").id,
+      decision: body.decision,
+      role: siteRoleAllows(c.get("siteRole"), "site.egress.manage") ? "site_admin" : "team_admin",
+    });
   });
 
   return app;
