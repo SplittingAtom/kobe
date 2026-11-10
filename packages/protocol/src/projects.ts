@@ -285,6 +285,23 @@ export const importProjectFileRequestSchema = z.strictObject({
 });
 export type ImportProjectFileRequest = z.infer<typeof importProjectFileRequestSchema>;
 
+/**
+ * `POST /v1/projects/from-folder` (KOBE-586, projects-in-conversations PF1-PF6) -> 201
+ * {@link projectSchema}: a folder of the caller's own My files becomes a new project they own,
+ * its files (sub-folders kept as paths) the project's first commit, then the folder leaves My
+ * files and the project mounts for the caller. `path` is resolved against the caller's synced
+ * manifest only (never `uploads/`, `projects/` or an internal path); `name` follows the project
+ * name rules and gives the slug. Rights: `team.projects.create` (team admins, contributors).
+ */
+export const promoteFolderRequestSchema = z.strictObject({
+  path: workspacePathSchema,
+  name: nameSchema,
+});
+export type PromoteFolderRequest = z.infer<typeof promoteFolderRequestSchema>;
+
+/** The first commit's message of a promoted folder (PF3). */
+export const promotedFolderMessage = (path: string): string => `Imported from My files/${path}`;
+
 // ----------------------------------------------------------------------------- REST: share and fork
 
 /**
