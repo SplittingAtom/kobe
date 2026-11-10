@@ -14,8 +14,8 @@ import { teams } from "./teams.js";
 export const DOMAIN_PATTERN_SQL =
   "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$";
 
-/** Preset groups (D28). The web-search provider's domain is added by KOBE-63 ("auto"). */
-export const EGRESS_PRESETS = ["package_registries", "git_hosts", "web_search"] as const;
+/** Preset groups (D28). `web_search` was dropped with the built-in web search (KOBE-606). */
+export const EGRESS_PRESETS = ["package_registries", "git_hosts"] as const;
 export type EgressPreset = (typeof EGRESS_PRESETS)[number];
 
 const patternCheck = (column: unknown) =>
