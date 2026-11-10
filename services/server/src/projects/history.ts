@@ -22,7 +22,7 @@ import {
 /**
  * CM7 history (KOBE-579): the commit list (newest first, paged by seq), one commit's tree and its
  * diff to its parent, a file at a commit, and the head as a zip (GV5). Readers may use all of it
- * (`view`); the routes check access first, so a restricted project answers 404 to non-members.
+ * (`view`, every workspace member, RV1); the routes check access first.
  */
 
 export async function historyPage(

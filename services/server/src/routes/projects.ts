@@ -129,8 +129,8 @@ function isSlugConflict(err: unknown): boolean {
  * `projectPermissions` through `projects/access.ts` (`decide`, `loadAccess`): contributors and team
  * admins create (and own what they create); readers view and converse; editors also upload and
  * remove files; owners manage the project and its people; team admins act as owners everywhere.
- * Anyone who may not view a project (a restricted one they are not listed in) gets 404, as if it
- * did not exist. Instructions are never written to the audit log.
+ * Every workspace member views every project of the workspace (RV1, KOBE-587); anyone outside
+ * the workspace gets 404, as if it did not exist. Instructions are never written to the audit log.
  */
 export function projectRoutes(
   deps: ServerDeps,
@@ -169,8 +169,7 @@ export function projectRoutes(
     const body = await parseBody(c, createProjectRequestSchema);
     if (!body)
       return invalidRequest(c, "Check the project fields (name, slug, instructions up to 8 KiB).");
-    if (!decide(c.get("team").role, undefined, "workspace").can.create)
-      return failure(c, "forbidden");
+    if (!decide(c.get("team").role, undefined).can.create) return failure(c, "forbidden");
     const viewer = viewerOf(c);
     try {
       return await withTeam(db, viewer.teamId, async (tx) => {
@@ -202,7 +201,7 @@ export function projectRoutes(
 
   /** PR5: projects whose only owner left the workspace, for team admins ("No owner: assign one"). */
   app.get("/no-owner", async (c) => {
-    if (!decide(c.get("team").role, undefined, "restricted").can.manage_members) {
+    if (!decide(c.get("team").role, undefined).can.manage_members) {
       return failure(c, "forbidden");
     }
     const query = listProjectsQuerySchema.safeParse(c.req.query());
@@ -225,16 +224,11 @@ export function projectRoutes(
   app.patch("/:id", async (c) => {
     const body = await parseBody(c, updateProjectRequestSchema);
     if (!body) return invalidRequest(c, "Check the project fields (instructions up to 8 KiB).");
-    const res = await withProject(c, "manage", async (tx, access) => {
+    return withProject(c, "manage", async (tx, access) => {
       const updated = await updateProject(tx, viewerOf(c), access, body);
       if (!updated.ok) return failure(c, updated.error);
       return c.json(await toProject(tx, access.project.teamId, updated.value.row, access.role));
     });
-    // A new visibility changes who the files are mounted for.
-    if (res.ok && body.visibility !== undefined) {
-      await deps.projectMounts.reconcileTeam(viewerOf(c).teamId);
-    }
-    return res;
   });
 
   app.delete("/:id", (c) =>
@@ -246,17 +240,17 @@ export function projectRoutes(
 
   app.get("/:id/members", (c) =>
     withProject(c, "view", async (tx, access) =>
-      c.json({
-        visibility: access.project.visibility,
-        members: await listMembers(tx, access.project.teamId, access.project.id),
-      }),
+      c.json({ members: await listMembers(tx, access.project.teamId, access.project.id) }),
     ),
   );
 
   app.post("/:id/members", async (c) => {
     const body = await parseBody(c, addProjectMemberRequestSchema);
     if (!body)
-      return invalidRequest(c, "Give user_id and optionally role (owner, editor or reader).");
+      return invalidRequest(
+        c,
+        "Give user_id and optionally role (owner or editor; every member already reads).",
+      );
     const res = await withProject(c, "manage_members", async (tx, access) => {
       const added = await addMember(tx, viewerOf(c), access.project.id, {
         userId: body.user_id,
@@ -283,11 +277,16 @@ export function projectRoutes(
   app.patch("/:id/members/:user_id", async (c) => {
     const body = await parseBody(c, updateProjectMemberRequestSchema);
     const user = memberParam(c);
-    if (!body || !user.success) return invalidRequest(c, "Give role (owner, editor or reader).");
+    if (!body || !user.success) {
+      return invalidRequest(
+        c,
+        "Give role (owner or editor). To make someone a reader, remove their row.",
+      );
+    }
     const res = await withProject(c, "manage_members", async (tx, access) => {
       const changed = await setMemberRole(tx, viewerOf(c), access, user.data, body.role);
       if (!changed.ok) return failure(c, changed.error);
-      // A reader no longer edits: their checkout ends (KOBE-579), the head comes back below.
+      // Owner and editor both edit; kept so a role that cannot edit always ends a checkout (KOBE-579).
       await endCheckoutsWithoutEditInTx(tx, viewerOf(c).teamId, user.data);
       return c.json(changed.value);
     });
@@ -305,8 +304,7 @@ export function projectRoutes(
       await endCheckoutsWithoutEditInTx(tx, viewerOf(c).teamId, user.data);
       return c.body(null, 204);
     });
-    // No longer a member (restricted) or still an implicit reader (workspace): the user's
-    // workspace is brought in line either way (MT2: a restricted project's mount goes).
+    // Still an implicit reader (RV1): the user's workspace is brought in line (a checkout ended).
     if (res.ok) await deps.projectMounts.reconcileUser(viewerOf(c).teamId, user.data);
     return res;
   });

@@ -12,8 +12,8 @@ import { endUserProjects } from "./projects/offboard.js";
 
 /**
  * KOBE-578 (Workspaces MT1-MT4, ac-2): a project is mounted into a member's workspace only while
- * they have a thread of their own in it that is not in Trash, or a checkout; restricted readers
- * lose it with their row; leaving the workspace unmounts everything and discards checkouts; a new
+ * they have a thread of their own in it that is not in Trash, or a checkout; every workspace member
+ * reads every project (KOBE-587), so losing a row or team admin keeps the mount; leaving the workspace unmounts everything and discards checkouts; a new
  * project conversation past the workspace cap is refused `too_many_mounts`.
  */
 const f = new RunFixture();
@@ -161,7 +161,7 @@ describe("losing access and leaving (MT2, MT4)", () => {
     expect(objects.objects.has(key)).toBe(true);
   });
 
-  it("a demoted team admin loses the mounts of restricted projects they are not listed in", async () => {
+  it("a demoted team admin keeps the mounts of projects they are not listed in (a reader, RV1)", async () => {
     const w = await f.world();
     const c = await contributor(w.team);
     const admin2 = await f.member(w.team);
@@ -169,24 +169,24 @@ describe("losing access and leaving (MT2, MT4)", () => {
       `UPDATE team_members SET role = 'team_admin' WHERE team_id = $1 AND user_id = $2`,
       [w.team, admin2.id],
     );
-    const p = await project(c, { name: "Admins only", visibility: "restricted" });
+    const p = await project(c, { name: "Admins too" });
     await thread(admin2, p.id);
     expect(await paths(w.team, admin2.id)).toEqual([p.path]);
     const res = await as(w.owner).patch(`/v1/team/members/${admin2.id}`, { role: "member" });
     expect(res.status, JSON.stringify(res.json)).toBe(200);
-    expect(await paths(w.team, admin2.id)).toEqual([]);
+    expect(await paths(w.team, admin2.id)).toEqual([p.path]);
   });
 
-  it("a reader of a restricted project loses the mount with their row", async () => {
+  it("an editor whose row is removed keeps the mount as a reader (RV1)", async () => {
     const w = await f.world();
     const c = await contributor(w.team);
     const r = await f.member(w.team);
-    const p = await project(c, { name: "Restricted", visibility: "restricted" });
-    await as(c).post(`/v1/projects/${p.id}/members`, { user_id: r.id, role: "reader" });
+    const p = await project(c, { name: "Demoted" });
+    await as(c).post(`/v1/projects/${p.id}/members`, { user_id: r.id, role: "editor" });
     await thread(r, p.id);
     expect(await paths(w.team, r.id)).toEqual([p.path]);
     expect((await as(c).delete(`/v1/projects/${p.id}/members/${r.id}`)).status).toBe(204);
-    expect(await paths(w.team, r.id)).toEqual([]);
+    expect(await paths(w.team, r.id)).toEqual([p.path]);
   });
 
   it("leaving the workspace unmounts everything, discards checkouts and drops project rows", async () => {
@@ -194,7 +194,7 @@ describe("losing access and leaving (MT2, MT4)", () => {
     const c = await contributor(w.team);
     const m = await f.member(w.team);
     const open = await project(c, { name: "Everyone" });
-    const closed = await project(c, { name: "Few", visibility: "restricted" });
+    const closed = await project(c, { name: "Few" });
     await as(c).post(`/v1/projects/${closed.id}/members`, { user_id: m.id, role: "editor" });
     await thread(m, open.id);
     await thread(m, closed.id);

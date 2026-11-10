@@ -188,8 +188,8 @@ describe("Edit as file (KOBE-485)", () => {
     expect((await editAsFile(w.b, id, 1)).status).toBe(404);
     const project = randomUUID();
     await fx.admin.query(
-      `INSERT INTO projects (team_id, id, slug, name, created_by, visibility)
-       VALUES ($1, $2, 'plan', 'Plan', $3, 'restricted')`,
+      `INSERT INTO projects (team_id, id, slug, name, created_by)
+       VALUES ($1, $2, 'plan', 'Plan', $3)`,
       [w.team, project, w.alice.id],
     );
     await fx.admin.query(

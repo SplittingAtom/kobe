@@ -14,8 +14,7 @@ import type { BlobStore } from "./blobs.js";
 /**
  * The export's projects (KOBE-579, Workspaces GV5). The retention export is member-scoped (the
  * caller's own threads in the active workspace; Kobe has no workspace-wide export), so it carries
- * every project the member may read (`viewableBy`: visibility `workspace`, an explicit row, or
- * any project for a team admin): its commit list (metadata only) and its head tree's files.
+ * every project the member may read (`viewableBy`: every project of the workspace, RV1): its commit list (metadata only) and its head tree's files.
  * History files stay in the product (`GET /v1/projects/{id}/commits/{seq}/files/…`). Object keys
  * are served only from the project's own tree.
  */

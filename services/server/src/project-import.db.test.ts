@@ -92,7 +92,6 @@ async function world(): Promise<World> {
   ) as World["as"];
   const created = await as.carol.post("/v1/projects", {
     name: `Launch ${randomBytes(2).toString("hex")}`,
-    visibility: "restricted",
     member_user_ids: [alice.id, bob.id, dave.id],
   });
   expect(created.status, JSON.stringify(created.json)).toBe(201);
@@ -251,23 +250,21 @@ describe("Add to project: artifacts (KOBE-585)", () => {
     expect(carol.status, JSON.stringify(carol.json)).toBe(201);
     const admin = await importInto(w.as.admin, w.project.id, fromArtifact(id, 1, { name: "a.md" }));
     expect(admin.status, JSON.stringify(admin.json)).toBe(201);
-    // Eve owns nothing here and is not in the selected project: it does not exist for her.
-    expect((await importInto(w.as.eve, w.project.id, fromArtifact(id, 1))).status).toBe(404);
+    // Eve has no row: an implicit reader (KOBE-587) reads the project but may not add.
+    expect((await importInto(w.as.eve, w.project.id, fromArtifact(id, 1))).status).toBe(403);
   });
 
-  it("refuses the content's owner who is not a project member", async () => {
+  it("refuses the content's owner who only reads the project", async () => {
     const w = await world();
     const id = await artifact(w, "Mine", ["# m"]);
-    // A team-wide project Alice is not an explicit member of, then made selected without her.
+    // A project Alice has no row in: she reads it (every member does, KOBE-587) but cannot add.
     const other = await w.as.carol.post("/v1/projects", {
       name: `Other ${randomBytes(2).toString("hex")}`,
-      visibility: "restricted",
       member_user_ids: [w.people.bob.id],
     });
     expect(other.status).toBe(201);
     const otherId = (other.json as { id: string }).id;
-    // A non-member never learns the project exists (404, as every project route).
-    expect((await importInto(w.as.alice, otherId, fromArtifact(id, 1))).status).toBe(404);
+    expect((await importInto(w.as.alice, otherId, fromArtifact(id, 1))).status).toBe(403);
     expect(await auditRows(w.team)).toEqual([]);
   });
 

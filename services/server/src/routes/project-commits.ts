@@ -121,8 +121,8 @@ function refusal(c: Ctx, r: Extract<CommitResult, { status: "refused" }>): Respo
 /**
  * Checkout, commit, update, discard, history and revert of a project (KOBE-579, Workspaces CM2-CM7;
  * contract `packages/protocol/src/project-commits.ts`), next to `routes/projects.ts` under
- * `/v1/projects`. Every route starts from `loadAccess`, so a restricted project answers 404 to
- * non-members; readers read history, editors check out, commit and revert; owners and team admins
+ * `/v1/projects`. Every route starts from `loadAccess` (every workspace member reads every project,
+ * RV1; anyone else gets 404); readers read history, editors check out, commit and revert; owners and team admins
  * see the working copies.
  */
 export function projectCommitRoutes(

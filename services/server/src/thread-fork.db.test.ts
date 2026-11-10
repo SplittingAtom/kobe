@@ -101,14 +101,13 @@ const HISTORY: readonly Entry[] = [
   message("a1b", "u1b", "assistant", "another first answer"),
 ];
 
-/** A team with a selected-mode project (author + reader) and a thread in it holding HISTORY. */
+/** A team with a project (author + an editor reader) and a thread in it holding HISTORY. */
 async function world() {
   const w = await f.world();
   const author = w.owner;
   const reader = await f.member(w.team);
   const project = await as(author).post("/v1/projects", {
     name: "Forks",
-    visibility: "restricted",
     member_user_ids: [reader.id],
   });
   expect(project.status, JSON.stringify(project.json)).toBe(201);
