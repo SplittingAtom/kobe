@@ -17,6 +17,9 @@ What a member can do today (on `main`):
 - **The agent proposes an edit for review** (`propose_file_edit`, KOBE-462/463). The proposal
   writes nothing. The member reviews an inline diff, accepts or rejects each change, then picks
   **Commit all** or **Discard all**.
+- **The agent proposes an edit to a project file, and accepting commits it** (KOBE-591/592).
+  In a conversation in a project the member can edit, `propose_file_edit` also takes the project's
+  files (section 3h); **Accept** commits the change, no checkout needed.
 - **The member edits and saves the file** in the editor's Raw mode. A save names the version it
   was based on, so a concurrent change is never overwritten.
 - **The agent commits to a project** (`commit_project`, KOBE-580). In a project the member has
@@ -344,8 +347,8 @@ scratchspace, where the owner's files do not exist. To hand an artifact or a wor
 people, its owner adds it to a project (KOBE-585). A project is mounted into a member's scratchspace
 at `projects/<slug>/`, read-only, while the member has a conversation in it or a checkout (the
 server-owned mount of `services/server/src/projects/mounts.ts`, at most 20 per member); the agent of
-any member's run can read it there. The Files panel lists mounted projects under Projects, apart
-from My files. A member who wants to change a project's file checks the project out (section 3g).
+any member's run can read it there. The Files panel lists every project of the workspace under
+Projects, apart from My files (section 3h). A member who wants to change a project's file checks the project out (section 3g).
 
 ```mermaid
 sequenceDiagram
@@ -420,6 +423,40 @@ agent unlocks it to 0664/0775 and workspace sync may push into it; the server ac
   `member_removed`, `access_lost`), `project.committed`, `project.commit_reverted` and
   `project.history_pruned` (see `docs/audit-log.md`). A member demoted to reader, or removed, loses
   their checkout.
+
+### 3h. Projects in conversations
+
+Every member of a workspace reads every project (KOBE-587): there is no restricted project any
+more. Explicit membership names only owners and editors; everyone else is a reader. Confidential
+work belongs in its own workspace or in the member's My files. Existing restricted projects became
+visible to the whole workspace when this shipped.
+
+- **New conversation in a project.** A conversation not started yet shows **New conversation in
+  &lt;Project&gt;** (KOBE-588). The project control beside it ("Project for this conversation", or
+  "Add to a project" when none is chosen) switches the project or removes it; nothing is mounted
+  until the first message is sent. New conversation clears the choice. "Open in a conversation"
+  and "New conversation in this project" start a draft in that project.
+- **The title.** A conversation in a project reads **&lt;Project&gt; / &lt;name&gt;** (KOBE-589), and
+  so does the browser tab. The project part opens a menu: Open project, Move to project…, Move out
+  of the project (the thread menu's move, offered from the title too).
+- **Files lists every project** (KOBE-590). The conversation's project is active (a green dot
+  labelled "Active in this conversation"); every other project is greyed ("Not in this
+  conversation") but keeps its role chip and "editing" mark, and expands read-only from its head
+  without being mounted. Dragging a file of an unmounted project onto the composer is refused until
+  a conversation starts in it. "Manage projects →" opens the projects page.
+- **Proposals commit** (KOBE-591, KOBE-592). In a conversation in a project, an editor's or owner's
+  agent may call `propose_file_edit` for a file of that project (existing or new) as well as for
+  files in My files. The card names the project and shows the diff against its head; **Accept**
+  commits it (`POST /v1/projects/:id/commits/from-proposal`; message = the agent's summary, editable
+  before Accept; author the member who accepted). If the file changed after the proposal the
+  answer is `proposal_stale` and the agent must propose again. A reader's agent is refused: "You can
+  read &lt;Project&gt; but not change it." Other projects and thread uploads stay read-only.
+- **Promote a folder** (KOBE-586). **Promote to project…** in a My files folder's ⋯ menu (team
+  admins and contributors) moves the folder into a new project you own, as its first commit, and
+  mounts it for you. A project made on the projects page is also mounted for its creator.
+
+Browser spec: `e2e/browser/tests/projects-in-conversations.spec.ts`. Design:
+`docs/specs/projects-in-conversations.md`.
 
 ### Where people and policy decide
 
