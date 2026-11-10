@@ -28,6 +28,12 @@ export function useDraftProjectState(): {
 export function useWorkspaceProjects(wanted: boolean): readonly Project[] | null {
   const session = useChatSession();
   const [projects, setProjects] = useState<readonly Project[] | null>(null);
+  // Read again when a project was made from this page (KOBE-586).
+  const version = useSyncExternalStore(
+    session.subscribeDraftProject,
+    () => session.projectsVersion,
+    () => 0,
+  );
   useEffect(() => {
     if (!wanted) return;
     let current = true;
@@ -40,7 +46,7 @@ export function useWorkspaceProjects(wanted: boolean): readonly Project[] | null
     return () => {
       current = false;
     };
-  }, [session, wanted]);
+  }, [session, wanted, version]);
   return projects;
 }
 

@@ -32,7 +32,11 @@ import {
   WorkspaceHeader,
 } from "./workspace-tree";
 import { ProjectWorkPanel, type ProjectRef, type WorkAction } from "../projects/project-work";
-import { isProjectFolder, projectSlugOf } from "../../lib/projects/workspace";
+import { isProjectFolder, projectSlugOf, PROJECTS_FOLDER } from "../../lib/projects/workspace";
+import { createProjectsApi, type Project } from "../../lib/projects/api";
+import { offersPromote } from "../../lib/projects/promote";
+import { useWorkspaceProjects } from "../projects/workspace-projects";
+import { PromoteDialog } from "./promote-dialog";
 import { useNavigate } from "../shell/use-navigate";
 
 const COPY_FAILED = {
@@ -73,13 +77,16 @@ function useWake(api: FilesApi, reload: () => void, refreshMs: number, key: numb
   return doneKey !== key;
 }
 
-type Dialog = { readonly kind: "delete" | "rename" | "move"; readonly entry: FileEntry } | null;
+type Dialog = {
+  readonly kind: "delete" | "rename" | "move" | "promote";
+  readonly entry: FileEntry;
+} | null;
 
 const where = (folder: string) => (folder === "" ? "My files" : folder);
 
 /**
  * A row's ⋯ menu (KOBE-292, KOBE-304): Open, Mention in message (files, KOBE-374), Download,
- * Rename, Move to…, Copy path, Delete.
+ * Rename, Move to…, Copy path, Promote to project… (a My files folder, KOBE-586), Delete.
  */
 function rowBindings(
   entry: FileEntry,
@@ -92,6 +99,8 @@ function rowBindings(
     readonly onMove: () => void;
     readonly onCopyPath: () => void;
     readonly onDelete: () => void;
+    /** Present only where the row offers it (PF1: a My files folder, team admins and contributors). */
+    readonly onPromote: (() => void) | undefined;
   },
 ): MenuBindings {
   const readOnly = isReadOnlyPath(entry.path, checkedOut);
@@ -111,6 +120,7 @@ function rowBindings(
       ? {}
       : { "rename-file": change(handlers.onRename), "move-file": change(handlers.onMove) }),
     "copy-file-path": { onSelect: handlers.onCopyPath },
+    ...(handlers.onPromote ? { "promote-to-project": change(handlers.onPromote) } : {}),
     ...(readOnly ? {} : { "delete-file": change(handlers.onDelete, true) }),
   };
 }
@@ -255,8 +265,17 @@ export function FileBrowser({
   activeProjectId = null,
   onNewConversationIn,
   onMoveHere,
+  canCreateProjects = false,
+  onPromoted,
 }: {
   readonly api: FilesApi;
+  /**
+   * The member may create projects (team admins, contributors): My files folders offer Promote to
+   * project… (KOBE-586, PF1). False: no such item.
+   */
+  readonly canCreateProjects?: boolean | undefined;
+  /** A folder became this project (PF6): the conversation's project control may offer it. */
+  readonly onPromoted?: ((project: ProjectRef) => void) | undefined;
   /** The project of the conversation on screen, or of the new one being drafted (FP2). */
   readonly activeProjectId?: string | null | undefined;
   /** "New conversation in this project" on a greyed project (FP4). Absent: no such item. */
@@ -306,6 +325,11 @@ export function FileBrowser({
     readonly action: WorkAction;
   } | null>(null);
   const navigate = useNavigate();
+  const workspaceProjects = useWorkspaceProjects();
+  const projectsApi = useMemo(
+    () => workspaceProjects?.projects ?? createProjectsApi(api.teamId),
+    [workspaceProjects?.projects, api.teamId],
+  );
   // Two trees report focus. Only the one holding the focus (DOM focus moved into it last) sets
   // the Upload target and the folder note; the other's reports are kept for when it is entered.
   const focusSource = useRef<"projects" | "mine">("mine");
@@ -434,6 +458,18 @@ export function FileBrowser({
     }
   };
 
+  /** PF6: the tree lists again and reveals the new project under Projects. */
+  const promoted = (entry: FileEntry, project: Project) => {
+    setDialog(null);
+    start();
+    setNotice(`Moved ${entry.name} into the new project ${project.name}`);
+    work.retry();
+    tree.reloadAll();
+    reveal(PROJECTS_FOLDER);
+    focusRow(`${PROJECTS_FOLDER}/${project.slug}`);
+    onPromoted?.({ id: project.id, name: project.name });
+  };
+
   // A file of a project that is not mounted is listed, not in the sandbox: it opens nowhere.
   const notMounted = (entry: FileEntry) => work.mentionRefusal(entry.path) !== undefined;
   const openHere = onOpenFile
@@ -464,6 +500,9 @@ export function FileBrowser({
             onMove: () => setDialog({ kind: "move", entry }),
             onCopyPath: () => copyPath(entry),
             onDelete: () => setDialog({ kind: "delete", entry }),
+            onPromote: offersPromote(entry, canCreateProjects)
+              ? () => setDialog({ kind: "promote", entry })
+              : undefined,
           }),
     onRename: (entry: FileEntry) => setDialog({ kind: "rename", entry }),
     onDelete: (entry: FileEntry) => setDialog({ kind: "delete", entry }),
@@ -616,6 +655,14 @@ export function FileBrowser({
           onRename={(name) =>
             void move(dialog.entry.path, joinPath(parentPath(dialog.entry.path), name), "Renamed")
           }
+          onCancel={() => closeDialog(dialog.entry)}
+        />
+      )}
+      {dialog?.kind === "promote" && (
+        <PromoteDialog
+          entry={dialog.entry}
+          api={projectsApi}
+          onDone={(project) => promoted(dialog.entry, project)}
           onCancel={() => closeDialog(dialog.entry)}
         />
       )}
