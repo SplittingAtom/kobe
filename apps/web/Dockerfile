@@ -23,6 +23,14 @@ RUN pnpm install --offline --frozen-lockfile \
 
 FROM ${NODE_IMAGE}
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=8080 HOSTNAME=0.0.0.0
+# Debian security fixes for the base image's own packages (apt, ...) before the pinned digest moves,
+# so a fixed CVE does not fail publish's Trivy gate; npm, npx and corepack go too: the app runs with
+# node only, and the bundled npm carried fixable HIGHs (undici, brace-expansion) (KOBE-539).
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && rm -rf /var/lib/apt/lists/* \
+ && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 WORKDIR /app
 COPY --from=build /repo/apps/web/.next/standalone ./
 COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static

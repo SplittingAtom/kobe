@@ -7,7 +7,8 @@
 ARG NODE_IMAGE=node:22-trixie-slim@sha256:8eb619e402eaede1748a3c8173bffab391592812e85136452f781741c7242ddf
 ARG PYTHON_IMAGE=python:3.12-slim-trixie@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
 ARG PNPM_VERSION=12.8.1
-ARG NPM_VERSION=12.2.1
+# 12.2.2 bundles undici 6.29.1 (12.2.1 had 6.29.0: three fixable HIGHs, KOBE-539).
+ARG NPM_VERSION=12.2.2
 # Init for PID 1 (reaps orphaned tool processes, forwards signals). MIT ("Expat").
 ARG TINI_VERSION=0.19.0-3+b8
 
@@ -65,7 +66,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/kobe
 
 # libpcre2-8-0 is already in the base image; naming it pulls the security fix (KOBE-474).
+# `apt-get upgrade` pulls Debian security fixes for the base image's own packages (apt, zlib1g,
+# libbrotli1, ...) before the pinned base digest moves, so a fixed CVE does not fail Trivy (KOBE-539).
 RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends \
       ca-certificates git curl jq ripgrep unzip zip file less procps libcap2-bin "tini=${TINI_VERSION}" \
       libpcre2-8-0 \
