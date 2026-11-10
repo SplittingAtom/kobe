@@ -9,6 +9,10 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
+- **Egress access lane (2026-11-10):** spec `docs/specs/egress-access.md` (EA1-EA4); KOBE-602 (db,
+  server), 603 (proxy, chart), 604 (card, consoles) committed; KOBE-605 adds
+  `e2e/browser/tests/egress-access.spec.ts`, the install/egress docs and the gate1 values
+  (`docs/ledger/KOBE-605.md`); the coordinator deploys and runs the spec.
 - **Projects in conversations at its gate (2026-11-10):** KOBE-587..593 and KOBE-586 merged in
   three waves (#510, #511, #512); gate1 upgraded to `local-4436e1af08aa` (backup
   `pre-projects-lane-2026-11-10.dump` kept, dry-run listed 2 archived restricted projects); the

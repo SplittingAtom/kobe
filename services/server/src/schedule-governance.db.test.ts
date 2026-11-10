@@ -507,7 +507,7 @@ describe("a failed deactivation step is finished by the scheduler's sweep (KOBE-
     await runner(NOW).tick();
     expect(await runStatus(runId)).toBe("cancelled");
     expect(await cancelAudit(runId)).toEqual([{ actor_kind: "system", reason: "member_removed" }]);
-    expect(causes.get(runId)).toBe("system_cancelled");
+    await expect.poll(() => causes.get(runId), { timeout: 10_000 }).toBe("system_cancelled");
     await runner(NOW).tick();
     expect(await cancelAudit(runId)).toHaveLength(1);
     expect(await scheduleAudit(id)).toHaveLength(1);
@@ -531,7 +531,7 @@ describe("a failed deactivation step is finished by the scheduler's sweep (KOBE-
     expect(await cancelAudit(runId)).toEqual([
       { actor_kind: "system", reason: "owner_deactivated" },
     ]);
-    expect(causes.get(runId)).toBe("system_cancelled");
+    await expect.poll(() => causes.get(runId), { timeout: 10_000 }).toBe("system_cancelled");
   });
 
   it("a user's own Stop is still user_cancelled", async () => {
@@ -539,7 +539,8 @@ describe("a failed deactivation step is finished by the scheduler's sweep (KOBE-
     const [runId] = (await fire([id])) as [string];
     const stopped = await as.carol.post(`/v1/runs/${runId}/cancel`);
     expect(stopped.status, JSON.stringify(stopped.json)).toBe(200);
-    expect(causes.get(runId)).toBe("user_cancelled");
+    // The orchestrator reports the transition from a background step after the response (#emit).
+    await expect.poll(() => causes.get(runId), { timeout: 10_000 }).toBe("user_cancelled");
   });
 });
 

@@ -33,6 +33,12 @@ export const egressDomains = pgTable(
     /** Preset group, or null for a domain a site admin added. */
     preset: text().$type<EgressPreset>(),
     inCeiling: boolean().notNull().default(false),
+    /**
+     * Same cluster (EA4, KOBE-602): a host this pattern matches may resolve to an address inside
+     * the install's configured internal targets (the cluster ingress), and only there. Site admins
+     * set it (console or the blocked card); every other host stays refused on internal addresses.
+     */
+    internal: boolean().notNull().default(false),
     note: text(),
     /** Null for presets seeded by the migration. */
     createdBy: uuid().references(() => users.id),

@@ -3538,7 +3538,9 @@ elif [[ -n "${KOBE_SANDBOX_IMAGE:-}" && "$(type -t chat_run)" == function && -n 
     $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node dist/cli/lifecycle.js "$1" \
       --team-id "$E2E_TEAM_ID" --user-id "$owner_id" 2>&1 | grep -E '^\{"(hibernated|woken)"' || true
   }
-  owner_lifecycle hibernate >/dev/null
+  # Must really hibernate (KOBE-563): an awake sandbox keeps its 900 s tokens and never sees a 404.
+  if owner_hibernate "token rotation"; then ok "the owner's sandbox is hibernated before the TTL change"
+  else fail "the owner's sandbox is hibernated before the TTL change"; fi
   if out=$($HELM upgrade kobe charts/kobe -n "$NS" --reuse-values --wait --timeout 5m \
       --set "server.sessionTokenTtlSeconds=$ROT_TTL" 2>&1); then ok "session tokens now live $ROT_TTL s (test install)"
   else fail "session tokens now live $ROT_TTL s (test install): $out"; fi

@@ -1,6 +1,6 @@
 import { verifyKeysFromEnv, type SessionVerifyKeys } from "@kobe/session-token";
 import { z } from "zod";
-import { validateCidrs } from "./address-policy.js";
+import { validateCidrs, validateInternalTargets } from "./address-policy.js";
 
 /**
  * Egress proxy configuration (spec D28), validated at startup: invalid env fails fast. The chart
@@ -42,8 +42,23 @@ const configSchema = z.object({
     .min(1, "KOBE_DATABASE_URL is required"),
   /** Destination ports a sandbox may CONNECT to (HTTPS only by default). */
   KOBE_EGRESS_ALLOWED_PORTS: list,
-  /** Internal targets explicitly allowed (CIDRs); still subject to the domain allowlist. */
+  /**
+   * Internal targets explicitly allowed for every allowlisted domain (CIDRs; the broader legacy
+   * option); still subject to the domain allowlist.
+   */
   KOBE_EGRESS_ALLOWED_INTERNAL_CIDRS: list,
+  /**
+   * Internal targets (CIDRs, the cluster ingress) reachable only by hosts whose ceiling pattern is
+   * marked internal (EA4, KOBE-603). Loopback, link-local and metadata stay refused even if listed;
+   * an entry starting in one of those ranges fails startup.
+   */
+  KOBE_EGRESS_INTERNAL_TARGETS: list.superRefine((cidrs, ctx) => {
+    try {
+      validateInternalTargets(cidrs);
+    } catch (err) {
+      ctx.addIssue({ code: "custom", message: (err as Error).message });
+    }
+  }),
   /** Cluster pod/Service CIDRs and other ranges to refuse beyond the built-in private ranges. */
   KOBE_EGRESS_DENIED_CIDRS: list,
   KOBE_EGRESS_MAX_CONNECTIONS_PER_SANDBOX: int(
@@ -104,6 +119,8 @@ export interface Config {
   readonly sessionVerifyKeys: SessionVerifyKeys;
   readonly allowedPorts: readonly number[];
   readonly allowedInternalCidrs: readonly string[];
+  /** Internal targets for hosts matched by an internal pattern only (EA4). */
+  readonly internalTargets: readonly string[];
   readonly deniedCidrs: readonly string[];
   readonly maxConnectionsPerSandbox: number;
   readonly maxConnections: number;
@@ -170,6 +187,7 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): C
     sessionVerifyKeys,
     allowedPorts,
     allowedInternalCidrs: c.KOBE_EGRESS_ALLOWED_INTERNAL_CIDRS,
+    internalTargets: c.KOBE_EGRESS_INTERNAL_TARGETS,
     deniedCidrs: c.KOBE_EGRESS_DENIED_CIDRS,
     maxConnectionsPerSandbox: c.KOBE_EGRESS_MAX_CONNECTIONS_PER_SANDBOX,
     maxConnections: c.KOBE_EGRESS_MAX_CONNECTIONS,

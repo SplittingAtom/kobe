@@ -360,7 +360,27 @@ egressProxy:
   allowedPorts: [443]
   # Internal targets sandboxes may reach (CIDRs), still only for allowlisted domains. Everything
   # private, loopback, link-local (cloud metadata) and reserved is refused unless listed here.
+  # The broader legacy option: these CIDRs open to EVERY allowlisted domain (any name that resolves
+  # there). For hosts served by this cluster's ingress prefer clusterIngress below, which opens its
+  # addresses only to ceiling patterns a site admin marks internal.
   allowedInternalCidrs: []
+  # Same-cluster hosts (EA4): names served by this cluster's own ingress resolve to its load
+  # balancer address, which the proxy refuses as internal. When enabled, a host matched by a
+  # ceiling pattern a site admin marked "Internal (same cluster)" may resolve to `addresses` (only
+  # those; loopback, link-local and cloud metadata never), every other host stays refused (DNS
+  # rebinding safe). Sets KOBE_EGRESS_INTERNAL_TARGETS and adds NetworkPolicy egress to the
+  # addresses (on allowedPorts) and to the ingress pods (on `ports`), since kube-proxy/servicelb
+  # DNATs the load balancer address to those pods.
+  clusterIngress:
+    enabled: false
+    # The ingress load balancer address(es), as CIDRs (e.g. 192.0.2.10/32).
+    addresses: []
+    # The ingress controller pods: a label selector, e.g. {matchLabels: {app.kubernetes.io/name: traefik}}.
+    podSelector: {}
+    # The ingress controller's namespace (matched by its kubernetes.io/metadata.name label).
+    namespace: ""
+    # The ports the ingress pods listen on after DNAT (e.g. Traefik's 8443), not the 443 sandboxes use.
+    ports: []
   # More ranges to refuse: your cluster's pod/Service CIDRs if they are not private addresses.
   # IPv4 entries are also excluded from the proxy's own NetworkPolicy.
   deniedCidrs: []

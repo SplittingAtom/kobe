@@ -1,6 +1,21 @@
-import { decideEgress, type EgressDecision } from "@kobe/db";
+import { decideEgress, type EgressDecision as SharedDecision } from "@kobe/db";
 
-export type { EgressDecision };
+/**
+ * The shared decision (@kobe/db), plus whether the matching (effective) pattern is marked internal
+ * (EA4, KOBE-603): only then may the host resolve to one of the install's internal targets.
+ * `internal` is present only when true.
+ */
+export type EgressDecision =
+  | (Extract<SharedDecision, { allowed: true }> & { readonly internal?: true })
+  | Extract<SharedDecision, { allowed: false }>;
+
+/** A ceiling row: its pattern and whether a site admin marked it internal; a bare string is not. */
+export type CeilingPattern = string | { readonly domain: string; readonly internal: boolean };
+
+interface Ceiling {
+  readonly patterns: ReadonlySet<string>;
+  readonly internal: ReadonlySet<string>;
+}
 
 /**
  * Per-team egress allowlists (spec D6, D28): effective(team) = team enablement ∩ site ceiling,
@@ -10,7 +25,7 @@ export type { EgressDecision };
  * repopulates the cache with what it read. Failures propagate: the proxy fails closed.
  */
 export interface EgressPolicySource {
-  loadCeiling(): Promise<readonly string[]>;
+  loadCeiling(): Promise<readonly CeilingPattern[]>;
   loadTeam(teamId: string): Promise<readonly string[]>;
   isActiveMember(teamId: string, userId: string): Promise<boolean>;
   /** The team's sealed injected headers per enabled pattern (KOBE-39); absent: none. */
@@ -32,7 +47,7 @@ interface Entry<T> {
 }
 
 export class AllowlistCache {
-  private ceiling: Entry<ReadonlySet<string>> | undefined;
+  private ceiling: Entry<Ceiling> | undefined;
   private readonly teams = new Map<string, Entry<ReadonlySet<string>>>();
   private readonly headerSets = new Map<string, Entry<ReadonlyMap<string, string>>>();
   private readonly members = new Map<string, Entry<boolean>>();
@@ -88,13 +103,13 @@ export class AllowlistCache {
   async decide(teamId: string, host: string): Promise<EgressDecision> {
     const [ceiling, team] = await Promise.all([this.getCeiling(), this.getTeam(teamId)]);
     // The shared decision (@kobe/db): the catalog's egress check uses the same one (KOBE-336).
-    return decideEgress(ceiling, team, host);
+    return withInternal(ceiling, decideEgress(ceiling.patterns, team, host));
   }
 
   /** A site job's decision (KOBE-343): the ceiling alone, by the same matching rules. */
   async decideSite(host: string): Promise<EgressDecision> {
     const ceiling = await this.getCeiling();
-    return decideEgress(ceiling, ceiling, host);
+    return withInternal(ceiling, decideEgress(ceiling.patterns, ceiling.patterns, host));
   }
 
   /**
@@ -127,14 +142,14 @@ export class AllowlistCache {
     );
   }
 
-  private getCeiling(): Promise<ReadonlySet<string>> {
+  private getCeiling(): Promise<Ceiling> {
     return this.cached(
       "ceiling",
       () => this.ceiling,
       (e) => {
         this.ceiling = e;
       },
-      async () => new Set(await this.source.loadCeiling()),
+      async () => ceilingOf(await this.source.loadCeiling()),
       this.ceilingGeneration(),
       this.ttl(),
     );
@@ -212,4 +227,24 @@ export class AllowlistCache {
     const [teamId = "", userId = ""] = key.split(":");
     return this.memberGeneration(teamId, userId);
   }
+}
+
+function ceilingOf(rows: readonly CeilingPattern[]): Ceiling {
+  const patterns = new Set<string>();
+  const internal = new Set<string>();
+  for (const row of rows) {
+    if (typeof row === "string") patterns.add(row);
+    else {
+      patterns.add(row.domain);
+      if (row.internal) internal.add(row.domain);
+    }
+  }
+  return { patterns, internal };
+}
+
+/** The matching pattern's internal flag: the pattern that decided, never a broader or narrower one. */
+function withInternal(ceiling: Ceiling, decision: SharedDecision): EgressDecision {
+  return decision.allowed && ceiling.internal.has(decision.pattern)
+    ? { ...decision, internal: true }
+    : decision;
 }

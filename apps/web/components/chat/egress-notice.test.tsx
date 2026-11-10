@@ -89,7 +89,7 @@ describe("EgressNotice (KOBE-39)", () => {
       />,
     );
     await userEvent.setup().click(await screen.findByRole("button", { name: /Request access/ }));
-    expect(fake.requestEgressAccess).toHaveBeenCalledWith("pypi.org", THREAD);
+    expect(fake.requestEgressAccess).toHaveBeenCalledWith("pypi.org", THREAD, undefined);
     expect(await screen.findByText(/your team admins were notified/)).toBeTruthy();
     fake.egressRequests.mockResolvedValue({
       ok: true,
@@ -166,5 +166,163 @@ describe("EgressNotice (KOBE-39)", () => {
       />,
     );
     expect(screen.queryByRole("button")).toBeNull();
+  });
+});
+
+type Viewer = { siteAdmin: boolean; teamAdmin: boolean; teamName: string };
+const SITE: Viewer = { siteAdmin: true, teamAdmin: false, teamName: "Team1" };
+const TEAM_ADMIN: Viewer = { siteAdmin: false, teamAdmin: true, teamName: "Team1" };
+const MEMBER: Viewer = { siteAdmin: false, teamAdmin: false, teamName: "Team1" };
+
+function adminApi(viewer: Viewer, existing: EgressRequest[] = []) {
+  return {
+    ...api(existing),
+    egressViewer: vi.fn(async () => ({ ok: true as const, status: 200, data: viewer })),
+    decideEgressRequest: vi.fn(async (_id: string, input: { pattern?: string | undefined }) => ({
+      ok: true as const,
+      status: 200,
+      data: {
+        request: request("approved"),
+        settled: 1,
+        enabled: true,
+        pattern: input.pattern ?? "a.example.com",
+        ceiling: "added" as const,
+        internal: false,
+      },
+    })),
+  };
+}
+
+const blocked = (reason: "not_enabled" | "not_in_ceiling" | "forbidden_address") => ({
+  domain: "a.example.com",
+  request_access: true,
+  reason,
+});
+
+describe("EgressNotice: request access for every block and decisions in the card (KOBE-604)", () => {
+  it.each([
+    ["not_enabled", /Your team admins can allow it/],
+    ["not_in_ceiling", /The site admins can allow it/],
+    ["forbidden_address", /The site admins can allow it/],
+  ] as const)("a member sees Request access and who decides for %s", async (reason, sentence) => {
+    const fake = adminApi(MEMBER);
+    render(<EgressNotice payload={blocked(reason)} api={fake} threadId={THREAD} />);
+    expect(await screen.findByRole("button", { name: /Request access/ })).toBeTruthy();
+    await waitFor(() => expect(fake.egressViewer).toHaveBeenCalled());
+    expect(screen.getByText(sentence)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
+    expect(screen.queryByRole("combobox")).toBeNull();
+    await userEvent.setup().click(screen.getByRole("button", { name: /Request access/ }));
+    expect(fake.requestEgressAccess).toHaveBeenCalledWith("a.example.com", THREAD, reason);
+  });
+
+  it("says the site admins were notified for a site-scope request", async () => {
+    const fake = adminApi(MEMBER, [{ ...request("pending"), scope: "site" }]);
+    render(<EgressNotice payload={blocked("not_in_ceiling")} api={fake} threadId={THREAD} />);
+    expect(await screen.findByText(/the site admins were notified/)).toBeTruthy();
+  });
+
+  it("a site admin approves an off-ceiling host: creates the request, then decides with the pattern", async () => {
+    const fake = adminApi(SITE);
+    render(<EgressNotice payload={blocked("not_in_ceiling")} api={fake} threadId={THREAD} />);
+    const user = userEvent.setup();
+    const select = await screen.findByRole("combobox", { name: /Allow/ });
+    expect([...(select as HTMLSelectElement).options].map((o) => o.value)).toEqual([
+      "a.example.com",
+      "*.example.com",
+    ]);
+    expect((select as HTMLSelectElement).value).toBe("a.example.com");
+    expect((screen.getByLabelText("Internal (same cluster)") as HTMLInputElement).checked).toBe(
+      false,
+    );
+    await user.selectOptions(select, "*.example.com");
+    await user.click(screen.getByLabelText("Internal (same cluster)"));
+    await user.click(screen.getByRole("button", { name: /Approve/ }));
+    expect(fake.requestEgressAccess).toHaveBeenCalledWith(
+      "a.example.com",
+      THREAD,
+      "not_in_ceiling",
+    );
+    expect(fake.decideEgressRequest).toHaveBeenCalledWith("r1", {
+      decision: "approve",
+      pattern: "*.example.com",
+      internal: true,
+    });
+    const status = await screen.findByText(
+      "Enabled *.example.com for Team1. Ask the agent to try again.",
+    );
+    expect(status).toBe(document.activeElement);
+    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
+  });
+
+  it("checks Internal by default for forbidden_address", async () => {
+    const fake = adminApi(SITE);
+    render(<EgressNotice payload={blocked("forbidden_address")} api={fake} threadId={THREAD} />);
+    const box = (await screen.findByLabelText("Internal (same cluster)")) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    await userEvent.setup().click(screen.getByRole("button", { name: /Approve/ }));
+    expect(fake.decideEgressRequest).toHaveBeenCalledWith("r1", {
+      decision: "approve",
+      internal: true,
+    });
+  });
+
+  it("decides the member's pending request and can deny it", async () => {
+    const pending = { ...request("pending"), domain: "a.example.com", pattern: "a.example.com" };
+    const fake = adminApi(SITE, [{ ...pending, scope: "site" }]);
+    render(<EgressNotice payload={blocked("not_in_ceiling")} api={fake} threadId={THREAD} />);
+    await userEvent.setup().click(await screen.findByRole("button", { name: /Deny/ }));
+    expect(fake.requestEgressAccess).not.toHaveBeenCalled();
+    expect(fake.decideEgressRequest).toHaveBeenCalledWith("r1", { decision: "deny" });
+    expect(await screen.findByText("Denied access to a.example.com for Team1.")).toBeTruthy();
+  });
+
+  it("offers a team admin Approve for a ceiling host, with no Internal box, defaulting to the ceiling pattern", async () => {
+    const pending = {
+      ...request("pending"),
+      domain: "a.example.com",
+      pattern: "*.example.com",
+      scope: "team" as const,
+    };
+    const fake = adminApi(TEAM_ADMIN, [pending]);
+    render(<EgressNotice payload={blocked("not_enabled")} api={fake} threadId={THREAD} />);
+    const select = (await screen.findByRole("combobox", { name: /Allow/ })) as HTMLSelectElement;
+    expect(select.value).toBe("*.example.com");
+    expect(screen.queryByLabelText("Internal (same cluster)")).toBeNull();
+    await userEvent.setup().click(screen.getByRole("button", { name: /Approve/ }));
+    expect(fake.decideEgressRequest).toHaveBeenCalledWith("r1", { decision: "approve" });
+  });
+
+  it("gives a team admin only Request access off the ceiling", async () => {
+    const fake = adminApi(TEAM_ADMIN);
+    render(<EgressNotice payload={blocked("not_in_ceiling")} api={fake} threadId={THREAD} />);
+    await waitFor(() => expect(fake.egressViewer).toHaveBeenCalled());
+    expect(await screen.findByRole("button", { name: /Request access/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
+  });
+
+  it("shows the server's refusal plainly and keeps the controls", async () => {
+    const fake = adminApi(SITE);
+    fake.decideEgressRequest.mockResolvedValueOnce({
+      ok: false,
+      error: { status: 422, code: "invalid_pattern", message: "That pattern is a public suffix." },
+    } as never);
+    render(<EgressNotice payload={blocked("not_in_ceiling")} api={fake} threadId={THREAD} />);
+    await userEvent.setup().click(await screen.findByRole("button", { name: /Approve/ }));
+    expect(await screen.findByText("That pattern is a public suffix.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Approve/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Deny/ })).toBeTruthy();
+  });
+
+  it("shows the error when the admin's own request cannot be created", async () => {
+    const fake = adminApi(SITE);
+    fake.requestEgressAccess.mockResolvedValueOnce({
+      ok: false,
+      error: { status: 429, code: "too_many_requests", message: "Slow down." },
+    } as never);
+    render(<EgressNotice payload={blocked("not_in_ceiling")} api={fake} threadId={THREAD} />);
+    await userEvent.setup().click(await screen.findByRole("button", { name: /Approve/ }));
+    expect(await screen.findByText("Slow down.")).toBeTruthy();
+    expect(fake.decideEgressRequest).not.toHaveBeenCalled();
   });
 });

@@ -574,6 +574,11 @@ export const AUDIT_EVENTS = {
   "egress.ceiling.changed": event("site", { domain: egressDomain, inCeiling: z.boolean() }),
   /** A custom domain was deleted; every team's enablement of it went with it. */
   "egress.ceiling.removed": event("site", { domain: egressDomain }),
+  /** A ceiling pattern was marked internal (same cluster, EA4) or no longer (KOBE-602). */
+  "egress.ceiling.internal_changed": event("site", {
+    domain: egressDomain,
+    internal: z.boolean(),
+  }),
   "egress.domain.enabled": event("team", { domain: egressDomain }),
   /** `headersRemoved`: the domain's injected headers (KOBE-39) were deleted with it. */
   "egress.domain.disabled": event("team", {
@@ -583,6 +588,8 @@ export const AUDIT_EVENTS = {
   /**
    * Request access (KOBE-39, D28): a member asked the team's admins to enable `pattern` after a
    * blocked request to `domain` (thread metadata only: the thread id; never a URL or prompt).
+   * `scope` (KOBE-602, EA1): `team` (in the ceiling: team admins notified) or `site` (outside it,
+   * or an internal address: site admins notified); `internal`: the block was an internal address.
    */
   "egress.request.created": event("team", {
     requestId: id,
@@ -590,15 +597,25 @@ export const AUDIT_EVENTS = {
     pattern: egressDomain,
     threadId: id.optional(),
     notified: count,
+    scope: z.enum(["team", "site"]).optional(),
+    internal: z.literal(true).optional(),
   }),
-  /** A team admin approved (enabled the pattern) or denied it; `requests` pending ones settled. */
+  /**
+   * A team or site admin approved (enabled the pattern) or denied it; `requests` pending ones
+   * settled. KOBE-602: `by` says which role decided; a site admin's approval may name another
+   * `pattern` than the request's (`requested`) and add it to the ceiling (the ceiling events go
+   * with it); `internal` when it marked the pattern internal.
+   */
   "egress.request.decided": event("team", {
     requestId: id,
     pattern: egressDomain,
+    requested: egressDomain.optional(),
     decision: z.enum(["approved", "denied"]),
     requests: z.number().int().positive(),
     /** Approved and the pattern was not enabled yet (an `egress.domain.enabled` row goes with it). */
     enabled: z.boolean(),
+    by: z.enum(["team_admin", "site_admin"]).optional(),
+    internal: z.literal(true).optional(),
   }),
   /** Header injection (KOBE-39) set or replaced for an enabled domain: names only, never values. */
   "egress.header.set": event("team", {

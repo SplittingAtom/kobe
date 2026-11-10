@@ -3,12 +3,15 @@ import {
   eq,
   egressRequestNotifications,
   egressRequests,
+  inArray,
+  siteRoles,
   sql,
   teamMembers,
   teams,
   users,
   withTeam,
   type EgressRequestEvent,
+  type EgressRequestScope,
   type KobeDb,
 } from "@kobe/db";
 import type { ServerDeps } from "../deps.js";
@@ -48,6 +51,8 @@ interface Detail {
   readonly pattern: string;
   readonly threadId: string | null;
   readonly requester: string;
+  /** `site`: outside the ceiling or an internal address, the site admins decide (KOBE-602). */
+  readonly scope: EgressRequestScope;
 }
 
 export function requestMessage(
@@ -58,6 +63,19 @@ export function requestMessage(
 ): MailMessage {
   const team = oneLine(detail.team);
   const requester = oneLine(detail.requester);
+  if (event === "requested" && detail.scope === "site") {
+    return {
+      to,
+      subject: `Access request: ${detail.pattern} for the ${team} team (site ceiling)`,
+      text: [
+        `${requester} asked to allow ${detail.pattern} for the ${team} team's sandboxes on Kobe.`,
+        `A request to ${detail.domain} was blocked: it is outside the site's egress ceiling or resolved to an internal address, so a site admin decides.`,
+        ...(detail.threadId ? [`Thread: ${detail.threadId}`] : []),
+        "",
+        `Approve or deny it in the site console: ${publicUrl}${CONSOLE_PATHS.siteEgress}`,
+      ].join("\n"),
+    };
+  }
   if (event === "requested") {
     return {
       to,
@@ -79,8 +97,8 @@ export function requestMessage(
       : `Your request for ${detail.pattern} was denied`,
     text: [
       approved
-        ? `A team admin enabled ${detail.pattern} for the ${team} team's sandboxes. Retry what was blocked.`
-        : `A team admin denied your request to enable ${detail.pattern} for the ${team} team.`,
+        ? `An admin enabled ${detail.pattern} for the ${team} team's sandboxes. Retry what was blocked.`
+        : `An admin denied your request to enable ${detail.pattern} for the ${team} team.`,
       ...(detail.threadId ? [`Thread: ${detail.threadId}`] : []),
     ].join("\n"),
   };
@@ -155,6 +173,7 @@ async function detailOf(
         domain: egressRequests.domain,
         pattern: egressRequests.pattern,
         threadId: egressRequests.threadId,
+        scope: egressRequests.scope,
         requester: users.name,
         team: teams.name,
       })
@@ -166,7 +185,22 @@ async function detailOf(
   });
 }
 
-async function stillEntitled(db: KobeDb, teamId: string, row: Claimed): Promise<boolean> {
+async function stillEntitled(
+  db: KobeDb,
+  teamId: string,
+  row: Claimed,
+  scope: EgressRequestScope,
+): Promise<boolean> {
+  if (row.event === "requested" && scope === "site") {
+    // Site-scope requests go to the site admins, members of the team or not (KOBE-602, EA1).
+    const [admin] = await db
+      .select({ role: siteRoles.role })
+      .from(siteRoles)
+      .where(
+        and(eq(siteRoles.userId, row.recipient_id), inArray(siteRoles.role, ["owner", "admin"])),
+      );
+    return admin !== undefined;
+  }
   return withTeam(db, teamId, async (tx) => {
     const [member] = await tx
       .select({ role: teamMembers.role })
@@ -195,8 +229,8 @@ export async function deliverEgressRequestNotifications(
         await settle(db, teamId, row, "skipped", "recipient_inactive");
         continue;
       }
-      // Still entitled at delivery: admins for a new request, members for a decision.
-      if (!(await stillEntitled(db, teamId, row))) {
+      // Still entitled at delivery: deciders for a new request, members for a decision.
+      if (!(await stillEntitled(db, teamId, row, detail.scope))) {
         await settle(db, teamId, row, "skipped", "recipient_not_entitled");
         continue;
       }

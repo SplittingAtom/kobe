@@ -38,7 +38,11 @@ import type {
   ApprovalDecisionBody,
   ApprovalView,
   RememberOptions,
+  EgressDecisionInput,
+  EgressDecisionResult,
+  EgressBlockedReason,
   EgressRequest,
+  EgressViewer,
   EntryPage,
   PendingMessages,
   RunnableAgent,
@@ -305,6 +309,7 @@ export interface ChatApi {
   requestEgressAccess(
     domain: string,
     threadId: string | undefined,
+    reason?: EgressBlockedReason,
   ): Promise<ApiResult<{ readonly request: EgressRequest }>>;
   /** The artifacts of a thread (`GET /v1/artifacts?thread_id=`, KOBE-55), to reopen them. */
   listArtifacts(
@@ -355,6 +360,17 @@ export interface ChatApi {
   egressRequests(
     domain: string,
   ): Promise<ApiResult<{ readonly requests: readonly EgressRequest[] }>>;
+  /**
+   * Decide a request from the blocked card (`POST /v1/egress/requests/:id/decision`): a site admin
+   * any request (with a chosen pattern and `internal`), a team admin a team-scope one. The server
+   * decides who may; 403/409/422 come back as plain errors.
+   */
+  decideEgressRequest(
+    id: string,
+    input: EgressDecisionInput,
+  ): Promise<ApiResult<EgressDecisionResult>>;
+  /** Whether the viewer is a site or team admin (`/v1/me`, `/v1/team`): shows buttons only. */
+  egressViewer(): Promise<ApiResult<EgressViewer>>;
 }
 
 /** Where a fork ends and what it is called (CE16); both optional. */
@@ -510,10 +526,11 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     toolOutput: (id, entryId) => get(`/v1/threads/${enc(id)}/entries/${enc(entryId)}/output`),
     budgetStatus: () => get("/v1/team/budgets/status"),
     getApproval: (id) => get(`/v1/approvals/${enc(id)}`),
-    requestEgressAccess: (domain, threadId) =>
+    requestEgressAccess: (domain, threadId, reason) =>
       send("POST", "/v1/egress/requests", {
         domain,
         ...(threadId === undefined ? {} : { thread_id: threadId }),
+        ...(reason === undefined ? {} : { reason }),
       }),
     listArtifacts: (threadId) => get(`/v1/artifacts${query({ thread_id: threadId })}`),
     getArtifact: (id) => get(`/v1/artifacts/${enc(id)}`),
@@ -555,6 +572,28 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     undoMemory: (docId, action) =>
       action.action === "restore" ? memory.restore(docId, action.version) : memory.remove(docId),
     egressRequests: (domain) => get(`/v1/egress/requests${query({ domain })}`),
+    decideEgressRequest: (id, input) =>
+      send("POST", `/v1/egress/requests/${enc(id)}/decision`, {
+        decision: input.decision,
+        ...(input.pattern === undefined ? {} : { pattern: input.pattern }),
+        ...(input.internal === undefined ? {} : { internal: input.internal }),
+      }),
+    egressViewer: async () => {
+      const [me, team] = await Promise.all([
+        get<{ siteRole: "owner" | "admin" | null }>("/v1/me"),
+        get<{ team: { name: string }; permissions: readonly string[] }>("/v1/team"),
+      ]);
+      if (!me.ok) return me;
+      if (!team.ok) return team;
+      return {
+        ...team,
+        data: {
+          siteAdmin: me.data.siteRole === "owner" || me.data.siteRole === "admin",
+          teamAdmin: team.data.permissions.includes("team.egress.manage"),
+          teamName: team.data.team.name,
+        },
+      };
+    },
     decideApproval: (id, body) =>
       send("POST", `/v1/approvals/${enc(id)}`, {
         decision: body.decision,

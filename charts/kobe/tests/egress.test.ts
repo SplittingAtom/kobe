@@ -184,6 +184,94 @@ describe("egress proxy NetworkPolicy", () => {
   });
 });
 
+describe("same-cluster hosts: clusterIngress (EA4, KOBE-603)", () => {
+  const INGRESS = {
+    enabled: true,
+    addresses: ["192.0.2.10/32"],
+    podSelector: { matchLabels: { "app.kubernetes.io/name": "traefik" } },
+    namespace: "kube-system",
+    ports: [8443],
+  };
+  const internalTargets = (ms: Manifest[]) =>
+    proxyEnv(ms).find((e) => e.name === "KOBE_EGRESS_INTERNAL_TARGETS")?.value;
+  const configOf = (ms: Manifest[]) =>
+    loadConfig({
+      ...Object.fromEntries(
+        proxyEnv(ms)
+          .filter((e) => e.value !== undefined)
+          .map((e) => [e.name, e.value]),
+      ),
+      KOBE_DATABASE_URL: "postgres://x",
+      KOBE_SESSION_VERIFY_KEY_EGRESS_PROXY: PUBLIC_PEM,
+    });
+
+  it("is off by default: no internal targets and no rule to any ingress pod", () => {
+    const ms = render();
+    expect(internalTargets(ms)).toBe("");
+    expect(configOf(ms).internalTargets).toEqual([]);
+    const rules = policy(ms)?.egress as any[];
+    expect(rules.some((r) => r.to?.some((p: any) => p.ipBlock?.cidr === "192.0.2.10/32"))).toBe(
+      false,
+    );
+    expect(
+      rules.filter((r) =>
+        r.to?.some(
+          (p: any) =>
+            p.namespaceSelector && p.podSelector && !p.podSelector.matchLabels?.["k8s-app"],
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("sets the proxy's internal targets (accepted by its config) and leaves allowedInternalCidrs alone", () => {
+    const ms = render({}, { "egressProxy.clusterIngress": INGRESS });
+    expect(internalTargets(ms)).toBe("192.0.2.10/32");
+    const config = configOf(ms);
+    expect(config.internalTargets).toEqual(["192.0.2.10/32"]);
+    expect(config.allowedInternalCidrs).toEqual([]);
+  });
+
+  it("adds egress to the addresses on the allowed ports and to the ingress pods on their ports", () => {
+    const ms = render(
+      {},
+      {
+        "egressProxy.clusterIngress": { ...INGRESS, addresses: ["192.0.2.10/32", "192.0.2.11/32"] },
+      },
+    );
+    const spec = policy(ms);
+    expect(spec?.egress).toContainEqual({
+      to: [{ ipBlock: { cidr: "192.0.2.10/32" } }, { ipBlock: { cidr: "192.0.2.11/32" } }],
+      ports: [{ protocol: "TCP", port: 443 }],
+    });
+    expect(spec?.egress).toContainEqual({
+      to: [
+        {
+          namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "kube-system" } },
+          podSelector: { matchLabels: { "app.kubernetes.io/name": "traefik" } },
+        },
+      ],
+      ports: [{ protocol: "TCP", port: 8443 }],
+    });
+    // The internet rule keeps refusing private ranges; the addresses get a rule of their own.
+    const internet = spec?.egress.find((r: any) => r.to?.[0]?.ipBlock?.cidr === "0.0.0.0/0");
+    expect(internet.to[0].ipBlock.except).toContain("192.0.0.0/24");
+    expect(spec?.egress.every((r: any) => Array.isArray(r.ports) && r.ports.length > 0)).toBe(true);
+  });
+
+  it("refuses to render when enabled without addresses, namespace, pods or ports", () => {
+    for (const missing of ["addresses", "namespace", "podSelector", "ports"] as const) {
+      const empty = { addresses: [], namespace: "", podSelector: {}, ports: [] }[missing];
+      expect(
+        () => render({}, { "egressProxy.clusterIngress": { ...INGRESS, [missing]: empty } }),
+        missing,
+      ).toThrow();
+    }
+    expect(() =>
+      render({}, { "egressProxy.clusterIngress": { ...INGRESS, addresses: ["not-a-cidr"] } }),
+    ).toThrow();
+  });
+});
+
 describe("sandbox side", () => {
   it("team namespaces send sandboxes to the proxy pods on 8080 (server config)", () => {
     const server = find(render(), "Deployment", "kobe-server")?.spec.template.spec.containers[0];

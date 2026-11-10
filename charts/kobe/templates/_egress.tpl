@@ -6,13 +6,28 @@ predates these keys still renders. Keep in sync with values.yaml.
 {{- $defaults := dict
   "allowedPorts" (list 443)
   "allowedInternalCidrs" (list)
+  "clusterIngress" (dict "enabled" false "addresses" (list) "podSelector" (dict) "namespace" "" "ports" (list))
   "deniedCidrs" (list)
   "auditFlushSeconds" 60
   "headerSecret" ""
   "upgrade" (dict "maxRequestBytes" 104857600 "maxResponseBytes" 2147483648 "timeoutSeconds" 600)
   "limits" (dict "connectionsPerSandbox" 64 "connections" 4096 "bandwidthBytesPerSecond" 20971520 "idleTimeoutSeconds" 300 "maxTunnelSeconds" 3600 "unauthenticatedPerSource" 16 "unauthenticated" 1024)
   "networkPolicy" (dict "restrictEgress" true "databasePeers" (list) "databasePort" 5432 "extraEgress" (list)) -}}
-{{- mustMergeOverwrite $defaults (deepCopy (.Values.egressProxy | default dict)) | toJson -}}
+{{- $e := mustMergeOverwrite $defaults (deepCopy (.Values.egressProxy | default dict)) -}}
+{{- with $e.clusterIngress }}
+{{- if .enabled }}
+{{- if or (empty .addresses) (empty .namespace) (empty .ports) (empty .podSelector) }}
+{{- fail "egressProxy.clusterIngress.enabled needs addresses, namespace, podSelector and ports" }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- $e | toJson -}}
+{{- end -}}
+
+{{/* Internal targets for internal patterns only (EA4): the cluster ingress addresses when enabled. */}}
+{{- define "kobe.egressInternalTargets" -}}
+{{- $e := include "kobe.egressProxyValues" . | fromJson -}}
+{{- if $e.clusterIngress.enabled }}{{ join "," $e.clusterIngress.addresses }}{{ end -}}
 {{- end -}}
 
 {{/* Secret sealing the teams' injected egress header values (KOBE-39): server and proxy only. */}}
@@ -53,6 +68,8 @@ session-token public key only (never a private key, never the other audiences', 
   value: {{ join "," $e.allowedPorts | quote }}
 - name: KOBE_EGRESS_ALLOWED_INTERNAL_CIDRS
   value: {{ join "," $e.allowedInternalCidrs | quote }}
+- name: KOBE_EGRESS_INTERNAL_TARGETS
+  value: {{ include "kobe.egressInternalTargets" . | quote }}
 - name: KOBE_EGRESS_DENIED_CIDRS
   value: {{ join "," $e.deniedCidrs | quote }}
 - name: KOBE_EGRESS_MAX_CONNECTIONS_PER_SANDBOX

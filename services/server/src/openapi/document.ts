@@ -8,6 +8,7 @@ import { brandingOpenApiPaths, brandingOpenApiSchemas } from "./branding.js";
 import { compactOpenApiPaths, compactOpenApiSchemas } from "./compact.js";
 import { branchSummaryOpenApiPaths, branchSummaryOpenApiSchemas } from "./branch-summary.js";
 import { contextOpenApiPaths, contextOpenApiSchemas } from "./context.js";
+import { egressAccessOpenApiPaths, egressAccessOpenApiSchemas } from "./egress-access.js";
 import { evalCasesOpenApiPaths, evalCasesOpenApiSchemas } from "./eval-cases.js";
 import { feedbackOpenApiPaths, feedbackOpenApiSchemas } from "./feedback.js";
 import { markersOpenApiPaths, markersOpenApiSchemas } from "./markers.js";
@@ -56,6 +57,7 @@ export function openApiDocument(): Record<string, unknown> {
       ...agentOwnershipOpenApiPaths(),
       ...projectCommitsOpenApiPaths(),
       ...teamDefaultAgentOpenApiPaths(),
+      ...egressAccessOpenApiPaths(),
     },
     components: {
       schemas: {
@@ -76,6 +78,7 @@ export function openApiDocument(): Record<string, unknown> {
         ...agentRosterOpenApiSchemas(),
         ...projectCommitsOpenApiSchemas(),
         ...teamDefaultAgentOpenApiSchemas(),
+        ...egressAccessOpenApiSchemas(),
       },
       securitySchemes: {
         session: { type: "apiKey", in: "cookie", name: "better-auth.session_token" },

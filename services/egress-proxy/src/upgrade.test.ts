@@ -367,6 +367,10 @@ describe("upgrade (plain HTTP → verified HTTPS with the team's headers)", () =
     expect(res.status).toBe(403);
     expect(res.message).toMatch(/internal address/);
     expect(connectCalls).toEqual([]);
+    // EA4: a site admin can mark the host's pattern internal (Request access).
+    expect(blocked).toMatchObject([
+      { domain: "internal.example.com", reason: "forbidden_address", requestAccess: true },
+    ]);
   });
 
   it("asks for the token (407) and refuses ports, IP literals and URL credentials", async () => {

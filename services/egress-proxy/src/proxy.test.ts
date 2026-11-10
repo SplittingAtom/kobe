@@ -259,12 +259,12 @@ describe("default deny", () => {
     expect(resolveCalls).toEqual([]);
   });
 
-  it("blocks a domain outside the site ceiling without offering request access", async () => {
+  it("blocks a domain outside the site ceiling and offers request access to site admins (EA1)", async () => {
     const { head } = await openConnect("example.org:443", auth());
     expect(status(head)).toMatch(
       /403 Kobe egress blocked: example.org is not allowed on this site/,
     );
-    expect(blocked[0]).toMatchObject({ reason: "not_in_ceiling", requestAccess: false });
+    expect(blocked[0]).toMatchObject({ reason: "not_in_ceiling", requestAccess: true });
   });
 
   it("refuses IP literals, other ports and junk targets before any lookup", async () => {
@@ -315,6 +315,8 @@ describe("internal addresses (SSRF, DNS rebinding)", () => {
     expect(blocked[0]).toMatchObject({
       reason: "forbidden_address",
       domain: "internal.example.com",
+      // EA4: a site admin can mark the host's pattern internal.
+      requestAccess: true,
     });
   });
 
@@ -341,6 +343,179 @@ describe("internal addresses (SSRF, DNS rebinding)", () => {
     } finally {
       ENABLED.delete("nxdomain.example.com");
     }
+  });
+});
+
+describe("internal patterns and internal targets (EA4, KOBE-603)", () => {
+  // Documentation ranges stand in for the cluster ingress (IPv4 and IPv6 ULA).
+  const TARGETS = ["192.0.2.10/32", "fd12:3456::/48"];
+  let internalPatterns: Set<string>;
+  let dns: Record<string, string[]>;
+
+  async function startInternal(addresses = new AddressPolicy({ internalTargets: TARGETS })) {
+    internalPatterns = new Set(["*.apps.example.test", "allowed.example.com"]);
+    dns = {
+      "loan.apps.example.test": ["192.0.2.10"],
+      "allowed.example.com": ["192.0.2.10"],
+      "plain.example.com": ["192.0.2.10"],
+    };
+    const decide = async (_team: string, host: string): Promise<EgressDecision> => {
+      const pattern = host.endsWith(".apps.example.test") ? "*.apps.example.test" : host;
+      if (!["*.apps.example.test", "allowed.example.com", "plain.example.com"].includes(pattern))
+        return { allowed: false, reason: "not_in_ceiling" };
+      return internalPatterns.has(pattern)
+        ? { allowed: true, pattern, internal: true }
+        : { allowed: true, pattern };
+    };
+    await start({
+      policy: { ...deps.policy, decide, decideSite: (host) => decide("", host) },
+      addresses,
+      resolve: async (host) => {
+        resolveCalls.push(host);
+        const found = dns[host];
+        if (!found) throw new Error("NXDOMAIN");
+        return found;
+      },
+      // Every checked address is played by the local upstream; the call records which one.
+      connectUpstream: (address, port, timeoutMs) => {
+        connectCalls.push(`${address}:${port}`);
+        return tcpConnect("127.0.0.1", upstreamPort, timeoutMs);
+      },
+    });
+  }
+
+  it("connects a host of an internal pattern that resolves to an internal target", async () => {
+    await startInternal();
+    const { socket, head } = await openConnect("loan.apps.example.test:443", auth());
+    expect(status(head)).toBe("HTTP/1.1 200 Connection Established");
+    expect(resolveCalls).toEqual(["loan.apps.example.test"]);
+    expect(connectCalls).toEqual(["192.0.2.10:443"]);
+    expect(blocked).toEqual([]);
+    socket.destroy();
+  });
+
+  it("refuses the same address for a host whose pattern is not internal (request access offered)", async () => {
+    await startInternal();
+    const { head } = await openConnect("plain.example.com:443", basic(THREAD, token()));
+    expect(status(head)).toMatch(
+      /403 Kobe egress blocked: plain.example.com resolves to an internal/,
+    );
+    expect(head).toContain("Request access");
+    expect(connectCalls).toEqual([]);
+    expect(blocked).toEqual([
+      {
+        teamId: TEAM,
+        userId: USER,
+        sandboxId: SANDBOX,
+        domain: "plain.example.com",
+        port: 443,
+        reason: "forbidden_address",
+        requestAccess: true,
+        threadHint: THREAD,
+      },
+    ]);
+  });
+
+  it("accepts mixed global and internal-target addresses for an internal pattern only", async () => {
+    await startInternal();
+    dns["loan.apps.example.test"] = ["1.1.1.1", "192.0.2.10"];
+    dns["plain.example.com"] = ["1.1.1.1", "192.0.2.10"];
+    const ok = await openConnect("loan.apps.example.test:443", auth());
+    expect(status(ok.head)).toBe("HTTP/1.1 200 Connection Established");
+    expect(connectCalls).toEqual(["1.1.1.1:443"]);
+    ok.socket.destroy();
+    connectCalls.length = 0;
+    const refused = await openConnect("plain.example.com:443", auth());
+    expect(status(refused.head)).toMatch(/^HTTP\/1.1 403 /);
+    expect(connectCalls).toEqual([]);
+  });
+
+  it("refuses an internal pattern's host when any address is outside the targets", async () => {
+    await startInternal();
+    for (const addresses of [
+      ["192.0.2.10", "10.0.0.1"],
+      ["192.0.2.11"],
+      ["172.16.5.4"],
+      ["fd12:3457::1"],
+      ["192.0.2.10", "fc00::1"],
+    ]) {
+      dns["loan.apps.example.test"] = addresses;
+      const { head } = await openConnect("loan.apps.example.test:443", auth());
+      expect(status(head), addresses.join()).toMatch(/^HTTP\/1.1 403 .*internal address/);
+      expect(audit.at(-1)).toMatchObject({ outcome: "blocked", reason: "forbidden_address" });
+    }
+    expect(connectCalls).toEqual([]);
+  });
+
+  it("reaches IPv6 internal targets for an internal pattern", async () => {
+    await startInternal();
+    dns["loan.apps.example.test"] = ["fd12:3456::10"];
+    const { socket, head } = await openConnect("loan.apps.example.test:443", auth());
+    expect(status(head)).toBe("HTTP/1.1 200 Connection Established");
+    expect(connectCalls).toEqual(["fd12:3456::10:443"]);
+    socket.destroy();
+  });
+
+  it("refuses metadata, loopback and link-local always, even when the targets cover them", async () => {
+    await startInternal(
+      new AddressPolicy({
+        internalTargets: ["192.0.2.0/24", "127.0.0.0/8", "169.254.0.0/16", "fe80::/10", "::/0"],
+      }),
+    );
+    for (const address of [
+      "169.254.169.254",
+      "127.0.0.1",
+      "fe80::1",
+      "::1",
+      "fd00:ec2::254",
+      "::ffff:127.0.0.1",
+      "::ffff:169.254.169.254",
+    ]) {
+      dns["loan.apps.example.test"] = ["192.0.2.10", address];
+      const { head } = await openConnect("loan.apps.example.test:443", auth());
+      expect(status(head), address).toMatch(/^HTTP\/1.1 403 .*internal address/);
+    }
+    expect(connectCalls).toEqual([]);
+  });
+
+  it("checks once and connects to the checked address (no second lookup)", async () => {
+    await startInternal();
+    const { socket, head } = await openConnect("loan.apps.example.test:443", auth());
+    expect(status(head)).toBe("HTTP/1.1 200 Connection Established");
+    expect(resolveCalls).toEqual(["loan.apps.example.test"]);
+    expect(connectCalls).toEqual(["192.0.2.10:443"]);
+    socket.destroy();
+  });
+
+  it("closes an open tunnel to an internal target once its pattern is no longer internal", async () => {
+    await startInternal();
+    const tunnels = new TunnelRegistry(deps.policy, deps.logger);
+    await start({ ...deps, tunnels });
+    const opened = await openConnect("allowed.example.com:443", auth());
+    expect(status(opened.head)).toBe("HTTP/1.1 200 Connection Established");
+    opened.socket.write(hello);
+    await readExactly(opened.socket, hello.length);
+    expect(await tunnels.recheck({ kind: "ceiling" })).toBe(0);
+    internalPatterns.delete("allowed.example.com");
+    expect(await tunnels.recheck({ kind: "ceiling" })).toBe(1);
+    await once(opened.socket, "close");
+    await settle();
+  });
+
+  it("keeps a tunnel to a global address open when the pattern stops being internal", async () => {
+    await startInternal();
+    dns["allowed.example.com"] = ["1.1.1.1"];
+    const tunnels = new TunnelRegistry(deps.policy, deps.logger);
+    await start({ ...deps, tunnels });
+    const opened = await openConnect("allowed.example.com:443", auth());
+    expect(status(opened.head)).toBe("HTTP/1.1 200 Connection Established");
+    opened.socket.write(hello);
+    await readExactly(opened.socket, hello.length);
+    internalPatterns.delete("allowed.example.com");
+    expect(await tunnels.recheck({ kind: "ceiling" })).toBe(0);
+    opened.socket.end();
+    await once(opened.socket, "close");
+    await settle();
   });
 });
 

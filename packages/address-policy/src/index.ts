@@ -48,11 +48,52 @@ export const DEFAULT_DENIED_CIDRS: readonly string[] = [
   "ff00::/8",
 ];
 
+/**
+ * Never reachable through an internal target (EA4, KOBE-603), even when the operator lists a range
+ * that covers them: unspecified, loopback, link-local (incl. the 169.254.169.254 metadata endpoint
+ * and AWS's IPv6 one, fd00:ec2::254), Alibaba's metadata address, multicast and broadcast, and the
+ * IPv6 ranges that embed an IPv4 address (an internal target is matched per family, so an embedded
+ * loopback or metadata address must not slip through an IPv6 target).
+ */
+export const ALWAYS_DENIED_CIDRS: readonly string[] = [
+  // IPv4
+  "0.0.0.0/8",
+  "127.0.0.0/8",
+  "169.254.0.0/16",
+  "100.100.100.200/32",
+  "224.0.0.0/4",
+  "255.255.255.255/32",
+  // IPv6
+  "::/96", // unspecified, loopback and IPv4-compatible
+  "::1/128",
+  "::ffff:0:0/96",
+  "64:ff9b::/96",
+  "64:ff9b:1::/48",
+  "2002::/16",
+  "fd00:ec2::254/128",
+  "fe80::/10",
+  "fec0::/10",
+  "ff00::/8",
+];
+
 export interface AddressPolicyOptions {
-  /** Internal targets an operator explicitly allows (still subject to the domain allowlist). */
+  /**
+   * Internal targets an operator explicitly allows for every allowlisted domain (the broader,
+   * install-wide option; still subject to the domain allowlist).
+   */
   readonly allowedInternal?: readonly string[];
+  /**
+   * Internal targets reachable only by hosts whose allowlist pattern is marked internal (EA4: the
+   * cluster ingress). Addresses in `ALWAYS_DENIED_CIDRS` stay refused even when listed.
+   */
+  readonly internalTargets?: readonly string[];
   /** More ranges to refuse (cluster pod/Service CIDRs, node networks). */
   readonly extraDenied?: readonly string[];
+}
+
+export interface AddressCheckOptions {
+  /** The host matched an allowlist pattern marked internal: `internalTargets` are reachable. */
+  readonly internal?: boolean;
 }
 
 export type AddressVerdict = "allowed" | "forbidden";
@@ -91,26 +132,64 @@ export function validateCidrs(cidrs: readonly string[]): void {
   for (const c of cidrs) parseCidr(c);
 }
 
+const ALWAYS_DENIED = blockListOf(ALWAYS_DENIED_CIDRS);
+
+function isAlwaysDenied(address: string): boolean {
+  const type = isIP(address) === 6 ? "ipv6" : "ipv4";
+  return ALWAYS_DENIED[type].check(address, type);
+}
+
+/**
+ * Validates the internal target list (config, fail fast): every entry a CIDR, none whose network
+ * address is always refused (`0.0.0.0/0`, `::/0`, loopback, link-local or metadata entries are
+ * configuration mistakes, not targets).
+ */
+export function validateInternalTargets(cidrs: readonly string[]): void {
+  for (const c of cidrs) {
+    const { address } = parseCidr(c);
+    if (isAlwaysDenied(address)) {
+      throw new Error(
+        `CIDR ${JSON.stringify(c)} starts in a range that is never reachable (loopback, link-local, metadata, unspecified or IPv4-embedding)`,
+      );
+    }
+  }
+}
+
 export class AddressPolicy {
   private readonly denied: FamilyLists;
   private readonly allowed: FamilyLists;
+  private readonly internalTargets: FamilyLists;
 
   constructor(options: AddressPolicyOptions = {}) {
     this.denied = blockListOf([...DEFAULT_DENIED_CIDRS, ...(options.extraDenied ?? [])]);
     this.allowed = blockListOf(options.allowedInternal ?? []);
+    this.internalTargets = blockListOf(options.internalTargets ?? []);
   }
 
-  check(address: string): AddressVerdict {
+  /**
+   * An address is allowed when it is an operator's install-wide internal target, or global (not in
+   * any denied range), or (only for a host matched by an internal pattern) inside the internal
+   * targets and not in `ALWAYS_DENIED_CIDRS`.
+   */
+  check(address: string, options: AddressCheckOptions = {}): AddressVerdict {
     const family = isIP(address);
     if (family === 0) return "forbidden";
     const type = family === 6 ? "ipv6" : "ipv4";
     if (this.allowed[type].check(address, type)) return "allowed";
-    return this.denied[type].check(address, type) ? "forbidden" : "allowed";
+    if (!this.denied[type].check(address, type)) return "allowed";
+    if (
+      options.internal === true &&
+      this.internalTargets[type].check(address, type) &&
+      !isAlwaysDenied(address)
+    ) {
+      return "allowed";
+    }
+    return "forbidden";
   }
 
   /** All addresses allowed (an empty list is not). One forbidden address refuses the whole name. */
-  checkAll(addresses: readonly string[]): AddressVerdict {
+  checkAll(addresses: readonly string[], options: AddressCheckOptions = {}): AddressVerdict {
     if (addresses.length === 0) return "forbidden";
-    return addresses.every((a) => this.check(a) === "allowed") ? "allowed" : "forbidden";
+    return addresses.every((a) => this.check(a, options) === "allowed") ? "allowed" : "forbidden";
   }
 }

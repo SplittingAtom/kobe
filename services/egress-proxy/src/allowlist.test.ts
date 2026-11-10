@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { AllowlistCache, type EgressPolicySource } from "./allowlist.js";
+import { AllowlistCache, type CeilingPattern, type EgressPolicySource } from "./allowlist.js";
 
 const TEAM = "0b5e8f1c-2d3a-4b5c-8d9e-0f1a2b3c4d5e";
 const OTHER = "1c6f9a2d-3e4b-4c6d-9eaf-1a2b3c4d5e6f";
 
-function setup(initial: { ceiling: string[]; teams: Record<string, string[]> }) {
+function setup(initial: { ceiling: CeilingPattern[]; teams: Record<string, string[]> }) {
   const state = { ...initial, members: new Set<string>([`${TEAM}:u1`]) };
   const source = {
     loadCeiling: vi.fn(async () => [...state.ceiling]),
@@ -175,5 +175,60 @@ describe("AllowlistCache.decideSite (KOBE-343)", () => {
     state.ceiling = [];
     cache.invalidateCeiling();
     expect((await cache.decideSite("git.example.org")).allowed).toBe(false);
+  });
+});
+
+describe("internal patterns (EA4, KOBE-603)", () => {
+  const ceiling: CeilingPattern[] = [
+    { domain: "*.apps.example.test", internal: true },
+    { domain: "loan.apps.example.test", internal: false },
+    { domain: "pypi.org", internal: false },
+    { domain: "intranet.example.test", internal: true },
+  ];
+
+  it("marks a decision internal only when its matching (effective) pattern is internal", async () => {
+    const { cache } = setup({
+      ceiling,
+      teams: { [TEAM]: ["*.apps.example.test", "loan.apps.example.test", "pypi.org"] },
+    });
+    expect(await cache.decide(TEAM, "calc.apps.example.test")).toEqual({
+      allowed: true,
+      pattern: "*.apps.example.test",
+      internal: true,
+    });
+    // The exact pattern decides (most specific first), and it is not internal.
+    expect(await cache.decide(TEAM, "loan.apps.example.test")).toEqual({
+      allowed: true,
+      pattern: "loan.apps.example.test",
+    });
+    expect(await cache.decide(TEAM, "pypi.org")).toEqual({ allowed: true, pattern: "pypi.org" });
+    // Internal in the ceiling but not enabled: a refusal carries no flag.
+    expect(await cache.decide(TEAM, "intranet.example.test")).toEqual({
+      allowed: false,
+      reason: "not_enabled",
+    });
+  });
+
+  it("applies to site jobs by the same rule, and follows ceiling changes", async () => {
+    const { cache, state } = setup({ ceiling, teams: {} });
+    expect(await cache.decideSite("intranet.example.test")).toEqual({
+      allowed: true,
+      pattern: "intranet.example.test",
+      internal: true,
+    });
+    state.ceiling = [{ domain: "intranet.example.test", internal: false }];
+    cache.invalidateCeiling();
+    expect(await cache.decideSite("intranet.example.test")).toEqual({
+      allowed: true,
+      pattern: "intranet.example.test",
+    });
+  });
+
+  it("reads a bare string row as a pattern that is not internal", async () => {
+    const { cache } = setup({ ceiling: ["intranet.example.test"], teams: {} });
+    expect(await cache.decideSite("intranet.example.test")).toEqual({
+      allowed: true,
+      pattern: "intranet.example.test",
+    });
   });
 });

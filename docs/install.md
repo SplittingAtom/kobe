@@ -282,6 +282,9 @@ equal the CONNECT host. It never decrypts traffic. Plain HTTP and other ports ar
   NetworkPolicy only lets it reach public addresses, a peer in `egressProxy.networkPolicy.extraEgress`
   (for an in-cluster Service: a `namespaceSelector`/`podSelector` for its pods; NetworkPolicy
   matches pods after Service translation). The domain must still be in the ceiling and enabled.
+  `allowedInternalCidrs` is install-wide: every allowlisted host may then reach those ranges. For
+  hosts served by this cluster's own ingress use `clusterIngress` (see [Same-cluster
+  hosts](#same-cluster-hosts-internal)).
 - **External Postgres:** the proxy reads allowlists and writes its connection log as the app role.
   Set `egressProxy.networkPolicy.databasePeers` (an `ipBlock` or selector for your database) so its
   NetworkPolicy reaches only the database on `databasePort`; when empty it may reach any address on
@@ -321,16 +324,54 @@ equal the CONNECT host. It never decrypts traffic. Plain HTTP and other ports ar
 
 ### Request access
 
-When the proxy blocks a domain that is in the ceiling, the chat shows the notice with **Request
-access** (D28: no user self-allow). It notifies the team's admins by email (the requester's name,
-the blocked host, the ceiling pattern that would allow it, and the thread id; never a URL or the
-conversation) and lists the request in Team console → Egress → Access requests. **Approve** enables
-that pattern for the team (still only within the ceiling; if it left the ceiling the approval is
-refused and the request stays open) and settles everyone's pending requests for it; **Deny**
-settles them too. Requesters are emailed the decision and the chat notice shows it. A member may
-have 20 open requests and make 10 per hour. Everything is audited (`egress.request.created`,
-`egress.request.decided`, `egress.domain.enabled`). Domains outside the ceiling offer no request:
-only a site admin can add them.
+Every block a request can fix offers **Request access** in the chat notice (D28: no user
+self-allow). The sentence names who decides:
+
+- **Host in the ceiling, not enabled for the team:** the team's admins decide. They are emailed
+  (requester, blocked host, ceiling pattern, thread id; never a URL or the conversation) and the
+  request is listed in Team console → Egress → Access requests.
+- **Host outside the ceiling, or a name that resolves to an internal address:** the **site admins**
+  decide. Every active site admin and the Owner is emailed, and the request is listed in Site
+  console → Egress → Access requests (with its team).
+
+A **site admin can approve from the card** (or the Site console): one step adds the pattern to the
+ceiling and enables it for the requesting team. A **team admin can approve from the card** a request
+whose pattern is already in the ceiling (team enablement only). Both can deny; everyone else only
+asks, and the server checks the role whatever the page shows. The approver picks the **pattern**:
+the exact host (default) or a parent wildcard of it (`*.parent`, never broader than the host's own
+parents, never a public suffix, at least two labels after `*.`). Approving or denying settles every
+pending request the pattern covers in that team. The requester sees the decision in the card ("Enabled
+...; ask the agent to try again") and by email. A member may have 20 open requests and make 10 per
+hour. Audited: `egress.request.created` (with scope), `egress.request.decided`,
+`egress.ceiling.*`, `egress.domain.enabled`.
+
+### Same-cluster hosts (Internal)
+
+A name served by this cluster's own ingress (an app published next to Kobe) resolves to the load
+balancer address, which the proxy refuses as internal even when allowlisted. Allow it per domain:
+
+1. A site admin marks the ceiling pattern **Internal (same cluster)** (checkbox in the card when
+   approving a `forbidden_address` block, or in Site console → Egress, per row).
+2. The chart opens only the ingress addresses, and only to such patterns:
+
+```yaml
+egressProxy:
+  clusterIngress:
+    enabled: true
+    addresses: [192.0.2.10/32] # the ingress load balancer address
+    namespace: kube-system # the ingress controller's namespace
+    podSelector:
+      matchLabels: { app.kubernetes.io/name: traefik } # k3s Traefik
+    ports: [8443] # Traefik's pod port after servicelb/kube-proxy DNAT (not 443)
+```
+
+This sets `KOBE_EGRESS_INTERNAL_TARGETS` and adds NetworkPolicy egress to the addresses (on
+`allowedPorts`) and to the ingress pods (on `ports`). Enabled without all four fields, the chart
+refuses to render. A host matched by an internal pattern may resolve only to global addresses or
+those targets; any other allowlisted host that resolves to a private address stays blocked (DNS
+rebinding safe), and loopback, link-local and cloud metadata are refused always. Clearing the flag
+closes open tunnels that used it. `egressProxy.allowedInternalCidrs` still works but is broader
+(every allowlisted host may reach those ranges); prefer `clusterIngress` for the cluster's own apps.
 
 ### Header injection
 
@@ -828,6 +869,14 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Egress access from the conversation (KOBE-602..605).** Migration `0203_egress_access` adds
+  `egress_domains.internal` and `egress_requests.scope` / `internal` (existing requests become team
+  scope; nothing else changes). Request access is now offered for every block: off-ceiling hosts go
+  to the site admins, who can approve from the card. New chart setting `egressProxy.clusterIngress`
+  (off by default; see [Same-cluster hosts](#same-cluster-hosts-internal)). Note
+  `egressProxy.allowedInternalCidrs` is broader than `clusterIngress`: it lets every allowlisted host
+  reach those ranges; consider replacing it. Deploy server, web and egress-proxy together, since an
+  older server refuses requests a newer card offers.
 - **Restricted projects removed (KOBE-587).** Every workspace member now reads every project of
   the workspace: migration `0202_restricted_removal` makes restricted projects readable by all,
   drops `projects.visibility` and deletes explicit `reader` rows (owners and editors stay).
