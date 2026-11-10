@@ -37,6 +37,7 @@ import {
   AnswerFeedbackScope,
 } from "./answer-feedback";
 import { MessageFooter } from "./message-footer";
+import { AnswerBlockedNotices } from "./answer-blocked";
 import { ForkAction } from "./fork-dialog";
 import { ContinueAction, useDimmed } from "./continue-from";
 import { RegenerateWith } from "./regenerate-with";
@@ -321,6 +322,7 @@ function AnswerMessage({ meta }: { readonly meta: KobeMessageMeta | undefined })
               </span>
             )}
           </AnswerParts>
+          <AnswerBlockedNotices />
           <div className="ms-2 flex min-h-7.5 items-center gap-2 pe-2 pt-1.5">
             <ActionBarPrimitive.Root
               hideWhenRunning

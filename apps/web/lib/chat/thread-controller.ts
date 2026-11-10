@@ -168,6 +168,12 @@ export class ThreadController {
     return id === null ? null : this.#api.threadUsage(id);
   };
 
+  /** The thread's stored blocked-egress notices (KOBE-605); null for a draft. */
+  readonly threadEgressBlocked = () => {
+    const id = this.#state.threadId;
+    return id === null ? null : this.#api.threadEgressBlocked(id);
+  };
+
   /** The context of this thread's latest model call (KOBE-471); null for a draft. */
   readonly threadContext = () => {
     const id = this.#state.threadId;
