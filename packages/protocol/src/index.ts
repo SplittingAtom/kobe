@@ -15,6 +15,7 @@ export * from "./web-search.js";
 export * from "./uploads.js";
 export * from "./files.js";
 export * from "./workspace-changes.js";
+export * from "./workspace-events.js";
 export * from "./skill-draft-tool.js";
 export * from "./file-editor.js";
 export * from "./sync-conflicts.js";

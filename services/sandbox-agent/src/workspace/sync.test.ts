@@ -290,6 +290,49 @@ describe("workspace sync (agent)", () => {
     expect(server.content("late.txt")).toBe("written just before hibernation");
   });
 
+  it("syncs now on request: a file written just before is on the server when it resolves (KOBE-599)", async () => {
+    const root = await volume();
+    const sync = await started(root);
+    await put(root, "fresh.txt", "written seconds ago");
+    await expect(sync.syncNow()).resolves.toBe(true);
+    expect(server.content("fresh.txt")).toBe("written seconds ago");
+    // Nothing new: still answered (true), nothing pushed.
+    await expect(sync.syncNow()).resolves.toBe(true);
+  });
+
+  it("shares one queued push between requests, and a request during a push waits for the next (KOBE-599)", async () => {
+    const root = await volume();
+    const sync = await started(root);
+    await put(root, "a.txt", "a");
+    const first = sync.syncNow();
+    const same = sync.syncNow();
+    expect(same).toBe(first); // not started yet: shared
+    await put(root, "b.txt", "b");
+    await Promise.resolve();
+    const [one, two] = await Promise.all([first, same]);
+    expect([one, two]).toEqual([true, true]);
+    expect(server.content("a.txt")).toBe("a");
+    // While a push runs, a new request gets its own push, which starts after it.
+    const running = sync.syncNow();
+    await new Promise((r) => setTimeout(r, 0));
+    await put(root, "c.txt", "c");
+    const after = sync.syncNow();
+    expect(after).not.toBe(running);
+    await expect(after).resolves.toBe(true);
+    expect(server.content("c.txt")).toBe("c");
+  });
+
+  it("answers false when sync is stopped or the push fails (KOBE-599)", async () => {
+    const root = await volume();
+    const sync = await started(root);
+    await put(root, "x.txt", "x");
+    server.failWith = 500;
+    await expect(sync.syncNow()).resolves.toBe(false);
+    server.failWith = undefined;
+    await sync.flush(5_000);
+    await expect(sync.syncNow()).resolves.toBe(false);
+  });
+
   it("lets a restore in flight finish before the flush returns: nothing is written after it", async () => {
     const root = await volume();
     let release = () => {};

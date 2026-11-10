@@ -18,6 +18,7 @@ import {
   CAPABILITY_SESSION_RENEW,
   CAPABILITY_SKILL_EVAL,
   CAPABILITY_WORKSPACE_MOVES,
+  CAPABILITY_WORKSPACE_SYNC_NOW,
   CAPABILITY_THREAD_CONTEXT,
   CAPABILITY_SYNC_CONFLICTS,
   KOBE_EVENT_DROPPED_TYPE,
@@ -142,6 +143,12 @@ export interface WorkspaceHooks {
    * renames now. Present: the agent announces `workspace_moves`.
    */
   movedOnServer?(): void;
+  /**
+   * Push every local change now and resolve whether it committed (`workspace.sync_now`,
+   * KOBE-599: the Files panel's Refresh). Never rejects. Present: the agent announces
+   * `workspace_sync_now`.
+   */
+  syncNow?(): Promise<boolean>;
   /**
    * Hear about conflict copies the sync makes (KOBE-492). Present (with kobe-tools, which tells
    * the model): the agent announces `sync_conflicts` and reports each one to the server.
@@ -509,6 +516,18 @@ export class Agent {
    * `share_file` needs the tools channel (fd 4) and workspace sync (push-then-share): without
    * either this agent neither registers the tool nor announces `files`.
    */
+  /**
+   * `workspace.sync_now` (KOBE-599): push now, then answer `workspace.synced` with the same id.
+   * An answer that cannot be sent (the connection dropped) is lost; the server's wait is bounded.
+   */
+  #syncNow(requestId: string): void {
+    const hooks = this.#deps.workspace;
+    const pushed = hooks?.syncNow ? hooks.syncNow() : Promise.resolve(false);
+    void pushed.then((ok) => {
+      this.#wire.send({ v: 1, type: "workspace.synced", request_id: requestId, ok });
+    });
+  }
+
   #filesEnabled(): boolean {
     return this.#deps.toolsExtension !== undefined && this.#deps.workspace?.pushPath !== undefined;
   }
@@ -584,6 +603,8 @@ export class Agent {
       CAPABILITY_SESSION_RENEW,
       // Server moves replayed as local renames (KOBE-304).
       ...(this.#deps.workspace?.movedOnServer === undefined ? [] : [CAPABILITY_WORKSPACE_MOVES]),
+      // Refresh in the Files panel pushes now and says when it is done (KOBE-599).
+      ...(this.#deps.workspace?.syncNow === undefined ? [] : [CAPABILITY_WORKSPACE_SYNC_NOW]),
       // Sync conflict copies reported, and the model told (KOBE-492).
       ...(this.#syncConflictsEnabled() ? [CAPABILITY_SYNC_CONFLICTS] : []),
       // The latest model call's context for its owner (KOBE-470): read from Pi's capture or the
@@ -711,6 +732,9 @@ export class Agent {
         return;
       case "workspace.moved":
         this.#deps.workspace?.movedOnServer?.();
+        return;
+      case "workspace.sync_now":
+        this.#syncNow(frame.request_id);
         return;
       case "workspace.conflict_note":
         void this.#threads.conflictNote(frame).then((told) => {
