@@ -46,8 +46,8 @@ export function useSkillOfToolCall(toolCallId: string): SkillMarker | undefined 
   return lookup(useMarkerData(), useWhere(), toolCallId);
 }
 
-/** "Used skill: <name>" on an answer, once per skill its steps loaded. */
-export function UsedSkills() {
+/** The skills an answer's steps loaded, once each ("name semver"). */
+export function useUsedSkills(): readonly string[] {
   const data = useMarkerData();
   const where = useWhere();
   const ids = useAuiState((s) =>
@@ -55,8 +55,8 @@ export function UsedSkills() {
       .flatMap((part) => (part.type === "tool-call" ? [part.toolCallId] : []))
       .join("\u0000"),
   );
-  if (ids === "" || data.skills.size === 0) return null;
-  const names = [
+  if (ids === "" || data.skills.size === 0) return NO_SKILLS;
+  return [
     ...new Set(
       ids.split("\u0000").flatMap((id) => {
         const skill = lookup(data, where, id);
@@ -64,6 +64,12 @@ export function UsedSkills() {
       }),
     ),
   ];
+}
+
+const NO_SKILLS: readonly string[] = [];
+
+/** "Used skill: <name>" on an answer, once per skill its steps loaded. */
+export function UsedSkills({ names }: { readonly names: readonly string[] }) {
   if (names.length === 0) return null;
   return (
     <ul

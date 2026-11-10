@@ -449,29 +449,33 @@ function approvalLabel(approval: ApprovalMarker): { label: string; icon: LucideI
 /** A tool card followed by its approval's outcome, when it needed one. */
 export function withApprovalMarker(Card: (props: ToolCallMessagePartProps) => ReactNode) {
   return function ToolCallWithMarker(props: ToolCallMessagePartProps) {
-    const prompt = useAuiState((s) => {
-      const meta = s.message.metadata.custom as KobeMessageMeta | undefined;
-      return meta?.kind === "assistant" ? meta.promptEntryId : undefined;
-    });
-    const approval = useContext(MarkersContext).approvals.get(
-      approvalKey(prompt, props.toolCallId),
-    );
-    const shown = approval ? approvalLabel(approval) : undefined;
     return (
       <>
         <Card {...props} />
-        {shown && (
-          <MarkerRow
-            kind="approval"
-            icon={shown.icon}
-            tone={approval?.status === "allowed" ? undefined : "warn"}
-          >
-            {shown.label}
-          </MarkerRow>
-        )}
+        <ApprovalMarkerRow toolCallId={props.toolCallId} />
       </>
     );
   };
+}
+
+/** A tool call's approval row (allowed, denied, timed out), if it had one. */
+export function ApprovalMarkerRow({ toolCallId }: { readonly toolCallId: string }) {
+  const prompt = useAuiState((s) => {
+    const meta = s.message.metadata.custom as KobeMessageMeta | undefined;
+    return meta?.kind === "assistant" ? meta.promptEntryId : undefined;
+  });
+  const approval = useContext(MarkersContext).approvals.get(approvalKey(prompt, toolCallId));
+  const shown = approval ? approvalLabel(approval) : undefined;
+  if (!shown) return null;
+  return (
+    <MarkerRow
+      kind="approval"
+      icon={shown.icon}
+      tone={approval?.status === "allowed" ? undefined : "warn"}
+    >
+      {shown.label}
+    </MarkerRow>
+  );
 }
 
 /** The label of the version on screen (CT9): "Version 2 of 3 · try 5% cut". */

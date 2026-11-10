@@ -1,18 +1,15 @@
 "use client";
 
-import { useAuiState } from "@assistant-ui/react";
 import { Maximize2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readAppResult, textReason, type AppResultView } from "../../lib/apps/app-results";
 import { appTabId } from "../../lib/apps/app-tabs";
-import { approvalKey, runToolKey } from "../../lib/chat/markers";
-import type { KobeMessageMeta } from "../../lib/chat/tree";
 import { useArtifactPanel } from "../chat/artifact-state";
-import { useKobeExtras } from "../chat/kobe-runtime";
 import { AppFrame, INLINE_HEIGHT, TEARDOWN_MS, type AppFrameHandle } from "./app-frame";
 import { useThreadApps, type ThreadApps } from "./thread-apps";
 import { useAppComposer } from "./use-app-composer";
 import { useAutoOpenApp } from "./use-app-placement";
+import { lookupAppResult, useAppWhere } from "./use-app-answer";
 
 /**
  * An MCP App in its tool card (KOBE-438, spec MA3, MA10): the pinned template rendered with the
@@ -32,30 +29,6 @@ import { useAutoOpenApp } from "./use-app-placement";
  */
 const NEAR = "100% 0px";
 const FAR = "300% 0px";
-
-function useWhere() {
-  const meta = useAuiState((s) => s.message.metadata.custom as KobeMessageMeta | undefined);
-  const runId = useKobeExtras()?.state.live?.runId;
-  const assistant = meta?.kind === "assistant" ? meta : undefined;
-  return { prompt: assistant?.promptEntryId, liveRunId: assistant?.live ? runId : undefined };
-}
-
-function lookup(
-  apps: ThreadApps,
-  where: ReturnType<typeof useWhere>,
-  toolCallId: string,
-): AppResultView | undefined {
-  const byPrompt =
-    where.prompt === undefined
-      ? undefined
-      : apps.byPrompt.get(approvalKey(where.prompt, toolCallId));
-  const byRun =
-    where.liveRunId === undefined
-      ? undefined
-      : apps.byRun.get(runToolKey(where.liveRunId, toolCallId));
-  // The thread's only result for this call (KOBE-445): never depends on the prompt's ancestry.
-  return byPrompt ?? byRun ?? apps.byTool.get(toolCallId);
-}
 
 /** The conversation's scroller: the margins below are measured against it (KOBE-445). */
 const SCROLLER = '[data-kobe-scroll="messages"]';
@@ -87,8 +60,8 @@ export function ToolCardApp({
   readonly hasMarker: boolean;
 }) {
   const apps = useThreadApps();
-  const where = useWhere();
-  const view = apps ? lookup(apps, where, toolCallId) : undefined;
+  const where = useAppWhere();
+  const view = apps ? lookupAppResult(apps, where, toolCallId) : undefined;
   if (!apps || !view) {
     return hasMarker ? <AppPlaceholder height={INLINE_HEIGHT} label="Loading app" /> : null;
   }
@@ -150,7 +123,7 @@ export function LiveApp({
   const [input, setInput] = useState<Record<string, unknown> | undefined>(undefined);
   const [mounted, setMounted] = useState(false);
   const [height, setHeight] = useState(INLINE_HEIGHT);
-  const { take, release, threadId, teamId } = apps;
+  const { take, release, threadId, teamId, markFailed } = apps;
 
   // Near the viewport: ask for a slot; far beyond it: give it back.
   useEffect(() => {
@@ -210,6 +183,11 @@ export function LiveApp({
       alive = false;
     };
   }, [wanted, result, threadId, teamId, view.resultRef]);
+
+  // A result that could not be read: the answer shows as before (KOBE-608), text and all.
+  useEffect(() => {
+    if (result === "failed") markFailed(cardKey);
+  }, [result, markFailed, cardKey]);
 
   // Mount when live inline; before removing a frame, send it ui/resource-teardown.
   const live = slotted && !expanded && result !== null && result !== "failed";
