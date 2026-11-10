@@ -206,7 +206,7 @@ export function egressAccessOpenApiPaths(): Record<string, Record<string, unknow
         summary: "Put a listed pattern into or out of the ceiling, or mark it internal",
         description:
           "Site admins. `internal` (same cluster, EA4): hosts the pattern matches may resolve to " +
-          "the install's internal targets. Audited `egress.ceiling.changed` / " +
+          "the site's internal targets. Audited `egress.ceiling.changed` / " +
           "`egress.ceiling.internal_changed`.",
         parameters: [
           {

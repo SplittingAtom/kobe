@@ -21,7 +21,7 @@ export interface CeilingEntry {
   readonly preset: EgressPreset | null;
   readonly in_ceiling: boolean;
   /**
-   * Same cluster (EA4, KOBE-602): hosts it matches may resolve to the install's internal targets
+   * Same cluster (EA4, KOBE-602): hosts it matches may resolve to the site's internal targets
    * (the cluster ingress). Site admins set it.
    */
   readonly internal: boolean;
