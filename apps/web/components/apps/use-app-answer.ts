@@ -90,7 +90,6 @@ export function useAppAnswer(): ReadonlySet<string> | null {
     .map((s) => s.id)
     .join(SEP);
   const settled = statuses.some((s) => s.status === "text" || s.status === "failed");
-  // The last app answer seen (derived state, updated while rendering).
   // The last app answer seen for this message (derived state, updated while rendering); the
   // branch picker can swap the message under the same component.
   const messageId = useAuiState((s) => s.message.id);
