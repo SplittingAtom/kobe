@@ -79,7 +79,8 @@ export type RunViewingContext = z.infer<typeof runViewingContextSchema>;
  */
 export const workspaceSaveQuerySchema = z.strictObject({
   path: workspacePathSchema,
-  base_sha256: sha256HexSchema,
+  /** Absent: create a new file (KOBE-591, accepting a proposed new file); 409 when it exists. */
+  base_sha256: sha256HexSchema.optional(),
 });
 export type WorkspaceSaveQuery = z.infer<typeof workspaceSaveQuerySchema>;
 
@@ -128,7 +129,8 @@ export const FILE_EDIT_PROPOSE_ERROR_CODES = [
   "not_allowed",
   "invalid_path",
   "not_found", // no synced file there (not pushed yet, deleted, or agent-internal)
-  "read_only", // project files and thread uploads
+  "read_only", // thread uploads, other projects, and the conversation's project for a reader
+  "project_full", // a new file in a project already holding PROJECT_FILES_MAX files
   "too_large",
   "storage_failed",
 ] as const;
@@ -145,8 +147,11 @@ export const fileEditProposeOkFields = {
   status: z.literal("awaiting_user"),
   /** The proposal's file, relative to `/workspace`. */
   path: workspacePathSchema,
-  /** The synced version the proposal is based on (what the member's commit must still match). */
-  base_sha256: sha256HexSchema,
+  /**
+   * The version the proposal is based on (what Accept must still find): the synced copy, or the
+   * project head's file. Absent for a new file (KOBE-591).
+   */
+  base_sha256: sha256HexSchema.optional(),
 } as const;
 export const fileEditProposeFailFields = {
   ok: z.literal(false),
@@ -170,16 +175,35 @@ export type FileEditToolsRequest = z.infer<typeof fileEditToolsRequestSchema>;
 /**
  * The `file.edit_proposed` event payload: the server's record of the proposal (the web builds its
  * diff from this, never from the tool result the sandbox relays).
+ *
+ * KOBE-591 (projects-in-conversations PE2/PE3): `proposal_id` names the proposal for Accept
+ * (absent on events recorded before it); `base_sha256` is absent for a new file. A proposal for a
+ * file of the conversation's project (`path` under `projects/<slug>/`) also carries `project_id`
+ * and `base_commit_seq` (the project's head when proposed, 0 before the first commit); Accept
+ * commits exactly `content` (`POST /v1/projects/{id}/commits/from-proposal`).
  */
-export const fileEditProposedPayloadSchema = z.strictObject({
+const fileEditProposedShape = {
   tool_call_id: idSchema,
+  proposal_id: uuidSchema.optional(),
   path: workspacePathSchema,
-  base_sha256: sha256HexSchema,
+  base_sha256: sha256HexSchema.optional(),
+  project_id: uuidSchema.optional(),
+  base_commit_seq: z.number().int().nonnegative().optional(),
   content: z
     .string()
     .refine((s) => utf8ByteLength(s) <= FILE_EDIT_CONTENT_MAX_BYTES, "content too large"),
   summary: z.string().min(1).max(FILE_EDIT_SUMMARY_MAX),
-});
+} as const;
+
+const projectFieldsTogether = (p: {
+  project_id?: string | undefined;
+  base_commit_seq?: number | undefined;
+}) => (p.project_id === undefined) === (p.base_commit_seq === undefined);
+const PROJECT_FIELDS = "project_id and base_commit_seq come together";
+
+export const fileEditProposedPayloadSchema = z
+  .strictObject(fileEditProposedShape)
+  .refine(projectFieldsTogether, PROJECT_FIELDS);
 export type FileEditProposedPayload = z.infer<typeof fileEditProposedPayloadSchema>;
 
 /** Most proposals one listing answers (newest kept). */
@@ -190,10 +214,9 @@ export const FILE_EDIT_PROPOSALS_MAX = 200;
  * `file.edit_proposed` events, oldest first, newest {@link FILE_EDIT_PROPOSALS_MAX}. A run's
  * events are compacted 7 days after it ended (D18), and its proposals with them.
  */
-export const fileEditProposalSchema = fileEditProposedPayloadSchema.extend({
-  run_id: uuidSchema,
-  created_at: timestampSchema,
-});
+export const fileEditProposalSchema = z
+  .strictObject({ ...fileEditProposedShape, run_id: uuidSchema, created_at: timestampSchema })
+  .refine(projectFieldsTogether, PROJECT_FIELDS);
 export type FileEditProposal = z.infer<typeof fileEditProposalSchema>;
 
 export const fileEditProposalsResponseSchema = z.strictObject({

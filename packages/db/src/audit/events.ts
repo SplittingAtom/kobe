@@ -1055,7 +1055,10 @@ export const AUDIT_EVENTS = {
     userId: id,
     reason: z.enum(["discarded", "member_removed", "access_lost"]),
   }),
-  /** CM5/CM6: a new head. `threadId`/`runId` for an agent's commit_project. */
+  /**
+   * CM5/CM6: a new head. `threadId`/`runId` for an agent's commit_project and for an accepted
+   * proposal (KOBE-591, PE4: `source: "proposal"` with its `proposalId`, author the accepting member).
+   */
   "project.committed": event("team", {
     projectId: id,
     commitId: id,
@@ -1063,6 +1066,8 @@ export const AUDIT_EVENTS = {
     authorKind: z.enum(PROJECT_COMMIT_AUTHOR_KINDS),
     threadId: id.optional(),
     runId: id.optional(),
+    source: z.enum(["proposal"]).optional(),
+    proposalId: id.optional(),
     added: count,
     modified: count,
     deleted: count,
