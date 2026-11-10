@@ -11,7 +11,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FolderKanbanIcon, LayersIcon } from "lucide-react";
 import type { FileEntry } from "../../lib/files/api";
-import { splitProjectRows, visibleRows } from "../../lib/files/tree";
+import { isWithin, splitProjectRows, visibleRows } from "../../lib/files/tree";
 import {
   NOT_IN_CONVERSATION,
   PROJECTS_FILTER_AT,
@@ -66,13 +66,19 @@ export function useProjectsInTree(tree: FileTree, activeProjectId: string | null
   const hasProjectsFolder = tree.root.entries.some(
     (e) => e.path === PROJECTS_FOLDER && e.type === "dir",
   );
-  const listsProjects = ctx !== null || hasProjectsFolder;
+  // Open: projects/ when the member's files have one (as before), and when a project of it
+  // that is not mounted is open (its folders list under projects/, from the head).
+  const hasCtx = ctx !== null;
+  const opensUnmounted =
+    hasCtx && [...expanded].some((p) => p !== PROJECTS_FOLDER && isWithin(p, PROJECTS_FOLDER));
+  const keepOpen = hasProjectsFolder || opensUnmounted;
+  // Once: a failed read is retried by Try again, not by every re-render.
   useEffect(() => {
-    if (!listsProjects) return;
-    ensure?.();
-    // The Projects section always shows its projects: projects/ stays open.
-    if (!expanded.has(PROJECTS_FOLDER)) expand(PROJECTS_FOLDER);
-  }, [listsProjects, ensure, expand, expanded]);
+    if (hasCtx) ensure?.();
+  }, [hasCtx, ensure]);
+  useEffect(() => {
+    if (keepOpen && !expanded.has(PROJECTS_FOLDER)) expand(PROJECTS_FOLDER);
+  }, [keepOpen, expand, expanded]);
 
   const checkedOut = ctx?.checkedOut ?? EMPTY;
   const bySlug = ctx?.bySlug;
@@ -85,14 +91,16 @@ export function useProjectsInTree(tree: FileTree, activeProjectId: string | null
       ? undefined
       : [...bySlug.values()].find((p) => p.id === activeProjectId)?.slug;
 
-  const mounted = tree.folders.get(PROJECTS_FOLDER);
+  const mounted = hasProjectsFolder ? tree.folders.get(PROJECTS_FOLDER) : undefined;
+  /** What the member's files hold under projects/ is known (none, when there is no such folder). */
+  const mountedKnown = hasProjectsFolder ? mounted?.loading === false : !tree.root.loading;
   const mountedSlugs = useMemo(
     () => new Set((mounted?.entries ?? []).map((e) => e.name)),
     [mounted],
   );
   /** A listed project with no folder in the member's files: browsed from its head. */
   const isUnmounted = (slug: string): boolean =>
-    mounted?.loading === false && !mountedSlugs.has(slug) && bySlug?.get(slug) !== undefined;
+    mountedKnown && !mountedSlugs.has(slug) && bySlug?.get(slug) !== undefined;
 
   const shaped = useMemo(() => {
     const live = [...(bySlug?.values() ?? [])].filter((p) => p.archivedAt === null);
@@ -109,7 +117,7 @@ export function useProjectsInTree(tree: FileTree, activeProjectId: string | null
     folders.set(PROJECTS_FOLDER, {
       entries: [...(mounted?.entries ?? []), ...synthetic],
       nextCursor: null,
-      loading: mounted?.loading ?? true,
+      loading: !mountedKnown,
       error: mounted?.error ?? null,
     });
     const rows = splitProjectRows(
@@ -201,10 +209,7 @@ export function useProjectsInTree(tree: FileTree, activeProjectId: string | null
         : dropRefusal(accessOf(folder)),
     total: ctx?.status === "ready" ? ctx.total : null,
     /** Whether "no projects" may be said: the listing is in, and the projects too if any. */
-    ready: listsProjects
-      ? tree.folders.get(PROJECTS_FOLDER)?.loading === false &&
-        (ctx === null || ctx.status === "ready" || ctx.status === "error")
-      : !tree.root.loading,
+    ready: mountedKnown && (ctx === null || ctx.status === "ready" || ctx.status === "error"),
     failed: ctx?.status === "error",
     retry: () => ctx?.reload(),
   };
