@@ -22,7 +22,6 @@ import { runPythonTool } from "./notebook-tool.js";
 import {
   artifactTools,
   shareFileTool,
-  webSearchTool,
   type ToolDefinitionLike,
   type ToolsTransport,
 } from "./tools.js";
@@ -131,8 +130,6 @@ export function registerKobeTools(
 ): void {
   if (transport === undefined) return;
   for (const tool of artifactTools(transport)) pi.registerTool(tool);
-  // Always listed: the server answers "unavailable" when the site or team has it off.
-  pi.registerTool(webSearchTool(transport));
   if (options.files === true) pi.registerTool(shareFileTool(transport));
   if (options.projects === true) {
     // KOBE-580: listed only while the run's viewer may edit the project. Without Pi's

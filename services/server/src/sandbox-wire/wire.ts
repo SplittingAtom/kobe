@@ -4,7 +4,6 @@ import type { NotebookFiles } from "../notebooks/files.js";
 import type { Server } from "node:http";
 import {
   MAX_RUN_TOKEN_TTL_SECONDS,
-  WEB_SEARCH_UNAVAILABLE_MESSAGES,
   type PolicyEngine,
   type ServerCallPurpose,
   type ToolRegistry,
@@ -26,7 +25,6 @@ import type { ProjectMounts } from "../projects/mounts.js";
 import { createPolicyEngine } from "../policy/engine.js";
 import { createToolRegistry } from "../policy/registry.js";
 import { createDbRuleSource, createDbSettingsSource } from "../policy/rule-store.js";
-import type { WebSearchService } from "../web-search/service.js";
 import { createSandboxBus, type BusHint } from "./bus.js";
 import { SandboxConnection } from "./connection.js";
 import { WIRE_DEFAULTS, type WireTuning } from "./constants.js";
@@ -71,8 +69,6 @@ export interface SandboxWireOptions {
   readonly uploads?: UploadSettings;
   /** Project file mounts: refreshed at run start (KOBE-162). */
   readonly projectMounts?: ProjectMounts;
-  /** Runs `web_search.query` (KOBE-114); unset: every search answers "not configured". */
-  readonly webSearch?: WebSearchService;
   /** `skill.draft_save` (KOBE-442); unset: refused as storage unavailable. */
   readonly skillDrafts?: SkillDraftTool;
   /** Notebook files (KOBE-464): `run_python` reads cells and saves outputs through them. */
@@ -141,14 +137,6 @@ function assertRunTokenTtl(ttl: number): void {
   }
 }
 
-const NO_WEB_SEARCH: WebSearchService = {
-  search: () =>
-    Promise.resolve({
-      kind: "unavailable",
-      reason: "not_configured",
-      message: WEB_SEARCH_UNAVAILABLE_MESSAGES.not_configured,
-    }),
-};
 const NO_WAKE: SandboxWaker = { wake: () => Promise.resolve() };
 const NOT_LIVE: SandboxLiveness = { isLive: () => Promise.resolve(false) };
 const VIOLATION_AUDIT_EVERY_MS = 5 * 60_000;
@@ -331,7 +319,6 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       runMaxEvents: tuning.runMaxEvents,
       log,
     },
-    webSearch: options.webSearch ?? NO_WEB_SEARCH,
     ...(options.skillDrafts ? { skillDrafts: options.skillDrafts } : {}),
     ...(options.notebooks ? { notebooks: options.notebooks } : {}),
     ui: options.ui ?? CANCEL_DIALOGS,
@@ -431,24 +418,6 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
             ...(refusal.scope ? { scope: refusal.scope } : {}),
             runId: refusal.runId,
             ...(refusal.toolCallId ? { toolCallId: refusal.toolCallId } : {}),
-          },
-        },
-      );
-    },
-    auditWebSearchRefused(target, sandboxId, refusal) {
-      throttledAudit(
-        `${target.teamId}:${target.userId}:web_search:${refusal.reason}`,
-        target.teamId,
-        {
-          action: "sandbox.web_search_refused",
-          actor: SYSTEM_ACTOR,
-          teamId: target.teamId,
-          target: {
-            sandboxId,
-            userId: target.userId,
-            reason: refusal.reason,
-            runId: refusal.runId,
-            toolCallId: refusal.toolCallId,
           },
         },
       );

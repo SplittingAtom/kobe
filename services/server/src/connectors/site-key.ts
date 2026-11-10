@@ -25,7 +25,7 @@ import { maskHint } from "./mask.js";
  * and for probes (pins, the refresh).
  */
 
-/** A site-wide record has no team: the envelope binds to the nil team id (as web search does). */
+/** A site-wide record has no team: the envelope binds to the nil team id. */
 const SITE_TEAM = "00000000-0000-0000-0000-000000000000";
 
 /** SHA-256 (hex) of a connector URL: what a site key is bound to (review M2). */

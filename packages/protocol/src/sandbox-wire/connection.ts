@@ -55,8 +55,8 @@
  *   `notebook.output` frames and `notebook.run` / `notebook.run_result` (`run_python`).
  *   `notebook_start` (`CAPABILITY_NOTEBOOK_START`, KOBE-477): `notebook.restart` with `op: "start"`
  *   (start the kernel, run nothing); never sent to agents without it.
- *   `web_search` ({@link CAPABILITY_WEB_SEARCH}, web-search.ts, KOBE-114): `web_search.query` /
- *   `web_search.result`; same refusal rule.
+ *   `web_search` (retired by KOBE-606, legacy-web-search-frames.ts): an agent from before KOBE-606
+ *   may still send `web_search.query`; the server answers `web_search.result` unavailable.
  *   `mcp` ({@link CAPABILITY_MCP}, mcp-config.ts, KOBE-111): `run.start.mcp`, the run's effective
  *   connectors for Pi's per-session MCP config; dropped (not refused) for agents without it.
  *   `thread_compact` ({@link CAPABILITY_THREAD_COMPACT}, threads.ts, KOBE-212): the server may send

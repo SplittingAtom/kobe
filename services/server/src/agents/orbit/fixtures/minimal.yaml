@@ -24,7 +24,6 @@ setup:
         - share_file
         - tool_search
         - update_artifact
-        - web_search
         - write
   edges: []
 metadata:

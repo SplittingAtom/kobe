@@ -32,7 +32,6 @@ export const TOOLS_TIMEOUT_MS = 30_000;
 export const OP_ARTIFACT_PUT = "artifact.put";
 export const OP_FILE_SHARE = "file.share";
 export const OP_PROJECT_COMMIT = "project.commit";
-export const OP_WEB_SEARCH = "web_search";
 export const OP_MEMORY_PUT = "memory.put";
 export const OP_MEMORY_READ = "memory.read";
 export const OP_SKILL_DRAFT_SAVE = "skill.draft_save";
@@ -43,7 +42,6 @@ export const OPS = [
   OP_ARTIFACT_PUT,
   OP_FILE_SHARE,
   OP_PROJECT_COMMIT,
-  OP_WEB_SEARCH,
   OP_MEMORY_PUT,
   OP_MEMORY_READ,
   OP_SKILL_DRAFT_SAVE,
@@ -63,11 +61,6 @@ export const MEMORY_FILE_MAX_BYTES = 64 * 1024;
 export const MEMORY_PATH_MAX = 200;
 export const MEMORY_QUERY_MAX = 500;
 export const MEMORY_RECALL_MAX_FILES = 20;
-
-export const TOOL_WEB_SEARCH = "web_search";
-/** Mirrors packages/protocol `web-search.ts` (pinned by a test). */
-export const WEB_SEARCH_QUERY_MAX = 400;
-export const WEB_SEARCH_COUNT_MAX = 10;
 
 /** Env var set to `1` by an agent that announced the `files` capability. Read once, removed. */
 export const TOOLS_FILES_ENV = "KOBE_TOOLS_FILES";
@@ -216,27 +209,6 @@ export interface NotebookRunAnswer {
   readonly saved: { readonly path: string; readonly sha256: string } | null;
 }
 
-export interface WebSearchCitation {
-  readonly title: string;
-  readonly url: string;
-  readonly snippet: string;
-}
-
-/** `web_search` answers: results, or "unavailable" as a normal answer (web-search.ts). */
-export interface WebSearchAnswer {
-  readonly ok: true;
-  readonly available: true;
-  readonly provider: string;
-  readonly query: string;
-  readonly results: readonly WebSearchCitation[];
-}
-export interface WebSearchUnavailable {
-  readonly ok: true;
-  readonly available: false;
-  readonly reason: string;
-  readonly message: string;
-}
-
 export interface MemoryPutAnswer {
   readonly ok: true;
   readonly op: "put";
@@ -266,8 +238,6 @@ export type ToolsResponse =
   | ({ readonly id: string } & FileEditAnswer)
   | ({ readonly id: string } & FileOpenAnswer)
   | ({ readonly id: string } & NotebookRunAnswer)
-  | ({ readonly id: string } & WebSearchAnswer)
-  | ({ readonly id: string } & WebSearchUnavailable)
   | {
       readonly id: string;
       readonly ok: true;
