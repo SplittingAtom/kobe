@@ -12,11 +12,10 @@ import { ARTIFACT_TOOLS, canonicalJson } from "@kobe/protocol";
 
 export type AllowedVerdict = "ok" | "not_allowed" | "input_mismatch";
 
-/** Tools whose wire frame (`artifact.put`, `file.share`, `web_search.query`) is bound to an allowed policy check. */
+/** Tools whose wire frame (`artifact.put`, `file.share`, `memory.put`, ...) is bound to an allowed policy check. */
 export const BOUND_TOOLS = [
   ...ARTIFACT_TOOLS,
   "share_file",
-  "web_search",
   "remember",
   "recall",
   "commit_project",
@@ -93,7 +92,7 @@ export class AllowedArtifactCalls {
   }
 
   /**
-   * Like {@link check}, but the allowance is single use (`web_search`, KOBE-114): the first
+   * Like {@link check}, but the allowance is single use (memory, project commits and the other non-idempotent tools): the first
    * matching call takes it, in this one synchronous step before any work starts, and a repeat is
    * "replayed". Artifact and file calls keep using `check`: they are idempotent in the database.
    */

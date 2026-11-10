@@ -34,7 +34,7 @@ const CEILING = {
     entry("*.example.com", null, true),
     entry("d111.cloudfront.net", null, true),
   ],
-  presets: ["package_registries", "git_hosts", "web_search"],
+  presets: ["package_registries", "git_hosts"],
 };
 
 beforeEach(forbidNativeConfirm);

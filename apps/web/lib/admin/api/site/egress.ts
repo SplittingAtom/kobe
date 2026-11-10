@@ -4,7 +4,7 @@ import { apiRequest, type ApiResult } from "../../../api/client";
 const enc = encodeURIComponent;
 const BASE = "/v1/site/egress-ceiling";
 
-export type EgressPreset = "package_registries" | "git_hosts" | "web_search";
+export type EgressPreset = "package_registries" | "git_hosts";
 
 export interface CeilingDomain {
   readonly domain: string;

@@ -9,7 +9,6 @@ import {
   CAPABILITY_FILE_EDITS,
   CAPABILITY_NOTEBOOKS,
   CAPABILITY_NOTEBOOK_START,
-  CAPABILITY_WEB_SEARCH,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
   CAPABILITY_THREAD_BRANCH_SUMMARY,
@@ -42,7 +41,6 @@ import { FileOpenBroker } from "./tools/file-open-broker.js";
 import { NotebookBroker } from "./tools/notebook-broker.js";
 import type { KernelManager } from "./notebook/manager.js";
 import { MemoryBroker } from "./tools/memory-broker.js";
-import { WebSearchBroker } from "./tools/web-search-broker.js";
 import { toolsError } from "./tools/channel.js";
 import type { ConflictListener, PushedFile } from "./workspace/sync.js";
 import { ConflictReporter } from "./workspace/conflict-reporter.js";
@@ -192,7 +190,6 @@ export class Agent {
   /** Runs whose `run.start.project.access` is `write` (KOBE-580): only they may commit. */
   readonly #projectWriteRuns = new Set<string>();
   readonly #skillDrafts: SkillDraftBroker;
-  readonly #searches: WebSearchBroker;
   readonly #fileEdits: FileEditBroker;
   readonly #fileOpens: FileOpenBroker;
   readonly #notebooks: NotebookBroker;
@@ -216,7 +213,6 @@ export class Agent {
     });
     this.#broker = new PolicyBroker({ send: (frame) => this.#wire.send(frame) });
     this.#artifacts = new ArtifactBroker({ send: (frame) => this.#wire.send(frame) });
-    this.#searches = new WebSearchBroker({ send: (frame) => this.#wire.send(frame) });
     this.#fileEdits = new FileEditBroker({ send: (frame) => this.#wire.send(frame) });
     this.#memory = new MemoryBroker({ send: (frame) => this.#wire.send(frame) });
     this.#conflicts = new ConflictReporter({
@@ -309,7 +305,6 @@ export class Agent {
           this.#commits.failRun(runId, "run ended");
           this.#projectWriteRuns.delete(runId);
           this.#skillDrafts.failRun(runId, "run ended");
-          this.#searches.failRun(runId, "run ended");
           this.#fileEdits.failRun(runId, "run ended");
           this.#fileOpens.failRun(runId, "run ended");
           this.#notebooks.failRun(runId, "run ended");
@@ -340,10 +335,6 @@ export class Agent {
           this.#broker.failThread(threadId, reason);
         },
         toolsRequest: (threadId, runId, request, reply) => {
-          if (request.op === "web_search") {
-            this.#searches.query(threadId, runId, request, reply);
-            return;
-          }
           if (request.op === "memory.put" || request.op === "memory.read") {
             if (this.#memoryEnabled()) this.#memory.request(threadId, runId, request, reply);
             else reply(toolsError(request.id, "not_allowed", "memory is not available"));
@@ -389,7 +380,6 @@ export class Agent {
           this.#shares.failThread(threadId, reason);
           this.#commits.failThread(threadId, reason);
           this.#skillDrafts.failThread(threadId, reason);
-          this.#searches.failThread(threadId, reason);
           this.#fileEdits.failThread(threadId, reason);
           this.#fileOpens.failThread(threadId, reason);
           this.#notebooks.failThread(threadId, reason);
@@ -412,7 +402,6 @@ export class Agent {
         this.#shares.failAll("connection to Kobe server lost");
         this.#commits.failAll("connection to Kobe server lost");
         this.#skillDrafts.failAll("connection to Kobe server lost");
-        this.#searches.failAll("connection to Kobe server lost");
         this.#fileEdits.failAll("connection to Kobe server lost");
         this.#fileOpens.failAll("connection to Kobe server lost");
         this.#notebooks.failAll("connection to Kobe server lost");
@@ -565,7 +554,6 @@ export class Agent {
       ...(this.#deps.kernels === undefined
         ? []
         : [CAPABILITY_NOTEBOOKS, CAPABILITY_NOTEBOOK_START]),
-      ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_WEB_SEARCH]),
       ...(this.#memoryEnabled() ? [CAPABILITY_MEMORY] : []),
       // Per-session MCP config (KOBE-111) needs the proxy URL, a session to trade tokens with, and
       // Pi's MCP extension (built into Pi 1.0.x).
@@ -692,7 +680,7 @@ export class Agent {
         this.#notebooks.onResult(frame);
         return;
       case "web_search.result":
-        this.#searches.onResult(frame);
+        // Retired (KOBE-606): this agent never sends `web_search.query`, so nothing waits for it.
         return;
       case "memory.result":
         this.#memory.onResult(frame);

@@ -1429,6 +1429,13 @@
       "when": 1794319535101,
       "tag": "0203_egress_access",
       "breakpoints": true
+    },
+    {
+      "idx": 204,
+      "version": "7",
+      "when": 1794326324431,
+      "tag": "0204_drop_web_search",
+      "breakpoints": true
     }
   ]
 }

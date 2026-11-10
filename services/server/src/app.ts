@@ -54,8 +54,6 @@ import { siteSkillCatalogEditRoutes } from "./routes/site-skill-catalog-edit.js"
 import { siteRolesRoutes } from "./routes/site-roles.js";
 import { siteBrandingPublicRoutes, siteBrandingRoutes } from "./routes/site-branding.js";
 import { siteSettingsRoutes } from "./routes/site-settings.js";
-import { siteWebSearchRoutes } from "./routes/site-web-search.js";
-import { teamWebSearchRoutes } from "./routes/team-web-search.js";
 import { siteTeamsRoutes } from "./routes/site-teams.js";
 import { siteUsersRoutes } from "./routes/site-users.js";
 import { meRoutes } from "./routes/me.js";
@@ -216,7 +214,6 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/models", teamModelsRoutes(deps));
   api.route("/team/connectors", teamConnectorsRoutes(deps));
   api.route("/team/apps", teamAppsRoutes(deps));
-  api.route("/team/web-search", teamWebSearchRoutes(deps));
   api.route("/team/usage", teamUsageRoutes(deps));
   api.route("/team/budgets", teamBudgetsRoutes(deps));
   api.route("/team/break-glass", teamBreakGlassRoutes(deps));
@@ -291,7 +288,6 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/site/agent-roster", siteAgentRosterRoutes(deps));
   api.route("/site/settings", siteSettingsRoutes(deps));
   api.route("/site/branding", siteBrandingRoutes(deps));
-  api.route("/site/web-search", siteWebSearchRoutes(deps));
   api.route("/site/teams", siteTeamsRoutes(deps));
   api.route("/site/roles", siteRolesRoutes(deps));
   api.route("/site/policy", sitePolicyRoutes(deps));

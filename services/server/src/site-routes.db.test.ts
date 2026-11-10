@@ -8,7 +8,6 @@ import { openHarness, type Harness } from "./testing/harness.js";
  */
 const READS = [
   "settings",
-  "web-search",
   "teams",
   "roles",
   "policy/rules",
@@ -54,6 +53,11 @@ describe("/v1/site", () => {
 
   it.each(READS)(`no longer answers GET ${RETIRED}/%s`, async (p) => {
     expect((await owner.get(`${RETIRED}/${p}`)).status).toBe(404);
+  });
+
+  it("no longer serves the built-in web search setting (KOBE-606)", async () => {
+    expect((await owner.get("/v1/site/web-search")).status).toBe(404);
+    expect((await owner.put("/v1/site/web-search", { provider: "brave" })).status).toBe(404);
   });
 
   it("names the caller's site role in /v1/me", async () => {

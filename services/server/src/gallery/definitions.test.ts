@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { agentConnectors, agentSkills } from "@kobe/agent-file";
 import { BUILTIN_TOOLS, KOBE_SKILL_NAMES } from "@kobe/protocol";
 import { computeToolManifest, manifestAllowsTool } from "../agents/manifest.js";
-import { KOBE_NO_SEARCH_NOTICE } from "./agents/kobe.js";
 import { GALLERY_DEFINITIONS, KOBE_GALLERY_KEY, parseGalleryDefinitions } from "./definitions.js";
 
 describe("the repo's gallery definitions", () => {
@@ -25,9 +24,10 @@ describe("the one gallery agent, Kobe (KOBE-254)", () => {
   const floor = { scope: "site", site: [], team: [], approvalFloor: "auto" } as const;
   const manifest = computeToolManifest(kobe.frontmatter, floor, new Date());
 
-  it("ships exactly one gallery agent, Kobe, at generation 2", () => {
+  it("ships exactly one gallery agent, Kobe, at generation 3", () => {
     // 2: the web-search notice is scoped to requests that need the web (review of #240).
-    expect(parsed.map((p) => [p.key, p.generation])).toEqual([[KOBE_GALLERY_KEY, 2]]);
+    // 3: no built-in web search any more; research goes through connectors (KOBE-606).
+    expect(parsed.map((p) => [p.key, p.generation])).toEqual([[KOBE_GALLERY_KEY, 3]]);
     expect(KOBE_GALLERY_KEY).toBe("kobe");
     expect(kobe.frontmatter.name).toBe("Kobe");
     expect(kobe.frontmatter.description).toBeTruthy();
@@ -49,7 +49,7 @@ describe("the one gallery agent, Kobe (KOBE-254)", () => {
     expect(manifest.tools.map((t) => t.name)).toEqual(available);
     expect(manifest.excluded.every((e) => e.reason === "unavailable")).toBe(true);
     expect(manifest.connectors).toBe("all");
-    for (const tool of ["create_artifact", "update_artifact", "share_file", "web_search"]) {
+    for (const tool of ["create_artifact", "update_artifact", "share_file"]) {
       expect(manifestAllowsTool(manifest, tool), tool).toBe(true);
     }
   });
@@ -63,15 +63,14 @@ describe("the one gallery agent, Kobe (KOBE-254)", () => {
     expect(new TextEncoder().encode(kobe.prompt).length).toBeLessThan(5000);
   });
 
-  it("carries the research guidance: web_search with URLs, and says plainly when it is unavailable", () => {
-    expect(kobe.prompt).toContain("web_search");
-    expect(kobe.prompt).toMatch(/URL/);
-    expect(kobe.prompt).toContain(KOBE_NO_SEARCH_NOTICE);
-    // Only when a request needs the web: never as the opening of every reply.
-    const notice = kobe.prompt.indexOf(KOBE_NO_SEARCH_NOTICE);
-    const sentence = kobe.prompt.slice(kobe.prompt.lastIndexOf("Research:", notice), notice);
-    expect(sentence).toMatch(/When a request needs current or external facts/);
-    expect(sentence).not.toMatch(/begin your reply/);
+  it("researches through connectors, with URLs, and never names the retired web_search (KOBE-606)", () => {
+    expect(kobe.prompt).not.toMatch(/web_search|web search/i);
+    const research = kobe.prompt.slice(kobe.prompt.indexOf("Research:"));
+    expect(research).toMatch(/^Research: for current or outside facts, use a connector tool/);
+    expect(research).toMatch(/URL/);
+    // Says so only when a request needs outside facts: never as the opening of every reply.
+    expect(research).toMatch(/no connector can provide them, say so plainly/);
+    expect(research).toMatch(/do not mention it for requests that do not need outside facts/);
   });
 
   it("carries the Document Drafter's Markdown preview artifact (KOBE-131) and share_file (KOBE-152)", () => {

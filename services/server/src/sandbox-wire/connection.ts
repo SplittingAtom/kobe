@@ -10,7 +10,7 @@ import {
   CAPABILITY_TRACE_SPANS,
   CAPABILITY_SESSION_RENEW,
   CAPABILITY_SYNC_CONFLICTS,
-  CAPABILITY_WEB_SEARCH,
+  LEGACY_WEB_SEARCH_MESSAGE,
   CAPABILITY_WORKSPACE_MOVES,
   builtinToolDescriptor,
   PI_PINNED_VERSION,
@@ -34,7 +34,7 @@ import {
   type NotebookRunFrame,
   type SkillDraftSaveFrame,
   type TraceSpansFrame,
-  type WebSearchQueryFrame,
+  type LegacyWebSearchQueryFrame,
   type ServerToSandboxFrame,
 } from "@kobe/protocol";
 import { withTeam } from "@kobe/db";
@@ -56,12 +56,7 @@ import { onProjectCommit } from "./project-commit.js";
 import { putMemory, readMemory, type MemoryRefusal, type MemoryReply } from "../memory/agent.js";
 import { decidePolicyCheck, denyFrame } from "./policy-check.js";
 import type { ConnectionRegistry, RegisteredConnection } from "./registry.js";
-import {
-  activeLeasedRuns,
-  endRunInTx,
-  isActiveMessageRun,
-  type InterruptCause,
-} from "./run-state.js";
+import { activeLeasedRuns, endRunInTx, type InterruptCause } from "./run-state.js";
 import { onFileEditPropose } from "./file-edit-propose.js";
 import { onFileOpen } from "./file-open.js";
 import { ConflictRate, onWorkspaceConflict } from "./sync-conflict.js";
@@ -180,7 +175,6 @@ export class SandboxConnection implements RegisteredConnection {
   readonly #pendingCommits = new Set<string>();
   #artifactPuts = 0;
   #fileShares = 0;
-  #webSearches = 0;
   #memoryOps = 0;
   readonly #skillDraftSaves = { count: 0 };
   /** Aborts pending project-memory approvals when the connection ends. */
@@ -545,7 +539,7 @@ export class SandboxConnection implements RegisteredConnection {
         this.#onMemoryRead(frame);
         return;
       case "web_search.query":
-        this.#onWebSearch(frame);
+        this.#onLegacyWebSearch(frame);
         return;
       case "trace.spans":
         this.#onTraceSpans(frame);
@@ -1084,131 +1078,21 @@ export class SandboxConnection implements RegisteredConnection {
   }
 
   /**
-   * `web_search.query` (KOBE-114). Accepted only if this connection announced `web_search`, the
-   * run is leased here and active, and this `web_search` call was allowed here with the same
-   * canonical input hash (D-3). The server then decides availability (site provider, team
-   * opt-in), opens the key and searches; "unavailable" is an answer, not an error. Refusals are
-   * audited (never the query).
+   * `web_search.query` from an agent built before KOBE-606 removed the built-in web search. The
+   * server no longer knows `web_search` (policy denies it as an unknown tool), so this only comes
+   * from an old agent mid-rollout or a confused one: answer unavailable and keep the connection.
    */
-  #onWebSearch(frame: WebSearchQueryFrame): void {
-    const answer = (result: Parameters<SandboxConnection["send"]>[0]) => this.send(result);
-    const fail = (code: string, message: string) =>
-      answer({
-        v: 1,
-        type: "web_search.result",
-        request_id: frame.request_id,
-        ok: false,
-        error: { code, message },
-      });
-    const refuse = (
-      reason: Parameters<WireContext["auditWebSearchRefused"]>[2]["reason"],
-      message: string,
-    ) => {
-      this.#ctx.auditWebSearchRefused(this.target, this.sandboxId, {
-        reason,
-        runId: frame.run_id,
-        toolCallId: frame.tool_call_id,
-      });
-      fail("not_allowed", message);
-    };
-    if (!this.hasCapability(CAPABILITY_WEB_SEARCH)) {
-      refuse("capability_missing", "This sandbox did not announce web search.");
-      return;
-    }
-    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "web_search.query");
-    if (check === "violation") return;
-    if (check === "ended") {
-      refuse("run_not_active", "The run has ended, so the search was not run.");
-      return;
-    }
-    const verdict = this.#allowedArtifacts.consume(
-      frame.run_id,
-      frame.tool_call_id,
-      frame.tool,
-      frame.input,
-    );
-    if (verdict !== "ok") {
-      refuse(
-        verdict,
-        verdict === "input_mismatch"
-          ? "The search differs from the call that was allowed."
-          : verdict === "replayed"
-            ? "This search was already run; ask the model to search again."
-            : "This tool call was not allowed for this tool.",
-      );
-      return;
-    }
-    if (this.#webSearches >= this.#ctx.tuning.maxPendingArtifactPuts) {
-      fail("rate_limited", "Too many searches are running. Try again.");
-      return;
-    }
-    this.#webSearches += 1;
-    const { teamId } = this.target;
-    void withTeam(this.#ctx.db, teamId, (tx) =>
-      isActiveMessageRun(tx, teamId, frame.run_id, frame.thread_id),
-    )
-      .then((active) => {
-        if (active) return true;
-        // A compaction (KOBE-213) or an ended run, from the database: no search.
-        this.#webSearches -= 1;
-        refuse("run_not_active", "The run is not an active conversation turn; no search.");
-        return false;
-      })
-      .then((go) => (go ? this.#search(frame, answer, fail) : undefined))
-      .catch((err: unknown) => {
-        this.#webSearches -= 1;
-        this.log.error({ err }, "web_search run check failed");
-        fail("search_failed", "The search could not be run. Try again.");
-      });
-  }
-
-  #search(
-    frame: WebSearchQueryFrame,
-    answer: (result: Parameters<SandboxConnection["send"]>[0]) => unknown,
-    fail: (code: string, message: string) => void,
-  ): Promise<void> {
-    return this.#ctx.webSearch
-      .search(this.target.teamId, frame.input, {
-        runId: frame.run_id,
-        toolCallId: frame.tool_call_id,
-        sandboxId: this.sandboxId,
-        userId: this.target.userId,
-      })
-      .catch((err: unknown) => {
-        this.log.error({ err }, "web_search failed");
-        return {
-          kind: "error",
-          code: "search_failed",
-          message: "The search could not be run. Try again.",
-        } as const;
-      })
-      .then((result) => {
-        this.#webSearches -= 1;
-        if (result.kind === "results") {
-          answer({
-            v: 1,
-            type: "web_search.result",
-            request_id: frame.request_id,
-            ok: true,
-            available: true,
-            provider: result.provider,
-            query: frame.input.query,
-            results: [...result.results],
-          });
-        } else if (result.kind === "unavailable") {
-          answer({
-            v: 1,
-            type: "web_search.result",
-            request_id: frame.request_id,
-            ok: true,
-            available: false,
-            reason: result.reason,
-            message: result.message,
-          });
-        } else {
-          fail(result.code, result.message);
-        }
-      });
+  #onLegacyWebSearch(frame: LegacyWebSearchQueryFrame): void {
+    this.log.debug({ run_id: frame.run_id }, "legacy web_search.query answered unavailable");
+    this.send({
+      v: 1,
+      type: "web_search.result",
+      request_id: frame.request_id,
+      ok: true,
+      available: false,
+      reason: "not_configured",
+      message: LEGACY_WEB_SEARCH_MESSAGE,
+    });
   }
 
   /**

@@ -44,7 +44,6 @@ const CUSTOM_HEADING = "custom-domains";
 export const PRESET_LABEL: Readonly<Record<EgressPreset, string>> = {
   package_registries: "Package registries",
   git_hosts: "Git hosts",
-  web_search: "Web search provider",
 };
 
 /** The site egress ceiling (spec D6/D28; `/v1/site/egress-ceiling`, KOBE-38). */

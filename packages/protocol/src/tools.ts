@@ -168,7 +168,6 @@ export const BUILTIN_TOOLS: Readonly<Record<string, BuiltinTool>> = {
     open_world: false,
     primary_arg: "/code",
   },
-  web_search: { source: "kobe", risk: "read", scope: "external", open_world: true },
   remember: { source: "kobe", risk: "write", scope: "kobe", open_world: false },
   recall: { source: "kobe", risk: "read", scope: "kobe", open_world: false },
 };

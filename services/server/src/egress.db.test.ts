@@ -100,7 +100,7 @@ describe("site egress ceiling", () => {
     );
     expect(byDomain["pypi.org"]).toMatchObject({ preset: "package_registries", in_ceiling: true });
     expect(byDomain["github.com"]).toMatchObject({ preset: "git_hosts", in_ceiling: false });
-    expect(res.json.presets).toEqual(["package_registries", "git_hosts", "web_search"]);
+    expect(res.json.presets).toEqual(["package_registries", "git_hosts"]);
   });
 
   it("adds a canonicalized custom domain, refuses duplicates and junk", async () => {

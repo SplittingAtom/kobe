@@ -6,7 +6,6 @@ import {
   scanTeams,
   sql,
   teamEgress,
-  webSearchSettings,
   type KobeDb,
   type KobeTx,
 } from "@kobe/db";
@@ -97,12 +96,6 @@ export function sealedFamilies(keys: {
         secret: envelope,
         keyIds: keys.envelopeKeyIds,
         site: kidCount(sql`${connectorSiteKeys.sealed}`, sql`${connectorSiteKeys}`),
-      },
-      {
-        name: "the web search API key",
-        secret: envelope,
-        keyIds: keys.envelopeKeyIds,
-        site: kidCount(sql`${webSearchSettings.sealed}`, sql`${webSearchSettings}`),
       },
     );
   }

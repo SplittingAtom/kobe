@@ -15,7 +15,6 @@ export { default as retention } from "./retention";
 export { default as audit } from "./audit";
 export { default as breakGlass } from "./break-glass";
 export { default as skills } from "./skills";
-export { default as webSearch } from "./web-search";
 export { default as memory } from "./memory";
 export { default as schedules } from "./schedules";
 export { default as followUps } from "./follow-ups";

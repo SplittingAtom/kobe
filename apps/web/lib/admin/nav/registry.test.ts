@@ -140,9 +140,10 @@ describe("registry contents", () => {
     },
   );
 
-  it.each(Object.entries(OPEN_PLACEHOLDER_TICKETS))(
-    "%s on the open list is still open and still named (KOBE-291)",
-    (ticket, reason) => {
+  // A loop, not it.each: the open list may be empty (it is since KOBE-606).
+  it("keeps every ticket on the open list open and named (KOBE-291)", () => {
+    const open: Readonly<Record<string, string>> = OPEN_PLACEHOLDER_TICKETS;
+    for (const [ticket, reason] of Object.entries(open)) {
       expect(reason.trim()).not.toBe("");
       expect(
         existsSync(new URL(`${ticket}.md`, LEDGER_DIR)),
@@ -156,8 +157,8 @@ describe("registry contents", () => {
         (s) => s.status.kind === "placeholder" && s.status.ticket === ticket,
       );
       expect(named, `${ticket}: no placeholder names it; drop its line`).toBe(true);
-    },
-  );
+    }
+  });
 
   it("reads the run ledger's done tickets (the check above can fail)", () => {
     const real = readFileSync(RUN_LEDGER, "utf8");
@@ -179,10 +180,11 @@ describe("registry contents", () => {
     expect(doneInRunLedger("KOBE-7", text)).toBe(false);
   });
 
-  it("keeps web search a placeholder on hold, with why", () => {
-    const status = must(SITE_SECTIONS.find((s) => s.id === "web-search")).status;
-    expect(status.kind).toBe("placeholder");
-    expect(status.kind === "placeholder" && status.onHold).toMatch(/on hold/i);
+  it("has no web search section in either console (KOBE-606)", () => {
+    for (const s of [...SITE_SECTIONS, ...TEAM_SECTIONS]) {
+      expect(s.id).not.toBe("web-search");
+      expect(s.label).not.toMatch(/web search/i);
+    }
   });
 
   it.each(["site", "team"] as const)("%s: every page directory belongs to a section", (kind) => {

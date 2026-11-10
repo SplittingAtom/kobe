@@ -9,7 +9,7 @@ import { toolsError } from "./channel.js";
 
 /**
  * Routes `remember` / `recall` kobe-tools requests (`memory.put`, `memory.read`) to the server and
- * its `memory.result` back (KOBE-157, memory.ts). Same rules as {@link WebSearchBroker}: wire ids
+ * its `memory.result` back (KOBE-157, memory.ts). Same rules as the other brokers: wire ids
  * are minted here, the frame carries the run and thread the agent knows (never ones the extension
  * names) plus the `tool_call_id` kobe-policy allowed, every pending request is answered exactly
  * once, and anything that prevents an answer is an error (fail closed). No retry.

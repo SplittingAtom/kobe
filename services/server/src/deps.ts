@@ -41,7 +41,6 @@ import {
   type SandboxWire,
   type SandboxWireOptions,
 } from "./sandbox-wire/index.js";
-import { createWebSearchService } from "./web-search/service.js";
 import {
   DbRunOrchestrator,
   PINNED_AGENTS,
@@ -436,9 +435,6 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     projectMounts,
     skillDrafts: skillDraftTool,
     notebooks: notebookFiles,
-    webSearch:
-      options.sandboxWire?.webSearch ??
-      createWebSearchService({ db: database.db, envelope: options.envelope }),
     hooks: {
       async onRunEnded(event) {
         if (event.status === "completed") serverCalls.afterRunCompleted(event);
