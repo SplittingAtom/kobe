@@ -44,7 +44,14 @@ import { RegenerateWith } from "./regenerate-with";
 import { AnswerDetailScope, AnswerDetailToggle, Disclosure, useDisclosure } from "./detail";
 import { CompactNowButton } from "./compact-now";
 import { MarkerPart, MessageMarkers, withApprovalMarker } from "./markers";
-import { UsedSkills } from "./skill-badge";
+import { UsedSkills, useUsedSkills } from "./skill-badge";
+import {
+  AppAnswerParts,
+  hiddenInAppAnswer,
+  keptInAppAnswer,
+  withAppAnswerPass,
+} from "./app-answer";
+import { useAppAnswer } from "../apps/use-app-answer";
 import { Reasoning } from "./reasoning";
 import { FullOutputStatus, Output, useFullOutput } from "./tool-output";
 import { ToolCallCard } from "./tool-call";
@@ -192,6 +199,25 @@ const ASSISTANT_PARTS = {
       "kobe-offloaded": Offloaded,
       "kobe-skipped": SkippedActions,
       "kobe-app-card": AppCardPart,
+    },
+  },
+} as const;
+
+/**
+ * An answer's parts (KOBE-608): the same, each in its pass of an app answer (`app-answer.tsx`):
+ * content hides behind "Show response", approvals, problems and markers never do.
+ */
+const ANSWER_PARTS = {
+  Text: hiddenInAppAnswer(MarkdownText),
+  Reasoning: hiddenInAppAnswer(Reasoning),
+  tools: { Override: withAppAnswerPass(ToolCallCard) },
+  data: {
+    by_name: {
+      "kobe-marker": keptInAppAnswer(MarkerPart),
+      "kobe-problem": keptInAppAnswer(Problem),
+      "kobe-offloaded": hiddenInAppAnswer(Offloaded),
+      "kobe-skipped": hiddenInAppAnswer(SkippedActions),
+      "kobe-app-card": keptInAppAnswer(AppCardPart),
     },
   },
 } as const;
@@ -370,12 +396,21 @@ function CopyAction() {
   );
 }
 
-/** An answer's parts (markdown, tool cards collapsed, skills), as the conversation shows them. */
+/**
+ * An answer's parts (markdown, tool cards collapsed, skills), as the conversation shows them; an
+ * answer with an MCP App shows only the app, the rest behind "Show response" (KOBE-608).
+ */
 function AnswerParts({ children }: { readonly children?: ReactNode }) {
+  const apps = useAppAnswer();
+  const skills = useUsedSkills();
   return (
     <div className="text-foreground flex flex-col gap-2 px-2 leading-relaxed wrap-break-word">
-      <MessagePrimitive.Parts components={ASSISTANT_PARTS} />
-      <UsedSkills />
+      <AppAnswerParts
+        apps={apps}
+        parts={ANSWER_PARTS}
+        skills={<UsedSkills names={skills} />}
+        hasSkills={skills.length > 0}
+      />
       {children}
     </div>
   );

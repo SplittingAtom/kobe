@@ -59,6 +59,12 @@ export interface ThreadApps {
   /** Whether `key`'s tab already opened by itself on this thread (closing it keeps it closed). */
   autoOpened(key: string): boolean;
   markAutoOpened(key: string): void;
+  /**
+   * Cards whose stored result could not be read for this viewer (KOBE-608): their answers render
+   * as before, not as an app answer.
+   */
+  readonly failed: ReadonlySet<string>;
+  markFailed(key: string): void;
 }
 
 const NONE: ReadonlyMap<string, AppResultView> = new Map();
@@ -215,6 +221,12 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
   const markAutoOpened = useCallback((key: string) => {
     opened.current.add(key);
   }, []);
+  const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => setFailed(new Set()), [threadId]);
+  const markFailed = useCallback(
+    (key: string) => setFailed((prev) => (prev.has(key) ? prev : new Set([...prev, key]))),
+    [],
+  );
   const forget = useCallback((ref: string) => removed.current.add(ref), []);
   const dismissDropped = useCallback(() => setDropped([]), []);
   const take = useCallback((key: string, force: boolean) => {
@@ -240,8 +252,12 @@ export function ThreadAppsProvider({ children }: { readonly children: ReactNode 
       placed,
       autoOpened,
       markAutoOpened,
+      failed,
+      markFailed,
     }),
     [
+      failed,
+      markFailed,
       placed,
       autoOpened,
       markAutoOpened,
