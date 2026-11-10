@@ -79,9 +79,31 @@ export function EgressNotice({
 
 interface NoticeProps {
   readonly payload: KobeEventPayload<"egress.blocked">;
+  /**
+   * When the block happened (the event's server `ts`, KOBE-609). A decision older than it is not
+   * this block's answer: the card offers Request access again. Unknown: the latest request counts.
+   */
+  readonly blockedAt?: string | undefined;
   readonly api: Api | undefined;
   readonly threadId: string | undefined;
   readonly pollMs?: number;
+}
+
+/**
+ * The member's request that answers this block (KOBE-609): the latest, unless it was decided
+ * before the block (an admin enabled or denied the host earlier, and it was blocked again since,
+ * say after the domain was removed). A pending request always counts. Both times are the server's.
+ */
+export function requestForBlock(
+  latest: EgressRequest | undefined,
+  blockedAt: string | undefined,
+): EgressRequest | undefined {
+  if (!latest || latest.status === "pending" || blockedAt === undefined) return latest;
+  if (latest.decidedAt === null) return latest;
+  const decided = Date.parse(latest.decidedAt);
+  const blocked = Date.parse(blockedAt);
+  if (Number.isNaN(decided) || Number.isNaN(blocked)) return latest;
+  return decided < blocked ? undefined : latest;
 }
 
 const NOT_ADMIN: EgressViewer = { siteAdmin: false, teamAdmin: false, teamName: "your team" };
@@ -104,6 +126,7 @@ function useViewer(api: Api | undefined, enabled: boolean): EgressViewer {
 
 function EgressNoticeBody({
   payload,
+  blockedAt,
   api,
   threadId,
   pollMs = PENDING_POLL_MS,
@@ -124,9 +147,9 @@ function EgressNoticeBody({
     if (!api) return;
     const res = await api.egressRequests(domain);
     if (!res.ok) return;
-    const latest = res.data.requests[0];
+    const latest = requestForBlock(res.data.requests[0], blockedAt);
     if (latest) setView({ kind: "request", request: latest });
-  }, [api, domain]);
+  }, [api, domain, blockedAt]);
 
   useEffect(() => {
     if (!canRequest) return;
@@ -301,14 +324,22 @@ function EgressNoticeBody({
 /** The notice with the chat's API and the thread on screen. */
 export function ConnectedEgressNotice({
   payload,
+  blockedAt,
   closeId,
 }: {
   readonly payload: KobeEventPayload<"egress.blocked">;
+  readonly blockedAt?: string | undefined;
   readonly closeId?: string | undefined;
 }) {
   const session = useContext(ChatSessionContext);
   const threadId = useKobeExtras()?.state.threadId ?? undefined;
   return (
-    <EgressNotice payload={payload} api={session?.api} threadId={threadId} closeId={closeId} />
+    <EgressNotice
+      payload={payload}
+      blockedAt={blockedAt}
+      api={session?.api}
+      threadId={threadId}
+      closeId={closeId}
+    />
   );
 }

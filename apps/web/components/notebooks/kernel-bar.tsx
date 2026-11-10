@@ -141,6 +141,7 @@ export function KernelNotices({
         <EgressNotice
           key={`${b.runId}:${b.payload.domain}`}
           payload={b.payload}
+          blockedAt={b.blockedAt}
           api={wiring?.egressApi}
           threadId={threadId ?? undefined}
         />

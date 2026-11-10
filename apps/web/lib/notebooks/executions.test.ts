@@ -106,7 +106,11 @@ describe("NotebookExecStore", () => {
       ev("egress.blocked", { domain: "agent.example", request_access: true }, RUN2),
     ]);
     expect(egressNotices(store.snapshot(), store.egress(), TH, "x.py")).toEqual([
-      { runId: RUN, payload: { domain: "example.com", request_access: true } },
+      {
+        runId: RUN,
+        payload: { domain: "example.com", request_access: true },
+        blockedAt: "2026-10-21T10:00:00Z",
+      },
     ]);
   });
 

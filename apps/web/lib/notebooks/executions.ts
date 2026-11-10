@@ -37,6 +37,8 @@ export interface Execution {
 export interface BlockedDomain {
   readonly runId: string;
   readonly payload: KobeEventPayload<"egress.blocked">;
+  /** The event's server time (KOBE-609): the card ignores decisions older than the block. */
+  readonly blockedAt: string;
 }
 
 type Listener = () => void;
@@ -100,7 +102,9 @@ function withBlocked(egress: readonly BlockedDomain[], event: KobeEvent): readon
   const known = egress.some(
     (b) => b.runId === event.run_id && b.payload.domain === event.payload.domain,
   );
-  return known ? egress : [...egress, { runId: event.run_id, payload: event.payload }];
+  return known
+    ? egress
+    : [...egress, { runId: event.run_id, payload: event.payload, blockedAt: event.ts }];
 }
 
 function endExecutions(
