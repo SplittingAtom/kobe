@@ -3,7 +3,7 @@
  * wrote, and which threads used a file. Three batched reads, validated here on the camelized answer:
  *
  * - `GET /v1/threads/file-links?threads=<id,...>` (at most 50 ids): the visible thread rows' links;
- * - `GET /v1/threads/{id}/files`: one thread's links;
+ * - `GET /v1/threads/{id}/file-links`: one thread's links (`/files` is KOBE-488's);
  * - `GET /v1/workspace/file-threads?paths=<p,...>` (at most 100 paths): the threads per file.
  *
  * Paths are the workspace tree's (`GET /v1/workspace/files`; project files under
@@ -109,7 +109,10 @@ export function createFileLinksApi(teamId: string, fetchFn?: typeof fetch): File
       return res.ok ? { ...res, data: res.data.links } : res;
     },
     async threadFileList(threadId) {
-      return parsed(await get(`/v1/threads/${encodeURIComponent(threadId)}/files`), threadLinks);
+      return parsed(
+        await get(`/v1/threads/${encodeURIComponent(threadId)}/file-links`),
+        threadLinks,
+      );
     },
     async fileThreads(paths) {
       if (paths.length === 0) return { ok: true, status: 200, data: [] };
