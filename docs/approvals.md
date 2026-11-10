@@ -155,7 +155,7 @@ client:
 - **Ended for good.** Archiving, moving to Trash or moving to another project deletes the
   thread's rules (audited `policy.rule.deleted`, system actor) in the same transaction, so
   unarchive, restore or moving back never revive them. Losing access to the thread's project
-  (removed from it, the project made selected-members, no longer team admin) ends them the same
+  (removed from it as an owner or editor, archived, no longer team admin) ends them the same
   way. A rule whose run ended is pruned when the member makes a new one.
 - **Only this exact action** (`exact: true`). The server derives `arg_pattern` from the approval's
   stored canonical input as the engine sees it (validated, paths canonical), each value a literal

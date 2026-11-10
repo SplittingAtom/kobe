@@ -13,6 +13,7 @@ Hadron via `scripts/hadron.sh`.
   `docs/specs/projects-in-conversations.md` (Chris's decisions §11), brief
   `docs/ledger/projects-lane.md`; KOBE-587 (PC-0, remove restricted) first, then KOBE-586 and
   KOBE-588..590 (web), KOBE-591 → 592 (proposals), KOBE-593 last; gate KOBE-594.
+  KOBE-593 notes: `docs/ledger/KOBE-593.md`.
 - **Workspaces gate approved by Chris (2026-11-09):** KOBE-583 done; gate1 on `local-3a893e08156a`.
 - **Workspaces lane at the gate (2026-11-09):** KOBE-576..582 merged (PRs #494 #496 #498 #499
   #500 #501 #502, fixes #504 #505); kobe-gate1 reinstalled fresh (backup
