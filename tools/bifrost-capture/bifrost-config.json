@@ -1,0 +1,59 @@
+{
+  "$schema": "https://www.getbifrost.ai/schema",
+  "client": {
+    "enforce_auth_on_inference": false,
+    "allow_direct_keys": false,
+    "enable_logging": false,
+    "disable_content_logging": true,
+    "allow_per_request_content_storage_override": false,
+    "allow_per_request_raw_override": false,
+    "allowed_origins": []
+  },
+  "config_store": {
+    "enabled": true,
+    "type": "sqlite",
+    "config": { "path": "/app/data/config.db" }
+  },
+  "logs_store": { "enabled": false },
+  "providers": {
+    "anthropic": {
+      "keys": [
+        { "name": "capture-anthropic", "value": "sk-capture", "models": ["*"], "weight": 1 }
+      ],
+      "network_config": {
+        "base_url": "http://capture:9000",
+        "allow_private_network": true,
+        "max_retries": 0
+      }
+    },
+    "openai": {
+      "keys": [{ "name": "capture-openai", "value": "sk-capture", "models": ["*"], "weight": 1 }],
+      "network_config": {
+        "base_url": "http://capture:9000",
+        "allow_private_network": true,
+        "max_retries": 0
+      }
+    },
+    "ollama": {
+      "keys": [
+        {
+          "name": "capture-ollama",
+          "value": "",
+          "models": ["*"],
+          "weight": 1,
+          "ollama_key_config": { "url": "http://capture:9000" }
+        }
+      ],
+      "network_config": { "allow_private_network": true, "max_retries": 0 }
+    },
+    "compat": {
+      "keys": [{ "name": "capture-compat", "value": "sk-capture", "models": ["*"], "weight": 1 }],
+      "network_config": {
+        "base_url": "http://capture:9000",
+        "allow_private_network": true,
+        "max_retries": 0
+      },
+      "custom_provider_config": { "base_provider_type": "openai" }
+    }
+  }
+}
