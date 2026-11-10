@@ -8,6 +8,7 @@ import { ErrorNotice } from "../admin/error-notice";
 import { useArtifactPanel } from "../chat/artifact-state";
 import { ChatSessionContext } from "../chat/kobe-runtime";
 import { useEndDraftProject } from "../chat/use-draft-project";
+import { useConversationProject } from "../chat/use-conversation-project";
 import { mentionRefusal } from "../../lib/chat/mention-insert";
 import { FileBrowser } from "../files/file-browser";
 import { WorkspaceConflictNotices } from "../files/workspace-conflict-notices";
@@ -320,6 +321,7 @@ function RailFiles({
         return refused;
       }
     : undefined;
+  const conversation = useConversationProject();
   const content = (
     <>
       <div className={styles.sectionHeader}>
@@ -345,6 +347,9 @@ function RailFiles({
           onOpenFile={openFile}
           onMoved={panel?.moveFiles}
           onMention={mention}
+          activeProjectId={conversation.activeProjectId}
+          onNewConversationIn={conversation.newConversationIn}
+          onMoveHere={conversation.moveHere}
         />
       )}
     </>

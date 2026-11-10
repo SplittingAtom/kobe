@@ -450,6 +450,19 @@ const LIST = [
     icon: FolderKanbanIcon,
     scope: "file-menu",
   },
+  // A project the conversation is not in (KOBE-590, FP4): on its row in the Files panel.
+  {
+    id: "new-conversation-in-project",
+    name: "New conversation in this project",
+    icon: SquarePenIcon,
+    scope: "file-menu",
+  },
+  {
+    id: "move-conversation-here",
+    name: "Move this conversation here",
+    icon: FolderInputIcon,
+    scope: "file-menu",
+  },
   // The conversation's chrome. Rename: the pencil beside the header's title (KOBE-292).
   { id: "rename-thread", name: "Rename", icon: PencilIcon, scope: "thread", slash: "rename" },
   { id: "open-project", name: "Project", icon: FolderKanbanIcon, scope: "thread" },

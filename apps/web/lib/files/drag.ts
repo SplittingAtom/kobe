@@ -34,3 +34,22 @@ export const carriesWorkspaceFolder = (dt: DataTransfer | null): boolean =>
 
 /** The dropped row's path; only readable in the drop event. Empty when there is none. */
 export const droppedRowPath = (dt: DataTransfer): string => dt.getData(TREE_DRAG_TYPE);
+
+/**
+ * A file of a project that is not mounted in the member's files (KOBE-590, FP4) is dragged with
+ * this type instead of {@link TREE_DRAG_TYPE}: the composer takes the drop only to say why it is
+ * refused (the file is not in the sandbox). The data is the refusal's message.
+ */
+export const UNMOUNTED_DRAG_TYPE = "application/x-kobe-unmounted-project-file";
+
+export function startUnmountedDrag(dt: DataTransfer, message: string): void {
+  dt.setData(UNMOUNTED_DRAG_TYPE, message);
+  dt.effectAllowed = "copy";
+}
+
+export const carriesUnmountedFile = (dt: DataTransfer | null): boolean =>
+  typesOf(dt).includes(UNMOUNTED_DRAG_TYPE);
+
+/** The refusal carried by the drag; only readable in the drop event. */
+export const droppedUnmountedMessage = (dt: DataTransfer): string =>
+  dt.getData(UNMOUNTED_DRAG_TYPE);

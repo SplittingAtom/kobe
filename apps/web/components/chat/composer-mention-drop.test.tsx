@@ -229,6 +229,23 @@ describe("drag a workspace file into the composer (KOBE-374 ac-4)", () => {
     expect(screen.queryByRole("list", { name: "Mentioned files" })).toBeNull();
   });
 
+  it("a file of an unmounted project is refused on the composer with the reason (KOBE-590, FP4)", async () => {
+    const t = fake.addThread("Work");
+    await openFiles(t);
+    await composer();
+    const dt = transfer();
+    dt.setData(
+      "application/x-kobe-unmounted-project-file",
+      "Start a conversation in Ops to mention its files",
+    );
+    fireEvent.dragOver(panel(), { dataTransfer: dt });
+    fireEvent.drop(panel(), { dataTransfer: dt });
+    expect(
+      await screen.findByText("Start a conversation in Ops to mention its files"),
+    ).toBeTruthy();
+    expect(chips()).toEqual([]);
+  });
+
   it("the tree still moves a row dropped on a folder (the composer is not in the way)", async () => {
     const t = fake.addThread("Work");
     await openFiles(t);

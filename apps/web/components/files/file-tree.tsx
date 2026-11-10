@@ -13,7 +13,8 @@ import { ChevronRightIcon, LoaderCircleIcon } from "lucide-react";
 import { WORKSPACE_DROP_FOLDER } from "@kobe/protocol";
 import type { FileEntry } from "../../lib/files/api";
 import { carriesFiles, droppedItems, type DroppedItems } from "../../lib/files/drop";
-import { carriesWorkspaceRow, startRowDrag } from "../../lib/files/drag";
+import { carriesWorkspaceRow, startRowDrag, startUnmountedDrag } from "../../lib/files/drag";
+import { ACTIVE_LABEL } from "../../lib/projects/files-panel";
 import { formatBytes, isReadOnlyPath, parentPath } from "../../lib/files/format";
 import { FILE_KIND_LABELS, fileKind, fileKindIcon, folderIcon } from "../../lib/files/icons";
 import {
@@ -58,6 +59,11 @@ export interface TreeActions {
   decorate?(entry: FileEntry): RowDecoration | undefined;
   /** Why files dropped onto `folder` are refused (a read-only project, FP1), else undefined. */
   dropRefusal?(folder: string): string | undefined;
+  /**
+   * Why the file at `path` cannot be mentioned in a conversation (a file of a project that is not
+   * mounted, KOBE-590 FP4), else undefined. Such a file drags only to be refused at the composer.
+   */
+  mentionRefusal?(path: string): string | undefined;
   /** Files were dragged onto a folder that refuses them: say why. */
   onRefusedDrop?(reason: string): void;
 }
@@ -67,6 +73,10 @@ export interface RowDecoration {
   readonly label: string;
   readonly title: string;
   readonly chips: ReactNode;
+  /** A project that is not the conversation's (KOBE-590, FP2): the muted token, never opacity. */
+  readonly greyed?: boolean;
+  /** The conversation's own project: a green dot before the name, labelled for screen readers. */
+  readonly active?: boolean;
   /** Words for screen readers after the kind ("reader", "editing"). */
   readonly description: string;
 }
@@ -225,7 +235,20 @@ function EntryRow({
         <span aria-hidden className="size-3.5 shrink-0" />
       )}
       <Icon aria-hidden className="text-muted-foreground size-4 shrink-0" />
-      <span className="min-w-0 flex-1 truncate">{decoration?.label ?? entry.name}</span>
+      {decoration?.active && (
+        <span
+          role="img"
+          aria-label={ACTIVE_LABEL}
+          title={ACTIVE_LABEL}
+          className="size-2 shrink-0 rounded-full"
+          style={{ backgroundColor: "var(--kobe-active-dot)" }}
+        />
+      )}
+      <span
+        className={cn("min-w-0 flex-1 truncate", decoration?.greyed && "text-muted-foreground")}
+      >
+        {decoration?.label ?? entry.name}
+      </span>
       {decoration?.chips}
       {row.loading && (
         <LoaderCircleIcon aria-hidden className="text-muted-foreground size-3 animate-spin" />
@@ -314,6 +337,9 @@ function useDrag(actions: TreeActions) {
     start(e, row) {
       const readOnly = isReadOnlyPath(row.entry.path, actions.checkedOut);
       if (readOnly && row.entry.type === "dir") return e.preventDefault();
+      const refused =
+        row.entry.type === "file" ? actions.mentionRefusal?.(row.entry.path) : undefined;
+      if (refused !== undefined) return startUnmountedDrag(e.dataTransfer, refused);
       dragging.current = { path: row.entry.path, type: row.entry.type };
       // A drop on the composer mentions it (copy); on a folder here it moves (canMoveInto
       // refuses read-only sources).

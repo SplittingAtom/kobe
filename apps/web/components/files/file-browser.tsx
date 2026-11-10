@@ -22,7 +22,15 @@ import { cn } from "../../lib/utils";
 import { ConfirmDelete, MoveForm, RenameForm } from "./file-dialogs";
 import { DROP_FOLDER_ATTR, FileTreeView, type Dragging, type TreeFocus } from "./file-tree";
 import { useFileTree, type FileTree } from "./use-file-tree";
-import { NoProjects, ProjectsHeader, useProjectsInTree, WorkspaceHeader } from "./workspace-tree";
+import { useProjectHeads } from "./project-heads";
+import {
+  NoProjects,
+  ProjectsFilter,
+  ProjectsHeader,
+  ShowAllProjects,
+  useProjectsInTree,
+  WorkspaceHeader,
+} from "./workspace-tree";
 import { ProjectWorkPanel, type ProjectRef, type WorkAction } from "../projects/project-work";
 import { isProjectFolder, projectSlugOf } from "../../lib/projects/workspace";
 import { useNavigate } from "../shell/use-navigate";
@@ -244,8 +252,20 @@ export function FileBrowser({
   onMoved,
   onMention,
   onRefresh,
+  activeProjectId = null,
+  onNewConversationIn,
+  onMoveHere,
 }: {
   readonly api: FilesApi;
+  /** The project of the conversation on screen, or of the new one being drafted (FP2). */
+  readonly activeProjectId?: string | null | undefined;
+  /** "New conversation in this project" on a greyed project (FP4). Absent: no such item. */
+  readonly onNewConversationIn?: ((project: ProjectRef) => void) | undefined;
+  /**
+   * "Move this conversation here" on a greyed project (FP4): offered only when the conversation
+   * on screen is the member's own; the answer is why it could not move, or undefined once it did.
+   */
+  readonly onMoveHere?: ((project: ProjectRef) => Promise<string | undefined>) | undefined;
   /** The active workspace's name (the switcher's): the tree's top row (FP1). */
   readonly workspaceName?: string | undefined;
   /** Refresh files in the top row (KOBE-461): wakes and lists again (a new `wakeKey`). Absent: none. */
@@ -265,7 +285,8 @@ export function FileBrowser({
   /** Reveals this folder, once per `seq` (uploads/ after a rail drop, KOBE-199). */
   readonly showFolder?: { readonly path: string; readonly seq: number } | null;
 }) {
-  const tree = useFileTree(api, expandedKey(api.teamId));
+  const heads = useProjectHeads(api);
+  const tree = useFileTree(heads, expandedKey(api.teamId));
   const waking = useWake(api, tree.reloadAll, refreshAfterWakeMs, wakeKey);
   const [focus, setFocus] = useState<TreeFocus>({ path: null, folder: "" });
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -275,10 +296,10 @@ export function FileBrowser({
   const [focusRequest, setFocusRequest] = useState<{ path: string; seq: number } | null>(null);
   const shownSeq = useRef(showFolder?.seq ?? 0);
   const { reveal, moved } = tree;
-  const work = useProjectsInTree(tree);
+  const work = useProjectsInTree(tree, activeProjectId);
   const { checkedOut } = work;
   const split = useMemo(() => splitProjectRows(tree.rows), [tree.rows]);
-  const projectsTree = useMemo(() => ({ ...tree, rows: split.projects }), [tree, split]);
+  const projectsTree = useMemo(() => ({ ...tree, rows: work.rows }), [tree, work.rows]);
   const myTree = useMemo(() => ({ ...tree, rows: split.mine }), [tree, split]);
   const [projectAction, setProjectAction] = useState<{
     readonly project: ProjectRef;
@@ -338,7 +359,7 @@ export function FileBrowser({
 
   const mention = (entry: FileEntry) => {
     start();
-    const refused = onMention?.(entry);
+    const refused = work.mentionRefusal(entry.path) ?? onMention?.(entry);
     if (refused !== undefined) {
       focusRow(entry.path);
       return setActionError({ status: 0, code: "client_error", message: refused });
@@ -413,24 +434,37 @@ export function FileBrowser({
     }
   };
 
+  // A file of a project that is not mounted is listed, not in the sandbox: it opens nowhere.
+  const notMounted = (entry: FileEntry) => work.mentionRefusal(entry.path) !== undefined;
+  const openHere = onOpenFile
+    ? (entry: FileEntry) => {
+        const refused = work.mentionRefusal(entry.path);
+        if (refused === undefined) return onOpenFile(entry);
+        start();
+        setNotice(refused.replace("to mention its files", "to open its files"));
+      }
+    : undefined;
   const actions = {
-    onOpenFile,
+    onOpenFile: openHere,
+    mentionRefusal: work.mentionRefusal,
     bindings: (entry: FileEntry) =>
-      rowBindings(entry, checkedOut, {
-        onOpen:
-          entry.type === "dir"
-            ? () => {
-                tree.expand(entry.path);
-                focusRow(entry.path);
-              }
-            : onOpenFile && (() => onOpenFile(entry)),
-        onMention: onMention && (() => mention(entry)),
-        onDownload: () => void download(entry),
-        onRename: () => setDialog({ kind: "rename", entry }),
-        onMove: () => setDialog({ kind: "move", entry }),
-        onCopyPath: () => copyPath(entry),
-        onDelete: () => setDialog({ kind: "delete", entry }),
-      }),
+      entry.type === "file" && notMounted(entry)
+        ? ({} as MenuBindings)
+        : rowBindings(entry, checkedOut, {
+            onOpen:
+              entry.type === "dir"
+                ? () => {
+                    tree.expand(entry.path);
+                    focusRow(entry.path);
+                  }
+                : openHere && (() => openHere(entry)),
+            onMention: onMention && (() => mention(entry)),
+            onDownload: () => void download(entry),
+            onRename: () => setDialog({ kind: "rename", entry }),
+            onMove: () => setDialog({ kind: "move", entry }),
+            onCopyPath: () => copyPath(entry),
+            onDelete: () => setDialog({ kind: "delete", entry }),
+          }),
     onRename: (entry: FileEntry) => setDialog({ kind: "rename", entry }),
     onDelete: (entry: FileEntry) => setDialog({ kind: "delete", entry }),
     onMove: (dragging: Dragging, folder: string) =>
@@ -442,6 +476,14 @@ export function FileBrowser({
       setActionError(null);
       setNotice(reason);
     },
+  };
+  const moveHere = async (ref: ProjectRef) => {
+    start();
+    const refused = await onMoveHere?.(ref);
+    if (refused !== undefined) {
+      return setActionError({ status: 0, code: "client_error", message: refused });
+    }
+    setNotice(`Moved this conversation to ${ref.name}`);
   };
   const projectActions = {
     ...actions,
@@ -466,6 +508,26 @@ export function FileBrowser({
           : project.kind === "editable"
             ? { "checkout-project": act("checkout") }
             : {}),
+        ...(project.project.id === activeProjectId
+          ? {}
+          : {
+              ...(onNewConversationIn
+                ? {
+                    "new-conversation-in-project": {
+                      onSelect: () => onNewConversationIn(ref),
+                      movesFocus: true,
+                    },
+                  }
+                : {}),
+              ...(onMoveHere
+                ? {
+                    "move-conversation-here": {
+                      onSelect: () => void moveHere(ref),
+                      movesFocus: true,
+                    },
+                  }
+                : {}),
+            }),
         "open-project-page": { onSelect: () => navigate(`/me/projects/${project.project.id}`) },
       };
     },
@@ -497,10 +559,18 @@ export function FileBrowser({
           actions={projectActions}
           focusRequest={focusRequest}
           onFocusChange={focusFrom.projects}
-          header={() => <ProjectsHeader total={work.total} />}
+          header={() => (
+            <>
+              <ProjectsHeader />
+              {work.showFilter && <ProjectsFilter value={work.filter} onChange={work.setFilter} />}
+            </>
+          )}
         />
       </div>
-      {split.projects.length === 0 && <NoProjects ready={work.ready} />}
+      {work.hidden > 0 && !work.showAll && work.filter === "" && (
+        <ShowAllProjects total={work.all} onShow={() => work.setShowAll(true)} />
+      )}
+      {work.rows.length === 0 && <NoProjects ready={work.ready} filtered={work.filter !== ""} />}
       {projectAction && (
         <ProjectWorkPanel
           key={`${projectAction.project.id}:${projectAction.action}`}
