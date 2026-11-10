@@ -30,6 +30,7 @@ import {
   shareThreadRequestSchema,
 } from "@kobe/protocol";
 import { readBranches, setLabel, type LabelError } from "../threads/branches.js";
+import { readThreadBlocked } from "../egress/thread-blocked.js";
 import { FORK_RATE, forkThread } from "../threads/fork.js";
 import { readLineage } from "../threads/lineage.js";
 import { hitRateLimit } from "../rate-limit.js";
@@ -545,6 +546,14 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     if (!id) return invalidRequest(c);
     const branches = await asViewer(c, (tx, viewer) => readBranches(tx, viewer, id));
     return branches ? c.json(branches) : fail(c, "thread_not_found");
+  });
+
+  /** The thread's blocked-egress cards per run (KOBE-605): for whoever may read the thread. */
+  app.get("/:id/egress-blocked", async (c) => {
+    const id = threadIdParam(c);
+    if (!id) return invalidRequest(c);
+    const blocked = await asViewer(c, (tx, viewer) => readThreadBlocked(tx, viewer, id));
+    return blocked ? c.json(blocked) : fail(c, "thread_not_found");
   });
 
   /** Label a node (CT9): owner only; `null` removes; idempotent, never activity, not audited. */
