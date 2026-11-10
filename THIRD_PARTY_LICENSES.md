@@ -23,7 +23,7 @@ Nothing is pending: every component outside the allowed family has Chris's appro
 
 Every package in pnpm-lock.yaml (production and development, all platforms). "linked, bundled" packages are in the production dependencies of a deployable and ship in its image (the services via `pnpm deploy --prod`, web via the Next.js standalone output, kobe-sandbox-agent in the sandbox image); "dev-only" packages build, lint and test Kobe and are never shipped. Checked by `pnpm license:check` (CI `checks`).
 
-924 packages, 637 of them shipped in an image.
+951 packages, 638 of them shipped in an image.
 
 | Component | Version | License (SPDX) | How used | Where | License text |
 | --- | --- | --- | --- | --- | --- |
@@ -33,39 +33,57 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @assistant-ui/react | 0.15.26 | MIT | linked, bundled | web | [license](https://unpkg.com/@assistant-ui/react@0.15.26/LICENSE) |
 | @assistant-ui/store | 0.3.18 | MIT | linked, bundled | web | [license](https://unpkg.com/@assistant-ui/store@0.3.18/LICENSE) |
 | @assistant-ui/tap | 0.9.22 | MIT | linked, bundled | web | [license](https://unpkg.com/@assistant-ui/tap@0.9.22/LICENSE) |
-| @aws-sdk/checksums | 3.1001.2 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/checksums@3.1001.2/LICENSE) |
-| @aws-sdk/client-s3 | 3.1149.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/client-s3@3.1149.0/LICENSE) |
-| @aws-sdk/core | 3.978.2 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/core@3.978.2/LICENSE) |
-| @aws-sdk/credential-provider-env | 3.972.73 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-env@3.972.73/LICENSE) |
-| @aws-sdk/credential-provider-http | 3.972.75 | Apache-2.0 | linked, bundled | server | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-http/v/3.972.75) |
-| @aws-sdk/credential-provider-ini | 3.973.18 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-ini@3.973.18/LICENSE) |
-| @aws-sdk/credential-provider-login | 3.972.80 | Apache-2.0 | linked, bundled | server | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-login/v/3.972.80) |
-| @aws-sdk/credential-provider-node | 3.972.85 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-node@3.972.85/LICENSE) |
-| @aws-sdk/credential-provider-process | 3.972.73 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-process@3.972.73/LICENSE) |
-| @aws-sdk/credential-provider-sso | 3.973.17 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-sso@3.973.17/LICENSE) |
-| @aws-sdk/credential-provider-web-identity | 3.972.79 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-web-identity@3.972.79/LICENSE) |
-| @aws-sdk/lib-storage | 3.1147.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/lib-storage@3.1147.0/LICENSE) |
-| @aws-sdk/middleware-sdk-s3 | 3.972.78 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/middleware-sdk-s3@3.972.78/LICENSE) |
-| @aws-sdk/nested-clients | 3.997.47 | Apache-2.0 | linked, bundled | server | [license](https://www.npmjs.com/package/@aws-sdk/nested-clients/v/3.997.47) |
-| @aws-sdk/signature-v4-multi-region | 3.996.48 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/signature-v4-multi-region@3.996.48/LICENSE) |
-| @aws-sdk/token-providers | 3.1149.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/token-providers@3.1149.0/LICENSE) |
-| @aws-sdk/types | 3.974.6 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/types@3.974.6/LICENSE) |
-| @aws-sdk/xml-builder | 3.972.41 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/xml-builder@3.972.41/LICENSE) |
+| @aws-sdk/checksums | 3.1001.2 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/checksums@3.1001.2/LICENSE) |
+| @aws-sdk/checksums | 3.1002.3 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/checksums@3.1002.3/LICENSE) |
+| @aws-sdk/client-s3 | 3.1149.0 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/client-s3@3.1149.0/LICENSE) |
+| @aws-sdk/client-s3 | 3.1164.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/client-s3@3.1164.0/LICENSE) |
+| @aws-sdk/core | 3.978.2 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/core@3.978.2/LICENSE) |
+| @aws-sdk/core | 3.980.1 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/core@3.980.1/LICENSE) |
+| @aws-sdk/credential-provider-env | 3.972.73 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/credential-provider-env@3.972.73/LICENSE) |
+| @aws-sdk/credential-provider-env | 3.972.82 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-env@3.972.82/LICENSE) |
+| @aws-sdk/credential-provider-http | 3.972.75 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-http/v/3.972.75) |
+| @aws-sdk/credential-provider-http | 3.972.84 | Apache-2.0 | linked, bundled | server | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-http/v/3.972.84) |
+| @aws-sdk/credential-provider-ini | 3.973.18 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/credential-provider-ini@3.973.18/LICENSE) |
+| @aws-sdk/credential-provider-ini | 3.973.27 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-ini@3.973.27/LICENSE) |
+| @aws-sdk/credential-provider-login | 3.972.80 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-login/v/3.972.80) |
+| @aws-sdk/credential-provider-login | 3.972.89 | Apache-2.0 | linked, bundled | server | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-login/v/3.972.89) |
+| @aws-sdk/credential-provider-node | 3.972.85 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/credential-provider-node@3.972.85/LICENSE) |
+| @aws-sdk/credential-provider-node | 3.972.94 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-node@3.972.94/LICENSE) |
+| @aws-sdk/credential-provider-process | 3.972.73 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/credential-provider-process@3.972.73/LICENSE) |
+| @aws-sdk/credential-provider-process | 3.972.82 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-process@3.972.82/LICENSE) |
+| @aws-sdk/credential-provider-sso | 3.973.17 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/credential-provider-sso@3.973.17/LICENSE) |
+| @aws-sdk/credential-provider-sso | 3.973.26 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-sso@3.973.26/LICENSE) |
+| @aws-sdk/credential-provider-web-identity | 3.972.79 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/credential-provider-web-identity@3.972.79/LICENSE) |
+| @aws-sdk/credential-provider-web-identity | 3.972.88 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-web-identity@3.972.88/LICENSE) |
+| @aws-sdk/lib-storage | 3.1164.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/lib-storage@3.1164.0/LICENSE) |
+| @aws-sdk/middleware-sdk-s3 | 3.972.78 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/middleware-sdk-s3@3.972.78/LICENSE) |
+| @aws-sdk/middleware-sdk-s3 | 3.972.87 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/middleware-sdk-s3@3.972.87/LICENSE) |
+| @aws-sdk/nested-clients | 3.997.47 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://www.npmjs.com/package/@aws-sdk/nested-clients/v/3.997.47) |
+| @aws-sdk/nested-clients | 3.998.1 | Apache-2.0 | linked, bundled | server | [license](https://www.npmjs.com/package/@aws-sdk/nested-clients/v/3.998.1) |
+| @aws-sdk/signature-v4-multi-region | 3.996.48 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/signature-v4-multi-region@3.996.48/LICENSE) |
+| @aws-sdk/signature-v4-multi-region | 3.996.51 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/signature-v4-multi-region@3.996.51/LICENSE) |
+| @aws-sdk/token-providers | 3.1149.0 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/token-providers@3.1149.0/LICENSE) |
+| @aws-sdk/token-providers | 3.1164.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/token-providers@3.1164.0/LICENSE) |
+| @aws-sdk/types | 3.974.6 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/types@3.974.6/LICENSE) |
+| @aws-sdk/types | 3.975.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/types@3.975.0/LICENSE) |
+| @aws-sdk/xml-builder | 3.972.41 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/xml-builder@3.972.41/LICENSE) |
+| @aws-sdk/xml-builder | 3.972.42 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/xml-builder@3.972.42/LICENSE) |
 | @aws/lambda-invoke-store | 0.3.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws/lambda-invoke-store@0.3.0/LICENSE) |
 | @babel/code-frame | 7.29.7 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@babel/code-frame@7.29.7/LICENSE) |
 | @babel/helper-validator-identifier | 7.29.7 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@babel/helper-validator-identifier@7.29.7/LICENSE) |
 | @babel/runtime | 7.29.7 | MIT | linked, bundled | web | [license](https://unpkg.com/@babel/runtime@7.29.7/LICENSE) |
-| @better-auth/core | 1.7.7 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/core@1.7.7/LICENSE.md) |
-| @better-auth/drizzle-adapter | 1.7.7 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/drizzle-adapter@1.7.7/LICENSE.md) |
-| @better-auth/kysely-adapter | 1.7.7 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/kysely-adapter@1.7.7/LICENSE.md) |
-| @better-auth/memory-adapter | 1.7.7 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/memory-adapter@1.7.7/LICENSE.md) |
-| @better-auth/mongo-adapter | 1.7.7 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/mongo-adapter@1.7.7/LICENSE.md) |
-| @better-auth/passkey | 1.7.7 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/passkey@1.7.7/LICENSE.md) |
-| @better-auth/prisma-adapter | 1.7.7 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/prisma-adapter@1.7.7/LICENSE.md) |
-| @better-auth/telemetry | 1.7.7 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/telemetry@1.7.7/LICENSE.md) |
-| @better-auth/utils | 0.4.2 | MIT | linked, bundled | server, web | [license](https://www.npmjs.com/package/@better-auth/utils/v/0.4.2) |
+| @better-auth/core | 1.7.14 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/core@1.7.14/LICENSE.md) |
+| @better-auth/drizzle-adapter | 1.7.14 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/drizzle-adapter@1.7.14/LICENSE.md) |
+| @better-auth/kysely-adapter | 1.7.14 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/kysely-adapter@1.7.14/LICENSE.md) |
+| @better-auth/memory-adapter | 1.7.14 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/memory-adapter@1.7.14/LICENSE.md) |
+| @better-auth/mongo-adapter | 1.7.14 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/mongo-adapter@1.7.14/LICENSE.md) |
+| @better-auth/passkey | 1.7.14 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/passkey@1.7.14/LICENSE.md) |
+| @better-auth/prisma-adapter | 1.7.14 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/prisma-adapter@1.7.14/LICENSE.md) |
+| @better-auth/telemetry | 1.7.14 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/telemetry@1.7.14/LICENSE.md) |
 | @better-auth/utils | 0.5.0 | MIT | linked, bundled | server, web | [license](https://www.npmjs.com/package/@better-auth/utils/v/0.5.0) |
+| @better-auth/utils | 0.5.1 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-auth/utils@0.5.1/LICENSE) |
 | @better-fetch/fetch | 1.3.2 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-fetch/fetch@1.3.2/LICENSE) |
+| @better-fetch/fetch | 1.3.3 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@better-fetch/fetch@1.3.3/LICENSE) |
 | @braintree/sanitize-url | 7.1.2 | MIT | linked, bundled | web | [license](https://unpkg.com/@braintree/sanitize-url@7.1.2/LICENSE) |
 | @cacheable/memory | 2.2.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@cacheable/memory@2.2.0/LICENSE) |
 | @cacheable/utils | 2.5.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@cacheable/utils@2.5.0/LICENSE) |
@@ -176,7 +194,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @floating-ui/react-dom | 2.1.9 | MIT | linked, bundled | web | [license](https://unpkg.com/@floating-ui/react-dom@2.1.9/LICENSE) |
 | @floating-ui/utils | 0.2.12 | MIT | linked, bundled | web | [license](https://unpkg.com/@floating-ui/utils@0.2.12/LICENSE) |
 | @hexagon/base64 | 1.1.28 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@hexagon/base64@1.1.28/LICENSE) |
-| @hono/node-server | 2.1.3 | MIT | linked, bundled | mcp-proxy, server | [license](https://unpkg.com/@hono/node-server@2.1.3/LICENSE) |
+| @hono/node-server | 2.1.6 | MIT | linked, bundled | mcp-proxy, server | [license](https://unpkg.com/@hono/node-server@2.1.6/LICENSE) |
 | @humanfs/core | 0.19.2 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@humanfs/core@0.19.2/LICENSE) |
 | @humanfs/node | 0.16.8 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@humanfs/node@0.16.8/LICENSE) |
 | @humanfs/types | 0.15.0 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://www.npmjs.com/package/@humanfs/types/v/0.15.0) |
@@ -193,7 +211,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @jsep-plugin/regex | 1.0.4 | MIT | linked, bundled | server | [license](https://unpkg.com/@jsep-plugin/regex@1.0.4/LICENSE) |
 | @keyv/bigmap | 1.3.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@keyv/bigmap@1.3.1/LICENSE) |
 | @keyv/serialize | 1.1.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@keyv/serialize@1.1.1/LICENSE) |
-| @kubernetes/client-node | 2.0.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@kubernetes/client-node@2.0.0/LICENSE) |
+| @kubernetes/client-node | 2.0.2 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@kubernetes/client-node@2.0.2/LICENSE) |
 | @levischuck/tiny-cbor | 0.2.11 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@levischuck/tiny-cbor@0.2.11/LICENSE) |
 | @levischuck/tiny-cbor | 0.3.6 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@levischuck/tiny-cbor@0.3.6/LICENSE) |
 | @lezer/common | 1.5.3 | MIT | linked, bundled | web | [license](https://unpkg.com/@lezer/common@1.5.3/LICENSE) |
@@ -244,7 +262,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @opentelemetry/sdk-trace-base | 2.12.0 | Apache-2.0 | linked, bundled | egress-proxy, mcp-proxy, model-gateway, server | [license](https://unpkg.com/@opentelemetry/sdk-trace-base@2.12.0/LICENSE) |
 | @opentelemetry/sdk-trace-node | 2.12.0 | Apache-2.0 | linked, bundled | egress-proxy, mcp-proxy, model-gateway, server | [license](https://unpkg.com/@opentelemetry/sdk-trace-node@2.12.0/LICENSE) |
 | @opentelemetry/sdk-trace | 2.12.0 | Apache-2.0 | linked, bundled | egress-proxy, mcp-proxy, model-gateway, server | [license](https://unpkg.com/@opentelemetry/sdk-trace@2.12.0/LICENSE) |
-| @opentelemetry/semantic-conventions | 1.43.0 | Apache-2.0 | linked, bundled | egress-proxy, mcp-proxy, model-gateway, server, web | [license](https://unpkg.com/@opentelemetry/semantic-conventions@1.43.0/LICENSE) |
+| @opentelemetry/semantic-conventions | 1.43.0 | Apache-2.0 | linked, bundled | egress-proxy, mcp-proxy, model-gateway, server | [license](https://unpkg.com/@opentelemetry/semantic-conventions@1.43.0/LICENSE) |
 | @oxc-project/types | 0.151.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@oxc-project/types@0.151.0/LICENSE) |
 | @peculiar/asn1-android | 2.10.0 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@peculiar/asn1-android@2.10.0/LICENSE) |
 | @peculiar/asn1-asym-key | 2.10.0 | MIT | linked, bundled | server | [license](https://unpkg.com/@peculiar/asn1-asym-key@2.10.0/LICENSE) |
@@ -273,64 +291,64 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @protobufjs/pool | 1.1.0 | BSD-3-Clause | dev-only | build, lint and test tooling | [license](https://unpkg.com/@protobufjs/pool@1.1.0/LICENSE) |
 | @protobufjs/utf8 | 1.1.2 | BSD-3-Clause | dev-only | build, lint and test tooling | [license](https://unpkg.com/@protobufjs/utf8@1.1.2/LICENSE) |
 | @radix-ui/number | 1.1.3 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/number@1.1.3/LICENSE) |
-| @radix-ui/primitive | 1.1.7 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/primitive@1.1.7/LICENSE) |
-| @radix-ui/react-accessible-icon | 1.1.16 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-accessible-icon@1.1.16/LICENSE) |
-| @radix-ui/react-accordion | 1.2.21 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-accordion@1.2.21/LICENSE) |
-| @radix-ui/react-alert-dialog | 1.1.24 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-alert-dialog@1.1.24/LICENSE) |
-| @radix-ui/react-arrow | 1.1.16 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-arrow@1.1.16/LICENSE) |
-| @radix-ui/react-aspect-ratio | 1.1.16 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-aspect-ratio@1.1.16/LICENSE) |
-| @radix-ui/react-avatar | 1.2.7 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-avatar@1.2.7/LICENSE) |
-| @radix-ui/react-checkbox | 1.3.12 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-checkbox@1.3.12/LICENSE) |
-| @radix-ui/react-collapsible | 1.1.21 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-collapsible@1.1.21/LICENSE) |
-| @radix-ui/react-collection | 1.1.16 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-collection@1.1.16/LICENSE) |
+| @radix-ui/primitive | 1.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/primitive@1.2.0/LICENSE) |
+| @radix-ui/react-accessible-icon | 1.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-accessible-icon@1.2.0/LICENSE) |
+| @radix-ui/react-accordion | 1.3.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-accordion@1.3.1/LICENSE) |
+| @radix-ui/react-alert-dialog | 1.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-alert-dialog@1.2.1/LICENSE) |
+| @radix-ui/react-arrow | 1.1.17 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-arrow@1.1.17/LICENSE) |
+| @radix-ui/react-aspect-ratio | 1.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-aspect-ratio@1.2.0/LICENSE) |
+| @radix-ui/react-avatar | 1.3.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-avatar@1.3.1/LICENSE) |
+| @radix-ui/react-checkbox | 1.4.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-checkbox@1.4.1/LICENSE) |
+| @radix-ui/react-collapsible | 1.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-collapsible@1.2.1/LICENSE) |
+| @radix-ui/react-collection | 1.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-collection@1.2.0/LICENSE) |
 | @radix-ui/react-compose-refs | 1.1.5 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-compose-refs@1.1.5/LICENSE) |
-| @radix-ui/react-context-menu | 2.3.8 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-context-menu@2.3.8/LICENSE) |
-| @radix-ui/react-context | 1.2.2 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-context@1.2.2/LICENSE) |
-| @radix-ui/react-dialog | 1.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-dialog@1.2.0/LICENSE) |
-| @radix-ui/react-direction | 1.1.5 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-direction@1.1.5/LICENSE) |
-| @radix-ui/react-dismissable-layer | 1.1.20 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-dismissable-layer@1.1.20/LICENSE) |
-| @radix-ui/react-dropdown-menu | 2.1.25 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-dropdown-menu@2.1.25/LICENSE) |
-| @radix-ui/react-focus-guards | 1.1.6 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-focus-guards@1.1.6/LICENSE) |
-| @radix-ui/react-focus-scope | 1.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-focus-scope@1.2.0/LICENSE) |
-| @radix-ui/react-form | 0.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-form@0.2.0/LICENSE) |
-| @radix-ui/react-hover-card | 1.1.24 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-hover-card@1.1.24/LICENSE) |
+| @radix-ui/react-context-menu | 2.4.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-context-menu@2.4.1/LICENSE) |
+| @radix-ui/react-context | 1.3.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-context@1.3.0/LICENSE) |
+| @radix-ui/react-dialog | 1.3.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-dialog@1.3.1/LICENSE) |
+| @radix-ui/react-direction | 1.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-direction@1.2.0/LICENSE) |
+| @radix-ui/react-dismissable-layer | 1.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-dismissable-layer@1.2.1/LICENSE) |
+| @radix-ui/react-dropdown-menu | 2.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-dropdown-menu@2.2.1/LICENSE) |
+| @radix-ui/react-focus-guards | 1.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-focus-guards@1.2.0/LICENSE) |
+| @radix-ui/react-focus-scope | 1.3.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-focus-scope@1.3.1/LICENSE) |
+| @radix-ui/react-form | 0.3.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-form@0.3.0/LICENSE) |
+| @radix-ui/react-hover-card | 1.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-hover-card@1.2.1/LICENSE) |
 | @radix-ui/react-id | 1.1.4 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-id@1.1.4/LICENSE) |
-| @radix-ui/react-label | 2.1.16 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-label@2.1.16/LICENSE) |
-| @radix-ui/react-menu | 2.1.25 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-menu@2.1.25/LICENSE) |
-| @radix-ui/react-menubar | 1.1.25 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-menubar@1.1.25/LICENSE) |
-| @radix-ui/react-navigation-menu | 1.3.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-navigation-menu@1.3.0/LICENSE) |
-| @radix-ui/react-one-time-password-field | 0.1.17 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-one-time-password-field@0.1.17/LICENSE) |
-| @radix-ui/react-password-toggle-field | 0.1.12 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-password-toggle-field@0.1.12/LICENSE) |
-| @radix-ui/react-popover | 1.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-popover@1.2.0/LICENSE) |
-| @radix-ui/react-popper | 1.3.8 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-popper@1.3.8/LICENSE) |
-| @radix-ui/react-portal | 1.1.18 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-portal@1.1.18/LICENSE) |
+| @radix-ui/react-label | 2.1.17 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-label@2.1.17/LICENSE) |
+| @radix-ui/react-menu | 2.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-menu@2.2.1/LICENSE) |
+| @radix-ui/react-menubar | 1.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-menubar@1.2.1/LICENSE) |
+| @radix-ui/react-navigation-menu | 1.4.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-navigation-menu@1.4.1/LICENSE) |
+| @radix-ui/react-one-time-password-field | 0.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-one-time-password-field@0.2.1/LICENSE) |
+| @radix-ui/react-password-toggle-field | 0.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-password-toggle-field@0.2.1/LICENSE) |
+| @radix-ui/react-popover | 1.3.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-popover@1.3.1/LICENSE) |
+| @radix-ui/react-popper | 1.4.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-popper@1.4.0/LICENSE) |
+| @radix-ui/react-portal | 1.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-portal@1.2.0/LICENSE) |
 | @radix-ui/react-presence | 1.1.11 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-presence@1.1.11/LICENSE) |
-| @radix-ui/react-primitive | 2.1.11 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-primitive@2.1.11/LICENSE) |
-| @radix-ui/react-progress | 1.1.17 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-progress@1.1.17/LICENSE) |
-| @radix-ui/react-radio-group | 1.4.8 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-radio-group@1.4.8/LICENSE) |
-| @radix-ui/react-roving-focus | 1.1.20 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-roving-focus@1.1.20/LICENSE) |
-| @radix-ui/react-scroll-area | 1.3.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-scroll-area@1.3.0/LICENSE) |
-| @radix-ui/react-select | 2.3.8 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-select@2.3.8/LICENSE) |
-| @radix-ui/react-separator | 1.1.16 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-separator@1.1.16/LICENSE) |
-| @radix-ui/react-slider | 1.5.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-slider@1.5.0/LICENSE) |
-| @radix-ui/react-slot | 1.4.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-slot@1.4.0/LICENSE) |
-| @radix-ui/react-switch | 1.3.8 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-switch@1.3.8/LICENSE) |
-| @radix-ui/react-tabs | 1.1.22 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-tabs@1.1.22/LICENSE) |
-| @radix-ui/react-toast | 1.2.24 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-toast@1.2.24/LICENSE) |
-| @radix-ui/react-toggle-group | 1.1.20 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-toggle-group@1.1.20/LICENSE) |
-| @radix-ui/react-toggle | 1.1.19 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-toggle@1.1.19/LICENSE) |
-| @radix-ui/react-toolbar | 1.1.20 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-toolbar@1.1.20/LICENSE) |
-| @radix-ui/react-tooltip | 1.3.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-tooltip@1.3.0/LICENSE) |
-| @radix-ui/react-use-callback-ref | 1.1.4 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-use-callback-ref@1.1.4/LICENSE) |
-| @radix-ui/react-use-controllable-state | 1.2.6 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-use-controllable-state@1.2.6/LICENSE) |
+| @radix-ui/react-primitive | 2.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-primitive@2.2.0/LICENSE) |
+| @radix-ui/react-progress | 1.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-progress@1.2.1/LICENSE) |
+| @radix-ui/react-radio-group | 1.5.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-radio-group@1.5.1/LICENSE) |
+| @radix-ui/react-roving-focus | 1.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-roving-focus@1.2.1/LICENSE) |
+| @radix-ui/react-scroll-area | 1.4.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-scroll-area@1.4.0/LICENSE) |
+| @radix-ui/react-select | 2.4.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-select@2.4.1/LICENSE) |
+| @radix-ui/react-separator | 1.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-separator@1.2.0/LICENSE) |
+| @radix-ui/react-slider | 1.6.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-slider@1.6.1/LICENSE) |
+| @radix-ui/react-slot | 1.5.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-slot@1.5.0/LICENSE) |
+| @radix-ui/react-switch | 1.4.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-switch@1.4.1/LICENSE) |
+| @radix-ui/react-tabs | 1.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-tabs@1.2.1/LICENSE) |
+| @radix-ui/react-toast | 1.3.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-toast@1.3.1/LICENSE) |
+| @radix-ui/react-toggle-group | 1.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-toggle-group@1.2.1/LICENSE) |
+| @radix-ui/react-toggle | 1.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-toggle@1.2.1/LICENSE) |
+| @radix-ui/react-toolbar | 1.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-toolbar@1.2.1/LICENSE) |
+| @radix-ui/react-tooltip | 1.4.1 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-tooltip@1.4.1/LICENSE) |
+| @radix-ui/react-use-callback-ref | 1.1.5 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-use-callback-ref@1.1.5/LICENSE) |
+| @radix-ui/react-use-controllable-state | 1.3.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-use-controllable-state@1.3.0/LICENSE) |
 | @radix-ui/react-use-effect-event | 0.0.5 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-use-effect-event@0.0.5/LICENSE) |
-| @radix-ui/react-use-escape-keydown | 1.1.5 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-use-escape-keydown@1.1.5/LICENSE) |
+| @radix-ui/react-use-escape-keydown | 1.1.6 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-use-escape-keydown@1.1.6/LICENSE) |
 | @radix-ui/react-use-is-hydrated | 0.1.3 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-use-is-hydrated@0.1.3/LICENSE) |
 | @radix-ui/react-use-layout-effect | 1.1.4 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-use-layout-effect@1.1.4/LICENSE) |
 | @radix-ui/react-use-previous | 1.1.4 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-use-previous@1.1.4/LICENSE) |
 | @radix-ui/react-use-rect | 1.1.4 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-use-rect@1.1.4/LICENSE) |
 | @radix-ui/react-use-size | 1.1.5 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-use-size@1.1.5/LICENSE) |
-| @radix-ui/react-visually-hidden | 1.2.12 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-visually-hidden@1.2.12/LICENSE) |
+| @radix-ui/react-visually-hidden | 1.2.13 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/react-visually-hidden@1.2.13/LICENSE) |
 | @radix-ui/rect | 1.1.3 | MIT | linked, bundled | web | [license](https://unpkg.com/@radix-ui/rect@1.1.3/LICENSE) |
 | @rolldown/binding-android-arm-eabi | 1.2.11 | MIT | dev-only (platform build) | build, lint and test tooling | [license](https://github.com/rolldown/rolldown/blob/main/LICENSE) |
 | @rolldown/binding-android-arm64 | 1.2.11 | MIT | dev-only (platform build) | build, lint and test tooling | [license](https://github.com/rolldown/rolldown/blob/main/LICENSE) |
@@ -352,12 +370,16 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @simplewebauthn/server | 13.3.3 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@simplewebauthn/server@13.3.3/LICENSE.md) |
 | @simplewebauthn/server | 14.0.3 | MIT | linked, bundled | server | [license](https://unpkg.com/@simplewebauthn/server@14.0.3/LICENSE.md) |
 | @smithy/core | 3.35.1 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/core@3.35.1/LICENSE) |
-| @smithy/core | 3.35.2 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/core@3.35.2/LICENSE) |
+| @smithy/core | 3.35.2 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@smithy/core@3.35.2/LICENSE) |
+| @smithy/core | 3.39.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/core@3.39.0/LICENSE) |
 | @smithy/credential-provider-imds | 4.5.2 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/credential-provider-imds@4.5.2/LICENSE) |
 | @smithy/fetch-http-handler | 5.8.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/fetch-http-handler@5.8.0/LICENSE) |
-| @smithy/node-http-handler | 4.12.1 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/node-http-handler@4.12.1/LICENSE) |
-| @smithy/signature-v4 | 5.7.4 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/signature-v4@5.7.4/LICENSE) |
+| @smithy/node-http-handler | 4.12.1 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@smithy/node-http-handler@4.12.1/LICENSE) |
+| @smithy/node-http-handler | 4.14.2 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/node-http-handler@4.14.2/LICENSE) |
+| @smithy/signature-v4 | 5.7.4 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@smithy/signature-v4@5.7.4/LICENSE) |
+| @smithy/signature-v4 | 5.7.5 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/signature-v4@5.7.5/LICENSE) |
 | @smithy/types | 4.19.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/types@4.19.0/LICENSE) |
+| @smithy/types | 4.20.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/types@4.20.0/LICENSE) |
 | @standard-schema/spec | 1.1.0 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@standard-schema/spec@1.1.0/LICENSE) |
 | @swc/helpers | 0.5.23 | Apache-2.0 | linked, bundled | web | [license](https://unpkg.com/@swc/helpers@0.5.23/LICENSE) |
 | @tailwindcss/node | 4.3.3 | MIT | linked, bundled | web | [license](https://unpkg.com/@tailwindcss/node@4.3.3/LICENSE) |
@@ -377,15 +399,15 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @tailwindcss/postcss | 4.3.3 | MIT | linked, bundled | web | [license](https://unpkg.com/@tailwindcss/postcss@4.3.3/LICENSE) |
 | @testing-library/dom | 10.4.2 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@testing-library/dom@10.4.2/LICENSE) |
 | @testing-library/react | 16.3.3 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@testing-library/react@16.3.3/LICENSE) |
-| @testing-library/user-event | 14.6.7 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@testing-library/user-event@14.6.7/LICENSE) |
-| @turbo/darwin-64 | 2.11.7 | MIT | dev-only (platform build) | build, lint and test tooling | [license](https://github.com/vercel/turborepo/blob/main/LICENSE) |
-| @turbo/darwin-arm64 | 2.11.7 | MIT | dev-only (platform build) | build, lint and test tooling | [license](https://github.com/vercel/turborepo/blob/main/LICENSE) |
-| @turbo/linux-64 | 2.11.7 | MIT | dev-only (platform build) | build, lint and test tooling | [license](https://github.com/vercel/turborepo/blob/main/LICENSE) |
-| @turbo/linux-arm64 | 2.11.7 | MIT | dev-only (platform build) | build, lint and test tooling | [license](https://github.com/vercel/turborepo/blob/main/LICENSE) |
-| @turbo/windows-64 | 2.11.7 | MIT | dev-only (platform build) | build, lint and test tooling | [license](https://github.com/vercel/turborepo/blob/main/LICENSE) |
-| @turbo/windows-arm64 | 2.11.7 | MIT | dev-only (platform build) | build, lint and test tooling | [license](https://github.com/vercel/turborepo/blob/main/LICENSE) |
+| @testing-library/user-event | 14.6.8 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@testing-library/user-event@14.6.8/LICENSE) |
+| @turbo/darwin-64 | 2.11.10 | MIT | dev-only (platform build) | build, lint and test tooling | [license](https://github.com/vercel/turborepo/blob/main/LICENSE) |
+| @turbo/darwin-arm64 | 2.11.10 | MIT | dev-only (platform build) | build, lint and test tooling | [license](https://github.com/vercel/turborepo/blob/main/LICENSE) |
+| @turbo/linux-64 | 2.11.10 | MIT | dev-only (platform build) | build, lint and test tooling | [license](https://github.com/vercel/turborepo/blob/main/LICENSE) |
+| @turbo/linux-arm64 | 2.11.10 | MIT | dev-only (platform build) | build, lint and test tooling | [license](https://github.com/vercel/turborepo/blob/main/LICENSE) |
+| @turbo/windows-64 | 2.11.10 | MIT | dev-only (platform build) | build, lint and test tooling | [license](https://github.com/vercel/turborepo/blob/main/LICENSE) |
+| @turbo/windows-arm64 | 2.11.10 | MIT | dev-only (platform build) | build, lint and test tooling | [license](https://github.com/vercel/turborepo/blob/main/LICENSE) |
 | @types/aria-query | 5.0.4 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@types/aria-query@5.0.4/LICENSE) |
-| @types/busboy | 1.5.4 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@types/busboy@1.5.4/LICENSE) |
+| @types/busboy | 1.5.5 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@types/busboy@1.5.5/LICENSE) |
 | @types/chai | 5.2.3 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@types/chai@5.2.3/LICENSE) |
 | @types/d3-array | 3.2.2 | MIT | linked, bundled | web | [license](https://unpkg.com/@types/d3-array@3.2.2/LICENSE) |
 | @types/d3-axis | 3.0.6 | MIT | linked, bundled | web | [license](https://unpkg.com/@types/d3-axis@3.0.6/LICENSE) |
@@ -429,7 +451,8 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @types/json-schema | 7.0.15 | MIT | linked, bundled | web | [license](https://unpkg.com/@types/json-schema@7.0.15/LICENSE) |
 | @types/mdast | 4.0.4 | MIT | linked, bundled | web | [license](https://unpkg.com/@types/mdast@4.0.4/LICENSE) |
 | @types/ms | 2.1.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@types/ms@2.1.0/LICENSE) |
-| @types/node | 24.19.0 | MIT | linked, bundled | server | [license](https://unpkg.com/@types/node@24.19.0/LICENSE) |
+| @types/node | 24.19.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@types/node@24.19.0/LICENSE) |
+| @types/node | 24.19.2 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@types/node@24.19.2/LICENSE) |
 | @types/node | 26.6.3 | MIT | linked, bundled | server | [license](https://unpkg.com/@types/node@26.6.3/LICENSE) |
 | @types/pg | 8.23.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@types/pg@8.23.1/LICENSE) |
 | @types/react-dom | 19.3.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@types/react-dom@19.3.0/LICENSE) |
@@ -440,16 +463,16 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @types/unist | 3.0.3 | MIT | linked, bundled | web | [license](https://unpkg.com/@types/unist@3.0.3/LICENSE) |
 | @types/whatwg-mimetype | 3.0.2 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@types/whatwg-mimetype@3.0.2/LICENSE) |
 | @types/ws | 8.18.2 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@types/ws@8.18.2/LICENSE) |
-| @typescript-eslint/eslint-plugin | 8.71.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/eslint-plugin@8.71.1/LICENSE) |
-| @typescript-eslint/parser | 8.71.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/parser@8.71.1/LICENSE) |
-| @typescript-eslint/project-service | 8.71.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/project-service@8.71.1/LICENSE) |
-| @typescript-eslint/scope-manager | 8.71.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/scope-manager@8.71.1/LICENSE) |
-| @typescript-eslint/tsconfig-utils | 8.71.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/tsconfig-utils@8.71.1/LICENSE) |
-| @typescript-eslint/type-utils | 8.71.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/type-utils@8.71.1/LICENSE) |
-| @typescript-eslint/types | 8.71.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/types@8.71.1/LICENSE) |
-| @typescript-eslint/typescript-estree | 8.71.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/typescript-estree@8.71.1/LICENSE) |
-| @typescript-eslint/utils | 8.71.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/utils@8.71.1/LICENSE) |
-| @typescript-eslint/visitor-keys | 8.71.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/visitor-keys@8.71.1/LICENSE) |
+| @typescript-eslint/eslint-plugin | 8.72.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/eslint-plugin@8.72.1/LICENSE) |
+| @typescript-eslint/parser | 8.72.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/parser@8.72.1/LICENSE) |
+| @typescript-eslint/project-service | 8.72.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/project-service@8.72.1/LICENSE) |
+| @typescript-eslint/scope-manager | 8.72.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/scope-manager@8.72.1/LICENSE) |
+| @typescript-eslint/tsconfig-utils | 8.72.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/tsconfig-utils@8.72.1/LICENSE) |
+| @typescript-eslint/type-utils | 8.72.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/type-utils@8.72.1/LICENSE) |
+| @typescript-eslint/types | 8.72.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/types@8.72.1/LICENSE) |
+| @typescript-eslint/typescript-estree | 8.72.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/typescript-estree@8.72.1/LICENSE) |
+| @typescript-eslint/utils | 8.72.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/utils@8.72.1/LICENSE) |
+| @typescript-eslint/visitor-keys | 8.72.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@typescript-eslint/visitor-keys@8.72.1/LICENSE) |
 | @ungap/structured-clone | 1.4.0 | ISC | linked, bundled | web | [license](https://unpkg.com/@ungap/structured-clone@1.4.0/LICENSE) |
 | @upsetjs/venn.js | 2.0.0 | MIT | linked, bundled | web | [license](https://unpkg.com/@upsetjs/venn.js@2.0.0/LICENSE) |
 | @vitest/mocker | 5.0.3 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@vitest/mocker@5.0.3/LICENSE) |
@@ -482,8 +505,8 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | bare-url | 2.5.4 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/bare-url@2.5.4/LICENSE) |
 | base64-js | 1.5.1 | MIT | linked, bundled | server | [license](https://unpkg.com/base64-js@1.5.1/LICENSE) |
 | baseline-browser-mapping | 2.11.26 | Apache-2.0 | linked, bundled | web | [license](https://unpkg.com/baseline-browser-mapping@2.11.26/LICENSE.txt) |
-| better-auth | 1.7.7 | MIT | linked, bundled | server, web | [license](https://unpkg.com/better-auth@1.7.7/LICENSE.md) |
-| better-call | 1.4.0 | MIT | linked, bundled | server, web | [license](https://unpkg.com/better-call@1.4.0/LICENSE) |
+| better-auth | 1.7.14 | MIT | linked, bundled | server, web | [license](https://unpkg.com/better-auth@1.7.14/LICENSE.md) |
+| better-call | 1.4.4 | MIT | linked, bundled | server, web | [license](https://unpkg.com/better-call@1.4.4/LICENSE) |
 | bowser | 2.14.1 | MIT | linked, bundled | server | [license](https://unpkg.com/bowser@2.14.1/LICENSE) |
 | brace-expansion | 5.0.12 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/brace-expansion@5.0.12/LICENSE) |
 | buffer-from | 1.1.2 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/buffer-from@1.1.2/LICENSE) |
@@ -593,7 +616,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | eslint-scope | 9.1.2 | BSD-2-Clause | dev-only | build, lint and test tooling | [license](https://unpkg.com/eslint-scope@9.1.2/LICENSE) |
 | eslint-visitor-keys | 3.4.3 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/eslint-visitor-keys@3.4.3/LICENSE) |
 | eslint-visitor-keys | 5.0.1 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/eslint-visitor-keys@5.0.1/LICENSE) |
-| eslint | 10.11.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/eslint@10.11.0/LICENSE) |
+| eslint | 10.14.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/eslint@10.14.0/LICENSE) |
 | espree | 11.2.0 | BSD-2-Clause | dev-only | build, lint and test tooling | [license](https://unpkg.com/espree@11.2.0/LICENSE) |
 | esquery | 1.7.0 | BSD-3-Clause | dev-only | build, lint and test tooling | [license](https://unpkg.com/esquery@1.7.0/license.txt) |
 | esrecurse | 4.3.0 | BSD-2-Clause | dev-only | build, lint and test tooling | [license](https://www.npmjs.com/package/esrecurse/v/4.3.0) |
@@ -712,7 +735,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | lodash-es | 4.18.1 | MIT | linked, bundled | web | [license](https://unpkg.com/lodash-es@4.18.1/LICENSE) |
 | long | 5.3.2 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/long@5.3.2/LICENSE) |
 | longest-streak | 3.1.0 | MIT | linked, bundled | web | [license](https://unpkg.com/longest-streak@3.1.0/license) |
-| lucide-react | 1.55.0 | ISC | linked, bundled | web | [license](https://unpkg.com/lucide-react@1.55.0/LICENSE) |
+| lucide-react | 1.70.0 | ISC | linked, bundled | web | [license](https://unpkg.com/lucide-react@1.70.0/LICENSE) |
 | lz-string | 1.5.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/lz-string@1.5.0/LICENSE) |
 | magic-string | 0.30.21 | MIT | linked, bundled | web | [license](https://unpkg.com/magic-string@0.30.21/LICENSE) |
 | magic-string | 1.4.2 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/magic-string@1.4.2/LICENSE) |
@@ -772,6 +795,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | minimisted | 2.0.1 | MIT | linked, bundled | server | [license](https://www.npmjs.com/package/minimisted/v/2.0.1) |
 | ms | 2.1.3 | MIT | linked, bundled | server, web | [license](https://unpkg.com/ms@2.1.3/license.md) |
 | nanoid | 3.3.19 | MIT | linked, bundled | web | [license](https://unpkg.com/nanoid@3.3.19/LICENSE) |
+| nanoid | 3.3.20 | MIT | linked, bundled | web | [license](https://unpkg.com/nanoid@3.3.20/LICENSE) |
 | nanoid | 6.0.2 | MIT | linked, bundled | web | [license](https://unpkg.com/nanoid@6.0.2/LICENSE) |
 | nanostores | 1.5.4 | MIT | linked, bundled | server, web | [license](https://unpkg.com/nanostores@1.5.4/LICENSE) |
 | natural-compare | 1.4.0 | MIT | dev-only | build, lint and test tooling | [license](https://www.npmjs.com/package/natural-compare/v/1.4.0) |
@@ -810,7 +834,8 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | points-on-path | 0.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/points-on-path@0.2.1/LICENSE) |
 | possible-typed-array-names | 1.1.0 | MIT | linked, bundled | server | [license](https://unpkg.com/possible-typed-array-names@1.1.0/LICENSE) |
 | postcss | 8.5.23 | MIT | linked, bundled | web | [license](https://unpkg.com/postcss@8.5.23/LICENSE) |
-| postcss | 8.5.29 | MIT | linked, bundled | web | [license](https://unpkg.com/postcss@8.5.29/LICENSE) |
+| postcss | 8.5.29 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/postcss@8.5.29/LICENSE) |
+| postcss | 8.5.32 | MIT | linked, bundled | web | [license](https://unpkg.com/postcss@8.5.32/LICENSE) |
 | postgres-array | 2.0.0 | MIT | linked, bundled | egress-proxy, model-gateway, server | [license](https://unpkg.com/postgres-array@2.0.0/license) |
 | postgres-bytea | 1.0.1 | MIT | linked, bundled | egress-proxy, model-gateway, server | [license](https://unpkg.com/postgres-bytea@1.0.1/license) |
 | postgres-date | 1.0.7 | MIT | linked, bundled | egress-proxy, model-gateway, server | [license](https://unpkg.com/postgres-date@1.0.7/license) |
@@ -828,15 +853,17 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | pvutils | 1.2.0 | MIT | linked, bundled | server, web | [license](https://unpkg.com/pvutils@1.2.0/LICENSE) |
 | qified | 0.10.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/qified@0.10.1/LICENSE) |
 | quick-format-unescaped | 4.0.4 | MIT | linked, bundled | egress-proxy, mcp-proxy, model-gateway, sandbox, server | [license](https://unpkg.com/quick-format-unescaped@4.0.4/LICENSE) |
-| radix-ui | 1.7.0 | MIT | linked, bundled | web | [license](https://unpkg.com/radix-ui@1.7.0/LICENSE) |
-| react-dom | 19.3.0 | MIT | linked, bundled | web | [license](https://unpkg.com/react-dom@19.3.0/LICENSE) |
+| radix-ui | 1.8.1 | MIT | linked, bundled | web | [license](https://unpkg.com/radix-ui@1.8.1/LICENSE) |
+| react-dom | 19.3.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/react-dom@19.3.0/LICENSE) |
+| react-dom | 19.3.1 | MIT | linked, bundled | web | [license](https://unpkg.com/react-dom@19.3.1/LICENSE) |
 | react-is | 17.0.2 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/react-is@17.0.2/LICENSE) |
 | react-markdown | 10.1.0 | MIT | linked, bundled | web | [license](https://unpkg.com/react-markdown@10.1.0/license) |
 | react-remove-scroll-bar | 2.3.8 | MIT | linked, bundled | web | [license](https://www.npmjs.com/package/react-remove-scroll-bar/v/2.3.8) |
 | react-remove-scroll | 2.7.2 | MIT | linked, bundled | web | [license](https://unpkg.com/react-remove-scroll@2.7.2/LICENSE) |
 | react-style-singleton | 2.2.3 | MIT | linked, bundled | web | [license](https://unpkg.com/react-style-singleton@2.2.3/LICENSE) |
 | react-textarea-autosize | 8.5.9 | MIT | linked, bundled | web | [license](https://unpkg.com/react-textarea-autosize@8.5.9/LICENSE) |
-| react | 19.3.0 | MIT | linked, bundled | web | [license](https://unpkg.com/react@19.3.0/LICENSE) |
+| react | 19.3.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/react@19.3.0/LICENSE) |
+| react | 19.3.1 | MIT | linked, bundled | web | [license](https://unpkg.com/react@19.3.1/LICENSE) |
 | readable-stream | 3.6.2 | MIT | linked, bundled | server | [license](https://unpkg.com/readable-stream@3.6.2/LICENSE) |
 | readable-stream | 4.8.0 | MIT | linked, bundled | server | [license](https://unpkg.com/readable-stream@4.8.0/LICENSE) |
 | real-require | 1.0.0 | MIT | linked, bundled | egress-proxy, mcp-proxy, model-gateway, sandbox, server | [license](https://unpkg.com/real-require@1.0.0/LICENSE.md) |
@@ -899,8 +926,8 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | tinybench | 6.2.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/tinybench@6.2.0/LICENSE) |
 | tinyexec | 1.3.1 | MIT | linked, bundled | web | [license](https://unpkg.com/tinyexec@1.3.1/LICENSE) |
 | tinyglobby | 0.2.17 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/tinyglobby@0.2.17/LICENSE) |
-| tldts-core | 7.4.16 | MIT | linked, bundled | egress-proxy, model-gateway, server | [license](https://unpkg.com/tldts-core@7.4.16/LICENSE) |
-| tldts | 7.4.16 | MIT | linked, bundled | egress-proxy, model-gateway, server | [license](https://unpkg.com/tldts@7.4.16/LICENSE) |
+| tldts-core | 7.4.20 | MIT | linked, bundled | egress-proxy, model-gateway, server | [license](https://unpkg.com/tldts-core@7.4.20/LICENSE) |
+| tldts | 7.4.19 | MIT | linked, bundled | egress-proxy, model-gateway, server | [license](https://unpkg.com/tldts@7.4.19/LICENSE) |
 | to-buffer | 1.2.2 | MIT | linked, bundled | server | [license](https://unpkg.com/to-buffer@1.2.2/LICENSE) |
 | trim-lines | 3.0.1 | MIT | linked, bundled | web | [license](https://unpkg.com/trim-lines@3.0.1/license) |
 | trough | 2.2.0 | MIT | linked, bundled | web | [license](https://unpkg.com/trough@2.2.0/license) |
@@ -910,13 +937,13 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | tslib | 2.8.1 | 0BSD | linked, bundled | server, web | [license](https://unpkg.com/tslib@2.8.1/LICENSE.txt) |
 | tsx | 4.23.15 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/tsx@4.23.15/LICENSE) |
 | tsyringe | 4.10.0 | MIT | linked, bundled | server, web | [license](https://unpkg.com/tsyringe@4.10.0/LICENSE) |
-| turbo | 2.11.7 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/turbo@2.11.7/LICENSE) |
+| turbo | 2.11.10 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/turbo@2.11.10/LICENSE) |
 | tw-animate-css | 1.4.0 | MIT | linked, bundled | web | [license](https://unpkg.com/tw-animate-css@1.4.0/LICENSE) |
 | type-check | 0.4.0 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/type-check@0.4.0/LICENSE) |
 | typed-array-buffer | 1.0.3 | MIT | linked, bundled | server | [license](https://unpkg.com/typed-array-buffer@1.0.3/LICENSE) |
-| typescript-eslint | 8.71.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/typescript-eslint@8.71.1/LICENSE) |
+| typescript-eslint | 8.72.1 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/typescript-eslint@8.72.1/LICENSE) |
 | typescript | 6.0.3 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/typescript@6.0.3/LICENSE.txt) |
-| undici-types | 7.24.6 | MIT | linked, bundled | server | [license](https://unpkg.com/undici-types@7.24.6/LICENSE) |
+| undici-types | 7.24.6 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/undici-types@7.24.6/LICENSE) |
 | undici-types | 8.9.0 | MIT | linked, bundled | server | [license](https://unpkg.com/undici-types@8.9.0/LICENSE) |
 | undici | 8.11.2 | MIT | linked, bundled | mcp-proxy, server | [license](https://unpkg.com/undici@8.11.2/LICENSE) |
 | unified | 11.0.5 | MIT | linked, bundled | web | [license](https://unpkg.com/unified@11.0.5/license) |
