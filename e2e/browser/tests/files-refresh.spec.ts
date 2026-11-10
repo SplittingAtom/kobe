@@ -77,13 +77,20 @@ test("Refresh syncs the running sandbox first: the agent's new file shows before
     const fresh = myFiles(page).locator(`[role="treeitem"][data-path="${dir}/fresh.txt"]`);
     let proven = false;
     const deadline = Date.now() + RUN_TIMEOUT_MS;
+    let clicked = false;
     while (!proven && Date.now() < deadline) {
       await page.waitForTimeout(3_000);
-      const before = await listed(page, dir, "fresh.txt");
-      expect(before, "a sandbox push landed before Refresh (periodic push raced); run again").toBe(
-        false,
-      );
+      // Only before the first Refresh can a listing come from the periodic push alone; after one,
+      // the sync it asked for (or the panel's own re-list on that push) is what brought it.
+      if (!clicked) {
+        const before = await listed(page, dir, "fresh.txt");
+        expect(
+          before,
+          "a sandbox push landed before Refresh (periodic push raced); run again",
+        ).toBe(false);
+      }
       await refresh.click();
+      clicked = true;
       await expect(refresh).not.toHaveAttribute("aria-busy", "true", { timeout: 15_000 });
       proven = await fresh.isVisible();
       // Still running (bash sleeps): no run-end push can have brought it.
