@@ -70,7 +70,13 @@ export function noticeCloseId(notice: RunNotice): string {
 
 export function NoticeSlot({ notice }: { readonly notice: RunNotice }) {
   if (notice.type === "egress.blocked") {
-    return <EgressBlocked payload={notice.payload} closeId={noticeCloseId(notice)} />;
+    return (
+      <EgressBlocked
+        payload={notice.payload}
+        blockedAt={notice.ts}
+        closeId={noticeCloseId(notice)}
+      />
+    );
   }
   return (
     <ClosableNotice id={noticeCloseId(notice)}>
@@ -102,13 +108,16 @@ function NoticeBody({
 /** U12: a blocked domain is a clear notice with Request access (KOBE-39, egress-notice.tsx). */
 export function EgressBlocked({
   payload,
+  blockedAt,
   closeId,
 }: {
   readonly payload: KobeEventPayload<"egress.blocked">;
+  /** The event's server time: a decision older than the block is not shown as its answer (KOBE-609). */
+  readonly blockedAt?: string | undefined;
   /** The event's id: the viewer can close the notice (KOBE-468). */
   readonly closeId?: string | undefined;
 }) {
-  return <ConnectedEgressNotice payload={payload} closeId={closeId} />;
+  return <ConnectedEgressNotice payload={payload} blockedAt={blockedAt} closeId={closeId} />;
 }
 
 export { FileCard as FileSlot };

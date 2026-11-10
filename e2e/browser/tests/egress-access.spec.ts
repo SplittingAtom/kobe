@@ -26,8 +26,10 @@ import { bashTurn, pageApi, secondBrowser } from "./support/gate5.js";
  * blocked card after the retry (KOBE-605: cards outlive their run).
  *
  * The agent's curl goes through a bash tool turn (the fake model's `bash:` line with
- * KOBE_FAKE_MODEL=1). Clean-up (finally): ceiling rows and team enablements the test added are
- * removed, leftover requests denied, threads trashed.
+ * KOBE_FAKE_MODEL=1). Each test first denies pending requests for its host left by an earlier run;
+ * clean-up (finally) puts the host's ceiling row back as it was, removes the team enablement,
+ * denies leftover requests and trashes threads. member2's approved request from an earlier run
+ * does not answer a new block (KOBE-609), so the spec passes twice in a row.
  */
 const USER2 = process.env["KOBE_USER2"];
 const PW2 = process.env["KOBE_PW2"];
@@ -84,40 +86,46 @@ async function allowlist(page: Page, host: string): Promise<void> {
   expect([200, 201], JSON.stringify(on.json)).toContain(on.status);
 }
 
-/** Undoes what a scenario did to `host`; every step tolerates "already gone". */
-async function cleanUp(page: Page, host: string, wasInCeiling: boolean): Promise<void> {
-  const settle = async (): Promise<void> => {
-    const list = await pageApi<{ requests?: SiteRequest[] }>(
-      page,
-      "GET",
-      "/v1/site/egress-ceiling/requests?status=pending",
-    );
-    for (const r of list.json.requests ?? []) {
-      if (!covers(r.pattern, host) && r.domain !== host) continue;
-      await pageApi(
-        page,
-        "POST",
-        `/v1/site/egress-ceiling/requests/${r.team.id}/${r.id}/decision`,
-        { decision: "deny" },
-      );
-    }
-  };
+/** Denies every pending request (any team) for `host`: leftovers of an earlier run, or this one's. */
+async function settlePending(page: Page, host: string): Promise<void> {
+  const list = await pageApi<{ requests?: SiteRequest[] }>(
+    page,
+    "GET",
+    "/v1/site/egress-ceiling/requests?status=pending",
+  );
+  for (const r of list.json.requests ?? []) {
+    if (!covers(r.pattern, host) && r.domain !== host) continue;
+    await pageApi(page, "POST", `/v1/site/egress-ceiling/requests/${r.team.id}/${r.id}/decision`, {
+      decision: "deny",
+    });
+  }
+}
+
+/**
+ * The host's ceiling row before the scenario (`undefined`: none), read after pending leftovers of
+ * an earlier run are settled, so a run starts from the same state whatever ran before (KOBE-609).
+ */
+async function prepare(page: Page, host: string): Promise<CeilingEntry | undefined> {
+  await settlePending(page, host);
+  await requireUncovered(page, host);
+  return (await ceiling(page)).find((d) => d.domain === host);
+}
+
+/**
+ * Undoes what a scenario did to `host`, back to the ceiling row it found (`before`), so the next
+ * run is not skipped as "already covered"; every step tolerates "already gone".
+ */
+async function cleanUp(page: Page, host: string, before: CeilingEntry | undefined): Promise<void> {
+  const path = `/v1/site/egress-ceiling/${encodeURIComponent(host)}`;
+  const restore = { in_ceiling: before?.in_ceiling ?? false, internal: before?.internal ?? false };
   const steps: Array<() => Promise<unknown>> = [
-    settle,
+    () => settlePending(page, host),
     () => pageApi(page, "DELETE", `/v1/team/egress/domains/${encodeURIComponent(host)}`),
     async () => {
-      if (wasInCeiling) return;
-      const del = await pageApi(
-        page,
-        "DELETE",
-        `/v1/site/egress-ceiling/${encodeURIComponent(host)}`,
-      );
-      if (del.status === 409) {
-        await pageApi(page, "PUT", `/v1/site/egress-ceiling/${encodeURIComponent(host)}`, {
-          in_ceiling: false,
-          internal: false,
-        });
-      }
+      if (before !== undefined) return pageApi(page, "PUT", path, restore);
+      const del = await pageApi(page, "DELETE", path);
+      if (del.status === 409) await pageApi(page, "PUT", path, restore);
+      return del;
     },
   ];
   for (const step of steps)
@@ -186,8 +194,7 @@ test("member2 is blocked off the ceiling, requests; the site admin approves; the
   test.skip(!USER2 || !PW2, "KOBE_USER2 and KOBE_PW2 name a second member");
   const host = BLOCKED_HOST as string;
   await new Chat(page).open();
-  await requireUncovered(page, host);
-  const wasInCeiling = (await ceiling(page)).some((d) => d.domain === host);
+  const before = await prepare(page, host);
   const other = await secondBrowser(browser, USER2, PW2);
   const otherChat = new Chat(other);
   try {
@@ -236,7 +243,7 @@ test("member2 is blocked off the ceiling, requests; the site admin approves; the
   } finally {
     await otherChat.trashAll().catch((e: unknown) => console.warn(`trash failed: ${String(e)}`));
     await other.context().close();
-    await cleanUp(page, host, wasInCeiling);
+    await cleanUp(page, host, before);
   }
 });
 
@@ -247,8 +254,7 @@ test("internal host: forbidden_address, the site admin approves Internal (same c
   test.skip(!INTERNAL_HOST, "KOBE_EGRESS_INTERNAL_HOST names a host on the cluster ingress");
   const host = INTERNAL_HOST as string;
   await chat.open();
-  await requireUncovered(page, host);
-  const wasInCeiling = (await ceiling(page)).some((d) => d.domain === host);
+  const before = await prepare(page, host);
   try {
     // Allowlisted but not internal: the name resolves to the ingress, which is refused.
     await allowlist(page, host);
@@ -273,7 +279,7 @@ test("internal host: forbidden_address, the site admin approves Internal (same c
     expect(again.notices).toBe(shown);
   } finally {
     await chat.trashAll().catch((e: unknown) => console.warn(`trash failed: ${String(e)}`));
-    await cleanUp(page, host, wasInCeiling);
+    await cleanUp(page, host, before);
   }
 });
 
@@ -284,8 +290,7 @@ test("an allowlisted host that resolves to a private address and is not internal
   test.skip(!PRIVATE_HOST, "KOBE_EGRESS_PRIVATE_HOST names a host resolving to a private address");
   const host = PRIVATE_HOST as string;
   await chat.open();
-  await requireUncovered(page, host);
-  const wasInCeiling = (await ceiling(page)).some((d) => d.domain === host);
+  const before = await prepare(page, host);
   try {
     await allowlist(page, host);
     await chat.ask(curlTurn(host));
@@ -299,6 +304,6 @@ test("an allowlisted host that resolves to a private address and is not internal
     expect((await ceiling(page)).find((d) => d.domain === host)?.internal).not.toBe(true);
   } finally {
     await chat.trashAll().catch((e: unknown) => console.warn(`trash failed: ${String(e)}`));
-    await cleanUp(page, host, wasInCeiling);
+    await cleanUp(page, host, before);
   }
 });

@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EgressRequest } from "../../lib/chat/types";
 import { IconActionProvider } from "../shell/icon-action";
-import { EgressNotice } from "./egress-notice";
+import { EgressNotice, requestForBlock } from "./egress-notice";
 
 afterEach(() => {
   cleanup();
@@ -324,5 +324,91 @@ describe("EgressNotice: request access for every block and decisions in the card
     await userEvent.setup().click(await screen.findByRole("button", { name: /Approve/ }));
     expect(await screen.findByText("Slow down.")).toBeTruthy();
     expect(fake.decideEgressRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe("EgressNotice: a decision older than the block is not its answer (KOBE-609)", () => {
+  // request(): created 00:00, decided 00:05 on 2026-10-04.
+  const AFTER = "2026-10-04T00:10:00Z";
+  const BEFORE = "2026-10-04T00:01:00Z";
+  const on = (domain = "pypi.org") => ({ domain, request_access: true });
+
+  it.each(["approved", "denied"] as const)(
+    "a block newer than an %s request offers Request access again",
+    async (status) => {
+      const fake = api([request(status)]);
+      render(<EgressNotice payload={on()} blockedAt={AFTER} api={fake} threadId={THREAD} />);
+      expect(await screen.findByRole("button", { name: /Request access/ })).toBeTruthy();
+      await waitFor(() => expect(fake.egressRequests).toHaveBeenCalled());
+      expect(screen.queryByText(/A team admin (enabled|denied)/)).toBeNull();
+    },
+  );
+
+  it("an older block still shows the decision that answered it", async () => {
+    render(
+      <EgressNotice
+        payload={on()}
+        blockedAt={BEFORE}
+        api={api([request("approved")])}
+        threadId={THREAD}
+      />,
+    );
+    expect(await screen.findByText(/A team admin enabled pypi.org/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Request access/ })).toBeNull();
+  });
+
+  it("a pending request shows pending whatever the block's time", async () => {
+    render(
+      <EgressNotice
+        payload={on()}
+        blockedAt={AFTER}
+        api={api([request("pending")])}
+        threadId={THREAD}
+      />,
+    );
+    expect(await screen.findByText(/your team admins were notified/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Request access/ })).toBeNull();
+  });
+
+  it("without the block's time the latest request counts (older callers)", async () => {
+    render(<EgressNotice payload={on()} api={api([request("approved")])} threadId={THREAD} />);
+    expect(await screen.findByText(/A team admin enabled pypi.org/)).toBeTruthy();
+  });
+
+  it("a site admin gets Approve and Deny on a block newer than an approved request", async () => {
+    const stale = { ...request("approved"), domain: "a.example.com", pattern: "a.example.com" };
+    const fake = adminApi(SITE, [{ ...stale, scope: "site" }]);
+    render(
+      <EgressNotice
+        payload={blocked("not_in_ceiling")}
+        blockedAt={AFTER}
+        api={fake}
+        threadId={THREAD}
+      />,
+    );
+    await waitFor(() => expect(fake.egressRequests).toHaveBeenCalled());
+    await userEvent.setup().click(await screen.findByRole("button", { name: /Approve/ }));
+    // The stale request is not re-decided: a new one is made for this block.
+    expect(fake.requestEgressAccess).toHaveBeenCalledWith(
+      "a.example.com",
+      THREAD,
+      "not_in_ceiling",
+    );
+    expect(fake.decideEgressRequest).toHaveBeenCalledWith("r1", { decision: "approve" });
+    expect(
+      await screen.findByText("Enabled a.example.com for Team1. Ask the agent to try again."),
+    ).toBeTruthy();
+  });
+});
+
+describe("requestForBlock (KOBE-609)", () => {
+  it("keeps the latest unless it was decided before the block", () => {
+    const approved = request("approved");
+    expect(requestForBlock(approved, "2026-10-04T00:10:00Z")).toBeUndefined();
+    expect(requestForBlock(approved, "2026-10-04T00:05:00Z")).toBe(approved);
+    expect(requestForBlock(approved, undefined)).toBe(approved);
+    expect(requestForBlock(approved, "not a time")).toBe(approved);
+    expect(requestForBlock(request("pending"), "2030-01-01T00:00:00Z")?.status).toBe("pending");
+    expect(requestForBlock(undefined, "2026-10-04T00:10:00Z")).toBeUndefined();
   });
 });

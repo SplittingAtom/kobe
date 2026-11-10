@@ -199,6 +199,8 @@ describe("POST /v1/workspace/sync (KOBE-599)", () => {
 });
 
 class Events {
+  /** A read `within` gave up on: the next call reuses it, so a timed-out wait never loses a frame. */
+  #pending: Promise<{ event: string; data: WorkspaceEvent } | undefined> | undefined;
   constructor(readonly reader: SseReader) {}
   async next(): Promise<{ event: string; data: WorkspaceEvent } | undefined> {
     for (;;) {
@@ -217,8 +219,12 @@ class Events {
     const timeout = new Promise<"none">((resolve) => {
       timer = setTimeout(() => resolve("none"), ms);
     });
+    const read = this.#pending ?? this.next();
+    this.#pending = read;
     try {
-      return await Promise.race([this.next(), timeout]);
+      const got = await Promise.race([read, timeout]);
+      if (got !== "none") this.#pending = undefined;
+      return got;
     } finally {
       clearTimeout(timer);
     }

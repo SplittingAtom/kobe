@@ -21,6 +21,9 @@ export interface LiveMessage {
   readonly parts: readonly LivePart[];
 }
 
+/** A tool call's blocked host, with the event's server time (KOBE-609: newer than old decisions). */
+export type ToolEgressBlock = Payload<"egress.blocked"> & { readonly blockedAt?: string };
+
 /** Everything the stream said about one tool call (the card renders it; KOBE-37/54/55 add more). */
 export interface ToolActivity {
   readonly call?: Payload<"tool.call"> | undefined;
@@ -28,7 +31,7 @@ export interface ToolActivity {
   readonly denied?: Payload<"policy.denied"> | undefined;
   /** One of the member's remembered approvals let it run without asking (KOBE-289). */
   readonly ruleApplied?: Payload<"policy.rule_applied"> | undefined;
-  readonly egressBlocked: readonly Payload<"egress.blocked">[];
+  readonly egressBlocked: readonly ToolEgressBlock[];
   readonly approvalRequested?: Payload<"approval.requested"> | undefined;
   readonly approvalResolved?: Payload<"approval.resolved"> | undefined;
   readonly artifacts: readonly (Payload<"artifact.created"> | Payload<"artifact.updated">)[];
@@ -274,7 +277,11 @@ function applyOne(run: LiveRun, event: KobeEvent): LiveRun {
       if (id === undefined) return notice(next, event);
       return withTool(next, id, (t) => ({
         ...t,
-        egressBlocked: addCapped(t.egressBlocked, event.payload, (b) => b.domain),
+        egressBlocked: addCapped(
+          t.egressBlocked,
+          { ...event.payload, blockedAt: event.ts },
+          (b) => b.domain,
+        ),
       }));
     }
     case "artifact.created":
