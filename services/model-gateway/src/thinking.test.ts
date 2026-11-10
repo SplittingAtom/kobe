@@ -4,7 +4,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { topLevelModel } from "./body-model.js";
 import { classify, type Route } from "./routes.js";
 import { startLocalGateway, type LocalGateway } from "./testing/local-gateway.js";
-import { anthropicBudget, applyThinking, callThinkingLevel, thinkingPolicies } from "./thinking.js";
+import {
+  anthropicBudget,
+  applyThinking,
+  callThinkingLevel,
+  reasoningSummary,
+  thinkingPolicies,
+} from "./thinking.js";
 
 const route = (method: string, path: string): Route => {
   const r = classify(method, path);
@@ -146,6 +152,81 @@ describe("thinking policies the gateway enforces (KOBE-260)", () => {
   });
 });
 
+describe("Responses reasoning.summary is kept, validated (KOBE-601)", () => {
+  const pi = (reasoning: unknown) => ({
+    model: "openai/gpt-5.1",
+    input: [{ role: "user", content: [{ type: "input_text", text: "Hello" }] }],
+    max_output_tokens: 16_384,
+    reasoning,
+    include: ["reasoning.encrypted_content"],
+    stream: true,
+  });
+
+  it("keeps each allowed summary beside the gateway's effort", () => {
+    for (const summary of ["auto", "concise", "detailed"]) {
+      const { decoded } = rewrite(RESPONSES, pi({ effort: "xhigh", summary }), {}, "low");
+      expect(decoded.reasoning).toEqual({ effort: "low", summary });
+      expect(decoded.include).toEqual(["reasoning.encrypted_content"]);
+    }
+  });
+
+  it("drops a summary that is not an allowed value", () => {
+    for (const summary of ["Auto", "verbose", "", null, 1, true, { x: 1 }, ["auto"]]) {
+      const { decoded } = rewrite(RESPONSES, pi({ effort: "high", summary }), {}, "medium");
+      expect(decoded.reasoning).toEqual({ effort: "medium" });
+    }
+  });
+
+  it("still strips every other reasoning member and field", () => {
+    const sent = {
+      ...pi({ effort: "xhigh", summary: "auto", max_tokens: 99_999, generate_summary: "detailed" }),
+      reasoning_effort: "high",
+      thinking: { type: "enabled", budget_tokens: 99_999 },
+      extra_body: { reasoning: { effort: "high" } },
+    };
+    const { decoded, out } = rewrite(RESPONSES, sent, {}, "medium");
+    expect(decoded.reasoning).toEqual({ effort: "medium", summary: "auto" });
+    expect(decoded.reasoning_effort).toBeUndefined();
+    expect(decoded.thinking).toBeUndefined();
+    expect(decoded.extra_body).toBeUndefined();
+    expect(out.ok && out.body.toString()).not.toMatch(/99999|generate_summary|xhigh/);
+  });
+
+  it("writes no summary when thinking is off (effort none) or none was asked for", () => {
+    expect(rewrite(RESPONSES, pi({ summary: "auto" }), {}, "off").decoded.reasoning).toEqual({
+      effort: "none",
+    });
+    expect(rewrite(RESPONSES, pi(undefined), {}, "low").decoded.reasoning).toEqual({
+      effort: "low",
+    });
+  });
+
+  it("reads the summary as Bifrost would: case variants merge, last wins, a later null clears", () => {
+    const parse = (text: string) => reasoningSummary(JSON.parse(text) as Record<string, unknown>);
+    expect(parse('{"reasoning":{"summary":"auto"},"REASONING":{"effort":"low"}}')).toBe("auto");
+    expect(parse('{"reasoning":{"summary":"auto"},"Reasoning":{"SUMMARY":"concise"}}')).toBe(
+      "concise",
+    );
+    expect(parse('{"reasoning":{"summary":"auto"},"REASONING":null}')).toBeUndefined();
+    expect(
+      parse('{"reasoning":{"summary":"auto"},"REASONING":{"summary":"bogus"}}'),
+    ).toBeUndefined();
+    expect(parse('{"reasoning":"auto"}')).toBeUndefined();
+  });
+
+  it("Chat Completions has no summary field: only reasoning_effort is written", () => {
+    const sent = {
+      model: "m",
+      messages: [],
+      reasoning: { summary: "auto" },
+      reasoning_effort: "x",
+    };
+    const { decoded } = rewrite(CHAT, sent, {}, "low");
+    expect(decoded.reasoning_effort).toBe("low");
+    expect(decoded.reasoning).toBeUndefined();
+  });
+});
+
 describe("the rewrite removes every caller reasoning field (S1, S6)", () => {
   const SNEAKY = {
     model: "m",
@@ -178,10 +259,13 @@ describe("the rewrite removes every caller reasoning field (S1, S6)", () => {
     }
   });
 
-  it("responses: a fresh reasoning object, the caller's extra fields gone", () => {
+  it("responses: a fresh reasoning object, the caller's extra fields gone but its summary kept", () => {
     const { decoded, out } = rewrite(RESPONSES, SNEAKY, {}, "medium");
-    expect(decoded.reasoning).toEqual({ effort: "medium" });
-    expect(out.ok && out.body.toString()).not.toMatch(LEFTOVERS);
+    // KOBE-601: a valid summary (here from REASONING, "reasoning" to Bifrost) is the one member kept.
+    expect(decoded.reasoning).toEqual({ effort: "medium", summary: "detailed" });
+    const text = out.ok ? out.body.toString() : "";
+    expect(text.replace('"summary":"detailed"', "")).not.toMatch(LEFTOVERS);
+    expect(text).not.toMatch(/max_tokens/);
   });
 
   it("Anthropic adaptive: a caller budget_tokens never survives; the output format is kept", () => {

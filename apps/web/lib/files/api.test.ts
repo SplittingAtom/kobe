@@ -76,6 +76,16 @@ describe("files api", () => {
     expect(must(wake.calls[0])).toMatchObject({ url: "/v1/workspace/wake" });
   });
 
+  it("syncs now with the team header and reads the status (KOBE-599)", async () => {
+    const sync = stub(200, { status: "synced" });
+    const res = await createFilesApi("t1", sync.fetchFn).syncNow();
+    expect(res.ok && res.data).toEqual({ status: "synced" });
+    const call = must(sync.calls[0]);
+    expect(call.url).toBe("/v1/workspace/sync");
+    expect(call.init.method).toBe("POST");
+    expect(new Headers(call.init.headers).get("x-kobe-team")).toBe("t1");
+  });
+
   it("downloads bytes", async () => {
     const fetchFn: typeof fetch = async () => new Response("abc");
     const res = await createFilesApi("t1", fetchFn).download("d/n.txt");

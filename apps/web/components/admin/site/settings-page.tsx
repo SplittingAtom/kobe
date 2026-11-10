@@ -14,7 +14,6 @@ import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 import { MemorySwitchesSection } from "./memory-switches";
-import { WebSearchSection } from "./web-search-form";
 
 /**
  * Site settings (`/v1/site/settings`): required two-factor authentication (D7) and how long
@@ -30,7 +29,6 @@ export function SettingsPage() {
           <>
             <SettingsForm settings={settings} onSaved={reload} />
             <AuditPrivacyForm settings={settings} onSaved={reload} />
-            <WebSearchSection />
             <MemorySwitchesSection />
           </>
         )}

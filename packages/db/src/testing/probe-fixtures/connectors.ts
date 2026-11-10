@@ -3,7 +3,6 @@ import {
   connectorGrants,
   connectors,
   teamConnectors,
-  teamWebSearch,
   threadConnectorsOff,
   threads,
   users,
@@ -61,10 +60,5 @@ export const connectorsFixtures: Record<(typeof connectorsDomain.team)[number], 
     await tx
       .insert(threadConnectorsOff)
       .values({ teamId, threadId: thread.id, connectorId: connector.id, turnedOffBy: userId });
-  },
-  team_web_search: async (tx, teamId) => {
-    const userId = randomUUID();
-    await tx.insert(users).values({ id: userId, name: "Probe", email: `${userId}@probe.test` });
-    await tx.insert(teamWebSearch).values({ teamId, enabledBy: userId });
   },
 };

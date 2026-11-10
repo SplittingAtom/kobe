@@ -49,6 +49,8 @@ let seen: Seen[];
 let overrides: Record<string, () => Response>;
 let fake: FakeKobe;
 let wakeGate: Promise<void>;
+let syncGate: Promise<void>;
+let syncStatus: string;
 
 /** The workspace routes from TREE; everything else goes to the fake chat server. */
 const fetchFn: typeof fetch = async (input, init = {}) => {
@@ -62,6 +64,10 @@ const fetchFn: typeof fetch = async (input, init = {}) => {
   if (key === "POST /v1/workspace/wake") {
     await wakeGate;
     return Response.json({ status: "waking" }, { status: 202 });
+  }
+  if (key === "POST /v1/workspace/sync") {
+    await syncGate;
+    return Response.json({ status: syncStatus });
   }
   if (key === "GET /v1/workspace/files") {
     const path = new URL(url, "http://x").searchParams.get("path") ?? "";
@@ -106,6 +112,9 @@ async function fileAction(user: ReturnType<typeof userEvent.setup>, name: string
 
 const wakes = () =>
   seen.filter((s) => s.method === "POST" && s.url === "/v1/workspace/wake").length;
+/** Refresh = sync now (KOBE-599): every ask after the first wake. */
+const syncs = () =>
+  seen.filter((s) => s.method === "POST" && s.url === "/v1/workspace/sync").length;
 const rootListings = () =>
   seen.filter((s) => s.method === "GET" && s.url === "/v1/workspace/files").length;
 
@@ -114,6 +123,8 @@ beforeEach(() => {
   overrides = {};
   fake = new FakeKobe();
   wakeGate = Promise.resolve();
+  syncGate = Promise.resolve();
+  syncStatus = "synced";
   sessionStorage.clear();
   localStorage.clear(); // the tree remembers expanded folders (KOBE-304)
   vi.stubGlobal("fetch", fetchFn);
@@ -138,21 +149,46 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     expect(rootListings()).toBe(1);
   });
 
-  it("wakes and lists again on each Show files, Mod+Shift+F and Refresh", async () => {
+  it("wakes once, then syncs now and lists again on each Show files, Mod+Shift+F and Refresh (KOBE-599)", async () => {
     const { user } = await open();
     await waitFor(() => expect(wakes()).toBe(1));
     act(() => void pressModShift("F"));
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByRole("region", { name: "Files" })),
     );
-    await waitFor(() => expect(wakes()).toBe(2));
-    expect(rootListings()).toBe(2);
+    await waitFor(() => expect(syncs()).toBe(1));
+    await waitFor(() => expect(rootListings()).toBe(2));
     await user.click(screen.getByRole("button", { name: "Refresh files" }));
-    await waitFor(() => expect(wakes()).toBe(3));
-    expect(rootListings()).toBe(3);
+    await waitFor(() => expect(syncs()).toBe(2));
+    await waitFor(() => expect(rootListings()).toBe(3));
     await user.click(screen.getByRole("button", { name: "Collapse the rail" }));
     await user.click(screen.getByRole("button", { name: "Show files" }));
-    await waitFor(() => expect(wakes()).toBe(4));
+    await waitFor(() => expect(syncs()).toBe(3));
+    expect(wakes()).toBe(1);
+  });
+
+  it("Refresh is busy while the sandbox pushes, and lists only after its push (KOBE-599, ac-1)", async () => {
+    let release: () => void = () => {};
+    const { user, panel } = await open();
+    await waitFor(() => expect(wakes()).toBe(1));
+    syncGate = new Promise<void>((r) => (release = r));
+    const refresh = within(panel).getByRole("button", { name: "Refresh files" });
+    await user.click(refresh);
+    await waitFor(() => expect(refresh.getAttribute("aria-busy")).toBe("true"));
+    expect(refresh.getAttribute("aria-disabled")).toBe("true");
+    // Busy: a second click asks nothing more, and nothing lists before the push is in.
+    await user.click(refresh);
+    expect(syncs()).toBe(1);
+    expect(rootListings()).toBe(1);
+    TREE[""] = [...(TREE[""] ?? []), entry("fresh.txt", "fresh.txt", "file")];
+    try {
+      await act(async () => release());
+      expect(await within(panel).findByText("fresh.txt")).toBeTruthy();
+      await waitFor(() => expect(refresh.getAttribute("aria-busy")).toBe("false"));
+      expect(rootListings()).toBe(2);
+    } finally {
+      TREE[""] = (TREE[""] ?? []).filter((e) => e.name !== "fresh.txt");
+    }
   });
 
   it("keeps its folder and listing through collapse and expand, without waking again (KOBE-461)", async () => {
@@ -176,8 +212,8 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     await user.click(await composer());
     await user.keyboard("/files");
     await user.keyboard("{Enter}");
-    await waitFor(() => expect(wakes()).toBe(2));
-    expect(rootListings()).toBe(2);
+    await waitFor(() => expect(syncs()).toBe(1));
+    await waitFor(() => expect(rootListings()).toBe(2));
   });
 
   it("wakes nothing on a load with the rail collapsed, and lists when it expands (KOBE-461 ac-2)", async () => {
@@ -207,8 +243,8 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     expect(within(panel).getAllByRole("button", { name: "Refresh files" })).toEqual([refresh]);
     expect(must(refresh.closest("div")).textContent).toMatch(/^Workspace/);
     await user.click(refresh);
-    await waitFor(() => expect(wakes()).toBe(2));
-    expect(rootListings()).toBe(2);
+    await waitFor(() => expect(syncs()).toBe(1));
+    await waitFor(() => expect(rootListings()).toBe(2));
   });
 
   it("is gone from the artifact column: the old side panel is removed", async () => {
@@ -223,7 +259,6 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     let release: () => void = () => {};
     wakeGate = new Promise<void>((r) => (release = r));
     const { panel } = await open();
-    act(() => void pressModShift("F"));
     expect(await within(panel).findByText(/last synced/i)).toBeTruthy();
     const before = seen.filter((s) => s.url.startsWith("/v1/workspace/files")).length;
     await act(async () => release());
@@ -237,6 +272,46 @@ describe("Files in the workspace rail (KOBE-198, ac-3)", () => {
     );
     await waitFor(() => expect(within(panel).queryByText(/last synced/i)).toBeNull());
   }, 10000);
+
+  it("a Refresh that finds the sandbox asleep shows the last synced files until it wakes (KOBE-599)", async () => {
+    const { user, panel } = await open();
+    await waitFor(() => expect(wakes()).toBe(1));
+    await waitFor(() => expect(within(panel).queryByText(/last synced/i)).toBeNull(), {
+      timeout: 6000,
+    });
+    syncStatus = "asleep";
+    await user.click(within(panel).getByRole("button", { name: "Refresh files" }));
+    expect(await within(panel).findByText(/last synced/i)).toBeTruthy();
+    const before = rootListings();
+    await waitFor(() => expect(rootListings()).toBeGreaterThan(before), { timeout: 6000 });
+    await waitFor(() => expect(within(panel).queryByText(/last synced/i)).toBeNull());
+  }, 15000);
+
+  it("lists again by itself when the workspace changes, keeping open folders open (KOBE-599, ac-2)", async () => {
+    const { user, panel } = await open();
+    await user.click(within(panel).getByRole("treeitem", { name: "notes" }));
+    await within(panel).findByText("todo.md");
+    await waitFor(() => expect(fake.workspaceEvents.open).toBe(1));
+    const notes = () => seen.filter((s) => s.url === "/v1/workspace/files?path=notes").length;
+    const [rootBefore, notesBefore] = [rootListings(), notes()];
+    TREE.notes = [...(TREE.notes ?? []), entry("pushed.md", "notes/pushed.md", "file")];
+    try {
+      // A burst of pushes lists once.
+      act(() => {
+        fake.workspaceEvents.bump();
+        fake.workspaceEvents.bump();
+      });
+      expect(await within(panel).findByText("pushed.md")).toBeTruthy();
+      expect(rootListings()).toBe(rootBefore + 1);
+      expect(notes()).toBe(notesBefore + 1);
+      expect(
+        within(panel).getByRole("treeitem", { name: "notes" }).getAttribute("aria-expanded"),
+      ).toBe("true");
+      expect(syncs()).toBe(0);
+    } finally {
+      TREE.notes = (TREE.notes ?? []).filter((e) => e.name !== "pushed.md");
+    }
+  });
 
   it("opens a folder in place and closes it again (the tree replaced the breadcrumb, KOBE-304)", async () => {
     const { user, panel } = await open();

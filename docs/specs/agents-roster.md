@@ -1,6 +1,13 @@
 # Kobe — Agents: Personal, Team and Site rosters
 
-Status: **decided by Chris, 2026-11-08** (Q1, Q3 and Q6 explicitly: references with a version
+Status: **shipped** (2026-11-09): KOBE-565 (DB, PR #481), KOBE-566 (roster server, PR #482), KOBE-567
+(resolution and schedules, PRs #484, #489), KOBE-568 (fork, transfer, adopt, PRs #485, #487), KOBE-569
+(Agents page, PR #490), KOBE-570 (admin fold-in, PR #493), KOBE-571 (fork dialog, lineage, picker,
+team default agent, PR #495; restored by PR #504 after a squash dropped it), KOBE-572 (gate1
+browser spec, PR #497), KOBE-573 (docs). The shipped behaviour
+is documented in `docs/agents.md`; where it differs from this spec, see `docs/ledger/KOBE-573.md`.
+
+Decided by Chris, 2026-11-08 (Q1, Q3 and Q6 explicitly: references with a version
 rule, builders assign directly, team-owned agents stay; for the other questions Chris took the
 proposed answers, so AR1–AR16 are the decisions). Hadron spec
 `4a057ebf-622f-4e43-aa23-7ac7a9e25edb`; tickets filed 2026-11-08: AR-1 KOBE-565, AR-2 KOBE-566,

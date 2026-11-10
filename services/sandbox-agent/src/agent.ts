@@ -9,7 +9,6 @@ import {
   CAPABILITY_FILE_EDITS,
   CAPABILITY_NOTEBOOKS,
   CAPABILITY_NOTEBOOK_START,
-  CAPABILITY_WEB_SEARCH,
   CAPABILITY_RUN_TOKEN,
   CAPABILITY_SKILL_BUNDLES,
   CAPABILITY_THREAD_BRANCH_SUMMARY,
@@ -18,6 +17,7 @@ import {
   CAPABILITY_SESSION_RENEW,
   CAPABILITY_SKILL_EVAL,
   CAPABILITY_WORKSPACE_MOVES,
+  CAPABILITY_WORKSPACE_SYNC_NOW,
   CAPABILITY_THREAD_CONTEXT,
   CAPABILITY_SYNC_CONFLICTS,
   KOBE_EVENT_DROPPED_TYPE,
@@ -42,7 +42,6 @@ import { FileOpenBroker } from "./tools/file-open-broker.js";
 import { NotebookBroker } from "./tools/notebook-broker.js";
 import type { KernelManager } from "./notebook/manager.js";
 import { MemoryBroker } from "./tools/memory-broker.js";
-import { WebSearchBroker } from "./tools/web-search-broker.js";
 import { toolsError } from "./tools/channel.js";
 import type { ConflictListener, PushedFile } from "./workspace/sync.js";
 import { ConflictReporter } from "./workspace/conflict-reporter.js";
@@ -143,6 +142,12 @@ export interface WorkspaceHooks {
    */
   movedOnServer?(): void;
   /**
+   * Push every local change now and resolve whether it committed (`workspace.sync_now`,
+   * KOBE-599: the Files panel's Refresh). Never rejects. Present: the agent announces
+   * `workspace_sync_now`.
+   */
+  syncNow?(): Promise<boolean>;
+  /**
    * Hear about conflict copies the sync makes (KOBE-492). Present (with kobe-tools, which tells
    * the model): the agent announces `sync_conflicts` and reports each one to the server.
    */
@@ -192,7 +197,6 @@ export class Agent {
   /** Runs whose `run.start.project.access` is `write` (KOBE-580): only they may commit. */
   readonly #projectWriteRuns = new Set<string>();
   readonly #skillDrafts: SkillDraftBroker;
-  readonly #searches: WebSearchBroker;
   readonly #fileEdits: FileEditBroker;
   readonly #fileOpens: FileOpenBroker;
   readonly #notebooks: NotebookBroker;
@@ -216,7 +220,6 @@ export class Agent {
     });
     this.#broker = new PolicyBroker({ send: (frame) => this.#wire.send(frame) });
     this.#artifacts = new ArtifactBroker({ send: (frame) => this.#wire.send(frame) });
-    this.#searches = new WebSearchBroker({ send: (frame) => this.#wire.send(frame) });
     this.#fileEdits = new FileEditBroker({ send: (frame) => this.#wire.send(frame) });
     this.#memory = new MemoryBroker({ send: (frame) => this.#wire.send(frame) });
     this.#conflicts = new ConflictReporter({
@@ -309,7 +312,6 @@ export class Agent {
           this.#commits.failRun(runId, "run ended");
           this.#projectWriteRuns.delete(runId);
           this.#skillDrafts.failRun(runId, "run ended");
-          this.#searches.failRun(runId, "run ended");
           this.#fileEdits.failRun(runId, "run ended");
           this.#fileOpens.failRun(runId, "run ended");
           this.#notebooks.failRun(runId, "run ended");
@@ -340,10 +342,6 @@ export class Agent {
           this.#broker.failThread(threadId, reason);
         },
         toolsRequest: (threadId, runId, request, reply) => {
-          if (request.op === "web_search") {
-            this.#searches.query(threadId, runId, request, reply);
-            return;
-          }
           if (request.op === "memory.put" || request.op === "memory.read") {
             if (this.#memoryEnabled()) this.#memory.request(threadId, runId, request, reply);
             else reply(toolsError(request.id, "not_allowed", "memory is not available"));
@@ -389,7 +387,6 @@ export class Agent {
           this.#shares.failThread(threadId, reason);
           this.#commits.failThread(threadId, reason);
           this.#skillDrafts.failThread(threadId, reason);
-          this.#searches.failThread(threadId, reason);
           this.#fileEdits.failThread(threadId, reason);
           this.#fileOpens.failThread(threadId, reason);
           this.#notebooks.failThread(threadId, reason);
@@ -412,7 +409,6 @@ export class Agent {
         this.#shares.failAll("connection to Kobe server lost");
         this.#commits.failAll("connection to Kobe server lost");
         this.#skillDrafts.failAll("connection to Kobe server lost");
-        this.#searches.failAll("connection to Kobe server lost");
         this.#fileEdits.failAll("connection to Kobe server lost");
         this.#fileOpens.failAll("connection to Kobe server lost");
         this.#notebooks.failAll("connection to Kobe server lost");
@@ -509,6 +505,18 @@ export class Agent {
    * `share_file` needs the tools channel (fd 4) and workspace sync (push-then-share): without
    * either this agent neither registers the tool nor announces `files`.
    */
+  /**
+   * `workspace.sync_now` (KOBE-599): push now, then answer `workspace.synced` with the same id.
+   * An answer that cannot be sent (the connection dropped) is lost; the server's wait is bounded.
+   */
+  #syncNow(requestId: string): void {
+    const hooks = this.#deps.workspace;
+    const pushed = hooks?.syncNow ? hooks.syncNow() : Promise.resolve(false);
+    void pushed.then((ok) => {
+      this.#wire.send({ v: 1, type: "workspace.synced", request_id: requestId, ok });
+    });
+  }
+
   #filesEnabled(): boolean {
     return this.#deps.toolsExtension !== undefined && this.#deps.workspace?.pushPath !== undefined;
   }
@@ -565,7 +573,6 @@ export class Agent {
       ...(this.#deps.kernels === undefined
         ? []
         : [CAPABILITY_NOTEBOOKS, CAPABILITY_NOTEBOOK_START]),
-      ...(this.#deps.toolsExtension === undefined ? [] : [CAPABILITY_WEB_SEARCH]),
       ...(this.#memoryEnabled() ? [CAPABILITY_MEMORY] : []),
       // Per-session MCP config (KOBE-111) needs the proxy URL, a session to trade tokens with, and
       // Pi's MCP extension (built into Pi 1.0.x).
@@ -584,6 +591,8 @@ export class Agent {
       CAPABILITY_SESSION_RENEW,
       // Server moves replayed as local renames (KOBE-304).
       ...(this.#deps.workspace?.movedOnServer === undefined ? [] : [CAPABILITY_WORKSPACE_MOVES]),
+      // Refresh in the Files panel pushes now and says when it is done (KOBE-599).
+      ...(this.#deps.workspace?.syncNow === undefined ? [] : [CAPABILITY_WORKSPACE_SYNC_NOW]),
       // Sync conflict copies reported, and the model told (KOBE-492).
       ...(this.#syncConflictsEnabled() ? [CAPABILITY_SYNC_CONFLICTS] : []),
       // The latest model call's context for its owner (KOBE-470): read from Pi's capture or the
@@ -692,7 +701,7 @@ export class Agent {
         this.#notebooks.onResult(frame);
         return;
       case "web_search.result":
-        this.#searches.onResult(frame);
+        // Retired (KOBE-606): this agent never sends `web_search.query`, so nothing waits for it.
         return;
       case "memory.result":
         this.#memory.onResult(frame);
@@ -711,6 +720,9 @@ export class Agent {
         return;
       case "workspace.moved":
         this.#deps.workspace?.movedOnServer?.();
+        return;
+      case "workspace.sync_now":
+        this.#syncNow(frame.request_id);
         return;
       case "workspace.conflict_note":
         void this.#threads.conflictNote(frame).then((told) => {

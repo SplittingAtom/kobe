@@ -24,7 +24,10 @@ import {
 } from "./memory-frames.js";
 import { projectCommitFrameSchema, projectCommitResultFrameSchema } from "./project-frames.js";
 import { runMcpContextSchema } from "./mcp-config.js";
-import { webSearchQueryFrameSchema, webSearchResultFrameSchema } from "./web-search-frames.js";
+import {
+  legacyWebSearchQueryFrameSchema,
+  legacyWebSearchResultFrameSchema,
+} from "./legacy-web-search-frames.js";
 import { traceSpansFrameSchema, wireTraceContextSchema } from "./trace-frames.js";
 import {
   evalPrepareFrameSchema,
@@ -38,6 +41,10 @@ import {
   skillDraftSaveFrameSchema,
   skillDraftSaveResultFrameSchema,
 } from "./skill-draft-frames.js";
+import {
+  workspaceSyncedFrameSchema,
+  workspaceSyncNowFrameSchema,
+} from "./workspace-sync-now-frames.js";
 import { APP_CARDS_PER_RUN_MAX, appCardEntrySchema } from "../app-cards.js";
 import { runMemoryContextSchema } from "../memory.js";
 import { runViewingContextSchema } from "../file-editor.js";
@@ -349,9 +356,10 @@ export const sandboxToServerFrameSchema = z.union([
   fileEditProposeFrameSchema,
   fileOpenFrameSchema,
   workspaceConflictFrameSchema,
+  workspaceSyncedFrameSchema,
   notebookOutputFrameSchema,
   notebookRunFrameSchema,
-  webSearchQueryFrameSchema,
+  legacyWebSearchQueryFrameSchema, // retired (KOBE-606): answered unavailable
   traceSpansFrameSchema,
   sessionRenewFrameSchema,
   piExitedFrameSchema,
@@ -768,12 +776,13 @@ export const serverToSandboxFrameSchema = z.union([
   notebookExecuteFrameSchema,
   notebookInterruptFrameSchema,
   notebookRestartFrameSchema,
-  webSearchResultFrameSchema,
+  legacyWebSearchResultFrameSchema, // retired (KOBE-606)
   sessionRestoreFrameSchema,
   ackFrameSchema,
   resendFrameSchema,
   shutdownFrameSchema,
   workspaceMovedFrameSchema,
+  workspaceSyncNowFrameSchema,
   pingFrame,
   pongFrame,
   serverErrorFrame,
@@ -790,8 +799,8 @@ export type FileShareFrame = z.infer<typeof fileShareFrameSchema>;
 export type FileShareResultFrame = z.infer<typeof fileShareResultFrameSchema>;
 export type ProjectCommitFrame = z.infer<typeof projectCommitFrameSchema>;
 export type ProjectCommitResultFrame = z.infer<typeof projectCommitResultFrameSchema>;
-export type WebSearchQueryFrame = z.infer<typeof webSearchQueryFrameSchema>;
-export type WebSearchResultFrame = z.infer<typeof webSearchResultFrameSchema>;
+export type LegacyWebSearchQueryFrame = z.infer<typeof legacyWebSearchQueryFrameSchema>;
+export type LegacyWebSearchResultFrame = z.infer<typeof legacyWebSearchResultFrameSchema>;
 export type MemoryPutFrame = z.infer<typeof memoryPutFrameSchema>;
 export type MemoryReadFrame = z.infer<typeof memoryReadFrameSchema>;
 export type MemoryResultFrame = z.infer<typeof memoryResultFrameSchema>;

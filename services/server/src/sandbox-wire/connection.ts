@@ -10,8 +10,9 @@ import {
   CAPABILITY_TRACE_SPANS,
   CAPABILITY_SESSION_RENEW,
   CAPABILITY_SYNC_CONFLICTS,
-  CAPABILITY_WEB_SEARCH,
+  LEGACY_WEB_SEARCH_MESSAGE,
   CAPABILITY_WORKSPACE_MOVES,
+  CAPABILITY_WORKSPACE_SYNC_NOW,
   builtinToolDescriptor,
   PI_PINNED_VERSION,
   PI_PREVIOUS_MINORS,
@@ -30,11 +31,12 @@ import {
   type FileEditProposeFrame,
   type FileOpenFrame,
   type WorkspaceConflictFrame,
+  type WorkspaceSyncedFrame,
   type NotebookOutputFrame,
   type NotebookRunFrame,
   type SkillDraftSaveFrame,
   type TraceSpansFrame,
-  type WebSearchQueryFrame,
+  type LegacyWebSearchQueryFrame,
   type ServerToSandboxFrame,
 } from "@kobe/protocol";
 import { withTeam } from "@kobe/db";
@@ -56,12 +58,7 @@ import { onProjectCommit } from "./project-commit.js";
 import { putMemory, readMemory, type MemoryRefusal, type MemoryReply } from "../memory/agent.js";
 import { decidePolicyCheck, denyFrame } from "./policy-check.js";
 import type { ConnectionRegistry, RegisteredConnection } from "./registry.js";
-import {
-  activeLeasedRuns,
-  endRunInTx,
-  isActiveMessageRun,
-  type InterruptCause,
-} from "./run-state.js";
+import { activeLeasedRuns, endRunInTx, type InterruptCause } from "./run-state.js";
 import { onFileEditPropose } from "./file-edit-propose.js";
 import { onFileOpen } from "./file-open.js";
 import { ConflictRate, onWorkspaceConflict } from "./sync-conflict.js";
@@ -95,6 +92,8 @@ type State = "hello" | "starting" | "ready" | "closed";
 
 const MAX_BUFFERED_BYTES = 32 * 1024 * 1024;
 const POLICY_ANSWERED_MAX = 4_096;
+/** `workspace.sync_now` asks in flight per connection (KOBE-599); more are answered `unsynced`. */
+const MAX_SYNC_REQUESTS = 16;
 /** `{"v":1,"type":"<type>"` at the start of a frame (whitespace tolerated). */
 const FRAME_PREFIX = /^\s*\{\s*"v"\s*:\s*1\s*,\s*"type"\s*:\s*"([a-z._]{1,32})"/;
 /** Ended leases kept to answer late frames with `run_not_active`; older ones are forgotten. */
@@ -180,7 +179,6 @@ export class SandboxConnection implements RegisteredConnection {
   readonly #pendingCommits = new Set<string>();
   #artifactPuts = 0;
   #fileShares = 0;
-  #webSearches = 0;
   #memoryOps = 0;
   readonly #skillDraftSaves = { count: 0 };
   /** Aborts pending project-memory approvals when the connection ends. */
@@ -198,6 +196,8 @@ export class SandboxConnection implements RegisteredConnection {
   #registered = false;
   /** `hello.capabilities` of the agent on this connection (none from older agents). */
   #capabilities: ReadonlySet<string> = new Set();
+  /** `workspace.sync_now` asks sent here and not answered yet (KOBE-599). */
+  readonly #syncRequests = new Set<string>();
   /** Relayed sandbox spans (KOBE-274): the replica's run state; absent when it does not relay. */
   readonly #traces: TraceIntake | undefined;
   readonly #traceRate: TraceFrameRate | undefined;
@@ -298,6 +298,37 @@ export class SandboxConnection implements RegisteredConnection {
 
   pokeCommands(): void {
     this.#delivery.poke();
+  }
+
+  /**
+   * Refresh in the Files panel (KOBE-599): ask the agent to push now. The answer
+   * (`workspace.synced`) goes back to the requester as a bus hint; an agent that cannot (older, not
+   * ready, too many asks in flight) is answered `unsynced` at once, so the requester lists without
+   * waiting.
+   */
+  workspaceSyncNow(requestId: string): void {
+    const ready = this.#state === "ready" && this.hasCapability(CAPABILITY_WORKSPACE_SYNC_NOW);
+    if (!ready || this.#syncRequests.size >= MAX_SYNC_REQUESTS) {
+      this.#syncAnswered(requestId, false);
+      return;
+    }
+    this.#syncRequests.add(requestId);
+    if (!this.send({ v: 1, type: "workspace.sync_now", request_id: requestId })) {
+      this.#syncRequests.delete(requestId);
+      this.#syncAnswered(requestId, false);
+    }
+  }
+
+  /** Only answers to asks sent on this connection are passed on; anything else is dropped. */
+  #onWorkspaceSynced(frame: WorkspaceSyncedFrame): void {
+    if (!this.#syncRequests.delete(frame.request_id)) return;
+    this.#syncAnswered(frame.request_id, frame.ok);
+  }
+
+  #syncAnswered(requestId: string, ok: boolean): void {
+    this.#ctx.bus
+      .notify(this.#ctx.db, { kind: ok ? "synced" : "unsynced", id: requestId })
+      .catch((err: unknown) => this.log.warn({ err }, "could not pass on a workspace sync answer"));
   }
 
   workspaceMoved(): void {
@@ -532,6 +563,9 @@ export class SandboxConnection implements RegisteredConnection {
       case "workspace.conflict":
         this.#onWorkspaceConflict(frame);
         return;
+      case "workspace.synced":
+        this.#onWorkspaceSynced(frame);
+        return;
       case "notebook.output":
         this.#onNotebookOutput(frame, bytes);
         return;
@@ -545,7 +579,7 @@ export class SandboxConnection implements RegisteredConnection {
         this.#onMemoryRead(frame);
         return;
       case "web_search.query":
-        this.#onWebSearch(frame);
+        this.#onLegacyWebSearch(frame);
         return;
       case "trace.spans":
         this.#onTraceSpans(frame);
@@ -1084,131 +1118,21 @@ export class SandboxConnection implements RegisteredConnection {
   }
 
   /**
-   * `web_search.query` (KOBE-114). Accepted only if this connection announced `web_search`, the
-   * run is leased here and active, and this `web_search` call was allowed here with the same
-   * canonical input hash (D-3). The server then decides availability (site provider, team
-   * opt-in), opens the key and searches; "unavailable" is an answer, not an error. Refusals are
-   * audited (never the query).
+   * `web_search.query` from an agent built before KOBE-606 removed the built-in web search. The
+   * server no longer knows `web_search` (policy denies it as an unknown tool), so this only comes
+   * from an old agent mid-rollout or a confused one: answer unavailable and keep the connection.
    */
-  #onWebSearch(frame: WebSearchQueryFrame): void {
-    const answer = (result: Parameters<SandboxConnection["send"]>[0]) => this.send(result);
-    const fail = (code: string, message: string) =>
-      answer({
-        v: 1,
-        type: "web_search.result",
-        request_id: frame.request_id,
-        ok: false,
-        error: { code, message },
-      });
-    const refuse = (
-      reason: Parameters<WireContext["auditWebSearchRefused"]>[2]["reason"],
-      message: string,
-    ) => {
-      this.#ctx.auditWebSearchRefused(this.target, this.sandboxId, {
-        reason,
-        runId: frame.run_id,
-        toolCallId: frame.tool_call_id,
-      });
-      fail("not_allowed", message);
-    };
-    if (!this.hasCapability(CAPABILITY_WEB_SEARCH)) {
-      refuse("capability_missing", "This sandbox did not announce web search.");
-      return;
-    }
-    const check = this.#checkToolRun(frame.run_id, frame.thread_id, "web_search.query");
-    if (check === "violation") return;
-    if (check === "ended") {
-      refuse("run_not_active", "The run has ended, so the search was not run.");
-      return;
-    }
-    const verdict = this.#allowedArtifacts.consume(
-      frame.run_id,
-      frame.tool_call_id,
-      frame.tool,
-      frame.input,
-    );
-    if (verdict !== "ok") {
-      refuse(
-        verdict,
-        verdict === "input_mismatch"
-          ? "The search differs from the call that was allowed."
-          : verdict === "replayed"
-            ? "This search was already run; ask the model to search again."
-            : "This tool call was not allowed for this tool.",
-      );
-      return;
-    }
-    if (this.#webSearches >= this.#ctx.tuning.maxPendingArtifactPuts) {
-      fail("rate_limited", "Too many searches are running. Try again.");
-      return;
-    }
-    this.#webSearches += 1;
-    const { teamId } = this.target;
-    void withTeam(this.#ctx.db, teamId, (tx) =>
-      isActiveMessageRun(tx, teamId, frame.run_id, frame.thread_id),
-    )
-      .then((active) => {
-        if (active) return true;
-        // A compaction (KOBE-213) or an ended run, from the database: no search.
-        this.#webSearches -= 1;
-        refuse("run_not_active", "The run is not an active conversation turn; no search.");
-        return false;
-      })
-      .then((go) => (go ? this.#search(frame, answer, fail) : undefined))
-      .catch((err: unknown) => {
-        this.#webSearches -= 1;
-        this.log.error({ err }, "web_search run check failed");
-        fail("search_failed", "The search could not be run. Try again.");
-      });
-  }
-
-  #search(
-    frame: WebSearchQueryFrame,
-    answer: (result: Parameters<SandboxConnection["send"]>[0]) => unknown,
-    fail: (code: string, message: string) => void,
-  ): Promise<void> {
-    return this.#ctx.webSearch
-      .search(this.target.teamId, frame.input, {
-        runId: frame.run_id,
-        toolCallId: frame.tool_call_id,
-        sandboxId: this.sandboxId,
-        userId: this.target.userId,
-      })
-      .catch((err: unknown) => {
-        this.log.error({ err }, "web_search failed");
-        return {
-          kind: "error",
-          code: "search_failed",
-          message: "The search could not be run. Try again.",
-        } as const;
-      })
-      .then((result) => {
-        this.#webSearches -= 1;
-        if (result.kind === "results") {
-          answer({
-            v: 1,
-            type: "web_search.result",
-            request_id: frame.request_id,
-            ok: true,
-            available: true,
-            provider: result.provider,
-            query: frame.input.query,
-            results: [...result.results],
-          });
-        } else if (result.kind === "unavailable") {
-          answer({
-            v: 1,
-            type: "web_search.result",
-            request_id: frame.request_id,
-            ok: true,
-            available: false,
-            reason: result.reason,
-            message: result.message,
-          });
-        } else {
-          fail(result.code, result.message);
-        }
-      });
+  #onLegacyWebSearch(frame: LegacyWebSearchQueryFrame): void {
+    this.log.debug({ run_id: frame.run_id }, "legacy web_search.query answered unavailable");
+    this.send({
+      v: 1,
+      type: "web_search.result",
+      request_id: frame.request_id,
+      ok: true,
+      available: false,
+      reason: "not_configured",
+      message: LEGACY_WEB_SEARCH_MESSAGE,
+    });
   }
 
   /**
@@ -1800,6 +1724,9 @@ export class SandboxConnection implements RegisteredConnection {
     this.#timers = [];
     for (const abort of this.#policyPending.values()) abort.abort();
     this.#policyPending.clear();
+    // Waiting Refreshes list now instead of at their timeout.
+    for (const id of this.#syncRequests) this.#syncAnswered(id, false);
+    this.#syncRequests.clear();
     this.#memoryAbort.abort();
     for (const lease of this.#leases.values()) lease.ingest.close();
     this.#delivery.close();

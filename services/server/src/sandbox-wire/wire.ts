@@ -4,10 +4,10 @@ import type { NotebookFiles } from "../notebooks/files.js";
 import type { Server } from "node:http";
 import {
   MAX_RUN_TOKEN_TTL_SECONDS,
-  WEB_SEARCH_UNAVAILABLE_MESSAGES,
   type PolicyEngine,
   type ServerCallPurpose,
   type ToolRegistry,
+  type WorkspaceSyncStatus,
 } from "@kobe/protocol";
 import { z } from "zod";
 import { recordRunRootSpan, spanRelay, telemetryState } from "@kobe/telemetry";
@@ -26,7 +26,6 @@ import type { ProjectMounts } from "../projects/mounts.js";
 import { createPolicyEngine } from "../policy/engine.js";
 import { createToolRegistry } from "../policy/registry.js";
 import { createDbRuleSource, createDbSettingsSource } from "../policy/rule-store.js";
-import type { WebSearchService } from "../web-search/service.js";
 import { createSandboxBus, type BusHint } from "./bus.js";
 import { SandboxConnection } from "./connection.js";
 import { WIRE_DEFAULTS, type WireTuning } from "./constants.js";
@@ -34,6 +33,7 @@ import { newMetrics, type LeaseViolation, type WireContext, type WireMetrics } f
 import { attachSandboxGateway } from "./gateway.js";
 import { DENY_APPROVALS } from "./policy-check.js";
 import { ConnectionRegistry } from "./registry.js";
+import { syncNowRequests, type SyncNowTarget } from "./sync-now.js";
 import type { SkillDraftTool } from "../skills/drafts/tool.js";
 import { CommandRouter } from "./router.js";
 import { RelayBudget } from "./trace-budget.js";
@@ -71,8 +71,6 @@ export interface SandboxWireOptions {
   readonly uploads?: UploadSettings;
   /** Project file mounts: refreshed at run start (KOBE-162). */
   readonly projectMounts?: ProjectMounts;
-  /** Runs `web_search.query` (KOBE-114); unset: every search answers "not configured". */
-  readonly webSearch?: WebSearchService;
   /** `skill.draft_save` (KOBE-442); unset: refused as storage unavailable. */
   readonly skillDrafts?: SkillDraftTool;
   /** Notebook files (KOBE-464): `run_python` reads cells and saves outputs through them. */
@@ -115,6 +113,11 @@ export interface SandboxWire {
    * caches of "this sandbox's user may act" (workspace sync, KOBE-27) drop their entries.
    */
   onUserRevalidate(listener: (userId: string) => void): () => void;
+  /**
+   * Refresh in the Files panel (KOBE-599): ask the member's running sandbox to push now and wait
+   * for it, at most `timeoutMs` (`sync-now.ts`). Never rejects for sandbox-side problems.
+   */
+  syncWorkspace(target: SyncNowTarget, timeoutMs: number): Promise<WorkspaceSyncStatus>;
   /** One lost-sandbox sweep + command expiry now. */
   sweep(): Promise<SweepResult>;
   metrics(): WireMetrics & { readonly connections: number; readonly waiting: number };
@@ -141,14 +144,6 @@ function assertRunTokenTtl(ttl: number): void {
   }
 }
 
-const NO_WEB_SEARCH: WebSearchService = {
-  search: () =>
-    Promise.resolve({
-      kind: "unavailable",
-      reason: "not_configured",
-      message: WEB_SEARCH_UNAVAILABLE_MESSAGES.not_configured,
-    }),
-};
 const NO_WAKE: SandboxWaker = { wake: () => Promise.resolve() };
 const NOT_LIVE: SandboxLiveness = { isLive: () => Promise.resolve(false) };
 const VIOLATION_AUDIT_EVERY_MS = 5 * 60_000;
@@ -202,6 +197,13 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       case "mv":
         registry.get(hint.id)?.workspaceMoved();
         return;
+      case "sync":
+        registry.get(hint.id)?.workspaceSyncNow(hint.request);
+        return;
+      case "synced":
+      case "unsynced":
+        syncNow.answered(hint.id, hint.kind === "synced");
+        return;
     }
   };
   const bus = createSandboxBus({
@@ -217,6 +219,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
   });
   // Hints and resyncs only arrive after bus.start() below, when both exist.
   const registry = new ConnectionRegistry(db, bus, replicaId);
+  const syncNow = syncNowRequests(db, bus, tuning.staleConnectionMs);
   const telemetry = telemetryState();
   const traceRelay =
     telemetry.enabled && options.traceSpanKey
@@ -331,7 +334,6 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       runMaxEvents: tuning.runMaxEvents,
       log,
     },
-    webSearch: options.webSearch ?? NO_WEB_SEARCH,
     ...(options.skillDrafts ? { skillDrafts: options.skillDrafts } : {}),
     ...(options.notebooks ? { notebooks: options.notebooks } : {}),
     ui: options.ui ?? CANCEL_DIALOGS,
@@ -435,24 +437,6 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
         },
       );
     },
-    auditWebSearchRefused(target, sandboxId, refusal) {
-      throttledAudit(
-        `${target.teamId}:${target.userId}:web_search:${refusal.reason}`,
-        target.teamId,
-        {
-          action: "sandbox.web_search_refused",
-          actor: SYSTEM_ACTOR,
-          teamId: target.teamId,
-          target: {
-            sandboxId,
-            userId: target.userId,
-            reason: refusal.reason,
-            runId: refusal.runId,
-            toolCallId: refusal.toolCallId,
-          },
-        },
-      );
-    },
     auditTokenRejected,
     localResult: (id) => router.onResult(id),
     runEnded(event) {
@@ -547,6 +531,8 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       userListeners.add(listener);
       return () => userListeners.delete(listener);
     },
+    syncWorkspace: (target, timeoutMs) =>
+      closed ? Promise.resolve("not_synced") : syncNow.request(target, timeoutMs),
     sweep,
     metrics() {
       return { ...metrics, connections: registry.size, waiting: router.waiting };
@@ -557,6 +543,7 @@ export function createSandboxWire(options: SandboxWireOptions): SandboxWire {
       if (sweepTimer) clearTimeout(sweepTimer);
       for (const detach of detachers) detach();
       router.close();
+      syncNow.close();
       // Sandboxes reconnect to another replica and resume from their durable cursors.
       for (const c of registry.all()) c.close("internal", "server shutting down");
       // Ended runs' roots now (their grace timers would outlive the replica).

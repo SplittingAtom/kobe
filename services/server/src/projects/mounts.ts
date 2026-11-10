@@ -15,6 +15,7 @@ import type { Logger } from "pino";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
 import { listLive, lockWorkspace } from "../workspace-sync/store.js";
 import { viewableBy } from "./access.js";
+import { notifyTeamWorkspaces } from "../event-stream/access.js";
 
 /**
  * Project files in members' workspaces (KOBE-162, ac-1; mechanism and why in
@@ -298,6 +299,14 @@ export function createProjectMounts(db: KobeDb, log: Pick<Logger, "warn">): Proj
     }
     return allOk;
   };
+  /** Open Files panels list their Projects rows again (KOBE-599); best effort. */
+  const tellPanels = async (teamId: string) => {
+    try {
+      await withTeam(db, teamId, (tx) => notifyTeamWorkspaces(tx, teamId));
+    } catch (err) {
+      log.warn({ err, teamId }, "project files: could not tell open panels");
+    }
+  };
   return {
     use: (store) => {
       sync = store;
@@ -319,7 +328,9 @@ export function createProjectMounts(db: KobeDb, log: Pick<Logger, "warn">): Proj
           );
           return res.rows.map((r) => r.user_id);
         });
-        return await reconcileUsers(teamId, users);
+        const ok = await reconcileUsers(teamId, users);
+        await tellPanels(teamId);
+        return ok;
       } catch (err) {
         log.warn({ err, teamId }, "project files: could not list the team to update");
         return false;
@@ -329,7 +340,9 @@ export function createProjectMounts(db: KobeDb, log: Pick<Logger, "warn">): Proj
       if (!sync) return true;
       try {
         const users = await withTeam(db, teamId, (tx) => membersOf(tx, teamId, projectId));
-        return await reconcileUsers(teamId, users);
+        const ok = await reconcileUsers(teamId, users);
+        await tellPanels(teamId);
+        return ok;
       } catch (err) {
         log.warn({ err, teamId }, "project files: could not list the members to update");
         return false;

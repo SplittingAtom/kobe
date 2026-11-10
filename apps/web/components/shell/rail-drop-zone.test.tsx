@@ -50,6 +50,11 @@ const fetchFn: typeof fetch = async (input, init = {}) => {
     wakes += 1;
     return Response.json({ status: "waking" }, { status: 202 });
   }
+  // Asks after the first are a sync now (KOBE-599); counted with the wakes as "asked for files".
+  if (route === "POST /v1/workspace/sync") {
+    wakes += 1;
+    return Response.json({ status: "synced" });
+  }
   if (route === "GET /v1/workspace/files") {
     const path = new URL(url, "http://x").searchParams.get("path") ?? "";
     listed.push(path);

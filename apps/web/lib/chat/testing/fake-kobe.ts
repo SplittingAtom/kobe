@@ -25,6 +25,7 @@ import {
 import { sha256Hex } from "../../files/editor";
 import type { EventSourceFactory, EventSourceLike } from "../stream";
 import { FakeWorkspaceChanges } from "./fake-workspace-changes";
+import { FakeWorkspaceEvents } from "./fake-workspace-events";
 import { FakeFolders } from "./fake-folders";
 
 type Json = Record<string, unknown>;
@@ -221,6 +222,8 @@ export class FakeKobe {
   readonly workspaceFiles = new Map<string, Uint8Array>();
   /** `GET /v1/workspace/changes` (KOBE-496): tests `announce` changes to open file tabs. */
   readonly workspaceChanges = new FakeWorkspaceChanges(this.workspaceFiles);
+  /** `GET /v1/workspace/events` and `POST /v1/workspace/sync` (KOBE-599). */
+  readonly workspaceEvents = new FakeWorkspaceEvents();
   /** Folders listed so far (`GET /v1/workspace/files`), to assert one request per thread. */
   readonly workspaceListings: string[] = [];
   /** The site catalog with the team's choice (KOBE-44); empty = no models route answers. */
@@ -291,6 +294,8 @@ export class FakeKobe {
     }
   >();
   readonly branchesFailing = new Set<string>();
+  /** `GET /v1/threads/{id}/egress-blocked` reads (KOBE-605). */
+  egressBlockedReads = 0;
   /** Label writes as the route took them (CT9, KOBE-546). */
   readonly labelWrites: { threadId: string; entryId: string; label: string | null }[] = [];
   branchesReads = 0;
@@ -717,6 +722,27 @@ export class FakeKobe {
     this.approvals.set(payload.approval_id, { runId, payload, status: "pending" });
     this.run(runId).status = "waiting_approval";
     this.emit(runId, "approval.requested", payload);
+  }
+
+  /** `GET /v1/threads/{id}/egress-blocked` (KOBE-605): each run's first block per domain. */
+  #egressBlocked(threadId: string): Json {
+    const blocked: Json[] = [];
+    for (const run of this.runs.values()) {
+      if (run.thread_id !== threadId) continue;
+      const seen = new Set<string>();
+      for (const event of run.events) {
+        if (event.type !== "egress.blocked" || seen.has(event.payload.domain)) continue;
+        seen.add(event.payload.domain);
+        blocked.push({
+          run_id: run.run_id,
+          user_entry_id: run.user_entry_id ?? null,
+          seq: event.seq,
+          ts: event.ts,
+          payload: event.payload as unknown as Json,
+        });
+      }
+    }
+    return { blocked };
   }
 
   emit<T extends KobeEventType>(runId: string, type: T, payload: KobeEventPayload<T>): void {
@@ -1287,6 +1313,9 @@ export class FakeKobe {
               : "workspace",
         }));
       return json(200, { entries });
+    }
+    if (url.pathname === "/v1/workspace/sync" && method === "POST") {
+      return json(200, await this.workspaceEvents.sync());
     }
     if (url.pathname === "/v1/workspace/files" && method === "GET") {
       const dir = url.searchParams.get("path") ?? "";
@@ -1950,6 +1979,10 @@ export class FakeKobe {
       this.branchesReads += 1;
       if (this.branchesFailing.has(thread.thread_id)) return error(500, "internal");
       return json(200, this.branches.get(thread.thread_id) ?? { labels: [], runs: [] });
+    }
+    if (action === "egress-blocked" && method === "GET") {
+      this.egressBlockedReads += 1;
+      return json(200, this.#egressBlocked(thread.thread_id));
     }
     if (action === "labels" && method === "PUT" && sub !== undefined) {
       return this.#setLabel(thread, sub, body);
@@ -2648,6 +2681,7 @@ export class FakeKobe {
     const parsed = new URL(url, "http://kobe.test");
     // Not in `requests`: tests count run streams there; `workspaceChanges.open` lists these.
     if (parsed.pathname === "/v1/workspace/changes") return this.workspaceChanges.connect(parsed);
+    if (parsed.pathname === "/v1/workspace/events") return this.workspaceEvents.connect();
     const runId = parsed.pathname.split("/")[3] ?? "";
     const after = Number(parsed.searchParams.get("starting_after") ?? "0");
     const source = new FakeEventSource(this, runId, after, () => this.#sources.delete(source));

@@ -6,7 +6,6 @@ export { default as teams } from "./teams";
 export { default as gallery } from "./gallery";
 export { default as models } from "./models";
 export { default as connectors } from "./connectors";
-export { default as webSearch } from "./web-search";
 export { default as policyFloor } from "./policy-floor";
 export { default as egress } from "./egress";
 export { default as skillBlocklist } from "./skill-blocklist";

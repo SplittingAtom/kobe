@@ -57,6 +57,36 @@ describe("dial-out connection", () => {
     await until(() => moved === 1);
   });
 
+  it("announces workspace_sync_now and answers workspace.synced after the push (KOBE-599)", async () => {
+    let pushes = 0;
+    h = await startHarness({
+      workspace: () => ({
+        beforeRun: () => Promise.resolve(),
+        runEnded: () => undefined,
+        flush: () => Promise.resolve(),
+        syncNow: () => {
+          pushes += 1;
+          return Promise.resolve(pushes === 1);
+        },
+      }),
+    });
+    expect(h.server.frames("hello")[0]?.capabilities).toContain("workspace_sync_now");
+    const id = "6c8f2a14-1d3b-4e5f-9a7b-0c1d2e3f4a5b";
+    h.server.send({ v: 1, type: "workspace.sync_now", request_id: id });
+    await h.server.waitFor((f) => f.type === "workspace.synced" && f.request_id === id);
+    expect(h.server.frames("workspace.synced")[0]).toEqual({
+      v: 1,
+      type: "workspace.synced",
+      request_id: id,
+      ok: true,
+    });
+    const id2 = "7d9f3b25-2e4c-4f60-8b8c-1d2e3f4a5b6c";
+    h.server.send({ v: 1, type: "workspace.sync_now", request_id: id2 });
+    await h.server.waitFor(
+      (f) => f.type === "workspace.synced" && f.request_id === id2 && f.ok === false,
+    );
+  });
+
   it("keeps retrying with backoff while the token is refused, and picks up a rotated token", async () => {
     h = await startHarness();
     await writeFile(path.join(h.dir, "token"), "stale-token");

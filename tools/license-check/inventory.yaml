@@ -363,14 +363,14 @@ sections:
           Apache-2.0.
       - id: bifrost
         component: Bifrost model gateway (`maximhq/bifrost`)
-        version: v2.2.5, digest-pinned (images/bifrost/Dockerfile, chart `bifrost.image`)
+        version: v2.5.1, digest-pinned (images/bifrost/Dockerfile, chart `bifrost.image`)
         license: Apache-2.0
         use: separate process (pulled unmodified by the chart)
         where: cluster (Kobe's namespace)
-        link: https://github.com/maximhq/bifrost/blob/transports/v2.2.5/LICENSE
+        link: https://github.com/maximhq/bifrost/blob/transports/v2.5.1/LICENSE
         images: [maximhq/bifrost]
         reason: >-
-          Checked at transports/v2.2.5: a single LICENSE (Apache-2.0); Kobe uses none of the
+          Checked at transports/v2.5.1: a single LICENSE (Apache-2.0); Kobe uses none of the
           enterprise features (docs/licensing.md). Re-check on every bump.
       - id: clamav
         approval: { by: Chris, on: 2026-10-17, ref: KOBE-375 }

@@ -18,10 +18,12 @@ import { bashTurn, pageApi, secondBrowser } from "./support/gate5.js";
  *
  * (a) member2 is blocked, sees "Request access to HOST" and the site-admins sentence, requests,
  * has no Approve; (b) the site admin approves with the exact host in the Site console, member2's
- * card shows the decision and the agent's retry makes no new block; (c) the site admin puts the
- * internal host in the ceiling and enables it for the team (so the block is forbidden_address),
- * approves from the card with "Internal (same cluster)" and the retry gets through; (d) an
- * allowlisted private-resolving host stays blocked.
+ * card shows the decision and the agent's retry reaches the host (its curl prints an HTTP code,
+ * not 000) with no new notice; (c) the site admin puts the internal host in the ceiling and
+ * enables it for the team (so the block is forbidden_address), approves from the card with
+ * "Internal (same cluster)" and the retry reaches the host; (d) an allowlisted private-resolving
+ * host stays blocked (the retry prints 000 again). In every case the first answer keeps its
+ * blocked card after the retry (KOBE-605: cards outlive their run).
  *
  * The agent's curl goes through a bash tool turn (the fake model's `bash:` line with
  * KOBE_FAKE_MODEL=1). Clean-up (finally): ceiling rows and team enablements the test added are
@@ -48,8 +50,15 @@ interface SiteRequest {
   readonly team: { readonly id: string };
 }
 
+/**
+ * The probe prints `kobe-605 <HTTP code>`: `000` when it never reached the host (the proxy refused
+ * the tunnel). `-k`: the question is whether the proxy lets the sandbox reach the host, not its
+ * certificate (a host on the cluster ingress often serves the ingress's default one).
+ */
 const curlTurn = (host: string): string =>
-  bashTurn(`curl -sS -o /dev/null -m 20 -w 'kobe-605 %{http_code}' https://${host}/`);
+  bashTurn(`curl -sS -k -o /dev/null -m 20 -w 'kobe-605 %{http_code}' https://${host}/`);
+
+const NOT_REACHED = "000";
 
 /** Whether a ceiling pattern covers a host (`*.x` matches subdomains only). */
 function covers(pattern: string, host: string): boolean {
@@ -124,15 +133,49 @@ async function waitBlocked(page: Page, host: string): Promise<Locator> {
   return note;
 }
 
-/** Sends the curl turn again and returns how many blocked notices the thread shows after it. */
-async function retry(chat: Chat, host: string): Promise<number> {
+/**
+ * The HTTP code the curl of `answer` printed, from its tool card's output (opened if folded). The
+ * card's input holds `%{http_code}`, never three digits, so only the output matches.
+ */
+async function curlCode(answer: Locator): Promise<string> {
+  const card = answer.getByRole("region", { name: "Tool call bash" }).last();
+  await expect(card).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  const toggle = card.locator("button[aria-expanded]").first();
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(card).toContainText(/kobe-605 \d{3}/, { timeout: SHELL_TIMEOUT_MS });
+  return /kobe-605 (\d{3})/.exec((await card.textContent()) ?? "")?.[1] ?? "";
+}
+
+interface Retry {
+  /** What the retry's curl printed (`000`: not reached). */
+  readonly code: string;
+  /** Blocked notices for the host on the whole page after the retry. */
+  readonly notices: number;
+}
+
+/**
+ * Sends the curl turn again, waits for its answer, and reads its curl's HTTP code and the page's
+ * blocked notices for the host. The first answer must still show its own notice (KOBE-605: a
+ * card outlives its run). A retry blocked again within the proxy's report window (30 s per
+ * sandbox and host) makes no new notice, so the HTTP code is what says whether it got through.
+ */
+async function retry(chat: Chat, host: string): Promise<Retry> {
   const before = await chat.answers.count();
   await chat.send(curlTurn(host));
   await expect
     .poll(() => chat.answers.count(), { timeout: RUN_TIMEOUT_MS, intervals: [1_000] })
     .toBeGreaterThan(before);
   await chat.waitForIdle();
-  return blockedNote(chat.page, host).count();
+  await expect(
+    chat.answers
+      .first()
+      .getByRole("note")
+      .filter({ hasText: `Internet access to ${host} was blocked` }),
+  ).toHaveCount(1, { timeout: SHELL_TIMEOUT_MS });
+  return {
+    code: await curlCode(chat.answers.last()),
+    notices: await blockedNote(chat.page, host).count(),
+  };
 }
 
 test("member2 is blocked off the ceiling, requests; the site admin approves; the retry is not blocked", async ({
@@ -184,9 +227,12 @@ test("member2 is blocked off the ceiling, requests; the site admin approves; the
     });
     await expect(note.getByRole("status")).toContainText("Ask the agent to try again.");
 
-    // The retry is no longer blocked by policy: no new notice for the host.
+    // The first answer's curl never reached the host; the retry does, with no new notice.
+    expect(await curlCode(otherChat.answers.first())).toBe(NOT_REACHED);
     const shown = await blockedNote(other, host).count();
-    expect(await retry(otherChat, host)).toBe(shown);
+    const again = await retry(otherChat, host);
+    expect(again.code).not.toBe(NOT_REACHED);
+    expect(again.notices).toBe(shown);
   } finally {
     await otherChat.trashAll().catch((e: unknown) => console.warn(`trash failed: ${String(e)}`));
     await other.context().close();
@@ -219,9 +265,12 @@ test("internal host: forbidden_address, the site admin approves Internal (same c
     await expect(note.getByRole("status")).toContainText("Ask the agent to try again.");
     expect((await ceiling(page)).find((d) => d.domain === host)?.internal).toBe(true);
 
-    // The retry reaches the host: no new blocked notice.
+    // The first curl never reached the host; the retry reaches it, with no new notice.
+    expect(await curlCode(chat.answers.first())).toBe(NOT_REACHED);
     const shown = await blockedNote(page, host).count();
-    expect(await retry(chat, host)).toBe(shown);
+    const again = await retry(chat, host);
+    expect(again.code).not.toBe(NOT_REACHED);
+    expect(again.notices).toBe(shown);
   } finally {
     await chat.trashAll().catch((e: unknown) => console.warn(`trash failed: ${String(e)}`));
     await cleanUp(page, host, wasInCeiling);
@@ -241,7 +290,12 @@ test("an allowlisted host that resolves to a private address and is not internal
     await allowlist(page, host);
     await chat.ask(curlTurn(host));
     await waitBlocked(page, host);
-    expect(await retry(chat, host)).toBeGreaterThanOrEqual(2); // blocked again
+    expect(await curlCode(chat.answers.first())).toBe(NOT_REACHED);
+    // Blocked again: the retry's curl does not reach the host either (its notice may be folded
+    // into the first one by the proxy's report window, so the code is what counts).
+    const again = await retry(chat, host);
+    expect(again.code).toBe(NOT_REACHED);
+    expect(again.notices).toBeGreaterThanOrEqual(1);
     expect((await ceiling(page)).find((d) => d.domain === host)?.internal).not.toBe(true);
   } finally {
     await chat.trashAll().catch((e: unknown) => console.warn(`trash failed: ${String(e)}`));

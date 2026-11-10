@@ -16,9 +16,15 @@ const HEAD_TTL_MS = 10_000;
  * member's own files have no `projects/<slug>` folder, a known project lists from its head
  * (`GET /v1/projects/:id/files`, readers too), read-only and without mounting. A mounted project,
  * and everything outside projects/, is the wrapped API's answer; a missing projects/ folder is an
- * empty one (the Projects section lists every project, mounted or not).
+ * empty one (the Projects section lists every project, mounted or not). The cache is dropped
+ * when the workspace says its projects changed (KOBE-599), so heads are never older than that.
  */
-export function useProjectHeads(api: FilesApi): FilesApi {
+export type ProjectHeadsApi = FilesApi & {
+  /** Drops the cached head lists (a project changed, KOBE-599): the next listing reads them. */
+  forget(): void;
+};
+
+export function useProjectHeads(api: FilesApi): ProjectHeadsApi {
   const ctx = useWorkspaceProjects();
   const latest = useRef<WorkspaceProjects | null>(ctx);
   latest.current = ctx;
@@ -36,6 +42,7 @@ export function useProjectHeads(api: FilesApi): FilesApi {
     };
     return {
       ...api,
+      forget: () => cache.clear(),
       async list(path, cursor, signal) {
         const real = await api.list(path, cursor, signal);
         const current = latest.current;

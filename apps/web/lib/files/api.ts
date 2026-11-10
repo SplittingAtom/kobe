@@ -4,7 +4,7 @@
  * caller's own, so no call names an owner. Entries are camelized by the client.
  */
 import type { SyncConflictView } from "./sync-conflicts";
-import type { WorkspaceArea } from "@kobe/protocol";
+import type { WorkspaceArea, WorkspaceSyncStatus } from "@kobe/protocol";
 import {
   apiDownload,
   apiReadCapped,
@@ -85,6 +85,12 @@ export interface FilesApi {
   settleSyncConflict(id: string, action: "resolved" | "dismissed"): Promise<ApiResult<void>>;
   /** The panel opened: start the sandbox so the next sync catches up (202, fire and forget). */
   wake(): Promise<ApiResult<{ readonly status: string }>>;
+  /**
+   * Refresh = sync now (KOBE-599, `POST /v1/workspace/sync`): a running sandbox pushes first and
+   * this answers once that push committed (at most ~10 s); `asleep`: nothing runs, the last push
+   * is current (and the sandbox starts waking). List afterwards whatever the answer.
+   */
+  syncNow(): Promise<ApiResult<{ readonly status: WorkspaceSyncStatus }>>;
 }
 
 function query(params: Readonly<Record<string, string | undefined>>): string {
@@ -127,6 +133,7 @@ export function createFilesApi(teamId: string, fetchFn?: typeof fetch): FilesApi
         raw: { body: new TextEncoder().encode(text), contentType: "text/plain; charset=utf-8" },
       }),
     wake: () => apiRequest(`/v1/workspace/wake`, { ...opts, method: "POST" }),
+    syncNow: () => apiRequest(`/v1/workspace/sync`, { ...opts, method: "POST", json: {} }),
     syncConflicts: () => apiRequest(`/v1/workspace/sync-conflicts`, opts),
     settleSyncConflict: (id, action) =>
       apiRequest(`/v1/workspace/sync-conflicts/${encodeURIComponent(id)}`, {

@@ -7,9 +7,7 @@ import type {
   MEMORY_REFUSALS,
   SKILL_DRAFT_REFUSALS,
   KobeDb,
-  WEB_SEARCH_REFUSALS,
 } from "@kobe/db";
-import type { WebSearchService } from "../web-search/service.js";
 import type { Logger } from "pino";
 import type { SandboxBus } from "./bus.js";
 import type { WireTuning } from "./constants.js";
@@ -116,8 +114,6 @@ export interface WireContext {
   readonly projectMounts?: ProjectMounts;
   /** Commits, approvals and limits for `project.commit` (KOBE-579). */
   readonly projectCommits: ProjectCommitDeps;
-  /** Runs `web_search.query` (KOBE-114). */
-  readonly webSearch: WebSearchService;
   /** `skill.draft_save` (KOBE-442); absent: refused as storage unavailable. */
   readonly skillDrafts?: SkillDraftTool;
   /** Notebook files (KOBE-464, `run_python`); absent: `notebook.run` is refused. */
@@ -177,16 +173,6 @@ export interface WireContext {
       scope?: "user" | "project";
       runId: string;
       toolCallId?: string;
-    },
-  ): void;
-  /** Records `sandbox.web_search_refused` (throttled per user and reason); never carries the query. */
-  auditWebSearchRefused(
-    target: SandboxTarget,
-    sandboxId: string,
-    refusal: {
-      reason: (typeof WEB_SEARCH_REFUSALS)[number];
-      runId: string;
-      toolCallId: string;
     },
   ): void;
   /** Records `sandbox.token_rejected` (throttled): a signed token refused after verification. */

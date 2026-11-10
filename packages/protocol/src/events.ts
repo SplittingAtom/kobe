@@ -531,3 +531,28 @@ export class EventPayloadTooLargeError extends RangeError {
     this.name = "EventPayloadTooLargeError";
   }
 }
+
+/** Most blocked attempts `GET /v1/threads/{id}/egress-blocked` returns (the newest). */
+export const THREAD_EGRESS_BLOCKED_MAX = 200;
+
+/**
+ * `GET /v1/threads/{id}/egress-blocked` (KOBE-605): the thread's stored `egress.blocked` run
+ * events, one per (run, domain), so each answer keeps its blocked cards after the run ended and
+ * after a reload. `user_entry_id` is the run's prompt entry (`runs.user_entry_id`): the answer the
+ * card belongs to; null for a run whose prompt was never committed. Read from `run_events`, so a
+ * run's cards go when its events are compacted (D18, 7 days after it ended).
+ */
+export const threadEgressBlockedResponseSchema = z.strictObject({
+  blocked: z
+    .array(
+      z.strictObject({
+        run_id: uuidSchema,
+        user_entry_id: idSchema.nullable(),
+        seq: z.number().int().positive(),
+        ts: timestampSchema,
+        payload: EVENT_PAYLOAD_SCHEMAS["egress.blocked"],
+      }),
+    )
+    .max(THREAD_EGRESS_BLOCKED_MAX),
+});
+export type ThreadEgressBlockedResponse = z.infer<typeof threadEgressBlockedResponseSchema>;

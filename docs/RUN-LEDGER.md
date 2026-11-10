@@ -9,10 +9,20 @@ Index only: the coordinator edits this file; each ticket keeps notes in `docs/le
 Parallel-work rules: [parallel-work.md](parallel-work.md); handoff: [agent-prompt.md](agent-prompt.md);
 Hadron via `scripts/hadron.sh`.
 
-- **Egress access lane (2026-11-10):** spec `docs/specs/egress-access.md` (EA1-EA4); KOBE-602 (db,
-  server), 603 (proxy, chart), 604 (card, consoles) committed; KOBE-605 adds
-  `e2e/browser/tests/egress-access.spec.ts`, the install/egress docs and the gate1 values
-  (`docs/ledger/KOBE-605.md`); the coordinator deploys and runs the spec.
+- **Pipeline B (2026-11-10, one PR, one CI run):** KOBE-601 (Responses keep a valid
+  `reasoning.summary`), KOBE-600 (Bifrost v2.5.1 by digest; back up the Bifrost PVC before
+  upgrading: its store migration is one-way), KOBE-606 (built-in web search removed, migration
+  0204; web search comes through MCP connectors, Chris 2026-11-10), KOBE-605 follow-up (answers
+  keep their blocked cards after the run and on reload; `GET /v1/threads/{id}/egress-blocked`),
+  KOBE-573 (roster docs, `docs/agents.md`), KOBE-599 (Files panel: Refresh syncs first, the panel
+  lists again by itself). KOBE-561 closed as superseded by KOBE-562. Then one gate1 deploy and the
+  egress-access and files-refresh specs.
+- **Egress access lane (2026-11-10):** KOBE-602..604, 552, 563 merged (#517, main `5f629f30`);
+  gate1 upgraded to `local-5f629f30c372` with `egressProxy.clusterIngress` on and the internal apps'
+  wildcard internal and enabled for Team1 (a site admin's choice, value in the local notes). The
+  egress spec's first gate1 run found blocked cards vanishing after a run (fixed in pipeline B);
+  KOBE-605 closes after the rerun; KOBE-563 waits for five green executor runs. KOBE-607 (first
+  tool run after a wake can hang) filed.
 - **Projects in conversations at its gate (2026-11-10):** KOBE-587..593 and KOBE-586 merged in
   three waves (#510, #511, #512); gate1 upgraded to `local-4436e1af08aa` (backup
   `pre-projects-lane-2026-11-10.dump` kept, dry-run listed 2 archived restricted projects); the

@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { workspaceFileChangeSchema, type WorkspaceFileChange } from "@kobe/protocol";
 import { withTeam } from "@kobe/db";
 import { createApp } from "./app.js";
+import { HUB_DEFAULTS } from "./event-stream/hub.js";
 import { EventStreamFixture, PUBLIC_URL, type Person } from "./testing/event-stream-fixture.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
 import { RawBody, TestBrowser } from "./testing/browser.js";
@@ -448,9 +449,11 @@ describe("GET /v1/workspace/changes (KOBE-496)", () => {
   it("caps workspace streams per user apart from run streams", async () => {
     const w = await world();
     const tabs: Changes[] = [];
-    for (let i = 0; i < 8; i += 1) tabs.push(await open(w.alice, w.team, ["a.md"]));
-    const ninth = await request(w.alice, changesUrl(w.team, ["a.md"]));
-    expect(ninth.status).toBe(429);
+    for (let i = 0; i < HUB_DEFAULTS.maxWorkspaceStreamsPerUser; i += 1) {
+      tabs.push(await open(w.alice, w.team, ["a.md"]));
+    }
+    const overCap = await request(w.alice, changesUrl(w.team, ["a.md"]));
+    expect(overCap.status).toBe(429);
     // Run streams still open: their slots are their own.
     const run = await fx.run(w.team, w.alice);
     const runStream = await fx.open(0, w.alice, run);

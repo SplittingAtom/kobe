@@ -162,7 +162,6 @@ describe("server-side tool registry", () => {
         "share_file",
         "tool_search",
         "update_artifact",
-        "web_search",
         "write",
       ].sort(),
     );

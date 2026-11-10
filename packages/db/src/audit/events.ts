@@ -273,7 +273,7 @@ export const PROJECT_FILE_REFUSALS = [
   "approval_denied",
 ] as const;
 
-/** Why the server refused a `web_search.query` (audit `sandbox.web_search_refused`, KOBE-114). */
+/** Why the server refused a `web_search.query` (audit `sandbox.web_search_refused`, KOBE-114; no longer emitted since KOBE-606, kept so old audit rows still read). */
 export const WEB_SEARCH_REFUSALS = [
   "capability_missing",
   "run_not_active",
@@ -1518,6 +1518,7 @@ export const AUDIT_EVENTS = {
    * The server refused a `web_search.query` (KOBE-114): no `web_search` capability, a run not
    * active here, or a tool call it did not allow (or other input). Never records the query (system;
    * at most one per 5 minutes per reason and user).
+   * Retired by KOBE-606 (built-in web search removed): no longer written; rows written before it stay.
    */
   "sandbox.web_search_refused": event("team", {
     sandboxId: id,
@@ -1530,6 +1531,7 @@ export const AUDIT_EVENTS = {
   /**
    * A `web_search` reached the provider (KOBE-114). Counts toward the per-run cap, read back from
    * this table under a per-run lock, so it holds across replicas. Never records the query (system).
+   * Retired by KOBE-606: no longer written; rows written before it stay.
    */
   "sandbox.web_search_queried": event("team", {
     sandboxId: id,
@@ -2634,6 +2636,8 @@ export const AUDIT_EVENTS = {
     reason: z.enum(["rejected", "no_refresh_token"]),
   }),
   // ── web search (KOBE-113): provider and switches only, never the key or its hint ──
+  // Retired by KOBE-606 (built-in web search removed; search comes through MCP connectors): none of
+  // these is written any more; rows written before it stay and still read.
   /** A site admin set the web search provider, its enabled switch, or replaced its key. */
   "mcp.web_search.configured": event("site", {
     provider: z.enum(["brave", "tavily", "exa"]),

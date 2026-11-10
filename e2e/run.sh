@@ -2225,12 +2225,11 @@ JS
     # KOBE-123: the agent's prompt reaches Pi (--append-system-prompt) and so the model: the fake
     # model answers "system?" with the system messages it received.
     g_out=$(gallery_run kobe "system?")
-    contains "Kobe: the run completes with no web search configured" '^terminal=run.completed$' "$g_out"
-    contains "Kobe: the web-search-unavailable notice reaches the model through Pi's system prompt" \
-      '^text=fake-openai: system said: .*Web search is not available here, so I can only work from the material you give me\.' "$g_out"
-    contains "Kobe: its published prompt has it say plainly that web search is unavailable" \
-      'Web search is not available here, so I can only work from the material you give me\.' \
-      "$(psql_kobe "SELECT v.prompt FROM site_agent_versions v JOIN site_agents a ON a.id = v.agent_id AND v.version = a.current_version WHERE a.gallery_key = 'kobe'")"
+    contains "Kobe: the system-prompt run completes" '^terminal=run.completed$' "$g_out"
+    contains "Kobe: its research guidance (connectors, KOBE-606) reaches the model through Pi's system prompt" \
+      '^text=fake-openai: system said: .*Research: for current or outside facts, use a connector tool' "$g_out"
+    contains "Kobe: its published prompt no longer names the retired built-in web search (KOBE-606)" '^0$' \
+      "$(psql_kobe "SELECT count(*) FROM site_agent_versions v JOIN site_agents a ON a.id = v.agent_id AND v.version = a.current_version WHERE a.gallery_key = 'kobe' AND v.prompt ~* 'web_search|web search'")"
     g_out=$(gallery_run kobe "bash: $gal_dir && python $(kobe_dir docx)/scripts/md_to_docx.py $(kobe_dir docx)/scripts/sample.md out.docx --title T >/dev/null && python $(kobe_dir docx)/scripts/docx_text.py out.docx | grep -c 'south | 310.35' && python $(kobe_dir pdf)/scripts/md_to_pdf.py $(kobe_dir pdf)/scripts/sample.md out.pdf --title T >/dev/null && test -s out.pdf && echo docx-and-pdf-produced")
     printf '     kobe documents: %s\n' "$(printf '%s' "$g_out" | tr '\n' ' ' | cut -c1-400)"
     contains "Kobe documents: the docx and pdf skills produced and read back the files offline" \

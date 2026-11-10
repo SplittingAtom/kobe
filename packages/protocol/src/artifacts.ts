@@ -5,11 +5,6 @@ import {
   projectCommitOkFields,
   projectCommitToolsRequestSchema,
 } from "./project-commits.js";
-import {
-  webSearchOkFields,
-  webSearchToolsRequestSchema,
-  webSearchUnavailableFields,
-} from "./web-search.js";
 import { fileShareOkFields, fileShareToolsRequestSchema } from "./files.js";
 import { memoryPutOkFields, memoryReadOkFields, memoryToolsRequestSchema } from "./memory.js";
 import { skillDraftSaveOkFields, skillDraftToolsRequestSchema } from "./skill-draft-tool.js";
@@ -138,7 +133,6 @@ export const kobeToolsRequestSchema = z.union([
   }),
   fileShareToolsRequestSchema, // KOBE-147 (files.ts)
   projectCommitToolsRequestSchema, // KOBE-576 (project-commits.ts)
-  webSearchToolsRequestSchema, // KOBE-114 (web-search.ts)
   memoryToolsRequestSchema, // KOBE-157 (memory.ts)
   skillDraftToolsRequestSchema, // KOBE-442 (skill-draft-tool.ts)
   fileEditToolsRequestSchema, // KOBE-462 (file-editor.ts)
@@ -152,8 +146,6 @@ export const kobeToolsResponseSchema = z.union([
   z.strictObject({ id: idSchema, ...fileShareOkFields }), // KOBE-147 (files.ts)
   z.strictObject({ id: idSchema, ...projectCommitOkFields }), // KOBE-576 (project-commits.ts)
   z.strictObject({ id: idSchema, ...projectCommitFailFields }),
-  z.strictObject({ id: idSchema, ...webSearchOkFields }), // KOBE-114 (web-search.ts)
-  z.strictObject({ id: idSchema, ...webSearchUnavailableFields }), // KOBE-114
   z.strictObject({ id: idSchema, ...memoryPutOkFields }), // KOBE-157 (memory.ts)
   z.strictObject({ id: idSchema, ...memoryReadOkFields }), // KOBE-157
   z.strictObject({ id: idSchema, ...skillDraftSaveOkFields }), // KOBE-442 (skill-draft-tool.ts)
