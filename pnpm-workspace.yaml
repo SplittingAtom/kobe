@@ -24,3 +24,8 @@ allowBuilds:
   esbuild: false
   # protobufjs (via the OTLP exporter) only runs a postinstall version-scheme check; not needed.
   protobufjs: false
+
+# @kubernetes/client-node 2.0.x accepts undici ^8.7.0 and would keep 8.11.2, which has fixable HIGH
+# CVEs (Trivy, KOBE-539); 8.12.2 fixes them. Drop this once its range starts at 8.12.2.
+overrides:
+  undici@<8.12.2: ">=8.12.2 <9"
