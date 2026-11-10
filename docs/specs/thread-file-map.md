@@ -1,6 +1,6 @@
 # Kobe — Threads panel: which files each thread used
 
-Status: **decisions TFM1–TFM7 by Chris 2026-11-10 (§8); ready for tickets.** Requested by Chris, 2026-11-10. Written against
+Status: **decisions TFM1–TFM7 by Chris 2026-11-10 (§8); ready for tickets.** Hadron spec `dc9b1ed8`. Requested by Chris, 2026-11-10. Written against
 main `d58136f3`. Builds on the Threads panel (KOBE-453, CE5), thread folders (TF7, KOBE-536,
 `docs/specs/thread-lineage-and-folders.md`) and Workspaces (`docs/specs/workspaces.md`).
 
