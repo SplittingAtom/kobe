@@ -1,6 +1,6 @@
 # Kobe — Threads panel: which files each thread used
 
-Status: **draft; decisions TFM1–TFM4 by Chris 2026-11-10 (§8), Q4, Q6, Q7 open.** Requested by Chris, 2026-11-10. Written against
+Status: **decisions TFM1–TFM7 by Chris 2026-11-10 (§8); ready for tickets.** Requested by Chris, 2026-11-10. Written against
 main `d58136f3`. Builds on the Threads panel (KOBE-453, CE5), thread folders (TF7, KOBE-536,
 `docs/specs/thread-lineage-and-folders.md`) and Workspaces (`docs/specs/workspaces.md`).
 
@@ -69,7 +69,7 @@ file) for keyboard and screen-reader users and narrow widths.
 ## 5. The panel
 
 - **Layout (wide band):** folders (as today) | threads (middle) | workspace rail (right, the same
-  tree as the Files panel, read-only here: open, no edit, drag a file onto a thread? see Q6).
+  tree as the Files panel, read-only here: open, no edit, no drag between rails (TFM6)).
   Below about 1,100 px: no workspace rail and no lines, the lists only (TFM4).
 - **Hover a thread** (or focus it with the keyboard): lines from the row's right edge to each linked
   file in the workspace rail; written links solid, read links dashed (TFM1); files not visible (closed folder) link to the nearest visible folder with a
@@ -80,8 +80,8 @@ file) for keyboard and screen-reader users and narrow widths.
   tokens, no animation under `prefers-reduced-motion`. A cap (e.g. 30 lines) with "+N" beyond it.
 - **Without hover:** each thread row's details show "Files (N)"; each file's context menu shows
   "Used in (N threads)"; both lists are links (open the file, open the thread).
-- **Click (see Q4):** clicking a thread still opens it (today's behaviour); clicking a file opens
-  it in the artifact column.
+- **Click and pin (TFM5):** clicking a thread still opens it (today's behaviour); clicking a file
+  opens it in the artifact column; a pin toggle on a row keeps its lines shown.
 
 ## 6. Permissions and privacy
 
@@ -107,11 +107,10 @@ the whole workspace, parsing shell commands for paths.
 - **TFM4. Narrow widths: lists, no lines.** Below the width three rails need (about 1,100 px),
   there is no workspace rail and no lines; each thread shows "Files (N)" and each file "Used in".
 
-Still open:
-
-- **Q4. Hover vs pin.** Hover alone, or also click-to-pin a thread's lines (useful on touch and for
-  following many lines)? Recommended: hover and keyboard focus, plus a pin toggle on the row.
-- **Q6. Drag between rails.** Out of scope, or drag a file onto a thread to attach it to a new
-  message there?
-- **Q7. Which workspace.** The right rail shows the viewer's own workspace (My files and their
-  mounted projects). Should teammates' shared threads show links into projects only, as §6 says?
+- **TFM5. Hover and focus, plus a pin.** Hovering or focusing a thread or a file shows its lines; a
+  pin toggle on the row keeps them shown (touch, many lines). Clicking a thread row still opens it;
+  clicking a file opens it in the artifact column.
+- **TFM6. No drag between rails** in this spec (seeing links only; dragging can come later).
+- **TFM7. Shared threads show project files only.** In a thread a teammate shared, links into
+  projects the viewer can read are shown by name; files in the teammate's own workspace appear only
+  as a count.
