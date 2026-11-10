@@ -219,7 +219,7 @@ describe("Memory panel project picker (KOBE-164)", () => {
     const calls = stubApi({
       "GET /v1/projects?include_archived=true": [
         200,
-        { projects: [project(), project({ id: "p-admin", name: "Not mine", my_role: null })] },
+        { projects: [project(), project({ id: "p-admin", name: "Unlisted", my_role: null })] },
       ],
       [`GET ${LIST}`]: [200, { docs: [summary()] }],
       [`GET /v1/memory?scope=project&project_id=${PROJECT}`]: [
@@ -230,8 +230,8 @@ describe("Memory panel project picker (KOBE-164)", () => {
     renderTeam(<MyMemoryPage />, MEMBER);
     await screen.findByRole("button", { name: "Open MEMORY.md" });
     const picker = await screen.findByLabelText("Memory of");
-    // A team admin who is not a member would only get 404s: not offered.
-    expect(within(picker).queryByRole("option", { name: "Not mine" })).toBeNull();
+    // Every project of the workspace is offered (every member reads its memory, KOBE-587).
+    expect(within(picker).getByRole("option", { name: "Unlisted" })).toBeTruthy();
     await userEvent.selectOptions(picker, "Launch");
     expect(await screen.findByRole("button", { name: "Open plan.md" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Project memory" })).toBeTruthy();

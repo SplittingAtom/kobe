@@ -7821,7 +7821,7 @@
             }
           },
           "404": {
-            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "description": "`not_found`: no such project in the caller's workspace.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7899,7 +7899,7 @@
             }
           },
           "404": {
-            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "description": "`not_found`: no such project in the caller's workspace.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7960,7 +7960,7 @@
             }
           },
           "404": {
-            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "description": "`not_found`: no such project in the caller's workspace.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8030,7 +8030,7 @@
             }
           },
           "404": {
-            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "description": "`not_found`: no such project in the caller's workspace.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8110,7 +8110,7 @@
             }
           },
           "404": {
-            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "description": "`not_found`: no such project in the caller's workspace.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8190,7 +8190,7 @@
             }
           },
           "404": {
-            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "description": "`not_found`: no such project in the caller's workspace.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8339,7 +8339,7 @@
             }
           },
           "404": {
-            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "description": "`not_found`: no such project in the caller's workspace.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8418,7 +8418,7 @@
             }
           },
           "404": {
-            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "description": "`not_found`: no such project in the caller's workspace.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8501,7 +8501,7 @@
             }
           },
           "404": {
-            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "description": "`not_found`: no such project in the caller's workspace.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8590,7 +8590,7 @@
             }
           },
           "404": {
-            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "description": "`not_found`: no such project in the caller's workspace.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8706,7 +8706,7 @@
             }
           },
           "404": {
-            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "description": "`not_found`: no such project in the caller's workspace.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8767,7 +8767,7 @@
             }
           },
           "404": {
-            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "description": "`not_found`: no such project in the caller's workspace.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8828,7 +8828,7 @@
             }
           },
           "404": {
-            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "description": "`not_found`: no such project in the caller's workspace.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8907,7 +8907,7 @@
             }
           },
           "404": {
-            "description": "`not_found`: no such project, or a restricted one the caller may not view.",
+            "description": "`not_found`: no such project in the caller's workspace.",
             "content": {
               "application/json": {
                 "schema": {

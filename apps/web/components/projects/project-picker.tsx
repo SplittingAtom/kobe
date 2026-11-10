@@ -7,8 +7,8 @@ import { Field, Select } from "../ui/console";
 import { useProjectsApi } from "./use-projects";
 
 /**
- * Chooses whose memory to open: yours, or a project's. Only projects you are a member of are
- * offered (a team admin who is not a member gets nothing from the memory API). If the project
+ * Chooses whose memory to open: yours, or a project's. Every project of the workspace is offered
+ * (every member reads every project's memory, KOBE-587; team admins act as owners). If the project
  * list cannot be loaded the picker stays out of the way and your own memory still works.
  */
 export function ProjectPicker({
@@ -21,7 +21,7 @@ export function ProjectPicker({
   const api = useProjectsApi();
   const { state } = useResource(() => api.list(true));
   const projects: readonly Project[] = useMemo(
-    () => (state.status === "ready" ? state.data.filter((p) => p.myRole !== null) : []),
+    () => (state.status === "ready" ? state.data : []),
     [state],
   );
   if (state.status !== "ready" || (projects.length === 0 && value === null)) return null;

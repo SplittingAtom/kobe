@@ -3,11 +3,11 @@
 import { useState, type FormEvent } from "react";
 import type { ApiResult } from "../../lib/api/client";
 import {
-  PROJECT_ROLES,
+  PROJECT_MEMBER_ROLES,
   worded,
   type Project,
   type ProjectMember,
-  type ProjectRole,
+  type ProjectMemberRole,
 } from "../../lib/projects/api";
 import { useTeamAccess } from "../admin/console-context";
 import { MutationStatus } from "../admin/error-notice";
@@ -33,18 +33,20 @@ import {
 } from "../ui/console";
 import { useProjectsApi, useRoster } from "./use-projects";
 
-const ROLES = PROJECT_ROLES;
+/** Listed roles only (RV1): every workspace member who is not listed is a reader. */
+const ROLES = PROJECT_MEMBER_ROLES;
 
 /** What each role may do (PR3), shown under the list. */
 const ROLES_NOTE =
-  "Owners manage the project and its people; editors check out, edit and commit its files; readers browse, read history and start conversations in it.";
+  "Owners manage the project and its people; editors check out, edit and commit its files. Everyone else in the workspace is a reader: they browse, read history and start conversations in it.";
 
 /** The section's heading: focus lands here when a removal empties the list. */
 const HEADING = "project-members";
 
 /**
- * People of one project (PR2, PR3): owners, editors and readers; add, re-role and remove for
- * owners and team admins (the last owner stays, `last_owner`); a list for everyone else.
+ * People of one project (PR3, RV1): the listed owners and editors (everyone else in the workspace
+ * reads); add, re-role and remove for owners and team admins (the last owner stays,
+ * `last_owner`; removing someone makes them a reader); a list for everyone else.
  */
 export function ProjectMembers({
   project,
@@ -82,12 +84,7 @@ export function ProjectMembers({
           const listed = new Set(data.members.map((m) => m.userId));
           return (
             <>
-              <p className="m-0 mb-2 text-sm text-console-muted">
-                {data.visibility === "workspace"
-                  ? "Visible to the whole workspace: everyone who is not listed is a reader."
-                  : "Restricted: only the people listed here can see this project."}{" "}
-                {ROLES_NOTE}
-              </p>
+              <p className="m-0 mb-2 text-sm text-console-muted">{ROLES_NOTE}</p>
               <div ref={focus.container}>
                 <Table caption="Project members" hideCaption>
                   <TableHead>
@@ -197,7 +194,7 @@ function MemberRow({
   readonly isMe: boolean;
   readonly editable: boolean;
   readonly pending: boolean;
-  readonly onRole: (role: ProjectRole) => Promise<unknown>;
+  readonly onRole: (role: ProjectMemberRole) => Promise<unknown>;
   readonly onRemove: (trigger: HTMLElement | null) => Promise<void>;
 }) {
   const [role, setRole] = useState(member.role);
@@ -223,7 +220,7 @@ function MemberRow({
             <Select
               id={`pm-${member.userId}`}
               value={role}
-              onChange={(e) => setRole(e.target.value as ProjectRole)}
+              onChange={(e) => setRole(e.target.value as ProjectMemberRole)}
             >
               {ROLES.map((r) => (
                 <option key={r}>{r}</option>
@@ -268,10 +265,10 @@ function AddMember({
     readonly email: string;
   }[];
   readonly pending: boolean;
-  readonly onAdd: (userId: string, role: ProjectRole) => Promise<unknown>;
+  readonly onAdd: (userId: string, role: ProjectMemberRole) => Promise<unknown>;
 }) {
   const [userId, setUserId] = useState("");
-  const [role, setRole] = useState<ProjectRole>("editor");
+  const [role, setRole] = useState<ProjectMemberRole>("editor");
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (userId === "") return;
@@ -292,7 +289,7 @@ function AddMember({
           </Select>
         </Field>
         <Field label="Role">
-          <Select value={role} onChange={(e) => setRole(e.target.value as ProjectRole)}>
+          <Select value={role} onChange={(e) => setRole(e.target.value as ProjectMemberRole)}>
             {ROLES.map((r) => (
               <option key={r}>{r}</option>
             ))}

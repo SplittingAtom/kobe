@@ -22,10 +22,8 @@ import {
   TableRow,
   TableRowHeader,
 } from "../ui/console";
-import { EMPTY_PROJECT, ProjectForm } from "./project-form";
+import { EMPTY_PROJECT, PROJECT_AUDIENCE_HINT, ProjectForm } from "./project-form";
 import { useProjectAgents, useProjectsApi } from "./use-projects";
-
-const VISIBILITY_LABEL = { workspace: "Whole workspace", restricted: "Restricted" } as const;
 
 /** Projects of the active team (`/v1/projects`, KOBE-161): the ones you can see, and create. */
 export function ProjectsPage() {
@@ -35,7 +33,7 @@ export function ProjectsPage() {
   const [archived, setArchived] = useState(false);
   const [listKey, setListKey] = useState(0);
   const mutation = useMutation();
-  const canCreate = projectPermissions(access.role, undefined, "workspace").create;
+  const canCreate = projectPermissions(access.role, undefined).create;
   const [creating, setCreating] = useState(false);
 
   async function create(input: ProjectInput) {
@@ -66,6 +64,7 @@ export function ProjectsPage() {
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       {creating && (
         <Card role="region" aria-label="New project" title="New project" level={2} className="my-4">
+          <p className="m-0 text-sm text-console-muted">{PROJECT_AUDIENCE_HINT}</p>
           <ProjectForm
             initial={EMPTY_PROJECT}
             agents={agents}
@@ -119,7 +118,6 @@ function ProjectList({
               <TableRow>
                 <TableHeader>Project</TableHeader>
                 <TableHeader>Your role</TableHeader>
-                <TableHeader>Visibility</TableHeader>
                 <TableHeader numeric>Files</TableHeader>
                 <TableHeader>Updated</TableHeader>
               </TableRow>
@@ -142,7 +140,6 @@ function ProjectList({
                     )}
                   </TableRowHeader>
                   <TableCell>{p.myRole ?? "Team admin"}</TableCell>
-                  <TableCell>{VISIBILITY_LABEL[p.visibility]}</TableCell>
                   <TableCell numeric>{p.fileCount}</TableCell>
                   <TableCell>
                     <DateTime value={p.updatedAt} />

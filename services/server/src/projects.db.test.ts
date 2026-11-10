@@ -5,7 +5,8 @@ import { RunFixture } from "./testing/run-fixture.js";
 import type { Person } from "./testing/event-stream-fixture.js";
 
 /**
- * KOBE-161: projects API (D23). Roles come from `projectPermissions`; non-members get 404;
+ * KOBE-161: projects API (D23). Roles come from `projectPermissions`; every workspace member reads
+ * every project (KOBE-587, RV1) and other workspaces get 404;
  * instructions reach every run on a project thread, only for members, only for agents that
  * announce `projects`; audit events carry no instruction text.
  */
@@ -45,7 +46,6 @@ describe("projects API", () => {
     expect(project).toMatchObject({
       slug: "q3-planning-budget",
       my_role: "owner",
-      visibility: "workspace",
       instructions: "Be brief.",
       file_count: 0,
     });
@@ -57,26 +57,25 @@ describe("projects API", () => {
     expect((await as(b).post("/v1/projects", { name: "x", instructions: tooLong })).status).toBe(
       400,
     );
-    // Default visibility `workspace`: every team member is an implicit reader.
+    expect(project).not.toHaveProperty("visibility");
+    // Every team member is an implicit reader (RV1).
     expect((await as(m).get(`/v1/projects/${project.id}`)).json.my_role).toBe("reader");
   });
 
-  it("hides selected-mode projects from non-members (404, not listed); admins manage all", async () => {
+  it("shows every project to every workspace member (RV1); admins manage all; other teams get 404", async () => {
     const w = await f.world();
     const b = await builder(w.team);
     const inside = await f.member(w.team);
-    const outside = await f.member(w.team);
-    const project = await create(b, {
-      name: "Secret",
-      visibility: "restricted",
-      member_user_ids: [inside.id],
-    });
-    expect((await as(inside).get(`/v1/projects/${project.id}`)).status).toBe(200);
-    expect((await as(outside).get(`/v1/projects/${project.id}`)).status).toBe(404);
-    expect((await as(outside).get(`/v1/projects/${project.id}/members`)).status).toBe(404);
-    expect((await as(outside).patch(`/v1/projects/${project.id}`, { name: "x" })).status).toBe(404);
-    expect((await as(outside).delete(`/v1/projects/${project.id}`)).status).toBe(404);
-    expect((await as(outside).get("/v1/projects")).json.projects).toEqual([]);
+    const unlisted = await f.member(w.team);
+    const project = await create(b, { name: "Open", member_user_ids: [inside.id] });
+    expect((await as(inside).get(`/v1/projects/${project.id}`)).json.my_role).toBe("editor");
+    expect((await as(unlisted).get(`/v1/projects/${project.id}`)).json.my_role).toBe("reader");
+    expect((await as(unlisted).get(`/v1/projects/${project.id}/members`)).status).toBe(200);
+    expect((await as(unlisted).patch(`/v1/projects/${project.id}`, { name: "x" })).status).toBe(
+      403,
+    );
+    expect((await as(unlisted).delete(`/v1/projects/${project.id}`)).status).toBe(403);
+    expect((await as(unlisted).get("/v1/projects")).json.projects).toHaveLength(1);
     expect((await as(inside).get("/v1/projects")).json.projects).toHaveLength(1);
     // A team admin who is not a member sees and manages it (my_role null), another team's user does not.
     const seen = await as(w.owner).get(`/v1/projects/${project.id}`);
@@ -88,7 +87,7 @@ describe("projects API", () => {
     expect((await f.on(0, other.owner).get(`/v1/projects/${project.id}`)).status).toBe(404);
   });
 
-  it("enforces owner vs member rules, visibility, last owner and team membership", async () => {
+  it("enforces owner vs member rules, owner|editor rows, last owner and team membership", async () => {
     const w = await f.world();
     const b = await builder(w.team);
     const m1 = await f.member(w.team);
@@ -106,9 +105,12 @@ describe("projects API", () => {
     const added = await as(b).post(`${url}/members`, { user_id: m1.id });
     expect(added.status).toBe(201);
     expect(added.json.role).toBe("editor");
-    // A reader row is stored as reader (KOBE-577, MG3).
-    const reader = await as(b).post(`${url}/members`, { user_id: m2.id, role: "reader" });
-    expect([reader.status, reader.json.role]).toEqual([201, "reader"]);
+    // No reader rows (RV3): every member reads anyway.
+    expect((await as(b).post(`${url}/members`, { user_id: m2.id, role: "reader" })).status).toBe(
+      400,
+    );
+    const second = await as(b).post(`${url}/members`, { user_id: m2.id, role: "editor" });
+    expect([second.status, second.json.role]).toEqual([201, "editor"]);
     expect((await as(b).post(`${url}/members`, { user_id: m1.id })).status).toBe(409);
     // Last owner stays; promote, then demote the first.
     expect((await as(b).patch(`${url}/members/${b.id}`, { role: "editor" })).json.code).toBe(
@@ -118,23 +120,20 @@ describe("projects API", () => {
     expect((await as(b).patch(`${url}/members/${m1.id}`, { role: "owner" })).status).toBe(200);
     expect((await as(m1).patch(url, { description: "by new owner" })).status).toBe(200);
     expect((await as(b).patch(`${url}/members/${b.id}`, { role: "editor" })).status).toBe(200);
-    // A reader row is re-roled like any other.
     expect((await as(m1).patch(`${url}/members/${m2.id}`, { role: "owner" })).status).toBe(200);
-    // Visibility workspace: an implicit reader without a row can be given a role (gets a row).
+    // An implicit reader without a row can be given a role (gets a row).
     const implicit = await f.member(w.team);
     expect((await as(m1).get(url)).json.my_role).toBe("owner");
     expect((await as(implicit).get(url)).json.my_role).toBe("reader");
     const given = await as(m1).patch(`${url}/members/${implicit.id}`, { role: "editor" });
     expect([given.status, given.json.role]).toEqual([200, "editor"]);
-    // Visibility restricted: only rows count; removing a row removes access.
-    expect((await as(m1).patch(url, { visibility: "restricted" })).status).toBe(200);
-    const third = await f.member(w.team);
-    expect((await as(third).get(url)).status).toBe(404);
+    // Removing a row leaves an implicit reader (RV1); visibility cannot be set any more.
+    expect((await as(m1).patch(url, { visibility: "restricted" })).status).toBe(400);
     expect((await as(m1).delete(`${url}/members/${randomUUID()}`)).status).toBe(404);
     expect((await as(m1).delete(`${url}/members/${b.id}`)).status).toBe(204);
-    expect((await as(b).get(url)).status).toBe(404);
+    expect((await as(b).get(url)).json.my_role).toBe("reader");
     const list = await as(m1).get(`${url}/members`);
-    expect(list.json.visibility).toBe("restricted");
+    expect(list.json).not.toHaveProperty("visibility");
     expect(list.json.members.map((x: { user_id: string }) => x.user_id).sort()).toEqual(
       [m1.id, m2.id, implicit.id].sort(),
     );
@@ -261,27 +260,25 @@ describe("projects API", () => {
 });
 
 describe("threads in a project", () => {
-  it("creates threads only for members; the default agent falls back quietly", async () => {
+  it("creates threads for every workspace member, not other teams; the default agent falls back quietly", async () => {
     const w = await f.world();
     const b = await builder(w.team);
-    const outside = await f.member(w.team);
-    const project = await create(b, { name: "Mine", visibility: "restricted" });
+    const unlisted = await f.member(w.team);
+    const outside = (await f.world()).owner;
+    const project = await create(b, { name: "Mine" });
     expect((await as(outside).post("/v1/threads", { project_id: project.id })).status).toBe(404);
+    expect((await as(unlisted).post("/v1/threads", { project_id: project.id })).status).toBe(201);
     expect((await as(b).post("/v1/threads", { project_id: project.id })).status).toBe(201);
     await as(b).patch(`/v1/projects/${project.id}`, { archived: true });
     expect((await as(b).post("/v1/threads", { project_id: project.id })).status).toBe(404);
   });
 
-  it("lists and searches shared threads for members only", async () => {
+  it("lists and searches shared threads for workspace members only", async () => {
     const w = await f.world();
     const b = await builder(w.team);
     const m = await f.member(w.team);
-    const outside = await f.member(w.team);
-    const project = await create(b, {
-      name: "Shared",
-      visibility: "restricted",
-      member_user_ids: [m.id],
-    });
+    const outside = (await f.world()).owner;
+    const project = await create(b, { name: "Shared" });
     const made = await as(b).post("/v1/threads", { title: "zebra plan", project_id: project.id });
     const id = made.json.thread_id as string;
     expect((await as(m).get(`/v1/threads/${id}`)).status).toBe(404); // private until shared
@@ -333,7 +330,7 @@ describe("instructions reach project runs", () => {
     expect(start2.project?.instructions).toBe("Answer in German.");
   });
 
-  it("omits it for threads without a project, agents without the capability, and non-members", async () => {
+  it("omits it for threads without a project and agents without the capability; unlisted members read", async () => {
     const w = await f.world();
     const plain = await f.thread(w.owner);
     expect((await runStart(w, plain, ["projects"])).project).toBeUndefined();
@@ -344,15 +341,14 @@ describe("instructions reach project runs", () => {
     expect((await runStart(w2, t2.json.thread_id, [])).project).toBeUndefined();
 
     const w3 = await f.world();
-    const p3 = await create(w3.owner, {
-      name: "Left",
-      instructions: "x",
-      visibility: "restricted",
-    });
+    const p3 = await create(w3.owner, { name: "Left", instructions: "x" });
     const t3 = await as(w3.owner).post("/v1/threads", { project_id: p3.id });
     await f.fx.admin.query(`DELETE FROM project_members WHERE team_id = $1`, [w3.team]);
-    // A team admin still acts as owner (PR3); a plain member who is no longer listed does not.
+    // A plain member who is no longer listed is still a reader (RV1): instructions, read access.
     await f.fx.admin.query(`UPDATE team_members SET role = 'member' WHERE team_id = $1`, [w3.team]);
-    expect((await runStart(w3, t3.json.thread_id, ["projects"])).project).toBeUndefined();
+    expect((await runStart(w3, t3.json.thread_id, ["projects"])).project).toMatchObject({
+      id: p3.id,
+      access: "read",
+    });
   });
 });

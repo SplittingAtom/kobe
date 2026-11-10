@@ -137,11 +137,11 @@ describe("team share (ac-1)", () => {
 
   it("switches between project and team scope, one scope at a time, each audited", async () => {
     const x = await world();
-    const outsider = x.reader;
+    // No project row: still a reader of the project (every member reads every project, KOBE-587).
+    const unlisted = x.reader;
     const member = await f.member(x.w.team);
     const project = await as(x.admin).post("/v1/projects", {
       name: `P${randomBytes(2).toString("hex")}`,
-      visibility: "restricted",
       member_user_ids: [x.author.id, member.id],
     });
     expect(project.status, JSON.stringify(project.json)).toBe(201);
@@ -153,7 +153,7 @@ describe("team share (ac-1)", () => {
 
     await share(x.author, x.threadId, "project");
     expect(await sharedIds(member)).toContain(x.threadId);
-    expect(await sharedIds(outsider)).not.toContain(x.threadId);
+    expect(await sharedIds(unlisted)).toContain(x.threadId);
     const inProject = await as(member).get(`/v1/threads?project_id=${projectId}`);
     expect(inProject.json.threads.map((r: { thread_id: string }) => r.thread_id)).toContain(
       x.threadId,
@@ -161,12 +161,11 @@ describe("team share (ac-1)", () => {
 
     const team = await share(x.author, x.threadId, "team");
     expect(team.json).toMatchObject({ visibility: "team", shared_to_project: false });
-    expect(await sharedIds(outsider)).toContain(x.threadId);
+    expect(await sharedIds(unlisted)).toContain(x.threadId);
     expect(await sharedIds(member)).toContain(x.threadId);
 
     await share(x.author, x.threadId, "project");
-    expect(await sharedIds(outsider)).not.toContain(x.threadId);
-    expect((await as(outsider).get(`/v1/threads/${x.threadId}`)).status).toBe(404);
+    expect((await as(unlisted).get(`/v1/threads/${x.threadId}`)).status).toBe(200);
 
     // A move keeps a team share (its readers don't depend on the project) and ends a project one.
     await share(x.author, x.threadId, "team");
@@ -282,32 +281,18 @@ describe("team admins and other teams (ac-3)", () => {
 });
 
 describe("revocation reaches open streams at once", () => {
-  it("ends a reader's live stream on revoke and on narrowing to the project", async () => {
-    for (const how of ["revoke", "narrow"] as const) {
-      const x = await world(false);
-      if (how === "narrow") {
-        const project = await as(x.admin).post("/v1/projects", {
-          name: `N${randomBytes(2).toString("hex")}`,
-          visibility: "restricted",
-          member_user_ids: [x.author.id],
-        });
-        expect(project.status, JSON.stringify(project.json)).toBe(201);
-        // The run is live, so the move waits: put the project on the thread directly.
-        await f.fx.admin.query(
-          `UPDATE threads SET project_id = $1 WHERE team_id = $2 AND id = $3`,
-          [project.json.id, x.w.team, x.threadId],
-        );
-      }
-      await share(x.author, x.threadId, "team");
-      const res = await f.fx.open(0, x.reader, x.runId);
-      expect(res.status, how).toBe(200);
-      const sse = new SseReader(res.body);
-      expect((await sse.nextEvent())?.run_id).toBe(x.runId);
-      if (how === "revoke") await share(x.author, x.threadId, "private");
-      if (how === "narrow") await share(x.author, x.threadId, "project");
-      // revalidateMs is 60 s here: only the access hint ends it this fast.
-      expect(await endsWithin(sse, 5_000), how).toBe(true);
-    }
+  it("ends a reader's live stream on revoke", async () => {
+    // Narrowing a team share to the project no longer drops anyone: every workspace member reads
+    // every project (KOBE-587), so only a revoke ends a reader's stream.
+    const x = await world(false);
+    await share(x.author, x.threadId, "team");
+    const res = await f.fx.open(0, x.reader, x.runId);
+    expect(res.status).toBe(200);
+    const sse = new SseReader(res.body);
+    expect((await sse.nextEvent())?.run_id).toBe(x.runId);
+    await share(x.author, x.threadId, "private");
+    // revalidateMs is 60 s here: only the access hint ends it this fast.
+    expect(await endsWithin(sse, 5_000)).toBe(true);
   });
 
   it("sends the access hint from the real Trash and move paths, for a run that just ended", async () => {
@@ -331,7 +316,6 @@ describe("revocation reaches open streams at once", () => {
       const b = await world();
       const project = await as(b.admin).post("/v1/projects", {
         name: `M${randomBytes(2).toString("hex")}`,
-        visibility: "restricted",
         member_user_ids: [b.author.id, b.reader.id],
       });
       expect(project.status, JSON.stringify(project.json)).toBe(201);
@@ -455,36 +439,29 @@ describe("more read paths (S3)", () => {
     expect([refused.status, refused.json.code]).toEqual([409, "test_thread"]);
   });
 
-  it("hides the project of a team-shared thread from someone who can't open it (N4)", async () => {
+  it("names the project of a team-shared thread to every member, who may open it (N4, RV1)", async () => {
     const x = await world();
     const project = await as(x.admin).post("/v1/projects", {
       name: `H${randomBytes(2).toString("hex")}`,
-      visibility: "restricted",
       member_user_ids: [x.author.id],
     });
     expect(project.status, JSON.stringify(project.json)).toBe(201);
     const projectId = project.json.id as string;
     await as(x.author).post(`/v1/threads/${x.threadId}/move`, { project_id: projectId });
     await share(x.author, x.threadId, "team");
-    expect((await as(x.reader).get(`/v1/threads/${x.threadId}`)).json.project_id).toBeNull();
+    // x.reader has no row in the project but reads it (KOBE-587), so the project is named.
+    expect((await as(x.reader).get(`/v1/threads/${x.threadId}`)).json.project_id).toBe(projectId);
     const listed = (await as(x.reader).get("/v1/threads/shared")).json.threads as {
       thread_id: string;
       project_id: string | null;
     }[];
-    expect(listed.find((r) => r.thread_id === x.threadId)?.project_id).toBeNull();
+    expect(listed.find((r) => r.thread_id === x.threadId)?.project_id).toBe(projectId);
     const found = (await as(x.reader).get("/v1/threads?q=wombat")).json.threads as {
       thread_id: string;
       project_id: string | null;
     }[];
-    expect(found.find((r) => r.thread_id === x.threadId)?.project_id).toBeNull();
-    // Listing or searching that project shows them nothing of it.
-    expect((await as(x.reader).get(`/v1/threads?project_id=${projectId}`)).json.threads).toEqual(
-      [],
-    );
-    expect(
-      (await as(x.reader).get(`/v1/threads?q=wombat&project_id=${projectId}`)).json.threads,
-    ).toEqual([]);
-    // The author and a team admin (who may open every project) still see it.
+    expect(found.find((r) => r.thread_id === x.threadId)?.project_id).toBe(projectId);
+    // The author and a team admin see it too.
     expect((await as(x.author).get(`/v1/threads/${x.threadId}`)).json.project_id).toBe(projectId);
     expect((await as(x.admin).get(`/v1/threads/${x.threadId}`)).json.project_id).toBe(projectId);
   });
@@ -537,7 +514,6 @@ describe("a member who leaves (S2)", () => {
     await share(x.author, x.threadId, "team");
     const project = await as(x.admin).post("/v1/projects", {
       name: `L${randomBytes(2).toString("hex")}`,
-      visibility: "restricted",
       member_user_ids: [x.author.id, x.reader.id],
     });
     expect(project.status, JSON.stringify(project.json)).toBe(201);

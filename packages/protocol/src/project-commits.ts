@@ -20,9 +20,11 @@ export const PROJECT_MOUNTS_MAX_PER_MEMBER = 20;
 export const PROJECT_HISTORY_PAGE_DEFAULT = 50;
 export const PROJECT_HISTORY_PAGE_MAX = 200;
 
-/** Team audit events of the workspaces lane (GV4); packages/db defines them in KOBE-577. */
+/**
+ * Team audit events of the workspaces lane (GV4); packages/db defines them in KOBE-577.
+ * `project.visibility_changed` is retired (KOBE-587): no longer written, old rows stay.
+ */
 export const PROJECT_AUDIT_EVENTS = [
-  "project.visibility_changed",
   "project.owner_transferred",
   "project.checked_out",
   "project.checkout_discarded",

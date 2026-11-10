@@ -82,8 +82,8 @@ describe("constants", () => {
     expect(PROJECT_HISTORY_MAX_COMMITS).toBe(1000);
     expect(PROJECT_MOUNTS_MAX_PER_MEMBER).toBe(20);
     expect(PROJECT_COMMIT_MESSAGE_MAX).toBe(500);
-    expect(PROJECT_AUDIT_EVENTS).toHaveLength(7);
-    expect(new Set(PROJECT_AUDIT_EVENTS).size).toBe(7);
+    expect(PROJECT_AUDIT_EVENTS).toHaveLength(6);
+    expect(new Set(PROJECT_AUDIT_EVENTS).size).toBe(6);
   });
   it("error codes are unique and include the commit codes", () => {
     expect(new Set(PROJECT_ERROR_CODES).size).toBe(PROJECT_ERROR_CODES.length);

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { statSync } from "node:fs";
+import pg from "pg";
 import { runBackup } from "./backup.js";
 import { keyFileWarning, parseCommand, tlsWarning, type Command } from "./config.js";
+import { formatRestrictedProjects, listRestrictedProjects } from "./restricted-projects.js";
 import { runRestore } from "./restore.js";
 import { s3Lister } from "./s3.js";
 
@@ -9,7 +11,24 @@ const log = (message: string): void => {
   process.stderr.write(`kobe: ${message}\n`);
 };
 
+async function listRestricted(databaseUrl: string, json: boolean): Promise<void> {
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const report = await listRestrictedProjects(client);
+    process.stdout.write(
+      `${json ? JSON.stringify(report, null, 2) : formatRestrictedProjects(report)}\n`,
+    );
+  } finally {
+    await client.end();
+  }
+}
+
 async function run(cmd: Command): Promise<void> {
+  if (cmd.command === "projects-restricted") {
+    await listRestricted(cmd.databaseUrl, cmd.json);
+    return;
+  }
   const objects = cmd.s3 ? s3Lister(cmd.s3) : null;
   if (cmd.command === "backup") {
     const m = await runBackup({

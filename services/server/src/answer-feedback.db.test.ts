@@ -281,12 +281,12 @@ describe("who rates (ac-1)", () => {
     expect(left.rows).toEqual([{ user_id: x.author.id }]);
   });
 
-  it("lets a project-share reader rate, and nobody outside the project", async () => {
+  it("lets a project-share reader rate, and nobody outside the workspace", async () => {
     const x = await world();
-    const outsider = await f.member(x.w.team);
+    // Every workspace member reads every project (KOBE-587): an outsider is in another workspace.
+    const outsider = (await f.world()).owner;
     const project = await as(x.w.owner).post("/v1/projects", {
       name: `P ${randomUUID().slice(0, 6)}`,
-      visibility: "restricted",
       member_user_ids: [x.author.id, x.reader.id],
     });
     expect(project.status, JSON.stringify(project.json)).toBe(201);

@@ -9,7 +9,8 @@ import { runRetentionPass, type BlobStore } from "./retention/index.js";
 
 /**
  * KOBE-163: share a thread to its project, read-only access for members, unshare, fork (D23).
- * A reader is a project member who is not the author; everyone else gets 404.
+ * A reader is a workspace member who is not the author (every member reads every project,
+ * KOBE-587); other workspaces get 404.
  */
 const f = new RunFixture();
 const objects = new MemoryObjects();
@@ -25,15 +26,15 @@ afterAll(async () => {
 
 const as = (p: Person) => f.on(0, p);
 
-/** A team with a selected-mode project (author + reader inside, outsider outside) and one run. */
+/** A team with a project (author + reader inside), an outsider from another workspace, and one run. */
 async function world(settle = true) {
   const w = await f.world();
   const author = w.owner;
   const reader = await f.member(w.team);
-  const outsider = await f.member(w.team);
+  // Every workspace member reads every project (KOBE-587): an outsider is in another workspace.
+  const outsider = (await f.world()).owner;
   const project = await as(author).post("/v1/projects", {
     name: "Shared",
-    visibility: "restricted",
     member_user_ids: [reader.id],
   });
   expect(project.status, JSON.stringify(project.json)).toBe(201);
@@ -329,7 +330,7 @@ describe("fork", () => {
 });
 
 describe("sharing needs a usable project", () => {
-  it("refuses a removed member and an archived project with the missing-project 404", async () => {
+  it("lets a member without a row share (a reader, RV1) and refuses an archived project with the missing-project 404", async () => {
     const x = await world();
     const member = await f.member(x.w.team);
     await as(x.author).post(`/v1/projects/${x.projectId}/members`, { user_id: member.id });
@@ -337,12 +338,11 @@ describe("sharing needs a usable project", () => {
     const id = made.json.thread_id as string;
     const share = `/v1/threads/${id}/share`;
     await as(x.author).delete(`/v1/projects/${x.projectId}/members/${member.id}`);
-    const removed = await as(member).post(share, { visibility: "project" });
-    expect([removed.status, removed.json.code]).toEqual([404, "project_not_found"]);
+    const unlisted = await as(member).post(share, { visibility: "project" });
+    expect(unlisted.status, JSON.stringify(unlisted.json)).toBe(200);
     // Unsharing is never blocked.
     expect((await as(member).post(share, { visibility: "private" })).status).toBe(200);
 
-    await as(x.author).post(`/v1/projects/${x.projectId}/members`, { user_id: member.id });
     await as(x.author).patch(`/v1/projects/${x.projectId}`, { archived: true });
     const archived = await as(member).post(share, { visibility: "project" });
     expect([archived.status, archived.json.code]).toEqual([404, "project_not_found"]);
@@ -362,7 +362,8 @@ describe("reader streams", () => {
       if (revoke === "unshare") {
         await as(x.author).post(`/v1/threads/${x.threadId}/share`, { visibility: "private" });
       } else {
-        await as(x.author).delete(`/v1/projects/${x.projectId}/members/${x.reader.id}`);
+        // Losing a project row leaves a reader (KOBE-587); leaving the workspace ends access.
+        expect((await as(x.author).delete(`/v1/team/members/${x.reader.id}`)).status).toBe(204);
       }
       // Revalidation (every revalidateMs; 30 s in production) closes the stream.
       const ended = await Promise.race([

@@ -187,12 +187,13 @@ describe("personal memory", () => {
 });
 
 describe("project memory", () => {
-  it("is reachable by those who may view the project; everyone else gets 404 (KOBE-161, PR3)", async () => {
+  it("is readable by every workspace member, written by editors; other workspaces get 404 (PR3, RV1)", async () => {
     const w = await world();
+    const elsewhere = await world();
     const projectId = randomUUID();
     await fx.admin.query(
-      `INSERT INTO projects (team_id, id, slug, name, created_by, visibility)
-       VALUES ($1, $2, 'mem2', 'Mem', $3, 'restricted')`,
+      `INSERT INTO projects (team_id, id, slug, name, created_by)
+       VALUES ($1, $2, 'mem2', 'Mem', $3)`,
       [w.team, projectId, w.admin.id],
     );
     await fx.admin.query(
@@ -207,22 +208,19 @@ describe("project memory", () => {
         content: "x",
       });
     const list = (p: Person) => p.browser.get(`/v1/memory?scope=project&project_id=${projectId}`);
-    // Not listed in a restricted project: 404. A team admin acts as owner (PR3): reads and edits.
-    expect((await write(w.other)).status).toBe(404);
-    expect((await list(w.other)).status).toBe(404);
+    // Another workspace: 404. A team admin acts as owner (PR3): reads and edits.
+    expect((await write(elsewhere.member)).status).toBe(404);
+    expect((await list(elsewhere.member)).status).toBe(404);
     expect((await list(w.admin)).status).toBe(200);
-    // Member: reads and edits; the doc is not reachable by id for others.
+    // Editor: reads and edits; the doc is not reachable by id from another workspace.
     const saved = await write(w.member);
     expect(saved.status, saved.text).toBe(200);
     expect((await list(w.member)).status).toBe(200);
     const docId = memoryDocDetailSchema.parse(saved.json).id;
     expect((await w.member.browser.get(`/v1/memory/${docId}`)).status).toBe(200);
-    expect((await w.other.browser.get(`/v1/memory/${docId}`)).status).toBe(404);
+    expect((await elsewhere.member.browser.get(`/v1/memory/${docId}`)).status).toBe(404);
     expect((await w.member.browser.get("/v1/memory?scope=project")).status).toBe(400);
-    // Visibility workspace: every team member is an implicit reader: reads, does not edit (PR6).
-    await fx.admin.query(`UPDATE projects SET visibility = 'workspace' WHERE team_id = $1`, [
-      w.team,
-    ]);
+    // Every other team member is an implicit reader: reads, does not edit (PR6).
     expect((await list(w.other)).status).toBe(200);
     expect((await w.other.browser.get(`/v1/memory/${docId}`)).status).toBe(200);
     const refused = await write(w.other);

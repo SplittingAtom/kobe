@@ -26,15 +26,15 @@ afterAll(async () => {
 
 const as = (p: Person) => f.on(0, p);
 
-/** A project thread (author, reader in the project, outsider not) with one answered run. */
+/** A project thread (author, reader in the project, outsider in another workspace) with one answered run. */
 async function world() {
   const w = await f.world();
   const author = w.owner;
   const reader = await f.member(w.team);
-  const outsider = await f.member(w.team);
+  // Every workspace member reads every project (KOBE-587): an outsider is in another workspace.
+  const outsider = (await f.world()).owner;
   const project = await as(author).post("/v1/projects", {
     name: "Shared",
-    visibility: "restricted",
     member_user_ids: [reader.id],
   });
   expect(project.status, JSON.stringify(project.json)).toBe(201);

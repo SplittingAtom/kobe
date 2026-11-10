@@ -1415,6 +1415,13 @@
       "when": 1794179719897,
       "tag": "0201_workspaces_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 202,
+      "version": "7",
+      "when": 1794267191945,
+      "tag": "0202_restricted_removal",
+      "breakpoints": true
     }
   ]
 }

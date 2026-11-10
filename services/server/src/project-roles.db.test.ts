@@ -8,8 +8,9 @@ import { RunFixture } from "./testing/run-fixture.js";
 /**
  * KOBE-578 (Workspaces WS-3, ac-1 and ac-3): the PR3 matrix row by row through the API, the
  * creation gate (PR4), `?role=editor` (PJ2), owners and ownership transfer (PR5), the project
- * memory write gate (PR6), restricted visibility answering 404 everywhere, and the project access
- * a run starts with.
+ * memory write gate (PR6), and the project access a run starts with. KOBE-587 (RV1, RV3): every
+ * workspace member reads every project (no 404 inside the workspace), explicit rows are owner or
+ * editor only, and project.visibility_changed is no longer written.
  */
 const f = new RunFixture();
 const objects = new MemoryObjects();
@@ -75,12 +76,17 @@ describe("creation gate (PR4)", () => {
     const m = await f.member(w.team);
     expect((await as(m).post("/v1/projects", { name: "No" })).status).toBe(403);
     const made = await as(c).post("/v1/projects", { name: "Mine" });
-    expect(made.json).toMatchObject({ my_role: "owner", visibility: "workspace" });
+    expect(made.json).toMatchObject({ my_role: "owner" });
+    expect(made.json).not.toHaveProperty("visibility");
     expect((await as(w.owner).post("/v1/projects", { name: "Admin's" })).status).toBe(201);
-    expect((await audits(w.team, "project.created")).map((t) => t.visibility)).toEqual([
-      "workspace",
-      "workspace",
+    expect(await audits(w.team, "project.created")).toEqual([
+      { projectId: made.json.id },
+      { projectId: expect.any(String) },
     ]);
+    // Visibility is gone from the create shape (strict).
+    expect(
+      (await as(c).post("/v1/projects", { name: "Closed", visibility: "restricted" })).status,
+    ).toBe(400);
   });
 });
 
@@ -144,51 +150,73 @@ describe("the matrix, row by row (PR3, ac-1)", () => {
     expect(ids(await as(editor).get("/v1/projects?role=editor"))).toEqual([project.id]);
     expect((await as(editor).patch(`/v1/projects/${project.id}`, { name: "x" })).status).toBe(403);
     expect(
-      (await as(editor).patch(`/v1/projects/${project.id}`, { visibility: "restricted" })).status,
-    ).toBe(403);
-    expect(
-      (await as(editor).patch(`/v1/projects/${project.id}/members/${c.id}`, { role: "reader" }))
+      (await as(editor).patch(`/v1/projects/${project.id}/members/${c.id}`, { role: "editor" }))
         .status,
     ).toBe(403);
   });
 
-  it("owner edits, changes visibility and re-roles, audited with the new role", async () => {
+  it("owner edits and re-roles owner|editor only; removing the row makes a reader", async () => {
     const w = await f.world();
     const c = await contributor(w.team);
     const m = await f.member(w.team);
     const project = await create(c, { name: "Owned" });
     expect((await as(c).patch(`/v1/projects/${project.id}`, { name: "Renamed" })).status).toBe(200);
+    // Visibility is gone from the update shape (strict) and never audited again.
+    expect(
+      (await as(c).patch(`/v1/projects/${project.id}`, { visibility: "restricted" })).status,
+    ).toBe(400);
+    // Reader is not an explicit role any more (RV3), neither on add nor on re-role.
+    expect(
+      (await as(c).post(`/v1/projects/${project.id}/members`, { user_id: m.id, role: "reader" }))
+        .status,
+    ).toBe(400);
     expect(
       (await as(c).post(`/v1/projects/${project.id}/members`, { user_id: m.id, role: "editor" }))
         .status,
     ).toBe(201);
-    const reroled = await as(c).patch(`/v1/projects/${project.id}/members/${m.id}`, {
-      role: "reader",
-    });
-    expect(reroled.json).toMatchObject({ user_id: m.id, role: "reader" });
-    expect((await upload(m, project.id, "no.md")).status).toBe(403);
     expect(
-      (await as(c).patch(`/v1/projects/${project.id}`, { visibility: "restricted" })).status,
-    ).toBe(200);
-    expect(await audits(w.team, "project.visibility_changed")).toEqual([
-      { projectId: project.id, from: "workspace", to: "restricted" },
-    ]);
+      (await as(c).patch(`/v1/projects/${project.id}/members/${m.id}`, { role: "reader" })).status,
+    ).toBe(400);
+    const reroled = await as(c).patch(`/v1/projects/${project.id}/members/${m.id}`, {
+      role: "owner",
+    });
+    expect(reroled.json).toMatchObject({ user_id: m.id, role: "owner" });
+    expect((await as(c).delete(`/v1/projects/${project.id}/members/${m.id}`)).status).toBe(204);
+    expect((await as(m).get(`/v1/projects/${project.id}`)).json.my_role).toBe("reader");
+    expect((await upload(m, project.id, "no.md")).status).toBe(403);
+    expect(await audits(w.team, "project.visibility_changed")).toEqual([]);
     expect(await audits(w.team, "project.member_role_changed")).toEqual([
       {
         projectId: project.id,
         userId: m.id,
         from: "editor",
-        to: "reader",
-        roles: { owner: 1, editor: 0, reader: 1 },
+        to: "owner",
+        roles: { owner: 2, editor: 0 },
       },
     ]);
+    const members = (await as(m).get(`/v1/projects/${project.id}/members`)).json;
+    expect(members).not.toHaveProperty("visibility");
   });
 
-  it("team admin does everything in a restricted project without a row", async () => {
+  it("an owner promotes an implicit reader to editor with PATCH (a row is added)", async () => {
     const w = await f.world();
     const c = await contributor(w.team);
     const m = await f.member(w.team);
-    const project = await create(c, { name: "Private", visibility: "restricted" });
+    const project = await create(c, { name: "Promote" });
+    const promoted = await as(c).patch(`/v1/projects/${project.id}/members/${m.id}`, {
+      role: "editor",
+    });
+    expect(promoted.status, JSON.stringify(promoted.json)).toBe(200);
+    expect(promoted.json).toMatchObject({ user_id: m.id, role: "editor" });
+    expect((await as(m).get(`/v1/projects/${project.id}`)).json.my_role).toBe("editor");
+    expect((await upload(m, project.id, "yes.md")).status).toBe(201);
+  });
+
+  it("team admin does everything in a project without a row", async () => {
+    const w = await f.world();
+    const c = await contributor(w.team);
+    const m = await f.member(w.team);
+    const project = await create(c, { name: "Private" });
     const admin = w.owner;
     expect((await as(admin).get(`/v1/projects/${project.id}`)).json.my_role).toBeNull();
     expect(ids(await as(admin).get("/v1/projects?role=editor"))).toEqual([project.id]);
@@ -201,7 +229,7 @@ describe("the matrix, row by row (PR3, ac-1)", () => {
       (
         await as(admin).post(`/v1/projects/${project.id}/members`, {
           user_id: m.id,
-          role: "reader",
+          role: "editor",
         })
       ).status,
     ).toBe(201);
@@ -211,16 +239,12 @@ describe("the matrix, row by row (PR3, ac-1)", () => {
     );
   });
 
-  it("restricted answers 404 to non-members everywhere", async () => {
+  it("every workspace member reads a project they are not listed in; other workspaces get 404", async () => {
     const w = await f.world();
     const c = await contributor(w.team);
     const listed = await f.member(w.team);
-    const outsider = await f.member(w.team);
-    const project = await create(c, {
-      name: "Hidden",
-      visibility: "restricted",
-      member_user_ids: [listed.id],
-    });
+    const unlisted = await f.member(w.team);
+    const project = await create(c, { name: "Open to all", member_user_ids: [listed.id] });
     expect((await upload(c, project.id, "h.md")).status).toBe(201);
     expect((await memoryPut(c, project.id)).status).toBe(200);
     // A conversation shared to the project: listed members read it, the outsider does not.
@@ -231,6 +255,20 @@ describe("the matrix, row by row (PR3, ac-1)", () => {
     );
     expect((await as(listed).get(`/v1/threads/${threadId}`)).status).toBe(200);
 
+    // A workspace member without a row reads everything and converses (RV1, RV3).
+    const u = as(unlisted);
+    expect(ids(await u.get("/v1/projects"))).toEqual([project.id]);
+    expect((await u.get(`/v1/projects/${project.id}`)).json.my_role).toBe("reader");
+    expect((await u.get(`/v1/projects/${project.id}/files`)).json.files).toHaveLength(1);
+    expect((await u.get(`/v1/projects/${project.id}/members`)).status).toBe(200);
+    expect((await memoryList(unlisted, project.id)).json.docs).toHaveLength(1);
+    expect((await u.get(`/v1/threads/${threadId}`)).status).toBe(200);
+    expect((await u.post("/v1/threads", { project_id: project.id })).status).toBe(201);
+    expect((await upload(unlisted, project.id, "x.md")).status).toBe(403);
+
+    // Someone from another workspace still finds nothing.
+    const other = await f.world();
+    const outsider = other.owner;
     const o = as(outsider);
     expect(ids(await o.get("/v1/projects"))).toEqual([]);
     expect((await o.get(`/v1/projects/${project.id}`)).status).toBe(404);
@@ -251,7 +289,7 @@ describe("the matrix, row by row (PR3, ac-1)", () => {
       ).status,
     ).toBe(404);
     expect(
-      (await o.patch(`/v1/projects/${project.id}/members/${listed.id}`, { role: "reader" })).status,
+      (await o.patch(`/v1/projects/${project.id}/members/${listed.id}`, { role: "editor" })).status,
     ).toBe(404);
     expect((await o.delete(`/v1/projects/${project.id}/members/${listed.id}`)).status).toBe(404);
     expect(
@@ -314,7 +352,7 @@ describe("owners (PR5, ac-3)", () => {
     const w = await f.world();
     const c = await contributor(w.team);
     const m = await f.member(w.team);
-    const project = await create(c, { name: "Orphan", visibility: "restricted" });
+    const project = await create(c, { name: "Orphan" });
     const other = await create(c, { name: "Kept" });
     await as(c).post(`/v1/projects/${other.id}/members`, { user_id: m.id, role: "owner" });
 

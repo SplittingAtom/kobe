@@ -71,7 +71,7 @@ describe("parseCommand", () => {
       allowObjectMismatch: true,
       skipObjects: false,
     });
-    expect(cmd.key.equals(KEY)).toBe(true);
+    expect("key" in cmd && cmd.key.equals(KEY)).toBe(true);
   });
 
   it("restore --no-objects skips object storage even when configured", () => {
@@ -181,5 +181,26 @@ describe("keyFileWarning", () => {
     );
     expect(keyFileWarning({ KOBE_BACKUP_KEY_FILE: "/k" }, () => 0o100640)).toMatch(/WARNING/);
     expect(keyFileWarning(KEY_ENV, () => 0o100644)).toBeNull();
+  });
+});
+
+describe("parseCommand: projects restricted (KOBE-587)", () => {
+  it("reads the backup role's URL and needs no backup key or object storage", () => {
+    expect(
+      parseCommand(["projects", "restricted"], { KOBE_BACKUP_DATABASE_URL: BACKUP_URL }),
+    ).toEqual({ command: "projects-restricted", databaseUrl: BACKUP_URL, json: false });
+    expect(
+      parseCommand(["projects", "restricted", "--json"], { KOBE_BACKUP_DATABASE_URL: BACKUP_URL }),
+    ).toMatchObject({ json: true });
+  });
+
+  it("refuses a missing URL, another subcommand and unknown flags", () => {
+    expect(() => parseCommand(["projects", "restricted"], {})).toThrow(/KOBE_BACKUP_DATABASE_URL/);
+    expect(() =>
+      parseCommand(["projects", "list"], { KOBE_BACKUP_DATABASE_URL: BACKUP_URL }),
+    ).toThrow(/projects restricted/);
+    expect(() =>
+      parseCommand(["projects", "restricted", "--force"], { KOBE_BACKUP_DATABASE_URL: BACKUP_URL }),
+    ).toThrow(/force/);
   });
 });

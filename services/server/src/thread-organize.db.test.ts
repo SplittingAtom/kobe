@@ -156,10 +156,7 @@ describe("who may organize", () => {
   it("refuses a reader of a thread shared to their project (read-only)", async () => {
     const w = await f.world();
     const reader = await f.member(w.team);
-    const projectId = await project(w.owner, "Shared", {
-      visibility: "restricted",
-      member_user_ids: [reader.id],
-    });
+    const projectId = await project(w.owner, "Shared");
     const made = await as(w.owner).post("/v1/threads", { project_id: projectId, title: "x" });
     const id = made.json.thread_id as string;
     expect(
@@ -209,21 +206,20 @@ describe("move to project", () => {
     ]);
   });
 
-  it("is refused where the member cannot create a thread: not a member, archived, unknown", async () => {
+  it("is refused where the member cannot create a thread: archived, unknown", async () => {
     const w = await f.world();
     const member = await f.member(w.team);
     const a = await f.thread(member);
-    const closed = await project(w.owner, "Closed", { visibility: "restricted" });
     const old = await project(w.owner, "Old");
     expect((await as(w.owner).patch(`/v1/projects/${old}`, { archived: true })).status).toBe(200);
 
-    for (const target of [closed, old, "00000000-0000-4000-8000-000000000000"]) {
+    for (const target of [old, "00000000-0000-4000-8000-000000000000"]) {
       const res = await as(member).post(`/v1/threads/${a}/move`, { project_id: target });
       expect(res.status, target).toBe(404);
       expect(res.json.code).toBe("project_not_found");
     }
     // The same check as creating a thread there.
-    expect((await as(member).post("/v1/threads", { project_id: closed })).status).toBe(404);
+    expect((await as(member).post("/v1/threads", { project_id: old })).status).toBe(404);
     expect((await as(w.owner).get(`/v1/threads/${a}`)).status).toBe(404);
     expect(await audit(w.team, "thread.moved")).toEqual([]);
   });
@@ -356,7 +352,7 @@ describe("move to project", () => {
     await expect(set({ at: "x" })).rejects.toMatchObject({ code: "23514" });
   });
 
-  it("names only projects the viewer may open in the marker, and never their ids", async () => {
+  it("names the project in the marker for any workspace member (every member may open it, RV1)", async () => {
     const w = await f.world();
     const member = await f.member(w.team);
     const ws = await f.connect(
@@ -366,10 +362,6 @@ describe("move to project", () => {
     const open = await project(w.owner, "Open");
     const a = await f.thread(member);
     await as(member).post(`/v1/threads/${a}/move`, { project_id: open });
-    // The member then loses the project (it becomes selected-mode without them).
-    expect(
-      (await as(w.owner).patch(`/v1/projects/${open}`, { visibility: "restricted" })).status,
-    ).toBe(200);
     const run = await f.message(member, a, "hi");
     ws.reply(await ws.started(run), "ok");
     await f.until(w.team, run, "completed");
@@ -381,10 +373,9 @@ describe("move to project", () => {
         run_id: run,
         from_project_id: null,
         from_project_hidden: false,
-        // A project the viewer can't open: "another project", its id not sent (review L2).
-        to_project_id: null,
-        to_project_name: null,
-        to_project_hidden: true,
+        to_project_id: open,
+        to_project_name: "Open",
+        to_project_hidden: false,
       }),
     ]);
   });
