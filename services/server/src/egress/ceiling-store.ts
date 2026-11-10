@@ -20,6 +20,11 @@ export interface CeilingEntry {
   readonly domain: string;
   readonly preset: EgressPreset | null;
   readonly in_ceiling: boolean;
+  /**
+   * Same cluster (EA4, KOBE-602): hosts it matches may resolve to the install's internal targets
+   * (the cluster ingress). Site admins set it.
+   */
+  readonly internal: boolean;
   readonly note: string | null;
   /**
    * Shared hosting or a CDN (Public Suffix List private section, or a known fronting CDN): TLS only
@@ -37,6 +42,7 @@ const toEntry = (r: Row): CeilingEntry => ({
   domain: r.domain,
   preset: r.preset ?? null,
   in_ceiling: r.inCeiling,
+  internal: r.internal,
   note: r.note,
   shared_hosting: isSharedHosting(r.domain),
   created_by: r.createdBy,
@@ -107,11 +113,14 @@ export async function addCeilingDomain(
   });
 }
 
-/** Puts a listed domain into or out of the ceiling; undefined when it isn't listed. */
-export async function setCeilingMembership(
+/**
+ * Puts a listed domain into or out of the ceiling and/or marks it internal (KOBE-602, EA4);
+ * undefined when it isn't listed. Each change is audited; one NOTIFY covers both.
+ */
+export async function setCeilingFlags(
   db: KobeDb,
   domain: string,
-  inCeiling: boolean,
+  flags: { readonly inCeiling?: boolean | undefined; readonly internal?: boolean | undefined },
 ): Promise<CeilingEntry | undefined> {
   return db.transaction(async (tx) => {
     const [before] = await tx
@@ -120,14 +129,24 @@ export async function setCeilingMembership(
       .where(eq(egressDomains.domain, domain))
       .for("update");
     if (!before) return undefined;
-    if (before.inCeiling === inCeiling) return toEntry(before);
+    const inCeiling = flags.inCeiling ?? before.inCeiling;
+    const internal = flags.internal ?? before.internal;
+    if (before.inCeiling === inCeiling && before.internal === internal) return toEntry(before);
     const [row] = await tx
       .update(egressDomains)
-      .set({ inCeiling, updatedAt: new Date() })
+      .set({ inCeiling, internal, updatedAt: new Date() })
       .where(eq(egressDomains.domain, domain))
       .returning();
     await notifyEgressChanged(tx, null);
-    await recordAudit(tx, { action: "egress.ceiling.changed", target: { domain, inCeiling } });
+    if (before.inCeiling !== inCeiling) {
+      await recordAudit(tx, { action: "egress.ceiling.changed", target: { domain, inCeiling } });
+    }
+    if (before.internal !== internal) {
+      await recordAudit(tx, {
+        action: "egress.ceiling.internal_changed",
+        target: { domain, internal },
+      });
+    }
     return toEntry(must(row));
   });
 }

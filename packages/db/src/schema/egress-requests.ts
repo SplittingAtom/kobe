@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   foreignKey,
   index,
@@ -27,6 +28,14 @@ export const egressRequestStatus = pgEnum("egress_request_status", [
 ]);
 export type EgressRequestStatus = (typeof egressRequestStatus.enumValues)[number];
 
+/**
+ * Who decides a request (EA1, KOBE-602): `team` when its pattern was in the site ceiling (the
+ * team's admins enable it), `site` when it was not, or the block was an internal address (the site
+ * admins add it to the ceiling and enable it for the team).
+ */
+export const EGRESS_REQUEST_SCOPES = ["team", "site"] as const;
+export type EgressRequestScope = (typeof EGRESS_REQUEST_SCOPES)[number];
+
 const domainCheck = (column: unknown) =>
   sql`char_length(${column}) <= 253 AND ${column} ~ ${sql.raw(`'${DOMAIN_PATTERN_SQL}'`)}`;
 
@@ -51,6 +60,9 @@ export const egressRequests = pgTable(
     /** The thread it was blocked in (the requester's own), if any. */
     threadId: uuid(),
     status: egressRequestStatus().notNull().default("pending"),
+    scope: text().$type<EgressRequestScope>().notNull().default("team"),
+    /** The block was `forbidden_address` (EA4): approving may mark the pattern internal. */
+    internal: boolean().notNull().default(false),
     decidedBy: uuid().references(() => users.id),
     decidedAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
@@ -63,6 +75,11 @@ export const egressRequests = pgTable(
     index("egress_requests_team_status_idx").on(t.teamId, t.status, t.createdAt),
     check("egress_requests_domain", domainCheck(t.domain)),
     check("egress_requests_pattern", domainCheck(t.pattern)),
+    check(
+      "egress_requests_scope",
+      sql`${t.scope} IN (${sql.raw(EGRESS_REQUEST_SCOPES.map((s) => `'${s}'`).join(", "))})`,
+    ),
+    check("egress_requests_internal_scope", sql`NOT ${t.internal} OR ${t.scope} = 'site'`),
     check(
       "egress_requests_decided",
       sql`(${t.status} = 'pending') = (${t.decidedAt} IS NULL) AND (${t.status} = 'pending' OR ${t.decidedBy} IS NOT NULL)`,

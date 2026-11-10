@@ -4,6 +4,7 @@ import {
   EGRESS_BLOCKED_EVENT_KIND,
   events,
   inArray,
+  normalizeHost,
   runs,
   sandboxRunLeases,
   sql,
@@ -11,6 +12,7 @@ import {
   type KobeDb,
   type KobeTx,
 } from "@kobe/db";
+import { EGRESS_BLOCKED_REASONS, type EgressBlockedReason } from "@kobe/protocol";
 import pg from "pg";
 import { z } from "zod";
 import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
@@ -32,8 +34,35 @@ const refSchema = z.object({
   user_id: z.uuid(),
   domain: z.string().min(1).max(253),
   request_access: z.boolean(),
+  /** The proxy's reason (any string; older proxies' rows may predate it). */
+  reason: z.string().max(64).optional(),
   thread_id: z.uuid().optional(),
 });
+
+const FIXABLE: ReadonlySet<string> = new Set(EGRESS_BLOCKED_REASONS);
+
+/**
+ * The event's `reason` and `request_access` (KOBE-602, EA1). A request can fix every reason in
+ * {@link EGRESS_BLOCKED_REASONS} when the target is a host name (not an IP literal), so Request
+ * access is offered for those even when an older proxy reported `request_access: false` for a host
+ * outside the ceiling; a row without a reason keeps the proxy's flag.
+ */
+export function blockedPayload(ref: {
+  readonly domain: string;
+  readonly request_access: boolean;
+  readonly reason?: string | undefined;
+}): { domain: string; request_access: boolean; reason?: EgressBlockedReason } {
+  const reason =
+    ref.reason !== undefined && FIXABLE.has(ref.reason)
+      ? (ref.reason as EgressBlockedReason)
+      : undefined;
+  const fixable = reason !== undefined && normalizeHost(ref.domain) !== null;
+  return {
+    domain: ref.domain,
+    request_access: ref.request_access || fixable,
+    ...(reason === undefined ? {} : { reason }),
+  };
+}
 
 /** Runs one blocked attempt is shown on, at most. */
 const MAX_RUNS_PER_EVENT = 8;
@@ -94,7 +123,7 @@ async function appendToActiveRuns(
     await appendRunEventsInTx(tx, teamId, runId, [
       {
         type: "egress.blocked",
-        payload: { domain: ref.domain, request_access: ref.request_access },
+        payload: blockedPayload(ref),
       },
     ]);
   }
