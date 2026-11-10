@@ -74,6 +74,13 @@ export type CommitResult =
   | { readonly status: "committed"; readonly seq: number; readonly commitId: string }
   | { readonly status: "nothing_to_commit" };
 
+/** `POST /v1/projects/:id/commits/from-proposal` (KOBE-591): Accept on an agent's proposal. */
+export interface FromProposalResult {
+  readonly status: "committed";
+  readonly seq: number;
+  readonly commitId: string;
+}
+
 export interface UpdateResult {
   readonly baseCommitSeq: number | null;
   /** Paths both sides changed: the head's version took them, the member's edit sits beside. */
@@ -102,6 +109,14 @@ export interface ProjectCommitsApi {
   commitDetail(id: string, seq: number): Promise<ApiResult<ProjectCommitDetail>>;
   /** A file as it was at commit `seq`. */
   downloadAt(id: string, seq: number, path: string): Promise<ApiResult<Uint8Array>>;
+  /**
+   * The thread owner accepts a proposal for a file of the project: the server commits exactly the
+   * recorded content (never the client's). 409 `proposal_stale` / `proposal_not_allowed`.
+   */
+  commitFromProposal(
+    id: string,
+    body: { readonly threadId: string; readonly proposalId: string; readonly message?: string },
+  ): Promise<ApiResult<FromProposalResult>>;
   /** A new commit whose tree is the tree at `seq` (editor+); answers like a commit. */
   revert(id: string, seq: number): Promise<ApiResult<CommitResult>>;
 }
@@ -137,6 +152,12 @@ export function createCommitsApi(teamId: string, fetchFn?: typeof fetch): Projec
     commitDetail: (id, seq) => call(`${base(id)}/commits/${seq}`),
     downloadAt: (id, seq, path) =>
       apiDownload(`${base(id)}/commits/${seq}/files/${encPath(path)}`, { teamId, fetchFn }),
+    commitFromProposal: (id, { threadId, proposalId, message }) =>
+      call(`${base(id)}/commits/from-proposal`, "POST", {
+        thread_id: threadId,
+        proposal_id: proposalId,
+        ...(message === undefined ? {} : { message }),
+      }),
     revert: (id, seq) => call(`${base(id)}/commits/${seq}/revert`, "POST", {}),
   };
 }

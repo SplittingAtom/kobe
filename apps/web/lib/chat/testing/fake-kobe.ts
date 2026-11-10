@@ -947,6 +947,41 @@ export class FakeKobe {
     };
   }
 
+  /** Project heads for the history and file reads of a proposal card (KOBE-592), by project id. */
+  readonly projectHeads = new Map<string, { seq: number; files: Map<string, string> }>();
+  /** `POST .../commits/from-proposal` bodies, in order. */
+  readonly fromProposalRequests: Json[] = [];
+  /** What the next from-proposal answers (default: committed at head + 1). */
+  nextFromProposal: { status: number; body: Json } | undefined;
+
+  #projectCommits(method: string, id: string, rest: string[], body: Json | undefined): Response {
+    if (!this.projects.some((p) => p.id === id)) return error(404, "not_found");
+    const head = this.projectHeads.get(id) ?? { seq: 0, files: new Map<string, string>() };
+    if (method === "GET" && rest.length === 0) {
+      const commits =
+        head.seq === 0 ? [] : [{ id: uuid(11, head.seq), project_id: id, seq: head.seq }];
+      return json(200, { commits, next_before: null });
+    }
+    if (method === "GET" && rest[1] === "files") {
+      const path = rest.slice(2).map(decodeURIComponent).join("/");
+      const text = Number(rest[0]) === head.seq ? head.files.get(path) : undefined;
+      if (text === undefined) return error(404, "not_found");
+      return new Response(new TextEncoder().encode(text), { status: 200 });
+    }
+    if (method === "POST" && rest[0] === "from-proposal") {
+      this.fromProposalRequests.push(body ?? {});
+      const next = this.nextFromProposal;
+      this.nextFromProposal = undefined;
+      if (next) return json(next.status, next.body);
+      return json(200, {
+        status: "committed",
+        seq: head.seq + 1,
+        commit_id: uuid(11, head.seq + 1),
+      });
+    }
+    return error(404, "not_found");
+  }
+
   /** `GET /v1/projects` (the caller's live projects): a move may target these only (CE19). */
   readonly projects: Json[] = [];
 
@@ -1460,6 +1495,9 @@ export class FakeKobe {
     }
     if (area === "projects" && id && action === "files")
       return this.#projectFiles(method, id, sub, body);
+    if (area === "projects" && id && action === "commits") {
+      return this.#projectCommits(method, id, parts.slice(4), body);
+    }
     if (area === "runs" && id && action === "eval-case")
       return this.#evalCase(method, id, sub, body);
     if (area === "runs" && id) return this.#runRoute(method, id, action, body);
@@ -2332,10 +2370,11 @@ export class FakeKobe {
   async #saveWorkspaceFile(url: URL, raw: unknown): Promise<Response> {
     await this.saveGate;
     const path = url.searchParams.get("path") ?? "";
+    // No base: the save creates a new file (KOBE-591); it conflicts with a live file.
     const base = url.searchParams.get("base_sha256") ?? "";
     const current = this.workspaceFiles.get(path);
     const currentSha = current === undefined ? undefined : await sha256Hex(current);
-    if (currentSha !== base) {
+    if (base === "" ? current !== undefined : currentSha !== base) {
       return json(409, {
         code: "version_conflict",
         message: "The file changed since you opened it.",

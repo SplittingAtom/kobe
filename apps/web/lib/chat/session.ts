@@ -20,6 +20,7 @@ import type { ChatApi } from "./api";
 import { createFilesApi, type FilesApi } from "../files/api";
 import { WorkspaceChangeFeed } from "../files/remote-changes";
 import { createProjectsApi, type Project } from "../projects/api";
+import { createCommitsApi, type ProjectCommitsApi } from "../projects/commits-api";
 import { AttachmentStore } from "./attachments";
 import { ComposerMentionChannel } from "./mention-insert";
 import { MentionStore } from "./mentions";
@@ -530,6 +531,11 @@ export class ChatSession {
     const result = this.api.listModels();
     this.#models = { at: now, fresh: options.fresh === true, result };
     return result;
+  }
+
+  /** The project commits and history client (KOBE-592: a proposal card reads the head). */
+  commits(): ProjectCommitsApi {
+    return createCommitsApi(this.teamId, this.#options.fetchFn);
   }
 
   /**

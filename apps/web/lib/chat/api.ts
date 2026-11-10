@@ -10,7 +10,7 @@ export type AppContextWire = ReturnType<typeof appContextBody>[number];
 import type { ItemReference, MessageViewing, ThinkingLevel } from "@kobe/protocol";
 import type { SyncConflictView } from "../files/sync-conflicts";
 import type { FileEntry } from "../files/api";
-import type { ProposalView } from "../files/editor-state";
+import { proposalExtras, type ProposalView } from "../files/editor-state";
 import { apiDownload, apiRequest, apiTextFile, type ApiResult, type TextFile } from "../api/client";
 import { readThreadContext, type ContextRead } from "./context-viewer";
 import { readThreadLineage } from "./lineage";
@@ -522,17 +522,19 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     artifactEditAsFile: (id, version) =>
       send("POST", `/v1/artifacts/${enc(id)}/versions/${version}/edit-as-file`),
     fileEditProposals: async (id) => {
-      const res = await get<{ proposals: readonly (ProposalView & Record<string, unknown>)[] }>(
+      type Listed = Omit<ProposalView, "baseSha256" | "isNew"> & { readonly baseSha256?: string };
+      const res = await get<{ proposals: readonly Listed[] }>(
         `/v1/threads/${enc(id)}/file-edit-proposals`,
       );
       if (!res.ok) return res;
       const proposals = res.data.proposals.map(
-        ({ toolCallId, path, baseSha256, content, summary }) => ({
+        ({ toolCallId, path, baseSha256, content, summary, ...rest }) => ({
           toolCallId,
           path,
-          baseSha256,
+          baseSha256: baseSha256 ?? "",
           content,
           summary,
+          ...proposalExtras({ baseSha256, ...rest }),
         }),
       );
       return { ...res, data: proposals };
