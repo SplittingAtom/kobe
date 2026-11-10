@@ -186,11 +186,12 @@ export function applyThinking(
   switch (policy.control) {
     case "reasoning_effort": {
       const effort = level === "off" ? "none" : level;
-      return out(
-        route.path === "/v1/responses"
-          ? { ...stripped, reasoning: { effort } }
-          : { ...stripped, reasoning_effort: effort },
-      );
+      if (route.path !== "/v1/responses") return out({ ...stripped, reasoning_effort: effort });
+      const summary = level === "off" ? undefined : reasoningSummary(parsed);
+      return out({
+        ...stripped,
+        reasoning: summary === undefined ? { effort } : { effort, summary },
+      });
     }
     case "anthropic_adaptive":
     case "anthropic_effort":
@@ -229,6 +230,33 @@ function withoutReasoning(json: JsonObject): JsonObject {
   return Object.fromEntries(
     maxTokens === undefined ? kept : [...kept, ["max_tokens", maxTokens] as const],
   );
+}
+
+/**
+ * The reasoning summary values the OpenAI Responses API accepts (`reasoning.summary`). Chat
+ * Completions has no summary field, so only Responses bodies carry one.
+ */
+export const REASONING_SUMMARIES: ReadonlySet<string> = new Set(["auto", "concise", "detailed"]);
+const REASONING = fold("reasoning");
+const SUMMARY = fold("summary");
+
+/**
+ * The caller's `reasoning.summary` on a Responses body (KOBE-601), the one reasoning member kept: it
+ * asks for a summary of the reasoning, not for more of it. Read as Bifrost would decode it (every
+ * `reasoning` key in any case merges into one object, a later `null` clears it, the last `summary`
+ * wins), then kept only if it is one of {@link REASONING_SUMMARIES}; anything else is dropped.
+ */
+export function reasoningSummary(json: JsonObject): string | undefined {
+  let summary: unknown;
+  for (const [key, value] of Object.entries(json)) {
+    if (fold(key) !== REASONING) continue;
+    if (!isObject(value)) {
+      summary = undefined;
+      continue;
+    }
+    for (const [k, inner] of Object.entries(value)) if (fold(k) === SUMMARY) summary = inner;
+  }
+  return typeof summary === "string" && REASONING_SUMMARIES.has(summary) ? summary : undefined;
 }
 
 /** The value Bifrost would read for a folded key: the last one in the body. */
