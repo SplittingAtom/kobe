@@ -51,4 +51,18 @@ describe("loadConfig", () => {
     expect(message).not.toContain(PAIR.privatePem.split("\n")[1]);
     expect(loadConfig(base).sessionVerifyKeys.has(PAIR.signing.kid)).toBe(true);
   });
+
+  it("reads and validates the internal targets (EA4, KOBE-603)", () => {
+    expect(loadConfig(base).internalTargets).toEqual([]);
+    const c = loadConfig({
+      ...base,
+      KOBE_EGRESS_INTERNAL_TARGETS: "192.0.2.10/32, fd12:3456::/48",
+    });
+    expect(c.internalTargets).toEqual(["192.0.2.10/32", "fd12:3456::/48"]);
+    for (const bad of ["192.0.2.0/33", "nope", "169.254.169.254/32", "127.0.0.1", "0.0.0.0/0"]) {
+      expect(() => loadConfig({ ...base, KOBE_EGRESS_INTERNAL_TARGETS: bad }), bad).toThrow(
+        /KOBE_EGRESS_INTERNAL_TARGETS/,
+      );
+    }
+  });
 });

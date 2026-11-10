@@ -1,4 +1,5 @@
 import type { Logger } from "pino";
+import type { EgressDecision } from "./allowlist.js";
 import type { ProxyPolicy } from "./proxy.js";
 
 /**
@@ -14,6 +15,8 @@ export interface LiveTunnel {
   /** A site job's tunnel (KOBE-343): re-checked against the ceiling alone. */
   readonly site?: boolean;
   readonly host: string;
+  /** Connected to an internal target (EA4): closed once the host's pattern is no longer internal. */
+  readonly internal?: boolean;
   close(reason: string): void;
 }
 
@@ -72,7 +75,7 @@ export class TunnelRegistry {
     for (const tunnel of affected) {
       try {
         if (tunnel.site) {
-          if (!(await this.policy.decideSite(tunnel.host)).allowed) {
+          if (!stillAllowed(tunnel, await this.policy.decideSite(tunnel.host))) {
             tunnel.close("revoked");
             closed += 1;
           }
@@ -80,7 +83,7 @@ export class TunnelRegistry {
         }
         const member = await this.policy.isActiveMember(tunnel.teamId, tunnel.userId);
         const decision = member ? await this.policy.decide(tunnel.teamId, tunnel.host) : undefined;
-        if (!decision?.allowed) {
+        if (!decision || !stillAllowed(tunnel, decision)) {
           tunnel.close(member ? "revoked" : "inactive_member");
           closed += 1;
         }
@@ -90,4 +93,9 @@ export class TunnelRegistry {
     }
     return closed;
   }
+}
+
+/** Allowed, and still internal when the tunnel reached an internal target (EA4). */
+function stillAllowed(tunnel: LiveTunnel, decision: EgressDecision): boolean {
+  return decision.allowed && (tunnel.internal !== true || decision.internal === true);
 }

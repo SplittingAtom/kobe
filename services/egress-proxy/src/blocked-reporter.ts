@@ -25,7 +25,10 @@ export interface BlockedAttempt {
   readonly domain: string;
   readonly port: number;
   readonly reason: string;
-  /** In the ceiling but not enabled: the team admin can enable it (Request access). */
+  /**
+   * A request can fix it (EA1, EA4): not enabled (team admins), not in the ceiling or an internal
+   * address for a host name (site admins). `reason` says which; the server picks the deciders.
+   */
   readonly requestAccess: boolean;
   readonly threadHint: string | undefined;
 }

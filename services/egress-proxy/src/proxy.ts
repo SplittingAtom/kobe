@@ -36,8 +36,10 @@ import {
  * 2. allows only ports in `allowedPorts` (443) and host names (no IP literals);
  * 3. checks the host against the team's effective allowlist (enablement ∩ ceiling);
  * 4. resolves the host itself and refuses it if any address is internal (private, loopback,
- *    link-local/metadata, cluster ranges) unless explicitly allowed; connects to an address it
- *    checked (no second lookup, so DNS rebinding gains nothing);
+ *    link-local/metadata, cluster ranges) unless explicitly allowed, or (EA4) inside the install's
+ *    internal targets for a host whose matching pattern is marked internal (loopback, link-local
+ *    and metadata never); connects to an address it checked (no second lookup, so DNS rebinding
+ *    gains nothing);
  * 5. replies 200, reads the TLS ClientHello and requires its SNI to equal the CONNECT host (no SNI,
  *    another name or another protocol tears the tunnel down);
  * 6. relays bytes without decrypting them, under per-sandbox connection, bandwidth and idle limits.
@@ -402,13 +404,15 @@ export function createEgressProxy(deps: ProxyDeps): Server {
           true,
         );
       } else {
+        // EA1: a site admin can decide it (adds it to the ceiling and enables it), so ask.
         block(
           socket,
           attempt,
           "not_in_ceiling",
           403,
           `Kobe egress blocked: ${host} is not allowed on this site`,
-          `Kobe egress: ${host} is not in this site's egress ceiling; a site admin must add it first.`,
+          `Kobe egress: ${host} is not in this site's egress ceiling; a site admin must add it first (Request access).`,
+          true,
         );
       }
       return;
@@ -460,17 +464,23 @@ export function createEgressProxy(deps: ProxyDeps): Server {
         );
         return;
       }
-      if (deps.addresses.checkAll(addresses) !== "allowed") {
+      // EA4: internal targets only for a host whose matching pattern is internal.
+      const internal = decision.internal === true;
+      if (deps.addresses.checkAll(addresses, { internal }) !== "allowed") {
+        // A host name (IP literals were refused above): a site admin can mark it internal (EA4).
         block(
           socket,
           attempt,
           "forbidden_address",
           403,
           `Kobe egress blocked: ${host} resolves to an internal address`,
-          `Kobe egress: ${host} resolves to an internal or reserved address, which sandboxes may never reach.`,
+          `Kobe egress: ${host} resolves to an internal or reserved address, which sandboxes may not reach unless a site admin marks it internal (Request access).`,
+          true,
         );
         return;
       }
+      // Reached through an internal target: re-checks close it once the pattern stops being internal.
+      const internalReach = internal && deps.addresses.checkAll(addresses) !== "allowed";
       upstream = await firstReachable(
         addresses,
         target.port,
@@ -523,6 +533,7 @@ export function createEgressProxy(deps: ProxyDeps): Server {
           userId: identity.userId,
           ...(identity.site ? { site: true } : {}),
           host,
+          ...(internalReach ? { internal: true } : {}),
           close: (reason) => {
             logger.info({ team: identity.teamId, host, reason }, "egress tunnel closed by policy");
             socket.destroy();

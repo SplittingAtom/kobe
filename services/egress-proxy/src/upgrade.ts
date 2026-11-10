@@ -380,7 +380,7 @@ async function decideFor(
   res: ServerResponse,
   attempt: UpgradeAttempt,
   host: string,
-): Promise<{ pattern: string; sealed: string | undefined } | undefined> {
+): Promise<{ pattern: string; internal: boolean; sealed: string | undefined } | undefined> {
   const { deps } = ctx;
   const { identity } = attempt;
   let decision: EgressDecision;
@@ -415,7 +415,8 @@ async function decideFor(
   if (!decision.allowed) {
     const enabled = decision.reason === "not_enabled";
     ctx.finish(attempt, "blocked", decision.reason);
-    ctx.report(attempt, decision.reason, enabled);
+    // EA1: both reasons can be fixed by a request (team admins, or site admins off the ceiling).
+    ctx.report(attempt, decision.reason, true);
     if (enabled) {
       reply(
         res,
@@ -428,12 +429,12 @@ async function decideFor(
         res,
         403,
         `Kobe egress blocked: ${host} is not allowed on this site`,
-        `Kobe egress: ${host} is not in this site's egress ceiling; a site admin must add it first.`,
+        `Kobe egress: ${host} is not in this site's egress ceiling; a site admin must add it first (Request access).`,
       );
     }
     return undefined;
   }
-  return { pattern: decision.pattern, sealed };
+  return { pattern: decision.pattern, internal: decision.internal === true, sealed };
 }
 
 async function upgrade(
@@ -508,14 +509,15 @@ async function upgrade(
       );
       return;
     }
-    if (deps.addresses.checkAll(addresses) !== "allowed") {
+    // EA4: internal targets only for a host whose matching pattern is internal.
+    if (deps.addresses.checkAll(addresses, { internal: decided.internal }) !== "allowed") {
       ctx.finish(attempt, "blocked", "forbidden_address");
-      ctx.report(attempt, "forbidden_address", false);
+      ctx.report(attempt, "forbidden_address", true);
       reply(
         res,
         403,
         `Kobe egress blocked: ${host} resolves to an internal address`,
-        `Kobe egress: ${host} resolves to an internal or reserved address, which sandboxes may never reach.`,
+        `Kobe egress: ${host} resolves to an internal or reserved address, which sandboxes may not reach unless a site admin marks it internal (Request access).`,
       );
       return;
     }

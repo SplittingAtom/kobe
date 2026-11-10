@@ -677,6 +677,50 @@
             "pattern": "^[0-9a-fA-F:.]+(/[0-9]{1,3})?$"
           }
         },
+        "clusterIngress": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Same-cluster hosts (EA4, KOBE-603): internal targets for ceiling patterns a site admin marks internal, and NetworkPolicy egress to the ingress pods.",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "addresses": {
+              "type": "array",
+              "description": "Ingress load balancer address(es) as CIDRs (KOBE_EGRESS_INTERNAL_TARGETS).",
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F:.]+(/[0-9]{1,3})?$"
+              }
+            },
+            "podSelector": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Label selector of the ingress controller pods.",
+              "properties": {
+                "matchLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+                "matchExpressions": { "type": "array", "items": { "type": "object" } }
+              }
+            },
+            "namespace": {
+              "type": "string",
+              "description": "The ingress controller's namespace (its kubernetes.io/metadata.name label)."
+            },
+            "ports": {
+              "type": "array",
+              "description": "Ports the ingress pods listen on after DNAT (e.g. 8443), not the 443 sandboxes connect to.",
+              "items": { "type": "integer", "minimum": 1, "maximum": 65535 }
+            }
+          },
+          "if": { "properties": { "enabled": { "const": true } }, "required": ["enabled"] },
+          "then": {
+            "required": ["addresses", "namespace", "podSelector", "ports"],
+            "properties": {
+              "addresses": { "minItems": 1 },
+              "namespace": { "minLength": 1 },
+              "podSelector": { "minProperties": 1 },
+              "ports": { "minItems": 1 }
+            }
+          }
+        },
         "deniedCidrs": {
           "type": "array",
           "items": {

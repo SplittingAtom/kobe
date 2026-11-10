@@ -95,6 +95,35 @@ spec:
           port: {{ int . }}
         {{- end }}
     {{- end }}
+    {{- with $e.clusterIngress }}
+    {{- if .enabled }}
+    # Same-cluster hosts (EA4): the ingress load balancer address(es) on the allowed ports (a rule
+    # of their own, so the internet rule's private-range exceptions do not cover them), and the
+    # ingress pods they are DNATed to, on the pods' ports. The proxy itself lets only hosts of
+    # internal patterns reach them.
+    - to:
+        {{- range .addresses }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        {{- range $e.allowedPorts }}
+        - protocol: TCP
+          port: {{ int . }}
+        {{- end }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace | quote }}
+          podSelector:
+            {{- toYaml .podSelector | nindent 12 }}
+      ports:
+        {{- range .ports }}
+        - protocol: TCP
+          port: {{ int . }}
+        {{- end }}
+    {{- end }}
+    {{- end }}
     {{- with $e.networkPolicy.extraEgress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}

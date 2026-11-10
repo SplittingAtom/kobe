@@ -2,7 +2,6 @@ import {
   createDb,
   headerBox,
   isActiveTeamMember,
-  loadEgressCeiling,
   loadTeamEgress,
   loadTeamEgressHeaders,
   openHeaders,
@@ -12,6 +11,7 @@ import { AddressPolicy } from "./address-policy.js";
 import { AllowlistCache } from "./allowlist.js";
 import { egressTokenVerifier, siteTokenVerifier } from "./auth.js";
 import { BlockedReporter, dbBlockedSink } from "./blocked-reporter.js";
+import { loadEgressCeilingWithInternal } from "./ceiling-store.js";
 import { ChangeListener } from "./change-listener.js";
 import { loadConfig } from "./config.js";
 import { ConnectionAudit, dbAuditWriter } from "./connection-audit.js";
@@ -32,7 +32,7 @@ const db = database.db;
 
 const cache = new AllowlistCache(
   {
-    loadCeiling: () => loadEgressCeiling(db),
+    loadCeiling: () => loadEgressCeilingWithInternal(db),
     loadTeam: (teamId) => loadTeamEgress(db, teamId),
     isActiveMember: (teamId, userId) => isActiveTeamMember(db, teamId, userId),
     loadTeamHeaders: (teamId) => loadTeamEgressHeaders(db, teamId),
@@ -74,6 +74,7 @@ const server = createEgressProxy({
   resolve: dnsResolver({ timeoutMs: config.dnsTimeoutMs }),
   addresses: new AddressPolicy({
     allowedInternal: config.allowedInternalCidrs,
+    internalTargets: config.internalTargets,
     extraDenied: config.deniedCidrs,
   }),
   connections: new ConnectionLimits({
@@ -113,7 +114,8 @@ server.listen(config.port, () => {
     {
       port: config.port,
       allowedPorts: config.allowedPorts,
-      internalTargets: config.allowedInternalCidrs.length,
+      allowedInternalCidrs: config.allowedInternalCidrs.length,
+      internalTargets: config.internalTargets.length,
       headerInjection: box !== undefined,
     },
     "egress proxy listening",
