@@ -26,6 +26,7 @@ import { useShellPreferences } from "../../lib/shell/preferences";
 import { useArtifactPanel } from "../chat/artifact-state";
 import { useChatSession, useKobeExtras } from "../chat/kobe-runtime";
 import styles from "../chat/chat.module.css";
+import { ProposalInlineReview } from "./proposal-inline-review";
 
 export const EXPIRED_NOTE =
   "This proposal is no longer available: proposals are kept 7 days after their run.";
@@ -58,6 +59,27 @@ function useProposal(
     };
   }, [session, threadId, toolCallId, live, done]);
   return live === undefined ? listed : { status: "found", proposal: proposalFromEvent(live) };
+}
+
+/** A proposal the card reviews itself: a project file (Accept commits) or a new file. */
+const isInline = (p: ProposalView | undefined): boolean =>
+  p !== undefined && (p.projectId !== undefined || p.isNew === true);
+
+/** The name of the project a proposal is for, once the member's project list has it. */
+function useProjectName(projectId: string | undefined): string | undefined {
+  const session = useChatSession();
+  const [name, setName] = useState<string>();
+  useEffect(() => {
+    if (projectId === undefined) return;
+    let current = true;
+    void session.projects().then((res) => {
+      if (current && res.ok) setName(res.data.find((p) => p.id === projectId)?.name);
+    });
+    return () => {
+      current = false;
+    };
+  }, [session, projectId]);
+  return name;
 }
 
 const OUTCOME_LABEL = { committed: "Committed", discarded: "Discarded" } as const;
@@ -152,7 +174,16 @@ export function FileEditCard({
   const recorded = useProposal(toolCallId, live, done && !failed);
   const autoOpen = useAutoOpenEdits();
   const found = recorded.status === "found" ? recorded.proposal : undefined;
-  const held = useAutoReview(toolCallId, found, autoOpen.on && !readOnly, autoOpen.known);
+  const inline = isInline(found);
+  const [reviewing, setReviewing] = useState(false);
+  const projectName = useProjectName(found?.projectId);
+  const threadId = useKobeExtras()?.state.threadId ?? undefined;
+  const held = useAutoReview(
+    toolCallId,
+    inline ? undefined : found,
+    autoOpen.on && !readOnly,
+    autoOpen.known,
+  );
   const reviews = session.fileReviews;
   const outcome = useSyncExternalStore(
     reviews.subscribe,
@@ -167,41 +198,69 @@ export function FileEditCard({
   }
   const { proposal } = recorded;
   const review = () => {
+    if (inline) return setReviewing(true);
     reviews.start(proposal);
     panel?.openFile(proposal.path);
   };
+  const inProject = proposal.projectId !== undefined;
+  const where = projectName === undefined ? "this project" : projectName;
+  const verb = proposal.isNew ? "Proposed new file" : "Proposed edit to";
   return (
-    <div className={`${styles.fileCard} kobe-panel`} data-kobe-file-edit={proposal.path}>
-      <FilePenIcon aria-hidden className="size-4" />
-      <div className={styles.fileInfo}>
-        <span className={styles.fileName} title={proposal.path}>
-          <span className="text-status-failed font-semibold">Proposed edit:</span>{" "}
-          {fileName(proposal.path)}
-        </span>
-        <span className={styles.fileMeta}>{proposal.summary}</span>
-        <span className={styles.fileMeta}>
-          {outcome === undefined
-            ? "Nothing is changed until you commit it."
-            : OUTCOME_LABEL[outcome]}
-        </span>
-        {held && outcome === undefined && (
-          <span className={styles.fileMeta} role="status">
-            {AUTO_OPEN_HELD_NOTE}
+    <>
+      <div className={`${styles.fileCard} kobe-panel`} data-kobe-file-edit={proposal.path}>
+        <FilePenIcon aria-hidden className="size-4" />
+        <div className={styles.fileInfo}>
+          <span className={styles.fileName} title={proposal.path}>
+            {inProject || proposal.isNew ? (
+              <>
+                <span className="text-status-failed font-semibold">{verb}</span>{" "}
+                {fileName(proposal.path)}
+                {inProject ? ` in ${where}` : ""}
+              </>
+            ) : (
+              <>
+                <span className="text-status-failed font-semibold">Proposed edit:</span>{" "}
+                {fileName(proposal.path)}
+              </>
+            )}
           </span>
+          <span className={styles.fileMeta}>{proposal.summary}</span>
+          <span className={styles.fileMeta}>
+            {outcome === undefined
+              ? "Nothing is changed until you commit it."
+              : OUTCOME_LABEL[outcome]}
+          </span>
+          {held && outcome === undefined && (
+            <span className={styles.fileMeta} role="status">
+              {AUTO_OPEN_HELD_NOTE}
+            </span>
+          )}
+          {!readOnly && panel && <AutoOpenSwitch checked={autoOpen.on} onChange={autoOpen.set} />}
+        </div>
+        {!readOnly && (panel || inline) && outcome !== "committed" && !reviewing && (
+          <button
+            type="button"
+            className="bg-confirm text-confirm-fg hover:bg-confirm-hover focus-visible:ring-ring rounded-md px-2 py-0.5 text-xs font-medium focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
+            aria-label={`Review the proposed edit to ${fileName(proposal.path)}`}
+            onClick={review}
+          >
+            Review
+          </button>
         )}
-        {!readOnly && panel && <AutoOpenSwitch checked={autoOpen.on} onChange={autoOpen.set} />}
       </div>
-      {!readOnly && panel && outcome !== "committed" && (
-        <button
-          type="button"
-          className="bg-confirm text-confirm-fg hover:bg-confirm-hover focus-visible:ring-ring rounded-md px-2 py-0.5 text-xs font-medium focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:outline-none"
-          aria-label={`Review the proposed edit to ${fileName(proposal.path)}`}
-          onClick={review}
-        >
-          Review
-        </button>
+      {inline && !readOnly && reviewing && (
+        <ProposalInlineReview
+          proposal={proposal}
+          threadId={threadId}
+          projectName={projectName}
+          onDone={(done) => {
+            reviews.record(toolCallId, done);
+            if (done === "discarded") setReviewing(false);
+          }}
+          onClose={() => setReviewing(false)}
+        />
       )}
-    </div>
+    </>
   );
 }
 

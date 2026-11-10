@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { projectPermissions } from "@kobe/protocol";
 import { saveBytes } from "../../lib/files/save";
 import { worded, type Project, type ProjectInput } from "../../lib/projects/api";
@@ -66,6 +66,11 @@ function ProjectView({
   const navigate = useNavigate();
   const [confirm, confirmDialog] = useConfirm();
   const can = projectPermissions(access.role, project.myRole ?? undefined);
+  // `#history` (the proposal card's "Open History" link) opens the History tab.
+  const [tab, setTab] = useState("overview");
+  useEffect(() => {
+    if (window.location.hash === "#history") setTab("history");
+  }, []);
   const commits = useCommitsApi();
   const threads = useResource(() => api.threads(project.id));
   const checkout = useResource(() => commits.checkoutState(project.id));
@@ -188,7 +193,7 @@ function ProjectView({
         </p>
       )}
       <MutationStatus error={mutation.error} notice={mutation.notice} />
-      <Tabs defaultValue="overview" className="mt-2">
+      <Tabs value={tab} onValueChange={setTab} className="mt-2">
         <TabsList label="Project">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>

@@ -77,16 +77,45 @@ export interface ProposalView {
   readonly baseSha256: string;
   readonly content: string;
   readonly summary: string;
+  /** The server's id of the proposal, for Accept on a project file (KOBE-591). */
+  readonly proposalId?: string | undefined;
+  /** The conversation's project this file belongs to; absent for the member's own files. */
+  readonly projectId?: string | undefined;
+  /** The project's head when proposed (0 before its first commit). */
+  readonly baseCommitSeq?: number | undefined;
+  /** A proposed new file: it has no base (`baseSha256` is ""). */
+  readonly isNew?: boolean | undefined;
+}
+
+/** Fields the server records only for project files and new files, in web casing. */
+export function proposalExtras(raw: {
+  readonly proposalId?: string | undefined;
+  readonly projectId?: string | undefined;
+  readonly baseCommitSeq?: number | undefined;
+  readonly baseSha256?: string | undefined;
+}): Pick<ProposalView, "proposalId" | "projectId" | "baseCommitSeq" | "isNew"> {
+  return {
+    ...(raw.proposalId === undefined ? {} : { proposalId: raw.proposalId }),
+    ...(raw.projectId === undefined ? {} : { projectId: raw.projectId }),
+    ...(raw.baseCommitSeq === undefined ? {} : { baseCommitSeq: raw.baseCommitSeq }),
+    ...(raw.baseSha256 === undefined ? { isNew: true } : {}),
+  };
 }
 
 export function proposalFromEvent(payload: FileEditProposedPayload): ProposalView {
   return {
     toolCallId: payload.tool_call_id,
     path: payload.path,
-    // A proposed new file has no base (KOBE-591); its card arrives with KOBE-592.
+    // A proposed new file has no base (KOBE-591): "" here, and `isNew` says so.
     baseSha256: payload.base_sha256 ?? "",
     content: payload.content,
     summary: payload.summary,
+    ...proposalExtras({
+      proposalId: payload.proposal_id,
+      projectId: payload.project_id,
+      baseCommitSeq: payload.base_commit_seq,
+      baseSha256: payload.base_sha256,
+    }),
   };
 }
 
@@ -108,6 +137,12 @@ export class FileReviewStore extends Snapshots<ProposalView> {
   start(proposal: ProposalView): void {
     if (this.map.get(proposal.path) === proposal) return;
     this.replace(new Map(this.map).set(proposal.path, proposal));
+  }
+
+  /** A card that reviews inline ends a proposal without the editor (a project file, a new file). */
+  record(toolCallId: string, outcome: ReviewOutcome): void {
+    this.#outcomes = new Map(this.#outcomes).set(toolCallId, outcome);
+    this.replace(new Map(this.map));
   }
 
   finish(path: string, outcome: ReviewOutcome): void {

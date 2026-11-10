@@ -11,6 +11,8 @@ export interface ApiError {
   readonly status: number;
   readonly code: string;
   readonly message: string;
+  /** A 409 `proposal_not_allowed`'s machine reason (KOBE-592), when the body carries one. */
+  readonly reason?: string;
 }
 
 export type ApiResult<T> =
@@ -108,7 +110,11 @@ async function readJson(res: Response): Promise<unknown> {
 function toError(status: number, body: unknown): ApiError {
   const base = fallback(status);
   if (body === null || typeof body !== "object") return base;
-  const { code, message } = body as { code?: unknown; message?: unknown };
+  const { code, message, reason } = body as {
+    code?: unknown;
+    message?: unknown;
+    reason?: unknown;
+  };
   const serverCode = typeof code === "string" && code.length <= 64 ? code : undefined;
   // 5xx bodies may carry internals: show them only for codes meant for people.
   if (status >= 500 && !(serverCode && SHOWN_5XX_CODES.has(serverCode))) return base;
@@ -119,6 +125,7 @@ function toError(status: number, body: unknown): ApiError {
       typeof message === "string" && message.trim() !== ""
         ? message.slice(0, MAX_MESSAGE)
         : base.message,
+    ...(typeof reason === "string" && reason.length <= 64 ? { reason } : {}),
   };
 }
 
