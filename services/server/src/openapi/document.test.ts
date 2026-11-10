@@ -19,6 +19,7 @@ import { threadCompactRoutes } from "../routes/thread-compact.js";
 import { threadContextRoutes } from "../routes/thread-context.js";
 import { threadRoutes } from "../routes/threads.js";
 import { threadFolderRoutes } from "../routes/thread-folders.js";
+import { threadFileLinkRoutes, workspaceFileThreadRoutes } from "../routes/thread-file-links.js";
 import { threadUsageRoutes } from "../routes/usage.js";
 import { Hono } from "hono";
 import {
@@ -89,7 +90,14 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
         ...mountedOperations("/v1/threads", threadContextRoutes(fakeDeps)),
         ...mountedOperations("/v1/threads", threadUsageRoutes(fakeDeps)),
         ...mountedOperations("/v1/threads", threadFeedbackRoutes(fakeDeps)),
+        ...mountedOperations("/v1/threads", threadFileLinkRoutes(fakeDeps)),
       ].sort(),
+    );
+  });
+
+  it("describes exactly the workspace file-threads route (KOBE-611)", () => {
+    expect(documented("/v1/workspace/file-threads")).toEqual(
+      mountedOperations("/v1/workspace", workspaceFileThreadRoutes(fakeDeps)),
     );
   });
 

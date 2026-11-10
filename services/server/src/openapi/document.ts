@@ -18,6 +18,7 @@ import { projectCommitsOpenApiPaths, projectCommitsOpenApiSchemas } from "./proj
 import { runsOpenApiPaths, runsOpenApiSchemas } from "./runs.js";
 import { threadsOpenApiPaths, threadsOpenApiSchemas } from "./threads.js";
 import { threadFoldersOpenApiPaths, threadFoldersOpenApiSchemas } from "./thread-folders.js";
+import { threadFileLinksOpenApiPaths, threadFileLinksOpenApiSchemas } from "./thread-file-links.js";
 import { usageOpenApiPaths, usageOpenApiSchemas } from "./usage.js";
 import {
   teamDefaultAgentOpenApiPaths,
@@ -58,6 +59,7 @@ export function openApiDocument(): Record<string, unknown> {
       ...projectCommitsOpenApiPaths(),
       ...teamDefaultAgentOpenApiPaths(),
       ...egressAccessOpenApiPaths(),
+      ...threadFileLinksOpenApiPaths(),
     },
     components: {
       schemas: {
@@ -79,6 +81,7 @@ export function openApiDocument(): Record<string, unknown> {
         ...projectCommitsOpenApiSchemas(),
         ...teamDefaultAgentOpenApiSchemas(),
         ...egressAccessOpenApiSchemas(),
+        ...threadFileLinksOpenApiSchemas(),
       },
       securitySchemes: {
         session: { type: "apiKey", in: "cookie", name: "better-auth.session_token" },
