@@ -544,7 +544,7 @@
     {
       "name": "npm",
       "versions": [
-        "12.2.1"
+        "12.2.2"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -919,7 +919,7 @@
     {
       "name": "pypdf",
       "versions": [
-        "6.19.0"
+        "6.21.4"
       ],
       "ecosystem": "pypi",
       "locations": [
@@ -1259,7 +1259,7 @@
     {
       "name": "@npmcli/promise-spawn",
       "versions": [
-        "10.0.0"
+        "10.0.1"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1319,7 +1319,7 @@
     {
       "name": "bin-links",
       "versions": [
-        "7.0.0"
+        "7.0.1"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1460,7 +1460,7 @@
     {
       "name": "libnpmexec",
       "versions": [
-        "11.0.4"
+        "11.0.5"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1690,7 +1690,7 @@
     {
       "name": "pacote",
       "versions": [
-        "22.0.0"
+        "22.0.1"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -1784,7 +1784,16 @@
       ],
       "ecosystem": "npm",
       "locations": [
-        "/opt/pi",
+        "/opt/pi"
+      ]
+    },
+    {
+      "name": "semver",
+      "versions": [
+        "7.8.6"
+      ],
+      "ecosystem": "npm",
+      "locations": [
         "/usr/local/lib"
       ]
     },
@@ -2359,7 +2368,7 @@
     {
       "name": "ip-address",
       "versions": [
-        "10.7.2"
+        "10.7.5"
       ],
       "ecosystem": "npm",
       "locations": [
@@ -2831,7 +2840,7 @@
     {
       "name": "undici",
       "versions": [
-        "6.29.0"
+        "6.29.1"
       ],
       "ecosystem": "npm",
       "locations": [

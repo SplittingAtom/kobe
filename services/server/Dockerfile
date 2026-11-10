@@ -19,6 +19,14 @@ RUN pnpm install --offline --frozen-lockfile \
 
 FROM ${NODE_IMAGE}
 ENV NODE_ENV=production
+# Debian security fixes for the base image's own packages (apt, ...) before the pinned digest moves,
+# so a fixed CVE does not fail publish's Trivy gate; npm, npx and corepack go too: the app runs with
+# node only, and the bundled npm carried fixable HIGHs (undici, brace-expansion) (KOBE-539).
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && rm -rf /var/lib/apt/lists/* \
+ && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 WORKDIR /app
 COPY --from=build /out ./
 # Kobe's license, NOTICE and third-party inventory (Apache-2.0 section 4, KOBE-375).

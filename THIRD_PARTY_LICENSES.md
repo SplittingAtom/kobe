@@ -23,7 +23,7 @@ Nothing is pending: every component outside the allowed family has Chris's appro
 
 Every package in pnpm-lock.yaml (production and development, all platforms). "linked, bundled" packages are in the production dependencies of a deployable and ship in its image (the services via `pnpm deploy --prod`, web via the Next.js standalone output, kobe-sandbox-agent in the sandbox image); "dev-only" packages build, lint and test Kobe and are never shipped. Checked by `pnpm license:check` (CI `checks`).
 
-951 packages, 638 of them shipped in an image.
+929 packages, 637 of them shipped in an image.
 
 | Component | Version | License (SPDX) | How used | Where | License text |
 | --- | --- | --- | --- | --- | --- |
@@ -33,40 +33,23 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @assistant-ui/react | 0.15.26 | MIT | linked, bundled | web | [license](https://unpkg.com/@assistant-ui/react@0.15.26/LICENSE) |
 | @assistant-ui/store | 0.3.18 | MIT | linked, bundled | web | [license](https://unpkg.com/@assistant-ui/store@0.3.18/LICENSE) |
 | @assistant-ui/tap | 0.9.22 | MIT | linked, bundled | web | [license](https://unpkg.com/@assistant-ui/tap@0.9.22/LICENSE) |
-| @aws-sdk/checksums | 3.1001.2 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/checksums@3.1001.2/LICENSE) |
 | @aws-sdk/checksums | 3.1002.3 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/checksums@3.1002.3/LICENSE) |
-| @aws-sdk/client-s3 | 3.1149.0 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/client-s3@3.1149.0/LICENSE) |
 | @aws-sdk/client-s3 | 3.1164.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/client-s3@3.1164.0/LICENSE) |
-| @aws-sdk/core | 3.978.2 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/core@3.978.2/LICENSE) |
 | @aws-sdk/core | 3.980.1 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/core@3.980.1/LICENSE) |
-| @aws-sdk/credential-provider-env | 3.972.73 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/credential-provider-env@3.972.73/LICENSE) |
 | @aws-sdk/credential-provider-env | 3.972.82 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-env@3.972.82/LICENSE) |
-| @aws-sdk/credential-provider-http | 3.972.75 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-http/v/3.972.75) |
 | @aws-sdk/credential-provider-http | 3.972.84 | Apache-2.0 | linked, bundled | server | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-http/v/3.972.84) |
-| @aws-sdk/credential-provider-ini | 3.973.18 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/credential-provider-ini@3.973.18/LICENSE) |
 | @aws-sdk/credential-provider-ini | 3.973.27 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-ini@3.973.27/LICENSE) |
-| @aws-sdk/credential-provider-login | 3.972.80 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-login/v/3.972.80) |
 | @aws-sdk/credential-provider-login | 3.972.89 | Apache-2.0 | linked, bundled | server | [license](https://www.npmjs.com/package/@aws-sdk/credential-provider-login/v/3.972.89) |
-| @aws-sdk/credential-provider-node | 3.972.85 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/credential-provider-node@3.972.85/LICENSE) |
 | @aws-sdk/credential-provider-node | 3.972.94 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-node@3.972.94/LICENSE) |
-| @aws-sdk/credential-provider-process | 3.972.73 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/credential-provider-process@3.972.73/LICENSE) |
 | @aws-sdk/credential-provider-process | 3.972.82 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-process@3.972.82/LICENSE) |
-| @aws-sdk/credential-provider-sso | 3.973.17 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/credential-provider-sso@3.973.17/LICENSE) |
 | @aws-sdk/credential-provider-sso | 3.973.26 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-sso@3.973.26/LICENSE) |
-| @aws-sdk/credential-provider-web-identity | 3.972.79 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/credential-provider-web-identity@3.972.79/LICENSE) |
 | @aws-sdk/credential-provider-web-identity | 3.972.88 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/credential-provider-web-identity@3.972.88/LICENSE) |
 | @aws-sdk/lib-storage | 3.1164.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/lib-storage@3.1164.0/LICENSE) |
-| @aws-sdk/middleware-sdk-s3 | 3.972.78 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/middleware-sdk-s3@3.972.78/LICENSE) |
 | @aws-sdk/middleware-sdk-s3 | 3.972.87 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/middleware-sdk-s3@3.972.87/LICENSE) |
-| @aws-sdk/nested-clients | 3.997.47 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://www.npmjs.com/package/@aws-sdk/nested-clients/v/3.997.47) |
 | @aws-sdk/nested-clients | 3.998.1 | Apache-2.0 | linked, bundled | server | [license](https://www.npmjs.com/package/@aws-sdk/nested-clients/v/3.998.1) |
-| @aws-sdk/signature-v4-multi-region | 3.996.48 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/signature-v4-multi-region@3.996.48/LICENSE) |
 | @aws-sdk/signature-v4-multi-region | 3.996.51 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/signature-v4-multi-region@3.996.51/LICENSE) |
-| @aws-sdk/token-providers | 3.1149.0 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/token-providers@3.1149.0/LICENSE) |
 | @aws-sdk/token-providers | 3.1164.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/token-providers@3.1164.0/LICENSE) |
-| @aws-sdk/types | 3.974.6 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/types@3.974.6/LICENSE) |
 | @aws-sdk/types | 3.975.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/types@3.975.0/LICENSE) |
-| @aws-sdk/xml-builder | 3.972.41 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@aws-sdk/xml-builder@3.972.41/LICENSE) |
 | @aws-sdk/xml-builder | 3.972.42 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws-sdk/xml-builder@3.972.42/LICENSE) |
 | @aws/lambda-invoke-store | 0.3.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@aws/lambda-invoke-store@0.3.0/LICENSE) |
 | @babel/code-frame | 7.29.7 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/@babel/code-frame@7.29.7/LICENSE) |
@@ -369,14 +352,10 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | @simplewebauthn/browser | 13.3.0 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@simplewebauthn/browser@13.3.0/LICENSE.md) |
 | @simplewebauthn/server | 13.3.3 | MIT | linked, bundled | server, web | [license](https://unpkg.com/@simplewebauthn/server@13.3.3/LICENSE.md) |
 | @simplewebauthn/server | 14.0.3 | MIT | linked, bundled | server | [license](https://unpkg.com/@simplewebauthn/server@14.0.3/LICENSE.md) |
-| @smithy/core | 3.35.1 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/core@3.35.1/LICENSE) |
-| @smithy/core | 3.35.2 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@smithy/core@3.35.2/LICENSE) |
 | @smithy/core | 3.39.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/core@3.39.0/LICENSE) |
 | @smithy/credential-provider-imds | 4.5.2 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/credential-provider-imds@4.5.2/LICENSE) |
 | @smithy/fetch-http-handler | 5.8.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/fetch-http-handler@5.8.0/LICENSE) |
-| @smithy/node-http-handler | 4.12.1 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@smithy/node-http-handler@4.12.1/LICENSE) |
 | @smithy/node-http-handler | 4.14.2 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/node-http-handler@4.14.2/LICENSE) |
-| @smithy/signature-v4 | 5.7.4 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/@smithy/signature-v4@5.7.4/LICENSE) |
 | @smithy/signature-v4 | 5.7.5 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/signature-v4@5.7.5/LICENSE) |
 | @smithy/types | 4.19.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/types@4.19.0/LICENSE) |
 | @smithy/types | 4.20.0 | Apache-2.0 | linked, bundled | server | [license](https://unpkg.com/@smithy/types@4.20.0/LICENSE) |
@@ -834,7 +813,6 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | points-on-path | 0.2.1 | MIT | linked, bundled | web | [license](https://unpkg.com/points-on-path@0.2.1/LICENSE) |
 | possible-typed-array-names | 1.1.0 | MIT | linked, bundled | server | [license](https://unpkg.com/possible-typed-array-names@1.1.0/LICENSE) |
 | postcss | 8.5.23 | MIT | linked, bundled | web | [license](https://unpkg.com/postcss@8.5.23/LICENSE) |
-| postcss | 8.5.29 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/postcss@8.5.29/LICENSE) |
 | postcss | 8.5.32 | MIT | linked, bundled | web | [license](https://unpkg.com/postcss@8.5.32/LICENSE) |
 | postgres-array | 2.0.0 | MIT | linked, bundled | egress-proxy, model-gateway, server | [license](https://unpkg.com/postgres-array@2.0.0/license) |
 | postgres-bytea | 1.0.1 | MIT | linked, bundled | egress-proxy, model-gateway, server | [license](https://unpkg.com/postgres-bytea@1.0.1/license) |
@@ -945,7 +923,7 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | typescript | 6.0.3 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/typescript@6.0.3/LICENSE.txt) |
 | undici-types | 7.24.6 | MIT | dev-only | build, lint and test tooling | [license](https://unpkg.com/undici-types@7.24.6/LICENSE) |
 | undici-types | 8.9.0 | MIT | linked, bundled | server | [license](https://unpkg.com/undici-types@8.9.0/LICENSE) |
-| undici | 8.11.2 | MIT | linked, bundled | mcp-proxy, server | [license](https://unpkg.com/undici@8.11.2/LICENSE) |
+| undici | 8.12.4 | MIT | linked, bundled | mcp-proxy, server | [license](https://unpkg.com/undici@8.12.4/LICENSE) |
 | unified | 11.0.5 | MIT | linked, bundled | web | [license](https://unpkg.com/unified@11.0.5/license) |
 | unist-util-is | 6.0.1 | MIT | linked, bundled | web | [license](https://unpkg.com/unist-util-is@6.0.1/license) |
 | unist-util-position | 5.0.0 | MIT | linked, bundled | web | [license](https://unpkg.com/unist-util-position@5.0.0/license) |
@@ -989,7 +967,7 @@ Documented exceptions (`tools/license-check/license-exceptions.json`):
 
 What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sandbox`): the Python data stack (`images/sandbox/requirements.txt`), Pi and its dependencies (`images/sandbox/pi/package-lock.json`), kobe-sandbox-agent's production dependencies and the npm CLI. The committed report is `images/sandbox/third-party-licenses.json`; CI `sandbox-image` compares it with the built image and runs the policy check on it.
 
-310 packages, 310 of them shipped in an image.
+311 packages, 311 of them shipped in an image.
 
 | Component | Version | License (SPDX) | How used | Where | License text |
 | --- | --- | --- | --- | --- | --- |
@@ -1037,7 +1015,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | @npmcli/name-from-folder | 5.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@npmcli/name-from-folder/v/5.0.0) |
 | @npmcli/node-gyp | 6.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@npmcli/node-gyp/v/6.0.0) |
 | @npmcli/package-json | 8.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@npmcli/package-json/v/8.0.0) |
-| @npmcli/promise-spawn | 10.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@npmcli/promise-spawn/v/10.0.0) |
+| @npmcli/promise-spawn | 10.0.1 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@npmcli/promise-spawn/v/10.0.1) |
 | @npmcli/query | 5.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@npmcli/query/v/5.0.0) |
 | @npmcli/redact | 5.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@npmcli/redact/v/5.0.0) |
 | @npmcli/run-script | 11.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/@npmcli/run-script/v/11.0.0) |
@@ -1079,7 +1057,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | balanced-match | 4.0.4 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi), npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/balanced-match/v/4.0.4) |
 | base64-js | 1.5.1 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/base64-js/v/1.5.1) |
 | bignumber.js | 9.3.1 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/bignumber.js/v/9.3.1) |
-| bin-links | 7.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/bin-links/v/7.0.0) |
+| bin-links | 7.0.1 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/bin-links/v/7.0.1) |
 | binary-extensions | 3.1.0 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/binary-extensions/v/3.1.0) |
 | bowser | 2.15.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/bowser/v/2.15.0) |
 | brace-expansion | 5.0.12 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi), npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/brace-expansion/v/5.0.12) |
@@ -1136,7 +1114,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | ignore | 7.0.8 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/ignore/v/7.0.8) |
 | ini | 7.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/ini/v/7.0.0) |
 | init-package-json | 9.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/init-package-json/v/9.0.0) |
-| ip-address | 10.7.2 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/ip-address/v/10.7.2) |
+| ip-address | 10.7.5 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/ip-address/v/10.7.5) |
 | ipykernel | 7.4.0 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/ipykernel/7.4.0/) |
 | ipython_pygments_lexers | 1.1.1 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/ipython_pygments_lexers/1.1.1/) |
 | ipython | 9.17.1 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/ipython/9.17.1/) |
@@ -1161,7 +1139,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | kiwisolver | 1.5.1 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/kiwisolver/1.5.1/) |
 | libnpmaccess | 11.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmaccess/v/11.0.0) |
 | libnpmdiff | 9.0.4 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmdiff/v/9.0.4) |
-| libnpmexec | 11.0.4 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmexec/v/11.0.4) |
+| libnpmexec | 11.0.5 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmexec/v/11.0.5) |
 | libnpmfund | 8.0.4 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmfund/v/8.0.4) |
 | libnpmorg | 9.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmorg/v/9.0.0) |
 | libnpmpack | 10.0.4 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/libnpmpack/v/10.0.4) |
@@ -1207,15 +1185,15 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | npm-profile | 13.0.1 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/npm-profile/v/13.0.1) |
 | npm-registry-fetch | 20.0.1 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/npm-registry-fetch/v/20.0.1) |
 | npm-user-validate | 5.0.0 | BSD-2-Clause | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/npm-user-validate/v/5.0.0) |
-| npm | 12.2.1 | Artistic-2.0 (exception) | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/npm/v/12.2.1) |
-| numpy | 2.5.3 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/numpy/2.5.3/) |
+| npm | 12.2.2 | Artistic-2.0 (exception) | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/npm/v/12.2.2) |
+| numpy | 2.5.4 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/numpy/2.5.4/) |
 | openai | 7.19.0 | Apache-2.0 | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/openai/v/7.19.0) |
 | openpyxl | 3.1.5 | MIT | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/openpyxl/3.1.5/) |
 | p-map | 7.0.5 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/p-map/v/7.0.5) |
 | p-retry | 4.6.2 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/p-retry/v/4.6.2) |
 | packaging | 26.3 | Apache-2.0 OR BSD-2-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/packaging/26.3/) |
-| pacote | 22.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/pacote/v/22.0.0) |
-| pandas | 3.0.6 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/pandas/3.0.6/) |
+| pacote | 22.0.1 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/pacote/v/22.0.1) |
+| pandas | 3.1.0 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/pandas/3.1.0/) |
 | parse-conflict-json | 6.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/parse-conflict-json/v/6.0.0) |
 | parso | 0.8.7 | MIT | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/parso/0.8.7/) |
 | partial-json | 0.1.7 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/partial-json/v/0.1.7) |
@@ -1243,7 +1221,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | pyarrow | 25.0.1 | Apache-2.0 | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/pyarrow/25.0.1/) |
 | pygments | 2.21.0 | BSD-2-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/pygments/2.21.0/) |
 | pyparsing | 3.3.3 | MIT | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/pyparsing/3.3.3/) |
-| pypdf | 6.19.0 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/pypdf/6.19.0/) |
+| pypdf | 6.21.4 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/pypdf/6.21.4/) |
 | python-dateutil | 2.9.0.post0 | Apache-2.0 OR BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/python-dateutil/2.9.0.post0/) |
 | python-docx | 1.2.0 | MIT | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/python-docx/1.2.0/) |
 | pyzmq | 27.2.0 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/pyzmq/27.2.0/) |
@@ -1252,13 +1230,14 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | read-cmd-shim | 7.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/read-cmd-shim/v/7.0.0) |
 | read | 6.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/read/v/6.0.0) |
 | referencing | 0.37.0 | MIT | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/referencing/0.37.0/) |
-| reportlab | 5.0.1 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/reportlab/5.0.1/) |
+| reportlab | 5.1.0 | BSD-3-Clause | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/reportlab/5.1.0/) |
 | retry | 0.12.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/retry/v/0.12.0) |
 | retry | 0.13.1 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/retry/v/0.13.1) |
 | rpds-py | 2026.9.1 | MIT | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/rpds-py/2026.9.1/) |
 | safe-buffer | 5.2.1 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/safe-buffer/v/5.2.1) |
 | safer-buffer | 2.1.2 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/safer-buffer/v/2.1.2) |
-| semver | 7.8.5 | ISC | bundled (npm package) | sandbox: Pi (/opt/pi), npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/semver/v/7.8.5) |
+| semver | 7.8.5 | ISC | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/semver/v/7.8.5) |
+| semver | 7.8.6 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/semver/v/7.8.6) |
 | shebang-command | 2.0.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/shebang-command/v/2.0.0) |
 | shebang-regex | 3.0.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/shebang-regex/v/3.0.0) |
 | signal-exit | 3.0.7 | ISC | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/signal-exit/v/3.0.7) |
@@ -1288,7 +1267,7 @@ What `images/sandbox/collect-licenses.sh` finds in the sandbox image (`kobe-sand
 | typebox | 1.3.27 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/typebox/v/1.3.27) |
 | typing_extensions | 4.16.0 | PSF-2.0 (exception) | bundled (Python package) | sandbox: Python site-packages | [license](https://pypi.org/project/typing_extensions/4.16.0/) |
 | undici-types | 8.9.0 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/undici-types/v/8.9.0) |
-| undici | 6.29.0 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/undici/v/6.29.0) |
+| undici | 6.29.1 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/undici/v/6.29.1) |
 | undici | 8.12.2 | MIT | bundled (npm package) | sandbox: Pi (/opt/pi) | [license](https://www.npmjs.com/package/undici/v/8.12.2) |
 | util-deprecate | 1.0.2 | MIT | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/util-deprecate/v/1.0.2) |
 | validate-npm-package-name | 8.0.0 | ISC | bundled (npm package) | sandbox: npm CLI (/usr/local/lib/node_modules) | [license](https://www.npmjs.com/package/validate-npm-package-name/v/8.0.0) |
@@ -1308,7 +1287,7 @@ Documented exceptions (`images/sandbox/license-exceptions.json`):
 
 - `asttokens` 3.0.2 (Apache 2.0): Apache-2.0 declared with a non-SPDX label (the package's own LICENSE is Apache-2.0); a dependency of IPython for the notebook kernel (KOBE-464). Approved by Chris on 2026-10-23.
 - `matplotlib` 3.11.2 (Python-2.0): matplotlib's PSF-based license: permissive, not copyleft. Required for chart artifacts (the charts skill, spec D21) (KOBE-21). Approved by Chris on 2026-10-17.
-- `npm` 12.2.1 (Artistic-2.0): The npm CLI, shipped unmodified as a separate program so agents can install packages through the egress proxy. Artistic-2.0 is OSI-approved and not copyleft for unmodified redistribution (KOBE-21). Approved by Chris on 2026-10-17.
+- `npm` 12.2.2 (Artistic-2.0): The npm CLI, shipped unmodified as a separate program so agents can install packages through the egress proxy. Artistic-2.0 is OSI-approved and not copyleft for unmodified redistribution (KOBE-21). Approved by Chris on 2026-10-17.
 - `pillow` 13.0.0 (MIT-CMU): HPND/MIT-CMU: permissive, MIT-like. matplotlib dependency (KOBE-21). Approved by Chris on 2026-10-17.
 - `qrcode-terminal` 0.12.0 (Apache 2.0): Apache-2.0 declared with a non-SPDX label (npm dependency) (KOBE-21). Approved by Chris on 2026-10-17.
 - `spdx-exceptions` 2.5.0 (CC-BY-3.0): SPDX exception-list data used by npm; attribution-only data license, not copyleft (KOBE-21). Approved by Chris on 2026-10-17.
