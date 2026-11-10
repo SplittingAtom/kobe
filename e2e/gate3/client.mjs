@@ -389,7 +389,6 @@ async function projectSetup() {
   const made = await admin.call("POST", "/v1/projects", {
     name: config.name,
     instructions: "Gate 3 project",
-    visibility: "restricted",
     member_user_ids: [],
   });
   out("project_create", `${made.status}:${made.json.my_role ?? made.json.code ?? "-"}`);
