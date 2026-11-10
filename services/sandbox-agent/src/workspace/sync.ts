@@ -207,6 +207,10 @@ export class WorkspaceSync {
   readonly #unreadable = new Set<string>();
   #seenRev = 0;
   #chain: Promise<unknown> = Promise.resolve();
+  /** The sync-now push not started yet (shared by the requests that wait for it), KOBE-599. */
+  #nowQueued: Promise<boolean> | undefined;
+  /** The sync-now push running now. */
+  #nowRunning: Promise<boolean> | undefined;
   /** Settles once the startup restore succeeded, or the server said it has no workspace sync. */
   #ready: Promise<void> | undefined;
   #settle: () => void = () => {};
@@ -405,6 +409,39 @@ export class WorkspaceSync {
       this.#warn("workspace flush failed", error);
       return undefined;
     }
+  }
+
+  /**
+   * Sync now (`workspace.sync_now`, KOBE-599: the Files panel's Refresh): one push that starts
+   * after this call, so every file written before it is pushed. Requests made while that push has
+   * not started yet share it; a request made while it runs waits for the next one. Resolves true
+   * once the push committed (or found nothing to push), false when sync is off, stopping, still
+   * restoring after `restoreWaitMs`, or the push failed. Never rejects.
+   */
+  syncNow(): Promise<boolean> {
+    if (!this.enabled || this.#stopped) return Promise.resolve(false);
+    if (this.#nowQueued) return this.#nowQueued;
+    const previous = this.#nowRunning ?? Promise.resolve(true);
+    const next: Promise<boolean> = previous.then(async () => {
+      this.#nowQueued = undefined; // started: a later request queues the next push
+      this.#nowRunning = next;
+      try {
+        await Promise.race([
+          this.ready(),
+          new Promise<void>((resolve) => setTimeout(resolve, this.#o.restoreWaitMs).unref()),
+        ]);
+        if (!this.#restored || this.#stopped) return false;
+        await this.#push();
+        return true;
+      } catch (error) {
+        this.#warn("workspace push on request failed", error);
+        return false;
+      } finally {
+        if (this.#nowRunning === next) this.#nowRunning = undefined;
+      }
+    });
+    this.#nowQueued = next;
+    return next;
   }
 
   /** One push now (tests, operators). */

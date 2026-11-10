@@ -58,7 +58,10 @@ export interface HubOptions {
   /** App-role URL. Must reach Postgres directly or via a session-mode pooler (LISTEN is per session). */
   readonly connectionString: string;
   readonly maxStreamsPerUser?: number;
-  /** Concurrent workspace change streams per user on this replica (about one per page). */
+  /**
+   * Concurrent workspace streams per user on this replica: a page holds up to two (file tabs'
+   * changes, KOBE-496; the Files panel's events, KOBE-599).
+   */
   readonly maxWorkspaceStreamsPerUser?: number;
   /**
    * While the listener is down, workspace change streams re-read this often (they live as long as
@@ -79,7 +82,7 @@ export interface HubOptions {
 
 export const HUB_DEFAULTS = {
   maxStreamsPerUser: 16,
-  maxWorkspaceStreamsPerUser: 8,
+  maxWorkspaceStreamsPerUser: 16,
   workspaceDegradedPollMs: 20_000,
   reconnectMinMs: 250,
   reconnectMaxMs: 10_000,

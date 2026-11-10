@@ -25,6 +25,7 @@ import {
 import { sha256Hex } from "../../files/editor";
 import type { EventSourceFactory, EventSourceLike } from "../stream";
 import { FakeWorkspaceChanges } from "./fake-workspace-changes";
+import { FakeWorkspaceEvents } from "./fake-workspace-events";
 import { FakeFolders } from "./fake-folders";
 
 type Json = Record<string, unknown>;
@@ -221,6 +222,8 @@ export class FakeKobe {
   readonly workspaceFiles = new Map<string, Uint8Array>();
   /** `GET /v1/workspace/changes` (KOBE-496): tests `announce` changes to open file tabs. */
   readonly workspaceChanges = new FakeWorkspaceChanges(this.workspaceFiles);
+  /** `GET /v1/workspace/events` and `POST /v1/workspace/sync` (KOBE-599). */
+  readonly workspaceEvents = new FakeWorkspaceEvents();
   /** Folders listed so far (`GET /v1/workspace/files`), to assert one request per thread. */
   readonly workspaceListings: string[] = [];
   /** The site catalog with the team's choice (KOBE-44); empty = no models route answers. */
@@ -1310,6 +1313,9 @@ export class FakeKobe {
               : "workspace",
         }));
       return json(200, { entries });
+    }
+    if (url.pathname === "/v1/workspace/sync" && method === "POST") {
+      return json(200, await this.workspaceEvents.sync());
     }
     if (url.pathname === "/v1/workspace/files" && method === "GET") {
       const dir = url.searchParams.get("path") ?? "";
@@ -2675,6 +2681,7 @@ export class FakeKobe {
     const parsed = new URL(url, "http://kobe.test");
     // Not in `requests`: tests count run streams there; `workspaceChanges.open` lists these.
     if (parsed.pathname === "/v1/workspace/changes") return this.workspaceChanges.connect(parsed);
+    if (parsed.pathname === "/v1/workspace/events") return this.workspaceEvents.connect();
     const runId = parsed.pathname.split("/")[3] ?? "";
     const after = Number(parsed.searchParams.get("starting_after") ?? "0");
     const source = new FakeEventSource(this, runId, after, () => this.#sources.delete(source));

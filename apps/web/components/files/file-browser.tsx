@@ -38,6 +38,7 @@ import { offersPromote } from "../../lib/projects/promote";
 import { useWorkspaceProjects } from "../projects/workspace-projects";
 import { PromoteDialog } from "./promote-dialog";
 import { useNavigate } from "../shell/use-navigate";
+import type { WorkspaceEventFeed, WorkspaceMoved } from "../../lib/files/workspace-events";
 
 const COPY_FAILED = {
   status: 0,
@@ -49,32 +50,72 @@ const COPY_FAILED = {
 const DEFAULT_REFRESH_AFTER_WAKE_MS = 4000;
 
 /**
- * Wakes the sandbox on mount and again on each new `key` (the member asked for the files again),
- * listing again at once and after the sync; tracks "last synced" until that refresh.
+ * Wakes the sandbox on mount, listing again after its first sync; tracks "last synced" until that
+ * refresh. Each later `key` (Refresh, Show files: the member asked for the files again) is a sync
+ * now (KOBE-599): the running sandbox pushes first, then everything on screen lists again
+ * (`relist`); `syncing` meanwhile. A sandbox that was asleep is woken by the server and listed
+ * again once more after its first sync.
  */
-function useWake(api: FilesApi, reload: () => void, refreshMs: number, key: number): boolean {
+function useWake(
+  api: FilesApi,
+  relist: () => void,
+  refreshMs: number,
+  key: number,
+): { readonly waking: boolean; readonly syncing: boolean } {
   const [doneKey, setDoneKey] = useState<number | null>(null);
+  const [syncedKey, setSyncedKey] = useState<number | null>(null);
   const mounted = useRef(false);
+  const firstKey = useRef(key);
   useEffect(() => {
     let current = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    if (mounted.current) reload(); // the first listing is the tree's own
-    mounted.current = true;
-    void api.wake().then((res) => {
-      if (!current) return;
-      if (!res.ok) return setDoneKey(key);
+    const later = () => {
       timer = setTimeout(() => {
-        reload();
+        relist();
         setDoneKey(key);
       }, refreshMs);
-    });
+    };
+    if (!mounted.current) {
+      // The first listing is the tree's own.
+      mounted.current = true;
+      void api.wake().then((res) => {
+        if (!current) return;
+        if (!res.ok) return setDoneKey(key);
+        later();
+      });
+    } else {
+      void api.syncNow().then((res) => {
+        if (!current) return;
+        relist();
+        setSyncedKey(key);
+        if (res.ok && res.data.status === "asleep") later();
+        else setDoneKey(key);
+      });
+    }
     return () => {
       current = false;
       clearTimeout(timer);
     };
-    // reload is stable; the wake runs once per ask.
+    // relist is stable; the wake or sync runs once per ask.
   }, [api, refreshMs, key]);
-  return doneKey !== key;
+  return {
+    // The first wake, or a Refresh that found the sandbox asleep, until its first sync is listed.
+    waking: doneKey !== key && (key === firstKey.current || syncedKey === key),
+    syncing: key !== firstKey.current && syncedKey !== key,
+  };
+}
+
+/**
+ * Lists again whenever the workspace says something changed (KOBE-599): a sandbox push, an
+ * upload in another tab, a project commit. Debounced by the feed; open folders stay open.
+ */
+function useWorkspaceEvents(
+  events: WorkspaceEventFeed | undefined,
+  onMoved: (moved: WorkspaceMoved) => void,
+): void {
+  const latest = useRef(onMoved);
+  latest.current = onMoved;
+  useEffect(() => events?.subscribe((moved) => latest.current(moved)), [events]);
 }
 
 type Dialog = {
@@ -268,8 +309,14 @@ export function FileBrowser({
   onMoveHere,
   canCreateProjects = false,
   onPromoted,
+  events,
 }: {
   readonly api: FilesApi;
+  /**
+   * The workspace's change hints (KOBE-599): the tree lists again when the member's files or the
+   * projects change. Absent: only Refresh lists again.
+   */
+  readonly events?: WorkspaceEventFeed | undefined;
   /**
    * The member may create projects (team admins, contributors): My files folders offer Promote to
    * project… (KOBE-586, PF1). False: no such item.
@@ -309,7 +356,26 @@ export function FileBrowser({
 }) {
   const heads = useProjectHeads(api);
   const tree = useFileTree(heads, expandedKey(api.teamId));
-  const waking = useWake(api, tree.reloadAll, refreshAfterWakeMs, wakeKey);
+  const workspaceProjects = useWorkspaceProjects();
+  const { reloadAll } = tree;
+  const reloadProjects = workspaceProjects?.reload;
+  const projectsLoaded = workspaceProjects !== null && workspaceProjects.status !== "idle";
+  /** Everything on screen again: folders (open ones stay open), project heads and rows. */
+  const relist = useCallback(
+    (projects = true) => {
+      if (projects) {
+        heads.forget();
+        if (projectsLoaded) reloadProjects?.();
+      }
+      reloadAll();
+    },
+    [heads, reloadAll, reloadProjects, projectsLoaded],
+  );
+  const relistRef = useRef(relist);
+  relistRef.current = relist;
+  const stableRelist = useCallback(() => relistRef.current(), []);
+  const { waking, syncing } = useWake(api, stableRelist, refreshAfterWakeMs, wakeKey);
+  useWorkspaceEvents(events, (moved) => relistRef.current(moved.projects));
   const [focus, setFocus] = useState<TreeFocus>({ path: null, folder: "" });
   const [dialog, setDialog] = useState<Dialog>(null);
   const [busy, setBusy] = useState(false);
@@ -328,7 +394,6 @@ export function FileBrowser({
     readonly action: WorkAction;
   } | null>(null);
   const navigate = useNavigate();
-  const workspaceProjects = useWorkspaceProjects();
   const projectsApi = useMemo(
     () => workspaceProjects?.projects ?? createProjectsApi(api.teamId),
     [workspaceProjects?.projects, api.teamId],
@@ -584,7 +649,7 @@ export function FileBrowser({
       )}
       <FolderErrors tree={tree} />
       {actionError && <ErrorNotice error={actionError} />}
-      <WorkspaceHeader name={workspaceName} onRefresh={onRefresh} />
+      <WorkspaceHeader name={workspaceName} onRefresh={onRefresh} syncing={syncing} />
       {work.failed && (
         <p role="alert" className="m-0 text-xs">
           Your projects could not be read, so none shows as checked out.{" "}

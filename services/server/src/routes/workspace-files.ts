@@ -38,6 +38,7 @@ import {
 } from "../workspace-files/paths.js";
 import { registerNotebookOutputFrame } from "./notebook-output-frame.js";
 import { registerWorkspaceChanges } from "./workspace-changes.js";
+import { registerWorkspaceEvents } from "./workspace-events.js";
 import { registerWorkspaceFrame } from "./workspace-frame.js";
 import { registerWorkspaceMove } from "./workspace-move.js";
 import { registerWorkspaceSave } from "./workspace-save.js";
@@ -68,6 +69,8 @@ export interface WorkspaceFilesOptions {
   readonly listPageSize?: number;
   /** How long a move waits for the workspace lock (default 5 s; tests). */
   readonly moveLockTimeoutMs?: number;
+  /** How long Refresh waits for the sandbox's push (KOBE-599; default 10 s; tests). */
+  readonly syncWaitMs?: number;
 }
 
 const fail = (c: Ctx, status: ErrStatus, code: WorkspaceFileError["code"], message: string) =>
@@ -297,6 +300,10 @@ export function workspaceFileRoutes(
   registerWorkspaceMove(app, deps, sync, options.moveLockTimeoutMs);
   registerWorkspaceSave(app, deps, sync);
   registerWorkspaceChanges(app, deps);
+  registerWorkspaceEvents(app, deps, {
+    waker,
+    ...(options.syncWaitMs === undefined ? {} : { syncWaitMs: options.syncWaitMs }),
+  });
 
   /** The panel opened: start the caller's sandbox so live files and the next sync are ready. */
   app.post("/wake", (c) => {

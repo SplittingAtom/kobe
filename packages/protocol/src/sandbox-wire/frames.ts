@@ -41,6 +41,10 @@ import {
   skillDraftSaveFrameSchema,
   skillDraftSaveResultFrameSchema,
 } from "./skill-draft-frames.js";
+import {
+  workspaceSyncedFrameSchema,
+  workspaceSyncNowFrameSchema,
+} from "./workspace-sync-now-frames.js";
 import { APP_CARDS_PER_RUN_MAX, appCardEntrySchema } from "../app-cards.js";
 import { runMemoryContextSchema } from "../memory.js";
 import { runViewingContextSchema } from "../file-editor.js";
@@ -352,6 +356,7 @@ export const sandboxToServerFrameSchema = z.union([
   fileEditProposeFrameSchema,
   fileOpenFrameSchema,
   workspaceConflictFrameSchema,
+  workspaceSyncedFrameSchema,
   notebookOutputFrameSchema,
   notebookRunFrameSchema,
   legacyWebSearchQueryFrameSchema, // retired (KOBE-606): answered unavailable
@@ -777,6 +782,7 @@ export const serverToSandboxFrameSchema = z.union([
   resendFrameSchema,
   shutdownFrameSchema,
   workspaceMovedFrameSchema,
+  workspaceSyncNowFrameSchema,
   pingFrame,
   pongFrame,
   serverErrorFrame,

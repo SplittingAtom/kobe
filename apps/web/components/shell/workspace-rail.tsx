@@ -361,6 +361,7 @@ function RailFiles({
           onMoveHere={conversation.moveHere}
           canCreateProjects={createsProjects}
           onPromoted={conversation.offerProject}
+          events={session?.workspaceEvents}
         />
       )}
     </>

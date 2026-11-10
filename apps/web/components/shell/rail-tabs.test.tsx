@@ -73,8 +73,13 @@ describe("Files | Apps (ac-1, ac-3)", () => {
 
   it("lists nothing on a load on Apps; the Files tab lists the first time, then reuses it (KOBE-461 ac-2)", async () => {
     fake.preferences = { rail_tab: "apps" };
+    // Asked for files: the first wake, then a sync now per ask (KOBE-599).
     const wakes = () =>
-      fake.requests.filter((r) => r.method === "POST" && r.path === "/v1/workspace/wake").length;
+      fake.requests.filter(
+        (r) =>
+          r.method === "POST" &&
+          (r.path === "/v1/workspace/wake" || r.path === "/v1/workspace/sync"),
+      ).length;
     const listings = () => fake.workspaceListings.length;
     await withApps();
     await waitFor(() => expect(tab("Apps").getAttribute("aria-selected")).toBe("true"));
