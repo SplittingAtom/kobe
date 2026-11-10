@@ -27,3 +27,6 @@
   run per wave. Wave 1: 587 + 588 + 589. Wave 2: 586 + 590 + 591. Wave 3: 592 + 593, then the gate1
   deploy and KOBE-594.
 - **Status (2026-11-09):** wave 1 (587, 588, 589) built and reviewed; its PR is open.
+- **Status (2026-11-10):** every ticket done (#510, #511, #512); gate1 upgraded to
+  `local-4436e1af08aa` after the backup and dry-run; the three browser specs pass (6 passed);
+  gate doc `docs/gates/gate-projects-in-conversations.md`; waiting for Chris at KOBE-594.

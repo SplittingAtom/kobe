@@ -143,7 +143,8 @@ test("owner: draft in a project, switch, remove, add back, send; title, Files li
     await control().click();
     const group = page.getByRole("radiogroup", { name: PROJECT_CONTROL });
     await expect(group.getByRole("radio", { name: a.name, exact: true })).toBeChecked();
-    await group.getByRole("radio", { name: b.name, exact: true }).check();
+    // Picking closes the control (the radio leaves the page), so click rather than check().
+    await group.getByRole("radio", { name: b.name, exact: true }).click();
     await expect(header(page)).toContainText(`New conversation in ${b.name}`);
 
     // ... remove it ...
@@ -157,9 +158,8 @@ test("owner: draft in a project, switch, remove, add back, send; title, Files li
     await page
       .getByRole("radiogroup", { name: PROJECT_CONTROL })
       .getByRole("radio", { name: a.name, exact: true })
-      .check();
+      .click();
     await expect(header(page)).toContainText(`New conversation in ${a.name}`);
-    await page.keyboard.press("Escape");
 
     // FP2 while drafting: A is active, B greyed.
     let tree = await projectsTree(page);
@@ -335,6 +335,8 @@ test("member2, a reader by default, sees every project and the proposal to chang
     ids.push(a.id);
     const b = await makeProject(page, `${stem} B`, { [README]: "other project\n" });
     ids.push(b.id);
+    // A's history before the reader acts: the owner's upload of NOTES only.
+    const history = await commitMessages(page, a.id);
 
     // RV1/FP1: no membership rows, yet every project is listed; A (the conversation's) is active.
     await other.goto(`/?project=${a.id}`);
@@ -372,7 +374,7 @@ test("member2, a reader by default, sees every project and the proposal to chang
       proposal_id: crypto.randomUUID(),
     });
     expect(forged.status).toBeGreaterThanOrEqual(400);
-    expect(await commitMessages(other, a.id)).toEqual([]);
+    expect(await commitMessages(other, a.id)).toEqual(history);
   } finally {
     await otherChat.trashAll().catch((e: unknown) => console.warn(`trash failed: ${String(e)}`));
     await other.context().close();
