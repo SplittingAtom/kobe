@@ -11,6 +11,48 @@ owner_lifecycle() { # hibernate|wake → the CLI's answer
   $KUBECTL -n "$NS" exec deploy/kobe-server -c server -- node dist/cli/lifecycle.js "$1" \
     --team-id "$E2E_TEAM_ID" --user-id "$owner_id" 2>&1 | grep -E '^\{"(hibernated|woken)"' || true
 }
+# KOBE-563: hibernation refuses while any run of the owner is queued, running or waiting for an
+# approval, or a command is in flight (lockIfIdle). A hung run therefore keeps the sandbox awake
+# for the rest of the shard: every later "hibernated" trial measured a warm sandbox and the sync and
+# token-rotation checks failed. Hibernate on the actual answer, never on a non-empty one.
+owner_busy_report() { # label → why the owner's sandbox is busy (active runs, commands in flight)
+  echo "     $1: the owner's sandbox is busy (active runs, commands in flight):"
+  psql_kobe "SELECT 'run ' || r.id || ' ' || r.status || ' started ' || coalesce(r.started_at::text, '-') FROM runs r
+      JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
+     WHERE r.team_id = '$E2E_TEAM_ID' AND t.owner_user_id = '$owner_id'
+       AND r.status IN ('queued', 'running', 'waiting_approval')
+    UNION ALL SELECT 'command ' || c.kind || ' ' || c.status || ' run ' || coalesce(c.run_id::text, '-') FROM sandbox_commands c
+     WHERE c.team_id = '$E2E_TEAM_ID' AND c.user_id = '$owner_id' AND c.status IN ('pending', 'delivered')" \
+    | sed 's/^/       /' || true
+}
+owner_active_run_ids() {
+  psql_kobe "SELECT r.id FROM runs r JOIN threads t ON t.team_id = r.team_id AND t.id = r.thread_id
+     WHERE r.team_id = '$E2E_TEAM_ID' AND t.owner_user_id = '$owner_id'
+       AND r.status IN ('queued', 'running', 'waiting_approval')"
+}
+owner_hibernated() { [[ "$(owner_lifecycle hibernate)" == *'"hibernated":true'* ]]; }
+# → succeeds once the CLI hibernated the owner's sandbox; a run or command still settling gets up
+# to `seconds` (one attempt on a healthy install). On failure: why, and its active runs are
+# stopped (so one hung run fails its own check, not every check after it), then one more try.
+owner_hibernate() { # label [seconds]
+  until_ok "${2:-30}" owner_hibernated && return 0
+  owner_busy_report "$1"
+  local run
+  for run in $(owner_active_run_ids); do
+    as_owner "POST /v1/runs/$run/cancel" | sed "s/^/       cancel $run: /" | cut -c1-200 || true
+  done
+  until_ok 60 owner_hibernated
+}
+# A run that did not end within its wait: where it stopped (events, status, server warnings, the
+# owner's agent log), then it is stopped so it cannot keep the sandbox awake (KOBE-563).
+owner_hung_run() { # label chat_run-output
+  local run
+  run=$(sed -n 's/^run=//p' <<<"$2" | sed -n 1p)
+  hung_run_report "$1" "$run" "$E2E_TEAM_ID"
+  $KUBECTL -n "$TEAM_NS" logs -l "agents.x-k8s.io/claim-uid=$(owner_claim_uid)" -c agent --since=10m --tail=60 2>&1 \
+    | cut -c1-400 | sed 's/^/     agent: /' || true
+  [[ -n "$run" ]] && as_owner "POST /v1/runs/$run/cancel" | sed "s/^/     cancel $run: /" | cut -c1-200 || true
+}
 owner_claim_id() { $KUBECTL -n "$TEAM_NS" get sandboxclaim "u-$owner_id" -o jsonpath='{.metadata.uid}' 2>/dev/null || true; }
 owner_pod_gone() { [[ -z "$($KUBECTL -n "$TEAM_NS" get pods -l "agents.x-k8s.io/claim-uid=$(owner_claim_id)" -o name 2>/dev/null)" ]]; }
 percentile() { # p (0-100) values... → nearest-rank percentile
@@ -33,29 +75,38 @@ slow_trial_diagnostics() { # since (RFC3339)
 # Hibernated → first token (a hello through the real wake path), then the first tool call of the
 # woken sandbox (a new thread: its Pi and, with the flag on, its executor start cold).
 executor_first_token_trials() {
-  local n="${KOBE_E2E_FT_TRIALS:-8}" i out ft tool_ms hib trial_start
+  local n="${KOBE_E2E_FT_TRIALS:-8}" i out ft tool_ms hib trial_start hung=0
   local -a fts=() tools=()
   echo "==> cold start: hibernated → first token, executor ${EXEC_LABEL} (KOBE-168)"
   for ((i = 1; i <= n; i++)); do
-    hib=$(owner_lifecycle hibernate)
-    until_ok 120 owner_pod_gone || true
+    # Only a trial that really started hibernated counts (KOBE-563: an awake sandbox once passed as
+    # cold for five trials, after a hung run kept it busy).
+    if owner_hibernate "trial $i" && until_ok 120 owner_pod_gone; then hib=ok; else hib=no; fi
     trial_start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     out=$(chat_run "hello-ft-$RANDOM" 300000)
     ft=$(field_of first_token_ms "$out")
     [[ "$ft" =~ ^[0-9]+$ ]] && ((ft > 10000)) && slow_trial_diagnostics "$trial_start"
-    out=$(chat_run "bash: true" 300000)
+    grep -q '^terminal=none$' <<<"$out" && owner_hung_run "trial $i hello" "$out"
+    # Normally ~3 s; 120 s bounds a hung run (it is reported and stopped below).
+    out=$(chat_run "bash: true" 120000)
     tool_ms=$(field_of terminal_ms "$out")
-    echo "     trial $i: hibernate=${hib:+ok} first_token_ms=${ft:-none} tool_run_ms=${tool_ms:-none}"
-    [[ "$ft" =~ ^[0-9]+$ ]] && fts+=("$ft")
+    if ! grep -q '^terminal=run.completed$' <<<"$out"; then
+      hung=$((hung + 1))
+      owner_hung_run "trial $i first tool run" "$out"
+    fi
+    echo "     trial $i: hibernate=$hib first_token_ms=${ft:-none} tool_run_ms=${tool_ms:-none} tool_run=$(field_of terminal "$out")"
+    [[ "$hib" == ok && "$ft" =~ ^[0-9]+$ ]] && fts+=("$ft")
     [[ "$tool_ms" =~ ^[0-9]+$ ]] && tools+=("$tool_ms")
   done
+  if ((hung == 0)); then ok "every first tool run after a wake completed (executor ${EXEC_LABEL})"
+  else fail "every first tool run after a wake completed ($hung of $n did not; executor ${EXEC_LABEL})"; fi
   if ((${#fts[@]} == n)); then
     echo "     first-token (executor ${EXEC_LABEL}): n=$n p50=$(percentile 50 "${fts[@]}") ms p95=$(percentile 95 "${fts[@]}") ms"
     echo "     tool-run (executor ${EXEC_LABEL}, first tool after wake): n=${#tools[@]} p50=$(percentile 50 "${tools[@]}") ms p95=$(percentile 95 "${tools[@]}") ms"
     if (($(percentile 95 "${fts[@]}") <= ${KOBE_COLD_START_P95_MS:-20000})); then
       ok "hibernated → first token p95 within ${KOBE_COLD_START_P95_MS:-20000} ms (executor ${EXEC_LABEL})"
     else fail "hibernated → first token p95 within ${KOBE_COLD_START_P95_MS:-20000} ms (executor ${EXEC_LABEL})"; fi
-  else fail "every cold-start trial produced a first token (${#fts[@]} of $n; executor ${EXEC_LABEL})"; fi
+  else fail "every cold-start trial started hibernated and produced a first token (${#fts[@]} of $n; executor ${EXEC_LABEL})"; fi
 }
 
 # KOBE-27 with tools running as the partner uid: a file the tool writes is pushed on hibernate,
@@ -65,7 +116,7 @@ executor_sync_checks() {
   echo "==> workspace sync with the paired tool uid (KOBE-168)"
   out=$(chat_run "bash: mkdir -p /workspace/kobe168-sync && printf '%s' '$content' > /workspace/kobe168-sync/q3.md && stat -c %u /workspace/kobe168-sync/q3.md" 240000)
   contains "a tool wrote the report as a partner uid" '^text=fake-openai: tool said: 30[0-9]{2}$' "$out"
-  contains "the idle sandbox hibernates" '"hibernated":true' "$(owner_lifecycle hibernate)"
+  if owner_hibernate "sync"; then ok "the idle sandbox hibernates"; else fail "the idle sandbox hibernates"; fi
   until_ok 120 owner_pod_gone || true
   sync_row_of() { psql_kobe "SELECT sha256 FROM workspace_files WHERE team_id = '$E2E_TEAM_ID' AND user_id = '$owner_id' AND path = 'kobe168-sync/q3.md' AND NOT deleted"; }
   row_ready() { [[ "$(sync_row_of)" =~ ^[0-9a-f]{64}$ ]]; }
