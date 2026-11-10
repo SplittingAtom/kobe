@@ -41,6 +41,7 @@ import { registerWorkspaceChanges } from "./workspace-changes.js";
 import { registerWorkspaceFrame } from "./workspace-frame.js";
 import { registerWorkspaceMove } from "./workspace-move.js";
 import { registerWorkspaceSave } from "./workspace-save.js";
+import { deleteWorkspaceFiles } from "../workspace-files/delete.js";
 import { searchFiles } from "../workspace-files/search.js";
 import { uploadToWorkspace } from "../workspace-files/upload.js";
 import type { WorkspaceSync } from "../workspace-sync/service.js";
@@ -264,16 +265,7 @@ export function workspaceFileRoutes(
       const files = drop ? under.filter((f) => f.path === path) : under;
       if (files.length === 0) return "missing" as const;
       if (files.length > DELETE_MAX_FILES) return "too_many" as const;
-      for (const file of files) await sync.deleteServerFile(tx, owner, file.path);
-      await recordAudit(tx, {
-        action: "workspace.file_deleted",
-        teamId: owner.teamId,
-        target: {
-          userId: owner.userId,
-          files: files.length,
-          bytes: files.reduce((sum, f) => sum + f.size, 0),
-        },
-      });
+      await deleteWorkspaceFiles(tx, sync, owner, files);
       return "deleted" as const;
     });
     switch (outcome) {

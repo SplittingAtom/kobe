@@ -437,6 +437,13 @@ const LIST = [
   { id: "rename-file", name: "Rename", icon: PencilIcon, scope: "file-menu" },
   { id: "move-file", name: "Move to…", icon: FolderInputIcon, scope: "file-menu" },
   { id: "copy-file-path", name: "Copy path", icon: ClipboardCopyIcon, scope: "file-menu" },
+  // A My files folder becomes a project (KOBE-586, PF1): team admins and contributors only.
+  {
+    id: "promote-to-project",
+    name: "Promote to project…",
+    icon: FolderKanbanIcon,
+    scope: "file-menu",
+  },
   { id: "delete-file", name: "Delete", icon: Trash2Icon, scope: "file-menu" },
   // A project's work (Workspaces CM8, FP1, FP4; KOBE-581): on a mounted project's row in Files
   // and on a project's header in the Threads panel, for editors and up.
@@ -448,6 +455,19 @@ const LIST = [
     id: "open-project-page",
     name: "Open project page",
     icon: FolderKanbanIcon,
+    scope: "file-menu",
+  },
+  // A project the conversation is not in (KOBE-590, FP4): on its row in the Files panel.
+  {
+    id: "new-conversation-in-project",
+    name: "New conversation in this project",
+    icon: SquarePenIcon,
+    scope: "file-menu",
+  },
+  {
+    id: "move-conversation-here",
+    name: "Move this conversation here",
+    icon: FolderInputIcon,
     scope: "file-menu",
   },
   // The conversation's chrome. Rename: the pencil beside the header's title (KOBE-292).

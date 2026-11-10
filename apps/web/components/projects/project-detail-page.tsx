@@ -8,7 +8,8 @@ import { worded, type Project, type ProjectInput } from "../../lib/projects/api"
 import { useTeamAccess } from "../admin/console-context";
 import { MutationStatus } from "../admin/error-notice";
 import { ResourceView } from "../admin/parts";
-import { useMutation, useResource } from "../admin/use-resource";
+import { useResource } from "../admin/use-resource";
+import { useProjectMutation } from "./use-project-mutation";
 import {
   Badge,
   Button,
@@ -61,7 +62,7 @@ function ProjectView({
   const access = useTeamAccess();
   const api = useProjectsApi();
   const agents = useProjectAgents(api);
-  const mutation = useMutation();
+  const mutation = useProjectMutation();
   const navigate = useNavigate();
   const [confirm, confirmDialog] = useConfirm();
   const can = projectPermissions(access.role, project.myRole ?? undefined);

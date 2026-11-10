@@ -21,8 +21,8 @@ import { viewableBy } from "./access.js";
  * docs/ledger/KOBE-162.md). The workspace of each (team, user) is a manifest the sandbox pulls
  * from; the `projects/` area of it is server-owned and read-only to the sandbox. This module keeps
  * that area equal to "the files of the projects this user has open" (Workspaces MT1, KOBE-578):
- * the projects where they own a thread that is not in Trash, or hold a checkout, and may still
- * view. A checked-out project's rows are the member's working copy (KOBE-579): reconcile neither
+ * the projects where they own a thread that is not in Trash, or hold a checkout, or that they
+ * created and have no thread in yet (PF5, KOBE-586), and may still view. A checked-out project's rows are the member's working copy (KOBE-579): reconcile neither
  * writes nor deletes anything under its folder.
  *
  * - {@link ProjectMounts.reconcileUser} makes one user's `projects/` rows exactly that set: puts
@@ -72,16 +72,20 @@ export const MOUNTS_MAX_SETTING = "projects.max_mounted_per_member";
 
 /**
  * The projects open for `userId` (MT1): their own threads not in Trash, plus their checkouts,
- * limited to projects they may view; nothing once they left the team or were deactivated (MT4). `excludeThreadId` leaves one
- * thread out (a move asks what stays open without it). `checkedOut` = the subset with a checkout.
+ * plus the projects they created while they have no thread of their own in them, in Trash or not
+ * (PF5, KOBE-586: a new project mounts for its creator at once; their first conversation in it
+ * hands the mount over to the thread rule), limited to projects they may view; nothing once they left the team or were deactivated (MT4). `excludeThreadId` leaves one
+ * thread out (a move asks what stays open without it); `creatorRule: false` leaves the PF5 creator
+ * mounts out (the cap, MT3). `checkedOut` = the subset with a checkout.
  */
 export async function openProjects(
   tx: KobeTx,
   teamId: string,
   userId: string,
-  options: { excludeThreadId?: string } = {},
+  options: { excludeThreadId?: string; creatorRule?: boolean } = {},
 ): Promise<{ ids: Set<string>; checkedOut: Set<string> }> {
   const exclude = options.excludeThreadId ?? null;
+  const creator = options.creatorRule !== false;
   const res = await tx.execute<{ id: string; checked_out: boolean }>(sql`
     SELECT p.id,
            EXISTS (SELECT 1 FROM project_checkouts c
@@ -98,7 +102,12 @@ export async function openProjects(
                        AND (${exclude}::uuid IS NULL OR th.id <> ${exclude}::uuid))
             OR EXISTS (SELECT 1 FROM project_checkouts c
                         WHERE c.team_id = p.team_id AND c.project_id = p.id
-                          AND c.user_id = ${userId}))`);
+                          AND c.user_id = ${userId})
+            OR (${creator}::boolean AND p.created_by = ${userId}
+                AND NOT EXISTS (SELECT 1 FROM threads th
+                                 WHERE th.team_id = ${teamId} AND th.project_id = p.id
+                                   AND th.owner_user_id = ${userId}
+                                   AND (${exclude}::uuid IS NULL OR th.id <> ${exclude}::uuid))))`);
   return {
     ids: new Set(res.rows.map((r) => r.id)),
     checkedOut: new Set(res.rows.filter((r) => r.checked_out).map((r) => r.id)),
@@ -126,12 +135,17 @@ export async function mountCapRefusal(
   projectId: string,
   movingThreadId?: string,
 ): Promise<number | undefined> {
-  const now = await openProjects(tx, viewer.teamId, viewer.userId);
+  // A creator's mount without a conversation (PF5) neither counts nor exempts: the cap is on
+  // conversation and checkout mounts, as before KOBE-586.
+  const now = await openProjects(tx, viewer.teamId, viewer.userId, { creatorRule: false });
   if (now.ids.has(projectId)) return undefined;
   const { ids } =
     movingThreadId === undefined
       ? now
-      : await openProjects(tx, viewer.teamId, viewer.userId, { excludeThreadId: movingThreadId });
+      : await openProjects(tx, viewer.teamId, viewer.userId, {
+          excludeThreadId: movingThreadId,
+          creatorRule: false,
+        });
   const limit = await mountLimit(tx, viewer.teamId);
   return ids.size >= limit ? limit : undefined;
 }
@@ -244,7 +258,7 @@ async function reconcile(
 
 /**
  * Everyone whose workspace the project's files concern: who has it open (MT1: a thread of their
- * own not in Trash, or a checkout) and whoever still holds a live row under its folder (mounted
+ * own not in Trash, or a checkout; its creator, PF5) and whoever still holds a live row under its folder (mounted
  * under an older rule, or a removal whose reconcile was missed). The second set matters for file
  * removal: the object is deleted only once no workspace names it.
  */
@@ -254,6 +268,8 @@ async function membersOf(tx: KobeTx, teamId: string, projectId: string): Promise
      WHERE team_id = ${teamId} AND project_id = ${projectId} AND deleted_at IS NULL
     UNION
     SELECT user_id FROM project_checkouts WHERE team_id = ${teamId} AND project_id = ${projectId}
+    UNION
+    SELECT created_by AS user_id FROM projects WHERE team_id = ${teamId} AND id = ${projectId}
     UNION
     SELECT DISTINCT f.user_id FROM workspace_files f
       JOIN projects p ON p.team_id = f.team_id AND p.id = ${projectId}

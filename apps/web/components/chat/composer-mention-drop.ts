@@ -13,7 +13,13 @@ import {
   lakehouseItemContentOf,
 } from "../../lib/apps/lakehouse-drop";
 import { MENTION_FOLDER_REFUSED, mentionRefusal } from "../../lib/chat/mention-insert";
-import { carriesWorkspaceFolder, carriesWorkspaceRow, droppedRowPath } from "../../lib/files/drag";
+import {
+  carriesUnmountedFile,
+  carriesWorkspaceFolder,
+  carriesWorkspaceRow,
+  droppedRowPath,
+  droppedUnmountedMessage,
+} from "../../lib/files/drag";
 import type { ChatSession } from "../../lib/chat/session";
 import { applyAppMessage } from "../apps/use-app-composer";
 import { useFrameDrop } from "./composer-frame-drop";
@@ -150,6 +156,13 @@ export function useComposerMentionDrop({
         setNotice("");
         return true;
       }
+      if (carriesUnmountedFile(e.dataTransfer)) {
+        // Refused on the drop (KOBE-590, FP4): the drop event is what carries the message.
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        setNotice("");
+        return true;
+      }
       if (!carriesWorkspaceRow(e.dataTransfer)) return false;
       const folder = carriesWorkspaceFolder(e.dataTransfer);
       e.preventDefault();
@@ -164,6 +177,12 @@ export function useComposerMentionDrop({
         e.preventDefault();
         setRowDrop(null);
         setNotice(insertItem(droppedLakehouseItem(e.dataTransfer)) ?? "");
+        return true;
+      }
+      if (carriesUnmountedFile(e.dataTransfer)) {
+        e.preventDefault();
+        setRowDrop(null);
+        setNotice(droppedUnmountedMessage(e.dataTransfer));
         return true;
       }
       if (!carriesWorkspaceRow(e.dataTransfer)) return false;

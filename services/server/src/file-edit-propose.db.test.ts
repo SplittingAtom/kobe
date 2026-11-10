@@ -194,6 +194,7 @@ describe("propose_file_edit (KOBE-462, ac-4)", () => {
     expect(await proposalEvents(w.team, w.runId)).toEqual([
       {
         tool_call_id: "call-1",
+        proposal_id: expect.any(String),
         path: "notes/plan.md",
         base_sha256: base,
         content: input.content,
@@ -226,12 +227,12 @@ describe("propose_file_edit (KOBE-462, ac-4)", () => {
     expect(other.status).toBe(404);
   });
 
-  it("refuses unknown, internal and read-only paths, and paths outside /workspace", async () => {
+  it("refuses internal and read-only paths, and paths outside /workspace", async () => {
     const w = await world();
     const sb = await started(w);
     await seed(w, "projects/p/spec.md", "spec\n", "projects");
     const cases: [string, string][] = [
-      ["missing.md", "not_found"],
+      ["missing/", "invalid_path"],
       [".kobe/state.md", "not_found"],
       ["projects/p/spec.md", "read_only"],
       ["/etc/passwd", "invalid_path"],

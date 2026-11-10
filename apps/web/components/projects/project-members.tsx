@@ -13,7 +13,8 @@ import { useTeamAccess } from "../admin/console-context";
 import { MutationStatus } from "../admin/error-notice";
 import { DateTime, ResourceView } from "../admin/parts";
 import { useFocusAfterRemoval } from "../admin/use-focus-after-removal";
-import { useMutation, useResource } from "../admin/use-resource";
+import { useResource } from "../admin/use-resource";
+import { useProjectMutation } from "./use-project-mutation";
 import {
   Button,
   Field,
@@ -59,7 +60,7 @@ export function ProjectMembers({
   const me = useTeamAccess().user.id;
   const { state, reload } = useResource(() => api.members(project.id));
   const roster = useRoster();
-  const mutation = useMutation();
+  const mutation = useProjectMutation();
   const editable = canManage && project.archivedAt === null;
   const [confirm, confirmDialog] = useConfirm();
   const focus = useFocusAfterRemoval(

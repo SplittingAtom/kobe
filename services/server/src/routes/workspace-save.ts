@@ -30,7 +30,8 @@ const fail = (
  * `PUT /v1/workspace/file?path=&base_sha256=` (KOBE-462, contract file-editor.ts, spec FE4): the
  * file editor's save into the caller's own workspace. Whoever may upload may save (`team.chat`,
  * the owner from the session, never the request); the same path rules, size limit, quotas and
- * read-only areas as the browser upload. Agent-internal paths are not found.
+ * read-only areas as the browser upload. Agent-internal paths are not found. Without
+ * `base_sha256` it creates a new file (KOBE-591: accepting a proposed new file).
  */
 export function registerWorkspaceSave(
   app: Hono<{ Variables: TeamVariables }>,

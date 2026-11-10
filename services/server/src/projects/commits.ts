@@ -90,7 +90,7 @@ export interface CommitRequest {
   readonly expect?: { readonly baseSeq: number | null; readonly diffHash: string };
 }
 
-interface Copy {
+export interface Copy {
   readonly sha256: string;
   readonly size: number;
   readonly source: string;
@@ -115,7 +115,7 @@ const refused = (
 ): CommitResult => ({ status: "refused", error, ...extra });
 
 /** Contents the project already holds, by hash: a key and its mime type. */
-async function heldContents(
+export async function heldContents(
   tx: KobeTx,
   teamId: string,
   projectId: string,
@@ -221,7 +221,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
  * checkouts keeps its object). Never another member's tree or another workspace's; the hash and
  * size are verified on the copy whatever the source.
  */
-async function sourceCheck(
+export async function sourceCheck(
   tx: KobeTx,
   prefix: string,
   owner: WorkspaceOwner,

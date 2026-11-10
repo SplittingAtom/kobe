@@ -24,7 +24,7 @@ export function projectAccessLine(project: RunProjectContext): string {
   const name = oneLine(project.name);
   const mount = oneLine(project.mount);
   return project.access === "write"
-    ? `You can edit project "${name}"; commit with commit_project. Its files under ${mount} are writable while the user has the project checked out (read-only otherwise: ask them to check it out first); commit_project then makes your changes the project's next version.`
+    ? `You can edit project "${name}"; commit with commit_project. Its files under ${mount} are writable while the user has the project checked out (read-only otherwise: ask them to check it out first); commit_project then makes your changes the project's next version. To change a project file, call propose_file_edit; the member accepts it and that commits it.`
     : `You can read project "${name}" but not change it: its files under ${mount} are read-only to you and you cannot commit. If the user wants the project changed, tell them an editor of the project has to do it.`;
 }
 

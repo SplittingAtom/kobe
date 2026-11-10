@@ -218,6 +218,15 @@ describe("status tokens (KOBE-301)", () => {
       }
     });
 
+    it(`the Files panel's active dot keeps 3:1 on the rail and the page (${name}, KOBE-590)`, () => {
+      for (const surface of ["--muted", "--background"]) {
+        expect(
+          contrast(resolve(theme, "--kobe-active-dot"), resolve(theme, surface)),
+          surface,
+        ).toBeGreaterThanOrEqual(3);
+      }
+    });
+
     it(`the composer's focus and running outlines keep 3:1 on the page, panels and cards (${name}, KOBE-374)`, () => {
       for (const outline of ["--kobe-composer-focus", "--kobe-status-running"]) {
         for (const surface of ["--background", "--muted", "--card"]) {

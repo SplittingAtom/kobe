@@ -22,9 +22,21 @@ import { cn } from "../../lib/utils";
 import { ConfirmDelete, MoveForm, RenameForm } from "./file-dialogs";
 import { DROP_FOLDER_ATTR, FileTreeView, type Dragging, type TreeFocus } from "./file-tree";
 import { useFileTree, type FileTree } from "./use-file-tree";
-import { NoProjects, ProjectsHeader, useProjectsInTree, WorkspaceHeader } from "./workspace-tree";
+import { useProjectHeads } from "./project-heads";
+import {
+  NoProjects,
+  ProjectsFilter,
+  ProjectsHeader,
+  ShowAllProjects,
+  useProjectsInTree,
+  WorkspaceHeader,
+} from "./workspace-tree";
 import { ProjectWorkPanel, type ProjectRef, type WorkAction } from "../projects/project-work";
-import { isProjectFolder, projectSlugOf } from "../../lib/projects/workspace";
+import { isProjectFolder, projectSlugOf, PROJECTS_FOLDER } from "../../lib/projects/workspace";
+import { createProjectsApi, type Project } from "../../lib/projects/api";
+import { offersPromote } from "../../lib/projects/promote";
+import { useWorkspaceProjects } from "../projects/workspace-projects";
+import { PromoteDialog } from "./promote-dialog";
 import { useNavigate } from "../shell/use-navigate";
 
 const COPY_FAILED = {
@@ -65,13 +77,16 @@ function useWake(api: FilesApi, reload: () => void, refreshMs: number, key: numb
   return doneKey !== key;
 }
 
-type Dialog = { readonly kind: "delete" | "rename" | "move"; readonly entry: FileEntry } | null;
+type Dialog = {
+  readonly kind: "delete" | "rename" | "move" | "promote";
+  readonly entry: FileEntry;
+} | null;
 
 const where = (folder: string) => (folder === "" ? "My files" : folder);
 
 /**
  * A row's ⋯ menu (KOBE-292, KOBE-304): Open, Mention in message (files, KOBE-374), Download,
- * Rename, Move to…, Copy path, Delete.
+ * Rename, Move to…, Copy path, Promote to project… (a My files folder, KOBE-586), Delete.
  */
 function rowBindings(
   entry: FileEntry,
@@ -84,6 +99,8 @@ function rowBindings(
     readonly onMove: () => void;
     readonly onCopyPath: () => void;
     readonly onDelete: () => void;
+    /** Present only where the row offers it (PF1: a My files folder, team admins and contributors). */
+    readonly onPromote: (() => void) | undefined;
   },
 ): MenuBindings {
   const readOnly = isReadOnlyPath(entry.path, checkedOut);
@@ -103,6 +120,7 @@ function rowBindings(
       ? {}
       : { "rename-file": change(handlers.onRename), "move-file": change(handlers.onMove) }),
     "copy-file-path": { onSelect: handlers.onCopyPath },
+    ...(handlers.onPromote ? { "promote-to-project": change(handlers.onPromote) } : {}),
     ...(readOnly ? {} : { "delete-file": change(handlers.onDelete, true) }),
   };
 }
@@ -244,8 +262,29 @@ export function FileBrowser({
   onMoved,
   onMention,
   onRefresh,
+  activeProjectId = null,
+  onNewConversationIn,
+  onMoveHere,
+  canCreateProjects = false,
+  onPromoted,
 }: {
   readonly api: FilesApi;
+  /**
+   * The member may create projects (team admins, contributors): My files folders offer Promote to
+   * project… (KOBE-586, PF1). False: no such item.
+   */
+  readonly canCreateProjects?: boolean | undefined;
+  /** A folder became this project (PF6): the conversation's project control may offer it. */
+  readonly onPromoted?: ((project: ProjectRef) => void) | undefined;
+  /** The project of the conversation on screen, or of the new one being drafted (FP2). */
+  readonly activeProjectId?: string | null | undefined;
+  /** "New conversation in this project" on a greyed project (FP4). Absent: no such item. */
+  readonly onNewConversationIn?: ((project: ProjectRef) => void) | undefined;
+  /**
+   * "Move this conversation here" on a greyed project (FP4): offered only when the conversation
+   * on screen is the member's own; the answer is why it could not move, or undefined once it did.
+   */
+  readonly onMoveHere?: ((project: ProjectRef) => Promise<string | undefined>) | undefined;
   /** The active workspace's name (the switcher's): the tree's top row (FP1). */
   readonly workspaceName?: string | undefined;
   /** Refresh files in the top row (KOBE-461): wakes and lists again (a new `wakeKey`). Absent: none. */
@@ -265,7 +304,8 @@ export function FileBrowser({
   /** Reveals this folder, once per `seq` (uploads/ after a rail drop, KOBE-199). */
   readonly showFolder?: { readonly path: string; readonly seq: number } | null;
 }) {
-  const tree = useFileTree(api, expandedKey(api.teamId));
+  const heads = useProjectHeads(api);
+  const tree = useFileTree(heads, expandedKey(api.teamId));
   const waking = useWake(api, tree.reloadAll, refreshAfterWakeMs, wakeKey);
   const [focus, setFocus] = useState<TreeFocus>({ path: null, folder: "" });
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -275,16 +315,21 @@ export function FileBrowser({
   const [focusRequest, setFocusRequest] = useState<{ path: string; seq: number } | null>(null);
   const shownSeq = useRef(showFolder?.seq ?? 0);
   const { reveal, moved } = tree;
-  const work = useProjectsInTree(tree);
+  const work = useProjectsInTree(tree, activeProjectId);
   const { checkedOut } = work;
   const split = useMemo(() => splitProjectRows(tree.rows), [tree.rows]);
-  const projectsTree = useMemo(() => ({ ...tree, rows: split.projects }), [tree, split]);
+  const projectsTree = useMemo(() => ({ ...tree, rows: work.rows }), [tree, work.rows]);
   const myTree = useMemo(() => ({ ...tree, rows: split.mine }), [tree, split]);
   const [projectAction, setProjectAction] = useState<{
     readonly project: ProjectRef;
     readonly action: WorkAction;
   } | null>(null);
   const navigate = useNavigate();
+  const workspaceProjects = useWorkspaceProjects();
+  const projectsApi = useMemo(
+    () => workspaceProjects?.projects ?? createProjectsApi(api.teamId),
+    [workspaceProjects?.projects, api.teamId],
+  );
   // Two trees report focus. Only the one holding the focus (DOM focus moved into it last) sets
   // the Upload target and the folder note; the other's reports are kept for when it is entered.
   const focusSource = useRef<"projects" | "mine">("mine");
@@ -338,7 +383,7 @@ export function FileBrowser({
 
   const mention = (entry: FileEntry) => {
     start();
-    const refused = onMention?.(entry);
+    const refused = work.mentionRefusal(entry.path) ?? onMention?.(entry);
     if (refused !== undefined) {
       focusRow(entry.path);
       return setActionError({ status: 0, code: "client_error", message: refused });
@@ -413,24 +458,52 @@ export function FileBrowser({
     }
   };
 
+  /** PF6: the tree lists again and reveals the new project under Projects. */
+  const promoted = (entry: FileEntry, project: Project) => {
+    setDialog(null);
+    start();
+    setNotice(`Moved ${entry.name} into the new project ${project.name}`);
+    work.retry();
+    tree.reloadAll();
+    reveal(PROJECTS_FOLDER);
+    focusRow(`${PROJECTS_FOLDER}/${project.slug}`);
+    onPromoted?.({ id: project.id, name: project.name });
+  };
+
+  // A file of a project that is not mounted is listed, not in the sandbox: it opens nowhere.
+  const notMounted = (entry: FileEntry) => work.mentionRefusal(entry.path) !== undefined;
+  const openHere = onOpenFile
+    ? (entry: FileEntry) => {
+        const refused = work.mentionRefusal(entry.path);
+        if (refused === undefined) return onOpenFile(entry);
+        start();
+        setNotice(refused.replace("to mention its files", "to open its files"));
+      }
+    : undefined;
   const actions = {
-    onOpenFile,
+    onOpenFile: openHere,
+    mentionRefusal: work.mentionRefusal,
     bindings: (entry: FileEntry) =>
-      rowBindings(entry, checkedOut, {
-        onOpen:
-          entry.type === "dir"
-            ? () => {
-                tree.expand(entry.path);
-                focusRow(entry.path);
-              }
-            : onOpenFile && (() => onOpenFile(entry)),
-        onMention: onMention && (() => mention(entry)),
-        onDownload: () => void download(entry),
-        onRename: () => setDialog({ kind: "rename", entry }),
-        onMove: () => setDialog({ kind: "move", entry }),
-        onCopyPath: () => copyPath(entry),
-        onDelete: () => setDialog({ kind: "delete", entry }),
-      }),
+      entry.type === "file" && notMounted(entry)
+        ? ({} as MenuBindings)
+        : rowBindings(entry, checkedOut, {
+            onOpen:
+              entry.type === "dir"
+                ? () => {
+                    tree.expand(entry.path);
+                    focusRow(entry.path);
+                  }
+                : openHere && (() => openHere(entry)),
+            onMention: onMention && (() => mention(entry)),
+            onDownload: () => void download(entry),
+            onRename: () => setDialog({ kind: "rename", entry }),
+            onMove: () => setDialog({ kind: "move", entry }),
+            onCopyPath: () => copyPath(entry),
+            onDelete: () => setDialog({ kind: "delete", entry }),
+            onPromote: offersPromote(entry, canCreateProjects)
+              ? () => setDialog({ kind: "promote", entry })
+              : undefined,
+          }),
     onRename: (entry: FileEntry) => setDialog({ kind: "rename", entry }),
     onDelete: (entry: FileEntry) => setDialog({ kind: "delete", entry }),
     onMove: (dragging: Dragging, folder: string) =>
@@ -442,6 +515,14 @@ export function FileBrowser({
       setActionError(null);
       setNotice(reason);
     },
+  };
+  const moveHere = async (ref: ProjectRef) => {
+    start();
+    const refused = await onMoveHere?.(ref);
+    if (refused !== undefined) {
+      return setActionError({ status: 0, code: "client_error", message: refused });
+    }
+    setNotice(`Moved this conversation to ${ref.name}`);
   };
   const projectActions = {
     ...actions,
@@ -466,6 +547,26 @@ export function FileBrowser({
           : project.kind === "editable"
             ? { "checkout-project": act("checkout") }
             : {}),
+        ...(project.project.id === activeProjectId
+          ? {}
+          : {
+              ...(onNewConversationIn
+                ? {
+                    "new-conversation-in-project": {
+                      onSelect: () => onNewConversationIn(ref),
+                      movesFocus: true,
+                    },
+                  }
+                : {}),
+              ...(onMoveHere
+                ? {
+                    "move-conversation-here": {
+                      onSelect: () => void moveHere(ref),
+                      movesFocus: true,
+                    },
+                  }
+                : {}),
+            }),
         "open-project-page": { onSelect: () => navigate(`/me/projects/${project.project.id}`) },
       };
     },
@@ -497,10 +598,18 @@ export function FileBrowser({
           actions={projectActions}
           focusRequest={focusRequest}
           onFocusChange={focusFrom.projects}
-          header={() => <ProjectsHeader total={work.total} />}
+          header={() => (
+            <>
+              <ProjectsHeader />
+              {work.showFilter && <ProjectsFilter value={work.filter} onChange={work.setFilter} />}
+            </>
+          )}
         />
       </div>
-      {split.projects.length === 0 && <NoProjects ready={work.ready} />}
+      {work.hidden > 0 && !work.showAll && work.filter === "" && (
+        <ShowAllProjects total={work.all} onShow={() => work.setShowAll(true)} />
+      )}
+      {work.rows.length === 0 && <NoProjects ready={work.ready} filtered={work.filter !== ""} />}
       {projectAction && (
         <ProjectWorkPanel
           key={`${projectAction.project.id}:${projectAction.action}`}
@@ -546,6 +655,14 @@ export function FileBrowser({
           onRename={(name) =>
             void move(dialog.entry.path, joinPath(parentPath(dialog.entry.path), name), "Renamed")
           }
+          onCancel={() => closeDialog(dialog.entry)}
+        />
+      )}
+      {dialog?.kind === "promote" && (
+        <PromoteDialog
+          entry={dialog.entry}
+          api={projectsApi}
+          onDone={(project) => promoted(dialog.entry, project)}
           onCancel={() => closeDialog(dialog.entry)}
         />
       )}

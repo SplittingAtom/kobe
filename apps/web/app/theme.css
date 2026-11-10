@@ -134,6 +134,11 @@
   --kobe-gauge-warn: var(--kobe-status-attention);
   --kobe-gauge-full: var(--kobe-status-failed);
 
+  /* The Files panel's active project (KOBE-590, FP2): the green dot before its name. The done
+     green, which every preset and scheme sets and which keeps 3:1 on the rail (--muted) and the
+     page (app/theme-css.test.ts). */
+  --kobe-active-dot: var(--kobe-status-done);
+
   /* The file editor's inline diff (KOBE-463, components/files/code-editor.tsx): added text on
      green, deleted on red (struck through, so colour never carries it alone), from the status
      colours so both themes follow; text and marks keep AA on the tints (app/theme-css.test.ts). */

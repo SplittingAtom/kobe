@@ -6,6 +6,7 @@ import {
   fileEditProposeFrameSchema,
   fileEditProposeResultFrameSchema,
   fileEditProposalsResponseSchema,
+  fileEditProposedPayloadSchema,
   kobeToolsRequestSchema,
   kobeToolsResponseSchema,
   proposeFileEditInputSchema,
@@ -170,11 +171,13 @@ describe("viewed-file context (KOBE-462)", () => {
 });
 
 describe("save route (KOBE-462)", () => {
-  it("needs the path and the version the editor loaded", () => {
+  it("needs the path, and the version the editor loaded for an existing file", () => {
     expect(workspaceSaveQuerySchema.safeParse({ path: "a.md", base_sha256: SHA }).success).toBe(
       true,
     );
-    expect(workspaceSaveQuerySchema.safeParse({ path: "a.md" }).success).toBe(false);
+    // KOBE-591: no base = create a new file (refused when the path is taken).
+    expect(workspaceSaveQuerySchema.safeParse({ path: "a.md" }).success).toBe(true);
+    expect(workspaceSaveQuerySchema.safeParse({ base_sha256: SHA }).success).toBe(false);
     expect(
       workspaceSaveQuerySchema.safeParse({ path: "a.md", base_sha256: "B".repeat(64) }).success,
     ).toBe(false);
@@ -193,6 +196,86 @@ describe("save route (KOBE-462)", () => {
     }
     expect(
       workspaceFileErrorSchema.safeParse({ code: "version_conflict", message: "m" }).success,
+    ).toBe(true);
+  });
+});
+
+describe("proposals for project files and new files (KOBE-591, PE3)", () => {
+  const PROJECT = "5b4c3d2e-7f6a-4b8c-9d0e-2f3a4b5c6d7e";
+  const PROPOSAL = "6c5d4e3f-8a7b-4c9d-8e1f-3a4b5c6d7e8f";
+  const base = {
+    tool_call_id: "call_1",
+    proposal_id: PROPOSAL,
+    path: "projects/budget/plan.md",
+    content: "new\n",
+    summary: "Adds the plan",
+  };
+
+  it("records the project, the head seq and the file's hash at that head", () => {
+    expect(
+      fileEditProposedPayloadSchema.safeParse({
+        ...base,
+        base_sha256: SHA,
+        project_id: PROJECT,
+        base_commit_seq: 3,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("a new file has no base_sha256, in a project or in My files", () => {
+    expect(
+      fileEditProposedPayloadSchema.safeParse({ ...base, project_id: PROJECT, base_commit_seq: 0 })
+        .success,
+    ).toBe(true);
+    expect(fileEditProposedPayloadSchema.safeParse({ ...base, path: "notes/new.md" }).success).toBe(
+      true,
+    );
+  });
+
+  it("project_id and base_commit_seq come together; old events (no proposal_id) still parse", () => {
+    expect(fileEditProposedPayloadSchema.safeParse({ ...base, project_id: PROJECT }).success).toBe(
+      false,
+    );
+    expect(fileEditProposedPayloadSchema.safeParse({ ...base, base_commit_seq: 1 }).success).toBe(
+      false,
+    );
+    expect(
+      fileEditProposedPayloadSchema.safeParse({ ...base, project_id: "x", base_commit_seq: 1 })
+        .success,
+    ).toBe(false);
+    expect(
+      fileEditProposedPayloadSchema.safeParse({ ...base, extra: true, base_sha256: SHA }).success,
+    ).toBe(false);
+    const { proposal_id: _drop, ...old } = base;
+    expect(fileEditProposedPayloadSchema.safeParse({ ...old, base_sha256: SHA }).success).toBe(
+      true,
+    );
+  });
+
+  it("the listing carries the new fields; the answer may omit base_sha256 (new file)", () => {
+    expect(
+      fileEditProposalsResponseSchema.safeParse({
+        proposals: [
+          {
+            ...base,
+            project_id: PROJECT,
+            base_commit_seq: 2,
+            run_id: RUN,
+            created_at: "2026-11-09T10:00:00.000Z",
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      fileEditProposeResultFrameSchema.safeParse({
+        v: 1,
+        type: "file.edit_propose_result",
+        request_id: "fe_1",
+        ok: true,
+        op: "file_edit_propose",
+        status: "awaiting_user",
+        path: "projects/budget/new.md",
+      }).success,
     ).toBe(true);
   });
 });

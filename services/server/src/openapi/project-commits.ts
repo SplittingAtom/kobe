@@ -1,6 +1,10 @@
 import { z } from "zod";
 import {
   commitConflictErrorSchema,
+  commitFromProposalRequestSchema,
+  commitFromProposalResponseSchema,
+  proposalNotAllowedErrorSchema,
+  proposalStaleErrorSchema,
   commitProjectRequestSchema,
   commitProjectResponseSchema,
   projectCheckoutSchema,
@@ -9,6 +13,8 @@ import {
   projectDiffEntrySchema,
   projectHistoryResponseSchema,
   projectQuotaErrorSchema,
+  projectSchema,
+  promoteFolderRequestSchema,
   revertProjectRequestSchema,
   updateCheckoutResponseSchema,
 } from "@kobe/protocol";
@@ -16,7 +22,7 @@ import { storageSettingsSchema } from "../projects/storage.js";
 
 /**
  * OpenAPI for project checkouts, commits, history and revert (KOBE-579, Workspaces CM2-CM7,
- * `routes/project-commits.ts`), the caller's checkouts and the workspace storage view (GV2, GV3).
+ * `routes/project-commits.ts`), Promote to project (KOBE-586, `routes/project-from-folder.ts`), the caller's checkouts and the workspace storage view (GV2, GV3).
  * Generated from the zod schemas of the contract (`packages/protocol/src/project-commits.ts`).
  */
 
@@ -183,6 +189,37 @@ export function projectCommitsOpenApiPaths(): Record<string, Record<string, unkn
         [id, seq, { name: "path", in: "path", required: true, schema: { type: "string" } }],
       ),
     },
+    "/v1/projects/{id}/commits/from-proposal": {
+      post: op(
+        "commitProjectFromProposal",
+        "Accept an agent's proposal: commit it (thread owner, editor+ now)",
+        "KOBE-591 (PE4-PE6). The caller owns the thread, the proposal is in it and is for a file of this project, the conversation is still in the project and the caller may edit it now (team admins act as owners). Under the project row lock, when the head still has the proposal's base (or still has no such file), commits exactly the recorded content (never content from the request) as the head tree with that one file replaced or added; author the caller, with the proposal's thread and run; message = `message` or the proposal's summary. Idempotent on `proposal_id`. Audited `project.committed` with `source: proposal`. Not blocked by legal holds.",
+        {
+          "200": json(
+            "CommitFromProposalResult",
+            "`committed {seq, commit_id}` (also for a repeat).",
+          ),
+          "404": json(
+            "Error",
+            "`not_found` (project), `thread_not_found` (no such thread of the caller's), or `proposal_not_found`.",
+          ),
+          "409": {
+            description:
+              "`proposal_stale {head_seq}`: the file changed since the proposal; `proposal_not_allowed {reason}`: moved, no_edit_access, archived, not_a_project_proposal.",
+            content: {
+              "application/json": {
+                schema: { oneOf: [ref("ProposalStale"), ref("ProposalNotAllowed")] },
+              },
+            },
+          },
+          "413": json("Error", "`file_too_large`."),
+          "422": json("Error", "`invalid_input`: a new file in a full project, or a bad name."),
+          "503": json("Error", "`storage_unavailable`."),
+          "507": json("ProjectQuotaError", "`quota_exceeded {limit: bytes|objects}`."),
+        },
+        { requestBody: body("CommitFromProposalBody") },
+      ),
+    },
     "/v1/projects/{id}/commits/{seq}/revert": {
       post: op(
         "revertProject",
@@ -199,6 +236,27 @@ export function projectCommitsOpenApiPaths(): Record<string, Record<string, unkn
         "The project's current files as a zip (GV5)",
         "Readers may download (they can read every file).",
         { "200": { description: "A zip.", content: { "application/zip": {} } } },
+      ),
+    },
+    "/v1/projects/from-folder": {
+      post: op(
+        "promoteFolderToProject",
+        "Promote a My files folder to a project (team admins, contributors)",
+        "KOBE-586 (PF3): the caller's own folder (never `uploads/`, `projects/` or an internal path) becomes a project they own; its files, sub-folders kept as paths, are the first commit \"Imported from My files/<path>\" (blobs copied server-side, hash-verified). Only once the project and the commit exist is the folder deleted from My files (as the Files panel's Delete), then the project mounts for the caller. Any refusal leaves My files and the projects unchanged. Audited `project.created`, `project.committed`, `workspace.file_deleted`.",
+        {
+          "201": json("Project", "The new project."),
+          "400": json("Error", "`invalid_request`: path and name (1-100) only."),
+          "409": json("Error", "`legal_hold`, or `slug_taken`."),
+          "413": json("Error", "`file_too_large` (the message names the file)."),
+          "422": json(
+            "Error",
+            "`invalid_input`: not a folder of My files, a file, an empty folder, more than 500 files, a bad name or a `.conflict-` copy.",
+          ),
+          "503": json("Error", "`storage_unavailable`, or `busy` (the folder kept changing)."),
+          "507": json("ProjectQuotaError", "`quota_exceeded {limit: bytes|objects}`."),
+        },
+        { requestBody: body("PromoteFolderBody") },
+        [],
       ),
     },
     "/v1/me/checkouts": {
@@ -287,6 +345,12 @@ export function projectCommitsOpenApiSchemas(): Record<string, JsonSchema> {
     ProjectHistory: schema(projectHistoryResponseSchema),
     ProjectCommitDetail: schema(projectCommitDetailSchema),
     RevertProjectBody: schema(revertProjectRequestSchema, "input"),
+    CommitFromProposalBody: schema(commitFromProposalRequestSchema, "input"),
+    CommitFromProposalResult: schema(commitFromProposalResponseSchema),
+    ProposalStale: schema(proposalStaleErrorSchema),
+    ProposalNotAllowed: schema(proposalNotAllowedErrorSchema),
+    PromoteFolderBody: schema(promoteFolderRequestSchema, "input"),
+    Project: schema(projectSchema),
     TeamStorage: schema(teamStorageSchema),
     TeamStorageSettings: schema(storageSettingsSchema, "input"),
   };

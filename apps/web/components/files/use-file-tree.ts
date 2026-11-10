@@ -22,6 +22,8 @@ export interface FileTree {
   /** Folders whose last load failed (the root's error is `root.error`). */
   readonly errors: readonly { readonly folder: string; readonly load: FolderLoad }[];
   readonly expanded: ReadonlySet<string>;
+  /** Rows a folder shows beyond the first page (Show more), by path. */
+  readonly limits: ReadonlyMap<string, number>;
   /** Every folder listed so far, for "Move to…". */
   readonly knownFolders: readonly FileEntry[];
   toggle(path: string): void;
@@ -191,6 +193,7 @@ export function useFileTree(api: FilesApi, storageKey: string): FileTree {
     folders,
     errors,
     expanded,
+    limits,
     knownFolders,
     toggle,
     expand,

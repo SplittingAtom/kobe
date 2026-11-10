@@ -7,7 +7,8 @@ import { worded, type ProjectInput } from "../../lib/projects/api";
 import { useTeamAccess } from "../admin/console-context";
 import { MutationStatus } from "../admin/error-notice";
 import { DateTime, ResourceView } from "../admin/parts";
-import { useMutation, useResource } from "../admin/use-resource";
+import { useResource } from "../admin/use-resource";
+import { useProjectMutation } from "./use-project-mutation";
 import {
   Button,
   Card,
@@ -32,7 +33,7 @@ export function ProjectsPage() {
   const agents = useProjectAgents(api);
   const [archived, setArchived] = useState(false);
   const [listKey, setListKey] = useState(0);
-  const mutation = useMutation();
+  const mutation = useProjectMutation();
   const canCreate = projectPermissions(access.role, undefined).create;
   const [creating, setCreating] = useState(false);
 

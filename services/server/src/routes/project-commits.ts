@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { withTeam, type KobeTx } from "@kobe/db";
 import {
+  commitFromProposalRequestSchema,
   commitProjectRequestSchema,
   PROJECT_HISTORY_MAX_COMMITS,
   projectHistoryQuerySchema,
@@ -28,6 +29,7 @@ import {
   type CommitDeps,
   type CommitResult,
 } from "../projects/commits.js";
+import { commitProposal, type ProposalResult } from "../projects/from-proposal.js";
 import { commitDetail, fileAt, headZip, historyPage, servable } from "../projects/history.js";
 import type { TreeFile } from "../projects/tree.js";
 import { storageSettingsSchema, storageView, writeStorageSettings } from "../projects/storage.js";
@@ -115,6 +117,43 @@ function refusal(c: Ctx, r: Extract<CommitResult, { status: "refused" }>): Respo
       return fail(c, 503, "busy", "Your working copy changed while committing. Try again.");
     case "storage_failed":
       return noStorage(c);
+  }
+}
+
+const NOT_ALLOWED: Record<Extract<ProposalResult, { status: "not_allowed" }>["reason"], string> = {
+  moved: "The conversation is no longer in this project, so the edit can't be committed here.",
+  no_edit_access: "You can no longer edit this project, so the edit can't be committed.",
+  archived: "The project is archived.",
+  not_a_project_proposal: "This proposal is for your own files; save it there instead.",
+};
+
+/** An accepted proposal's outcome as the REST contract answers it (`project-commits.ts`). */
+function proposalAnswer(c: Ctx, result: ProposalResult): Response {
+  switch (result.status) {
+    case "committed":
+      return c.json({ status: "committed", seq: result.seq, commit_id: result.commitId });
+    case "thread_not_found":
+      return fail(c, 404, "thread_not_found", "No thread with that id.");
+    case "proposal_not_found":
+      return fail(c, 404, "proposal_not_found", "No such proposal in that conversation.");
+    case "not_found":
+      return notFound(c);
+    case "stale":
+      return fail(
+        c,
+        409,
+        "proposal_stale",
+        "This file changed after the agent proposed the edit. Ask it to propose again.",
+        { head_seq: result.headSeq },
+      );
+    case "not_allowed":
+      return fail(c, 409, "proposal_not_allowed", NOT_ALLOWED[result.reason], {
+        reason: result.reason,
+      });
+    case "quota_exceeded":
+      return refusal(c, { status: "refused", error: "quota_exceeded", limit: result.limit });
+    case "refused":
+      return refusal(c, { status: "refused", error: result.error });
   }
 }
 
@@ -240,6 +279,30 @@ export function projectCommitRoutes(
       author: { userId: viewer.userId, kind: "user" },
     });
     return commitAnswer(c, result);
+  });
+
+  /**
+   * PE4-PE6 (KOBE-591): the thread's owner accepts an agent's proposal for a file of the
+   * conversation's project; the recorded content is committed (never content from the request).
+   */
+  app.post("/:id/commits/from-proposal", async (c) => {
+    const id = idParam.safeParse(c.req.param("id"));
+    if (!id.success) return notFound(c);
+    const body = await parseBody(c, commitFromProposalRequestSchema);
+    if (!body) {
+      return invalidRequest(
+        c,
+        "Give thread_id and proposal_id, and optionally a message (1 to 500 characters).",
+      );
+    }
+    const result = await commitProposal(commitDeps(), {
+      owner: owner(c),
+      projectId: id.data,
+      threadId: body.thread_id,
+      proposalId: body.proposal_id,
+      message: body.message,
+    });
+    return proposalAnswer(c, result);
   });
 
   app.get("/:id/commits", async (c) => {

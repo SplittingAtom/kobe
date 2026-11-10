@@ -103,6 +103,11 @@ export interface ProjectsApi {
   downloadHead(id: string): Promise<ApiResult<Uint8Array>>;
   get(id: string): Promise<ApiResult<Project>>;
   create(input: ProjectInput): Promise<ApiResult<Project>>;
+  /**
+   * Promote to project (KOBE-586, PF3): the caller's My files folder becomes a project they own
+   * (one commit), leaves My files and mounts for them. Team admins and contributors only.
+   */
+  promoteFolder(path: string, name: string): Promise<ApiResult<Project>>;
   update(
     id: string,
     input: Partial<ProjectInput> & { archived?: boolean },
@@ -164,6 +169,8 @@ export function createProjectsApi(teamId: string, fetchFn?: typeof fetch): Proje
     transferOwner: (id, userId) => call(`${base(id)}/owner`, "POST", { user_id: userId }),
     get: (id) => call<Project>(base(id)),
     create: (input) => call<Project>("/v1/projects", "POST", toBody(input)),
+    promoteFolder: (path, name) =>
+      call<Project>("/v1/projects/from-folder", "POST", { path, name: name.trim() }),
     update: (id, input) => call<Project>(base(id), "PATCH", toBody(input)),
     remove: (id) => call(base(id), "DELETE"),
     members: (id) => call<ProjectMembers>(`${base(id)}/members`),

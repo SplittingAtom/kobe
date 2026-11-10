@@ -62,7 +62,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-function mount() {
+function mount(extra: Partial<React.ComponentProps<typeof FileBrowser>> = {}) {
   const { fetchFn, calls } = routedFetch(routes);
   render(
     <div data-kobe-chat>
@@ -72,6 +72,7 @@ function mount() {
             api={createFilesApi(TEAM, fetchFn)}
             workspaceName="Marketing"
             refreshAfterWakeMs={60_000}
+            {...extra}
           />
         </WorkspaceProjectsProvider>
       </IconActionProvider>
@@ -109,7 +110,7 @@ describe("the Workspace tree (FP1)", () => {
     // A team admin who is not listed acts as owner.
     expect(within(await project("Ops plan")).getByText("owner")).toBeTruthy();
     // Every readable, live project counts; archived ones do not.
-    const all = screen.getByRole("link", { name: "All projects (4) →" });
+    const all = screen.getByRole("link", { name: "Manage projects →" });
     expect(all.getAttribute("href")).toBe("/me/projects");
     const mine = screen.getByRole("tree", { name: "My files" });
     expect(
@@ -209,11 +210,13 @@ describe("the Workspace tree (FP1)", () => {
     }
   });
 
-  it("says when no project is mounted, and still links to all projects", async () => {
+  it("says when the workspace has no project, and still links to Manage projects", async () => {
     routes["GET /v1/workspace/files"] = listing("", [entry("notes", "dir")]);
+    routes["GET /v1/projects"] = [200, { projects: [] }];
+    delete routes["GET /v1/workspace/files?path=projects"];
     mount();
-    expect(await screen.findByText(/No projects in your files yet/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: /^All projects/ })).toBeTruthy();
+    expect(await screen.findByText(/No projects yet/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Manage projects →" })).toBeTruthy();
   });
 
   it("a checked-out project's own row keeps Upload and is not called read-only", async () => {
@@ -239,5 +242,184 @@ describe("the Workspace tree (FP1)", () => {
     const budget = await project("Budget plan");
     await waitFor(() => expect(budget.textContent).toMatch(/editing ●/));
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("every project, the conversation's one active (KOBE-590, FP1-FP6)", () => {
+  const names = () =>
+    within(projects())
+      .getAllByRole("treeitem")
+      .filter((r) => r.getAttribute("aria-level") === "1")
+      .map((r) => r.getAttribute("aria-label"));
+
+  it("lists every non-archived project, mounted or not, the active one first with a dot", async () => {
+    mount({ activeProjectId: "p-ops" });
+    await project("Other plan");
+    expect(names()).toEqual(["Ops plan", "Budget plan", "Deck plan", "Other plan"]);
+    const ops = await project("Ops plan");
+    expect(within(ops).getByRole("img", { name: "Active in this conversation" })).toBeTruthy();
+    expect(ops.textContent).not.toMatch(/Not in this conversation/);
+    const deck = await project("Deck plan");
+    expect(within(deck).queryByRole("img", { name: "Active in this conversation" })).toBeNull();
+    expect(deck.querySelector("span.text-muted-foreground")?.textContent).toBe("Deck plan");
+    expect(deck.querySelector("[id$='-d']")?.textContent).toMatch(/Not in this conversation/);
+    // Role chip and editing stay on a greyed row; editing is never greyed.
+    const budget = await project("Budget plan");
+    expect(within(budget).getByText("editor")).toBeTruthy();
+    expect(within(budget).getByText(/^editing/).className).toContain("text-foreground");
+  });
+
+  it("a conversation with no project has no active row", async () => {
+    mount({ activeProjectId: null });
+    await project("Other plan");
+    expect(
+      within(projects()).queryByRole("img", { name: "Active in this conversation" }),
+    ).toBeNull();
+    expect(names()).toEqual(["Budget plan", "Deck plan", "Ops plan", "Other plan"]);
+  });
+
+  it("opens an unmounted project from its head, read-only, without mounting it", async () => {
+    routes["GET /v1/projects/p-other/files"] = [
+      200,
+      {
+        files: [
+          {
+            id: "f1",
+            project_id: "p-other",
+            path: "brief.md",
+            size_bytes: 5,
+            sha256: "x",
+            mime_type: "text/markdown",
+            source: "upload",
+            added_by: "u-1",
+            added_at: "2026-11-01T10:00:00Z",
+          },
+        ],
+      },
+    ];
+    const calls = mount();
+    await userEvent.setup().click(await project("Other plan"));
+    expect(await within(projects()).findByRole("treeitem", { name: "brief.md" })).toBeTruthy();
+    expect(calls.some((c) => c.method !== "GET" && c.url.includes("mount"))).toBe(false);
+    expect(calls.filter((c) => c.method === "POST" && c.url !== "/v1/workspace/wake")).toEqual([]);
+  });
+
+  it("refuses to drag an unmounted project's file onto the composer", async () => {
+    routes["GET /v1/projects/p-other/files"] = [
+      200,
+      {
+        files: [
+          {
+            id: "f1",
+            project_id: "p-other",
+            path: "brief.md",
+            size_bytes: 5,
+            sha256: "x",
+            mime_type: "text/markdown",
+            source: "upload",
+            added_by: "u-1",
+            added_at: "2026-11-01T10:00:00Z",
+          },
+        ],
+      },
+    ];
+    mount();
+    await userEvent.setup().click(await project("Other plan"));
+    const file = await within(projects()).findByRole("treeitem", { name: "brief.md" });
+    const data: Record<string, string> = {};
+    fireEvent.dragStart(file, {
+      dataTransfer: {
+        setData: (type: string, value: string) => (data[type] = value),
+        types: [],
+        effectAllowed: "",
+      },
+    });
+    expect(data).toEqual({
+      "application/x-kobe-unmounted-project-file":
+        "Start a conversation in Other plan to mention its files",
+    });
+  });
+
+  it("a greyed project's menu starts a conversation, moves this one here, opens the project", async () => {
+    const started: string[] = [];
+    const moved: string[] = [];
+    mount({
+      activeProjectId: "p-ops",
+      onNewConversationIn: (p) => started.push(p.id),
+      onMoveHere: async (p) => {
+        moved.push(p.id);
+        return undefined;
+      },
+    });
+    const user = userEvent.setup();
+    const deck = await project("Deck plan");
+    await user.click(within(deck).getByRole("button", { name: "Actions for Deck plan" }));
+    const menu = await screen.findByRole("menu", { name: "Actions for Deck plan" });
+    const items = within(menu)
+      .getAllByRole("menuitem")
+      .map((i) => i.textContent);
+    expect(items).toEqual(
+      expect.arrayContaining([
+        "New conversation in this project",
+        "Move this conversation here",
+        "Open project page",
+      ]),
+    );
+    await user.click(within(menu).getByRole("menuitem", { name: "Move this conversation here" }));
+    await waitFor(() => expect(moved).toEqual(["p-deck"]));
+    expect(await screen.findByText("Moved this conversation to Deck plan")).toBeTruthy();
+    const other = await project("Other plan");
+    await user.click(within(other).getByRole("button", { name: "Actions for Other plan" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "New conversation in this project" }),
+    );
+    expect(started).toEqual(["p-other"]);
+  });
+
+  it("the active project's menu has no move or new conversation; no Move without an own conversation", async () => {
+    mount({ activeProjectId: "p-ops", onNewConversationIn: () => undefined });
+    const user = userEvent.setup();
+    const ops = await project("Ops plan");
+    await user.click(within(ops).getByRole("button", { name: "Actions for Ops plan" }));
+    const menu = await screen.findByRole("menu", { name: "Actions for Ops plan" });
+    expect(within(menu).queryByRole("menuitem", { name: /conversation/ })).toBeNull();
+    await user.keyboard("{Escape}");
+    const deck = await project("Deck plan");
+    await user.click(within(deck).getByRole("button", { name: "Actions for Deck plan" }));
+    const other = await screen.findByRole("menu", { name: "Actions for Deck plan" });
+    expect(
+      within(other).queryByRole("menuitem", { name: "Move this conversation here" }),
+    ).toBeNull();
+  });
+
+  it("scale: a filter from 20 projects, a cap above 50 with Show all (N)", async () => {
+    const many = Array.from({ length: 60 }, (_, i) => {
+      const slug = `p${String(i).padStart(2, "0")}`;
+      return wireProject(slug, {
+        name: `Project ${slug}`,
+        updated_at: `2026-11-01T10:${String(i).padStart(2, "0")}:00Z`,
+      });
+    });
+    routes["GET /v1/projects"] = [200, { projects: many }];
+    routes["GET /v1/workspace/files?path=projects"] = listing("projects", []);
+    routes["GET /v1/me/checkouts"] = [200, { checkouts: [] }];
+    mount({ activeProjectId: "p-p00" });
+    const user = userEvent.setup();
+    await within(projects()).findByRole("treeitem", { name: "Project p59" });
+    // The 50 most recent plus the active (oldest) one.
+    expect(names()).toHaveLength(51);
+    expect(names()[0]).toBe("Project p00");
+    const showAll = screen.getByRole("button", { name: "Show all (60)" });
+    await user.click(showAll);
+    expect(names()).toHaveLength(60);
+    expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();
+    await user.type(screen.getByRole("searchbox", { name: "Filter projects" }), "p07");
+    expect(names()).toEqual(["Project p07"]);
+  });
+
+  it("no filter field below 20 projects", async () => {
+    mount();
+    await project("Other plan");
+    expect(screen.queryByRole("searchbox", { name: "Filter projects" })).toBeNull();
   });
 });
