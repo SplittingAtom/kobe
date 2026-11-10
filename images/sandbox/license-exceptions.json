@@ -22,7 +22,7 @@
   },
   "npm": {
     "license": "Artistic-2.0",
-    "versions": ["12.2.1"],
+    "versions": ["12.2.2"],
     "reason": "The npm CLI, shipped unmodified as a separate program so agents can install packages through the egress proxy. Artistic-2.0 is OSI-approved and not copyleft for unmodified redistribution (KOBE-21).",
     "approvedBy": "Chris",
     "approvedOn": "2026-10-17"

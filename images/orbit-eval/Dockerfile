@@ -35,7 +35,10 @@ COPY images/orbit-eval/scenarios /opt/kobe/orbit-eval/scenarios
 # ca-certificates from trixie's updates: the base's 20250419 still trusts emSign ECC Root CA - G3
 # (compromised intermediates, KOBE-486); Python's ssl and aiohttp read this store. libpcre2-8-0
 # takes the trixie security fix (CVE-2026-103111).
+# `apt-get upgrade` takes Debian security fixes for the base's own packages (apt, zlib1g, ...) before
+# the pinned digest moves (KOBE-539).
 RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends ca-certificates libpcre2-8-0 \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --gid 1000 kobe \
