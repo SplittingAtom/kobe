@@ -108,6 +108,9 @@ describe("apps in tool cards (KOBE-438)", () => {
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
     expect(frame.getAttribute("src")).toContain(`/v1/team/apps/${APP_ID}/frame?`);
     expect(frame.getAttribute("src")).toContain(`sha256=${SHA}`);
+    // The answer has an app: its other tool cards are under Show response (KOBE-608).
+    expect(screen.queryByText("Connect Catalyst to use this app.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show response" }));
     expect(screen.getByText("Connect Catalyst to use this app.")).toBeTruthy();
     expect(screen.getByText("This app changed and is waiting for review.")).toBeTruthy();
     // The reload read the stored result; nothing else (no call, no upstream).

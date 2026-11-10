@@ -290,6 +290,18 @@ everything else `chat`. The rejected "artifact column as the main surface" still
 default: an app opens there only when a site admin placed it there, and its card stays in the
 conversation where it was produced.
 
+_Amended 2026-11-10 (Chris, KOBE-608): an answer with an app shows only the app._ When at least
+one tool card in an answer renders an app frame for the viewer, the answer shows only its app
+card(s), as a rail-launched card does (KOBE-440). Everything else in that answer (prose before
+and after, reasoning steps, other tool cards, the "Used skill" line) sits behind a collapsed
+**Show response** under the card(s), which reveals it in its original order. Copy still copies
+the answer's text. Never hidden: approval cards and approval outcomes, problems (a model error,
+an output limit), blocked-domain cards and the "Working…" line. The answer renders as before
+when the viewer gets the text card (MA10) or the app's stored result could not be read. The
+decision uses what the card itself uses (the thread's app list and, live, the tool result's app
+marker), never the frame's load: once the app card appeared in a live run the rest stays hidden.
+It applies live, after a reload, in Compare versions and in shared threads.
+
 **MA4. Server-mediated `resources/read`, never the sandbox.** Templates are fetched only by the
 server's pin and refresh probes, through mcp-proxy's internal probe endpoint (server key only,
 with the KOBE-431 probe credential), and stored in Postgres. **Amended 2026-10-19 (coordinator,

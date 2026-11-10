@@ -144,6 +144,11 @@ separated), `KOBE_APPS_ITEM_ROLE` (`button` or `treeitem`), `KOBE_APPS_USE_LABEL
 `KOBE_APPS_USE_TEXT`, `KOBE_APPS_PROBES=1`, `KOBE_APPS_SECRET`. k3d: `e2e/gate-apps.sh` sets them;
 the gate install: `docs/gates/gate-apps-runbook.md`. A few model turns.
 
+`app-only-answer.spec.ts` (KOBE-608) asks the model to open the app of `KOBE_APPS_CONNECTOR`
+(prompt `KOBE_APPS_OPEN`, as for the Explorer Gate) and checks that its answer shows only the app
+card(s), that "Show response" (closed, keyboard) reveals the rest, and the same after a reload.
+It skips without that connector's app, unless `KOBE_REQUIRE_APP=1`. One model run.
+
 ## Console sections (KOBE-291)
 
 `console-sections.spec.ts` opens the Site audit log (Verify chain, a category filter and Clear),
