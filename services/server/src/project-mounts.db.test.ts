@@ -89,9 +89,9 @@ describe("mount on conversation (MT1)", () => {
     const c = await contributor(w.team);
     const m = await f.member(w.team);
     const p = await project(c, { name: "Mounted" });
-    // Readable but not open: nothing mounted (the creator has no conversation in it either).
+    // Readable but not open: nothing mounted; the creator has it at once (PF5, KOBE-586).
     expect(await paths(w.team, m.id)).toEqual([]);
-    expect(await paths(w.team, c.id)).toEqual([]);
+    expect(await paths(w.team, c.id)).toEqual([p.path]);
 
     const first = await thread(m, p.id);
     expect(await paths(w.team, m.id)).toEqual([p.path]);
@@ -107,8 +107,8 @@ describe("mount on conversation (MT1)", () => {
     expect(await paths(w.team, m.id)).toEqual([]);
     expect((await as(m).post(`/v1/threads/${second}/move`, { project_id: p.id })).status).toBe(200);
     expect(await paths(w.team, m.id)).toEqual([p.path]);
-    // A thread shared to the project that they only read does not mount it for others.
-    expect(await paths(w.team, c.id)).toEqual([]);
+    // Another member's threads change nothing for the creator (still mounted by PF5).
+    expect(await paths(w.team, c.id)).toEqual([p.path]);
   });
 
   it("leaves a checked-out project's folder to the member (reconcile skips it)", async () => {
@@ -277,7 +277,8 @@ describe("the mount cap (MT3)", () => {
     expect((await as(c).post(`/v1/threads/${inA}/move`, { project_id: third.id })).status).toBe(
       409,
     );
-    expect(await paths(w.team, c.id)).toEqual([a.path, b.path].sort());
+    // C stays mounted for its creator (PF5): such a mount neither counts nor exempts.
+    expect(await paths(w.team, c.id)).toEqual([a.path, b.path, third.path].sort());
   });
 
   it("defaults to 20 open projects per member", async () => {

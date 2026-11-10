@@ -125,6 +125,8 @@ export async function createProject(
   tx: KobeTx,
   viewer: Viewer,
   body: CreateProjectRequest,
+  /** Promote to project (KOBE-586) picks the id first: its blobs are copied before the insert. */
+  options: { readonly id?: string } = {},
 ): Promise<Outcome<{ row: ProjectRow }>> {
   const members = [...new Set(body.member_user_ids ?? [])].filter((id) => id !== viewer.userId);
   if (!(await usersInTeam(tx, viewer.teamId, members))) return fail("not_in_team");
@@ -139,6 +141,7 @@ export async function createProject(
   const [row] = await tx
     .insert(projects)
     .values({
+      ...(options.id === undefined ? {} : { id: options.id }),
       teamId: viewer.teamId,
       slug,
       name: body.name,
