@@ -51,6 +51,17 @@ Without a local browser, run the same command in the matching image,
 `mcr.microsoft.com/playwright:v1.55.0-noble`, with the three variables passed through
 `docker run -e KOBE_BASE_URL -e KOBE_USER -e KOBE_PW …`.
 
+## Files panel stays current (KOBE-599)
+
+`files-refresh.spec.ts`: Refresh files syncs the running sandbox first (the agent writes a file
+inside a run that keeps going, and Refresh shows it before any run-end or periodic push; each
+Refresh is checked against the server's listing first, so a periodic push that lands in between
+fails the test with "run again" instead of passing silently), and the open panel lists again
+by itself after an upload from another tab, the agent's push after a run, and a new file in a
+mounted project, keeping open folders open. Creates `kobe-599-*` folders and one project
+(`KOBE_USER` must be allowed to create projects) and deletes them. Two short model turns:
+`npx playwright test files-refresh`.
+
 ## Files tree (KOBE-304)
 
 `files-tree.spec.ts` uploads three small files into a new folder of the member's workspace, opens

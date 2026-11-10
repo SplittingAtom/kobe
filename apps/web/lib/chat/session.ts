@@ -19,6 +19,7 @@ import type { TeamModels } from "../admin/api/team/models";
 import type { ChatApi } from "./api";
 import { createFilesApi, type FilesApi } from "../files/api";
 import { WorkspaceChangeFeed } from "../files/remote-changes";
+import { WorkspaceEventFeed } from "../files/workspace-events";
 import { createProjectsApi, type Project } from "../projects/api";
 import { createCommitsApi, type ProjectCommitsApi } from "../projects/commits-api";
 import { AttachmentStore } from "./attachments";
@@ -121,6 +122,8 @@ export class ChatSession {
   readonly editDrafts = new EditDraftStore();
   /** Live changes to the files open in this page's tabs (KOBE-496): one stream per page. */
   readonly fileChanges: WorkspaceChangeFeed;
+  /** The Files panel's "something changed, list again" stream (KOBE-599); open while listened. */
+  readonly workspaceEvents: WorkspaceEventFeed;
   /** The agent's file edit proposals under review per file (KOBE-463). */
   readonly fileReviews = new FileReviewStore();
   /** The proposal cards' auto-open switch (KOBE-489), seeded from the stored preference. */
@@ -214,6 +217,14 @@ export class ChatSession {
       teamId: options.teamId,
       eventSource: options.eventSource,
       // Another tab switched the active team: this page's stream can never open again.
+      probe: async () => {
+        const res = await this.files.list("");
+        return res.ok || res.error.code !== "team_mismatch";
+      },
+    });
+    this.workspaceEvents = new WorkspaceEventFeed({
+      teamId: options.teamId,
+      eventSource: options.eventSource,
       probe: async () => {
         const res = await this.files.list("");
         return res.ok || res.error.code !== "team_mismatch";
@@ -655,6 +666,7 @@ export class ChatSession {
     this.attachments.dispose();
     this.sentFiles.dispose();
     this.fileChanges.dispose();
+    this.workspaceEvents.dispose();
     for (const untrack of this.#untrack.values()) untrack();
     this.#untrack.clear();
     this.activity.clear();
