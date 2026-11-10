@@ -115,7 +115,7 @@ const refused = (
 ): CommitResult => ({ status: "refused", error, ...extra });
 
 /** Contents the project already holds, by hash: a key and its mime type. */
-async function heldContents(
+export async function heldContents(
   tx: KobeTx,
   teamId: string,
   projectId: string,

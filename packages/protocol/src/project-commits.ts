@@ -44,6 +44,9 @@ export const PROJECT_COMMIT_ERROR_CODES = [
   "too_many_mounts", // 409 the member's mounted-project cap (MT3)
   "checkout_required", // 409 a write inside a project folder without a checkout
   "commit_not_found", // 404 no such seq in this project (also once pruned)
+  "proposal_not_found", // 404 no such proposal in that thread (or its run was compacted)
+  "proposal_stale", // 409 the file changed in the project after the agent proposed the edit
+  "proposal_not_allowed", // 409 the proposal can no longer be accepted (see its reason)
 ] as const;
 export const projectCommitErrorCodeSchema = z.enum(PROJECT_COMMIT_ERROR_CODES);
 export type ProjectCommitErrorCode = z.infer<typeof projectCommitErrorCodeSchema>;
@@ -151,6 +154,55 @@ export const commitProjectResponseSchema = z.discriminatedUnion("status", [
   z.strictObject({ status: z.literal("nothing_to_commit") }),
 ]);
 export type CommitProjectResponse = z.infer<typeof commitProjectResponseSchema>;
+
+// ----------------------------------------------------------------------------- accept a proposal
+
+/**
+ * `POST /v1/projects/:id/commits/from-proposal` (KOBE-591, projects-in-conversations PE4-PE6): the
+ * thread's owner accepts an agent's `propose_file_edit` for a file of the conversation's project;
+ * the server commits exactly the recorded content (never content from the request) as the head
+ * tree with that one file replaced or added. `message` (the edited commit message) defaults to
+ * the proposal's summary. Idempotent on `proposal_id`: a second accept answers the same commit.
+ */
+export const commitFromProposalRequestSchema = z.strictObject({
+  thread_id: uuidSchema,
+  proposal_id: uuidSchema,
+  message: messageSchema.optional(),
+});
+export type CommitFromProposalRequest = z.infer<typeof commitFromProposalRequestSchema>;
+
+export const commitFromProposalResponseSchema = z.strictObject({
+  status: z.literal("committed"),
+  seq: seqSchema,
+  commit_id: uuidSchema,
+});
+export type CommitFromProposalResponse = z.infer<typeof commitFromProposalResponseSchema>;
+
+/** 409: the file at the head is no longer the proposal's base (or a new file now exists). */
+export const proposalStaleErrorSchema = z.strictObject({
+  code: z.literal("proposal_stale"),
+  message: z.string().max(2000),
+  head_seq: seqSchema,
+});
+export type ProposalStaleError = z.infer<typeof proposalStaleErrorSchema>;
+
+/**
+ * Why a proposal can no longer be accepted (PE5): the conversation `moved` to another project (or
+ * out of it), the member has `no_edit_access` now, the project is `archived`, or the proposal is
+ * for the member's own files (`not_a_project_proposal`: accepted with the save route instead).
+ */
+export const PROPOSAL_NOT_ALLOWED_REASONS = [
+  "moved",
+  "no_edit_access",
+  "archived",
+  "not_a_project_proposal",
+] as const;
+export const proposalNotAllowedErrorSchema = z.strictObject({
+  code: z.literal("proposal_not_allowed"),
+  message: z.string().max(2000),
+  reason: z.enum(PROPOSAL_NOT_ALLOWED_REASONS),
+});
+export type ProposalNotAllowedError = z.infer<typeof proposalNotAllowedErrorSchema>;
 
 /**
  * `POST /v1/projects/:id/checkout/update` -> 200. The head's version takes a path both sides

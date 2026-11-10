@@ -90,6 +90,31 @@ describe("propose_file_edit (KOBE-462)", () => {
     expect(parseFileEditReply({ ...reply, base_sha256: "x" })).toBeUndefined();
   });
 
+  it("works for the member's own files and the conversation's project, new files too (KOBE-591)", async () => {
+    const tool = proposeFileEditTool(transport(PROPOSED).t);
+    expect(tool.description).toMatch(/the user's own files/);
+    expect(tool.description).toMatch(/conversation's project/);
+    expect(tool.description).toMatch(/new file/);
+    expect(tool.description).toMatch(/accepting commits it/);
+    // A new file has no base: the answer omits base_sha256 and still parses.
+    const created = {
+      ok: true,
+      op: "file_edit_propose",
+      status: "awaiting_user",
+      path: "projects/p/new.md",
+    } as const;
+    const reply = { id: "kt_2", ...created };
+    expect(parseFileEditReply(reply)).toEqual(reply);
+    expect(kobeToolsResponseSchema.safeParse(reply).success).toBe(true);
+    const result = await proposeFileEditTool(transport(created).t).execute("call_2", {
+      ...input,
+      path: "/workspace/projects/p/new.md",
+    });
+    const text = JSON.parse(result.content[0]?.text ?? "{}") as Record<string, unknown>;
+    expect(text).toMatchObject({ status: "awaiting_user", path: "projects/p/new.md" });
+    expect(text).not.toHaveProperty("base_sha256");
+  });
+
   it("is registered only with the file_edits flag, read once", () => {
     const env: Record<string, string | undefined> = { KOBE_TOOLS_FILE_EDITS: "1" };
     expect(fileEditsEnabled(env)).toBe(true);

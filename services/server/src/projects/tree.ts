@@ -55,6 +55,8 @@ export interface CommitAuthor {
   readonly kind: "user" | "agent";
   readonly threadId?: string | undefined;
   readonly runId?: string | undefined;
+  /** An accepted agent proposal (KOBE-591, PE4): audited as `source: "proposal"`. */
+  readonly proposalId?: string | undefined;
 }
 
 type EntryRow = {
@@ -346,6 +348,9 @@ export async function writeCommit(
         authorKind: author.kind,
         ...(author.threadId === undefined ? {} : { threadId: author.threadId }),
         ...(author.runId === undefined ? {} : { runId: author.runId }),
+        ...(author.proposalId === undefined
+          ? {}
+          : { source: "proposal" as const, proposalId: author.proposalId }),
         added: changes.filter((c) => c.change === "added").length,
         modified: changes.filter((c) => c.change === "modified").length,
         deleted: changes.filter((c) => c.change === "deleted").length,

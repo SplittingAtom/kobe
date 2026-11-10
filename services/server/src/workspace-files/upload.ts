@@ -48,7 +48,7 @@ export const fail = (
   code,
   message,
 });
-const TAKEN = fail(409, "already_exists", "A file or folder with that name already exists.");
+export const TAKEN = fail(409, "already_exists", "A file or folder with that name already exists.");
 export const QUOTA = fail(507, "quota_exceeded", "Your workspace has no room for this file.");
 /** The checkout ended while the write was on its way (KOBE-579): the folder is read-only again. */
 export const READ_ONLY = fail(

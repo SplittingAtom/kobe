@@ -1,6 +1,10 @@
 import { z } from "zod";
 import {
   commitConflictErrorSchema,
+  commitFromProposalRequestSchema,
+  commitFromProposalResponseSchema,
+  proposalNotAllowedErrorSchema,
+  proposalStaleErrorSchema,
   commitProjectRequestSchema,
   commitProjectResponseSchema,
   projectCheckoutSchema,
@@ -183,6 +187,37 @@ export function projectCommitsOpenApiPaths(): Record<string, Record<string, unkn
         [id, seq, { name: "path", in: "path", required: true, schema: { type: "string" } }],
       ),
     },
+    "/v1/projects/{id}/commits/from-proposal": {
+      post: op(
+        "commitProjectFromProposal",
+        "Accept an agent's proposal: commit it (thread owner, editor+ now)",
+        "KOBE-591 (PE4-PE6). The caller owns the thread, the proposal is in it and is for a file of this project, the conversation is still in the project and the caller may edit it now (team admins act as owners). Under the project row lock, when the head still has the proposal's base (or still has no such file), commits exactly the recorded content (never content from the request) as the head tree with that one file replaced or added; author the caller, with the proposal's thread and run; message = `message` or the proposal's summary. Idempotent on `proposal_id`. Audited `project.committed` with `source: proposal`. Not blocked by legal holds.",
+        {
+          "200": json(
+            "CommitFromProposalResult",
+            "`committed {seq, commit_id}` (also for a repeat).",
+          ),
+          "404": json(
+            "Error",
+            "`not_found` (project), `thread_not_found` (no such thread of the caller's), or `proposal_not_found`.",
+          ),
+          "409": {
+            description:
+              "`proposal_stale {head_seq}`: the file changed since the proposal; `proposal_not_allowed {reason}`: moved, no_edit_access, archived, not_a_project_proposal.",
+            content: {
+              "application/json": {
+                schema: { oneOf: [ref("ProposalStale"), ref("ProposalNotAllowed")] },
+              },
+            },
+          },
+          "413": json("Error", "`file_too_large`."),
+          "422": json("Error", "`invalid_input`: a new file in a full project, or a bad name."),
+          "503": json("Error", "`storage_unavailable`."),
+          "507": json("ProjectQuotaError", "`quota_exceeded {limit: bytes|objects}`."),
+        },
+        { requestBody: body("CommitFromProposalBody") },
+      ),
+    },
     "/v1/projects/{id}/commits/{seq}/revert": {
       post: op(
         "revertProject",
@@ -287,6 +322,10 @@ export function projectCommitsOpenApiSchemas(): Record<string, JsonSchema> {
     ProjectHistory: schema(projectHistoryResponseSchema),
     ProjectCommitDetail: schema(projectCommitDetailSchema),
     RevertProjectBody: schema(revertProjectRequestSchema, "input"),
+    CommitFromProposalBody: schema(commitFromProposalRequestSchema, "input"),
+    CommitFromProposalResult: schema(commitFromProposalResponseSchema),
+    ProposalStale: schema(proposalStaleErrorSchema),
+    ProposalNotAllowed: schema(proposalNotAllowedErrorSchema),
     TeamStorage: schema(teamStorageSchema),
     TeamStorageSettings: schema(storageSettingsSchema, "input"),
   };

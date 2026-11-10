@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PROJECT_AUDIT_EVENTS,
+  PROJECT_COMMIT_ERROR_CODES,
   PROJECT_COMMIT_MESSAGE_MAX,
   PROJECT_ERROR_CODES,
   PROJECT_HISTORY_MAX_COMMITS,
@@ -9,6 +10,10 @@ import {
   TEAM_ROLES,
   checkoutProjectRequestSchema,
   commitConflictErrorSchema,
+  commitFromProposalRequestSchema,
+  commitFromProposalResponseSchema,
+  proposalNotAllowedErrorSchema,
+  proposalStaleErrorSchema,
   commitProjectRequestSchema,
   commitProjectResponseSchema,
   commitProjectToolInputSchema,
@@ -436,5 +441,60 @@ describe("list query and owner transfer", () => {
     expect(
       transferOwnerResponseSchema.safeParse({ project_id: ID2, owner_user_id: ID }).success,
     ).toBe(false);
+  });
+});
+
+describe("commit from a proposal (KOBE-591, PE4-PE6)", () => {
+  it("takes the thread, the proposal and an optional edited message; nothing else", () => {
+    const body = { thread_id: ID, proposal_id: ID2 };
+    expect(commitFromProposalRequestSchema.safeParse(body).success).toBe(true);
+    expect(commitFromProposalRequestSchema.safeParse({ ...body, message: "Fix" }).success).toBe(
+      true,
+    );
+    for (const bad of [
+      { thread_id: ID },
+      { ...body, message: "" },
+      { ...body, message: "x".repeat(PROJECT_COMMIT_MESSAGE_MAX + 1) },
+      // Never client content: the server commits the recorded bytes.
+      { ...body, content: "evil" },
+      { ...body, proposal_id: "call_1" },
+    ]) {
+      expect(commitFromProposalRequestSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(
+        false,
+      );
+    }
+  });
+
+  it("answers committed, or 409 proposal_stale / proposal_not_allowed", () => {
+    expect(
+      commitFromProposalResponseSchema.safeParse({ status: "committed", seq: 3, commit_id: ID })
+        .success,
+    ).toBe(true);
+    expect(
+      commitFromProposalResponseSchema.safeParse({ status: "nothing_to_commit" }).success,
+    ).toBe(false);
+    expect(
+      proposalStaleErrorSchema.safeParse({ code: "proposal_stale", message: "m", head_seq: 4 })
+        .success,
+    ).toBe(true);
+    for (const reason of ["moved", "no_edit_access", "archived", "not_a_project_proposal"]) {
+      expect(
+        proposalNotAllowedErrorSchema.safeParse({
+          code: "proposal_not_allowed",
+          message: "m",
+          reason,
+        }).success,
+      ).toBe(true);
+    }
+    expect(
+      proposalNotAllowedErrorSchema.safeParse({
+        code: "proposal_not_allowed",
+        message: "m",
+        reason: "whatever",
+      }).success,
+    ).toBe(false);
+    expect(PROJECT_COMMIT_ERROR_CODES).toEqual(
+      expect.arrayContaining(["proposal_stale", "proposal_not_allowed", "proposal_not_found"]),
+    );
   });
 });
