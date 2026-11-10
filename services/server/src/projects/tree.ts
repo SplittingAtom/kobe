@@ -8,6 +8,7 @@ import {
   type ProjectTreeEntry,
 } from "@kobe/protocol";
 import { recordAudit } from "../audit/record.js";
+import { recordLinks } from "../thread-file-links/record.js";
 
 /**
  * A project's history as data (KOBE-579, Workspaces CM1): commits with a full snapshot tree each
@@ -331,6 +332,16 @@ export async function writeCommit(
     UPDATE projects SET head_commit_id = ${commitId}, updated_at = now()
      WHERE team_id = ${teamId} AND id = ${projectId}`);
   await refreshProjectStorage(tx, teamId, projectId);
+  // KOBE-610: a commit from a thread (the agent's commit_project, an accepted proposal) wrote
+  // every file it changed, a deleted one included (its link is kept, marked deleted).
+  const threadId = author.threadId;
+  if (threadId !== undefined) {
+    await recordLinks(
+      tx,
+      teamId,
+      changes.map((c) => ({ threadId, projectId, path: c.path, access: "write" as const })),
+    );
+  }
   const keys = [...new Set(files.map((f) => f.blobRef))];
   if (keys.length > 0) {
     await tx.execute(sql`

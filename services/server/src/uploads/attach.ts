@@ -11,6 +11,7 @@ import {
   recordBlob,
   reserveUpload,
 } from "../workspace-sync/store.js";
+import { recordLinks } from "../thread-file-links/record.js";
 import { threadAttachmentPaths } from "./attach-list.js";
 import { uploadBlobKey } from "./keys.js";
 import { lockTeamStorage, storageLimit, storageUsed } from "./quota.js";
@@ -277,6 +278,17 @@ export function createAttachmentStager(options: AttachmentStagerOptions): Attach
         "user",
       );
     }
+    // KOBE-610: the message put these files into the workspace, so its thread wrote them (TFM1).
+    await recordLinks(
+      tx,
+      caller.teamId,
+      staged.flatMap((file) => {
+        const path = paths.get(file.id);
+        return path === undefined
+          ? []
+          : [{ threadId, ownerUserId: owner.userId, path, access: "write" as const }];
+      }),
+    );
   }
 
   async function remove(keys: readonly string[], what: string): Promise<void> {

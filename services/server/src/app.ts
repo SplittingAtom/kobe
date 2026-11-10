@@ -54,6 +54,7 @@ import { siteSkillCatalogEditRoutes } from "./routes/site-skill-catalog-edit.js"
 import { siteRolesRoutes } from "./routes/site-roles.js";
 import { siteBrandingPublicRoutes, siteBrandingRoutes } from "./routes/site-branding.js";
 import { siteSettingsRoutes } from "./routes/site-settings.js";
+import { threadFileLinkRoutes, workspaceFileThreadRoutes } from "./routes/thread-file-links.js";
 import { siteTeamsRoutes } from "./routes/site-teams.js";
 import { siteUsersRoutes } from "./routes/site-users.js";
 import { meRoutes } from "./routes/me.js";
@@ -238,6 +239,8 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/projects", projectRoutes(deps, options.workspaceFiles?.sync));
   api.route("/projects", projectCommitRoutes(deps, options.workspaceFiles?.sync));
   api.route("/projects", projectFromFolderRoutes(deps, options.workspaceFiles?.sync));
+  // Before the `/:id` routes: `/threads/file-links` is not a thread id (KOBE-611).
+  api.route("/threads", threadFileLinkRoutes(deps));
   api.route("/threads", threadRunRoutes(deps));
   api.route("/threads", threadPendingRoutes(deps));
   api.route("/threads", threadCompactRoutes(deps));
@@ -266,6 +269,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/connector-grants", connectorOauthRoutes(deps));
   api.route("/connector-grants", connectorGrantRoutes(deps));
   // Before the file routes, whose guard answers 503 without workspace storage (KOBE-492).
+  api.route("/workspace", workspaceFileThreadRoutes(deps));
   api.route("/workspace", workspaceSyncConflictRoutes(deps));
   api.route("/workspace", workspaceFileRoutes(deps, options.workspaceFiles));
   api.route("/agents", agentRoutes(deps, options.evals ? { runner: options.evals } : {}));

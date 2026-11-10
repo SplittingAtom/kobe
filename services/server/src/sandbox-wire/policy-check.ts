@@ -22,6 +22,8 @@ import { appliedDangerousMode, recordDangerousApplied } from "../policy/dangerou
 import { loadRunAgentTools } from "../policy/run-agent-tools.js";
 import { guardViewedFile, proposeAvailable } from "../policy/viewed-file-guard.js";
 import { recordSkippedActionInTx } from "../policy/skipped-actions.js";
+import { toolCallLink } from "../thread-file-links/paths.js";
+import { recordWorkspaceLink } from "../thread-file-links/record.js";
 import type {
   ApprovalBroker,
   ApprovalOutcome,
@@ -419,6 +421,36 @@ async function recordSkipped(
 }
 
 /**
+ * An allowed file tool call links its thread to the path (KOBE-610, thread-file-map §3): Pi's file
+ * tools and `share_file`/`open_file`/`run_python`, never `bash` (TFM2) nor an MCP tool. The path is
+ * in the thread owner's workspace (`buildInput` checked the sandbox is the owner's); paths outside
+ * `/workspace` are ignored. Best effort: a failure is logged and the call stays allowed.
+ */
+async function recordFileLink(
+  deps: PolicyCheckDeps,
+  target: SandboxTarget,
+  frame: PolicyCheckFrame,
+  source: string,
+): Promise<void> {
+  if (source === "mcp") return;
+  const link = toolCallLink(frame.tool, frame.input);
+  if (link === undefined) return;
+  try {
+    await withTeam(deps.db, target.teamId, (tx) =>
+      recordWorkspaceLink(tx, {
+        teamId: target.teamId,
+        threadId: frame.thread_id,
+        ownerUserId: target.userId,
+        path: link.path,
+        access: link.access,
+      }),
+    );
+  } catch (err) {
+    logger.warn({ err, runId: frame.run_id, tool: frame.tool }, "could not record a file link");
+  }
+}
+
+/**
  * Decides one call. Never throws: any failure is a deny. `onPending` sends `policy.pending` when a
  * human is asked (the sandbox keeps waiting until `policy.result`).
  */
@@ -526,6 +558,7 @@ export async function decidePolicyCheck(
           return denyFrame(frame, [denyReason("policy_error", message)], message);
         }
       }
+      if (!evalRun) await recordFileLink(deps, target, frame, evaluated.input.tool.source);
       return {
         v: 1,
         type: "policy.result",
@@ -591,6 +624,7 @@ export async function decidePolicyCheck(
       onPending,
     );
     if (outcome.decision === "allow") {
+      await recordFileLink(deps, target, frame, evaluated.input.tool.source);
       return {
         v: 1,
         type: "policy.result",
