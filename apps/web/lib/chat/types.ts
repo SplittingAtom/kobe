@@ -302,7 +302,36 @@ export interface EgressRequest {
   /** The ceiling pattern approving it enables. */
   readonly pattern: string;
   readonly status: "pending" | "approved" | "denied";
+  /** Who decides: the team's admins (`team`, pattern in the ceiling) or the site admins (`site`). */
+  readonly scope?: "team" | "site";
+  /** The block was a private address: approving may mark the pattern internal. */
+  readonly internal?: boolean;
   readonly threadId: string | null;
   readonly createdAt: string;
   readonly decidedAt: string | null;
+}
+
+/** Why the proxy blocked a host (`egress.blocked.reason`). */
+export type EgressBlockedReason = "not_enabled" | "not_in_ceiling" | "forbidden_address";
+
+/** What the card needs to know about its viewer, only to show or hide the decision controls. */
+export interface EgressViewer {
+  readonly siteAdmin: boolean;
+  readonly teamAdmin: boolean;
+  readonly teamName: string;
+}
+
+export interface EgressDecisionInput {
+  readonly decision: "approve" | "deny";
+  readonly pattern?: string | undefined;
+  readonly internal?: boolean | undefined;
+}
+
+export interface EgressDecisionResult {
+  readonly request: EgressRequest;
+  readonly settled: number;
+  readonly enabled: boolean;
+  readonly pattern: string;
+  readonly ceiling: "added" | "restored" | null;
+  readonly internal: boolean;
 }

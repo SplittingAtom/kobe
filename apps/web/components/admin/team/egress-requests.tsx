@@ -59,6 +59,7 @@ export function EgressRequests({ onDecided }: { readonly onDecided: () => void }
                 <TableRow>
                   <TableHeader>Blocked host</TableHeader>
                   <TableHeader>Enables</TableHeader>
+                  {requests.some((r) => r.scope) ? <TableHeader>Scope</TableHeader> : null}
                   <TableHeader>Requested by</TableHeader>
                   <TableHeader>When</TableHeader>
                   <TableHeader>Decision</TableHeader>
@@ -73,6 +74,9 @@ export function EgressRequests({ onDecided }: { readonly onDecided: () => void }
                     <TableCell>
                       <code>{r.pattern}</code>
                     </TableCell>
+                    {requests.some((x) => x.scope) ? (
+                      <TableCell>{r.scope === "site" ? "Site" : "Team"}</TableCell>
+                    ) : null}
                     <TableCell>
                       {r.requestedBy.name}
                       {r.threadId ? (

@@ -21,6 +21,7 @@ const entry = (domain: string, preset: string | null, in_ceiling: boolean) => ({
   in_ceiling,
   note: null,
   shared_hosting: domain.endsWith("cloudfront.net"),
+  internal: domain.startsWith("*.apps"),
   created_by: null,
   created_at: "2026-10-01T10:00:00Z",
   updated_at: "2026-10-01T10:00:00Z",
@@ -44,7 +45,10 @@ afterEach(() => {
 
 describe("Site egress ceiling", () => {
   it("lists domains by preset and offers delete for custom domains only", async () => {
-    stubApi({ "GET /v1/site/egress-ceiling": [200, CEILING] });
+    stubApi({
+      "GET /v1/site/egress-ceiling": [200, CEILING],
+      "GET /v1/site/egress-ceiling/requests": [200, { requests: [] }],
+    });
     renderSite(<EgressCeilingPage />);
     const registries = await screen.findByRole("table", { name: "Package registries" });
     expect(registries.textContent).toContain("pypi.org");
@@ -64,6 +68,7 @@ describe("Site egress ceiling", () => {
   it("toggles a domain and a whole preset, and deletes a custom domain", async () => {
     const calls = stubApi({
       "GET /v1/site/egress-ceiling": [200, CEILING],
+      "GET /v1/site/egress-ceiling/requests": [200, { requests: [] }],
       "PUT /v1/site/egress-ceiling/github.com": [
         200,
         { domain: entry("github.com", "git_hosts", true) },
@@ -94,6 +99,7 @@ describe("Site egress ceiling", () => {
   it("adds a domain and shows the server's validation errors", async () => {
     const calls = stubApi({
       "GET /v1/site/egress-ceiling": [200, CEILING],
+      "GET /v1/site/egress-ceiling/requests": [200, { requests: [] }],
       "POST /v1/site/egress-ceiling": [
         [201, { domain: entry("api.vendor.io", null, true) }],
         [
@@ -124,6 +130,7 @@ describe("Domain fronting warnings", () => {
   it("marks shared hosting in the list and repeats the server's warning after adding", async () => {
     stubApi({
       "GET /v1/site/egress-ceiling": [200, CEILING],
+      "GET /v1/site/egress-ceiling/requests": [200, { requests: [] }],
       "POST /v1/site/egress-ceiling": [
         [
           201,
@@ -282,5 +289,134 @@ describe("Team egress", () => {
     expect(summary(calls)).not.toContain("DELETE /v1/team/egress/domains/pkgs.example.com/headers");
     await answerConfirm("Remove the injected headers for pkgs.example.com?", "Remove headers");
     await screen.findByText("Removed the injected headers for pkgs.example.com.");
+  });
+});
+
+const SITE_REQUEST = {
+  id: "11111111-1111-4111-8111-111111111111",
+  domain: "api.vendor.io",
+  pattern: "api.vendor.io",
+  status: "pending",
+  scope: "site",
+  internal: false,
+  thread_id: "9a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+  requested_by: { id: "u1", name: "Mia Member" },
+  decided_by: null,
+  created_at: "2026-11-10T10:00:00Z",
+  decided_at: null,
+  team: { id: "22222222-2222-4222-8222-222222222222", name: "Team1" },
+};
+const DECIDE_URL = `/v1/site/egress-ceiling/requests/${SITE_REQUEST.team.id}/${SITE_REQUEST.id}/decision`;
+
+describe("Site console: site-scope access requests and Internal (KOBE-604)", () => {
+  it("lists the requests and approves one with a chosen pattern and Internal", async () => {
+    const calls = stubApi({
+      "GET /v1/site/egress-ceiling": [200, CEILING],
+      "GET /v1/site/egress-ceiling/requests": [
+        [200, { requests: [SITE_REQUEST] }],
+        [200, { requests: [] }],
+      ],
+      [`POST ${DECIDE_URL}`]: [
+        200,
+        { settled: 1, enabled: true, pattern: "*.vendor.io", ceiling: "added", internal: true },
+      ],
+    });
+    renderSite(<EgressCeilingPage />);
+    const table = await screen.findByRole("table", { name: /Pending site requests/ });
+    expect(table.textContent).toMatch(/api\.vendor\.io.*Team1.*Mia Member/);
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Pattern to enable for api.vendor.io" }),
+      "*.vendor.io",
+    );
+    await userEvent.click(
+      screen.getByRole("checkbox", { name: "Internal (same cluster) for api.vendor.io" }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Approve api.vendor.io for Team1" }));
+    await screen.findByText(/Enabled \*\.vendor\.io for Team1\. Mia Member was told\./);
+    const post = must(calls.find((c) => c.url === DECIDE_URL));
+    expect(JSON.parse(String(post.body))).toEqual({
+      decision: "approve",
+      pattern: "*.vendor.io",
+      internal: true,
+    });
+    expect(await screen.findByText("No pending requests.")).toBeTruthy();
+    expect(summary(calls).filter((c) => c === "GET /v1/site/egress-ceiling").length).toBe(2);
+  });
+
+  it("denies a request and shows the server's refusal plainly", async () => {
+    const calls = stubApi({
+      "GET /v1/site/egress-ceiling": [200, CEILING],
+      "GET /v1/site/egress-ceiling/requests": [200, { requests: [SITE_REQUEST] }],
+      [`POST ${DECIDE_URL}`]: [
+        [409, { code: "too_many_domains", message: "The ceiling is full." }],
+        [200, { settled: 1, enabled: false, pattern: "api.vendor.io" }],
+      ],
+    });
+    renderSite(<EgressCeilingPage />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Approve api.vendor.io for Team1" }),
+    );
+    expect((await screen.findByRole("alert")).textContent).toMatch(/The ceiling is full/);
+    await userEvent.click(screen.getByRole("button", { name: "Deny api.vendor.io for Team1" }));
+    await screen.findByText(/Denied api\.vendor\.io for Team1/);
+    const bodies = calls.filter((c) => c.url === DECIDE_URL).map((c) => JSON.parse(String(c.body)));
+    expect(bodies).toEqual([
+      { decision: "approve", pattern: "api.vendor.io" },
+      { decision: "deny" },
+    ]);
+  });
+
+  it("toggles Internal on a ceiling row", async () => {
+    const calls = stubApi({
+      "GET /v1/site/egress-ceiling": [
+        200,
+        { ...CEILING, domains: [entry("*.apps.example.internal", null, true)] },
+      ],
+      "GET /v1/site/egress-ceiling/requests": [200, { requests: [] }],
+      "PUT /v1/site/egress-ceiling/*.apps.example.internal": [
+        200,
+        { domain: { ...entry("*.apps.example.internal", null, true), internal: false } },
+      ],
+    });
+    renderSite(<EgressCeilingPage />);
+    const box = await screen.findByRole("checkbox", {
+      name: "*.apps.example.internal internal (same cluster)",
+    });
+    expect((box as HTMLInputElement).checked).toBe(true);
+    await userEvent.click(box);
+    await screen.findByText(/no longer internal/);
+    const put = must(calls.find((c) => c.method === "PUT"));
+    expect(JSON.parse(String(put.body))).toEqual({ internal: false });
+  });
+});
+
+describe("Team console: request scope", () => {
+  it("shows a scope column when the server reports one", async () => {
+    stubApi({
+      "GET /v1/team/egress": [200, { domains: [] }],
+      "GET /v1/team/egress/requests": [
+        200,
+        {
+          requests: [
+            {
+              id: "r1",
+              domain: "a.example.com",
+              pattern: "*.example.com",
+              status: "pending",
+              scope: "team",
+              thread_id: null,
+              requested_by: { id: "u1", name: "Mia Member" },
+              decided_by: null,
+              created_at: "2026-11-10T10:00:00Z",
+              decided_at: null,
+            },
+          ],
+        },
+      ],
+    });
+    renderTeam(<TeamEgressPage />);
+    const table = await screen.findByRole("table", { name: /Pending requests/ });
+    expect(within(table).getByRole("columnheader", { name: "Scope" })).toBeTruthy();
+    expect(within(table).getByRole("cell", { name: "Team" })).toBeTruthy();
   });
 });

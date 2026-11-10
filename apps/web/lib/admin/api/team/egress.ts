@@ -28,6 +28,8 @@ export interface TeamEgressRequest {
   readonly domain: string;
   readonly pattern: string;
   readonly status: "pending" | "approved" | "denied";
+  /** The team lists team scope only (`site` requests are the site admins'). */
+  readonly scope?: "team" | "site";
   readonly threadId: string | null;
   readonly requestedBy: { readonly id: string; readonly name: string };
   readonly decidedBy: string | null;
