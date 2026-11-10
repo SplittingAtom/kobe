@@ -5,6 +5,7 @@ import {
   addCeilingDomain,
   deleteCeilingDomain,
   getEgressCeiling,
+  setCeilingInternal,
   setCeilingMembership,
   setPresetMembership,
   type CeilingDomain,
@@ -32,6 +33,7 @@ import {
 } from "../../ui/console";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
+import { SiteEgressRequests } from "./egress-site-requests";
 import { SharedHostingNote } from "../shared-hosting-note";
 import { useFocusAfterRemoval } from "../use-focus-after-removal";
 import { useMutation, useResource, type Mutation } from "../use-resource";
@@ -53,10 +55,11 @@ export function EgressCeilingPage() {
     <>
       <PageHeader
         title="Egress ceiling"
-        description="Sandboxes reach the internet only through Kobe's egress proxy, over HTTPS, and only to domains their team enabled. The ceiling is what teams may enable: a new site reaches nothing, and package registries sit in the ceiling but are off for every team until a team admin enables them. Sandboxes have no DNS of their own; the proxy resolves names and never connects to internal addresses."
+        description="Sandboxes reach the internet only through Kobe's egress proxy, over HTTPS, and only to domains their team enabled. The ceiling is what teams may enable: a new site reaches nothing, and package registries sit in the ceiling but are off for every team until a team admin enables them. Sandboxes have no DNS of their own; the proxy resolves names and never connects to internal addresses, except for a domain marked internal (same cluster), and then only to the cluster ingress."
       />
       <AddDomainForm mutation={mutation} onAdded={reload} />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
+      <SiteEgressRequests onDecided={reload} />
       <ResourceView state={state} label="egress ceiling">
         {(ceiling) => <CeilingTables ceiling={ceiling} mutation={mutation} onChanged={reload} />}
       </ResourceView>
@@ -145,6 +148,17 @@ function CeilingTables({
     if (done) onChanged();
   }
 
+  async function toggleInternal(d: CeilingDomain) {
+    const done = await mutation.run(
+      () => setCeilingInternal(d.domain, !d.internal),
+      (saved) =>
+        saved.internal
+          ? `${saved.domain} is internal: it may resolve to the cluster ingress.`
+          : `${saved.domain} is no longer internal: private addresses are refused again.`,
+    );
+    if (done) onChanged();
+  }
+
   async function togglePreset(preset: EgressPreset, inCeiling: boolean) {
     const done = await mutation.run(
       () => setPresetMembership(preset, inCeiling),
@@ -206,6 +220,7 @@ function CeilingTables({
               rows={rows}
               pending={mutation.pending}
               onToggle={toggle}
+              onInternal={toggleInternal}
             />
           </Section>
         );
@@ -220,6 +235,7 @@ function CeilingTables({
               rows={custom}
               pending={mutation.pending}
               onToggle={toggle}
+              onInternal={toggleInternal}
               onDelete={remove}
             />
           </div>
@@ -235,12 +251,14 @@ function DomainTable({
   rows,
   pending,
   onToggle,
+  onInternal,
   onDelete,
 }: {
   readonly caption: string;
   readonly rows: readonly CeilingDomain[];
   readonly pending: boolean;
   readonly onToggle: (d: CeilingDomain) => Promise<void>;
+  readonly onInternal: (d: CeilingDomain) => Promise<void>;
   readonly onDelete?: (
     d: CeilingDomain,
     index: number,
@@ -253,6 +271,7 @@ function DomainTable({
         <TableRow>
           <TableHeader>Domain</TableHeader>
           <TableHeader>In ceiling</TableHeader>
+          <TableHeader>Internal (same cluster)</TableHeader>
           <TableHeader>Note</TableHeader>
           {onDelete ? (
             <TableHeader>
@@ -274,6 +293,14 @@ function DomainTable({
                 checked={d.inCeiling}
                 disabled={pending}
                 onChange={() => void onToggle(d)}
+              />
+            </TableCell>
+            <TableCell>
+              <Checkbox
+                label={<span className="sr-only">{d.domain} internal (same cluster)</span>}
+                checked={d.internal}
+                disabled={pending}
+                onChange={() => void onInternal(d)}
               />
             </TableCell>
             <TableCell>{d.note ?? ""}</TableCell>
