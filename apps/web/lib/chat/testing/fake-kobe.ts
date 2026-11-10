@@ -26,6 +26,7 @@ import { sha256Hex } from "../../files/editor";
 import type { EventSourceFactory, EventSourceLike } from "../stream";
 import { FakeWorkspaceChanges } from "./fake-workspace-changes";
 import { FakeWorkspaceEvents } from "./fake-workspace-events";
+import { FakeFileLinks } from "./fake-file-links";
 import { FakeFolders } from "./fake-folders";
 
 type Json = Record<string, unknown>;
@@ -207,6 +208,11 @@ export class FakeKobe {
   readonly threads = new Map<string, FakeThread>();
   /** The team's thread folders (KOBE-536): `/v1/thread-folders`, filing and `?folder=`. */
   readonly folders = new FakeFolders(() => this.threads.values(), uuid(3, 1));
+  /** Thread–file links (KOBE-612): `/v1/threads/file-links`, `/v1/workspace/file-threads`. */
+  readonly fileLinks = new FakeFileLinks((id) => {
+    const t = this.threads.get(id);
+    return t === undefined || t.deleted_at !== null ? undefined : t.title;
+  });
   readonly runs = new Map<string, FakeRun>();
   /** `GET /v1/runs/{id}/usage` answers (KOBE-43); absent: a run without model calls. */
   readonly usage = new Map<string, Json>();
@@ -224,6 +230,8 @@ export class FakeKobe {
   readonly workspaceChanges = new FakeWorkspaceChanges(this.workspaceFiles);
   /** `GET /v1/workspace/events` and `POST /v1/workspace/sync` (KOBE-599). */
   readonly workspaceEvents = new FakeWorkspaceEvents();
+  /** Folders listed as rows of their parent (KOBE-612); files alone list no folders. */
+  readonly workspaceDirs = new Set<string>();
   /** Folders listed so far (`GET /v1/workspace/files`), to assert one request per thread. */
   readonly workspaceListings: string[] = [];
   /** The site catalog with the team's choice (KOBE-44); empty = no models route answers. */
@@ -1314,6 +1322,9 @@ export class FakeKobe {
         }));
       return json(200, { entries });
     }
+    if (url.pathname === "/v1/workspace/file-threads" && method === "GET") {
+      return this.fileLinks.route(url) ?? error(404, "not_found");
+    }
     if (url.pathname === "/v1/workspace/sync" && method === "POST") {
       return json(200, await this.workspaceEvents.sync());
     }
@@ -1698,6 +1709,9 @@ export class FakeKobe {
     body: Json | undefined,
     headers: Headers,
   ): Response {
+    if (id === "file-links" && method === "GET") {
+      return this.fileLinks.route(url) ?? error(404, "not_found");
+    }
     if (id === undefined && method === "GET") {
       const q = url.searchParams.get("q");
       // KOBE-534 (TF5): `none` = own unfiled; a folder id = its threads the caller reads.
@@ -2396,7 +2410,17 @@ export class FakeKobe {
         sha256: await sha256Hex(bytes),
       })),
     );
-    return json(200, { path: dir, entries });
+    const dirs = [...this.workspaceDirs].filter(inDir).map((path) => ({
+      name: path.split("/").at(-1),
+      path,
+      type: "dir",
+      size_bytes: null,
+      mtime: NOW,
+      source: "synced",
+      owner: "sandbox",
+      area: "workspace",
+    }));
+    return json(200, { path: dir, entries: [...dirs, ...entries] });
   }
 
   /** The editor's save (FE4): replaces the file when it still has `base_sha256`, else 409. */
