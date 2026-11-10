@@ -167,8 +167,14 @@ describe("PUT /v1/workspace/file (KOBE-462)", () => {
     expect((await save(w.a, "uploads/thread-1/a.txt", base, "x")).status).toBe(403);
     expect((await save(w.a, ".kobe/state.json", base, "x")).status).toBe(404);
     expect(
-      (await w.a.put("/v1/workspace/file?path=a.md", new RawBody("x", "text/plain"))).status,
+      (await w.a.put(`/v1/workspace/file?base_sha256=${base}`, new RawBody("x", "text/plain")))
+        .status,
     ).toBe(400);
+    // KOBE-591: no base creates a new file, never in a read-only area.
+    const q = new URLSearchParams({ path: "projects/p/new.md" });
+    expect(
+      (await w.a.put(`/v1/workspace/file?${q.toString()}`, new RawBody("x", "text/plain"))).status,
+    ).toBe(403);
     expect((await save(w.a, "../a.md", base, "x")).status).toBe(400);
   });
 

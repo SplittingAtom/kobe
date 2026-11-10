@@ -16,9 +16,12 @@ import {
   type StoredEntry,
 } from "../workspace-sync/store.js";
 import { WRITE_SPAN, lockWaitSpan, s3PutSpan, writeTxSpan } from "../workspace-sync/write-spans.js";
+import { pathIsTaken } from "./browse.js";
+import { ancestorsOf } from "./paths.js";
 import {
   fail,
   OBJECTS,
+  TAKEN,
   QUOTA,
   READ_ONLY,
   resultOutcome,
@@ -44,8 +47,11 @@ export type SaveResult =
 
 export interface SaveRequest {
   readonly path: string;
-  /** The version the editor loaded (`sha256` of the synced copy). */
-  readonly baseSha256: string;
+  /**
+   * The version the editor loaded (`sha256` of the synced copy); undefined creates a new file
+   * (KOBE-591: accepting a proposed new file), refused when anything is at the path.
+   */
+  readonly baseSha256: string | undefined;
   readonly content: Buffer;
   /** Most bytes accepted: the browser upload's limit. */
   readonly limitBytes: number;
@@ -75,10 +81,29 @@ function conflict(current: StoredEntry | undefined): SaveConflict {
   };
 }
 
-/** The live file at `path` still has `base`: undefined, else the conflict to answer. */
-function baseMismatch(current: StoredEntry | undefined, base: string): SaveConflict | undefined {
+/**
+ * The live file at `path` still has `base` (or, without a base, there is no live file):
+ * undefined, else the conflict to answer.
+ */
+function baseMismatch(
+  current: StoredEntry | undefined,
+  base: string | undefined,
+): SaveConflict | undefined {
   const live = current !== undefined && !current.deleted && current.blobKey !== null;
+  if (base === undefined) return live ? conflict(current) : undefined;
   return live && current.sha256 === base ? undefined : conflict(current);
+}
+
+/** A new file where a folder is, or inside a file (KOBE-591). */
+async function newPathTaken(
+  tx: KobeTx,
+  owner: WorkspaceOwner,
+  request: SaveRequest,
+): Promise<boolean> {
+  return (
+    request.baseSha256 === undefined &&
+    (await pathIsTaken(tx, owner, request.path, ancestorsOf(request.path)))
+  );
 }
 
 /**
@@ -111,6 +136,7 @@ export async function saveWorkspaceFile(
       const current = await currentEntry(tx, owner, request.path);
       const mismatch = baseMismatch(current, request.baseSha256);
       if (mismatch) return mismatch;
+      if (await newPathTaken(tx, owner, request)) return TAKEN;
       if (sha256 === request.baseSha256 && current) return { unchanged: current };
       const held = await blobState(tx, owner, sha256);
       if (held !== "absent") return held;
@@ -169,12 +195,16 @@ async function saveManifest(
   // Under the workspace lock: the base check is atomic with the write.
   const current = await currentEntry(tx, owner, request.path);
   const mismatch = baseMismatch(current, request.baseSha256);
-  if (mismatch || current === undefined) return mismatch ?? conflict(undefined);
-  const delta = blob.size - countedBytes(current);
+  if (mismatch) return mismatch;
+  if (await newPathTaken(tx, owner, request)) return TAKEN;
+  const created = request.baseSha256 === undefined;
+  if (!created && current === undefined) return conflict(undefined);
+  const live = created ? undefined : current;
+  const delta = blob.size - (live ? countedBytes(live) : 0);
   const decision = await sync.quota(tx, {
     owner,
     fileBytes: blob.size,
-    liveFiles: state.liveFiles,
+    liveFiles: state.liveFiles + (created ? 1 : 0),
     liveBytes: state.liveBytes + delta,
   });
   if (!decision.ok) return QUOTA;
@@ -190,7 +220,7 @@ async function saveManifest(
       sha256: blob.sha256,
       size: blob.size,
       blobKey: blob.blobKey,
-      executable: current.executable,
+      executable: live?.executable ?? false,
     },
     "user",
   );
