@@ -23,7 +23,7 @@ Nothing is pending: every component outside the allowed family has Chris's appro
 
 Every package in pnpm-lock.yaml (production and development, all platforms). "linked, bundled" packages are in the production dependencies of a deployable and ship in its image (the services via `pnpm deploy --prod`, web via the Next.js standalone output, kobe-sandbox-agent in the sandbox image); "dev-only" packages build, lint and test Kobe and are never shipped. Checked by `pnpm license:check` (CI `checks`).
 
-924 packages, 637 of them shipped in an image.
+925 packages, 638 of them shipped in an image.
 
 | Component | Version | License (SPDX) | How used | Where | License text |
 | --- | --- | --- | --- | --- | --- |
@@ -918,7 +918,8 @@ Every package in pnpm-lock.yaml (production and development, all platforms). "li
 | typescript | 6.0.3 | Apache-2.0 | dev-only | build, lint and test tooling | [license](https://unpkg.com/typescript@6.0.3/LICENSE.txt) |
 | undici-types | 7.24.6 | MIT | linked, bundled | server | [license](https://unpkg.com/undici-types@7.24.6/LICENSE) |
 | undici-types | 8.9.0 | MIT | linked, bundled | server | [license](https://unpkg.com/undici-types@8.9.0/LICENSE) |
-| undici | 8.11.2 | MIT | linked, bundled | mcp-proxy, server | [license](https://unpkg.com/undici@8.11.2/LICENSE) |
+| undici | 8.11.2 | MIT | linked, bundled | server | [license](https://unpkg.com/undici@8.11.2/LICENSE) |
+| undici | 8.12.4 | MIT | linked, bundled | mcp-proxy | [license](https://unpkg.com/undici@8.12.4/LICENSE) |
 | unified | 11.0.5 | MIT | linked, bundled | web | [license](https://unpkg.com/unified@11.0.5/license) |
 | unist-util-is | 6.0.1 | MIT | linked, bundled | web | [license](https://unpkg.com/unist-util-is@6.0.1/license) |
 | unist-util-position | 5.0.0 | MIT | linked, bundled | web | [license](https://unpkg.com/unist-util-position@5.0.0/license) |

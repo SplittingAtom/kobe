@@ -28,7 +28,7 @@
     "@kobe/telemetry": "workspace:*",
     "hono": "^4.13.13",
     "pino": "^10.4.0",
-    "undici": "^8.11.2",
+    "undici": "^8.12.2",
     "zod": "^4.0.0"
   }
 }
