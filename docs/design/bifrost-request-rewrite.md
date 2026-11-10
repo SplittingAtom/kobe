@@ -97,7 +97,7 @@ went upstream verbatim, key order included, which is if anything closer to what 
 
 | Provider | Level    | Gateway writes                                                                                                  | Forwarded (both versions)                                                                                                                                                 |
 | -------- | -------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| openai   | off…high | `reasoning {effort}`, `max_output_tokens` 16,384, Pi's `include: [reasoning.encrypted_content]`, `store: false` | same, **+ `reasoning.summary: null`**                                                                                                                                     |
+| openai   | off…high | `reasoning {effort}`, `max_output_tokens` 16,384, Pi's `include: [reasoning.encrypted_content]`, `store: false` | same, **+ `reasoning.summary: null`** (before KOBE-601; see below)                                                                                                        |
 | ollama   | off…high | same                                                                                                            | **converted to Chat Completions**: `reasoning_effort`, `max_tokens`, `messages` (instructions → system), `stream_options.include_usage` added; `include`, `store` dropped |
 
 ### Models without a thinking control (body passes the gateway unchanged)
@@ -115,22 +115,31 @@ without a control. The v2.5.0 `cache_control` fix concerns chat-message shapes K
 v2.2.5. An empty `messages` array was refused with a 400 on both versions for chat, Ollama chat and
 Messages (the v2.5.1 crash fix concerns paths these shapes did not reach).
 
-**Gateway-side observation (not Bifrost):** for a `reasoning_effort` model on `/v1/responses` the
-gateway replaces Pi's whole `reasoning` object, so Pi's `summary: "auto"` is dropped and OpenAI
-returns no reasoning summary (Bifrost then writes `summary: null`). If summaries are wanted, the
-rewrite can keep `reasoning.summary` (it is not a level); a small follow-up, not part of this ticket.
+**Reasoning summary (KOBE-601).** KOBE-414 found that for a `reasoning_effort` model on
+`/v1/responses` the gateway replaced Pi's whole `reasoning` object, so Pi's `summary: "auto"` was
+dropped and OpenAI returned no reasoning summary (Bifrost then wrote `summary: null`). Since
+KOBE-601 the rewrite keeps the caller's `reasoning.summary` (`thinking.ts` `reasoningSummary`): it
+is read as Bifrost would decode it (every `reasoning` key in any case merges, a later `null` clears,
+the last `summary` wins) and kept only if it is `auto`, `concise` or `detailed` (the Responses
+API's values); anything else is dropped. The gateway writes `reasoning {effort, summary}`; every
+other reasoning member (`max_tokens`, `generate_summary`, …) and field is still stripped. At level
+`off` (`effort: none`) no summary is written. Chat Completions has no summary field, so nothing
+changes there. Re-measured on 2026-11-10 with the v2.2.5 image: for gpt-5.1 at low/medium/high the
+upstream body carried `reasoning {effort, summary: "auto"}` exactly as written (off:
+`{effort: none, summary: null}`, Bifrost's own default); Bifrost's Ollama provider converts
+Responses to Chat Completions and drops the summary there, as before.
 
 ## 3. Gateway paths that modify a request body (ac-3)
 
-| Path                                               | What                                                                                                                                                                                                              | Kind                                                                                                                    |
-| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `thinking.ts` `applyThinking` (gateway.ts:610)     | `JSON.parse`, remove every reasoning field in any case (`withoutReasoning`), collapse `max_tokens` case variants to the last value, add the gateway's fields once, `JSON.stringify`                               | **parse and rewrite**                                                                                                   |
-| `body-model.ts` `withStreamUsage` (gateway.ts:628) | streaming `/v1/chat/completions`: splices `,"stream_options":{"include_usage":true}` before the closing `}`                                                                                                       | **append**                                                                                                              |
-| `server-call.ts` `checkServerCallBody`             | validates the server's body (zod shape, model, output cap, `reasoning_effort` only for reasoning models); forwards it unchanged                                                                                   | none (read only); the server builds the body with `JSON.stringify` (`services/server/src/models/gateway-client.ts:289`) |
-| Output limits (KOBE-259)                           | the gateway writes no limit: Pi sends the catalog limit as `max_tokens`/`max_completion_tokens`/`max_output_tokens`; `topLevelModel` reads it to size the reservation; `applyThinking` caps the budget against it | none (read only)                                                                                                        |
-| `body-model.ts` `topLevelModel`                    | structural scan for `model`, `stream`, `background`, output caps, `n`, `fallbacks`                                                                                                                                | none (read only)                                                                                                        |
-| Usage metering (`usage/`)                          | reads responses only                                                                                                                                                                                              | none                                                                                                                    |
-| Forward / retry (gateway.ts:674)                   | sends `forwardBody` as is, same bytes on the one retry                                                                                                                                                            | none                                                                                                                    |
+| Path                                               | What                                                                                                                                                                                                                                                  | Kind                                                                                                                    |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `thinking.ts` `applyThinking` (gateway.ts:610)     | `JSON.parse`, remove every reasoning field in any case (`withoutReasoning`), collapse `max_tokens` case variants to the last value, add the gateway's fields once (Responses: a valid caller `reasoning.summary` is kept, KOBE-601), `JSON.stringify` | **parse and rewrite**                                                                                                   |
+| `body-model.ts` `withStreamUsage` (gateway.ts:628) | streaming `/v1/chat/completions`: splices `,"stream_options":{"include_usage":true}` before the closing `}`                                                                                                                                           | **append**                                                                                                              |
+| `server-call.ts` `checkServerCallBody`             | validates the server's body (zod shape, model, output cap, `reasoning_effort` only for reasoning models); forwards it unchanged                                                                                                                       | none (read only); the server builds the body with `JSON.stringify` (`services/server/src/models/gateway-client.ts:289`) |
+| Output limits (KOBE-259)                           | the gateway writes no limit: Pi sends the catalog limit as `max_tokens`/`max_completion_tokens`/`max_output_tokens`; `topLevelModel` reads it to size the reservation; `applyThinking` caps the budget against it                                     | none (read only)                                                                                                        |
+| `body-model.ts` `topLevelModel`                    | structural scan for `model`, `stream`, `background`, output caps, `n`, `fallbacks`                                                                                                                                                                    | none (read only)                                                                                                        |
+| Usage metering (`usage/`)                          | reads responses only                                                                                                                                                                                                                                  | none                                                                                                                    |
+| Forward / retry (gateway.ts:674)                   | sends `forwardBody` as is, same bytes on the one retry                                                                                                                                                                                                | none                                                                                                                    |
 
 **The one append path, `withStreamUsage`, is safe under Bifrost's decoder and needs no urgent fix.**
 Under merge-into a caller's earlier `stream_options` (any letter case) decodes first and the
@@ -202,5 +211,5 @@ bump PR:
 - deploy: back up the Bifrost PVC first; keep Bifrost's MCP gateway, MCP Apps, A2A, relays and
   semantic cache off (the chart configures none of them).
 
-Optional follow-ups for the coordinator: keep `reasoning.summary` on Responses (section 2), and
-rewrite `stream_options` on the parsed body where one exists (section 3).
+Optional follow-up for the coordinator: rewrite `stream_options` on the parsed body where one
+exists (section 3). (Keeping `reasoning.summary` on Responses, section 2, is done: KOBE-601.)
