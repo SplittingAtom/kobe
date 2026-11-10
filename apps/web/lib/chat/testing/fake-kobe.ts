@@ -291,6 +291,8 @@ export class FakeKobe {
     }
   >();
   readonly branchesFailing = new Set<string>();
+  /** `GET /v1/threads/{id}/egress-blocked` reads (KOBE-605). */
+  egressBlockedReads = 0;
   /** Label writes as the route took them (CT9, KOBE-546). */
   readonly labelWrites: { threadId: string; entryId: string; label: string | null }[] = [];
   branchesReads = 0;
@@ -717,6 +719,27 @@ export class FakeKobe {
     this.approvals.set(payload.approval_id, { runId, payload, status: "pending" });
     this.run(runId).status = "waiting_approval";
     this.emit(runId, "approval.requested", payload);
+  }
+
+  /** `GET /v1/threads/{id}/egress-blocked` (KOBE-605): each run's first block per domain. */
+  #egressBlocked(threadId: string): Json {
+    const blocked: Json[] = [];
+    for (const run of this.runs.values()) {
+      if (run.thread_id !== threadId) continue;
+      const seen = new Set<string>();
+      for (const event of run.events) {
+        if (event.type !== "egress.blocked" || seen.has(event.payload.domain)) continue;
+        seen.add(event.payload.domain);
+        blocked.push({
+          run_id: run.run_id,
+          user_entry_id: run.user_entry_id ?? null,
+          seq: event.seq,
+          ts: event.ts,
+          payload: event.payload as unknown as Json,
+        });
+      }
+    }
+    return { blocked };
   }
 
   emit<T extends KobeEventType>(runId: string, type: T, payload: KobeEventPayload<T>): void {
@@ -1950,6 +1973,10 @@ export class FakeKobe {
       this.branchesReads += 1;
       if (this.branchesFailing.has(thread.thread_id)) return error(500, "internal");
       return json(200, this.branches.get(thread.thread_id) ?? { labels: [], runs: [] });
+    }
+    if (action === "egress-blocked" && method === "GET") {
+      this.egressBlockedReads += 1;
+      return json(200, this.#egressBlocked(thread.thread_id));
     }
     if (action === "labels" && method === "PUT" && sub !== undefined) {
       return this.#setLabel(thread, sub, body);

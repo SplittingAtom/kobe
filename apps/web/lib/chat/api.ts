@@ -15,7 +15,12 @@ import { apiDownload, apiRequest, apiTextFile, type ApiResult, type TextFile } f
 import { readThreadContext, type ContextRead } from "./context-viewer";
 import { readThreadLineage } from "./lineage";
 import { readThreadBranches, writeThreadLabel } from "./branches";
-import type { ThreadBranchesResponse, ThreadLineageResponse } from "@kobe/protocol";
+import { readThreadEgressBlocked } from "./egress-blocked";
+import type {
+  ThreadBranchesResponse,
+  ThreadEgressBlockedResponse,
+  ThreadLineageResponse,
+} from "@kobe/protocol";
 import type { ArtifactDetailView, ArtifactSummaryView } from "./artifacts";
 import type { BudgetStatus } from "../admin/api/budgets";
 import type { RunUsage, ThreadUsage } from "../admin/api/usage";
@@ -263,6 +268,8 @@ export interface ChatApi {
   threadLineage(threadId: string): Promise<ThreadLineageResponse | null>;
   /** Labels and remembered-rule runs for the Conversation tree (CT2, KOBE-545); null on failure. */
   getThreadBranches(threadId: string): Promise<ThreadBranchesResponse | null>;
+  /** The thread's stored blocked-egress notices per run (KOBE-605); null on failure. */
+  threadEgressBlocked(threadId: string): Promise<ThreadEgressBlockedResponse | null>;
   /** Sets (or, with null, removes) a node's label (CT9, KOBE-546); answers the `branches` body. */
   setThreadLabel(
     threadId: string,
@@ -512,6 +519,7 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     threadContext: (id) => readThreadContext(id, teamId, fetchFn),
     threadLineage: (id) => readThreadLineage(id, teamId, fetchFn),
     getThreadBranches: (id) => readThreadBranches(id, teamId, fetchFn),
+    threadEgressBlocked: (id) => readThreadEgressBlocked(id, teamId, fetchFn),
     setThreadLabel: (id, entryId, label) => writeThreadLabel(id, entryId, label, teamId, fetchFn),
     threadMarkers: (id) => get(`/v1/threads/${enc(id)}/markers`),
     threadFeedback: (id) => get(`/v1/threads/${enc(id)}/feedback`),

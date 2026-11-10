@@ -8,6 +8,8 @@ import {
   jsonByteLength,
   KOBE_EVENT_TYPES,
   TERMINAL_EVENT_TYPES,
+  THREAD_EGRESS_BLOCKED_MAX,
+  threadEgressBlockedResponseSchema,
   formatSseEvent,
   isKobeEventType,
   isTerminalEventType,
@@ -132,6 +134,37 @@ describe("egress.blocked reason (KOBE-602)", () => {
       schema.safeParse({ domain: "pypi.org", request_access: true, reason: "sni_mismatch" })
         .success,
     ).toBe(false);
+  });
+});
+
+describe("thread egress-blocked read (KOBE-605)", () => {
+  const row = {
+    run_id: "00000000-0000-4000-8000-000000000001",
+    user_entry_id: "e1",
+    seq: 4,
+    ts: "2026-11-10T10:00:00.000Z",
+    payload: { domain: "example.com", request_access: true, reason: "not_in_ceiling" },
+  };
+
+  it("accepts rows with or without a prompt entry", () => {
+    expect(threadEgressBlockedResponseSchema.parse({ blocked: [row] })).toEqual({ blocked: [row] });
+    expect(
+      threadEgressBlockedResponseSchema.safeParse({ blocked: [{ ...row, user_entry_id: null }] })
+        .success,
+    ).toBe(true);
+  });
+
+  it("rejects a bad payload and more than the cap", () => {
+    expect(
+      threadEgressBlockedResponseSchema.safeParse({
+        blocked: [{ ...row, payload: { domain: "" } }],
+      }).success,
+    ).toBe(false);
+    const many = Array.from({ length: THREAD_EGRESS_BLOCKED_MAX + 1 }, (_, i) => ({
+      ...row,
+      seq: i + 1,
+    }));
+    expect(threadEgressBlockedResponseSchema.safeParse({ blocked: many }).success).toBe(false);
   });
 });
 

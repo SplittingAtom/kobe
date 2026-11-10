@@ -3,6 +3,7 @@ import {
   forkThreadRequestSchema,
   setLabelBodySchema,
   threadBranchesResponseSchema,
+  threadEgressBlockedResponseSchema,
   shareThreadRequestSchema,
   threadLineageResponseSchema,
 } from "@kobe/protocol";
@@ -394,6 +395,24 @@ export function threadsOpenApiPaths(): Record<string, Record<string, unknown>> {
         },
       },
     },
+    "/v1/threads/{id}/egress-blocked": {
+      get: {
+        operationId: "getThreadEgressBlocked",
+        summary: "The thread's blocked internet access, per run",
+        description:
+          "KOBE-605: the thread's stored `egress.blocked` run events, one per run and domain " +
+          "(the first), so each answer keeps its blocked cards after its run ended and after a " +
+          "reload. `user_entry_id` is the run's prompt entry (null when never committed). At most " +
+          "the newest 200, oldest first; a run's rows go when its events are compacted (7 days " +
+          "after it ended). Readable by whoever may read the thread. Never wakes a sandbox.",
+        parameters: [idParameter, teamHeader],
+        responses: {
+          "200": json("ThreadEgressBlocked", "The thread's blocked attempts."),
+          "404": notFound,
+          ...ERROR_RESPONSES,
+        },
+      },
+    },
     "/v1/threads/{id}/labels/{entryId}": {
       put: {
         operationId: "setThreadBranchLabel",
@@ -600,6 +619,7 @@ export function threadsOpenApiSchemas(): Record<string, JsonSchema> {
     ThreadCard: withoutDialect(output(threadCardSchema)),
     ThreadLineage: withoutDialect(output(threadLineageResponseSchema)),
     ThreadBranches: withoutDialect(output(threadBranchesResponseSchema)),
+    ThreadEgressBlocked: withoutDialect(output(threadEgressBlockedResponseSchema)),
     SetLabelBody: withoutDialect(input(setLabelBodySchema)),
     EntryPage: withoutDialect(output(entryPageSchema)),
     ToolOutput: withoutDialect(output(toolOutputSchema)),
