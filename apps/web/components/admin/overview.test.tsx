@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 describe("console overview", () => {
-  it("lists the site sections with what each is for, placeholders marked", () => {
+  it("lists the site sections with what each is for, none a placeholder (KOBE-606)", () => {
     renderSite(<ConsoleOverview kind="site" />);
     expect(screen.getByRole("heading", { level: 1, name: "Site console" })).toBeTruthy();
     const people = screen.getByRole("region", { name: "People" });
@@ -24,7 +24,7 @@ describe("console overview", () => {
       "/admin/site/users",
     );
     const models = screen.getByRole("region", { name: "Models and connectors" });
-    expect(models.textContent).toMatch(/On hold KOBE-63/);
+    expect(models.textContent).not.toMatch(/On hold|Coming in|Web search/);
   });
 
   it("lists only the team sections the role covers", () => {
@@ -47,19 +47,27 @@ describe("console overview", () => {
 describe("section placeholder", () => {
   it("names the ticket that builds it", () => {
     const section = {
-      ...must(findSection("site", "web-search")),
+      ...must(findSection("site", "settings")),
       status: { kind: "placeholder", ticket: "KOBE-999" } as const,
     };
     render(<SectionPlaceholder section={section} />);
-    expect(screen.getByRole("heading", { name: "Web search" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
     expect(screen.getByRole("note").textContent).toBe("Coming in KOBE-999.");
   });
 
   it("says why a section is on hold (KOBE-291)", () => {
-    render(<SectionPlaceholder section={must(findSection("site", "web-search"))} />);
+    const section = {
+      ...must(findSection("site", "settings")),
+      status: {
+        kind: "placeholder",
+        ticket: "KOBE-999",
+        onHold: "Settings are on hold while the options are chosen.",
+      } as const,
+    };
+    render(<SectionPlaceholder section={section} />);
     const note = screen.getByRole("note");
     expect(note.textContent).toMatch(/^On hold/);
-    expect(note.textContent).toMatch(/while the provider is chosen.*\(KOBE-63\)/);
+    expect(note.textContent).toMatch(/while the options are chosen.*\(KOBE-999\)/);
     expect(note.textContent).not.toMatch(/Coming in/);
   });
 });

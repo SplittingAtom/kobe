@@ -104,7 +104,7 @@ export function defineTeamSection(section: Omit<TeamSection, "console">): TeamSe
  * recorded as done or merged in docs/RUN-LEDGER.md, or when no placeholder names it any more.
  */
 export const OPEN_PLACEHOLDER_TICKETS = {
-  "KOBE-63": "the web search provider choice is on hold (product owner)",
+  // Empty since KOBE-606 removed the built-in web search (KOBE-63's on-hold placeholder).
 } as const satisfies Readonly<Record<TicketId, string>>;
 
 export type OpenTicket = keyof typeof OPEN_PLACEHOLDER_TICKETS;
