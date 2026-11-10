@@ -7,6 +7,7 @@ import { useHitNote } from "./hit-note";
 import { placementOf } from "../../lib/chat/thread-groups";
 import { IconAction } from "../shell/icon-action";
 import { RailThreadCard } from "../shell/rail-thread-card";
+import { ThreadFilesRow } from "../shell/thread-file-row";
 import styles from "./chat.module.css";
 import { ThreadActivityDot, useRowActivity, useRowUnread } from "./thread-activity";
 import { ThreadRowMenu } from "./thread-row-menu";
@@ -91,6 +92,8 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
         </span>
       </ThreadListItemPrimitive.Root>
       {hitNote}
+      {/* In the Threads panel: "Files (N)" and the line pin (KOBE-612). */}
+      <ThreadFilesRow threadId={remoteId} title={title} />
     </li>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
-import { ThreadListPrimitive, useAuiState } from "@assistant-ui/react";
-import { useContext, useEffect, useRef } from "react";
+import { ThreadListPrimitive, useAui, useAuiState } from "@assistant-ui/react";
+import { useContext, useEffect, useMemo, useRef } from "react";
 import type { ApiError } from "../../lib/api/client";
 import type { FileEntry, FilesApi } from "../../lib/files/api";
 import { ErrorNotice } from "../admin/error-notice";
@@ -330,6 +330,21 @@ function RailFiles({
       }
     : undefined;
   const conversation = useConversationProject();
+  // "Used in (N threads)" on files (KOBE-612, TFM4); the drawer makes way for the thread.
+  const aui = useAui();
+  const fileLinks = useMemo(
+    () =>
+      session
+        ? {
+            api: session.api,
+            openThread: (threadId: string) => {
+              if (rail.drawer) rail.closeDrawer();
+              aui.threads.switchToThread(threadId);
+            },
+          }
+        : undefined,
+    [session, rail, aui],
+  );
   const content = (
     <>
       <div className={styles.sectionHeader}>
@@ -362,6 +377,7 @@ function RailFiles({
           canCreateProjects={createsProjects}
           onPromoted={conversation.offerProject}
           events={session?.workspaceEvents}
+          fileLinks={fileLinks}
         />
       )}
     </>
