@@ -36,7 +36,7 @@ import { useModalLayer } from "./use-modal-layer";
 import { RailTeam, RailTeamIcon } from "./rail-team";
 import { RailApps, hasRailApps, useRailApps } from "./rail-apps";
 import styles from "./rail.module.css";
-import { RAIL_ACTION, RAIL_ACTION_VARIANT } from "./rail-action";
+import { RAIL_ACTION, RAIL_ACTION_VARIANT, RAIL_HEADER_VARIANT } from "./rail-action";
 
 const SECTION_IDS = { files: RAIL_TAB_IDS.files.panel, apps: RAIL_TAB_IDS.apps.panel } as const;
 
@@ -127,11 +127,13 @@ function ThreadsButton({
   size,
   side,
   className,
+  variant = RAIL_ACTION_VARIANT,
 }: {
   readonly command: "rail-threads" | "show-threads";
   readonly size?: "sm";
   readonly side: "bottom" | "right";
   readonly className: string;
+  readonly variant?: typeof RAIL_ACTION_VARIANT | typeof RAIL_HEADER_VARIANT;
 }) {
   const openPanel = useOpenPanel();
   const activity = useOverallActivity();
@@ -142,7 +144,7 @@ function ThreadsButton({
       data-kobe-activity={activity}
       size={size}
       side={side}
-      variant={RAIL_ACTION_VARIANT}
+      variant={variant}
       className={className}
       aria-haspopup="dialog"
       onClick={() => openPanel?.(THREADS_PANEL_HREF)}
@@ -164,7 +166,7 @@ function ThreadActions() {
           onClick={endDraftProject}
           size="sm"
           side="bottom"
-          variant={RAIL_ACTION_VARIANT}
+          variant={RAIL_HEADER_VARIANT}
           className={`size-7 ${RAIL_ACTION}`}
         />
       </ThreadListPrimitive.New>
@@ -172,6 +174,7 @@ function ThreadActions() {
         command="rail-threads"
         size="sm"
         side="bottom"
+        variant={RAIL_HEADER_VARIANT}
         className={`size-7 ${RAIL_ACTION}`}
       />
     </>
@@ -190,7 +193,7 @@ function FilesToggle({ rail, withApps }: { readonly rail: RailApi; readonly with
       label={withApps ? "Files and apps" : undefined}
       size="sm"
       side="bottom"
-      variant={RAIL_ACTION_VARIANT}
+      variant={RAIL_HEADER_VARIANT}
       className={`size-7 ${RAIL_ACTION}`}
       shortcut={shortcutOf("files")}
       aria-pressed={on}
@@ -209,7 +212,7 @@ function TeamConsoleLink() {
       command="team-console"
       size="sm"
       side="bottom"
-      variant={RAIL_ACTION_VARIANT}
+      variant={RAIL_HEADER_VARIANT}
       className={`size-7 ${RAIL_ACTION}`}
     />
   );
@@ -244,7 +247,7 @@ function RailHeader({
             label={rail.drawer ? "Close the workspace" : undefined}
             side="right"
             size="sm"
-            variant={RAIL_ACTION_VARIANT}
+            variant={RAIL_HEADER_VARIANT}
             className={`size-7 ${RAIL_ACTION}`}
             aria-expanded
             aria-controls="kobe-rail-sections"

@@ -465,7 +465,9 @@ describe("Team console on the rail line (ac-5)", { timeout: 30_000 }, () => {
 describe("one look for the rail's icon actions", () => {
   // The shell loads no CSS reset: a button kept the browser's box and a link (Team console,
   // Export my conversations) had none and the link blue. Every icon action carries one look.
-  const LOOK = ["border", "bg-background", "text-foreground", "p-0"];
+  // Every icon action keeps the text colour and no browser padding. The top line's actions have
+  // no border (Chris 2026-11-10, ghost); the Threads panel's Export keeps the outline.
+  const LOOK = ["text-foreground", "p-0"];
 
   it("links and buttons on the top line and in the Threads panel share the same classes", async () => {
     withAccess("team_admin");
@@ -478,16 +480,19 @@ describe("one look for the rail's icon actions", () => {
         "a[data-slot='tooltip-trigger'], button[data-slot='tooltip-trigger']",
       ),
     ];
-    const actions = [
-      ...lineActions,
-      within(await openThreads()).getByRole("link", { name: "Export my conversations" }),
-    ];
+    const exportLink = within(await openThreads()).getByRole("link", {
+      name: "Export my conversations",
+    });
+    const actions = [...lineActions, exportLink];
     expect(lineActions.map((a) => a.getAttribute("aria-label"))).toContain("New conversation");
     expect(actions.map((a) => a.tagName)).toEqual(expect.arrayContaining(["A", "BUTTON"]));
     for (const action of actions) {
       for (const cls of LOOK)
         expect(action.classList, `${action.getAttribute("aria-label")}`).toContain(cls);
     }
+    for (const action of lineActions)
+      expect(action.classList, `${action.getAttribute("aria-label")}`).not.toContain("border");
+    expect(exportLink.classList).toContain("border");
   });
 
   it("icon-action links keep the text colour over the chat's unlayered link blue (CSS contract)", () => {
