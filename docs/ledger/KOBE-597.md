@@ -5,11 +5,13 @@ Branch `kobe-597-deps-wave`. One PR replaces the Dependabot PRs below.
 ## Applied
 
 GitHub Actions (SHA pins and `# vX.Y.Z` comments kept):
+
 - #457 pnpm/action-setup 6.1.0 -> 6.1.1 (ci, e2e, orbit-eval-image, sandbox-image, skill-scan-image)
 - #414 docker/login-action 4.6.0 -> 4.7.0 (publish)
 - #410 actions/setup-python 7.0.0 -> 7.1.0 (ci)
 
 npm (lockfile resolved to the newest version in range, so a few land above the PR's version):
+
 - #424 postcss ^8.5.29 -> ^8.5.32
 - #423 @kubernetes/client-node ^2.0.0 -> ^2.0.1
 - #422 @aws-sdk/lib-storage ^3.1147.0 -> ^3.1157.0, plus @aws-sdk/client-s3 ^3.1147.0 -> ^3.1157.0
@@ -31,6 +33,7 @@ npm (lockfile resolved to the newest version in range, so a few land above the P
 Sandbox Python (`images/sandbox/requirements.in`, hashed `requirements.txt` regenerated with
 `uv pip compile --generate-hashes --python-version 3.12 --unsafe-package debugpy -P pandas -P numpy -P reportlab`;
 only these three entries changed, debugpy stays out of the lock, unlike the Dependabot PRs which added it):
+
 - #417 pandas 3.0.6 -> 3.1.0
 - #293 numpy 2.5.3 -> 2.5.4
 - #412 reportlab 5.0.1 -> 5.1.0
