@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * Workspaces web (KOBE-581): project roles and visibility (PR2, PR3, PR5), Open to mount (FP2,
+ * Workspaces web (KOBE-581): project roles (PR3, PR5; no visibility since KOBE-587), Open to mount (FP2,
  * ac-2), History with diff, download at a commit and Revert, and Working copies (CM7, CM8).
  */
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
@@ -20,7 +20,6 @@ const project = (over: Record<string, unknown> = {}) => ({
   description: "",
   instructions: "",
   default_agent_id: null,
-  visibility: "workspace",
   my_role: "reader",
   file_count: 1,
   head_commit_id: "c-2",
@@ -69,10 +68,7 @@ const commit = (seq: number, over: Record<string, unknown> = {}) => ({
 });
 const base = (over: Record<string, unknown> = {}, members = [member("u-bob", "owner")]) => ({
   [`GET /v1/projects/${P}`]: [200, project(over)] as const,
-  [`GET /v1/projects/${P}/members`]: [
-    200,
-    { visibility: (over.visibility as string | undefined) ?? "workspace", members },
-  ] as const,
+  [`GET /v1/projects/${P}/members`]: [200, { members }] as const,
   [`GET /v1/projects/${P}/files`]: [200, { files: [] }] as const,
   [`GET /v1/threads?project_id=${P}`]: [200, { threads: [], next_cursor: null }] as const,
   "GET /v1/team/members": [200, ROSTER] as const,
@@ -85,7 +81,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("roles and visibility (PR2, PR3; ac-1, ac-2)", () => {
+describe("roles (PR3, RV1; ac-1, ac-2)", () => {
   it("a reader sees Open to mount and no edit affordances", async () => {
     stubApi(base());
     renderTeam(<ProjectDetailPage projectId={P} />, { role: "member" });
@@ -142,38 +138,36 @@ describe("roles and visibility (PR2, PR3; ac-1, ac-2)", () => {
     expect(screen.queryByText(/You can read this project and start/)).toBeNull();
   });
 
-  it("offers owner, editor and reader, explains a restricted project and shows storage", async () => {
-    stubApi(
-      base({ my_role: "owner", visibility: "restricted" }, [
-        member("u-me", "owner"),
-        member("u-bob", "reader"),
-      ]),
-    );
+  it("offers owner and editor only, has no visibility control or Restricted badge, and shows storage", async () => {
+    stubApi(base({ my_role: "owner" }, [member("u-me", "owner"), member("u-bob", "editor")]));
     renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
-    expect(await screen.findByText(/Restricted: only the people listed/)).toBeTruthy();
+    expect(await screen.findByText(/Everyone else in the workspace is a reader/)).toBeTruthy();
     const select = screen.getByLabelText("Project role of Bob") as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(["owner", "editor", "reader"]);
-    expect(select.value).toBe("reader"); // a reader shows as a reader, never "member"
+    expect([...select.options].map((o) => o.value)).toEqual(["owner", "editor"]);
+    expect(select.value).toBe("editor");
     const add = within(screen.getByRole("form", { name: "Add a member" }));
-    expect((add.getByLabelText("Role") as HTMLSelectElement).value).toBe("editor");
-    expect(screen.getByLabelText("Visibility")).toBeTruthy();
+    const addRole = add.getByLabelText("Role") as HTMLSelectElement;
+    expect(addRole.value).toBe("editor");
+    expect([...addRole.options].map((o) => o.value)).toEqual(["owner", "editor"]);
+    expect(screen.queryByLabelText("Visibility")).toBeNull();
+    expect(screen.queryByText(/Restricted/)).toBeNull();
     // Storage: live figures, "—" for those not counted yet.
     expect(screen.getByText("4 KB")).toBeTruthy();
     expect(screen.getAllByText("—")).toHaveLength(2);
   });
 
-  it("re-roles a member to reader as reader on the wire", async () => {
+  it("re-roles a member to owner on the wire", async () => {
     const calls = stubApi({
       ...base({ my_role: "owner" }, [member("u-me", "owner"), member("u-bob", "editor")]),
-      [`PATCH /v1/projects/${P}/members/u-bob`]: [200, member("u-bob", "reader")],
+      [`PATCH /v1/projects/${P}/members/u-bob`]: [200, member("u-bob", "owner")],
     });
     renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
     const user = userEvent.setup();
-    await user.selectOptions(await screen.findByLabelText("Project role of Bob"), "reader");
+    await user.selectOptions(await screen.findByLabelText("Project role of Bob"), "owner");
     await user.click(screen.getByRole("button", { name: "Save role of Bob" }));
-    await screen.findByText("Bob is now reader.");
+    await screen.findByText("Bob is now owner.");
     const patch = must(calls.find((c) => c.method === "PATCH"));
-    expect(JSON.parse(String(patch.body))).toEqual({ role: "reader" });
+    expect(JSON.parse(String(patch.body))).toEqual({ role: "owner" });
   });
 
   it("a team admin assigns an owner to an owner-less project", async () => {
@@ -211,7 +205,9 @@ describe("roles and visibility (PR2, PR3; ac-1, ac-2)", () => {
     renderTeam(<ProjectsPage />, { role: "team_admin" });
     const link = await screen.findByRole("link", { name: "No owner: assign one" });
     expect(link.getAttribute("href")).toBe(`/me/projects/${P}#project-owner`);
-    expect(screen.getByText("Whole workspace")).toBeTruthy();
+    // No Visibility column any more (KOBE-587): every member reads every project.
+    expect(screen.queryByText("Whole workspace")).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Visibility" })).toBeNull();
   });
 
   it("never asks a member for the owner-less list", async () => {

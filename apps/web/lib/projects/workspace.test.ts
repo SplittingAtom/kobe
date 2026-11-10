@@ -16,7 +16,6 @@ const project = (slug: string, over: Partial<Project> = {}): Project => ({
   description: "",
   instructions: "",
   defaultAgentId: null,
-  visibility: "workspace",
   myRole: "editor",
   fileCount: 0,
   createdBy: "u-1",

@@ -42,7 +42,6 @@ describe("which files the editor opens (KOBE-463)", () => {
       description: "",
       instructions: "",
       defaultAgentId: null,
-      visibility: "workspace",
       myRole: "editor",
       fileCount: 0,
       createdBy: "u",

@@ -1,12 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import type {
-  Project,
-  ProjectAgent,
-  ProjectInput,
-  ProjectVisibility,
-} from "../../lib/projects/api";
+import type { Project, ProjectAgent, ProjectInput } from "../../lib/projects/api";
 import { Button, Field, FormRow, Select, TextInput, Textarea } from "../ui/console";
 
 /** Mirrors `PROJECT_*` in `@kobe/protocol` (the server checks again). */
@@ -17,20 +12,18 @@ export const INSTRUCTIONS_MAX_BYTES = 8 * 1024;
 const encoder = new TextEncoder();
 const bytes = (text: string): number => encoder.encode(text).length;
 
-/** What each visibility means (PR2), under the choice and on the project page. */
-export const VISIBILITY_HINTS: Readonly<Record<ProjectVisibility, string>> = {
-  workspace:
-    "Every member of the workspace can read it and start conversations in it; owners and editors are listed.",
-  restricted:
-    "Only the people listed can see it; to everyone else it does not exist. Team admins see every project.",
-};
+/**
+ * Who reads a project (RV1, RV4; KOBE-587): everyone in the workspace, so the help text says where
+ * confidential work goes instead. Shown where projects are created.
+ */
+export const PROJECT_AUDIENCE_HINT =
+  "Every member of the workspace can read a project and start conversations in it; owners and editors are listed. Confidential work belongs in a separate workspace or in My files.";
 
 export const EMPTY_PROJECT: ProjectInput = {
   name: "",
   description: "",
   instructions: "",
   defaultAgentId: null,
-  visibility: "workspace",
 };
 
 export function inputOf(project: Project): ProjectInput {
@@ -39,12 +32,11 @@ export function inputOf(project: Project): ProjectInput {
     description: project.description,
     instructions: project.instructions,
     defaultAgentId: project.defaultAgentId,
-    visibility: project.visibility,
   };
 }
 
 /**
- * Name, description, instructions, default agent and visibility (PR2). Everything typed or shown is
+ * Name, description, instructions and default agent. Everything typed or shown is
  * plain text (inputs and a textarea, never HTML). `disabled` shows the values read-only.
  */
 export function ProjectForm({
@@ -135,16 +127,6 @@ export function ProjectForm({
                 {a.name}
               </option>
             ))}
-          </Select>
-        </Field>
-        <Field label="Visibility" hint={VISIBILITY_HINTS[draft.visibility]}>
-          <Select
-            value={draft.visibility}
-            disabled={disabled}
-            onChange={(e) => set({ visibility: e.target.value as ProjectVisibility })}
-          >
-            <option value="workspace">Everyone in the workspace</option>
-            <option value="restricted">Only the people listed</option>
           </Select>
         </Field>
         {!disabled && (
