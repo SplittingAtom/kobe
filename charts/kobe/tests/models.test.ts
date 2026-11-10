@@ -64,7 +64,7 @@ describe("Bifrost", () => {
 
   it("runs the pinned Apache-2.0 image by digest, one replica, never two at once", () => {
     expect(spec?.containers[0].image).toBe(
-      "docker.io/maximhq/bifrost:v2.2.5@sha256:65854fd1941ba8159f1f98cd69df380f6e8ac8cd374bde632c4e28f822a6f115",
+      "docker.io/maximhq/bifrost:v2.5.1@sha256:5ec9873acaf1687556b6e4dd854b92b539d9debf87a5a683b66338648b84d3c8",
     );
     const deployment = find(ms, "Deployment", "kobe-bifrost");
     expect(deployment?.spec.replicas).toBe(1);

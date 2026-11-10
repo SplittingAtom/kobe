@@ -869,6 +869,16 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Bifrost v2.5.1 (KOBE-600).** The chart's Bifrost moves from v2.2.5 to v2.5.1 (pinned by
+  digest). On its first start it migrates its store on the Bifrost PVC (`config.db`): 76 new
+  migrations, 17 of them one-way, among them `move_config_json_vk_limits_to_model_configs`, which
+  moves virtual-key rate limits onto model-config tiers (the admin API still reports them on the
+  key, so the server's sync sees no change). **Back up the PVC before upgrading** (for example scale
+  `<release>-bifrost` to 0 and copy `config.db` out with a helper pod) and keep the copy: a rollback
+  is that backup with the v2.2.5 image, not a downgrade in place (the server re-pushes providers,
+  keys and virtual keys on its next sync, so a restored store converges). No chart setting
+  changes; keep `logs_store.enabled: false` and `client.enable_logging: false`, which keep
+  v2.5's new `user_email` / `client_ip` log columns empty.
 - **Egress access from the conversation (KOBE-602..605).** Migration `0203_egress_access` adds
   `egress_domains.internal` and `egress_requests.scope` / `internal` (existing requests become team
   scope; nothing else changes). Request access is now offered for every block: off-ceiling hosts go
