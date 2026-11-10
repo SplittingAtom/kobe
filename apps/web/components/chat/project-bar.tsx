@@ -1,6 +1,5 @@
 "use client";
 
-import { IconAction } from "../shell/icon-action";
 import { useState } from "react";
 import { isBusy } from "../../lib/chat/thread-state";
 import { SHARED_HINT, sharedBy, visibilityOf } from "../../lib/chat/share";
@@ -95,7 +94,6 @@ export function ProjectBar({
       <span className={styles.hint}>
         {shared ? ` ${SHARED_HINT.project}` : " Only you can see this conversation."}
       </span>
-      <IconAction command="open-project" href={`/me/projects/${summary.projectId}`} size="sm" />
     </div>
   );
 }

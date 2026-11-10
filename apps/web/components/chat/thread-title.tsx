@@ -6,7 +6,9 @@ import type { ThreadController } from "../../lib/chat/thread-controller";
 import { renameBlocker } from "../../lib/chat/thread-commands";
 import type { ThreadState } from "../../lib/chat/thread-state";
 import { useBindCommands } from "../shell/command-bindings";
-import { useDraftProjectName, useDraftProjectState } from "./use-draft-project";
+import { ProjectTitleMenu } from "./project-title-menu";
+import { useDraftProjectState, useProjectName } from "./use-draft-project";
+import { useDocumentTitle } from "./use-document-title";
 
 const UNTITLED = "Untitled conversation";
 const MAX_TITLE = 200;
@@ -66,13 +68,21 @@ export function ThreadTitle({
   const draft_ = state.threadId === null;
   // NC1: a conversation not created yet says which project it will be in.
   const { projectId } = useDraftProjectState();
-  const projectName = useDraftProjectName(draft_ ? projectId : null);
+  // TT1: a created conversation in a project reads "<Project> / <name>".
+  const threadProject = draft_ ? null : (state.summary?.projectId ?? null);
+  const projectName = useProjectName(draft_ ? projectId : threadProject);
   const inProject = draft_ && projectId !== null;
   const title = !draft_
     ? (named ?? UNTITLED)
     : inProject
       ? `New conversation in ${projectName ?? "…"}`
       : "New conversation";
+  const part =
+    threadProject !== null && projectName !== null
+      ? { id: threadProject, name: projectName }
+      : null;
+  const fullTitle = part ? `${part.name} / ${title}` : title;
+  useDocumentTitle(editable && !draft_ && state.summary !== undefined ? fullTitle : null);
 
   useEffect(() => {
     if (draft !== null || !returnFocus.current) return;
@@ -121,7 +131,7 @@ export function ThreadTitle({
 
   const renameable = editable && canRename(state);
   return (
-    <span ref={wrapper} className="flex min-w-0 flex-wrap items-center gap-1">
+    <span ref={wrapper} className="flex max-w-full min-w-0 items-center gap-1">
       <h2
         id="kobe-thread-title"
         className={draft === null && !renameable ? "text-sm font-medium" : "sr-only"}
@@ -136,10 +146,28 @@ export function ThreadTitle({
               {projectName ?? "…"}
             </span>
           </>
+        ) : part ? (
+          <>
+            <span className="text-muted-foreground">{part.name}</span> / {title}
+          </>
         ) : (
           title
         )}
       </h2>
+      {part && renameable && (
+        <>
+          <ProjectTitleMenu
+            state={state}
+            controller={controller}
+            projectId={part.id}
+            projectName={part.name}
+            title={title}
+          />
+          <span aria-hidden className="text-muted-foreground text-sm">
+            /
+          </span>
+        </>
+      )}
       {draft !== null ? (
         <form onSubmit={submit} className="flex min-w-0 flex-wrap items-center gap-2">
           <input
@@ -173,9 +201,9 @@ export function ThreadTitle({
             type="button"
             data-command="rename-thread"
             aria-label={`Rename ${title}`}
-            title="Click to rename"
+            title={`${title} (click to rename)`}
             onClick={open}
-            className="hover:bg-muted focus-visible:ring-ring -mx-1 min-w-0 cursor-text rounded-md px-1 text-start text-sm font-medium focus-visible:ring-2 focus-visible:outline-none"
+            className="hover:bg-muted focus-visible:ring-ring -mx-1 min-w-0 cursor-text truncate rounded-md px-1 text-start text-sm font-medium focus-visible:ring-2 focus-visible:outline-none"
           >
             {title}
           </button>

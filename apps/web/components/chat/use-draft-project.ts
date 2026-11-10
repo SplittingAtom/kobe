@@ -44,7 +44,7 @@ export function useWorkspaceProjects(wanted: boolean): readonly Project[] | null
   return projects;
 }
 
-/** The draft's project name (null: none yet, or still loading). */
+/** A project's name by id: the draft's, or a conversation's (null: none, or still loading). */
 export function useDraftProjectName(projectId: string | null): string | null {
   const session = useChatSession();
   const projects = useWorkspaceProjects(projectId !== null);
@@ -76,3 +76,6 @@ export function useEndDraftProject(): () => void {
   const session = useContext(ChatSessionContext);
   return useCallback(() => session?.setDraftProject(null), [session]);
 }
+
+/** The conversation header's project name (TT1): the same lookup as the draft's. */
+export const useProjectName = useDraftProjectName;

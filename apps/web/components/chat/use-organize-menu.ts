@@ -111,6 +111,8 @@ export interface OrganizeMenuInput {
   readonly readOnly: boolean;
   readonly state: ThreadState | undefined;
   readonly notify: (notice: { readonly short: string; readonly full: string }) => void;
+  /** Runs after a move was saved (the conversation header reads its summary again). */
+  readonly onMoved?: (() => void) | undefined;
 }
 
 export function useOrganizeMenu(input: OrganizeMenuInput): MenuBindings {
@@ -131,6 +133,7 @@ export function useOrganizeMenu(input: OrganizeMenuInput): MenuBindings {
           return;
         }
         announce(organizedMessage(change, title, projectName));
+        if (change.action === "move") input.onMoved?.();
         const group =
           change.action === "pin" ? "pinned" : change.action === "archive" ? "archived" : null;
         followRow(threadId, group);
