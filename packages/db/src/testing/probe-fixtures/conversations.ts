@@ -5,11 +5,13 @@ import {
   answerFeedback,
   answerFeedbackHistory,
   events,
+  projects,
   runEvents,
   runs,
   threadAppResults,
   threadBranchLabels,
   threadEntries,
+  threadFileLinks,
   threadFolders,
   threads,
   users,
@@ -188,5 +190,34 @@ export const conversationsFixtures: Record<(typeof conversations.team)[number], 
       label: "probe label",
       createdBy: thread.ownerUserId,
     });
+  },
+  thread_file_links: async (tx, teamId) => {
+    // A file the thread wrote in its owner's workspace and one it read in a project (KOBE-610).
+    const threadId = await insertThread(tx, teamId);
+    const [thread] = await tx
+      .select({ ownerUserId: threads.ownerUserId })
+      .from(threads)
+      .where(eq(threads.id, threadId));
+    if (!thread) throw new Error("probe: thread vanished");
+    const [project] = await tx
+      .insert(projects)
+      .values({
+        teamId,
+        slug: `probe-${threadId.slice(0, 8)}`,
+        name: "Probe",
+        createdBy: thread.ownerUserId,
+      })
+      .returning({ id: projects.id });
+    if (!project) throw new Error("probe: project insert returned nothing");
+    await tx.insert(threadFileLinks).values([
+      {
+        teamId,
+        threadId,
+        ownerUserId: thread.ownerUserId,
+        path: "notes/probe.md",
+        access: "write",
+      },
+      { teamId, threadId, projectId: project.id, path: "docs/probe.md", access: "read" },
+    ]);
   },
 };
