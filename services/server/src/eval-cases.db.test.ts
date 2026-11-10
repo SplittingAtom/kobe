@@ -276,7 +276,6 @@ describe("own words only (review B1)", () => {
     const bob = x.reader;
     const project = await as(x.w.owner).post("/v1/projects", {
       name: `P ${randomUUID().slice(0, 6)}`,
-      visibility: "restricted",
       member_user_ids: [x.author.id, bob.id],
     });
     expect(project.status, JSON.stringify(project.json)).toBe(201);

@@ -21,14 +21,14 @@ import {
 } from "./testing/project-commits-fixture.js";
 
 /**
- * KOBE-579: losing `edit` ends a checkout (made reader, editor row removed, team admin demoted);
+ * KOBE-579: losing `edit` ends a checkout (editor row removed: a reader, KOBE-587; team admin demoted);
  * the export carries the projects the member may read (GV5); history pruning keeps the head,
  * checkout bases and held workspaces, queues released objects for the blob deleter and is
  * audited (ac-4, GV3).
  */
 
 describe("a role change that takes away edit ends the checkout", () => {
-  it("discards an editor's checkout when made reader (head back, relocked) and audits it", async () => {
+  it("discards an editor's checkout when made reader by removing the row (head back, relocked) and audits it", async () => {
     const w = await world();
     const { id, slug } = w.project;
     await projectUpload(w.as.alice, id, "a.md", "A1");
@@ -38,13 +38,10 @@ describe("a role change that takes away edit ends the checkout", () => {
     const token = auth.issue({ sandboxId: randomUUID(), teamId: w.team, userId: w.people.bob.id });
     expect((await pull(token)).checkouts).toHaveLength(1);
     const demoted = await w.as.alice.request(
-      "PATCH",
+      "DELETE",
       `/v1/projects/${id}/members/${w.people.bob.id}`,
-      {
-        role: "reader",
-      },
     );
-    expect(demoted.status, JSON.stringify(demoted.json)).toBe(200);
+    expect(demoted.status, JSON.stringify(demoted.json)).toBe(204);
     expect((await w.as.bob.get(`/v1/projects/${id}/checkout`)).status).toBe(404);
     expect((await pull(token)).checkouts).toEqual([]);
     // His conversation keeps the project mounted: the head is back as a server row.
@@ -73,7 +70,7 @@ describe("a role change that takes away edit ends the checkout", () => {
       (
         await w.as.alice.post(`/v1/projects/${id}/members`, {
           user_id: w.people.carol.id,
-          role: "reader",
+          role: "editor",
         })
       ).status,
     ).toBe(201);
@@ -108,19 +105,16 @@ describe("export (GV5)", () => {
     const w = await world();
     const { id, slug } = w.project;
     await projectUpload(w.as.alice, id, "a.md", "A1");
-    const hidden = await w.as.alice.post("/v1/projects", {
-      name: "Hidden",
-      visibility: "restricted",
-    });
-    expect(hidden.status).toBe(201);
-    const h = hidden.json as { id: string; slug: string };
+    const second = await w.as.alice.post("/v1/projects", { name: "Second" });
+    expect(second.status).toBe(201);
+    const h = second.json as { id: string; slug: string };
     await projectUpload(w.as.alice, h.id, "secret.md", "S");
-    // carol, a plain member, reads the workspace project, not the restricted one.
+    // carol, a plain member without rows, reads both (every member reads every project, KOBE-587).
     const carol = await exportedNames(w.team, w.people.carol.id);
     expect(Buffer.from(carol[`projects/${slug}/head/a.md`] ?? []).toString()).toBe("A1");
     const meta = JSON.parse(Buffer.from(carol[`projects/${slug}/commits.json`] ?? []).toString());
     expect(meta).toMatchObject({ id, slug, head_seq: 1, commits: [{ seq: 1 }] });
-    expect(Object.keys(carol).some((n) => n.startsWith(`projects/${h.slug}/`))).toBe(false);
+    expect(Buffer.from(carol[`projects/${h.slug}/head/secret.md`] ?? []).toString()).toBe("S");
     // The team admin reads every project of the workspace.
     const admin = await exportedNames(w.team, w.admin.id);
     expect(Buffer.from(admin[`projects/${h.slug}/head/secret.md`] ?? []).toString()).toBe("S");

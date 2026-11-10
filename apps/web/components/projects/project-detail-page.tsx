@@ -64,7 +64,7 @@ function ProjectView({
   const mutation = useMutation();
   const navigate = useNavigate();
   const [confirm, confirmDialog] = useConfirm();
-  const can = projectPermissions(access.role, project.myRole ?? undefined, project.visibility);
+  const can = projectPermissions(access.role, project.myRole ?? undefined);
   const commits = useCommitsApi();
   const threads = useResource(() => api.threads(project.id));
   const checkout = useResource(() => commits.checkoutState(project.id));
@@ -157,7 +157,7 @@ function ProjectView({
             <Button disabled={mutation.pending} onClick={() => void downloadZip()}>
               Download as zip
             </Button>
-            {project.myRole !== null && (
+            {can.view && (
               <Button asChild>
                 <Link href={`/me/memory?project=${project.id}`}>Project memory</Link>
               </Button>

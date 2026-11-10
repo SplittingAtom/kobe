@@ -5,8 +5,8 @@ import { pageApi, toolTurn } from "./support/gate5.js";
 
 /**
  * KOBE-585 (workspaces lane WS-2): the owner asks the agent for a small markdown artifact and adds
- * it to a new project (workspace visibility, so the second member can read it) with Add to
- * project on the artifact header. The second member signs in (KOBE_USER2 / KOBE_PW2, as the
+ * it to a new project (every workspace member reads it, KOBE-587, so the second member can) with
+ * Add to project on the artifact header. The second member signs in (KOBE_USER2 / KOBE_PW2, as the
  * KOBE-221 sharing spec), finds the file in the Projects tree of Files, opens it read-only and
  * cannot save over it (403). afterEach archives the project. One short model turn.
  */
@@ -51,7 +51,7 @@ test("Add to project: the owner adds an artifact; another member reads it under 
     page,
     "POST",
     "/v1/projects",
-    { name: `KOBE-585 ${stem}`, visibility: "workspace" },
+    { name: `KOBE-585 ${stem}` },
   );
   expect(created.status, JSON.stringify(created.json)).toBe(201);
   projectId = created.json.id;

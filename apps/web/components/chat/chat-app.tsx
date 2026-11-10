@@ -304,7 +304,21 @@ function ChatWorkspace({
     url.searchParams.delete("project");
     window.history.replaceState(window.history.state, "", url);
   }, [session, pathname]);
-  const runtime = useKobeRuntime({ session, adapter, threadId, onThreadIdChange: setThreadId });
+  // NC4: New conversation and opening another conversation end the draft's project (a new draft
+  // starts without one); switching workspace builds a new session, which starts without one too.
+  const changeThread = useCallback(
+    (next: string | undefined) => {
+      session.setDraftProject(null);
+      setThreadId(next);
+    },
+    [session, setThreadId],
+  );
+  const runtime = useKobeRuntime({
+    session,
+    adapter,
+    threadId,
+    onThreadIdChange: changeThread,
+  });
   // A thread created by its first message: read the list again for its title.
   useEffect(() => session.onThreadCreated(() => void runtime.threads.reload()), [session, runtime]);
   // The server titled a thread after its first answer (KOBE-219): the rail reads the list again.

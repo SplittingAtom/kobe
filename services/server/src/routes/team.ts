@@ -35,7 +35,7 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
     const result = await setMemberRole(db, c.get("team").id, userId.data, body.role);
     if (!result.ok) return membershipError(c, result.error);
     // A demoted team admin no longer edits projects without a row of their own: those checkouts
-    // end (KOBE-579); a team admin views every project, a demoted one loses restricted mounts (MT2).
+    // end (KOBE-579); mounts are brought in line (MT2).
     await withTeam(db, c.get("team").id, (tx) =>
       endCheckoutsWithoutEditInTx(tx, c.get("team").id, userId.data),
     );

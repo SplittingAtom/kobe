@@ -960,7 +960,6 @@ export class FakeKobe {
       description: "",
       instructions: "",
       default_agent_id: null,
-      visibility: "workspace",
       my_role: "editor",
       file_count: 0,
       head_commit_id: null,

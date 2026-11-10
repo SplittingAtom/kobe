@@ -346,11 +346,11 @@ describe("shared project threads (D23, data layer)", () => {
   beforeAll(async () => {
     // threads.project_id references projects (KOBE-160): the project row comes first.
     await admin.query(
-      `INSERT INTO projects (team_id, id, slug, name, created_by, visibility)
-       VALUES ($1, $2, 'plan', 'Plan', $3, 'restricted')`,
+      `INSERT INTO projects (team_id, id, slug, name, created_by)
+       VALUES ($1, $2, 'plan', 'Plan', $3)`,
       [finance, project, ids.alice],
     );
-    // Selected mode (KOBE-161): bob is in the team but not in the project.
+    // bob is in the team without a row: an implicit reader (KOBE-587, RV1).
     await admin.query(
       `INSERT INTO project_members (team_id, project_id, user_id, role, added_by)
        VALUES ($1, $2, $3, 'owner', $3)`,
@@ -416,10 +416,11 @@ describe("shared project threads (D23, data layer)", () => {
     );
   });
 
-  it("lists a project's threads the viewer may read", async () => {
-    const res = await as.alice.get(`/v1/threads?project_id=${project}`);
-    expect(res.json.threads.map((t: { thread_id: string }) => t.thread_id)).toEqual([shared]);
-    expect((await as.bob.get(`/v1/threads?project_id=${project}`)).json.threads).toEqual([]);
+  it("lists a project's threads the viewer may read (every workspace member reads, RV1)", async () => {
+    const ids = (r: { json: { threads: { thread_id: string }[] } }) =>
+      r.json.threads.map((t) => t.thread_id);
+    expect(ids(await as.alice.get(`/v1/threads?project_id=${project}`))).toEqual([shared]);
+    expect(ids(await as.bob.get(`/v1/threads?project_id=${project}`))).toEqual([shared]);
   });
 });
 

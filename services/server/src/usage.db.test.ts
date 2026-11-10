@@ -336,7 +336,7 @@ describe("the thread's latest model call (KOBE-211, the context gauge)", () => {
     expect(threadUsageResponseSchema.safeParse(r.json).error).toBeUndefined();
   });
 
-  it("is visible like the thread: a project reader once shared, never a member it isn't shared with", async () => {
+  it("is visible like the thread: project readers once shared, every workspace member (RV1)", async () => {
     const db = h.deps.database.db;
     const reader = await h.createUser("carol@usage.test");
     const outsider = await h.createUser("erin@usage.test");
@@ -356,7 +356,6 @@ describe("the thread's latest model call (KOBE-211, the context gauge)", () => {
     }
     const project = await as.alice.post("/v1/projects", {
       name: "Usage shared",
-      visibility: "restricted",
       member_user_ids: [reader],
     });
     expect(project.status, JSON.stringify(project.json)).toBe(201);
@@ -386,10 +385,8 @@ describe("the thread's latest model call (KOBE-211, the context gauge)", () => {
     const seen = await browsers.reader.get(url);
     expect(seen.status, JSON.stringify(seen.json)).toBe(200);
     expect(seen.json.latest_call).toMatchObject({ run_id: run?.id, input_tokens: 5_000 });
-    // A team member outside the project never sees it.
-    const hidden = await browsers.outsider.get(url);
-    expect(hidden.status).toBe(404);
-    expect(hidden.json.code).toBe("thread_not_found");
+    // A team member without a project row reads it too (KOBE-587: every member reads every project).
+    expect((await browsers.outsider.get(url)).status).toBe(200);
   });
 
   it("is null before the thread's first model call", async () => {

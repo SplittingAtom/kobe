@@ -5,11 +5,12 @@ import { pageApi, secondBrowser } from "./support/gate5.js";
 import { panelOf } from "./support/panel.js";
 
 /**
- * KOBE-582 (Workspaces WS-7, spec docs/specs/workspaces.md): the owner (KOBE_USER, Team1 admin)
- * creates a restricted project with one file and adds member2 (KOBE_USER2 / KOBE_PW2, a plain
- * member) as reader. member2 converses in it: the Files panel lists the project under Projects,
- * read-only with "You can read this project, not change it.", and an upload is refused (403/404).
- * The owner promotes member2 to editor; member2 checks the project out, edits the file in the
+ * KOBE-582 (Workspaces WS-7, spec docs/specs/workspaces.md), updated by KOBE-587 (every workspace
+ * member reads every project, projects-in-conversations RV1-RV3): the owner (KOBE_USER, Team1
+ * admin) creates a project with one file and adds nobody; member2 (KOBE_USER2 / KOBE_PW2, a plain
+ * member) is a reader by default. member2 converses in it: the Files panel lists the project under
+ * Projects, read-only with "You can read this project, not change it.", and an upload is refused
+ * (403). The owner promotes member2 to editor (PATCH adds the row); member2 checks the project out, edits the file in the
  * editor, saves and commits with a message. The owner sees the commit in the project's History
  * tab and the edit in their own mount after opening a conversation in the project. One short
  * model turn (member2's first message). afterEach archives and deletes the project and moves the
@@ -127,21 +128,15 @@ test("a reader converses and cannot upload; as editor they check out, edit, comm
   test.skip(!USER2 || !PW2, "KOBE_USER2 and KOBE_PW2 name a second member");
   const stem = `kobe-582-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 
-  // The owner: a restricted project with one file, member2 as reader.
+  // The owner: a project with one file; member2 has no row, so is a reader by default (RV1).
   const created = await pageApi<Created>(page, "POST", "/v1/projects", {
     name: `KOBE-582 ${stem}`,
-    visibility: "restricted",
   });
   expect(created.status, JSON.stringify(created.json)).toBe(201);
   projectId = created.json.id;
   const project = created.json;
   expect(await uploadAs(page, project.id, FILE, BASE)).toBe(201);
   const userId = await memberId(page, USER2 ?? "");
-  const added = await pageApi(page, "POST", `/v1/projects/${project.id}/members`, {
-    user_id: userId,
-    role: "reader",
-  });
-  expect(added.status, JSON.stringify(added.json)).toBe(201);
 
   // member2 converses in the project: it is mounted, read-only, "You can read this project".
   const other = await signInMember(browser);
@@ -159,8 +154,8 @@ test("a reader converses and cannot upload; as editor they check out, edit, comm
   await expect(readerBar.getByRole("button", { name: "Check out to edit" })).toHaveCount(0);
   await expect(readerTab.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
 
-  // A reader cannot upload: the server answers 403 (or 404 where the project is hidden).
-  expect([403, 404]).toContain(await uploadAs(other, project.id, "extra.md", "no"));
+  // A reader cannot upload: the server answers 403 (the project is never hidden from a member).
+  expect(await uploadAs(other, project.id, "extra.md", "no")).toBe(403);
   await other.goto(`/me/projects/${project.id}`);
   const readerPage = panelOf(other);
   await expect(readerPage.getByRole("tab", { name: "History", exact: true })).toBeVisible({

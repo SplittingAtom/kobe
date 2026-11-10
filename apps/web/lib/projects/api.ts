@@ -8,9 +8,12 @@ import type { ThreadPage } from "../chat/types";
 
 /** Project roles (PR3): owners manage, editors change files and commit, readers read and converse. */
 export type ProjectRole = "owner" | "editor" | "reader";
-export const PROJECT_ROLES: readonly ProjectRole[] = ["owner", "editor", "reader"];
-/** `workspace`: every member of the workspace is a reader; `restricted`: only the listed people (PR2). */
-export type ProjectVisibility = "workspace" | "restricted";
+/**
+ * Roles a listed member holds (RV1, KOBE-587): every workspace member reads every project, so
+ * nobody is listed as a reader.
+ */
+export type ProjectMemberRole = "owner" | "editor";
+export const PROJECT_MEMBER_ROLES: readonly ProjectMemberRole[] = ["owner", "editor"];
 
 export interface Project {
   readonly id: string;
@@ -20,7 +23,6 @@ export interface Project {
   readonly description: string;
   readonly instructions: string;
   readonly defaultAgentId: string | null;
-  readonly visibility: ProjectVisibility;
   /** The caller's effective role; null = a team admin who is not listed (acts as owner). */
   readonly myRole: ProjectRole | null;
   readonly fileCount: number;
@@ -39,12 +41,11 @@ export interface Project {
 
 export interface ProjectMember {
   readonly userId: string;
-  readonly role: ProjectRole;
+  readonly role: ProjectMemberRole;
   readonly addedAt: string;
 }
 
 export interface ProjectMembers {
-  readonly visibility: ProjectVisibility;
   readonly members: readonly ProjectMember[];
 }
 
@@ -78,7 +79,6 @@ export interface ProjectInput {
   readonly description: string;
   readonly instructions: string;
   readonly defaultAgentId: string | null;
-  readonly visibility: ProjectVisibility;
 }
 
 export interface ProjectAgent {
@@ -109,8 +109,12 @@ export interface ProjectsApi {
   ): Promise<ApiResult<Project>>;
   remove(id: string): Promise<ApiResult<void>>;
   members(id: string): Promise<ApiResult<ProjectMembers>>;
-  addMember(id: string, userId: string, role: ProjectRole): Promise<ApiResult<ProjectMember>>;
-  setMemberRole(id: string, userId: string, role: ProjectRole): Promise<ApiResult<ProjectMember>>;
+  addMember(id: string, userId: string, role: ProjectMemberRole): Promise<ApiResult<ProjectMember>>;
+  setMemberRole(
+    id: string,
+    userId: string,
+    role: ProjectMemberRole,
+  ): Promise<ApiResult<ProjectMember>>;
   removeMember(id: string, userId: string): Promise<ApiResult<void>>;
   files(id: string): Promise<ApiResult<readonly ProjectFile[]>>;
   uploadFile(id: string, file: File, folder: string): Promise<ApiResult<ProjectFile>>;
@@ -135,7 +139,6 @@ function toBody(input: Partial<ProjectInput> & { archived?: boolean }): Record<s
     ...(input.description === undefined ? {} : { description: input.description }),
     ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
     ...(input.defaultAgentId === undefined ? {} : { default_agent_id: input.defaultAgentId }),
-    ...(input.visibility === undefined ? {} : { visibility: input.visibility }),
     ...(input.archived === undefined ? {} : { archived: input.archived }),
   };
 }
@@ -160,11 +163,7 @@ export function createProjectsApi(teamId: string, fetchFn?: typeof fetch): Proje
     downloadHead: (id) => apiDownload(`${base(id)}/download`, { teamId, fetchFn }),
     transferOwner: (id, userId) => call(`${base(id)}/owner`, "POST", { user_id: userId }),
     get: (id) => call<Project>(base(id)),
-    create: (input) =>
-      call<Project>("/v1/projects", "POST", {
-        ...toBody(input),
-        ...(input.visibility === "workspace" ? {} : { member_user_ids: [] }),
-      }),
+    create: (input) => call<Project>("/v1/projects", "POST", toBody(input)),
     update: (id, input) => call<Project>(base(id), "PATCH", toBody(input)),
     remove: (id) => call(base(id), "DELETE"),
     members: (id) => call<ProjectMembers>(`${base(id)}/members`),

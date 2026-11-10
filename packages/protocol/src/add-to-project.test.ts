@@ -11,21 +11,20 @@ const ID = "11111111-1111-4111-8111-111111111111";
 /** KOBE-585 on the Workspaces roles (KOBE-576): editors, owners and team admins add; readers never. */
 describe("canAddToProject", () => {
   it("lets team admins add anywhere, listed or not", () => {
-    expect(canAddToProject("team_admin", undefined, "restricted")).toBe(true);
-    expect(canAddToProject("team_admin", "reader", "workspace")).toBe(true);
+    expect(canAddToProject("team_admin", undefined)).toBe(true);
+    expect(canAddToProject("team_admin", "reader")).toBe(true);
   });
 
   it("lets owners and editors add whatever their team role", () => {
-    expect(canAddToProject("member", "owner", "restricted")).toBe(true);
-    expect(canAddToProject("member", "editor", "workspace")).toBe(true);
-    expect(canAddToProject("contributor", "editor", "restricted")).toBe(true);
+    expect(canAddToProject("member", "owner")).toBe(true);
+    expect(canAddToProject("member", "editor")).toBe(true);
+    expect(canAddToProject("contributor", "editor")).toBe(true);
   });
 
-  it("refuses readers (explicit or implicit) and non-members of restricted projects", () => {
-    expect(canAddToProject("contributor", "reader", "workspace")).toBe(false);
-    expect(canAddToProject("contributor", undefined, "workspace")).toBe(false);
-    expect(canAddToProject("contributor", undefined, "restricted")).toBe(false);
-    expect(canAddToProject("member", undefined, "workspace")).toBe(false);
+  it("refuses readers (explicit or implicit)", () => {
+    expect(canAddToProject("contributor", "reader")).toBe(false);
+    expect(canAddToProject("contributor", undefined)).toBe(false);
+    expect(canAddToProject("member", undefined)).toBe(false);
   });
 });
 

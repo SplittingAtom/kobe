@@ -453,6 +453,15 @@ const LIST = [
   // The conversation's chrome. Rename: the pencil beside the header's title (KOBE-292).
   { id: "rename-thread", name: "Rename", icon: PencilIcon, scope: "thread", slash: "rename" },
   { id: "open-project", name: "Project", icon: FolderKanbanIcon, scope: "thread" },
+  // A new conversation's project (KOBE-588, NC2): the icon beside the header's title, and the
+  // palette's "Choose the project for this conversation" with the projects as its choices.
+  {
+    id: "draft-project",
+    name: "Project for this conversation",
+    icon: FolderKanbanIcon,
+    scope: "thread",
+    palette: true,
+  },
   { id: "jump-to-latest", name: "Jump to latest", icon: ArrowDownIcon, scope: "thread" },
   // Closes a notice banner (retention, a file that left the workspace).
   { id: "dismiss-notice", name: "Dismiss", icon: XIcon, scope: "thread" },

@@ -52,10 +52,7 @@ const team = {
 const common = {
   "401": json("Error", "`unauthenticated`: no session."),
   "403": json("Error", "`not_a_team_member`, or `forbidden`: the project role doesn't allow it."),
-  "404": json(
-    "Error",
-    "`not_found`: no such project, or a restricted one the caller may not view.",
-  ),
+  "404": json("Error", "`not_found`: no such project in the caller's workspace."),
 };
 
 const op = (

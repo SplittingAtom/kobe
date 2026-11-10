@@ -110,7 +110,8 @@ interface World {
 }
 
 /**
- * A plain member whose thread is in a restricted project where they hold `role`; the project has
+ * A plain member whose thread is in a project where they hold `role` (an explicit editor row, or
+ * none: every workspace member is a reader, KOBE-587); the project has
  * one file (commit 1). With `checkout`, the member has checked it out and edited `a.md`.
  */
 async function world(role: "editor" | "reader", checkout = true): Promise<World> {
@@ -118,12 +119,15 @@ async function world(role: "editor" | "reader", checkout = true): Promise<World>
   const owner = await fx.person(`m${randomBytes(2).toString("hex")}`);
   const team = await fx.team(`pc-${randomBytes(3).toString("hex")}`, admin, [owner]);
   const adminAs = browserFor(admin, team);
-  const made = await adminAs.post("/v1/projects", { name: "P", visibility: "restricted" });
+  const made = await adminAs.post("/v1/projects", { name: "P" });
   expect(made.status, JSON.stringify(made.json)).toBe(201);
   const project = made.json as { id: string; slug: string };
-  expect(
-    (await adminAs.post(`/v1/projects/${project.id}/members`, { user_id: owner.id, role })).status,
-  ).toBe(201);
+  if (role === "editor") {
+    expect(
+      (await adminAs.post(`/v1/projects/${project.id}/members`, { user_id: owner.id, role }))
+        .status,
+    ).toBe(201);
+  }
   const boundary = `----kobe${randomBytes(6).toString("hex")}`;
   const bytes = Buffer.from(
     `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="a.md"\r\n` +

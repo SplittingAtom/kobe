@@ -23,6 +23,7 @@ import type {
   CreateProjectRequest,
   Project,
   ProjectMember,
+  ProjectMemberRole,
   ProjectRole,
   TransferOwnerResponse,
   UpdateProjectRequest,
@@ -79,7 +80,6 @@ export async function toProject(
     description: row.description,
     instructions: row.instructions,
     default_agent_id: row.defaultAgentId,
-    visibility: row.visibility,
     my_role: myRole ?? null,
     file_count: files?.n ?? 0,
     head_commit_id: row.headCommitId,
@@ -145,7 +145,6 @@ export async function createProject(
       description: body.description ?? "",
       instructions: body.instructions ?? "",
       defaultAgentId: body.default_agent_id ?? null,
-      visibility: body.visibility ?? "workspace",
       createdBy: viewer.userId,
     })
     .returning();
@@ -169,7 +168,7 @@ export async function createProject(
   await recordAudit(tx, {
     action: "project.created",
     teamId: viewer.teamId,
-    target: { projectId: row.id, visibility: row.visibility },
+    target: { projectId: row.id },
   });
   return { ok: true, value: { row } };
 }
@@ -203,7 +202,7 @@ export async function listProjects(
     .orderBy(asc(projects.name), asc(projects.id));
   const out: Project[] = [];
   for (const { project, role: explicit } of rows) {
-    const { role, can } = decide(options.teamRole, explicit ?? undefined, project.visibility);
+    const { role, can } = decide(options.teamRole, explicit ?? undefined);
     if (!can.view || (options.editorOnly === true && !can.edit)) continue;
     out.push(await toProject(tx, viewer.teamId, project, role));
   }
@@ -253,7 +252,6 @@ export async function updateProject(
       ...(body.description === undefined ? {} : { description: body.description }),
       ...(body.instructions === undefined ? {} : { instructions: body.instructions }),
       ...(body.default_agent_id === undefined ? {} : { defaultAgentId: body.default_agent_id }),
-      ...(body.visibility === undefined ? {} : { visibility: body.visibility }),
       ...(body.archived === undefined
         ? {}
         : { archivedAt: body.archived ? (access.project.archivedAt ?? new Date()) : null }),
@@ -262,20 +260,12 @@ export async function updateProject(
     .where(and(eq(projects.teamId, viewer.teamId), eq(projects.id, access.project.id)))
     .returning();
   if (!row) throw new Error("project update returned no row");
-  if (body.visibility !== undefined) await endUnreachableThreadRules(tx, viewer.teamId);
   // Field names only: instructions and descriptions are content, never audited.
   await recordAudit(tx, {
     action: "project.updated",
     teamId: viewer.teamId,
     target: { projectId: row.id, fields: Object.keys(body).sort() },
   });
-  if (row.visibility !== access.project.visibility) {
-    await recordAudit(tx, {
-      action: "project.visibility_changed",
-      teamId: viewer.teamId,
-      target: { projectId: row.id, from: access.project.visibility, to: row.visibility },
-    });
-  }
   return { ok: true, value: { row } };
 }
 
@@ -372,8 +362,8 @@ async function roleCounts(tx: KobeTx, teamId: string, projectId: string) {
     .from(projectMembers)
     .where(and(eq(projectMembers.teamId, teamId), eq(projectMembers.projectId, projectId)))
     .groupBy(projectMembers.role);
-  const of = (role: ProjectRole) => rows.find((r) => r.role === role)?.n ?? 0;
-  return { owner: of("owner"), editor: of("editor"), reader: of("reader") };
+  const of = (role: ProjectMemberRole) => rows.find((r) => r.role === role)?.n ?? 0;
+  return { owner: of("owner"), editor: of("editor") };
 }
 
 async function currentRole(tx: KobeTx, teamId: string, projectId: string, userId: string) {
@@ -394,7 +384,7 @@ export async function addMember(
   tx: KobeTx,
   viewer: Viewer,
   projectId: string,
-  member: { userId: string; role: ProjectRole },
+  member: { userId: string; role: ProjectMemberRole },
 ): Promise<Outcome<ProjectMember>> {
   if (!(await usersInTeam(tx, viewer.teamId, [member.userId]))) return fail("not_in_team");
   if ((await currentRole(tx, viewer.teamId, projectId, member.userId)) !== undefined) {
@@ -426,21 +416,17 @@ export async function addMember(
   };
 }
 
-/** Sets a role; with visibility `workspace` an implicit reader without a row gets one. */
+/** Sets a role; a workspace member without a row (an implicit reader, RV1) gets one. */
 export async function setMemberRole(
   tx: KobeTx,
   viewer: Viewer,
   access: ProjectAccess,
   userId: string,
-  role: ProjectRole,
+  role: ProjectMemberRole,
 ): Promise<Outcome<ProjectMember>> {
   const projectId = access.project.id;
   const before = await currentRole(tx, viewer.teamId, projectId, userId);
-  if (before === undefined) {
-    if (access.project.visibility !== "workspace") return fail("not_found");
-    const added = await addMember(tx, viewer, projectId, { userId, role });
-    return added;
-  }
+  if (before === undefined) return addMember(tx, viewer, projectId, { userId, role });
   if (
     before === "owner" &&
     role !== "owner" &&
@@ -564,7 +550,7 @@ async function setRole(
   teamId: string,
   projectId: string,
   userId: string,
-  role: ProjectRole,
+  role: ProjectMemberRole,
 ): Promise<void> {
   await tx
     .update(projectMembers)

@@ -7,16 +7,20 @@ export const USAGE = `Usage:
   kobe backup  --out <new directory> [--no-objects]
   kobe restore --from <backup directory> [--allow-object-mismatch] [--no-objects]
                [--operator <name>] [--expect-audit-head <seq>:<sha256>]
+  kobe projects restricted [--json]
 
   --operator           recorded as who ran the restore (default: the OS user)
   --expect-audit-head  an audit chain head recorded off the box (server log, SIEM); the restore
                        fails unless the restored chain contains it
+  projects restricted  read-only dry-run before the upgrade that removes restricted project
+                       visibility (KOBE-587): lists every restricted project and its members
 
 Environment:
   both     KOBE_BACKUP_KEY_FILE      file with the backup key (openssl rand -base64 32), or
            KOBE_BACKUP_KEY           the key itself; encrypts and signs backups. Keep it safe:
                                      without it a backup cannot be restored
-  backup   KOBE_BACKUP_DATABASE_URL  role with BYPASSRLS (or superuser) that can read every table
+  backup, projects
+           KOBE_BACKUP_DATABASE_URL  role with BYPASSRLS (or superuser) that can read every table
   restore  KOBE_DB_MIGRATE_URL       the owner role (the chart's migrate-url), never the app role
   both     KOBE_S3_BUCKET, KOBE_S3_ENDPOINT, KOBE_S3_REGION, KOBE_S3_PREFIX,
            KOBE_S3_FORCE_PATH_STYLE, KOBE_S3_ACCESS_KEY_ID, KOBE_S3_SECRET_ACCESS_KEY
@@ -61,7 +65,14 @@ export interface RestoreCommand {
   readonly expectAuditHead: { readonly seq: number; readonly hash: string } | undefined;
 }
 
-export type Command = BackupCommand | RestoreCommand;
+/** `kobe projects restricted` (KOBE-587): read-only, no backup key or object storage needed. */
+export interface ProjectsRestrictedCommand {
+  readonly command: "projects-restricted";
+  readonly databaseUrl: string;
+  readonly json: boolean;
+}
+
+export type Command = BackupCommand | RestoreCommand | ProjectsRestrictedCommand;
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -252,6 +263,16 @@ export function parseCommand(
       key: readBackupKey(env, readKeyFile),
       operator,
       expectAuditHead: head ? { seq: Number(head[1]), hash: head[2] ?? "" } : undefined,
+    };
+  }
+  if (command === "projects") {
+    const [sub, ...flagArgs] = rest;
+    if (sub !== "restricted") throw usageError("projects needs a subcommand: projects restricted");
+    const flags = parseFlags(flagArgs, { json: { type: "boolean", default: false } });
+    return {
+      command: "projects-restricted",
+      databaseUrl: readUrl(env, "KOBE_BACKUP_DATABASE_URL"),
+      json: flags.json === true,
     };
   }
   throw usageError(command ? `Unknown command "${command}"` : "No command given");

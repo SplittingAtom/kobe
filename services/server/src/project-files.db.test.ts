@@ -99,12 +99,8 @@ describe("project files API", () => {
     const b = await builder(w.team);
     const m = await f.member(w.team);
     const project = await create(b, { name: "Docs" });
-    const outsider = await f.member(w.team);
-    const hidden = await create(b, {
-      name: "Hidden",
-      visibility: "restricted",
-      member_user_ids: [m.id],
-    });
+    // Someone from another workspace (every member of this one reads every project, KOBE-587).
+    const outsider = (await f.world()).owner;
 
     const up = await upload(b, project.id, "brief.md", "# brief\n", "docs");
     expect(up.status, JSON.stringify(up.json)).toBe(201);
@@ -117,11 +113,11 @@ describe("project files API", () => {
     });
     expect((await as(m).get(`/v1/projects/${project.id}/files`)).json.files).toHaveLength(1);
     expect((await as(m).get(`/v1/projects/${project.id}`)).json.file_count).toBe(1);
-    // A reader uses the files but does not edit them; a non-member of a restricted project sees nothing.
+    // A reader uses the files but does not edit them; another workspace sees nothing.
     expect((await upload(m, project.id, "x.md", "x")).status).toBe(403);
     expect((await as(m).delete(`/v1/projects/${project.id}/files/${up.json.id}`)).status).toBe(403);
-    expect((await upload(outsider, hidden.id, "x.md", "x")).status).toBe(404);
-    expect((await as(outsider).get(`/v1/projects/${hidden.id}/files`)).status).toBe(404);
+    expect((await upload(outsider, project.id, "x.md", "x")).status).toBe(404);
+    expect((await as(outsider).get(`/v1/projects/${project.id}/files`)).status).toBe(404);
     // Same name and folder again; names and folders that could leave the project folder.
     expect((await upload(b, project.id, "brief.md", "again", "docs")).json.code).toBe(
       "already_exists",
@@ -164,11 +160,7 @@ describe("project files in members' workspaces", () => {
     const b = await builder(w.team);
     const m1 = await f.member(w.team);
     const m2 = await f.member(w.team);
-    const project = await create(b, {
-      name: "Secret Plans",
-      visibility: "restricted",
-      member_user_ids: [m1.id],
-    });
+    const project = await create(b, { name: "Secret Plans", member_user_ids: [m1.id] });
     expect((await upload(b, project.id, "a.md", "A", "docs")).status).toBe(201);
     expect((await upload(b, project.id, "b.md", "B")).status).toBe(201);
     const expected = [`projects/${project.slug}/b.md`, `projects/${project.slug}/docs/a.md`];
@@ -179,19 +171,16 @@ describe("project files in members' workspaces", () => {
 
     expect(await paths(w.team, m1.id)).toEqual(expected);
     expect(await paths(w.team, b.id)).toEqual(expected);
-    // A non-member of the restricted project cannot open it; a team admin without a conversation has nothing mounted.
-    expect((await as(m2).post("/v1/threads", { project_id: project.id })).status).toBe(404);
+    // Without a conversation nothing is mounted, for a member or a team admin.
     expect(await paths(w.team, m2.id)).toEqual([]);
     expect(await paths(w.team, w.owner.id)).toEqual([]);
 
-    // Added, then a conversation: mounted; removing a member unmounts (no later than the sync pull).
-    expect(
-      await as(b).post(`/v1/projects/${project.id}/members`, { user_id: m2.id }),
-    ).toMatchObject({ status: 201 });
+    // An unlisted member reads every project (KOBE-587): a conversation mounts it; removing a row
+    // leaves a reader, whose conversation keeps the mount.
     await converse(m2, project.id);
     expect(await paths(w.team, m2.id)).toEqual(expected);
     expect((await as(b).delete(`/v1/projects/${project.id}/members/${m1.id}`)).status).toBe(204);
-    expect(await paths(w.team, m1.id)).toEqual([]);
+    expect(await paths(w.team, m1.id)).toEqual(expected);
     expect(await paths(w.team, m2.id)).toEqual(expected);
 
     // Removing a file unmounts it everywhere; adding one reaches the remaining members.
@@ -212,7 +201,7 @@ describe("project files in members' workspaces", () => {
       expect(p.startsWith(`projects/${project.slug}/`)).toBe(true);
   });
 
-  it("mounts for any reader with a conversation in a workspace project, and un-mounts when it is restricted", async () => {
+  it("mounts for any reader with a conversation in the project", async () => {
     const w = await f.world();
     const b = await builder(w.team);
     const m1 = await f.member(w.team);
@@ -223,16 +212,6 @@ describe("project files in members' workspaces", () => {
       await converse(p, project.id);
       expect(await paths(w.team, p.id)).toEqual([`projects/${project.slug}/all.md`]);
     }
-    // Narrowed to the creator only: the others lose it.
-    await as(b).post(`/v1/projects/${project.id}/members`, { user_id: m1.id });
-    expect(
-      (await as(b).patch(`/v1/projects/${project.id}`, { visibility: "restricted" })).status,
-    ).toBe(200);
-    expect(await paths(w.team, m1.id)).toHaveLength(1);
-    expect(await paths(w.team, b.id)).toHaveLength(1);
-    expect(await paths(w.team, m2.id)).toEqual([]);
-    // A team admin still views every project (PR2), so their conversation keeps it mounted.
-    expect(await paths(w.team, w.owner.id)).toHaveLength(1);
   });
 
   it("brings a workspace in line at every run start, and takes everything from a removed member", async () => {
@@ -272,15 +251,11 @@ describe("project files in members' workspaces", () => {
 });
 
 describe("one membership decides files and memory (ac-3)", () => {
-  it("project memory read/write follows the same membership as the file mounts", async () => {
+  it("project memory read/write follows the same project role as the file mounts", async () => {
     const w = await f.world();
     const b = await builder(w.team);
     const m = await f.member(w.team);
-    const project = await create(b, {
-      name: "Shared Brain",
-      visibility: "restricted",
-      member_user_ids: [m.id],
-    });
+    const project = await create(b, { name: "Shared Brain", member_user_ids: [m.id] });
     await upload(b, project.id, "k.md", "K");
     await converse(m, project.id);
     const memory = (p: Person) =>
@@ -294,10 +269,11 @@ describe("one membership decides files and memory (ac-3)", () => {
     expect(await paths(w.team, m.id)).toHaveLength(1);
 
     expect((await as(b).delete(`/v1/projects/${project.id}/members/${m.id}`)).status).toBe(204);
-    // Removed: memory is a 404 like any outsider's, and the files left the workspace.
-    expect((await memory(m)).status).toBe(404);
-    expect((await as(m).get(`/v1/memory?scope=project&project_id=${project.id}`)).status).toBe(404);
-    expect(await paths(w.team, m.id)).toEqual([]);
+    // Row removed: an implicit reader (KOBE-587) reads memory but no longer writes it; the
+    // conversation keeps the files mounted.
+    expect((await memory(m)).status).toBe(403);
+    expect((await as(m).get(`/v1/memory?scope=project&project_id=${project.id}`)).status).toBe(200);
+    expect(await paths(w.team, m.id)).toHaveLength(1);
     // A team admin acts as owner (PR3): memory yes; nothing mounted without a conversation (MT1).
     expect((await memory(w.owner)).status).toBe(200);
     expect(await paths(w.team, w.owner.id)).toEqual([]);

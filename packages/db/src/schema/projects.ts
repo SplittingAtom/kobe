@@ -22,15 +22,21 @@ import { teams } from "./teams.js";
 // (`project_files.blob_ref`, listed in `blob-refs.ts`), never in Postgres.
 
 /**
- * Project roles (KOBE-577, Workspaces PR3; protocol `projectRoleSchema`): `owner` manages the
- * project and its people, `editor` checks out and commits, `reader` views and converses.
+ * Effective project roles (KOBE-577, Workspaces PR3; protocol `projectRoleSchema`): `owner` manages
+ * the project and its people, `editor` checks out and commits, `reader` views and converses. Every
+ * workspace member is at least a reader (KOBE-587, projects-in-conversations RV1), so `reader` is
+ * never stored: explicit rows name owners and editors only ({@link PROJECT_MEMBER_ROLE_VALUES}).
  */
 export const PROJECT_ROLE_VALUES = ["owner", "editor", "reader"] as const;
 export type ProjectRole = (typeof PROJECT_ROLE_VALUES)[number];
 
+/** Roles an explicit `project_members` row may hold (RV1; protocol `projectMemberRoleSchema`). */
+export const PROJECT_MEMBER_ROLE_VALUES = ["owner", "editor"] as const;
+export type ProjectMemberRole = (typeof PROJECT_MEMBER_ROLE_VALUES)[number];
+
 /**
- * Who sees a project (PR2; protocol `projectVisibilitySchema`): `workspace` = every team member is
- * an implicit reader; `restricted` = only `project_members` rows (team admins see both).
+ * The retired project visibilities (Workspaces PR2, removed by KOBE-587): only audit rows written
+ * before the removal name them (`project.created`, `project.visibility_changed`).
  */
 export const PROJECT_VISIBILITY_VALUES = ["workspace", "restricted"] as const;
 export type ProjectVisibility = (typeof PROJECT_VISIBILITY_VALUES)[number];
@@ -76,7 +82,6 @@ export const projects = pgTable(
     description: text().notNull().default(""),
     instructions: text().notNull().default(""),
     defaultAgentId: uuid(),
-    visibility: text().$type<ProjectVisibility>().notNull().default("workspace"),
     /**
      * The current commit (CM1): `project_files` is its tree. Null until the first commit. The
      * SQL-only key (team_id, id, head_commit_id) -> project_commits (team_id, project_id, id) refuses deleting the head (GV3
@@ -115,7 +120,6 @@ export const projects = pgTable(
       "projects_instructions",
       sql`octet_length(${t.instructions}) <= ${sql.raw(String(PROJECT_INSTRUCTIONS_MAX_BYTES))}`,
     ),
-    check("projects_visibility", sql`${t.visibility} IN ('workspace', 'restricted')`),
     check(
       "projects_storage_counts",
       sql`${t.liveBytes} >= 0 AND ${t.liveObjects} >= 0 AND ${t.historyBytes} >= 0 AND ${t.historyObjects} >= 0`,
@@ -127,10 +131,9 @@ export const projects = pgTable(
 );
 
 /**
- * Explicit project members (PR2, PR3). With `visibility = 'workspace'` everyone else is an
- * implicit reader, so rows name owners and editors (a reader row changes nothing until the project
- * is restricted); with `restricted` they are the whole membership. "The last owner stays" is a
- * server rule. Removing a project removes its member rows.
+ * Explicit project members (PR3, RV1): owners and editors only; every other workspace member is an
+ * implicit reader (KOBE-587 removed restricted visibility and the reader rows). "The last owner
+ * stays" is a server rule. Removing a project removes its member rows.
  */
 export const projectMembers = pgTable(
   "project_members",
@@ -140,7 +143,7 @@ export const projectMembers = pgTable(
     userId: uuid()
       .notNull()
       .references(() => users.id),
-    role: text().$type<ProjectRole>().notNull().default("editor"),
+    role: text().$type<ProjectMemberRole>().notNull().default("editor"),
     addedBy: uuid()
       .notNull()
       .references(() => users.id),
@@ -153,9 +156,9 @@ export const projectMembers = pgTable(
       columns: [t.teamId, t.projectId],
       foreignColumns: [projects.teamId, projects.id],
     }).onDelete("cascade"),
-    // "Which projects is this user in" (project list for a member of restricted projects).
+    // "Which projects is this user in" (a member's explicit roles).
     index("project_members_user_idx").on(t.teamId, t.userId),
-    check("project_members_role", sql`${t.role} IN ('owner', 'editor', 'reader')`),
+    check("project_members_role", sql`${t.role} IN ('owner', 'editor')`),
   ],
 );
 

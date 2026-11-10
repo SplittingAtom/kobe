@@ -6,6 +6,7 @@ import { adjacentThread, threadOrder } from "../../lib/chat/thread-groups";
 import type { MenuBinding, MenuBindings } from "../../lib/shell/menu";
 import { useArtifactPanel, type ArtifactPanelApi } from "../chat/artifact-state";
 import { useDetail } from "../chat/detail";
+import { useEndDraftProject } from "../chat/use-draft-project";
 import { useBindCommands } from "./command-bindings";
 import { useRail, type RailApi } from "./rail-state";
 import { toggleTheme, useTheme } from "./use-theme";
@@ -73,8 +74,14 @@ export function AppCommands() {
   const detail = useDetail();
   const theme = useTheme();
   const steps = useThreadSteps();
+  const endDraftProject = useEndDraftProject();
   useBindCommands({
-    "new-thread": { onSelect: () => aui.threads.switchToNewThread() },
+    "new-thread": {
+      onSelect: () => {
+        endDraftProject();
+        aui.threads.switchToNewThread();
+      },
+    },
     ...(rail
       ? { files: { onSelect: () => rail.reveal("files") }, "toggle-rail": railBinding(rail) }
       : {}),

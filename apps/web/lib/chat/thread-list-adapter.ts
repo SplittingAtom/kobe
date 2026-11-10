@@ -7,7 +7,7 @@
  */
 import type { RemoteThreadListAdapter } from "@assistant-ui/react";
 import type { ApiError, ApiResult } from "../api/client";
-import type { ChatSession } from "./session";
+import type { ChatSession, DraftProjectIssue } from "./session";
 import { forkHint, forkOrigin } from "./fork";
 import { activityOfSummary } from "./thread-activity";
 import { placementCustom } from "./thread-groups";
@@ -62,6 +62,17 @@ type GenerateTitle = RemoteThreadListAdapter["generateTitle"];
 export interface ThreadListAdapterOptions {
   /** Every failed list or change is reported here (the list shows it as an alert). */
   readonly onError: (error: ApiError) => void;
+}
+
+/** The refusal of a send in a project (NC5): the mount limit, else the project is unusable. */
+function projectIssueOf(err: unknown): DraftProjectIssue | null {
+  const apiError = err instanceof ChatApiError ? err.apiError : undefined;
+  if (apiError === undefined) return null;
+  if (apiError.code === "too_many_mounts") {
+    return { kind: "too_many_mounts", message: apiError.message };
+  }
+  const gone = apiError.status === 403 || apiError.status === 404 || apiError.status === 409;
+  return gone ? { kind: "unusable", message: apiError.message } : null;
 }
 
 export function createThreadListAdapter(
@@ -182,6 +193,8 @@ export function createThreadListAdapter(
       ).catch((err: unknown) => {
         // A refused creation gives the draft its off connectors back.
         for (const id of off) session.draftConnectors.set(id, false);
+        // NC5: the draft keeps its project, and the control says why it was refused.
+        if (projectId !== null) session.refuseDraftProject(projectId, projectIssueOf(err));
         throw err;
       });
       session.setProvisionalTitle(created.threadId, provisional);

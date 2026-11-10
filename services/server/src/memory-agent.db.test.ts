@@ -132,11 +132,11 @@ async function started(w: World, capabilities: readonly string[] = [CAPABILITY_M
   return sb;
 }
 
-/** Puts the world's thread into a new project (rows by SQL, visibility `restricted`: only `join`ed users are members, team admins are not). */
+/** Puts the world's thread into a new project (rows by SQL: only `join`ed users have rows; every other team member is a reader, KOBE-587). */
 async function inProject(w: World): Promise<string> {
   const id = randomUUID();
   await fx.admin.query(
-    `INSERT INTO projects (team_id, id, slug, name, created_by, visibility) VALUES ($1, $2, $3, 'P', $4, 'restricted')`,
+    `INSERT INTO projects (team_id, id, slug, name, created_by) VALUES ($1, $2, $3, 'P', $4)`,
     [w.team, id, `p-${randomBytes(3).toString("hex")}`, w.owner.id],
   );
   await fx.admin.query(`UPDATE threads SET project_id = $3 WHERE team_id = $1 AND id = $2`, [
@@ -147,8 +147,8 @@ async function inProject(w: World): Promise<string> {
   return id;
 }
 
-/** Makes the world's owner an explicit member of the thread's project (real `project_members`). */
-async function join(w: World, role: "editor" | "reader" = "editor"): Promise<void> {
+/** Makes the world's owner an explicit editor of the thread's project (real `project_members`). */
+async function join(w: World, role: "owner" | "editor" = "editor"): Promise<void> {
   await fx.admin.query(
     `INSERT INTO project_members (team_id, project_id, user_id, role, added_by)
      SELECT t.team_id, t.project_id, $3, $4, $3 FROM threads t
@@ -534,7 +534,7 @@ describe("run.start.memory", () => {
     expect(old.frames("run.start")[0]).not.toHaveProperty("memory");
   });
 
-  it("lists project only for a member of the thread's project, with its index", async () => {
+  it("lists project for every member of the thread's workspace, with its index", async () => {
     const w = await world();
     const projectId = await inProject(w);
     await join(w);
@@ -551,12 +551,12 @@ describe("run.start.memory", () => {
 
     const w2 = await world();
     await inProject(w2);
-    await asPlainMember(w2); // a team admin would read it (PR3)
+    await asPlainMember(w2); // no row: an implicit reader (RV1) still reads project memory
     const sb = await started(w2);
     const memory = runMemoryContextSchema.parse(
       (sb.frames("run.start")[0] as { memory?: unknown } | undefined)?.memory,
     );
-    expect(memory.scopes).toEqual(["user"]);
+    expect(memory.scopes).toEqual(["user", "project"]);
 
     const w3 = await world();
     await inProject(w3);
@@ -788,21 +788,7 @@ describe("project memory", () => {
     ).toBe(1);
   });
 
-  it("refuses non-members, threads outside a project and a disabled project scope", async () => {
-    const stranger = await world();
-    await inProject(stranger); // owner is not in `members`
-    await asPlainMember(stranger);
-    const sbS = await started(stranger);
-    await check(sbS, stranger, "n1", input);
-    expect(errorCode(await result(sbS, sendPut(sbS, stranger, "n1", input)))).toBe("not_allowed");
-    expect(errorCode(await read(sbS, stranger, { scope: "project" }))).toBe("not_allowed");
-    await expect
-      .poll(() => refusals(stranger.team), AUDIT_POLL)
-      .toEqual(expect.arrayContaining(["put:not_a_member", "read:not_a_member"]));
-    expect((await rows(`SELECT 1 FROM approvals WHERE team_id = $1`, [stranger.team])).length).toBe(
-      0,
-    );
-
+  it("refuses threads outside a project and a disabled project scope", async () => {
     const loose = await world();
     await join(loose);
     const sbL = await started(loose);
@@ -824,8 +810,7 @@ describe("project memory", () => {
 
   it("a reader's remember into the project is refused plainly; reading and personal memory work (PR6)", async () => {
     const w = await world();
-    await inProject(w);
-    await join(w, "reader");
+    await inProject(w); // no row: an implicit reader (RV1)
     await asPlainMember(w);
     const sb = await started(w);
     await check(sb, w, "rd1", input);

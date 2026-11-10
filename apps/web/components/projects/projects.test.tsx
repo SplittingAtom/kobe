@@ -16,7 +16,6 @@ const project = (over: Record<string, unknown> = {}) => ({
   description: "The Q4 launch",
   instructions: "Answer in French.",
   default_agent_id: null,
-  visibility: "restricted",
   my_role: "owner",
   file_count: 1,
   created_by: "u-me",
@@ -78,7 +77,7 @@ const base = (over: Record<string, unknown> = {}) => ({
   [`GET /v1/projects/${P}`]: [200, project(over)] as const,
   [`GET /v1/projects/${P}/members`]: [
     200,
-    { visibility: "restricted", members: [member("u-me", "owner"), member("u-bob")] },
+    { members: [member("u-me", "owner"), member("u-bob")] },
   ] as const,
   [`GET /v1/projects/${P}/files`]: [200, { files: [file()] }] as const,
   [`GET /v1/threads?project_id=${P}`]: [200, { threads: [], next_cursor: null }] as const,
@@ -112,7 +111,7 @@ describe("projects list and create (KOBE-164, ac-1)", () => {
     expect(screen.queryByRole("button", { name: "New project" })).toBeNull();
   });
 
-  it("creates a project with instructions, a team agent and selected members", async () => {
+  it("creates a project with instructions and a team agent, saying every member reads it", async () => {
     const calls = stubApi({
       "GET /v1/projects": [200, { projects: [] }],
       "GET /v1/agents/runnable?limit=200": [200, AGENTS],
@@ -121,13 +120,17 @@ describe("projects list and create (KOBE-164, ac-1)", () => {
     renderTeam(<ProjectsPage />, { role: "contributor" });
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "New project" }));
+    // RV4: no visibility choice; the help text says where confidential work goes.
+    expect(screen.queryByLabelText("Visibility")).toBeNull();
+    expect(
+      screen.getByText(/Confidential work belongs in a separate workspace or in My files/),
+    ).toBeTruthy();
     await user.type(screen.getByLabelText("Name"), "Launch");
     await user.type(screen.getByLabelText("Instructions"), "Answer in French.");
     // Personal agents are not offered: the server only accepts team and gallery agents.
     const agent = screen.getByLabelText("Default agent");
     expect(within(agent).queryByText("Mine")).toBeNull();
     await user.selectOptions(agent, "Analyst");
-    await user.selectOptions(screen.getByLabelText("Visibility"), "Only the people listed");
     await user.click(screen.getByRole("button", { name: "Create project" }));
     await screen.findByText("Created Launch.");
     const post = must(calls.find((c) => c.method === "POST"));
@@ -136,8 +139,6 @@ describe("projects list and create (KOBE-164, ac-1)", () => {
       description: "",
       instructions: "Answer in French.",
       default_agent_id: "a-team",
-      visibility: "restricted",
-      member_user_ids: [],
     });
     expect(post.headers.get("x-kobe-team")).toBe("t-1");
   });
@@ -151,6 +152,11 @@ describe("projects list and create (KOBE-164, ac-1)", () => {
     renderTeam(<ProjectsPage />, { role: "team_admin" });
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "New project" }));
+    // RV4: no visibility choice; the help text says where confidential work goes.
+    expect(screen.queryByLabelText("Visibility")).toBeNull();
+    expect(
+      screen.getByText(/Confidential work belongs in a separate workspace or in My files/),
+    ).toBeTruthy();
     await user.type(screen.getByLabelText("Name"), "Launch");
     await user.click(screen.getByRole("button", { name: "Create project" }));
     expect(await screen.findByText("Another project already uses that web name.")).toBeTruthy();
@@ -267,12 +273,12 @@ describe("project detail (KOBE-164, ac-1)", () => {
     );
   });
 
-  it("lets a team admin who is not a member manage but not open memory", async () => {
+  it("lets a team admin who is not listed manage it and open its memory (acts as owner, PR3)", async () => {
     stubApi(base({ my_role: null }));
     renderTeam(<ProjectDetailPage projectId={P} />, { role: "team_admin" });
     await screen.findByRole("button", { name: "Save changes" }).catch(() => undefined);
     expect(await screen.findByRole("button", { name: "Archive project" })).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "Project memory" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Project memory" })).toBeTruthy();
   });
 
   it("shows the server's 404 for a project you cannot see", async () => {
@@ -329,14 +335,8 @@ describe("project members (KOBE-164, ac-1)", () => {
     const calls = stubApi({
       ...base(),
       [`GET /v1/projects/${P}/members`]: [
-        [
-          200,
-          {
-            visibility: "restricted",
-            members: [member("u-me", "owner"), member("u-bob"), member("u-cy")],
-          },
-        ],
-        [200, { visibility: "restricted", members: [member("u-me", "owner"), member("u-cy")] }],
+        [200, { members: [member("u-me", "owner"), member("u-bob"), member("u-cy")] }],
+        [200, { members: [member("u-me", "owner"), member("u-cy")] }],
       ],
       [`DELETE /v1/projects/${P}/members/u-bob`]: [204],
     });
@@ -366,16 +366,15 @@ describe("project members (KOBE-164, ac-1)", () => {
     expect(await screen.findByText(/A project keeps at least one owner/)).toBeTruthy();
   });
 
-  it("says that everyone in the workspace reads a workspace-visible project", async () => {
+  it("says that everyone else in the workspace reads the project, with no visibility control", async () => {
     stubApi({
-      ...base({ visibility: "workspace" }),
-      [`GET /v1/projects/${P}/members`]: [
-        200,
-        { visibility: "workspace", members: [member("u-me", "owner")] },
-      ],
+      ...base(),
+      [`GET /v1/projects/${P}/members`]: [200, { members: [member("u-me", "owner")] }],
     });
     renderTeam(<ProjectDetailPage projectId={P} />, { role: "contributor" });
-    expect(await screen.findByText(/everyone who is not listed is a reader/)).toBeTruthy();
+    expect(await screen.findByText(/Everyone else in the workspace is a reader/)).toBeTruthy();
+    expect(screen.queryByLabelText("Visibility")).toBeNull();
+    expect(screen.queryByText(/Restricted/)).toBeNull();
   });
 });
 

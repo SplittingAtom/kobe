@@ -164,7 +164,7 @@ describe("rail activity dots (ac-2)", () => {
       "Threads panel, a conversation has new activity",
     );
     // The tab title marks runs and approvals only.
-    expect(document.title).toBe("Kobe");
+    expect(document.title).not.toMatch(/^(● |\(!\) )/);
     await userEvent
       .setup()
       .click(await within(await rail()).findByRole("button", { name: /^Deploy/ }));
@@ -211,7 +211,7 @@ describe("rail activity dots (ac-2)", () => {
     setVisibility("hidden");
     await new Promise((r) => setTimeout(r, 100));
     expect(theirs.querySelector("[data-status-dot]")).toBeNull();
-    expect(document.title).toBe("Kobe");
+    expect(document.title).not.toMatch(/^(● |\(!\) )/);
   });
 
   it("reads only the activity, never the thread lists, and not while the tab is hidden", async () => {
@@ -240,27 +240,27 @@ describe("tab title (ac-5)", () => {
     open(t);
     const runId = await startRun(t);
     await waitFor(async () => expect(await activityOf("Build")).toBe("running"));
-    expect(document.title).toBe("Kobe"); // a visible tab: no prefix
+    expect(document.title).toBe("Build · Kobe"); // a visible tab: no prefix
 
     setVisibility("hidden");
-    expect(document.title).toBe("● Kobe");
+    expect(document.title).toBe("● Build · Kobe");
     setVisibility("visible");
-    expect(document.title).toBe("Kobe");
+    expect(document.title).toBe("Build · Kobe");
 
     setVisibility("hidden");
     fake.agent.toolCall(runId, "tc1", "bash", { command: "ls" }, "m1");
     fake.requestApproval(runId, asked());
-    await waitFor(() => expect(document.title).toBe("(!) Kobe"));
+    await waitFor(() => expect(document.title).toBe("(!) Build · Kobe"));
     window.dispatchEvent(new Event("focus"));
-    expect(document.title).toBe("(!) Kobe"); // still hidden: focus alone does not show the tab
+    expect(document.title).toBe("(!) Build · Kobe"); // still hidden: focus alone does not show the tab
     visibility = "visible";
     window.dispatchEvent(new Event("focus"));
-    expect(document.title).toBe("Kobe");
+    expect(document.title).toBe("Build · Kobe");
 
     setVisibility("hidden");
-    expect(document.title).toBe("(!) Kobe");
+    expect(document.title).toBe("(!) Build · Kobe");
     fake.agent.complete(runId);
-    await waitFor(() => expect(document.title).toBe("Kobe")); // the state ended
+    await waitFor(() => expect(document.title).toBe("Build · Kobe")); // the state ended
   });
 
   it("leaves the title alone when the app goes away", async () => {
@@ -268,7 +268,7 @@ describe("tab title (ac-5)", () => {
     const view = open(t);
     await startRun(t);
     setVisibility("hidden");
-    await waitFor(() => expect(document.title).toBe("● Kobe"));
+    await waitFor(() => expect(document.title).toBe("● Gone · Kobe"));
     view.unmount();
     expect(document.title).toBe("Kobe");
   });

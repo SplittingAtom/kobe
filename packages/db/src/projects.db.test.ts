@@ -6,7 +6,7 @@ import { BREAK_GLASS_ACTOR_SETTING, BREAK_GLASS_GRANT_SETTING } from "./settings
 
 /**
  * KOBE-160: projects, project_members, project_files and the project FKs; KOBE-577 (Workspaces):
- * visibility, roles owner|editor|reader, project_commits, project_tree_entries, project_checkouts,
+ * roles owner|editor (KOBE-587: no visibility, no reader rows), project_commits, project_tree_entries, project_checkouts,
  * the keys between them and the legal-hold guard over history (probe suite: probe.db.test).
  */
 const admin = new pg.Client({ connectionString: inject("adminUrl") });
@@ -54,14 +54,13 @@ interface ProjectOpts {
   name?: string;
   instructions?: string;
   description?: string;
-  visibility?: string;
 }
 
 async function project(teamId: string, o: ProjectOpts = {}): Promise<string> {
   const id = o.id ?? randomUUID();
   await admin.query(
-    `INSERT INTO projects (team_id, id, slug, name, description, instructions, visibility, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    `INSERT INTO projects (team_id, id, slug, name, description, instructions, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [
       teamId,
       id,
@@ -69,7 +68,6 @@ async function project(teamId: string, o: ProjectOpts = {}): Promise<string> {
       o.name ?? "P",
       o.description ?? "",
       o.instructions ?? "",
-      o.visibility ?? "workspace",
       owner,
     ],
   );
@@ -127,7 +125,7 @@ afterAll(async () => {
 });
 
 describe("projects", () => {
-  it("accepts a project with visibility workspace, no head and zero storage by default", async () => {
+  it("accepts a project with no head and zero storage by default", async () => {
     const t = await team();
     const id = randomUUID();
     await admin.query(
@@ -135,14 +133,13 @@ describe("projects", () => {
       [t, id, `d-${id.slice(0, 8)}`, owner],
     );
     const { rows } = await admin.query(
-      `SELECT visibility, archived_at, default_agent_id, head_commit_id, live_bytes, live_objects,
+      `SELECT archived_at, default_agent_id, head_commit_id, live_bytes, live_objects,
               history_bytes, history_objects
          FROM projects WHERE team_id = $1 AND id = $2`,
       [t, id],
     );
     expect(rows).toEqual([
       {
-        visibility: "workspace",
         archived_at: null,
         default_agent_id: null,
         head_commit_id: null,
@@ -154,11 +151,11 @@ describe("projects", () => {
     ]);
   });
 
-  it("has no members_mode column any more (MG0)", async () => {
+  it("has no members_mode (MG0) or visibility (KOBE-587) column any more", async () => {
     expect(
       await count(
         `SELECT count(*) AS n FROM information_schema.columns
-          WHERE table_name = 'projects' AND column_name = 'members_mode'`,
+          WHERE table_name = 'projects' AND column_name IN ('members_mode', 'visibility')`,
         [],
       ),
     ).toBe(0);
@@ -184,7 +181,7 @@ describe("projects", () => {
     expect(await errorCode(project(await team(), { slug: "alpha" }))).toBeUndefined();
   });
 
-  it("refuses slugs, names, descriptions and visibilities the contract refuses", async () => {
+  it("refuses slugs, names and descriptions the contract refuses", async () => {
     const t = await team();
     for (const slug of ["", "-a", "A", "a_b", "a b", "a/b", "a".repeat(41)]) {
       expect(await errorCode(project(t, { slug })), slug).toBe("23514");
@@ -193,10 +190,6 @@ describe("projects", () => {
     expect(await errorCode(project(t, { name: "  " }))).toBe("23514");
     expect(await errorCode(project(t, { name: "n".repeat(101) }))).toBe("23514");
     expect(await errorCode(project(t, { description: "d".repeat(501) }))).toBe("23514");
-    for (const visibility of ["everyone", "team", "selected"]) {
-      expect(await errorCode(project(t, { visibility })), visibility).toBe("23514");
-    }
-    expect(await errorCode(project(t, { visibility: "restricted" }))).toBeUndefined();
   });
 
   it("caps instructions at 8 KiB of UTF-8 bytes", async () => {
@@ -216,15 +209,14 @@ describe("project_members", () => {
       [t, p, userId, role, owner],
     );
 
-  it("accepts one row per user and project, roles owner|editor|reader only", async () => {
+  it("accepts one row per user and project, roles owner|editor only (no reader rows, RV1)", async () => {
     const t = await team();
     const p = await project(t);
     expect(await errorCode(member(t, p, owner, "owner"))).toBeUndefined();
     expect(await errorCode(member(t, p, owner))).toBe("23505");
-    for (const role of ["admin", "member"]) {
+    for (const role of ["admin", "member", "reader"]) {
       expect(await errorCode(member(t, p, other, role)), role).toBe("23514");
     }
-    expect(await errorCode(member(t, p, other, "reader"))).toBeUndefined();
     const third = await user();
     expect(await errorCode(member(t, p, third))).toBeUndefined();
   });

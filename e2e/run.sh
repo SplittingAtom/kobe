@@ -2485,20 +2485,17 @@ const code = (r) => r.status + ":" + (r.json.code ?? "-");
 out("signin", owner.login + ":" + reader.login);
 if (mode === "setup") {
   const marker = "E2E projects " + Date.now();
-  const created = await owner("POST", "/v1/projects", { name: marker, instructions: "Always answer in " + marker, visibility: "restricted", member_user_ids: [] });
+  const created = await owner("POST", "/v1/projects", { name: marker, instructions: "Always answer in " + marker, member_user_ids: [] });
   const id = created.json.id;
   out("project_id", id ?? "-");
-  out("create", created.status + ":" + created.json.my_role + ":" + created.json.visibility);
-  const hidden = await owner("POST", "/v1/projects", { name: marker + " hidden", visibility: "restricted", member_user_ids: [] });
-  out("hidden_project_id", hidden.json.id ?? "-");
-  out("outsider_get", code(await reader("GET", "/v1/projects/" + id)));
-  out("outsider_list", (await reader("GET", "/v1/projects")).json.projects.some((p) => p.id === id || p.id === hidden.json.id));
-  out("add_member", (await owner("POST", "/v1/projects/" + id + "/members", { user_id: readerId, role: "reader" })).status);
+  out("create", created.status + ":" + created.json.my_role + ":" + ("visibility" in created.json));
+  // Every workspace member reads every project (KOBE-587, RV1): no row needed, no reader role.
+  out("member_list", (await reader("GET", "/v1/projects")).json.projects.some((p) => p.id === id));
+  out("reader_role_refused", code(await owner("POST", "/v1/projects/" + id + "/members", { user_id: readerId, role: "reader" })));
   const mine = await reader("GET", "/v1/projects/" + id);
   out("member_get", mine.status + ":" + mine.json.my_role + ":" + (mine.json.instructions === "Always answer in " + marker));
   out("member_patch", code(await reader("PATCH", "/v1/projects/" + id, { name: "mine now" })));
   out("member_add", code(await reader("POST", "/v1/projects/" + id + "/members", { user_id: readerId, role: "owner" })));
-  out("hidden_still_404", code(await reader("GET", "/v1/projects/" + hidden.json.id)));
   const up = await upload(owner, id, "brief.txt", "project brief " + marker);
   out("upload", up.status + ":" + (up.json.path ?? "-") + ":" + (up.json.source ?? "-"));
   out("member_upload", code(await upload(reader, id, "nope.txt", "x")));
@@ -2539,14 +2536,12 @@ JS
     printf '     projects: %s\n' "$(printf '%s' "$pr_out" | tr '\n' ' ' | cut -c1-700)"
     pr_id=$(printf '%s\n' "$pr_out" | sed -n 's/^project_id=//p')
     contains "projects: both users signed in" '^signin=200:200$' "$pr_out"
-    contains "projects: the Owner creates a project and becomes its owner (201)" '^create=201:owner:restricted$' "$pr_out"
-    contains "projects: a person outside the project gets 404, not 403" '^outsider_get=404:not_found$' "$pr_out"
-    contains "projects: the project is not in the outsider's list" '^outsider_list=false$' "$pr_out"
-    contains "projects: the Owner adds the reader with role reader (201)" '^add_member=201$' "$pr_out"
+    contains "projects: the Owner creates a project and becomes its owner (201, no visibility)" '^create=201:owner:false$' "$pr_out"
+    contains "projects: every workspace member lists the project (KOBE-587)" '^member_list=true$' "$pr_out"
+    contains "projects: explicit reader rows are refused (owner or editor only)" '^reader_role_refused=400:invalid_request$' "$pr_out"
     contains "projects: the member sees the project, its role and instructions" '^member_get=200:reader:true$' "$pr_out"
     contains "projects: a reader cannot change the project (403)" '^member_patch=403:forbidden$' "$pr_out"
     contains "projects: a reader cannot manage members (403)" '^member_add=403:forbidden$' "$pr_out"
-    contains "projects: another project without the reader stays 404" '^hidden_still_404=404:not_found$' "$pr_out"
     contains "projects: the Owner uploads a project file (201, upload, in its folder)" '^upload=201:docs/brief.txt:upload$' "$pr_out"
     contains "projects: a reader cannot upload (403)" '^member_upload=403:forbidden$' "$pr_out"
     contains "projects: a reader lists the file" '^member_files=200:docs/brief.txt$' "$pr_out"
@@ -2822,9 +2817,10 @@ const unarchive = await owner("POST", t + "/unarchive");
 out("unarchive", unarchive.status + ":" + (unarchive.json.archived_at === null));
 out("unarchived_lists", (await has(owner, "/v1/threads/archived")) + ":" + (await has(owner, "/v1/threads")));
 // Move into a project and out again; a project share ends with the move.
-const project = await owner("POST", "/v1/projects", { name: "E2E organize " + marker, visibility: "restricted", member_user_ids: [] });
+const project = await owner("POST", "/v1/projects", { name: "E2E organize " + marker, member_user_ids: [] });
 const projectId = project.json.id;
-out("project", project.status + ":" + (await owner("POST", "/v1/projects/" + projectId + "/members", { user_id: readerId, role: "reader" })).status);
+// The reader reads it as every workspace member does (KOBE-587).
+out("project", project.status + ":" + (await reader("GET", "/v1/projects/" + projectId)).json.my_role);
 const moveIn = await owner("POST", t + "/move", { project_id: projectId });
 out("move_in", moveIn.status + ":" + (moveIn.json.project_id === projectId) + ":" + (await has(owner, "/v1/threads?project_id=" + projectId)));
 const pshare = await owner("POST", t + "/share", { visibility: "project" });
@@ -2887,7 +2883,7 @@ JS
     contains "organize: an archived thread can't be pinned (409 thread_archived)" '^pin_archived=409:thread_archived$' "$org_out"
     contains "organize: unarchive (200, archived_at cleared)" '^unarchive=200:true$' "$org_out"
     contains "organize: an unarchived thread is back in the activity list" '^unarchived_lists=false:true$' "$org_out"
-    contains "organize: a project with the reader as member" '^project=201:201$' "$org_out"
+    contains "organize: a project every member reads" '^project=201:reader$' "$org_out"
     contains "organize: the owner moves the thread into the project (listed there)" '^move_in=200:true:true$' "$org_out"
     contains "organize: shared to the project, the member reads it" '^project_share=200:project:200:read_only=true$' "$org_out"
     contains "organize: the member can't move it (403 read_only)" '^reader_move=403:read_only$' "$org_out"

@@ -186,17 +186,18 @@ describe("checkout, edit, commit, conflict, update, discard, revert (ac-1)", () 
     expect(zip.status).toBe(200);
   });
 
-  it("answers 404 to a non-member of a restricted project", async () => {
+  it("answers 404 to another workspace; every member of this one reads (KOBE-587)", async () => {
     const w = await world();
     const { id } = w.project;
-    expect(
-      (await w.as.alice.request("PATCH", `/v1/projects/${id}`, { visibility: "restricted" }))
-        .status,
-    ).toBe(200);
+    await projectUpload(w.as.alice, id, "a.md", "A1");
+    const other = await world();
     for (const path of ["commits", "commits/1", "checkout", "download"]) {
-      expect((await w.as.carol.get(`/v1/projects/${id}/${path}`)).status).toBe(404);
+      expect((await other.as.carol.get(`/v1/projects/${id}/${path}`)).status).toBe(404);
     }
-    expect((await w.as.carol.post(`/v1/projects/${id}/checkout`, {})).status).toBe(404);
+    expect((await other.as.carol.post(`/v1/projects/${id}/checkout`, {})).status).toBe(404);
+    // carol has no row here: an implicit reader reads history, does not check out.
+    expect((await w.as.carol.get(`/v1/projects/${id}/commits`)).status).toBe(200);
+    expect((await w.as.carol.post(`/v1/projects/${id}/checkout`, {})).status).toBe(403);
   });
 });
 

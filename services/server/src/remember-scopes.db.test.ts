@@ -316,7 +316,7 @@ describe("thread scope (this conversation)", () => {
     expect(await outcome(w, w, "share_file", share("b.md"))).toBe("ask");
   });
 
-  it("does not hold while the thread is in a project the member can't open", async () => {
+  it("holds while the thread is in a project of the workspace (every member reads it, RV1)", async () => {
     const w = await world();
     await approve(w, w, "share_file", share("a.md"), {
       decision: "allow",
@@ -324,17 +324,17 @@ describe("thread scope (this conversation)", () => {
     });
     const project = randomUUID();
     await fx.admin.query(
-      `INSERT INTO projects (team_id, id, slug, name, visibility, created_by)
-       VALUES ($1, $2, $3, 'Closed', 'restricted', $4)`,
+      `INSERT INTO projects (team_id, id, slug, name, created_by)
+       VALUES ($1, $2, $3, 'Unlisted', $4)`,
       [w.team, project, `p-${project.slice(0, 8)}`, w.owner.id],
     );
-    // The owner is the team's admin (fx.team): demote them so the project is out of reach.
+    // A plain member without a row is an implicit reader: the project stays in reach.
     await fx.admin.query(
       `UPDATE team_members SET role = 'member' WHERE team_id = $1 AND user_id = $2`,
       [w.team, w.owner.id],
     );
     await fx.admin.query(`UPDATE threads SET project_id = $2 WHERE id = $1`, [w.threadId, project]);
-    expect(await outcome(w, w, "share_file", share("c.md"))).toBe("ask");
+    expect(await outcome(w, w, "share_file", share("c.md"))).toBe("allow");
   });
 });
 
