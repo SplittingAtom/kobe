@@ -13,6 +13,8 @@ import {
   projectDiffEntrySchema,
   projectHistoryResponseSchema,
   projectQuotaErrorSchema,
+  projectSchema,
+  promoteFolderRequestSchema,
   revertProjectRequestSchema,
   updateCheckoutResponseSchema,
 } from "@kobe/protocol";
@@ -20,7 +22,7 @@ import { storageSettingsSchema } from "../projects/storage.js";
 
 /**
  * OpenAPI for project checkouts, commits, history and revert (KOBE-579, Workspaces CM2-CM7,
- * `routes/project-commits.ts`), the caller's checkouts and the workspace storage view (GV2, GV3).
+ * `routes/project-commits.ts`), Promote to project (KOBE-586, `routes/project-from-folder.ts`), the caller's checkouts and the workspace storage view (GV2, GV3).
  * Generated from the zod schemas of the contract (`packages/protocol/src/project-commits.ts`).
  */
 
@@ -236,6 +238,27 @@ export function projectCommitsOpenApiPaths(): Record<string, Record<string, unkn
         { "200": { description: "A zip.", content: { "application/zip": {} } } },
       ),
     },
+    "/v1/projects/from-folder": {
+      post: op(
+        "promoteFolderToProject",
+        "Promote a My files folder to a project (team admins, contributors)",
+        "KOBE-586 (PF3): the caller's own folder (never `uploads/`, `projects/` or an internal path) becomes a project they own; its files, sub-folders kept as paths, are the first commit \"Imported from My files/<path>\" (blobs copied server-side, hash-verified). Only once the project and the commit exist is the folder deleted from My files (as the Files panel's Delete), then the project mounts for the caller. Any refusal leaves My files and the projects unchanged. Audited `project.created`, `project.committed`, `workspace.file_deleted`.",
+        {
+          "201": json("Project", "The new project."),
+          "400": json("Error", "`invalid_request`: path and name (1-100) only."),
+          "409": json("Error", "`legal_hold`, or `slug_taken`."),
+          "413": json("Error", "`file_too_large` (the message names the file)."),
+          "422": json(
+            "Error",
+            "`invalid_input`: not a folder of My files, a file, an empty folder, more than 500 files, a bad name or a `.conflict-` copy.",
+          ),
+          "503": json("Error", "`storage_unavailable`, or `busy` (the folder kept changing)."),
+          "507": json("ProjectQuotaError", "`quota_exceeded {limit: bytes|objects}`."),
+        },
+        { requestBody: body("PromoteFolderBody") },
+        [],
+      ),
+    },
     "/v1/me/checkouts": {
       get: op(
         "listMyCheckouts",
@@ -326,6 +349,8 @@ export function projectCommitsOpenApiSchemas(): Record<string, JsonSchema> {
     CommitFromProposalResult: schema(commitFromProposalResponseSchema),
     ProposalStale: schema(proposalStaleErrorSchema),
     ProposalNotAllowed: schema(proposalNotAllowedErrorSchema),
+    PromoteFolderBody: schema(promoteFolderRequestSchema, "input"),
+    Project: schema(projectSchema),
     TeamStorage: schema(teamStorageSchema),
     TeamStorageSettings: schema(storageSettingsSchema, "input"),
   };

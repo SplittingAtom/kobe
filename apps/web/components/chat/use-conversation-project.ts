@@ -59,5 +59,18 @@ export function useConversationProject() {
         }
       : undefined;
 
-  return { activeProjectId, newConversationIn, moveHere };
+  /**
+   * A project was just made from a Files folder (KOBE-586, PF6): the project controls read the
+   * list again, and a new conversation with no project yet takes it as its draft project.
+   */
+  const offerProject = session
+    ? (project: ProjectRef) => {
+        session.projectsChanged();
+        if (typeof threadId !== "string" && session.draftProjectId === null) {
+          session.setDraftProject(project.id);
+        }
+      }
+    : undefined;
+
+  return { activeProjectId, newConversationIn, moveHere, offerProject };
 }

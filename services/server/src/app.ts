@@ -93,6 +93,7 @@ import { teamSkillBlockRoutes } from "./routes/team-skill-blocks.js";
 import { skillUsageRoutes, teamSkillUsageRoutes } from "./routes/skill-usage.js";
 import { teamRoutes } from "./routes/team.js";
 import { projectRoutes } from "./routes/projects.js";
+import { projectFromFolderRoutes } from "./routes/project-from-folder.js";
 import {
   myCheckoutRoutes,
   projectCommitRoutes,
@@ -239,6 +240,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/eval-cases", evalCaseRoutes(deps));
   api.route("/projects", projectRoutes(deps, options.workspaceFiles?.sync));
   api.route("/projects", projectCommitRoutes(deps, options.workspaceFiles?.sync));
+  api.route("/projects", projectFromFolderRoutes(deps, options.workspaceFiles?.sync));
   api.route("/threads", threadRunRoutes(deps));
   api.route("/threads", threadPendingRoutes(deps));
   api.route("/threads", threadCompactRoutes(deps));

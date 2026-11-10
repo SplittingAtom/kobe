@@ -282,7 +282,10 @@ empty folder ("This folder is empty; create the project from Projects instead").
 
 **PF5. Mount on create.** A project created from the Projects page also mounts for its creator at
 once (KOBE-586 option 1), so a new project is never empty in the creator's Files panel; with FP1 it
-is listed for everyone else (greyed) and mounts for them per MT1.
+is listed for everyone else (greyed) and mounts for them per MT1. _(KOBE-586, as built: the
+creator keeps the mount while they have no thread of their own in the project, in Trash or not;
+their first conversation hands it to the MT1 thread rule. Such a creator mount neither counts
+toward nor exempts from the mount cap, MT3. No migration: `projects.created_by` decides.)_
 
 **PF6. After.** The Files tree reloads, reveals the new project under Projects and, when the
 current conversation is a new one with no project, offers it in the project control (NC2). Audit:

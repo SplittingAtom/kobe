@@ -1452,6 +1452,12 @@ export class FakeKobe {
     if (area === "projects" && id === undefined && method === "GET") {
       return json(200, { projects: this.projects });
     }
+    if (area === "projects" && id === "from-folder" && method === "POST") {
+      // Promote to project (KOBE-586): the folder's name makes the project; recorded in requests.
+      const name = String((body as { name?: unknown } | undefined)?.name ?? "");
+      const projectId = this.addProject(name);
+      return json(201, { ...this.projects.find((p) => p.id === projectId), my_role: "owner" });
+    }
     if (area === "projects" && id && action === "files")
       return this.#projectFiles(method, id, sub, body);
     if (area === "runs" && id && action === "eval-case")

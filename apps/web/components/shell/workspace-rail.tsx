@@ -11,6 +11,7 @@ import { useEndDraftProject } from "../chat/use-draft-project";
 import { useConversationProject } from "../chat/use-conversation-project";
 import { mentionRefusal } from "../../lib/chat/mention-insert";
 import { FileBrowser } from "../files/file-browser";
+import { canCreateProjects } from "../../lib/projects/promote";
 import { WorkspaceConflictNotices } from "../files/workspace-conflict-notices";
 import { useMyTeams, type MyTeamsState } from "../../app/team-switcher";
 import { useOpenConsoles } from "../admin/console-links";
@@ -38,6 +39,10 @@ import styles from "./rail.module.css";
 import { RAIL_ACTION, RAIL_ACTION_VARIANT } from "./rail-action";
 
 const SECTION_IDS = { files: RAIL_TAB_IDS.files.panel, apps: RAIL_TAB_IDS.apps.panel } as const;
+
+/** The member's role in the active team, once their teams are read. */
+const activeRole = ({ my }: MyTeamsState) =>
+  my?.teams.find((t) => t.id === my.activeTeamId)?.role ?? null;
 
 /** The drawer closes once a thread is on screen, however it was opened (CE8). */
 function useFoldOnThreadChange({ closeDrawer }: RailApi) {
@@ -284,7 +289,10 @@ function RailFiles({
   clearDrop,
   hidden,
   tabbed,
+  createsProjects,
 }: {
+  /** Team admins and contributors: My files folders offer Promote to project… (KOBE-586). */
+  readonly createsProjects: boolean;
   readonly rail: RailApi;
   readonly api: FilesApi;
   /** The active workspace's name: the top row of Files (FP1). */
@@ -350,6 +358,8 @@ function RailFiles({
           activeProjectId={conversation.activeProjectId}
           onNewConversationIn={conversation.newConversationIn}
           onMoveHere={conversation.moveHere}
+          canCreateProjects={createsProjects}
+          onPromoted={conversation.offerProject}
         />
       )}
     </>
@@ -469,6 +479,7 @@ export function WorkspaceRail({
               clearDrop={drop.clear}
               hidden={!filesShown || tab !== "files"}
               tabbed={showsApps}
+              createsProjects={canCreateProjects(activeRole(teams))}
             />
             {appsPending && (
               <p role="status" className={styles.appsPending}>

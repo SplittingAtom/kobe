@@ -487,3 +487,27 @@ describe("sync conflicts no thread wrote (KOBE-492)", () => {
     );
   });
 });
+
+describe("Promote to project… from the rail (KOBE-586, PF1, PF6)", () => {
+  it("is offered to contributors only, and a new conversation takes the new project", async () => {
+    fake.teamRole = "contributor";
+    const { user } = await open();
+    const menu = await rowMenu("notes");
+    expect(menuNames(menu)).toContain("Promote to project…");
+    await user.click(within(menu).getByRole("menuitem", { name: "Promote to project…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Promote notes to a project" });
+    await user.click(within(dialog).getByRole("button", { name: "Promote" }));
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "New conversation in notes" }),
+    ).toBeTruthy();
+    expect(
+      fake.requests.some((r) => r.method === "POST" && r.path === "/v1/projects/from-folder"),
+    ).toBe(true);
+  });
+
+  it("is hidden for members", async () => {
+    fake.teamRole = "member";
+    await open();
+    expect(menuNames(await rowMenu("notes"))).not.toContain("Promote to project…");
+  });
+});

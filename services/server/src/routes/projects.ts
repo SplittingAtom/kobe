@@ -172,12 +172,15 @@ export function projectRoutes(
     if (!decide(c.get("team").role, undefined).can.create) return failure(c, "forbidden");
     const viewer = viewerOf(c);
     try {
-      return await withTeam(db, viewer.teamId, async (tx) => {
+      const res = await withTeam(db, viewer.teamId, async (tx) => {
         const created = await createProject(tx, viewer, body);
         if (!created.ok) return failure(c, created.error);
         const { row } = created.value;
         return c.json(await toProject(tx, viewer.teamId, row, "owner"), 201);
       });
+      // PF5 (KOBE-586): a new project mounts for its creator at once (MT1 creator rule).
+      if (res.status === 201) await deps.projectMounts.reconcileUser(viewer.teamId, viewer.userId);
+      return res;
     } catch (err) {
       if (isSlugConflict(err)) return failure(c, "slug_taken");
       throw err;

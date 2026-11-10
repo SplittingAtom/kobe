@@ -396,6 +396,23 @@ export class ChatSession {
     for (const listener of this.#projectListeners) listener();
   }
 
+  #projectsVersion = 0;
+
+  /** Bumped when the workspace's projects changed here (a folder promoted, KOBE-586). */
+  get projectsVersion(): number {
+    return this.#projectsVersion;
+  }
+
+  /**
+   * A project was made from this page (Promote to project, KOBE-586): the cached list is dropped
+   * and the project controls read it again (they subscribe with {@link subscribeDraftProject}).
+   */
+  projectsChanged(): void {
+    this.#projects = undefined;
+    this.#projectsVersion += 1;
+    this.#notifyDraftProject();
+  }
+
   /** The model picked for a conversation not created yet (KOBE-44). */
   get draftModel(): string | null {
     return this.#nextModel;
