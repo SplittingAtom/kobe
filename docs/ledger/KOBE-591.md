@@ -28,7 +28,7 @@ Spec `docs/specs/projects-in-conversations.md` §6 PE1-PE7, §9; commit model `d
   which need not be unique across runs). Optional in the schema so older events still list.
 - **Commit message** = edited `message` or the proposal's `summary` (the tool's field is `summary`,
   the spec calls it `reason`; the agent-facing input is unchanged).
-- **Role at proposal time:** the run owner's role *now* (PE3), not the `run.start` snapshot.
+- **Role at proposal time:** the run owner's role _now_ (PE3), not the `run.start` snapshot.
   Readers: `read_only` "You can read <Project name> but not change it." Archived project: refused.
 - **Other projects, a conversation outside any project, `projects/<slug>` itself:** `read_only`
   ("Only files of this conversation's project can be proposed; other projects are read-only.").
@@ -72,4 +72,6 @@ Spec `docs/specs/projects-in-conversations.md` §6 PE1-PE7, §9; commit model `d
 - ac-4: sandbox-agent `file-edit-tool.test.ts`, `memory/project-context.test.ts`,
   `tools/file-edit-broker.test.ts`; `services/server/openapi.json` regenerated; protocol
   `project-commits.test.ts`.
-- ac-5: per package (no repo-wide verify, by instruction): see the final report.
+- ac-5: per package (no repo-wide verify, by instruction): protocol 1185, server 2549, server
+  test:db 2580 (215 files), db 801 incl. the cross-team probe, sandbox-agent 1066; all green;
+  web tsc clean; prettier and eslint clean on changed files.
