@@ -1,5 +1,7 @@
 # Answer feedback
 
+Member guide: [Writing messages](guide/chat/composer.md) (Rate an answer). This page is the engineering reference.
+
 Members rate an agent's answers with thumbs up or down (KOBE-275). Kobe can't retrain models, so
 ratings are a quality signal for agent builders and, with tracing, a way to line a bad answer up
 with what the agent did.

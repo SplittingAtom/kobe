@@ -23,6 +23,8 @@ import { composer, streamed, streaming } from "../chat/testing";
 import { consolePortalContainer } from "../ui/chat-portal";
 import { useUnsavedChanges } from "../ui/console";
 import { useEditorWidth } from "../skills/define-layout";
+import { GuideView } from "../docs/guide-view";
+import { pageBySlug } from "../../lib/docs/guide";
 
 // Next's Link navigates through the app router, which a test has none of: a plain link that pushes
 // on the router in context, as the real one does on a plain click.
@@ -98,6 +100,9 @@ afterEach(() => {
 
 /** A console page with a form, a link to another section and an editor of its own. */
 function TestPage({ path }: { readonly path: string }) {
+  if (path === "/docs" || path.startsWith("/docs/")) {
+    return <GuideView page={pageBySlug(path.slice("/docs/".length))} appName="Kobe" />;
+  }
   if (path === "/admin/site") {
     return (
       <ConsoleShell kind="site" pathname={path}>
@@ -323,6 +328,56 @@ describe("a panel over the workspace (KOBE-452 ac-1, ac-5)", () => {
     const panel = await dialog("Team console");
     expect(panel.getAttribute("aria-modal")).toBe("true");
     expect(within(panel).getByRole("button", { name: "Close Team console" })).toBeTruthy();
+  });
+});
+
+describe("the Docs panel (KOBE-616)", () => {
+  it("opens the guide over the workspace like the Site console; pages and links stay inside; Escape closes", async () => {
+    const t = await openThread();
+    const user = userEvent.setup();
+    const input = await composer();
+    await user.type(input, "half a thought");
+    const icon = (await screen.findByRole("link", { name: "Docs" }, WAIT)) as HTMLAnchorElement;
+    expect(icon.getAttribute("data-command")).toBe("docs");
+    await user.click(icon);
+    const panel = await dialog("Docs");
+    expect(panel.getAttribute("aria-modal")).toBe("true");
+    expect(panel.getAttribute("data-kobe-panel")).toBe("docs");
+    expect(window.location.pathname).toBe("/docs");
+    expect(within(panel).getByRole("heading", { level: 1, name: "Kobe guide" })).toBeTruthy();
+    expect(input.closest("[inert]")).not.toBeNull();
+
+    // A page from the guide's nav, then a relative link in its body: both inside the panel.
+    const nav = within(panel).getByRole("navigation", { name: "Guide" });
+    await user.click(within(nav).getByRole("link", { name: "Getting started" }));
+    expect(window.location.pathname).toBe("/docs/getting-started");
+    expect(
+      await within(panel).findByRole("heading", { level: 1, name: "Getting started" }),
+    ).toBeTruthy();
+    const markdown = within(panel).getByRole("link", { name: "View as Markdown" });
+    expect(markdown.getAttribute("href")).toBe("/docs/getting-started.md");
+    expect(markdown.getAttribute("target")).toBe("_blank");
+    const bodyLink = must(
+      panel.querySelector<HTMLAnchorElement>('[data-kobe-guide-body] a[href^="/docs/"]'),
+    );
+    const target = must(bodyLink.getAttribute("href")).split("#")[0] as string;
+    await user.click(bodyLink);
+    expect(window.location.pathname).toBe(target);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(panelEl()).toBe(panel);
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(panelEl()).toBeNull());
+    expect(window.location.pathname).toBe("/");
+    expect(new URLSearchParams(window.location.search).get("thread")).toBe(t);
+    expect(input.value).toBe("half a thought");
+    await waitFor(() => expect(document.activeElement).toBe(icon));
+  });
+
+  it("a link or a reload to a guide page opens it in the panel over the workspace", async () => {
+    open("/docs/glossary");
+    const panel = await dialog("Docs");
+    expect(within(panel).getByRole("heading", { level: 1, name: "Glossary" })).toBeTruthy();
   });
 });
 

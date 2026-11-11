@@ -8,6 +8,7 @@ import {
   ArrowUpIcon,
   AtSignIcon,
   BellIcon,
+  BookOpenIcon,
   BotIcon,
   BrainIcon,
   CalendarClockIcon,
@@ -209,6 +210,15 @@ const LIST = [
     scope: "bar",
     href: consoleHref("site"),
     available: (ctx) => ctx.consoles.includes("site"),
+  },
+  // KOBE-616: the Kobe guide, a page of its own (same tab); agents read it at /llms.txt.
+  {
+    id: "docs",
+    name: "Docs",
+    icon: BookOpenIcon,
+    scope: "bar",
+    href: "/docs",
+    readOnlySafe: true,
   },
   { id: "notifications", name: "Notifications", icon: BellIcon, scope: "bar" },
   { id: "profile", name: "Profile", icon: CircleUserIcon, scope: "bar" },

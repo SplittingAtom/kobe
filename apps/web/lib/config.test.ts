@@ -7,6 +7,7 @@ describe("parseWebConfig", () => {
     expect(parseWebConfig({ KOBE_SERVER_URL: "http://kobe-server" })).toEqual({
       serverUrl: "http://kobe-server",
       problem: null,
+      publicUrl: null,
     });
     expect(parseWebConfig({ KOBE_SERVER_URL: "https://kobe-server.ns.svc:8443/" }).serverUrl).toBe(
       "https://kobe-server.ns.svc:8443",
@@ -31,6 +32,16 @@ describe("parseWebConfig", () => {
   ])("fails fast on %s with the reason", (value) => {
     expect(() => parseWebConfig({ KOBE_SERVER_URL: value })).toThrow(
       /KOBE_SERVER_URL is invalid: /,
+    );
+  });
+
+  it("reads KOBE_PUBLIC_URL as an origin (KOBE-616) and fails on an invalid one", () => {
+    expect(parseWebConfig({ KOBE_PUBLIC_URL: "https://kobe.example.com/" }).publicUrl).toBe(
+      "https://kobe.example.com",
+    );
+    expect(parseWebConfig({}).publicUrl).toBeNull();
+    expect(() => parseWebConfig({ KOBE_PUBLIC_URL: "https://kobe.example.com/app" })).toThrow(
+      /KOBE_PUBLIC_URL is invalid/,
     );
   });
 });
