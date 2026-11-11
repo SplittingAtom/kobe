@@ -111,6 +111,8 @@ export function UtilityBar({
                 onOpenSkill={navigate}
               />
             )}
+            {/* The Kobe guide (KOBE-616). */}
+            <IconAction command="docs" className={styles.iconLink} />
             <ThemeToggle />
             <ProfileMenu />
           </div>
