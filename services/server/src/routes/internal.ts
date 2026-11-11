@@ -188,6 +188,11 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
     if (!deps.kobe) return notAvailable(c);
     const auth = await principalOf(c.req.header("kobe-sandbox-token"));
     if (!auth.ok) return c.json({ code: "sandbox_unauthorized", message: auth.code }, 401);
+    const wait = decideLimiter.take(auth.principal.sandboxId);
+    if (wait > 0) {
+      c.header("Retry-After", String(Math.ceil(wait / 1000)));
+      return c.json({ code: "rate_limited", message: "Too many calls." }, 429);
+    }
     const listed = await deps.kobe.list(auth.principal);
     return listed ? c.json(listed) : notAvailable(c);
   });

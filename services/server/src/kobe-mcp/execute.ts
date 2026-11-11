@@ -81,6 +81,13 @@ function routeError(answer: KobeRouteAnswer): { code: string; message: string } 
   return { code, message };
 }
 
+const CHANGED: KobeExecution = {
+  ok: false,
+  code: "changed_since_approval",
+  message:
+    "The target changed since this call was approved, so nothing was changed. Read it again and ask for a new approval.",
+};
+
 export async function executeKobeTool(
   api: Hono,
   delegation: Delegation,
@@ -95,18 +102,16 @@ export async function executeKobeTool(
     const call = routeCaller(api, delegation);
     if (isWriteTool(tool)) {
       const state = await tool.before(parsed.data, call);
+      if (state === "changed") return CHANGED;
       if (state !== "same") {
-        return {
-          ok: false,
-          code: "changed_since_approval",
-          message:
-            "The target changed since this call was approved, so nothing was changed. Read it again and ask for a new approval.",
-        };
+        return { ok: false, code: state.code, message: `Kobe refused: ${state.message}` };
       }
     }
     const answer = await call(tool.route(parsed.data));
     if (answer.status < 200 || answer.status > 299) {
       const error = routeError(answer);
+      // The route's own conditional check (under its lock) found another before-state.
+      if (error.code === "changed_since_approval") return CHANGED;
       return { ok: false, code: error.code, message: `Kobe refused: ${error.message}` };
     }
     const output = tool.output.parse(tool.reduce(answer.body, parsed.data)) as Record<

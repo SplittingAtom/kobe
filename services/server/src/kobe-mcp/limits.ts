@@ -45,3 +45,34 @@ export async function withinKobeLimit(
   );
   return row.used < limit;
 }
+
+const LOCK_ATTEMPTS = 100;
+const LOCK_RETRY_MS = 100;
+
+/**
+ * Runs `fn` (a Kobe admin decision: limit count, then the `mcp.tool_call` row that counts) while
+ * holding the person's limit lock, a transaction-level advisory lock, so two replicas cannot both
+ * pass the count before either records its call (review L5). The lock's transaction stays open
+ * while `fn` runs on other connections; waiting uses try-and-retry with the connection released
+ * between attempts, so waiters never hold pool connections the holder needs. Undefined when the
+ * lock was not obtained in about 10 s.
+ */
+export async function withKobePersonLock<T>(
+  db: KobeDb,
+  userId: string,
+  fn: () => Promise<T>,
+): Promise<{ readonly ok: true; readonly value: T } | { readonly ok: false }> {
+  const key = `kobe_mcp.limit:${userId}`;
+  for (let attempt = 0; attempt < LOCK_ATTEMPTS; attempt++) {
+    const outcome = await db.transaction(async (tx) => {
+      const res = await tx.execute<{ locked: boolean }>(
+        sql`SELECT pg_try_advisory_xact_lock(hashtextextended(${key}, 0)) AS locked`,
+      );
+      if (res.rows[0]?.locked !== true) return { ok: false as const };
+      return { ok: true as const, value: await fn() };
+    });
+    if (outcome.ok) return outcome;
+    await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
+  }
+  return { ok: false };
+}

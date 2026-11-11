@@ -66,9 +66,25 @@
   in the registry, its levels; `internet-and-approvals`: admin approvals never remembered or bulk.
 - `reference`: `target.viaAgent` on audit events; reason codes `kobe_admin_*`.
 
+## Security review fixes
+
+- M1: a delegation needs its run active, in its thread, owned by the person, and a session of the
+  person that was live when the run started still live (`kobe-mcp/delegation-live.ts`). Deviation:
+  the starting session id is not recorded on the run (that needs a migration, which lands alone);
+  signing out everywhere stops the tools, signing out one device while an older session lives
+  does not.
+- L2: `kobe-mcp/session-contract.test.ts`: no catalog route module (or its direct imports) reads
+  `sessionId`, the active-team pointer or the session tables.
+- L3: writes carry the approved before-state as a route condition (`expectedRole` on PATCH
+  `/team/members/:id`, 409 `changed_since_approval` under the row lock); the convention is in
+  `catalog.ts` `BeforeState` for KA-4/KA-5.
+- L4: a target who left is `not_a_member`; policy.check validates admin input against the tool's
+  strict schema before any approval card.
+- L5: the limit count and the decision's audit row run under a per-person advisory lock
+  (`withKobePersonLock`, try-and-retry); `/kobe/list` is rate limited like `/kobe/calls`.
+
 ## Open risks
 
-- Before-state check and route are two requests: a change between them (ms window) is not caught.
 - Agent publish/manifest checks do not know `kobe` yet (an agent naming it may get a warning);
   thread "connectors off" lists no Kobe row yet (KA-6).
 - Limits count allowed decisions, including writes that then failed (`changed_since_approval`).

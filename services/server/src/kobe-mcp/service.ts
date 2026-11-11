@@ -17,7 +17,7 @@ import {
   switchesAllow,
 } from "./access.js";
 import { executeKobeTool } from "./execute.js";
-import { withinKobeLimit } from "./limits.js";
+import { withKobePersonLock, withinKobeLimit } from "./limits.js";
 import { kobeConnector, kobePinnedTool } from "./pinned.js";
 import { KOBE_ADMIN_TOOLS, kobeToolByName } from "./tools/index.js";
 
@@ -132,47 +132,58 @@ export function createKobeMcpService(options: KobeMcpServiceOptions): KobeMcpSer
       if (!row) return { outcome: "unavailable" };
       const tool = kobeToolByName(request.tool);
       const deps = decideDeps(row);
-      const decided = await decideMcpCall(
-        {
-          ...deps,
-          // The person half (§8): permission and switches re-read now, then the per-person limits.
-          refuse: async (pinned) => {
-            const name = kobeToolName(pinned.pi_name);
-            const def = name === undefined ? undefined : kobeToolByName(name);
-            if (def === undefined) return { code: "unknown_tool", message: "Unknown Kobe tool." };
-            // Checked before anyone is asked: an approval is only ever for a well-formed change.
-            if (!def.input.safeParse(request.arguments ?? {}).success) {
-              return { code: "invalid_input", message: `The input of ${def.name} is not valid.` };
-            }
-            const access = await withTeam(db, principal.teamId, (tx) =>
-              loadKobeAccess(tx, principal.teamId, principal.userId),
-            );
-            if (!switchesAllow(def, access) || !personAllows(def, access)) {
-              return {
-                code: KOBE_ADMIN_NOT_ALLOWED_REASON,
-                message: `${pinned.pi_name} is not available to you in this team (your role, or the Kobe admin switches).`,
-              };
-            }
-            if (!(await withinKobeLimit(db, principal.userId, def.readOnly ? "read" : "write"))) {
-              return {
-                code: "kobe_admin_rate_limited",
-                message: def.readOnly
-                  ? "Too many Kobe admin reads in the last minute; try again shortly."
-                  : "Too many Kobe admin changes in the last hour; try again later.",
-              };
-            }
-            return undefined;
+      // The limit count and the decision's audit row under the person's lock (atomic limits).
+      const locked = await withKobePersonLock(db, principal.userId, () =>
+        decideMcpCall(
+          {
+            ...deps,
+            // The person half (§8): permission and switches re-read now, then the per-person limits.
+            refuse: async (pinned) => {
+              const name = kobeToolName(pinned.pi_name);
+              const def = name === undefined ? undefined : kobeToolByName(name);
+              if (def === undefined) return { code: "unknown_tool", message: "Unknown Kobe tool." };
+              // Checked before anyone is asked: an approval is only ever for a well-formed change.
+              if (!def.input.safeParse(request.arguments ?? {}).success) {
+                return { code: "invalid_input", message: `The input of ${def.name} is not valid.` };
+              }
+              const access = await withTeam(db, principal.teamId, (tx) =>
+                loadKobeAccess(tx, principal.teamId, principal.userId),
+              );
+              if (!switchesAllow(def, access) || !personAllows(def, access)) {
+                return {
+                  code: KOBE_ADMIN_NOT_ALLOWED_REASON,
+                  message: `${pinned.pi_name} is not available to you in this team (your role, or the Kobe admin switches).`,
+                };
+              }
+              if (!(await withinKobeLimit(db, principal.userId, def.readOnly ? "read" : "write"))) {
+                return {
+                  code: "kobe_admin_rate_limited",
+                  message: def.readOnly
+                    ? "Too many Kobe admin reads in the last minute; try again shortly."
+                    : "Too many Kobe admin changes in the last hour; try again later.",
+                };
+              }
+              return undefined;
+            },
           },
-        },
-        principal,
-        {
-          connectorId: row.id,
-          tool: request.tool,
-          arguments: request.arguments,
-          ...(request.threadId === undefined ? {} : { threadId: request.threadId }),
-          ...(request.toolCallId === undefined ? {} : { toolCallId: request.toolCallId }),
-        },
+          principal,
+          {
+            connectorId: row.id,
+            tool: request.tool,
+            arguments: request.arguments,
+            ...(request.threadId === undefined ? {} : { threadId: request.threadId }),
+            ...(request.toolCallId === undefined ? {} : { toolCallId: request.toolCallId }),
+          },
+        ),
       );
+      if (!locked.ok) {
+        return {
+          outcome: "denied",
+          code: "kobe_admin_rate_limited",
+          message: "Kobe is busy with your other admin calls; try again shortly.",
+        };
+      }
+      const decided = locked.value;
       if (decided.decision === "deny") {
         return { outcome: "denied", code: decided.code, message: decided.message };
       }

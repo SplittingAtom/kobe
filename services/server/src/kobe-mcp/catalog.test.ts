@@ -58,6 +58,16 @@ describe("Kobe MCP catalog (KOBE-619)", () => {
     expect(await tool.before(input, () => Promise.resolve({ status: 403, body: {} }))).toBe(
       "changed",
     );
+    // A target who is no longer a member is said so, not "changed" (review L4).
+    expect(
+      await tool.before(input, () => Promise.resolve({ status: 200, body: { members: [] } })),
+    ).toEqual({ code: "not_a_member", message: expect.any(String) });
+    // The route itself carries the approved before-state as a condition (review L3).
+    expect(
+      (teamMembersSetRole as unknown as { route: (i: typeof input) => { body: unknown } }).route(
+        input,
+      ).body,
+    ).toEqual({ role: "team_admin", expectedRole: "member" });
     expect(tool.summary(input)).toContain("Member → Team admin");
   });
 });

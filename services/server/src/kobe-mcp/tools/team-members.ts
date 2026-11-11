@@ -88,17 +88,23 @@ export const teamMembersSetRole = kobeTool({
   destructive: false,
   input: setRoleInput,
   output: z.strictObject({ user_id: z.uuid(), role }),
+  // The approved before-state is a condition of the change itself (checked under its row lock).
   route: (input) => ({
     method: "PATCH",
     path: `/team/members/${input.user_id}`,
-    body: { role: input.to_role },
+    body: { role: input.to_role, expectedRole: input.from_role },
   }),
   reduce: (body) => {
     const parsed = z.object({ userId: z.uuid(), role }).parse(body);
     return { user_id: parsed.userId, role: parsed.role };
   },
-  before: async (input, call) =>
-    (await currentRole(call, input.user_id)) === input.from_role ? "same" : "changed",
+  before: async (input, call) => {
+    const current = await currentRole(call, input.user_id);
+    if (current === undefined) {
+      return { code: "not_a_member", message: "That user is not a member of this team." };
+    }
+    return current === input.from_role ? "same" : "changed";
+  },
   summary: (input) =>
     `Change the role of member ${input.user_id}: ${ROLE_LABEL[input.from_role]} → ${ROLE_LABEL[input.to_role]}`,
 });

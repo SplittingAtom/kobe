@@ -30,8 +30,17 @@ export interface KobeRouteAnswer {
 /** Calls a console route as the delegated person (same delegation as the tool call). */
 export type KobeRouteCaller = (route: KobeRoute) => Promise<KobeRouteAnswer>;
 
-/** Whether the target still has the before-state the person approved (§5). */
-export type BeforeState = "same" | "changed";
+/**
+ * Whether the target still has the before-state the person approved (§5): `same`, `changed`
+ * (refused `changed_since_approval`), or a refusal of its own (e.g. `not_a_member` when the
+ * target is gone).
+ *
+ * The pre-check gives the model a precise answer; it is not the guarantee. Every write route a
+ * tool calls must also take the approved before-state in its request and refuse with 409
+ * `changed_since_approval` under the change's own lock (e.g. `expectedRole` on PATCH
+ * `/team/members/:id`), so nothing can slip in between the check and the change.
+ */
+export type BeforeState = "same" | "changed" | { readonly code: string; readonly message: string };
 
 /** Results are compact and bounded (§5). */
 export const KOBE_RESULT_MAX_BYTES = 64 * 1024;
@@ -61,6 +70,7 @@ interface WriteTool<I> {
   /**
    * Reads the target's current state as the person and compares it with the before-state named in
    * the input (and covered by the signed approval): `changed` refuses with `changed_since_approval`.
+   * The route call must carry the same before-state as a condition ({@link BeforeState}).
    */
   readonly before: (input: I, call: KobeRouteCaller) => Promise<BeforeState>;
   /** The card's one-line summary, built from the input only (never model text). */

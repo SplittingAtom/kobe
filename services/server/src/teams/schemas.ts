@@ -21,7 +21,14 @@ export const createTeamSchema = z
 
 export const renameTeamSchema = z.object({ name: teamNameSchema }).strict();
 
-export const memberRoleSchema = z.object({ role: teamRoleSchema }).strict();
+/**
+ * `expectedRole` (KOBE-619): refuse with 409 `changed_since_approval` unless the member's role is
+ * still this one, checked under the change's row lock (the Kobe MCP tool sends the approved
+ * before-state; the console may too).
+ */
+export const memberRoleSchema = z
+  .object({ role: teamRoleSchema, expectedRole: teamRoleSchema.optional() })
+  .strict();
 
 export const activeTeamSchema = z.object({ teamId: idSchema }).strict();
 

@@ -3,6 +3,7 @@ import { eq, siteRoles, siteSettings, users } from "@kobe/db";
 import type { SiteRole } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
 import { DELEGATED_SESSION_PREFIX, delegationOf } from "../kobe-mcp/delegation.js";
+import { delegationBacked } from "../kobe-mcp/delegation-live.js";
 
 export type { SiteRole } from "../authz/permissions.js";
 
@@ -55,6 +56,10 @@ export function requireSession(deps: ServerDeps) {
         .leftJoin(siteRoles, eq(siteRoles.userId, users.id))
         .where(eq(users.id, delegation.userId));
       if (!person || person.deactivatedAt !== null) {
+        return c.json({ code: "unauthenticated", message: "Sign in to continue." }, 401);
+      }
+      // The run is still active and the person's sign-in from its start still live (review M1).
+      if (!(await delegationBacked(deps.database.db, delegation))) {
         return c.json({ code: "unauthenticated", message: "Sign in to continue." }, 401);
       }
       if (!person.twoFactorEnabled && (await readRequireTwoFactor(deps))) {
