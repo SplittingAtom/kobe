@@ -1,6 +1,6 @@
 # Kobe — Admin and docs from the conversation (Kobe MCP server)
 
-Status: **decisions KA1–KA8 by Chris 2026-11-11 (§10); ready for tickets** (KA-1..KA-7 in §11). Requested by Chris, 2026-11-11. Written against main `435cdb67`, with the
+Status: **decisions KA1–KA8 by Chris 2026-11-11 (§10); ready for tickets** (KA-1..KA-7 in §11). Hadron spec `aebf89f6`; tickets KA-1 KOBE-618, KA-2 KOBE-619, KA-3 KOBE-620, KA-4 KOBE-621, KA-5 KOBE-622, KA-6 KOBE-623, KA-7 KOBE-624. Requested by Chris, 2026-11-11. Written against main `435cdb67`, with the
 user guide of branch `kobe-docs` (PR #526, KOBE-616/617) assumed merged.
 
 Request (Chris, 2026-11-11): "I want to create an MCP server for Kobe that will allow an agent in a
