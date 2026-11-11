@@ -10,3 +10,5 @@ THIRD_PARTY_LICENSES.md
 images/*/third-party-licenses.json
 # Invalid YAML on purpose (KOBE-324 golden fixture).
 packages/protocol/src/skill-evals/fixtures/cases/yaml-syntax.yaml
+# Generated from docs/guide (KOBE-616); gitignored.
+apps/web/lib/docs/guide.generated.ts
