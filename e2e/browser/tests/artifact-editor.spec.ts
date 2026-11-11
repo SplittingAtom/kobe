@@ -67,7 +67,7 @@ test("artifact editor: text artifact read-only in Rendered/Raw, Edit as file ope
     const fileTab = page
       .getByRole("tabpanel")
       .filter({ has: page.getByRole("button", { name: "Save", exact: true }) });
-    await fileTab.getByRole("button", { name: "Raw", exact: true }).click();
+    await fileTab.getByRole("switch", { name: "Raw" }).click();
     const editor = page.getByLabel(`Edit ${stem}.md`);
     await expect(editor).toHaveAttribute("contenteditable", "true");
     await editor.click();

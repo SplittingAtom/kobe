@@ -54,7 +54,7 @@ async function openTab(path = PATH, text = ORIGINAL, label = "Edit notes.md") {
   const thread = threadWithFile(path, text);
   openApp(fake, thread);
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "Raw" }));
+  await user.click(await screen.findByRole("switch", { name: "Raw" }));
   const view = await editorView(label);
   await waitFor(() => expect(fake.workspaceChanges.open).toEqual([[path]]), { timeout: 3_000 });
   return { user, view, thread };

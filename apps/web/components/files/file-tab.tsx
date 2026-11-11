@@ -11,7 +11,8 @@
  * `/v1/workspace/frame` (same sandbox and CSP as artifact frames). PDFs and anything else:
  * Cannot preview, with Download. Text is read up to 1 MB; large images are not fetched. Text files
  * open in the file editor (KOBE-463, `file-editor.tsx`): Rendered and Raw modes, Save, and the
- * review of the agent's proposals; the version a save names is the SHA-256 of the bytes read.
+ * review of the agent's proposals; the version a save names is the SHA-256 of the bytes read. The
+ * editor fills the tab and follows the column's size (KOBE-615); Save As opens the copy here.
  * An open text tab follows outside changes to its file (KOBE-491, `use-outside-change.ts`); the
  * page's change stream says who changed it (KOBE-496, `lib/files/remote-changes.ts`).
  */
@@ -49,9 +50,9 @@ import { AddToProject } from "../projects/add-to-project";
 import { ProjectFileBar } from "../projects/project-file-bar";
 import styles from "../chat/chat.module.css";
 
-// Notebooks and the `.py` Run pane load only when such a file opens (KOBE-465).
+// Notebooks and the `.py` editor with Run load only when such a file opens (KOBE-465).
 const NotebookView = lazy(() => import("../notebooks/notebook-view"));
-const PythonRunPane = lazy(() => import("../notebooks/python-run"));
+const PythonFile = lazy(() => import("../notebooks/python-run"));
 
 const isNotebook = (path: string) => path.toLowerCase().endsWith(".ipynb");
 const isPython = (path: string) => path.toLowerCase().endsWith(".py");
@@ -182,6 +183,53 @@ interface EditorWiring {
   reloadOutside(): void;
   /** Past the change stream's path limit: no live changes for this tab (KOBE-496). */
   readonly liveOff: boolean;
+  /** Save As saved a copy: this tab opens it (KOBE-615). */
+  readonly onOpenPath?: ((path: string) => void) | undefined;
+}
+
+/** Whether the tab shows the file editor or a notebook, which fill the tab themselves. */
+function fillsTab(loaded: Loaded, path: string, editor: EditorWiring | undefined): boolean {
+  return (
+    editor !== undefined &&
+    loaded.status === "text" &&
+    (isNotebook(path) || isTextPreview(previewOf(path)))
+  );
+}
+
+/** A text file in the editor; a `.py` file with the kernel gets Run and the output split. */
+function TextFileEditor({
+  path,
+  loaded,
+  editor,
+}: {
+  readonly path: string;
+  readonly loaded: Extract<Loaded, { status: "text" }>;
+  readonly editor: EditorWiring;
+}) {
+  const props = {
+    path,
+    text: loaded.text,
+    sha256: loaded.sha256,
+    truncated: loaded.truncated,
+    api: editor.api,
+    drafts: editor.drafts,
+    reviews: editor.reviews,
+    onSaved: editor.saved,
+    onReload: editor.reread,
+    outside: editor.outside,
+    onOutsideDismiss: editor.dismissOutside,
+    onOutsideReload: editor.reloadOutside,
+    liveOff: editor.liveOff,
+    onOpenPath: editor.onOpenPath,
+  };
+  if (isPython(path) && editor.kernel) {
+    return (
+      <Suspense fallback={<EditorFallback />}>
+        <PythonFile {...props} kernel={editor.kernel} />
+      </Suspense>
+    );
+  }
+  return <FileEditor {...props} />;
 }
 
 function FileBody({
@@ -231,7 +279,7 @@ function FileBody({
       return (
         <>
           {loaded.truncated && (
-            <p role="status" className="text-muted-foreground mb-2 text-xs">
+            <p role="status" className="text-muted-foreground mb-2 shrink-0 text-xs">
               {`Showing the first ${formatBytes(TEXT_PREVIEW_MAX_BYTES)}${
                 loaded.size === null ? "" : ` of ${formatBytes(loaded.size)}`
               }. Download the file for all of it.`}
@@ -250,31 +298,11 @@ function FileBody({
                 kernel={editor.kernel}
                 onSaved={editor.saved}
                 onReload={editor.reread}
+                onOpenPath={editor.onOpenPath}
               />
             </Suspense>
           ) : editor && isTextPreview(previewOf(path)) ? (
-            <>
-              <FileEditor
-                path={path}
-                text={loaded.text}
-                sha256={loaded.sha256}
-                truncated={loaded.truncated}
-                api={editor.api}
-                drafts={editor.drafts}
-                reviews={editor.reviews}
-                onSaved={editor.saved}
-                onReload={editor.reread}
-                outside={editor.outside}
-                onOutsideDismiss={editor.dismissOutside}
-                onOutsideReload={editor.reloadOutside}
-                liveOff={editor.liveOff}
-              />
-              {isPython(path) && editor.kernel && (
-                <Suspense fallback={null}>
-                  <PythonRunPane path={path} drafts={editor.drafts} kernel={editor.kernel} />
-                </Suspense>
-              )}
-            </>
+            <TextFileEditor path={path} loaded={loaded} editor={editor} />
           ) : (
             <TextView text={loaded.text} preview={previewOf(path)} />
           )}
@@ -297,6 +325,7 @@ export function FileTabContent({
   changeHint,
   changes,
   owner = false,
+  onOpenPath,
 }: {
   readonly path: string;
   readonly api: FilesApi;
@@ -316,6 +345,8 @@ export function FileTabContent({
   readonly changes?: WorkspaceChangeFeed | undefined;
   /** The viewer is the conversation's owner: Add to project is offered (KOBE-585). */
   readonly owner?: boolean | undefined;
+  /** Save As saved a copy at `path`: open it in this tab (KOBE-615). */
+  readonly onOpenPath?: ((path: string) => void) | undefined;
 }) {
   const { loaded, reread, saved } = useFilePreview(api, path, reload, onGone);
   // Text files in the editor follow outside changes; notebooks keep today's explicit reload.
@@ -350,6 +381,7 @@ export function FileTabContent({
           dismissOutside: dismiss,
           reloadOutside,
           liveOff,
+          onOpenPath,
         }
       : undefined;
   const [downloadError, setDownloadError] = useState<ApiError | null>(null);
@@ -374,7 +406,13 @@ export function FileTabContent({
         {owner && <AddToProject source={{ kind: "workspace_file", path }} defaultName={name} />}
       </header>
       <ProjectFileBar path={path} version={loaded.status === "text" ? loaded.sha256 : undefined} />
-      <div className="min-h-0 flex-1 overflow-auto p-3">
+      <div
+        className={
+          fillsTab(loaded, path, editor)
+            ? "flex min-h-0 min-w-0 flex-1 flex-col px-3 pt-2 pb-3"
+            : "min-h-0 flex-1 overflow-auto p-3"
+        }
+      >
         {downloadError && <ErrorNotice error={downloadError} />}
         <FileBody loaded={loaded} path={path} teamId={teamId} editor={editor} />
       </div>

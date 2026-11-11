@@ -125,7 +125,7 @@ describe("Edit as file (ac-2)", () => {
     expect(await screen.findByRole("tab", { name: "q3-plan-2.md", selected: true })).toBeTruthy();
     expect(new TextDecoder().decode(fake.workspaceFiles.get("artifacts/q3-plan.md"))).toBe("taken");
     const user2 = userEvent.setup();
-    await user2.click(await screen.findByRole("button", { name: "Raw" }));
+    await user2.click(await screen.findByRole("switch", { name: "Raw" }));
     const view = await editorView("Edit q3-plan-2.md");
     expect(view.state.doc.toString()).toBe("# v1");
     expect(view.state.readOnly).toBe(false);

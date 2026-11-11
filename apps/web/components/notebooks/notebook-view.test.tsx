@@ -184,7 +184,7 @@ describe("rendering cells and saved outputs (ac-1, ac-2)", () => {
   it("opens a file that is not nbformat 4 as text", async () => {
     await setup('{"cells": "no"}');
     expect(await screen.findByText(/not a Jupyter \(nbformat 4\) notebook/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Raw" })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "Raw" })).toBeTruthy();
   });
 });
 

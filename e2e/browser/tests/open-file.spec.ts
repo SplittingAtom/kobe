@@ -58,8 +58,8 @@ test("open_file: asking the agent to open notes.md opens it in the editor tab", 
     const tab = page
       .getByRole("tabpanel")
       .filter({ has: page.getByRole("toolbar", { name: "notes.md view" }) });
-    await expect(tab.getByRole("button", { name: "Rendered", exact: true })).toBeVisible();
-    await expect(tab.getByRole("button", { name: "Raw", exact: true })).toBeVisible();
+    // Rendered first: the Rendered/Raw switch is off (KOBE-615).
+    await expect(tab.getByRole("switch", { name: "Raw" })).toHaveAttribute("aria-checked", "false");
     await expect(tab.getByText("Opened by the agent.")).toBeVisible();
     await chat.waitForIdle();
     // Not a download card or an artifact copy.

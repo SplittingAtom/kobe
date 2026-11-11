@@ -21,7 +21,11 @@ What a member can do today (on `main`):
   In a conversation in a project the member can edit, `propose_file_edit` also takes the project's
   files (section 3h); **Accept** commits the change, no checkout needed.
 - **The member edits and saves the file** in the editor's Raw mode. A save names the version it
-  was based on, so a concurrent change is never overwritten.
+  was based on, so a concurrent change is never overwritten. The editor fills the artifact column
+  and has one toolbar (KOBE-615): **Save**, **Save As** (a copy at a new path, opened in the tab;
+  also for read-only files, into My files) and the **Rendered/Raw** switch; on narrow columns Save
+  As moves into the **More** menu. A `.py` file adds **Run**, **Interrupt** and **Start/Restart**,
+  and a run splits the editor with the output below.
 - **The agent commits to a project** (`commit_project`, KOBE-580). In a project the member has
   checked out, the agent edits the project's folder like any other file and saves it as a commit
   (section 3g). `propose_project_file`, which used to add one file after an approval, was removed
@@ -97,25 +101,26 @@ flowchart LR
   TFE --> RE
 ```
 
-| Component                | Location                                                                                        | Responsibility                                                                                                                          |
-| ------------------------ | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Tool cards               | `apps/web/components/files/open-file-card.tsx`, `file-edit-card.tsx`                            | "Opened <name>" with Open again; "Proposed edit" with Review. Built only from the server's events or lists.                             |
-| File tab                 | `apps/web/components/files/file-tab.tsx`                                                        | Reads the synced copy (`GET /v1/workspace/file`, text up to 1 MB) and picks a viewer or the editor.                                     |
-| File editor              | `apps/web/components/files/file-editor.tsx`, `code-editor.tsx`                                  | Rendered and Raw (CodeMirror) modes, Save, conflict notice, and the proposal review (inline diff).                                      |
-| Editor state             | `apps/web/lib/files/editor-state.ts`                                                            | `EditDraftStore` (unsaved drafts plus their base SHA-256) and `FileReviewStore` (one review per file, committed or discarded per call). |
-| Thread controller        | `apps/web/lib/chat/thread-controller.ts`                                                        | Streams run events and turns a live `file.opened` into `fileOpenRequest`.                                                               |
-| Edit as file             | `apps/web/components/chat/artifact-text-view.tsx`                                               | Owner-only button that calls the edit-as-file route, then opens the new file.                                                           |
-| Message route            | `services/server/src/routes/runs.ts`                                                            | Starts a run; the optional `viewing` field names the file the member has open.                                                          |
-| Policy check             | `services/server/src/sandbox-wire/policy-check.ts`, `services/server/src/policy/`               | Decides every tool call: allow, deny, or require approval. Records allowed bound calls.                                                 |
-| Frame handlers           | `services/server/src/sandbox-wire/file-edit-propose.ts`, `file-open.ts`, `connection.ts`        | `file.edit_propose` and `file.open`: capability, lease, allowed-call hash, single use, path; then append the run event.                 |
-| Allowed calls            | `services/server/src/artifacts/allowed.ts`                                                      | SHA-256 of the canonical input of each allowed bound call, consumed once.                                                               |
-| Save route               | `services/server/src/routes/workspace-save.ts`, `workspace-files/save.ts`                       | `PUT /v1/workspace/file?path=&base_sha256=`: base-version check under the workspace lock, then a new server revision.                   |
-| Proposals list           | `services/server/src/routes/thread-file-edits.ts`                                               | The thread's `file.edit_proposed` events, for the owner only.                                                                           |
-| Edit-as-file route       | `services/server/src/routes/artifact-edit-as-file.ts`                                           | Copies a stored artifact version into the owner's workspace through the upload path.                                                    |
-| Workspace sync (server)  | `services/server/src/workspace-sync/`                                                           | Manifest, blobs, commit and pull for sandboxes. Brokers every byte to object storage.                                                   |
-| kobe-sandbox-agent       | `services/sandbox-agent/src/agent.ts`, `tools/file-edit-broker.ts`, `tools/file-open-broker.ts` | Announces `file_edits`, relays kobe-tools requests as wire frames, answers each request exactly once.                                   |
-| kobe-tools tools         | `services/sandbox-agent/src/kobe-tools/file-edit-tool.ts`, `open-file-tool.ts`                  | Model-facing `propose_file_edit` and `open_file`, registered only when `file_edits` is on.                                              |
-| Workspace sync (sandbox) | `services/sandbox-agent/src/workspace/sync.ts`                                                  | Restore at startup, pull before each run and periodically, push on an interval, soon after a run ends, and before hibernation.          |
+| Component                 | Location                                                                                               | Responsibility                                                                                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tool cards                | `apps/web/components/files/open-file-card.tsx`, `file-edit-card.tsx`                                   | "Opened <name>" with Open again; "Proposed edit" with Review. Built only from the server's events or lists.                                               |
+| File tab                  | `apps/web/components/files/file-tab.tsx`                                                               | Reads the synced copy (`GET /v1/workspace/file`, text up to 1 MB) and picks a viewer or the editor.                                                       |
+| File editor               | `apps/web/components/files/file-editor.tsx`, `code-editor.tsx`                                         | Rendered and Raw (CodeMirror) modes, Save, conflict notice, and the proposal review (inline diff).                                                        |
+| Editor toolbar (KOBE-615) | `apps/web/components/files/editor-toolbar.tsx`, `save-as.tsx`, `proposal-review.tsx`, `split-pane.tsx` | One toolbar (Save, Save As, Rendered/Raw switch, Run and kernel controls, More menu), Save As, the proposal bubble and review row, the code/output split. |
+| Editor state              | `apps/web/lib/files/editor-state.ts`                                                                   | `EditDraftStore` (unsaved drafts plus their base SHA-256) and `FileReviewStore` (one review per file, committed or discarded per call).                   |
+| Thread controller         | `apps/web/lib/chat/thread-controller.ts`                                                               | Streams run events and turns a live `file.opened` into `fileOpenRequest`.                                                                                 |
+| Edit as file              | `apps/web/components/chat/artifact-text-view.tsx`                                                      | Owner-only button that calls the edit-as-file route, then opens the new file.                                                                             |
+| Message route             | `services/server/src/routes/runs.ts`                                                                   | Starts a run; the optional `viewing` field names the file the member has open.                                                                            |
+| Policy check              | `services/server/src/sandbox-wire/policy-check.ts`, `services/server/src/policy/`                      | Decides every tool call: allow, deny, or require approval. Records allowed bound calls.                                                                   |
+| Frame handlers            | `services/server/src/sandbox-wire/file-edit-propose.ts`, `file-open.ts`, `connection.ts`               | `file.edit_propose` and `file.open`: capability, lease, allowed-call hash, single use, path; then append the run event.                                   |
+| Allowed calls             | `services/server/src/artifacts/allowed.ts`                                                             | SHA-256 of the canonical input of each allowed bound call, consumed once.                                                                                 |
+| Save route                | `services/server/src/routes/workspace-save.ts`, `workspace-files/save.ts`                              | `PUT /v1/workspace/file?path=&base_sha256=`: base-version check under the workspace lock, then a new server revision.                                     |
+| Proposals list            | `services/server/src/routes/thread-file-edits.ts`                                                      | The thread's `file.edit_proposed` events, for the owner only.                                                                                             |
+| Edit-as-file route        | `services/server/src/routes/artifact-edit-as-file.ts`                                                  | Copies a stored artifact version into the owner's workspace through the upload path.                                                                      |
+| Workspace sync (server)   | `services/server/src/workspace-sync/`                                                                  | Manifest, blobs, commit and pull for sandboxes. Brokers every byte to object storage.                                                                     |
+| kobe-sandbox-agent        | `services/sandbox-agent/src/agent.ts`, `tools/file-edit-broker.ts`, `tools/file-open-broker.ts`        | Announces `file_edits`, relays kobe-tools requests as wire frames, answers each request exactly once.                                                     |
+| kobe-tools tools          | `services/sandbox-agent/src/kobe-tools/file-edit-tool.ts`, `open-file-tool.ts`                         | Model-facing `propose_file_edit` and `open_file`, registered only when `file_edits` is on.                                                                |
+| Workspace sync (sandbox)  | `services/sandbox-agent/src/workspace/sync.ts`                                                         | Restore at startup, pull before each run and periodically, push on an interval, soon after a run ends, and before hibernation.                            |
 
 ## 3. Flows
 
@@ -309,6 +314,11 @@ sequenceDiagram
   Note over A: an agent edit of the old revision is kept as name.conflict-time.ext
 ```
 
+**Save As** (KOBE-615, spec FE15) sends the same `PUT` without `base_sha256`: the server creates
+the file, or answers 409 when one is there; the editor then asks before replacing it and saves at
+the version it reads from the folder's listing, so nothing is overwritten silently. The tab moves
+to the copy.
+
 The member's save is never lost. If the agent changed the same file meanwhile, the save gets a 409
 and the member reloads. If the agent's change is pushed after the member saved, the sandbox keeps
 the agent's version beside the file as a conflict copy (`services/sandbox-agent/src/workspace/sync.ts`).
@@ -496,7 +506,10 @@ Browser spec: `e2e/browser/tests/projects-in-conversations.spec.ts`. Design:
    saved content is.
 3. **The agent proposes.** `propose_file_edit` sends the whole new content. The server fixes
    `base_sha256` to the synced copy's current version (3c).
-4. **The member reviews.** In the inline diff, each change has Accept and Reject. The document
+4. **The member reviews.** A gold-glowing **Proposed edit** bubble names the proposal; the row
+   under it steps through the changes ("Change N of M"), accepts or rejects the current one, and
+   holds Commit all and Discard all (KOBE-615). In the inline diff, each change has Accept (a green
+   check in a circle) and Reject (a red cross in a circle). The document
    stays editable, so the member can type further changes, and **Commit all** saves exactly what is
    shown, at the proposal's base version.
 5. **The next round.** The member asks for the next change. Before the run starts, the sandbox

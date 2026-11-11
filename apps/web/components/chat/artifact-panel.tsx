@@ -308,6 +308,8 @@ function FileTab({
       changeHint={changeHint}
       changes={session.fileChanges}
       owner={!readOnly}
+      // Save As (KOBE-615): the tab moves to the copy, where the original's tab was.
+      onOpenPath={moveFiles && ((to: string) => moveFiles(path, to))}
     />
   );
 }

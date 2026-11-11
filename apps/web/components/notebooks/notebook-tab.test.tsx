@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tabsKey } from "../../lib/chat/artifact-tabs";
 import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
@@ -52,10 +52,13 @@ describe("the file tab (ac-1, ac-3)", () => {
     expect(screen.getByRole("button", { name: "Run cell 1" }).hasAttribute("disabled")).toBe(false);
   });
 
-  it("gives a .py file the editor and a Run pane", async () => {
+  it("gives a .py file the editor with Run in its toolbar (KOBE-615)", async () => {
     const thread = threadWithFile("job.py", "print(1)\n");
     openApp(fake, thread);
-    expect(await screen.findByRole("region", { name: "Run output" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Raw" })).toBeTruthy();
+    const toolbar = await screen.findByRole("toolbar", { name: "job.py view" });
+    expect(within(toolbar).getByRole("button", { name: "Run" })).toBeTruthy();
+    expect(within(toolbar).getByRole("switch", { name: "Raw" })).toBeTruthy();
+    // The output splits the editor only once something ran.
+    expect(screen.queryByRole("region", { name: "Run output" })).toBeNull();
   });
 });

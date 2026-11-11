@@ -69,7 +69,7 @@ describe("Rendered and Raw (ac-1)", () => {
     openApp(fake, thread);
     const user = userEvent.setup();
     expect(await screen.findByRole("heading", { name: "Plan" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Raw" }));
+    await user.click(screen.getByRole("switch", { name: "Raw" }));
     const view = await editorView("Edit notes.md");
     expect(view.state.doc.toString()).toBe("# Plan\n");
     const save = screen.getByRole("button", { name: "Save" });
@@ -78,7 +78,7 @@ describe("Rendered and Raw (ac-1)", () => {
     replaceText(view, "# Plan\n\nShip it.\n");
     expect(await screen.findByText("Unsaved changes.")).toBeTruthy();
     // Rendered shows the draft too.
-    await user.click(screen.getByRole("button", { name: "Rendered" }));
+    await user.click(screen.getByRole("switch", { name: "Raw" }));
     expect(await screen.findByText("Ship it.")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByText("Saved.")).toBeTruthy();
@@ -87,7 +87,7 @@ describe("Rendered and Raw (ac-1)", () => {
     ]);
 
     // The next save is based on the saved version.
-    await user.click(screen.getByRole("button", { name: "Raw" }));
+    await user.click(screen.getByRole("switch", { name: "Raw" }));
     replaceText(await editorView("Edit notes.md"), "# Plan v2\n");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(fake.workspaceSaves).toHaveLength(2));
@@ -98,7 +98,7 @@ describe("Rendered and Raw (ac-1)", () => {
     const thread = threadWithFile("notes.md", "one\n");
     openApp(fake, thread);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Raw" }));
+    await user.click(await screen.findByRole("switch", { name: "Raw" }));
     const view = await editorView("Edit notes.md");
     replaceText(view, "two\n");
     let release = () => {};
@@ -125,7 +125,7 @@ describe("Rendered and Raw (ac-1)", () => {
     const thread = threadWithFile("data.json", '{"a":1}');
     openApp(fake, thread);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Raw" }));
+    await user.click(await screen.findByRole("switch", { name: "Raw" }));
     replaceText(await editorView("Edit data.json"), '{"a":2}');
     fake.workspaceFiles.set("data.json", enc('{"a":3}')); // the agent pushed meanwhile
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -146,7 +146,7 @@ describe("Rendered and Raw (ac-1)", () => {
     const thread = threadWithFile("todo.txt", "one\n");
     openApp(fake, thread);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Raw" }));
+    await user.click(await screen.findByRole("switch", { name: "Raw" }));
     replaceText(await editorView("Edit todo.txt"), "two\n");
     const confirm = answerConfirm(false);
     await user.click(screen.getByRole("button", { name: /^Close todo\.txt/ }));
@@ -161,7 +161,7 @@ describe("Rendered and Raw (ac-1)", () => {
     const thread = threadWithFile("projects/p1/readme.md", "# Readme\n");
     openApp(fake, thread);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Raw" }));
+    await user.click(await screen.findByRole("switch", { name: "Raw" }));
     const view = await editorView("Edit readme.md");
     expect(view.state.readOnly).toBe(true);
     expect(screen.getByText("Project files are read-only here.")).toBeTruthy();
@@ -306,14 +306,37 @@ describe("reviewing a proposal (ac-3)", () => {
     expect(
       within(region).getByText("2 changes to accept or reject. Commit all saves what is shown."),
     ).toBeTruthy();
-    // The deleted line shows struck (del) with its own Accept/Reject buttons.
+    // KOBE-615: the Proposed edit bubble with the gold glow, then the review row.
+    const bubble = must(region.querySelector("[data-kobe-proposal-bubble]"));
+    expect(bubble.textContent).toBe("Proposed edit: Capitalises beta and adds delta");
+    expect(bubble.classList.contains("kobe-glow-gold")).toBe(true);
+    const row = within(region).getByRole("toolbar", { name: "Review changes" });
+    for (const name of [
+      "Previous change",
+      "Next change",
+      "Accept current change",
+      "Reject current change",
+      "Commit all",
+      "Discard all",
+    ]) {
+      expect(within(row).getByRole("button", { name })).toBeTruthy();
+    }
+    expect(within(row).getByText("Change 1 of 2")).toBeTruthy();
+    // The deleted line shows struck (del) with its own Accept/Reject icon buttons.
     expect(region.querySelector(".cm-deletedChunk del")?.textContent).toBe("beta");
-    const accepts = within(region).getAllByRole("button", { name: "Accept this change" });
+    const accepts = within(region).getAllByRole("button", { name: "Accept change" });
     expect(accepts).toHaveLength(2);
+    expect(must(accepts[0]).getAttribute("title")).toBe("Accept change");
+    expect(must(accepts[0]).querySelector("svg.lucide-circle-check")).toBeTruthy();
+    expect(
+      within(region)
+        .getAllByRole("button", { name: "Reject change" })[0]
+        ?.querySelector("svg.lucide-circle-x"),
+    ).toBeTruthy();
     // Accept the first (beta -> BETA), reject the second (delta goes away).
     await user.click(must(accepts[0]));
     await waitFor(() => expect(getChunks(view.state)?.chunks).toHaveLength(1));
-    await user.click(within(region).getByRole("button", { name: "Reject this change" }));
+    await user.click(within(region).getByRole("button", { name: "Reject change" }));
     await waitFor(() => expect(getChunks(view.state)?.chunks).toHaveLength(0));
     expect(view.state.doc.toString()).toBe("alpha\nBETA\ngamma\n");
 
@@ -331,11 +354,13 @@ describe("reviewing a proposal (ac-3)", () => {
     expect(await screen.findByText("Committed")).toBeTruthy();
   });
 
-  it("the toolbar accepts from the keyboard; Commit all keeps changes left open", async () => {
+  it("the review row moves between changes and accepts the current one; Commit all keeps changes left open", async () => {
     const { user, view } = await reviewProposal();
     await waitFor(() => expect(getChunks(view.state)?.chunks).toHaveLength(2));
-    await user.click(screen.getByRole("button", { name: "Next change" }));
-    await user.click(screen.getByRole("button", { name: "Accept change" }));
+    const row = screen.getByRole("toolbar", { name: "Review changes" });
+    expect(within(row).getByText("Change 1 of 2")).toBeTruthy();
+    await user.click(within(row).getByRole("button", { name: "Next change" }));
+    await user.click(within(row).getByRole("button", { name: "Accept current change" }));
     await waitFor(() => expect(getChunks(view.state)?.chunks).toHaveLength(1));
     await user.click(screen.getByRole("button", { name: "Commit all" }));
     await waitFor(() => expect(fake.workspaceSaves).toHaveLength(1));
@@ -345,7 +370,7 @@ describe("reviewing a proposal (ac-3)", () => {
   it("re-reading the file keeps the review's decisions; a file that moved on ends it with a notice", async () => {
     const { user, view } = await reviewProposal();
     await waitFor(() => expect(getChunks(view.state)?.chunks).toHaveLength(2));
-    await user.click(must(screen.getAllByRole("button", { name: "Accept this change" })[0]));
+    await user.click(must(screen.getAllByRole("button", { name: "Accept change" })[0]));
     await waitFor(() => expect(getChunks(view.state)?.chunks).toHaveLength(1));
     const reviewButton = screen.getByRole("button", {
       name: "Review the proposed edit to notes.txt",

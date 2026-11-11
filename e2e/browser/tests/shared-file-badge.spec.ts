@@ -72,7 +72,7 @@ async function openNotes(page: Page, dir: string) {
   const tab = page
     .getByRole("tabpanel")
     .filter({ has: page.getByRole("toolbar", { name: "notes.md view" }) });
-  await tab.getByRole("button", { name: "Raw", exact: true }).click();
+  await tab.getByRole("switch", { name: "Raw" }).click();
   const editor = page.getByLabel("Edit notes.md");
   await expect(editor).toContainText("beta");
   return { tab, editor };

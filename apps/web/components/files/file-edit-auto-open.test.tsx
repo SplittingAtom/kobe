@@ -223,7 +223,7 @@ describe("auto-open (ac-2, ac-3)", () => {
       JSON.stringify({ open: [tab], active: tab }),
     );
     const { user, input, run } = await startRun(thread);
-    await user.click(await screen.findByRole("button", { name: "Raw" }));
+    await user.click(await screen.findByRole("switch", { name: "Raw" }));
     const content = await screen.findByLabelText("Edit notes.txt");
     const view = must(EditorView.findFromDOM(content as HTMLElement));
     act(() => view.dispatch({ changes: { from: 0, insert: "mine\n" } }));

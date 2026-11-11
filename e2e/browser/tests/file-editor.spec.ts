@@ -102,11 +102,11 @@ test("file editor: raw edit and save, conflict notice, viewing chip, proposal co
     await tree.getByRole("treeitem", { name: "notes.md", exact: true }).click();
     const tab = page
       .getByRole("tabpanel")
-      .filter({ has: page.getByRole("button", { name: "Raw", exact: true }) });
+      .filter({ has: page.getByRole("switch", { name: "Raw" }) });
     await expect(tab.getByText("beta")).toBeVisible();
 
     // Raw: edit and save at the loaded version.
-    await tab.getByRole("button", { name: "Raw", exact: true }).click();
+    await tab.getByRole("switch", { name: "Raw" }).click();
     const editor = page.getByLabel("Edit notes.md");
     await expect(editor).toBeVisible();
     await expectGutterBeside(tab);
@@ -154,17 +154,45 @@ test("file editor: raw edit and save, conflict notice, viewing chip, proposal co
       review.getByText("2 changes to accept or reject.", { exact: false }),
     ).toBeVisible();
     await expectGutterBeside(review);
+    // KOBE-615: the Proposed edit bubble glows gold; the review row names the current change.
+    const bubble = review.locator("[data-kobe-proposal-bubble]");
+    await expect(bubble).toContainText("Proposed edit: Capitalise beta and add delta");
+    expect(await bubble.evaluate((el) => getComputedStyle(el).boxShadow)).not.toBe("none");
+    const row = review.getByRole("toolbar", { name: "Review changes" });
+    await expect(row.getByText("Change 1 of 2")).toBeVisible();
     expect(TRANSPARENT).not.toContain(await backgroundOf(review, ".cm-changedLine"));
     expect(TRANSPARENT).not.toContain(await backgroundOf(review, ".cm-deletedChunk"));
-    await review.getByRole("button", { name: "Accept this change" }).first().click();
+    await review.getByRole("button", { name: "Accept change", exact: true }).first().click();
     await expect(review.getByText("1 change to accept or reject.", { exact: false })).toBeVisible();
-    await review.getByRole("button", { name: "Reject this change" }).click();
+    await review.getByRole("button", { name: "Reject change", exact: true }).click();
     await expect(
       review.getByText("0 changes to accept or reject.", { exact: false }),
     ).toBeVisible();
     await review.getByRole("button", { name: "Commit all", exact: true }).click();
     await expect(card).toContainText("Committed");
     expect((await workspace(page, "read", path)).text).toBe("alpha\nBETA\ngamma\n");
+
+    // KOBE-615: the editor fills the column; Save As saves a copy and opens it in the tab.
+    const editorBox = await tab.locator("[data-kobe-code-editor]").first().boundingBox();
+    const tabBox = await tab.boundingBox();
+    expect(editorBox && tabBox && editorBox.height > tabBox.height / 2).toBe(true);
+    // Save As folds into More on a narrow column.
+    const bar = tab.getByRole("toolbar", { name: "notes.md view" });
+    const inline = bar.getByRole("button", { name: "Save As", exact: true });
+    if (await inline.isVisible()) await inline.click();
+    else {
+      await bar.getByRole("button", { name: "More file actions" }).click();
+      await page.getByRole("menuitem", { name: "Save As" }).click();
+    }
+    const saveAs = tab.getByRole("dialog", { name: "Save as" });
+    await expect(saveAs.getByRole("textbox", { name: "Save as" })).toHaveValue(
+      `${dir}/notes-copy.md`,
+    );
+    await saveAs.getByRole("button", { name: "Save copy" }).click();
+    await expect(page.getByRole("tab", { name: "notes-copy.md", selected: true })).toBeVisible();
+    expect((await workspace(page, "read", `${dir}/notes-copy.md`)).text).toBe(
+      "alpha\nBETA\ngamma\n",
+    );
     expect(await styleViolations(page)).toEqual([]);
   } finally {
     expect((await workspace(page, "delete", dir)).status).toBe(204);

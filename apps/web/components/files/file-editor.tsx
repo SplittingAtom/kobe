@@ -6,17 +6,20 @@
  * a draft per file (the session's `editDrafts`) until saved; Save sends the version the draft was
  * based on, and a 409 says the file changed meanwhile (nothing is overwritten). Project files,
  * thread uploads and files over the preview cap open read-only with a notice. An agent proposal
- * under review (the session's `fileReviews`) replaces both modes with the inline diff: per-change
- * Accept/Reject, Commit all (saves at the proposal's base version, FE10) and Discard all.
+ * under review (the session's `fileReviews`) replaces both modes with the inline diff
+ * (`proposal-review.tsx`). KOBE-615: the editor fills the artifact column and follows its size;
+ * one toolbar at the top holds Save, Save As (also for read-only files, into My files) and the
+ * Rendered/Raw switch, plus a runnable file's Run and kernel controls (`actions`, `status`); a
+ * run's output opens below the code in a split (`output`).
  */
-import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
+import { SaveIcon, SaveAllIcon } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { OutsideChange } from "./use-outside-change";
 import type { ApiError } from "../../lib/api/client";
 import type { FilesApi } from "../../lib/files/api";
 import { useWorkspaceProjects } from "../projects/workspace-projects";
-import { editBlockReason, editorLanguage, sha256Hex } from "../../lib/files/editor";
-import type { EditDraftStore, FileReviewStore, ProposalView } from "../../lib/files/editor-state";
-import { describeFileError } from "../../lib/files/format";
+import { editBlockReason } from "../../lib/files/editor";
+import type { EditDraftStore, FileReviewStore } from "../../lib/files/editor-state";
 import { fileVersion } from "../../lib/files/outside-change";
 import { fileName, previewOf } from "../../lib/files/preview";
 import { ErrorNotice } from "../admin/error-notice";
@@ -29,19 +32,23 @@ import {
   TAKE_THEIRS_PROMPT,
   UPDATED_NOTE,
 } from "./outside-change-notice";
-import {
-  BUTTON,
-  CodeEditor,
-  EditorFallback,
-  TextModeBody,
-  TextModeToolbar,
-  type TextMode,
-} from "./text-modes";
+import { useDraft, useReview, useSave, type SaveState } from "./editor-save";
+import { EditorToolbar, ModeSwitch, type ToolbarAction } from "./editor-toolbar";
+import { ProposalReview } from "./proposal-review";
+import { SaveAsForm } from "./save-as";
+import { SplitPane } from "./split-pane";
+import { BUTTON, EditorFallback, TextModeBody, type TextMode } from "./text-modes";
 
 export { BUTTON, EditorFallback };
+export {
+  CONFLICT_NOTICE,
+  SaveNotices,
+  useDraft,
+  useReview,
+  useSave,
+  type SaveState,
+} from "./editor-save";
 
-export const CONFLICT_NOTICE =
-  "This file changed since it was opened here (another save, or the agent), so nothing was saved.";
 const CHANGED_AGAIN: ApiError = {
   status: 409,
   code: "version_conflict",
@@ -49,27 +56,6 @@ const CHANGED_AGAIN: ApiError = {
     "The file changed again, so nothing was saved. Compare again, or Keep mine to save over the newest version.",
 };
 const DISCARD_PROMPT = (name: string) => `Discard your unsaved changes to ${name}?`;
-
-/** The editor's saved version: the server's, else computed from what was saved. */
-async function savedVersion(text: string, sha256: string | undefined): Promise<string> {
-  return sha256 ?? sha256Hex(new TextEncoder().encode(text));
-}
-
-export function useDraft(drafts: EditDraftStore, path: string) {
-  return useSyncExternalStore(
-    drafts.subscribe,
-    () => drafts.get(path),
-    () => undefined,
-  );
-}
-
-export function useReview(reviews: FileReviewStore, path: string) {
-  return useSyncExternalStore(
-    reviews.subscribe,
-    () => reviews.reviewOf(path),
-    () => undefined,
-  );
-}
 
 /** Asks before the page unloads while any file has unsaved changes. */
 export function useUnsavedGuard(drafts: EditDraftStore): void {
@@ -90,6 +76,41 @@ export function confirmDiscard(drafts: EditDraftStore, path: string): boolean {
   if (!window.confirm(DISCARD_PROMPT(fileName(path)))) return false;
   drafts.clear(path);
   return true;
+}
+
+/** A run's output under the code (KOBE-615): the split shows while `node` is given. */
+export interface EditorOutput {
+  readonly label: string;
+  readonly node: ReactNode;
+  onClose(): void;
+}
+
+/** Save As's toolbar action (KOBE-615): folds into More when the toolbar is narrow. */
+export const saveAsAction = (onSelect: () => void): ToolbarAction => ({
+  id: "save-as",
+  label: "Save As",
+  icon: SaveAllIcon,
+  overflow: true,
+  onSelect,
+});
+
+/** Save's toolbar action: enabled while there is something to save. */
+export function saveAction(
+  state: SaveState,
+  canSave: boolean,
+  onSelect: () => void,
+): ToolbarAction {
+  const saving = state.status === "saving";
+  return {
+    id: "save",
+    label: "Save",
+    text: saving ? "Saving…" : "Save",
+    icon: SaveIcon,
+    busy: saving,
+    disabled: !canSave || saving,
+    reason: saving ? undefined : "Nothing to save: no unsaved changes.",
+    onSelect,
+  };
 }
 
 export interface FileEditorProps {
@@ -114,47 +135,16 @@ export interface FileEditorProps {
   onOutsideReload?(): void;
   /** Past the change stream's path limit: this tab gets no live changes (KOBE-496). */
   readonly liveOff?: boolean | undefined;
-}
-
-export type SaveState =
-  | { readonly status: "idle" | "saving" | "saved" | "conflict" }
-  | { readonly status: "error"; readonly error: ApiError };
-
-/** One save at a version; reports conflicts and errors, and the new version on success. */
-export function useSave(
-  api: FilesApi,
-  path: string,
-  onSaved: (text: string, sha256: string) => void,
-) {
-  const [state, setState] = useState<SaveState>({ status: "idle" });
-  const save = async (base: string, text: string): Promise<"saved" | "conflict" | "error"> => {
-    setState({ status: "saving" });
-    const res = await api.save(path, base, text);
-    if (res.ok) {
-      onSaved(text, await savedVersion(text, res.data.sha256));
-      setState({ status: "saved" });
-      return "saved";
-    }
-    const conflict = res.error.code === "version_conflict";
-    setState(
-      conflict ? { status: "conflict" } : { status: "error", error: describeFileError(res.error) },
-    );
-    return conflict ? "conflict" : "error";
-  };
-  return { state, save, reset: () => setState({ status: "idle" }) };
-}
-
-export function SaveNotices({ state, onReload }: { readonly state: SaveState; onReload(): void }) {
-  if (state.status === "error") return <ErrorNotice error={state.error} />;
-  if (state.status !== "conflict") return null;
-  return (
-    <div role="alert" className="mb-2 rounded-md border p-2 text-sm">
-      <p>{`${CONFLICT_NOTICE} Copy your changes if you need them, then reload the file.`}</p>
-      <button type="button" className={`${BUTTON} mt-1`} onClick={onReload}>
-        Reload the file
-      </button>
-    </div>
-  );
+  /** Save As saved a copy: open that path in this tab (KOBE-615). */
+  readonly onOpenPath?: ((path: string) => void) | undefined;
+  /** More toolbar actions after Save and Save As (a `.py` file's Run and kernel controls). */
+  readonly actions?: readonly ToolbarAction[] | undefined;
+  /** At the toolbar's end (the kernel's state). */
+  readonly status?: ReactNode;
+  /** Under the toolbar (the kernel's notices). */
+  readonly notices?: ReactNode;
+  /** A run's output: the editor splits, code on top. */
+  readonly output?: EditorOutput | null | undefined;
 }
 
 export function FileEditor(props: FileEditorProps) {
@@ -162,6 +152,8 @@ export function FileEditor(props: FileEditorProps) {
   const draft = useDraft(drafts, path);
   const review = useReview(reviews, path);
   const [mode, setMode] = useState<TextMode>(draft === undefined ? "rendered" : "raw");
+  const [savingAs, setSavingAs] = useState(false);
+  const [savedAs, setSavedAs] = useState<string | null>(null);
   const { state, save, reset } = useSave(props.api, path, (saved, version) => {
     // Keystrokes typed while the save was in flight stay unsaved, now based on the new version.
     const latest = drafts.get(path);
@@ -194,10 +186,72 @@ export function FileEditor(props: FileEditorProps) {
       />
     );
   }
+  const savedCopy = (to: string) => {
+    setSavingAs(false);
+    // The copy has the unsaved changes; the file itself stays as saved.
+    drafts.clear(path);
+    if (props.onOpenPath) props.onOpenPath(to);
+    else setSavedAs(to);
+  };
+  const actions: ToolbarAction[] = [
+    ...(blocked === undefined
+      ? [
+          saveAction(
+            state,
+            draft !== undefined && base !== undefined,
+            () => base !== undefined && void save(base, current),
+          ),
+        ]
+      : []),
+    saveAsAction(() => setSavingAs(true)),
+    ...(props.actions ?? []),
+  ];
   const updated =
     props.outside?.kind === "updated" && props.outside.sha256 === sha256 && draft === undefined;
+  const body =
+    outside.comparing && draft !== undefined ? (
+      <CompareView
+        api={props.api}
+        path={path}
+        name={name}
+        draft={current}
+        onDraft={edit}
+        onTheirs={outside.setTheirs}
+      />
+    ) : (
+      <div
+        data-kobe-editor-body={mode}
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto"
+      >
+        <TextModeBody
+          mode={mode}
+          text={current}
+          preview={previewOf(path)}
+          label={`Edit ${name}`}
+          readOnly={blocked !== undefined}
+          onChange={edit}
+        />
+      </div>
+    );
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2" data-kobe-file-editor={path}>
+      <EditorToolbar
+        label={`${name} view`}
+        leading={<ModeSwitch mode={mode} onMode={setMode} />}
+        actions={actions}
+        status={props.status}
+      />
+      {savingAs && (
+        <SaveAsForm
+          api={props.api}
+          path={path}
+          text={current}
+          truncated={truncated}
+          checkedOut={projects?.checkedOut}
+          onSaved={savedCopy}
+          onCancel={() => setSavingAs(false)}
+        />
+      )}
       <ChangesStatus>
         {props.outside?.kind === "remote" && draft === undefined && (
           <ChangedBadge
@@ -212,26 +266,16 @@ export function FileEditor(props: FileEditorProps) {
           {LIVE_OFF_NOTE}
         </p>
       )}
-      <TextModeToolbar label={`${name} view`} mode={mode} onMode={setMode}>
-        {blocked === undefined && (
-          <button
-            type="button"
-            className={`${BUTTON} ms-auto`}
-            disabled={draft === undefined || state.status === "saving" || base === undefined}
-            onClick={() => base !== undefined && void save(base, current)}
-          >
-            {state.status === "saving" ? "Saving…" : "Save"}
-          </button>
-        )}
-      </TextModeToolbar>
       <p role="status" className="text-muted-foreground text-xs empty:hidden">
         {draft !== undefined
           ? "Unsaved changes."
           : state.status === "saved"
             ? "Saved."
-            : updated
-              ? UPDATED_NOTE
-              : ""}
+            : savedAs !== null
+              ? `Saved a copy as ${savedAs}.`
+              : updated
+                ? UPDATED_NOTE
+                : ""}
       </p>
       {blocked !== undefined && (
         <p role="note" className="text-muted-foreground text-xs">
@@ -251,24 +295,16 @@ export function FileEditor(props: FileEditorProps) {
         />
       )}
       {outside.error && <ErrorNotice error={outside.error} />}
-      {outside.comparing && draft !== undefined ? (
-        <CompareView
-          api={props.api}
-          path={path}
-          name={name}
-          draft={current}
-          onDraft={edit}
-          onTheirs={outside.setTheirs}
+      {props.notices}
+      {props.output ? (
+        <SplitPane
+          top={body}
+          bottom={props.output.node}
+          bottomLabel={props.output.label}
+          onClose={props.output.onClose}
         />
       ) : (
-        <TextModeBody
-          mode={mode}
-          text={current}
-          preview={previewOf(path)}
-          label={`Edit ${name}`}
-          readOnly={blocked !== undefined}
-          onChange={edit}
-        />
+        body
       )}
     </div>
   );
@@ -345,87 +381,4 @@ function useOutsideChoices(
     takeTheirs,
     error,
   };
-}
-
-function ProposalReview({
-  path,
-  text,
-  sha256,
-  api,
-  drafts,
-  reviews,
-  onSaved,
-  onReload,
-  review,
-  dirty,
-}: FileEditorProps & { readonly review: ProposalView; readonly dirty: boolean }) {
-  const [proposed, setProposed] = useState(review.content);
-  // The file as the review started: a re-read never rebuilds the diff (and its accept/reject);
-  // a file that moved on ends the review with the notice below instead.
-  const [original] = useState(text);
-  const [open, setOpen] = useState<number | null>(null);
-  const { state, save } = useSave(api, path, (saved, version) => {
-    reviews.finish(path, "committed");
-    onSaved(saved, version);
-  });
-  const discard = () => reviews.finish(path, "discarded");
-  const name = fileName(path);
-  const stale = sha256 !== review.baseSha256;
-  return (
-    <section aria-label={`Proposed edit to ${name}`} className="flex min-h-0 flex-1 flex-col gap-2">
-      <p className="text-sm">
-        <strong>Proposed edit:</strong> {review.summary}
-      </p>
-      {stale ? (
-        <div role="alert" className="rounded-md border p-2 text-sm">
-          <p>
-            {name} changed since the agent proposed this edit, so it can no longer be applied.
-            Discard it and ask the agent to propose again.
-          </p>
-          <button type="button" className={`${BUTTON} mt-1`} onClick={discard}>
-            Discard the proposal
-          </button>
-        </div>
-      ) : dirty ? (
-        <div role="alert" className="rounded-md border p-2 text-sm">
-          <p>You have unsaved changes to {name}. Save or discard them to review the proposal.</p>
-          <button type="button" className={`${BUTTON} mt-1`} onClick={() => drafts.clear(path)}>
-            Discard my changes
-          </button>
-        </div>
-      ) : (
-        <>
-          <div className="flex flex-wrap items-center gap-1">
-            <p role="status" className="text-muted-foreground me-auto text-xs">
-              {open === null
-                ? ""
-                : `${open === 1 ? "1 change" : `${open} changes`} to accept or reject. Commit all saves what is shown.`}
-            </p>
-            <button
-              type="button"
-              className={BUTTON}
-              disabled={state.status === "saving" || proposed === original}
-              onClick={() => void save(review.baseSha256, proposed)}
-            >
-              {state.status === "saving" ? "Committing…" : "Commit all"}
-            </button>
-            <button type="button" className={BUTTON} onClick={discard}>
-              Discard all
-            </button>
-          </div>
-          <SaveNotices state={state} onReload={onReload} />
-          <Suspense fallback={<EditorFallback />}>
-            <CodeEditor
-              value={review.content}
-              original={original}
-              language={editorLanguage(previewOf(path))}
-              label={`Proposed content of ${name}`}
-              onChange={setProposed}
-              onChunks={setOpen}
-            />
-          </Suspense>
-        </>
-      )}
-    </section>
-  );
 }
