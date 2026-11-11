@@ -46,6 +46,7 @@ export {
 } from "./verify.js";
 export {
   AUDIT_LOCK_TIMEOUT,
+  AUDIT_VIA_AGENT_KEY,
   AuditBusyError,
   AuditEventError,
   SYSTEM_ACTOR,
@@ -57,6 +58,7 @@ export {
   type AuditEvent,
   type AuditRecordRef,
   type AuditRequestContext,
+  type AuditVia,
 } from "./write.js";
 export { sealAuditV1, type AuditSealResult } from "./seal.js";
 export {

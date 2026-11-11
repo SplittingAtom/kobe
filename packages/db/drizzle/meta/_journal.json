@@ -1450,6 +1450,13 @@
       "when": 1794353486599,
       "tag": "0206_thread_file_links_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 207,
+      "version": "7",
+      "when": 1794419054630,
+      "tag": "0207_kobe_builtin_connector",
+      "breakpoints": true
     }
   ]
 }

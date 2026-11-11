@@ -50,6 +50,62 @@ export const CONNECTOR_NAME_PATTERN = "^[a-z0-9]+([-_][a-z0-9]+)*$";
 /** Longest connector URL / icon URL the registry stores. */
 export const CONNECTOR_URL_MAX = 2048;
 
+/**
+ * Built-in connectors hosted by Kobe itself (KOBE-618, spec kobe-admin-mcp §3): `kobe`, the Kobe
+ * MCP server (docs and admin tools). Its row is seeded by the server at start
+ * ({@link seedKobeBuiltinConnector}); the MCP proxy routes it to the server's internal listener,
+ * never to its URL, which only marks the row (a check ties the two together, so no registered
+ * connector can carry the internal URL and no built-in can point anywhere else).
+ */
+export const BUILTIN_CONNECTORS = ["kobe"] as const;
+export type BuiltinConnector = (typeof BUILTIN_CONNECTORS)[number];
+
+/**
+ * The `kobe` row's fixed id, the same on every site ("kobe" in hex, then a v4-shaped tail), so
+ * replicas seed one row and the MCP proxy can route it without asking.
+ */
+export const KOBE_BUILTIN_CONNECTOR_ID = "6b6f6265-0000-4000-8000-000000000001";
+
+/** The `kobe` row's URL: a marker in the reserved `.internal` zone, never fetched. */
+export const KOBE_BUILTIN_CONNECTOR_URL = "http://kobe-server.internal/internal/v1/mcp/kobe";
+
+/**
+ * Site switch of the Kobe MCP server (`site_settings`, spec §6, KA5): `off` (no `kobe` connector),
+ * `docs` (docs tools only; the default, also when unset or unreadable), `admin` (docs plus the
+ * admin tools each team turns on).
+ */
+export const KOBE_MCP_MODE_KEY = "kobe_mcp.mode";
+export const KOBE_MCP_MODES = ["off", "docs", "admin"] as const;
+export type KobeMcpMode = (typeof KOBE_MCP_MODES)[number];
+export const KOBE_MCP_MODE_DEFAULT: KobeMcpMode = "docs";
+
+/**
+ * Team switch (`teams.settings`, spec §6, KA5): `docs` (default), `read` (admin reads), or
+ * `read_write` (admin reads and writes). Only honoured while the site switch is `admin`.
+ */
+export const KOBE_MCP_TEAM_SETTING = "kobe_mcp.admin";
+export const KOBE_MCP_TEAM_LEVELS = ["docs", "read", "read_write"] as const;
+export type KobeMcpTeamLevel = (typeof KOBE_MCP_TEAM_LEVELS)[number];
+export const KOBE_MCP_TEAM_LEVEL_DEFAULT: KobeMcpTeamLevel = "docs";
+
+/** The site switch from its stored text: anything but a known mode is the default. */
+export function parseKobeMcpMode(value: string | null | undefined): KobeMcpMode {
+  return (KOBE_MCP_MODES as readonly string[]).includes(value ?? "")
+    ? (value as KobeMcpMode)
+    : KOBE_MCP_MODE_DEFAULT;
+}
+
+/** The team switch from `teams.settings`: anything but a known level is the default. */
+export function parseKobeMcpTeamLevel(settings: unknown): KobeMcpTeamLevel {
+  const value =
+    typeof settings === "object" && settings !== null
+      ? (settings as Record<string, unknown>)[KOBE_MCP_TEAM_SETTING]
+      : undefined;
+  return typeof value === "string" && (KOBE_MCP_TEAM_LEVELS as readonly string[]).includes(value)
+    ? (value as KobeMcpTeamLevel)
+    : KOBE_MCP_TEAM_LEVEL_DEFAULT;
+}
+
 /** Site-wide (†): the connector registry (site admins, D6). */
 export const connectors = pgTable(
   "connectors",
@@ -96,6 +152,12 @@ export const connectors = pgTable(
      * tools were checked; null after a pass that checked them. Shown to site admins.
      */
     templatesSkipped: text(),
+    /**
+     * Built-in connector hosted by Kobe (KOBE-618): `kobe`, or NULL for a registered remote server.
+     * A built-in row has no credential, no pinned snapshot, and is skipped by the probe, pinning,
+     * the periodic refresh and drift: its tools come from Kobe's own catalog.
+     */
+    builtin: text().$type<BuiltinConnector>(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
@@ -129,6 +191,18 @@ export const connectors = pgTable(
     check(
       "connectors_templates_skipped",
       sql`${t.templatesSkipped} IS NULL OR ${t.templatesSkipped} ~ '^[a-z_]{1,32}$'`,
+    ),
+    uniqueIndex("connectors_builtin_key")
+      .on(t.builtin)
+      .where(sql`${t.builtin} IS NOT NULL`),
+    check(
+      "connectors_builtin",
+      sql`${t.builtin} IS NULL OR (${t.builtin} = 'kobe' AND ${t.id} = '${sql.raw(KOBE_BUILTIN_CONNECTOR_ID)}'::uuid AND ${t.authKind} = 'none' AND ${t.credentialSource} = 'member' AND ${t.toolsHash} IS NULL AND ${t.toolsSnapshot} = '[]'::jsonb)`,
+    ),
+    // Only the built-in carries the internal URL, and the built-in carries nothing else.
+    check(
+      "connectors_builtin_url",
+      sql`(${t.builtin} IS NOT NULL) = (${t.url} = '${sql.raw(KOBE_BUILTIN_CONNECTOR_URL)}')`,
     ),
     check(
       "connectors_refresh_skipped",

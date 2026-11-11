@@ -19,6 +19,29 @@ export interface AuditRequestContext {
   readonly userAgent?: string | null;
 }
 
+/**
+ * The person acted through an agent (KOBE-618, spec kobe-admin-mcp §7): a Kobe MCP admin tool ran
+ * the console's own action for them in a run. Accepted on every action, recorded in the target
+ * under {@link AUDIT_VIA_AGENT_KEY} (so the hash chain covers it), and only with a user actor.
+ */
+export interface AuditVia {
+  readonly kind: "agent";
+  readonly threadId: string;
+  readonly runId: string;
+  /** The model's tool call id (same grammar as `mcp.tool_call`'s `toolCallId`). */
+  readonly toolCallId: string;
+}
+
+/** Target key of {@link AuditVia}; no action's own allowlist may use it (tested). */
+export const AUDIT_VIA_AGENT_KEY = "viaAgent";
+
+const viaSchema = z.strictObject({
+  kind: z.literal("agent"),
+  threadId: z.uuid(),
+  runId: z.uuid(),
+  toolCallId: z.string().regex(/^[A-Za-z0-9_.:/-]{1,128}$/),
+});
+
 /** One audited action: a known action, its allowlisted target, and where it belongs. */
 export type AuditEvent = {
   [A in AuditAction]: {
@@ -28,6 +51,8 @@ export type AuditEvent = {
     readonly teamId?: string | null;
     readonly target: AuditTarget<A>;
     readonly request?: AuditRequestContext;
+    /** The person acted through an agent (KOBE-618); recorded as `target.viaAgent`. */
+    readonly via?: AuditVia;
   };
 }[AuditAction];
 
@@ -130,6 +155,19 @@ export async function audit(tx: KobeTx, event: AuditEvent): Promise<AuditRecordR
     const fields = target.error.issues.map((i) => i.path.join(".") || i.code).join(", ");
     throw new AuditEventError(`audit: ${action} target rejected (${fields})`);
   }
+  const recorded: Record<string, unknown> = { ...(target.data as Record<string, unknown>) };
+  if (event.via !== undefined) {
+    const via = viaSchema.safeParse(event.via);
+    if (!via.success) throw new AuditEventError(`audit: ${action} via rejected`);
+    if (event.actor.kind !== "user" || event.actor.id === null) {
+      throw new AuditEventError("audit: only a person acts via an agent");
+    }
+    if (Object.hasOwn(recorded, AUDIT_VIA_AGENT_KEY)) {
+      throw new AuditEventError(`audit: ${action} target already names ${AUDIT_VIA_AGENT_KEY}`);
+    }
+    const { kind: _kind, ...ids } = via.data;
+    recorded[AUDIT_VIA_AGENT_KEY] = ids;
+  }
   // Waiting for the chain lock is bounded: a transaction without a lock timeout gets one for its
   // remainder (the append is its last write), a caller's own timeout is kept.
   await tx.execute(
@@ -143,7 +181,7 @@ export async function audit(tx: KobeTx, event: AuditEvent): Promise<AuditRecordR
       actorKind: event.actor.kind,
       actorId: event.actor.id,
       action,
-      target: target.data as Record<string, unknown>,
+      target: recorded,
       ip: normalizeIp(event.request?.ip),
       userAgent: normalizeUserAgent(event.request?.userAgent),
     })
