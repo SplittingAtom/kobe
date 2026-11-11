@@ -506,6 +506,7 @@ export async function decidePolicyCheck(
         now: new Date(),
       }),
       evaluated.input.tool,
+      frame.input,
     );
     if (evalRun && evalIsolatedCall(frame.tool, frame.input)) {
       const reasons = [EVAL_ISOLATED];

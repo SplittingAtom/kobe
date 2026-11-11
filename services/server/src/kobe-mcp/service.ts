@@ -24,7 +24,7 @@ import {
   runKobeDocsTool,
 } from "./docs/index.js";
 import { executeKobeTool } from "./execute.js";
-import { withinKobeLimit } from "./limits.js";
+import { withKobePersonLock, withinKobeLimit } from "./limits.js";
 import { kobeConnector, kobePinnedTool } from "./pinned.js";
 import { KOBE_ADMIN_TOOLS, kobeToolByName } from "./tools/index.js";
 
@@ -152,49 +152,67 @@ export function createKobeMcpService(options: KobeMcpServiceOptions): KobeMcpSer
       const docs = kobeDocsToolByName(request.tool);
       const tool = docs === undefined ? kobeToolByName(request.tool) : undefined;
       const deps = decideDeps(row);
-      const decided = await decideMcpCall(
-        {
-          ...deps,
-          // The person half (§8): permission and switches re-read now, then the per-person limits.
-          refuse: async (pinned) => {
-            const name = kobeToolName(pinned.pi_name);
-            // The docs tools (KOBE-620): no team or user data, no permission, no admin limit.
-            if (name !== undefined && isKobeDocsToolName(name)) return undefined;
-            const def = name === undefined ? undefined : kobeToolByName(name);
-            if (def === undefined) return { code: "unknown_tool", message: "Unknown Kobe tool." };
-            // Checked before anyone is asked: an approval is only ever for a well-formed change.
-            if (!def.input.safeParse(request.arguments ?? {}).success) {
-              return { code: "invalid_input", message: `The input of ${def.name} is not valid.` };
-            }
-            const access = await withTeam(db, principal.teamId, (tx) =>
-              loadKobeAccess(tx, principal.teamId, principal.userId),
-            );
-            if (!switchesAllow(def, access) || !personAllows(def, access)) {
-              return {
-                code: KOBE_ADMIN_NOT_ALLOWED_REASON,
-                message: `${pinned.pi_name} is not available to you in this team (your role, or the Kobe admin switches).`,
-              };
-            }
-            if (!(await withinKobeLimit(db, principal.userId, def.readOnly ? "read" : "write"))) {
-              return {
-                code: "kobe_admin_rate_limited",
-                message: def.readOnly
-                  ? "Too many Kobe admin reads in the last minute; try again shortly."
-                  : "Too many Kobe admin changes in the last hour; try again later.",
-              };
-            }
-            return undefined;
+      // The limit count and the decision's audit row under the person's lock (atomic limits).
+      // The docs tools (KOBE-620) count against no limit, so they never wait for the lock.
+      const underLock = async <T>(
+        f: () => Promise<T>,
+      ): Promise<{ readonly ok: true; readonly value: T } | { readonly ok: false }> =>
+        docs === undefined
+          ? withKobePersonLock(db, principal.userId, f)
+          : { ok: true as const, value: await f() };
+      const locked = await underLock(() =>
+        decideMcpCall(
+          {
+            ...deps,
+            // The person half (§8): permission and switches re-read now, then the per-person limits.
+            refuse: async (pinned) => {
+              const name = kobeToolName(pinned.pi_name);
+              // The docs tools (KOBE-620): no team or user data, no permission, no admin limit.
+              if (name !== undefined && isKobeDocsToolName(name)) return undefined;
+              const def = name === undefined ? undefined : kobeToolByName(name);
+              if (def === undefined) return { code: "unknown_tool", message: "Unknown Kobe tool." };
+              // Checked before anyone is asked: an approval is only ever for a well-formed change.
+              if (!def.input.safeParse(request.arguments ?? {}).success) {
+                return { code: "invalid_input", message: `The input of ${def.name} is not valid.` };
+              }
+              const access = await withTeam(db, principal.teamId, (tx) =>
+                loadKobeAccess(tx, principal.teamId, principal.userId),
+              );
+              if (!switchesAllow(def, access) || !personAllows(def, access)) {
+                return {
+                  code: KOBE_ADMIN_NOT_ALLOWED_REASON,
+                  message: `${pinned.pi_name} is not available to you in this team (your role, or the Kobe admin switches).`,
+                };
+              }
+              if (!(await withinKobeLimit(db, principal.userId, def.readOnly ? "read" : "write"))) {
+                return {
+                  code: "kobe_admin_rate_limited",
+                  message: def.readOnly
+                    ? "Too many Kobe admin reads in the last minute; try again shortly."
+                    : "Too many Kobe admin changes in the last hour; try again later.",
+                };
+              }
+              return undefined;
+            },
           },
-        },
-        principal,
-        {
-          connectorId: row.id,
-          tool: request.tool,
-          arguments: request.arguments,
-          ...(request.threadId === undefined ? {} : { threadId: request.threadId }),
-          ...(request.toolCallId === undefined ? {} : { toolCallId: request.toolCallId }),
-        },
+          principal,
+          {
+            connectorId: row.id,
+            tool: request.tool,
+            arguments: request.arguments,
+            ...(request.threadId === undefined ? {} : { threadId: request.threadId }),
+            ...(request.toolCallId === undefined ? {} : { toolCallId: request.toolCallId }),
+          },
+        ),
       );
+      if (!locked.ok) {
+        return {
+          outcome: "denied",
+          code: "kobe_admin_rate_limited",
+          message: "Kobe is busy with your other admin calls; try again shortly.",
+        };
+      }
+      const decided = locked.value;
       if (decided.decision === "deny") {
         return { outcome: "denied", code: decided.code, message: decided.message };
       }

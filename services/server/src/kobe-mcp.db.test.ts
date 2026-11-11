@@ -27,6 +27,7 @@ import { kobeRunServer } from "./kobe-mcp/run.js";
 import { routeCaller } from "./kobe-mcp/execute.js";
 import { KOBE_ADMIN_TOOLS } from "./kobe-mcp/tools/index.js";
 import { createInternalApp } from "./routes/internal.js";
+import { TestBrowser } from "./testing/browser.js";
 import { EventStreamFixture, PUBLIC_URL, type Person } from "./testing/event-stream-fixture.js";
 import {
   INTERNAL_KEY,
@@ -671,25 +672,102 @@ describe("catalog contract", () => {
     async (_name, tool) => {
       const w = await world();
       const input = tool.input.parse(samples[tool.name]?.({ w }));
-      const as = (p: Person) =>
-        routeCaller(fx.replica(0).app, {
+      // A delegation needs the person's own active run (review M1).
+      const as = async (p: Person) => {
+        const s = await sandboxFor(w.team, p);
+        return routeCaller(fx.replica(0).app, {
           userId: p.id,
           teamId: w.team,
-          runId: randomUUID(),
-          threadId: randomUUID(),
+          runId: s.runId,
+          threadId: s.threadId,
           toolCallId: "contract",
         });
+      };
       const route = tool.route(input);
-      // An outsider (no membership) is always refused.
+      // An outsider (no membership, so no run in the team) is always refused.
       const outsider = await fx.person(`ko${randomUUID().slice(0, 4)}`);
-      expect((await as(outsider)(route)).status).toBe(403);
+      const stranger = routeCaller(fx.replica(0).app, {
+        userId: outsider.id,
+        teamId: w.team,
+        runId: randomUUID(),
+        threadId: randomUUID(),
+        toolCallId: "contract",
+      });
+      expect([401, 403]).toContain((await stranger(route)).status);
       if (!tool.readOnly) {
         // A member lacks every team-admin permission: the route itself refuses the write.
-        expect((await as(w.member)(route)).status).toBe(403);
+        expect((await (await as(w.member))(route)).status).toBe(403);
       }
-      const held = await as(w.admin)(route);
+      const held = await (await as(w.admin))(route);
       expect(held.status, JSON.stringify(held.body)).toBeLessThan(300);
       expect(() => tool.output.parse(tool.reduce(held.body, input))).not.toThrow();
     },
   );
+});
+
+describe("review fixes (KOBE-619)", () => {
+  it("M1: signing out everywhere mid-run stops the run's admin tools", async () => {
+    const w = await world();
+    const s = await sandboxFor(w.team, w.admin);
+    expect((await call(s, "team_members_list", {})).isError).toBeUndefined();
+    await fx.replica(0).deps.revokeAllSessions(w.admin.id);
+    const after = await call(s, "team_members_list", {});
+    expect(after.isError).toBe(true);
+    // Signing in again later does not revive a run started before the revocation.
+    const again = await new TestBrowser(fx.replica(0).app, PUBLIC_URL).post(
+      "/api/auth/sign-in/email",
+      { email: w.admin.email, password: "a long enough password" },
+    );
+    expect(again.status).toBe(200);
+    expect((await call(s, "team_members_list", {})).isError).toBe(true);
+  });
+
+  it("L3: the role change itself refuses another before-state (409 changed_since_approval)", async () => {
+    const w = await world();
+    const res = await w.admin.browser.patch(`/v1/team/members/${w.target.id}`, {
+      role: "team_admin",
+      expectedRole: "contributor",
+    });
+    expect(res.status).toBe(409);
+    expect(res.json).toMatchObject({ code: "changed_since_approval" });
+    expect(await roleOf(w.team, w.target.id)).toBe("member");
+    const ok = await w.admin.browser.patch(`/v1/team/members/${w.target.id}`, {
+      role: "contributor",
+      expectedRole: "member",
+    });
+    expect(ok.status).toBe(200);
+  });
+
+  it("L4: a target who left the team is not_a_member, not changed_since_approval", async () => {
+    const w = await world();
+    const s = await sandboxFor(w.team, w.admin);
+    const input = { user_id: w.target.id, from_role: "member", to_role: "contributor" };
+    await approve(s, "team_members_set_role", input);
+    await fx.admin.query(`DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`, [
+      w.team,
+      w.target.id,
+    ]);
+    const out = await call(s, "team_members_set_role", input);
+    expect(out.isError).toBe(true);
+    expect(out.text).toContain("not_a_member");
+  });
+
+  it("L5: concurrent writes cannot both pass the per-person limit", async () => {
+    const w = await world();
+    const s = await sandboxFor(w.team, w.admin);
+    await setSite("kobe_mcp.writes_per_hour", "1");
+    const a = { user_id: w.target.id, from_role: "member", to_role: "contributor" };
+    const b = { user_id: w.member.id, from_role: "member", to_role: "contributor" };
+    await approve(s, "team_members_set_role", a);
+    await approve(s, "team_members_set_role", b);
+    const outs = await Promise.all([
+      call(s, "team_members_set_role", a),
+      call(s, "team_members_set_role", b),
+    ]);
+    expect(outs.filter((o) => o.isError === undefined)).toHaveLength(1);
+    const allowed = (await decisions(w.team)).filter(
+      (d) => d.decision === "allowed" && d.risk !== "read",
+    );
+    expect(allowed).toHaveLength(1);
+  });
 });

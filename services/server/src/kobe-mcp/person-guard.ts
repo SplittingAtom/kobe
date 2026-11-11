@@ -21,11 +21,15 @@ export async function kobeToolAllowedFor(
   userId: string,
   piName: string,
 ): Promise<boolean> {
-  const name = kobeToolName(piName);
-  const tool = name === undefined ? undefined : kobeToolByName(name);
+  const tool = kobeToolOf(piName);
   if (tool === undefined) return false;
   const access = await withTeam(db, teamId, (tx) => loadKobeAccess(tx, teamId, userId));
   return switchesAllow(tool, access) && personAllows(tool, access);
+}
+
+function kobeToolOf(piName: string) {
+  const name = kobeToolName(piName);
+  return name === undefined ? undefined : kobeToolByName(name);
 }
 
 export async function guardKobeAdminCall(
@@ -33,9 +37,26 @@ export async function guardKobeAdminCall(
   who: { readonly teamId: string; readonly userId: string },
   decision: PolicyDecision,
   tool: ToolDescriptor,
+  /** The call's input as the sandbox sent it: checked against the tool's strict schema. */
+  input: unknown,
 ): Promise<PolicyDecision> {
   // The docs tools (KOBE-620) need no permission: the ordinary policy decided them.
   if (!isKobeAdminTool(tool) || decision.effect === "deny") return decision;
+  // A malformed call is refused before anyone is asked to approve it (review L4).
+  const def = kobeToolOf(tool.name);
+  if (def !== undefined && !def.input.safeParse(input ?? {}).success) {
+    return {
+      effect: "deny",
+      risk: decision.risk,
+      reasons: [
+        {
+          code: "invalid_input",
+          stage: "site_deny",
+          message: `The input of ${tool.name} is not valid, so the call was denied.`,
+        },
+      ],
+    };
+  }
   const allowed = await kobeToolAllowedFor(db, who.teamId, who.userId, tool.name).catch(
     () => false,
   );

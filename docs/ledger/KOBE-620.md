@@ -66,9 +66,31 @@
   also compared before/after the move with docs unchanged (identical). The web test asserts the
   routes answer exactly the package's texts.
 
+## Follow-up 1: merged `kobe-618-619-admin-host` (security-review fixes 27c49518)
+
+- Conflicts in `kobe-mcp/person-guard.ts` and `kobe-mcp/service.ts` resolved: the strict input
+  check before approval cards stays (admin tools only, docs are `isKobeAdminTool` false); the
+  per-person limit lock wraps admin calls only (docs calls skip `withKobePersonLock` and the
+  person/limit `refuse` step); `limits.ts` merged cleanly and still excludes `docs_*` calls.
+
+## Follow-up 2: migration 0208 never fails an upgrade
+
+- `registry_skills_kobe_names` now also lets a **non-Kobe** skill hold a name in
+  `KOBE_SKILL_NAMES_ADDED_LATER` (`kobe-guide`); Kobe still may publish only its names, older Kobe
+  names stay strictly reserved, and the name stays unique.
+- The seed skips such a name: action `skipped_name_taken` with a warning log (not `failed`, so
+  starts don't retry); other Kobe skills publish as usual. That Site simply has no Kobe
+  `kobe-guide` (the docs tools still attach to every run).
+- `submissionRight`: new submissions of `kobe-guide` are refused as reserved, but the maintainers
+  of a skill that held it before the upgrade keep working on it.
+- Tests: `packages/db/src/kobe-guide-skill-upgrade.db.test.ts` (upgrade with the clash),
+  `services/server/src/kobe-guide-seed.db.test.ts`, `skill-maintainers.db.test.ts`.
+
 ## Open questions / risks
 
-- Migration 0208 fails if a non-Kobe registry skill is already named `kobe-guide` (none expected).
+- `tools.allow`/`tools.deny` deliberately still filter the docs tools (an agent's explicit config
+  wins, coordinator 2026-11-11): an agent with a narrow `tools.allow` has no docs tools unless it
+  lists `mcp__kobe__docs_*`.
 - Every docs call writes an `mcp.tool_call` audit row (as any MCP call).
 
 ## Evidence

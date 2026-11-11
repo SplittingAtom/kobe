@@ -32,7 +32,13 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
     const userId = idSchema.safeParse(c.req.param("userId"));
     const body = await parseBody(c, memberRoleSchema);
     if (!userId.success || !body) return invalidRequest(c);
-    const result = await setMemberRole(db, c.get("team").id, userId.data, body.role);
+    const result = await setMemberRole(
+      db,
+      c.get("team").id,
+      userId.data,
+      body.role,
+      body.expectedRole,
+    );
     if (!result.ok) return membershipError(c, result.error);
     // A demoted team admin no longer edits projects without a row of their own: those checkouts
     // end (KOBE-579); mounts are brought in line (MT2).

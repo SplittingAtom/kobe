@@ -1,5 +1,5 @@
 {
-  "id": "73b6c033-5123-4d3b-852c-684c5f8cc4e4",
+  "id": "d89cefd1-ae80-4311-8123-b71a53a14b9b",
   "prevId": "2d0c34e5-401f-4afc-83c7-bec62eca0fb2",
   "version": "7",
   "dialect": "postgresql",
@@ -16589,7 +16589,7 @@
         },
         "registry_skills_kobe_names": {
           "name": "registry_skills_kobe_names",
-          "value": "(\"registry_skills\".\"publisher\" = 'kobe') = (\"registry_skills\".\"name\" IN ('data-analysis', 'charts', 'docx', 'pdf', 'xlsx', 'code-review', 'skill-creator', 'kobe-guide'))"
+          "value": "(\"registry_skills\".\"publisher\" = 'kobe') = (\"registry_skills\".\"name\" IN ('data-analysis', 'charts', 'docx', 'pdf', 'xlsx', 'code-review', 'skill-creator', 'kobe-guide')) OR (\"registry_skills\".\"publisher\" <> 'kobe' AND \"registry_skills\".\"name\" IN ('kobe-guide'))"
         },
         "registry_skills_detached": {
           "name": "registry_skills_detached",

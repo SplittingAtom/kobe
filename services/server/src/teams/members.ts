@@ -36,7 +36,7 @@ export interface TeamSummary {
 }
 
 /** Why a membership change was refused; routes map these to HTTP errors. */
-export type MembershipError = "not_a_member" | "last_team_admin";
+export type MembershipError = "not_a_member" | "last_team_admin" | "changed_since_approval";
 
 export type MembershipResult =
   { readonly ok: true } | { readonly ok: false; error: MembershipError };
@@ -123,10 +123,13 @@ export async function setMemberRole(
   teamId: string,
   userId: string,
   role: TeamRole,
+  /** KOBE-619: change only while the role is still this one (the approved before-state). */
+  expected?: TeamRole,
 ): Promise<MembershipResult> {
   return withTeam(db, teamId, async (tx) => {
     const lock = await lockForChange(tx, teamId, userId);
     if (lock.current === null) return fail("not_a_member");
+    if (expected !== undefined && lock.current !== expected) return fail("changed_since_approval");
     if (role !== "team_admin" && losesLastActiveAdmin(lock)) return fail("last_team_admin");
     // A team admin's decision makes them the team's own member (KOBE-331 review).
     await tx
