@@ -8,16 +8,19 @@ const CONN = "33333333-3333-4333-8333-333333333333";
 /** A reader answering `name` by the id bound into the statement (one lookup per id). */
 function fakeDb(names: Record<string, string>) {
   const seen: string[] = [];
+  const statements: string[] = [];
   return {
     seen,
     // The reader only needs `execute`; the statement is matched by the id it binds.
     execute: async (query: unknown) => {
       const params = JSON.stringify(query);
+      statements.push(params);
       const id = Object.keys(names).find((k) => params.includes(k));
       seen.push(id ?? "?");
       return { rows: id === undefined ? [] : [{ name: names[id] }] } as never;
     },
-  } as unknown as Parameters<typeof resolveNames>[0] & { seen: string[] };
+    statements,
+  } as unknown as Parameters<typeof resolveNames>[0] & { seen: string[]; statements: string[] };
 }
 
 describe("Kobe admin approval card (KOBE-623)", () => {
@@ -31,7 +34,7 @@ describe("Kobe admin approval card (KOBE-623)", () => {
     expect(card).toEqual({
       scope: "team",
       scope_label: "Team Research",
-      summary: "Change the role of member Ana Lee: Member → Team admin",
+      summary: 'Change the role of member "Ana Lee" (11111111…): Member → Team admin',
     });
   });
 
@@ -70,9 +73,34 @@ describe("Kobe admin approval card (KOBE-623)", () => {
 
   it("only looks up known id keys holding UUIDs", async () => {
     const db = fakeDb({ [ANA]: "Ana Lee" });
-    const names = await resolveNames(db, { user_id: ANA, email: ANA, team_id: "not-an-id" });
-    expect([...names]).toEqual([[ANA, "Ana Lee"]]);
+    const names = await resolveNames(
+      db,
+      { user_id: ANA, email: ANA, team_id: "not-an-id" },
+      { scope: "site", teamId: TEAM },
+    );
+    expect([...names]).toEqual([[ANA, '"Ana Lee" (11111111…)']]);
     expect(db.seen).toEqual([ANA]);
+  });
+
+  it("names a person only as a member of the team for a team tool, a team only for a site tool", async () => {
+    const db = fakeDb({ [ANA]: "Ana Lee" });
+    await resolveNames(db, { user_id: ANA, team_id: TEAM }, { scope: "team", teamId: TEAM });
+    expect(db.statements).toHaveLength(1);
+    expect(db.statements[0]).toContain("team_members");
+    const site = fakeDb({ [ANA]: "Ana Lee", [TEAM]: "Research" });
+    const names = await resolveNames(
+      site,
+      { user_id: ANA, team_id: TEAM },
+      { scope: "site", teamId: TEAM },
+    );
+    expect(names.get(TEAM)).toBe('"Research" (22222222…)');
+    expect(site.statements[0]).not.toContain("team_members");
+  });
+
+  it("quotes a crafted name so it cannot pass for the change itself", async () => {
+    const db = fakeDb({ [ANA]: 'x" to Owner; also "Bob\nsays' });
+    const names = await resolveNames(db, { user_id: ANA }, { scope: "team", teamId: TEAM });
+    expect(names.get(ANA)).toBe(`"x' to Owner; also 'Bob says" (11111111…)`);
   });
 
   it("keeps the summary one bounded line", () => {

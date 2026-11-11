@@ -122,7 +122,11 @@ export const siteSkillReviewsClaim = kobeTool({
   destructive: false,
   input: z.strictObject({ version_id: z.uuid(), from_state: z.literal("submitted") }),
   output: reviewOut,
-  route: (input) => ({ method: "POST", path: `${REGISTRY}/${input.version_id}/claim` }),
+  route: (input) => ({
+    method: "POST",
+    path: `${REGISTRY}/${input.version_id}/claim`,
+    query: { expectedState: input.from_state },
+  }),
   reduce: reviewAnswer,
   before: async (input, call) => {
     const v = await reviewState(call, input.version_id);
@@ -187,7 +191,11 @@ export const siteSkillReviewsDecide = kobeTool({
   route: (input) => ({
     method: "POST",
     path: `${REGISTRY}/${input.version_id}/decision`,
-    body: { action: input.action, ...(input.note === undefined ? {} : { note: input.note }) },
+    body: {
+      action: input.action,
+      ...(input.note === undefined ? {} : { note: input.note }),
+      expected_state: input.from_state,
+    },
   }),
   reduce: reviewAnswer,
   before: async (input, call) => {
@@ -217,7 +225,7 @@ export const siteSkillReviewsRejectAndBlock = kobeTool({
   route: (input) => ({
     method: "POST",
     path: `${REGISTRY}/${input.version_id}/decision`,
-    body: { action: "reject_and_block", note: input.note },
+    body: { action: "reject_and_block", note: input.note, expected_state: input.from_state },
   }),
   reduce: reviewAnswer,
   before: async (input, call) => {

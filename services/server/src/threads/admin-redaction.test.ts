@@ -115,4 +115,33 @@ describe("shared-thread redaction of Kobe admin results (KOBE-623, KA6)", () => 
     expect(redactEvent(event, teamAdmin)).toBe(event);
     expect(redactEvent(event, undefined)).toBe(event);
   });
+
+  it("redacts the stored entry an entry.committed event carries", () => {
+    const event = {
+      run_id: "r",
+      seq: 5,
+      ts: "2026-11-11T00:00:00.000Z",
+      type: "entry.committed",
+      payload: {
+        entry_id: "e1",
+        parent_id: null,
+        entry_type: "message",
+        payload: result("mcp__kobe__site_users_list"),
+      },
+    } as unknown as KobeEvent;
+    const out = redactEvent(event, teamAdmin);
+    expect(JSON.stringify(out)).not.toContain("secret rows");
+    expect(JSON.stringify(out)).toContain(KOBE_ADMIN_RESULT_HIDDEN);
+    const siteAdmin = adminResultGate({
+      segments: ["kobe"],
+      teamRole: "member",
+      siteRole: "admin",
+    });
+    expect(redactEvent(event, siteAdmin)).toBe(event);
+    const docs = {
+      ...event,
+      payload: { ...event.payload, payload: result("mcp__kobe__docs_index") },
+    };
+    expect(redactEvent(docs as KobeEvent, member)).toBe(docs);
+  });
 });

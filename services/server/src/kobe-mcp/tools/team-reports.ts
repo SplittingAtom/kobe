@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { auditTarget } from "./site/reads.js";
 import { cursorSchema, kobeTool, KOBE_RESULT_MAX_BYTES } from "../catalog.js";
 
 /**
@@ -118,7 +119,13 @@ const AUDIT_PAGE = 50;
 /** Room left under the result cap for the envelope. */
 const AUDIT_BUDGET = KOBE_RESULT_MAX_BYTES - 2048;
 /** A request's address or client, should a target ever carry one (it does not today). */
-const CLIENT_KEYS = /^(ip|ipAddress|ip_address|userAgent|user_agent)$/i;
+/** The audit target without any IP/UA-like key, at any depth (`auditTarget` of the site tool). */
+function clientFree(target: Record<string, unknown>): Record<string, unknown> {
+  const clean = auditTarget(target);
+  return typeof clean === "object" && clean !== null && !Array.isArray(clean)
+    ? (clean as Record<string, unknown>)
+    : {};
+}
 
 /** An audit cursor: the last event's `seq` (base64url of a decimal); undefined when not one. */
 export const seqCursor = {
@@ -201,7 +208,8 @@ export const teamAuditList = kobeTool({
           name: e.actor.name?.slice(0, 200) ?? null,
         },
         action: e.action.slice(0, 100),
-        target: Object.fromEntries(Object.entries(e.target).filter(([k]) => !CLIENT_KEYS.test(k))),
+        // IP/UA-like keys dropped at any depth (security review), as the site tool does.
+        target: clientFree(e.target),
       };
       size += Buffer.byteLength(JSON.stringify(event), "utf8") + 1;
       if (size > AUDIT_BUDGET && events.length > 0) break;

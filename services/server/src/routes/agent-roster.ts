@@ -9,8 +9,9 @@ import {
   updateAgentRosterEntryRequestSchema,
   type AgentRosterErrorCode,
 } from "@kobe/protocol";
+import { withTeam } from "@kobe/db";
 import type { RosterActor, RosterTarget, SiteRosterActor } from "../agents/access.js";
-import { entryView } from "../agents/roster.js";
+import { entryView, teamEntry } from "../agents/roster.js";
 import { decodeCursor, listRoster } from "../agents/roster-list.js";
 import {
   assignAgent,
@@ -258,6 +259,16 @@ async function conditionalSuspension(
     expected === suspended
   ) {
     return rosterError(c, "invalid_request", "expectedSuspended is the opposite of the change.");
+  }
+  // The entry first, as the console's own request reads it (`updateEntry`): a proposal is decided,
+  // never suspended. The console answers its suspend `roster_entry_not_found` (nothing runs here
+  // to suspend), and so does this; a resume approved against "suspended" does not hold for a
+  // proposal (the console's would approve it), so it is refused as changed.
+  const entry = await withTeam(db, actor.teamId, (tx) =>
+    teamEntry(tx, actor.teamId, update.agentId),
+  );
+  if (entry?.state === "proposed") {
+    return suspended ? rosterError(c, "roster_entry_not_found") : c.json(CHANGED, 409);
   }
   const location = { scope: "team" as const, teamId: actor.teamId };
   const owned = await findAgent(db, location, update.agentId);

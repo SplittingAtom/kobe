@@ -115,11 +115,20 @@ export function redactEntry<E extends { readonly payload: Record<string, unknown
   return { ...rest, payload, admin_result_hidden: true } as unknown as E;
 }
 
-/** A run event as a reader may see it: a hidden Kobe admin `tool.result` carries no output. */
+/**
+ * A run event as a reader may see it: a hidden Kobe admin `tool.result` carries no output, and an
+ * `entry.committed` carrying the stored tool result entry (≤ 64 KB) carries it redacted.
+ */
 export function redactEvent(event: KobeEvent, gate: AdminResultGate | undefined): KobeEvent {
-  if (gate === undefined || event.type !== "tool.result" || !gate.hides(event.payload.tool)) {
-    return event;
+  if (gate === undefined) return event;
+  if (event.type === "entry.committed") {
+    const payload = event.payload.payload;
+    const redacted = payload === undefined ? undefined : redactEntryPayload(payload, gate);
+    return redacted === undefined
+      ? event
+      : ({ ...event, payload: { ...event.payload, payload: redacted } } as KobeEvent);
   }
+  if (event.type !== "tool.result" || !gate.hides(event.payload.tool)) return event;
   const { blob_ref: _ref, app: _app, ...payload } = event.payload;
   return {
     ...event,

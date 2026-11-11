@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { MODEL_ALIAS_PATTERN } from "@kobe/db";
 import { cursorSchema, kobeTool, page, segment } from "../../catalog.js";
-import { changeLine, clip, fromTo, missing, readAs, sameValues } from "./shared.js";
+import { changeLine, clip, fromTo, missing, publicUrl, readAs, sameValues } from "./shared.js";
 
 /**
  * Site console › Models (`/v1/site/models`, `site.models.manage`) and › Connectors
@@ -214,7 +214,7 @@ export const siteConnectorsList = kobeTool({
       connectors: rows.map((c) => ({
         connector_id: c.id,
         name: clip(c.name, 100),
-        url: clip(c.url, 300),
+        url: publicUrl(c.url),
         auth_kind: c.authKind,
         credential_source: c.credentialSource,
         status: c.status,

@@ -52,6 +52,26 @@ scope_label, summary}` (`@kobe/protocol` `kobeAdminApprovalSchema`, additive). T
 - Server typecheck needs `NODE_OPTIONS=--max-old-space-size=6144` on the 7 GB GSD box (baseline
   without this ticket OOMs too).
 
+## Security review fixes (KA-4/5/6 review, after merging `kobe-admin-mcp`)
+
+- HIGH: `entry.committed` events carry the stored entry (≤ 64 KB): `redactEvent` now redacts their
+  payload too (live and replayed `/runs/:id/events`). Other entry carriers checked: entry list,
+  output route and fork (redacted), export, context viewer and eval-case copies (owner only),
+  thread search, cards and message reads (user/assistant text only), notifications (no entries).
+- MEDIUM: conditional suspension reads the team roster entry first: a proposal is never suspended
+  (`roster_entry_not_found`, as the console) nor approved by a resume (409).
+- LOW: card names via `team_members` for team tools, `team_id` only for site tools, shown quoted
+  with a short id; `setTeamModel` insert-if-absent and `setMemberBudget` insert answer 409 on a
+  concurrent insert; Registry claim/decide/reject-and-block (`expectedState` / `expected_state`)
+  and site invite revoke (`expectedEmail`) checked by the routes under their lock; team audit
+  target stripped of IP/UA at any depth; connector URLs as origin + path; branding before-state
+  compared key-order independently (tool and route).
+
+## Residual (for KA-7's guide page)
+
+- Compaction and branch summaries, and the assistant's own prose, can restate an admin result;
+  they are not redacted and are copied into a reader's fork.
+
 ## For KA-7 (guide pages to update for this ticket)
 
 - New `admin/admin-from-a-conversation.md`: the Admin change card (scope, summary, before →

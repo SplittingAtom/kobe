@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import type { BeforeState, KobeRoute, KobeRouteCaller } from "../../catalog.js";
 
@@ -39,14 +40,30 @@ export const querySchema = z
   .max(100)
   .regex(/^[^\p{Cc}]*$/u);
 
-/** Key-by-key equality of the named before-state values (JSON for objects). */
+/**
+ * Key-by-key equality of the named before-state values; objects compared deeply and independent of
+ * key order (a theme read back with its keys in another order is the same theme).
+ */
 export function sameValues(
   expected: Readonly<Record<string, unknown>>,
   current: Readonly<Record<string, unknown>>,
 ): boolean {
   return Object.entries(expected).every(
-    ([k, v]) => v === undefined || JSON.stringify(v) === JSON.stringify(current[k]),
+    ([k, v]) => v === undefined || isDeepStrictEqual(v, current[k]),
   );
+}
+
+/**
+ * A connector URL as the model may see it (security review): scheme, host, port and path only.
+ * User info and the query (where keys and tokens hide) and the fragment are dropped.
+ */
+export function publicUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    return clip(`${u.origin}${u.pathname}`, 300);
+  } catch {
+    return "(not shown)";
+  }
 }
 
 /** "a → b" for the card's summary line; values from the input only. */

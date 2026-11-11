@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { Readable } from "node:stream";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { Hono, type Context } from "hono";
@@ -219,8 +220,7 @@ export function siteBrandingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
       const before = await readBrandingSettings(tx);
       if (expected !== undefined) {
         const differs = (Object.keys(expected) as (keyof typeof expected)[]).some(
-          (k) =>
-            expected[k] !== undefined && JSON.stringify(expected[k]) !== JSON.stringify(before[k]),
+          (k) => expected[k] !== undefined && !isDeepStrictEqual(expected[k], before[k]),
         );
         if (differs) return true;
       }

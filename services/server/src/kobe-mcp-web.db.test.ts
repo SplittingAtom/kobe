@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { KOBE_ADMIN_RESULT_HIDDEN, type KobeEvent } from "@kobe/protocol";
 import { KOBE_MCP_MODE_KEY, withTeam } from "@kobe/db";
@@ -90,7 +91,7 @@ describe("the Admin change approval card", () => {
     expect(card?.admin).toEqual({
       scope: "team",
       scope_label: `Team ${rows[0]?.name}`,
-      summary: `Change the role of member ${names[0]?.name}: Member → Team admin`,
+      summary: `Change the role of member "${names[0]?.name}" (${w.target.id.slice(0, 8)}…): Member → Team admin`,
     });
     const plain = await ask("bash", { command: "ls" }, "team_ask_rule");
     expect(plain).toBeDefined();
@@ -323,6 +324,50 @@ describe("shared threads hide Kobe admin results (KA6)", () => {
     ]);
     expect((await results(w.admin)).map((e) => e.payload.preview)).toEqual([SECRET]);
   });
+
+  it("hides entry.committed tool results from a reader, live and replayed (site tool)", async () => {
+    const w = await h.world();
+    const s = await sharedThread(w);
+    const USERS = "every user: ceo@example.test owner";
+    const committed = (id: string) => ({
+      type: "entry.committed" as const,
+      payload: {
+        entry_id: id,
+        parent_id: "e2",
+        entry_type: "message",
+        payload: {
+          type: "message",
+          id,
+          message: {
+            role: "toolResult",
+            toolCallId: `tc-${id}`,
+            toolName: h.pi("site_users_list"),
+            content: [{ type: "text", text: USERS }],
+            details: { text: USERS },
+            isError: false,
+          },
+        },
+      },
+    });
+    const append = (id: string) =>
+      withTeam(h.fx.db, w.team, (tx) => appendRunEventsInTx(tx, w.team, s.runId, [committed(id)]));
+    // Live: the reader's stream is open before the event is written.
+    const live = await h.fx.stream(0, w.member, s.runId);
+    await append("e3");
+    await h.fx.complete(w.team, s.runId);
+    const seen = JSON.stringify(await live.rest());
+    expect(seen).toContain('"entry_id":"e3"');
+    expect(seen).not.toContain("ceo@example.test");
+    expect(seen).toContain(KOBE_ADMIN_RESULT_HIDDEN);
+    // Replay of the stored events, from the start.
+    const replay = JSON.stringify(await (await h.fx.stream(0, w.member, s.runId)).rest());
+    expect(replay).not.toContain("ceo@example.test");
+    expect(replay).toContain(KOBE_ADMIN_RESULT_HIDDEN);
+    // The owner sees it.
+    expect(JSON.stringify(await (await h.fx.stream(0, w.admin, s.runId)).rest())).toContain(
+      "ceo@example.test",
+    );
+  });
 });
 
 describe("the composer's Connectors list the built-in Kobe connector", () => {
@@ -354,5 +399,145 @@ describe("the composer's Connectors list the built-in Kobe connector", () => {
 
     await h.setSite(KOBE_MCP_MODE_KEY, "off");
     expect(await kobeRow(w.admin)).toBeUndefined();
+  });
+});
+
+describe("conditional suspension on a team roster entry (review MEDIUM)", () => {
+  async function proposed(w: KobeWorld): Promise<string> {
+    const created = await w.member.browser.post("/v1/agents", {
+      scope: "personal",
+      frontmatter: { name: "Roster Helper", description: "helps" },
+      prompt: "You help.",
+    });
+    expect(created.status, JSON.stringify(created.json)).toBe(201);
+    const id = created.json.agent.id as string;
+    const pub = await w.member.browser.request(
+      "POST",
+      `/v1/agents/${id}/publish`,
+      {},
+      { "if-match": "*" },
+    );
+    expect(pub.status, JSON.stringify(pub.json)).toBe(201);
+    const assigned = await w.member.browser.post(`/v1/agents/${id}/assignments`, {
+      target: "team",
+    });
+    expect(assigned.status, JSON.stringify(assigned.json)).toBe(202);
+    return id;
+  }
+  const entryState = async (team: string, id: string) =>
+    (
+      await h.fx.admin.query<{ state: string }>(
+        `SELECT state FROM team_agent_roster WHERE team_id = $1 AND site_agent_id = $2`,
+        [team, id],
+      )
+    ).rows[0]?.state;
+  const suspendedHere = async (team: string, id: string) =>
+    (
+      await h.fx.admin.query(
+        `SELECT 1 FROM team_agent_suspensions WHERE team_id = $1 AND agent_id = $2`,
+        [team, id],
+      )
+    ).rows.length === 1;
+
+  it("a proposed entry: the conditional call decides like the console, never suspends", async () => {
+    const w = await h.world();
+    const id = await proposed(w);
+    const put = (q: string, state: string) =>
+      w.admin.browser.put(`/v1/team/agent-roster/${id}${q}`, { state });
+    // The console finds nothing running here to suspend for a proposal; neither does the tool.
+    expect((await put("", "suspended")).json.code).toBe("roster_entry_not_found");
+    expect((await put("?expectedSuspended=false", "suspended")).json.code).toBe(
+      "roster_entry_not_found",
+    );
+    // A resume approved against "suspended" never approves the proposal.
+    const resume = await put("?expectedSuspended=true", "active");
+    expect(resume.status).toBe(409);
+    expect(resume.json.code).toBe("changed_since_approval");
+    expect(await entryState(w.team, id)).toBe("proposed");
+    expect(await suspendedHere(w.team, id)).toBe(false);
+  });
+
+  it("an active entry: tool and console suspend the same thing (this team's suspension)", async () => {
+    const w = await h.world();
+    const id = await proposed(w);
+    const put = (q: string, state: string) =>
+      w.admin.browser.put(`/v1/team/agent-roster/${id}${q}`, { state });
+    expect((await put("", "active")).status).toBe(200);
+    expect(await entryState(w.team, id)).toBe("active");
+    const tool = await put("?expectedSuspended=false", "suspended");
+    expect(tool.status, JSON.stringify(tool.json)).toBe(200);
+    expect(await suspendedHere(w.team, id)).toBe(true);
+    expect(await entryState(w.team, id)).toBe("active");
+    expect((await put("", "active")).status).toBe(200);
+    expect(await suspendedHere(w.team, id)).toBe(false);
+    expect((await put("", "suspended")).status).toBe(200);
+    expect(await suspendedHere(w.team, id)).toBe(true);
+    expect((await put("?expectedSuspended=false", "suspended")).status).toBe(409);
+  });
+});
+
+describe("approved 'none yet' before-states under a concurrent insert (review LOW)", () => {
+  /** Runs `call` while another transaction holds an uncommitted insert of the same row. */
+  async function racing<T>(insert: string, args: unknown[], call: () => Promise<T>): Promise<T> {
+    const other = new pg.Client({ connectionString: h.fx.database.adminUrl });
+    await other.connect();
+    try {
+      await other.query("BEGIN");
+      await other.query(insert, args);
+      const pending = call();
+      await new Promise((r) => setTimeout(r, 400));
+      await other.query("COMMIT");
+      return await pending;
+    } finally {
+      await other.end();
+    }
+  }
+
+  it("enabling a model approved as not enabled: 409, the concurrent enable stays", async () => {
+    const w = await h.world();
+    const alias = `m-${randomUUID().slice(0, 6)}`;
+    const provider = `p${randomUUID().slice(0, 6)}`;
+    await h.fx.admin.query(
+      `INSERT INTO model_providers (id, kind, name, base_url, created_by)
+       VALUES ($1, 'openai_compatible', $1, 'https://vllm.example', $2)`,
+      [provider, w.admin.id],
+    );
+    await h.fx.admin.query(
+      `INSERT INTO model_catalog (alias, provider_id, model, created_by) VALUES ($1, $2, 'fake', $3)`,
+      [alias, provider, w.admin.id],
+    );
+    const res = await racing(
+      `INSERT INTO team_models (team_id, alias, is_default, thinking_max, enabled_by)
+       VALUES ($1, $2, false, NULL, $3)`,
+      [w.team, alias, w.admin.id],
+      () =>
+        w.admin.browser.put(`/v1/team/models/${alias}`, {
+          enabled: true,
+          thinking_max: null,
+          expected: { enabled: false, is_default: false, thinking_max: null },
+        }),
+    );
+    expect(res.status, JSON.stringify(res.json)).toBe(409);
+    expect(res.json.code).toBe("changed_since_approval");
+    const { rows } = await h.fx.admin.query(
+      `SELECT 1 FROM team_models WHERE team_id = $1 AND alias = $2`,
+      [w.team, alias],
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it("a member budget approved as none: 409, not a 500, when one is set meanwhile", async () => {
+    const w = await h.world();
+    const res = await racing(
+      `INSERT INTO team_budgets (team_id, user_id, monthly_usd, updated_by) VALUES ($1, $2, 5, $3)`,
+      [w.team, w.target.id, w.admin.id],
+      () =>
+        w.admin.browser.put(`/v1/team/budgets/members/${w.target.id}`, {
+          monthly_usd: 50,
+          expected: null,
+        }),
+    );
+    expect(res.status, JSON.stringify(res.json)).toBe(409);
+    expect(res.json.code).toBe("changed_since_approval");
   });
 });

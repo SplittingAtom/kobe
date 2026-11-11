@@ -490,7 +490,14 @@ export async function setMemberBudget(
           .set({ ...values, updatedBy: actorId, updatedAt: new Date() })
           .where(and(eq(teamBudgets.teamId, teamId), eq(teamBudgets.id, before.id)));
       } else {
-        await tx.insert(teamBudgets).values({ teamId, userId, ...values, updatedBy: actorId });
+        // Insert only if still absent: a budget set meanwhile (another tab, a concurrent approved
+        // call) is a changed before-state, never a unique-violation 500 or an overwrite.
+        const inserted = await tx
+          .insert(teamBudgets)
+          .values({ teamId, userId, ...values, updatedBy: actorId })
+          .onConflictDoNothing()
+          .returning({ id: teamBudgets.id });
+        if (inserted.length === 0) return "changed_since_approval";
       }
     }
     await notifyModels(tx, `${MODELS_BUDGETS_PREFIX}${teamId}`);

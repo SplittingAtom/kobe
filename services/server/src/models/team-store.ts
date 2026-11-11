@@ -113,6 +113,16 @@ export async function setTeamModel(
       if (before && before.isDefault === wantDefault && before.thinkingMax === thinkingMax) {
         return "unchanged";
       }
+      if (expected !== undefined && !before) {
+        // Approved as "not enabled": insert only if still absent. A concurrent enable is a changed
+        // before-state (409), never overwritten; nothing else was written yet.
+        const inserted = await tx
+          .insert(teamModels)
+          .values({ teamId, alias, isDefault: false, thinkingMax, enabledBy: userId })
+          .onConflictDoNothing()
+          .returning({ alias: teamModels.alias });
+        if (inserted.length === 0) return "changed_since_approval";
+      }
       if (wantDefault) {
         await tx
           .update(teamModels)

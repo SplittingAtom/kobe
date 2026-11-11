@@ -369,7 +369,11 @@ export const siteInvitesRevoke = kobeTool({
   destructive: true,
   input: z.strictObject({ invitation_id: z.uuid(), email: z.email().max(254) }),
   output: z.strictObject({ invitation_id: z.uuid(), revoked: z.literal(true) }),
-  route: (input) => ({ method: "DELETE", path: `/site/invites/${input.invitation_id}` }),
+  route: (input) => ({
+    method: "DELETE",
+    path: `/site/invites/${input.invitation_id}`,
+    query: { expectedEmail: input.email },
+  }),
   reduce: (_body, input) => ({ invitation_id: input.invitation_id, revoked: true as const }),
   before: async (input, call) => {
     const answer = await readAs(call, INVITES, invitesAnswer);

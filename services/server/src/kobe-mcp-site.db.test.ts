@@ -683,3 +683,83 @@ describe("site catalog contract (ac-5)", () => {
     expect(rejected.status, JSON.stringify(rejected.body)).toBe(200);
   });
 });
+
+describe("before-states checked by the routes themselves (review LOW, KOBE-623)", () => {
+  const routeOf = (name: string, input: Record<string, unknown>) => {
+    const tool = KOBE_SITE_TOOLS.find((t) => t.name === name);
+    if (!tool) throw new Error(name);
+    return tool.route(input as never);
+  };
+
+  it("the tools send the state they were approved against", () => {
+    const v = "00000000-0000-4000-8000-000000000001";
+    expect(
+      routeOf("site_skill_reviews_claim", { version_id: v, from_state: "submitted" }).query,
+    ).toEqual({ expectedState: "submitted" });
+    expect(
+      routeOf("site_skill_reviews_decide", {
+        version_id: v,
+        from_state: "in_review",
+        action: "reject",
+      }).body,
+    ).toMatchObject({ expected_state: "in_review" });
+    expect(
+      routeOf("site_skill_reviews_reject_and_block", {
+        version_id: v,
+        from_state: "submitted",
+        note: "x",
+      }).body,
+    ).toMatchObject({ expected_state: "submitted" });
+    expect(routeOf("site_invites_revoke", { invitation_id: v, email: "a@b.test" }).query).toEqual({
+      expectedEmail: "a@b.test",
+    });
+  });
+
+  it("claim and decide refuse a version no longer in the approved state, under its lock", async () => {
+    const w = await world();
+    const version = await submittedVersion(w.target);
+    const base = `/v1/site/skills/registry/${version}`;
+    const stale = await w.siteAdmin.browser.post(`${base}/claim?expectedState=in_review`, {});
+    expect(stale.status).toBe(409);
+    expect(stale.json.code).toBe("changed_since_approval");
+    for (const action of ["reject", "reject_and_block"]) {
+      const d = await w.siteAdmin.browser.post(`${base}/decision`, {
+        action,
+        note: "No.",
+        expected_state: "in_review",
+      });
+      expect(d.status, action).toBe(409);
+      expect(d.json.code).toBe("changed_since_approval");
+    }
+    const approveStale = await w.siteAdmin.browser.post(`${base}/decision`, {
+      action: "approve",
+      expected_state: "in_review",
+    });
+    expect(approveStale.json.code).toBe("changed_since_approval");
+    const { rows } = await fx.admin.query<{ state: string }>(
+      `SELECT state FROM registry_versions WHERE id = $1`,
+      [version],
+    );
+    expect(rows[0]?.state).toBe("submitted");
+    const ok = await w.siteAdmin.browser.post(`${base}/claim?expectedState=submitted`, {});
+    expect(ok.status, JSON.stringify(ok.json)).toBe(200);
+    expect(ok.json.state).toBe("in_review");
+  });
+
+  it("revoking a site invitation checks the approved address in the same statement", async () => {
+    const w = await world();
+    const email = `rv-${short()}@invite.test`;
+    const r = await w.siteAdmin.browser.post("/v1/site/invites", { email });
+    const id = (r.json as { invitation: { id: string } }).invitation.id;
+    const stale = await w.siteAdmin.browser.request(
+      "DELETE",
+      `/v1/site/invites/${id}?expectedEmail=${encodeURIComponent("other@invite.test")}`,
+    );
+    expect(stale.status).toBe(409);
+    const ok = await w.siteAdmin.browser.request(
+      "DELETE",
+      `/v1/site/invites/${id}?expectedEmail=${encodeURIComponent(email.toUpperCase())}`,
+    );
+    expect(ok.status).toBe(204);
+  });
+});

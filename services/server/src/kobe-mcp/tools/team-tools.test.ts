@@ -311,7 +311,13 @@ describe("results stay compact (ac-4)", () => {
       at: "2026-11-11T00:00:00.000Z",
       actor: { kind: "user", id: ID, name: "A", email: "a@x" },
       action: "identity.member.role_changed",
-      target: { userId: ID, note: big, ip: "10.0.0.1", userAgent: "UA" },
+      // Strings are clipped (300) and keys capped (30) like the site tool: many long fields.
+      target: {
+        userId: ID,
+        ...Object.fromEntries(Array.from({ length: 25 }, (_, k) => [`note${k}`, big])),
+        ip: "10.0.0.1",
+        userAgent: "UA",
+      },
       ip: "10.0.0.1",
       userAgent: "UA",
       prevHash: "p",
