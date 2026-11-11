@@ -3,6 +3,7 @@ import { annotate, honoTracing } from "@kobe/telemetry";
 import { AuditBusyError } from "@kobe/db";
 import { auditRequestContext, auditUserContext } from "./audit/context.js";
 import { requireSession, type AuthVariables } from "./auth/session.js";
+import { delegationOf } from "./kobe-mcp/delegation.js";
 import type { ServerDeps } from "./deps.js";
 import { logger } from "./logger.js";
 import type { IsolationGate } from "./isolation/gate.js";
@@ -188,7 +189,9 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.use(async (c, next) => {
     if (
       !["GET", "HEAD", "OPTIONS"].includes(c.req.method) &&
-      c.req.header("origin") !== deps.publicUrl
+      c.req.header("origin") !== deps.publicUrl &&
+      // A Kobe MCP delegation (KOBE-619) is an in-process call, never a browser's.
+      delegationOf(c) === undefined
     ) {
       return c.json({ code: "forbidden_origin", message: "Cross-origin request rejected." }, 403);
     }
@@ -319,5 +322,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/site/skills", siteSkillTagRoutes(deps));
   if (isolation) api.route("/site/isolation", siteIsolationRoutes(isolation));
   app.route("/v1", api);
+  // Kobe MCP admin tools (KOBE-619) run their console routes in process through this router.
+  deps.kobeMcp.bindApi(app);
   return app;
 }

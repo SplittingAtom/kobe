@@ -146,7 +146,9 @@ const columns = {
   updatedAt: connectors.updatedAt,
 } as const;
 
-const live = isNull(connectors.deletedAt);
+// The built-in Kobe connector (KOBE-619) is not a registered server: the registry never lists,
+// edits, probes, pins or removes it (the site switch `kobe_mcp.mode` governs it).
+const live = and(isNull(connectors.deletedAt), isNull(connectors.builtin));
 
 export async function listConnectors(db: KobeDb): Promise<ConnectorView[]> {
   return db.select(columns).from(connectors).where(live).orderBy(asc(connectors.name));

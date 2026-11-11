@@ -955,12 +955,14 @@ describe("history reads never wake sandboxes (ac-2)", () => {
     // orchestration, isolation, user management) throws if a read path touches it.
     // `agentLimits` is static configuration the agent routes read when mounted (KOBE-46);
     // `runAgents.pinnedModel` (KOBE-44) reads the agent's model pin in the read's transaction.
+    // `kobeMcp` (KOBE-619): `createApp` binds its router to it once, at construction.
     const allowed = new Set<PropertyKey>([
       "database",
       "auth",
       "publicUrl",
       "agentLimits",
       "runAgents",
+      "kobeMcp",
     ]);
     const readOnlyDeps = new Proxy(deps, {
       get(target, prop, receiver) {

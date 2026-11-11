@@ -26,6 +26,8 @@ import {
 } from "./run-mcp.js";
 import type { AgentResolution, AgentResolutionInput, RunAgentResolver } from "./seams.js";
 import { connectorsOffIn } from "../connectors/thread-connectors.js";
+import { kobeRunServer } from "../kobe-mcp/run.js";
+import { kobeBuiltinName } from "../kobe-mcp/access.js";
 
 /** The skill facts of a test chat's run: its draft as the agent's only skill, nothing else. */
 const onlySkillFacts = (ref: SkillRef): SkillFacts => ({
@@ -212,7 +214,21 @@ export const PINNED_AGENTS: RunAgentResolver = {
     if (!resolved.ok) return { ok: false, error: resolved.error };
     const { value } = resolved;
     // Per-session MCP config (KOBE-111): the effective connectors with the tools the agent may see.
-    const mcp = buildRunMcp(connectorRows, value.connectors, frontmatter.tools);
+    const teamMcp = buildRunMcp(connectorRows, value.connectors, frontmatter.tools);
+    // KOBE-619: the built-in Kobe connector's admin tools, for a run its person can answer.
+    const kobe = await kobeRunServer(tx, {
+      teamId: input.teamId,
+      userId: input.ownerUserId,
+      answerable:
+        input.trigger === "user" &&
+        input.skillEval === undefined &&
+        input.skillTest === undefined &&
+        input.onlySkill === undefined &&
+        input.noPersonalGrants === undefined,
+      frontmatter,
+      off,
+    });
+    const mcp = kobe === undefined ? teamMcp : { servers: [...teamMcp.servers, kobe] };
     const mcpServers = mcp.servers.map((s) => ({ name: s.name, connector_id: s.connector_id }));
     // Both this and `resolveRunModel` (lifecycle.ts) exist because the resolver sees aliases only:
     // `resolveRunModel` adds the gateway id/API style and the thread's choice (no resolver input).
@@ -234,8 +250,12 @@ export const PINNED_AGENTS: RunAgentResolver = {
             value.skills,
           );
     // A connector the owner turned off here is no "connect it" notice (review LOW-4): left out.
+    // The built-in Kobe connector is never a "connect it" notice (KOBE-619): it has no team row.
+    const builtinName = await kobeBuiltinName(tx);
     const omissions = [
-      ...value.omissions.filter((o) => !(o.kind === "connector" && offNames.has(o.name))),
+      ...value.omissions.filter(
+        (o) => !(o.kind === "connector" && (offNames.has(o.name) || o.name === builtinName)),
+      ),
       ...unavailableOmissions(unavailable),
     ];
     const config = {

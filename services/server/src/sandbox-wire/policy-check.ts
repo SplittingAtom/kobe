@@ -21,6 +21,8 @@ import { appliedUserRule, recordRuleApplied } from "../policy/rule-applied.js";
 import { appliedDangerousMode, recordDangerousApplied } from "../policy/dangerous-mode.js";
 import { loadRunAgentTools } from "../policy/run-agent-tools.js";
 import { guardViewedFile, proposeAvailable } from "../policy/viewed-file-guard.js";
+import { guardKobeAdmin } from "../policy/kobe-admin-guard.js";
+import { guardKobeAdminCall } from "../kobe-mcp/person-guard.js";
 import { recordSkippedActionInTx } from "../policy/skipped-actions.js";
 import { toolCallLink } from "../thread-file-links/paths.js";
 import { recordWorkspaceLink } from "../thread-file-links/record.js";
@@ -481,7 +483,7 @@ export async function decidePolicyCheck(
     }
     // KOBE-493: Pi write/edit never change the member's viewed file directly, in any mode.
     const { viewedPath } = evaluated;
-    const decision = guardViewedFile(evaluated.decision, {
+    const viewedGuarded = guardViewedFile(evaluated.decision, {
       tool: evaluated.input.tool,
       input: frame.input,
       viewedPath,
@@ -493,6 +495,18 @@ export async function decidePolicyCheck(
     // A skill eval's run (KOBE-325) never reads or writes the member's memory or projects: an eval
     // measures the skill alone and leaves nothing behind in the member's own state.
     const evalRun = await isEvalThread(deps.db, target.teamId, frame.thread_id);
+    // KOBE-619: Kobe admin tools only for a person who may use them now; writes ask in every mode.
+    const decision = await guardKobeAdminCall(
+      deps.db,
+      target,
+      guardKobeAdmin(viewedGuarded, {
+        tool: evaluated.input.tool,
+        input: evaluated.input,
+        evalRun,
+        now: new Date(),
+      }),
+      evaluated.input.tool,
+    );
     if (evalRun && evalIsolatedCall(frame.tool, frame.input)) {
       const reasons = [EVAL_ISOLATED];
       await recordDenied(deps, target.teamId, frame, reasons, mayRecordDenied);

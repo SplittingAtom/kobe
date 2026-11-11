@@ -14718,6 +14718,9 @@
                     "dangerous_mode",
                     "not_a_member",
                     "viewed_file",
+                    "kobe_admin_write",
+                    "kobe_admin_not_allowed",
+                    "kobe_admin_rate_limited",
                     "sandbox_policy_unavailable",
                     "install_deny_rule",
                     "install_ask_rule"
@@ -14941,6 +14944,9 @@
                           "dangerous_mode",
                           "not_a_member",
                           "viewed_file",
+                          "kobe_admin_write",
+                          "kobe_admin_not_allowed",
+                          "kobe_admin_rate_limited",
                           "sandbox_policy_unavailable",
                           "install_deny_rule",
                           "install_ask_rule"

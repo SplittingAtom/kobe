@@ -87,7 +87,8 @@ export async function listTeamConnectors(db: KobeDb, teamId: string): Promise<Te
       tx
         .select()
         .from(connectors)
-        .where(isNull(connectors.deletedAt))
+        // The built-in Kobe connector (KOBE-619) has its own team level, not an enablement row.
+        .where(and(isNull(connectors.deletedAt), isNull(connectors.builtin)))
         .orderBy(asc(connectors.name)),
       tx.select().from(teamConnectors).where(eq(teamConnectors.teamId, teamId)),
     ]);
@@ -110,7 +111,13 @@ export async function listGalleryConnectors(db: KobeDb): Promise<TeamConnectorVi
     const rows = await tx
       .select()
       .from(connectors)
-      .where(and(isNull(connectors.deletedAt), eq(connectors.status, "active")))
+      .where(
+        and(
+          isNull(connectors.deletedAt),
+          isNull(connectors.builtin),
+          eq(connectors.status, "active"),
+        ),
+      )
       .orderBy(asc(connectors.name));
     const siteKeys = await usableSiteKeyIds(
       tx,
@@ -145,7 +152,13 @@ export async function setTeamConnector(
     const [row] = await tx
       .select()
       .from(connectors)
-      .where(and(eq(connectors.id, connectorId), isNull(connectors.deletedAt)))
+      .where(
+        and(
+          eq(connectors.id, connectorId),
+          isNull(connectors.deletedAt),
+          isNull(connectors.builtin),
+        ),
+      )
       .for("share");
     if (!row) return { ok: false, error: "not_found" } as const;
     if (row.status !== "active") return { ok: false, error: "connector_disabled" } as const;

@@ -161,6 +161,15 @@ export const POLICY_REASON_CODES = [
   // KOBE-493: Pi write/edit to the run's viewed file: deny (stage site_deny) when the agent can
   // propose_file_edit, else ask (stage ask_rule); in every mode. Never remembered.
   "viewed_file",
+  // KOBE-619 (Kobe MCP, spec kobe-admin-mcp §6): a Kobe admin write asks in every mode (stage
+  // ask_rule), Dangerous and remembered approvals included; never remembered or approved in bulk;
+  // denied where nobody can be asked (auto, scheduled, skill eval; stage approval_mode).
+  "kobe_admin_write",
+  // KOBE-619: a Kobe admin tool the person may not use now (permission, team or site switch, or a
+  // run that gets docs tools only) → deny (stage team_deny).
+  "kobe_admin_not_allowed",
+  // KOBE-619: the person's admin reads per minute or writes per hour are used up → deny.
+  "kobe_admin_rate_limited",
   // Sandbox-side deny (kobe-policy / kobe-sandbox-agent): no server decision could be obtained
   // (policy channel closed, timed out, extension refused). Never produced by the server.
   "sandbox_policy_unavailable",

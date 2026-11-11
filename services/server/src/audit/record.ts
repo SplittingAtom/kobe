@@ -27,7 +27,15 @@ function complete(event: ServerAuditEvent): AuditEvent {
     actor.kind === "system"
       ? {}
       : { ip: context?.ip ?? null, userAgent: context?.userAgent ?? null };
-  return { ...event, actor, request } as AuditEvent;
+  // KOBE-619: the request's person acting through an agent; only on events that are theirs.
+  const via =
+    context?.via !== undefined &&
+    context.actor !== undefined &&
+    actor.kind === context.actor.kind &&
+    actor.id === context.actor.id
+      ? { via: context.via }
+      : {};
+  return { ...event, actor, request, ...via } as AuditEvent;
 }
 
 /**
