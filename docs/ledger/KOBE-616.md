@@ -49,3 +49,10 @@ Plumbing only: build step, viewer at /docs, the bar's Docs icon, agent-facing te
 - ac-5 failures: `lib/docs/guide-loader.test.ts`, `lib/docs/generate-guide.test.ts` (exit 1).
 - ac-6 browser spec: `e2e/browser/tests/docs.spec.ts` (not run here: needs a deployment).
 - Chart: `charts/kobe/tests/web-server-url.test.ts` (KOBE_PUBLIC_URL on the web).
+
+## Run on gate1 (2026-11-11, coordinator)
+
+Group branch kobe-docs (KOBE-616 viewer + KOBE-617 guide + CLAUDE.md docs rule) deployed with
+KOBE-615 merged in (local-33e68a3609da). /llms.txt, /llms-full.txt (110 KB) and /docs answer 200
+without a session, text/plain UTF-8, site name from branding. docs, file-editor, thread-file-map,
+rail-header and open-file specs: 11 passed.
