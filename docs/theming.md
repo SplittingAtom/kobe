@@ -1,5 +1,7 @@
 # Theming Kobe: what can be themed
 
+Member guide: [Appearance](guide/appearance.md). This page is the reference for operators and developers.
+
 Status: **Shipped 2026-10-29 (KOBE-497..503).** Plan and decisions: [`docs/specs/theming.md`](specs/theming.md).
 Every token below is declared in `apps/web/app/theme.css`; the presets are in
 `apps/web/lib/theme/presets.ts`, the accent maths and the contrast floor in

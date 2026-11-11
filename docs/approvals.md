@@ -1,5 +1,7 @@
 # Approvals
 
+Member guide: [Approvals](guide/internet-and-approvals/approvals.md). This page is the engineering reference.
+
 How Kobe asks a person before a tool call runs (spec D29; built in KOBE-37). The server decides
 every tool call. An approval is signed so that exactly the approved input runs, once. There is no
 bypass mode: the one exception, an admin-only agent mode **Dangerous** (decision AC1 in
