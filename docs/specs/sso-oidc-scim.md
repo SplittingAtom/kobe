@@ -1,6 +1,6 @@
 # Kobe — Single sign-on with OIDC (Entra ID) and SCIM provisioning
 
-Status: **decisions SSO1–SSO5 by Chris 2026-11-11 (§16); open questions Q1–Q5 to answer before
+Status: **decisions SSO1–SSO5 by Chris 2026-11-11 (§16); decisions SSO6–SSO10 (answers to Q1–Q5); ready for
 tickets** (SSO-1..SSO-10 in §17). Requested by Chris, 2026-11-11. Written against main `0694c325`.
 
 Request (Chris, 2026-11-11): "I would like to add the ability to federate user identity with an
@@ -396,18 +396,24 @@ and `/Me`; per-team providers.
 - **SSO5 SCIM**: SCIM 2.0 Users and Groups per provider, hashed rotatable bearer token, deactivation
   revokes sessions at once.
 
-Open questions for Chris:
-
-- **Q1** May a mapping grant a **site role**? Recommendation: no in v1. If yes: Admin only, behind
-  an Owner switch that is off by default.
-- **Q2** MFA not proven while 2FA is required: **refuse** (recommended), or allow the opt-in Kobe
-  TOTP fallback for users who already enrolled?
-- **Q3** SCIM deactivation of a **site-role holder**: recommended to refuse it (SSO sessions end,
-  console banner). Or deactivate like anyone else?
-- **Q4** May **SSO-provisioned users add local credentials** (passkey or password)? Recommendation:
-  no in v1.
-- **Q5** Manual vs IdP-managed membership: **manual wins, managed rows locked with "Take over"**
-  (recommended), or IdP always wins?
+- **SSO6. Team roles only.** Mappings grant team memberships and team roles (member, contributor,
+  team admin). No mapping grants a site role; site roles stay manual in the Site console (Q1).
+- **SSO7. No MFA proof → refuse.** When the person's policy requires two-factor and the Entra sign-in
+  did not prove MFA (`amr`/`acr`), the sign-in is refused with a message pointing at Entra
+  Conditional Access; there is no fallback to Kobe TOTP for SSO sign-ins (Q2).
+- **SSO8. SCIM never deactivates site-role holders.** SCIM deactivation of the Owner or a site Admin
+  is refused and audited; a site admin does it in the Site console (Q3).
+- **SSO9. SSO-created users have no local credentials.** Users provisioned through SSO or SCIM sign in
+  only through the IdP and cannot add a password or passkey; existing local users who link SSO keep
+  their local sign-in (SSO4) (Q4).
+- **SSO10. Managed rows locked, plus a permanent local super admin.** Memberships created by the
+  mapping show "Managed by <provider>" and cannot be edited in the Team console; an audited **Take
+  over** makes a row manual, after which the mapping never touches it; manual rows are never touched
+  by the mapping (Q5). **The initial super admin** created when Kobe is set up (the site Owner from
+  the setup flow) always keeps local sign-in and is the break-glass identity when the IdP is
+  unavailable: it can never be linked away from local credentials, converted to SSO-only, deactivated
+  by SCIM, or have its local password/passkey removed by any SSO flow; local sign-in for it works
+  even with `auth.sso.enabled` on and the IdP unreachable (a CI test proves sign-in with the IdP down).
 
 ## 17. Tickets
 
@@ -439,9 +445,9 @@ Choosing Keycloak instead would need an `inventory.yaml` row (Apache-2.0, test-o
   the mock IdP); unmapped identity gets no user; `returnTo=//evil` lands on `/`; deactivated user
   refused.
 - **SSO-4 MFA trust** (3): `mfa_rule` evaluation, the `claims` request for `acrs`, `requireSession`
-  change, refusal, optional TOTP fallback, no TOTP enrolment from a non-MFA session; verify the
-  Entra preset on a real tenant. AC: MFA-proving session passes `require_2fa`; non-proving refused;
-  fallback asks TOTP only for enrolled users; enrolment endpoint refused for such a session.
+  change, refusal (no TOTP fallback, SSO7), no TOTP enrolment from a non-MFA session; verify the
+  Entra preset on a real tenant. AC: MFA-proving session passes `require_2fa`; non-proving refused
+  with the Entra Conditional Access message; enrolment endpoint refused for such a session.
 - **SSO-5 Account linking** (3): link-required flow with local proof, admin-expected link (console),
   unlink (Me and admin), sessions of an unlinked identity revoked, password-reset guard for accounts
   without a credential. AC: same email never auto-links; a different local user doesn't link;
