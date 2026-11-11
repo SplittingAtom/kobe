@@ -62,7 +62,8 @@ function seed() {
   return { budget, hiring };
 }
 
-const body = (dialog: HTMLElement) => must(dialog.querySelector("[data-kobe-threads-body]"));
+const body = (dialog: HTMLElement) =>
+  must(dialog.querySelector<HTMLElement>("[data-kobe-threads-body]"));
 const row = (dialog: HTMLElement, id: string) =>
   must(dialog.querySelector<HTMLElement>(`[data-kobe-thread="${id}"]`));
 /** Budget's line pin: shown once its links are read (three rails). */
