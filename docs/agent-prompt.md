@@ -46,6 +46,8 @@ Rules: tests first; a new dependency, image or service gets an entry in THIRD_PA
 (`pnpm licenses:update`; images, chart components and services: a row in
 tools/license-check/inventory.yaml; outside MIT/Apache/BSD/MPL: mark it `pending: gate review`
 with a reason and carry on, never stop to ask);
+user-facing docs: decide how the change belongs in docs/guide/ (served at /docs and /llms.txt) and
+update the pages in the same change, or note in the ledger why none is needed;
 notes in docs/ledger/KOBE-<N>.md (template; stay under ~150 lines, link
 evidence instead of pasting logs). Before pushing run `pnpm verify` (it formats, so commit after
 it). Open a PR, then wait for CI with exactly one background `gh pr checks <n> --watch`; never
@@ -70,7 +72,8 @@ agents can then work on a migration ticket's feature half while the next migrati
 | Other service or web code                                                   | `/code-review medium` on the PR          |
 | Docs, CI config, chart values only                                          | Coordinator reads the diff               |
 
-One review pass per PR with a combined checklist; send findings back to the same agent
+One review pass per PR with a combined checklist (it includes: is docs/guide/ updated, or is the
+ledger's reason for no doc change sound?); send findings back to the same agent
 (`SendMessage`) rather than starting a new one, so it keeps its context. Reviewers read the `.sql`
 migrations and the journal, never `drizzle/meta/*_snapshot.json` (generated, 10k+ lines each).
 
