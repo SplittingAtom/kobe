@@ -210,6 +210,19 @@ no ceiling pattern covering it; approved as Internal from the card) and `KOBE_EG
 (resolves to a private address that is not the ingress; must stay blocked). Each scenario skips
 without its variable. Clean-up removes the ceiling rows and team enablements it added.
 
+## Thread-file map (`thread-file-map.spec.ts`)
+
+KOBE-613 (spec `docs/specs/thread-file-map.md`). The agent reads one file of a new `kobe-613-*`
+folder and writes another (two short turns with the `read` and `write` tools; with
+`KOBE_FAKE_MODEL=1` the fake's `tool:` lines). The spec waits until `GET /v1/threads/{id}/file-links`
+lists both, then at 1,280 px checks the Threads panel's lines: solid to the written file, dashed to
+the read one, the pin keeps them, hovering the file in the workspace rail draws a line to the
+thread; at 900 px no rail and no lines, only "Files (N)". With `KOBE_USER2`/`KOBE_PW2` (skipped
+without them) a thread in a new project (`KOBE_USER` must be allowed to create projects) reads the
+project's file, writes one in the owner's workspace and is shared with the team: member2 sees the
+project file by name and the owner's file only as a count. Clean-up deletes the folders, unshares
+and archives and deletes the project. `npx playwright test thread-file-map`.
+
 ## Writing specs
 
 - Select by role and accessible name, labels and `data-kobe-*` attributes (`data-kobe-steering`,
