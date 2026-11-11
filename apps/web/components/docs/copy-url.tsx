@@ -5,7 +5,10 @@ import { useState } from "react";
 import { copyText } from "../../lib/clipboard";
 import { Button } from "../ui/button";
 
-/** A path on this site with a button that copies its full URL (KOBE-616: /llms.txt). */
+/**
+ * A path on this site with a button that copies its full URL (KOBE-616: /llms.txt). The link opens
+ * a new tab: the Docs panel and the workspace under it stay as they were.
+ */
 export function CopyUrl({ path }: { readonly path: string }) {
   const [copied, setCopied] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -21,7 +24,7 @@ export function CopyUrl({ path }: { readonly path: string }) {
   };
   return (
     <span className="inline-flex items-center gap-2">
-      <a href={path}>
+      <a href={path} target="_blank" rel="noopener">
         <code>{path}</code>
       </a>
       <Button

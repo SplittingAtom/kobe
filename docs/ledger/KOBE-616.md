@@ -21,8 +21,8 @@ Plumbing only: build step, viewer at /docs, the bar's Docs icon, agent-facing te
   section or audience, bad file name, duplicate slug, a relative link that is not a guide `.md`
   page or leaves `docs/guide`, a root-relative `/docs/...` link. A leading `# Title` is dropped
   (the viewer and the Markdown outputs print the title).
-- **Routes:** `/docs` and `/docs/<slug>` (`app/docs/[[...slug]]`), a page of its own outside the
-  workspace; `/docs/<slug>.md` is rewritten (next.config `beforeFiles`) to the handler
+- **Routes:** `/docs` and `/docs/<slug>` (`app/docs/[[...slug]]`), a panel over the
+  workspace (see "Docs as a panel"); `/docs/<slug>.md` is rewritten (next.config `beforeFiles`) to the handler
   `app/guide-md/[...slug]`; `/llms.txt` and `/llms-full.txt` are route handlers.
 - **Auth:** the web has no server-side auth gate (pages fetch their data from the server's API with
   the cookie; the chat shows "Sign in" itself). All guide routes, `/docs` included, are readable
@@ -56,3 +56,25 @@ Group branch kobe-docs (KOBE-616 viewer + KOBE-617 guide + CLAUDE.md docs rule) 
 KOBE-615 merged in (local-33e68a3609da). /llms.txt, /llms-full.txt (110 KB) and /docs answer 200
 without a session, text/plain UTF-8, site name from branding. docs, file-editor, thread-file-map,
 rail-header and open-file specs: 11 passed.
+
+## Docs as a panel (Chris, 2026-11-11: "open in a panel like the way site admin opens")
+
+- **Mechanism reused, not copied.** The Site console is a route-addressed panel (KOBE-452):
+  `lib/shell/panels.ts` maps the `/admin/site` prefix to a panel, the root layout's
+  `WorkspaceHost` keeps `ChatApp` mounted for every panel address, and `ChatApp` renders the route's
+  page inside `WorkspacePanel` (modal dialog, about 90% of the window, full-screen sheet under
+  820 px; Close, Escape and a press outside close it; focus returns to the opener). Docs now gets
+  the same by one entry: prefix `/docs` → panel `docs`, title "Docs". The bar's icon is unchanged
+  (a Link to `/docs`), so open, close, Back, reload and deep links (`/docs/<slug>`) behave exactly
+  like the Site console's.
+- **Content:** `app/docs/layout.tsx` lost its standalone header ("Back to Kobe": the panel's Close
+  does that) and keeps a "guide home" link; the page body moved to `components/docs/guide-view.tsx`
+  (shared by the route and the tests). Guide links are Next `Link`s, so a nav or body link steps
+  inside the panel. "View as Markdown" and the llms.txt links open a new tab (plain text would
+  otherwise replace the workspace).
+- **Opened directly:** `/docs/<slug>` from a link or a reload opens the workspace with the Docs
+  panel over it (as `/admin/site` does). Without a session the panel still shows the guide over the
+  chat's "Sign in" prompt. `/llms.txt`, `/llms-full.txt` and `/docs/<slug>.md` are route handlers,
+  untouched.
+- **Evidence:** `components/shell/workspace-panel.test.tsx` ("the Docs panel"), `lib/shell/panels.test.ts`,
+  browser spec `e2e/browser/tests/docs.spec.ts` (not run here: needs a deployment).

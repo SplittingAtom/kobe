@@ -111,7 +111,7 @@ export function UtilityBar({
                 onOpenSkill={navigate}
               />
             )}
-            {/* The Kobe guide (KOBE-616). */}
+            {/* The Kobe guide (KOBE-616): a panel over the workspace, like the consoles. */}
             <IconAction command="docs" className={styles.iconLink} />
             <ThemeToggle />
             <ProfileMenu />

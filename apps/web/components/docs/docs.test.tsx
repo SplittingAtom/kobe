@@ -31,7 +31,7 @@ const GROUPS: DocsNavGroup[] = [
 ];
 
 describe("the Docs icon", () => {
-  it("sits in the bar's first row and opens /docs in the same tab", async () => {
+  it("sits in the bar's first row and opens /docs, the Docs panel over the workspace", async () => {
     const fake = new FakeKobe();
     vi.stubGlobal("fetch", fake.fetch);
     openApp(fake);

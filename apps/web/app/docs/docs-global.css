@@ -1,12 +1,7 @@
-/* The Kobe guide at /docs (KOBE-616): Tailwind's theme and utilities (app/tailwind.css, no
+/* The Kobe guide at /docs (KOBE-616), in the Docs panel over the workspace: Tailwind's theme and utilities (app/tailwind.css, no
    preflight), and the few base rules the guide's pages need, scoped to the guide's root. Colours
    come from the theme tokens (app/theme.css), so the guide follows the site theme and dark mode. */
 @import "../tailwind.css";
-
-/* The guide paints edge to edge. */
-body:has([data-kobe-docs]) {
-  margin: 0;
-}
 
 @layer base {
   [data-kobe-docs],

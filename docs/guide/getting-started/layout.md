@@ -19,6 +19,9 @@ From left to right:
 - **My area**: **My memory**, **My schedules**, **Agents** and **Skills**.
 - **Site console**, shown only to site admins. See [Site admin overview](../admin/site-admin.md).
 - **Notifications.**
+- **Docs**: opens this guide in a panel over your conversation, the way the consoles open. Pick a
+  page from its contents; **Close** or Escape takes you back to the conversation as you left it.
+  Each page has its own address (`/docs/<page>`), so you can share a link to it.
 - **Dark theme**: switches between light and dark. See [Appearance](../appearance.md).
 - **Profile**: **Projects**, **My connectors**, **My approvals**, **My shared cases** and
   **Sign out**.

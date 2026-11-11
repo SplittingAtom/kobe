@@ -20,7 +20,7 @@ All paths are on the same address as the Kobe site itself.
 | `/llms.txt`       | The index, in the llms.txt format: one line per page with its title, link and one-sentence summary, grouped by section.         |
 | `/llms-full.txt`  | Every page's full text in one file, in section order.                                                                           |
 | `/docs/<slug>.md` | One page as Markdown. The slug is the page's path, for example `/docs/memory.md` or `/docs/for-agents/working-in-a-sandbox.md`. |
-| `/docs/<slug>`    | The same page in the docs viewer, for people.                                                                                   |
+| `/docs/<slug>`    | The same page for people, in the Docs panel over the conversation.                                                              |
 
 ## How to use them
 
