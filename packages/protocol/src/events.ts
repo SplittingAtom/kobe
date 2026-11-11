@@ -17,6 +17,7 @@ import {
 } from "./skill-package/layout.js";
 import { approvalResolutionCauseSchema, policyReasonSchema } from "./policy.js";
 import { rememberScopeSchema } from "./remember.js";
+import { kobeAdminApprovalSchema } from "./kobe-mcp.js";
 import { fileEditProposedPayloadSchema } from "./file-editor.js";
 import { fileOpenedPayloadSchema } from "./file-open.js";
 import {
@@ -246,6 +247,11 @@ export const EVENT_PAYLOAD_SCHEMAS = {
     risk: riskClassSchema,
     reasons: z.array(policyReasonSchema).min(1),
     expires_at: timestampSchema,
+    /**
+     * A Kobe admin write (KOBE-623): the card's "Admin change" scope and summary, built by the
+     * server. Additive: clients that predate it show the ordinary card.
+     */
+    admin: kobeAdminApprovalSchema.optional(),
   }),
   "approval.resolved": z.strictObject({
     approval_id: uuidSchema,

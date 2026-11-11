@@ -250,6 +250,22 @@ describe("event payloads", () => {
   });
 });
 
+describe("approval.requested admin card (KOBE-623)", () => {
+  const example = EVENT_PAYLOAD_EXAMPLES["approval.requested"];
+  it("accepts the server's Admin change scope and summary", () => {
+    const admin = { scope: "team", scope_label: "Team Research", summary: "Change Ana's role" };
+    expect(parseEventPayload("approval.requested", { ...example, admin }).admin).toEqual(admin);
+  });
+  it.each([
+    { scope: "org", scope_label: "x", summary: "y" },
+    { scope: "site", scope_label: "", summary: "y" },
+    { scope: "site", scope_label: "Whole site", summary: "y".repeat(1001) },
+    { scope: "site", scope_label: "Whole site", summary: "y", extra: 1 },
+  ])("refuses a malformed admin card %#", (admin) => {
+    expect(() => parseEventPayload("approval.requested", { ...example, admin })).toThrow();
+  });
+});
+
 describe("payload size bounds", () => {
   const big = (bytes: number) => "x".repeat(bytes);
 

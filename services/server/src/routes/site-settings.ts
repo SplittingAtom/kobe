@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   AUDIT_PII_RETENTION_KEY,
+  KOBE_MCP_MODES,
   auditPiiRetentionHoursSchema,
   siteSettings,
   readAuditPiiRetentionHours,
@@ -11,16 +12,23 @@ import { REQUIRE_TWO_FACTOR, readRequireTwoFactor, type AuthVariables } from "..
 import { recordAudit } from "../audit/record.js";
 import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
+import { readKobeMode, storeKobeMode } from "../kobe-mcp/switches.js";
 
 const settingsSchema = z
   .strictObject({
     requireTwoFactor: z.boolean().optional(),
     /** Hours audit rows keep their client IP and user agent (KOBE-17): 1-8760, default 12. */
     auditPiiRetentionHours: auditPiiRetentionHoursSchema.optional(),
+    /** The Kobe MCP site switch (KOBE-623, KA5): `off`, `docs` (default) or `admin`. */
+    kobeMcpMode: z.enum(KOBE_MCP_MODES).optional(),
   })
-  .refine((v) => v.requireTwoFactor !== undefined || v.auditPiiRetentionHours !== undefined, {
-    message: "Change at least one setting.",
-  });
+  .refine(
+    (v) =>
+      v.requireTwoFactor !== undefined ||
+      v.auditPiiRetentionHours !== undefined ||
+      v.kobeMcpMode !== undefined,
+    { message: "Change at least one setting." },
+  );
 
 async function store(tx: KobeTx, key: string, value: string): Promise<void> {
   await tx
@@ -39,6 +47,7 @@ export function siteSettingsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
   const current = async () => ({
     requireTwoFactor: await readRequireTwoFactor(deps),
     auditPiiRetentionHours: await readAuditPiiRetentionHours(db),
+    kobeMcpMode: await readKobeMode(db),
   });
 
   app.get("/", async (c) => c.json(await current()));
@@ -49,12 +58,14 @@ export function siteSettingsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
       return c.json(
         {
           code: "invalid_request",
-          message: "Send requireTwoFactor (true or false) and/or auditPiiRetentionHours (1-8760).",
+          message:
+            "Send requireTwoFactor (true or false), auditPiiRetentionHours (1-8760) and/or " +
+            "kobeMcpMode (off, docs or admin).",
         },
         400,
       );
     }
-    const { requireTwoFactor, auditPiiRetentionHours } = parsed.data;
+    const { requireTwoFactor, auditPiiRetentionHours, kobeMcpMode } = parsed.data;
     // Lowering the requirement weakens every account: Owner only.
     if (requireTwoFactor === false && c.get("siteRole") !== "owner") {
       return c.json(
@@ -82,6 +93,7 @@ export function siteSettingsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
           target: { setting: "audit_pii_retention_hours", value: auditPiiRetentionHours },
         });
       }
+      if (kobeMcpMode !== undefined) await storeKobeMode(tx, kobeMcpMode);
     });
     return c.json(await current());
   });

@@ -24,7 +24,6 @@ import { llmsTxt, PAGES } from "@kobe/guide";
 import { withTeam } from "@kobe/db";
 import { approvalKeyring } from "./approvals/index.js";
 import { kobeRunServer } from "./kobe-mcp/run.js";
-import { routeCaller } from "./kobe-mcp/execute.js";
 import { KOBE_ADMIN_TOOLS } from "./kobe-mcp/tools/index.js";
 import { createInternalApp } from "./routes/internal.js";
 import { TestBrowser } from "./testing/browser.js";

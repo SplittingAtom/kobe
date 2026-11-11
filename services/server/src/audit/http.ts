@@ -1,5 +1,12 @@
 import type { Context } from "hono";
-import { auditQuerySchema, type AuditPage, type AuditQuery, type TeamAuditPage } from "@kobe/db";
+import {
+  auditQuerySchema,
+  type AuditPage,
+  type AuditQuery,
+  type KobeDb,
+  type TeamAuditPage,
+} from "@kobe/db";
+import { withViaAgent } from "./via-agent.js";
 
 type Parsed = { ok: true; value: AuditQuery } | { ok: false; response: Response };
 
@@ -30,4 +37,18 @@ export function auditPageBody(page: AuditPage | TeamAuditPage) {
     events: page.events.map((e) => ({ ...e, at: e.at.toISOString() })),
     nextCursor: page.nextCursor === null ? null : String(page.nextCursor),
   };
+}
+
+/**
+ * {@link auditPageBody} with "via agent" views for `userId` (KOBE-623): events a person caused
+ * through a Kobe MCP admin tool name the thread, run and tool call, and whether the viewer may
+ * open that thread.
+ */
+export async function auditPageBodyFor(
+  db: KobeDb,
+  userId: string,
+  page: AuditPage | TeamAuditPage,
+) {
+  const body = auditPageBody(page);
+  return { ...body, events: await withViaAgent(db, userId, body.events) };
 }
