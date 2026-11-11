@@ -155,11 +155,29 @@ export const PINNED_AGENTS: RunAgentResolver = {
   async resolve(tx, input) {
     const floor = await readApprovalFloor(tx);
     if (input.agentId === null || input.agentScope === null) {
+      const required = await requiredOnly(tx, input);
+      // KOBE-620 (KA7): a run without an agent still gets the Kobe docs tools.
+      const kobe = await kobeRunServer(tx, {
+        teamId: input.teamId,
+        userId: input.ownerUserId,
+        answerable: false,
+        frontmatter: undefined,
+        off: await connectorsOffIn(tx, input.teamId, input.threadId),
+      });
+      const config =
+        kobe === undefined
+          ? required.config
+          : {
+              ...required.config,
+              mcp_servers: [{ name: kobe.name, connector_id: kobe.connector_id }],
+            };
       return {
         ok: true,
         agent: null,
         approvalMode: strictestApprovalMode(input.approvalMode, floor),
-        ...(await requiredOnly(tx, input)),
+        ...required,
+        ...(config === undefined ? {} : { config }),
+        ...(kobe === undefined ? {} : { mcp: { servers: [kobe] } }),
       };
     }
     const owner = { teamId: input.teamId, userId: input.ownerUserId };
@@ -215,7 +233,8 @@ export const PINNED_AGENTS: RunAgentResolver = {
     const { value } = resolved;
     // Per-session MCP config (KOBE-111): the effective connectors with the tools the agent may see.
     const teamMcp = buildRunMcp(connectorRows, value.connectors, frontmatter.tools);
-    // KOBE-619: the built-in Kobe connector's admin tools, for a run its person can answer.
+    // KOBE-619/620: the built-in Kobe connector: docs tools on every run (KA7), admin tools for a
+    // run its person can answer when the agent names the connector.
     const kobe = await kobeRunServer(tx, {
       teamId: input.teamId,
       userId: input.ownerUserId,

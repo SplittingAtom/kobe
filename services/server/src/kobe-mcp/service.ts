@@ -16,6 +16,13 @@ import {
   personAllows,
   switchesAllow,
 } from "./access.js";
+import {
+  isKobeDocsToolName,
+  KOBE_DOCS_TOOLS,
+  kobeDocsContext,
+  kobeDocsToolByName,
+  runKobeDocsTool,
+} from "./docs/index.js";
 import { executeKobeTool } from "./execute.js";
 import { withinKobeLimit } from "./limits.js";
 import { kobeConnector, kobePinnedTool } from "./pinned.js";
@@ -29,6 +36,10 @@ import { KOBE_ADMIN_TOOLS, kobeToolByName } from "./tools/index.js";
  * (policy engine, Kobe admin guard, signed approval verified and consumed, audit), and only an
  * `allow` for exactly this run, tool call and input reaches the executor. Nothing is minted for
  * the sandbox; the principal is re-derived from server state on every call.
+ *
+ * The docs tools (KOBE-620, spec §4, KA4/KA7) are listed for every run that has the connector
+ * (every run while the site switch is not `off`: `run.ts`), scheduled runs and evals included;
+ * they need no permission and count against no admin limit, and run here from `@kobe/guide`.
  */
 
 export interface KobeToolListing {
@@ -50,7 +61,8 @@ export type KobeCallAnswer =
       readonly outcome: "result";
       readonly result: {
         readonly content: readonly { readonly type: "text"; readonly text: string }[];
-        readonly structuredContent: Record<string, unknown>;
+        /** Absent for the docs tools' text results (they declare no output schema). */
+        readonly structuredContent?: Record<string, unknown>;
       };
     }
   | { readonly outcome: "denied"; readonly code: string; readonly message: string }
@@ -64,7 +76,10 @@ export interface KobeMcpService {
   call(principal: McpPrincipal, request: KobeCallRequest): Promise<KobeCallAnswer>;
 }
 
-export type KobeMcpServiceOptions = Omit<McpDecideDeps, "loadConnector" | "refuse" | "guard">;
+export type KobeMcpServiceOptions = Omit<McpDecideDeps, "loadConnector" | "refuse" | "guard"> & {
+  /** The deployment's public origin (`KOBE_PUBLIC_URL`): the docs tools' links (KOBE-620). */
+  readonly publicUrl: string;
+};
 
 /** The audit field grammar of tool call ids: other ids are replaced by the decision's own. */
 const PLAIN_ID = /^[A-Za-z0-9_.:/-]{1,128}$/;
@@ -106,15 +121,19 @@ export function createKobeMcpService(options: KobeMcpServiceOptions): KobeMcpSer
       const runs = loaded.runs.filter((r) => runHasConnector(r, row.id));
       if (runs.length === 0) return undefined;
       // Admin tools only for a run a person can answer (§3: scheduled runs and evals get docs only).
-      const answerable = runs.some((r) => r.trigger === "user" && r.skillEval !== true);
-      const access = await withTeam(db, principal.teamId, (tx) =>
-        loadKobeAccess(tx, principal.teamId, principal.userId),
-      );
-      const tools =
-        answerable && principal.evalThreadId === undefined ? allowedKobeTools(access) : [];
+      const answerable =
+        principal.evalThreadId === undefined &&
+        runs.some((r) => r.trigger === "user" && r.skillEval !== true);
+      const admin = answerable
+        ? allowedKobeTools(
+            await withTeam(db, principal.teamId, (tx) =>
+              loadKobeAccess(tx, principal.teamId, principal.userId),
+            ),
+          )
+        : [];
       return {
         connector: { id: row.id, name: row.name },
-        tools: tools.map((t) => {
+        tools: [...KOBE_DOCS_TOOLS, ...admin].map((t) => {
           const {
             status: _status,
             sha256: _sha,
@@ -130,7 +149,8 @@ export function createKobeMcpService(options: KobeMcpServiceOptions): KobeMcpSer
     async call(principal, request) {
       const row = await loadKobeBuiltin(db);
       if (!row) return { outcome: "unavailable" };
-      const tool = kobeToolByName(request.tool);
+      const docs = kobeDocsToolByName(request.tool);
+      const tool = docs === undefined ? kobeToolByName(request.tool) : undefined;
       const deps = decideDeps(row);
       const decided = await decideMcpCall(
         {
@@ -138,6 +158,8 @@ export function createKobeMcpService(options: KobeMcpServiceOptions): KobeMcpSer
           // The person half (§8): permission and switches re-read now, then the per-person limits.
           refuse: async (pinned) => {
             const name = kobeToolName(pinned.pi_name);
+            // The docs tools (KOBE-620): no team or user data, no permission, no admin limit.
+            if (name !== undefined && isKobeDocsToolName(name)) return undefined;
             const def = name === undefined ? undefined : kobeToolByName(name);
             if (def === undefined) return { code: "unknown_tool", message: "Unknown Kobe tool." };
             // Checked before anyone is asked: an approval is only ever for a well-formed change.
@@ -178,13 +200,26 @@ export function createKobeMcpService(options: KobeMcpServiceOptions): KobeMcpSer
       }
       // Defence in depth: an allow names the run and thread it was decided for.
       if (
-        tool === undefined ||
+        (tool === undefined && docs === undefined) ||
         decided.run_id === undefined ||
         request.threadId === undefined ||
-        decided.tool.name !== tool.name ||
+        decided.tool.name !== request.tool ||
         api === undefined
       ) {
         logger.error({ sandboxId: principal.sandboxId }, "kobe-mcp: allow without a run; refused");
+        return { outcome: "error", code: "failed", message: "Kobe could not run this tool." };
+      }
+      if (docs !== undefined) {
+        const answered = runKobeDocsTool(
+          docs,
+          request.arguments,
+          await kobeDocsContext(db, options.publicUrl),
+        );
+        return answered.ok
+          ? { outcome: "result", result: answered.result }
+          : { outcome: "error", code: answered.code, message: answered.message };
+      }
+      if (tool === undefined) {
         return { outcome: "error", code: "failed", message: "Kobe could not run this tool." };
       }
       const toolCallId =

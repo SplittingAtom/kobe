@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { headingSlug, rehypeHeadingIds } from "./heading-ids";
+import { headingSlug, rehypeHeadingIds } from "./headings.js";
 
 describe("rehypeHeadingIds (KOBE-616)", () => {
   it("slugs headings GitHub-style and numbers repeats", () => {

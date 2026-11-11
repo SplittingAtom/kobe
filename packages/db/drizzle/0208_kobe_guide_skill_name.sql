@@ -1,0 +1,2 @@
+ALTER TABLE "registry_skills" DROP CONSTRAINT "registry_skills_kobe_names";--> statement-breakpoint
+ALTER TABLE "registry_skills" ADD CONSTRAINT "registry_skills_kobe_names" CHECK (("registry_skills"."publisher" = 'kobe') = ("registry_skills"."name" IN ('data-analysis', 'charts', 'docx', 'pdf', 'xlsx', 'code-review', 'skill-creator', 'kobe-guide')));

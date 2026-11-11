@@ -45,6 +45,7 @@ export const KOBE_SKILL_NAMES = [
   "xlsx",
   "code-review",
   "skill-creator",
+  "kobe-guide",
 ] as const;
 const NOTE_MAX = 4000;
 const quoted = (values: readonly string[]) => sql.raw(values.map((v) => `'${v}'`).join(", "));

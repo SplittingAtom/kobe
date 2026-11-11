@@ -61,6 +61,10 @@ truth.
 | `list_mcp_resources`, `read_mcp_resource` | Read a connector's resources.                                                                                                                                            |
 | `tool_search`                             | Find a tool by description.                                                                                                                                              |
 
+Questions about Kobe itself: read the Kobe guide with the kobe connector's docs tools
+(`docs_index`, `docs_page`, `docs_search`, `docs_full`), which every agent has and which need no
+internet access; see [How AI agents should read these docs](reading-the-docs.md).
+
 You have no built-in web search or URL-reading tool. To fetch from the web, use `bash` (for example
 `curl`) or Python through the egress proxy, which is already configured.
 

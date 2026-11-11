@@ -6,13 +6,12 @@
   "description": "Kobe web app: Next.js + assistant-ui",
   "type": "module",
   "scripts": {
-    "generate:guide": "node scripts/generate-guide.mjs",
-    "dev": "node scripts/generate-guide.mjs && next dev",
-    "build": "node scripts/generate-guide.mjs && next build",
+    "dev": "next dev",
+    "build": "next build",
     "start": "next start",
-    "test": "node scripts/generate-guide.mjs && vitest run",
+    "test": "vitest run",
     "lint": "eslint .",
-    "typecheck": "node scripts/generate-guide.mjs && next typegen && tsc --noEmit"
+    "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
     "@assistant-ui/react": "0.15.26",
@@ -28,6 +27,7 @@
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
     "@kobe/agent-file": "workspace:*",
+    "@kobe/guide": "workspace:*",
     "@kobe/protocol": "workspace:*",
     "@tailwindcss/postcss": "4.3.3",
     "better-auth": "1.7.14",

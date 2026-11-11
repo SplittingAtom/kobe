@@ -7,6 +7,7 @@ import {
   type ToolDescriptor,
 } from "@kobe/protocol";
 import { KOBE_BUILTIN_CONNECTOR_ID } from "@kobe/db";
+import { isKobeDocsToolName } from "../kobe-mcp/docs/index.js";
 
 /**
  * The Kobe admin guard (KOBE-619, spec kobe-admin-mcp §6, KA2), applied after the policy engine at
@@ -18,7 +19,9 @@ import { KOBE_BUILTIN_CONNECTOR_ID } from "@kobe/db";
  * - where nobody can be asked it is denied: `auto` here, scheduled runs and skill evals below;
  * - a Kobe admin tool of any kind is denied in scheduled runs and skill evals (they get the docs
  *   tools only, §3);
- * - an engine deny stands as it is; reads otherwise follow the ordinary policy.
+ * - an engine deny stands as it is; reads otherwise follow the ordinary policy;
+ * - the docs tools (KOBE-620, KA4) are no admin tools: the ordinary policy alone decides them, in
+ *   every run (scheduled runs and evals included).
  *
  * Such an approval is never remembered (`approvals/remember-options.ts`, `approvals/decide.ts`)
  * nor approved in bulk (`approvals/approve-all.ts`). Reason codes `kobe_admin_write` and
@@ -34,6 +37,15 @@ export const KOBE_ADMIN_NOT_REMEMBERED =
 /** A tool of the built-in Kobe connector, by the server's own descriptor. */
 export function isKobeTool(tool: Pick<ToolDescriptor, "source" | "connector_id">): boolean {
   return tool.source === "mcp" && tool.connector_id === KOBE_BUILTIN_CONNECTOR_ID;
+}
+
+/** A Kobe **admin** tool: a tool of the built-in connector other than the docs tools (KOBE-620). */
+export function isKobeAdminTool(
+  tool: Pick<ToolDescriptor, "source" | "connector_id" | "name">,
+): boolean {
+  if (!isKobeTool(tool)) return false;
+  const name = kobeToolName(tool.name);
+  return name === undefined || !isKobeDocsToolName(name);
 }
 
 /** The Kobe tool's catalog name (`team_members_set_role`) from its Pi name. */
@@ -70,7 +82,7 @@ function notAllowed(decision: PolicyDecision, message: string): PolicyDecision {
 
 /** The decision with the guard applied: `decision` itself for every other tool. */
 export function guardKobeAdmin(decision: PolicyDecision, g: KobeAdminGuard): PolicyDecision {
-  if (!isKobeTool(g.tool) || decision.effect === "deny") return decision;
+  if (!isKobeAdminTool(g.tool) || decision.effect === "deny") return decision;
   if (g.input.actor.kind === "schedule" || g.evalRun) {
     return notAllowed(
       decision,

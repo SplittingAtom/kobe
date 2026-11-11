@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 /** KOBE-616 (ac-5): the generator writes the typed module, or fails the build with the reasons. */
-const SCRIPT = fileURLToPath(new URL("../../scripts/generate-guide.mjs", import.meta.url));
+const SCRIPT = fileURLToPath(new URL("../scripts/generate-guide.mjs", import.meta.url));
 let dir = "";
 
 function run(files: Record<string, string>) {
@@ -16,7 +16,7 @@ function run(files: Record<string, string>) {
     mkdirSync(dirname(join(dir, "guide", path)), { recursive: true });
     writeFileSync(join(dir, "guide", path), content);
   }
-  const out = join(dir, "guide.generated.ts");
+  const out = join(dir, "pages.ts");
   const r = spawnSync(process.execPath, [SCRIPT, join(dir, "guide"), out], { encoding: "utf8" });
   return { ...r, out };
 }
@@ -34,7 +34,7 @@ describe("scripts/generate-guide.mjs", () => {
     const r = run({ "a.md": PAGE, "sub/b.md": B });
     expect(r.status, r.stderr).toBe(0);
     const source = readFileSync(r.out, "utf8");
-    expect(source).toContain('import type { GuidePage } from "./guide-loader";');
+    expect(source).toContain('import type { GuidePage } from "../loader.js";');
     expect(source).toContain("export const GUIDE_PAGES: readonly GuidePage[] = [");
     expect(source).toContain('"slug": "sub/b"');
     expect(source).toContain("(/docs/sub/b)");
