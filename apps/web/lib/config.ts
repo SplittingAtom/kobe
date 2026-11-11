@@ -14,6 +14,11 @@ export interface WebConfig {
   readonly serverUrl: string | null;
   /** Why `serverUrl` is null, for the startup warning; null when it is set. */
   readonly problem: string | null;
+  /**
+   * KOBE-616: the public origin (`KOBE_PUBLIC_URL`, the chart sets the server's value) for the
+   * guide's absolute links in /llms.txt; null when unset (then the request's host is used).
+   */
+  readonly publicUrl: string | null;
 }
 
 const serverUrlSchema = z.url({ protocol: /^https?$/ }).refine((value) => {
@@ -28,10 +33,23 @@ const serverUrlSchema = z.url({ protocol: /^https?$/ }).refine((value) => {
   );
 }, "must be an origin only (http(s)://host[:port], no path, query or credentials)");
 
+function parsePublicUrl(env: Readonly<Record<string, string | undefined>>): string | null {
+  const raw = env.KOBE_PUBLIC_URL?.trim() ?? "";
+  if (raw === "") return null;
+  const parsed = serverUrlSchema.safeParse(raw);
+  if (!parsed.success) {
+    const reason = parsed.error.issues[0]?.message ?? "invalid URL";
+    throw new Error(`KOBE_PUBLIC_URL is invalid: ${reason} (got ${JSON.stringify(raw)})`);
+  }
+  return new URL(parsed.data).origin;
+}
+
 export function parseWebConfig(env: Readonly<Record<string, string | undefined>>): WebConfig {
+  const publicUrl = parsePublicUrl(env);
   const raw = env.KOBE_SERVER_URL?.trim() ?? "";
   if (raw === "") {
     return {
+      publicUrl,
       serverUrl: null,
       problem:
         "KOBE_SERVER_URL is not set: the site branding (name, logo, theme) falls back to the Kobe defaults",
@@ -42,7 +60,7 @@ export function parseWebConfig(env: Readonly<Record<string, string | undefined>>
     const reason = parsed.error.issues[0]?.message ?? "invalid URL";
     throw new Error(`KOBE_SERVER_URL is invalid: ${reason} (got ${JSON.stringify(raw)})`);
   }
-  return { serverUrl: new URL(parsed.data).origin, problem: null };
+  return { serverUrl: new URL(parsed.data).origin, problem: null, publicUrl };
 }
 
 let cached: WebConfig | undefined;

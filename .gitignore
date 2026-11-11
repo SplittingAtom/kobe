@@ -31,3 +31,6 @@ e2e/browser/playwright-report/
 e2e/browser/console-shots/
 e2e/browser/perf-results/
 e2e/browser-results/
+
+# The Kobe guide compiled from docs/guide (KOBE-616, apps/web/scripts/generate-guide.mjs)
+apps/web/lib/docs/guide.generated.ts

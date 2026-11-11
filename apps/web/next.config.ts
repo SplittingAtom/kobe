@@ -5,6 +5,7 @@ import { resolveBuildId } from "./lib/build/build-id";
 import { SECURITY_HEADERS } from "./lib/security/csp";
 import { skillEditorRedirects } from "./lib/skills/redirects";
 import { agentsRedirects } from "./lib/agents/redirects";
+import { GUIDE_MARKDOWN_REWRITE } from "./lib/docs/rewrite";
 
 // KOBE-487: one id per build. Set back into the environment so build workers that load this file
 // again agree; inlined into client and server code as process.env.KOBE_BUILD_ID (lib/build).
@@ -29,6 +30,10 @@ const nextConfig: NextConfig = {
   // KOBE-569: My agents became the Agents page (/agents); /me/agents links still land.
   async redirects() {
     return [...consoleRedirects(), ...skillEditorRedirects(), ...agentsRedirects()];
+  },
+  // KOBE-616: /docs/<slug>.md is a guide page's Markdown (a route handler); /docs/<slug> is the viewer.
+  async rewrites() {
+    return { beforeFiles: [GUIDE_MARKDOWN_REWRITE], afterFiles: [], fallback: [] };
   },
 };
 
