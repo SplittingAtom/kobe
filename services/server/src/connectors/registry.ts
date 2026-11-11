@@ -72,9 +72,17 @@ export const updateSchema = z
     authKind: z.enum(AUTH_KINDS),
     status: z.enum(STATUSES),
     credentialSource: z.enum(CONNECTOR_CREDENTIAL_SOURCES),
+    /**
+     * The status the caller saw (KOBE-622): refused `changed_since_approval` under the row lock
+     * when it is another one now (the Kobe MCP tool sends the approved before-state).
+     */
+    expectedStatus: z.enum(STATUSES),
   })
   .partial()
-  .refine((v) => Object.keys(v).length > 0, "nothing to change")
+  .refine(
+    (v) => Object.keys(v).filter((k) => k !== "expectedStatus").length > 0,
+    "nothing to change",
+  )
   .refine(
     (v) => v.credentialSource !== "site" || v.authKind === undefined || v.authKind === "api_key",
     SITE_NEEDS_API_KEY,
@@ -146,7 +154,9 @@ const columns = {
   updatedAt: connectors.updatedAt,
 } as const;
 
-const live = isNull(connectors.deletedAt);
+// The built-in Kobe connector (KOBE-619) is not a registered server: the registry never lists,
+// edits, probes, pins or removes it (the site switch `kobe_mcp.mode` governs it).
+const live = and(isNull(connectors.deletedAt), isNull(connectors.builtin));
 
 export async function listConnectors(db: KobeDb): Promise<ConnectorView[]> {
   return db.select(columns).from(connectors).where(live).orderBy(asc(connectors.name));
@@ -211,7 +221,10 @@ export async function updateConnector(
   input: UpdateInput,
 ): Promise<
   | { ok: true; connector: ConnectorView }
-  | { ok: false; error: NameConflict | "not_found" | "site_needs_api_key" }
+  | {
+      ok: false;
+      error: NameConflict | "not_found" | "site_needs_api_key" | "changed_since_approval";
+    }
 > {
   return db.transaction(async (tx) => {
     const [current] = await tx
@@ -220,6 +233,9 @@ export async function updateConnector(
       .where(and(eq(connectors.id, id), live))
       .for("update");
     if (!current) return { ok: false as const, error: "not_found" as const };
+    if (input.expectedStatus !== undefined && input.expectedStatus !== current.status) {
+      return { ok: false as const, error: "changed_since_approval" as const };
+    }
     // Asking for a site-wide key on a connector that will not be api_key is refused (review L4).
     if (input.credentialSource === "site" && (input.authKind ?? current.authKind) !== "api_key") {
       return { ok: false as const, error: "site_needs_api_key" as const };

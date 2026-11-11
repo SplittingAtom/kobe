@@ -16,6 +16,12 @@ export interface ChatConnector {
   readonly name: string;
   readonly enabled: boolean;
   readonly problem: ChatConnectorProblem | null;
+  /**
+   * The built-in Kobe connector (KOBE-623): always on (its docs tools are in every conversation),
+   * so it has no toggle; `admin` is what the member's admin tools would be where the agent uses
+   * it (the site's and team's switches and the member's role decide).
+   */
+  readonly builtin?: { readonly kind: "kobe"; readonly admin: "off" | "read" | "read_write" };
 }
 
 const enc = encodeURIComponent;

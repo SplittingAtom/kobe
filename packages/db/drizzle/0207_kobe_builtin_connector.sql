@@ -1,0 +1,4 @@
+ALTER TABLE "connectors" ADD COLUMN "builtin" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "connectors_builtin_key" ON "connectors" USING btree ("builtin") WHERE "connectors"."builtin" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "connectors" ADD CONSTRAINT "connectors_builtin" CHECK ("connectors"."builtin" IS NULL OR ("connectors"."builtin" = 'kobe' AND "connectors"."id" = '6b6f6265-0000-4000-8000-000000000001'::uuid AND "connectors"."auth_kind" = 'none' AND "connectors"."credential_source" = 'member' AND "connectors"."tools_hash" IS NULL AND "connectors"."tools_snapshot" = '[]'::jsonb));--> statement-breakpoint
+ALTER TABLE "connectors" ADD CONSTRAINT "connectors_builtin_url" CHECK (("connectors"."builtin" IS NOT NULL) = ("connectors"."url" = 'http://kobe-server.internal/internal/v1/mcp/kobe'));

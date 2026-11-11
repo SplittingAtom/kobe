@@ -97,7 +97,21 @@ export function siteInvitesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVaria
   app.delete("/:id", async (c) => {
     const id = idSchema.safeParse(c.req.param("id"));
     if (!id.success) return invalidRequest(c);
-    return (await revokeInvite(db, id.data)) ? c.body(null, 204) : c.json(notFound, 404);
+    // `?expectedEmail=` (KOBE-623): revoke only while the invitation is still for that address.
+    const expected = c.req.query("expectedEmail");
+    if (expected !== undefined && !z.email().max(254).safeParse(expected).success)
+      return invalidRequest(c);
+    const revoked = await revokeInvite(db, id.data, expected);
+    if (revoked === "changed_since_approval") {
+      return c.json(
+        {
+          code: "changed_since_approval",
+          message: "The invitation changed meanwhile; nothing was changed.",
+        },
+        409,
+      );
+    }
+    return revoked ? c.body(null, 204) : c.json(notFound, 404);
   });
 
   return app;

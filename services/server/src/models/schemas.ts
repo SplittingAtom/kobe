@@ -149,6 +149,21 @@ export const addCatalogSchema = z.strictObject({
 });
 export type AddCatalogInput = z.infer<typeof addCatalogSchema>;
 
+/**
+ * The values the caller saw (KOBE-622): the update is refused `changed_since_approval` under the
+ * row lock when any named one differs now (the Kobe MCP tool sends the approved before-state).
+ */
+export const catalogExpectedSchema = z
+  .strictObject({
+    label: z.string().max(200).nullable(),
+    input_usd_per_mtok: z.number().nullable(),
+    output_usd_per_mtok: z.number().nullable(),
+    max_output_tokens: z.number().int().nullable(),
+    context_window: z.number().int().nullable(),
+  })
+  .partial();
+export type CatalogExpected = z.infer<typeof catalogExpectedSchema>;
+
 export const updateCatalogSchema = z
   .strictObject({
     provider_id: providerIdSchema.optional(),
@@ -157,8 +172,9 @@ export const updateCatalogSchema = z
     input_modalities: inputModalitiesSchema.optional(),
     ...priceFields,
     ...tokenLimitFields,
+    expected: catalogExpectedSchema.optional(),
   })
-  .refine((v) => Object.keys(v).length > 0, "nothing to change");
+  .refine((v) => Object.keys(v).filter((k) => k !== "expected").length > 0, "nothing to change");
 export type UpdateCatalogInput = z.infer<typeof updateCatalogSchema>;
 
 export const teamModelSchema = z.strictObject({
@@ -170,6 +186,17 @@ export const teamModelSchema = z.strictObject({
    * narrow the site's; null goes back to the site's.
    */
   thinking_max: teamThinkingMaxSchema.optional(),
+  /**
+   * KOBE-621: the team's setting as the caller saw it; another one is a 409
+   * `changed_since_approval` (a Kobe MCP write's approved before-state).
+   */
+  expected: z
+    .strictObject({
+      enabled: z.boolean(),
+      is_default: z.boolean(),
+      thinking_max: teamThinkingMaxSchema,
+    })
+    .optional(),
 });
 export type TeamModelInput = z.infer<typeof teamModelSchema>;
 

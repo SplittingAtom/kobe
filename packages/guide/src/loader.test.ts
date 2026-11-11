@@ -7,7 +7,7 @@ import {
   slugFromPath,
   splitFrontmatter,
   type GuideFile,
-} from "./guide-loader";
+} from "./loader.js";
 
 /** KOBE-616 (ac-5, ac-6): the guide's build step — frontmatter, order, slugs, links, failures. */
 

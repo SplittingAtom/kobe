@@ -6,7 +6,12 @@ import { listMaintainers, recordFirstMaintainer } from "./maintainers.js";
 import { confirmerOf, dutiesProblem } from "./review-duties.js";
 import { authoritativeScorecardProblem, isSiteAdmin, siteJudge } from "./review-guards.js";
 import { cautionKeys, unacknowledgedProblem } from "./review-findings.js";
-import { DECIDABLE_STATES, PROBLEMS, type Problem } from "./review-problems.js";
+import {
+  CHANGED_SINCE_APPROVAL,
+  DECIDABLE_STATES,
+  PROBLEMS,
+  type Problem,
+} from "./review-problems.js";
 import { versionRow, type VersionRow } from "./review-queue.js";
 import { inRegistryTx } from "./registry-tx.js";
 import { cancelOpenReruns } from "./rerun.js";
@@ -129,10 +134,15 @@ export async function approve(
   versionId: string,
   userId: string,
   input: DecisionInput,
+  /** The state the caller saw (a Kobe MCP call's approved before-state), checked under the lock. */
+  expectedState?: string,
 ): Promise<ApproveResult> {
   try {
     return await inRegistryTx(db, async (tx, registryTeamId) => {
       const v = await versionRow(tx, versionId, true);
+      if (v && expectedState !== undefined && v.state !== expectedState) {
+        throw new Refused(CHANGED_SINCE_APPROVAL);
+      }
       const { problems, sole } = await approveProblems(tx, v, userId, input);
       const first = problems[0];
       if (first || !v) throw new Refused(first ?? PROBLEMS.not_found);

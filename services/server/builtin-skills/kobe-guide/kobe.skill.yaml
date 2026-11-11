@@ -1,0 +1,6 @@
+apiVersion: kobe.dev/skill/v1
+name: kobe-guide
+version: 1.0.0
+summary: "Answers questions about using and administering Kobe from the Kobe user guide, read through the kobe connector's docs tools."
+license: Apache-2.0
+changelog: Published by Kobe with the Kobe guide's docs tools (KOBE-620).

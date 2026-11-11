@@ -64,7 +64,9 @@ import {
 import { NO_PROBE, type ConnectorProbe } from "./connectors/probe.js";
 import type { AppResultsDeps } from "./apps/results.js";
 import { captureKey } from "./apps/capture-ticket.js";
-import { createMcpService, type McpService } from "./mcp/service.js";
+import { createMcpService, DENIED_AUDIT_RATE, type McpService } from "./mcp/service.js";
+import { createKobeMcpService, type KobeMcpService } from "./kobe-mcp/service.js";
+import { createRateLimiter } from "./sandbox/rate-limit.js";
 import { createPolicyEngine } from "./policy/engine.js";
 import { createToolRegistry } from "./policy/registry.js";
 import { createDbRuleSource, createDbSettingsSource } from "./policy/rule-store.js";
@@ -270,6 +272,11 @@ export interface ServerDeps {
    * the internal listener only (`routes/internal.ts`).
    */
   readonly mcp: McpService;
+  /**
+   * The built-in Kobe MCP server (KOBE-619): its tools listed and decided-and-executed on the
+   * internal listener; `createApp` binds the public API router it dispatches admin tools to.
+   */
+  readonly kobeMcp: KobeMcpService;
   /** The address policy registered connector URLs must pass (KOBE-100). */
   readonly connectorUrlPolicy: ConnectorUrlPolicy;
   /** Fetches a connector's live `tools/list` through the MCP proxy, to pin it (KOBE-101). */
@@ -482,6 +489,18 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     ...(options.mcp?.now ? { now: options.mcp.now } : {}),
     captureKey: captureKey(options.authSecret),
   });
+  const kobeMcp = createKobeMcpService({
+    db: database.db,
+    publicUrl: new URL(options.publicUrl).origin,
+    policy: policySources,
+    runContext,
+    approvals: approvalVerifierForMcp(database.db, approvals.verifier),
+    mayAuditDenied: (() => {
+      const limiter = createRateLimiter(DENIED_AUDIT_RATE);
+      return (sandboxId: string) => limiter.take(sandboxId) === 0;
+    })(),
+    ...(options.mcp?.now ? { now: options.mcp.now } : {}),
+  });
   const budgets = new BudgetMonitor({
     db: database.db,
     connectionString: options.databaseUrl,
@@ -575,6 +594,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     skillEvalJudge,
     skillManifests,
     mcp,
+    kobeMcp,
     connectorUrlPolicy,
     connectorProbe: options.connectorProbe ?? NO_PROBE,
     appCaller: options.appCaller ?? NO_APP_CALLER,

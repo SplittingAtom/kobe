@@ -16,10 +16,10 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "NODE_OPTIONS=--max-old-space-size=4096 tsc -p tsconfig.build.json",
     "test": "vitest run",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "NODE_OPTIONS=--max-old-space-size=4096 tsc --noEmit",
     "test:db": "vitest run -c vitest.db.config.ts"
   },
   "dependencies": {
@@ -31,6 +31,7 @@
     "@kobe/address-policy": "workspace:*",
     "@kobe/agent-file": "workspace:*",
     "@kobe/db": "workspace:*",
+    "@kobe/guide": "workspace:*",
     "@kobe/protocol": "workspace:*",
     "@kobe/session-token": "workspace:*",
     "@kobe/skill-scanner": "workspace:*",

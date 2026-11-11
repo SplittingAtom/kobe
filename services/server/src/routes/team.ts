@@ -8,7 +8,7 @@ import { notifyWorkspaceAccess } from "../event-stream/access.js";
 import { logger } from "../logger.js";
 import { invalidRequest, membershipError, parseBody } from "../teams/http.js";
 import { listMembers, removeMember, setMemberRole } from "../teams/members.js";
-import { idSchema, memberRoleSchema } from "../teams/schemas.js";
+import { idSchema, memberRoleSchema, teamRoleSchema } from "../teams/schemas.js";
 
 /**
  * The active team (`/v1/team`, spec §6.1): who you are in it and its membership (D8). People join
@@ -32,7 +32,13 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
     const userId = idSchema.safeParse(c.req.param("userId"));
     const body = await parseBody(c, memberRoleSchema);
     if (!userId.success || !body) return invalidRequest(c);
-    const result = await setMemberRole(db, c.get("team").id, userId.data, body.role);
+    const result = await setMemberRole(
+      db,
+      c.get("team").id,
+      userId.data,
+      body.role,
+      body.expectedRole,
+    );
     if (!result.ok) return membershipError(c, result.error);
     // A demoted team admin no longer edits projects without a row of their own: those checkouts
     // end (KOBE-579); mounts are brought in line (MT2).
@@ -45,9 +51,13 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
 
   app.delete("/members/:userId", requireTeamPermission("team.members.manage"), async (c) => {
     const userId = idSchema.safeParse(c.req.param("userId"));
-    if (!userId.success) return invalidRequest(c);
+    // `?expectedRole=` (KOBE-621): remove only while the member still has this role (the before-state
+    // a Kobe MCP removal was approved with), checked under the change's row lock.
+    const expectedRaw = c.req.query("expectedRole");
+    const expected = expectedRaw === undefined ? undefined : teamRoleSchema.safeParse(expectedRaw);
+    if (!userId.success || (expected !== undefined && !expected.success)) return invalidRequest(c);
     const teamId = c.get("team").id;
-    const result = await removeMember(db, teamId, userId.data);
+    const result = await removeMember(db, teamId, userId.data, expected?.data);
     if (!result.ok) return membershipError(c, result.error);
     // Their scheduled runs here stop while the sandbox still answers (KOBE-180); the schedules were
     // paused with the removal. A failure is logged; the scheduler's owner sweep cancels what is left

@@ -54,6 +54,10 @@ or a wildcard of its parent domain (`*.parent`), never broader. Site admins also
 appear in the team console's **Egress** page (**Access requests**) and the site console's **Egress
 ceiling** page.
 
+Where the team turned on Kobe's admin tools, team admins can also ask the agent to list and decide
+access requests or enable a domain; each decision shows an **Admin change** card. Domains with
+injected headers are changed in the console only.
+
 ## Tips
 
 - Installing Python or npm packages needs the package index (for example `pypi.org` and

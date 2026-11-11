@@ -9,8 +9,9 @@ import {
   updateAgentRosterEntryRequestSchema,
   type AgentRosterErrorCode,
 } from "@kobe/protocol";
+import { withTeam } from "@kobe/db";
 import type { RosterActor, RosterTarget, SiteRosterActor } from "../agents/access.js";
-import { entryView } from "../agents/roster.js";
+import { entryView, teamEntry } from "../agents/roster.js";
 import { decodeCursor, listRoster } from "../agents/roster-list.js";
 import {
   assignAgent,
@@ -195,6 +196,11 @@ export function teamAgentRosterRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
     }
     const update = await readAdminUpdate(c, deps, "team");
     if (update instanceof Response) return update;
+    // `?expectedSuspended=true|false` (KOBE-621): suspend or resume for this team only while the
+    // team's suspension is still the approved before-state (never an entry decision).
+    const expectedRaw = c.req.query("expectedSuspended");
+    if (expectedRaw !== undefined)
+      return conditionalSuspension(c, deps, actor, update, expectedRaw);
     const result = await updateEntry(db, actor, update);
     if (result)
       return result.ok ? c.json({ entry: entryView(result.value) }) : rosterError(c, result.error);
@@ -214,13 +220,71 @@ export function teamAgentRosterRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
     }
     const here = await setTeamSuspension(db, actor, update.agentId, suspended);
     if (here.ok) return c.json(here.value);
+    const error = here.error;
+    // Only with an expected suspension (not given here).
+    if (error === "changed_since_approval") return c.json(CHANGED, 409);
     // Neither an entry of this roster nor a site-wide agent the team runs.
-    return rosterError(c, here.error === "agent_not_found" ? "roster_entry_not_found" : here.error);
+    return rosterError(c, error === "agent_not_found" ? "roster_entry_not_found" : error);
   });
 
   // Adopt an entry into a team-owned agent (KOBE-568, AR10).
   mountTeamAdopt(app, deps);
   return app;
+}
+
+const CHANGED = {
+  code: "changed_since_approval",
+  message: "The agent's suspension changed meanwhile; nothing was changed.",
+} as const;
+
+/**
+ * A team suspension or resume conditional on the current one (KOBE-621): a team-owned agent's own
+ * status, or this team's suspension of a site-wide agent; a 409 `changed_since_approval` when it
+ * is not the opposite of the change.
+ */
+async function conditionalSuspension(
+  c: TeamCtx,
+  deps: ServerDeps,
+  actor: RosterActor,
+  update: AdminUpdate,
+  expectedRaw: string,
+) {
+  const db = deps.database.db;
+  const suspended = update.state === "suspended";
+  const expected = expectedRaw === "true" ? true : expectedRaw === "false" ? false : undefined;
+  if (
+    update.state === "removed" ||
+    update.versionRule !== undefined ||
+    expected === undefined ||
+    expected === suspended
+  ) {
+    return rosterError(c, "invalid_request", "expectedSuspended is the opposite of the change.");
+  }
+  // The entry first, as the console's own request reads it (`updateEntry`): a proposal is decided,
+  // never suspended. The console answers its suspend `roster_entry_not_found` (nothing runs here
+  // to suspend), and so does this; a resume approved against "suspended" does not hold for a
+  // proposal (the console's would approve it), so it is refused as changed.
+  const entry = await withTeam(db, actor.teamId, (tx) =>
+    teamEntry(tx, actor.teamId, update.agentId),
+  );
+  if (entry?.state === "proposed") {
+    return suspended ? rosterError(c, "roster_entry_not_found") : c.json(CHANGED, 409);
+  }
+  const location = { scope: "team" as const, teamId: actor.teamId };
+  const owned = await findAgent(db, location, update.agentId);
+  if (owned) {
+    const from = expected ? "suspended" : "active";
+    const to = suspended ? "suspended" : "active";
+    const done = await setAgentStatus(db, location, owned.id, to, from);
+    return done === null
+      ? c.json(CHANGED, 409)
+      : c.json({ agentId: owned.id, suspendedHere: suspended });
+  }
+  const here = await setTeamSuspension(db, actor, update.agentId, suspended, expected);
+  if (here.ok) return c.json(here.value);
+  const error = here.error;
+  if (error === "changed_since_approval") return c.json(CHANGED, 409);
+  return rosterError(c, error === "agent_not_found" ? "roster_entry_not_found" : error);
 }
 
 /** `PUT /v1/site/agent-roster/:agentId` (site admins): the same decisions for the site roster. */

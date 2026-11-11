@@ -9,6 +9,7 @@ import {
   type KobeTx,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
+import { allowedKobeTools, loadKobeAccess, loadKobeBuiltin } from "../kobe-mcp/access.js";
 import { exposedTools } from "../mcp/catalog.js";
 import {
   loadTeamConnectorRows,
@@ -70,6 +71,12 @@ export interface ChatConnector {
   readonly enabled: boolean;
   /** Why it is not working; null when it works. */
   readonly problem: ConnectorProblem | null;
+  /**
+   * The built-in Kobe connector (KOBE-623, spec kobe-admin-mcp KA7): its docs tools are on in every
+   * conversation, so it has no toggle; `admin` says which admin tools the member gets where the
+   * agent uses the Kobe connector (`off` while the switches or their role give none).
+   */
+  readonly builtin?: { readonly kind: "kobe"; readonly admin: "off" | "read" | "read_write" };
 }
 
 export interface ChatViewer {
@@ -119,6 +126,38 @@ export async function listChatConnectors(
   threadId: string | null,
   now = new Date(),
 ): Promise<ChatConnector[]> {
+  const kobe = await kobeChatConnector(tx, viewer);
+  const listed = await listRegisteredChatConnectors(tx, viewer, threadId, now);
+  return kobe === undefined ? listed : [kobe, ...listed];
+}
+
+/**
+ * The built-in Kobe connector's row (first in the list) while the site switch is not `off`: always
+ * on, and the admin tools the member would get now (switches and role).
+ */
+async function kobeChatConnector(
+  tx: KobeTx,
+  viewer: ChatViewer,
+): Promise<ChatConnector | undefined> {
+  const row = await loadKobeBuiltin(tx);
+  if (row === undefined) return undefined;
+  const tools = allowedKobeTools(await loadKobeAccess(tx, viewer.teamId, viewer.userId));
+  const admin = tools.length === 0 ? "off" : tools.some((t) => !t.readOnly) ? "read_write" : "read";
+  return {
+    id: row.id,
+    name: row.name,
+    enabled: true,
+    problem: null,
+    builtin: { kind: "kobe", admin },
+  };
+}
+
+async function listRegisteredChatConnectors(
+  tx: KobeTx,
+  viewer: ChatViewer,
+  threadId: string | null,
+  now: Date,
+): Promise<ChatConnector[]> {
   const rows = await loadTeamConnectorRows(tx, viewer.teamId);
   if (rows.length === 0) return [];
   const grants = new Map(
@@ -154,7 +193,8 @@ export async function listChatConnectors(
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export type ToggleError = "thread_not_found" | "connector_not_found" | "connector_not_working";
+export type ToggleError =
+  "thread_not_found" | "connector_not_found" | "connector_not_working" | "connector_always_on";
 
 /**
  * Turns `connectorId` on or off for the viewer's own thread, audited. Refused for a thread that is
@@ -184,6 +224,7 @@ export async function setThreadConnector(
   if (!thread) return { ok: false, error: "thread_not_found" };
   const listed = (await listChatConnectors(tx, viewer, threadId)).find((c) => c.id === connectorId);
   if (!listed) return { ok: false, error: "connector_not_found" };
+  if (listed.builtin !== undefined) return { ok: false, error: "connector_always_on" };
   if (listed.problem !== null) return { ok: false, error: "connector_not_working" };
   if (listed.enabled !== enabled) {
     if (enabled) {
@@ -227,7 +268,8 @@ export async function checkConnectorsOff(
   const listed = new Map((await listChatConnectors(tx, viewer, null)).map((c) => [c.id, c]));
   for (const id of ids) {
     const c = listed.get(id);
-    if (!c) return "connector_not_found";
+    // The built-in Kobe connector cannot be turned off (its docs tools are always on).
+    if (!c || c.builtin !== undefined) return "connector_not_found";
     if (c.problem !== null) return "connector_not_working";
   }
   return null;

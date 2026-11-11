@@ -2205,7 +2205,7 @@ JS
     kobe_dir() { # a Kobe skill's directory in the run's skill store: its newest approved version
       printf '/run/kobe-skills/store/sk-%s' "$(psql_kobe "SELECT v.runtime_hash FROM registry_versions v JOIN registry_skills s ON s.id = v.skill_id WHERE s.name = '$1' AND s.publisher = 'kobe' AND v.state = 'approved' ORDER BY v.seq DESC LIMIT 1")"
     }
-    contains "Kobe skills: the seven are Kobe-published catalog skills, approved (KOBE-317)" '^7$' \
+    contains "Kobe skills: the eight are Kobe-published catalog skills, approved (KOBE-317; kobe-guide KOBE-620)" '^8$' \
       "$(psql_kobe "SELECT count(DISTINCT s.name) FROM registry_skills s JOIN registry_versions v ON v.skill_id = s.id WHERE s.publisher = 'kobe' AND v.state = 'approved'")"
     contains "the gallery holds exactly one agent, Kobe (key kobe)" '^kobe$' \
       "$(psql_kobe "SELECT string_agg(gallery_key, ',') FROM site_agents WHERE scope = 'gallery' AND archived_at IS NULL")"

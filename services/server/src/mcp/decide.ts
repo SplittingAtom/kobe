@@ -25,6 +25,7 @@ import {
   describePinnedTool,
   exposedTools,
   loadTeamConnector,
+  type EnabledConnector,
   type TeamConnector,
 } from "./catalog.js";
 import {
@@ -103,6 +104,12 @@ export type McpCallDecision =
       readonly reason: PolicyReasonCode;
       readonly approval_id?: string;
       /**
+       * The run the call was decided for and the tool call id it was decided under (KOBE-619: the
+       * Kobe MCP executor's delegation). Server-internal: the proxy's schema ignores them.
+       */
+      readonly run_id?: string;
+      readonly tool_call_id?: string;
+      /**
        * MCP Apps (KOBE-438): the tool opens a pinned, approved `ui://` template, so the proxy
        * reports the upstream's full result with this signed ticket (`capture-ticket.ts`). Absent
        * for every other tool, and from a server without a capture key.
@@ -127,6 +134,31 @@ export interface McpDecideDeps {
   readonly mayAuditDenied?: (sandboxId: string) => boolean;
   /** Signs MCP Apps capture tickets (KOBE-438); unset: results are never captured. */
   readonly captureKey?: Buffer;
+  /**
+   * The connector as enabled in the team (default {@link loadTeamConnector}). The built-in Kobe
+   * connector (KOBE-619) supplies its catalog here instead of a pinned snapshot.
+   */
+  readonly loadConnector?: (
+    teamId: string,
+    connectorId: string,
+  ) => Promise<EnabledConnector | undefined>;
+  /**
+   * A refusal decided before any run is looked at (KOBE-619: the person's permission, the Kobe
+   * switches, the admin limits); audited like every deny.
+   */
+  readonly refuse?: (
+    tool: PinnedTool,
+    descriptor: ToolDescriptor,
+  ) => Promise<{ readonly code: PolicyReasonCode; readonly message: string } | undefined>;
+  /**
+   * Applied to each run's engine decision before they are combined (KOBE-619: the Kobe admin
+   * guard, which asks for writes in every mode and denies where nobody can be asked).
+   */
+  readonly guard?: (
+    decision: PolicyDecision,
+    input: PolicyInput,
+    run: ActiveRunContext,
+  ) => PolicyDecision;
 }
 
 /** Same grammar as the `mcp.tool_call` audit field: other ids are decided on but not recorded. */
@@ -332,7 +364,10 @@ export async function decideMcpCall(
   };
 
   try {
-    const connector = await loadTeamConnector(deps.db, principal.teamId, request.connectorId);
+    const connector = await (deps.loadConnector ?? ((t, c) => loadTeamConnector(deps.db, t, c)))(
+      principal.teamId,
+      request.connectorId,
+    );
     if (!connector) {
       // Not enabled (or not registered): the name is unknown, the refusal is still audited.
       facts = {
@@ -375,6 +410,8 @@ export async function decideMcpCall(
         `${pinned.pi_name} is offered only to apps, not to agents.`,
       );
     }
+    const refused = await deps.refuse?.(pinned, descriptor);
+    if (refused !== undefined) return await denied(refused.code, refused.message);
     if (!exposedTools(connector).some((t) => t.pi_name === pinned.pi_name)) {
       return await denied(
         "connector_exposure",
@@ -410,8 +447,18 @@ export async function decideMcpCall(
 
     const toolCallId = request.toolCallId ?? `mcp-proxy-${randomUUID()}`;
     const engine = engineForCall(deps.policy);
-    const decide = (run: ActiveRunContext) =>
-      engine.decide(policyInputFor(principal, run, descriptor, toolCallId, input.data, connector));
+    const decide = async (run: ActiveRunContext) => {
+      const policyInput = policyInputFor(
+        principal,
+        run,
+        descriptor,
+        toolCallId,
+        input.data,
+        connector,
+      );
+      const decision = await engine.decide(policyInput);
+      return deps.guard === undefined ? decision : deps.guard(decision, policyInput, run);
+    };
     // The sandbox's claim picks the named run, but cannot pick its policy: the call is decided
     // under every distinct policy context of its active runs (review M1), bounded (fan-out.ts).
     const namedDecision = await decide(named);
@@ -561,6 +608,8 @@ export async function decideMcpCall(
       input_sha256: inputDigest(input.data),
       reason,
       ...(approvalId === undefined ? {} : { approval_id: approvalId }),
+      run_id: named.runId,
+      tool_call_id: toolCallId,
       ...(capture === undefined ? {} : { app_capture: { ticket: capture } }),
     };
   } catch (err) {

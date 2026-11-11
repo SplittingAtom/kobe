@@ -14,6 +14,7 @@ import { appendRunEventsInTx, withAppendTx } from "../event-stream/append.js";
 import { insertUserAllowRule, type ApprovedCall } from "../policy/remember.js";
 import { readTeamRememberLimits } from "../policy/remember-limits-store.js";
 import { isViewedFileAsk, VIEWED_FILE_NOT_REMEMBERED } from "../policy/viewed-file-guard.js";
+import { isKobeAdminAsk, KOBE_ADMIN_NOT_REMEMBERED } from "../policy/kobe-admin-guard.js";
 import { lockRunRow, lockThreadRow } from "../runs/store.js";
 import { notifyHintInTx } from "../sandbox-wire/bus.js";
 import { WIRE_DEFAULTS } from "../sandbox-wire/constants.js";
@@ -158,6 +159,10 @@ function approvedCall(row: ApprovalRow, tool: ToolDescriptor | undefined): Appro
   // KOBE-493: a viewed-file ask is asked again whatever is remembered.
   if (isViewedFileAsk(row.reasons)) {
     throw new ApprovalError("remember_not_allowed", 403, VIEWED_FILE_NOT_REMEMBERED);
+  }
+  // KOBE-619: a Kobe admin change is asked every time.
+  if (isKobeAdminAsk(row.reasons)) {
+    throw new ApprovalError("remember_not_allowed", 403, KOBE_ADMIN_NOT_REMEMBERED);
   }
   if (tool === undefined || tool.name !== row.tool) {
     throw new ApprovalError(

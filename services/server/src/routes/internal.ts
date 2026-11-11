@@ -8,6 +8,7 @@ import { logger } from "../logger.js";
 import { reportCapturedResult, resultReportSchema, type AppResultsDeps } from "../apps/results.js";
 import { authenticateSandbox, type McpAuthDeps } from "../mcp/principal.js";
 import type { McpService } from "../mcp/service.js";
+import type { KobeMcpService } from "../kobe-mcp/service.js";
 import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
 
 /**
@@ -28,6 +29,11 @@ import { createRateLimiter, type RateLimiter } from "../sandbox/rate-limit.js";
  *      user only (KOBE-108); 404 `not_connected` | `connector_not_available`, 503 `unavailable`
  * POST /internal/v1/mcp/connectors/{id}/results `{ticket, input, result}` (KOBE-438) → 201
  *      `{storage}`; 403 `ticket_invalid`, 409 `run_not_active`, 429 `too_many_unclaimed` (the allow's `app_capture.ticket`, MCP Apps)
+ * POST /internal/v1/mcp/kobe/list → 200 `{connector, tools}` (KOBE-619: the built-in Kobe connector's
+ *      tools for this person now) | 404 `connector_not_available`
+ * POST /internal/v1/mcp/kobe/calls `{tool, arguments, thread_id?, tool_call_id?}` → 200
+ *      `{outcome: "result", result}` | `{outcome: "denied" | "error", code, message}`: decided and
+ *      executed in this one request (spec kobe-admin-mcp §3) | 404 `connector_not_available`
  * 429 `rate_limited` (per sandbox, `DECIDE_RATE`),
  * 404 `connector_not_available`, 400 `invalid_request`.
  */
@@ -52,6 +58,8 @@ export interface InternalAppDeps {
   readonly appResults?: AppResultsDeps;
   readonly auth: McpAuthDeps;
   readonly decideLimiter?: RateLimiter;
+  /** The built-in Kobe MCP server (KOBE-619); unset: its routes answer not available. */
+  readonly kobe?: KobeMcpService;
 }
 
 const callBodySchema = z.strictObject({
@@ -165,7 +173,47 @@ export function createInternalApp(deps: InternalAppDeps): Hono {
       ...(body.data.thread_id === undefined ? {} : { threadId: body.data.thread_id }),
       ...(body.data.tool_call_id === undefined ? {} : { toolCallId: body.data.tool_call_id }),
     });
+    if (decision.decision === "allow") {
+      // Server-internal fields (KOBE-619) stay here.
+      const { run_id: _run, tool_call_id: _call, ...answer } = decision;
+      return c.json(answer);
+    }
     return c.json(decision);
+  });
+
+  // The built-in Kobe connector (KOBE-619): listed and decided-and-executed by the server itself.
+  const notAvailable = (c: Context) =>
+    c.json({ code: "connector_not_available", message: "Not available." }, 404);
+  mcp.post("/kobe/list", async (c) => {
+    if (!deps.kobe) return notAvailable(c);
+    const auth = await principalOf(c.req.header("kobe-sandbox-token"));
+    if (!auth.ok) return c.json({ code: "sandbox_unauthorized", message: auth.code }, 401);
+    const wait = decideLimiter.take(auth.principal.sandboxId);
+    if (wait > 0) {
+      c.header("Retry-After", String(Math.ceil(wait / 1000)));
+      return c.json({ code: "rate_limited", message: "Too many calls." }, 429);
+    }
+    const listed = await deps.kobe.list(auth.principal);
+    return listed ? c.json(listed) : notAvailable(c);
+  });
+  mcp.post("/kobe/calls", async (c) => {
+    if (!deps.kobe) return notAvailable(c);
+    const body = callBodySchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ code: "invalid_request", message: "Invalid call." }, 400);
+    const auth = await principalOf(c.req.header("kobe-sandbox-token"));
+    if (!auth.ok) return c.json({ code: "sandbox_unauthorized", message: auth.code }, 401);
+    const wait = decideLimiter.take(auth.principal.sandboxId);
+    if (wait > 0) {
+      c.header("Retry-After", String(Math.ceil(wait / 1000)));
+      return c.json({ code: "rate_limited", message: "Too many calls." }, 429);
+    }
+    const answer = await deps.kobe.call(auth.principal, {
+      tool: body.data.tool,
+      arguments: body.data.arguments,
+      ...(body.data.thread_id === undefined ? {} : { threadId: body.data.thread_id }),
+      ...(body.data.tool_call_id === undefined ? {} : { toolCallId: body.data.tool_call_id }),
+    });
+    return answer.outcome === "unavailable" ? notAvailable(c) : c.json(answer);
   });
 
   // MCP Apps (KOBE-438): the proxy reports a UI tool's full upstream result under the ticket the

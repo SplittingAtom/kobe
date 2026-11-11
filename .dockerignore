@@ -7,7 +7,8 @@
 .github
 docs
 *.md
-# The Kobe guide is compiled into the web bundle (KOBE-616, apps/web/scripts/generate-guide.mjs).
+# The Kobe guide is compiled into @kobe/guide (KOBE-616/620, packages/guide/scripts/generate-guide.mjs),
+# which the web and server images both build.
 !docs/guide
 !docs/guide/**
 !apps/**/*.md

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { eq, getMembership, sessionActiveTeams, teams, type TeamRole } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import type { ServerDeps } from "../deps.js";
+import { delegationOf } from "../kobe-mcp/delegation.js";
 import { grantsOf } from "../skills/registry/grants.js";
 import {
   siteRoleAllows,
@@ -65,6 +66,30 @@ export function requireTeam(deps: ServerDeps) {
     // Already resolved for this request by an enclosing router (e.g. /team and /team/invites).
     if (c.var.team !== undefined) return next();
     const claimed = c.req.header(TEAM_HEADER);
+    // A Kobe MCP admin tool's in-process call (KOBE-619): the run's team, never another; the team
+    // header is implied (a different one is refused), membership re-checked as for a session.
+    const delegation = delegationOf(c);
+    if (delegation !== undefined) {
+      if (claimed !== undefined && claimed !== delegation.teamId) {
+        return c.json({ code: "team_mismatch", message: "Not the run's team." }, 409);
+      }
+      const [team] = await deps.database.db
+        .select({ id: teams.id, slug: teams.slug, name: teams.name })
+        .from(teams)
+        .where(eq(teams.id, delegation.teamId));
+      const role =
+        team === undefined
+          ? null
+          : await getMembership(deps.database.db, team.id, c.get("user").id);
+      if (team === undefined || role === null) {
+        return c.json(
+          { code: "not_a_team_member", message: "You are no longer a member of this team." },
+          403,
+        );
+      }
+      c.set("team", { ...team, role });
+      return next();
+    }
     // Changes must name the team the client is acting on, so a stale tab can't write to the team
     // another tab switched to. Reads may omit it (the web client always sends it).
     if (claimed === undefined && !SAFE_METHODS.has(c.req.method)) {

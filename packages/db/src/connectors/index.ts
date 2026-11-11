@@ -20,3 +20,9 @@ export {
   type UiResourceFailure,
   type UiResourceMeta,
 } from "./ui-resources.js";
+export {
+  KOBE_BUILTIN_NAMES,
+  readKobeMcpMode,
+  seedKobeBuiltinConnector,
+  type KobeBuiltinSeed,
+} from "./builtin.js";

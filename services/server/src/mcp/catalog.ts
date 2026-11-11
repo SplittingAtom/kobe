@@ -7,6 +7,7 @@ import {
   type ToolDescriptor,
 } from "@kobe/protocol";
 import {
+  KOBE_BUILTIN_CONNECTOR_ID,
   and,
   connectors,
   eq,
@@ -23,6 +24,9 @@ import {
 import type { ConnectorStateSource } from "../policy/engine.js";
 import type { ConnectorPolicyState } from "../policy/gates.js";
 import type { McpToolCatalog } from "../policy/registry.js";
+import { loadKobeBuiltin, loadKobeSwitches, switchesAllow } from "../kobe-mcp/access.js";
+import { kobeConnector, kobePinnedTools } from "../kobe-mcp/pinned.js";
+import { KOBE_ADMIN_TOOLS } from "../kobe-mcp/tools/index.js";
 
 /**
  * Connector state as the MCP proxy core sees it (KOBE-58 minimal model over `connectors` and
@@ -145,14 +149,39 @@ export function createDbMcpCatalog(db: KobeDb): McpToolCatalog & ConnectorStateS
       const parsed = parseMcpToolName(toolName);
       if (!parsed) return undefined;
       const [row] = await db
-        .select({ id: connectors.id, snapshot: connectors.toolsSnapshot })
+        .select({
+          id: connectors.id,
+          name: connectors.name,
+          snapshot: connectors.toolsSnapshot,
+          builtin: connectors.builtin,
+        })
         .from(connectors)
         .where(sql`replace(${connectors.name}, '-', '_') = ${parsed.server_segment}`);
       if (!row) return undefined;
-      const tool = parseToolsSnapshot(row.snapshot).find((t) => t.pi_name === toolName);
+      // The built-in Kobe connector (KOBE-619): its tools come from Kobe's own catalog.
+      const tools =
+        row.builtin === "kobe" ? kobePinnedTools(row.name) : parseToolsSnapshot(row.snapshot);
+      const tool = tools.find((t) => t.pi_name === toolName);
       return tool ? describePinnedTool(row.id, tool) : undefined;
     },
     async get(teamId, connectorId): Promise<ConnectorPolicyState | undefined> {
+      if (connectorId === KOBE_BUILTIN_CONNECTOR_ID) {
+        // Enabled while the site switch is not off; `custom` over what the switches allow (the
+        // person's own permission is the Kobe MCP service's check, which knows the person).
+        const row = await loadKobeBuiltin(db);
+        if (!row) return undefined;
+        const switches = await loadKobeSwitches(db, teamId);
+        const connector = kobeConnector(
+          row,
+          KOBE_ADMIN_TOOLS.filter((t) => switchesAllow(t, switches)),
+        );
+        return {
+          enabled: true,
+          exposure: "custom",
+          enabled_tools: [...connector.enabledTools],
+          drifted_tools: [],
+        };
+      }
       const connector = await loadTeamConnector(db, teamId, connectorId);
       if (!connector) return undefined;
       return {

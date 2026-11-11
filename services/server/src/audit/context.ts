@@ -2,9 +2,10 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { BlockList, isIP } from "node:net";
 import type { Context, MiddlewareHandler } from "hono";
 import { createMiddleware } from "hono/factory";
-import type { AuditActor } from "@kobe/db";
+import type { AuditActor, AuditVia } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import type { ServerDeps } from "../deps.js";
+import { delegationOf } from "../kobe-mcp/delegation.js";
 
 /**
  * The request an audited action happens in: who (once authenticated) and from where. Set by
@@ -14,6 +15,11 @@ import type { ServerDeps } from "../deps.js";
  */
 export interface RequestAuditContext {
   readonly actor?: AuditActor;
+  /**
+   * The person acts through an agent (KOBE-619, spec kobe-admin-mcp §7): set from a Kobe MCP
+   * delegation, recorded with every event the request's person causes.
+   */
+  readonly via?: AuditVia;
   readonly ip: string | null;
   readonly userAgent: string | null;
 }
@@ -89,10 +95,25 @@ export function auditRequestContext(deps: ServerDeps): MiddlewareHandler {
   return createMiddleware(async (c, next) => runWithAuditContext(contextOf(c), next));
 }
 
-/** The signed-in user as the actor of everything audited in this request. After requireSession. */
+/**
+ * The signed-in user as the actor of everything audited in this request. After requireSession. A
+ * Kobe MCP delegation (KOBE-619) records the person "via agent" with its thread, run and tool call;
+ * it has no client of its own, so no address or user agent.
+ */
 export function auditUserContext(deps: ServerDeps) {
   const contextOf = requestContext(deps);
-  return createMiddleware<{ Variables: AuthVariables }>(async (c, next) =>
-    runWithAuditContext(contextOf(c, { kind: "user", id: c.get("user").id }), next),
-  );
+  return createMiddleware<{ Variables: AuthVariables }>(async (c, next) => {
+    const actor: AuditActor = { kind: "user", id: c.get("user").id };
+    const delegation = delegationOf(c);
+    if (delegation !== undefined) {
+      const via: AuditVia = {
+        kind: "agent",
+        threadId: delegation.threadId,
+        runId: delegation.runId,
+        toolCallId: delegation.toolCallId,
+      };
+      return runWithAuditContext({ actor, via, ip: null, userAgent: null }, next);
+    }
+    return runWithAuditContext(contextOf(c, actor), next);
+  });
 }

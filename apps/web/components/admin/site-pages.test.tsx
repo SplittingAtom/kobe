@@ -414,6 +414,41 @@ describe("Settings", () => {
   });
 });
 
+describe("Settings: the Kobe connector switch (KOBE-623)", () => {
+  it("shows off / docs / admin with docs chosen, and round-trips a change", async () => {
+    const calls = stubApi({
+      "GET /v1/site/settings": [
+        [200, { requireTwoFactor: false, kobeMcpMode: "docs" }],
+        [200, { requireTwoFactor: false, kobeMcpMode: "admin" }],
+      ],
+      "PUT /v1/site/settings": [200, { requireTwoFactor: false, kobeMcpMode: "admin" }],
+    });
+    renderSite(<SettingsPage />, "admin");
+    const form = within(await screen.findByRole("form", { name: "Kobe connector" }));
+    expect((form.getByRole("radio", { name: "Docs only" }) as HTMLInputElement).checked).toBe(true);
+    expect(form.getByRole("radio", { name: "Off" })).toBeTruthy();
+    await userEvent.click(form.getByRole("radio", { name: "Docs and admin tools" }));
+    await userEvent.click(form.getByRole("button", { name: "Save Kobe connector" }));
+    await screen.findByText("Kobe connector: Docs and admin tools.");
+    const put = must(calls.find((c) => c.method === "PUT"));
+    expect(JSON.parse(String(put.body))).toEqual({ kobeMcpMode: "admin" });
+    expect(
+      (
+        within(screen.getByRole("form", { name: "Kobe connector" })).getByRole("radio", {
+          name: "Docs and admin tools",
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(true);
+  });
+
+  it("is absent on a server that predates the switch", async () => {
+    stubApi({ "GET /v1/site/settings": [200, { requireTwoFactor: false }] });
+    renderSite(<SettingsPage />, "admin");
+    await screen.findAllByRole("checkbox");
+    expect(screen.queryByRole("form", { name: "Kobe connector" })).toBeNull();
+  });
+});
+
 describe("Isolation", () => {
   const MISSING = {
     state: "missing",

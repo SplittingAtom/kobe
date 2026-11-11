@@ -27,6 +27,11 @@ Open **Skills** in the top bar (`/me/skills`). It has four tabs:
 In a conversation, **+** → **Skills** shows the skills available to you there. An agent can also
 name the skills it loads (see [Agents](agents.md)).
 
+Kobe installs its own skills in every team, **On by default**. One of them, **kobe-guide**, makes
+the agent answer questions about Kobe from this guide (read through the built-in Kobe connector's
+docs tools, with no internet access) and cite the pages it used. Ask "How do I…" in any
+conversation.
+
 ## Write a skill in the Workbench
 
 1. On the **Workbench** tab, create a **New draft**: give a **Skill name** and **Start from**
@@ -80,7 +85,11 @@ version to that team's queue the first time one of your runs meets it.
 
 Team admins approve or reject in the Team console under **Agents and skills → Skill review**. A
 Caution version needs its findings acknowledged (**Approve anyway**). Versions never change once
-saved, so each new version you save is reviewed again.
+saved, so each new version you save is reviewed again. Where the team turned on Kobe's admin tools,
+a team admin can also ask the agent to list the queue and approve, request changes on or reject a
+version; the decision shows an **Admin change** card first (see
+[Admin from a conversation](../admin/admin-from-a-conversation.md)). Site Skill reviewers can claim,
+comment on and decide Site Registry reviews the same way.
 
 **2. It was suspended or blocked.** A later rescan can turn an approved version into Block. Kobe
 then suspends it until a team admin decides again. A site admin can also put a skill's exact

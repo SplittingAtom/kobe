@@ -124,7 +124,17 @@ export function siteEgressRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
     const entry = await setCeilingFlags(db, domain.data, {
       inCeiling: parsed.value.in_ceiling,
       internal: parsed.value.internal,
+      expectedInCeiling: parsed.value.expected_in_ceiling,
     });
+    if (entry === "changed") {
+      return c.json(
+        {
+          code: "changed_since_approval",
+          message: "That domain's ceiling state changed meanwhile; nothing was changed.",
+        },
+        409,
+      );
+    }
     return entry ? c.json({ domain: entry }) : notFound(c);
   });
 

@@ -21,7 +21,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import Link from "next/link";
-import { rehypeHeadingIds } from "../../lib/docs/heading-ids";
+import { rehypeHeadingIds } from "@kobe/guide/headings";
 import { cn } from "../../lib/utils";
 import { IconAction } from "../shell/icon-action";
 import { MarkdownWords, rehypeArrivingWords, SettledProvider } from "./arriving-words";

@@ -140,6 +140,15 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
     const result = await updateConnector(db, id.data, patch);
     if (!result.ok) {
       if (result.error === "not_found") return notFound(c);
+      if (result.error === "changed_since_approval") {
+        return c.json(
+          {
+            code: "changed_since_approval",
+            message: "The connector's status changed meanwhile; nothing was changed.",
+          },
+          409,
+        );
+      }
       if (result.error === "site_needs_api_key") {
         return invalidRequest(
           c,

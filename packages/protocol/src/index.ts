@@ -55,3 +55,4 @@ export * from "./agent-roster.js";
 export * from "./agent-ownership.js";
 export * from "./team-default-agent.js";
 export * from "./theme/index.js";
+export * from "./kobe-mcp.js";

@@ -19,6 +19,7 @@ import { useTeamAccess } from "../console-context";
 import { ErrorNotice } from "../error-notice";
 import { DateTime, ResourceView } from "../parts";
 import { useResource } from "../use-resource";
+import { ViaAgentNote } from "../via-agent";
 import { BreakGlassBanners } from "./break-glass-page";
 
 interface AuditData {
@@ -90,7 +91,10 @@ export function TeamAuditPage() {
                         <TableCell className="whitespace-nowrap">
                           <DateTime value={e.at} />
                         </TableCell>
-                        <TableCell>{actorName(e)}</TableCell>
+                        <TableCell>
+                          {actorName(e)}
+                          <ViaAgentNote via={e.viaAgent} />
+                        </TableCell>
                         <TableCell>
                           <code>{e.action}</code>
                         </TableCell>

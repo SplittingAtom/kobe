@@ -8,6 +8,7 @@ import { createRunEventStream, type StreamSource } from "../event-stream/stream.
 import { withTeam } from "@kobe/db";
 import { viewerProjectIds } from "../threads/references.js";
 import { canWatchThread } from "../event-stream/visibility.js";
+import { loadAdminResultGate, redactEvent } from "../threads/admin-redaction.js";
 
 const uuid = z.uuid();
 
@@ -117,10 +118,25 @@ export function runEventsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
       );
     }
 
+    // KOBE-623 (KA6): a reader of a shared thread gets no Kobe admin output they lack the
+    // permission for (read at open and again at every revalidation, so a role change applies).
+    const loadGate = () =>
+      run.ownerUserId === user.id
+        ? Promise.resolve(undefined)
+        : withTeam(deps.database.db, team.id, (tx) =>
+            loadAdminResultGate(tx, { teamId: team.id, userId: user.id }, run.ownerUserId),
+          );
+    let gate = await loadGate();
     const source: StreamSource = {
-      read: (after) => reader.readPage(team.id, runId, after),
+      read: async (after) => {
+        const page = await reader.readPage(team.id, runId, after);
+        return gate === undefined
+          ? page
+          : { ...page, events: page.events.map((e) => redactEvent(e, gate)) };
+      },
       async revalidate() {
         const access = await reader.access({ teamId: team.id, runId, userId: user.id, sessionId });
+        gate = await loadGate();
         return (
           access.sessionLive &&
           teamRoleAllows(access.role, "team.chat") &&

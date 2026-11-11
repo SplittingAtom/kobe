@@ -243,6 +243,9 @@ importers:
       '@kobe/agent-file':
         specifier: workspace:*
         version: link:../../packages/agent-file
+      '@kobe/guide':
+        specifier: workspace:*
+        version: link:../../packages/guide
       '@kobe/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -410,6 +413,15 @@ importers:
       drizzle-kit:
         specifier: ^0.31.11
         version: 0.31.11
+
+  packages/guide:
+    dependencies:
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
 
   packages/protocol:
     dependencies:
@@ -601,6 +613,9 @@ importers:
       '@kobe/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@kobe/guide':
+        specifier: workspace:*
+        version: link:../../packages/guide
       '@kobe/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

@@ -19,6 +19,10 @@ const ERRORS = {
   thread_not_found: [404, "No thread with that id."],
   connector_not_found: [404, "That connector isn't available to you in this team."],
   connector_not_working: [409, "That connector isn't working right now, so it can't be changed."],
+  connector_always_on: [
+    409,
+    "Kobe's docs tools are on in every conversation; its admin tools follow the team's and site's switches.",
+  ],
 } as const satisfies Record<ToggleError, readonly [number, string]>;
 
 /** The wire shape: fixed words for a problem, never a credential or an upstream detail. */
@@ -26,6 +30,7 @@ const body = (c: ChatConnector) => ({
   connector_id: c.id,
   name: c.name,
   enabled: c.enabled,
+  ...(c.builtin === undefined ? {} : { builtin: c.builtin }),
   problem:
     c.problem === null
       ? null

@@ -23,7 +23,8 @@ export type ProblemCode =
   | "findings_unacknowledged"
   | "scan_override_reason"
   | "archived"
-  | "submitter_deactivated";
+  | "submitter_deactivated"
+  | "changed_since_approval";
 
 /** States Approve and Request changes act on (the first decision wins). */
 export const DECIDABLE_STATES: ReadonlySet<string> = new Set(["submitted", "in_review"]);
@@ -36,6 +37,15 @@ export const REJECTABLE_STATES: ReadonlySet<string> = new Set([
   "in_review",
   "changes_requested",
 ]);
+
+/**
+ * The version's state is not the one a Kobe MCP admin call was approved against (KOBE-623): the
+ * route checks it under the version's row lock, so nothing slips in between.
+ */
+export const CHANGED_SINCE_APPROVAL: Problem = {
+  code: "changed_since_approval",
+  message: "The version's review state changed meanwhile; nothing was changed.",
+};
 
 export const PROBLEMS = {
   registry_not_ready: {

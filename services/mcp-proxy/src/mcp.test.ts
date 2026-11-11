@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { pino } from "pino";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { canonicalJson } from "@kobe/protocol";
+import { KOBE_BUILTIN_CONNECTOR_ID, canonicalJson } from "@kobe/protocol";
 import {
   generateSessionKeyPair,
   signSessionToken,
@@ -20,6 +20,7 @@ import { createLimiter } from "./limits.js";
 import type {
   CallDecision,
   CallQuery,
+  KobeCallAnswer,
   PolicyServer,
   ServerAnswer,
   ToolsResponse,
@@ -96,6 +97,41 @@ class FakePolicyServer implements PolicyServer {
 
   listTools() {
     return Promise.resolve(this.tools);
+  }
+
+  /** The built-in Kobe connector (KOBE-619): what the server lists and answers. */
+  readonly kobeAsked: { token: string; query: Omit<CallQuery, "connectorId"> }[] = [];
+  kobeTools: ServerAnswer<ToolsResponse> = {
+    ok: true,
+    value: {
+      connector: { id: KOBE_BUILTIN_CONNECTOR_ID, name: "kobe" },
+      tools: [
+        {
+          name: "team_members_list",
+          pi_name: "mcp__kobe__team_members_list",
+          description: "List team members",
+          input_schema: { type: "object" },
+          annotations: { readOnlyHint: true },
+        },
+      ],
+    },
+  };
+  kobeAnswer: ServerAnswer<KobeCallAnswer> = {
+    ok: true,
+    value: {
+      outcome: "result",
+      result: {
+        content: [{ type: "text", text: '{"members":[]}' }],
+        structuredContent: { members: [] },
+      },
+    },
+  };
+  kobeList() {
+    return Promise.resolve(this.kobeTools);
+  }
+  kobeCall(t: string, query: Omit<CallQuery, "connectorId">) {
+    this.kobeAsked.push({ token: t, query });
+    return Promise.resolve(this.kobeAnswer);
   }
 
   fetchGrant() {
@@ -939,5 +975,85 @@ describe("tracing (KOBE-274)", () => {
       expect(spans.length).toBeGreaterThan(0);
       expect(spans.every((s) => s.spanContext().traceId !== caller)).toBe(true);
     });
+  });
+});
+
+describe("the built-in Kobe connector (KOBE-619)", () => {
+  const kobe = { connector: KOBE_BUILTIN_CONNECTOR_ID };
+
+  it("lists its tools from the server's Kobe endpoint, never a connector's pinned list", async () => {
+    const res = await rpc("tools/list", undefined, kobe);
+    expect(res.status).toBe(200);
+    expect(res.json?.result.tools.map((t: { name: string }) => t.name)).toEqual([
+      "team_members_list",
+    ]);
+    const init = await rpc("initialize", {}, kobe);
+    expect(init.status).toBe(200);
+  });
+
+  it("relays the server's decided-and-executed result; nothing goes upstream, no credential", async () => {
+    let asked = false;
+    credentials = {
+      headersFor: () => {
+        asked = true;
+        return Promise.resolve({ ok: false, code: "unavailable" });
+      },
+    } as unknown as CredentialResolver;
+    const res = await rpc(
+      "tools/call",
+      {
+        name: "team_members_list",
+        arguments: { cursor: "MA" },
+        _meta: { "kobe.dev/tool_call_id": "call-7" },
+      },
+      kobe,
+    );
+    expect(res.status).toBe(200);
+    expect(res.json?.result).toEqual({
+      content: [{ type: "text", text: '{"members":[]}' }],
+      structuredContent: { members: [] },
+    });
+    expect(server.kobeAsked).toEqual([
+      {
+        token: expect.any(String),
+        query: {
+          tool: "team_members_list",
+          arguments: { cursor: "MA" },
+          threadId: THREAD,
+          toolCallId: "call-7",
+        },
+      },
+    ]);
+    expect(server.asked).toEqual([]);
+    expect(fake.received).toEqual([]);
+    expect(asked).toBe(false);
+  });
+
+  it("turns a denial or a refused execution into a tool error the model sees", async () => {
+    server.kobeAnswer = {
+      ok: true,
+      value: { outcome: "denied", code: "kobe_admin_not_allowed", message: "Not for you." },
+    };
+    const denied = await rpc("tools/call", { name: "team_members_set_role", arguments: {} }, kobe);
+    expect(denied.json?.result).toEqual({
+      content: [{ type: "text", text: "Kobe denied this call: Not for you." }],
+      isError: true,
+    });
+    server.kobeAnswer = {
+      ok: true,
+      value: { outcome: "error", code: "changed_since_approval", message: "Changed." },
+    };
+    const changed = await rpc("tools/call", { name: "team_members_set_role", arguments: {} }, kobe);
+    expect(changed.json?.result.isError).toBe(true);
+    expect(changed.json?.result.content[0].text).toContain("changed_since_approval");
+  });
+
+  it("fails closed when the server is away or the connector is not available", async () => {
+    server.kobeAnswer = { ok: false, failure: "unavailable" };
+    const away = await rpc("tools/call", { name: "team_members_list", arguments: {} }, kobe);
+    expect(away.json?.result.isError).toBe(true);
+    server.kobeTools = { ok: false, failure: "not_available" };
+    const listed = await rpc("tools/list", undefined, kobe);
+    expect(listed.status).toBe(403);
   });
 });

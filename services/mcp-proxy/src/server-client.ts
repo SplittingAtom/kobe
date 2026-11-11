@@ -66,6 +66,26 @@ const decisionSchema = z.discriminatedUnion("decision", [
 ]);
 export type CallDecision = z.infer<typeof decisionSchema>;
 
+/**
+ * The built-in Kobe connector's call answer (KOBE-619): the server decided and executed the call
+ * in one request; the proxy only relays it. `result` is an MCP `tools/call` result.
+ */
+const kobeCallSchema = z.discriminatedUnion("outcome", [
+  z.object({
+    outcome: z.literal("result"),
+    result: z.object({
+      content: z.array(z.object({ type: z.literal("text"), text: z.string() })),
+      structuredContent: z.record(z.string(), z.unknown()).optional(),
+    }),
+  }),
+  z.object({
+    outcome: z.enum(["denied", "error"]),
+    code: z.string().max(64),
+    message: z.string().max(2000),
+  }),
+]);
+export type KobeCallAnswer = z.infer<typeof kobeCallSchema>;
+
 export interface CallQuery {
   readonly connectorId: string;
   readonly tool: string;
@@ -91,6 +111,13 @@ const grantSchema = z.discriminatedUnion("kind", [
 
 export interface PolicyServer {
   listTools(token: string, connectorId: string): Promise<ServerAnswer<ToolsResponse>>;
+  /** The built-in Kobe connector's tools for the sandbox's person (KOBE-619). */
+  kobeList(token: string): Promise<ServerAnswer<ToolsResponse>>;
+  /** A built-in Kobe tool call, decided and executed by the server (KOBE-619). */
+  kobeCall(
+    token: string,
+    query: Omit<CallQuery, "connectorId">,
+  ): Promise<ServerAnswer<KobeCallAnswer>>;
   decide(token: string, query: CallQuery): Promise<ServerAnswer<CallDecision>>;
   /** The sandbox's own user's API key or OAuth access token for a connector; never cached. */
   fetchGrant(token: string, connectorId: string): Promise<GrantAnswer>;
@@ -232,9 +259,18 @@ export function createPolicyServer(options: PolicyServerOptions): PolicyServer {
     }
   }
 
+  const callBody = (query: Omit<CallQuery, "connectorId">) => ({
+    tool: query.tool,
+    arguments: query.arguments,
+    ...(query.threadId === undefined ? {} : { thread_id: query.threadId }),
+    ...(query.toolCallId === undefined ? {} : { tool_call_id: query.toolCallId }),
+  });
+
   return {
     fetchGrant,
     reportResult,
+    kobeList: (token) => post("/kobe/list", token, undefined, toolsResponseSchema),
+    kobeCall: (token, query) => post("/kobe/calls", token, callBody(query), kobeCallSchema),
     listTools: (token, connectorId) =>
       post(
         `/connectors/${encodeURIComponent(connectorId)}/tools`,

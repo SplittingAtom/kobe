@@ -52,7 +52,12 @@ export type KobeSeedAction =
   | "refused"
   | "failed"
   /** A Site admin detached the skill (KOBE-495): the shipped version is only recorded. */
-  | "skipped_detached";
+  | "skipped_detached"
+  /**
+   * A non-Kobe catalog skill already has this name (KOBE-620: a name Kobe added later, which an
+   * upgraded Site may hold; migration 0208 keeps it): nothing is published, a warning is logged.
+   */
+  | "skipped_name_taken";
 export type KobeSeedRefusal = "scan_block" | "version_reused" | "version_not_newer";
 
 export interface KobeSeedResult {
@@ -261,8 +266,22 @@ async function held(db: KobeDb, p: KobePackage): Promise<boolean> {
   return rows.length > 0;
 }
 
+/** Another publisher's catalog skill holds the name (KOBE-620). */
+async function nameTaken(db: KobeDb, name: string): Promise<boolean> {
+  const res = await db.execute(sql`
+    SELECT 1 FROM registry_skills WHERE name = ${name} AND publisher <> 'kobe'`);
+  return res.rows.length > 0;
+}
+
 async function seedOne(deps: KobeSeedDeps, p: KobePackage): Promise<KobeSeedResult> {
   const base = { name: p.name, semver: p.semver };
+  if (await nameTaken(deps.db, p.name)) {
+    deps.log.warn(
+      { name: p.name, semver: p.semver },
+      "skills: a Kobe skill's name is taken by another catalog skill; Kobe's is not published here",
+    );
+    return { ...base, action: "skipped_name_taken" };
+  }
   if (await isDetached(deps.db, p.name)) {
     await recordShipped(deps.db, p.name, p.semver);
     return { ...base, action: "skipped_detached" };

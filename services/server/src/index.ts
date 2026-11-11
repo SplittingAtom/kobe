@@ -551,6 +551,7 @@ const internalServer =
           fetch: createInternalApp({
             internalKey: config.mcpProxyInternalKey,
             mcp: deps.mcp,
+            kobe: deps.kobeMcp,
             appResults: deps.appResults,
             auth: {
               db: deps.database.db,

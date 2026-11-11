@@ -10,6 +10,7 @@ import { logger } from "../logger.js";
 import { threadKey, type BlobStore } from "../retention/blobs.js";
 import { createThread, findThread, type ThreadError, type Viewer } from "./repository.js";
 import { holdFolder } from "./folders.js";
+import { loadAdminResultGate, redactEntryPayload } from "./admin-redaction.js";
 import { copyLabels } from "./branches.js";
 import {
   forkedAppResultKey,
@@ -217,6 +218,12 @@ async function planFork(
   }
   // Every fork has a fork point, so it can always say it is one (even once its source is gone).
   if (path.length === 0) return { ok: false, error: "nothing_to_fork" };
+  // KOBE-623 (KA6): a reader's copy keeps Kobe admin results hidden as they were to the reader.
+  const gate = await loadAdminResultGate(tx, viewer, source.ownerUserId);
+  const copied = path.map((row) => {
+    const payload = redactEntryPayload(row.payload, gate);
+    return payload === undefined ? row : { ...row, payload };
+  });
   return {
     ok: true,
     value: {
@@ -224,7 +231,7 @@ async function planFork(
       teamId: viewer.teamId,
       newId: randomUUID(),
       title: options.title,
-      path,
+      path: copied,
       apps: await planAppCopies(tx, viewer.teamId, id, path, options.quotaDefaultBytes),
     },
   };

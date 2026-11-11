@@ -50,6 +50,11 @@ const decisionSchema = z
     action: z.enum(["approve", "request_changes", "reject", "reject_and_block"]),
     note: noteSchema.optional(),
     checklist: checklistSchema.optional(),
+    /**
+     * KOBE-623: the version's state as the caller saw it (a Kobe MCP call's approved
+     * before-state); another one is a 409 `changed_since_approval`, checked under the row lock.
+     */
+    expected_state: z.enum(["submitted", "in_review", "changes_requested"]).optional(),
   })
   // Request changes goes back to the author's Workbench: it needs the comments (SK23).
   .refine((b) => b.action !== "request_changes" || b.note !== undefined, {
@@ -158,7 +163,11 @@ export function registryReviewRoutes(
   app.post("/:id/claim", requireSkillReview(deps, "claim"), async (c) => {
     const id = versionId(c);
     if (!id) return c.json(NOT_FOUND, 404);
-    return answer(c, await claim(db, id, c.get("user").id));
+    // `?expectedState=` (KOBE-623): claim only while the version is still in that state.
+    const expected = c.req.query("expectedState");
+    if (expected !== undefined && !["submitted", "in_review"].includes(expected))
+      return invalidRequest(c, "expectedState is submitted or in_review.");
+    return answer(c, await claim(db, id, c.get("user").id, expected));
   });
 
   app.delete("/:id/claim", requireSkillReview(deps, "claim"), async (c) => {
@@ -223,14 +232,18 @@ export function registryReviewRoutes(
     const input = { note: body.note ?? null, checklist: body.checklist ?? null };
     const userId = c.get("user").id;
     if (body.action === "approve") {
-      const r = await approve(db, id, userId, input);
+      const r = await approve(db, id, userId, input, body.expected_state);
       if (!r.ok) return refuse(c, r.problem);
       tell(r.version, input.note);
       // The optional git mirror (KOBE-343) pushes the new catalog version.
       mirror?.kick();
       return c.json({ id: r.version.id, state: r.version.state, selfApproved: r.selfApproved });
     }
-    return answer(c, await decide(db, id, userId, body.action, input), input.note);
+    return answer(
+      c,
+      await decide(db, id, userId, body.action, input, body.expected_state),
+      input.note,
+    );
   });
 
   return app;

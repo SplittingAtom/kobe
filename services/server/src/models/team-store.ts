@@ -63,6 +63,7 @@ export type SetTeamModelResult =
   | "unchanged"
   | "not_in_catalog"
   | "default_requires_enabled"
+  | "changed_since_approval"
   | { readonly error: "thinking_invalid"; readonly message: string };
 
 /** Enables/disables an alias for the team and optionally makes it the team's default. */
@@ -87,6 +88,15 @@ export async function setTeamModel(
       .from(teamModels)
       .where(and(eq(teamModels.teamId, teamId), eq(teamModels.alias, alias)))
       .for("update");
+    const expected = input.expected;
+    if (
+      expected !== undefined &&
+      (expected.enabled !== (before !== undefined) ||
+        expected.is_default !== (before?.isDefault ?? false) ||
+        expected.thinking_max !== (before?.thinkingMax ?? null))
+    ) {
+      return "changed_since_approval";
+    }
     const wantDefault = input.enabled && (input.is_default ?? before?.isDefault ?? false);
     // KOBE-260 ac-4: a team maximum may only narrow the site's settings.
     const thinkingMax = input.enabled ? keepMax(input.thinking_max, before?.thinkingMax) : null;
@@ -102,6 +112,16 @@ export async function setTeamModel(
     } else {
       if (before && before.isDefault === wantDefault && before.thinkingMax === thinkingMax) {
         return "unchanged";
+      }
+      if (expected !== undefined && !before) {
+        // Approved as "not enabled": insert only if still absent. A concurrent enable is a changed
+        // before-state (409), never overwritten; nothing else was written yet.
+        const inserted = await tx
+          .insert(teamModels)
+          .values({ teamId, alias, isDefault: false, thinkingMax, enabledBy: userId })
+          .onConflictDoNothing()
+          .returning({ alias: teamModels.alias });
+        if (inserted.length === 0) return "changed_since_approval";
       }
       if (wantDefault) {
         await tx
