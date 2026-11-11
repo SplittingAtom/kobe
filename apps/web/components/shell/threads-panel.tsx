@@ -28,6 +28,12 @@ import { FolderPicker } from "./folder-picker";
 import { FolderTree } from "./folder-tree";
 import { IconAction } from "./icon-action";
 import { FileMapLayer, pinKey } from "./file-map-layer";
+import {
+  FileRailResizeHandle,
+  railStyle,
+  THREE_RAIL_COLUMNS,
+  useFileRailWidth,
+} from "./file-rail-resize";
 import { useShellBand } from "./shell-band";
 import { ThreadFileMap, type ThreadFileMapValue } from "./thread-file-row";
 import { useShownThreads, useThreadLinks } from "./use-file-links";
@@ -76,8 +82,11 @@ function useTreeModel() {
  * wider) the folder tree, the chosen node's threads and a read-only workspace rail, with lines
  * between threads and the files they used; at 820 px and wider the tree beside the threads; below
  * that a dropdown above them. Rows keep the rail's menu, keyboard access and drag onto a project
- * header or a folder, and show "Files (N)". Choosing a thread (its title) calls `onChosen`: the
- * panel closes onto it; a file opens in the artifact column and `onClose` closes the panel.
+ * header or a folder; a row with links has its line pin and "Files (N)…" in its ⋯ menu (KOBE-614).
+ * At three rails the thread column is as wide as its titles, the workspace rail takes the rest
+ * (or its dragged width) and each column scrolls on its own. Choosing a thread (its title) calls
+ * `onChosen`: the panel closes onto it; a file opens in the artifact column and `onClose` closes
+ * the panel.
  */
 export function ThreadsPanelContent({
   listError,
@@ -125,6 +134,7 @@ export function ThreadsPanelContent({
   const shownThreads = useMemo(() => new Set(shownIds), [shownIds]);
   const links = useThreadLinks(session.api, shownIds);
   const [pins, setPins] = useState<ReadonlySet<string>>(new Set());
+  const railWidth = useFileRailWidth();
   const openPanelFile = artifactPanel?.openFile;
   const fileMap = useMemo<ThreadFileMapValue>(
     () => ({
@@ -217,7 +227,10 @@ export function ThreadsPanelContent({
   const openThread = (threadId: string) => onChosen(threadId);
 
   const treeColumn = wide ? (
-    <nav aria-label="Folders" className="flex min-w-0 flex-col gap-2">
+    <nav
+      aria-label="Folders"
+      className={`flex min-w-0 flex-col gap-2 ${threeRails ? "min-h-0 overflow-y-auto" : ""}`}
+    >
       <FolderTree
         rows={tree.rows}
         chosen={node}
@@ -229,7 +242,7 @@ export function ThreadsPanelContent({
       <FolderEditor actions={actions} announce={announce} />
       <button
         type="button"
-        className="self-start px-1 text-sm underline"
+        className="self-start border-0 bg-transparent px-1 py-0 text-sm underline"
         onClick={() => actions.startNew(null)}
       >
         + New folder
@@ -253,7 +266,9 @@ export function ThreadsPanelContent({
   return (
     <RailAnnounce.Provider value={announce}>
       <ThreadFileMap.Provider value={fileMap}>
-        <ThreadListPrimitive.Root className="flex min-h-full flex-col gap-2 px-4 py-3">
+        <ThreadListPrimitive.Root
+          className={`flex flex-col gap-2 px-4 py-3 ${threeRails ? "h-full min-h-0" : "min-h-full"}`}
+        >
           <div className="flex items-center gap-2">
             <input
               type="search"
@@ -276,9 +291,10 @@ export function ThreadsPanelContent({
           </div>
           <div
             ref={bodyRef}
+            style={threeRails ? railStyle(railWidth.width) : undefined}
             className={
               threeRails
-                ? "relative grid min-w-0 grid-cols-[200px_1px_minmax(0,1fr)_1px_minmax(220px,0.8fr)] gap-3"
+                ? `relative grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(0,1fr)] gap-3 ${THREE_RAIL_COLUMNS}`
                 : wide
                   ? "grid min-w-0 grid-cols-[220px_1px_minmax(0,1fr)] gap-3"
                   : "flex flex-col gap-2"
@@ -288,7 +304,12 @@ export function ThreadsPanelContent({
             {treeColumn}
             {wide && <div aria-hidden className="bg-border w-px self-stretch" />}
             {/* Sees the clicks of the rows' own title buttons (Enter on a button is one). */}
-            <div ref={threadsRef} className="min-w-0" onClick={chooseOnClick}>
+            <div
+              ref={threadsRef}
+              className={threeRails ? "min-h-0 min-w-48 overflow-y-auto" : "min-w-0"}
+              data-kobe-thread-column=""
+              onClick={chooseOnClick}
+            >
               {listError && <ErrorNotice error={listError} />}
               {projects.failed && (
                 <p className={chat.hint} role="status">
@@ -316,6 +337,13 @@ export function ThreadsPanelContent({
                 {announcement}
               </p>
             </div>
+            {threeRails && filesApi && (
+              <FileRailResizeHandle
+                width={railWidth.width}
+                onChange={railWidth.setWidth}
+                onReset={railWidth.resetWidth}
+              />
+            )}
             {threeRails && filesApi && (
               <FileMapLayer
                 filesApi={filesApi}

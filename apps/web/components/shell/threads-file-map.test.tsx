@@ -10,8 +10,9 @@ import { composer, openApp } from "../chat/testing";
 /**
  * KOBE-612 (spec thread-file-map, TFM1–TFM7): the Threads panel's three rails at wide widths
  * (folders | threads | workspace), lines between thread rows and the files they used on hover,
- * focus and pin, closed-folder aggregation, and the lists ("Files (N)", "Used in") that give the
- * keyboard, screen readers and narrow widths the same links.
+ * focus and pin, closed-folder aggregation, and the lists ("Files (N)…" in a row's ⋯ menu since
+ * KOBE-614, "Used in") that give the keyboard, screen readers and narrow widths the same links.
+ * KOBE-614: the pin on the thread row, the workspace rail's resize handle and its saved width.
  */
 let fake: FakeKobe;
 const WAIT = { timeout: 10_000 };
@@ -64,6 +65,17 @@ function seed() {
 const body = (dialog: HTMLElement) => must(dialog.querySelector("[data-kobe-threads-body]"));
 const row = (dialog: HTMLElement, id: string) =>
   must(dialog.querySelector<HTMLElement>(`[data-kobe-thread="${id}"]`));
+/** Budget's line pin: shown once its links are read (three rails). */
+const budgetPin = (dialog: HTMLElement) =>
+  within(dialog).findByRole("button", { name: "Keep lines shown for Budget" }, WAIT);
+
+/** Opens Budget's ⋯ menu and returns its "Files (N)…" item. */
+async function filesItem(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement) {
+  await user.click(within(dialog).getByRole("button", { name: "Actions for Budget" }));
+  const menu = await screen.findByRole("menu", { name: "Actions for Budget" }, WAIT);
+  return within(menu).findByRole("menuitem", { name: /^Files \(4\)…/ }, WAIT);
+}
+
 const lines = (dialog: HTMLElement) =>
   [...dialog.querySelectorAll<SVGGElement>("[data-kobe-line]")].map((g) => ({
     anchor: g.getAttribute("data-kobe-line"),
@@ -90,7 +102,7 @@ describe("three rails (ac-1)", () => {
     const { budget } = seed();
     const { dialog } = await openPanel();
     await within(dialog).findByRole("treeitem", { name: "report.md" }, WAIT);
-    await within(dialog).findByRole("button", { name: "Files (4)" }, WAIT);
+    await budgetPin(dialog);
     fireEvent.pointerOver(row(dialog, budget));
     await waitFor(() => expect(lines(dialog)).toHaveLength(2), WAIT);
     expect(lines(dialog)).toEqual(
@@ -117,7 +129,7 @@ describe("three rails (ac-1)", () => {
   it("keyboard focus on a thread shows its lines too", async () => {
     const { budget } = seed();
     const { dialog } = await openPanel();
-    await within(dialog).findByRole("button", { name: "Files (4)" }, WAIT);
+    await budgetPin(dialog);
     await within(dialog).findByRole("treeitem", { name: "report.md" }, WAIT);
     act(() => within(row(dialog, budget)).getByRole("button", { name: "Budget" }).focus());
     await waitFor(() => expect(lines(dialog)).toHaveLength(2), WAIT);
@@ -130,7 +142,7 @@ describe("three rails (ac-1)", () => {
     fake.fileLinks.link(archived, { path: "report.md", access: "read" });
     const { dialog } = await openPanel();
     const report = await within(dialog).findByRole("treeitem", { name: "report.md" }, WAIT);
-    await within(dialog).findByRole("button", { name: "Files (4)" }, WAIT);
+    await budgetPin(dialog);
     fireEvent.pointerOver(report);
     await waitFor(
       () =>
@@ -179,7 +191,7 @@ describe("three rails (ac-1)", () => {
     const { hiring } = seed();
     const { user, dialog } = await openPanel();
     await within(dialog).findByRole("treeitem", { name: "report.md" }, WAIT);
-    await within(dialog).findByRole("button", { name: "Files (4)" }, WAIT);
+    await budgetPin(dialog);
     await waitFor(() => expect(fake.fileLinks.fileReads.flat()).toContain("report.md"), WAIT);
     await user.click(within(dialog).getByRole("button", { name: "Actions for report.md" }));
     const menu = await screen.findByRole("menu", { name: "Actions for report.md" }, WAIT);
@@ -214,15 +226,15 @@ describe("three rails (ac-1)", () => {
 });
 
 describe("the lists (ac-2)", () => {
-  it("Files (N) lists a thread's files as links, deleted and unseen ones named", async () => {
-    seed();
+  it("Files (N)… in a row's menu lists its files as links, deleted and unseen ones named", async () => {
+    const { budget } = seed();
     const { user, dialog } = await openPanel();
-    const toggle = await within(dialog).findByRole("button", { name: "Files (4)" }, WAIT);
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    await user.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    const list = within(dialog).getByRole("list", { name: "Files Budget used" });
-    expect(must(toggle.getAttribute("aria-controls"))).toBe(list.id);
+    await budgetPin(dialog);
+    // No "Files (N)" button under the title any more (KOBE-614).
+    expect(within(dialog).queryByRole("button", { name: /^Files \(/ })).toBeNull();
+    await user.click(await filesItem(user, dialog));
+    const list = await within(dialog).findByRole("list", { name: "Files Budget used" }, WAIT);
+    expect(row(dialog, budget).contains(list)).toBe(true);
     const items = within(list)
       .getAllByRole("listitem")
       .map((li) => li.textContent);
@@ -232,7 +244,24 @@ describe("the lists (ac-2)", () => {
       "old.md (deleted)written",
       "1 file you can't see",
     ]);
-    await user.click(within(list).getByRole("button", { name: "report.md" }));
+    // The focus moves to the first file; Escape closes the list, back on the row's menu button.
+    await waitFor(
+      () =>
+        expect(document.activeElement).toBe(
+          within(list).getByRole("button", { name: "report.md" }),
+        ),
+      WAIT,
+    );
+    await user.keyboard("{Escape}");
+    await waitFor(
+      () => expect(within(dialog).queryByRole("list", { name: "Files Budget used" })).toBeNull(),
+      WAIT,
+    );
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Actions for Budget");
+    // Open again and open a file: the panel closes onto the artifact column.
+    await user.click(await filesItem(user, dialog));
+    const again = await within(dialog).findByRole("list", { name: "Files Budget used" }, WAIT);
+    await user.click(within(again).getByRole("button", { name: "report.md" }));
     await waitFor(
       () => expect(document.querySelector('[data-kobe-panel="threads"]')).toBeNull(),
       WAIT,
@@ -240,17 +269,37 @@ describe("the lists (ac-2)", () => {
     expect(await screen.findByRole("toolbar", { name: "report.md view" }, WAIT)).toBeTruthy();
   });
 
+  it("the menu item closes the list again", async () => {
+    seed();
+    const { user, dialog } = await openPanel();
+    await budgetPin(dialog);
+    await user.click(await filesItem(user, dialog));
+    await within(dialog).findByRole("list", { name: "Files Budget used" }, WAIT);
+    await user.click(within(dialog).getByRole("button", { name: "Actions for Budget" }));
+    const menu = await screen.findByRole("menu", { name: "Actions for Budget" }, WAIT);
+    await user.click(within(menu).getByRole("menuitem", { name: /^Hide files \(4\)/ }));
+    await waitFor(
+      () => expect(within(dialog).queryByRole("list", { name: "Files Budget used" })).toBeNull(),
+      WAIT,
+    );
+  });
+
   it("narrower than the wide band: two rails, no workspace rail, no lines, no pin; the lists stay", async () => {
     const { budget } = seed();
-    const { dialog } = await openPanel();
+    const { user, dialog } = await openPanel();
     resizeWindow(1000);
     await waitFor(
       () => expect(body(dialog).getAttribute("data-kobe-threads-body")).toBe("two-rails"),
       WAIT,
     );
-    expect(await within(dialog).findByRole("button", { name: "Files (4)" }, WAIT)).toBeTruthy();
+    await waitFor(() => expect(fake.fileLinks.linkReads.length).toBeGreaterThan(0), WAIT);
+    expect(await filesItem(user, dialog)).toBeTruthy();
+    await user.keyboard("{Escape}");
     expect(within(dialog).queryByRole("tree", { name: "Workspace files" })).toBeNull();
     expect(within(dialog).queryByRole("button", { name: /Keep lines shown/ })).toBeNull();
+    expect(
+      within(dialog).queryByRole("separator", { name: "Resize the workspace files" }),
+    ).toBeNull();
     fireEvent.pointerOver(row(dialog, budget));
     await act(() => new Promise((r) => setTimeout(r, 50)));
     expect(dialog.querySelector("[data-kobe-file-lines]")).toBeNull();
@@ -260,11 +309,77 @@ describe("the lists (ac-2)", () => {
     expect(fake.fileLinks.fileReads.length).toBe(reads);
   });
 
-  it("a thread without links shows no Files row", async () => {
+  it("a thread without links has no Files item and no pin", async () => {
     fake.addThread("Quiet");
-    const { dialog } = await openPanel();
+    const { user, dialog } = await openPanel();
     await within(dialog).findByRole("button", { name: "Quiet" }, WAIT);
     await waitFor(() => expect(fake.fileLinks.linkReads.length).toBeGreaterThan(0), WAIT);
-    expect(within(dialog).queryByRole("button", { name: /^Files \(/ })).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: /Keep lines shown/ })).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Actions for Quiet" }));
+    const menu = await screen.findByRole("menu", { name: "Actions for Quiet" }, WAIT);
+    expect(within(menu).queryByRole("menuitem", { name: /^Files \(/ })).toBeNull();
+  });
+});
+
+describe("KOBE-614: the pin on the row, the rail's handle", () => {
+  it("the thread's pin sits on its row, after the title, in the same row group as its menu", async () => {
+    const { budget } = seed();
+    const { dialog } = await openPanel();
+    const pin = await budgetPin(dialog);
+    const rowGroup = must(pin.closest(".group\\/row"));
+    expect(row(dialog, budget).contains(rowGroup)).toBe(true);
+    expect(within(rowGroup as HTMLElement).getByRole("button", { name: "Budget" })).toBeTruthy();
+    expect(
+      within(rowGroup as HTMLElement).getByRole("button", { name: "Actions for Budget" }),
+    ).toBeTruthy();
+    // Revealed by the row's hover or focus; a pinned one always shows.
+    expect(pin.className).toContain("group-hover/row:opacity-100");
+    expect(pin.className).toContain("group-focus-within/row:opacity-100");
+  });
+
+  it("the workspace rail resizes by keyboard and the width is saved and applied", async () => {
+    seed();
+    const { user, dialog } = await openPanel();
+    await within(dialog).findByRole("treeitem", { name: "report.md" }, WAIT);
+    const handle = within(dialog).getByRole("separator", { name: "Resize the workspace files" });
+    expect(handle.getAttribute("aria-controls")).toBe("kobe-threads-file-rail");
+    const railColumn = must(dialog.querySelector<HTMLElement>("#kobe-threads-file-rail"));
+    const box = (width: number, right: number) =>
+      ({
+        width,
+        left: right - width,
+        right,
+        top: 0,
+        bottom: 600,
+        height: 600,
+        x: 0,
+        y: 0,
+      }) as DOMRect;
+    vi.spyOn(body(dialog), "getBoundingClientRect").mockReturnValue(box(1200, 1200));
+    vi.spyOn(railColumn, "getBoundingClientRect").mockReturnValue(box(400, 1200));
+    // By default the thread column fits its titles and the rail takes the rest.
+    expect(body(dialog).style.getPropertyValue("--kobe-threads-col")).toBe("fit-content(28rem)");
+    handle.focus();
+    await user.keyboard("{ArrowLeft}");
+    await waitFor(() => expect(fake.preferences["threads_file_rail_width"]).toBe(424), WAIT);
+    expect(body(dialog).style.getPropertyValue("--kobe-file-rail-col")).toBe("minmax(240px,424px)");
+    expect(body(dialog).style.getPropertyValue("--kobe-threads-col")).toBe("minmax(12rem,1fr)");
+    // Enter: back to the default.
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(fake.preferences["threads_file_rail_width"]).toBeNull(), WAIT);
+    expect(body(dialog).style.getPropertyValue("--kobe-threads-col")).toBe("fit-content(28rem)");
+  });
+
+  it("a saved width is applied when the panel opens", async () => {
+    seed();
+    fake.preferences = { threads_file_rail_width: 380 };
+    const { dialog } = await openPanel();
+    await waitFor(
+      () =>
+        expect(body(dialog).style.getPropertyValue("--kobe-file-rail-col")).toBe(
+          "minmax(240px,380px)",
+        ),
+      WAIT,
+    );
   });
 });

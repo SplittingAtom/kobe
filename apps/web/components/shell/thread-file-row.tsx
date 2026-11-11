@@ -1,7 +1,16 @@
 "use client";
 
-import { ChevronRightIcon, PinIcon } from "lucide-react";
-import { createContext, useContext, useId, useState } from "react";
+import { PinIcon } from "lucide-react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import type { MenuBinding } from "../../lib/shell/menu";
 import type { ThreadFileLinks } from "../../lib/threads/file-links";
 import { accessWord, baseName, fileCount, hiddenFilesText } from "../../lib/threads/file-map";
 import type { Side } from "../../lib/threads/line-model";
@@ -23,7 +32,11 @@ export interface ThreadFileMapValue {
 
 export const ThreadFileMap = createContext<ThreadFileMapValue | null>(null);
 
-/** The pin toggle of a row (a thread or a file): keeps its lines shown (TFM5). */
+/**
+ * The pin toggle of a row (a thread or a file): keeps its lines shown (TFM5). Pinned, it always
+ * shows; otherwise it shows while the row (`group/row`) is hovered or holds the focus, and always
+ * on touch screens, which have no hover (KOBE-614).
+ */
 export function LinePin({
   side,
   pathOrId,
@@ -44,8 +57,10 @@ export function LinePin({
       title={pinned ? "Lines kept shown" : "Keep lines shown"}
       data-kobe-line-pin={pinned ? "on" : "off"}
       className={cn(
-        "text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex size-5 shrink-0 items-center justify-center rounded-sm outline-none focus-visible:ring-2",
-        pinned ? "text-primary" : "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100",
+        "text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex size-5 shrink-0 items-center justify-center rounded-sm border-0 bg-transparent p-0 outline-none focus-visible:ring-2",
+        pinned
+          ? "text-primary"
+          : "pointer-fine:opacity-0 pointer-fine:group-hover/row:opacity-100 pointer-fine:group-focus-within/row:opacity-100 focus-visible:opacity-100",
       )}
       onClick={(e) => {
         e.stopPropagation();
@@ -62,14 +77,35 @@ function FilesList({
   title,
   links,
   openFile,
+  onClose,
 }: {
   readonly id: string;
   readonly title: string;
   readonly links: ThreadFileLinks;
   openFile(path: string): void;
+  onClose(): void;
 }) {
+  const ref = useRef<HTMLUListElement>(null);
+  // Opened from the row's menu: the focus moves to the first file (KOBE-614).
+  useEffect(() => {
+    ref.current?.querySelector<HTMLElement>("button")?.focus();
+  }, []);
   return (
-    <ul id={id} aria-label={`Files ${title} used`} className="m-0 ms-6 list-none ps-0 text-xs">
+    <ul
+      ref={ref}
+      id={id}
+      aria-label={`Files ${title} used`}
+      data-kobe-thread-files=""
+      className="m-0 ms-6 list-none ps-0 text-xs"
+      onKeyDown={(e) => {
+        if (e.key !== "Escape") return;
+        e.stopPropagation();
+        // Back to the row's ⋯ menu button, where the list was opened from.
+        const row = ref.current?.closest("[data-kobe-thread]");
+        row?.querySelector<HTMLElement>('[aria-label^="Actions for "]')?.focus();
+        onClose();
+      }}
+    >
       {links.files.map((f) => (
         <li key={`${f.path}:${f.access}`} className="flex min-w-0 items-center gap-1">
           {f.deleted ? (
@@ -79,7 +115,7 @@ function FilesList({
           ) : (
             <button
               type="button"
-              className="min-w-0 truncate text-start underline"
+              className="min-w-0 truncate border-0 bg-transparent p-0 text-start underline"
               title={f.path}
               onClick={() => openFile(f.path)}
             >
@@ -96,47 +132,47 @@ function FilesList({
   );
 }
 
+/** What a thread row of the Threads panel shows about its files (KOBE-612, KOBE-614). */
+export interface ThreadFiles {
+  /** The line pin, after the title (three rails only); null without links. */
+  readonly pin: ReactNode;
+  /** The row menu's "Files (N)…" item; undefined without links. */
+  readonly binding: MenuBinding | undefined;
+  /** The list of the thread's files under the row, while open. */
+  readonly list: ReactNode;
+}
+
+const NONE: ThreadFiles = { pin: null, binding: undefined, list: null };
+
 /**
- * Under a thread row with links: "Files (N)", opening the list of its files as links (open the
- * file; deleted ones named, the viewer's unseen ones counted, TFM7), and at three rails the pin.
- * The keyboard and screen-reader way to the same links the lines draw.
+ * A thread row's files in the Threads panel (KOBE-614): the line pin on the row, "Files (N)…" in
+ * its ⋯ menu, opening the list of its files as links (open the file; deleted ones named, the
+ * viewer's unseen ones counted, TFM7) under the row; the menu item again or Escape closes it.
+ * The keyboard and screen-reader way to the same links the lines draw. Nothing elsewhere.
  */
-export function ThreadFilesRow({
-  threadId,
-  title,
-}: {
-  readonly threadId: string | undefined;
-  readonly title: string;
-}) {
+export function useThreadFiles(threadId: string | undefined, title: string): ThreadFiles {
   const map = useContext(ThreadFileMap);
   const [open, setOpen] = useState(false);
   const listId = useId();
-  if (map === null || threadId === undefined) return null;
+  if (map === null || threadId === undefined) return NONE;
   const links = map.linksOf(threadId);
   const count = fileCount(links);
-  if (links === undefined || count === 0) return null;
-  return (
-    <div data-kobe-thread-files="" className="group/row">
-      <div className="ms-6 flex items-center gap-1 text-xs">
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={listId}
-          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-0.5"
-          onClick={(e) => {
-            e.stopPropagation();
-            setOpen((v) => !v);
-          }}
-        >
-          <ChevronRightIcon
-            aria-hidden
-            className={cn("size-3 motion-safe:transition-transform", open && "rotate-90")}
-          />
-          Files ({count})
-        </button>
-        {map.lines && <LinePin side="thread" pathOrId={threadId} name={title} map={map} />}
-      </div>
-      {open && <FilesList id={listId} title={title} links={links} openFile={map.openFile} />}
-    </div>
-  );
+  if (links === undefined || count === 0) return NONE;
+  return {
+    pin: map.lines ? <LinePin side="thread" pathOrId={threadId} name={title} map={map} /> : null,
+    binding: {
+      label: open ? `Hide files (${count})` : `Files (${count})…`,
+      movesFocus: !open,
+      onSelect: () => setOpen((v) => !v),
+    },
+    list: open ? (
+      <FilesList
+        id={listId}
+        title={title}
+        links={links}
+        openFile={map.openFile}
+        onClose={() => setOpen(false)}
+      />
+    ) : null,
+  };
 }

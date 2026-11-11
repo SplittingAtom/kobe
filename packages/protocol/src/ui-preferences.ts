@@ -22,6 +22,8 @@ import { z } from "zod";
  * not live for the member shows the first live one, with a note.
  * `auto_open_edits` (KOBE-489): the proposed-edit card's "Open edits automatically" switch; a live
  * proposal opens its file with the inline diff. Absent is off.
+ * `threads_file_rail_width` (KOBE-614): the Threads panel's workspace rail's dragged width; `null`
+ * goes back to the default (the rail takes what the thread column leaves).
  */
 
 /** Threads' share of the rail's height over Files (CE5): never squeezing either section out. */
@@ -45,6 +47,13 @@ export const RAIL_WIDTH_BOUNDS = { min: 200, max: 560 } as const;
  * file tree is decided on the screen it is applied to).
  */
 export const WORKBENCH_EDITOR_WIDTH_BOUNDS = { min: 320, max: 8192 } as const;
+
+/**
+ * The Threads panel's workspace rail's dragged width in px (KOBE-614): never under 240 (file names
+ * stay readable); the upper bound only keeps the stored value sane (whether it fits beside the
+ * folders and the threads is decided on the screen it is applied to).
+ */
+export const THREADS_FILE_RAIL_WIDTH_BOUNDS = { min: 240, max: 8192 } as const;
 
 /** The rail's panels on screen (KOBE-419): one of them, or both. */
 export const RAIL_PANELS = ["both", "threads", "files"] as const;
@@ -101,6 +110,13 @@ export const uiPreferencesSchema = z.strictObject({
     .optional(),
   rail_picker: z.string().regex(APP_ID_PATTERN).nullable().optional(),
   auto_open_edits: z.boolean().optional(),
+  threads_file_rail_width: z
+    .number()
+    .int()
+    .min(THREADS_FILE_RAIL_WIDTH_BOUNDS.min)
+    .max(THREADS_FILE_RAIL_WIDTH_BOUNDS.max)
+    .nullable()
+    .optional(),
 });
 export type UiPreferences = z.infer<typeof uiPreferencesSchema>;
 

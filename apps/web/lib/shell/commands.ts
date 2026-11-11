@@ -28,6 +28,7 @@ import {
   EllipsisIcon,
   EllipsisVerticalIcon,
   ExternalLinkIcon,
+  FilesIcon,
   FolderDownIcon,
   FolderIcon,
   FolderInputIcon,
@@ -420,6 +421,9 @@ const LIST = [
     slash: "saveskill",
     arg: "skill",
   },
+  // In the Threads panel (KOBE-614): "Files (N)…" opens the list of the files the thread used, the
+  // keyboard and screen-reader way to what the lines draw; the row binds it only with links.
+  { id: "thread-files", name: "Files", icon: FilesIcon, scope: "thread-menu" },
   // Delete moves the thread to Trash (D18): undoable, so no confirm (Delete forever asks).
   { id: "trash-thread", name: "Delete", icon: Trash2Icon, scope: "thread-menu" },
   // A folder node's menu in the Threads panel's tree (KOBE-536, TF7); the button names the folder.

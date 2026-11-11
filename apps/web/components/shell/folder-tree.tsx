@@ -212,15 +212,22 @@ export function FolderTree({
             {row.expanded === undefined ? (
               <span aria-hidden className="size-3.5 shrink-0" />
             ) : (
+              // No outline-button face (the chat's base button rule): its padding and border left
+              // the 14 px box no room, and the chevron that opens Current or a folder was
+              // clipped away (KOBE-614).
               <button
                 type="button"
                 tabIndex={-1}
                 aria-hidden
-                className="flex size-3.5 shrink-0 items-center"
+                data-kobe-node-chevron=""
+                className="flex size-3.5 shrink-0 items-center justify-center rounded-sm border-0 bg-transparent p-0"
                 onClick={() => setOpen(row.node, !row.expanded)}
               >
                 <ChevronRightIcon
-                  className={cn("size-3.5 transition-transform", row.expanded && "rotate-90")}
+                  className={cn(
+                    "size-3.5 shrink-0 transition-transform",
+                    row.expanded && "rotate-90",
+                  )}
                 />
               </button>
             )}

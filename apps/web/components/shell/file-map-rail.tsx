@@ -80,7 +80,8 @@ export function FileMapRail({
       ref={railRef}
       aria-label="Workspace files"
       data-kobe-file-rail=""
-      className="flex max-h-[70vh] min-w-0 flex-col gap-1 self-start overflow-auto"
+      // Fills the rail's column (KOBE-614): the whole height and width, scrolling inside.
+      className="flex min-h-0 min-w-0 flex-1 flex-col gap-1 overflow-auto"
     >
       {/* Not a heading: the panel's headings are the thread groups'. */}
       <div className="flex h-6.5 items-center gap-1 ps-0.5 text-xs font-medium">
@@ -110,7 +111,11 @@ export function FileMapRail({
       {tree.root.error && (
         <p role="alert" className="text-muted-foreground m-0 text-xs">
           Your files could not be listed.{" "}
-          <button type="button" className="underline" onClick={tree.reloadAll}>
+          <button
+            type="button"
+            className="border-0 bg-transparent p-0 underline"
+            onClick={tree.reloadAll}
+          >
             Try again
           </button>
         </p>

@@ -42,6 +42,14 @@ describe("uiPreferencesSchema", () => {
     expect(uiPreferencesSchema.parse({ auto_open_edits: false })).toEqual({
       auto_open_edits: false,
     });
+    // KOBE-614: the Threads panel's workspace rail's dragged width.
+    expect(uiPreferencesSchema.parse({ threads_file_rail_width: 420 })).toEqual({
+      threads_file_rail_width: 420,
+    });
+    expect(uiPreferencesSchema.parse({ threads_file_rail_width: null })).toEqual({
+      threads_file_rail_width: null,
+    });
+    expect(uiPreferencesSchema.safeParse({ threads_file_rail_width: 239 }).success).toBe(false);
   });
 
   it("refuses unknown keys (strict, not stripped)", () => {
