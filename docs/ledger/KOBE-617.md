@@ -49,6 +49,11 @@ shared page contract (front matter `title`, `summary`, `section`, `order`, `audi
 - `for-agents/working-in-a-sandbox` is ~1,050 words (the tools table); the access part was split
   into `for-agents/asking-for-access` to stay near the length target.
 
+- **Skill review gap (coordinator, 2026-11-11):** `agents/skills` gained "Why isn't my skill
+  showing up?" from `services/server/src/skills/review.ts`, `frozen.ts`, `enablements.ts`: every
+  team skill version needs team-admin approval (any verdict; D22 default), personal ones only when
+  not Pass; plus troubleshooting and team-admin lines.
+
 ## Open questions (for Chris or the coordinator)
 
 - KOBE-616 decides whether `/llms.txt` and `/docs/<slug>.md` need a session; `reading-the-docs`

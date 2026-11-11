@@ -64,7 +64,9 @@ after saving.
 - **Skills**: access modes (required, on by default, available, hidden), the agents they reach and
   catalog installs.
 - **Skill review**: approve or reject scanned skill versions; switch personal skills off for the
-  team.
+  team. No run uses a new team skill version until you approve it, and the same goes for a
+  member's personal skill whose scan is not Pass. Pending versions are left out without a warning,
+  so check the queue when a member says a skill does not load.
 
 ## Governance
 

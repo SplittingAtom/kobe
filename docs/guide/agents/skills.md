@@ -61,6 +61,44 @@ BSD-3-Clause). Review the file, then save a new version: the evals run again bef
 Listing hosts or packages in the file does not allow them; your team's internet settings still
 decide.
 
+## Why isn't my skill showing up?
+
+Kobe leaves a skill out of a run, without an error, when the version is not cleared for your team.
+Check these in order.
+
+**1. It is waiting for review.** Kobe scans every saved version and gives it a verdict:
+
+- **Pass**: nothing the scanner flags;
+- **Caution**: findings a reviewer must acknowledge before the team can use the version;
+- **Block**: only a site admin can override it, with a reason.
+
+Every new version of a **team skill** waits for a team admin's approval, whatever its verdict. Until
+then runs keep using the newest approved version, or leave the skill out if none is approved yet.
+A **personal skill** with a Pass verdict runs in every team without review. A Caution or Block
+verdict, or a version not scanned yet, needs the approval of each team's admin. Kobe adds the
+version to that team's queue the first time one of your runs meets it.
+
+Team admins approve or reject in the Team console under **Agents and skills → Skill review**. A
+Caution version needs its findings acknowledged (**Approve anyway**). Versions never change once
+saved, so each new version you save is reviewed again.
+
+**2. It was suspended or blocked.** A later rescan can turn an approved version into Block. Kobe
+then suspends it until a team admin decides again. A site admin can also put a skill's exact
+content on the site's **Skill blocklist**, and it then never loads anywhere.
+
+**3. It is switched off.** On the **Mine** tab, **Skills in your runs in _workspace_** lists your
+choices for this workspace. They apply from your next run:
+
+- your personal skills are on by default, and you can turn one off;
+- a team skill **On by default** can be turned off, and an **Available** one must be turned on;
+- **Required** skills are always on, and **Hidden** skills load only for agents that name them;
+- a team admin can **Disable personal skills in this team** (on the Skill review page). Your
+  personal skills are then left out there, and you see a notice.
+
+**4. The agent does not use it.** An agent set to **Use only the listed skills** loads no others.
+A published team agent keeps the skill versions it was published with: a newly approved version
+reaches that agent only after it is published again.
+
 ## Promote to the Site
 
 **Promote to Site** on a saved team version shows what would leave the team and sends the request

@@ -66,6 +66,13 @@ open while you ask, and ask it to propose changes.
 **The kernel lost my variables.** It restarted, stopped after 30 idle minutes, or the sandbox went
 to sleep. Run your setup cells again.
 
+## Skills
+
+**My skill never loads.** Every new version of a team skill needs a team admin's approval in
+**Skill review** before any run uses it. A personal skill needs one too unless its scan says Pass.
+Check also that the skill is switched on for you on the Skills page's **Mine** tab. See [Skills](../agents/skills.md)
+(Why isn't my skill showing up?).
+
 ## Internet, connectors and approvals
 
 **"Internet access to … was blocked".** The site is not enabled for your team. Press **Request
