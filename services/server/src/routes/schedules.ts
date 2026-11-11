@@ -25,6 +25,7 @@ import {
   parseScheduleBody,
   scheduleError,
   send,
+  CHANGED_SINCE_APPROVAL,
   type Answer,
 } from "../schedules/http.js";
 import { withUserScheduleLock } from "../schedules/user-lock.js";
@@ -290,10 +291,13 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
     const admin = isAdmin(c);
+    // `?expectedActive=true` (KOBE-621): the approved before-state; a paused one is a 409.
+    const expectActive = c.req.query("expectedActive") === "true";
     const answer = await withTeam(db, teamId, async (tx): Promise<Answer> => {
       const row = await findSchedule(tx, teamId, id.data);
       const own = row?.userId === userId;
       if (!row || (!own && !admin)) return NOT_FOUND;
+      if (!row.active && expectActive) return CHANGED_SINCE_APPROVAL;
       if (!row.active) return { status: 200, json: toResponse(row) };
       const by = own ? "owner" : "team_admin";
       const updated = await updateSchedule(
@@ -313,6 +317,8 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
     const teamId = c.get("team").id;
     const userId = c.get("user").id;
     const admin = isAdmin(c);
+    // `?expectedActive=false` (KOBE-621): the approved before-state; an active one is a 409.
+    const expectPaused = c.req.query("expectedActive") === "false";
     // The cap is the owner's, who is not the caller when a team admin resumes.
     const owner = await withTeam(db, teamId, (tx) =>
       findSchedule(tx, teamId, id.data).then((r) => r?.userId ?? null),
@@ -321,7 +327,9 @@ export function scheduleRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariable
     const answer = await inTeam(teamId, owner, true, async (tx, elsewhere): Promise<Answer> => {
       const row = await findSchedule(tx, teamId, id.data);
       const own = row?.userId === userId;
-      if (!row || (!own && !(admin && row.pausedBy === "team_admin"))) return NOT_FOUND;
+      if (!row || (!own && !admin)) return NOT_FOUND;
+      if (row.active && expectPaused) return CHANGED_SINCE_APPROVAL;
+      if (!own && row.pausedBy !== "team_admin") return NOT_FOUND;
       if (row.active) return { status: 200, json: toResponse(row) };
       if (own && row.pausedBy === "team_admin") return PAUSED_BY_ADMIN;
       if (!(await agentBack(tx, row))) return scheduleError("agent_not_runnable");

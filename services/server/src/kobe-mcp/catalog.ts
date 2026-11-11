@@ -18,6 +18,8 @@ export interface KobeRoute {
   readonly method: KobeRouteMethod;
   /** Path under `/v1`, starting with `/` (ids are validated by the input schema first). */
   readonly path: string;
+  /** Query parameters (a route's filters, or a removal's before-state condition). */
+  readonly query?: Readonly<Record<string, string>>;
   readonly body?: unknown;
 }
 
@@ -46,14 +48,27 @@ export type BeforeState = "same" | "changed" | { readonly code: string; readonly
 export const KOBE_RESULT_MAX_BYTES = 64 * 1024;
 export const KOBE_PAGE_MAX = 50;
 
+/**
+ * What the catalog infers a schema's type from: its `parse`. Inferring through `z.ZodType<I>`
+ * instead makes the compiler expand every zod schema of every tool (KOBE-621: the server's
+ * typecheck ran out of memory). The values are zod schemas: {@link zodOf} gives them back.
+ */
+export interface Schema<T> {
+  parse(data: unknown): T;
+  safeParse(data: unknown): { success: true; data: T } | { success: false };
+}
+
+/** A catalog schema as the zod schema it is (for `z.toJSONSchema`). */
+export const zodOf = (schema: Schema<unknown>): z.ZodType => schema as unknown as z.ZodType;
+
 interface ToolBase<I, O> {
   /** `<area>_<verb>`, lowercase. */
   readonly name: string;
   readonly title: string;
   readonly description: string;
   /** Strict: unknown keys are refused, so the approved input is exactly what runs. */
-  readonly input: z.ZodType<I>;
-  readonly output: z.ZodType<O>;
+  readonly input: Schema<I>;
+  readonly output: Schema<O>;
   readonly route: (input: I) => KobeRoute;
   /** The route's 2xx answer reduced to the output schema (never more than the tool promises). */
   readonly reduce: (body: unknown, input: I) => O;
@@ -100,6 +115,12 @@ export const cursorSchema = z
   .max(32)
   .regex(/^[A-Za-z0-9_-]+$/);
 
+/** A route's own opaque cursor passed through (base64url, bounded). */
+export const routeCursorSchema = z
+  .string()
+  .max(512)
+  .regex(/^[A-Za-z0-9_-]+$/);
+
 export function decodeCursor(cursor: string | undefined): number {
   if (cursor === undefined) return 0;
   const n = Number(Buffer.from(cursor, "base64url").toString("utf8"));
@@ -109,6 +130,9 @@ export function decodeCursor(cursor: string | undefined): number {
 export function encodeCursor(offset: number): string {
   return Buffer.from(String(offset), "utf8").toString("base64url");
 }
+
+/** A path segment from a validated value (a domain, an alias): percent-encoded, `*` too. */
+export const segment = (value: string): string => encodeURIComponent(value).replace(/\*/g, "%2A");
 
 /** One page of `rows` from the cursor, at most {@link KOBE_PAGE_MAX}. */
 export function page<T>(

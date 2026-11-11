@@ -301,10 +301,13 @@ describe("listing follows the person's permission and both switches (ac-1, KA5)"
     const w = await world(null);
     const s = await sandboxFor(w.team, w.admin);
     expect(await listNames(s)).toEqual(withDocs()); // default: docs only (KA5)
+    const team = KOBE_ADMIN_TOOLS.filter((t) => t.scope === "team");
     await setLevel(w.team, "read");
-    expect(await listNames(s)).toEqual(withDocs("team_members_list"));
+    expect(await listNames(s)).toEqual(
+      withDocs(...team.filter((t) => t.readOnly).map((t) => t.name)),
+    );
     await setLevel(w.team, "read_write");
-    expect(await listNames(s)).toEqual(withDocs("team_members_list", "team_members_set_role"));
+    expect(await listNames(s)).toEqual(withDocs(...team.map((t) => t.name)));
     // The site switch: docs hides every admin tool, off removes the connector.
     await setSite(KOBE_MCP_MODE_KEY, "docs");
     expect(await listNames(s)).toEqual(withDocs());
@@ -442,7 +445,7 @@ describe("the docs tools (KOBE-620, KA-3; spec §4, KA4, KA7)", () => {
     expect(names(await runServer(agent({ connectors: "all" }), false))).toEqual(DOCS);
     // Naming the connector adds the admin tools the person may use.
     expect(names(await runServer(agent({ connectors: "all" })))).toEqual(
-      withDocs("team_members_list", "team_members_set_role"),
+      withDocs(...KOBE_ADMIN_TOOLS.filter((t) => t.scope === "team").map((t) => t.name)),
     );
     // The agent's tool globs still apply; the thread's off switch and the site's off remove all.
     expect(names(await runServer(agent({ tools: { deny: [`${pi("docs_full")}`] } })))).toEqual(
@@ -646,64 +649,9 @@ describe("no header or route on the public listener accepts a delegation (ac-6)"
   });
 });
 
-/**
- * Contract (spec §5): every admin tool's route, called as a person without the tool's permission,
- * is refused by the route itself (writes) or the tool's permission is stricter than its route's
- * (reads, which the console page gates more tightly); and as a holder it answers. KA-4/KA-5 add
- * their tools' sample inputs here: a tool without one fails the test.
- */
-describe("catalog contract", () => {
-  type Ctx = { readonly w: World };
-  const samples: Readonly<Record<string, (ctx: Ctx) => Record<string, unknown>>> = {
-    team_members_list: () => ({}),
-    team_members_set_role: ({ w }) => ({
-      user_id: w.target.id,
-      from_role: "member",
-      to_role: "contributor",
-    }),
-  };
-
-  it("names a sample for every tool", () => {
-    expect(KOBE_ADMIN_TOOLS.map((t) => t.name).filter((n) => !(n in samples))).toEqual([]);
-  });
-
-  it.each(KOBE_ADMIN_TOOLS.map((t) => [t.name, t] as const))(
-    "%s: refused without the permission, answered with it",
-    async (_name, tool) => {
-      const w = await world();
-      const input = tool.input.parse(samples[tool.name]?.({ w }));
-      // A delegation needs the person's own active run (review M1).
-      const as = async (p: Person) => {
-        const s = await sandboxFor(w.team, p);
-        return routeCaller(fx.replica(0).app, {
-          userId: p.id,
-          teamId: w.team,
-          runId: s.runId,
-          threadId: s.threadId,
-          toolCallId: "contract",
-        });
-      };
-      const route = tool.route(input);
-      // An outsider (no membership, so no run in the team) is always refused.
-      const outsider = await fx.person(`ko${randomUUID().slice(0, 4)}`);
-      const stranger = routeCaller(fx.replica(0).app, {
-        userId: outsider.id,
-        teamId: w.team,
-        runId: randomUUID(),
-        threadId: randomUUID(),
-        toolCallId: "contract",
-      });
-      expect([401, 403]).toContain((await stranger(route)).status);
-      if (!tool.readOnly) {
-        // A member lacks every team-admin permission: the route itself refuses the write.
-        expect((await (await as(w.member))(route)).status).toBe(403);
-      }
-      const held = await (await as(w.admin))(route);
-      expect(held.status, JSON.stringify(held.body)).toBeLessThan(300);
-      expect(() => tool.output.parse(tool.reduce(held.body, input))).not.toThrow();
-    },
-  );
-});
+// The catalog contract for every Team console tool (without the permission: not listed and
+// refused; with it: listed and working; the console's own audit event) is in
+// `kobe-mcp-team.db.test.ts` (KOBE-621).
 
 describe("review fixes (KOBE-619)", () => {
   it("M1: signing out everywhere mid-run stops the run's admin tools", async () => {

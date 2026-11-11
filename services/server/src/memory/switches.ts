@@ -3,6 +3,7 @@ import {
   eq,
   inArray,
   siteSettings,
+  sql,
   teamMemorySettings,
   type KobeTx,
 } from "@kobe/db";
@@ -81,8 +82,24 @@ export async function writeTeamSwitches(
   teamId: string,
   userId: string,
   change: Partial<SwitchPair>,
-): Promise<SwitchPair> {
+  /**
+   * KOBE-621: the team's switches as the caller saw them (a Kobe MCP write's approved
+   * before-state); others, read under the team's switch lock, change nothing.
+   */
+  expected?: SwitchPair,
+): Promise<SwitchPair | "changed_since_approval"> {
+  // Team switch writes serialize per team (the row may not exist yet, so no row lock).
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtextextended(${`kobe.memory-switches:${teamId}`}, 0))`,
+  );
   const current = await readTeamSwitches(tx, teamId);
+  if (
+    expected !== undefined &&
+    (expected.memoryEnabled !== current.memoryEnabled ||
+      expected.projectMemoryEnabled !== current.projectMemoryEnabled)
+  ) {
+    return "changed_since_approval";
+  }
   const next: SwitchPair = {
     memoryEnabled: change.memoryEnabled ?? current.memoryEnabled,
     projectMemoryEnabled: change.projectMemoryEnabled ?? current.projectMemoryEnabled,

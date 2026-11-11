@@ -37,6 +37,15 @@ export function teamModelsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
         404,
       );
     }
+    if (result === "changed_since_approval") {
+      return c.json(
+        {
+          code: result,
+          message: "The team's setting for that model changed meanwhile; nothing was changed.",
+        },
+        409,
+      );
+    }
     if (result === "default_requires_enabled") {
       return invalidRequest(c, "Only an enabled model can be the team's default.");
     }

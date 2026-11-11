@@ -31,6 +31,15 @@ export const PAUSED_BY_ADMIN: Answer = {
   },
 };
 
+/** KOBE-621: the schedule is not in the state a Kobe MCP pause or resume was approved against. */
+export const CHANGED_SINCE_APPROVAL: Answer = {
+  status: 409,
+  json: {
+    code: "changed_since_approval",
+    message: "The schedule was paused or resumed meanwhile; nothing was changed.",
+  },
+};
+
 export const OWNER_INACTIVE: Answer = {
   status: 409,
   json: {

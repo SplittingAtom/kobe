@@ -3,7 +3,7 @@ import { z } from "zod";
 import { KOBE_BUILTIN_CONNECTOR_URL, type PinnedTool } from "@kobe/db";
 import type { EnabledConnector } from "../mcp/catalog.js";
 import type { KobeBuiltinRow } from "./access.js";
-import type { KobeTool } from "./catalog.js";
+import { zodOf, type KobeTool } from "./catalog.js";
 import { KOBE_DOCS_TOOLS } from "./docs/index.js";
 import { KOBE_ADMIN_TOOLS } from "./tools/index.js";
 
@@ -20,7 +20,7 @@ import { KOBE_ADMIN_TOOLS } from "./tools/index.js";
 
 /** What a pinned entry is made from: an admin tool or a docs tool. */
 export type KobePinnable = Pick<KobeTool, "name" | "title" | "description" | "input"> & {
-  readonly output?: z.ZodType;
+  readonly output?: KobeTool["output"] | z.ZodType;
 } & ({ readonly readOnly: true } | { readonly readOnly: false; readonly destructive: boolean });
 
 const schemaOf = (type: z.ZodType) =>
@@ -34,8 +34,8 @@ export function kobePinnedTool(connectorName: string, tool: KobePinnable): Pinne
     name: tool.name,
     title: tool.title,
     description: tool.description,
-    input_schema: schemaOf(tool.input),
-    ...(tool.output === undefined ? {} : { output_schema: schemaOf(tool.output) }),
+    input_schema: schemaOf(zodOf(tool.input)),
+    ...(tool.output === undefined ? {} : { output_schema: schemaOf(zodOf(tool.output)) }),
   };
   return {
     ...definition,

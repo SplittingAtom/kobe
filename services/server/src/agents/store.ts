@@ -409,6 +409,8 @@ export async function setAgentStatus(
   location: AgentLocation,
   id: string,
   status: AgentStatus,
+  /** KOBE-621: change only while the status is still this one (else null, nothing changes). */
+  expected?: AgentStatus,
 ): Promise<AgentRecord | null> {
   return inLocation(db, location, async (tx) => {
     const [row] =
@@ -416,12 +418,23 @@ export async function setAgentStatus(
         ? await tx
             .update(teamAgents)
             .set({ status, updatedAt: new Date() })
-            .where(eq(teamAgents.id, id))
+            .where(
+              and(
+                eq(teamAgents.id, id),
+                expected === undefined ? undefined : eq(teamAgents.status, expected),
+              ),
+            )
             .returning(TEAM)
         : await tx
             .update(siteAgents)
             .set({ status, updatedAt: new Date() })
-            .where(and(siteWhere(location), eq(siteAgents.id, id)))
+            .where(
+              and(
+                siteWhere(location),
+                eq(siteAgents.id, id),
+                expected === undefined ? undefined : eq(siteAgents.status, expected),
+              ),
+            )
             .returning(SITE);
     if (!row) return null;
     await recordAudit(tx, {

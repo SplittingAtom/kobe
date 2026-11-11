@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { MiddlewareHandler } from "hono";
+import { z } from "zod";
 import { memorySettingsSchema, type MemorySettings } from "@kobe/protocol";
 import { withTeam } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
@@ -39,6 +40,16 @@ const chain =
     };
     return at(0);
   };
+
+/**
+ * The PUT body; at the team level it may carry `expected` (KOBE-621): the team's switches as the
+ * caller saw them, another state is a 409 `changed_since_approval`.
+ */
+const putSchema = memorySettingsSchema.extend({
+  expected: z
+    .strictObject({ memory_enabled: z.boolean(), project_memory_enabled: z.boolean() })
+    .optional(),
+});
 
 const LEVELS = ["team", "site", "effective"] as const;
 type Level = (typeof LEVELS)[number];
@@ -95,11 +106,12 @@ export function memorySettingsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   });
 
   app.put("/", async (c) => {
-    const body = await parseBody(c, memorySettingsSchema);
+    const body = await parseBody(c, putSchema);
     if (!body || (body.memory_enabled === undefined && body.project_memory_enabled === undefined)) {
       return invalidRequest(c, "Send memory_enabled and/or project_memory_enabled.");
     }
     if (levelOf(c.req.query("level")) === "site") {
+      if (body.expected !== undefined) return invalidRequest(c, "expected is for level=team.");
       const next = await db.transaction(async (tx) => {
         const saved = await writeSiteSwitches(tx, changeOf(body));
         await recordAudit(tx, {
@@ -114,8 +126,16 @@ export function memorySettingsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
       return c.json(wire(next));
     }
     const teamId = c.get("team").id;
+    const expected =
+      body.expected === undefined
+        ? undefined
+        : {
+            memoryEnabled: body.expected.memory_enabled,
+            projectMemoryEnabled: body.expected.project_memory_enabled,
+          };
     const next = await withTeam(db, teamId, async (tx) => {
-      const saved = await writeTeamSwitches(tx, teamId, c.get("user").id, changeOf(body));
+      const saved = await writeTeamSwitches(tx, teamId, c.get("user").id, changeOf(body), expected);
+      if (saved === "changed_since_approval") return saved;
       await recordAudit(tx, {
         action: "memory.settings_changed",
         teamId,
@@ -126,6 +146,15 @@ export function memorySettingsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
       });
       return saved;
     });
+    if (next === "changed_since_approval") {
+      return c.json(
+        {
+          code: next,
+          message: "The team's memory switches changed meanwhile; nothing was changed.",
+        },
+        409,
+      );
+    }
     return c.json(wire(next));
   });
 

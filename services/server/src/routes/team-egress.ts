@@ -58,6 +58,13 @@ export function teamEgressRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
     const teamId = c.get("team").id;
     const { result, settled } = await enableTeamDomain(db, teamId, domain.data, c.get("user").id);
     if (result === "not_in_ceiling") return notInCeiling(c);
+    // `?expected=disabled` (KOBE-621): the approved before-state was "not enabled".
+    if (result === "already_enabled" && c.req.query("expected") === "disabled") {
+      return c.json(
+        { code: "changed_since_approval", message: "The domain was enabled meanwhile." },
+        409,
+      );
+    }
     if (settled > 0) {
       deps.background.run(
         "egress request notification failed",
@@ -74,9 +81,20 @@ export function teamEgressRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   app.delete("/domains/:domain", requireTeamPermission("team.egress.manage"), async (c) => {
     const domain = domainPatternSchema.safeParse(c.req.param("domain"));
     if (!domain.success) return notFound(c);
-    return (await disableTeamDomain(db, c.get("team").id, domain.data))
-      ? c.body(null, 204)
-      : notFound(c);
+    // `?expected=enabled_without_headers` (KOBE-621): never delete injected header values.
+    const withoutHeaders = c.req.query("expected") === "enabled_without_headers";
+    const result = await disableTeamDomain(db, c.get("team").id, domain.data, { withoutHeaders });
+    if (result === "headers_present") {
+      return c.json(
+        {
+          code: "injected_headers",
+          message:
+            "The domain has injected headers, which disabling it would delete: do it in the Team console.",
+        },
+        409,
+      );
+    }
+    return result ? c.body(null, 204) : notFound(c);
   });
 
   // Header injection (KOBE-39): replaces the domain's whole list; values are write-only.
