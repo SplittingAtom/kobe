@@ -16,7 +16,7 @@ import {
   themeSettingsSchema,
   type BrandingAssetKind,
 } from "@kobe/protocol";
-import { inArray, siteBrandingAssets, siteSettings, type KobeTx } from "@kobe/db";
+import { inArray, siteBrandingAssets, siteSettings, sql, type KobeTx } from "@kobe/db";
 import { auditRequestContext } from "../audit/context.js";
 import { recordAudit } from "../audit/record.js";
 import type { AuthVariables } from "../auth/session.js";
@@ -122,16 +122,35 @@ export function siteBrandingPublicRoutes(deps: ServerDeps): Hono {
   return app;
 }
 
+/**
+ * The settings the caller saw (KOBE-622): the change is refused 409 `changed_since_approval` when
+ * any named one differs now, checked under the branding lock (the Kobe MCP tool sends the approved
+ * before-state; the console sends none).
+ */
+const brandingExpectedSchema = z
+  .strictObject({
+    appName: z.string().max(200),
+    showName: z.boolean(),
+    theme: themeSettingsSchema,
+    logoThemeColor: z.boolean(),
+  })
+  .partial();
+
 export const brandingPutSchema = z
   .strictObject({
     appName: appNameSchema.optional(),
     showName: z.boolean().optional(),
     theme: themeSettingsSchema.optional(),
     logoThemeColor: z.boolean().optional(),
+    expected: brandingExpectedSchema.optional(),
   })
-  .refine((v) => Object.values(v).some((field) => field !== undefined), {
-    message: "Change at least one of appName, showName, theme and logoThemeColor.",
-  });
+  .refine(
+    (v) => [v.appName, v.showName, v.theme, v.logoThemeColor].some((field) => field !== undefined),
+    { message: "Change at least one of appName, showName, theme and logoThemeColor." },
+  );
+
+/** Serialises branding changes, so a before-state check and its change are one step. */
+const BRANDING_LOCK = sql`SELECT pg_advisory_xact_lock(hashtext('kobe.site_branding'))`;
 
 const noFields = z.strictObject({});
 
@@ -180,7 +199,7 @@ export function siteBrandingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
         parsed.error.issues[0]?.message ?? "Check the fields.",
       );
     }
-    const { appName, showName, theme, logoThemeColor } = parsed.data;
+    const { appName, showName, theme, logoThemeColor, expected } = parsed.data;
     if (theme?.preset === "custom") {
       const floor = checkFloor(theme);
       if (!floor.ok) {
@@ -195,8 +214,16 @@ export function siteBrandingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
         );
       }
     }
-    await db.transaction(async (tx) => {
+    const stale = await db.transaction(async (tx) => {
+      await tx.execute(BRANDING_LOCK);
       const before = await readBrandingSettings(tx);
+      if (expected !== undefined) {
+        const differs = (Object.keys(expected) as (keyof typeof expected)[]).some(
+          (k) =>
+            expected[k] !== undefined && JSON.stringify(expected[k]) !== JSON.stringify(before[k]),
+        );
+        if (differs) return true;
+      }
       const changes: [Setting, string, string, string][] = [];
       if (appName !== undefined && appName !== before.appName) {
         changes.push(["app_name", BRANDING_SETTING_KEYS.appName, appName, appName]);
@@ -224,7 +251,17 @@ export function siteBrandingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
       // Audit last: every write first, then one event per changed setting.
       for (const [, key, value] of changes) await storeSetting(tx, key, value);
       for (const [setting, , , label] of changes) await audited(tx, setting, label);
+      return false;
     });
+    if (stale) {
+      return c.json(
+        {
+          code: "changed_since_approval",
+          message: "The branding changed meanwhile; nothing was changed.",
+        },
+        409,
+      );
+    }
     return current(c);
   });
 
@@ -309,6 +346,7 @@ export function siteBrandingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
    */
   app.post("/reset", async (c) => {
     await db.transaction(async (tx) => {
+      await tx.execute(BRANDING_LOCK);
       const settings = await tx
         .delete(siteSettings)
         .where(inArray(siteSettings.key, [...BRANDING_KEYS]))

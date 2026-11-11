@@ -553,11 +553,14 @@ describe("catalog contract", () => {
     }),
   };
 
+  // Site tools have their own contract (`kobe-mcp-site.db.test.ts`, KOBE-622).
+  const TEAM_TOOLS = KOBE_ADMIN_TOOLS.filter((t) => t.scope === "team");
+
   it("names a sample for every tool", () => {
-    expect(KOBE_ADMIN_TOOLS.map((t) => t.name).filter((n) => !(n in samples))).toEqual([]);
+    expect(TEAM_TOOLS.map((t) => t.name).filter((n) => !(n in samples))).toEqual([]);
   });
 
-  it.each(KOBE_ADMIN_TOOLS.map((t) => [t.name, t] as const))(
+  it.each(TEAM_TOOLS.map((t) => [t.name, t] as const))(
     "%s: refused without the permission, answered with it",
     async (_name, tool) => {
       const w = await world();

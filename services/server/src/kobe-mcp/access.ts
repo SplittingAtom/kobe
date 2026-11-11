@@ -9,7 +9,13 @@ import {
   type KobeTx,
   type TeamRole,
 } from "@kobe/db";
-import { siteRoleAllows, teamRoleAllows, type SiteRole } from "../authz/permissions.js";
+import { SITE_GRANTS, type SiteGrant } from "@kobe/protocol";
+import {
+  siteRoleAllows,
+  skillReviewAllows,
+  teamRoleAllows,
+  type SiteRole,
+} from "../authz/permissions.js";
 import type { KobeTool } from "./catalog.js";
 import { KOBE_ADMIN_TOOLS } from "./tools/index.js";
 
@@ -33,6 +39,8 @@ export interface KobeAccess {
   /** The person's role in the team; null when no longer a member. */
   readonly teamRole: TeamRole | null;
   readonly siteRole: SiteRole;
+  /** The person's site grants (Skill reviewer, KOBE-622); none for an inactive account. */
+  readonly grants: readonly SiteGrant[];
 }
 
 /** The seeded `kobe` row while it is active and the site switch is not `off`. */
@@ -82,14 +90,34 @@ export async function loadKobeAccess(
     SELECT (SELECT m.role FROM public.team_members m
              WHERE m.team_id = ${teamId} AND m.user_id = ${userId}) AS team_role,
            (SELECT r.role FROM public.site_roles r WHERE r.user_id = ${userId}) AS site_role,
-           (SELECT u.deactivated_at IS NOT NULL FROM public.users u WHERE u.id = ${userId}) AS gone`);
-  const row = res.rows[0] as { team_role: TeamRole | null; site_role: SiteRole; gone?: boolean };
+           (SELECT u.deactivated_at IS NOT NULL FROM public.users u WHERE u.id = ${userId}) AS gone,
+           (SELECT coalesce(array_agg(g."grant"::text ORDER BY g."grant"), '{}')
+              FROM public.site_grants g WHERE g.user_id = ${userId}) AS grants`);
+  const row = res.rows[0] as {
+    team_role: TeamRole | null;
+    site_role: SiteRole;
+    gone?: boolean;
+    grants?: unknown;
+  };
   const active = row !== undefined && row.gone === false;
   return {
     ...switches,
     teamRole: active ? row.team_role : null,
     siteRole: active ? (row.site_role ?? null) : null,
+    grants: active ? parseGrants(row.grants) : [],
   };
+}
+
+const KNOWN_GRANTS: ReadonlySet<string> = new Set<string>(SITE_GRANTS);
+
+/** `array_agg` comes back as an array (or its text form on some drivers): known grants only. */
+function parseGrants(value: unknown): SiteGrant[] {
+  const list = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.replace(/^\{|\}$/g, "").split(",")
+      : [];
+  return list.filter((g): g is SiteGrant => typeof g === "string" && KNOWN_GRANTS.has(g));
 }
 
 /** The site and team switches allow the tool (KA5: admin tools only with `admin` + a level). */
@@ -105,9 +133,15 @@ export function switchesAllow(
 /** The person holds the tool's console permission (and is still a member of the team). */
 export function personAllows(tool: KobeTool, access: KobeAccess): boolean {
   if (access.teamRole === null) return false;
-  return tool.scope === "team"
-    ? teamRoleAllows(access.teamRole, tool.permission)
-    : siteRoleAllows(access.siteRole, tool.permission);
+  if (tool.scope === "team") return teamRoleAllows(access.teamRole, tool.permission);
+  // A Skill Registry tool: the page's own action check, Skill reviewer grant included (SK22).
+  if (tool.skillReview !== undefined) {
+    return skillReviewAllows(
+      { siteRole: access.siteRole, grants: access.grants },
+      tool.skillReview,
+    );
+  }
+  return siteRoleAllows(access.siteRole, tool.permission);
 }
 
 /** The tools this person may list and call now. */

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { SitePermission, TeamPermission } from "../authz/permissions.js";
+import type { SitePermission, SkillReviewAction, TeamPermission } from "../authz/permissions.js";
 
 /**
  * The Kobe MCP tool catalog framework (KOBE-619, spec kobe-admin-mcp §5, KA3). Each admin tool is
@@ -18,6 +18,8 @@ export interface KobeRoute {
   readonly method: KobeRouteMethod;
   /** Path under `/v1`, starting with `/` (ids are validated by the input schema first). */
   readonly path: string;
+  /** Query parameters (built from validated input only); appended URL-encoded. */
+  readonly query?: Readonly<Record<string, string>>;
   readonly body?: unknown;
 }
 
@@ -79,7 +81,16 @@ interface WriteTool<I> {
 
 type Scoped =
   | { readonly scope: "team"; readonly permission: TeamPermission }
-  | { readonly scope: "site"; readonly permission: SitePermission };
+  | {
+      readonly scope: "site";
+      readonly permission: SitePermission;
+      /**
+       * A Skill Registry tool (KOBE-622): gated by this action through `skillReviewAllows`
+       * (Site admins and the Owner, or a Skill reviewer for the reviewer's actions) instead of the
+       * plain role check of `permission` (then `site.skills.review`, the page's own permission).
+       */
+      readonly skillReview?: SkillReviewAction;
+    };
 
 export type KobeTool<I = unknown, O = unknown> = ToolBase<I, O> &
   Scoped &

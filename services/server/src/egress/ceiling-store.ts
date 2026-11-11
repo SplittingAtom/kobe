@@ -120,8 +120,13 @@ export async function addCeilingDomain(
 export async function setCeilingFlags(
   db: KobeDb,
   domain: string,
-  flags: { readonly inCeiling?: boolean | undefined; readonly internal?: boolean | undefined },
-): Promise<CeilingEntry | undefined> {
+  flags: {
+    readonly inCeiling?: boolean | undefined;
+    readonly internal?: boolean | undefined;
+    /** The caller's before-state (KOBE-622): `changed` when the row has another one now. */
+    readonly expectedInCeiling?: boolean | undefined;
+  },
+): Promise<CeilingEntry | "changed" | undefined> {
   return db.transaction(async (tx) => {
     const [before] = await tx
       .select()
@@ -129,6 +134,9 @@ export async function setCeilingFlags(
       .where(eq(egressDomains.domain, domain))
       .for("update");
     if (!before) return undefined;
+    if (flags.expectedInCeiling !== undefined && flags.expectedInCeiling !== before.inCeiling) {
+      return "changed";
+    }
     const inCeiling = flags.inCeiling ?? before.inCeiling;
     const internal = flags.internal ?? before.internal;
     if (before.inCeiling === inCeiling && before.internal === internal) return toEntry(before);

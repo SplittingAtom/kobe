@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { z } from "zod";
 import { asc, eq, siteRoles, users } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import { requireSitePermission } from "../authz/middleware.js";
@@ -10,6 +11,10 @@ import {
   reactivateUser,
   teamsLeftWithoutActiveAdmin,
 } from "../users/deactivation.js";
+
+const expectedStateSchema = z.strictObject({
+  expectedState: z.enum(["active", "deactivated"]).optional(),
+});
 
 /**
  * Site users (spec D7, §6.1 `/v1/site/users`): list, deactivate, reactivate. Deactivation
@@ -76,12 +81,38 @@ export function siteUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
     return null;
   }
 
+  /**
+   * The optional body `{expectedState}` (KOBE-622): the state the caller saw. The change itself is
+   * a conditional update, so when it changed nothing (someone else got there first) the call is
+   * refused 409 `changed_since_approval` instead of reporting success (the Kobe MCP tools send the
+   * approved before-state; the console sends no body).
+   */
+  async function expected(c: Context, want: "active" | "deactivated") {
+    const raw: unknown = await c.req.json().catch(() => ({}));
+    const parsed = expectedStateSchema.safeParse(raw ?? {});
+    if (!parsed.success) return { ok: false as const, response: invalidRequest(c) };
+    const state = parsed.data.expectedState;
+    return { ok: true as const, check: state !== undefined, matches: state === want };
+  }
+  const changed = (c: Context) =>
+    c.json(
+      {
+        code: "changed_since_approval",
+        message: "The account's state changed meanwhile; nothing was changed.",
+      },
+      409,
+    );
+
   app.post("/:userId/deactivate", async (c) => {
     const userId = idSchema.safeParse(c.req.param("userId"));
     if (!userId.success) return invalidRequest(c);
+    const want = await expected(c, "active");
+    if (!want.ok) return want.response;
+    if (want.check && !want.matches) return changed(c);
     const refused = await guard(c, userId.data);
     if (refused) return refused;
-    await deactivateUser(db, userId.data);
+    const did = await deactivateUser(db, userId.data);
+    if (want.check && !did) return changed(c);
     const incompleteSteps = await deps.lifecycle.emit("deactivated", userId.data);
     return c.json({
       userId: userId.data,
@@ -95,9 +126,13 @@ export function siteUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
   app.post("/:userId/reactivate", async (c) => {
     const userId = idSchema.safeParse(c.req.param("userId"));
     if (!userId.success) return invalidRequest(c);
+    const want = await expected(c, "deactivated");
+    if (!want.ok) return want.response;
+    if (want.check && !want.matches) return changed(c);
     const refused = await guard(c, userId.data);
     if (refused) return refused;
-    await reactivateUser(db, userId.data);
+    const did = await reactivateUser(db, userId.data);
+    if (want.check && !did) return changed(c);
     const incompleteSteps = await deps.lifecycle.emit("reactivated", userId.data);
     return c.json({ userId: userId.data, deactivated: false, incompleteSteps });
   });

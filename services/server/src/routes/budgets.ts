@@ -41,8 +41,22 @@ const siteSchema = z
     daily_usd: amount.optional(),
     ...tokenFields,
     user_requests_per_minute: rate.optional(),
+    /**
+     * The values the caller saw (KOBE-622): refused 409 `changed_since_approval` under the row
+     * lock when any named one differs now (the Kobe MCP tool sends the approved before-state).
+     */
+    expected: z
+      .strictObject({
+        monthly_usd: z.number().nullable(),
+        daily_usd: z.number().nullable(),
+        monthly_tokens: z.number().int().nullable(),
+        daily_tokens: z.number().int().nullable(),
+        user_requests_per_minute: z.number().int(),
+      })
+      .partial()
+      .optional(),
   })
-  .refine(nonEmpty, "nothing to change");
+  .refine((v) => Object.keys(v).filter((k) => k !== "expected").length > 0, "nothing to change");
 const teamSchema = z
   .strictObject({
     monthly_usd: amount.optional(),
@@ -171,6 +185,15 @@ export function siteBudgetRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
       );
     }
     const view = await setSiteLimits(db, input, c.get("user").id);
+    if (view === "changed") {
+      return c.json(
+        {
+          code: "changed_since_approval",
+          message: "The site budget changed meanwhile; nothing was changed.",
+        },
+        409,
+      );
+    }
     // Every team's runs answer to the site budget.
     void deps.budgets.sweep();
     return c.json(view);

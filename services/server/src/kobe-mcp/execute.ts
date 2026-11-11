@@ -28,17 +28,25 @@ export type KobeExecution =
     }
   | { readonly ok: false; readonly code: string; readonly message: string };
 
-/** Paths are built from validated ids only; anything else never reaches the router. */
-const SAFE_PATH = /^\/(?:[A-Za-z0-9_-]+\/?)+$/;
+/**
+ * Paths are built from validated ids (and domain patterns, KOBE-622) only; anything else never
+ * reaches the router. No `.` or `..` segment, so nothing can be normalised away.
+ */
+const SAFE_PATH = /^\/(?:[A-Za-z0-9_.*-]+\/?)+$/;
+const DOT_SEGMENT = /(?:^|\/)\.{1,2}(?:\/|$)/;
 
 export function routeCaller(api: Hono, delegation: Delegation): KobeRouteCaller {
   return async (route: KobeRoute): Promise<KobeRouteAnswer> => {
-    if (!SAFE_PATH.test(route.path) || route.path.includes("..")) {
+    if (!SAFE_PATH.test(route.path) || route.path.includes("..") || DOT_SEGMENT.test(route.path)) {
       throw new Error("kobe-mcp: unsafe route path");
     }
     const hasBody = route.body !== undefined;
+    const query =
+      route.query === undefined || Object.keys(route.query).length === 0
+        ? ""
+        : `?${new URLSearchParams(route.query).toString()}`;
     const res = await api.request(
-      `/v1${route.path}`,
+      `/v1${route.path}${query}`,
       {
         method: route.method,
         headers: hasBody ? { "content-type": "application/json" } : {},

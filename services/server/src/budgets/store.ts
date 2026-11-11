@@ -153,6 +153,10 @@ export interface SiteLimitsInput {
   readonly monthly_tokens?: number | null | undefined;
   readonly daily_tokens?: number | null | undefined;
   readonly user_requests_per_minute?: number | undefined;
+  /** The caller's before-state (KOBE-622): `changed` when any named value differs now. */
+  readonly expected?:
+    | { readonly [K in keyof Omit<SiteLimitsView, "updated_at">]?: SiteLimitsView[K] | undefined }
+    | undefined;
 }
 
 const pick = <T>(next: T | undefined, before: T): T => (next === undefined ? before : next);
@@ -161,9 +165,20 @@ export async function setSiteLimits(
   db: KobeDb,
   input: SiteLimitsInput,
   actorId: string,
-): Promise<SiteLimitsView> {
+): Promise<SiteLimitsView | "changed"> {
   return db.transaction(async (tx) => {
+    // The row lock makes the before-state check and the change one step (KOBE-622).
+    await tx
+      .select({ id: siteModelLimits.id })
+      .from(siteModelLimits)
+      .where(eq(siteModelLimits.id, 1))
+      .for("update");
     const before = await getSiteLimits(tx);
+    const expected = input.expected ?? {};
+    const stale = (Object.keys(expected) as (keyof typeof expected)[]).some(
+      (k) => expected[k] !== undefined && expected[k] !== before[k],
+    );
+    if (stale) return "changed";
     const next = {
       monthlyUsd: pick(input.monthly_usd, before.monthly_usd),
       dailyUsd: pick(input.daily_usd, before.daily_usd),

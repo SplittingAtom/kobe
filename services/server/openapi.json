@@ -17431,6 +17431,68 @@
           },
           "logoThemeColor": {
             "type": "boolean"
+          },
+          "expected": {
+            "type": "object",
+            "properties": {
+              "appName": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "showName": {
+                "type": "boolean"
+              },
+              "theme": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "preset": {
+                        "type": "string",
+                        "enum": [
+                          "default",
+                          "slate",
+                          "forest",
+                          "plum",
+                          "ember",
+                          "tokyo-nights",
+                          "catalyst"
+                        ]
+                      }
+                    },
+                    "required": ["preset"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "preset": {
+                        "type": "string",
+                        "const": "custom"
+                      },
+                      "accent": {
+                        "type": "string",
+                        "pattern": "^#[0-9a-f]{6}$"
+                      },
+                      "corners": {
+                        "type": "string",
+                        "enum": ["sharp", "soft", "round"]
+                      },
+                      "font": {
+                        "type": "string",
+                        "enum": ["system", "humanist", "grotesk", "serif", "catalyst"]
+                      }
+                    },
+                    "required": ["preset", "accent", "corners", "font"],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "logoThemeColor": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
@@ -20609,6 +20671,9 @@
             "type": "boolean"
           },
           "internal": {
+            "type": "boolean"
+          },
+          "expected_in_ceiling": {
             "type": "boolean"
           }
         },

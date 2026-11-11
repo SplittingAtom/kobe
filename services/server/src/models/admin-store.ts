@@ -19,6 +19,7 @@ import {
   MAX_PROVIDERS,
   type AddCatalogInput,
   type AddProviderInput,
+  type CatalogExpected,
   type UpdateCatalogInput,
   type UpdateProviderInput,
 } from "./schemas.js";
@@ -461,9 +462,27 @@ export async function addCatalogEntry(
 
 export type UpdateCatalogResult =
   | { readonly ok: true; readonly entry: CatalogView }
-  | { readonly ok: false; readonly error: "not_found" | "provider_not_found" | "partial_prices" }
+  | {
+      readonly ok: false;
+      readonly error:
+        "not_found" | "provider_not_found" | "partial_prices" | "changed_since_approval";
+    }
   | OutputLimitTooLarge
   | ThinkingInvalid;
+
+/** Whether every value the caller named is still the entry's (KOBE-622). */
+function catalogMatches(row: CatalogRow, expected: CatalogExpected): boolean {
+  const current: Required<CatalogExpected> = {
+    label: row.label,
+    input_usd_per_mtok: row.inputUsdPerMtok,
+    output_usd_per_mtok: row.outputUsdPerMtok,
+    max_output_tokens: row.maxOutputTokens,
+    context_window: row.contextWindow,
+  };
+  return (Object.keys(expected) as (keyof CatalogExpected)[]).every(
+    (k) => expected[k] === undefined || expected[k] === current[k],
+  );
+}
 
 export async function updateCatalogEntry(
   db: KobeDb,
@@ -478,6 +497,9 @@ export async function updateCatalogEntry(
       .where(eq(modelCatalog.alias, alias))
       .for("update");
     if (!before) return { ok: false, error: "not_found" };
+    if (input.expected !== undefined && !catalogMatches(before, input.expected)) {
+      return { ok: false, error: "changed_since_approval" };
+    }
     const providerId = input.provider_id ?? before.providerId;
     const [provider] = await tx
       .select({ kind: modelProviders.kind })

@@ -1,4 +1,5 @@
 import type { KobeTool } from "../catalog.js";
+import { KOBE_SITE_TOOLS } from "./site/index.js";
 import { teamMembersList, teamMembersSetRole } from "./team-members.js";
 
 /**
@@ -6,7 +7,11 @@ import { teamMembersList, teamMembersSetRole } from "./team-members.js";
  * The contract test (`kobe-mcp.db.test.ts`) runs each one's route as a person without the tool's
  * permission.
  */
-export const KOBE_ADMIN_TOOLS: readonly KobeTool[] = [teamMembersList, teamMembersSetRole];
+export const KOBE_ADMIN_TOOLS: readonly KobeTool[] = [
+  teamMembersList,
+  teamMembersSetRole,
+  ...KOBE_SITE_TOOLS,
+];
 
 export function kobeToolByName(name: string): KobeTool | undefined {
   return KOBE_ADMIN_TOOLS.find((t) => t.name === name);

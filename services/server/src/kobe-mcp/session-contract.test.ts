@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { KOBE_SITE_SAMPLES } from "../testing/kobe-site-samples.js";
 import { KOBE_ADMIN_TOOLS } from "./tools/index.js";
 
 /**
@@ -16,9 +17,15 @@ const ID = "00000000-0000-4000-8000-000000000001";
 const SAMPLES: Readonly<Record<string, unknown>> = {
   team_members_list: {},
   team_members_set_role: { user_id: ID, from_role: "member", to_role: "contributor" },
+  ...KOBE_SITE_SAMPLES,
 };
 /** Reads the session, by design and for sessions only: requireTeam takes the delegation first. */
-const EXEMPT = new Set(["authz/middleware.ts", "auth/session.ts"]);
+const EXEMPT = new Set([
+  "authz/middleware.ts",
+  "auth/session.ts",
+  // Deactivation revokes the *target's* sessions (KOBE-622); it never reads the caller's.
+  "users/deactivation.ts",
+]);
 const SESSION_KEYED =
   /get\(\s*"sessionId"\s*\)|var\.sessionId|readActiveTeamId|sessionActiveTeams|\bsessions\b\s*[,)]/;
 
