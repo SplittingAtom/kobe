@@ -45,3 +45,11 @@ Each test sets the site switch (`PUT /v1/site/settings {kobeMcpMode}`) and the t
 `pnpm run build` (guide frontmatter and links), `pnpm run format:check`,
 `scripts/check-public-hygiene.sh`, `node scripts/check-site-wording.mjs`, `@kobe/guide` tests,
 web `lib/docs` tests, server `kobe-mcp/docs` tests; spec: `tsc -p e2e/browser`, eslint, prettier.
+
+## Run on gate1 (2026-11-11, coordinator)
+
+Pre-migration dump kept: compute1 ~/kobe-gate1/backups/kobe-pre-admin-mcp-2026-11-11.sql.gz. Group branch
+deployed as local-f15893aef8b7 (migrations 0207, 0208: kobe connector row, kobe-guide active).
+kobe-admin-mcp spec passed twice (4 tests); docs, share, remember-approvals specs pass (remember-approvals
+had one model-side timeout in a combined run, passed alone). The spec restored the switches (site docs,
+Team1 docs) and member2's role; audit shows identity.member.role_changed with viaAgent.
