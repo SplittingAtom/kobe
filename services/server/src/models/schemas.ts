@@ -186,6 +186,17 @@ export const teamModelSchema = z.strictObject({
    * narrow the site's; null goes back to the site's.
    */
   thinking_max: teamThinkingMaxSchema.optional(),
+  /**
+   * KOBE-621: the team's setting as the caller saw it; another one is a 409
+   * `changed_since_approval` (a Kobe MCP write's approved before-state).
+   */
+  expected: z
+    .strictObject({
+      enabled: z.boolean(),
+      is_default: z.boolean(),
+      thinking_max: teamThinkingMaxSchema,
+    })
+    .optional(),
 });
 export type TeamModelInput = z.infer<typeof teamModelSchema>;
 

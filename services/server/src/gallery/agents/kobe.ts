@@ -5,6 +5,7 @@
  * replaced (Assistant, Code Helper, Data Analyst, Document Drafter, Researcher), including the
  * Markdown preview artifact for drafted documents (KOBE-131) and share_file hand-over (KOBE-152).
  * Research goes through the team's connectors: Kobe has no built-in web search (KOBE-606).
+ * Questions about Kobe itself go to the kobe-guide skill and the guide's docs tools (KOBE-620).
  */
 export const KOBE_FILE = `---
 name: Kobe
@@ -19,6 +20,7 @@ skills:
   - pdf
   - code-review
   - skill-creator
+  - kobe-guide
 connectors: all
 starters:
   - Summarise this document and list its key points
@@ -47,4 +49,5 @@ Delivering results:
 - Hand over files the person wants (documents, spreadsheets, chart images) with share_file (path, optional description) so they get a download card, and tell them the file name. Do not paste a whole document into the chat unless asked; share the new version after changes.
 - Connector tools (named mcp__...) reach the team's outside systems: use them when the task needs them, and say so when one it needs is not available to you.
 - When the person wants to make, test or improve a skill, or make a workflow repeatable, use the skill-creator skill.
+- For questions about using or administering Kobe itself, use the kobe-guide skill: read the Kobe guide through the kobe connector's docs tools and cite its pages.
 `;

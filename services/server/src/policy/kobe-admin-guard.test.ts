@@ -10,6 +10,7 @@ import { batchable } from "../approvals/approve-all.js";
 import {
   guardKobeAdmin,
   isKobeAdminAsk,
+  isKobeAdminTool,
   isKobeTool,
   kobeToolName,
   type KobeAdminGuard,
@@ -111,6 +112,19 @@ describe("guardKobeAdmin", () => {
     expect(guardKobeAdmin(allowed, g({ tool: other }))).toBe(allowed);
     expect(isKobeTool(other)).toBe(false);
     expect(kobeToolName("mcp__kobe_builtin__team_members_list")).toBe("team_members_list");
+  });
+
+  it("leaves the docs tools to the ordinary policy: scheduled runs, evals and auto too (KOBE-620)", () => {
+    const docs: ToolDescriptor = { ...kobe("read"), name: "mcp__kobe__docs_index" };
+    expect(isKobeTool(docs)).toBe(true);
+    expect(isKobeAdminTool(docs)).toBe(false);
+    expect(isKobeAdminTool(kobe("read"))).toBe(true);
+    const allowed = allow("risk_read", "risk_class");
+    const read = g({ tool: docs });
+    expect(guardKobeAdmin(allowed, read)).toBe(allowed);
+    expect(guardKobeAdmin(allowed, { ...read, evalRun: true })).toBe(allowed);
+    expect(guardKobeAdmin(allowed, { ...read, input: input("auto", "schedule") })).toBe(allowed);
+    expect(guardKobeAdmin(allowed, { ...read, input: input("auto") })).toBe(allowed);
   });
 
   it("is never approved in bulk", () => {

@@ -41,6 +41,11 @@ const decisionSchema = z.strictObject({
     .string()
     .regex(/^[0-9a-f]{64}$/)
     .optional(),
+  /**
+   * KOBE-621: the review's status as the caller saw it; another one is a 409
+   * `changed_since_approval` (a Kobe MCP write's approved before-state).
+   */
+  expectedStatus: z.enum(["pending", "approved", "rejected"]).optional(),
 });
 const settingsSchema = z
   .strictObject({
@@ -131,12 +136,21 @@ export function teamSkillReviewRoutes(deps: ServerDeps): Hono<{ Variables: TeamV
           note: body.note || null,
           reviewerId: c.get("user").id,
           ...(body.acknowledgedFindings ? { acknowledgedFindings: body.acknowledgedFindings } : {}),
+          ...(body.expectedStatus ? { expectedStatus: body.expectedStatus } : {}),
           mayOverrideBlock: siteRoleAllows(c.get("siteRole"), "site.skills.override_scan"),
         },
       );
       if (!result.ok) {
         if (result.error === "not_found")
           return c.json({ code: "not_found", message: "No such skill version." }, 404);
+        if (result.error === "changed_since_approval")
+          return c.json(
+            {
+              code: result.error,
+              message: "The review's status changed meanwhile; nothing was changed.",
+            },
+            409,
+          );
         if (result.error === "acknowledgement_required")
           return c.json(
             {

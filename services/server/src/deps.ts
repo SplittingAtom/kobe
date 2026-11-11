@@ -491,6 +491,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   });
   const kobeMcp = createKobeMcpService({
     db: database.db,
+    publicUrl: new URL(options.publicUrl).origin,
     policy: policySources,
     runContext,
     approvals: approvalVerifierForMcp(database.db, approvals.verifier),

@@ -1,0 +1,32 @@
+{
+  "name": "@kobe/guide",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "description": "The Kobe user guide (docs/guide) built into typed pages, with the llms.txt, llms-full.txt and page Markdown renderers shared by the web routes and the server's docs tools",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./headings": {
+      "types": "./dist/headings.d.ts",
+      "default": "./dist/headings.js"
+    }
+  },
+  "scripts": {
+    "generate:guide": "node scripts/generate-guide.mjs",
+    "build": "node scripts/generate-guide.mjs && tsc -p tsconfig.build.json",
+    "test": "node scripts/generate-guide.mjs && vitest run",
+    "lint": "eslint .",
+    "typecheck": "node scripts/generate-guide.mjs && tsc --noEmit"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
+  }
+}

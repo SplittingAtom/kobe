@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { cursorSchema, kobeTool, page } from "../../catalog.js";
+import { cursorSchema, kobeTool, page, segment } from "../../catalog.js";
 import { clip, matches, missing, querySchema, readAs } from "./shared.js";
 
 /**
@@ -137,7 +137,7 @@ export const siteEgressCeilingSet = kobeTool({
   output: z.strictObject({ domain: ceilingOut }),
   route: (input) => ({
     method: "PUT",
-    path: `/site/egress-ceiling/${input.domain.toLowerCase()}`,
+    path: `/site/egress-ceiling/${segment(input.domain.toLowerCase())}`,
     body: { in_ceiling: input.to_in_ceiling, expected_in_ceiling: input.from_in_ceiling },
   }),
   reduce: (body) => ({ domain: toOut(z.object({ domain: ceilingRow }).parse(body).domain) }),

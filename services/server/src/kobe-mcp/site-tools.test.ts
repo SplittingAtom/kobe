@@ -260,10 +260,10 @@ describe("the executor's paths", () => {
       threadId: ID,
       toolCallId: "t",
     });
-    await call({ method: "PUT", path: "/site/egress-ceiling/*.example.com" });
+    await call({ method: "PUT", path: "/site/egress-ceiling/%2A.example.com" });
     await call({ method: "GET", path: "/site/audit", query: { limit: "5", action: "a.b" } });
     expect(seen).toEqual([
-      "/v1/site/egress-ceiling/*.example.com",
+      "/v1/site/egress-ceiling/%2A.example.com",
       "/v1/site/audit?limit=5&action=a.b",
     ]);
     await expect(call({ method: "GET", path: "/site/./users" })).rejects.toThrow();

@@ -1,0 +1,55 @@
+# Acme Chat user guide
+
+> Every page of the Acme Chat guide in one file; the index is https://chat.example.com/llms.txt.
+
+---
+
+# Using [Kobe]
+
+> How agents read the guide.
+
+See [the glossary](https://chat.example.com/docs/glossary.md) first.
+
+Source: https://chat.example.com/docs/agents/use.md
+
+---
+
+# Getting started
+
+> Sign in, pick an agent and send a first message.
+
+Read [the glossary](https://chat.example.com/docs/glossary.md#thread) and [using Kobe](https://chat.example.com/docs/agents/use.md).
+
+Settings live at [/settings](https://chat.example.com/settings); outside links stay as they are: [site](https://example.com).
+
+```md
+[not a link](glossary.md)
+```
+
+Inline `[code](glossary.md)` stays.
+
+[ref]: https://chat.example.com/docs/agents/use.md "Using"
+
+Source: https://chat.example.com/docs/getting-started.md
+
+---
+
+# Admin from a conversation
+
+> What admins can do.
+
+Ask the agent.
+
+Source: https://chat.example.com/docs/agents/admin.md
+
+---
+
+# Glossary
+
+> Words Kobe uses.
+
+## Thread
+
+A conversation. Back to [start](https://chat.example.com/docs/getting-started.md).
+
+Source: https://chat.example.com/docs/glossary.md

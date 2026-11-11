@@ -45,7 +45,15 @@ export const KOBE_SKILL_NAMES = [
   "xlsx",
   "code-review",
   "skill-creator",
+  "kobe-guide",
 ] as const;
+/**
+ * Kobe names added after Sites could already hold them (KOBE-620): a non-Kobe catalog skill that
+ * took one before the upgrade keeps it (the check below lets it, so the migration never fails),
+ * the server refuses new ones (`isKobeSkillName`), and the Kobe seed skips that skill there
+ * (logged) instead of publishing it. Every name here is also in `KOBE_SKILL_NAMES`.
+ */
+export const KOBE_SKILL_NAMES_ADDED_LATER = ["kobe-guide"] as const;
 const NOTE_MAX = 4000;
 const quoted = (values: readonly string[]) => sql.raw(values.map((v) => `'${v}'`).join(", "));
 
@@ -144,7 +152,7 @@ export const registrySkills = pgTable(
     // name or be renamed away from one.
     check(
       "registry_skills_kobe_names",
-      sql`(${t.publisher} = 'kobe') = (${t.name} IN (${quoted(KOBE_SKILL_NAMES)}))`,
+      sql`(${t.publisher} = 'kobe') = (${t.name} IN (${quoted(KOBE_SKILL_NAMES)})) OR (${t.publisher} <> 'kobe' AND ${t.name} IN (${quoted(KOBE_SKILL_NAMES_ADDED_LATER)}))`,
     ),
     // All or nothing, and only on a Kobe skill (KOBE-495).
     check(

@@ -1,17 +1,41 @@
 ---
 title: How AI agents should read these docs
-summary: Where an AI agent finds Kobe's documentation in machine-readable form (llms.txt, llms-full.txt and one Markdown file per page) and how to use it.
+summary: How an AI agent reads Kobe's documentation, through the kobe connector's docs tools inside a sandbox or as llms.txt, llms-full.txt and one Markdown file per page outside Kobe.
 section: For agents
 order: 1
 audience: agent
 ---
 
-This page is for AI agents and the tools that feed them: assistants answering questions about
-Kobe, agents running inside a Kobe sandbox, and crawlers building a knowledge base. The same guide
-people read in Kobe's docs viewer is served as plain Markdown so you can read it without parsing
-HTML.
+This page is for AI agents and the tools that feed them: agents running inside a Kobe sandbox,
+assistants answering questions about Kobe from outside, and crawlers building a knowledge base.
+The same guide people read in Kobe's docs viewer is served as plain Markdown so you can read it
+without parsing HTML.
 
-## Where to find the docs
+## Inside a Kobe sandbox: the kobe connector's docs tools
+
+Every agent in Kobe has the built-in **kobe** connector with four docs tools, whatever connectors
+the agent itself lists. They hold no one's data, never ask for approval and work in every run,
+scheduled runs included. Pi names them `mcp__kobe__<tool>` (on some sites the connector is
+called `kobe-builtin`).
+
+| Tool          | What it returns                                                                       |
+| ------------- | ------------------------------------------------------------------------------------- |
+| `docs_index`  | The index, exactly as `/llms.txt` below.                                              |
+| `docs_page`   | One page as Markdown, by its slug (for example `memory` or `admin/team-admin`).       |
+| `docs_search` | Pages whose titles, summaries or headings match a query, ranked, with slugs and URLs. |
+| `docs_full`   | Every page in one text, as `/llms-full.txt`, or only one section's pages.             |
+
+The **kobe-guide** skill, which Kobe installs in every team, says how to use them: for any
+question about using or administering Kobe, start with `docs_index`, read the pages that fit with
+`docs_page` (or find them with `docs_search`), answer from the guide rather than from memory, and
+cite the pages' URLs. Do not fetch the docs over the internet from a sandbox: the docs tools are
+the source and need no internet access.
+
+When someone asks you to change something in Kobe, use the kobe connector's admin tools only if
+they are listed for you. They act as that person, with their permissions, and every change shows
+them an approval card first.
+
+## Outside Kobe: llms.txt and Markdown pages
 
 All paths are on the same address as the Kobe site itself.
 
@@ -24,18 +48,18 @@ All paths are on the same address as the Kobe site itself.
 
 ## How to use them
 
-1. **Start with `/llms.txt`.** Each line's summary says what question the page answers. Pick the
-   pages that match the user's question.
-2. **Fetch only what you need** from `/docs/<slug>.md`. Prefer this over `/llms-full.txt` when your
-   context is limited.
-3. **Use `/llms-full.txt`** when you need the whole picture at once, for example to build an
-   index or answer many questions in a row.
-4. **Follow relative links.** Links between pages are relative Markdown links to `.md` files;
-   resolve them against the current page's path.
+1. **Start with the index** (`docs_index`, or `/llms.txt`). Each line's summary says what question
+   the page answers. Pick the pages that match the user's question.
+2. **Read only what you need**, one page at a time (`docs_page`, or `/docs/<slug>.md`). Prefer this
+   over the full text when your context is limited.
+3. **Use the full text** (`docs_full`, or `/llms-full.txt`) when you need the whole picture at
+   once, for example to answer many questions in a row.
+4. **Follow the links.** Links between pages are absolute links to the pages' `.md` files; with
+   the docs tools, pass the part after `/docs/` to `docs_page`.
 
-Each page starts with YAML front matter: `title`, `summary`, `section`, `order` and `audience`
-(`member`, `admin` or `agent`). Pages for `admin` describe settings only team or site admins can
-change: when you answer a member, say that an admin has to do it rather than telling them to do it.
+Each page starts with its title as a heading and its one-sentence summary as a quote. Pages for
+admins describe settings only team or site admins can change: when you answer a member, say that
+an admin has to do it rather than telling them to do it.
 
 ## What the docs cover and what they do not
 
@@ -53,8 +77,3 @@ If something on screen contradicts the docs, trust the screen and say the docs m
 Read [Working inside a Kobe sandbox](working-in-a-sandbox.md) first: it says what your tools can
 and cannot do and how to ask the user for access. [Concepts for agents](concepts.md) maps Kobe's
 words to your tools and paths.
-
-Your sandbox reaches the internet only through Kobe's egress proxy, so fetching these docs from
-inside it works only if your team has enabled the Kobe site's own host. If the fetch is blocked,
-do not retry in a loop: tell the user, and answer from what you know or ask them to paste the
-page.

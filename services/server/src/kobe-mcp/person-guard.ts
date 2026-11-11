@@ -1,7 +1,7 @@
 import type { PolicyDecision, ToolDescriptor } from "@kobe/protocol";
 import { withTeam, type KobeDb } from "@kobe/db";
 import {
-  isKobeTool,
+  isKobeAdminTool,
   KOBE_ADMIN_NOT_ALLOWED_REASON,
   kobeToolName,
 } from "../policy/kobe-admin-guard.js";
@@ -40,7 +40,8 @@ export async function guardKobeAdminCall(
   /** The call's input as the sandbox sent it: checked against the tool's strict schema. */
   input: unknown,
 ): Promise<PolicyDecision> {
-  if (!isKobeTool(tool) || decision.effect === "deny") return decision;
+  // The docs tools (KOBE-620) need no permission: the ordinary policy decided them.
+  if (!isKobeAdminTool(tool) || decision.effect === "deny") return decision;
   // A malformed call is refused before anyone is asked to approve it (review L4).
   const def = kobeToolOf(tool.name);
   if (def !== undefined && !def.input.safeParse(input ?? {}).success) {

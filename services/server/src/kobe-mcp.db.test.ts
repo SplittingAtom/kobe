@@ -20,8 +20,10 @@ import {
   verifyAuditChain,
 } from "@kobe/db";
 import { KOBE_BUILTIN_CONNECTOR_ID as PROTOCOL_KOBE_ID } from "@kobe/protocol";
+import { llmsTxt, PAGES } from "@kobe/guide";
+import { withTeam } from "@kobe/db";
 import { approvalKeyring } from "./approvals/index.js";
-import { routeCaller } from "./kobe-mcp/execute.js";
+import { kobeRunServer } from "./kobe-mcp/run.js";
 import { KOBE_ADMIN_TOOLS } from "./kobe-mcp/tools/index.js";
 import { createInternalApp } from "./routes/internal.js";
 import { TestBrowser } from "./testing/browser.js";
@@ -229,6 +231,10 @@ const roleOf = async (team: string, userId: string) => {
   return rows[0]?.role;
 };
 
+/** KOBE-620 (KA7): the docs tools are listed on every run while the site switch is not off. */
+const DOCS = ["docs_full", "docs_index", "docs_page", "docs_search"];
+const withDocs = (...names: string[]) => [...DOCS, ...names].sort();
+
 const pi = (tool: string) => `mcp__${kobeName.replace(/-/g, "_")}__${tool}`;
 
 const approve = (s: Sandbox, tool: string, input: Record<string, unknown>) =>
@@ -260,7 +266,7 @@ describe("listing follows the person's permission and both switches (ac-1, KA5)"
   it("a member's sandbox lists no team-admin tool; a forged call is refused like a 403", async () => {
     const w = await world();
     const s = await sandboxFor(w.team, w.member);
-    expect(await listNames(s)).toEqual([]);
+    expect(await listNames(s)).toEqual(withDocs());
     const forged = await call(s, "team_members_set_role", {
       user_id: w.target.id,
       from_role: "member",
@@ -293,16 +299,19 @@ describe("listing follows the person's permission and both switches (ac-1, KA5)"
   it("a team admin lists by the team level: docs none, read the reads, read_write all", async () => {
     const w = await world(null);
     const s = await sandboxFor(w.team, w.admin);
-    expect(await listNames(s)).toEqual([]); // default: docs only (KA5)
+    expect(await listNames(s)).toEqual(withDocs()); // default: docs only (KA5)
+    const team = KOBE_ADMIN_TOOLS.filter((t) => t.scope === "team");
     await setLevel(w.team, "read");
-    expect(await listNames(s)).toEqual(["team_members_list"]);
+    expect(await listNames(s)).toEqual(
+      withDocs(...team.filter((t) => t.readOnly).map((t) => t.name)),
+    );
     await setLevel(w.team, "read_write");
-    expect(await listNames(s)).toEqual(["team_members_list", "team_members_set_role"]);
+    expect(await listNames(s)).toEqual(withDocs(...team.map((t) => t.name)));
     // The site switch: docs hides every admin tool, off removes the connector.
     await setSite(KOBE_MCP_MODE_KEY, "docs");
-    expect(await listNames(s)).toEqual([]);
+    expect(await listNames(s)).toEqual(withDocs());
     await setSite(KOBE_MCP_MODE_KEY, null);
-    expect(await listNames(s)).toEqual([]);
+    expect(await listNames(s)).toEqual(withDocs());
     await setSite(KOBE_MCP_MODE_KEY, "off");
     expect((await rpc(s, "tools/list")).status).toBe(403);
     const off = await rpc(s, "tools/call", { name: "team_members_list", arguments: {} });
@@ -341,6 +350,109 @@ describe("reads run freely, as the person", () => {
     const out = await call(s, "team_members_list", {});
     expect(out.isError).toBe(true);
     expect((await decisions(w.team)).at(-1)).toMatchObject({ reason: "kobe_admin_not_allowed" });
+  });
+});
+
+describe("the docs tools (KOBE-620, KA-3; spec §4, KA4, KA7)", () => {
+  const index = () => llmsTxt(PAGES, { appName: "Kobe", origin: new URL(PUBLIC_URL).origin });
+
+  it("docs_index equals /llms.txt for the deployment's origin and app name (ac-1)", async () => {
+    const w = await world(null);
+    const s = await sandboxFor(w.team, w.member);
+    const out = await call(s, "docs_index", {});
+    expect(out.isError).toBeUndefined();
+    expect(out.text).toBe(index());
+    expect((await decisions(w.team)).at(-1)).toMatchObject({
+      decision: "allowed",
+      tool: pi("docs_index"),
+      risk: "read",
+    });
+  });
+
+  it("follows the site's app name", async () => {
+    const w = await world(null);
+    const s = await sandboxFor(w.team, w.member);
+    await setSite("branding.app_name", "Acme Chat");
+    try {
+      const out = await call(s, "docs_index", {});
+      expect(out.text.startsWith("# Acme Chat\n")).toBe(true);
+    } finally {
+      await setSite("branding.app_name", null);
+    }
+  });
+
+  it("docs_page returns a page; an unknown or traversing slug is a tool error (ac-2)", async () => {
+    const w = await world(null);
+    const s = await sandboxFor(w.team, w.member);
+    const page = PAGES[0] as (typeof PAGES)[number];
+    const out = await call(s, "docs_page", { slug: page.slug });
+    expect(out.text.startsWith(`# ${page.title}\n`)).toBe(true);
+    for (const slug of ["no-such-page", "../../../etc/passwd"]) {
+      const bad = await call(s, "docs_page", { slug });
+      expect(bad.isError).toBe(true);
+      expect(bad.text).toContain("unknown_page");
+    }
+    const search = await call(s, "docs_search", { query: "approvals" });
+    expect((search.structured?.results as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  it("work in auto and scheduled runs and skill evals, with the site at docs and the team at docs only", async () => {
+    await setSite(KOBE_MCP_MODE_KEY, "docs");
+    const w = await world(null);
+    const s = await sandboxFor(w.team, w.member);
+    await fx.admin.query(`UPDATE runs SET approval_mode = 'auto' WHERE id = $1`, [s.runId]);
+    expect((await call(s, "docs_index", {})).text).toBe(index());
+    await fx.admin.query(`UPDATE runs SET trigger = 'schedule' WHERE id = $1`, [s.runId]);
+    expect(await listNames(s)).toEqual(withDocs());
+    expect((await call(s, "docs_index", {})).text).toBe(index());
+    // An eval thread's flag never changes: set with triggers off (one statement batch).
+    await fx.admin.query(
+      `BEGIN; SET LOCAL session_replication_role = replica;
+       UPDATE threads SET skill_eval = true WHERE id = '${s.threadId}'; COMMIT;`,
+    );
+    expect(await listNames(s)).toEqual(withDocs());
+    expect((await call(s, "docs_index", {})).text).toBe(index());
+  });
+
+  it("need no permission and never count against the admin read limit", async () => {
+    const w = await world("read");
+    const s = await sandboxFor(w.team, w.admin);
+    await setSite("kobe_mcp.reads_per_minute", "1");
+    for (let i = 0; i < 3; i++) expect((await call(s, "docs_index", {})).isError).toBeUndefined();
+    expect((await call(s, "team_members_list", {})).isError).toBeUndefined();
+    expect((await call(s, "team_members_list", {})).isError).toBe(true);
+    expect((await call(s, "docs_index", {})).isError).toBeUndefined();
+  });
+
+  it("attach to every run whatever the agent's connector list; admin tools follow it (KA7)", async () => {
+    const w = await world("read_write");
+    const names = (server: Awaited<ReturnType<typeof kobeRunServer>>) =>
+      (server?.tools ?? []).map((t) => t.name).sort();
+    const runServer = (
+      frontmatter: Parameters<typeof kobeRunServer>[1]["frontmatter"],
+      answerable = true,
+      off: ReadonlySet<string> = new Set(),
+    ) =>
+      withTeam(fx.db, w.team, (tx) =>
+        kobeRunServer(tx, { teamId: w.team, userId: w.admin.id, answerable, frontmatter, off }),
+      );
+    const agent = (extra: Record<string, unknown> = {}) =>
+      ({ name: "A", role: "r", description: "d", ...extra }) as never;
+    // No connectors named, no agent at all, a scheduled run: docs tools only.
+    expect(names(await runServer(agent()))).toEqual(DOCS);
+    expect(names(await runServer(undefined))).toEqual(DOCS);
+    expect(names(await runServer(agent({ connectors: "all" }), false))).toEqual(DOCS);
+    // Naming the connector adds the admin tools the person may use.
+    expect(names(await runServer(agent({ connectors: "all" })))).toEqual(
+      withDocs(...KOBE_ADMIN_TOOLS.filter((t) => t.scope === "team").map((t) => t.name)),
+    );
+    // The agent's tool globs still apply; the thread's off switch and the site's off remove all.
+    expect(names(await runServer(agent({ tools: { deny: [`${pi("docs_full")}`] } })))).toEqual(
+      DOCS.filter((d) => d !== "docs_full"),
+    );
+    expect(await runServer(agent(), true, new Set([KOBE_BUILTIN_CONNECTOR_ID]))).toBeUndefined();
+    await setSite(KOBE_MCP_MODE_KEY, "off");
+    expect(await runServer(agent())).toBeUndefined();
   });
 });
 
@@ -536,67 +648,9 @@ describe("no header or route on the public listener accepts a delegation (ac-6)"
   });
 });
 
-/**
- * Contract (spec §5): every admin tool's route, called as a person without the tool's permission,
- * is refused by the route itself (writes) or the tool's permission is stricter than its route's
- * (reads, which the console page gates more tightly); and as a holder it answers. KA-4/KA-5 add
- * their tools' sample inputs here: a tool without one fails the test.
- */
-describe("catalog contract", () => {
-  type Ctx = { readonly w: World };
-  const samples: Readonly<Record<string, (ctx: Ctx) => Record<string, unknown>>> = {
-    team_members_list: () => ({}),
-    team_members_set_role: ({ w }) => ({
-      user_id: w.target.id,
-      from_role: "member",
-      to_role: "contributor",
-    }),
-  };
-
-  // Site tools have their own contract (`kobe-mcp-site.db.test.ts`, KOBE-622).
-  const TEAM_TOOLS = KOBE_ADMIN_TOOLS.filter((t) => t.scope === "team");
-
-  it("names a sample for every tool", () => {
-    expect(TEAM_TOOLS.map((t) => t.name).filter((n) => !(n in samples))).toEqual([]);
-  });
-
-  it.each(TEAM_TOOLS.map((t) => [t.name, t] as const))(
-    "%s: refused without the permission, answered with it",
-    async (_name, tool) => {
-      const w = await world();
-      const input = tool.input.parse(samples[tool.name]?.({ w }));
-      // A delegation needs the person's own active run (review M1).
-      const as = async (p: Person) => {
-        const s = await sandboxFor(w.team, p);
-        return routeCaller(fx.replica(0).app, {
-          userId: p.id,
-          teamId: w.team,
-          runId: s.runId,
-          threadId: s.threadId,
-          toolCallId: "contract",
-        });
-      };
-      const route = tool.route(input);
-      // An outsider (no membership, so no run in the team) is always refused.
-      const outsider = await fx.person(`ko${randomUUID().slice(0, 4)}`);
-      const stranger = routeCaller(fx.replica(0).app, {
-        userId: outsider.id,
-        teamId: w.team,
-        runId: randomUUID(),
-        threadId: randomUUID(),
-        toolCallId: "contract",
-      });
-      expect([401, 403]).toContain((await stranger(route)).status);
-      if (!tool.readOnly) {
-        // A member lacks every team-admin permission: the route itself refuses the write.
-        expect((await (await as(w.member))(route)).status).toBe(403);
-      }
-      const held = await (await as(w.admin))(route);
-      expect(held.status, JSON.stringify(held.body)).toBeLessThan(300);
-      expect(() => tool.output.parse(tool.reduce(held.body, input))).not.toThrow();
-    },
-  );
-});
+// The catalog contract for every Team console tool (without the permission: not listed and
+// refused; with it: listed and working; the console's own audit event) is in
+// `kobe-mcp-team.db.test.ts` (KOBE-621).
 
 describe("review fixes (KOBE-619)", () => {
   it("M1: signing out everywhere mid-run stops the run's admin tools", async () => {

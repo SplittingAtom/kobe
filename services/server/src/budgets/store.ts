@@ -332,6 +332,35 @@ export interface TeamBudgetInput {
     { readonly [K in keyof BudgetAmounts]?: BudgetAmounts[K] | undefined } | undefined;
 }
 
+/**
+ * KOBE-621: the budget as the caller saw it (a Kobe MCP write's approved before-state). Amounts
+ * compare to the cent; `user_requests_per_minute` applies to the team's own budget only.
+ */
+export interface BudgetExpectation extends BudgetAmounts {
+  readonly user_requests_per_minute?: number | null | undefined;
+}
+
+const cents = (v: number | null | undefined) =>
+  v === null || v === undefined ? null : Math.round(v * 100);
+
+type BudgetRow = Awaited<ReturnType<typeof currentRow>>;
+
+/** Whether the stored row (undefined: none, all null) is the expected budget. */
+export function budgetMatches(
+  row: BudgetRow,
+  expected: BudgetExpectation,
+  withRate: boolean,
+): boolean {
+  return (
+    cents(row?.monthlyUsd) === cents(expected.monthly_usd) &&
+    cents(row?.dailyUsd) === cents(expected.daily_usd) &&
+    (row?.monthlyTokens ?? null) === expected.monthly_tokens &&
+    (row?.dailyTokens ?? null) === expected.daily_tokens &&
+    (!withRate ||
+      (row?.userRequestsPerMinute ?? null) === (expected.user_requests_per_minute ?? null))
+  );
+}
+
 async function currentRow(tx: KobeTx, teamId: string, userId: string | null) {
   const [row] = await tx
     .select()
@@ -352,9 +381,14 @@ export async function setTeamBudget(
   teamId: string,
   input: TeamBudgetInput,
   actorId: string,
-): Promise<void> {
-  await withTeam(db, teamId, async (tx) => {
+  /** KOBE-621: change only while the team's own budget is still this one. */
+  expected?: BudgetExpectation,
+): Promise<"ok" | "changed_since_approval"> {
+  return withTeam(db, teamId, async (tx) => {
     const before = await currentRow(tx, teamId, null);
+    if (expected !== undefined && !budgetMatches(before, expected, true)) {
+      return "changed_since_approval";
+    }
     const next = {
       monthlyUsd: pick(input.monthly_usd, before?.monthlyUsd ?? null),
       dailyUsd: pick(input.daily_usd, before?.dailyUsd ?? null),
@@ -405,6 +439,7 @@ export async function setTeamBudget(
         requestsPerMinute: next.userRequestsPerMinute,
       },
     });
+    return "ok";
   });
 }
 
@@ -423,9 +458,19 @@ export async function setMemberBudget(
   userId: string,
   input: BudgetAmounts | null,
   actorId: string,
-): Promise<"ok" | "not_member" | "not_found"> {
+  /** KOBE-621: change only while the member's budget is still this one (null: none of their own). */
+  expected?: BudgetAmounts | null,
+): Promise<"ok" | "not_member" | "not_found" | "changed_since_approval"> {
   return withTeam(db, teamId, async (tx) => {
     const before = await currentRow(tx, teamId, userId);
+    if (
+      expected !== undefined &&
+      (expected === null
+        ? before !== undefined
+        : !before || !budgetMatches(before, expected, false))
+    ) {
+      return "changed_since_approval";
+    }
     if (input === null) {
       if (!before) return "not_found";
       await tx

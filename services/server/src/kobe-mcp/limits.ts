@@ -5,6 +5,7 @@ import { KOBE_BUILTIN_CONNECTOR_ID, sql, type KobeDb } from "@kobe/db";
  * hour, site settings with defaults 60 and 30. Counted from the person's allowed `mcp.tool_call`
  * rows for the built-in connector in the audit log, so the limit holds across server replicas and
  * restarts; the window is found by `at` (indexed) and the person's rows by `(actor_id, seq)`.
+ * Calls of the docs tools (`mcp__<kobe>__docs_*`, KOBE-620) are not admin calls and never count.
  */
 export const KOBE_READS_PER_MINUTE_KEY = "kobe_mcp.reads_per_minute";
 export const KOBE_WRITES_PER_HOUR_KEY = "kobe_mcp.writes_per_hour";
@@ -35,6 +36,8 @@ export async function withinKobeLimit(
           AND a.action = 'mcp.tool_call'
           AND a.target ->> 'connectorId' = ${KOBE_BUILTIN_CONNECTOR_ID}
           AND a.target ->> 'decision' = 'allowed'
+          -- The docs tools (KOBE-620) are no admin reads: they never count.
+          AND a.target ->> 'tool' !~ '__docs_[a-z_]+$'
           AND (a.target ->> 'risk' = 'read') = ${kind === "read"}) AS used,
       (SELECT s.value FROM public.site_settings s WHERE s.key = ${key}) AS limit_value`);
   const row = res.rows[0];

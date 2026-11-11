@@ -67,10 +67,16 @@ const PUBLISHED: Record<string, Record<string, { runtime: string; package: strin
       package: "4e719e33003b019a95ff293c302fca3879b3599ca639d2615e8806dc025599d0",
     },
   },
+  "kobe-guide": {
+    "1.0.0": {
+      runtime: "1e0cb2f5361a760c0ac4d4ec37f92ed6d3c77f4b0e3714b6c92e0eef57d877de",
+      package: "ee3440a8e9ce7fdc7acc8346a23d6e2c7caaa9e731245bda0cb833b8601c5a88",
+    },
+  },
 };
 
 describe("the Kobe package set (KOBE-317)", () => {
-  it("holds exactly the seven former built-ins, each named like its directory", async () => {
+  it("holds exactly the former built-ins and kobe-guide (KOBE-620), each named like its directory", async () => {
     const set = await loadKobePackages();
     expect(set.map((p) => p.name)).toEqual([...KOBE_SKILL_NAMES]);
     expect([...DB_KOBE_SKILL_NAMES]).toEqual([...KOBE_SKILL_NAMES]);

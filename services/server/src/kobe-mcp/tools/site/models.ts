@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { MODEL_ALIAS_PATTERN } from "@kobe/db";
-import { cursorSchema, kobeTool, page } from "../../catalog.js";
+import { cursorSchema, kobeTool, page, segment } from "../../catalog.js";
 import { changeLine, clip, fromTo, missing, readAs, sameValues } from "./shared.js";
 
 /**
@@ -139,7 +139,7 @@ export const siteModelsCatalogUpdate = kobeTool({
   }),
   route: (input) => ({
     method: "PATCH",
-    path: `/site/models/catalog/${input.alias}`,
+    path: `/site/models/catalog/${segment(input.alias)}`,
     body: { ...input.change.to, expected: input.change.from },
   }),
   reduce: (body) => {

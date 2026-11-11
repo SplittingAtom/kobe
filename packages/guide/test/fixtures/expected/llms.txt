@@ -1,0 +1,21 @@
+# Acme Chat
+
+> Acme Chat is a self-hosted conversational agent platform: people in one organization and its teams chat with AI agents that work in isolated sandboxes.
+
+This is the Acme Chat user guide for agents and people. Each link below is one page as Markdown; https://chat.example.com/llms-full.txt has every page in one file. The same pages are at https://chat.example.com/docs for people.
+
+## For agents
+
+- [Using \[Kobe\]](https://chat.example.com/docs/agents/use.md): How agents read the guide.
+
+## Getting started
+
+- [Getting started](https://chat.example.com/docs/getting-started.md): Sign in, pick an agent and send a first message.
+
+## Team admin
+
+- [Admin from a conversation](https://chat.example.com/docs/agents/admin.md): What admins can do.
+
+## Reference
+
+- [Glossary](https://chat.example.com/docs/glossary.md): Words Kobe uses.
