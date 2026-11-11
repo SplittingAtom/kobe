@@ -9,11 +9,18 @@ import {
 } from "../connectors/team-store.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 
+const exposureSchema = z.enum(["read_only", "all", "custom"]);
+
 const bodySchema = z
   .strictObject({
-    exposure: z.enum(["read_only", "all", "custom"]),
+    exposure: exposureSchema,
     /** Pi tool names; custom exposure only. */
     enabled_tools: z.array(z.string().max(256)).max(1000).optional(),
+    /**
+     * KOBE-621: the team's exposure as the caller saw it (`off`: not enabled); another one is a 409
+     * `changed_since_approval` (a Kobe MCP write's approved before-state).
+     */
+    expected_exposure: z.enum(["off", "read_only", "all", "custom"]).optional(),
   })
   .refine((b) => (b.exposure === "custom") === (b.enabled_tools !== undefined), {
     message: "enabled_tools is required for custom exposure and not allowed otherwise",
@@ -23,6 +30,11 @@ const MESSAGES = {
   not_found: [404, "connector_not_found", "That connector is not registered."],
   connector_disabled: [409, "connector_disabled", "The site admin has disabled that connector."],
   unknown_tool: [422, "unknown_tool", "Pick only tools the connector lists (not drifted ones)."],
+  changed_since_approval: [
+    409,
+    "changed_since_approval",
+    "The team's exposure changed meanwhile; nothing was changed.",
+  ],
 } as const;
 
 /**
@@ -53,7 +65,11 @@ export function teamConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
       db,
       c.get("team").id,
       id.data,
-      { exposure: body.exposure, enabledTools: body.enabled_tools ?? [] },
+      {
+        exposure: body.exposure,
+        enabledTools: body.enabled_tools ?? [],
+        expectedExposure: body.expected_exposure,
+      },
       c.get("user").id,
     );
     if (result.ok) return c.json({ connector: result.connector });
@@ -64,7 +80,15 @@ export function teamConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   app.delete("/:id", requireTeamPermission("team.connectors.manage"), async (c) => {
     const id = z.uuid().safeParse(c.req.param("id"));
     if (!id.success) return c.json(notFound(), 404);
-    const removed = await disableTeamConnector(db, c.get("team").id, id.data);
+    // `?expectedExposure=` (KOBE-621): disable only while the exposure is still this one.
+    const expectedRaw = c.req.query("expectedExposure");
+    const expected = expectedRaw === undefined ? undefined : exposureSchema.safeParse(expectedRaw);
+    if (expected !== undefined && !expected.success) return invalidRequest(c);
+    const removed = await disableTeamConnector(db, c.get("team").id, id.data, expected?.data);
+    if (removed === "changed_since_approval") {
+      const [status, code, message] = MESSAGES.changed_since_approval;
+      return c.json({ code, message }, status);
+    }
     return removed
       ? c.body(null, 204)
       : c.json({ code: "not_enabled", message: "The team has not enabled that connector." }, 404);

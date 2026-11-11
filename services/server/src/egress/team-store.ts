@@ -3,6 +3,7 @@ import {
   asc,
   egressDomains,
   eq,
+  isNull,
   isSharedHosting,
   notifyEgressChanged,
   teamEgress,
@@ -126,12 +127,22 @@ export async function disableTeamDomain(
   db: KobeDb,
   teamId: string,
   domain: string,
-): Promise<boolean> {
+  /**
+   * KOBE-621: only a domain without injected headers (whose sealed values the disable would
+   * delete for good); `headers_present` otherwise, and nothing changes.
+   */
+  options: { readonly withoutHeaders?: boolean } = {},
+): Promise<boolean | "headers_present"> {
   return withTeam(db, teamId, async (tx) => {
+    const key = and(eq(teamEgress.teamId, teamId), eq(teamEgress.domain, domain));
     const deleted = await tx
       .delete(teamEgress)
-      .where(and(eq(teamEgress.teamId, teamId), eq(teamEgress.domain, domain)))
+      .where(options.withoutHeaders ? and(key, isNull(teamEgress.headersSealed)) : key)
       .returning({ domain: teamEgress.domain, sealed: teamEgress.headersSealed });
+    if (deleted.length === 0 && options.withoutHeaders) {
+      const [kept] = await tx.select({ domain: teamEgress.domain }).from(teamEgress).where(key);
+      if (kept) return "headers_present";
+    }
     if (deleted.length === 0) return false;
     await notifyEgressChanged(tx, teamId);
     const headersRemoved = deleted.some((d) => d.sealed !== null);

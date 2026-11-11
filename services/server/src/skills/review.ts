@@ -313,6 +313,8 @@ export function reviewsOfSkill(
 export type DecideError =
   | "not_found"
   | "unchanged"
+  /** KOBE-621: the review's status is not the `expectedStatus` the decision was approved against. */
+  | "changed_since_approval"
   | "blocklisted"
   /** The version was never scanned: it can be rejected, not approved (review S4). */
   | "scan_pending"
@@ -339,6 +341,8 @@ export interface Decision {
   readonly acknowledgedFindings?: string;
   /** The reviewer may override a Block scan (a Site admin, `site.skills.override_scan`). */
   readonly mayOverrideBlock?: boolean;
+  /** KOBE-621: decide only while the review is still in this status (the approved before-state). */
+  readonly expectedStatus?: SkillReviewStatus;
 }
 
 /**
@@ -380,6 +384,9 @@ export function decideReview(
   return withTeam(db, teamId, async (tx) => {
     const [current] = await tx.select().from(teamSkillReviews).where(key).for("update");
     if (!current) return { ok: false, error: "not_found" };
+    if (decision.expectedStatus !== undefined && current.status !== decision.expectedStatus) {
+      return { ok: false, error: "changed_since_approval" };
+    }
     if (current.status === decision.status) return { ok: false, error: "unchanged" };
     // A blocklisted bundle can still be rejected, never approved (KOBE-81).
     const blocked = await isBlocked(tx, current.contentHash);

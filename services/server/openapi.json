@@ -15779,6 +15779,30 @@
                 "type": "null"
               }
             ]
+          },
+          "expected": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "is_default": {
+                "type": "boolean"
+              },
+              "thinking_max": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": ["off", "low", "medium", "high"]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": ["enabled", "is_default", "thinking_max"],
+            "additionalProperties": false
           }
         },
         "required": ["enabled"],

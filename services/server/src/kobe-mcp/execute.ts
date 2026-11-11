@@ -28,8 +28,16 @@ export type KobeExecution =
     }
   | { readonly ok: false; readonly code: string; readonly message: string };
 
-/** Paths are built from validated ids only; anything else never reaches the router. */
-const SAFE_PATH = /^\/(?:[A-Za-z0-9_-]+\/?)+$/;
+/**
+ * Paths are built from validated ids, aliases and domains only (`segment()` encodes them; a
+ * wildcard domain's `*` is `%2A`); anything else never reaches the router.
+ */
+const SAFE_PATH = /^\/(?:(?:[A-Za-z0-9_.-]|%2A)+\/?)+$/;
+
+function urlOf(route: KobeRoute): string {
+  const query = route.query === undefined ? "" : new URLSearchParams(route.query).toString();
+  return `/v1${route.path}${query === "" ? "" : `?${query}`}`;
+}
 
 export function routeCaller(api: Hono, delegation: Delegation): KobeRouteCaller {
   return async (route: KobeRoute): Promise<KobeRouteAnswer> => {
@@ -38,7 +46,7 @@ export function routeCaller(api: Hono, delegation: Delegation): KobeRouteCaller 
     }
     const hasBody = route.body !== undefined;
     const res = await api.request(
-      `/v1${route.path}`,
+      urlOf(route),
       {
         method: route.method,
         headers: hasBody ? { "content-type": "application/json" } : {},

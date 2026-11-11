@@ -8,7 +8,21 @@ import { hitRateLimit } from "../rate-limit.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 import { idSchema, teamRoleSchema } from "../teams/schemas.js";
 
-const inviteSchema = z.object({ email: z.email().max(254), role: teamRoleSchema }).strict();
+const inviteSchema = z
+  .object({
+    email: z.email().max(254),
+    role: teamRoleSchema,
+    /**
+     * KOBE-621: the address's invitation as the caller saw it (its role, or null for none); another
+     * state is a 409 `changed_since_approval` (a Kobe MCP write's approved before-state).
+     */
+    expectedRole: teamRoleSchema.nullable().optional(),
+  })
+  .strict();
+const CHANGED = {
+  code: "changed_since_approval",
+  message: "The invitation changed meanwhile; nothing was changed.",
+} as const;
 const INVITES_PER_HOUR = 50;
 
 /**
@@ -42,10 +56,16 @@ export function teamInvitesRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
         429,
       );
     }
-    const invite = await inviteToTeam(db, team.id, { ...body, invitedBy: me.id });
+    const invite = await inviteToTeam(db, team.id, {
+      email: body.email,
+      role: body.role,
+      invitedBy: me.id,
+      expectedRole: body.expectedRole,
+    });
     if (invite === "already_member") {
       return c.json({ code: "already_member", message: "That person is already a member." }, 409);
     }
+    if (invite === "changed_since_approval") return c.json(CHANGED, 409);
     notifyTeamInvite(deps, {
       email: invite.email,
       teamName: team.name,
@@ -57,8 +77,13 @@ export function teamInvitesRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
 
   app.delete("/:id", async (c) => {
     const id = idSchema.safeParse(c.req.param("id"));
-    if (!id.success) return invalidRequest(c);
-    return (await revokeTeamInvite(db, c.get("team").id, id.data))
+    // `?expectedRole=` (KOBE-621): revoke only while the invitation still offers this role.
+    const expectedRaw = c.req.query("expectedRole");
+    const expected = expectedRaw === undefined ? undefined : teamRoleSchema.safeParse(expectedRaw);
+    if (!id.success || (expected !== undefined && !expected.success)) return invalidRequest(c);
+    const revoked = await revokeTeamInvite(db, c.get("team").id, id.data, expected?.data);
+    if (revoked === "changed_since_approval") return c.json(CHANGED, 409);
+    return revoked
       ? c.body(null, 204)
       : c.json({ code: "invitation_not_found", message: "No invitation with that id." }, 404);
   });

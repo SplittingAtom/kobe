@@ -63,6 +63,7 @@ export type SetTeamModelResult =
   | "unchanged"
   | "not_in_catalog"
   | "default_requires_enabled"
+  | "changed_since_approval"
   | { readonly error: "thinking_invalid"; readonly message: string };
 
 /** Enables/disables an alias for the team and optionally makes it the team's default. */
@@ -87,6 +88,15 @@ export async function setTeamModel(
       .from(teamModels)
       .where(and(eq(teamModels.teamId, teamId), eq(teamModels.alias, alias)))
       .for("update");
+    const expected = input.expected;
+    if (
+      expected !== undefined &&
+      (expected.enabled !== (before !== undefined) ||
+        expected.is_default !== (before?.isDefault ?? false) ||
+        expected.thinking_max !== (before?.thinkingMax ?? null))
+    ) {
+      return "changed_since_approval";
+    }
     const wantDefault = input.enabled && (input.is_default ?? before?.isDefault ?? false);
     // KOBE-260 ac-4: a team maximum may only narrow the site's settings.
     const thinkingMax = input.enabled ? keepMax(input.thinking_max, before?.thinkingMax) : null;

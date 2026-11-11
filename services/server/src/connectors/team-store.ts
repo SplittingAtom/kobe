@@ -130,11 +130,20 @@ export async function listGalleryConnectors(db: KobeDb): Promise<TeamConnectorVi
 export interface ExposureInput {
   readonly exposure: ConnectorExposureKind;
   readonly enabledTools: readonly string[];
+  /**
+   * KOBE-621: the team's exposure as the caller saw it (`off`: not enabled). Another one, checked
+   * under the enablement's lock, is `changed_since_approval` and nothing changes.
+   */
+  readonly expectedExposure?: ConnectorExposureKind | "off" | undefined;
 }
 
 export type SetTeamConnectorResult =
   | { readonly ok: true; readonly connector: TeamConnectorView }
-  | { readonly ok: false; readonly error: "not_found" | "connector_disabled" | "unknown_tool" };
+  | {
+      readonly ok: false;
+      readonly error:
+        "not_found" | "connector_disabled" | "unknown_tool" | "changed_since_approval";
+    };
 
 const same = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
@@ -174,15 +183,26 @@ export async function setTeamConnector(
       .from(teamConnectors)
       .where(and(eq(teamConnectors.teamId, teamId), eq(teamConnectors.connectorId, connectorId)))
       .for("update");
+    const expected = input.expectedExposure;
+    if (expected !== undefined && (before?.exposure ?? "off") !== expected) {
+      return { ok: false, error: "changed_since_approval" } as const;
+    }
     const next: Enablement = { exposure: input.exposure, enabledTools: tools };
     if (!before || before.exposure !== next.exposure || !same(before.enabledTools, tools)) {
-      await tx
+      const insert = tx
         .insert(teamConnectors)
-        .values({ teamId, connectorId, ...next, enabledBy: userId })
-        .onConflictDoUpdate({
-          target: [teamConnectors.teamId, teamConnectors.connectorId],
-          set: next,
-        });
+        .values({ teamId, connectorId, ...next, enabledBy: userId });
+      const written =
+        expected === "off"
+          ? // Not enabled as approved: a concurrent enablement wins and this changes nothing.
+            await insert.onConflictDoNothing().returning({ id: teamConnectors.connectorId })
+          : await insert
+              .onConflictDoUpdate({
+                target: [teamConnectors.teamId, teamConnectors.connectorId],
+                set: next,
+              })
+              .returning({ id: teamConnectors.connectorId });
+      if (written.length === 0) return { ok: false, error: "changed_since_approval" } as const;
       await recordAudit(tx, {
         action: "mcp.connector.team_changed",
         teamId,
@@ -205,11 +225,23 @@ export async function disableTeamConnector(
   db: KobeDb,
   teamId: string,
   connectorId: string,
-): Promise<boolean> {
+  /** KOBE-621: disable only while the team's exposure is still this one (approved before-state). */
+  expectedExposure?: ConnectorExposureKind,
+): Promise<boolean | "changed_since_approval"> {
   return withTeam(db, teamId, async (tx) => {
+    const key = and(eq(teamConnectors.teamId, teamId), eq(teamConnectors.connectorId, connectorId));
+    if (expectedExposure !== undefined) {
+      const [current] = await tx
+        .select({ exposure: teamConnectors.exposure })
+        .from(teamConnectors)
+        .where(key)
+        .for("update");
+      if (current === undefined) return false;
+      if (current.exposure !== expectedExposure) return "changed_since_approval";
+    }
     const gone = await tx
       .delete(teamConnectors)
-      .where(and(eq(teamConnectors.teamId, teamId), eq(teamConnectors.connectorId, connectorId)))
+      .where(key)
       .returning({ id: teamConnectors.connectorId });
     if (gone.length === 0) return false;
     const [row] = await tx

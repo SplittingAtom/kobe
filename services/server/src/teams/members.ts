@@ -159,8 +159,10 @@ export async function removeMember(
   db: KobeDb,
   teamId: string,
   userId: string,
+  /** KOBE-621: remove only while the role is still this one (the approved before-state). */
+  expected?: TeamRole,
 ): Promise<MembershipResult> {
-  return withTeam(db, teamId, (tx) => removeMemberInTx(tx, teamId, userId));
+  return withTeam(db, teamId, (tx) => removeMemberInTx(tx, teamId, userId, undefined, expected));
 }
 
 /**
@@ -173,9 +175,11 @@ export async function removeMemberInTx(
   teamId: string,
   userId: string,
   via?: "skill_reviewer_grant",
+  expected?: TeamRole,
 ): Promise<MembershipResult> {
   const lock = await lockForChange(tx, teamId, userId);
   if (lock.current === null) return fail("not_a_member");
+  if (expected !== undefined && lock.current !== expected) return fail("changed_since_approval");
   if (losesLastActiveAdmin(lock)) return fail("last_team_admin");
   await tx
     .delete(teamMembers)

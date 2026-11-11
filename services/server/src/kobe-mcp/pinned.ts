@@ -3,7 +3,7 @@ import { z } from "zod";
 import { KOBE_BUILTIN_CONNECTOR_URL, type PinnedTool } from "@kobe/db";
 import type { EnabledConnector } from "../mcp/catalog.js";
 import type { KobeBuiltinRow } from "./access.js";
-import type { KobeTool } from "./catalog.js";
+import { zodOf, type KobeTool } from "./catalog.js";
 import { KOBE_ADMIN_TOOLS } from "./tools/index.js";
 
 /**
@@ -25,8 +25,8 @@ export function kobePinnedTool(connectorName: string, tool: KobeTool): PinnedToo
     name: tool.name,
     title: tool.title,
     description: tool.description,
-    input_schema: schemaOf(tool.input),
-    output_schema: schemaOf(tool.output),
+    input_schema: schemaOf(zodOf(tool.input)),
+    output_schema: schemaOf(zodOf(tool.output)),
   };
   return {
     ...definition,

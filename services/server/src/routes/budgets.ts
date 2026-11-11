@@ -35,6 +35,23 @@ const rate = z.number().int().min(1).max(MAX_REQUESTS_PER_MINUTE);
 const tokenFields = { monthly_tokens: tokens.optional(), daily_tokens: tokens.optional() };
 const nonEmpty = (v: object) => Object.keys(v).length > 0;
 
+/** KOBE-621: the budget as the caller saw it; another one is a 409 `changed_since_approval`. */
+const expectedAmounts = {
+  monthly_usd: amount,
+  daily_usd: amount,
+  monthly_tokens: tokens,
+  daily_tokens: tokens,
+};
+const expectedTeamSchema = z.strictObject({
+  ...expectedAmounts,
+  user_requests_per_minute: rate.nullable(),
+});
+const expectedMemberSchema = z.strictObject(expectedAmounts).nullable();
+const CHANGED = {
+  code: "changed_since_approval",
+  message: "The budget changed meanwhile; nothing was changed.",
+} as const;
+
 const siteSchema = z
   .strictObject({
     monthly_usd: amount.optional(),
@@ -58,16 +75,23 @@ const teamSchema = z
         ...tokenFields,
       })
       .optional(),
+    expected: expectedTeamSchema.optional(),
   })
-  .refine(nonEmpty, "nothing to change");
+  .refine(({ expected: _, ...change }) => nonEmpty(change), "nothing to change");
 const memberSchema = z
   .strictObject({
     monthly_usd: amount.default(null),
     daily_usd: amount.default(null),
     monthly_tokens: tokens.default(null),
     daily_tokens: tokens.default(null),
+    expected: expectedMemberSchema.optional(),
   })
-  .refine((v) => Object.values(v).some((x) => x !== null), "set at least one budget");
+  .refine(
+    ({ expected: _, ...v }) => Object.values(v).some((x) => x !== null),
+    "set at least one budget",
+  );
+/** `DELETE /members/:userId` may carry the member's budget as the caller saw it (KOBE-621). */
+const memberDeleteSchema = z.strictObject({ expected: z.strictObject(expectedAmounts) });
 
 const BUDGET_HINT =
   'Send "monthly_usd"/"daily_usd" (dollars, 0–1,000,000,000) and/or "monthly_tokens"/"daily_tokens" (whole tokens), each a number or null.';
@@ -99,7 +123,9 @@ export function teamBudgetsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
       );
     }
     const teamId = c.get("team").id;
-    await setTeamBudget(db, teamId, input, c.get("user").id);
+    const { expected, ...change } = input;
+    const set = await setTeamBudget(db, teamId, change, c.get("user").id, expected);
+    if (set === "changed_since_approval") return c.json(CHANGED, 409);
     void deps.budgets.evaluate(teamId).catch(() => undefined);
     return c.json(await teamBudgetsView(db, teamId));
   });
@@ -109,7 +135,16 @@ export function teamBudgetsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
     const input = await parseBody(c, memberSchema);
     if (!userId.success || !input) return invalidRequest(c, BUDGET_HINT);
     const teamId = c.get("team").id;
-    const result = await setMemberBudget(db, teamId, userId.data, input, c.get("user").id);
+    const { expected, ...amounts } = input;
+    const result = await setMemberBudget(
+      db,
+      teamId,
+      userId.data,
+      amounts,
+      c.get("user").id,
+      expected,
+    );
+    if (result === "changed_since_approval") return c.json(CHANGED, 409);
     if (result !== "ok") {
       return c.json(
         { code: "not_a_member", message: "That user is not a member of this team." },
@@ -139,9 +174,20 @@ export function teamBudgetsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
 
   app.delete("/members/:userId", requireTeamPermission("team.budgets.manage"), async (c) => {
     const userId = uuidSchema.safeParse(c.req.param("userId"));
-    if (!userId.success) return invalidRequest(c);
+    // An optional body `{expected}` (KOBE-621): remove only while the budget is still this one.
+    const raw = await c.req.text();
+    const body = raw === "" ? undefined : memberDeleteSchema.safeParse(safeJson(raw));
+    if (!userId.success || (body !== undefined && !body.success)) return invalidRequest(c);
     const teamId = c.get("team").id;
-    const result = await setMemberBudget(db, teamId, userId.data, null, c.get("user").id);
+    const result = await setMemberBudget(
+      db,
+      teamId,
+      userId.data,
+      null,
+      c.get("user").id,
+      body?.data?.expected,
+    );
+    if (result === "changed_since_approval") return c.json(CHANGED, 409);
     if (result !== "ok") {
       return c.json({ code: "budget_not_found", message: "That member has no budget." }, 404);
     }
@@ -149,6 +195,14 @@ export function teamBudgetsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVaria
   });
 
   return app;
+}
+
+function safeJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

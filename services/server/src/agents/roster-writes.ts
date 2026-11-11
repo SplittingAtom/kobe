@@ -408,22 +408,22 @@ async function setSuspendedHere(
   agentId: string,
   scope: "personal" | "gallery",
   suspended: boolean,
-): Promise<void> {
+): Promise<boolean> {
   if (suspended) {
-    await tx
+    const added = await tx
       .insert(teamAgentSuspensions)
       .values({ teamId: actor.teamId, agentId, agentScope: scope, suspendedBy: actor.userId })
-      .onConflictDoNothing();
-  } else {
-    await tx
-      .delete(teamAgentSuspensions)
-      .where(
-        and(
-          eq(teamAgentSuspensions.teamId, actor.teamId),
-          eq(teamAgentSuspensions.agentId, agentId),
-        ),
-      );
+      .onConflictDoNothing()
+      .returning({ agentId: teamAgentSuspensions.agentId });
+    return added.length > 0;
   }
+  const gone = await tx
+    .delete(teamAgentSuspensions)
+    .where(
+      and(eq(teamAgentSuspensions.teamId, actor.teamId), eq(teamAgentSuspensions.agentId, agentId)),
+    )
+    .returning({ agentId: teamAgentSuspensions.agentId });
+  return gone.length > 0;
 }
 
 /**
@@ -533,7 +533,12 @@ export async function setTeamSuspension(
   actor: RosterActor,
   agentId: string,
   suspended: boolean,
-): Promise<RosterResult<{ agentId: string; suspendedHere: boolean }>> {
+  /** KOBE-621: change only while the team's suspension is still this (else `changed_since_approval`). */
+  expectedSuspended?: boolean,
+): Promise<
+  | RosterResult<{ agentId: string; suspendedHere: boolean }>
+  | { ok: false; error: "changed_since_approval" }
+> {
   return withTeam(db, actor.teamId, async (tx) => {
     const [agent] = await tx
       .select({ id: siteAgents.id, slug: siteAgents.slug, scope: siteAgents.scope })
@@ -548,7 +553,14 @@ export async function setTeamSuspension(
       if (!runs) return fail("agent_not_found");
     }
     const scope = agent.scope === "gallery" ? "gallery" : "personal";
-    await setSuspendedHere(tx, actor, agentId, scope, suspended);
+    if (expectedSuspended === suspended)
+      return { ok: false, error: "changed_since_approval" } as const;
+    const changed = await setSuspendedHere(tx, actor, agentId, scope, suspended);
+    // The approved before-state was the opposite: a row already there (or already gone) means it
+    // changed meanwhile, and this wrote nothing.
+    if (expectedSuspended !== undefined && !changed) {
+      return { ok: false, error: "changed_since_approval" } as const;
+    }
     await audit(tx, suspended ? "suspended" : "resumed", "team", actor.teamId, { ...agent, scope });
     await syncAgentSchedules(tx, actor.teamId, { agentIds: [agentId] });
     return { ok: true, value: { agentId, suspendedHere: suspended } };
