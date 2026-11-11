@@ -11616,6 +11616,10 @@
                   "type": "boolean",
                   "const": true
                 },
+                "admin_result_hidden": {
+                  "type": "boolean",
+                  "const": true
+                },
                 "created_at": {
                   "type": "string",
                   "format": "date-time",
@@ -12224,6 +12228,10 @@
                   "type": "boolean",
                   "const": true
                 },
+                "admin_result_hidden": {
+                  "type": "boolean",
+                  "const": true
+                },
                 "created_at": {
                   "type": "string",
                   "format": "date-time",
@@ -12281,6 +12289,10 @@
           },
           "truncated": {
             "type": "boolean"
+          },
+          "admin_result_hidden": {
+            "type": "boolean",
+            "const": true
           }
         },
         "required": ["entry_id", "tool_call_id", "tool_name", "is_error", "text", "truncated"],

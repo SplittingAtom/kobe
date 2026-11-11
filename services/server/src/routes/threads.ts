@@ -22,6 +22,7 @@ import {
 } from "../agents/versions.js";
 import {
   BRANCH_LABEL_ERROR_HTTP_STATUS,
+  KOBE_ADMIN_RESULT_HIDDEN,
   fileThreadRequestSchema,
   forkThreadRequestSchema,
   LABEL_WRITE_RATE,
@@ -35,6 +36,7 @@ import { FORK_RATE, forkThread } from "../threads/fork.js";
 import { readLineage } from "../threads/lineage.js";
 import { hitRateLimit } from "../rate-limit.js";
 import { findToolOutput, readOffloadedOutput } from "../threads/entry-output.js";
+import { loadAdminResultGate, redactEntry } from "../threads/admin-redaction.js";
 import { projectDefaultAgent } from "../projects/run-context.js";
 import { canCreateInProject, viewerProjectIds } from "../threads/references.js";
 import { mountCapRefusal } from "../projects/mounts.js";
@@ -177,6 +179,24 @@ function parseQuery<T>(c: Context, schema: z.ZodType<T>): T | undefined {
 }
 
 /** The thread id path parameter, normalized to lowercase; undefined when it is not a uuid. */
+/**
+ * One page of entries as `viewer` may see them: a reader of a shared thread gets Kobe admin
+ * results they lack the permission for replaced (KOBE-623, KA6); the owner sees everything.
+ */
+async function readableEntries(
+  tx: KobeTx,
+  viewer: Viewer,
+  ownerUserId: string,
+  threadId: string,
+  query: { readonly after: number; readonly limit: number },
+) {
+  const page = await listEntries(tx, viewer, threadId, query.after, query.limit);
+  const gate = await loadAdminResultGate(tx, viewer, ownerUserId);
+  return gate === undefined
+    ? page
+    : { ...page, entries: page.entries.map((e) => redactEntry(e, gate)) };
+}
+
 function threadIdParam(c: Context): string | undefined {
   const parsed = uuidSchema.safeParse(c.req.param("id"));
   return parsed.success ? parsed.data : undefined;
@@ -396,7 +416,7 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const detail = await asViewer(c, async (tx, viewer) => {
       const found = await findThread(tx, viewer, id);
       if (!found) return null;
-      const page = await listEntries(tx, viewer, id, query.after, query.limit);
+      const page = await readableEntries(tx, viewer, found.thread.ownerUserId, id, query);
       const latest = await latestPinnedVersion(tx, { teamId: viewer.teamId, ...found.thread });
       // KOBE-44: the agent's model pin (KOBE-47 seam), which wins over the thread's `model`.
       const agentModel = await deps.runAgents.pinnedModel?.(tx, {
@@ -458,8 +478,9 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const query = parseQuery(c, entriesQuerySchema);
     if (!id || !query) return invalidRequest(c);
     const page = await asViewer(c, async (tx, viewer) => {
-      if (!(await findThread(tx, viewer, id))) return null;
-      return listEntries(tx, viewer, id, query.after, query.limit);
+      const found = await findThread(tx, viewer, id);
+      if (!found) return null;
+      return readableEntries(tx, viewer, found.thread.ownerUserId, id, query);
     });
     return page
       ? c.json({ entries: page.entries, next_entries_after: page.nextAfter })
@@ -476,10 +497,16 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     const entryId = entryIdSchema.safeParse(c.req.param("entryId"));
     if (!id || !entryId.success) return invalidRequest(c);
     c.header("X-Content-Type-Options", "nosniff");
-    const found = await asViewer(c, async (tx, viewer) => {
-      if (!(await findThread(tx, viewer, id))) return { kind: "thread_not_found" as const };
-      return findToolOutput(tx, viewer.teamId, id, entryId.data);
+    const looked = await asViewer(c, async (tx, viewer) => {
+      const thread = await findThread(tx, viewer, id);
+      if (!thread) return { found: { kind: "thread_not_found" as const }, gate: undefined };
+      return {
+        found: await findToolOutput(tx, viewer.teamId, id, entryId.data),
+        // KOBE-623 (KA6): a reader without the tool's permission gets no Kobe admin output.
+        gate: await loadAdminResultGate(tx, viewer, thread.thread.ownerUserId),
+      };
     });
+    const { found, gate } = looked;
     if (found.kind === "thread_not_found") return fail(c, "thread_not_found");
     if (found.kind === "missing") return fail(c, "entry_not_found");
     if (found.kind === "not_a_tool_output") return fail(c, "not_a_tool_output");
@@ -491,6 +518,15 @@ export function threadRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables 
     if (output === "not_a_tool_output") return fail(c, "not_a_tool_output");
     if (output === "busy" || output === "timed_out") return fail(c, "output_busy");
     if (typeof output === "string") return fail(c, "entry_unavailable");
+    if (gate?.hides(output.tool_name)) {
+      return c.json({
+        entry_id: entryId.data,
+        ...output,
+        text: KOBE_ADMIN_RESULT_HIDDEN,
+        truncated: false,
+        admin_result_hidden: true,
+      });
+    }
     return c.json({ entry_id: entryId.data, ...output });
   });
 

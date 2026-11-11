@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import { KOBE_MCP_TEAM_LEVELS, withTeam } from "@kobe/db";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import {
@@ -8,6 +9,7 @@ import {
   setTeamConnector,
 } from "../connectors/team-store.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
+import { readKobeTeamConnector, setKobeTeamLevel } from "../kobe-mcp/switches.js";
 
 const exposureSchema = z.enum(["read_only", "all", "custom"]);
 
@@ -25,6 +27,12 @@ const bodySchema = z
   .refine((b) => (b.exposure === "custom") === (b.enabled_tools !== undefined), {
     message: "enabled_tools is required for custom exposure and not allowed otherwise",
   });
+
+const kobeLevelSchema = z.strictObject({
+  level: z.enum(KOBE_MCP_TEAM_LEVELS),
+  /** The level as the caller saw it; another one is a 409 `changed_since_approval`. */
+  expected_level: z.enum(KOBE_MCP_TEAM_LEVELS).optional(),
+});
 
 const MESSAGES = {
   not_found: [404, "connector_not_found", "That connector is not registered."],
@@ -50,6 +58,31 @@ export function teamConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   app.get("/", requireTeamPermission("team.read"), async (c) =>
     c.json({ connectors: await listTeamConnectors(db, c.get("team").id) }),
   );
+
+  /**
+   * The built-in Kobe connector (KOBE-623, spec kobe-admin-mcp §6, KA5): the site switch and the
+   * team's level (`docs` default, `read`, `read_write`). Registered before `/:id`.
+   */
+  app.get("/kobe", requireTeamPermission("team.read"), async (c) => {
+    const teamId = c.get("team").id;
+    return c.json({ kobe: await withTeam(db, teamId, (tx) => readKobeTeamConnector(tx, teamId)) });
+  });
+
+  app.put("/kobe", requireTeamPermission("team.connectors.manage"), async (c) => {
+    const body = await parseBody(c, kobeLevelSchema);
+    if (!body) {
+      return invalidRequest(c, 'Send {"level": "docs" | "read" | "read_write"}.');
+    }
+    const teamId = c.get("team").id;
+    const set = await setKobeTeamLevel(db, teamId, body.level, body.expected_level);
+    if (!set.ok) {
+      return c.json(
+        { code: "changed_since_approval", message: "The team's Kobe level changed meanwhile." },
+        409,
+      );
+    }
+    return c.json({ kobe: await withTeam(db, teamId, (tx) => readKobeTeamConnector(tx, teamId)) });
+  });
 
   app.put("/:id", requireTeamPermission("team.connectors.manage"), async (c) => {
     const id = z.uuid().safeParse(c.req.param("id"));

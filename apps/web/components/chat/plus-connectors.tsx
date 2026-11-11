@@ -76,6 +76,40 @@ function Broken({ connector }: { readonly connector: ChatConnector }) {
   );
 }
 
+const KOBE_ADMIN_TEXT = {
+  off: "Docs always on. No admin tools for you here.",
+  read: "Docs always on. Admin tools: read, as you, when the agent uses Kobe.",
+  read_write:
+    "Docs always on. Admin tools: read and change, as you, when the agent uses Kobe; each change asks you first.",
+} as const;
+
+/**
+ * The built-in Kobe connector (KOBE-623, spec kobe-admin-mcp KA7): no toggle, its docs tools are
+ * in every conversation; the line says which admin tools the member has, as the server decided.
+ */
+function BuiltinKobe({ connector }: { readonly connector: ChatConnector }) {
+  const textId = useId();
+  const admin = connector.builtin?.admin ?? "off";
+  return (
+    <DropdownMenu.Item
+      className={PLUS_ITEM}
+      data-kobe-connector={connector.connectorId}
+      data-kobe-connector-builtin="kobe"
+      aria-disabled
+      aria-describedby={textId}
+      onSelect={(e) => e.preventDefault()}
+    >
+      <CheckIcon aria-label="Always on" className="size-4 shrink-0" />
+      <span className="flex min-w-0 flex-col">
+        <span className="truncate">{connector.name}</span>
+        <span id={textId} className="text-muted-foreground text-xs whitespace-normal">
+          {KOBE_ADMIN_TEXT[admin]}
+        </span>
+      </span>
+    </DropdownMenu.Item>
+  );
+}
+
 /**
  * The + menu's Connectors (KOBE-451): the member's MCP servers in this team as the server lists
  * them. A working one is a checkbox for this conversation only (on by default; stored on the
@@ -153,7 +187,9 @@ export function ConnectorsSubmenu({
           )}
           {load.status === "ready" &&
             load.list.map((c) =>
-              c.problem !== null ? (
+              c.builtin !== undefined ? (
+                <BuiltinKobe key={c.connectorId} connector={c} />
+              ) : c.problem !== null ? (
                 <Broken key={c.connectorId} connector={c} />
               ) : (
                 <DropdownMenu.CheckboxItem

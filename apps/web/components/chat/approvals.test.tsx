@@ -341,6 +341,72 @@ describe("ApprovalCard", () => {
     expect(screen.getByRole("button", { name: "Allow" })).toBeTruthy();
   });
 
+  describe("Admin change (KOBE-623)", () => {
+    const options = {
+      approvalId: APPROVAL,
+      runId: "r",
+      canRemember: true,
+      reason: null,
+      choices: [{ scope: "day" as const, label: "for 1 day", expiresAt: null }],
+      timeZone: "UTC",
+      exact: null,
+      exactOnly: false,
+      approveAll: { approvalIds: [APPROVAL, "00000000-0000-4000-8000-000900000002"] },
+      approveAllReason: null,
+    };
+    const adminAsked = () =>
+      asked({
+        tool: "mcp__kobe__team_members_set_role",
+        input: { user_id: "u1", from_role: "member", to_role: "team_admin" },
+        admin: {
+          scope: "team",
+          scope_label: "Team Research",
+          summary: "Change the role of member Ana Lee: Member → Team admin",
+        },
+      });
+
+    it("shows the scope, the server's summary, before → after and the exact input", () => {
+      render(<ApprovalCard requested={adminAsked()} resolved={undefined} api={api} />);
+      const card = screen.getByRole("group", { name: /Admin change: Approval needed/ });
+      expect(card.textContent).toContain("Team Research");
+      expect(screen.getByLabelText("Change summary").textContent).toBe(
+        "Change the role of member Ana Lee: Member → Team admin",
+      );
+      const table = screen.getByRole("table", { name: "Before and after" });
+      expect(within(table).getByRole("row", { name: /role member team_admin/ })).toBeTruthy();
+      expect(screen.getByLabelText("Input to approve").textContent).toContain('"to_role"');
+    });
+
+    it("offers no remember controls and no Approve all, and never asks for them", async () => {
+      const withOptions = {
+        ...api,
+        rememberOptions: vi.fn(() =>
+          Promise.resolve({ ok: true as const, status: 200, data: options }),
+        ),
+        approveAll: vi.fn(),
+      };
+      render(<ApprovalCard requested={adminAsked()} resolved={undefined} api={withOptions} />);
+      await Promise.resolve();
+      expect(withOptions.rememberOptions).not.toHaveBeenCalled();
+      expect(screen.queryByRole("checkbox", { name: /Remember/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /Approve all/ })).toBeNull();
+      expect(screen.getByRole("button", { name: "Allow" })).toBeTruthy();
+    });
+
+    it("an ordinary card stays as it was", async () => {
+      const withOptions = {
+        ...api,
+        rememberOptions: vi.fn(() =>
+          Promise.resolve({ ok: true as const, status: 200, data: options }),
+        ),
+        approveAll: vi.fn(),
+      };
+      render(<ApprovalCard requested={asked()} resolved={undefined} api={withOptions} />);
+      expect(await screen.findByRole("button", { name: /Approve all waiting \(2\)/ })).toBeTruthy();
+      expect(screen.queryByLabelText("Change summary")).toBeNull();
+    });
+  });
+
   it("offers no buttons once the request is past its expiry", () => {
     render(
       <ApprovalCard

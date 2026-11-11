@@ -20,6 +20,7 @@ import {
 import { ErrorNotice } from "../error-notice";
 import { DateTime } from "../parts";
 import { useMutation } from "../use-resource";
+import { ViaAgentNote } from "../via-agent";
 
 const PLACEHOLDER = "—";
 const HOUR_MS = 3_600_000;
@@ -174,6 +175,7 @@ export function AuditEventsTable({
                 {e.actor.kind === "user" && e.actor.email && (
                   <div className="text-sm text-console-muted">{e.actor.email}</div>
                 )}
+                <ViaAgentNote via={e.viaAgent} />
               </TableCell>
               <TableCell>
                 {e.teamId === null ? "Site" : (teamNames.get(e.teamId) ?? e.teamId)}

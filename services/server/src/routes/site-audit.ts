@@ -3,7 +3,7 @@ import { listAuditEvents, verifyAuditChain } from "@kobe/db";
 import { exportResponse, parseExportQuery } from "../audit/export/http.js";
 import { EXPORT_PAGE_SIZE } from "../audit/export/stream.js";
 import { readForwardingHealth } from "../audit/forward/state.js";
-import { auditPageBody, parseAuditQuery } from "../audit/http.js";
+import { auditPageBodyFor, parseAuditQuery } from "../audit/http.js";
 import type { AuthVariables } from "../auth/session.js";
 import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
@@ -28,7 +28,9 @@ export function siteAuditRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
   app.get("/", async (c) => {
     const query = parseAuditQuery(c);
     if (!query.ok) return query.response;
-    return c.json(auditPageBody(await listAuditEvents(db, query.value)));
+    return c.json(
+      await auditPageBodyFor(db, c.get("user").id, await listAuditEvents(db, query.value)),
+    );
   });
 
   /** CSV or JSONL download of the whole log (optionally one team) for a date range (KOBE-19). */

@@ -7,6 +7,8 @@ import {
 } from "@kobe/protocol";
 import { SYSTEM_ACTOR, pgCodeOf, sql, withTeam, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
+import { kobeAdminApprovalCard } from "../kobe-mcp/approval-card.js";
+import { isKobeAdminAsk } from "../policy/kobe-admin-guard.js";
 import { appendRunEventsInTx, withAppendTx, type NewRunEvent } from "../event-stream/append.js";
 import { applyTransition, lockRunRow, lockThreadRow } from "../runs/store.js";
 import type { ApprovalBroker, ApprovalOutcome, ApprovalRequest } from "../sandbox-wire/types.js";
@@ -268,16 +270,22 @@ export class ApprovalBrokerImpl implements ApprovalBroker {
         await this.#reject(tx, req, "replayed_tool_call_id", taken);
         return { kind: "replay" as const };
       }
+      const input = JSON.parse(canonical) as JsonObject;
+      // KOBE-623: a Kobe admin write's card says what changes, by name, and where.
+      const admin = isKobeAdminAsk(req.decision.reasons)
+        ? await kobeAdminApprovalCard(tx, teamId, req.tool, input)
+        : undefined;
       const event: NewRunEvent = {
         type: "approval.requested",
         payload: {
           approval_id: id,
           tool_call_id: req.toolCallId,
           tool: req.tool,
-          input: JSON.parse(canonical) as JsonObject,
+          input,
           risk: req.decision.risk,
           reasons: [...req.decision.reasons],
           expires_at: expiresAt.toISOString(),
+          ...(admin === undefined ? {} : { admin }),
         },
       };
       if (run.status === "running") {

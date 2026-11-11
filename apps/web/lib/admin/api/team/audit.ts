@@ -1,5 +1,6 @@
 /** Team console: the team's audit view (`/v1/team/audit`, team.audit.read; KOBE-15). */
 import { apiRequest, type ApiResult } from "../../../api/client";
+import type { ViaAgent } from "../audit-via";
 
 const enc = encodeURIComponent;
 
@@ -15,6 +16,8 @@ export interface TeamAuditEvent {
   };
   readonly action: string;
   readonly target: Record<string, unknown>;
+  /** Done through a Kobe MCP admin tool (KOBE-623): thread, run, tool call. */
+  readonly viaAgent?: ViaAgent;
 }
 
 export interface TeamAuditPage {

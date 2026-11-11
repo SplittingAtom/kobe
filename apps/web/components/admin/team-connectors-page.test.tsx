@@ -178,3 +178,68 @@ describe("Team connectors (KOBE-105)", () => {
     expect(await screen.findByText(/No connectors are registered/)).toBeTruthy();
   });
 });
+
+describe("the built-in Kobe connector (KOBE-623)", () => {
+  const kobe = (over: Record<string, unknown> = {}) => ({
+    connector_id: "6b6f6265-0000-4000-8000-000000000001",
+    name: "kobe",
+    mode: "admin",
+    level: "docs",
+    docs_tools: ["mcp__kobe__docs_index"],
+    admin_tools: [],
+    ...over,
+  });
+
+  it("shows its three levels (docs only by default) and saves one with the level seen", async () => {
+    const calls = stubApi({
+      [`GET ${BASE}`]: [200, { connectors: [] }],
+      [`GET ${BASE}/kobe`]: [
+        [200, { kobe: kobe() }],
+        [200, { kobe: kobe({ level: "read_write" }) }],
+      ],
+      [`PUT ${BASE}/kobe`]: [200, { kobe: kobe({ level: "read_write" }) }],
+    });
+    renderTeam(<TeamConnectorsPage />, { permissions: ["team.read", "team.connectors.manage"] });
+    const k = within(await screen.findByRole("article", { name: "Kobe" }));
+    const docs = k.getByRole("radio", { name: "Docs only" }) as HTMLInputElement;
+    expect(docs.checked).toBe(true);
+    expect(k.getByRole("radio", { name: "Read" })).toBeTruthy();
+    expect((k.getByRole("button", { name: /Save level/ }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    await userEvent.click(k.getByRole("radio", { name: "Read and write" }));
+    await userEvent.click(k.getByRole("button", { name: /Save level/ }));
+    const put = calls.find((c) => c.method === "PUT");
+    expect(JSON.parse(String(put?.body))).toEqual({ level: "read_write", expected_level: "docs" });
+    await screen.findByText("Kobe connector: Read and write.");
+    expect(
+      (
+        within(screen.getByRole("article", { name: "Kobe" })).getByRole("radio", {
+          name: "Read and write",
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(true);
+  });
+
+  it("is read-only without team.connectors.manage and says when the site limits it", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [200, { connectors: [] }],
+      [`GET ${BASE}/kobe`]: [200, { kobe: kobe({ mode: "docs", level: "read" }) }],
+    });
+    renderTeam(<TeamConnectorsPage />, { role: "member", permissions: ["team.read"] });
+    const k = within(await screen.findByRole("article", { name: "Kobe" }));
+    expect((k.getByRole("radio", { name: "Read" }) as HTMLInputElement).disabled).toBe(true);
+    expect(k.queryByRole("button", { name: /Save level/ })).toBeNull();
+    expect(k.getByText(/limited Kobe to its docs tools/)).toBeTruthy();
+  });
+
+  it("is not shown while the site switch is off", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [200, { connectors: [connector()] }],
+      [`GET ${BASE}/kobe`]: [200, { kobe: kobe({ mode: "off" }) }],
+    });
+    renderTeam(<TeamConnectorsPage />);
+    await screen.findByRole("article", { name: "jira" });
+    expect(screen.queryByRole("article", { name: "Kobe" })).toBeNull();
+  });
+});
