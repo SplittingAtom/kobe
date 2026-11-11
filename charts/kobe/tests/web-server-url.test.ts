@@ -69,3 +69,15 @@ describe("web.serverUrl -> KOBE_SERVER_URL", () => {
     },
   );
 });
+
+// KOBE-616: the web also gets KOBE_PUBLIC_URL (the server's value) for the guide's /llms.txt links.
+describe("KOBE_PUBLIC_URL on the web", () => {
+  const publicUrl = (env: EnvVar[]) => env.find((e) => e.name === "KOBE_PUBLIC_URL")?.value;
+
+  it("follows the ingress host, or publicUrl when set", () => {
+    expect(publicUrl(envOf("kobe-web"))).toBe(publicUrl(envOf("kobe-server")));
+    expect(publicUrl(envOf("kobe-web", { publicUrl: "https://chat.example.com" }))).toBe(
+      "https://chat.example.com",
+    );
+  });
+});

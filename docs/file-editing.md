@@ -1,5 +1,8 @@
 # File editing with the agent
 
+Member guide: [Editing files](guide/files/file-editor.md), [Notebooks and Python](guide/files/notebooks.md) and
+[Workspaces, My files and projects](guide/files/workspaces-and-projects.md). This page is the engineering view.
+
 How a member and the agent create and edit workspace files together in Kobe's code editor: the
 file tab in the artifact column, with CodeMirror for raw text. Audience: engineers and the product
 owner. Contract and decisions FE1–FE13: `docs/specs/file-editor.md`; protocol types:
@@ -707,19 +710,7 @@ sequenceDiagram
 
 ### Practical guidance
 
-- **Use a proposal when you are working on the file yourself.** Keep the file's tab on screen so
-  the Viewing chip is on. The agent is then told to propose instead of writing, and every change
-  waits for your Commit.
-- **Allow a direct write for new files, generated output or bulk changes** you are not editing.
-  Ask the agent to `open_file` the result, or reopen the tab, to see the pushed version.
-- **Protect hand edits.** Save before asking for a change: drafts are invisible to the agent, and
-  saving is what puts your text into its context. A run that wrote the file updates or badges the
-  open tab by itself.
-  **The viewed file is guarded (KOBE-493).** In every mode, Dangerous included, Pi `write` and `edit`
-  on the file the run was started from are denied with "Propose the change with propose_file_edit
-  instead" when the agent can propose, and otherwise ask the member (denied in runs nobody can be
-  asked in). **Not covered:** `bash`, `powershell`, `run_python` and other tools that write files,
-  and other names for the same file (symlinks, hard links).
+Moved to the member guide: [Editing files](guide/files/file-editor.md) (Good habits).
 
 ## 5. Limits and edge cases
 

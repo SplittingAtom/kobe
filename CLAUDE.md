@@ -16,6 +16,13 @@ Several agents work in parallel: follow `docs/parallel-work.md` (worktree per ti
 ledger in `docs/ledger/`, tables in your area's `packages/db/src/tenancy/<area>.ts`, `db:rebase` for
 migration conflicts).
 
+**User-facing docs.** Every change to Kobe must be evaluated for how it should be documented in the
+user- and agent-facing guide (`docs/guide/`, served in the app at `/docs` and to agents as
+`/llms.txt`, `/llms-full.txt` and `/docs/<slug>.md`). A change that adds, removes or alters
+anything a member, admin or in-sandbox agent sees or can do updates the guide in the same PR
+(new or changed pages, UI labels, the "For agents" pages); if no doc change is needed, say why in
+the ticket ledger. Ticket briefs and reviews check this like tests.
+
 ## Commands
 
 pnpm 12 is pinned via `packageManager`; if the global pnpm is older, prefix with `npx pnpm@12.8.1`.

@@ -12,11 +12,16 @@
  *   `img-src` stays `'self' data:`): a Markdown image becomes a link to it, or its alt text when its
  *   URL isn't safe.
  * - Code blocks have a Copy button.
+ *
+ * `variant="guide"` (the Kobe guide at /docs, KOBE-616): the same, plus same-tab links to the
+ * app's own paths (`/docs/...`, `#anchor`) and ids on h2–h4 with an anchor link each.
  */
 import { useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CheckIcon, CopyIcon } from "lucide-react";
+import Link from "next/link";
+import { rehypeHeadingIds } from "../../lib/docs/heading-ids";
 import { cn } from "../../lib/utils";
 import { IconAction } from "../shell/icon-action";
 import { MarkdownWords, rehypeArrivingWords, SettledProvider } from "./arriving-words";
@@ -173,12 +178,70 @@ const COMPONENTS: Components = {
   hr: () => <hr className="border-border my-4" />,
 };
 
+/** The guide's own links: a same-origin path (not `//host`) or an anchor on the page. */
+export function internalUrl(raw: string | undefined | null): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const t = raw.trim();
+  if (t.startsWith("#") || (t.startsWith("/") && !t.startsWith("//") && !t.startsWith("/\\")))
+    return t;
+  return undefined;
+}
+
+type HeadingProps = { readonly id?: string | undefined; readonly children?: ReactNode };
+
+function guideHeading(Tag: "h2" | "h3" | "h4", className: string) {
+  return function GuideHeading({ id, children }: HeadingProps) {
+    return (
+      <Tag id={id} className={cn("group scroll-mt-4", className)}>
+        {children}
+        {id && (
+          <a
+            href={`#${id}`}
+            aria-label="Link to this section"
+            className="text-muted-foreground ms-2 no-underline opacity-0 group-hover:opacity-100 focus:opacity-100"
+          >
+            #
+          </a>
+        )}
+      </Tag>
+    );
+  };
+}
+
+const GUIDE_COMPONENTS: Components = {
+  ...COMPONENTS,
+  a: ({ href, children }) => {
+    const internal = internalUrl(href);
+    if (internal)
+      return (
+        <Link className={LINK} href={internal}>
+          {children}
+        </Link>
+      );
+    const url = safeUrl(href);
+    if (!url) return <span>{children}</span>;
+    return (
+      <a className={LINK} href={url} target="_blank" rel="noopener noreferrer nofollow">
+        {children}
+      </a>
+    );
+  },
+  h2: guideHeading("h2", "mt-6 mb-2 text-xl font-semibold tracking-tight"),
+  h3: guideHeading("h3", "mt-4 mb-2 text-lg font-semibold"),
+  h4: guideHeading("h4", "mt-3 mb-1 text-base font-semibold"),
+};
+
 const REMARK_PLUGINS = [remarkGfm, remarkHtmlAsText];
 const WORD_PLUGINS = [rehypeArrivingWords];
+const GUIDE_PLUGINS = [rehypeHeadingIds];
 
 /** Unsafe URLs are dropped before rendering; the components above check again. */
 function urlTransform(url: string): string {
   return safeUrl(url) ?? "";
+}
+
+function guideUrlTransform(url: string): string {
+  return internalUrl(url) ?? safeUrl(url) ?? "";
 }
 
 /**
@@ -190,11 +253,14 @@ export function Markdown({
   text,
   words = false,
   arriving = false,
+  variant = "chat",
 }: {
   readonly text: string;
   readonly words?: boolean;
   readonly arriving?: boolean;
+  readonly variant?: "chat" | "guide";
 }) {
+  const guide = variant === "guide";
   return (
     <div
       data-kobe-words={words ? "" : undefined}
@@ -204,9 +270,9 @@ export function Markdown({
       <SettledProvider text={text}>
         <ReactMarkdown
           remarkPlugins={REMARK_PLUGINS}
-          rehypePlugins={words ? WORD_PLUGINS : undefined}
-          components={COMPONENTS}
-          urlTransform={urlTransform}
+          rehypePlugins={guide ? GUIDE_PLUGINS : words ? WORD_PLUGINS : undefined}
+          components={guide ? GUIDE_COMPONENTS : COMPONENTS}
+          urlTransform={guide ? guideUrlTransform : urlTransform}
         >
           {text}
         </ReactMarkdown>
