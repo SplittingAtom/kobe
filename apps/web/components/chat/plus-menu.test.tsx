@@ -118,6 +118,25 @@ describe("the + menu (ac-1)", { timeout: 30_000 }, () => {
 });
 
 describe("Connectors (ac-2, ac-3, ac-6)", { timeout: 30_000 }, () => {
+  it("lists the built-in Kobe connector as always on, with the member's admin tools (KOBE-623)", async () => {
+    fake.chatConnectors.unshift({
+      connector_id: "6b6f6265-0000-4000-8000-000000000001",
+      name: "kobe",
+      problem: null,
+      builtin: { kind: "kobe", admin: "read_write" },
+    });
+    const t = answered();
+    openApp(fake, t);
+    const { user, sub } = await openSub("Connectors");
+    const kobe = await within(sub).findByRole("menuitem", { name: /kobe/ }, WAIT);
+    expect(kobe.getAttribute("aria-disabled")).toBe("true");
+    expect(kobe.textContent).toContain("Docs always on.");
+    expect(kobe.textContent).toContain("read and change");
+    expect(within(sub).queryByRole("menuitemcheckbox", { name: /kobe/ })).toBeNull();
+    await user.click(kobe);
+    expect(chatRequests(fake, "PUT").filter((r) => r.path.includes("/connectors/"))).toEqual([]);
+  });
+
   it("toggles a working one for this thread; a broken one shows its reason and fix, no toggle", async () => {
     const t = answered();
     openApp(fake, t);

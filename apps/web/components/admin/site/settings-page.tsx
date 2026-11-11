@@ -3,12 +3,22 @@
 import { useState, type FormEvent } from "react";
 import {
   AUDIT_PII_RETENTION_HOURS,
+  KOBE_MCP_MODE_LABELS,
   getSiteSettings,
   putSiteSettings,
+  type KobeMcpMode,
   type SiteSettings,
 } from "../../../lib/admin/api/site/settings";
 import { canTurnOffRequiredTwoFactor } from "../../../lib/admin/rules";
-import { Button, Checkbox, ChoiceGroup, Field, PageHeader, TextInput } from "../../ui/console";
+import {
+  Button,
+  Checkbox,
+  ChoiceGroup,
+  Field,
+  PageHeader,
+  Radio,
+  TextInput,
+} from "../../ui/console";
 import { useSiteAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
@@ -16,8 +26,8 @@ import { useMutation, useResource } from "../use-resource";
 import { MemorySwitchesSection } from "./memory-switches";
 
 /**
- * Site settings (`/v1/site/settings`): required two-factor authentication (D7) and how long
- * audit events keep the client IP address and user agent (KOBE-17).
+ * Site settings (`/v1/site/settings`): required two-factor authentication (D7), how long audit
+ * events keep the client IP address and user agent (KOBE-17), and the Kobe MCP switch (KOBE-623).
  */
 export function SettingsPage() {
   const { state, reload } = useResource(getSiteSettings);
@@ -29,6 +39,9 @@ export function SettingsPage() {
           <>
             <SettingsForm settings={settings} onSaved={reload} />
             <AuditPrivacyForm settings={settings} onSaved={reload} />
+            {settings.kobeMcpMode !== undefined && (
+              <KobeMcpForm mode={settings.kobeMcpMode} onSaved={reload} />
+            )}
             <MemorySwitchesSection />
           </>
         )}
@@ -134,6 +147,64 @@ function AuditPrivacyForm({
         disabled={mutation.pending || Number(hours) === saved}
       >
         Save retention
+      </Button>
+      <MutationStatus error={mutation.error} notice={mutation.notice} />
+    </form>
+  );
+}
+
+const KOBE_MCP_HINTS: Readonly<Record<KobeMcpMode, string>> = {
+  off: "No Kobe connector: agents get neither the docs tools nor admin tools.",
+  docs: "Agents can read the Kobe user guide. No admin tools in any team.",
+  admin:
+    "Each team admin may also turn on admin tools for their team. Agents then act as the person in the conversation, within that person's own permissions, and every change asks that person first.",
+};
+
+/**
+ * The Kobe MCP switch (`kobeMcpMode`, KOBE-623, spec kobe-admin-mcp §6, KA5): off, docs only (the
+ * default) or docs and admin tools. A team still chooses its own level in Team console ›
+ * Connectors; this caps it for the whole site. Audited by the server.
+ */
+function KobeMcpForm({
+  mode,
+  onSaved,
+}: {
+  readonly mode: KobeMcpMode;
+  readonly onSaved: () => void;
+}) {
+  const mutation = useMutation();
+  const [choice, setChoice] = useState<KobeMcpMode>(mode);
+
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const done = await mutation.run(
+      () => putSiteSettings({ kobeMcpMode: choice }),
+      (saved) => `Kobe connector: ${KOBE_MCP_MODE_LABELS[saved.kobeMcpMode ?? choice]}.`,
+    );
+    if (done) onSaved();
+  }
+
+  return (
+    <form onSubmit={onSubmit} aria-label="Kobe connector">
+      <ChoiceGroup
+        legend="Kobe connector (docs and admin from a conversation)"
+        stacked
+        className="my-4"
+      >
+        {(Object.keys(KOBE_MCP_MODE_LABELS) as KobeMcpMode[]).map((m) => (
+          <Radio
+            key={m}
+            name="kobe-mcp-mode"
+            label={KOBE_MCP_MODE_LABELS[m]}
+            hint={KOBE_MCP_HINTS[m]}
+            checked={choice === m}
+            disabled={mutation.pending}
+            onChange={() => setChoice(m)}
+          />
+        ))}
+      </ChoiceGroup>
+      <Button type="submit" variant="primary" disabled={mutation.pending || choice === mode}>
+        Save Kobe connector
       </Button>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
     </form>

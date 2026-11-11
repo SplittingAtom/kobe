@@ -13,8 +13,10 @@ import {
   deniedTools,
   denyTool,
   withConnectorTools,
+  withKobeDocs,
 } from "../../../../lib/admin/agent-builder/tool-lists";
-import type { TeamConnector } from "../../../../lib/admin/api/team/connectors";
+import type { ApiResult } from "../../../../lib/api/client";
+import type { KobeTeamConnector, TeamConnector } from "../../../../lib/admin/api/team/connectors";
 import { Button, Checkbox, FieldError, Notice, TextInput } from "../../../ui/console";
 import { useResource } from "../../use-resource";
 import { useBuilderSources } from "./builder-sources";
@@ -31,11 +33,27 @@ function toolsOf(
     .flatMap((c) => c.tools.filter((t) => t.status === "pinned").map((t) => t.piName));
 }
 
+/** No built-in Kobe connector where the sources offer none (gallery agents). */
+const NO_KOBE = (): Promise<ApiResult<KobeTeamConnector>> =>
+  Promise.resolve({ ok: false, error: { status: 404, code: "not_found", message: "" } });
+
+/** The built-in Kobe connector when it can be chosen (the site switch is not off). */
+function usableKobe(state: ReturnType<typeof useResource<KobeTeamConnector>>["state"]) {
+  if (state.status !== "ready" || state.data.mode === "off" || state.data.name === null) {
+    return undefined;
+  }
+  return state.data as KobeTeamConnector & { readonly name: string };
+}
+
 /**
  * The Behaviour tab's connectors and tool lists (KOBE-476 AC4): pick connectors from the team's
  * enabled ones (or every one), and their pinned tools appear under Allowed; each tool moves to
  * Denied and back with a button. Saved as `connectors`, `tools.deny` and, when the agent already
  * restricts its tools, `tools.allow` (lib/admin/agent-builder/tool-lists.ts).
+ *
+ * The built-in Kobe connector (KOBE-623) is offered by its name: choosing it adds Kobe's admin
+ * tools (each person still gets only what their role and the switches allow), and Kobe's docs
+ * tools, on for every agent, stay named whenever the allow list narrows anything.
  */
 export function ConnectorTools({
   form,
@@ -50,10 +68,19 @@ export function ConnectorTools({
 }) {
   const sources = useBuilderSources();
   const { state } = useResource(sources.connectors);
+  const kobe = usableKobe(useResource(sources.kobe ?? NO_KOBE).state);
   const team =
     state.status === "ready" ? state.data.filter((c) => c.enabled && c.status === "active") : [];
   const chosen = splitLines(form.connectors);
   const replaced = form.connectorsAll ? chosen : [];
+  const docs = kobe?.docsTools ?? [];
+  // Team connectors' pinned tools, plus Kobe's admin tools when it is among `names`.
+  const toolsFor = (names: readonly string[] | typeof ALL_CONNECTORS) => [
+    ...toolsOf(team, names),
+    ...(kobe !== undefined && (names === ALL_CONNECTORS || names.includes(kobe.name))
+      ? kobe.adminTools.map((t) => t.piName)
+      : []),
+  ];
 
   // Each chosen connector's tools are written into tools.allow one by one (AC1, AC4); a
   // connector taken away takes its tools with it.
@@ -61,25 +88,31 @@ export function ConnectorTools({
     const added = next.filter((n) => !chosen.includes(n));
     const removed = chosen.filter((n) => !next.includes(n));
     onChange(
-      withConnectorTools(
-        { ...form, connectors: next.join("\n") },
-        toolsOf(team, added),
-        toolsOf(team, removed),
+      withKobeDocs(
+        withConnectorTools(
+          { ...form, connectors: next.join("\n") },
+          toolsFor(added),
+          toolsFor(removed),
+        ),
+        docs,
       ),
     );
   };
   const setAll = (all: boolean) => {
-    const every = toolsOf(team, ALL_CONNECTORS);
-    const current = toolsOf(team, chosen);
+    const every = toolsFor(ALL_CONNECTORS);
+    const current = toolsFor(chosen);
     const updated = { ...form, connectorsAll: all };
     onChange(
-      all
-        ? withConnectorTools(updated, every)
-        : withConnectorTools(
-            updated,
-            [],
-            every.filter((t) => !current.includes(t)),
-          ),
+      withKobeDocs(
+        all
+          ? withConnectorTools(updated, every)
+          : withConnectorTools(
+              updated,
+              [],
+              every.filter((t) => !current.includes(t)),
+            ),
+        docs,
+      ),
     );
   };
 
@@ -93,7 +126,12 @@ export function ConnectorTools({
             : "Connectors the team enables. Each person still connects their own account."
         }
         chosen={chosen}
-        options={team.map((c) => ({ value: c.name, label: c.name }))}
+        options={[
+          ...(kobe === undefined
+            ? []
+            : [{ value: kobe.name, label: `${kobe.name} (Kobe's admin tools)` }]),
+          ...team.map((c) => ({ value: c.name, label: c.name })),
+        ]}
         noun="connector"
         readOnly={readOnly || form.connectorsAll}
         error={fieldError(errors.connectors)}

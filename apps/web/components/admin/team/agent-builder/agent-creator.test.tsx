@@ -215,6 +215,64 @@ describe("connector tools: Allowed and Denied (ac-2)", () => {
   });
 });
 
+describe("the built-in Kobe connector (KOBE-623)", () => {
+  const KOBE = {
+    kobe: {
+      connector_id: "6b6f6265-0000-4000-8000-000000000001",
+      name: "kobe",
+      mode: "admin",
+      level: "read",
+      docs_tools: ["mcp__kobe__docs_index", "mcp__kobe__docs_page"],
+      admin_tools: [
+        { pi_name: "mcp__kobe__team_members_list", title: "List", scope: "team", read_only: true },
+      ],
+    },
+  };
+
+  it("is offered by name; choosing it adds its admin tools and keeps the docs tools named", async () => {
+    const calls = stubApi({
+      ...READ,
+      "GET /v1/team/connectors/kobe": [200, KOBE],
+      "POST /v1/agents": [201, { agent: CREATED }],
+    });
+    renderTeam(<AgentBuilderPage scope="personal" />, { role: "member", permissions: [] });
+    await fillIdentity();
+    await userEvent.click(tab("Behaviour"));
+    const add = await screen.findByRole("combobox", { name: "Add a connector" });
+    await within(add).findByRole("option", { name: "kobe (Kobe's admin tools)" });
+    await userEvent.selectOptions(add, "jira");
+    // Narrowing to jira's tools keeps Kobe's docs tools on.
+    const allowed = () =>
+      within(screen.getByRole("list", { name: "Allowed tools" }))
+        .getAllByRole("listitem")
+        .map((li) => li.querySelector("code")?.textContent);
+    expect(allowed()).toEqual([
+      "mcp__jira__search",
+      "mcp__jira__create_issue",
+      "mcp__kobe__docs_index",
+      "mcp__kobe__docs_page",
+    ]);
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Add a connector" }),
+      "kobe",
+    );
+    expect(allowed()).toContain("mcp__kobe__team_members_list");
+    await userEvent.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() => expect(postedBody(calls).frontmatter.connectors).toEqual(["jira", "kobe"]));
+  });
+
+  it("is not offered while the site switch is off, and its absence changes nothing", async () => {
+    stubApi({
+      ...READ,
+      "GET /v1/team/connectors/kobe": [200, { kobe: { ...KOBE.kobe, mode: "off" } }],
+    });
+    renderTeam(<AgentBuilderPage scope="personal" />, { role: "member", permissions: [] });
+    await userEvent.click(tab("Behaviour"));
+    const add = await screen.findByRole("combobox", { name: "Add a connector" });
+    expect(within(add).queryByRole("option", { name: /kobe/ })).toBeNull();
+  });
+});
+
 describe("Dangerous approval mode (ac-3)", () => {
   const modes = () =>
     within(screen.getByLabelText("Approval mode"))
