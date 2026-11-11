@@ -1,7 +1,6 @@
 # Kobe — Admin and docs from the conversation (Kobe MCP server)
 
-Status: **proposed** (Chris's decisions KA1–KA4 of 2026-11-11 in §10; tickets KA-1..KA-7 in §11,
-not yet filed in Hadron). Requested by Chris, 2026-11-11. Written against main `435cdb67`, with the
+Status: **decisions KA1–KA8 by Chris 2026-11-11 (§10); ready for tickets** (KA-1..KA-7 in §11). Requested by Chris, 2026-11-11. Written against main `435cdb67`, with the
 user guide of branch `kobe-docs` (PR #526, KOBE-616/617) assumed merged.
 
 Request (Chris, 2026-11-11): "I want to create an MCP server for Kobe that will allow an agent in a
@@ -146,10 +145,10 @@ person's current permissions, the team's setting (§6) and the site switch. Call
 ## 6. Switches, approvals and limits
 
 - **Site switch** (Site console › Settings, `site.settings.manage`): `kobe_mcp.mode` = `off` (no
-  `kobe` connector), `docs` (docs tools only), `admin` (default after upgrade: docs plus admin tools
-  per team). Stored in `site_settings`; the seeded `connectors` row follows it.
+  `kobe` connector), `docs` (docs tools only; the default after upgrade, KA5), `admin` (docs plus admin
+  tools per team). Stored in `site_settings`; the seeded `connectors` row follows it.
 - **Team switch** (Team console › Connectors, `team.connectors.manage`): the built-in connector shows
-  as **Kobe** with `docs only`, `read` (default) or `read and write`. Its value lives in
+  as **Kobe** with `docs only` (default, KA5), `read` or `read and write`. Its value lives in
   `teams.settings` (`kobe_mcp.admin`), not `team_connectors`, so it needs no enabling admin row.
 - **Writes always ask.** A Kobe admin write is decided like the viewed-file guard: ask in every mode
   (Dangerous included); never remembered, never in "Approve all waiting"; denied where nobody can be
@@ -182,8 +181,8 @@ person's current permissions, the team's setting (§6) and the site switch. Call
   Telemetry keeps `captureContent: false` as configured.
 - **Prompt injection.** Untrusted content (files, web pages, connector results, a teammate's message)
   can steer the agent into asking for an admin write. Mitigations: every write asks with the exact
-  change and its scope; no remember; no auto or scheduled writes; the team switch defaults to
-  `read`; the site switch can turn admin tools off; per-person write limits; audit "via agent".
+  change and its scope; no remember; no auto or scheduled writes; the site and team switches
+  default to docs only (KA5); the site switch can turn admin tools off; per-person write limits; audit "via agent".
   Reads are allowed freely, so injection can make the agent _read_ what the person may read; the
   redaction above keeps it from leaking through sharing, and no admin tool sends data out (no
   email/webhook tools in v1).
@@ -214,16 +213,16 @@ external MCP endpoint for clients outside Kobe (KOBE-526 territory).
   so no egress change is needed; a Kobe-shipped skill available to every team points agents at the
   llms.txt index via the Kobe MCP for questions about using or administering Kobe.
 
-Open questions for Chris:
-
-- **OQ1. Defaults.** Site `admin` and team `read` after upgrade (proposed), or admin tools off until
-  a site admin turns them on?
-- **OQ2. Redacting admin results in shared threads** (§8): agree, or refuse to share such threads?
-- **OQ3. Agents without `connectors: all`.** Should the docs tools be attached to every run whatever
-  the agent's connector list (proposed: yes, docs only), with admin tools only for agents that list
-  `kobe` or `all`?
-- **OQ4. Excluded actions** (§9): confirm that break-glass, ownership, site roles, legal hold,
-  retention and deletion stay console-only in v1.
+- **KA5. Off until enabled.** After an upgrade the admin tools are off: the site switch
+  (`kobe_mcp.mode`) starts at `docs`; a site admin turns admin tools on for the site, then each team
+  admin turns them on for the team. The docs tools are on everywhere.
+- **KA6. Shared threads hide admin results.** A teammate viewing a shared thread sees that an admin
+  tool ran and its summary line; the tool's output is shown only to viewers holding the same
+  permission ("Admin result hidden" otherwise). Sharing such threads stays allowed.
+- **KA7. Docs tools for every agent.** The docs tools attach to every run whatever the agent's
+  connector list; admin tools follow the connector list (`kobe` or `all`).
+- **KA8. Console-only in v1:** break-glass, ownership transfer, site roles, legal hold, retention and
+  deletions. The agent may explain them and link to the console page but has no tool for them.
 
 ## 11. Tickets
 
