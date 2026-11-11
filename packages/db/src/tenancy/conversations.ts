@@ -16,6 +16,8 @@ export const conversations = defineDomain({
     "thread_folders",
     // Branch labels on tree nodes (KOBE-543, CT9): they follow their thread and entry.
     "thread_branch_labels",
+    // Which workspace files each thread read or wrote (KOBE-610, TFM): they follow their thread.
+    "thread_file_links",
   ],
   siteWide: [],
   grants: {},

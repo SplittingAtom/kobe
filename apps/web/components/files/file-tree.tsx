@@ -66,6 +66,8 @@ export interface TreeActions {
   mentionRefusal?(path: string): string | undefined;
   /** Files were dragged onto a folder that refuses them: say why. */
   onRefusedDrop?(reason: string): void;
+  /** Controls after the row's name, before its ⋯ menu (the Threads panel's line pin, KOBE-612). */
+  trailing?(entry: FileEntry): ReactNode;
 }
 
 /** How a decorated row reads (FP1): its label, hover text and chips after the name. */
@@ -143,6 +145,8 @@ interface RowProps {
   readonly menuSignal: number;
   readonly actions: TreeActions;
   readonly drag: DragHandlers;
+  /** Rows drag (move, mention); false in a read-only view (the Threads panel's rail, TFM6). */
+  readonly dragRows: boolean;
   onFocusRow(): void;
   onToggle(): void;
   register(el: HTMLElement | null): void;
@@ -163,6 +167,7 @@ function EntryRow({
   menuSignal,
   actions,
   drag,
+  dragRows,
   onFocusRow,
   onToggle,
   register,
@@ -199,7 +204,7 @@ function EntryRow({
       {...(dropHere ? { "data-drop-target": "" } : {})}
       {...(takesFiles || refusal !== undefined ? { [DROP_FOLDER_ATTR]: "" } : {})}
       // Read-only files still drag, to be mentioned in the composer (KOBE-374); never moved.
-      draggable={!readOnly || !dir}
+      draggable={dragRows && (!readOnly || !dir)}
       title={decoration?.title ?? entry.path}
       className={cn(
         "group/row relative flex h-6.5 cursor-default items-center gap-1 rounded-sm pe-0.5 text-sm outline-none select-none",
@@ -220,10 +225,14 @@ function EntryRow({
         if (dir) onToggle();
         else actions.onOpenFile?.(entry);
       }}
-      onDragStart={(e) => drag.start(e, row)}
-      onDragOver={(e) => drag.over(e, folder, takesFiles, refusal)}
-      onDrop={(e) => drag.drop(e, folder, takesFiles, refusal)}
-      onDragEnd={drag.end}
+      {...(dragRows
+        ? {
+            onDragStart: (e: DragEvent) => drag.start(e, row),
+            onDragOver: (e: DragEvent) => drag.over(e, folder, takesFiles, refusal),
+            onDrop: (e: DragEvent) => drag.drop(e, folder, takesFiles, refusal),
+            onDragEnd: drag.end,
+          }
+        : {})}
     >
       <Guides level={level} />
       {dir ? (
@@ -254,6 +263,7 @@ function EntryRow({
         <LoaderCircleIcon aria-hidden className="text-muted-foreground size-3 animate-spin" />
       )}
       {badge && <ReadOnlyBadge />}
+      {actions.trailing?.(entry)}
       {entry.sizeBytes !== null && (
         <span className="text-muted-foreground hidden shrink-0 text-xs tabular-nums @min-[15rem]:inline">
           {formatBytes(entry.sizeBytes)}
@@ -413,9 +423,12 @@ export function FileTreeView({
   onFocusChange,
   header,
   idPrefix = "kobe-files-row",
+  dragRows = true,
 }: {
   /** Row ids start with this (two trees on one page: Projects and My files). */
   readonly idPrefix?: string;
+  /** Rows drag and take drops (default); false for a read-only view (KOBE-612, TFM6). */
+  readonly dragRows?: boolean;
   readonly tree: FileTree;
   readonly label: string;
   readonly actions: TreeActions;
@@ -577,6 +590,7 @@ export function FileTreeView({
               menuSignal={menuSignal}
               actions={actions}
               drag={drag.handlers}
+              dragRows={dragRows}
               register={register}
               onFocusRow={() => setActiveKey(key)}
               onToggle={() => tree.toggle(row.entry.path)}

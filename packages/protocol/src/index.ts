@@ -20,6 +20,7 @@ export * from "./file-editor.js";
 export * from "./sync-conflicts.js";
 export * from "./file-open.js";
 export * from "./thread-files.js";
+export * from "./thread-file-links.js";
 export * from "./notebooks.js";
 export * from "./mentions.js";
 export * from "./schedules.js";

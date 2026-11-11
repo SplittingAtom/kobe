@@ -197,6 +197,20 @@ describe("message with file_ids", () => {
       [w.team],
     );
     expect(pending.rows).toHaveLength(0);
+    // KOBE-610: the message wrote the file into the workspace, so its thread links it (write).
+    const links = await f.fx.admin.query(
+      `SELECT owner_user_id, path, access, deleted_at FROM thread_file_links
+        WHERE team_id = $1 AND thread_id = $2`,
+      [w.team, threadId],
+    );
+    expect(links.rows).toEqual([
+      {
+        owner_user_id: w.owner.id,
+        path: `uploads/${threadId}/sales.csv`,
+        access: "write",
+        deleted_at: null,
+      },
+    ]);
   });
 
   it("numbers repeated names and gives a queued run its files when it starts", async () => {

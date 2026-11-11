@@ -452,6 +452,9 @@ function ChatWorkspace({
                                     <ThreadsPanelContent
                                       listError={listError}
                                       onChosen={chooseThread}
+                                      filesApi={filesApi}
+                                      workspaceName={teamName}
+                                      onClose={onClosePanel}
                                     />
                                   </WorkspacePanel>
                                 )}

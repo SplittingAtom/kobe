@@ -869,6 +869,17 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Thread–file links (KOBE-610).** Migrations `0205_thread_file_links` and
+  `0206_thread_file_links_rls` add the team table `thread_file_links` (which workspace files each
+  thread read or wrote) and triggers on `workspace_files`, `workspace_moves` and `project_files`
+  that follow moves and deletes. New links are recorded from the upgrade on. To link existing
+  threads, run the one-time backfill in a server pod after the rollout:
+  `kubectl -n <namespace> exec deploy/<release>-server -- node dist/cli/thread-file-links-backfill.js`.
+  It reads stored tool calls, attachments and project commits, prints one JSON line
+  (`{"threads":…,"links":…,"done":true}`), and is idempotent and resumable: it continues after the
+  last thread it finished, `--max <threads>` stops early (exit 1, run again to continue),
+  `--pace-ms <ms>` pauses between threads, `--restart` walks everything again (changes nothing
+  already recorded).
 - **Bifrost v2.5.1 (KOBE-600).** The chart's Bifrost moves from v2.2.5 to v2.5.1 (pinned by
   digest). On its first start it migrates its store on the Bifrost PVC (`config.db`): 76 new
   migrations, 17 of them one-way, among them `move_config_json_vk_limits_to_model_configs`, which

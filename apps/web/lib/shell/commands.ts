@@ -437,6 +437,8 @@ const LIST = [
   { id: "rename-file", name: "Rename", icon: PencilIcon, scope: "file-menu" },
   { id: "move-file", name: "Move to…", icon: FolderInputIcon, scope: "file-menu" },
   { id: "copy-file-path", name: "Copy path", icon: ClipboardCopyIcon, scope: "file-menu" },
+  // The threads that read or wrote the file (KOBE-612, TFM4): "Used in (N threads)", a submenu.
+  { id: "file-used-in", name: "Used in", icon: MessagesSquareIcon, scope: "file-menu" },
   // A My files folder becomes a project (KOBE-586, PF1): team admins and contributors only.
   {
     id: "promote-to-project",

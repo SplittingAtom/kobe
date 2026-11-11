@@ -4,6 +4,7 @@
  * acting on the wrong team. Request bodies use the routes' snake_case (spec §6.1).
  */
 import type { appContextBody } from "../apps/app-context";
+import { createFileLinksApi, type FileLinksApi } from "../threads/file-links";
 
 /** One `app_context` part as sent (KOBE-439). */
 export type AppContextWire = ReturnType<typeof appContextBody>[number];
@@ -122,7 +123,8 @@ export interface ToolOutput {
   readonly truncated: boolean;
 }
 
-export interface ChatApi {
+/** `FileLinksApi`: the thread–file links of the Threads panel (KOBE-612). */
+export interface ChatApi extends FileLinksApi {
   /** The member's own live threads; `folder` (TF5): one folder's readable ones, or `none`. */
   listThreads(cursor?: string, folder?: string): Promise<ApiResult<ThreadPage>>;
   searchThreads(
@@ -394,6 +396,7 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     apiRequest<T>(path, { method, json, teamId, fetchFn });
 
   return {
+    ...createFileLinksApi(teamId, fetchFn),
     listThreads: (cursor, folder) => get(`/v1/threads${query({ folder, cursor })}`),
     searchThreads: (q, cursor, signal) =>
       apiRequest(`/v1/threads${query({ q, cursor })}`, { teamId, fetchFn, signal }),
