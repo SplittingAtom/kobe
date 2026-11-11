@@ -40,13 +40,19 @@ workspace; switch workspace first to manage another.
 | ----------------------- | --------------------------------------------------------------------------------------------------------- |
 | **Models**              | Which models from the site catalog the team may use, and the team default.                                |
 | **Budgets**             | Daily or monthly dollar budgets for the team, a default member budget, and budgets per member.            |
-| **Connectors**          | Enable registered connectors and choose each one's exposure: read-only, all or chosen tools.              |
+| **Connectors**          | Enable registered connectors and choose each one's exposure; set the built-in **Kobe** connector's level. |
 | **Egress**              | Enable domains within the site ceiling, answer access requests, and inject headers for a domain.          |
 | **Policy**              | Team deny, ask and allow rules inside the site floor, remember limits, and members' remembered approvals. |
 | **Memory**              | Allow memory, and allow project memory (both also need the site switch).                                  |
 | **Retention**           | How long the team keeps threads, within the site maximum.                                                 |
 | **Storage and history** | Bytes and objects per workspace and project, the object budget, and how long project history is kept.     |
 | **Follow-ups**          | Suggest three follow-up messages after each answer (a short model call per run).                          |
+
+The **Kobe** card on the **Connectors** page sets what agents may do with Kobe's own admin tools
+in this team: **Docs only** (the default), **Read** or **Read and write**. Agents always have the
+docs tools. Admin tools act as the person in the conversation, within that person's permissions,
+and every change asks them first. It works only while a site admin allows admin tools. See
+[Admin from a conversation](admin-from-a-conversation.md).
 
 Header injection on the **Egress** page adds a header, such as an API token, to requests the
 proxy forwards to that domain, so the secret never enters a sandbox. Values are not shown again
@@ -74,6 +80,14 @@ after saving.
 - **Usage**: spend by user, agent and model.
 - **Break-glass access**: when site admins had time-boxed, read-only access to this team, now and
   in the past. A banner tells members while it is active.
+
+## From a conversation
+
+With the Kobe connector at **Read and write**, most of this console can also be run by asking the
+agent: change a role, send an invitation, approve a skill version, enable a domain, pause a
+schedule, read usage or the audit log. Each change shows an **Admin change** card first and is
+audited as you "via agent". Break-glass, retention, deletions, injected headers and the Kobe level
+itself stay in the console. See [Admin from a conversation](admin-from-a-conversation.md).
 
 ## What team admins cannot do
 

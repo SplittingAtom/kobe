@@ -81,6 +81,17 @@ access**. See [Internet access](../internet-and-approvals/internet-access.md).
 **A connector shows a red cross.** Open **+** → **Connectors** to read the reason. Often you need to
 add your own key in **Profile → My connectors**.
 
+**The agent says it has no admin tools.** Kobe's admin tools need all of these: a site admin chose
+**Docs and admin tools** (Site console → Settings → Kobe connector), your team admin set the Kobe
+card on the team console's **Connectors** page to **Read** or **Read and write** (changes need Read
+and write), the agent uses the kobe connector (the gallery agent Kobe does; others must list
+**kobe** among their connectors), and your role allows the action (members get none). Scheduled
+and auto runs never make admin changes. **+** → **Connectors** shows which admin tools you have.
+See [Admin from a conversation](../admin/admin-from-a-conversation.md).
+
+**An admin change says "changed since approval".** The setting changed between the card and your
+Allow, so nothing was changed. Ask the agent to read it again and approve the new card.
+
 **An approval expired.** Approvals wait one hour. Send your message again and answer the card.
 
 **My remembered approval did not apply.** Remembered approvals never apply to scheduled or auto

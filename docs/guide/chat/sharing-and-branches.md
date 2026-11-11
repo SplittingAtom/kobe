@@ -25,6 +25,11 @@ can fork it; they cannot write in it, approve its tool calls or see what its mod
 see "This conversation is shared with you read-only." Files from your own My files are never named
 to them (see [The Threads panel](threads-panel.md)).
 
+If the agent used Kobe's admin tools in the thread, readers see that the tool ran and its summary,
+but its result reads "Admin result hidden" unless they hold the same permission, in their forks
+too. The agent's own answers are not hidden, so check what they say before sharing. See
+[Admin from a conversation](../admin/admin-from-a-conversation.md).
+
 ## Fork a thread
 
 **Fork to a new thread** on a message (or `/fork`) asks for a title, then **Fork** copies the

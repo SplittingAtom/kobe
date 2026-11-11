@@ -20,6 +20,17 @@ the team in the team console's **Connectors** page and choose which of its tools
 The agent never holds the connector's credentials. Its calls go through Kobe's MCP proxy, which
 adds the credential on the way out, checks the call against your team's rules and records it.
 
+## The built-in Kobe connector
+
+Every site has one connector it did not have to register: **Kobe**, Kobe's own. It needs no key
+and no internet access, and it cannot be turned off for a conversation. Its docs tools let any
+agent read this guide, so you can ask "How do I…" anywhere. Where a site admin and your team admin
+turned them on, its admin tools let the agent read or change Kobe settings as you, within your own
+permissions, and every change asks you first with an **Admin change** card. In the composer,
+**+** → **Connectors** lists it first, with "Docs always on" and which admin tools you have. In
+the agent creator you can name **kobe** among an agent's connectors to give it the admin tools.
+See [Admin from a conversation](admin/admin-from-a-conversation.md).
+
 ## Add your own key
 
 Some connectors act as you, with your own account. Open **Profile → My connectors** (**My

@@ -33,7 +33,9 @@ the source and need no internet access.
 
 When someone asks you to change something in Kobe, use the kobe connector's admin tools only if
 they are listed for you. They act as that person, with their permissions, and every change shows
-them an approval card first.
+them an approval card first; see
+[Working inside a Kobe sandbox](working-in-a-sandbox.md#the-kobe-connector). If they are not
+listed, answer from the guide and tell the person where in the console to do it.
 
 ## Outside Kobe: llms.txt and Markdown pages
 
