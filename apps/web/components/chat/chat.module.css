@@ -99,6 +99,30 @@
   cursor: pointer;
 }
 
+/* In the Threads panel (KOBE-614): the row hugs its title, so the pin, trash and ⋯ sit right
+   after it (a long title still truncates, the icons stay), and hovering or focusing it by
+   keyboard shows a pill behind it. After `.threadItem[data-active]` so the pill wins on hover. */
+.panelRow {
+  width: fit-content;
+  max-width: 100%;
+  padding-inline-end: 0.25rem;
+  border-radius: var(--kobe-radius-pill);
+}
+
+.panelRow:hover,
+.panelRow:has(:focus-visible) {
+  background: var(--accent);
+}
+
+.panelRow .threadTrigger {
+  flex: 0 1 auto;
+  border-radius: var(--kobe-radius-pill);
+}
+
+.panelRow .itemActions {
+  flex-shrink: 0;
+}
+
 /* The row's activity dot (KOBE-301), before its title. */
 .railDot {
   margin-inline-start: 0.375rem;

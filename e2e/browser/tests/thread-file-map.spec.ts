@@ -17,7 +17,9 @@ import {
  * `tool:` lines). At 1,280 px the panel has three rails: hovering the thread row draws a solid line
  * to the written file and a dashed one to the read file (TFM1); its pin keeps them after the
  * pointer leaves (TFM5); hovering the written file in the workspace rail draws a line to the
- * thread. At 900 px there is no workspace rail and no lines, the row shows "Files (N)" (TFM4).
+ * thread. At 900 px there is no workspace rail and no lines, the row's ⋯ menu still has
+ * "Files (N)…" (TFM4). KOBE-614: the pin sits on the thread row, "Files (N)…" moved from under the
+ * title into the row's ⋯ menu, and the workspace rail resizes from its divider (keyboard here).
  *
  * Shared (KOBE_USER2 / KOBE_PW2, skipped without them): the owner's thread in a new project reads
  * the project's file and writes one in the owner's own workspace, and is shared with the team.
@@ -82,7 +84,16 @@ const railRow = (page: Page, path: string) =>
 const lines = (page: Page) => panelOf(page).locator("[data-kobe-file-lines] [data-kobe-line]");
 const lineTo = (page: Page, anchor: string) =>
   panelOf(page).locator(`[data-kobe-file-lines] [data-kobe-line="${anchor}"]`);
-const filesButton = (row: Locator) => row.getByRole("button", { name: /^Files \(\d+\)$/ });
+/** Opens the row's ⋯ menu (KOBE-614) and returns its "Files (N)…" item. */
+async function filesItem(
+  page: Page,
+  row: Locator,
+  name: RegExp = /^Files \(\d+\)…/,
+): Promise<Locator> {
+  await row.hover();
+  await row.getByRole("button", { name: /^Actions for / }).click();
+  return page.getByRole("menu", { name: /^Actions for / }).getByRole("menuitem", { name });
+}
 
 /** Moves the pointer off the panel's rails (the search box): hover lines go. */
 async function pointAway(page: Page): Promise<void> {
@@ -126,7 +137,12 @@ test("hover a thread: solid line to the written file, dashed to the read one; pi
     await expect(bodyOf(page)).toHaveAttribute("data-kobe-threads-body", "three-rails");
     const row = rowOf(page, threadId);
     await expect(row).toHaveCount(1, { timeout: SHELL_TIMEOUT_MS });
-    await expect(filesButton(row)).toHaveText(`Files (${count})`, { timeout: SHELL_TIMEOUT_MS });
+    // The pin is on the thread's row (KOBE-614), shown on hover.
+    await row.hover();
+    await expect(row.getByRole("button", { name: /^Keep lines shown for / })).toBeVisible({
+      timeout: SHELL_TIMEOUT_MS,
+    });
+    await expect(row.getByRole("button", { name: /^Files \(/ })).toHaveCount(0);
     await openRailFolder(page, dir);
     await railRow(page, writePath).scrollIntoViewIfNeeded();
     await expect(railRow(page, readPath)).toBeVisible();
@@ -168,23 +184,50 @@ test("hover a thread: solid line to the written file, dashed to the read one; pi
     await pointAway(page);
     await expect(lines(page)).toHaveCount(0);
 
-    // The list way to the same links: "Files (N)" opens the files as links.
-    await filesButton(row).click();
+    // The workspace rail resizes from its divider (KOBE-614): Right narrows it (Left widens it only
+    // while the thread column has room to give, so the spec narrows), Enter resets.
+    const handle = panelOf(page).getByRole("separator", { name: "Resize the workspace files" });
+    const railColumn = panelOf(page).locator("#kobe-threads-file-rail");
+    const before = (await railColumn.boundingBox())?.width ?? 0;
+    await handle.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect
+      .poll(async () => (await railColumn.boundingBox())?.width ?? 0)
+      .toBeLessThan(before - 10);
+    await page.keyboard.press("Enter");
+    // Back to the default columns: the thread column fits its titles (so its width follows the rows
+    // loaded meanwhile, not a fixed number) and the rail takes the rest.
+    await expect
+      .poll(() =>
+        bodyOf(page).evaluate((el) =>
+          (el as HTMLElement).style.getPropertyValue("--kobe-threads-col"),
+        ),
+      )
+      .toBe("fit-content(28rem)");
+    expect((await railColumn.boundingBox())?.width ?? 0).toBeGreaterThan(240);
+
+    // The list way to the same links: "Files (N)…" in the row's ⋯ menu opens the files as links.
+    const item = await filesItem(page, row);
+    await expect(item).toContainText(`Files (${count})…`);
+    await item.click();
     const list = row.getByRole("list", { name: `Files ${title} used` });
     await expect(list.getByRole("button", { name: "written.txt", exact: true })).toBeVisible();
     await expect(list.getByRole("button", { name: "source.txt", exact: true })).toBeVisible();
     await expect(list).toContainText("written");
     await expect(list).toContainText("read");
+    // The ⋯ menu's item now reads "Hide files (N)" and closes the list.
+    await (await filesItem(page, row, /^Hide files \(\d+\)/)).click();
+    await expect(list).toHaveCount(0);
 
-    // Narrow (TFM4): no workspace rail and no lines, the row still says "Files (N)".
+    // Narrow (TFM4): no workspace rail and no lines, the row's menu still has "Files (N)…".
     await page.setViewportSize(NARROW);
     await chat.openThreads();
     await expect(bodyOf(page)).not.toHaveAttribute("data-kobe-threads-body", "three-rails");
     await expect(railOf(page)).toHaveCount(0);
     const narrowRow = rowOf(page, threadId);
     await expect(narrowRow).toHaveCount(1, { timeout: SHELL_TIMEOUT_MS });
-    await narrowRow.hover();
-    await expect(filesButton(narrowRow)).toHaveText(`Files (${count})`);
+    await expect(await filesItem(page, narrowRow)).toContainText(`Files (${count})…`);
+    await page.keyboard.press("Escape");
     await expect(narrowRow.getByRole("button", { name: /^Keep lines shown for / })).toHaveCount(0);
     await page.waitForTimeout(500);
     await expect(panelOf(page).locator("[data-kobe-file-lines]")).toHaveCount(0);
@@ -256,8 +299,12 @@ test("a shared thread shows the reader project files by name, the owner's own fi
     await current.click();
     const row = rowOf(second, threadId);
     await expect(row).toHaveCount(1, { timeout: SHELL_TIMEOUT_MS });
-    await expect(filesButton(row)).toHaveText(`Files (${count})`, { timeout: SHELL_TIMEOUT_MS });
-    await filesButton(row).click();
+    await expect(row.getByRole("button", { name: /^Actions for / })).toHaveCount(1, {
+      timeout: SHELL_TIMEOUT_MS,
+    });
+    const item = await filesItem(second, row);
+    await expect(item).toContainText(`Files (${count})…`, { timeout: SHELL_TIMEOUT_MS });
+    await item.click();
     const list = row.getByRole("list", { name: /^Files .* used$/ });
     await expect(list.getByRole("button", { name: projectFile, exact: true })).toHaveAttribute(
       "title",

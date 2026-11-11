@@ -1,13 +1,13 @@
 "use client";
 
 import { ThreadListItemPrimitive, useAui, useAuiState } from "@assistant-ui/react";
-import { useId } from "react";
+import { useContext, useId } from "react";
 import { SHARED_THREAD_DRAG_TYPE, THREAD_DRAG_TYPE } from "../../lib/chat/organize";
 import { useHitNote } from "./hit-note";
 import { placementOf } from "../../lib/chat/thread-groups";
 import { IconAction } from "../shell/icon-action";
 import { RailThreadCard } from "../shell/rail-thread-card";
-import { ThreadFilesRow } from "../shell/thread-file-row";
+import { ThreadFileMap, useThreadFiles } from "../shell/thread-file-row";
 import styles from "./chat.module.css";
 import { ThreadActivityDot, useRowActivity, useRowUnread } from "./thread-activity";
 import { ThreadRowMenu } from "./thread-row-menu";
@@ -18,7 +18,9 @@ import { ThreadRowMenu } from "./thread-row-menu";
  * icon on hover or focus moves it there too (KOBE-466). In Trash:
  * restore or delete forever. Hovering or focusing the row shows its card (CE18, KOBE-219). The
  * member's own rows can be dragged onto a project header to move there (CE19), and any row onto a
- * folder in the Threads panel's tree to file it there (KOBE-536, TF8).
+ * folder in the Threads panel's tree to file it there (KOBE-536, TF8). In the Threads panel
+ * (KOBE-614) the row hugs its title, with the pin, trash and ⋯ right after it, and shows a pill
+ * on hover or keyboard focus; its ⋯ menu has "Files (N)…" when the thread used files.
  */
 function ThreadItem({ archived }: { readonly archived: boolean }) {
   const aui = useAui();
@@ -36,6 +38,8 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
   const activityId = useId();
   // In the Threads panel's search (KOBE-453): where this thread matched.
   const hitNote = useHitNote(remoteId);
+  const inPanel = useContext(ThreadFileMap) !== null;
+  const files = useThreadFiles(remoteId, title);
 
   return (
     <li
@@ -52,7 +56,7 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
       }
     >
       <ThreadListItemPrimitive.Root
-        className={`group/row ${styles.threadItem}`}
+        className={`group/row ${styles.threadItem}${inPanel ? ` ${styles.panelRow}` : ""}`}
         data-kobe-activity={activity}
       >
         <ThreadActivityDot activity={activity} id={activityId} unread={unread} />
@@ -66,6 +70,7 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
           </ThreadListItemPrimitive.Trigger>
         </RailThreadCard>
         <span className={styles.itemActions}>
+          {files.pin}
           {archived ? (
             <>
               <ThreadListItemPrimitive.Unarchive asChild>
@@ -87,13 +92,13 @@ function ThreadItem({ archived }: { readonly archived: boolean }) {
               />
             </>
           ) : (
-            <ThreadRowMenu />
+            <ThreadRowMenu extra={files.binding ? { "thread-files": files.binding } : undefined} />
           )}
         </span>
       </ThreadListItemPrimitive.Root>
       {hitNote}
-      {/* In the Threads panel: "Files (N)" and the line pin (KOBE-612). */}
-      <ThreadFilesRow threadId={remoteId} title={title} />
+      {/* In the Threads panel: the files list, opened from the ⋯ menu (KOBE-612, KOBE-614). */}
+      {files.list}
     </li>
   );
 }

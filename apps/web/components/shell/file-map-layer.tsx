@@ -8,6 +8,7 @@ import type { Side } from "../../lib/threads/line-model";
 import type { MenuBinding } from "../../lib/shell/menu";
 import { FileMapOverlay, type ActiveSource } from "./file-map-overlay";
 import { FileMapRail, railFilePaths, useRailTree } from "./file-map-rail";
+import { FILE_RAIL_ID } from "./file-rail-resize";
 import type { ThreadFileMapValue } from "./thread-file-row";
 import { useFileThreads } from "./use-file-links";
 
@@ -178,8 +179,8 @@ export function FileMapLayer({
 
   return (
     <>
-      <div aria-hidden className="bg-border w-px self-stretch" />
-      <div className="flex min-w-0 flex-col gap-1">
+      {/* The divider before it is the panel's resize handle (KOBE-614). */}
+      <div id={FILE_RAIL_ID} className="flex min-h-0 min-w-0 flex-col gap-1">
         <FileMapRail
           tree={tree}
           workspaceName={workspaceName}

@@ -81,6 +81,14 @@ describe("the tree and the folder views (ac-1)", () => {
     expect(
       within(tree).getByRole("treeitem", { name: "Current" }).getAttribute("aria-selected"),
     ).toBe("true");
+    // Current's chevron (KOBE-614): no outline-button padding or border, which clipped it away.
+    const chevron = must(
+      within(tree).getByRole("treeitem", { name: "Current" }).querySelector("button"),
+    );
+    expect(chevron.querySelector("svg")).not.toBeNull();
+    expect(chevron.className.split(" ")).toEqual(
+      expect.arrayContaining(["p-0", "border-0", "bg-transparent"]),
+    );
     // Current's chevron shows Archived, which counts every archived thread.
     fireEvent.click(
       must(within(tree).getByRole("treeitem", { name: "Current" }).querySelector("button")),

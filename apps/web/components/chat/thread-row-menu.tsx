@@ -5,6 +5,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { threadReadOnly } from "../../lib/chat/thread-commands";
 import type { ThreadController } from "../../lib/chat/thread-controller";
 import type { ThreadState } from "../../lib/chat/thread-state";
+import type { MenuBindings } from "../../lib/shell/menu";
 import { IconAction } from "../shell/icon-action";
 import { ActionMenu, ROW_REVEAL } from "../ui/action-menu";
 import { useChatSession } from "./kobe-runtime";
@@ -43,8 +44,9 @@ function useHeldThread(threadId: string | undefined, hold: boolean): ThreadState
  * (`useThreadMenuBindings`: Copy, Regenerate (with), Pin, Move, Archive, Share, Delete), read
  * against the thread's state while the menu is open. Beside it, revealed on hover or focus, a trash
  * icon runs the menu's own Delete (KOBE-466); not on threads shared with the member read-only.
+ * `extra`: items the row adds (the Threads panel's "Files (N)…", KOBE-614).
  */
-export function ThreadRowMenu() {
+export function ThreadRowMenu({ extra }: { readonly extra?: MenuBindings | undefined } = {}) {
   const threadId = useAuiState((s) => s.threadListItem.remoteId);
   const title = useAuiState((s) => s.threadListItem.title) || "Untitled conversation";
   const custom = useAuiState((s) => s.threadListItem.custom);
@@ -63,9 +65,11 @@ export function ThreadRowMenu() {
   });
   // The row names its submenu "Save to folder…" (TF8); the command listings keep the plain name.
   const save = menu["save-to-folder"];
-  const bindings = save
-    ? { ...menu, "save-to-folder": { ...save, label: "Save to folder…" } }
-    : menu;
+  const bindings = {
+    ...menu,
+    ...(save ? { "save-to-folder": { ...save, label: "Save to folder…" } } : {}),
+    ...extra,
+  };
   useEffect(() => {
     if (notice === null) return;
     const timer = setTimeout(() => setNotice(null), NOTICE_MS);
