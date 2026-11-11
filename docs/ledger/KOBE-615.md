@@ -63,3 +63,10 @@ run splits the editor (code top, output bottom). Spec: `docs/specs/file-editor.m
 - ac-7/ac-8 Run, kernel controls, split: `components/notebooks/python-run.test.tsx`,
   `notebook-tab.test.tsx`, `notebook-view.test.tsx`.
 - ac-9 docs: `docs/specs/file-editor.md` FE14–FE17, `docs/file-editing.md`, `docs/theming.md` §4.4.
+
+## Run on gate1 (2026-11-11, coordinator)
+
+Deployed with KOBE-614 merged in (local-227456d5c577). artifact-editor, file-edit-auto-open,
+file-editor, file-tab-outside-change, notebook, open-file, shared-file-badge, viewed-file-guard,
+workspaces and thread-file-map: 14 passed. One earlier run had the agent-driven "follows the agent's
+mv" test time out; it passed alone and in the full rerun (agent-run flake, not this change).
