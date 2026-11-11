@@ -9,7 +9,7 @@
  */
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FolderKanbanIcon, LayersIcon, RefreshCwIcon } from "lucide-react";
+import { FolderKanbanIcon, RefreshCwIcon, VaultIcon } from "lucide-react";
 import type { FileEntry } from "../../lib/files/api";
 import { isWithin, splitProjectRows, visibleRows } from "../../lib/files/tree";
 import {
@@ -237,7 +237,7 @@ export function WorkspaceHeader({
 }) {
   return (
     <div className="flex h-6.5 items-center gap-1 ps-0.5 text-xs font-medium">
-      <LayersIcon aria-hidden className="text-muted-foreground size-4 shrink-0" />
+      <VaultIcon aria-hidden className="text-muted-foreground size-4 shrink-0" />
       <h4 className="m-0 min-w-0 flex-1 truncate text-xs font-medium" title={name || undefined}>
         {name ? `Workspace: ${name}` : "Workspace"}
       </h4>

@@ -9,3 +9,9 @@ export const RAIL_ACTION =
 
 /** The variant every rail icon action uses with {@link RAIL_ACTION}. */
 export const RAIL_ACTION_VARIANT = "outline" as const;
+
+/**
+ * The rail header's icon actions (New conversation, Threads, Files, Team console, collapse): no
+ * border (Chris 2026-11-10); hover and the pressed accent stay.
+ */
+export const RAIL_HEADER_VARIANT = "ghost" as const;
