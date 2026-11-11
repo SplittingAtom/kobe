@@ -8,7 +8,7 @@
 ## What landed
 
 - **Admin change card** (ac-1, ac-2): `approval.requested` gains optional `admin: {scope,
-  scope_label, summary}` (`@kobe/protocol` `kobeAdminApprovalSchema`, additive). The broker builds
+scope_label, summary}` (`@kobe/protocol` `kobeAdminApprovalSchema`, additive). The broker builds
   it in the approval's own team transaction for a `kobe_admin_write` ask
   (`kobe-mcp/approval-card.ts`): the tool's catalog `summary(input)` with ids replaced by names
   (`user_id`, `connector_id`, `team_id`, `invitation_id`, `request_id`; agents, schedules and
@@ -46,7 +46,7 @@
 - The thread toggle cannot turn Kobe off (docs always on, KA7); admin tools follow the site/team
   switches and the person's role, not a per-thread switch.
 - The team level stays console-only (KA-4 left it out of the tools); the site switch likewise.
-- Redaction blind spot: an *offloaded* entry body (blob, none written today) is not inspected when
+- Redaction blind spot: an _offloaded_ entry body (blob, none written today) is not inspected when
   a reader forks; the output route does redact offloaded outputs (it reads the body first).
 - Base fix: removed an unused `routeCaller` import in `kobe-mcp.db.test.ts` (lint was red).
 - Server typecheck needs `NODE_OPTIONS=--max-old-space-size=6144` on the 7 GB GSD box (baseline
