@@ -48,6 +48,12 @@ const KEY_STEPS: Readonly<Record<string, KeyStep>> = {
   End: (_v, r) => r.max,
 };
 
+/** Up and Down for a horizontal splitter (top/bottom panes): Up shrinks the top pane. */
+const VERTICAL_KEYS: Readonly<Record<string, string>> = {
+  ArrowUp: "ArrowLeft",
+  ArrowDown: "ArrowRight",
+};
+
 /** The arrows for a pane after the handle. */
 const MIRRORED: Readonly<Record<string, string>> = {
   ArrowLeft: "ArrowRight",
@@ -70,8 +76,11 @@ export interface SplitterOptions {
   measure(handle: HTMLElement | null): SplitterRange | null;
   /** Elements whose size moves the range; none: the window's resize is watched instead. */
   observe(handle: HTMLElement | null): readonly Element[];
-  /** The (unclamped) value with the edge at the pointer; null when it can't be read. */
-  pointerValue(clientX: number, handle: HTMLElement): number | null;
+  /**
+   * The (unclamped) value with the edge at the pointer; null when it can't be read. The pointer's
+   * x, or its y for a horizontal splitter.
+   */
+  pointerValue(client: number, handle: HTMLElement): number | null;
   /** Shows a dragged value at once, without a render. */
   preview(value: number, handle: HTMLElement): void;
   /** A value the member chose (a key, a release), within the bounds. */
@@ -91,12 +100,17 @@ export interface SplitterOptions {
   readonly reversed?: boolean | undefined;
   /** The aria values until the first measure. */
   readonly fallback: SplitterRange;
+  /**
+   * `horizontal` (KOBE-615, the file editor's code/output split): the handle lies across, the
+   * pointer's y moves it and Up/Down step it (Up shrinks the pane before it). Default `vertical`.
+   */
+  readonly orientation?: "vertical" | "horizontal" | undefined;
 }
 
 export interface SplitterProps {
   readonly ref: RefObject<HTMLDivElement | null>;
   readonly role: "separator";
-  readonly "aria-orientation": "vertical";
+  readonly "aria-orientation": "vertical" | "horizontal";
   readonly "aria-valuenow": number;
   readonly "aria-valuemin": number;
   readonly "aria-valuemax": number;
@@ -175,22 +189,24 @@ export function useSplitter(options: SplitterOptions): SplitterProps {
     [],
   );
   const { measure, pointerValue, preview, commit, reset, snap, step, fallback, reversed } = options;
+  const across = options.orientation === "horizontal";
+  const at = (e: PointerEvent<HTMLDivElement>) => (across ? e.clientY : e.clientX);
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
     e.preventDefault();
     const now = measure(e.currentTarget);
-    const raw = pointerValue(e.clientX, e.currentTarget);
+    const raw = pointerValue(at(e), e.currentTarget);
     const offset = now && raw !== null ? now.value - raw : 0;
-    drag.current = { startX: e.clientX, offset, value: null };
+    drag.current = { startX: at(e), offset, value: null };
     e.currentTarget.setPointerCapture?.(e.pointerId);
   };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
     const current = drag.current;
     if (current === null) return;
-    if (current.value === null && Math.abs(e.clientX - current.startX) < DRAG_THRESHOLD_PX) return;
+    if (current.value === null && Math.abs(at(e) - current.startX) < DRAG_THRESHOLD_PX) return;
     const now = measure(e.currentTarget);
-    const raw = pointerValue(e.clientX, e.currentTarget);
+    const raw = pointerValue(at(e), e.currentTarget);
     if (!now || raw === null) return;
     const next = clampToRange(raw + current.offset, now);
     drag.current = { ...current, value: next };
@@ -212,7 +228,8 @@ export function useSplitter(options: SplitterOptions): SplitterProps {
       reset();
       return;
     }
-    const keyStep = KEY_STEPS[reversed ? (MIRRORED[e.key] ?? e.key) : e.key];
+    const key = across ? (VERTICAL_KEYS[e.key] ?? (e.key.startsWith("Arrow") ? "" : e.key)) : e.key;
+    const keyStep = KEY_STEPS[reversed ? (MIRRORED[key] ?? key) : key];
     const now = measure(e.currentTarget);
     if (!keyStep || !now) {
       setRange(now);
@@ -231,7 +248,7 @@ export function useSplitter(options: SplitterOptions): SplitterProps {
   return {
     ref,
     role: "separator",
-    "aria-orientation": "vertical",
+    "aria-orientation": across ? "horizontal" : "vertical",
     "aria-valuenow": Math.round(shown.value),
     "aria-valuemin": shown.min,
     "aria-valuemax": shown.max,

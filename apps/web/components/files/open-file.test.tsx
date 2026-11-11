@@ -75,8 +75,8 @@ describe("open_file in the web (KOBE-484, ac-2)", () => {
     expect(editorToolbar()).toBeNull();
     act(() => fake.emit(run, "file.opened", { tool_call_id: "of9", path: "notes.md" }));
     expect(await screen.findByRole("toolbar", { name: "notes.md view" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Rendered" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Raw" })).toBeTruthy();
+    // Rendered first: the Rendered/Raw switch is off (KOBE-615).
+    expect(screen.getByRole("switch", { name: "Raw" }).getAttribute("aria-checked")).toBe("false");
     expect(await screen.findByText("Opened notes.md")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Open notes.md again" })).toBeTruthy();
   });

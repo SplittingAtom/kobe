@@ -66,7 +66,7 @@ async function openAndRun() {
   const thread = threadWithFile();
   openApp(fake, thread);
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "Raw" }));
+  await user.click(await screen.findByRole("switch", { name: "Raw" }));
   const view = await editorView();
   await user.type(await composer(), "edit it{Enter}");
   await waitFor(() => expect(fake.activeRun(thread)).toBeDefined());
@@ -203,7 +203,7 @@ describe("saving after an outside change (ac-3)", () => {
     const thread = threadWithFile();
     openApp(fake, thread);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Raw" }));
+    await user.click(await screen.findByRole("switch", { name: "Raw" }));
     replaceText(await editorView(), "# Mine\n");
     fake.workspaceFiles.set(PATH, enc(THEIRS));
     await user.click(screen.getByRole("button", { name: "Save" }));

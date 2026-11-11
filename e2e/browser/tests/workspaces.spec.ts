@@ -185,7 +185,7 @@ test("a reader converses and cannot upload; as editor they check out, edit, comm
     timeout: SHELL_TIMEOUT_MS,
   });
   await expect(bar.getByText("editing")).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
-  await tab.getByRole("button", { name: "Raw", exact: true }).click();
+  await tab.getByRole("switch", { name: "Raw" }).click();
   const editor = other.getByLabel(`Edit ${FILE}`);
   await expect(editor).toBeVisible();
   await editor.click();

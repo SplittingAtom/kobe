@@ -84,7 +84,7 @@ describe("thread badges (KOBE-488)", () => {
     const file = within(row).getByRole("button", { name: "Open file reports/budget-notes.md" });
     await user.click(file);
     expect(await screen.findByRole("toolbar", { name: "budget-notes.md view" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Raw" }));
+    await user.click(screen.getByRole("switch", { name: "Raw" }));
     expect(await screen.findByLabelText("Edit budget-notes.md")).toBeTruthy();
     expect(file.getAttribute("aria-expanded")).toBe("true");
     expect(artifact.getAttribute("aria-expanded")).toBe("false");

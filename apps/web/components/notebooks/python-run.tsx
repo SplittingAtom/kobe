@@ -1,66 +1,91 @@
 "use client";
 
 /**
- * Run for a `.py` file (KOBE-465, NB6/NB13): runs the saved file in the conversation's kernel and
- * shows its outputs (the notebook's renderer) live, the agent's `run_python {path}` runs of the
- * same file too. Unsaved changes are not run: the server reads the saved file.
+ * A `.py` file in the file editor with Run (KOBE-465, NB6/NB13; layout KOBE-615): the editor's
+ * toolbar gains Run, Interrupt and Start or Restart with the kernel's state, and a run splits the
+ * editor, code on top and the outputs (the notebook's renderer) live below; the split stays after
+ * the run and closes back to the full height. The agent's `run_python {path}` runs of the same file
+ * show there too. Unsaved changes are not run: the server reads the saved file. Loaded lazily by
+ * the file tab with the kernel.
  */
-import type { EditDraftStore } from "../../lib/files/editor-state";
+import { PlayIcon } from "lucide-react";
+import { useState } from "react";
 import { latestRun } from "../../lib/notebooks/executions";
-import { BUTTON, useDraft } from "../files/file-editor";
+import { useDraft } from "../files/editor-save";
+import type { ToolbarAction } from "../files/editor-toolbar";
+import { FileEditor, type FileEditorProps } from "../files/file-editor";
 import { ExecutionNote } from "./execution-status";
-import { KernelControls, KernelNotices } from "./kernel-bar";
+import { kernelActions, kernelBlocker, KernelNotices, KernelState } from "./kernel-bar";
 import { NotebookOutputs } from "./output-view";
 import { useKernel, type KernelWiring } from "./use-kernel";
 
-export default function PythonRunPane({
-  path,
-  drafts,
-  kernel,
-}: {
-  readonly path: string;
-  readonly drafts: EditDraftStore;
+export const SAVE_FIRST_NOTE = "Save your changes first: Run uses the saved file.";
+
+export type PythonFileProps = FileEditorProps & {
   readonly kernel: KernelWiring | undefined;
-}) {
+};
+
+export default function PythonFile({ kernel, ...editor }: PythonFileProps) {
+  const { path, drafts } = editor;
   const k = useKernel(kernel);
   const dirty = useDraft(drafts, path) !== undefined;
   const threadId = k.threadId;
   const last = threadId === null ? undefined : latestRun(k.execs, threadId, path);
+  // The output closed by the member stays closed until the next run.
+  const [closed, setClosed] = useState<string | null>(null);
+  const blocker = kernelBlocker(kernel);
+  const run: ToolbarAction = {
+    id: "run",
+    label: "Run",
+    icon: PlayIcon,
+    disabled: blocker !== undefined || dirty,
+    reason: blocker ?? (dirty ? SAVE_FIRST_NOTE : undefined),
+    onSelect: () => {
+      setClosed(null);
+      void k.run({ path });
+    },
+  };
+  const controls = { wiring: kernel, busy: k.busy, live: k.live, phase: k.phase };
+  const actions =
+    kernel?.readOnly === true
+      ? []
+      : [
+          run,
+          ...kernelActions({
+            ...controls,
+            onStart: () => void k.start(),
+            onKernel: (op) => void k.kernel(op),
+          }),
+        ];
+  const output =
+    last !== undefined && closed !== last.execId
+      ? {
+          label: "Run output",
+          onClose: () => setClosed(last.execId),
+          node: (
+            <div className="flex flex-col gap-1" data-kobe-run-output={path}>
+              <ExecutionNote exec={last} notebook={false} />
+              <NotebookOutputs outputs={last.outputs} teamId={kernel?.teamId ?? ""} />
+            </div>
+          ),
+        }
+      : null;
   return (
-    <section aria-label="Run output" className="flex flex-col gap-2 border-t pt-2">
-      <div role="toolbar" aria-label="Run" className="flex flex-wrap items-center gap-1">
-        {kernel?.readOnly !== true && (
-          <button
-            type="button"
-            className={BUTTON}
-            disabled={threadId === null || dirty}
-            title={dirty ? "Save your changes first: Run uses the saved file." : undefined}
-            onClick={() => void k.run({ path })}
-          >
-            Run
-          </button>
-        )}
-        <KernelControls
-          wiring={kernel}
-          busy={k.busy}
-          live={k.live}
-          phase={k.phase}
-          onStart={() => void k.start()}
-          onKernel={(op) => void k.kernel(op)}
-        />
-      </div>
-      {dirty && (
-        <p role="note" className="text-muted-foreground text-xs">
-          Save your changes first: Run uses the saved file.
-        </p>
-      )}
-      <KernelNotices wiring={kernel} note={k.note} execs={k.execs} path={path} />
-      {last && (
-        <div className="flex flex-col gap-1" data-kobe-run-output={path}>
-          <ExecutionNote exec={last} notebook={false} />
-          <NotebookOutputs outputs={last.outputs} teamId={kernel?.teamId ?? ""} />
-        </div>
-      )}
-    </section>
+    <FileEditor
+      {...editor}
+      actions={actions}
+      status={<KernelState {...controls} />}
+      notices={
+        <>
+          {dirty && kernel?.readOnly !== true && (
+            <p role="note" className="text-muted-foreground text-xs">
+              {SAVE_FIRST_NOTE}
+            </p>
+          )}
+          <KernelNotices wiring={kernel} note={k.note} execs={k.execs} path={path} />
+        </>
+      }
+      output={output}
+    />
   );
 }

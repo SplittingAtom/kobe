@@ -136,3 +136,27 @@ body:has([data-kobe-chat]) {
     border-color: Highlight;
   }
 }
+[data-kobe-chat] .kobe-glow-gold {
+  border: 1px solid var(--kobe-glow-gold-border);
+  box-shadow: 0 0 12px 1px var(--kobe-glow-gold);
+  animation: kobe-glow-gold 2.4s ease-in-out infinite alternate;
+}
+@keyframes kobe-glow-gold {
+  from {
+    box-shadow: 0 0 6px 0 var(--kobe-glow-gold);
+  }
+  to {
+    box-shadow: 0 0 14px 2px var(--kobe-glow-gold);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-kobe-chat] .kobe-glow-gold {
+    animation: none;
+  }
+}
+@media (forced-colors: active) {
+  [data-kobe-chat] .kobe-glow-gold {
+    border-color: Highlight;
+    box-shadow: none;
+  }
+}

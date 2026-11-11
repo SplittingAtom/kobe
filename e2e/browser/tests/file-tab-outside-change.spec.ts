@@ -55,7 +55,7 @@ test("file tab: picks up the agent's write when clean, shows the banner and Comp
     const tab = page
       .getByRole("tabpanel")
       .filter({ has: page.getByRole("toolbar", { name: "notes.md view" }) });
-    await tab.getByRole("button", { name: "Raw", exact: true }).click();
+    await tab.getByRole("switch", { name: "Raw" }).click();
     const editor = page.getByLabel("Edit notes.md");
     await expect(editor).toContainText("beta");
     const notViewing = page.getByRole("button", { name: "Don't send notes.md with the message" });

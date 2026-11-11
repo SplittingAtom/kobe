@@ -110,6 +110,10 @@
   --kobe-tool-badge: #6b4e00;
   --kobe-tool-badge-bg: #fbf0c4;
   --kobe-tool-badge-border: #b8860b;
+  /* The file editor's Proposed edit bubble (KOBE-615): a gold border and halo around the pill.
+     Decoration only (the bubble's text keeps the card's colours); fixed like the tool badge. */
+  --kobe-glow-gold: rgb(212 160 23 / 55%);
+  --kobe-glow-gold-border: #b8860b;
 
   /* The composer panel's focus outline (KOBE-374, components/chat/composer.module.css): 3:1 or more
      (WCAG 1.4.11) on the page, the muted panel and cards in both themes. Today's neutral, not
@@ -263,6 +267,8 @@
   --kobe-tool-badge: #f5cd5b;
   --kobe-tool-badge-bg: #3b2f08;
   --kobe-tool-badge-border: #c9a227;
+  --kobe-glow-gold: rgb(245 205 91 / 45%);
+  --kobe-glow-gold-border: #c9a227;
   --kobe-composer-focus: #a1a1aa;
   --kobe-lane-2: #cea608;
   --kobe-lane-3: #f67fa5;
@@ -332,6 +338,8 @@
     --kobe-tool-badge: #f5cd5b;
     --kobe-tool-badge-bg: #3b2f08;
     --kobe-tool-badge-border: #c9a227;
+    --kobe-glow-gold: rgb(245 205 91 / 45%);
+    --kobe-glow-gold-border: #c9a227;
     --kobe-composer-focus: #a1a1aa;
     --kobe-lane-2: #cea608;
     --kobe-lane-3: #f67fa5;

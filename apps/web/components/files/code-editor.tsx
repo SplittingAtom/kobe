@@ -6,8 +6,10 @@
  * the review of an agent's proposal (spec FE3, FE10): `@codemirror/merge`'s unified view shows the
  * proposal against the file, added text on green and deleted text on red (struck through), with
  * Accept and Reject on each change. Accepting keeps a change, rejecting puts the original back;
- * the document is always what a commit saves. The toolbar does the same from the keyboard, on the
- * change at the cursor.
+ * the document is always what a commit saves. Inline, Accept and Reject are icon buttons (KOBE-615:
+ * a green check and a red cross in a circle, Lucide's CircleCheck and CircleX); the review row
+ * above the editor (`proposal-review.tsx`) moves between the changes and decides the change at the
+ * cursor through `onReview`.
  */
 import { useEffect, useRef, useState } from "react";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -44,10 +46,24 @@ export interface CodeEditorProps {
   onChange?(text: string): void;
   /** Review mode: how many changes are still open (neither accepted nor rejected). */
   onChunks?(count: number): void;
+  /**
+   * Review mode: the controls for the review row (null once the view is gone) and, on each
+   * change, which open change is current (1-based: the one at the cursor, else the next).
+   */
+  onReview?(review: ReviewControls | null): void;
+  onCurrent?(current: number | null): void;
   /** A notebook cell (KOBE-465): as tall as its text, not the file editor's full column. */
   readonly compact?: boolean | undefined;
   /** Shift+Enter runs (a notebook cell, KOBE-465) instead of inserting a line. */
   readonly onRun?: (() => void) | undefined;
+}
+
+/** What the review row does to the change at the cursor (KOBE-615). */
+export interface ReviewControls {
+  previous(): void;
+  next(): void;
+  accept(): void;
+  reject(): void;
 }
 
 /** Colours only from the theme tokens (app/theme.css), so light and dark both hold. */
@@ -90,27 +106,70 @@ const theme = EditorView.theme({
   ".cm-deletedLineGutter": { background: "var(--kobe-diff-deleted)" },
   ".cm-deletedChunk .cm-chunkButtons": { display: "flex", gap: "0.25rem", padding: "0.125rem 0" },
   ".cm-chunkButtons button": {
-    border: "1px solid currentColor",
-    borderRadius: "0.25rem",
-    padding: "0 0.5rem",
-    fontSize: "0.75rem",
-    background: "var(--background)",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "0",
+    borderRadius: "9999px",
+    padding: "0.125rem",
+    background: "transparent",
     cursor: "pointer",
   },
+  ".cm-chunkButtons button:hover": { background: "var(--muted)" },
+  ".cm-chunkButtons button:focus-visible": { outline: "2px solid var(--ring)" },
+  ".cm-chunkButtons button svg": { width: "1.125rem", height: "1.125rem" },
   ".cm-chunkButtons button[name=accept]": { color: "var(--kobe-diff-added)" },
   ".cm-chunkButtons button[name=reject]": { color: "var(--kobe-diff-deleted)" },
 });
 
-/** Accept and Reject as real buttons (click, so Enter and Space work too), with full names. */
-function chunkButton(type: "accept" | "reject", action: (e: MouseEvent) => void): HTMLElement {
+const SVG_NS = "http://www.w3.org/2000/svg";
+/** Lucide's CircleCheck and CircleX (ISC), drawn here: CodeMirror's controls are plain DOM. */
+const ICON_PATHS = {
+  accept: ["m9 12 2 2 4-4"],
+  reject: ["m15 9-6 6", "m9 9 6 6"],
+} as const;
+
+function circleIcon(type: "accept" | "reject"): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  for (const [k, v] of Object.entries({
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "2",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true",
+    class: type === "accept" ? "lucide-circle-check" : "lucide-circle-x",
+  })) {
+    svg.setAttribute(k, v);
+  }
+  const circle = document.createElementNS(SVG_NS, "circle");
+  circle.setAttribute("cx", "12");
+  circle.setAttribute("cy", "12");
+  circle.setAttribute("r", "10");
+  svg.append(circle);
+  for (const d of ICON_PATHS[type]) {
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
+}
+
+/** Accept and Reject as real icon buttons (click, so Enter and Space work too), named and titled. */
+export function chunkButton(
+  type: "accept" | "reject",
+  action: (e: MouseEvent) => void,
+): HTMLElement {
   const button = document.createElement("button");
+  const name = type === "accept" ? "Accept change" : "Reject change";
   button.type = "button";
   button.name = type;
-  button.textContent = type === "accept" ? "Accept" : "Reject";
-  button.setAttribute(
-    "aria-label",
-    type === "accept" ? "Accept this change" : "Reject this change",
-  );
+  // Its own padding: the chat's base button rule would crush the icon (KOBE-269).
+  button.className = "p-0.5";
+  button.setAttribute("aria-label", name);
+  button.title = name;
+  button.append(circleIcon(type));
   button.onclick = action;
   return button;
 }
@@ -128,6 +187,28 @@ function targetChange(state: EditorState): number | null {
 
 function openChanges(state: EditorState): number {
   return getChunks(state)?.chunks.length ?? 0;
+}
+
+/** The current change's number (1-based, see `targetChange`); null when none is left. */
+function currentChange(state: EditorState): number | null {
+  const chunks = getChunks(state)?.chunks ?? [];
+  const at = targetChange(state);
+  if (at === null) return null;
+  const i = chunks.findIndex((c) => c.fromB === at);
+  return i < 0 ? null : i + 1;
+}
+
+function reviewControls(view: EditorView): ReviewControls {
+  const act = (run: (view: EditorView, pos: number) => boolean) => {
+    const pos = targetChange(view.state);
+    if (pos !== null) run(view, pos);
+  };
+  return {
+    previous: () => void goToPreviousChunk(view),
+    next: () => void goToNextChunk(view),
+    accept: () => act(acceptChunk),
+    reject: () => act(rejectChunk),
+  };
 }
 
 function baseExtensions(label: string): Extension[] {
@@ -151,34 +232,6 @@ function readOnlyExtensions(readOnly: boolean): Extension[] {
   return readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [];
 }
 
-function ReviewToolbar({ view }: { readonly view: EditorView | null }) {
-  const act = (run: (view: EditorView, pos: number) => boolean) => {
-    if (!view) return;
-    const pos = targetChange(view.state);
-    if (pos !== null) run(view, pos);
-  };
-  const actions: readonly (readonly [string, () => void])[] = [
-    ["Previous change", () => view && goToPreviousChunk(view)],
-    ["Next change", () => view && goToNextChunk(view)],
-    ["Accept change", () => act(acceptChunk)],
-    ["Reject change", () => act(rejectChunk)],
-  ];
-  return (
-    <div role="toolbar" aria-label="Review changes" className="flex flex-wrap gap-1 px-1 pb-1">
-      {actions.map(([name, onClick]) => (
-        <button
-          key={name}
-          type="button"
-          className="hover:bg-muted rounded border px-2 py-0.5 text-xs"
-          onClick={onClick}
-        >
-          {name}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 export default function CodeEditor({
   value,
   language,
@@ -187,13 +240,15 @@ export default function CodeEditor({
   original,
   onChange,
   onChunks,
+  onReview,
+  onCurrent,
   compact = false,
   onRun,
 }: CodeEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<EditorView | null>(null);
-  const callbacks = useRef({ onChange, onChunks, onRun });
-  callbacks.current = { onChange, onChunks, onRun };
+  const callbacks = useRef({ onChange, onChunks, onRun, onReview, onCurrent });
+  callbacks.current = { onChange, onChunks, onRun, onReview, onCurrent };
   const valueRef = useRef(value);
   valueRef.current = value;
   const readOnlyRef = useRef(readOnly);
@@ -207,11 +262,14 @@ export default function CodeEditor({
     const parent = host.current;
     if (!parent) return;
     let chunks = -1;
+    let current: number | null | undefined;
     synced.current = valueRef.current;
     const report = (state: EditorState) => {
       if (original === undefined) return;
       const open = openChanges(state);
       if (open !== chunks) callbacks.current.onChunks?.((chunks = open));
+      const at = currentChange(state);
+      if (at !== current) callbacks.current.onCurrent?.((current = at));
     };
     const created = new EditorView({
       parent,
@@ -253,7 +311,9 @@ export default function CodeEditor({
     });
     report(created.state);
     setView(created);
+    if (original !== undefined) callbacks.current.onReview?.(reviewControls(created));
     return () => {
+      if (original !== undefined) callbacks.current.onReview?.(null);
       created.destroy();
       setView(null);
     };
@@ -291,15 +351,14 @@ export default function CodeEditor({
   }, [view, value]);
 
   return (
-    <div className={compact ? "flex flex-col" : "flex min-h-0 flex-1 flex-col"}>
-      {original !== undefined && <ReviewToolbar view={view} />}
+    <div className={compact ? "flex flex-col" : "flex min-h-0 min-w-0 flex-1 flex-col"}>
       <div
         ref={host}
         data-kobe-code-editor
         className={
           compact
             ? "min-h-10 overflow-hidden rounded-md border"
-            : "min-h-80 flex-1 overflow-hidden rounded-md border"
+            : "min-h-24 min-w-0 flex-1 overflow-hidden rounded-md border"
         }
       />
     </div>

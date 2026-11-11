@@ -131,6 +131,42 @@ this tab started, or after the replay window), never on a reload; the card "Open
 Open again to the owner only. Agent guidance: `open_file` to open, show or view a file;
 `share_file` only for a download.
 
+**FE14. The editor's layout and toolbar (KOBE-615, Chris 2026-11-11).** The file editor fills the
+artifact column (height and width) and follows its size live: CodeMirror, the rendered views,
+notebooks and the diff scroll inside it. One toolbar at the top holds the editor's controls:
+**Save**, **Save As** and a **Rendered/Raw switch** (`role="switch"`, named Raw, checked = raw);
+for runnable files also **Run**, **Interrupt**, **Start/Restart** and the kernel's state (Start
+wakes a hibernated sandbox, KOBE-477). Notebooks keep Run all and Add code cell there. Actions
+marked to fold (Save As, Add code cell) move into a **More** menu when the toolbar is narrower than
+34rem (a container query). A disabled action says why in its tooltip.
+
+**FE15. Save As (KOBE-615).** Saves the editor's text (unsaved changes included) to a path the
+member types (default: `<stem>-copy<ext>` beside the file, or the file's name at the top of My
+files when the file is read-only). The path is checked first (workspace path rules, no `.kobe/`,
+not a read-only area, not the file itself); the save is the FE4 route **without** `base_sha256`,
+which creates the file or answers 409 when one is there (KOBE-591's create mode, no server change).
+A 409 asks "already exists. Replace it?"; Replace reads the file's version from its folder's
+listing and saves at that version, so a file that changed again is refused again, never
+overwritten. The copy then opens in the same tab (the tab moves to it, like a rename), and the
+original's unsaved changes are dropped (they went into the copy). Read-only files (project files a
+member cannot commit, thread uploads, files over the preview cap, files of unknown version) offer
+Save As but not Save; a cut file saves only the part shown, and the dialog says so.
+
+**FE16. Reviewing a proposal (KOBE-615).** The review shows a **Proposed edit** bubble with the
+agent's summary and a gold glow (`--kobe-glow-gold`, fixed for every preset in light and dark; it
+breathes slowly, still under `prefers-reduced-motion`). Under it one row: Previous and Next change
+with "Change N of M" (the change at the cursor, else the next), **Accept** and **Reject** for the
+current change, then **Commit all** and **Discard all** (FE10 unchanged). In the text, each change
+has icon buttons: a green check in a circle (Accept change) and a red cross in a circle (Reject
+change), with tooltips.
+
+**FE17. Run and the output split (KOBE-615).** A `.py` file's Run splits the editor: code on top,
+the run's output (live, the notebook renderer) below, with a draggable divider (Up/Down 5%,
+Page Up/Down 20%, Home/End, Enter back to half), remembered per viewer in this browser
+(`localStorage`, a convenience). The output stays after the run, collapses to its bar and closes
+back to the full height; the next run (the member's or the agent's `run_python` of the file) opens
+it again. Notebooks keep outputs in their cells.
+
 ## 3. Shapes the web needs (KOBE-463)
 
 - Save: `workspaceSaveQuerySchema`, 200 `workspaceSaveResponseSchema` (a file entry), 409

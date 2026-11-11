@@ -10,6 +10,7 @@
  * keeping any edits made meanwhile. An agent proposal under review shows the file editor's diff;
  * the agent's `run_python` runs show live in their cell, or below the cells.
  */
+import { ListPlusIcon, PlayIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { NOTEBOOK_FILE_MAX_BYTES } from "@kobe/protocol";
 import type { FilesApi } from "../../lib/files/api";
@@ -33,16 +34,12 @@ import {
   withSavedResults,
   type Notebook,
 } from "../../lib/notebooks/ipynb";
-import {
-  BUTTON,
-  FileEditor,
-  SaveNotices,
-  useDraft,
-  useReview,
-  useSave,
-} from "../files/file-editor";
+import { SaveNotices, useDraft, useReview, useSave } from "../files/editor-save";
+import { EditorToolbar, type ToolbarAction } from "../files/editor-toolbar";
+import { FileEditor, saveAction, saveAsAction } from "../files/file-editor";
+import { SaveAsForm } from "../files/save-as";
 import { ExecutionNote } from "./execution-status";
-import { KernelControls, KernelNotices } from "./kernel-bar";
+import { kernelActions, kernelBlocker, KernelNotices, KernelState } from "./kernel-bar";
 import { NotebookCell } from "./notebook-cell";
 import { NotebookOutputs } from "./output-view";
 import { useKernel, whenFinished, type KernelWiring } from "./use-kernel";
@@ -58,6 +55,8 @@ export interface NotebookViewProps {
   readonly kernel: KernelWiring | undefined;
   onSaved(text: string, sha256: string): void;
   onReload(): void;
+  /** Save As saved a copy: open that path in this tab (KOBE-615). */
+  readonly onOpenPath?: ((path: string) => void) | undefined;
 }
 
 const newCellId = () => crypto.randomUUID();
@@ -88,6 +87,7 @@ export default function NotebookView(props: NotebookViewProps) {
       reviews={reviews}
       onSaved={props.onSaved}
       onReload={props.onReload}
+      onOpenPath={props.onOpenPath}
     />
   );
   if (review !== undefined) return fileEditor; // the proposal's diff (KOBE-463 review)
@@ -160,6 +160,7 @@ function NotebookBody(
   const { path, text, sha256, truncated, drafts, notebook, idsAdded } = props;
   const draft = useDraft(drafts, path);
   const k = useKernel(props.kernel);
+  const [savingAs, setSavingAs] = useState(false);
   const synced = useSavedOutputSync(props, k.execs);
   const {
     state: saveState,
@@ -219,41 +220,69 @@ function NotebookBody(
 
   const agentRuns =
     threadId === null ? [] : agentCodeRuns(k.execs, threadId).slice(-AGENT_RUNS_SHOWN);
+  const notebookActions = (): ToolbarAction[] => {
+    const why = kernelBlocker(props.kernel);
+    const runAllAction: ToolbarAction = {
+      id: "run-all",
+      label: "Run all",
+      icon: PlayIcon,
+      disabled: !canRun,
+      reason: why ?? (canRun ? undefined : "This notebook cannot be run here."),
+      onSelect: () => void runAll(),
+    };
+    return [
+      ...(blocked === undefined
+        ? [
+            saveAction(
+              saveState,
+              draft !== undefined && base !== undefined,
+              () => base !== undefined && void save(base, serializeNotebook(notebook)),
+            ),
+          ]
+        : []),
+      saveAsAction(() => setSavingAs(true)),
+      ...(reader ? [] : [runAllAction]),
+      ...kernelActions({
+        wiring: props.kernel,
+        busy: k.busy,
+        live: k.live,
+        phase: k.phase,
+        onStart: () => void k.start(),
+        onKernel: (op) => void k.kernel(op),
+      }),
+      {
+        id: "add-code-cell",
+        label: "Add code cell",
+        icon: ListPlusIcon,
+        overflow: true,
+        disabled: !editable,
+        reason: blocked,
+        onSelect: () => edit(addCell(notebook, lastCellId(notebook), "code", newCellId())),
+      },
+    ];
+  };
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2" data-kobe-notebook={path}>
-      <div role="toolbar" aria-label="Notebook" className="flex flex-wrap items-center gap-1">
-        {!reader && (
-          <button type="button" className={BUTTON} disabled={!canRun} onClick={() => void runAll()}>
-            Run all
-          </button>
-        )}
-        <KernelControls
-          wiring={props.kernel}
-          busy={k.busy}
-          live={k.live}
-          phase={k.phase}
-          onStart={() => void k.start()}
-          onKernel={(op) => void k.kernel(op)}
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2" data-kobe-notebook={path}>
+      <EditorToolbar
+        label="Notebook"
+        actions={notebookActions()}
+        status={<KernelState wiring={props.kernel} busy={k.busy} live={k.live} phase={k.phase} />}
+      />
+      {savingAs && (
+        <SaveAsForm
+          api={props.files}
+          path={path}
+          text={serializeNotebook(notebook)}
+          truncated={false}
+          checkedOut={projects?.checkedOut}
+          onSaved={(to) => {
+            setSavingAs(false);
+            drafts.clear(path);
+            props.onOpenPath?.(to);
+          }}
+          onCancel={() => setSavingAs(false)}
         />
-        <button
-          type="button"
-          className={BUTTON}
-          disabled={!editable}
-          onClick={() => edit(addCell(notebook, lastCellId(notebook), "code", newCellId()))}
-        >
-          Add code cell
-        </button>
-        {blocked === undefined && (
-          <button
-            type="button"
-            className={`${BUTTON} ms-auto`}
-            disabled={draft === undefined || saveState.status === "saving" || base === undefined}
-            onClick={() => base !== undefined && void save(base, serializeNotebook(notebook))}
-          >
-            {saveState.status === "saving" ? "Saving…" : "Save"}
-          </button>
-        )}
-      </div>
+      )}
       <p role="status" className="text-muted-foreground text-xs empty:hidden">
         {draft !== undefined ? "Unsaved changes." : saveState.status === "saved" ? "Saved." : ""}
       </p>
@@ -264,48 +293,50 @@ function NotebookBody(
       )}
       <SaveNotices state={saveState} onReload={props.onReload} />
       <KernelNotices wiring={props.kernel} note={k.note} execs={k.execs} path={path} />
-      {notebook.cells.map((cell, i) => {
-        const id = cellId(cell);
-        const live = threadId === null ? undefined : latestRun(k.execs, threadId, path, id);
-        const fromRun = showsLive(live);
-        const count = fromRun
-          ? live.finished === undefined
-            ? "[*]"
-            : `[${live.finished.executionCount ?? " "}]`
-          : `[${executionCount(cell) ?? " "}]`;
-        return (
-          <NotebookCell
-            key={id}
-            cell={cell}
-            number={i + 1}
-            first={i === 0}
-            last={i === notebook.cells.length - 1}
-            editable={editable}
-            canRun={canRun}
-            showRun={!reader}
-            count={count}
-            outputs={fromRun ? live.outputs : savedOutputs(cell)}
-            live={fromRun ? live : undefined}
-            teamId={props.kernel?.teamId ?? ""}
-            onSource={(source) => edit(setSource(notebook, id, source))}
-            onRun={() => void runCell(id)}
-            onMove={(delta) => edit(moveCell(notebook, id, delta))}
-            onDelete={() => edit(deleteCell(notebook, id))}
-            onAdd={(type) => edit(addCell(notebook, id, type, newCellId()))}
-          />
-        );
-      })}
-      {agentRuns.length > 0 && (
-        <section aria-label="The agent's code runs" className="flex flex-col gap-2 border-t pt-2">
-          <h3 className="text-xs font-medium">The agent&apos;s code runs in this kernel</h3>
-          {agentRuns.map((run) => (
-            <div key={run.execId} className="flex flex-col gap-1">
-              <ExecutionNote exec={run} notebook={false} />
-              <NotebookOutputs outputs={run.outputs} teamId={props.kernel?.teamId ?? ""} />
-            </div>
-          ))}
-        </section>
-      )}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-auto">
+        {notebook.cells.map((cell, i) => {
+          const id = cellId(cell);
+          const live = threadId === null ? undefined : latestRun(k.execs, threadId, path, id);
+          const fromRun = showsLive(live);
+          const count = fromRun
+            ? live.finished === undefined
+              ? "[*]"
+              : `[${live.finished.executionCount ?? " "}]`
+            : `[${executionCount(cell) ?? " "}]`;
+          return (
+            <NotebookCell
+              key={id}
+              cell={cell}
+              number={i + 1}
+              first={i === 0}
+              last={i === notebook.cells.length - 1}
+              editable={editable}
+              canRun={canRun}
+              showRun={!reader}
+              count={count}
+              outputs={fromRun ? live.outputs : savedOutputs(cell)}
+              live={fromRun ? live : undefined}
+              teamId={props.kernel?.teamId ?? ""}
+              onSource={(source) => edit(setSource(notebook, id, source))}
+              onRun={() => void runCell(id)}
+              onMove={(delta) => edit(moveCell(notebook, id, delta))}
+              onDelete={() => edit(deleteCell(notebook, id))}
+              onAdd={(type) => edit(addCell(notebook, id, type, newCellId()))}
+            />
+          );
+        })}
+        {agentRuns.length > 0 && (
+          <section aria-label="The agent's code runs" className="flex flex-col gap-2 border-t pt-2">
+            <h3 className="text-xs font-medium">The agent&apos;s code runs in this kernel</h3>
+            {agentRuns.map((run) => (
+              <div key={run.execId} className="flex flex-col gap-1">
+                <ExecutionNote exec={run} notebook={false} />
+                <NotebookOutputs outputs={run.outputs} teamId={props.kernel?.teamId ?? ""} />
+              </div>
+            ))}
+          </section>
+        )}
+      </div>
     </div>
   );
 }
