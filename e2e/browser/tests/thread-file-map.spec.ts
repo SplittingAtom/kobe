@@ -87,6 +87,8 @@ const filesButton = (row: Locator) => row.getByRole("button", { name: /^Files \(
 /** Moves the pointer off the panel's rails (the search box): hover lines go. */
 async function pointAway(page: Page): Promise<void> {
   await panelOf(page).getByRole("searchbox", { name: "Search threads" }).hover();
+  // A focused row shows its lines too (TFM5), and opening a rail folder leaves focus on it.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 }
 
 /** Opens the folder `dir` in the workspace rail (a click on a folder row folds it, opens nothing). */
@@ -156,6 +158,7 @@ test("hover a thread: solid line to the written file, dashed to the read one; pi
     await expect(lineTo(page, readPath)).toHaveCount(1);
     await pin.click();
     await expect(pin).toHaveAttribute("aria-pressed", "false");
+    await pointAway(page);
     await expect(lines(page)).toHaveCount(0);
 
     // Hover the written file in the workspace rail: a line to the thread.

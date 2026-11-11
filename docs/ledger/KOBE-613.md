@@ -44,3 +44,9 @@ deployment, a member guide for the Threads panel, spec status shipped.
 - `e2e/browser`: `npx tsc -p .` clean; prettier 3.9.9 `--check` clean on changed files. The
   browser suite is not a pnpm workspace package, so `pnpm lint` does not cover it.
 - gate1 run: pending (coordinator).
+
+## Run on gate1 (2026-11-11)
+
+Deployed main 7587063e (PR #522) to gate1; backfill recorded 69 links over 66 threads. The spec
+passed twice (2 tests, shared-thread test included) after two fixes: moving the pointer away also
+clears focus (a focused row shows its lines, TFM5), and the unpin check moves the pointer away first.
