@@ -57,3 +57,11 @@ workspace rail resizable; the files tree filling the rail.
 - 2b is my reading of "the icon for opening the current threads" (Current's chevron); confirm
   with Chris after the deploy.
 - The spec text (§5, TFM4) still says "Files (N)" under the row; left as is (decisions final).
+
+## Run on gate1 (2026-11-11, coordinator)
+
+Deployed the branch as local-94e6c39c5ede (the first build failed on a test helper's type; fixed).
+thread-file-map, thread-folders and rail-resize passed twice (6 tests) after spec fixes: the files
+list opened in the wide step is closed before the narrow step (its menu item reads "Hide files (N)"),
+the resize check narrows the rail (it can widen only while the thread column has room) and the reset
+check reads the default column setting (the fit-content thread column follows the rows loaded).

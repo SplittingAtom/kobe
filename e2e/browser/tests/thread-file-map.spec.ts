@@ -85,12 +85,14 @@ const lines = (page: Page) => panelOf(page).locator("[data-kobe-file-lines] [dat
 const lineTo = (page: Page, anchor: string) =>
   panelOf(page).locator(`[data-kobe-file-lines] [data-kobe-line="${anchor}"]`);
 /** Opens the row's ⋯ menu (KOBE-614) and returns its "Files (N)…" item. */
-async function filesItem(page: Page, row: Locator): Promise<Locator> {
+async function filesItem(
+  page: Page,
+  row: Locator,
+  name: RegExp = /^Files \(\d+\)…/,
+): Promise<Locator> {
   await row.hover();
   await row.getByRole("button", { name: /^Actions for / }).click();
-  return page
-    .getByRole("menu", { name: /^Actions for / })
-    .getByRole("menuitem", { name: /^Files \(\d+\)…/ });
+  return page.getByRole("menu", { name: /^Actions for / }).getByRole("menuitem", { name });
 }
 
 /** Moves the pointer off the panel's rails (the search box): hover lines go. */
@@ -182,19 +184,27 @@ test("hover a thread: solid line to the written file, dashed to the read one; pi
     await pointAway(page);
     await expect(lines(page)).toHaveCount(0);
 
-    // The workspace rail resizes from its divider (KOBE-614): Left widens it, Enter resets.
+    // The workspace rail resizes from its divider (KOBE-614): Right narrows it (Left widens it only
+    // while the thread column has room to give, so the spec narrows), Enter resets.
     const handle = panelOf(page).getByRole("separator", { name: "Resize the workspace files" });
     const railColumn = panelOf(page).locator("#kobe-threads-file-rail");
     const before = (await railColumn.boundingBox())?.width ?? 0;
     await handle.focus();
-    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowRight");
     await expect
       .poll(async () => (await railColumn.boundingBox())?.width ?? 0)
-      .toBeGreaterThan(before + 10);
+      .toBeLessThan(before - 10);
     await page.keyboard.press("Enter");
+    // Back to the default columns: the thread column fits its titles (so its width follows the rows
+    // loaded meanwhile, not a fixed number) and the rail takes the rest.
     await expect
-      .poll(async () => Math.round((await railColumn.boundingBox())?.width ?? 0))
-      .toBe(Math.round(before));
+      .poll(() =>
+        bodyOf(page).evaluate((el) =>
+          (el as HTMLElement).style.getPropertyValue("--kobe-threads-col"),
+        ),
+      )
+      .toBe("fit-content(28rem)");
+    expect((await railColumn.boundingBox())?.width ?? 0).toBeGreaterThan(240);
 
     // The list way to the same links: "Files (N)…" in the row's ⋯ menu opens the files as links.
     const item = await filesItem(page, row);
@@ -205,6 +215,9 @@ test("hover a thread: solid line to the written file, dashed to the read one; pi
     await expect(list.getByRole("button", { name: "source.txt", exact: true })).toBeVisible();
     await expect(list).toContainText("written");
     await expect(list).toContainText("read");
+    // The ⋯ menu's item now reads "Hide files (N)" and closes the list.
+    await (await filesItem(page, row, /^Hide files \(\d+\)/)).click();
+    await expect(list).toHaveCount(0);
 
     // Narrow (TFM4): no workspace rail and no lines, the row's menu still has "Files (N)…".
     await page.setViewportSize(NARROW);
