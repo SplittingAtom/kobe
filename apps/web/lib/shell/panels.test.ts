@@ -23,6 +23,9 @@ describe("panelOfPath (KOBE-452)", () => {
       ["/me/projects/p-1", "Projects"],
       ["/me/shared-cases", "My shared cases"],
       ["/tree", "Conversation tree"],
+      ["/docs", "Docs"],
+      ["/docs/getting-started", "Docs"],
+      ["/docs/ref/limits", "Docs"],
     ];
     for (const [path, title] of cases) expect(panelOfPath(path)?.title, path).toBe(title);
   });
@@ -32,6 +35,8 @@ describe("panelOfPath (KOBE-452)", () => {
     expect(panelOfPath("/admin/teams")?.title).toBe("Administration");
     expect(panelOfPath("/me/skillset")?.title).toBe("My area");
     expect(panelOfPath("/agentsx")).toBeUndefined();
+    expect(panelOfPath("/docsy")).toBeUndefined();
+    expect(panelOfPath("/llms.txt")).toBeUndefined();
     // KOBE-569: the Agents panel keeps the id stored preferences know it by.
     expect(panelOfPath("/agents")?.id).toBe("my-agents");
     for (const path of ["/", "/sign-in", "/setup", "/invite", "/reset-password", ""]) {
@@ -52,6 +57,7 @@ describe("panelOfPath (KOBE-452)", () => {
     expect(isWorkspacePath("/")).toBe(true);
     expect(isWorkspacePath("/admin/team/usage")).toBe(true);
     expect(isWorkspacePath("/me/memory")).toBe(true);
+    expect(isWorkspacePath("/docs/glossary")).toBe(true);
     expect(isWorkspacePath("/sign-in")).toBe(false);
     expect(isWorkspacePath("/setup")).toBe(false);
   });

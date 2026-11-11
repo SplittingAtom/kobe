@@ -1,6 +1,6 @@
 /**
- * The panels over the workspace (KOBE-452): the Team and Site consoles, Agents, Skills and the
- * rest of the My area open as one large overlay over the chat instead of leaving it. Each keeps
+ * The panels over the workspace (KOBE-452): the Team and Site consoles, Agents, Skills, the
+ * rest of the My area and the Kobe guide (KOBE-616) open as one large overlay over the chat instead of leaving it. Each keeps
  * its own address (`/admin/team/...`, `/me/skills`, ...), so a link, a reload and Back work; the
  * root layout keeps the workspace mounted under it (components/shell/workspace-host.tsx).
  */
@@ -21,7 +21,9 @@ export type PanelId =
   /** The context viewer (KOBE-471): opened from the context gauge, no address of its own. */
   | "context-viewer"
   /** The Conversation tree (CT4, KOBE-546): every branch of the thread on screen, at `/tree`. */
-  | "conversation-tree";
+  | "conversation-tree"
+  /** The Kobe guide (KOBE-616): `/docs` and `/docs/<slug>`, from the bar's Docs icon. */
+  | "docs";
 
 export interface Panel {
   readonly id: PanelId;
@@ -51,6 +53,8 @@ const PANELS: readonly (Panel & { readonly prefix: string })[] = [
   { prefix: "/me/projects", id: "projects", title: "Projects", embedded: false },
   { prefix: "/me/shared-cases", id: "my-shared-cases", title: "My shared cases", embedded: false },
   { prefix: "/me", id: "my-area", title: "My area", embedded: false },
+  // The guide (KOBE-616); its Markdown (`/docs/<slug>.md`) is a route handler, never a page.
+  { prefix: "/docs", id: "docs", title: "Docs", embedded: false },
 ];
 
 const within = (path: string, prefix: string) => path === prefix || path.startsWith(`${prefix}/`);

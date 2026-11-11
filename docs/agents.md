@@ -1,5 +1,7 @@
 # Agents: Personal, Team and Site rosters
 
+Member guide: [Agents](guide/agents/agents.md). This page is the reference for rosters, rights and the API.
+
 Kobe separates who **owns** an agent from who may **run** it. An agent is created and edited in
 one place; a **roster** lends it to a team or to the whole site by reference, without copying it.
 This page describes the shipped behaviour (KOBE-565..572, spec `docs/specs/agents-roster.md`).
@@ -61,10 +63,7 @@ notices, Edit, Run eval… and Export file.
 
 ## Creating
 
-**New agent** on any tab creates a personal agent. The Team tab keeps **Create for the team** for
-Contributors: a team-owned agent, which outlives its creator's membership and suits shared,
-long-lived assistants. Personal agents are edited only by their owner (`/agents/:id`); team-owned
-agents by their creator or a team admin; gallery agents by site admins.
+Moved to the member guide: [Agents](guide/agents/agents.md).
 
 ## Rosters are references
 

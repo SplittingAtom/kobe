@@ -7,6 +7,9 @@
 .github
 docs
 *.md
+# The Kobe guide is compiled into the web bundle (KOBE-616, apps/web/scripts/generate-guide.mjs).
+!docs/guide
+!docs/guide/**
 !apps/**/*.md
 !THIRD_PARTY_LICENSES.md
 **/.env
