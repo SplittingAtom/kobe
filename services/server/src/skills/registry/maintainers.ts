@@ -265,13 +265,21 @@ export async function submissionRight(
   name: string,
   userId: string,
 ): Promise<SubmissionRight> {
-  if (isReservedName(name))
-    return { ok: false, code: "reserved", message: `${name} is reserved for Kobe's own skill.` };
-  const [skill] = await tx
-    .select({ id: registrySkills.id, name: registrySkills.name, status: registrySkills.status })
+  const [row] = await tx
+    .select({
+      id: registrySkills.id,
+      name: registrySkills.name,
+      status: registrySkills.status,
+      publisher: registrySkills.publisher,
+    })
     .from(registrySkills)
     .where(eq(registrySkills.name, name));
-  if (!skill) return { ok: true, skill: null };
+  // Kobe's names are Kobe's; only a skill that held a name before Kobe reserved it (KOBE-620,
+  // `KOBE_SKILL_NAMES_ADDED_LATER`) keeps working under it.
+  if (isReservedName(name) && (row === undefined || row.publisher === "kobe"))
+    return { ok: false, code: "reserved", message: `${name} is reserved for Kobe's own skill.` };
+  if (!row) return { ok: true, skill: null };
+  const skill = { id: row.id, name: row.name, status: row.status };
   if (skill.status === "archived")
     return { ok: false, code: "archived", message: `${name} is archived; choose another name.` };
   const all = await listMaintainers(tx, skill.id);

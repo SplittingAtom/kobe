@@ -426,7 +426,8 @@ export const AUDIT_EVENTS = {
 
   // ── site: site-wide settings ──
   "site.settings.updated": event("site", {
-    setting: z.enum(["require_two_factor", "audit_pii_retention_hours"]),
+    /** `kobe_mcp_mode` (KOBE-623): the Kobe MCP site switch, value `off`, `docs` or `admin`. */
+    setting: z.enum(["require_two_factor", "audit_pii_retention_hours", "kobe_mcp_mode"]),
     value: z.union([z.boolean(), z.number().int().nonnegative(), label]),
   }),
   /**
@@ -2648,6 +2649,14 @@ export const AUDIT_EVENTS = {
   "mcp.web_search.removed": event("site", { provider: z.enum(["brave", "tavily", "exa"]) }),
   /** A team admin turned web search on or off for the team. */
   "mcp.web_search.team_changed": event("team", { enabled: z.boolean() }),
+  /**
+   * A team admin changed the team's level of the built-in Kobe connector (KOBE-623, spec
+   * kobe-admin-mcp §6, KA5): `docs` (docs tools only), `read` or `read_write` (admin tools).
+   */
+  "mcp.kobe.team_level_changed": event("team", {
+    from: z.enum(["docs", "read", "read_write"]),
+    to: z.enum(["docs", "read", "read_write"]),
+  }),
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_EVENTS;

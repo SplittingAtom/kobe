@@ -63,8 +63,22 @@ access, which is time-boxed, read-only, audited and shown to the team.
   [Appearance](../appearance.md).
 - **Settings**: site-wide settings such as required two-factor authentication, and the site's
   memory and project memory switches (both the site and the team switch must be on for memory to
-  work; see [Memory](../memory.md)).
+  work; see [Memory](../memory.md)). The **Kobe connector** setting is **Off**, **Docs only** (the
+  default) or **Docs and admin tools**; see below.
 - **Isolation**: whether agents can run. Kobe refuses to run agents unless the cluster offers a
   gVisor or Kata sandbox runtime; this page shows the check and how to fix it.
 - **Backup and restore**: how to back up and restore the site, and the last restore.
 - **Audit forwarding**: whether audit events reach your security monitoring system.
+
+## From a conversation
+
+The built-in **Kobe** connector gives every agent the guide's docs tools. Its admin tools are off
+until you choose **Docs and admin tools** under **Settings → Kobe connector**; each team admin then
+chooses a level for their team (**Docs only**, **Read** or **Read and write**). In a team at Read
+and write, a site admin can ask the agent to deactivate or reactivate a user, create a team,
+invite someone, update the model catalog, change a connector's status, edit the egress ceiling,
+decide access requests, manage the skill blocklist and Skill reviewer grants, change branding or
+the site budget, and read usage and the audit log. Each change shows an **Admin change** card
+("Whole site") first and is audited "via agent". Site roles, ownership, break-glass, legal hold,
+retention, deletions, connector registration, provider keys and the site settings themselves stay
+in the console. See [Admin from a conversation](admin-from-a-conversation.md).

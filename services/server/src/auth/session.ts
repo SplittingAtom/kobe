@@ -2,6 +2,8 @@ import { createMiddleware } from "hono/factory";
 import { eq, siteRoles, siteSettings, users } from "@kobe/db";
 import type { SiteRole } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
+import { DELEGATED_SESSION_PREFIX, delegationOf } from "../kobe-mcp/delegation.js";
+import { delegationBacked } from "../kobe-mcp/delegation-live.js";
 
 export type { SiteRole } from "../authz/permissions.js";
 
@@ -36,6 +38,49 @@ export async function readRequireTwoFactor(deps: ServerDeps): Promise<boolean> {
  */
 export function requireSession(deps: ServerDeps) {
   return createMiddleware<{ Variables: AuthVariables }>(async (c, next) => {
+    // A Kobe MCP admin tool's in-process call (KOBE-619, KA1): the person of the run, re-read
+    // here exactly like a session's user (deactivation, site role, the site's 2FA requirement).
+    // Only the executor can mint one (`kobe-mcp/delegation.ts`); nothing on the wire can.
+    const delegation = delegationOf(c);
+    if (delegation !== undefined) {
+      const [person] = await deps.database.db
+        .select({
+          id: users.id,
+          email: users.email,
+          name: users.name,
+          twoFactorEnabled: users.twoFactorEnabled,
+          deactivatedAt: users.deactivatedAt,
+          role: siteRoles.role,
+        })
+        .from(users)
+        .leftJoin(siteRoles, eq(siteRoles.userId, users.id))
+        .where(eq(users.id, delegation.userId));
+      if (!person || person.deactivatedAt !== null) {
+        return c.json({ code: "unauthenticated", message: "Sign in to continue." }, 401);
+      }
+      // The run is still active and the person's sign-in from its start still live (review M1).
+      if (!(await delegationBacked(deps.database.db, delegation))) {
+        return c.json({ code: "unauthenticated", message: "Sign in to continue." }, 401);
+      }
+      if (!person.twoFactorEnabled && (await readRequireTwoFactor(deps))) {
+        return c.json(
+          {
+            code: "two_factor_enrollment_required",
+            message: "This site requires two-factor authentication.",
+          },
+          403,
+        );
+      }
+      c.set("user", {
+        id: person.id,
+        email: person.email,
+        name: person.name,
+        twoFactorEnabled: person.twoFactorEnabled,
+      });
+      c.set("sessionId", `${DELEGATED_SESSION_PREFIX}${delegation.runId}`);
+      c.set("siteRole", person.role ?? null);
+      return next();
+    }
     const session = await deps.auth.api.getSession({ headers: c.req.raw.headers });
     if (!session) return c.json({ code: "unauthenticated", message: "Sign in to continue." }, 401);
     // Re-read per request: a deactivation or role change applies to the very next request.

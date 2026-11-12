@@ -56,6 +56,7 @@ export const KOBE_SKILL_NAMES = [
   "xlsx",
   "code-review",
   "skill-creator",
+  "kobe-guide",
 ] as const;
 export type KobeSkillName = (typeof KOBE_SKILL_NAMES)[number];
 

@@ -109,14 +109,33 @@ export async function findOpenInviteEmail(db: KobeDb, id: string): Promise<strin
 }
 
 /** Revokes an open invitation; its link stops working at once. */
-export async function revokeInvite(db: KobeDb, id: string): Promise<boolean> {
+export async function revokeInvite(
+  db: KobeDb,
+  id: string,
+  /**
+   * KOBE-623: the invitation's address as the caller saw it (a Kobe MCP call's approved
+   * before-state): revoked only while the open invitation still has it, in the same statement.
+   */
+  expectedEmail?: string,
+): Promise<boolean | "changed_since_approval"> {
   return db.transaction(async (tx) => {
+    const sameEmail =
+      expectedEmail === undefined
+        ? undefined
+        : sql`lower(${invitations.email}) = ${expectedEmail.toLowerCase()}`;
     const rows = await tx
       .update(invitations)
       .set({ revokedAt: dbNow })
-      .where(and(eq(invitations.id, id), open()))
+      .where(and(eq(invitations.id, id), open(), sameEmail))
       .returning({ id: invitations.id });
-    if (rows.length === 0) return false;
+    if (rows.length === 0) {
+      if (sameEmail === undefined) return false;
+      const still = await tx
+        .select({ id: invitations.id })
+        .from(invitations)
+        .where(and(eq(invitations.id, id), open()));
+      return still.length > 0 ? "changed_since_approval" : false;
+    }
     await recordAudit(tx, { action: "identity.invitation.revoked", target: { invitationId: id } });
     return true;
   });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildGuide } from "./guide-loader";
-import { groupBySection, pageBySlug, prevNext, sectionId } from "./guide";
+import { buildGuide } from "./loader.js";
+import { groupBySection, pageBySlug, prevNext, sectionId } from "./pages.js";
 
 const fm = (title: string, section: string, order: number) =>
   `---\ntitle: ${title}\nsummary: S.\nsection: ${section}\norder: ${order}\n---\nText.\n`;
@@ -26,7 +26,7 @@ describe("guide lookups (KOBE-616)", () => {
     expect(prevNext("a", PAGES).prev).toBeNull();
   });
   it("builds the repository's guide (docs/guide) into the bundle", async () => {
-    const { PAGES: built } = await import("./guide");
+    const { PAGES: built } = await import("./pages.js");
     expect(built.length).toBeGreaterThan(0);
     expect(built.every((p) => p.title && p.summary)).toBe(true);
   });

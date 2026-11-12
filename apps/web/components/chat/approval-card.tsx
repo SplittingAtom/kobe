@@ -6,6 +6,7 @@ import type { KobeEventPayload } from "@kobe/protocol";
 import type { ApiError } from "../../lib/api/client";
 import type { ChatApi } from "../../lib/chat/api";
 import type { RememberOptions } from "../../lib/chat/types";
+import { changeRows } from "../../lib/chat/admin-change";
 import { visible } from "../../lib/security/visible";
 import { cn } from "../../lib/utils";
 import { toneClass } from "../ui/status";
@@ -95,6 +96,52 @@ function ApprovedInput({ tool, input }: { readonly tool: string; readonly input:
   );
 }
 
+/**
+ * A Kobe admin write's header (KOBE-623, spec kobe-admin-mcp §6): where it applies, the server's
+ * summary built from the input (names resolved, never model text) and the change before → after.
+ * The exact input is still shown in full below it.
+ */
+function AdminChange({
+  admin,
+  input,
+}: {
+  readonly admin: NonNullable<Requested["admin"]>;
+  readonly input: unknown;
+}) {
+  const rows = changeRows(input);
+  return (
+    <div data-kobe-admin-change="">
+      <p className={styles.who}>
+        Scope: <strong>{visible(admin.scope_label)}</strong>
+      </p>
+      <p aria-label="Change summary">{visible(admin.summary)}</p>
+      {rows.length > 0 && (
+        <table aria-label="Before and after" className={styles.toolPre}>
+          <thead>
+            <tr>
+              <th scope="col">Field</th>
+              <th scope="col">Before</th>
+              <th scope="col">After</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.field}>
+                <th scope="row">{visible(r.field)}</th>
+                <td>{visible(r.before)}</td>
+                <td>{visible(r.after)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className={styles.hint}>
+        Admin changes are asked every time: never remembered, never approved with others.
+      </p>
+    </div>
+  );
+}
+
 /** Smooth unless the member asked for less motion. */
 function scrollBehavior(): ScrollBehavior {
   const reduce =
@@ -171,6 +218,8 @@ export function ApprovalCard({
   );
   const [attempt, setAttempt] = useState(0);
   const card = useRef<HTMLElement>(null);
+  // A Kobe admin write (KOBE-623): never remembered, never in "Approve all waiting".
+  const admin = requested.admin;
   const expired = Date.parse(requested.expires_at) <= now();
   const askable = resolved === undefined && !expired && !readOnly;
   // A request that arrives is brought into view once (KOBE-301), only while the list follows the
@@ -185,7 +234,7 @@ export function ApprovalCard({
   // What may be remembered, and whether "Approve all waiting" is offered: the server's answer.
   useEffect(() => {
     const load = api?.rememberOptions;
-    if (!askable || !load) return;
+    if (!askable || !load || admin !== undefined) return;
     let live = true;
     load(approvalId)
       .then((res) => {
@@ -195,7 +244,7 @@ export function ApprovalCard({
     return () => {
       live = false;
     };
-  }, [api, approvalId, askable]);
+  }, [api, approvalId, askable, admin]);
   useEffect(() => {
     if (!inputMissing || resolved || !api) return;
     let live = true;
@@ -231,7 +280,10 @@ export function ApprovalCard({
   );
   // Destructive tools are never remembered (the server refuses it as well).
   const canRemember =
-    requested.risk !== "destructive" && options?.canRemember === true && options.choices.length > 0;
+    admin === undefined &&
+    requested.risk !== "destructive" &&
+    options?.canRemember === true &&
+    options.choices.length > 0;
   const scope = choice.scope ?? options?.choices[0]?.scope;
   const exact = options?.exactOnly === true || choice.exact;
   const decide = async (decision: "allow" | "deny") => {
@@ -254,7 +306,7 @@ export function ApprovalCard({
     if (res.ok) setSent(decision);
     else setError(res.error);
   };
-  const waiting = options?.approveAll?.approvalIds ?? [];
+  const waiting = admin === undefined ? (options?.approveAll?.approvalIds ?? []) : [];
   const approveAll = async () => {
     if (!api?.approveAll || options === undefined || waiting.length < 2) return;
     setBusy(true);
@@ -277,6 +329,11 @@ export function ApprovalCard({
     >
       <p id={`${ids}-title`} className={styles.approvalTitle}>
         <ShieldAlertIcon aria-hidden className={cn(styles.approvalIcon, toneClass("attention"))} />
+        {admin !== undefined && (
+          <>
+            <strong>Admin change:</strong>{" "}
+          </>
+        )}
         <strong>Approval needed</strong> to run <span className={styles.toolName}>{toolShown}</span>{" "}
         <span className={styles.badge}>{RISK_LABEL[requested.risk]}</span>
       </p>
@@ -291,6 +348,7 @@ export function ApprovalCard({
           <li key={`${r.stage}:${r.code}:${r.rule_id ?? ""}`}>{r.message}</li>
         ))}
       </ul>
+      {admin !== undefined && <AdminChange admin={admin} input={input} />}
       <p className={styles.who}>Exactly this input runs if you allow it:</p>
       {inputState === "ready" ? (
         <ApprovedInput tool={requested.tool} input={input} />
@@ -316,7 +374,7 @@ export function ApprovalCard({
         </p>
       ) : (
         <>
-          {options !== undefined && requested.risk !== "destructive" && (
+          {options !== undefined && admin === undefined && requested.risk !== "destructive" && (
             <RememberControls
               options={options}
               toolShown={toolShown}

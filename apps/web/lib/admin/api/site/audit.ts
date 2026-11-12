@@ -3,6 +3,7 @@
  * Read-only: the list (newest first, keyset paged by `seq`, filtered by the server) and the
  * full-chain integrity check. Responses arrive camelized.
  */
+import type { ViaAgent } from "../audit-via";
 import { apiRequest, type ApiResult } from "../../../api/client";
 
 /**
@@ -60,6 +61,8 @@ export interface SiteAuditEvent {
   /** Null once erased (after the site's retention period) or when the request had none. */
   readonly ip: string | null;
   readonly userAgent: string | null;
+  /** Done through a Kobe MCP admin tool (KOBE-623): thread, run, tool call. */
+  readonly viaAgent?: ViaAgent;
 }
 
 export interface SiteAuditPage {
@@ -109,7 +112,17 @@ function pick(e: SiteAuditEvent): SiteAuditEvent {
     target: e.target && typeof e.target === "object" ? e.target : {},
     ip: e.ip ?? null,
     userAgent: e.userAgent ?? null,
+    ...(viaAgentOf(e.viaAgent) ?? {}),
   };
+}
+
+/** The server's via-agent view, kept only when it is well formed (strings and a boolean). */
+function viaAgentOf(v: unknown): { viaAgent: ViaAgent } | undefined {
+  if (v === null || typeof v !== "object") return undefined;
+  const { threadId, runId, toolCallId, threadOpen } = v as Record<string, unknown>;
+  if (typeof threadId !== "string" || typeof runId !== "string") return undefined;
+  if (typeof toolCallId !== "string" || typeof threadOpen !== "boolean") return undefined;
+  return { viaAgent: { threadId, runId, toolCallId, threadOpen } };
 }
 
 export async function listSiteAudit(

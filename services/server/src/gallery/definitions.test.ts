@@ -24,10 +24,10 @@ describe("the one gallery agent, Kobe (KOBE-254)", () => {
   const floor = { scope: "site", site: [], team: [], approvalFloor: "auto" } as const;
   const manifest = computeToolManifest(kobe.frontmatter, floor, new Date());
 
-  it("ships exactly one gallery agent, Kobe, at generation 3", () => {
+  it("ships exactly one gallery agent, Kobe, at generation 4", () => {
     // 2: the web-search notice is scoped to requests that need the web (review of #240).
     // 3: no built-in web search any more; research goes through connectors (KOBE-606).
-    expect(parsed.map((p) => [p.key, p.generation])).toEqual([[KOBE_GALLERY_KEY, 3]]);
+    expect(parsed.map((p) => [p.key, p.generation])).toEqual([[KOBE_GALLERY_KEY, 4]]);
     expect(KOBE_GALLERY_KEY).toBe("kobe");
     expect(kobe.frontmatter.name).toBe("Kobe");
     expect(kobe.frontmatter.description).toBeTruthy();

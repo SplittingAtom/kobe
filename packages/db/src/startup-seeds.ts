@@ -3,7 +3,8 @@
  * the gallery agents (`services/server/src/gallery/seed.ts`, at every start), Kobe's own catalog
  * skills (`services/server/src/skills/kobe-seed.ts`, KOBE-317) with their Default tags and sync
  * jobs, the chart's branding defaults (KOBE-503, `services/server/src/branding/defaults.ts`,
- * written only while each key is unset), the audit events of that seeding, and the background
+ * written only while each key is unset), the built-in Kobe MCP connector row (KOBE-618), the audit
+ * events of that seeding, and the background
  * jobs' own bookkeeping in `site_settings` (retention, PII erasure, SIEM forwarding). The catalog
  * skills' bytes in the bucket (`<prefix>skills/catalog/<sha256>`) need nothing here: the restore
  * leaves objects that are not in the backup untouched, and the backup's rows name the same
@@ -125,6 +126,10 @@ export const STARTUP_SEEDED_ROWS: Readonly<Record<string, StartupSeed>> = {
       // A site admin's Default jobs write the same system events for their skills: real data.
       ` OR (action IN (${list(DEFAULT_SYNC_AUDIT_ACTIONS)}) AND target ->> 'skillId' IN (SELECT id::text FROM (${KOBE_SKILL_IDS}) k))` +
       `)`,
+  },
+  connectors: {
+    why: "the built-in Kobe MCP connector row seeded at every server start (KOBE-618)",
+    rows: "builtin IS NOT NULL",
   },
   site_settings: {
     why: "where the retention pass, the audit PII sweep and SIEM forwarding stand (KOBE-18, KOBE-17, KOBE-19), and the chart's branding defaults no admin has changed (KOBE-503)",

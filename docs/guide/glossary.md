@@ -35,7 +35,9 @@ discard.
 
 **Commit.** A saved version of a project's files, with a message and an author.
 
-**Connector.** A link to another system through MCP that gives the agent tools.
+**Connector.** A link to another system through MCP that gives the agent tools. The built-in
+**Kobe** connector is Kobe's own: the guide for every agent, and admin tools where admins turn
+them on. See [Admin from a conversation](admin/admin-from-a-conversation.md).
 
 **Contributor.** A team role between member and team admin: builds agents, publishes skills,
 creates projects.

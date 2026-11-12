@@ -2,13 +2,12 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
 /**
- * The Kobe guide's build step (KOBE-616): `docs/guide/<slug>.md` pages (YAML frontmatter, then
- * Markdown) become typed pages that `scripts/generate-guide.mjs` writes into the web bundle as
- * `guide.generated.ts`. Nothing is read from outside the app at runtime.
+ * The Kobe guide's build step (KOBE-616, in `@kobe/guide` since KOBE-620): `docs/guide/<slug>.md`
+ * pages (YAML frontmatter, then Markdown) become typed pages that `scripts/generate-guide.mjs`
+ * writes into the package as `src/generated/pages.ts`. Nothing is read from docs/guide at runtime.
  *
  * Self-contained on purpose (only `yaml` and `zod`): Node runs this file directly from the
- * generator (type stripping), which cannot resolve extensionless relative imports. Client
- * components import its types only.
+ * generator (type stripping), which cannot resolve the `.js` relative imports of the package.
  *
  * Contract with the content (shared with KOBE-617): frontmatter `title`, `summary` (one sentence)
  * and `section` (one of SECTIONS) are required, `order` sorts within the section, `audience` is

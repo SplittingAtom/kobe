@@ -24,6 +24,7 @@ import { EgressBlockedRelay } from "../egress/blocked-relay.js";
 import { resealTeamHeaders } from "../egress/header-store.js";
 import { EgressRequestSweeper, sweepEgressRequestNotifications } from "../egress/request-notify.js";
 import { seedGalleryAgents } from "../gallery/seed.js";
+import { seedKobeBuiltinConnector } from "@kobe/db";
 import { seedBrandingDefaults } from "../branding/defaults.js";
 import type { BifrostAdmin } from "../models/bifrost-admin.js";
 import type { ModelsConfig } from "../models/config.js";
@@ -91,6 +92,23 @@ export async function seedAtStart(deps: ServerDeps, logger: Logger): Promise<Sta
   await seedGalleryAgents(deps.database.db).catch((err: unknown) =>
     logger.error({ err }, "gallery agents could not be seeded"),
   );
+  // The built-in Kobe MCP connector row (KOBE-618/619): one row however many replicas start.
+  await seedKobeBuiltinConnector(deps.database.db)
+    .then((seeded) => {
+      if (seeded.outcome === "seeded" && seeded.fallback) {
+        logger.warn(
+          { name: seeded.name },
+          "a connector named kobe exists: the built-in Kobe connector is kobe-builtin",
+        );
+      } else if (seeded.outcome === "names_taken") {
+        logger.error(
+          "connectors named kobe and kobe-builtin exist: the built-in Kobe connector is not available",
+        );
+      }
+    })
+    .catch((err: unknown) =>
+      logger.error({ err }, "the built-in Kobe connector could not be seeded"),
+    );
   await seedBrandingDefaults(deps.database.db, deps.brandingDefaults)
     .then((settings) => {
       if (settings.length > 0) logger.info({ settings }, "branding defaults seeded from the chart");

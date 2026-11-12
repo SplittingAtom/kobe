@@ -3,7 +3,7 @@ import { listTeamAuditEvents, withTeam } from "@kobe/db";
 import { exportResponse, parseExportQuery } from "../audit/export/http.js";
 import { EXPORT_PAGE_SIZE } from "../audit/export/stream.js";
 import { hitRateLimit } from "../rate-limit.js";
-import { auditPageBody, parseAuditQuery } from "../audit/http.js";
+import { auditPageBodyFor, parseAuditQuery } from "../audit/http.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 
@@ -57,8 +57,9 @@ export function teamAuditRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariabl
     const query = parseAuditQuery(c, { allowTeamFilter: false });
     if (!query.ok) return query.response;
     // The team comes from the withTeam transaction (kobe.team_id), not from a parameter.
-    const page = await withTeam(db, c.get("team").id, (tx) => listTeamAuditEvents(tx, query.value));
-    return c.json(auditPageBody(page));
+    const teamId = c.get("team").id;
+    const page = await withTeam(db, teamId, (tx) => listTeamAuditEvents(tx, query.value));
+    return c.json(await auditPageBodyFor(db, c.get("user").id, page));
   });
 
   return app;

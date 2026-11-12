@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Logger } from "pino";
-import { canonicalJson, toolInputSchema, uuidSchema } from "@kobe/protocol";
+import {
+  KOBE_BUILTIN_CONNECTOR_ID,
+  canonicalJson,
+  toolInputSchema,
+  uuidSchema,
+} from "@kobe/protocol";
 import type { SessionVerifyKeys } from "@kobe/session-token";
 import { bearerToken, isExpiredSandboxToken, verifySandboxToken } from "./auth.js";
 import type { Limits } from "./config.js";
@@ -199,6 +204,18 @@ function serverFailure(id: JsonRpcId, failure: string): Answer {
   return [rpcError(id, JSONRPC_ERRORS.internal, "Kobe could not be reached; try again."), 503];
 }
 
+/**
+ * The built-in Kobe connector (KOBE-619, spec kobe-admin-mcp §3): hosted by the server, never an
+ * upstream. Its tools are listed and its calls decided and executed by the server's internal
+ * listener; the proxy attaches no credential and contacts nothing else.
+ */
+const isKobe = (ctx: CallContext) => ctx.connectorId === KOBE_BUILTIN_CONNECTOR_ID;
+
+const listFor = (ctx: CallContext) =>
+  isKobe(ctx)
+    ? ctx.deps.server.kobeList(ctx.token)
+    : ctx.deps.server.listTools(ctx.token, ctx.connectorId);
+
 async function initialize(ctx: CallContext, id: JsonRpcId, params: unknown): Promise<Answer> {
   const requested = isObject(params) ? params.protocolVersion : undefined;
   const version =
@@ -207,7 +224,7 @@ async function initialize(ctx: CallContext, id: JsonRpcId, params: unknown): Pro
       ? requested
       : SUPPORTED_PROTOCOL_VERSIONS[0];
   // Only connectors the team enabled exist for this sandbox.
-  const listed = await ctx.deps.server.listTools(ctx.token, ctx.connectorId);
+  const listed = await listFor(ctx);
   if (!listed.ok) return serverFailure(id, listed.failure);
   return [
     rpcResult(id, {
@@ -219,7 +236,7 @@ async function initialize(ctx: CallContext, id: JsonRpcId, params: unknown): Pro
 }
 
 async function listTools(ctx: CallContext, id: JsonRpcId): Promise<Answer> {
-  const listed = await ctx.deps.server.listTools(ctx.token, ctx.connectorId);
+  const listed = await listFor(ctx);
   if (!listed.ok) return serverFailure(id, listed.failure);
   return [rpcResult(id, { tools: listed.value.tools.map(toMcpTool) })];
 }
@@ -261,8 +278,69 @@ async function callTool(ctx: CallContext, id: JsonRpcId, params: unknown): Promi
         ...contentAttributes({ "kobe.tool.input": canonical }),
       },
     },
-    () => decideAndForward(ctx, id, params.name as string, args, canonical, toolCallId, threadId),
+    () =>
+      isKobe(ctx)
+        ? callKobe(ctx, id, params.name as string, args, toolCallId, threadId)
+        : decideAndForward(ctx, id, params.name as string, args, canonical, toolCallId, threadId),
   );
+}
+
+async function callKobe(
+  ctx: CallContext,
+  id: JsonRpcId,
+  toolName: string,
+  args: Record<string, unknown>,
+  toolCallId: unknown,
+  threadId: string | undefined,
+): Promise<Answer> {
+  const { deps } = ctx;
+  const release = deps.limiter.acquireCall(ctx.sandboxId);
+  if (!release) return [rpcError(id, JSONRPC_ERRORS.internal, "Too many calls in flight."), 429];
+  const started = Date.now();
+  try {
+    const answered = await deps.server.kobeCall(ctx.token, {
+      tool: toolName,
+      arguments: args,
+      ...(threadId === undefined ? {} : { threadId }),
+      ...(typeof toolCallId === "string" && toolCallId.length <= 128 ? { toolCallId } : {}),
+    });
+    const log = (outcome: string, reason?: string) =>
+      deps.log.info(
+        {
+          sandboxId: ctx.sandboxId,
+          teamId: ctx.teamId,
+          connectorId: ctx.connectorId,
+          tool: toolName,
+          ms: Date.now() - started,
+          outcome,
+          ...(reason === undefined ? {} : { reason }),
+        },
+        "mcp tools/call",
+      );
+    if (!answered.ok) {
+      log("refused", answered.failure);
+      if (answered.failure === "unavailable") {
+        return [toolError(id, "Kobe could not check this call, so it was not run. Try again.")];
+      }
+      return serverFailure(id, answered.failure);
+    }
+    const answer = answered.value;
+    if (answer.outcome === "result") {
+      log("ok");
+      return [rpcResult(id, answer.result)];
+    }
+    log(answer.outcome, answer.code);
+    return [
+      toolError(
+        id,
+        answer.outcome === "denied"
+          ? `Kobe denied this call: ${answer.message}`
+          : `${answer.message} (${answer.code})`,
+      ),
+    ];
+  } finally {
+    release();
+  }
 }
 
 async function decideAndForward(

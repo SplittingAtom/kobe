@@ -20,7 +20,7 @@ import type { AuthResult, SandboxAuthenticator } from "./workspace-sync/auth.js"
 
 /**
  * KOBE-317 (SK4, U38): the built-ins become Kobe-published Default catalog skills. A site that
- * ran them from the sandbox image upgrades: the seed publishes the seven at every start (approved,
+ * ran them from the sandbox image upgrades: the seed publishes them at every start (approved,
  * no person, tagged Default, bytes in the object store), the Default sync installs them in every
  * team (On by default, Track within major, by Kobe, no notices), and a run that named a built-in
  * keeps getting the same content as a bundle, also before the sync reaches its team.
@@ -112,7 +112,7 @@ afterAll(async () => {
 });
 
 describe("the seed (ac-1)", () => {
-  it("publishes the seven as approved Kobe catalog versions with no person, tagged Default", async () => {
+  it("publishes every Kobe skill (kobe-guide too, KOBE-620) as approved Kobe catalog versions with no person, tagged Default", async () => {
     const results = await seed();
     expect(results.map((r) => [r.name, r.action])).toEqual(
       KOBE_SKILL_NAMES.map((n) => [n, "created"]),
@@ -126,7 +126,7 @@ describe("the seed (ac-1)", () => {
        FROM registry_skills s JOIN registry_versions v ON v.skill_id = s.id ORDER BY s.name`,
     );
     const hashes = await runtimeHashes();
-    expect(rows).toHaveLength(7);
+    expect(rows).toHaveLength(KOBE_SKILL_NAMES.length);
     for (const r of rows) {
       expect(r, r.name).toMatchObject({
         sp: "kobe",
@@ -150,13 +150,17 @@ describe("the seed (ac-1)", () => {
       `SELECT actor_kind, actor_id, team_id, target ->> 'name' AS name FROM audit_log
        WHERE action = 'skill.kobe.published' ORDER BY seq`,
     );
-    expect(audits.rows).toHaveLength(7);
+    expect(audits.rows).toHaveLength(KOBE_SKILL_NAMES.length);
     expect(audits.rows.every((a) => a.actor_kind === "system" && a.actor_id === null)).toBe(true);
     const jobs = await f.fx.admin.query(
       `SELECT kind, by_kobe, requested_by FROM skill_default_syncs`,
     );
     expect(jobs.rows).toEqual(
-      Array.from({ length: 7 }, () => ({ kind: "add", by_kobe: true, requested_by: null })),
+      Array.from({ length: KOBE_SKILL_NAMES.length }, () => ({
+        kind: "add",
+        by_kobe: true,
+        requested_by: null,
+      })),
     );
   });
 
@@ -208,7 +212,8 @@ describe("the seed (ac-1)", () => {
          (SELECT count(*) FROM skill_default_syncs)::int AS jobs,
          (SELECT count(*) FROM audit_log WHERE action = 'skill.kobe.published')::int AS audits`,
     );
-    expect(counts.rows[0]).toEqual({ versions: 7, jobs: 7, audits: 7 });
+    const n = KOBE_SKILL_NAMES.length;
+    expect(counts.rows[0]).toEqual({ versions: n, jobs: n, audits: n });
   });
 
   it("re-writes a Kobe object that went missing", async () => {
@@ -221,7 +226,7 @@ describe("the seed (ac-1)", () => {
 });
 
 describe("the Default sync installs them in every team (ac-1)", () => {
-  it("every team gets all seven, On by default, Track within major, by Kobe, and no notice", async () => {
+  it("every team gets all of them (kobe-guide too, KOBE-620), On by default, Track within major, by Kobe, and no notice", async () => {
     // A team opts out of pdf before the sync reaches it: the opt-out is kept.
     await f.fx.admin.query(
       `INSERT INTO team_skill_optouts (team_id, skill_id, opted_out_by)
@@ -258,7 +263,7 @@ describe("the Default sync installs them in every team (ac-1)", () => {
       `SELECT count(*)::int AS n FROM team_skill_installs WHERE team_id = $1 AND by_kobe`,
       [fresh.team],
     );
-    expect(rows[0]?.n).toBe(7);
+    expect(rows[0]?.n).toBe(KOBE_SKILL_NAMES.length);
   });
 
   it("their install listing names no installer", async () => {

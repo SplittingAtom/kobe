@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { groupBySection, prevNext } from "../../lib/docs/guide";
-import type { GuidePage } from "../../lib/docs/guide-loader";
+import type { GuidePage } from "../../lib/docs/guide";
 import { Markdown } from "../chat/markdown";
 import { CopyUrl } from "./copy-url";
 import { DocsNav, type DocsNavGroup } from "./docs-nav";

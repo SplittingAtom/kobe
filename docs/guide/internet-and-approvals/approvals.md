@@ -41,6 +41,19 @@ When several calls of one run wait, **Approve all waiting (N)** allows them toge
 confirmation (**Allow all N**). It is not offered when any of them could delete or overwrite,
 writes project memory or commits to a project, or when your team turned it off.
 
+## Admin changes
+
+When the agent changes a Kobe setting for you through the built-in Kobe connector (for example a
+member's role, a budget or a team connector), the card starts with **Admin change:**. It shows the
+**Scope** ("Team _name_" or "Whole site"), a summary Kobe built from the input (with names, not the
+model's words), a **Before and after** table, and the exact input.
+
+- It asks every time, in every approval mode, Dangerous included.
+- It has no Remember controls and is never part of **Approve all waiting**.
+- If the setting changed before you allowed it, nothing is changed and the agent has to ask again.
+
+See [Admin from a conversation](../admin/admin-from-a-conversation.md).
+
 ## Remember an approval
 
 Tick **Remember: allow _tool_** before pressing Allow, and pick how long under **Remember for**:
@@ -53,7 +66,7 @@ A remembered approval:
 - applies only to you, in this workspace, and only in conversations where you are present (never in
   scheduled or auto runs);
 - never overrides a team or site deny or ask rule;
-- cannot be made for tools that can delete or overwrite;
+- cannot be made for tools that can delete or overwrite, or for admin changes;
 - for "this conversation" ends for good when the thread is archived, deleted or moved to another
   project.
 

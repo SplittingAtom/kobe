@@ -8,6 +8,7 @@ import { withTeam } from "@kobe/db";
 import { withAppendTx } from "../event-stream/append.js";
 import { readTeamRememberLimits } from "../policy/remember-limits-store.js";
 import { isViewedFileAsk } from "../policy/viewed-file-guard.js";
+import { isKobeAdminAsk } from "../policy/kobe-admin-guard.js";
 import { lockRunRow, lockThreadRow } from "../runs/store.js";
 import { ApprovalError, type ApprovalContext } from "./context.js";
 import { allowRowInTx, askerConnected, isProjectWrite } from "./decide.js";
@@ -29,6 +30,8 @@ export function batchable(
   return (
     // KOBE-493: a write to the file the member is viewing is decided on its own.
     !isViewedFileAsk(row.reasons) &&
+    // KOBE-619: a Kobe admin change is approved on its own, every time.
+    !isKobeAdminAsk(row.reasons) &&
     !isProjectWrite(row.tool, JSON.parse(row.inputCanonical) as unknown) &&
     tool !== undefined &&
     tool.name === row.tool &&

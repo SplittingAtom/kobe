@@ -44,8 +44,17 @@ export interface TeamInviteSummary extends TeamInvite {
 export async function inviteToTeam(
   db: KobeDb,
   teamId: string,
-  input: { readonly email: string; readonly role: TeamRole; readonly invitedBy: string },
-): Promise<TeamInvite | "already_member"> {
+  input: {
+    readonly email: string;
+    readonly role: TeamRole;
+    readonly invitedBy: string;
+    /**
+     * KOBE-621: the address's invitation as the person saw it: its role, or null for none. Another
+     * state (checked under the row's lock) is `changed_since_approval` and nothing changes.
+     */
+    readonly expectedRole?: TeamRole | null | undefined;
+  },
+): Promise<TeamInvite | "already_member" | "changed_since_approval"> {
   const email = normalizeEmail(input.email);
   return withTeam(db, teamId, async (tx) => {
     const [member] = await tx
@@ -60,11 +69,33 @@ export async function inviteToTeam(
       createdAt: sql`now()`,
       expiresAt: teamInviteExpiry,
     };
-    const [row] = await tx
-      .insert(teamInvitations)
-      .values({ teamId, email, ...values })
-      .onConflictDoUpdate({ target: [teamInvitations.teamId, teamInvitations.email], set: values })
-      .returning({ id: teamInvitations.id, expiresAt: teamInvitations.expiresAt });
+    const key = and(eq(teamInvitations.teamId, teamId), eq(teamInvitations.email, email));
+    if (input.expectedRole !== undefined && input.expectedRole !== null) {
+      const [open] = await tx
+        .select({ role: teamInvitations.role })
+        .from(teamInvitations)
+        .where(key)
+        .for("update");
+      if (open?.role !== input.expectedRole) return "changed_since_approval";
+    }
+    const returning = { id: teamInvitations.id, expiresAt: teamInvitations.expiresAt };
+    const [row] =
+      input.expectedRole === null
+        ? // None expected: a concurrent invitation of the address wins and this one changes nothing.
+          await tx
+            .insert(teamInvitations)
+            .values({ teamId, email, ...values })
+            .onConflictDoNothing()
+            .returning(returning)
+        : await tx
+            .insert(teamInvitations)
+            .values({ teamId, email, ...values })
+            .onConflictDoUpdate({
+              target: [teamInvitations.teamId, teamInvitations.email],
+              set: values,
+            })
+            .returning(returning);
+    if (!row && input.expectedRole === null) return "changed_since_approval";
     if (!row) throw new Error("team invitation upsert returned no row");
     await recordAudit(tx, {
       action: "identity.team_invitation.created",
@@ -104,12 +135,25 @@ export async function listTeamInvites(db: KobeDb, teamId: string): Promise<TeamI
   }));
 }
 
-export async function revokeTeamInvite(db: KobeDb, teamId: string, id: string): Promise<boolean> {
+export async function revokeTeamInvite(
+  db: KobeDb,
+  teamId: string,
+  id: string,
+  /** KOBE-621: revoke only while the invitation still offers this role (the approved before-state). */
+  expectedRole?: TeamRole,
+): Promise<boolean | "changed_since_approval"> {
   return withTeam(db, teamId, async (tx) => {
-    const rows = await tx
-      .delete(teamInvitations)
-      .where(and(eq(teamInvitations.teamId, teamId), eq(teamInvitations.id, id)))
-      .returning({ id: teamInvitations.id });
+    const key = and(eq(teamInvitations.teamId, teamId), eq(teamInvitations.id, id));
+    if (expectedRole !== undefined) {
+      const [open] = await tx
+        .select({ role: teamInvitations.role })
+        .from(teamInvitations)
+        .where(key)
+        .for("update");
+      if (open === undefined) return false;
+      if (open.role !== expectedRole) return "changed_since_approval";
+    }
+    const rows = await tx.delete(teamInvitations).where(key).returning({ id: teamInvitations.id });
     if (rows.length === 0) return false;
     await recordAudit(tx, {
       action: "identity.team_invitation.revoked",

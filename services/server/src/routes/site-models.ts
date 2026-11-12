@@ -270,6 +270,14 @@ export function siteModelsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariab
     }
     if (result.error === "partial_prices") return partialPrices(c);
     if (result.error === "thinking_invalid") return thinkingInvalid(c, result.message);
+    if (result.error === "changed_since_approval") {
+      return err(
+        c,
+        409,
+        "changed_since_approval",
+        "The model's settings changed meanwhile; nothing was changed.",
+      );
+    }
     return result.error === "not_found" ? aliasNotFound(c) : providerNotFound(c);
   });
 

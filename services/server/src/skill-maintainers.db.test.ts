@@ -92,6 +92,25 @@ describe("names (ac-1)", () => {
     ).rejects.toMatchObject({ code: "23514" });
   });
 
+  it("lets the maintainers of a skill that held kobe-guide before Kobe reserved it keep it (KOBE-620)", async () => {
+    expect(await submissionRight(db(), "kobe-guide", ids.bob)).toMatchObject({
+      ok: false,
+      code: "reserved",
+    });
+    const held = await skillRow("kobe-guide");
+    const dana = await h.createUser("dana@maint.test");
+    await h.admin.query(`INSERT INTO registry_maintainers (skill_id, user_id) VALUES ($1, $2)`, [
+      held,
+      dana,
+    ]);
+    expect(await submissionRight(db(), "kobe-guide", dana)).toMatchObject({ ok: true });
+    expect(await submissionRight(db(), "kobe-guide", ids.bob)).toMatchObject({
+      ok: false,
+      code: "not_maintainer",
+    });
+    expect(await submissionRight(db(), "pdf", ids.bob)).toMatchObject({ code: "reserved" });
+  });
+
   it("hints at near names to reviewers, never to members", async () => {
     const r = await as.admin.get("/v1/site/skills/registry/similar?name=invoice-checkr");
     expect(r.json).toEqual({ similar: ["invoice-checker"] });

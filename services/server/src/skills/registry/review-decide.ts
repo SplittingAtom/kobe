@@ -2,7 +2,13 @@ import { sql, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../../audit/record.js";
 import { addBlockedInTx } from "../blocklist.js";
 import { dutiesProblem, type DecisionInput } from "./review-approve.js";
-import { DECIDABLE_STATES, PROBLEMS, REJECTABLE_STATES, type Problem } from "./review-problems.js";
+import {
+  CHANGED_SINCE_APPROVAL,
+  DECIDABLE_STATES,
+  PROBLEMS,
+  REJECTABLE_STATES,
+  type Problem,
+} from "./review-problems.js";
 import { versionRow, type VersionRow } from "./review-queue.js";
 import { inRegistryTx } from "./registry-tx.js";
 import { cancelOpenReruns } from "./rerun.js";
@@ -29,11 +35,16 @@ async function locked(
   db: KobeDb,
   versionId: string,
   fn: (tx: KobeTx, v: VersionRow) => Promise<{ version: VersionRow; changed: boolean }>,
+  /** The state the caller saw (a Kobe MCP call's approved before-state), checked under the lock. */
+  expectedState?: string,
 ): Promise<ReviewResult> {
   try {
     return await inRegistryTx(db, async (tx, registryTeamId) => {
       const v = await versionRow(tx, versionId, true);
       if (!v || v.publisher !== "maintainer") throw new Refused(PROBLEMS.not_found);
+      if (expectedState !== undefined && v.state !== expectedState) {
+        throw new Refused(CHANGED_SINCE_APPROVAL);
+      }
       const done = await fn(tx, v);
       // A version decided or retracted needs no more re-runs: stop spending on them (L3).
       if (registryTeamId && !["submitted", "in_review"].includes(done.version.state))
@@ -59,23 +70,33 @@ const event = (
       ${input?.checklist ? JSON.stringify(input.checklist) : null}::jsonb)`);
 
 /** Claims the version: Submitted → In review, held by `userId`. Claiming one's own claim is a no-op. */
-export function claim(db: KobeDb, versionId: string, userId: string): Promise<ReviewResult> {
-  return locked(db, versionId, async (tx, v) => {
-    if (!DECIDABLE_STATES.has(v.state)) throw new Refused(PROBLEMS.decided);
-    if (v.claimedBy === userId) return { version: v, changed: false };
-    if (v.claimedBy !== null) throw new Refused(PROBLEMS.claimed);
-    if (v.submittedBy === userId) {
-      const duties = await dutiesProblem(tx, v, userId);
-      if (duties.problem) throw new Refused(duties.problem);
-    }
-    await tx.execute(sql`
+export function claim(
+  db: KobeDb,
+  versionId: string,
+  userId: string,
+  expectedState?: string,
+): Promise<ReviewResult> {
+  return locked(
+    db,
+    versionId,
+    async (tx, v) => {
+      if (!DECIDABLE_STATES.has(v.state)) throw new Refused(PROBLEMS.decided);
+      if (v.claimedBy === userId) return { version: v, changed: false };
+      if (v.claimedBy !== null) throw new Refused(PROBLEMS.claimed);
+      if (v.submittedBy === userId) {
+        const duties = await dutiesProblem(tx, v, userId);
+        if (duties.problem) throw new Refused(duties.problem);
+      }
+      await tx.execute(sql`
       UPDATE registry_versions
          SET state = 'in_review', claimed_by = ${userId}, claimed_at = now(), updated_at = now()
        WHERE id = ${v.id}`);
-    await event(tx, v.id, userId, "claimed");
-    await recordAudit(tx, { action: "registry.claimed", target: { registryVersionId: v.id } });
-    return { version: { ...v, state: "in_review", claimedBy: userId }, changed: true };
-  });
+      await event(tx, v.id, userId, "claimed");
+      await recordAudit(tx, { action: "registry.claimed", target: { registryVersionId: v.id } });
+      return { version: { ...v, state: "in_review", claimedBy: userId }, changed: true };
+    },
+    expectedState,
+  );
 }
 
 /**
@@ -134,39 +155,45 @@ export function decide(
   userId: string,
   verdict: Verdict,
   input: DecisionInput,
+  expectedState?: string,
 ): Promise<ReviewResult> {
   const plan = VERDICT[verdict];
   const states = verdict === "request_changes" ? DECIDABLE_STATES : REJECTABLE_STATES;
-  return locked(db, versionId, async (tx, v) => {
-    if (!states.has(v.state)) throw new Refused(PROBLEMS.decided);
-    if (v.claimedBy !== null && v.claimedBy !== userId) throw new Refused(PROBLEMS.claimed);
-    // Only an approval may be the submitter's own (a single-admin Site's): the database refuses
-    // the rest. The confirming Team admin may send it back or reject it (only approving is theirs
-    // to sit out, review-c2 (b)).
-    if (v.submittedBy === userId) throw new Refused(PROBLEMS.own_submission);
-    await tx.execute(sql`
+  return locked(
+    db,
+    versionId,
+    async (tx, v) => {
+      if (!states.has(v.state)) throw new Refused(PROBLEMS.decided);
+      if (v.claimedBy !== null && v.claimedBy !== userId) throw new Refused(PROBLEMS.claimed);
+      // Only an approval may be the submitter's own (a single-admin Site's): the database refuses
+      // the rest. The confirming Team admin may send it back or reject it (only approving is theirs
+      // to sit out, review-c2 (b)).
+      if (v.submittedBy === userId) throw new Refused(PROBLEMS.own_submission);
+      await tx.execute(sql`
       UPDATE registry_versions
          SET state = ${plan.state}::registry_version_state, reviewed_by = ${userId},
              claimed_by = NULL, claimed_at = NULL, updated_at = now()
        WHERE id = ${v.id}`);
-    if (plan.blocked)
-      await addBlockedInTx(tx, {
-        hash: v.runtimeHash,
-        reason: `Rejected and blocked in the Registry review: ${v.name} ${v.semver}`,
-        userId,
-      });
-    await event(tx, v.id, userId, plan.action, input);
-    await recordAudit(
-      tx,
-      verdict === "request_changes"
-        ? { action: "registry.changes_requested", target: { registryVersionId: v.id } }
-        : {
-            action: "registry.rejected",
-            target: { registryVersionId: v.id, blocked: plan.blocked },
-          },
-    );
-    return { version: { ...v, state: plan.state, claimedBy: null }, changed: true };
-  });
+      if (plan.blocked)
+        await addBlockedInTx(tx, {
+          hash: v.runtimeHash,
+          reason: `Rejected and blocked in the Registry review: ${v.name} ${v.semver}`,
+          userId,
+        });
+      await event(tx, v.id, userId, plan.action, input);
+      await recordAudit(
+        tx,
+        verdict === "request_changes"
+          ? { action: "registry.changes_requested", target: { registryVersionId: v.id } }
+          : {
+              action: "registry.rejected",
+              target: { registryVersionId: v.id, blocked: plan.blocked },
+            },
+      );
+      return { version: { ...v, state: plan.state, claimedBy: null }, changed: true };
+    },
+    expectedState,
+  );
 }
 
 /**

@@ -10,6 +10,7 @@ import {
   auditCategoryNames,
   isAuditAction,
 } from "./events.js";
+import { AUDIT_VIA_AGENT_KEY } from "./write.js";
 
 /** Field names that suggest content or credentials; the allowlist must never contain them. */
 const FORBIDDEN_FIELD =
@@ -27,6 +28,8 @@ describe("audit event taxonomy", () => {
       const { target } = AUDIT_EVENTS[action];
       expect(target.safeParse({ unexpected: 1 }).success).toBe(false);
       expect(Object.keys(target.shape).filter((k) => FORBIDDEN_FIELD.test(k))).toEqual([]);
+      // KOBE-618: `viaAgent` is the person-via-agent record `audit()` adds to any action.
+      expect(Object.keys(target.shape)).not.toContain(AUDIT_VIA_AGENT_KEY);
       // Free text is bounded everywhere: every string field has a maximum length or a format.
       for (const [field, schema] of Object.entries(target.shape)) {
         const inner = schema instanceof z.ZodOptional ? schema.unwrap() : schema;

@@ -11616,6 +11616,10 @@
                   "type": "boolean",
                   "const": true
                 },
+                "admin_result_hidden": {
+                  "type": "boolean",
+                  "const": true
+                },
                 "created_at": {
                   "type": "string",
                   "format": "date-time",
@@ -12224,6 +12228,10 @@
                   "type": "boolean",
                   "const": true
                 },
+                "admin_result_hidden": {
+                  "type": "boolean",
+                  "const": true
+                },
                 "created_at": {
                   "type": "string",
                   "format": "date-time",
@@ -12281,6 +12289,10 @@
           },
           "truncated": {
             "type": "boolean"
+          },
+          "admin_result_hidden": {
+            "type": "boolean",
+            "const": true
           }
         },
         "required": ["entry_id", "tool_call_id", "tool_name", "is_error", "text", "truncated"],
@@ -14718,6 +14730,9 @@
                     "dangerous_mode",
                     "not_a_member",
                     "viewed_file",
+                    "kobe_admin_write",
+                    "kobe_admin_not_allowed",
+                    "kobe_admin_rate_limited",
                     "sandbox_policy_unavailable",
                     "install_deny_rule",
                     "install_ask_rule"
@@ -14941,6 +14956,9 @@
                           "dangerous_mode",
                           "not_a_member",
                           "viewed_file",
+                          "kobe_admin_write",
+                          "kobe_admin_not_allowed",
+                          "kobe_admin_rate_limited",
                           "sandbox_policy_unavailable",
                           "install_deny_rule",
                           "install_ask_rule"
@@ -15773,6 +15791,30 @@
                 "type": "null"
               }
             ]
+          },
+          "expected": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "is_default": {
+                "type": "boolean"
+              },
+              "thinking_max": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": ["off", "low", "medium", "high"]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": ["enabled", "is_default", "thinking_max"],
+            "additionalProperties": false
           }
         },
         "required": ["enabled"],
@@ -17425,6 +17467,68 @@
           },
           "logoThemeColor": {
             "type": "boolean"
+          },
+          "expected": {
+            "type": "object",
+            "properties": {
+              "appName": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "showName": {
+                "type": "boolean"
+              },
+              "theme": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "preset": {
+                        "type": "string",
+                        "enum": [
+                          "default",
+                          "slate",
+                          "forest",
+                          "plum",
+                          "ember",
+                          "tokyo-nights",
+                          "catalyst"
+                        ]
+                      }
+                    },
+                    "required": ["preset"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "preset": {
+                        "type": "string",
+                        "const": "custom"
+                      },
+                      "accent": {
+                        "type": "string",
+                        "pattern": "^#[0-9a-f]{6}$"
+                      },
+                      "corners": {
+                        "type": "string",
+                        "enum": ["sharp", "soft", "round"]
+                      },
+                      "font": {
+                        "type": "string",
+                        "enum": ["system", "humanist", "grotesk", "serif", "catalyst"]
+                      }
+                    },
+                    "required": ["preset", "accent", "corners", "font"],
+                    "additionalProperties": false
+                  }
+                ]
+              },
+              "logoThemeColor": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
@@ -20603,6 +20707,9 @@
             "type": "boolean"
           },
           "internal": {
+            "type": "boolean"
+          },
+          "expected_in_ceiling": {
             "type": "boolean"
           }
         },

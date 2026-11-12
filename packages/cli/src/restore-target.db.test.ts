@@ -89,6 +89,8 @@ describe("kobe restore's target check on a started site (KOBE-422)", () => {
       skill_rescan_runs: 0,
       // The catalog usage job's snapshot of the last closed window (KOBE-339): replaced too.
       skill_usage_snapshots: 0,
+      // The built-in kobe connector row (KOBE-618): replaced before the load like the others.
+      connectors: 0,
       // The replaced chain's head and size, for the restore's event (KOBE-422).
       replacedAudit: `2:${head?.hash ?? ""}:2`,
     });

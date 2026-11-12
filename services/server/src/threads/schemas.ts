@@ -296,6 +296,11 @@ export const threadEntrySchema = z.object({
   payload_offloaded: z.boolean(),
   /** A tool output over 64 KB cut to a preview (KOBE-208); the full one via `.../output`. */
   payload_truncated: z.literal(true).optional(),
+  /**
+   * A Kobe admin tool's output hidden from this reader of a shared thread (KOBE-623, KA6): the
+   * payload's result reads "Admin result hidden".
+   */
+  admin_result_hidden: z.literal(true).optional(),
   created_at: timestamp,
 });
 export type ThreadEntry = z.infer<typeof threadEntrySchema>;
@@ -309,6 +314,8 @@ export const toolOutputSchema = z.object({
   text: z.string(),
   /** The output was longer than the route answers (1,000,000 characters). */
   truncated: z.boolean(),
+  /** A Kobe admin tool's output hidden from this reader (KOBE-623, KA6). */
+  admin_result_hidden: z.literal(true).optional(),
 });
 
 export const threadPageSchema = z.object({
