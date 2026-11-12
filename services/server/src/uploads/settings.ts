@@ -8,7 +8,7 @@ import {
 const GIB = 1024 * 1024 * 1024;
 
 /** Default per-team storage quota when the team has none of its own (D26). */
-export const DEFAULT_TEAM_STORAGE_QUOTA_BYTES = 10 * GIB;
+export const DEFAULT_TEAM_STORAGE_QUOTA_BYTES = 50 * GIB;
 /** Default object budget per team when it has none of its own (Workspaces GV2, KOBE-579). */
 export const DEFAULT_TEAM_MAX_OBJECTS = 2_000_000;
 /** How long an upload that never joined a thread is kept (hours). */

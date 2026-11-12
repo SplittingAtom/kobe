@@ -229,9 +229,9 @@ server:
     maxFileBytes: 104857600
     # Largest total per message (bytes): 500 MiB. Also bounds a single file.
     maxMessageBytes: 524288000
-    # Storage quota per team (bytes) when the team has no value of its own: 10 GiB. Counts uploaded
+    # Storage quota per team (bytes) when the team has no value of its own: 50 GiB. Counts uploaded
     # files and live workspace-sync bytes; uploads and sync pushes are refused beyond it.
-    teamStorageQuotaBytes: 10737418240
+    teamStorageQuotaBytes: 53687091200
     # Hours an upload that never joined a thread is kept (1..720).
     orphanHours: 24
     # Object budget per workspace (team) when it has none of its own (Workspaces GV2): S3 objects

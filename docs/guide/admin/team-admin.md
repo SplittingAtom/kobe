@@ -36,17 +36,17 @@ workspace; switch workspace first to manage another.
 
 ## Workspace settings
 
-| Page                    | What you set                                                                                              |
-| ----------------------- | --------------------------------------------------------------------------------------------------------- |
-| **Models**              | Which models from the site catalog the team may use, and the team default.                                |
-| **Budgets**             | Daily or monthly dollar budgets for the team, a default member budget, and budgets per member.            |
-| **Connectors**          | Enable registered connectors and choose each one's exposure; set the built-in **Kobe** connector's level. |
-| **Egress**              | Enable domains within the site ceiling, answer access requests, and inject headers for a domain.          |
-| **Policy**              | Team deny, ask and allow rules inside the site floor, remember limits, and members' remembered approvals. |
-| **Memory**              | Allow memory, and allow project memory (both also need the site switch).                                  |
-| **Retention**           | How long the team keeps threads, within the site maximum.                                                 |
-| **Storage and history** | Bytes and objects per workspace and project, the object budget, and how long project history is kept.     |
-| **Follow-ups**          | Suggest three follow-up messages after each answer (a short model call per run).                          |
+| Page                    | What you set                                                                                                                                                  |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Models**              | Which models from the site catalog the team may use, and the team default.                                                                                    |
+| **Budgets**             | Daily or monthly dollar budgets for the team, a default member budget, and budgets per member.                                                                |
+| **Connectors**          | Enable registered connectors and choose each one's exposure; set the built-in **Kobe** connector's level.                                                     |
+| **Egress**              | Enable domains within the site ceiling, answer access requests, and inject headers for a domain.                                                              |
+| **Policy**              | Team deny, ask and allow rules inside the site floor, remember limits, and members' remembered approvals.                                                     |
+| **Memory**              | Allow memory, and allow project memory (both also need the site switch).                                                                                      |
+| **Retention**           | How long the team keeps threads, within the site maximum.                                                                                                     |
+| **Storage and history** | Bytes and objects per workspace and project, the object budget, and how long project history is kept; limits in [Storage limits](../files/storage-limits.md). |
+| **Follow-ups**          | Suggest three follow-up messages after each answer (a short model call per run).                                                                              |
 
 The **Kobe** card on the **Connectors** page sets what agents may do with Kobe's own admin tools
 in this team: **Docs only** (the default), **Read** or **Read and write**. Agents always have the
