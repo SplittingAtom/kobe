@@ -355,6 +355,19 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   const authAttempts = new AuthAttemptAudit(database.db);
   authAttempts.start();
   const background = options.background ?? new BackgroundTasks();
+  const ssoSettings = options.sso?.settings ?? SSO_OFF;
+  const sso: ServerDeps["sso"] = {
+    settings: ssoSettings,
+    net: ssoNet(ssoSettings, options.sso?.net, options.sso?.request),
+    providers: {
+      db: database.db,
+      publicUrl: options.publicUrl,
+      settings: ssoSettings,
+      envelope: options.envelope,
+    },
+  };
+  // SSO sign-in applies access mappings, whose side effects need the finished deps (bound below).
+  const lateDeps: { deps?: ServerDeps } = {};
   const auth = createAuth({
     attempts: authAttempts,
     background,
@@ -363,6 +376,13 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     secret: options.authSecret,
     trustedProxies: options.trustedProxies,
     mailer: options.mailer,
+    sso: {
+      ...sso,
+      afterChange: () => {
+        if (!lateDeps.deps) throw new Error("server deps not ready");
+        return lateDeps.deps;
+      },
+    },
   });
   const setupDigest = digest(options.setupToken);
   const hub = createRunEventHub({
@@ -586,7 +606,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   const feedbackScores = options.feedbackScores
     ? new FeedbackScores({ db: database.db, ...options.feedbackScores })
     : undefined;
-  return {
+  const deps: ServerDeps = {
     database,
     models: options.models
       ? {
@@ -621,16 +641,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     appCaller: options.appCaller ?? NO_APP_CALLER,
     approvals,
     envelope: options.envelope,
-    sso: {
-      settings: options.sso?.settings ?? SSO_OFF,
-      net: ssoNet(options.sso?.settings ?? SSO_OFF, options.sso?.net, options.sso?.request),
-      providers: {
-        db: database.db,
-        publicUrl: options.publicUrl,
-        settings: options.sso?.settings ?? SSO_OFF,
-        envelope: options.envelope,
-      },
-    },
+    sso,
     egressHeaders: options.egressHeaderSecrets ? headerBox(options.egressHeaderSecrets) : undefined,
     budgets,
     blobs: options.blobs,
@@ -698,4 +709,6 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       await database.close();
     },
   };
+  lateDeps.deps = deps;
+  return deps;
 }

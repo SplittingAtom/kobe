@@ -689,6 +689,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2
+      jose:
+        specifier: 6.2.12
+        version: 6.2.12
 
   tools/license-check:
     dependencies:

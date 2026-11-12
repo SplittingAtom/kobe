@@ -128,8 +128,27 @@ export async function validateDiscovery(
   net: SsoNet,
   target: DiscoveryTarget,
 ): Promise<DiscoveryReport> {
+  return (await discoverProvider(net, target)).report;
+}
+
+/**
+ * {@link validateDiscovery} plus the server metadata when every check passed: what the sign-in
+ * flow (KOBE-628) builds its `openid-client` configuration from.
+ */
+export async function discoverProvider(
+  net: SsoNet,
+  target: DiscoveryTarget,
+): Promise<{ readonly report: DiscoveryReport; readonly metadata?: oidc.ServerMetadata }> {
+  return checkDiscovery(net, target);
+}
+
+async function checkDiscovery(
+  net: SsoNet,
+  target: DiscoveryTarget,
+): Promise<{ report: DiscoveryReport; metadata?: oidc.ServerMetadata }> {
+  const wrap = (report: DiscoveryReport) => ({ report });
   const pinned = issuerFor(target);
-  if (!pinned.ok) return new Report(null).fail("tenant_pinned", pinned.code, pinned.message);
+  if (!pinned.ok) return wrap(new Report(null).fail("tenant_pinned", pinned.code, pinned.message));
   const issuer = pinned.issuer;
   const report = new Report(issuer);
   report.pass("tenant_pinned");
@@ -139,7 +158,7 @@ export async function validateDiscovery(
     await checkSsoUrl(net, wellKnown);
   } catch (error) {
     const code = netErrorIn(error)?.code ?? "invalid_url";
-    return report.fail("address_allowed", code, NET_MESSAGES[code]);
+    return wrap(report.fail("address_allowed", code, NET_MESSAGES[code]));
   }
   report.pass("address_allowed");
 
@@ -159,30 +178,32 @@ export async function validateDiscovery(
     meta = config.serverMetadata();
   } catch (error) {
     const netError = netErrorIn(error);
-    if (netError) return report.fail("reachable", netError.code, NET_MESSAGES[netError.code]);
+    if (netError) return wrap(report.fail("reachable", netError.code, NET_MESSAGES[netError.code]));
     const code = (error as { code?: unknown }).code;
     if (code === JSON_ATTRIBUTE_COMPARISON) {
       report.pass("reachable");
-      return report.fail("issuer_match", "issuer_mismatch", MESSAGES.issuer_mismatch);
+      return wrap(report.fail("issuer_match", "issuer_mismatch", MESSAGES.issuer_mismatch));
     }
-    return report.fail("reachable", "not_discovery_document", MESSAGES.not_discovery_document);
+    return wrap(
+      report.fail("reachable", "not_discovery_document", MESSAGES.not_discovery_document),
+    );
   }
   report.pass("reachable");
 
   // Exact equality: openid-client accepts any issuer from login.microsoftonline.com or b2clogin.com.
   if (meta.issuer !== issuer) {
-    return report.fail("issuer_match", "issuer_mismatch", MESSAGES.issuer_mismatch);
+    return wrap(report.fail("issuer_match", "issuer_mismatch", MESSAGES.issuer_mismatch));
   }
   report.pass("issuer_match");
 
   if (!(meta.response_types_supported ?? []).includes("code")) {
-    return report.fail("code_flow", "no_code_flow", MESSAGES.no_code_flow);
+    return wrap(report.fail("code_flow", "no_code_flow", MESSAGES.no_code_flow));
   }
   report.pass("code_flow");
 
   const methods = meta.code_challenge_methods_supported;
   const s256 = methods === undefined ? target.kind === "entra" : methods.includes("S256");
-  if (!s256) return report.fail("pkce_s256", "no_pkce_s256", MESSAGES.no_pkce_s256);
+  if (!s256) return wrap(report.fail("pkce_s256", "no_pkce_s256", MESSAGES.no_pkce_s256));
   report.pass("pkce_s256");
 
   const endpoints = [meta.authorization_endpoint, meta.token_endpoint, meta.jwks_uri];
@@ -191,13 +212,11 @@ export async function validateDiscovery(
       if (typeof endpoint !== "string") throw new SsoNetError("invalid_url");
       await checkSsoUrl(net, endpoint);
     } catch {
-      return report.fail(
-        "endpoints_allowed",
-        "endpoint_not_allowed",
-        MESSAGES.endpoint_not_allowed,
+      return wrap(
+        report.fail("endpoints_allowed", "endpoint_not_allowed", MESSAGES.endpoint_not_allowed),
       );
     }
   }
   report.pass("endpoints_allowed");
-  return report.done();
+  return { report: report.done(), metadata: meta };
 }

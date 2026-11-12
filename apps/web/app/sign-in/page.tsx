@@ -1,14 +1,25 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { SsoSignIn } from "../../components/auth/sso-sign-in";
 import { useBranding } from "../../components/shell/branding-context";
 import { authClient } from "../../lib/auth-client";
+import { ssoErrorMessage } from "../../lib/sso-errors";
 
-/** Sign in with a passkey, or email + password followed by a TOTP code when 2FA is enrolled. */
+/**
+ * Sign in with single sign-on (one button per enabled provider, KOBE-628), a passkey, or email +
+ * password followed by a TOTP code when 2FA is enrolled. A failed SSO sign-in comes back here with
+ * `?sso_error=<code>`, shown as a plain message.
+ */
 export default function SignInPage() {
   const [step, setStep] = useState<"password" | "totp">("password");
   const [error, setError] = useState<string | null>(null);
   const { appName } = useBranding();
+
+  useEffect(() => {
+    const message = ssoErrorMessage(new URLSearchParams(window.location.search).get("sso_error"));
+    if (message) setError(message);
+  }, []);
 
   const done = () => window.location.assign("/");
 
@@ -44,6 +55,7 @@ export default function SignInPage() {
       <h1>Sign in to {appName}</h1>
       {step === "password" ? (
         <>
+          <SsoSignIn />
           <button type="button" onClick={onPasskey}>
             Sign in with a passkey
           </button>

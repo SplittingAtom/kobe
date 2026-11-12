@@ -5,6 +5,8 @@ import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
 import { jwt, twoFactor } from "better-auth/plugins";
 import {
   accounts,
+  and,
+  eq,
   jwks,
   passkeys,
   rateLimits,
@@ -24,6 +26,7 @@ import { readAppName } from "../branding/settings.js";
 import { isDeactivated } from "../users/deactivation.js";
 import { invitationPlugin, PASSWORD_MAX, PASSWORD_MIN } from "./invitation-plugin.js";
 import { claimResetLinkSend, releaseResetLinkClaim, revokeResetLinks } from "./reset-links.js";
+import { ssoPlugin, SSO_RATE_LIMITS, type SsoRuntime } from "./sso-plugin.js";
 import { isUserVerified } from "./webauthn-flags.js";
 
 export interface AuthOptions {
@@ -43,6 +46,8 @@ export interface AuthOptions {
   readonly attempts: AuthAttemptAudit;
   /** Runs the reset email and its audit off the request path. */
   readonly background: BackgroundTasks;
+  /** OIDC single sign-on (KOBE-628); unset: no SSO routes at all. */
+  readonly sso?: SsoRuntime;
 }
 
 /** Password-reset links work once, for 30 minutes. */
@@ -72,6 +77,7 @@ export function createAuth({
   mailer,
   attempts,
   background,
+  sso,
 }: AuthOptions) {
   const origin = new URL(publicUrl);
 
@@ -83,6 +89,9 @@ export function createAuth({
    */
   async function mailResetLink(user: { id: string; email: string }, token: string) {
     if (await isDeactivated(db, user.id)) return;
+    // A user made by SSO (JIT) or SCIM has no password: a reset must not give them one, or the
+    // mailbox could outlive the identity provider's disable (spec sso-oidc-scim §6, SSO9).
+    if (!(await hasCredentialAccount(db, user.id))) return;
     // Not awaited: the email must not wait on the audit write. Aggregated: anyone can request
     // resets for an address in any number.
     background.run("password reset audit failed", () =>
@@ -159,6 +168,7 @@ export function createAuth({
         "/reset-password": { window: 60, max: 5 },
         "/invitation/lookup": { window: 60, max: 10 },
         "/invitation/accept": { window: 60, max: 5 },
+        ...SSO_RATE_LIMITS,
       },
     },
     databaseHooks: {
@@ -221,6 +231,7 @@ export function createAuth({
     },
     plugins: [
       invitationPlugin({ db, publicOrigin: origin.origin }),
+      ssoPlugin({ db, publicOrigin: origin.origin, secret, attempts, sso }),
       twoFactor({ issuer: "Kobe" }),
       passkey({
         rpID: origin.hostname,
@@ -248,3 +259,12 @@ export function createAuth({
 }
 
 export type KobeAuth = ReturnType<typeof createAuth>;
+
+async function hasCredentialAccount(db: KobeDb, userId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: accounts.id })
+    .from(accounts)
+    .where(and(eq(accounts.userId, userId), eq(accounts.providerId, "credential")))
+    .limit(1);
+  return row !== undefined;
+}

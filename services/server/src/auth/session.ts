@@ -1,5 +1,5 @@
 import { createMiddleware } from "hono/factory";
-import { eq, siteRoles, siteSettings, users } from "@kobe/db";
+import { eq, siteRoles, siteSettings, users, type KobeDb } from "@kobe/db";
 import type { SiteRole } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
 import { DELEGATED_SESSION_PREFIX, delegationOf } from "../kobe-mcp/delegation.js";
@@ -24,7 +24,12 @@ export interface AuthVariables {
 export const REQUIRE_TWO_FACTOR = "require_2fa";
 
 export async function readRequireTwoFactor(deps: ServerDeps): Promise<boolean> {
-  const [row] = await deps.database.db
+  return readRequireTwoFactorIn(deps.database.db);
+}
+
+/** The site's `require_2fa` setting, for code that has only the database (the SSO plugin). */
+export async function readRequireTwoFactorIn(db: KobeDb): Promise<boolean> {
+  const [row] = await db
     .select({ value: siteSettings.value })
     .from(siteSettings)
     .where(eq(siteSettings.key, REQUIRE_TWO_FACTOR));
