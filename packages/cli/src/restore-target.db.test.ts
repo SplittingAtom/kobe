@@ -68,6 +68,19 @@ const BRANDING_SEED = `
     ('system', 'site.branding.updated', '{"setting":"app_name","value":"Acme Assist"}'),
     ('system', 'site.branding.updated', '{"setting":"theme","value":"theme:forest"}');`;
 
+/** What the server's start writes for a provider in `auth.sso.providers` (KOBE-626). */
+const HELM_SSO_SEED = `
+  INSERT INTO sso_providers (id, slug, display_name, kind, issuer, client_id, tenant_id,
+    subject_claim, access_claim, managed_by, enabled)
+  VALUES ('00000000-0000-4000-8000-0000000005a1', 'entra', 'Contoso', 'entra',
+    'https://login.microsoftonline.com/11111111-2222-4333-8444-555555555555/v2.0', 'kobe-app',
+    '11111111-2222-4333-8444-555555555555', 'oid', 'roles', 'helm', true);
+  INSERT INTO audit_log (actor_kind, action, target) VALUES
+    ('system', 'identity.sso.provider.created',
+     '{"providerId":"00000000-0000-4000-8000-0000000005a1","slug":"entra","kind":"entra"}'),
+    ('system', 'identity.sso.provider.enabled',
+     '{"providerId":"00000000-0000-4000-8000-0000000005a1","slug":"entra"}');`;
+
 describe("kobe restore's target check on a started site (KOBE-422)", () => {
   it("accepts the rows the server's start wrote and replaces them before the load", async () => {
     const db = await started();
@@ -91,6 +104,8 @@ describe("kobe restore's target check on a started site (KOBE-422)", () => {
       skill_usage_snapshots: 0,
       // The built-in kobe connector row (KOBE-618): replaced before the load like the others.
       connectors: 0,
+      // The chart's SSO providers (KOBE-626): none in this fixture.
+      sso_providers: 0,
       // The replaced chain's head and size, for the restore's event (KOBE-422).
       replacedAudit: `2:${head?.hash ?? ""}:2`,
     });
@@ -108,6 +123,29 @@ describe("kobe restore's target check on a started site (KOBE-422)", () => {
     const counts = await prelude(db);
     expect(counts).toMatchObject({ site_settings: 0, audit_log: 0 });
     expect(await sql(db.adminUrl, "SELECT count(*)::int AS n FROM audit_log")).toEqual([{ n: 4 }]);
+  });
+
+  it("accepts the chart's SSO providers upserted at start (KOBE-626) and replaces them", async () => {
+    const db = await started();
+    await sql(db.adminUrl, HELM_SSO_SEED);
+    expect(await prelude(db)).toMatchObject({ sso_providers: 0, audit_log: 0 });
+    expect(await sql(db.adminUrl, "SELECT count(*)::int AS n FROM sso_providers")).toEqual([
+      { n: 1 },
+    ]);
+  });
+
+  it("refuses a Site console SSO provider (KOBE-626)", async () => {
+    const db = await started();
+    await sql(
+      db.adminUrl,
+      `INSERT INTO sso_providers (slug, display_name, kind, issuer, client_id, client_secret_sealed,
+         client_secret_key_id, subject_claim, access_claim, managed_by)
+       VALUES ('okta', 'Okta', 'oidc', 'https://idp.example.com', 'kobe', 'e1.k.sealed', 'k',
+         'sub', 'roles', 'console')`,
+    );
+    await expect(prelude(db)).rejects.toThrow(
+      /already has data in:.*\bsso_providers\b.*restore only into a freshly installed/,
+    );
   });
 
   it("refuses a branding setting an admin changed after the seed (KOBE-503)", async () => {

@@ -27,11 +27,14 @@ export function meRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
   // `siteGrants` (KOBE-334): Skill reviewers see the Registry queue though they hold no site role.
+  // `siteFeatures` (KOBE-626): optional console sections that are on, for site role holders only;
+  // `sso` is absent while `auth.sso.enabled` is false (the kill switch hides the page).
   app.get("/", async (c) =>
     c.json({
       user: c.get("user"),
       siteRole: c.get("siteRole"),
       siteGrants: await grantsOf(db, c.get("user").id),
+      ...(c.get("siteRole") && deps.sso.settings.enabled ? { siteFeatures: ["sso"] } : {}),
     }),
   );
 

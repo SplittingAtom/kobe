@@ -74,6 +74,9 @@ const SITE_RANK: Readonly<Record<SiteRole, number>> = { user: 0, admin: 1, owner
 export function canSee(section: ConsoleSection, access: ConsoleAccess): boolean {
   if (section.console === "site") {
     if (access.console !== "site") return false;
+    if (section.feature !== undefined && !(access.features ?? []).includes(section.feature)) {
+      return false;
+    }
     if (SITE_RANK[access.siteRole] >= SITE_RANK[section.minRole]) return true;
     return section.grant !== undefined && (access.grants ?? []).includes(section.grant);
   }

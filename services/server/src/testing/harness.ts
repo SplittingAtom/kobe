@@ -41,6 +41,7 @@ export async function openHarness(
     | "connectorProbe"
     | "appCaller"
     | "envelope"
+    | "sso"
     | "modelTokenDefaults"
     | "auditForwardingDestinations"
     | "auditForwardingSecrets"

@@ -93,6 +93,9 @@ import { DEFAULT_UPLOAD_SETTINGS, type UploadSettings } from "./uploads/settings
 import type { ScoreSink } from "@kobe/telemetry";
 import { FeedbackScores } from "./feedback/scores.js";
 import type { BrandingDefaults } from "./branding/defaults-config.js";
+import type { SsoNet } from "./sso/net.js";
+import type { ProviderStore } from "./sso/providers.js";
+import { SSO_OFF, ssoNet, type SsoSettings } from "./sso/settings.js";
 
 export interface ServerDepsOptions {
   readonly databaseUrl: string;
@@ -158,6 +161,15 @@ export interface ServerDepsOptions {
   readonly egressHeaderSecrets?: readonly string[];
   /** Site envelope (KOBE-107, `KOBE_ENVELOPE_KEY`) for per-record secrets; unset = off. */
   readonly envelope?: Envelope;
+  /**
+   * Single sign-on (`auth.sso`, KOBE-626): the kill switch, the SSRF exceptions and the Helm
+   * providers; unset = off. `net` overrides the outbound address policy (tests only).
+   */
+  readonly sso?: {
+    readonly settings: SsoSettings;
+    readonly net?: Partial<ConnectorUrlPolicy>;
+    readonly request?: SsoNet["request"];
+  };
   /**
    * Object storage (`s3.*`, KOBE-27) for thread blobs: export reads offloaded entries, retention
    * deletes released keys (KOBE-18). Unset: nothing is read or deleted from a bucket.
@@ -292,6 +304,15 @@ export interface ServerDeps {
   readonly egressHeaders: SecretBox | undefined;
   /** Envelope encryption for connector credentials and other per-record secrets (KOBE-107). */
   readonly envelope: Envelope | undefined;
+  /**
+   * Single sign-on (KOBE-626): `settings.enabled` is the kill switch (`auth.sso.enabled`); `net`
+   * is the SSRF-guarded outbound policy; `providers` the provider store.
+   */
+  readonly sso: {
+    readonly settings: SsoSettings;
+    readonly net: SsoNet;
+    readonly providers: ProviderStore;
+  };
   /**
    * Budgets (KOBE-42, D30): watches spend, records and emails warnings, budget-stops runs.
    * `index.ts` starts it (LISTEN + sweep); tests call `evaluate()` / `sweep()` directly.
@@ -600,6 +621,16 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     appCaller: options.appCaller ?? NO_APP_CALLER,
     approvals,
     envelope: options.envelope,
+    sso: {
+      settings: options.sso?.settings ?? SSO_OFF,
+      net: ssoNet(options.sso?.settings ?? SSO_OFF, options.sso?.net, options.sso?.request),
+      providers: {
+        db: database.db,
+        publicUrl: options.publicUrl,
+        settings: options.sso?.settings ?? SSO_OFF,
+        envelope: options.envelope,
+      },
+    },
     egressHeaders: options.egressHeaderSecrets ? headerBox(options.egressHeaderSecrets) : undefined,
     budgets,
     blobs: options.blobs,

@@ -17,6 +17,7 @@ import { loadConfig } from "./config.js";
 import { seedAtStart, serverJobs, startServerJobs } from "./startup/jobs.js";
 import { checkSealedKeys, sealedFamilies } from "./startup/sealed-keys.js";
 import { loadConnectorUrlPolicy } from "./connectors/config.js";
+import { loadSsoSettings } from "./sso/settings.js";
 import { createProxyProbe, PROBE_TIMEOUT_MS } from "./connectors/probe.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
 import { loadEgressHeaderSecrets } from "./egress/config.js";
@@ -140,6 +141,8 @@ if (config.process === "scheduler") {
       ? { serverCalls: { gatewayUrl: config.modelGatewayUrl, key: serverCallKey } }
       : {}),
     connectors: loadConnectorUrlPolicy(process.env),
+    // Single sign-on (KOBE-626): kill switch, SSRF exceptions, Helm providers and their secrets.
+    sso: { settings: loadSsoSettings(process.env) },
     auditForwardingDestinations: destinationsOf(config.auditForwarding),
     auditForwardingSecrets: forwardingSecrets(config.auditForwarding),
     ...(config.mcpProxyUrl && config.mcpProxyInternalKey

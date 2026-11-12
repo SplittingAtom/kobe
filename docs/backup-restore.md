@@ -249,7 +249,9 @@ transaction:
 - rows the server writes when it starts (`packages/db/src/startup-seeds.ts`): the gallery agents
   (not those a site admin customized, KOBE-494) with their published versions and the system's audit events for seeding them, and where the
   retention pass, the audit PII sweep and SIEM forwarding stand (`site_settings`), and the chart's
-  branding defaults (`branding.*`, KOBE-503) with the system's audit events for them. The started
+  branding defaults (`branding.*`, KOBE-503) with the system's audit events for them, and the
+  single sign-on providers the chart declares (`auth.sso.providers`, `managed_by = 'helm'`,
+  KOBE-626) with the system's audit events for them. The started
   site's own audit events go with them: the restored audit chain is the backup's, continued by
   the restore's event, which records the replaced chain's head and size
   (`replacedAuditHeadSeq`, `replacedAuditHeadHash`, `replacedAuditRows`). Audit anchors the
