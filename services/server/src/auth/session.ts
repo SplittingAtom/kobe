@@ -73,7 +73,11 @@ export function requireSession(deps: ServerDeps) {
         return c.json({ code: "unauthenticated", message: "Sign in to continue." }, 401);
       }
       // The run is still active and the person's sign-in from its start still live (review M1).
-      if (!(await delegationBacked(deps.database.db, delegation))) {
+      if (
+        !(await delegationBacked(deps.database.db, delegation, {
+          ssoEnabled: deps.sso.settings.enabled,
+        }))
+      ) {
         return c.json({ code: "unauthenticated", message: "Sign in to continue." }, 401);
       }
       if (!person.twoFactorEnabled && (await readRequireTwoFactor(deps))) {

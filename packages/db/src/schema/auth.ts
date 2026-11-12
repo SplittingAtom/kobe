@@ -64,6 +64,10 @@ export const users = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
+    // One setup Owner per site (re-review C).
+    uniqueIndex("users_setup_owner")
+      .on(t.setupOwner)
+      .where(sql`${t.setupOwner}`),
     check(
       "users_deactivated_via",
       sql`${t.deactivatedVia} IS NULL OR ${t.deactivatedVia} = 'admin' OR ${t.deactivatedVia} ~ '^scim:[0-9a-f-]{36}$'`,

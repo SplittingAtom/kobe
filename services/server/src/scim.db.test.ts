@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sessions, sessionSsoContexts, ssoIdentities, ssoProviders } from "@kobe/db";
 import { createApp } from "./app.js";
@@ -798,14 +799,19 @@ describe("security review fixes (KOBE-sso-review1)", () => {
   });
 
   it("protects the setup Owner by a durable flag, not by an audit row (finding 8)", async () => {
-    const setup = await h.deps.createUserWithPassword(
-      { email: "setup2@scim.test", name: "Setup", password: PASSWORD },
-      { recordSetup: true },
+    // The setup Owner made earlier in this file (recordSetup) carries the flag.
+    const flagged = await h.admin.query<{ email: string }>(
+      "SELECT email FROM users WHERE setup_owner",
     );
-    const flag = await h.admin.query("SELECT setup_owner FROM users WHERE id = $1", [setup.id]);
-    expect(flag.rows[0].setup_owner).toBe(true);
+    expect(flagged.rows).toEqual([{ email: "setup@scim.test" }]);
+    // At most one user carries it (partial unique index, re-review C).
+    const second = await h.createUser(`second.${randomUUID()}@scim.test`);
+    await expect(
+      h.admin.query("UPDATE users SET setup_owner = true WHERE id = $1", [second]),
+    ).rejects.toMatchObject({ code: "23505" });
     // A setup Owner with no audit row at all (e.g. the log was pruned) stays protected.
     const bare = await h.createUser(`bare.${randomUUID()}@scim.test`);
+    await h.admin.query("UPDATE users SET setup_owner = false WHERE setup_owner");
     await h.admin.query("UPDATE users SET setup_owner = true WHERE id = $1", [bare]);
     await h.deps.database.db.insert(ssoIdentities).values({
       providerId: providers.contoso ?? "",
@@ -822,5 +828,43 @@ describe("security review fixes (KOBE-sso-review1)", () => {
     expect(res.status).toBe(403);
     const row = await h.admin.query("SELECT deactivated_at FROM users WHERE id = $1", [bare]);
     expect(row.rows[0].deactivated_at).toBeNull();
+  });
+
+  it("re-checks who deactivated under the row lock when reactivating (re-review B)", async () => {
+    const t = tokens.contoso;
+    const created = await scim("POST", "/contoso/Users", t, {
+      userName: `race.${randomUUID()}@contoso.com`,
+      externalId: randomUUID(),
+      active: false,
+    });
+    const id: string = created.json.id;
+    // An admin's deactivation is in flight (row locked, not yet committed) when SCIM reactivates.
+    const admin = new pg.Client({ connectionString: h.adminUrl });
+    await admin.connect();
+    try {
+      await admin.query("BEGIN");
+      await admin.query("UPDATE users SET deactivated_via = 'admin' WHERE id = $1", [id]);
+      const pending = scim("PATCH", `/contoso/Users/${id}`, t, patch("active", true));
+      await expect
+        .poll(async () => {
+          const r = await h.admin.query(
+            `SELECT count(*)::int AS n FROM pg_stat_activity
+              WHERE wait_event_type = 'Lock' AND datname = current_database()`,
+          );
+          return r.rows[0].n as number;
+        })
+        .toBeGreaterThan(0);
+      await admin.query("COMMIT");
+      const res = await pending;
+      expect(res.status).toBe(403);
+      const row = await h.admin.query(
+        "SELECT deactivated_at, deactivated_via FROM users WHERE id = $1",
+        [id],
+      );
+      expect(row.rows[0].deactivated_at).not.toBeNull();
+      expect(row.rows[0].deactivated_via).toBe("admin");
+    } finally {
+      await admin.end();
+    }
   });
 });

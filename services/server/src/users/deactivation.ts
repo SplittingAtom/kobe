@@ -97,7 +97,36 @@ export async function reactivateUser(
   userId: string,
   options: ActivationOptions = {},
 ): Promise<boolean> {
+  return (await reactivate(db, userId, undefined, options)) === "reactivated";
+}
+
+/**
+ * Reactivates a user only when `via` deactivated them (SSO11: SCIM undoes only its own
+ * deactivation). The check and the update run in one transaction on the locked user row, so an
+ * admin's deactivation committed meanwhile wins (`refused`).
+ */
+export function reactivateUserIfVia(
+  db: KobeDb,
+  userId: string,
+  via: DeactivatedVia,
+  options: ActivationOptions = {},
+): Promise<"reactivated" | "unchanged" | "refused"> {
+  return reactivate(db, userId, via, options);
+}
+
+async function reactivate(
+  db: KobeDb,
+  userId: string,
+  via: DeactivatedVia | undefined,
+  options: ActivationOptions,
+): Promise<"reactivated" | "unchanged" | "refused"> {
   return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ at: users.deactivatedAt, via: users.deactivatedVia })
+      .from(users)
+      .where(eq(users.id, userId))
+      .for("update");
+    if (via !== undefined && row?.at && (row.via ?? "admin") !== via) return "refused";
     const changed = await tx
       .update(users)
       .set({ deactivatedAt: null, deactivatedVia: null, updatedAt: new Date() })
@@ -107,7 +136,7 @@ export async function reactivateUser(
     if (changed.length > 0) {
       await recordAudit(tx, { action: "identity.user.reactivated", target: { userId } });
     }
-    return changed.length > 0;
+    return changed.length > 0 ? "reactivated" : "unchanged";
   });
 }
 

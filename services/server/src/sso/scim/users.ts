@@ -15,7 +15,7 @@ import {
   type KobeTx,
 } from "@kobe/db";
 import { recordAudit } from "../../audit/record.js";
-import { deactivateUser, deactivatedVia, reactivateUser } from "../../users/deactivation.js";
+import { deactivateUser, deactivatedVia, reactivateUserIfVia } from "../../users/deactivation.js";
 import type { UserLifecycle } from "../../users/lifecycle.js";
 import type { UserFilter } from "./filter.js";
 import type { ScimType } from "./schemas.js";
@@ -357,16 +357,22 @@ async function refuseDeactivation(ctx: ScimContext, userId: string): Promise<Sci
  * deleted in the same transaction, egress told, invitations revoked) then the lifecycle hooks
  * (sandboxes, connector grants, schedules); `reactivateUser` the other way.
  */
-async function applyActive(ctx: ScimContext, userId: string, active: boolean): Promise<void> {
+async function applyActive(
+  ctx: ScimContext,
+  userId: string,
+  active: boolean,
+): Promise<ScimFailure | undefined> {
   const target = { providerId: ctx.provider.id, userId, credentialId: ctx.credentialId };
   if (active) {
-    const did = await reactivateUser(ctx.db, userId, {
+    // Checked again under the row lock: an admin's deactivation that landed meanwhile wins.
+    const outcome = await reactivateUserIfVia(ctx.db, userId, scimVia(ctx.provider), {
       inTx: async (tx, changed) => {
         if (changed) await recordAudit(tx, { action: "identity.scim.user.reactivated", target });
       },
     });
-    if (did) await ctx.lifecycle.emit("reactivated", userId);
-    return;
+    if (outcome === "refused") return refuseReactivation(ctx, userId);
+    if (outcome === "reactivated") await ctx.lifecycle.emit("reactivated", userId);
+    return undefined;
   }
   const did = await deactivateUser(ctx.db, userId, {
     via: scimVia(ctx.provider),
@@ -375,6 +381,7 @@ async function applyActive(ctx: ScimContext, userId: string, active: boolean): P
     },
   });
   if (did) await ctx.lifecycle.emit("deactivated", userId);
+  return undefined;
 }
 
 /**
@@ -469,7 +476,10 @@ export async function updateScimUser(
     if (clash) return clash;
     throw err;
   }
-  if (wantsActive !== undefined) await applyActive(ctx, userId, wantsActive);
+  if (wantsActive !== undefined) {
+    const refused = await applyActive(ctx, userId, wantsActive);
+    if (refused) return refused;
+  }
   const row = await readUser(ctx.db, ctx.provider.id, userId);
   return row ? { ok: true, value: row } : NOT_FOUND;
 }

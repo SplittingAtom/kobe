@@ -1,5 +1,5 @@
 {
-  "id": "352aecc7-00a5-4909-bd3f-50faf1191b67",
+  "id": "3db85866-9662-4413-b531-98048f07366b",
   "prevId": "5b4a413c-c3ae-4aa7-ab8a-d5f00ef868cb",
   "version": "7",
   "dialect": "postgresql",
@@ -732,7 +732,24 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "users_setup_owner": {
+          "name": "users_setup_owner",
+          "columns": [
+            {
+              "expression": "setup_owner",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"users\".\"setup_owner\"",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {

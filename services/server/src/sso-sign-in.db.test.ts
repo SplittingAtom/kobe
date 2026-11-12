@@ -762,6 +762,41 @@ describe("max_session_hours (review finding 9a)", () => {
   });
 });
 
+describe("max_session_hours against Better Auth's refresh (re-review A)", () => {
+  it("never lets a refresh push an SSO session past created_at + max hours", async () => {
+    await h.admin.query(`UPDATE sso_providers SET max_session_hours = 1 WHERE id = $1`, [corpId]);
+    try {
+      const user = entraUser();
+      const { browser } = await signInVia(entra, "corp", user);
+      // A capped session is "due" for Better Auth's refresh at once: get-session refreshes it.
+      const got = await browser.get("/api/auth/get-session");
+      expect(got.status, got.text).toBe(200);
+      const over = await h.admin.query<{ over: boolean }>(
+        `SELECT s.expires_at > s.created_at + interval '1 hour' AS over
+           FROM sessions s JOIN sso_identities i ON i.user_id = s.user_id WHERE i.subject = $1`,
+        [user.oid],
+      );
+      expect(over.rows).toEqual([{ over: false }]);
+      // Any later update of the expiry is capped as well.
+      await h.admin.query(
+        `UPDATE sessions s SET expires_at = now() + interval '30 days'
+           FROM sso_identities i WHERE i.user_id = s.user_id AND i.subject = $1`,
+        [user.oid],
+      );
+      const again = await h.admin.query<{ over: boolean }>(
+        `SELECT s.expires_at > s.created_at + interval '1 hour' AS over
+           FROM sessions s JOIN sso_identities i ON i.user_id = s.user_id WHERE i.subject = $1`,
+        [user.oid],
+      );
+      expect(again.rows).toEqual([{ over: false }]);
+    } finally {
+      await h.admin.query(`UPDATE sso_providers SET max_session_hours = NULL WHERE id = $1`, [
+        corpId,
+      ]);
+    }
+  });
+});
+
 describe("kill switch and live sessions (review finding 6)", () => {
   it("refuses SSO sessions while auth.sso.enabled is false; local sessions keep working", async () => {
     const { browser } = await signInVia(entra, "corp", entraUser());

@@ -31,6 +31,17 @@
 (bool, default false); backfills as above. New audit event `identity.scim.reactivation_refused`
 (`events.ts`, `docs/audit-log.md`).
 
+## Re-review follow-ups
+
+- **A:** `delegationBacked` takes `{ ssoEnabled }`: an SSO-backed session backs a Kobe MCP
+  delegation only while SSO is on and within `max_session_hours` (from its `created_at`). Trigger
+  `sessions_cap_sso_expiry` (0212) caps every `expires_at` update, so Better Auth's get-session
+  refresh can't outlive the cap. Tests: `kobe-mcp.db.test.ts`, `sso-sign-in.db.test.ts`.
+- **B:** SCIM reactivation re-checks `deactivated_via` and updates in one transaction on the
+  `FOR UPDATE`-locked user row (`reactivateUserIfVia`); race test in `scim.db.test.ts`.
+- **C:** partial unique index `users_setup_owner` (amended into 0212, not shipped); test in
+  `scim.db.test.ts`.
+
 ## Notes and limits
 
 - An unverified generic-OIDC `email` is still stored as the JIT user's address (needed to sign in);

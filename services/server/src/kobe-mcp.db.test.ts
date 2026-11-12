@@ -23,6 +23,7 @@ import { KOBE_BUILTIN_CONNECTOR_ID as PROTOCOL_KOBE_ID } from "@kobe/protocol";
 import { llmsTxt, PAGES } from "@kobe/guide";
 import { withTeam } from "@kobe/db";
 import { approvalKeyring } from "./approvals/index.js";
+import { delegationBacked } from "./kobe-mcp/delegation-live.js";
 import { kobeRunServer } from "./kobe-mcp/run.js";
 import { KOBE_ADMIN_TOOLS } from "./kobe-mcp/tools/index.js";
 import { createInternalApp } from "./routes/internal.js";
@@ -667,6 +668,43 @@ describe("review fixes (KOBE-619)", () => {
     );
     expect(again.status).toBe(200);
     expect((await call(s, "team_members_list", {})).isError).toBe(true);
+  });
+
+  it("SSO review A: an SSO-backed delegation obeys the kill switch and max_session_hours", async () => {
+    const w = await world();
+    const s = await sandboxFor(w.team, w.admin);
+    expect((await call(s, "team_members_list", {})).isError).toBeUndefined();
+    // The person's sessions are SSO sign-ins of a provider capping them at 1 hour.
+    const { rows } = await fx.admin.query<{ id: string }>(
+      `INSERT INTO sso_providers (slug, display_name, kind, issuer, client_id, subject_claim, access_claim, max_session_hours, managed_by)
+       VALUES ($1, 'P', 'oidc', 'https://idp.example.com', 'c', 'sub', 'groups', 1, 'helm') RETURNING id`,
+      [`p-${randomUUID().slice(0, 8)}`],
+    );
+    const providerId = rows[0]?.id;
+    await fx.admin.query(
+      `INSERT INTO session_sso_contexts (session_id, provider_id, mfa_satisfied)
+       SELECT id, $2, false FROM sessions WHERE user_id = $1`,
+      [w.admin.id, providerId],
+    );
+    const db = fx.replica(0).deps.database.db;
+    const d = {
+      userId: w.admin.id,
+      teamId: w.team,
+      runId: s.runId,
+      threadId: s.threadId,
+      toolCallId: "tc",
+    };
+    // This fixture runs with single sign-on off: the kill switch refuses the delegation.
+    expect(fx.replica(0).deps.sso.settings.enabled).toBe(false);
+    expect((await call(s, "team_members_list", {})).isError).toBe(true);
+    expect(await delegationBacked(db, d, { ssoEnabled: false })).toBe(false);
+    // With SSO on, the backing session counts while within its provider's hours.
+    expect(await delegationBacked(db, d, { ssoEnabled: true })).toBe(true);
+    await fx.admin.query(
+      `UPDATE sessions SET created_at = created_at - interval '2 hours' WHERE user_id = $1`,
+      [w.admin.id],
+    );
+    expect(await delegationBacked(db, d, { ssoEnabled: true })).toBe(false);
   });
 
   it("L3: the role change itself refuses another before-state (409 changed_since_approval)", async () => {

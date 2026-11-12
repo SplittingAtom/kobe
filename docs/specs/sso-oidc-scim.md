@@ -295,7 +295,9 @@ SSO-4 verifies this against a real tenant and adjusts the preset if needed.
 - Kobe keeps no refresh token, so a session never silently outlives the IdP's view. Optional
   `max_session_hours` per provider ends SSO sessions earlier than local ones: the new session's
   expiry is capped, and `requireSession` ends an SSO session once that many hours have passed
-  since sign-in (Better Auth's refresh can't extend it).
+  since sign-in. A trigger on `sessions` caps any update of `expires_at` at `created_at` + max
+  hours, so Better Auth's refresh can't extend it. A Kobe MCP delegation backed by an SSO session
+  obeys the same rules (kill switch, max hours).
 - **Kill switch.** With `auth.sso.enabled: false`, `requireSession` refuses every session that has
   a `session_sso_contexts` row, and the server deletes those sessions at start-up. Local sessions
   are untouched (break-glass). The access-mapping routes (`/v1/site/sso/...mappings`,
