@@ -24,7 +24,7 @@ access, which is time-boxed, read-only, audited and shown to the team.
   With single sign-on on, **Single sign-on** on a row shows the person's linked organization
   sign-ins (**Unlink**) and **Expect SSO link**: their next sign-in from the chosen provider links
   automatically when its verified address matches theirs and lies in one of the provider's
-  verified domains (once, within 14 days). The Owner links only by signing in themselves.
+  verified domains (once, within 14 days). The Owner and Admins link only by signing in themselves.
 - **Invitations**: invite people by email; resend or revoke open invitations.
 - **Site roles**: who is Owner and who are Admins.
 

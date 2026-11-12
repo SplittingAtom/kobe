@@ -41,8 +41,9 @@ export type SsoUserOutcome =
       readonly failure: SsoFailure;
       readonly userId?: string;
       /**
-       * The identity is unlinked and carries an address: the callback leaves a link intent, so a
-       * local sign-in as the owner of that address links it (§6 local proof). Set alike for
+       * The identity is unlinked and carries a verified address: the callback leaves a link
+       * intent, so a local sign-in as the owner of that address can link it after confirming
+       * (§6 local proof, review M1). Set alike for
        * `link_required` and `no_access`, so nothing tells whether the address has an account.
        */
       readonly linkIntent?: { readonly subject: string; readonly email: string };
@@ -60,7 +61,9 @@ const refuseLinkable = (
   ok: false,
   failure,
   ...(userId === undefined ? {} : { userId }),
-  ...(identity.email === null
+  // Only a verified address (review M1): an unverified one names nobody, so a self-set `email`
+  // can never steer a local proof onto someone else's account.
+  ...(identity.email === null || !identity.emailVerified
     ? {}
     : { linkIntent: { subject: identity.subject, email: identity.email } }),
 });

@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { SsoSignIn } from "../../components/auth/sso-sign-in";
 import { useBranding } from "../../components/shell/branding-context";
+import { getPendingSsoLink } from "../../lib/admin/api/site/sso-links";
 import { authClient } from "../../lib/auth-client";
 import { ssoErrorMessage } from "../../lib/sso-errors";
 
@@ -21,7 +22,12 @@ export default function SignInPage() {
     if (message) setError(message);
   }, []);
 
-  const done = () => window.location.assign("/");
+  // A local sign-in that followed an SSO attempt may have staged a link: confirm it first
+  // (KOBE-630 review M1); otherwise straight to the app.
+  const done = async () => {
+    const pending = await getPendingSsoLink().catch(() => null);
+    window.location.assign(pending?.ok && pending.data ? "/link-sign-in" : "/");
+  };
 
   async function onPassword(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -33,7 +39,7 @@ export default function SignInPage() {
     if (res.error) return setError("Email or password is incorrect.");
     if ((res.data as { twoFactorRedirect?: boolean } | null)?.twoFactorRedirect)
       return setStep("totp");
-    done();
+    await done();
   }
 
   async function onTotp(e: FormEvent<HTMLFormElement>) {
@@ -41,13 +47,13 @@ export default function SignInPage() {
     const code = String(new FormData(e.currentTarget).get("code") ?? "");
     const res = await authClient.twoFactor.verifyTotp({ code });
     if (res.error) return setError("That code didn't work. Try the current one.");
-    done();
+    await done();
   }
 
   async function onPasskey() {
     const res = await authClient.signIn.passkey();
     if (res?.error) return setError("Passkey sign-in failed.");
-    done();
+    await done();
   }
 
   return (

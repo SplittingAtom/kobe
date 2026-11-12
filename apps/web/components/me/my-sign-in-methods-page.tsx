@@ -57,7 +57,7 @@ export function MySignInMethodsPage() {
     <>
       <PageHeader
         title="Sign-in methods"
-        description="Your organization's sign-ins linked to this Kobe account. To link one, sign in with it once, then sign in here with your password or passkey within 10 minutes."
+        description="Your organization's sign-ins linked to this Kobe account. To link one, sign in with it once, then sign in here with your password or passkey within 10 minutes and confirm."
       />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       {state.status === "loading" && <p role="status">Loading sign-in methods…</p>}

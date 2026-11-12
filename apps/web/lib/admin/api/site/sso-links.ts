@@ -79,3 +79,23 @@ export const LINKED_VIA_LABEL: Readonly<Record<SsoLink["linkedVia"], string>> = 
   admin_expected: "Linked by an admin",
   scim: "Provisioned",
 };
+
+/** A local proof waiting for the signed-in user's confirmation (review M1). */
+export interface PendingSsoLink {
+  readonly providerId: string;
+  readonly providerName: string;
+  readonly email: string;
+}
+
+export async function getPendingSsoLink(): Promise<ApiResult<PendingSsoLink | null>> {
+  const res = await apiRequest<{ pending: PendingSsoLink | null }>("/v1/me/sso/pending-link");
+  return res.ok ? { ...res, data: res.data.pending } : res;
+}
+
+export function confirmPendingSsoLink(): Promise<ApiResult<{ linked: true }>> {
+  return apiRequest("/v1/me/sso/pending-link/confirm", { method: "POST" });
+}
+
+export function discardPendingSsoLink(): Promise<ApiResult<{ discarded: true }>> {
+  return apiRequest("/v1/me/sso/pending-link", { method: "DELETE" });
+}

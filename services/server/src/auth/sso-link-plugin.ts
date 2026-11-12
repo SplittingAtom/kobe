@@ -4,6 +4,7 @@ import type { KobeDb } from "@kobe/db";
 import { logger } from "../logger.js";
 import { LinkIntentBox, consumeLinkIntent } from "../sso/link-intent.js";
 import { linkByLocalProof } from "../sso/linking.js";
+import { stagePendingLink } from "../sso/pending-link.js";
 import type { SsoSettings } from "../sso/settings.js";
 import { linkIntentCookieName } from "./sso-plugin.js";
 
@@ -28,8 +29,9 @@ export interface SsoLinkPluginOptions {
 /**
  * The local-proof half of account linking (spec sso-oidc-scim §6, KOBE-630). After a local sign-in
  * that **completes** (a password without TOTP, the TOTP or backup-code step of a pending sign-in,
- * or a passkey) in a browser holding a link intent, the intent is spent: the identity is linked
- * (`local_proof`) when the signed-in user's address equals the intent's, else discarded. A failed
+ * or a passkey) in a browser holding a link intent, the intent is spent: when the signed-in
+ * user's address equals the intent's, the identity is staged for that session and linked only
+ * once the person confirms it (`/v1/me/sso/pending-link`, review M1); otherwise it is discarded. A failed
  * attempt or a pending TOTP challenge keeps the intent for the next try; enrolment with a session
  * never counts. Register after the two-factor and passkey plugins: the two-factor after hook turns
  * a password sign-in with TOTP into a challenge (no `newSession`), which must be seen here.
@@ -72,8 +74,12 @@ export function ssoLinkPlugin(options: SsoLinkPluginOptions) {
             if (!intent) return;
             try {
               if (!(await consumeLinkIntent(options.db, intent))) return;
-              const outcome = await linkByLocalProof(options.db, intent, signedIn.user.id);
-              if (outcome !== "linked") {
+              const userId = signedIn.user.id;
+              const outcome = await linkByLocalProof(options.db, intent, userId, { commit: false });
+              if (outcome === "ready") {
+                // Nothing is linked yet: the person confirms on the next screen (review M1).
+                await stagePendingLink(options.db, signedIn.session.id, intent, userId);
+              } else {
                 logger.info({ outcome }, "single sign-on link intent discarded");
               }
             } catch (err) {

@@ -102,11 +102,11 @@ afterAll(async () => {
   await h?.close();
 });
 
-/** An Entra identity whose UPN (verified in contoso.com) is `upn`. */
+/** An Entra member identity whose UPN (verified in contoso.com) is `upn`. */
 const entraUser = (upn: string, over: Record<string, unknown> = {}) => ({
   oid: oid(),
   name: "Grace Hopper",
-  preferred_username: upn,
+  upn,
   roles: ["kobe.research.member"],
   amr: ["pwd", "mfa"],
   auth_time: Math.floor(Date.now() / 1000) - 5,
@@ -132,6 +132,15 @@ async function passwordSignIn(browser: TestBrowser, email: string) {
   const res = await browser.post("/api/auth/sign-in/email", { email, password: PASSWORD });
   expect(res.status, res.text).toBe(200);
   return res;
+}
+
+/** The confirmation step (review M1): the staged identity, then POST confirm. */
+async function confirmLink(browser: TestBrowser, provider = "Contoso") {
+  const pending = await browser.get("/v1/me/sso/pending-link");
+  expect(pending.status, pending.text).toBe(200);
+  expect(pending.json.pending).toMatchObject({ providerName: provider });
+  const res = await browser.post("/v1/me/sso/pending-link/confirm");
+  expect(res.status, res.text).toBe(200);
 }
 
 async function linksOf(userId: string) {
@@ -178,6 +187,14 @@ describe("local proof (§6)", () => {
     expect(await sso(idp, b)).toBe("not_allowed");
     await passwordSignIn(b, email);
     expect(b.cookies.has(LINK_COOKIE)).toBe(false);
+    // Review M1: nothing is linked until the signed-in user confirms on the next screen.
+    expect(await linksOf(userId)).toEqual([]);
+    expect((await b.get("/v1/me/sso/pending-link")).json.pending).toEqual({
+      providerId: corpId,
+      providerName: "Contoso",
+      email,
+    });
+    await confirmLink(b);
     expect(await linksOf(userId)).toEqual([
       { provider_id: corpId, subject: idp.oid, linked_via: "local_proof" },
     ]);
@@ -226,6 +243,7 @@ describe("local proof (§6)", () => {
     expect(b.cookies.has(LINK_COOKIE)).toBe(true);
     const second = await b.post("/api/auth/two-factor/verify-totp", { code: totpFromUri(uri) });
     expect(second.status, second.text).toBe(200);
+    await confirmLink(b);
     expect((await linksOf(userId)).map((l) => l.linked_via)).toEqual(["local_proof"]);
   });
 
@@ -247,6 +265,7 @@ describe("local proof (§6)", () => {
       response: authenticator.authenticate(authOptions.json),
     });
     expect(verified.status, verified.text).toBe(200);
+    await confirmLink(b);
     expect((await linksOf(userId)).map((l) => l.linked_via)).toEqual(["local_proof"]);
   });
 
@@ -262,10 +281,13 @@ describe("local proof (§6)", () => {
     await passwordSignIn(b, otherEmail);
     expect(b.cookies.has(LINK_COOKIE)).toBe(false);
     expect(await linksOf(otherId)).toEqual([]);
+    expect((await b.get("/v1/me/sso/pending-link")).json.pending).toBeNull();
+    expect((await b.post("/v1/me/sso/pending-link/confirm")).status).toBe(404);
     // The intent is spent server-side too: replaying its cookie with the right user links nothing.
     const replay = h.browser();
     replay.cookies.set(LINK_COOKIE, spent);
     await passwordSignIn(replay, email);
+    expect((await replay.get("/v1/me/sso/pending-link")).json.pending).toBeNull();
     expect(await linksOf(victimId)).toEqual([]);
     expect(await audits("identity.sso.link.created", victimId)).toEqual([]);
   });
@@ -279,6 +301,7 @@ describe("local proof (§6)", () => {
     expect(wrong.status).toBe(401);
     expect(b.cookies.has(LINK_COOKIE)).toBe(true);
     await passwordSignIn(b, email);
+    await confirmLink(b);
     expect((await linksOf(userId)).map((l) => l.linked_via)).toEqual(["local_proof"]);
 
     const forgedEmail = address("forged");
@@ -287,6 +310,44 @@ describe("local proof (§6)", () => {
     forged.cookies.set(LINK_COOKIE, "A".repeat(120));
     await passwordSignIn(forged, forgedEmail);
     expect(await linksOf(forgedId)).toEqual([]);
+  });
+
+  it("review M1: an unverified address gets no intent at all", async () => {
+    const email = address("self-set", "kc.test");
+    const userId = await h.createUser(email);
+    const b = h.browser();
+    const unverified = { sub: `kc-${oid()}`, email, email_verified: false, groups: ["g-research"] };
+    expect(await sso(unverified, b, kc, "kc")).toBe("not_allowed");
+    expect(b.cookies.has(LINK_COOKIE)).toBe(false);
+    await passwordSignIn(b, email);
+    expect((await b.get("/v1/me/sso/pending-link")).json.pending).toBeNull();
+    expect(await linksOf(userId)).toEqual([]);
+  });
+
+  it("review M1: a staged link can be declined, and belongs to the session that signed in", async () => {
+    const email = address("decline");
+    const userId = await h.createUser(email);
+    const b = h.browser();
+    expect(await sso(entraUser(email), b)).toBe("not_allowed");
+    await passwordSignIn(b, email);
+    // Another session of the same user sees nothing to confirm.
+    const other = await h.signIn(email);
+    expect((await other.get("/v1/me/sso/pending-link")).json.pending).toBeNull();
+    expect((await other.post("/v1/me/sso/pending-link/confirm")).status).toBe(404);
+    // A cross-origin confirmation is refused by the API's CSRF check.
+    const csrf = await b.request(
+      "POST",
+      "/v1/me/sso/pending-link/confirm",
+      {},
+      {
+        origin: "https://evil.example",
+      },
+    );
+    expect(csrf.status).toBe(403);
+    expect((await b.delete("/v1/me/sso/pending-link")).status).toBe(200);
+    expect((await b.post("/v1/me/sso/pending-link/confirm")).status).toBe(404);
+    expect(await linksOf(userId)).toEqual([]);
+    expect(await audits("identity.sso.link.created", userId)).toEqual([]);
   });
 
   it("an unmapped identity gets the same answer and intent (nothing tells the address exists)", async () => {
@@ -363,10 +424,21 @@ describe("admin-expected links (§6)", () => {
     expect(await linksOf(userId)).toEqual([]);
   });
 
-  it("SSO10: refuses an expectation for the setup Owner and for the Owner", async () => {
+  it("SSO10 + review M3: refuses an expectation for the setup Owner and any site Admin", async () => {
     const res = await expect_(ownerId);
     expect(res.status).toBe(409);
     expect(res.json.code).toBe("protected_user");
+    const adminId = await h.createUser(address("site-admin"), "admin");
+    const admin = await expect_(adminId);
+    expect(admin.status).toBe(409);
+    expect(admin.json.code).toBe("protected_user");
+    // Promoted after the expectation: refused at link time too.
+    const email = address("promoted");
+    const userId = await h.createUser(email);
+    expect((await expect_(userId)).status).toBe(200);
+    await h.admin.query(`INSERT INTO site_roles (user_id, role) VALUES ($1, 'admin')`, [userId]);
+    expect(await sso(entraUser(email), h.browser())).toBe("not_allowed");
+    expect(await linksOf(userId)).toEqual([]);
   });
 
   it("withdraws an expectation (audited); only the Owner acts on Admins", async () => {
@@ -399,6 +471,7 @@ describe("unlink (§6, §9)", () => {
     const b = h.browser();
     expect(await sso(idp, b)).toBe("not_allowed");
     await passwordSignIn(b, email);
+    await confirmLink(b);
     const ssoBrowser = h.browser();
     expect(await sso(idp, ssoBrowser)).toBeNull();
     return { email, userId, idp, local: b, ssoBrowser };
@@ -434,6 +507,90 @@ describe("unlink (§6, §9)", () => {
     expect(byAdmin.status).toBe(409);
   });
 
+  it("review M2: an SSO session Better Auth rotates (TOTP enrolment, password change) still ends at unlink", async () => {
+    const who = await linkedLocal("rotate");
+    const enable = await who.ssoBrowser.post("/api/auth/two-factor/enable", {
+      password: PASSWORD,
+    });
+    expect(enable.status, enable.text).toBe(200);
+    const before = (await who.ssoBrowser.get("/v1/me")).status;
+    expect(before).toBe(200);
+    const verify = await who.ssoBrowser.post("/api/auth/two-factor/verify-totp", {
+      code: totpFromUri(enable.json.totpURI as string),
+    });
+    expect(verify.status, verify.text).toBe(200);
+    const change = await who.ssoBrowser.post("/api/auth/change-password", {
+      currentPassword: PASSWORD,
+      newPassword: PASSWORD,
+    });
+    expect(change.status, change.text).toBe(200);
+    const { rows } = await h.admin.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM sessions s JOIN session_sso_contexts c ON c.session_id = s.id
+        WHERE s.user_id = $1`,
+      [who.userId],
+    );
+    expect(rows[0]?.n).toBe(1);
+    expect(await me(who.ssoBrowser)).toBe(who.userId);
+    const res = await owner.delete(`/v1/site/sso/users/${who.userId}/links/${corpId}`);
+    expect(res.status, res.text).toBe(200);
+    expect(res.json.sessionsEnded).toBe(1);
+    expect(await me(who.ssoBrowser)).toBeNull();
+  });
+
+  it("review M2: a non-MFA SSO session can't turn two-factor off", async () => {
+    const who = await linkedLocal("disable");
+    const enable = await who.local.post("/api/auth/two-factor/enable", { password: PASSWORD });
+    await who.local.post("/api/auth/two-factor/verify-totp", {
+      code: totpFromUri(enable.json.totpURI as string),
+    });
+    const weak = h.browser();
+    expect(await sso({ ...who.idp, amr: ["pwd"] }, weak)).toBeNull();
+    const off = await weak.post("/api/auth/two-factor/disable", { password: PASSWORD });
+    expect(off.status).toBe(403);
+    expect(off.json.code).toBe("SSO_MFA_REQUIRED");
+    const { rows } = await h.admin.query(`SELECT two_factor_enabled FROM users WHERE id = $1`, [
+      who.userId,
+    ]);
+    expect(rows[0]).toEqual({ two_factor_enabled: true });
+  });
+
+  it("review L2: a link to a disabled provider is no way to sign in; nor is a removed passkey", async () => {
+    const b = h.browser();
+    expect(await sso(entraUser(address("two-links")), b)).toBeNull();
+    const userId = (await me(b)) ?? "";
+    await h.admin.query(
+      `INSERT INTO sso_identities (provider_id, subject, user_id, linked_via) VALUES ($1, $2, $3, 'jit')`,
+      [kcId, `kc-${oid()}`, userId],
+    );
+    await h.admin.query(`UPDATE sso_providers SET enabled = false WHERE id = $1`, [kcId]);
+    try {
+      const res = await b.delete(`/v1/me/sso/links/${corpId}`);
+      expect(res.status).toBe(409);
+      expect(res.json.code).toBe("last_sign_in_method");
+    } finally {
+      await h.admin.query(`UPDATE sso_providers SET enabled = true WHERE id = $1`, [kcId]);
+    }
+
+    // A passkey-only account (no password, no link) keeps its last passkey.
+    const email = address("pk-only");
+    const pkUser = await h.createUser(email);
+    const authenticator = new SoftwareAuthenticator("kobe.test", "http://kobe.test");
+    const local = await h.signIn(email);
+    const options = await local.get("/api/auth/passkey/generate-register-options");
+    await local.post("/api/auth/passkey/verify-registration", {
+      response: authenticator.register(options.json),
+      name: "only",
+    });
+    await h.admin.query(`DELETE FROM accounts WHERE user_id = $1`, [pkUser]);
+    const { rows } = await h.admin.query<{ id: string }>(
+      `SELECT id FROM passkeys WHERE user_id = $1`,
+      [pkUser],
+    );
+    const del = await local.post("/api/auth/passkey/delete-passkey", { id: rows[0]?.id });
+    expect(del.status).toBe(403);
+    expect(del.json.code).toBe("LAST_SIGN_IN_METHOD");
+  });
+
   it("Site console: an admin unlinks (audited by: admin)", async () => {
     const who = await linkedLocal("unlink-admin");
     const res = await owner.delete(`/v1/site/sso/users/${who.userId}/links/${corpId}`);
@@ -459,6 +616,7 @@ describe("the setup Owner keeps local sign-in (SSO10)", () => {
     const b = h.browser();
     expect(await sso(idp, b)).toBe("not_allowed");
     await passwordSignIn(b, "owner@contoso.com");
+    await confirmLink(b);
     expect((await linksOf(ownerId)).map((l) => l.linked_via)).toEqual(["local_proof"]);
 
     const ssoSession = h.browser();
@@ -476,6 +634,10 @@ describe("the setup Owner keeps local sign-in (SSO10)", () => {
     });
     expect(unlinkAccount.status).toBe(403);
     expect(unlinkAccount.json.code).toBe("SETUP_OWNER_LOCAL_ONLY");
+    // Review L3: nor its authenticator app.
+    const off = await ssoSession.post("/api/auth/two-factor/disable", { password: PASSWORD });
+    expect(off.status).toBe(403);
+    expect(off.json.code).toBe("SETUP_OWNER_LOCAL_ONLY");
     const creds = await h.admin.query(
       `SELECT (SELECT count(*)::int FROM passkeys WHERE user_id = $1) AS passkeys,
               (SELECT count(*)::int FROM accounts WHERE user_id = $1 AND provider_id = 'credential') AS passwords`,

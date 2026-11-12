@@ -6,7 +6,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
   // One code for "no access" and "an account with this address exists" (the page never reveals
   // whether an address has an account).
   not_allowed:
-    "Your organization's sign-in can't be used for this site yet. If you already have an account here, sign in below with your password or passkey within 10 minutes: that links your organization's sign-in to it. Otherwise ask your administrator for access.",
+    "Your organization's sign-in can't be used for this site yet. If you already have an account here, sign in below with your password or passkey within 10 minutes; you'll then be asked to confirm linking your organization's sign-in to it. Otherwise ask your administrator for access.",
   deactivated: "This account is deactivated. Ask a site admin to reactivate it.",
   mfa_missing:
     "Your organization's sign-in did not include multi-factor authentication, which this site requires. Ask your administrator about Conditional Access.",

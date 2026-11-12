@@ -8,7 +8,9 @@ import {
   jwks,
   passkeys,
   rateLimits,
+  and,
   eq,
+  gt,
   sessions,
   sessionSsoContexts,
   twoFactors,
@@ -31,6 +33,7 @@ import {
   releaseResetLinkClaim,
   revokeResetLinks,
 } from "./reset-links.js";
+import { passkeyIsLastSignIn } from "../sso/linking.js";
 import { ssoLinkPlugin } from "./sso-link-plugin.js";
 import { ssoPlugin, SSO_RATE_LIMITS, type SsoRuntime } from "./sso-plugin.js";
 import { isUserVerified } from "./webauthn-flags.js";
@@ -93,6 +96,8 @@ const SSO_ONLY_ACCOUNT = {
  */
 const MFA_GUARDED_PATHS = new Set([
   ...LOCAL_CREDENTIAL_PATHS,
+  // Removing a factor too (KOBE-630 review M2): it would also rotate the session.
+  "/two-factor/disable",
   "/two-factor/get-totp-uri",
   "/two-factor/verify-totp",
   "/two-factor/generate-backup-codes",
@@ -114,16 +119,21 @@ async function ssoSessionWithoutMfa(db: KobeDb, sessionId: string): Promise<bool
 }
 
 /**
- * Endpoints that remove a local credential: refused from an SSO session of the setup Owner
+ * Endpoints that remove a local credential or factor: refused from an SSO session of the setup Owner
  * (SSO10, KOBE-630), so no single sign-on path can take away the break-glass identity's password
  * or passkey. From a local session the Owner manages them as before.
  */
-const LOCAL_CREDENTIAL_REMOVAL_PATHS = new Set(["/passkey/delete-passkey", "/unlink-account"]);
+const LOCAL_CREDENTIAL_REMOVAL_PATHS = new Set([
+  "/passkey/delete-passkey",
+  "/unlink-account",
+  // Its second factor too (review L3).
+  "/two-factor/disable",
+]);
 
 const SETUP_OWNER_LOCAL_ONLY = {
   code: "SETUP_OWNER_LOCAL_ONLY",
   message:
-    "The setup Owner's password and passkeys can only be removed from a session signed in with them, not through single sign-on.",
+    "The setup Owner's password, passkeys and authenticator app can only be removed from a session signed in with them, not through single sign-on.",
 };
 
 /** The session is an SSO session of the setup Owner. */
@@ -138,6 +148,35 @@ async function setupOwnerSsoSession(
     .where(eq(sessionSsoContexts.sessionId, session.id));
   return row?.setupOwner === true;
 }
+
+/**
+ * Endpoints after which Better Auth replaces the session with a new one (new id, old one deleted):
+ * an SSO session's `session_sso_contexts` row is carried over to the new session (KOBE-630 review
+ * M2), so unlink, the kill switch, max hours and the MFA and setup-Owner guards keep applying.
+ */
+const SESSION_ROTATING_PATHS = new Set([
+  "/two-factor/enable",
+  "/two-factor/disable",
+  "/two-factor/verify-totp",
+  "/two-factor/verify-backup-code",
+  "/two-factor/verify-otp",
+  "/change-password",
+]);
+
+type SsoContextRow = typeof sessionSsoContexts.$inferSelect;
+
+async function ssoContextOf(db: KobeDb, sessionId: string): Promise<SsoContextRow | undefined> {
+  const [row] = await db
+    .select()
+    .from(sessionSsoContexts)
+    .where(eq(sessionSsoContexts.sessionId, sessionId));
+  return row;
+}
+
+const LAST_SIGN_IN_METHOD = {
+  code: "LAST_SIGN_IN_METHOD",
+  message: "This passkey is your only way to sign in to Kobe, so it can't be removed.",
+};
 
 const PASSKEY_VERIFY_PATHS = new Set([
   "/passkey/verify-registration",
@@ -161,6 +200,11 @@ export function createAuth({
   sso,
 }: AuthOptions) {
   const origin = new URL(publicUrl);
+  // The SSO context of the session a rotating endpoint started from, keyed by the shared Request.
+  const rotatingFrom = new WeakMap<
+    object,
+    { userId: string; createdAt: Date; context: SsoContextRow }
+  >();
 
   /**
    * Mails a reset link, off the request path: the response (and its timing) is the same whether or
@@ -291,6 +335,28 @@ export function createAuth({
             throw new APIError("FORBIDDEN", SSO_MFA_REQUIRED);
           }
         }
+        if (SESSION_ROTATING_PATHS.has(ctx.path) && ctx.request) {
+          const current = await getSessionFromCtx(ctx).catch(() => null);
+          const context = current ? await ssoContextOf(db, current.session.id) : undefined;
+          if (current && context) {
+            rotatingFrom.set(ctx.request, {
+              userId: current.user.id,
+              createdAt: new Date(current.session.createdAt),
+              context,
+            });
+          }
+        }
+        if (ctx.path === "/passkey/delete-passkey") {
+          const current = await getSessionFromCtx(ctx).catch(() => null);
+          const id = (ctx.body as { id?: unknown } | undefined)?.id;
+          if (
+            current &&
+            typeof id === "string" &&
+            (await passkeyIsLastSignIn(db, current.user.id, id))
+          ) {
+            throw new APIError("FORBIDDEN", LAST_SIGN_IN_METHOD);
+          }
+        }
         if (LOCAL_CREDENTIAL_REMOVAL_PATHS.has(ctx.path)) {
           const current = await getSessionFromCtx(ctx).catch(() => null);
           if (current && (await setupOwnerSsoSession(db, current.session))) {
@@ -315,6 +381,25 @@ export function createAuth({
         return undefined;
       }),
       after: createAuthMiddleware(async (ctx) => {
+        // Carry an SSO session's context over to the session Better Auth replaced it with.
+        const from = ctx.request ? rotatingFrom.get(ctx.request) : undefined;
+        const next = ctx.context.newSession;
+        if (
+          from &&
+          next &&
+          next.user.id === from.userId &&
+          next.session.id !== from.context.sessionId
+        ) {
+          await db
+            .insert(sessionSsoContexts)
+            .values({ ...from.context, sessionId: next.session.id })
+            .onConflictDoNothing();
+          // max_session_hours counts from the original sign-in, not from the rotation.
+          await db
+            .update(sessions)
+            .set({ createdAt: from.createdAt })
+            .where(and(eq(sessions.id, next.session.id), gt(sessions.createdAt, from.createdAt)));
+        }
         // A changed password also kills any reset link still in a mailbox.
         if (
           ctx.path === "/change-password" &&

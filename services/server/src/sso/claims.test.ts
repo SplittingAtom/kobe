@@ -150,10 +150,25 @@ describe("checkIdTokenClaims", () => {
     it("Entra: ignores an unverified email claim and takes the UPN instead", () => {
       // A tenant user sets their own mail attribute to someone else's address.
       const r = check(
-        entraClaims({ email: "victim@kobe-customer.com", preferred_username: "eve@contoso.com" }),
+        entraClaims({ email: "victim@kobe-customer.com", upn: "eve@contoso.com" }),
         CORP,
       );
       expect(r.ok && r.identity).toMatchObject({ email: "eve@contoso.com", emailVerified: true });
+    });
+
+    it("Entra: preferred_username and guest UPNs are never verified (KOBE-630 review L1)", () => {
+      const fallback = check(entraClaims({ preferred_username: "eve@contoso.com" }), CORP);
+      expect(fallback.ok && fallback.identity).toMatchObject({
+        email: "eve@contoso.com",
+        emailVerified: false,
+      });
+      const ext = check(entraClaims({ upn: "eve_gmail.com#EXT#@contoso.com" }), CORP);
+      expect(ext.ok && ext.identity.emailVerified).toBe(false);
+      const foreignIdp = check(
+        entraClaims({ upn: "eve@contoso.com", idp: "https://sts.windows.net/other/" }),
+        CORP,
+      );
+      expect(foreignIdp.ok && foreignIdp.identity.emailVerified).toBe(false);
     });
 
     it("Entra: prefers upn over preferred_username", () => {

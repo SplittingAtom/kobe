@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (commits on `kobe-630-sso-linking`, not pushed)
+- **Status:** in review (commits on `kobe-630-sso-linking`, not pushed; review fixes applied)
 - **Branch / worktree:** `kobe-630-sso-linking` in `../Kobe-wt630`, from group branch `kobe-sso`
   at `e551da08`
 - **Depends on:** KOBE-628 (sign-in), KOBE-629 (MFA), KOBE-631 (reset guard), KOBE-sso-review1.
@@ -54,6 +54,32 @@ user_id)` PK, `created_by`, `created_at`, `expires_at > created_at`; cascades wi
 - **Guide**: `getting-started/layout.md` (profile menu), `admin/site-admin.md` (Users bullet).
 - No new dependency.
 
+## Review fixes (`review-630.md`, follow-up commit)
+
+- **M1**: an intent is issued only for a **verified** address; a local sign-in no longer links.
+  It stages the identity for that session (`sso/pending-link.ts`, `verifications`, 10 min). The
+  sign-in page goes to `/link-sign-in` (`components/auth/confirm-sso-link.tsx`), which names the
+  provider and address. **Link** = `POST /v1/me/sso/pending-link/confirm` (same-origin CSRF check;
+  never from a delegated session); **Don't link** = `DELETE`. Other sessions see nothing.
+- **M2**: `auth.ts` carries `session_sso_contexts` (and the original `sessions.created_at`, so
+  max hours still count from sign-in) over to the session Better Auth makes in
+  `/two-factor/enable|disable|verify-totp|verify-backup-code|verify-otp` and `/change-password`.
+  `/two-factor/disable` is MFA-guarded too.
+- **M3**: expected links are refused for every site-role holder (as well as the setup Owner), and
+  checked again at link time (covers a later promotion).
+- **L1**: an Entra address counts as verified only from `upn` (not `preferred_username`), and
+  never for guests (`#EXT#`, or `idp` ≠ `iss`).
+- **L2**: "only way to sign in" counts links to **enabled** providers only and locks the
+  password/passkey rows. `/passkey/delete-passkey` is refused (`LAST_SIGN_IN_METHOD`) when it would
+  remove the last method (checked on the locked user row). Residual race: Better Auth's delete
+  runs outside that transaction. In practice it needs a passkey-only account, which Kobe doesn't
+  create (invitations set a password, SSO-made users can't add passkeys).
+- **L3**: setup-Owner guard also covers `/two-factor/disable`.
+- **Info**: I1 rate limits as described (no `/sso/link/*` endpoint); I2 a groups-overage sign-in
+  gets no intent, so >200-group users can't link by local proof (follow-up: issue the intent for
+  overage when SCIM supplies groups); I3 jwt-plugin tokens of unlinked sessions live ≤ 5 min;
+  I4 migration/grants confirmed.
+
 ## Decisions
 
 - **"(Entra) `xms_edov: true`" read as "a verified address"** (`VerifiedIdentity.emailVerified`):
@@ -61,9 +87,9 @@ user_id)` PK, `created_by`, `created_at`, `expires_at > created_at`; cascades wi
   counts as verified only inside `allowed_email_domains` (tenant-controlled, not user-editable).
   Requiring the raw `xms_edov` would make expected links impossible for UPN-only tenants. Generic
   OIDC needs `email_verified === true`.
-- **Expectations refused for the setup Owner and the current Owner** (`409 protected_user`),
-  re-checked at link time: the break-glass identity links only by its own local proof (SSO10).
-  Linking it by local proof is allowed: SSO9/SSO10 keep its local password/passkey.
+- **Expectations refused for the setup Owner and site-role holders** (`409 protected_user`, review
+  M3), re-checked at link time; they link only by their own local proof (SSO10), which keeps
+  their local password/passkey.
 - **Link intent for `no_access` too** (unlinked, has an address): uniform with `link_required`.
   Harmless when no user has the address; invitation acceptance is not a local-proof path.
 - **A link survives a later `no_access`**: an expected or proven link whose mapping gives no team
@@ -76,8 +102,6 @@ user_id)` PK, `created_by`, `created_at`, `expires_at > created_at`; cascades wi
 
 ## Open questions (for Chris or the coordinator)
 
-- Should a site Admin (not only the Owner) also be excluded from expected links? Today only the
-  Owner may set one for an Admin.
 - Kill switch: a pending intent is discarded (never linked) while `auth.sso.enabled` is false; not
   covered by its own test (same middleware as the other SSO routes).
 
@@ -95,7 +119,7 @@ user_id)` PK, `created_by`, `created_at`, `expires_at > created_at`; cascades wi
 
 ## Evidence (acceptance criteria → tests)
 
-`services/server/src/sso-linking.db.test.ts` (16 tests, mock IdP):
+`services/server/src/sso-linking.db.test.ts` (21 tests, mock IdP; review tests named "review …"):
 
 - **ac-1** "ac-1: the same email never links on its own" (Entra email with `xms_edov`, twice; no
   link, no session); expected link with an unverified generic email → no link.
