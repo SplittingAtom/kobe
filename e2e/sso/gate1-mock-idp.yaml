@@ -1,0 +1,113 @@
+# The mock identity provider for the browser SSO spec on a shared deployment (KOBE-634,
+# e2e/browser/tests/sso.spec.ts). Applied by e2e/sso/gate1-mock-idp.sh, which fills the __X__
+# placeholders and creates the Secrets and the code ConfigMap first.
+#
+# The mock runs as its own generic OIDC provider with an issuer at its in-cluster name
+# (https://__HOST__/__TENANT__/v2.0): it never answers for login.microsoftonline.com and needs no
+# DNS change, so a real Entra provider on the same site is untouched. The server reaches it on the
+# Service's https port (private CA via server.extraCaBundle, address via
+# auth.sso.allowedInternalCidrs); the browser reaches only the authorize step, through the ingress
+# (plain HTTP behind it), with Chromium mapping __HOST__ to the ingress (KOBE_SSO_MOCK_MAP).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kobe-sso-mock
+  labels: { app.kubernetes.io/part-of: kobe-e2e }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-idp
+  namespace: kobe-sso-mock
+  labels: { app: mock-idp }
+spec:
+  replicas: 1 # codes live in memory: one replica
+  selector: { matchLabels: { app: mock-idp } }
+  template:
+    metadata:
+      labels: { app: mock-idp }
+      annotations: { kobe.e2e/code-hash: "__CODE_HASH__" }
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000 }
+      containers:
+        - name: mock
+          image: __SERVER_IMAGE__ # the installed Kobe server image: its own jose, no new image
+          imagePullPolicy: IfNotPresent
+          command: [node, /mock/mock-entra.mjs]
+          env:
+            - { name: MOCK_TENANTS, value: "__TENANT__" }
+            - { name: MOCK_CLIENT_ID, value: "__CLIENT_ID__" }
+            - name: MOCK_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: mock-idp-client, key: client-secret } }
+            - { name: MOCK_ORIGIN, value: "https://__HOST__" }
+            - { name: MOCK_ADVERTISE_PKCE, value: "1" }
+            - { name: MOCK_TLS_CERT, value: /tls/tls.crt }
+            - { name: MOCK_TLS_KEY, value: /tls/tls.key }
+            - { name: PORT, value: "8443" }
+            - { name: MOCK_HTTP_PORT, value: "8080" }
+          ports:
+            - { name: https, containerPort: 8443 }
+            - { name: http, containerPort: 8080 }
+          readinessProbe: { tcpSocket: { port: 8443 }, periodSeconds: 5 }
+          resources:
+            requests: { cpu: 10m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: code, mountPath: /mock, readOnly: true }
+            - { name: tls, mountPath: /tls, readOnly: true }
+      volumes:
+        - { name: code, configMap: { name: mock-idp-code } }
+        - { name: tls, secret: { secretName: mock-idp-tls } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-idp
+  namespace: kobe-sso-mock
+spec:
+  selector: { app: mock-idp }
+  ports:
+    - { name: https, port: 443, targetPort: 8443 } # the Kobe server: discovery, keys, token
+    - { name: http, port: 80, targetPort: 8080 } # the ingress: the authorize step only
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mock-idp
+  namespace: kobe-sso-mock
+spec:
+  tls:
+    - hosts: [__HOST__]
+      secretName: mock-idp-tls
+  rules:
+    - host: __HOST__
+      http:
+        paths:
+          - path: /__TENANT__/oauth2/v2.0/authorize
+            pathType: Exact
+            backend: { service: { name: mock-idp, port: { name: http } } }
+---
+# Only the Kobe server may call the https port (token endpoint, keys) and only the ingress
+# controller the http port; nothing else in the cluster reaches the mock.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mock-idp
+  namespace: kobe-sso-mock
+spec:
+  podSelector: { matchLabels: { app: mock-idp } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: __KOBE_NS__ } }
+          podSelector: { matchLabels: { app.kubernetes.io/component: server } }
+      ports: [{ port: 8443 }]
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+      ports: [{ port: 8080 }]
+  egress: []
