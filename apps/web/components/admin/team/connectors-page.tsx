@@ -26,6 +26,7 @@ import {
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
+import { ToolColumns } from "../connector-tools";
 import { useMutation, useResource, type Mutation } from "../use-resource";
 import { KobeConnectorCard } from "./kobe-connector-card";
 
@@ -166,7 +167,9 @@ function ConnectorCard({
           </ChoiceGroup>
         )}
         <ToolList
+          connectorName={c.name}
           tools={c.tools}
+          exposure={exposure}
           choosing={!blocked && exposure === "custom"}
           ticked={ticked}
           onToggle={toggleTick}
@@ -196,13 +199,18 @@ function ConnectorCard({
 }
 
 function ToolList({
+  connectorName,
   tools,
+  exposure,
   choosing,
   ticked,
   onToggle,
   disabled,
 }: {
+  readonly connectorName: string;
   readonly tools: readonly TeamConnectorTool[];
+  /** The exposure as chosen in the form: under read_only, Write tools are not offered. */
+  readonly exposure: Exposure;
   readonly choosing: boolean;
   readonly ticked: readonly string[];
   readonly onToggle: (piName: string) => void;
@@ -216,39 +224,63 @@ function ToolList({
         that doesn&apos;t say otherwise as able to reach outside systems. Read-only exposure offers
         only tools that declare themselves read-only.
       </p>
-      <ul aria-label="Tools" className="m-0 my-2 grid list-none gap-1 p-0">
-        {tools.map((t) => {
-          const drifted = t.status === "drifted";
-          return (
-            <li
-              key={t.piName}
-              aria-label={`${t.name} tool`}
-              className="flex flex-wrap items-center gap-x-2 gap-y-1"
-            >
-              {choosing ? (
-                <Checkbox
-                  label={t.name}
-                  checked={!drifted && ticked.includes(t.piName)}
-                  disabled={disabled || drifted}
-                  onChange={() => onToggle(t.piName)}
-                />
-              ) : (
-                <code>{t.name}</code>
-              )}
-              {drifted ? (
-                <Badge tone="attention">
-                  Unavailable: changed upstream, waiting for a site admin
-                </Badge>
-              ) : (
-                <>
-                  <span className={HINT}>{t.readOnly ? "Read-only" : "Write"}</span>
-                  <span className={HINT}>{t.openWorld ? "Open-world" : "Closed-world"}</span>
-                </>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+      <ToolColumns
+        connectorName={connectorName}
+        tools={tools}
+        isReadOnly={(t) => t.readOnly}
+        toolName={(t) => t.name}
+        renderTool={(t) => (
+          <ToolRow
+            tool={t}
+            hidden={exposure === "read_only" && !t.readOnly}
+            choosing={choosing}
+            ticked={ticked}
+            onToggle={onToggle}
+            disabled={disabled}
+          />
+        )}
+      />
+    </>
+  );
+}
+
+function ToolRow({
+  tool: t,
+  hidden,
+  choosing,
+  ticked,
+  onToggle,
+  disabled,
+}: {
+  readonly tool: TeamConnectorTool;
+  /** Not offered under the chosen exposure (a Write tool under Read-only tools). */
+  readonly hidden: boolean;
+  readonly choosing: boolean;
+  readonly ticked: readonly string[];
+  readonly onToggle: (piName: string) => void;
+  readonly disabled: boolean;
+}) {
+  const drifted = t.status === "drifted";
+  return (
+    <>
+      {choosing ? (
+        <Checkbox
+          label={t.name}
+          checked={!drifted && ticked.includes(t.piName)}
+          disabled={disabled || drifted}
+          onChange={() => onToggle(t.piName)}
+        />
+      ) : (
+        <code className={hidden ? "text-console-muted line-through" : undefined}>{t.name}</code>
+      )}
+      {drifted ? (
+        <Badge tone="attention">Unavailable: changed upstream, waiting for a site admin</Badge>
+      ) : (
+        <>
+          <span className={HINT}>{t.openWorld ? "Open-world" : "Closed-world"}</span>
+          {hidden ? <Badge>Not offered to the team (Read-only tools)</Badge> : null}
+        </>
+      )}
     </>
   );
 }

@@ -48,6 +48,13 @@ workspace; switch workspace first to manage another.
 | **Storage and history** | Bytes and objects per workspace and project, the object budget, and how long project history is kept.     |
 | **Follow-ups**          | Suggest three follow-up messages after each answer (a short model call per run).                          |
 
+Each registered connector on the **Connectors** page lists its tools in two columns with counts:
+**Read only** (tools that declare themselves read-only) and **Write** (every other tool, including
+one that declares nothing, which Kobe treats as able to change data). The exposure still decides
+what the team gets: under **Read-only tools**, the Write column's tools are marked **Not offered
+to the team**; under **Chosen tools**, tick tools in either column. On a narrow window the columns
+stack. A tool changed upstream shows **Unavailable** until a site admin approves it again.
+
 The **Kobe** card on the **Connectors** page sets what agents may do with Kobe's own admin tools
 in this team: **Docs only** (the default), **Read** or **Read and write**. Agents always have the
 docs tools. Admin tools act as the person in the conversation, within that person's permissions,
