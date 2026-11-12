@@ -182,13 +182,16 @@ export function MembersPage() {
                   <TableCell>
                     {m.managedBy ? (
                       // The identity provider decides; Take over makes the row the team's own.
-                      <Button
-                        size="sm"
-                        disabled={mutation.pending}
-                        onClick={(e) => void takeOver(m, eventTrigger(e))}
-                      >
-                        Take over<span className="sr-only"> membership of {m.name}</span>
-                      </Button>
+                      // Never your own row: another team admin takes it over (review finding 4).
+                      m.userId === access.user.id ? null : (
+                        <Button
+                          size="sm"
+                          disabled={mutation.pending}
+                          onClick={(e) => void takeOver(m, eventTrigger(e))}
+                        >
+                          Take over<span className="sr-only"> membership of {m.name}</span>
+                        </Button>
+                      )
                     ) : (
                       <Button
                         size="sm"

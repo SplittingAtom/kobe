@@ -432,7 +432,7 @@ describe("SSO-made users get no local credential (SSO9, review finding 3)", () =
       response: authenticator.register({
         challenge: "AAAA",
         rp: { id: "kobe.test", name: "Kobe" },
-        user: { id: "AAAA", name: "x", displayName: "x" },
+        user: { id: "AAAA", name: "x" },
       }),
     });
     expect(verify.status).toBe(403);

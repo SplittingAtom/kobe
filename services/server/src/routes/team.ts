@@ -64,6 +64,17 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
     async (c) => {
       const userId = idSchema.safeParse(c.req.param("userId"));
       if (!userId.success) return invalidRequest(c);
+      // A mapped team admin can't free their own row from the IdP (review finding 4): another team
+      // admin takes it over, or the IdP removes the mapping.
+      if (userId.data === c.get("user").id) {
+        return c.json(
+          {
+            code: "cannot_take_over_self",
+            message: "Another team admin has to take over your own membership.",
+          },
+          403,
+        );
+      }
       const result = await takeOverMember(db, c.get("team").id, userId.data);
       if (!result.ok) return membershipError(c, result.error);
       return c.json({ userId: userId.data, managedBy: null });
@@ -71,8 +82,11 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
   );
 
   // The access mappings that target this team, read-only (spec sso §7): site admins edit them.
+  // The kill switch hides them like every other SSO route (review finding 7).
   app.get("/sso-mappings", requireTeamPermission("team.members.manage"), async (c) =>
-    c.json({ mappings: await listTeamMappings(db, c.get("team").id) }),
+    deps.sso.settings.enabled
+      ? c.json({ mappings: await listTeamMappings(db, c.get("team").id) })
+      : c.json({ code: "not_found", message: "Not found." }, 404),
   );
 
   return app;

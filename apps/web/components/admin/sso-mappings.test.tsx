@@ -62,6 +62,19 @@ describe("Team console: managed memberships", () => {
     expect(screen.getByLabelText(`Role of ${ME.name}`)).toBeTruthy();
   });
 
+  it("offers no Take over of the admin's own managed row (review finding 4)", async () => {
+    const mine = {
+      ...MEMBERS.members[0],
+      addedVia: "idp",
+      managedBy: { providerId: P, providerName: "Contoso Entra" },
+    };
+    stubApi({ "GET /v1/team/members": [200, { members: [mine, MEMBERS.members[1]] }] });
+    renderTeam(<MembersPage />);
+    await screen.findByText("Bob");
+    expect(screen.queryByRole("button", { name: `Take over membership of ${ME.name}` })).toBeNull();
+    expect(screen.getByRole("button", { name: "Take over membership of Bob" })).toBeTruthy();
+  });
+
   it("takes a membership over after confirmation", async () => {
     const calls = stubApi({
       "GET /v1/team/members": [

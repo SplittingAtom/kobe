@@ -280,6 +280,36 @@ describe("console providers and the client secret (ac-3)", () => {
     ]);
   });
 
+  it("refuses to change the issuer, tenant or subject claim while identities are linked (finding 5)", async () => {
+    const userId = await h.createUser(`locked-${randomUUID()}@sso.test`);
+    await h.admin.query(
+      `INSERT INTO sso_identities (provider_id, subject, user_id, linked_via) VALUES ($1, 'oid-locked', $2, 'jit')`,
+      [id, userId],
+    );
+    try {
+      const before = (await admin.get(`${BASE}/${id}`)).json.provider;
+      for (const body of [{ tenantId: TENANT }, { subjectClaim: "sub" }]) {
+        const res = await admin.patch(`${BASE}/${id}`, body);
+        expect(res.status, JSON.stringify(body)).toBe(409);
+        expect(res.json.code).toBe("identity_settings_locked");
+      }
+      const after = (await admin.get(`${BASE}/${id}`)).json.provider;
+      expect(after).toMatchObject({
+        tenantId: before.tenantId,
+        issuer: before.issuer,
+        subjectClaim: before.subjectClaim,
+      });
+      // Other fields, and the same values, still save.
+      expect((await admin.patch(`${BASE}/${id}`, { displayName: "Contoso" })).status).toBe(200);
+      expect(
+        (await admin.patch(`${BASE}/${id}`, { tenantId: before.tenantId, subjectClaim: "oid" }))
+          .status,
+      ).toBe(200);
+    } finally {
+      await h.admin.query(`DELETE FROM sso_identities WHERE provider_id = $1`, [id]);
+    }
+  });
+
   it("refuses to delete while an identity is linked, then deletes", async () => {
     const userId = await h.createUser(`linked-${randomUUID()}@sso.test`);
     await h.admin.query(
@@ -370,6 +400,29 @@ describe("Helm providers (ac-4)", () => {
     ]);
   });
 
+  it("keeps a linked Helm provider's tenant and subject claim (finding 5)", async () => {
+    const db = h.deps.database.db;
+    await seedHelmProviders(db, helmEnv([HELM_PROVIDER]));
+    const userId = await h.createUser(`helm-linked-${randomUUID()}@sso.test`);
+    await h.admin.query(
+      `INSERT INTO sso_identities (provider_id, subject, user_id, linked_via) VALUES ($1, 'oid-helm', $2, 'jit')`,
+      [helmId, userId],
+    );
+    try {
+      const seeded = await seedHelmProviders(
+        db,
+        helmEnv([{ ...HELM_PROVIDER, tenantId: OTHER_TENANT, displayName: "Moved" }]),
+      );
+      expect(seeded.locked).toEqual(["corp"]);
+      expect((await admin.get(`${BASE}/${helmId}`)).json.provider).toMatchObject({
+        tenantId: TENANT,
+        issuer: ENTRA,
+      });
+    } finally {
+      await h.admin.query(`DELETE FROM sso_identities WHERE provider_id = $1`, [helmId]);
+    }
+  });
+
   it("never overwrites a console provider of the same slug", async () => {
     const res = await admin.post(BASE, entraBody({ slug: "taken" }));
     expect(res.status).toBe(201);
@@ -433,6 +486,30 @@ describe("the kill switch auth.sso.enabled: false (ac-5)", () => {
               : await b.delete(path);
       expect(res.status, `${method} ${path}`).toBe(404);
     }
+    // The access mapping routes too (finding 7), site and team.
+    for (const [method, path] of [
+      ["GET", "/v1/site/sso/mappings"],
+      ["POST", `/v1/site/sso/providers/${randomUUID()}/mappings`],
+      ["DELETE", `/v1/site/sso/providers/${randomUUID()}/mappings/${randomUUID()}`],
+    ] as const) {
+      const res =
+        method === "GET"
+          ? await b.get(path)
+          : method === "POST"
+            ? await b.post(path, { claimValue: "x", teamId: randomUUID(), role: "member" })
+            : await b.delete(path);
+      expect(res.status, `${method} ${path}`).toBe(404);
+    }
+    const team = await admin.post("/v1/site/teams", {
+      slug: `kill-${randomUUID().slice(0, 8)}`,
+      name: "Kill",
+      adminUserId: adminId,
+    });
+    expect(team.status, team.text).toBe(201);
+    b.team = team.json.team.id;
+    expect((await b.put("/v1/me/teams/active", { teamId: b.team })).status).toBeLessThan(300);
+    expect((await b.get("/v1/team/sso-mappings")).status).toBe(404);
+    expect((await b.get("/v1/team/members")).status).toBe(200);
     expect((await b.get("/v1/me")).json.siteFeatures).toBeUndefined();
     // Local sign-in is unaffected (the sign-in above).
     expect(adminId).not.toBe("");

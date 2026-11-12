@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { every } from "hono/combine";
+import { createMiddleware } from "hono/factory";
 import type { AuthVariables } from "../auth/session.js";
 import { requireSitePermission } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
@@ -26,8 +28,17 @@ const NOT_FOUND = {
 export function siteSsoMappingRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
   const db = deps.database.db;
-  // Per route, not `app.use`: this app shares the `/site/sso` prefix with KOBE-626's routes.
-  const manage = requireSitePermission("site.users.manage");
+  // Per route, not `app.use`: this app shares the `/site/sso` prefix with KOBE-626's routes, and
+  // is mounted before them, so it applies the kill switch itself (review finding 7).
+  const killSwitch = createMiddleware(async (c, next) => {
+    if (!deps.sso.settings.enabled) {
+      return c.json({ code: "not_found", message: "Not found." }, 404);
+    }
+    c.header("Cache-Control", "no-store");
+    await next();
+  });
+  const permission = requireSitePermission("site.users.manage");
+  const manage = every(killSwitch, permission);
 
   app.get("/mappings", manage, async (c) => {
     const raw = c.req.query("providerId");

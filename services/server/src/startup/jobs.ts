@@ -125,6 +125,12 @@ export async function seedAtStart(deps: ServerDeps, logger: Logger): Promise<Sta
           "auth.sso.providers names a slug a Site console provider already uses: the chart's provider is not applied",
         );
       }
+      for (const slug of seeded.locked) {
+        logger.error(
+          { slug },
+          "auth.sso.providers changes the tenant, issuer or subject claim of a provider people have signed in with: the chart's provider is not applied",
+        );
+      }
       const missing = deps.sso.settings.helmProviders
         .map((p) => p.slug)
         .filter((slug) => !deps.sso.settings.helmSecrets.has(slug));

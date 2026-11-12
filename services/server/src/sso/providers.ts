@@ -226,7 +226,24 @@ async function endProviderSessions(tx: KobeTx, providerId: string): Promise<numb
   return gone.length;
 }
 
-export type ChangeFailure = "not_found" | "managed_by_helm" | "credentials_unavailable";
+export type ChangeFailure =
+  "not_found" | "managed_by_helm" | "credentials_unavailable" | "identity_settings_locked";
+
+/**
+ * The settings that decide which IdP account an identity row means: the issuer (tenant) and the
+ * subject claim. While any identity is linked they never change (review finding 5), or the same
+ * `sso_identities.subject` would name another person.
+ */
+const IDENTITY_KEYS = ["issuer", "tenantId", "subjectClaim"] as const;
+
+async function hasIdentities(tx: KobeTx, providerId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: ssoIdentities.providerId })
+    .from(ssoIdentities)
+    .where(eq(ssoIdentities.providerId, providerId))
+    .limit(1);
+  return row !== undefined;
+}
 export type UpdateOutcome =
   | { readonly ok: true; readonly provider: ProviderView }
   | { readonly ok: false; readonly failure: ChangeFailure };
@@ -271,6 +288,12 @@ export async function updateProvider(
     const row = await lockRow(tx, id);
     if (!row) return { ok: false, failure: "not_found" };
     if (row.managedBy === "helm") return { ok: false, failure: "managed_by_helm" };
+    const identityMoves = IDENTITY_KEYS.some(
+      (k) => patch[k] !== undefined && !same(patch[k], row[k]),
+    );
+    if (identityMoves && (await hasIdentities(tx, id))) {
+      return { ok: false, failure: "identity_settings_locked" };
+    }
     const changed = settingsChanged(row, patch);
     const sealed =
       patch.clientSecret !== undefined && s.envelope
@@ -366,6 +389,11 @@ export interface HelmSeedResult {
   readonly conflicts: readonly string[];
   /** Helm providers no longer in the values: disabled, kept (identities may name them). */
   readonly retired: readonly string[];
+  /**
+   * Helm providers whose values move the tenant, issuer or subject claim while identities are
+   * linked (review finding 5): left as they are, nothing applied.
+   */
+  readonly locked: readonly string[];
 }
 
 /**
@@ -386,6 +414,7 @@ export async function seedHelmProviders(
     const updated: string[] = [];
     const conflicts: string[] = [];
     const retired: string[] = [];
+    const locked: string[] = [];
     const existing = await tx.select().from(ssoProviders);
     const bySlug = new Map(existing.map((r) => [r.slug, r]));
     for (const p of settings.helmProviders) {
@@ -427,6 +456,11 @@ export async function seedHelmProviders(
       }
       if (row.managedBy !== "helm") {
         conflicts.push(p.slug);
+        continue;
+      }
+      const moves = IDENTITY_KEYS.some((k) => !same(values[k], row[k]));
+      if (moves && (await hasIdentities(tx, row.id))) {
+        locked.push(p.slug);
         continue;
       }
       const { enabled, ...rest } = values;
@@ -471,6 +505,6 @@ export async function seedHelmProviders(
       });
       retired.push(row.slug);
     }
-    return { created, updated, conflicts, retired };
+    return { created, updated, conflicts, retired, locked };
   });
 }

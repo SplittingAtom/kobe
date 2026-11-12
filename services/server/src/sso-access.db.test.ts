@@ -5,6 +5,7 @@ import type { AuditActor } from "@kobe/db";
 import { createTestDatabase, testServerUrl, type TestDatabase } from "@kobe/db/testing";
 import { createApp } from "./app.js";
 import { createServerDeps, type ServerDeps } from "./deps.js";
+import { loadSsoSettings } from "./sso/settings.js";
 import {
   UnknownProviderError,
   applyIdpAccess,
@@ -120,6 +121,8 @@ beforeAll(async () => {
     setupToken: "setup-token-for-sso-access-0123",
     trustedProxies: ["127.0.0.1/32"],
     mailer: new MemoryMailer(),
+    // The mapping routes follow the kill switch (review finding 7).
+    sso: { settings: loadSsoSettings({ KOBE_SSO_ENABLED: "true" }) },
   });
   app = createApp(deps);
   for (const who of PEOPLE) {
@@ -545,9 +548,18 @@ describe("managed rows in the Team console (SSO10, ac-3, ac-4)", () => {
 
   it("Take over makes the row manual (audited); the mapping no longer touches it", async () => {
     expect((await as.fred.post(`/v1/team/members/${ids.alice}/take-over`)).status).toBe(403);
-    expect((await as.alice.post(`/v1/team/members/${ids.alice}/take-over`)).json.code).toBe(
+    // A manual row has nothing to take over.
+    await adminPg.query(
+      `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member')`,
+      [teams.finance, ids.siteAdmin],
+    );
+    expect((await as.alice.post(`/v1/team/members/${ids.siteAdmin}/take-over`)).json.code).toBe(
       "not_managed",
     );
+    await adminPg.query(`DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`, [
+      teams.finance,
+      ids.siteAdmin,
+    ]);
     expect((await as.alice.post(`/v1/team/members/${randomUUID()}/take-over`)).status).toBe(404);
     const seq = await lastSeq();
     const res = await as.alice.post(`/v1/team/members/${ids.fred}/take-over`);
@@ -571,6 +583,27 @@ describe("managed rows in the Team console (SSO10, ac-3, ac-4)", () => {
     expect((await as.alice.patch(`/v1/team/members/${ids.fred}`, { role: "member" })).status).toBe(
       200,
     );
+  });
+});
+
+describe("Take over of one's own row (review finding 4)", () => {
+  it("refuses a team admin taking over their own managed row (403)", async () => {
+    await switchTo("alice", teams.finance);
+    await adminPg.query(
+      `UPDATE team_members SET added_via = $1 WHERE team_id = $2 AND user_id = $3`,
+      [`idp:${provider}`, teams.finance, ids.alice],
+    );
+    try {
+      const res = await as.alice.post(`/v1/team/members/${ids.alice}/take-over`);
+      expect(res.status).toBe(403);
+      expect(res.json.code).toBe("cannot_take_over_self");
+      expect((await row(teams.finance, "alice"))?.added_via).toBe(`idp:${provider}`);
+    } finally {
+      await adminPg.query(
+        `UPDATE team_members SET added_via = NULL WHERE team_id = $1 AND user_id = $2`,
+        [teams.finance, ids.alice],
+      );
+    }
   });
 });
 
