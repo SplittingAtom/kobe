@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { eq, sql, verifications, type KobeDb, type KobeTx } from "@kobe/db";
+import { accounts, and, eq, sql, verifications, type KobeDb, type KobeTx } from "@kobe/db";
 
 /**
  * While a reset link mailed less than this long ago is still valid, further requests send nothing
@@ -7,6 +7,19 @@ import { eq, sql, verifications, type KobeDb, type KobeTx } from "@kobe/db";
  * attacker's requests can't lock the account owner out of resetting.
  */
 export const RESET_RESEND_AFTER_MS = 5 * 60_000;
+
+/**
+ * Whether the user has a local password (a Better Auth `credential` account). Users provisioned
+ * through SCIM or SSO have none (SSO9): a reset link would create one and bypass the identity
+ * provider, so none is ever mailed to them (KOBE-631, spec sso-oidc-scim §6).
+ */
+export async function hasLocalPassword(db: KobeDb, userId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: accounts.id })
+    .from(accounts)
+    .where(and(eq(accounts.userId, userId), eq(accounts.providerId, "credential")));
+  return row !== undefined;
+}
 
 const sentKey = (userId: string) => `kobe:reset-sent:${userId}:`;
 

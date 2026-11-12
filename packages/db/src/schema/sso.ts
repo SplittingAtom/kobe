@@ -10,6 +10,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { sessions, users } from "./auth.js";
@@ -151,11 +152,24 @@ export const ssoIdentities = pgTable(
     emailAtLink: text(),
     linkedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     lastSignInAt: timestamp({ withTimezone: true }),
+    /**
+     * The SCIM `userName` the provider's SCIM client gave this user (KOBE-631, §10); NULL for
+     * identities SCIM never touched. Unique per provider, ignoring case (SCIM `userName` is
+     * `caseExact: false`). Not a sign-in key: sign-in keys on `subject`.
+     */
+    scimUserName: text(),
   },
   (t) => [
     primaryKey({ columns: [t.providerId, t.subject] }),
     unique("sso_identities_provider_user").on(t.providerId, t.userId),
     index("sso_identities_user_idx").on(t.userId),
+    uniqueIndex("sso_identities_scim_user_name")
+      .on(t.providerId, sql`lower(${t.scimUserName})`)
+      .where(sql`${t.scimUserName} IS NOT NULL`),
+    check(
+      "sso_identities_scim_user_name",
+      sql`${t.scimUserName} IS NULL OR char_length(${t.scimUserName}) BETWEEN 1 AND ${MAX}`,
+    ),
     check("sso_identities_subject", sql`char_length(${t.subject}) BETWEEN 1 AND ${MAX}`),
     check("sso_identities_linked_via", sql`${t.linkedVia} IN ${inList(SSO_LINKED_VIA)}`),
     check(

@@ -29,6 +29,8 @@ import { siteBreakGlassRoutes } from "./routes/site-break-glass.js";
 import { siteGalleryRoutes } from "./routes/site-gallery.js";
 import { siteInvitesRoutes } from "./routes/site-invites.js";
 import { siteSsoRoutes } from "./routes/site-sso.js";
+import { siteScimTokenRoutes } from "./routes/site-scim-tokens.js";
+import { scimRoutes } from "./routes/scim.js";
 import { siteIsolationRoutes } from "./routes/site-isolation.js";
 import { siteModelsRoutes } from "./routes/site-models.js";
 import { siteLegalHoldRoutes } from "./routes/site-legal-hold.js";
@@ -186,6 +188,9 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
     return c.json(clientMetadataDocument(kobeOrigin(deps.publicUrl)));
   });
 
+  // SCIM provisioning (KOBE-631): bearer-token only, outside the session API (no cookies, no CSRF).
+  app.route("/v1/scim/v2", scimRoutes(deps));
+
   const api = new Hono<{ Variables: AuthVariables }>();
   // CSRF: state-changing API calls must come from the site's own origin.
   api.use(async (c, next) => {
@@ -304,6 +309,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/site/users", siteUsersRoutes(deps));
   api.route("/site/invites", siteInvitesRoutes(deps));
   api.route("/site/sso", siteSsoRoutes(deps));
+  api.route("/site/sso", siteScimTokenRoutes(deps));
   api.route(
     "/site/gallery/agents",
     siteGalleryRoutes(deps, options.evals ? { runner: options.evals } : {}),
