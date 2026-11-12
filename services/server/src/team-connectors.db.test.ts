@@ -87,6 +87,25 @@ describe("off by default", () => {
   });
 });
 
+describe("app-only tools (review M1)", () => {
+  it("says which tools Pi can see: a ui.visibility without model is never offered", async () => {
+    const c = await registerConnector(h.admin, {
+      tools: [
+        { name: "render", readOnly: true, ui: { visibility: ["app"] } },
+        { name: "both", readOnly: true, ui: { visibility: ["app", "model"] } },
+        { name: "plain", readOnly: true },
+      ],
+    });
+    const res = await member.get(BASE);
+    const view = res.json.connectors.find((x: { id: string }) => x.id === c.id);
+    const visible = (name: string) =>
+      view.tools.find((t: { name: string }) => t.name === name).model_visible;
+    expect(visible("render")).toBe(false);
+    expect(visible("both")).toBe(true);
+    expect(visible("plain")).toBe(true);
+  });
+});
+
 describe("MCP Apps templates per tool (KOBE-640)", () => {
   it("names each tool's ui:// template and whether a site admin approved it", async () => {
     const sha = "a".repeat(64);

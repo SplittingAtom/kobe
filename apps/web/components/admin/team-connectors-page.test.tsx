@@ -84,7 +84,7 @@ describe("Team connectors (KOBE-105)", () => {
     expect(readOnly.getByRole("heading", { name: /Read only.*0/ })).toBeTruthy();
   });
 
-  it("marks Write tools as not offered while the exposure is Read-only tools", async () => {
+  it("marks Write tools as not offered while the saved exposure is Read-only tools", async () => {
     stubApi({
       [`GET ${BASE}`]: [200, { connectors: [connector({ enabled: true, exposure: "read_only" })] }],
     });
@@ -92,12 +92,59 @@ describe("Team connectors (KOBE-105)", () => {
     await screen.findByRole("article", { name: "jira" });
     const jira = card("jira");
     const create = jira.getByRole("listitem", { name: "create_issue tool" });
-    expect(within(create).getByText(/Not offered to the team/)).toBeTruthy();
+    expect(within(create).getByText("Not offered to the team (Read-only tools)")).toBeTruthy();
     const get = jira.getByRole("listitem", { name: "get_issue tool" });
-    expect(within(get).queryByText(/Not offered to the team/)).toBeNull();
-    // Under All tools nothing is marked.
+    expect(within(get).queryByText(/Not offered/)).toBeNull();
+    // Choosing All tools without saving changes nothing the team has (review M2).
     await userEvent.click(jira.getByLabelText(/All tools/));
+    expect(within(create).getByText("Not offered to the team (Read-only tools)")).toBeTruthy();
+  });
+
+  it("says a Write tool would not be offered while Read-only tools is chosen but not saved", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [200, { connectors: [connector({ enabled: true, exposure: "all" })] }],
+    });
+    renderTeam(<TeamConnectorsPage />);
+    await screen.findByRole("article", { name: "jira" });
+    const jira = card("jira");
+    const create = jira.getByRole("listitem", { name: "create_issue tool" });
+    expect(within(create).queryByText(/offered/)).toBeNull();
+    await userEvent.click(jira.getByLabelText(/Read-only tools/));
+    expect(within(create).getByText("Would not be offered under Read-only tools")).toBeTruthy();
     expect(within(create).queryByText(/Not offered to the team/)).toBeNull();
+  });
+
+  it("marks app-only tools as not offered under every exposure, like the server (review M1)", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [
+        200,
+        {
+          connectors: [
+            connector({
+              enabled: true,
+              exposure: "all",
+              tools: [
+                tool("render", { read_only: true, model_visible: false }),
+                tool("get_issue", { read_only: true }),
+              ],
+            }),
+          ],
+        },
+      ],
+    });
+    renderTeam(<TeamConnectorsPage />);
+    await screen.findByRole("article", { name: "jira" });
+    const jira = card("jira");
+    const render = () => within(jira.getByRole("listitem", { name: "render tool" }));
+    expect(render().getByText("Not offered (app only)")).toBeTruthy();
+    expect(
+      within(jira.getByRole("listitem", { name: "get_issue tool" })).queryByText(/Not offered/),
+    ).toBeNull();
+    await userEvent.click(jira.getByLabelText(/Chosen tools/));
+    expect(render().getByText("Not offered (app only)")).toBeTruthy();
+    expect((jira.getByLabelText("render") as HTMLInputElement).disabled).toBe(true);
+    await userEvent.click(jira.getByLabelText(/Read-only tools/));
+    expect(render().getByText("Not offered (app only)")).toBeTruthy();
   });
 
   it("ticks tools in both columns under Chosen tools", async () => {
@@ -145,14 +192,20 @@ describe("Team connectors (KOBE-105)", () => {
     await screen.findByRole("article", { name: "jira" });
     const jira = card("jira");
     const explore = within(jira.getByRole("listitem", { name: "explore tool" }));
-    const badge = explore.getByText("MCP-UI");
-    expect(badge.closest("[title]")?.getAttribute("title")).toBe(
-      "Opens an app: ui://jira/explorer (approved)",
-    );
-    expect(explore.getByText(/Opens an app: ui:\/\/jira\/explorer \(approved\)/)).toBeTruthy();
+    // A focusable trigger named by the template and its review; its tooltip opens on focus.
+    const badge = explore.getByRole("button", {
+      name: "MCP-UI: Opens an app: ui://jira/explorer (approved)",
+    });
+    badge.focus();
+    expect(document.activeElement).toBe(badge);
+    expect(
+      (await screen.findAllByText("Opens an app: ui://jira/explorer (approved)")).length,
+    ).toBeGreaterThan(0);
     const pick = within(jira.getByRole("listitem", { name: "pick tool" }));
     expect(
-      pick.getByTitle("Opens an app: ui://jira/picker (waiting for a site admin's review)"),
+      pick.getByRole("button", {
+        name: "MCP-UI: Opens an app: ui://jira/picker (waiting for a site admin's review)",
+      }),
     ).toBeTruthy();
     const plain = within(jira.getByRole("listitem", { name: "get_issue tool" }));
     expect(plain.queryByText("MCP-UI")).toBeNull();

@@ -15,6 +15,7 @@ import {
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { usableSiteKeyIds } from "./site-key.js";
+import { modelVisible } from "./visibility.js";
 
 /**
  * Team connector enablement (spec D27, KOBE-104). Connectors are off by default: no
@@ -32,6 +33,11 @@ export interface TeamConnectorToolView {
   readonly status: "pinned" | "drifted";
   /** The MCP Apps template the tool opens (`_meta.ui.resourceUri`, KOBE-433/640), else null. */
   readonly app: ToolAppView | null;
+  /**
+   * False for an app-only tool (`_meta.ui.visibility` without `"model"`, KOBE-435): never offered
+   * to Pi under any exposure (`exposedTools`), so the panel marks it not offered.
+   */
+  readonly model_visible: boolean;
 }
 
 /**
@@ -134,6 +140,7 @@ function view(
       open_world: t.annotations.openWorldHint !== false,
       status: t.status,
       app: toolApp(t.ui?.resource_uri, templates.get(row.id)),
+      model_visible: modelVisible(t),
     })),
   };
 }

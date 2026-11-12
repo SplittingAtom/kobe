@@ -51,12 +51,14 @@ workspace; switch workspace first to manage another.
 Each registered connector on the **Connectors** page lists its tools in two columns with counts:
 **Read only** (tools that declare themselves read-only) and **Write** (every other tool, including
 one that declares nothing, which Kobe treats as able to change data). The exposure still decides
-what the team gets: under **Read-only tools**, the Write column's tools are marked **Not offered
-to the team**; under **Chosen tools**, tick tools in either column. On a narrow window the columns
-stack. A tool changed upstream shows **Unavailable** until a site admin approves it again. A tool
-that opens an app card (an MCP Apps `ui://` template) carries an **MCP-UI** badge; its tooltip names
-the template and whether a site admin has approved it (an app that is not approved yet does not
-open).
+what the team gets: while the saved exposure is **Read-only tools**, the Write column's tools are
+marked **Not offered to the team**; choosing **Read-only tools** without saving marks them **Would
+not be offered under Read-only tools**. A tool only an app may call (not the agent) is marked
+**Not offered (app only)** under every exposure and cannot be ticked. Under **Chosen tools**, tick
+tools in either column. On a narrow window the columns stack. A tool changed upstream shows
+**Unavailable** until a site admin approves it again. A tool that opens an app card (an MCP Apps
+`ui://` template) carries an **MCP-UI** badge; hover or focus it to see the template and whether a
+site admin has approved it (an app that is not approved yet does not open).
 
 The **Kobe** card on the **Connectors** page sets what agents may do with Kobe's own admin tools
 in this team: **Docs only** (the default), **Read** or **Read and write**. Agents always have the

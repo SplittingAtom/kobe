@@ -34,6 +34,8 @@ export interface TeamConnectorTool {
   readonly status: "pinned" | "drifted";
   /** The MCP Apps template it opens and its review (KOBE-640); null when none (or older server). */
   readonly app?: ToolApp | null;
+  /** False for an app-only tool (ui.visibility without "model"): never offered to agents. */
+  readonly modelVisible?: boolean;
 }
 
 export interface TeamConnector {

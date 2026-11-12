@@ -61,3 +61,15 @@
 `e2e/browser/tests/connector-panels.spec.ts` (owner, `KOBE_CONNECTOR` default `catalyst_2`; no
 writes, no tokens): team columns + counts + badges + narrow stacking; site name opens the panel,
 `/teams` has no key/header text, ≥3 templates, tool details, badges, Escape returns focus.
+
+## Review fixes (docs/ledger/review-g47.md)
+
+- M1: team view tools gain `model_visible` (`connectors/visibility.ts` `modelVisible`); app-only
+  tools are marked "Not offered (app only)" under every exposure and cannot be ticked.
+- M2: marker follows the saved exposure ("Not offered to the team (Read-only tools)"); an unsaved
+  Read-only choice says "Would not be offered under Read-only tools".
+- L3 built-in connector 404s on `/teams`; L4 team reads via `mapLimited` (now generic, 4 at once);
+  L5 custom count ignores ticks that no longer name a pinned tool; L7 key-set assertions.
+- L9 badge neutral while templates load; L10 badge is a focusable button (Radix Tooltip on hover
+  and focus, portalled into the console root), accessible name "MCP-UI: Opens an app: …".
+- e2e: `exact: true` names, key-set check, per-column list counts vs heading counts, `expect.poll`.

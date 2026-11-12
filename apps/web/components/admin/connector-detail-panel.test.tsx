@@ -154,7 +154,11 @@ describe("connector detail panel (KOBE-641)", () => {
     expect(lake.getByText("Closed world")).toBeTruthy();
     expect(lake.getByText(/sql \(string, required\)/)).toBeTruthy();
     expect(lake.getByText(/limit \(integer\)/)).toBeTruthy();
-    expect(lake.getByTitle("Opens an app: ui://catalyst/lake-query (approved)")).toBeTruthy();
+    expect(
+      lake.getByRole("button", {
+        name: "MCP-UI: Opens an app: ui://catalyst/lake-query (approved)",
+      }),
+    ).toBeTruthy();
     expect(lake.getByText("Pinned")).toBeTruthy();
     const drop = within(write.getByRole("listitem", { name: "drop_table tool" }));
     expect(drop.getByText("Destructive")).toBeTruthy();
@@ -164,8 +168,31 @@ describe("connector detail panel (KOBE-641)", () => {
     expect(pick.getByText(/Awaiting approval \(new\)/)).toBeTruthy();
     expect(pick.getByText("No inputs")).toBeTruthy();
     expect(
-      pick.getByTitle("Opens an app: ui://catalyst/picker (waiting for a site admin's review)"),
+      pick.getByRole("button", {
+        name: "MCP-UI: Opens an app: ui://catalyst/picker (waiting for a site admin's review)",
+      }),
     ).toBeTruthy();
+  });
+
+  it("keeps the badge neutral while the templates load (review L9)", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    const calls = stubApi(routes());
+    const stubbed = globalThis.fetch;
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith("/templates")) await gate;
+      return stubbed(url, init);
+    });
+    const { panel } = await openPanel();
+    const lake = within(await panel.findByRole("listitem", { name: "lake_query tool" }));
+    const badge = lake.getByRole("button", {
+      name: /^MCP-UI: Opens an app: ui:\/\/catalyst\/lake-query/,
+    });
+    const tone = () => badge.querySelector("[data-tone]")?.getAttribute("data-tone");
+    expect(tone()).toBe("neutral");
+    release();
+    await waitFor(() => expect(tone()).toBe("accent"));
+    expect(calls.some((c) => c.url.endsWith("/templates"))).toBe(true);
   });
 
   it("says when a part could not be loaded and keeps the rest", async () => {

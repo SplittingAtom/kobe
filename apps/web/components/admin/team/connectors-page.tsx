@@ -75,9 +75,11 @@ export function TeamConnectorsPage() {
   );
 }
 
-/** Ticks that still name a pinned tool; a tool that drifted since is dropped, not sent. */
+/** Ticks that still name a pinned tool Pi can see; drifted and app-only ones are dropped. */
 function pinnedTicks(c: TeamConnector): string[] {
-  const pinned = new Set(c.tools.filter((t) => t.status === "pinned").map((t) => t.piName));
+  const pinned = new Set(
+    c.tools.filter((t) => t.status === "pinned" && t.modelVisible !== false).map((t) => t.piName),
+  );
   return c.enabledTools.filter((t) => pinned.has(t));
 }
 
@@ -169,6 +171,7 @@ function ConnectorCard({
         <ToolList
           connectorName={c.name}
           tools={c.tools}
+          saved={c.enabled ? (c.exposure ?? "read_only") : null}
           exposure={exposure}
           choosing={!blocked && exposure === "custom"}
           ticked={ticked}
@@ -201,6 +204,7 @@ function ConnectorCard({
 function ToolList({
   connectorName,
   tools,
+  saved,
   exposure,
   choosing,
   ticked,
@@ -209,7 +213,9 @@ function ToolList({
 }: {
   readonly connectorName: string;
   readonly tools: readonly TeamConnectorTool[];
-  /** The exposure as chosen in the form: under read_only, Write tools are not offered. */
+  /** The team's saved exposure; null while the connector is not enabled. */
+  readonly saved: Exposure | null;
+  /** The exposure as chosen in the form, maybe not saved yet. */
   readonly exposure: Exposure;
   readonly choosing: boolean;
   readonly ticked: readonly string[];
@@ -232,7 +238,7 @@ function ToolList({
         renderTool={(t) => (
           <ToolRow
             tool={t}
-            hidden={exposure === "read_only" && !t.readOnly}
+            offer={offerOf(t, saved, exposure)}
             choosing={choosing}
             ticked={ticked}
             onToggle={onToggle}
@@ -244,34 +250,56 @@ function ToolList({
   );
 }
 
+/**
+ * Whether the team's agents get the tool, as the server's `exposedTools` decides: an app-only
+ * tool (`_meta.ui.visibility` without "model") never, under any exposure; a Write tool not while
+ * the saved exposure is Read-only tools. A Read-only choice not saved yet is said as a "would".
+ */
+type Offer = "offered" | "app_only" | "not_read_only" | "would_not_read_only";
+
+const OFFER_TEXT: Readonly<Record<Exclude<Offer, "offered">, string>> = {
+  app_only: "Not offered (app only)",
+  not_read_only: "Not offered to the team (Read-only tools)",
+  would_not_read_only: "Would not be offered under Read-only tools",
+};
+
+function offerOf(t: TeamConnectorTool, saved: Exposure | null, draft: Exposure): Offer {
+  if (t.modelVisible === false) return "app_only";
+  if (t.readOnly) return "offered";
+  if (saved === "read_only") return "not_read_only";
+  return draft === "read_only" ? "would_not_read_only" : "offered";
+}
+
 function ToolRow({
   tool: t,
-  hidden,
+  offer,
   choosing,
   ticked,
   onToggle,
   disabled,
 }: {
   readonly tool: TeamConnectorTool;
-  /** Not offered under the chosen exposure (a Write tool under Read-only tools). */
-  readonly hidden: boolean;
+  readonly offer: Offer;
   readonly choosing: boolean;
   readonly ticked: readonly string[];
   readonly onToggle: (piName: string) => void;
   readonly disabled: boolean;
 }) {
   const drifted = t.status === "drifted";
+  const appOnly = offer === "app_only";
   return (
     <>
       {choosing ? (
         <Checkbox
           label={t.name}
-          checked={!drifted && ticked.includes(t.piName)}
-          disabled={disabled || drifted}
+          checked={!drifted && !appOnly && ticked.includes(t.piName)}
+          disabled={disabled || drifted || appOnly}
           onChange={() => onToggle(t.piName)}
         />
       ) : (
-        <code className={hidden ? "text-console-muted line-through" : undefined}>{t.name}</code>
+        <code className={offer === "offered" ? undefined : "text-console-muted line-through"}>
+          {t.name}
+        </code>
       )}
       <McpUiBadge app={t.app} />
       {drifted ? (
@@ -279,7 +307,7 @@ function ToolRow({
       ) : (
         <>
           <span className={HINT}>{t.openWorld ? "Open-world" : "Closed-world"}</span>
-          {hidden ? <Badge>Not offered to the team (Read-only tools)</Badge> : null}
+          {offer === "offered" ? null : <Badge>{OFFER_TEXT[offer]}</Badge>}
         </>
       )}
     </>
