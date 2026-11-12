@@ -45,6 +45,13 @@ describe("console access", () => {
     expect(res).toMatchObject({ ok: true, data: { console: "site", siteRole: "user" } });
   });
 
+  it("reads the site features that are on, ignoring unknown ones (KOBE-626)", async () => {
+    stubApi({ "GET /v1/me": [200, { ...me("admin"), siteFeatures: ["sso", "later"] }] });
+    expect(await fetchSiteAccess()).toMatchObject({ data: { features: ["sso"] } });
+    stubApi({ "GET /v1/me": [200, me("admin")] });
+    expect(await fetchSiteAccess()).toMatchObject({ data: { features: [] } });
+  });
+
   it("reads team role and permissions from /v1/team", async () => {
     stubApi({
       "GET /v1/me": [200, me("admin")],

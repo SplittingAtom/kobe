@@ -152,6 +152,49 @@ auth:
   # pod network. Add your load balancer's CIDR if one sits in front.
   trustedProxies:
     - 10.42.0.0/16
+  # Single sign-on with OpenID Connect (KOBE-626, spec docs/specs/sso-oidc-scim.md): Microsoft
+  # Entra ID first, any OIDC provider with PKCE S256. Providers are added in the Site console
+  # (People > Single sign-on) or declared here; local sign-in keeps working beside them.
+  sso:
+    # Kill switch: false hides every single sign-on route, page and button and refuses SSO
+    # sign-in, without a database change. Local sign-in (passwords, passkeys) is unaffected.
+    enabled: true
+    # The server calls each provider itself (discovery, keys, token endpoint) and refuses http,
+    # private, loopback, link-local and metadata addresses and redirects. List the private ranges
+    # of an on-premises provider here (CIDRs); a private CA goes in server.extraCaBundle.
+    allowedInternalCidrs: []
+    # Ports a provider may use (an on-premises Keycloak on 8443, for example).
+    allowedPorts: [443]
+    # Providers as configuration (upserted at every server start, read-only in the console except
+    # their access mappings). The client secret is read from an existing Secret, never from values,
+    # and never copied into the database. Each entry:
+    #   - slug: contoso              # in the redirect URI https://<kobe>/api/auth/sso/callback/<slug>
+    #     displayName: Contoso       # the sign-in button says "Sign in with Contoso"
+    #     kind: entra                # entra (tenantId) or oidc (issuer)
+    #     tenantId: "<directory (tenant) id GUID>"  # Entra; common/organizations/consumers refused
+    #     # issuer: https://idp.example.com/realms/kobe   # oidc: the exact issuer
+    #     clientId: "<application (client) id>"
+    #     clientSecretSecret: { name: kobe-sso-contoso, key: client-secret }
+    #     accessClaim: roles         # roles (app roles, recommended) or groups
+    #     # subjectClaim: oid        # default: oid for entra, sub for oidc
+    #     # mfaRule: { amr_any: [mfa], acr_any: [], acrs_any: [c1] }   # default per kind
+    #     # allowedEmailDomains: [contoso.com]   # admin-expected links only
+    #     # jitProvisioning: true
+    #     # enabled: true
+    #     # maxSessionHours: 12
+    providers: []
+    # The server has no egress NetworkPolicy of its own. If your namespace denies egress by
+    # default, enable this to allow the server DNS and HTTPS to the identity provider. It selects
+    # the server pods, so on its own it would also make every other server egress default-deny:
+    # enable it only beside your own allow rules for Postgres, S3, SMTP and the Kubernetes API.
+    # Entra ID needs login.microsoftonline.com (discovery, keys and token endpoint) on 443; its
+    # addresses are not fixed, so the default allows public addresses on allowedPorts.
+    networkPolicy:
+      enabled: false
+      # Destination CIDRs on allowedPorts; empty = every public address (private ranges excluded).
+      cidrs: []
+      # Extra raw NetworkPolicy egress rules for the server.
+      extraEgress: []
 
 # Outgoing email (spec D7: required): invitations, password resets, notifications. API server only.
 smtp:

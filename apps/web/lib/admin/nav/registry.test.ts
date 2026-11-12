@@ -290,6 +290,17 @@ describe("sectionProblems", () => {
   });
 });
 
+describe("feature gating (KOBE-626)", () => {
+  it("hides Single sign-on unless the server reports the feature on", () => {
+    const sso = must(SITE_SECTIONS.find((s) => s.id === "sso"));
+    expect(sso).toMatchObject({ group: "People", feature: "sso", minRole: "admin" });
+    expect(canSee(sso, site("owner"))).toBe(false);
+    expect(canSee(sso, { ...site("admin"), features: ["sso"] })).toBe(true);
+    expect(canSee(sso, { ...site("user"), features: ["sso"] })).toBe(false);
+    expect(visibleSections(site("owner")).map((s) => s.id)).not.toContain("sso");
+  });
+});
+
 describe("role gating", () => {
   it("opens the site console to the Owner and Admins only", () => {
     expect(canOpenConsole(site("owner"))).toBe(true);

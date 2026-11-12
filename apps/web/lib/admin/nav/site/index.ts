@@ -2,6 +2,7 @@
 export { default as users } from "./users";
 export { default as invites } from "./invites";
 export { default as roles } from "./roles";
+export { default as sso } from "./sso";
 export { default as teams } from "./teams";
 export { default as gallery } from "./gallery";
 export { default as models } from "./models";

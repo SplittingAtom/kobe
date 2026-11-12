@@ -28,6 +28,7 @@ import { siteEgressRoutes } from "./routes/site-egress.js";
 import { siteBreakGlassRoutes } from "./routes/site-break-glass.js";
 import { siteGalleryRoutes } from "./routes/site-gallery.js";
 import { siteInvitesRoutes } from "./routes/site-invites.js";
+import { siteSsoRoutes } from "./routes/site-sso.js";
 import { siteIsolationRoutes } from "./routes/site-isolation.js";
 import { siteModelsRoutes } from "./routes/site-models.js";
 import { siteLegalHoldRoutes } from "./routes/site-legal-hold.js";
@@ -300,6 +301,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/site/policy", sitePolicyRoutes(deps));
   api.route("/site/users", siteUsersRoutes(deps));
   api.route("/site/invites", siteInvitesRoutes(deps));
+  api.route("/site/sso", siteSsoRoutes(deps));
   api.route(
     "/site/gallery/agents",
     siteGalleryRoutes(deps, options.evals ? { runner: options.evals } : {}),

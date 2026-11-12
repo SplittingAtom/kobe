@@ -178,6 +178,7 @@ securityContext:
       key: setup-token
 - name: KOBE_TRUSTED_PROXIES
   value: {{ join "," (default (list "10.42.0.0/16") (.Values.auth).trustedProxies) | quote }}
+{{ include "kobe.ssoEnv" . }}
 {{- end -}}
 
 {{/* Outgoing email (KOBE-13): the API server only. Credentials come from a Secret, never values. */}}
