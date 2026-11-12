@@ -86,6 +86,7 @@ old commits.
 
 ## Related
 
+- [Storage limits](storage-limits.md): file sizes, file counts and the workspace quota
 - [Editing files](file-editor.md)
 - [Memory](../memory.md): personal and project memory
 - [Glossary](../glossary.md)
