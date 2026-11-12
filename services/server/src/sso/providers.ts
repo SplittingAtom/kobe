@@ -226,6 +226,20 @@ async function endProviderSessions(tx: KobeTx, providerId: string): Promise<numb
   return gone.length;
 }
 
+/**
+ * With the kill switch off (`auth.sso.enabled: false`), deletes every session signed in through
+ * any provider (review finding 6); run at start-up. Local sessions stay. Returns how many ended.
+ */
+export async function endSsoSessionsWhenOff(db: KobeDb, settings: SsoSettings): Promise<number> {
+  if (settings.enabled) return 0;
+  const ids = db.select({ id: sessionSsoContexts.sessionId }).from(sessionSsoContexts);
+  const gone = await db
+    .delete(sessions)
+    .where(inArray(sessions.id, ids))
+    .returning({ id: sessions.id });
+  return gone.length;
+}
+
 export type ChangeFailure =
   "not_found" | "managed_by_helm" | "credentials_unavailable" | "identity_settings_locked";
 

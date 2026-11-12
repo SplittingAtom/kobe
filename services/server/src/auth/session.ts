@@ -1,5 +1,14 @@
 import { createMiddleware } from "hono/factory";
-import { eq, siteRoles, siteSettings, users, type KobeDb } from "@kobe/db";
+import {
+  eq,
+  sessions,
+  sessionSsoContexts,
+  siteRoles,
+  siteSettings,
+  ssoProviders,
+  users,
+  type KobeDb,
+} from "@kobe/db";
 import type { SiteRole } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
 import { DELEGATED_SESSION_PREFIX, delegationOf } from "../kobe-mcp/delegation.js";
@@ -88,16 +97,39 @@ export function requireSession(deps: ServerDeps) {
     }
     const session = await deps.auth.api.getSession({ headers: c.req.raw.headers });
     if (!session) return c.json({ code: "unauthenticated", message: "Sign in to continue." }, 401);
-    // Re-read per request: a deactivation or role change applies to the very next request.
+    // Re-read per request: a deactivation or role change applies to the very next request. The
+    // session's SSO context (if any) comes along: the kill switch and max_session_hours (§9).
     const [account] = await deps.database.db
-      .select({ deactivatedAt: users.deactivatedAt, role: siteRoles.role })
+      .select({
+        deactivatedAt: users.deactivatedAt,
+        role: siteRoles.role,
+        ssoProviderId: sessionSsoContexts.providerId,
+        maxSessionHours: ssoProviders.maxSessionHours,
+      })
       .from(users)
       .leftJoin(siteRoles, eq(siteRoles.userId, users.id))
+      .leftJoin(sessionSsoContexts, eq(sessionSsoContexts.sessionId, session.session.id))
+      .leftJoin(ssoProviders, eq(ssoProviders.id, sessionSsoContexts.providerId))
       .where(eq(users.id, session.user.id));
     if (!account || account.deactivatedAt !== null) {
       // Sessions are deleted on deactivation; this catches anything that slipped through.
       await deps.revokeAllSessions(session.user.id);
       return c.json({ code: "unauthenticated", message: "Sign in to continue." }, 401);
+    }
+    if (account.ssoProviderId !== null) {
+      // auth.sso.enabled: false refuses every SSO session; local sessions are the break-glass
+      // path (review finding 6). Start-up deletes them as well (`endSsoSessionsWhenOff`).
+      if (!deps.sso.settings.enabled) {
+        return c.json({ code: "unauthenticated", message: "Sign in to continue." }, 401);
+      }
+      // max_session_hours counts from the sign-in, whatever Better Auth's refresh did to the
+      // expiry (review finding 9a).
+      const hours = account.maxSessionHours;
+      const started = new Date(session.session.createdAt).getTime();
+      if (hours !== null && Date.now() - started >= hours * 3_600_000) {
+        await deps.database.db.delete(sessions).where(eq(sessions.id, session.session.id));
+        return c.json({ code: "unauthenticated", message: "Sign in to continue." }, 401);
+      }
     }
     const user: SessionUser = {
       id: session.user.id,

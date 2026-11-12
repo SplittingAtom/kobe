@@ -3,10 +3,10 @@
  * (KOBE-628, spec sso-oidc-scim §5.7). They never echo anything from the identity provider.
  */
 const MESSAGES: Readonly<Record<string, string>> = {
-  no_access:
-    "Your organization has not given you access to this site. Ask your administrator to assign you to it.",
-  link_required:
-    "An account with this email address already exists. Sign in with your password or passkey; an administrator can link it to your organization's sign-in.",
+  // One code for "no access" and "an account with this address exists" (the page never reveals
+  // whether an address has an account).
+  not_allowed:
+    "Your organization's sign-in can't be used for this site. If you already have an account here, sign in with your password or passkey; otherwise ask your administrator for access.",
   deactivated: "This account is deactivated. Ask a site admin to reactivate it.",
   mfa_missing:
     "Your organization's sign-in did not include multi-factor authentication, which this site requires. Ask your administrator about Conditional Access.",

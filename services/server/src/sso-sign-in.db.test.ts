@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { seedHelmProviders } from "./sso/providers.js";
+import { createApp } from "./app.js";
+import { endSsoSessionsWhenOff, seedHelmProviders } from "./sso/providers.js";
 import { loadSsoSettings, type SsoSettings } from "./sso/settings.js";
 import { resolver } from "./sso/testing.js";
-import type { TestBrowser } from "./testing/browser.js";
-import { openHarness, PASSWORD, type Harness } from "./testing/harness.js";
+import { TestBrowser } from "./testing/browser.js";
+import { openHarness, PASSWORD, PUBLIC_URL, type Harness } from "./testing/harness.js";
 import { MockOidcProvider, routeMockOidc } from "./testing/mock-oidc.js";
 import { SoftwareAuthenticator } from "./testing/webauthn.js";
 
@@ -272,7 +273,7 @@ describe("JIT and linked sign-in", () => {
   it("gives an unmapped identity no user (no_access)", async () => {
     const before = await userCount();
     const { location, browser } = await signInVia(entra, "corp", entraUser({ roles: ["other"] }));
-    expect(errorOf(location)).toBe("no_access");
+    expect(errorOf(location)).toBe("not_allowed");
     expect(new URL(location).pathname).toBe("/sign-in");
     expect(await userCount()).toBe(before);
     expect((await browser.get("/v1/me")).status).toBe(401);
@@ -283,7 +284,7 @@ describe("JIT and linked sign-in", () => {
     const user = entraUser();
     await signInVia(entra, "corp", user);
     const { location, browser } = await signInVia(entra, "corp", { ...user, roles: [] });
-    expect(errorOf(location)).toBe("no_access");
+    expect(errorOf(location)).toBe("not_allowed");
     expect((await browser.get("/v1/me")).status).toBe(401);
   });
 
@@ -314,7 +315,7 @@ describe("JIT and linked sign-in", () => {
         xms_edov: true,
       }),
     );
-    expect(errorOf(location)).toBe("link_required");
+    expect(errorOf(location)).toBe("not_allowed");
     expect(await userCount()).toBe(before);
     expect((await browser.get("/v1/me")).status).toBe(401);
     const links = await h.admin.query(`SELECT 1 FROM sso_identities WHERE user_id = $1`, [localId]);
@@ -708,5 +709,81 @@ describe("kill switch (auth.sso.enabled: false)", () => {
     } finally {
       await off.close();
     }
+  });
+});
+
+describe("one browser code for no access and an existing account (review finding 9b)", () => {
+  it("answers not_allowed for both and keeps the reason in the audit log", async () => {
+    await h.createUser("exists-9b@contoso.com");
+    const linked = await signInVia(
+      entra,
+      "corp",
+      entraUser({ preferred_username: "exists-9b@contoso.com" }),
+    );
+    const none = await signInVia(entra, "corp", entraUser({ roles: ["nothing"] }));
+    expect(errorOf(linked.location)).toBe("not_allowed");
+    expect(errorOf(none.location)).toBe("not_allowed");
+    expect(linked.location).toBe(none.location);
+    expect((await failures("link_required")).length).toBeGreaterThan(0);
+    expect((await failures("no_access")).length).toBeGreaterThan(0);
+  });
+});
+
+describe("max_session_hours (review finding 9a)", () => {
+  it("caps the SSO session's expiry and ends it once the hours have passed", async () => {
+    await h.admin.query(`UPDATE sso_providers SET max_session_hours = 1 WHERE id = $1`, [corpId]);
+    try {
+      const user = entraUser();
+      const { browser } = await signInVia(entra, "corp", user);
+      // Read before any request: Better Auth's refresh may push expires_at forward on use.
+      const { rows } = await h.admin.query<{ id: string; left: number }>(
+        `SELECT s.id, extract(epoch FROM s.expires_at - now())::int AS left
+           FROM sessions s JOIN sso_identities i ON i.user_id = s.user_id
+          WHERE i.subject = $1`,
+        [user.oid],
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.left).toBeLessThanOrEqual(3600);
+      expect((await browser.get("/v1/me")).status).toBe(200);
+      // The cap counts from the session's start, whatever a refresh did to expires_at.
+      await h.admin.query(
+        `UPDATE sessions SET created_at = now() - interval '61 minutes',
+                             expires_at = now() + interval '1 day' WHERE id = $1`,
+        [rows[0]?.id],
+      );
+      expect((await browser.get("/v1/me")).status).toBe(401);
+      const gone = await h.admin.query(`SELECT 1 FROM sessions WHERE id = $1`, [rows[0]?.id]);
+      expect(gone.rowCount).toBe(0);
+    } finally {
+      await h.admin.query(`UPDATE sso_providers SET max_session_hours = NULL WHERE id = $1`, [
+        corpId,
+      ]);
+    }
+  });
+});
+
+describe("kill switch and live sessions (review finding 6)", () => {
+  it("refuses SSO sessions while auth.sso.enabled is false; local sessions keep working", async () => {
+    const { browser } = await signInVia(entra, "corp", entraUser());
+    expect((await browser.get("/v1/me")).status).toBe(200);
+    const local = await h.signIn("owner@sso-signin.test");
+    const offSettings = settingsFor("false");
+    const offApp = createApp({ ...h.deps, sso: { ...h.deps.sso, settings: offSettings } });
+    const as = (from: TestBrowser) => {
+      const b = new TestBrowser(offApp, PUBLIC_URL);
+      for (const [k, v] of from.cookies) b.cookies.set(k, v);
+      return b;
+    };
+    expect((await as(browser).get("/v1/me")).status).toBe(401);
+    expect((await as(local).get("/v1/me")).status).toBe(200);
+
+    // At start-up with the switch off, every SSO session is deleted; local ones stay.
+    const ended = await endSsoSessionsWhenOff(h.deps.database.db, offSettings);
+    expect(ended).toBeGreaterThan(0);
+    const left = await h.admin.query(`SELECT 1 FROM session_sso_contexts`);
+    expect(left.rowCount).toBe(0);
+    expect((await browser.get("/v1/me")).status).toBe(401);
+    expect((await local.get("/v1/me")).status).toBe(200);
+    expect(await endSsoSessionsWhenOff(h.deps.database.db, settingsFor("true"))).toBe(0);
   });
 });

@@ -19,6 +19,8 @@ import type { MfaRule } from "./schemas.js";
  */
 
 export const DISCOVERY_TTL_MS = 60 * 60_000;
+/** A failed discovery is remembered this long per provider (review finding 9c). */
+export const DISCOVERY_FAILURE_TTL_MS = 60_000;
 export const SSO_SCOPE = "openid profile email";
 
 export interface SsoProvider {
@@ -113,6 +115,8 @@ interface Cached {
 /** Builds `openid-client` configurations from validated, cached discovery. One per process. */
 export class OidcClients {
   private readonly cache = new Map<string, Cached>();
+  /** When discovery last failed, per provider key: refused without a request for a minute. */
+  private readonly failures = new Map<string, number>();
 
   constructor(
     private readonly net: SsoNet,
@@ -127,6 +131,22 @@ export class OidcClients {
     const key = this.key(p);
     const hit = this.cache.get(key);
     if (hit && this.now() - hit.at < DISCOVERY_TTL_MS) return hit;
+    const failedAt = this.failures.get(key);
+    if (failedAt !== undefined && this.now() - failedAt < DISCOVERY_FAILURE_TTL_MS) {
+      throw new SsoFlowError("idp_unreachable");
+    }
+    try {
+      const entry = await this.discover(p);
+      this.failures.delete(key);
+      this.cache.set(key, entry);
+      return entry;
+    } catch (err) {
+      this.failures.set(key, this.now());
+      throw err;
+    }
+  }
+
+  private async discover(p: SsoProvider): Promise<Cached> {
     const target =
       p.kind === "entra"
         ? ({ kind: "entra", tenantId: p.tenantId ?? "" } as const)
@@ -136,9 +156,7 @@ export class OidcClients {
     if (!report.ok || !metadata || report.issuer !== p.issuer) {
       throw new SsoFlowError("idp_unreachable");
     }
-    const entry: Cached = { metadata, at: this.now() };
-    this.cache.set(key, entry);
-    return entry;
+    return { metadata, at: this.now() };
   }
 
   /** A configuration for one provider and secret; throws {@link SsoFlowError}. */

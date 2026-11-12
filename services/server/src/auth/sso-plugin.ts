@@ -4,7 +4,7 @@ import { APIError, createAuthEndpoint, getSessionFromCtx, isAPIError } from "bet
 import { setSessionCookie } from "better-auth/cookies";
 import * as oidc from "openid-client";
 import { z } from "zod";
-import { sessionSsoContexts, type KobeDb } from "@kobe/db";
+import { eq, sessions, sessionSsoContexts, type KobeDb } from "@kobe/db";
 import type { AuthAttemptAudit } from "../audit/attempts.js";
 import { recordAuditAfter } from "../audit/record.js";
 import { logger } from "../logger.js";
@@ -64,6 +64,15 @@ const sameText = (a: string, b: string): boolean => {
 const notFound = () => new APIError("NOT_FOUND", { message: "Not found" });
 
 /**
+ * The `sso_error` code the browser sees. "No access" and "an account with this address exists"
+ * share one code, so the page never tells whether an address has a Kobe account (review finding
+ * 9b); the audit log keeps the precise reason.
+ */
+export function browserSsoError(failure: SsoFailure): string {
+  return failure === "no_access" || failure === "link_required" ? "not_allowed" : failure;
+}
+
+/**
  * OIDC single sign-on as Better Auth endpoints (KOBE-628, spec sso-oidc-scim §5, §9, §13), so it
  * shares Better Auth's Postgres rate limits, session creation (the deactivation hook and trigger),
  * cookies and revocation:
@@ -79,6 +88,18 @@ const notFound = () => new APIError("NOT_FOUND", { message: "Not found" });
  * from the token reaches the page or the log. `auth.sso.enabled: false` turns every route into a
  * 404 (the kill switch); local sign-in never reaches this code.
  */
+async function capSessionExpiry<S extends { id: string; expiresAt: Date }>(
+  db: KobeDb,
+  session: S,
+  hours: number | null,
+): Promise<S> {
+  if (hours === null) return session;
+  const cap = new Date(Date.now() + hours * 3_600_000);
+  if (session.expiresAt.getTime() <= cap.getTime()) return session;
+  await db.update(sessions).set({ expiresAt: cap }).where(eq(sessions.id, session.id));
+  return { ...session, expiresAt: cap };
+}
+
 export function ssoPlugin(options: SsoPluginOptions) {
   const off = { enabled: false } as const;
   const o = { ...options, settings: options.sso?.settings ?? off };
@@ -105,7 +126,7 @@ export function ssoPlugin(options: SsoPluginOptions) {
       method: "sso",
       reason: failure,
     });
-    return `${o.publicOrigin}/sign-in?sso_error=${failure}`;
+    return `${o.publicOrigin}/sign-in?sso_error=${browserSsoError(failure)}`;
   }
 
   async function configured(p: SsoProvider) {
@@ -217,9 +238,12 @@ export function ssoPlugin(options: SsoPluginOptions) {
             // A new session id at every sign-in; the browser's previous session ends (fixation).
             const prior = await getSessionFromCtx(ctx).catch(() => null);
             if (prior) await adapter.deleteSession(prior.session.token);
-            const session = await adapter.createSession(outcome.userId);
+            const created = await adapter.createSession(outcome.userId);
             const user = await adapter.findUserById(outcome.userId);
-            if (!session || !user) throw new Error("session not created");
+            if (!created || !user) throw new Error("session not created");
+            // max_session_hours caps the expiry (§9, review finding 9a); requireSession also ends
+            // the session once the hours have passed since sign-in, whatever a refresh did.
+            const session = await capSessionExpiry(o.db, created, p.maxSessionHours);
             try {
               await o.db.insert(sessionSsoContexts).values({
                 sessionId: session.id,

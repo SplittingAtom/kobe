@@ -54,8 +54,7 @@ describe("SsoSignIn", () => {
 
 describe("ssoErrorMessage", () => {
   it.each([
-    "no_access",
-    "link_required",
+    "not_allowed",
     "deactivated",
     "mfa_missing",
     "groups_overage",
@@ -67,6 +66,11 @@ describe("ssoErrorMessage", () => {
     const message = ssoErrorMessage(code);
     expect(message).toBeTruthy();
     expect(message).not.toMatch(/Single sign-on did not work/);
+  });
+
+  it("has no separate codes that would reveal whether an account exists", () => {
+    expect(ssoErrorMessage("link_required")).toMatch(/Single sign-on did not work/);
+    expect(ssoErrorMessage("no_access")).toMatch(/Single sign-on did not work/);
   });
 
   it("falls back for unknown codes and is null without one", () => {

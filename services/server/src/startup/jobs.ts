@@ -22,7 +22,7 @@ import {
 import type { ServerDeps } from "../deps.js";
 import { EgressBlockedRelay } from "../egress/blocked-relay.js";
 import { resealTeamHeaders } from "../egress/header-store.js";
-import { seedHelmProviders } from "../sso/providers.js";
+import { endSsoSessionsWhenOff, seedHelmProviders } from "../sso/providers.js";
 import { EgressRequestSweeper, sweepEgressRequestNotifications } from "../egress/request-notify.js";
 import { seedGalleryAgents } from "../gallery/seed.js";
 import { seedKobeBuiltinConnector } from "@kobe/db";
@@ -110,6 +110,12 @@ export async function seedAtStart(deps: ServerDeps, logger: Logger): Promise<Sta
     .catch((err: unknown) =>
       logger.error({ err }, "the built-in Kobe connector could not be seeded"),
     );
+  // The kill switch also ends the SSO sessions still in the database (review finding 6).
+  await endSsoSessionsWhenOff(deps.database.db, deps.sso.settings)
+    .then((ended) => {
+      if (ended > 0) logger.info({ ended }, "single sign-on is off: SSO sessions ended");
+    })
+    .catch((err: unknown) => logger.error({ err }, "SSO sessions could not be ended"));
   // The chart's SSO providers (KOBE-626), `managed_by: helm`; no IdP is contacted here.
   await seedHelmProviders(deps.database.db, deps.sso.settings)
     .then((seeded) => {
