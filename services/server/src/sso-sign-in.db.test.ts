@@ -420,6 +420,46 @@ describe("team invitations need a verified address (nOAuth, review finding 1)", 
   });
 });
 
+describe("SSO-made users get no local credential (SSO9, review finding 3)", () => {
+  it("refuses passkey registration, a password change and TOTP enrolment", async () => {
+    const { browser } = await signInVia(entra, "corp", entraUser());
+    expect((await browser.get("/v1/me")).status).toBe(200);
+    const authenticator = new SoftwareAuthenticator("kobe.test", "http://kobe.test");
+    const options = await browser.get("/api/auth/passkey/generate-register-options");
+    expect(options.status).toBe(403);
+    expect(options.json.code).toBe("SSO_ONLY_ACCOUNT");
+    const verify = await browser.post("/api/auth/passkey/verify-registration", {
+      response: authenticator.register({
+        challenge: "AAAA",
+        rp: { id: "kobe.test", name: "Kobe" },
+        user: { id: "AAAA", name: "x", displayName: "x" },
+      }),
+    });
+    expect(verify.status).toBe(403);
+    const change = await browser.post("/api/auth/change-password", {
+      currentPassword: "x",
+      newPassword: "a-new-long-password-123",
+    });
+    expect(change.status).toBe(403);
+    const totp = await browser.post("/api/auth/two-factor/enable", { password: "x" });
+    expect(totp.status).toBe(403);
+    const userId = (await browser.get("/v1/me")).json.user.id as string;
+    const creds = await h.admin.query(
+      `SELECT (SELECT count(*)::int FROM passkeys WHERE user_id = $1) AS passkeys,
+              (SELECT count(*)::int FROM accounts WHERE user_id = $1) AS accounts`,
+      [userId],
+    );
+    expect(creds.rows[0]).toEqual({ passkeys: 0, accounts: 0 });
+  });
+
+  it("still lets a local user add a passkey", async () => {
+    await h.createUser("pk-local@sso-signin.test");
+    const b = await h.signIn("pk-local@sso-signin.test");
+    const options = await b.get("/api/auth/passkey/generate-register-options");
+    expect(options.status, options.text).toBe(200);
+  });
+});
+
 describe("state, nonce and ID token checks (ac-1)", () => {
   it("refuses a tampered state parameter", async () => {
     const flow = await startAt(entra, "corp", entraUser());

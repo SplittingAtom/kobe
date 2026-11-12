@@ -1,7 +1,7 @@
 import { passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
+import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from "better-auth/api";
 import { jwt, twoFactor } from "better-auth/plugins";
 import {
   accounts,
@@ -59,6 +59,26 @@ export const RESET_TOKEN_TTL_SECONDS = 30 * 60;
 const ACCOUNT_DEACTIVATED = {
   code: "ACCOUNT_DEACTIVATED",
   message: "This account is deactivated. Ask a site admin to reactivate it.",
+};
+
+/**
+ * Endpoints that add a local credential or factor to the signed-in account (SSO9, review finding 3):
+ * refused for a user with no `credential` account (made by SSO JIT or SCIM), who signs in only
+ * through the identity provider, so an IdP-side disable can never be outlived by a local passkey
+ * or password. TOTP enrolment is refused too (it would be a Kobe factor the IdP doesn't govern).
+ */
+const LOCAL_CREDENTIAL_PATHS = new Set([
+  "/passkey/generate-register-options",
+  "/passkey/verify-registration",
+  "/passkey/register",
+  "/change-password",
+  "/two-factor/enable",
+]);
+
+const SSO_ONLY_ACCOUNT = {
+  code: "SSO_ONLY_ACCOUNT",
+  message:
+    "This account signs in through your organization's identity provider and can't have a Kobe password, passkey or authenticator app.",
 };
 
 const PASSKEY_VERIFY_PATHS = new Set([
@@ -201,6 +221,12 @@ export function createAuth({
     telemetry: { enabled: false },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        if (LOCAL_CREDENTIAL_PATHS.has(ctx.path)) {
+          const current = await getSessionFromCtx(ctx).catch(() => null);
+          if (current && !(await hasLocalPassword(db, current.user.id))) {
+            throw new APIError("FORBIDDEN", SSO_ONLY_ACCOUNT);
+          }
+        }
         // A passkey counts as a strong factor only with user verification (PIN/biometric).
         if (
           PASSKEY_VERIFY_PATHS.has(ctx.path) &&
