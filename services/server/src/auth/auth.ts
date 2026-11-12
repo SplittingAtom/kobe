@@ -8,7 +8,9 @@ import {
   jwks,
   passkeys,
   rateLimits,
+  eq,
   sessions,
+  sessionSsoContexts,
   twoFactors,
   users,
   verifications,
@@ -80,6 +82,34 @@ const SSO_ONLY_ACCOUNT = {
   message:
     "This account signs in through your organization's identity provider and can't have a Kobe password, passkey or authenticator app.",
 };
+
+/**
+ * Endpoints that enrol a Kobe second factor (a TOTP secret, its confirmation, backup codes):
+ * refused from an SSO session whose sign-in did not prove MFA (spec sso-oidc-scim §8, SSO7,
+ * KOBE-629), so a stolen IdP password can never mint a second factor. A local session, or an SSO
+ * session that proved MFA, is unaffected; the TOTP sign-in challenge carries no session.
+ */
+const TOTP_ENROLMENT_PATHS = new Set([
+  "/two-factor/enable",
+  "/two-factor/get-totp-uri",
+  "/two-factor/verify-totp",
+  "/two-factor/generate-backup-codes",
+]);
+
+const SSO_MFA_REQUIRED = {
+  code: "SSO_MFA_REQUIRED",
+  message:
+    "Your organization's sign-in did not include multi-factor authentication, so this session can't set up an authenticator app. Sign in again with multi-factor authentication (your administrator sets it up with Conditional Access).",
+};
+
+/** The session is a single sign-on session whose sign-in did not prove MFA. */
+async function ssoSessionWithoutMfa(db: KobeDb, sessionId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ mfaSatisfied: sessionSsoContexts.mfaSatisfied })
+    .from(sessionSsoContexts)
+    .where(eq(sessionSsoContexts.sessionId, sessionId));
+  return row !== undefined && !row.mfaSatisfied;
+}
 
 const PASSKEY_VERIFY_PATHS = new Set([
   "/passkey/verify-registration",
@@ -225,6 +255,12 @@ export function createAuth({
           const current = await getSessionFromCtx(ctx).catch(() => null);
           if (current && !(await hasLocalPassword(db, current.user.id))) {
             throw new APIError("FORBIDDEN", SSO_ONLY_ACCOUNT);
+          }
+        }
+        if (TOTP_ENROLMENT_PATHS.has(ctx.path)) {
+          const current = await getSessionFromCtx(ctx).catch(() => null);
+          if (current && (await ssoSessionWithoutMfa(db, current.session.id))) {
+            throw new APIError("FORBIDDEN", SSO_MFA_REQUIRED);
           }
         }
         // A passkey counts as a strong factor only with user verification (PIN/biometric).

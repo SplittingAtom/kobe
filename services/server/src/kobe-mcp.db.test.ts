@@ -707,6 +707,38 @@ describe("review fixes (KOBE-619)", () => {
     expect(await delegationBacked(db, d, { ssoEnabled: true })).toBe(false);
   });
 
+  it("KOBE-629: under require_2fa a delegation without TOTP needs an MFA-proving SSO backing session", async () => {
+    const w = await world();
+    const s = await sandboxFor(w.team, w.admin);
+    const { rows } = await fx.admin.query<{ id: string }>(
+      `INSERT INTO sso_providers (slug, display_name, kind, issuer, client_id, subject_claim, access_claim, managed_by)
+       VALUES ($1, 'P', 'oidc', 'https://idp.example.com', 'c', 'sub', 'groups', 'helm') RETURNING id`,
+      [`p-${randomUUID().slice(0, 8)}`],
+    );
+    await fx.admin.query(
+      `INSERT INTO session_sso_contexts (session_id, provider_id, mfa_satisfied)
+       SELECT id, $2, false FROM sessions WHERE user_id = $1`,
+      [w.admin.id, rows[0]?.id],
+    );
+    const db = fx.replica(0).deps.database.db;
+    const d = {
+      userId: w.admin.id,
+      teamId: w.team,
+      runId: s.runId,
+      threadId: s.threadId,
+      toolCallId: "tc",
+    };
+    const opts = { ssoEnabled: true, ssoMfaProof: true };
+    expect(await delegationBacked(db, d, { ssoEnabled: true })).toBe(true);
+    expect(await delegationBacked(db, d, opts)).toBe(false);
+    await fx.admin.query(
+      `UPDATE session_sso_contexts SET mfa_satisfied = true
+        WHERE session_id IN (SELECT id FROM sessions WHERE user_id = $1)`,
+      [w.admin.id],
+    );
+    expect(await delegationBacked(db, d, opts)).toBe(true);
+  });
+
   it("L3: the role change itself refuses another before-state (409 changed_since_approval)", async () => {
     const w = await world();
     const res = await w.admin.browser.patch(`/v1/team/members/${w.target.id}`, {

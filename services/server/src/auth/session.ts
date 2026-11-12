@@ -32,6 +32,18 @@ export interface AuthVariables {
 
 export const REQUIRE_TWO_FACTOR = "require_2fa";
 
+const TWO_FACTOR_ENROLLMENT_REQUIRED = {
+  code: "two_factor_enrollment_required",
+  message: "This site requires two-factor authentication.",
+} as const;
+
+/** An SSO session whose sign-in did not prove MFA, on a site that requires 2FA (SSO7). */
+const SSO_MFA_MISSING = {
+  code: "mfa_missing",
+  message:
+    "Your organization's sign-in did not include multi-factor authentication, which this site requires. Sign out and sign in again with multi-factor authentication, or ask your administrator about Conditional Access.",
+} as const;
+
 export async function readRequireTwoFactor(deps: ServerDeps): Promise<boolean> {
   return readRequireTwoFactorIn(deps.database.db);
 }
@@ -47,8 +59,10 @@ export async function readRequireTwoFactorIn(db: KobeDb): Promise<boolean> {
 
 /**
  * Requires a live Better Auth session (looked up in Postgres on every request, so revocation is
- * immediate) and, when the site requires 2FA, an enrolled TOTP factor. Enrollment itself goes
- * through /api/auth/two-factor/*, which this middleware does not guard.
+ * immediate) and, when the site requires 2FA, an enrolled TOTP factor (local sessions) or an IdP
+ * MFA proof (SSO sessions, `session_sso_contexts.mfa_satisfied`). Enrollment itself goes through
+ * /api/auth/two-factor/*, which this middleware does not guard; auth.ts refuses it from an SSO
+ * session without MFA proof.
  */
 export function requireSession(deps: ServerDeps) {
   return createMiddleware<{ Variables: AuthVariables }>(async (c, next) => {
@@ -80,14 +94,16 @@ export function requireSession(deps: ServerDeps) {
       ) {
         return c.json({ code: "unauthenticated", message: "Sign in to continue." }, 401);
       }
-      if (!person.twoFactorEnabled && (await readRequireTwoFactor(deps))) {
-        return c.json(
-          {
-            code: "two_factor_enrollment_required",
-            message: "This site requires two-factor authentication.",
-          },
-          403,
-        );
+      // Without a Kobe TOTP factor, only an SSO sign-in that proved MFA backs the run (KOBE-629).
+      if (
+        !person.twoFactorEnabled &&
+        (await readRequireTwoFactor(deps)) &&
+        !(await delegationBacked(deps.database.db, delegation, {
+          ssoEnabled: deps.sso.settings.enabled,
+          ssoMfaProof: true,
+        }))
+      ) {
+        return c.json(TWO_FACTOR_ENROLLMENT_REQUIRED, 403);
       }
       c.set("user", {
         id: person.id,
@@ -108,6 +124,7 @@ export function requireSession(deps: ServerDeps) {
         deactivatedAt: users.deactivatedAt,
         role: siteRoles.role,
         ssoProviderId: sessionSsoContexts.providerId,
+        ssoMfaSatisfied: sessionSsoContexts.mfaSatisfied,
         maxSessionHours: ssoProviders.maxSessionHours,
       })
       .from(users)
@@ -141,14 +158,15 @@ export function requireSession(deps: ServerDeps) {
       name: session.user.name,
       twoFactorEnabled: session.user.twoFactorEnabled === true,
     };
-    if (!user.twoFactorEnabled && (await readRequireTwoFactor(deps))) {
-      return c.json(
-        {
-          code: "two_factor_enrollment_required",
-          message: "This site requires two-factor authentication.",
-        },
-        403,
-      );
+    if (await readRequireTwoFactor(deps)) {
+      // An SSO session counts only by its own sign-in's MFA proof (§8, SSO3): a Kobe TOTP factor
+      // never stands in for it, and it is never sent to TOTP enrolment (SSO7). A local session
+      // needs the enrolled factor, which its sign-in had to pass.
+      if (account.ssoProviderId !== null) {
+        if (account.ssoMfaSatisfied !== true) return c.json(SSO_MFA_MISSING, 403);
+      } else if (!user.twoFactorEnabled) {
+        return c.json(TWO_FACTOR_ENROLLMENT_REQUIRED, 403);
+      }
     }
     c.set("user", user);
     c.set("sessionId", session.session.id);

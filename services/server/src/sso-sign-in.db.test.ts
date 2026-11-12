@@ -203,6 +203,10 @@ describe("sign-in page data", () => {
     expect(p.get("redirect_uri")).toBe("http://kobe.test/api/auth/sso/callback/corp");
     expect(p.get("scope")).toBe("openid profile email");
     expect(p.get("prompt")).toBe("select_account");
+    // The Entra preset asks for the MFA authentication context c1 (§8, KOBE-629).
+    expect(JSON.parse(p.get("claims") ?? "null")).toEqual({
+      id_token: { acrs: { essential: true, value: "c1" } },
+    });
     // The cookie carries no readable verifier, nonce or state.
     expect(flow.flowCookie).not.toContain(p.get("state") ?? "-");
     expect(flow.flowCookie).not.toContain(p.get("nonce") ?? "-");
@@ -238,7 +242,8 @@ describe("JIT and linked sign-in", () => {
     expect(ctx.rows).toHaveLength(1);
     expect(ctx.rows[0]).toMatchObject({
       provider_id: corpId,
-      mfa_satisfied: false,
+      // amr "mfa" is in the Entra preset's amr_any (KOBE-629).
+      mfa_satisfied: true,
       amr: ["pwd", "mfa"],
       acr: "1",
     });
@@ -620,18 +625,140 @@ describe("groups overage (generic provider, access claim groups)", () => {
   });
 });
 
-describe("site requires 2FA (MFA trust is SSO-4)", () => {
-  it("refuses SSO with mfa_missing rather than letting the session enrol TOTP", async () => {
-    await h.admin.query(
-      `INSERT INTO site_settings (key, value) VALUES ('require_2fa', 'true')
-       ON CONFLICT (key) DO UPDATE SET value = 'true'`,
-    );
+describe("site requires 2FA: trust the IdP's MFA (KOBE-629, SSO3, SSO7)", () => {
+  const requireTwoFactor = async (on: boolean) => {
+    await (on
+      ? h.admin.query(
+          `INSERT INTO site_settings (key, value) VALUES ('require_2fa', 'true')
+           ON CONFLICT (key) DO UPDATE SET value = 'true'`,
+        )
+      : h.admin.query(`DELETE FROM site_settings WHERE key = 'require_2fa'`));
+  };
+  const contextOf = async (userId: string) =>
+    (
+      await h.admin.query<{ mfa_satisfied: boolean }>(
+        `SELECT c.mfa_satisfied FROM session_sso_contexts c
+           JOIN sessions s ON s.id = c.session_id WHERE s.user_id = $1`,
+        [userId],
+      )
+    ).rows;
+
+  it("ac-1: an MFA-proving sign-in (Entra acrs c1) passes require_2fa without Kobe TOTP", async () => {
+    await requireTwoFactor(true);
     try {
-      const { location } = await signInVia(entra, "corp", entraUser());
-      expect(errorOf(location)).toBe("mfa_missing");
+      const { location, browser } = await signInVia(
+        entra,
+        "corp",
+        entraUser({ amr: ["pwd"], acrs: ["c1"] }),
+      );
+      expect(errorOf(location)).toBeNull();
+      const me = await browser.get("/v1/me");
+      expect(me.status, me.text).toBe(200);
+      expect(me.json.user.twoFactorEnabled).toBe(false);
+      expect(await contextOf(me.json.user.id as string)).toEqual([{ mfa_satisfied: true }]);
     } finally {
-      await h.admin.query(`DELETE FROM site_settings WHERE key = 'require_2fa'`);
+      await requireTwoFactor(false);
     }
+  });
+
+  it("ac-1: an amr value in the rule proves MFA too (generic provider)", async () => {
+    await requireTwoFactor(true);
+    try {
+      const { location, browser } = await signInVia(kc, "kc", {
+        sub: `kc-mfa-${oid()}`,
+        email: `kc-mfa-${nextOid}@kc.example.com`,
+        email_verified: true,
+        groups: ["g-research"],
+        amr: ["pwd", "otp"],
+      });
+      expect(errorOf(location)).toBeNull();
+      expect((await browser.get("/v1/me")).status).toBe(200);
+    } finally {
+      await requireTwoFactor(false);
+    }
+  });
+
+  it("ac-2: a non-proving sign-in is refused with mfa_missing: no user, no session", async () => {
+    await requireTwoFactor(true);
+    try {
+      const before = await userCount();
+      const sessionsBefore = (await h.admin.query(`SELECT 1 FROM session_sso_contexts`)).rowCount;
+      // acrs for another context, or c1 sent to a generic provider, prove nothing.
+      for (const [mock, slug, user] of [
+        [entra, "corp", entraUser({ amr: ["pwd"], acr: "1" })],
+        [entra, "corp", entraUser({ amr: ["pwd"], acrs: ["c2"] })],
+        [
+          kc,
+          "kc",
+          { sub: `kc-nomfa-${oid()}`, groups: ["g-research"], amr: ["pwd"], acrs: ["c1"] },
+        ],
+      ] as const) {
+        const { location, browser } = await signInVia(mock, slug, user);
+        expect(errorOf(location)).toBe("mfa_missing");
+        expect((await browser.get("/v1/me")).status).toBe(401);
+      }
+      expect(await userCount()).toBe(before);
+      expect((await h.admin.query(`SELECT 1 FROM session_sso_contexts`)).rowCount).toBe(
+        sessionsBefore,
+      );
+    } finally {
+      await requireTwoFactor(false);
+    }
+  });
+
+  it("a non-proving sign-in is allowed while 2FA is not required, recorded as not satisfied", async () => {
+    const { location, browser } = await signInVia(entra, "corp", entraUser({ amr: ["pwd"] }));
+    expect(errorOf(location)).toBeNull();
+    const me = await browser.get("/v1/me");
+    expect(me.status).toBe(200);
+    expect(await contextOf(me.json.user.id as string)).toEqual([{ mfa_satisfied: false }]);
+    // Turning require_2fa on later stops that session with the Conditional Access message,
+    // not the TOTP enrolment prompt (SSO7: no TOTP fallback).
+    await requireTwoFactor(true);
+    try {
+      const refused = await browser.get("/v1/me");
+      expect(refused.status).toBe(403);
+      expect(refused.json.code).toBe("mfa_missing");
+      expect(refused.json.message).toMatch(/Conditional Access/);
+    } finally {
+      await requireTwoFactor(false);
+    }
+  });
+
+  it("ac-3: a linked local user's non-MFA SSO session cannot enrol TOTP or backup codes", async () => {
+    const localId = await h.createUser("linked-local@sso-signin.test");
+    const subject = oid();
+    await h.admin.query(
+      `INSERT INTO sso_identities (provider_id, subject, user_id, linked_via)
+       VALUES ($1, $2, $3, 'admin_expected')`,
+      [corpId, subject, localId],
+    );
+    const user = entraUser({ oid: subject, amr: ["pwd"] });
+    const { location, browser } = await signInVia(entra, "corp", user);
+    expect(errorOf(location)).toBeNull();
+    expect((await browser.get("/v1/me")).json.user.id).toBe(localId);
+    for (const [path, body] of [
+      ["/api/auth/two-factor/enable", { password: PASSWORD }],
+      ["/api/auth/two-factor/get-totp-uri", { password: PASSWORD }],
+      ["/api/auth/two-factor/verify-totp", { code: "123456" }],
+      ["/api/auth/two-factor/generate-backup-codes", { password: PASSWORD }],
+    ] as const) {
+      const res = await browser.post(path, body);
+      expect(res.status, `${path}: ${res.text}`).toBe(403);
+      expect(res.json.code).toBe("SSO_MFA_REQUIRED");
+    }
+    const { rows } = await h.admin.query(
+      `SELECT u.two_factor_enabled, (SELECT count(*)::int FROM two_factors t WHERE t.user_id = u.id) AS secrets
+         FROM users u WHERE u.id = $1`,
+      [localId],
+    );
+    expect(rows[0]).toEqual({ two_factor_enabled: false, secrets: 0 });
+
+    // The same person with an MFA-proving SSO session, or a local session, may enrol.
+    const mfa = await signInVia(entra, "corp", { ...user, amr: ["pwd", "mfa"] });
+    expect(errorOf(mfa.location)).toBeNull();
+    const enable = await mfa.browser.post("/api/auth/two-factor/enable", { password: PASSWORD });
+    expect(enable.status, enable.text).toBe(200);
   });
 });
 
