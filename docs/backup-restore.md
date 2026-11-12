@@ -101,16 +101,19 @@ reaches a disk:
 ### Secrets
 
 A backup file never holds plaintext, because everything is encrypted under the backup key. Once
-decrypted, the dump contains every backed-up table, **including `accounts`**. Should a sign-in
-provider ever store OAuth tokens there, those tokens are in the dump too, and they are protected
-only by the backup encryption. The test suite seeds such tokens and asserts exactly this. Inside
-the encryption:
+decrypted, the dump contains every backed-up table, **including `accounts`**. Kobe's single
+sign-on stores no identity-provider tokens there (or anywhere); should a future sign-in method
+store OAuth tokens in `accounts`, they would be in the dump too, protected only by the backup
+encryption. The test suite seeds such tokens and asserts exactly this. Inside the encryption:
 
 | Data                                          | Inside the backup as                                       |
 | --------------------------------------------- | ---------------------------------------------------------- |
 | Passwords                                     | scrypt hashes (`accounts.password`)                        |
 | TOTP secrets and backup codes                 | ciphertext under the **auth secret** (`two_factors`)       |
-| OAuth tokens in `accounts` (if SSO is added)  | **as stored** (plaintext inside the encrypted dump)        |
+| SSO: identity-provider tokens                 | none: Kobe stores no access, refresh or ID tokens          |
+| SSO: client secrets (console providers)       | ciphertext under the **envelope key** (`sso_providers`)    |
+| SSO: SCIM tokens                              | SHA-256 hashes (`scim_tokens`)                             |
+| OAuth tokens in `accounts` (none today)       | **as stored** (plaintext inside the encrypted dump)        |
 | Connector grants and site-wide connector keys | ciphertext under the **envelope key** (spec D27, D28)      |
 | Model provider API keys, virtual keys         | ciphertext under the **model keys** Secret (KOBE-40)       |
 | Egress header values (KOBE-39)                | ciphertext under the **egress header** Secret              |
@@ -154,6 +157,36 @@ done
 
 `kobe backup` cannot include them: the CLI talks to Postgres and S3 only, and bundling the keys with
 the ciphertext they protect would defeat the separation.
+
+Secrets you created yourself and named in values are not in the table above but belong in the
+same store: the client secrets of single sign-on providers declared in Helm
+(`auth.sso.providers[].clientSecretSecret`) and a private CA bundle (`server.extraCaBundle`).
+
+### Single sign-on and SCIM
+
+| Table                                  | In the backup                                                                                                                       |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `sso_providers`                        | yes; a console provider's client secret sealed under the envelope key, a Helm provider's secret not at all (it stays in its Secret) |
+| `sso_identities`                       | yes: who is linked to which provider identity (`oid`/`sub`), and how                                                                |
+| `sso_access_mappings`                  | yes                                                                                                                                 |
+| `sso_link_expectations`                | yes (expected links still pending)                                                                                                  |
+| `scim_tokens`                          | yes, as SHA-256 hashes with their revoked state                                                                                     |
+| `scim_groups`, `scim_group_members`    | yes (empty until SCIM Groups ship)                                                                                                  |
+| `users.deactivated_via`, `setup_owner` | yes: who deactivated a user (an admin or SCIM) and which account is the break-glass setup Owner                                     |
+| `session_sso_contexts`                 | no (see above): SSO sessions end like every other session                                                                           |
+
+After a restore:
+
+- **Rotate every SCIM token.** The hashes are the ones of backup time, so a token revoked since
+  then works again until you revoke it once more: Site console → Single sign-on → SCIM →
+  **Rotate**, put the new token in Entra's provisioning settings, then **Revoke** the old one.
+- Console providers need the same envelope key (`envelope.keySecret`), or their client secrets
+  can't be opened and their sign-in fails until a site admin enters the secret again. Helm
+  providers need their `clientSecretSecret` and are re-applied from the chart at start.
+- SCIM changes Entra made after the backup (new, renamed or deactivated people) are not in the
+  restored database. Entra's next provisioning cycle sends them again for the people it knows
+  changed; to be sure, use **Restart provisioning** on the enterprise application.
+- Everyone signs in again, through SSO or locally.
 
 - The backup key, the S3 credentials and the database credentials.
 

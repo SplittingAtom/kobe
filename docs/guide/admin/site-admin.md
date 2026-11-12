@@ -25,6 +25,10 @@ access, which is time-boxed, read-only, audited and shown to the team.
   sign-ins (**Unlink**) and **Expect SSO link**: their next sign-in from the chosen provider links
   automatically when its verified address matches theirs and lies in one of the provider's
   verified domains (once, within 14 days). The Owner and Admins link only by signing in themselves.
+- **Single sign-on** and **SSO access mappings**: let people sign in with Microsoft Entra ID or
+  another OpenID Connect provider, decide which app roles or groups give which team role, and
+  create SCIM tokens so the provider provisions and deactivates accounts. See
+  [Single sign-on](single-sign-on.md).
 - **Invitations**: invite people by email; resend or revoke open invitations.
 - **Site roles**: who is Owner and who are Admins.
 
@@ -88,7 +92,8 @@ access, which is time-boxed, read-only, audited and shown to the team.
 - **Settings**: site-wide settings such as required two-factor authentication (local accounts
   enrol an authenticator app; a single sign-on sign-in counts only when the identity provider
   proved multi-factor authentication, for Microsoft Entra through a Conditional Access
-  authentication context, and is refused otherwise), and the site's
+  authentication context, and is refused otherwise; see
+  [Single sign-on](single-sign-on.md#multi-factor-authentication)), and the site's
   memory and project memory switches (both the site and the team switch must be on for memory to
   work; see [Memory](../memory.md)). The **Kobe connector** setting is **Off**, **Docs only** (the
   default) or **Docs and admin tools**; see below.

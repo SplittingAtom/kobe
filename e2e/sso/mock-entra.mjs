@@ -26,6 +26,12 @@
 // Run: node e2e/sso/mock-entra.mjs with MOCK_TENANTS (comma-separated GUIDs), MOCK_CLIENT_ID,
 // MOCK_CLIENT_SECRET, MOCK_TLS_CERT and MOCK_TLS_KEY (PEM file paths), PORT (default 8443). `jose`
 // is the server image's own copy (openid-client's dependency): no new package or image.
+//
+// As a generic OIDC provider (gate1 browser spec, KOBE-634; e2e/sso/gate1-mock-idp.yaml): set
+// MOCK_ORIGIN to the mock's own https origin (its issuer is then `<origin>/<tid>/v2.0`, so the real
+// login.microsoftonline.com is never touched), MOCK_ADVERTISE_PKCE=1 (Kobe's generic preset
+// requires S256 in the document) and MOCK_HTTP_PORT for a plain-HTTP listener behind the ingress
+// that serves the browser's authorize step only.
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
@@ -101,6 +107,7 @@ export async function createMockEntra({
   clientId,
   clientSecret,
   origin = ENTRA_ORIGIN,
+  advertisePkce = false,
   now = () => Date.now(),
 }) {
   if (!jose) throw new Error("jose is required");
@@ -138,6 +145,7 @@ export async function createMockEntra({
       subject_types_supported: ["pairwise"],
       id_token_signing_alg_values_supported: ["RS256"],
       response_types_supported: ["code", "id_token", "code id_token", "id_token token"],
+      ...(advertisePkce ? { code_challenge_methods_supported: ["S256"] } : {}),
       scopes_supported: ["openid", "profile", "email", "offline_access"],
       issuer: issuerOf(tid),
       request_uri_parameter_supported: false,
@@ -433,6 +441,15 @@ export async function createMockEntra({
   return { handle, stats, kid, issuerOf, publicJwk: jwk };
 }
 
+/**
+ * Whether a request may use the plain-HTTP listener: the browser's authorize step only (the
+ * ingress in front of it), never the token endpoint, the keys or the stats.
+ */
+export function browserPath(method, path) {
+  const pathname = path.split("?")[0];
+  return method === "GET" && /^\/[0-9a-fA-F-]{36}\/oauth2\/v2\.0\/authorize$/.test(pathname);
+}
+
 /** Finds `jose`: this directory's resolution first, else the server image's pnpm store. */
 async function loadJose() {
   try {
@@ -449,41 +466,55 @@ async function loadJose() {
 async function main() {
   const { readFileSync } = await import("node:fs");
   const https = await import("node:https");
+  const http = await import("node:http");
   const env = process.env;
   const mock = await createMockEntra({
     jose: await loadJose(),
     tenants: (env.MOCK_TENANTS ?? "").split(",").filter(Boolean),
     clientId: env.MOCK_CLIENT_ID,
     clientSecret: env.MOCK_CLIENT_SECRET,
+    ...(env.MOCK_ORIGIN ? { origin: env.MOCK_ORIGIN.replace(/\/$/, "") } : {}),
+    advertisePkce: env.MOCK_ADVERTISE_PKCE === "1",
   });
-  const server = https.createServer(
-    { cert: readFileSync(env.MOCK_TLS_CERT), key: readFileSync(env.MOCK_TLS_KEY) },
-    (req, res) => {
-      const chunks = [];
-      req.on("data", (c) => chunks.push(c));
-      req.on("end", async () => {
-        let out;
-        try {
-          out = await mock.handle({
-            method: req.method,
-            path: req.url,
-            headers: req.headers,
-            body: Buffer.concat(chunks).toString("utf8"),
-          });
-        } catch (err) {
-          out = json(500, {
-            error: "server_error",
-            error_description: String(err?.message ?? err),
-          });
-        }
-        // One line per request, never a query string, code or token.
-        console.log(`REQ ${req.method} ${req.url.split("?")[0]} ${out.status}`);
-        res.writeHead(out.status, out.headers).end(out.body);
-      });
-    },
-  );
+  const serve = (onlyBrowser) => (req, res) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", async () => {
+      let out;
+      try {
+        out =
+          onlyBrowser && !browserPath(req.method, req.url)
+            ? json(404, { error: "not_found" })
+            : await mock.handle({
+                method: req.method,
+                path: req.url,
+                headers: req.headers,
+                body: Buffer.concat(chunks).toString("utf8"),
+              });
+      } catch (err) {
+        out = json(500, {
+          error: "server_error",
+          error_description: String(err?.message ?? err),
+        });
+      }
+      // One line per request, never a query string, code or token.
+      console.log(`REQ ${req.method} ${req.url.split("?")[0]} ${out.status}`);
+      res.writeHead(out.status, out.headers).end(out.body);
+    });
+  };
   const port = Number(env.PORT ?? 8443);
-  server.listen(port, () => console.log(`mock Entra on :${port}, kid ${mock.kid}`));
+  https
+    .createServer(
+      { cert: readFileSync(env.MOCK_TLS_CERT), key: readFileSync(env.MOCK_TLS_KEY) },
+      serve(false),
+    )
+    .listen(port, () => console.log(`mock Entra on :${port}, kid ${mock.kid}`));
+  if (env.MOCK_HTTP_PORT) {
+    const httpPort = Number(env.MOCK_HTTP_PORT);
+    http
+      .createServer(serve(true))
+      .listen(httpPort, () => console.log(`mock authorize (http) on :${httpPort}`));
+  }
 }
 
 /** Run as a script (the ConfigMap mount is a symlink, so compare real paths). */

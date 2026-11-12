@@ -465,3 +465,107 @@ describe("SCIM client: Entra's request shapes", () => {
     expect(calls).not.toContain("POST");
   });
 });
+
+describe("mock as a generic OIDC provider on gate1 (KOBE-634 browser spec)", () => {
+  const ORIGIN = "https://mock-idp.kobe-sso-mock.svc.cluster.local";
+  const GENERIC: ClaimsProvider = {
+    kind: "oidc",
+    issuer: `${ORIGIN}/${TENANT}/v2.0`,
+    clientId: CLIENT_ID,
+    tenantId: null,
+    subjectClaim: "oid",
+    accessClaim: "roles",
+  };
+  let generic: any;
+  let genericKeys: ReturnType<typeof jose.createLocalJWKSet>;
+
+  beforeAll(async () => {
+    generic = await m.createMockEntra({
+      jose,
+      tenants: [TENANT],
+      clientId: CLIENT_ID,
+      clientSecret: SECRET,
+      origin: ORIGIN,
+      advertisePkce: true,
+    });
+    const keys = await generic.handle({ method: "GET", path: `/${TENANT}/discovery/v2.0/keys` });
+    genericKeys = jose.createLocalJWKSet(JSON.parse(keys.body));
+  });
+
+  it("names its own origin as issuer and advertises PKCE S256, as Kobe's generic preset requires", async () => {
+    const res = await generic.handle({
+      method: "GET",
+      path: `/${TENANT}/v2.0/.well-known/openid-configuration`,
+    });
+    const doc = JSON.parse(res.body);
+    expect(doc.issuer).toBe(GENERIC.issuer);
+    expect(doc.code_challenge_methods_supported).toEqual(["S256"]);
+    for (const k of ["authorization_endpoint", "token_endpoint", "jwks_uri"]) {
+      expect(doc[k].startsWith(`${ORIGIN}/${TENANT}/`)).toBe(true);
+    }
+  });
+
+  it("issues tokens a generic provider keyed on oid accepts, with a verified email and amr MFA", async () => {
+    const verifier = randomBytes(32).toString("base64url");
+    const nonce = randomBytes(16).toString("base64url");
+    const person = {
+      oid: randomUUID(),
+      upn: "bo@sso-e2e.test",
+      email: "bo@sso-e2e.test",
+      name: "Bo",
+      roles: ["kobe.e2e.member"],
+      amr: ["pwd", "mfa"],
+      extra: { email_verified: true },
+    };
+    const q = new URLSearchParams({
+      client_id: CLIENT_ID,
+      response_type: "code",
+      redirect_uri: REDIRECT,
+      scope: "openid profile email",
+      state: "s",
+      nonce,
+      code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+      code_challenge_method: "S256",
+      mock_user: m.encodeUser(person),
+    });
+    const auth = await generic.handle({
+      method: "GET",
+      path: `/${TENANT}/oauth2/v2.0/authorize?${q}`,
+    });
+    const code = new URL(auth.headers.location).searchParams.get("code") ?? "";
+    const res = await generic.handle({
+      method: "POST",
+      path: `/${TENANT}/oauth2/v2.0/token`,
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: REDIRECT,
+        code_verifier: verifier,
+        client_id: CLIENT_ID,
+        client_secret: SECRET,
+      }).toString(),
+    });
+    const token: string = JSON.parse(res.body).id_token;
+    await jose.jwtVerify(token, genericKeys, { algorithms: ["RS256"] });
+    const check = checkIdTokenClaims({
+      header: jose.decodeProtectedHeader(token) as Record<string, unknown>,
+      claims: jose.decodeJwt(token) as Record<string, unknown>,
+      provider: GENERIC,
+      expectedNonce: nonce,
+    });
+    expect(check.ok).toBe(true);
+    if (!check.ok) return;
+    expect(check.identity.subject).toBe(person.oid);
+    expect(check.identity.email).toBe(person.email);
+    expect(check.identity.emailVerified).toBe(true);
+    expect(mfaProven("oidc", kindDefaults("oidc").mfaRule, check.identity)).toBe(true);
+  });
+
+  it("serves only the authorize step on its plain-HTTP listener (the ingress path)", () => {
+    expect(m.browserPath("GET", `/${TENANT}/oauth2/v2.0/authorize?client_id=x`)).toBe(true);
+    expect(m.browserPath("POST", `/${TENANT}/oauth2/v2.0/authorize`)).toBe(false);
+    expect(m.browserPath("POST", `/${TENANT}/oauth2/v2.0/token`)).toBe(false);
+    expect(m.browserPath("GET", `/${TENANT}/discovery/v2.0/keys`)).toBe(false);
+    expect(m.browserPath("GET", "/_mock/stats")).toBe(false);
+  });
+});

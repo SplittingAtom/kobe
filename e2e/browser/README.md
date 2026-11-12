@@ -223,6 +223,38 @@ project's file, writes one in the owner's workspace and is shared with the team:
 project file by name and the owner's file only as a count. Clean-up deletes the folders, unshares
 and archives and deletes the project. `npx playwright test thread-file-map`.
 
+## Single sign-on (`sso.spec.ts`, KOBE-634)
+
+Sign-in with the mock identity provider (`e2e/sso/mock-entra.mjs`), registered as its own generic
+OIDC provider (slug `e2e-mock`, issuer at the mock's in-cluster name) beside any real provider,
+which the spec never touches: the **Sign in with** button on the sign-in page; a first sign-in
+that creates a member from an access mapping, the **Managed by** row in the Team console and
+**Take over**; linking an organization sign-in to member2's account (refused as `not_allowed`,
+member2's password, the confirm page, **Link**, a second SSO sign-in, **Unlink** in Sign-in
+methods); and a person provisioned by the mock's SCIM client who is signed out in the browser the
+moment SCIM deactivates them. The test-only person comes from the `mock_user` parameter the spec
+adds to the authorize request. No model tokens: `npx playwright test sso`.
+
+Deploy the mock first with `e2e/sso/gate1-mock-idp.sh` (it prints the Helm values to add and the
+variables below). The spec registers the provider through the API when it is missing (console
+provider, needs the envelope key), turns it on for the run and off again, adds and deletes the
+mapping, and creates and revokes a SCIM token. `KOBE_USER` must be the Owner (or a site admin) and
+a team admin of its active team (`KOBE_TEAM`). Each run leaves two deactivated `sso-e2e-*`
+accounts (Kobe never deletes users).
+
+| Variable                      | Meaning                                                                                 |
+| ----------------------------- | --------------------------------------------------------------------------------------- |
+| `KOBE_SSO_MOCK_ISSUER`        | The mock's issuer (`https://mock-idp.kobe-sso-mock.svc.cluster.local/<tenant>/v2.0`).   |
+| `KOBE_SSO_MOCK_CLIENT_ID`     | Its client ID (only to register the provider).                                          |
+| `KOBE_SSO_MOCK_CLIENT_SECRET` | Its client secret (only to register the provider); from the `mock-idp-client` Secret.   |
+| `KOBE_SSO_MOCK_MAP`           | `ip:port` of the cluster's ingress: Chromium reaches the mock's name there.             |
+| `KOBE_SSO_MOCK_SLUG`, `_NAME` | Optional: slug (default `e2e-mock`) and display name (default `Mock IdP (e2e)`).        |
+| `KOBE_USER2`, `KOBE_PW2`      | member2 for the link test (password sign-in, no authenticator app); skipped without it. |
+
+The spec imports the mock's SCIM client from `../sso/`, so copy `e2e/sso` beside `e2e/browser`
+when you run the suite elsewhere (for example in the Playwright container:
+`tar -c e2e/browser e2e/sso --exclude node_modules`, then `cd e2e/browser`).
+
 ## Writing specs
 
 - Select by role and accessible name, labels and `data-kobe-*` attributes (`data-kobe-steering`,

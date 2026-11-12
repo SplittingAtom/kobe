@@ -16,6 +16,10 @@ sign-in screen to your first answer.
 Open your organization's Kobe address and use one of the options on **Sign in to Kobe** (your site
 may show its own name instead of Kobe):
 
+- **Sign in with _your organization_** (for example "Sign in with Contoso"), if your site uses
+  single sign-on: you sign in on your organization's page and come back signed in. See
+  [Signing in with your organization](getting-started/single-sign-on.md), also for linking it to
+  an account you already have;
 - **Sign in with a passkey**, if you have saved one, or
 - your **Email** and **Password**, then **Sign in**.
 
@@ -23,7 +27,8 @@ If your account has two-factor sign-in turned on, Kobe then asks for your **Auth
 (six digits) and **Verify**. Forgot your password? Use **Forgot your password?** on the sign-in
 page and follow the link Kobe emails you.
 
-There is no open sign-up. You join through an invitation: the link in the invitation email opens
+There is no open sign-up. You join through an invitation, or through your organization's sign-in
+when your organization has given you access to Kobe. With an invitation: the link in the invitation email opens
 **Join Kobe**, where you choose a password and press **Create account**. If the page says
 **Invitation not valid**, ask whoever invited you to send a new one.
 

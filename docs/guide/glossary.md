@@ -10,6 +10,9 @@ The words Kobe uses, in alphabetical order, each with a link to the page that ex
 
 ## Terms
 
+**Access mapping.** A site admin's rule that gives people with an identity provider's app role or
+group a team role in one team. See [Single sign-on](admin/single-sign-on.md#access-mappings).
+
 **Agent.** A configured assistant: system prompt, model, skills, connectors, tool rules and
 approval mode. Personal, team or site-wide. See [Agents](agents/agents.md).
 
@@ -47,8 +50,18 @@ site's list of allowed sites. See [Internet access](internet-and-approvals/inter
 
 **Fork.** A new thread copied from another up to a point.
 
+**Identity provider.** Your organization's sign-in service (for example Microsoft Entra ID) that
+Kobe trusts for single sign-on.
+
 **Kernel.** The live Python process in your sandbox that runs notebooks and `.py` files. See
 [Notebooks and Python](files/notebooks.md).
+
+**Linked sign-in.** An identity provider account joined to a Kobe account, so either signs you
+in. Linking needs your Kobe password or passkey, or an administrator's **expected link**. See
+[Signing in with your organization](getting-started/single-sign-on.md).
+
+**Managed member.** A team membership an access mapping made; it shows "Managed by _provider_"
+and changes only at the provider until a team admin uses **Take over**.
 
 **Memory.** Notes the agent keeps between conversations: **My memory** and **project memory**. See
 [Memory](memory.md).
@@ -75,6 +88,12 @@ and your files.
 it sleeps when idle.
 
 **Schedule.** A prompt sent to an agent at set times.
+
+**SCIM.** The standard an identity provider uses to create, update and deactivate Kobe accounts
+on its own. A **SCIM token** (created in the Site console, shown once) lets one provider do this.
+
+**Single sign-on (SSO).** Signing in to Kobe with your organization's account instead of a Kobe
+password. See [Signing in with your organization](getting-started/single-sign-on.md).
 
 **Site.** The whole Kobe installation of your organization, run by site admins.
 
