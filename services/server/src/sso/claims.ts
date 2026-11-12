@@ -107,10 +107,19 @@ function addressOf(
     const email = addressIn(claims.email);
     if (email !== null) return { email, verified: true };
   }
-  const upn = addressIn(claims.upn) ?? addressIn(claims.preferred_username);
+  const fromUpn = addressIn(claims.upn);
+  const upn = fromUpn ?? addressIn(claims.preferred_username);
   if (upn === null) return { email: null, verified: false };
   const domain = upn.slice(upn.lastIndexOf("@") + 1);
-  return { email: upn, verified: (p.allowedEmailDomains ?? []).includes(domain) };
+  // Only the `upn` claim of a member counts (KOBE-630 review L1): `preferred_username` is a
+  // guest's home sign-in name, and a guest (`#EXT#`, or an `idp` other than the tenant) has a UPN
+  // the tenant did not verify.
+  const guest =
+    upn.includes("#ext#") || (typeof claims.idp === "string" && claims.idp !== claims.iss);
+  return {
+    email: upn,
+    verified: fromUpn !== null && !guest && (p.allowedEmailDomains ?? []).includes(domain),
+  };
 }
 
 function nameOf(claims: Claims): string | null {

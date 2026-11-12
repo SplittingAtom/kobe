@@ -29,6 +29,8 @@ import { siteBreakGlassRoutes } from "./routes/site-break-glass.js";
 import { siteGalleryRoutes } from "./routes/site-gallery.js";
 import { siteInvitesRoutes } from "./routes/site-invites.js";
 import { siteSsoRoutes } from "./routes/site-sso.js";
+import { siteSsoLinkRoutes } from "./routes/site-sso-links.js";
+import { meSsoLinkRoutes } from "./routes/me-sso-links.js";
 import { siteScimTokenRoutes } from "./routes/site-scim-tokens.js";
 import { scimRoutes } from "./routes/scim.js";
 import { siteIsolationRoutes } from "./routes/site-isolation.js";
@@ -217,6 +219,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/me/connector-notices", meConnectorNoticesRoutes(deps));
   api.route("/me/skills", meSkillEnablementRoutes(deps));
   api.route("/me/checkouts", myCheckoutRoutes(deps));
+  api.route("/me/sso", meSsoLinkRoutes(deps));
   api.route("/me", meRoutes(deps));
   api.route("/team/policy", teamPolicyRoutes(deps));
   api.route("/team/invites", teamInvitesRoutes(deps));
@@ -310,6 +313,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/site/invites", siteInvitesRoutes(deps));
   api.route("/site/sso", siteSsoRoutes(deps));
   api.route("/site/sso", siteScimTokenRoutes(deps));
+  api.route("/site/sso", siteSsoLinkRoutes(deps));
   api.route(
     "/site/gallery/agents",
     siteGalleryRoutes(deps, options.evals ? { runner: options.evals } : {}),

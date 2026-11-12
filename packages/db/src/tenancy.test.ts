@@ -66,6 +66,7 @@ describe("tenancy registry", () => {
     const sso = [
       "sso_providers",
       "sso_identities",
+      "sso_link_expectations",
       "sso_access_mappings",
       "session_sso_contexts",
       "scim_tokens",

@@ -85,6 +85,9 @@ describe("utility bar", () => {
     expect(menu.getByRole("link", { name: "My shared cases" }).getAttribute("href")).toBe(
       "/me/shared-cases",
     );
+    expect(menu.getByRole("link", { name: "Sign-in methods" }).getAttribute("href")).toBe(
+      "/me/sign-in-methods",
+    );
     expect(menu.getByRole("button", { name: "Sign out" })).toBeTruthy();
   });
 

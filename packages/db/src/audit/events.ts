@@ -504,13 +504,17 @@ export const AUDIT_EVENTS = {
     userId: id,
     method: z.enum(SSO_LINKED_VIA),
   }),
+  /** `sessionsEnded`: the user's sessions signed in through the provider that ended (KOBE-630). */
   "identity.sso.link.removed": event("site", {
     providerId: id,
     userId: id,
     by: z.enum(["user", "admin", "scim"]),
+    sessionsEnded: count.optional(),
   }),
   /** An admin expects the user's next sign-in from the provider to link (§6). */
   "identity.sso.link_expected": event("site", { providerId: id, userId: id }),
+  /** An admin withdrew an expected link before it was used (KOBE-630). */
+  "identity.sso.link_expectation.withdrawn": event("site", { providerId: id, userId: id }),
   "identity.scim.token.created": event("site", { providerId: id, credentialId: id }),
   "identity.scim.token.revoked": event("site", { providerId: id, credentialId: id }),
   "identity.scim.user.created": event("site", {

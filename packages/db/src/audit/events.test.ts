@@ -144,6 +144,7 @@ describe("audit event taxonomy", () => {
       "identity.scim.user.updated",
       "identity.sso.link.created",
       "identity.sso.link.removed",
+      "identity.sso.link_expectation.withdrawn",
       "identity.sso.link_expected",
       "identity.sso.mapping.created",
       "identity.sso.mapping.deleted",
