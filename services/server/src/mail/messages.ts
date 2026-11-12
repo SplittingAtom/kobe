@@ -66,6 +66,31 @@ export function teamInviteMessage(
   };
 }
 
+/** A Site admin added an existing user to a team, no invitation (KOBE-638). */
+export function teamMemberAddedMessage(
+  input: Branded & {
+    readonly to: string;
+    readonly adderName: string;
+    readonly teamName: string;
+    readonly role: keyof typeof ROLE_NAMES;
+    readonly signInUrl: string;
+  },
+): MailMessage {
+  const adder = oneLine(input.adderName);
+  const team = oneLine(input.teamName);
+  const app = oneLine(input.appName);
+  return {
+    to: input.to,
+    subject: `${adder} added you to the ${team} team on ${app}`,
+    text: [
+      `${adder}, a site admin, added you to the ${team} team on ${app} as a ${ROLE_NAMES[input.role]}.`,
+      "",
+      `Sign in and pick the team from the team switcher: ${input.signInUrl}`,
+      "If you think this is a mistake, ask the team's admins to remove you.",
+    ].join("\n"),
+  };
+}
+
 export function passwordResetMessage(
   input: Branded & {
     readonly to: string;

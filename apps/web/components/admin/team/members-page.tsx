@@ -33,12 +33,26 @@ import { useMutation, useResource } from "../use-resource";
 
 export const TEAM_ROLES: readonly TeamRole[] = ["team_admin", "contributor", "member"];
 
-/** Team members and roles (spec D8; `/v1/team/members`). People join by accepting an invitation. */
+/**
+ * Team members and roles (spec D8; `/v1/team/members`). People join by accepting an invitation;
+ * a Site admin can also add existing users from the Site console (KOBE-638), shown here.
+ */
 /** A membership Kobe made for the Skill reviewer grant (KOBE-331 review H1b). */
 export const ADDED_BY_GRANT = "Added by Kobe: Skill reviewer";
 
 /** A membership an identity provider's access mappings manage (KOBE-627, SSO10). */
 export const managedByLabel = (providerName: string) => `Managed by ${providerName}`;
+
+/** A membership a Site admin made from the Site console, no invitation (KOBE-638). */
+export const ADDED_BY_SITE_ADMIN = "Added by a site admin";
+
+/** How the member joined, in words (KOBE-638: the Site console's roster column). */
+export function joinedVia(m: TeamMember): string {
+  if (m.managedBy) return managedByLabel(m.managedBy.providerName);
+  if (m.addedVia === "skill_reviewer_grant") return ADDED_BY_GRANT;
+  if (m.addedVia === "site_admin") return ADDED_BY_SITE_ADMIN;
+  return "Invitation";
+}
 
 export function MembersPage() {
   const access = useTeamAccess();
@@ -154,6 +168,7 @@ export function MembersPage() {
                   <TableRowHeader>
                     {m.name}
                     {m.userId === access.user.id && " (you)"}
+                    {m.deactivated && <span className="block text-xs">Deactivated</span>}
                   </TableRowHeader>
                   <TableCell>{m.email}</TableCell>
                   <TableCell>
@@ -177,6 +192,9 @@ export function MembersPage() {
                     <DateTime value={m.joinedAt} />
                     {m.addedVia === "skill_reviewer_grant" && (
                       <span className="block text-xs">{ADDED_BY_GRANT}</span>
+                    )}
+                    {m.addedVia === "site_admin" && (
+                      <span className="block text-xs">{ADDED_BY_SITE_ADMIN}</span>
                     )}
                   </TableCell>
                   <TableCell>
@@ -270,17 +288,20 @@ function TeamSsoMappingList({ teamId }: { readonly teamId: string }) {
 }
 
 /** A member's role: choosing doesn't change anything until Save (keyboard-safe). */
-function RoleCell({
+export function RoleCell({
   member,
   pending,
   onSave,
+  idPrefix = "",
 }: {
-  readonly member: TeamMember;
+  readonly member: Pick<TeamMember, "userId" | "name" | "role">;
+  /** Keeps ids unique when several rosters are on one page (the Site console's teams). */
+  readonly idPrefix?: string;
   readonly pending: boolean;
   readonly onSave: (role: TeamRole, trigger: HTMLElement | null) => Promise<void>;
 }) {
   const [role, setRole] = useState<TeamRole>(member.role);
-  const id = `role-${member.userId}`;
+  const id = `role-${idPrefix}${member.userId}`;
   return (
     <form
       className="flex flex-wrap items-center gap-1.5"

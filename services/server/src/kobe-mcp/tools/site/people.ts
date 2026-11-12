@@ -230,9 +230,8 @@ export const siteTeamsCreate = kobeTool({
   description:
     "Creates a team and names its first team admin (Site console › Teams). Give a slug (1-32 " +
     "lowercase letters, digits or hyphens; it cannot be changed later), a display name and the " +
-    "admin's user_id (from site_users_list). Site admins cannot add other members: the team's " +
-    "own admin invites them. The person is always asked to approve; never retry a refused or " +
-    "denied call.",
+    "admin's user_id (from site_users_list). Add more members with site_team_members_add. The " +
+    "person is always asked to approve; never retry a refused or denied call.",
   scope: "site",
   permission: "site.teams.manage",
   readOnly: false,

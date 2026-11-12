@@ -23,6 +23,12 @@ import {
   siteUsersReactivate,
 } from "./people.js";
 import { siteAuditList, siteUsageRead } from "./reads.js";
+import {
+  siteTeamMembersAdd,
+  siteTeamMembersList,
+  siteTeamMembersRemove,
+  siteTeamMembersSetRole,
+} from "./team-members.js";
 import { siteBrandingGet, siteBrandingSet, siteBudgetGet, siteBudgetSet } from "./settings.js";
 import {
   siteGrantsGive,
@@ -49,6 +55,10 @@ export const KOBE_SITE_TOOLS: readonly KobeTool[] = [
   siteUsersReactivate,
   siteTeamsList,
   siteTeamsCreate,
+  siteTeamMembersList,
+  siteTeamMembersAdd,
+  siteTeamMembersSetRole,
+  siteTeamMembersRemove,
   siteInvitesList,
   siteInvitesCreate,
   siteInvitesRevoke,

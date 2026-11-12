@@ -30,6 +30,11 @@ export const memberRoleSchema = z
   .object({ role: teamRoleSchema, expectedRole: teamRoleSchema.optional() })
   .strict();
 
+/** A Site admin's Add (KOBE-638): existing users, one team role for all of them. */
+export const addMembersSchema = z
+  .object({ userIds: z.array(idSchema).min(1).max(50), role: teamRoleSchema })
+  .strict();
+
 export const activeTeamSchema = z.object({ teamId: idSchema }).strict();
 
 export const siteRoleChangeSchema = z.object({ role: z.enum(["admin", "user"]) }).strict();

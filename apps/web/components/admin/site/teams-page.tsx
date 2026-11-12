@@ -7,12 +7,10 @@ import {
   createTeam,
   listSiteTeams,
   renameTeam,
-  teamRoster,
   type SiteTeam,
 } from "../../../lib/admin/api/site/teams";
 import { listUsers, type SiteUser } from "../../../lib/admin/api/site/users";
 import { slugFromTeamName } from "../../../lib/admin/rules";
-import { roleLabel } from "../../../lib/teams";
 import {
   Button,
   EmptyState,
@@ -33,6 +31,7 @@ import {
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
+import { TeamMembersPanel } from "./team-members-panel";
 
 interface TeamsData {
   readonly teams: readonly SiteTeam[];
@@ -48,7 +47,8 @@ async function loadTeams(): Promise<ApiResult<TeamsData>> {
 
 /**
  * Teams (spec D5/D8; `/v1/site/teams`). Site admins create a team with its first team admin,
- * rename teams and read rosters. Membership changes belong to the team's own admins (KOBE-14).
+ * rename teams and manage each team's members (KOBE-638: add existing users without an
+ * invitation, change roles, remove); never their own membership (break-glass stays the way in).
  */
 export function TeamsPage() {
   const { state, reload } = useResource(loadTeams);
@@ -58,7 +58,7 @@ export function TeamsPage() {
     <>
       <PageHeader
         title="Teams"
-        description="Teams are walls: each has its own members, agents and data. Site admins create teams and name the first team admin; the team's admins manage its members from then on."
+        description="Teams are walls: each has its own members, agents and data. Site admins create teams, name the first team admin and can add existing users, change their team roles or remove them; the team's admins manage members too and see every change in the team's audit log. You can't add yourself: site admins reach team content only through break-glass."
       />
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="teams">
@@ -268,7 +268,7 @@ function TeamRow({
               aria-controls={`roster-${team.id}`}
               onClick={() => setShowRoster((v) => !v)}
             >
-              {showRoster ? "Hide members" : "Members"}
+              {showRoster ? "Hide members" : "Manage members"}
               <span className="sr-only"> of {team.name}</span>
             </Button>
           </div>
@@ -277,31 +277,10 @@ function TeamRow({
       {showRoster && (
         <TableRow id={`roster-${team.id}`}>
           <TableCell colSpan={4}>
-            <Roster team={team} />
+            <TeamMembersPanel team={team} />
           </TableCell>
         </TableRow>
       )}
     </>
-  );
-}
-
-function Roster({ team }: { readonly team: SiteTeam }) {
-  const { state } = useResource(() => teamRoster(team.id));
-  return (
-    <ResourceView state={state} label={`members of ${team.name}`}>
-      {(members) =>
-        members.length === 0 ? (
-          <p className="m-0 text-console-muted">No members.</p>
-        ) : (
-          <ul aria-label={`Members of ${team.name}`} className="m-0 ps-5">
-            {members.map((m) => (
-              <li key={m.userId}>
-                {m.name} ({m.email}) · {roleLabel(m.role)}
-              </li>
-            ))}
-          </ul>
-        )
-      }
-    </ResourceView>
   );
 }

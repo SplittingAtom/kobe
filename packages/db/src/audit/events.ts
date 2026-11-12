@@ -402,37 +402,48 @@ export const AUDIT_EVENTS = {
   "identity.team_invitation.accepted": event("team", { userId: id, role, invitedBy: id }),
   /** Actor: the invitee. */
   "identity.team_invitation.declined": event("team", {}),
-  /** `via: "idp"`: the provider's access mappings changed a row they manage (KOBE-625, §7). */
+  /**
+   * `via: "idp"`: the provider's access mappings changed a row they manage (KOBE-625, §7);
+   * `via: "site_admin"`: a Site admin changed it from the Site console (KOBE-638, actor = them).
+   */
   "identity.member.role_changed": event("team", {
     userId: id,
     from: role,
     to: role,
-    via: z.enum(["idp"]).optional(),
+    via: z.enum(["idp", "site_admin"]).optional(),
     providerId: id.optional(),
   }),
   /**
    * `via`: Kobe removed a membership the Skill reviewer grant made when the grant was taken, or
-   * the provider's access mappings no longer grant it (`idp`, KOBE-625, with `providerId`).
+   * the provider's access mappings no longer grant it (`idp`, KOBE-625, with `providerId`), or a
+   * Site admin removed it from the Site console (`site_admin`, KOBE-638, actor = them).
    */
   "identity.member.removed": event("team", {
     userId: id,
     role,
-    via: z.enum(["skill_reviewer_grant", "idp"]).optional(),
+    via: z.enum(["skill_reviewer_grant", "idp", "site_admin"]).optional(),
     providerId: id.optional(),
   }),
   /**
    * Kobe added someone to the team on its own (KOBE-331): a Skill reviewer joins the Registry
    * team as a member when granted, or when the team becomes the Registry team (SK22); or an
-   * identity provider's access mapping grants the membership (`idp`, KOBE-625, with `providerId`).
+   * identity provider's access mapping grants the membership (`idp`, KOBE-625, with `providerId`);
+   * or a Site admin added an existing user from the Site console (`site_admin`, KOBE-638, actor =
+   * the Site admin, no invitation).
    */
   "identity.member.added": event("team", {
     userId: id,
     role,
-    via: z.enum(["skill_reviewer_grant", "idp"]),
+    via: z.enum(["skill_reviewer_grant", "idp", "site_admin"]),
     providerId: id.optional(),
   }),
   /** A team admin took over a membership the provider managed: it is manual from now on (SSO10). */
-  "identity.member.taken_over": event("team", { userId: id, providerId: id }),
+  /** `via: "site_admin"`: a Site admin took it over from the Site console (KOBE-638). */
+  "identity.member.taken_over": event("team", {
+    userId: id,
+    providerId: id,
+    via: z.enum(["site_admin"]).optional(),
+  }),
   /** The Owner or a Site admin gave or took a site grant beside the role ladder (KOBE-331, SK22). */
   /** `selfGranted`: the Site's only admin gave it to themselves (flagged, KOBE-336 review). */
   "identity.site_grant.granted": event("site", {
