@@ -15,6 +15,7 @@ describe("tables excluded from backups", () => {
       "jwks",
       "rate_limits",
       "session_active_teams",
+      "session_sso_contexts",
       "sessions",
       "verifications",
     ]);

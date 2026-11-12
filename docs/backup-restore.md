@@ -31,13 +31,14 @@ with the operator's backup key. There is no plaintext mode.
   ran.
 - **Not backed up (by design):**
 
-  | Table                  | Why                                                                                                 |
-  | ---------------------- | --------------------------------------------------------------------------------------------------- |
-  | `sessions`             | bearer session tokens; after a restore everyone signs in again                                      |
-  | `verifications`        | one-time email-verification and password-reset tokens                                               |
-  | `jwks`                 | JWT signing keys; the server generates a new one on first use                                       |
-  | `rate_limits`          | throwaway counters                                                                                  |
-  | `session_active_teams` | per-session pointer to the active team; it references `sessions`, so its rows could not be restored |
+  | Table                  | Why                                                                                                                    |
+  | ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+  | `sessions`             | bearer session tokens; after a restore everyone signs in again                                                         |
+  | `verifications`        | one-time email-verification and password-reset tokens                                                                  |
+  | `jwks`                 | JWT signing keys; the server generates a new one on first use                                                          |
+  | `rate_limits`          | throwaway counters                                                                                                     |
+  | `session_active_teams` | per-session pointer to the active team; it references `sessions`, so its rows could not be restored                    |
+  | `session_sso_contexts` | how a session signed in through SSO (provider, MFA proof); it references `sessions`, so its rows could not be restored |
 
 - **Schema, grants and the migration journal are not in the dump.** The target gets them from
   Kobe's own migrations (`helm install`). Objects therefore stay owned by the owner role, and the

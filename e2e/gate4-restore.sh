@@ -147,7 +147,7 @@ writers_gone() {
 TEAM_COUNTS_SQL="SELECT c.relname || '=' || (xpath('/row/n/text()', query_to_xml(format('SELECT count(*) AS n FROM public.%I', c.relname), false, true, '')))[1]::text
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
  WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relrowsecurity
-   AND c.relname NOT IN ('sessions', 'session_active_teams', 'verifications', 'jwks', 'rate_limits')
+   AND c.relname NOT IN ('sessions', 'session_active_teams', 'session_sso_contexts', 'verifications', 'jwks', 'rate_limits')
    AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname = 'team_id' AND a.attnotnull AND NOT a.attisdropped)
  ORDER BY 1"
 

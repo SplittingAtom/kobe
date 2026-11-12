@@ -23,7 +23,16 @@ export const EXCLUDED_MARKERS = {
   reset: "RESET-TOKEN-PLAINTEXT-4a5b6c",
   jwks: "JWKS-PRIVATE-KEY-7d8e9f",
   rateLimit: "RATE-LIMIT-KEY-9e8d7c",
+  /** `session_sso_contexts.acr` (KOBE-625): per-session SSO state, left out with `sessions`. */
+  ssoContext: "SSO-SESSION-CONTEXT-5c6d7e",
 } as const;
+/** SSO rows that ARE backed up (KOBE-625): the sealed secret is ciphertext, the token a hash. */
+export const SSO_BACKED_UP = {
+  sealed: "e1.k1.U1NPLVNFQUxFRC1TRUNSRVQ",
+  subject: "SSO-SUBJECT-OID-2b3c4d",
+  scimHash: "5ca1ab1e".repeat(8),
+} as const;
+export const SSO_PROVIDER = "00000000-0000-4000-8000-0000000000d1";
 /**
  * Better Auth OAuth tokens in `accounts` (if SSO providers are added). `accounts` IS backed up, so
  * these are in the decrypted dump: protected by the backup encryption only.
@@ -125,6 +134,17 @@ export async function seed(db: TestDatabase): Promise<void> {
      INSERT INTO verifications (identifier, value, expires_at) VALUES ('reset', '${RESET_TOKEN}', now() + interval '1 hour');
      INSERT INTO jwks (public_key, private_key) VALUES ('pub', '${JWKS_PRIVATE}');
      INSERT INTO rate_limits (key, count, last_request) VALUES ('${EXCLUDED_MARKERS.rateLimit}', 3, 1);
+     INSERT INTO sso_providers (id, slug, display_name, kind, issuer, client_id, client_secret_sealed,
+         client_secret_key_id, tenant_id, subject_claim, access_claim)
+       VALUES ('${SSO_PROVIDER}', 'contoso', 'Contoso', 'entra',
+         'https://login.microsoftonline.com/6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b/v2.0', 'kobe-app',
+         '${SSO_BACKED_UP.sealed}', 'k1', '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b', 'oid', 'roles');
+     INSERT INTO sso_identities (provider_id, subject, user_id, linked_via)
+       VALUES ('${SSO_PROVIDER}', '${SSO_BACKED_UP.subject}', $3, 'jit');
+     INSERT INTO scim_tokens (provider_id, token_hash, prefix)
+       VALUES ('${SSO_PROVIDER}', '${SSO_BACKED_UP.scimHash}', 'kobe_scim_Ab12');
+     INSERT INTO session_sso_contexts (session_id, provider_id, mfa_satisfied, acr)
+       SELECT id, '${SSO_PROVIDER}', true, '${EXCLUDED_MARKERS.ssoContext}' FROM sessions;
      INSERT INTO widgets (team_id, id, parent_id, name, blob_ref) VALUES
        ($1, 1, 2, 'child', 'teams/a1/uploads/report.csv'), ($1, 2, NULL, 'parent', NULL),
        ($2, 3, NULL, 'beta-only', NULL);

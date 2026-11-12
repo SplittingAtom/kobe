@@ -124,6 +124,105 @@ describe("audit event taxonomy", () => {
     expect(target.safeParse({ setting: "logo", value: sha, bytes: "x" }).success).toBe(false);
   });
 
+  it("records SSO and SCIM actions by ids and codes only (KOBE-625, spec sso-oidc-scim §12)", () => {
+    const providerId = "0b8f2a3e-5d1c-4e8f-9a6b-7c2d1e0f3a4b";
+    const userId = "1b8f2a3e-5d1c-4e8f-9a6b-7c2d1e0f3a4b";
+    const teamId = "2b8f2a3e-5d1c-4e8f-9a6b-7c2d1e0f3a4b";
+    const credentialId = "3b8f2a3e-5d1c-4e8f-9a6b-7c2d1e0f3a4b";
+    const sso = AUDIT_ACTIONS.filter((a) => /^identity\.(sso|scim)\./.test(a)).sort();
+    expect(sso).toEqual([
+      "identity.scim.deactivation_refused",
+      "identity.scim.group.created",
+      "identity.scim.group.deleted",
+      "identity.scim.group.updated",
+      "identity.scim.token.created",
+      "identity.scim.token.revoked",
+      "identity.scim.user.created",
+      "identity.scim.user.deactivated",
+      "identity.scim.user.reactivated",
+      "identity.scim.user.updated",
+      "identity.sso.link.created",
+      "identity.sso.link.removed",
+      "identity.sso.link_expected",
+      "identity.sso.mapping.created",
+      "identity.sso.mapping.deleted",
+      "identity.sso.mapping_conflict",
+      "identity.sso.provider.created",
+      "identity.sso.provider.deleted",
+      "identity.sso.provider.disabled",
+      "identity.sso.provider.enabled",
+      "identity.sso.provider.updated",
+    ]);
+    for (const a of sso) expect(AUDIT_EVENTS[a].scope, a).toBe("site");
+
+    const ok = (action: keyof typeof AUDIT_EVENTS, target: unknown) =>
+      AUDIT_EVENTS[action].target.safeParse(target).success;
+    expect(ok("auth.sign_in.succeeded", { method: "sso" })).toBe(true);
+    expect(ok("auth.sign_in.failed", { method: "sso", reason: "groups_overage" })).toBe(true);
+    expect(
+      ok("identity.sso.provider.created", { providerId, slug: "contoso", kind: "entra" }),
+    ).toBe(true);
+    expect(ok("identity.sso.provider.created", { providerId, slug: "contoso", kind: "saml" })).toBe(
+      false,
+    );
+    expect(
+      ok("identity.sso.mapping.created", {
+        providerId,
+        mappingId: credentialId,
+        teamId,
+        role: "member",
+      }),
+    ).toBe(true);
+    // Team roles only (SSO6).
+    expect(
+      ok("identity.sso.mapping.created", {
+        providerId,
+        mappingId: credentialId,
+        teamId,
+        role: "owner",
+      }),
+    ).toBe(false);
+    expect(
+      ok("identity.sso.mapping_conflict", {
+        providerId,
+        teamId,
+        userId,
+        reason: "last_team_admin",
+      }),
+    ).toBe(true);
+    expect(ok("identity.sso.link.created", { providerId, userId, method: "local_proof" })).toBe(
+      true,
+    );
+    expect(ok("identity.sso.link.created", { providerId, userId, method: "email" })).toBe(false);
+    // Never a claim value, subject or email in the log.
+    expect(
+      ok("identity.sso.link.created", { providerId, userId, method: "jit", subject: "x" }),
+    ).toBe(false);
+    expect(ok("identity.scim.token.created", { providerId, credentialId })).toBe(true);
+    expect(ok("identity.scim.user.deactivated", { providerId, userId, credentialId })).toBe(true);
+    expect(ok("identity.scim.deactivation_refused", { providerId, userId, credentialId })).toBe(
+      true,
+    );
+    // Memberships the mappings manage reuse the published team events, with `via: "idp"`.
+    expect(ok("identity.member.added", { userId, role: "member", via: "idp", providerId })).toBe(
+      true,
+    );
+    expect(ok("identity.member.removed", { userId, role: "member", via: "idp", providerId })).toBe(
+      true,
+    );
+    expect(
+      ok("identity.member.role_changed", {
+        userId,
+        from: "member",
+        to: "team_admin",
+        via: "idp",
+        providerId,
+      }),
+    ).toBe(true);
+    expect(ok("identity.member.taken_over", { userId, providerId })).toBe(true);
+    expect(AUDIT_EVENTS["identity.member.taken_over"].scope).toBe("team");
+  });
+
   it("is documented: docs/audit-log.md lists every action", () => {
     const doc = readFileSync(new URL("../../../../docs/audit-log.md", import.meta.url), "utf8");
     expect(AUDIT_ACTIONS.filter((a) => !doc.includes(`\`${a}\``))).toEqual([]);

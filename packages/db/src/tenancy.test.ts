@@ -2,7 +2,9 @@ import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import * as schema from "./schema/index.js";
 import {
+  SITE_WIDE_COLUMN_GRANTS,
   SITE_WIDE_TABLES,
+  TEAM_REFERENCING_SITE_WIDE,
   TEAM_TABLES,
   TENANCY_DOMAINS,
   appPrivilegesFor,
@@ -56,6 +58,40 @@ describe("tenancy registry", () => {
     ]);
     const table = schemaTables.find((t) => t.name === "site_branding_assets");
     expect(table?.columns.map((c) => snake(c.name))).not.toContain("team_id");
+  });
+
+  // KOBE-625 (spec sso-oidc-scim §4–§10): single sign-on and SCIM are site configuration, not
+  // team content. Only the access mappings name teams; SCIM tokens are revoked, never deleted.
+  it("keeps the SSO and SCIM tables site-wide with least-privilege grants (KOBE-625)", () => {
+    const sso = [
+      "sso_providers",
+      "sso_identities",
+      "sso_access_mappings",
+      "session_sso_contexts",
+      "scim_tokens",
+      "scim_groups",
+      "scim_group_members",
+    ];
+    const all = ["SELECT", "INSERT", "UPDATE", "DELETE"];
+    for (const t of sso) {
+      expect(SITE_WIDE_TABLES).toContain(t);
+      expect(isTeamTable(t)).toBe(false);
+    }
+    for (const t of sso.filter((t) => t !== "scim_tokens")) {
+      expect(appPrivilegesFor(t), t).toEqual(all);
+    }
+    expect(appPrivilegesFor("scim_tokens")).toEqual(["SELECT", "INSERT"]);
+    expect(SITE_WIDE_COLUMN_GRANTS.scim_tokens).toEqual({
+      UPDATE: ["last_used_at", "revoked_at"],
+    });
+    expect(Object.keys(TEAM_REFERENCING_SITE_WIDE).filter((t) => sso.includes(t))).toEqual([
+      "sso_access_mappings",
+    ]);
+    for (const t of sso.filter((t) => t !== "sso_access_mappings")) {
+      const table = schemaTables.find((s) => s.name === t);
+      expect(table, t).toBeDefined();
+      expect(table?.columns.map((c) => snake(c.name))).not.toContain("team_id");
+    }
   });
 
   it("classifies every table defined in the Drizzle schema", () => {

@@ -1464,6 +1464,20 @@
       "when": 1794424311163,
       "tag": "0208_kobe_guide_skill_name",
       "breakpoints": true
+    },
+    {
+      "idx": 209,
+      "version": "7",
+      "when": 1794444855226,
+      "tag": "0209_sso",
+      "breakpoints": true
+    },
+    {
+      "idx": 210,
+      "version": "7",
+      "when": 1794444863635,
+      "tag": "0210_sso_guards",
+      "breakpoints": true
     }
   ]
 }

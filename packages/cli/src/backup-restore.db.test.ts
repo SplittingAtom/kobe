@@ -29,6 +29,7 @@ import {
   EXCLUDED_MARKERS,
   OAUTH_TOKENS,
   SEARCH_WORD,
+  SSO_BACKED_UP,
   T1,
   T2,
   U1,
@@ -141,6 +142,7 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
         "jwks",
         "rate_limits",
         "session_active_teams",
+        "session_sso_contexts",
         "sessions",
         "verifications",
       ]);
@@ -170,12 +172,18 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
       }
     });
 
-    it("leaves sessions, verifications, jwks and rate_limits out of the decrypted dump", async () => {
+    it("leaves sessions, their SSO contexts, verifications, jwks and rate_limits out of the decrypted dump", async () => {
       const script = await dumpScript(backupDir, KEY, pgBinDir);
       for (const [name, marker] of Object.entries(EXCLUDED_MARKERS)) {
         expect(script, name).not.toContain(marker);
       }
-      for (const table of ["sessions", "verifications", "jwks", "rate_limits"]) {
+      for (const table of [
+        "sessions",
+        "session_sso_contexts",
+        "verifications",
+        "jwks",
+        "rate_limits",
+      ]) {
         expect(script).not.toContain(`COPY public.${table} `);
       }
       expect(script).not.toContain("__drizzle_migrations");
@@ -183,12 +191,23 @@ describe("kobe backup → kobe restore (real Postgres, pg_dump, pg_restore, psql
       // only by the backup encryption (docs/backup-restore.md).
       expect(script).toContain("ann@example.com");
       expect(script).toContain("beta-only");
+      // SSO configuration is backed up (KOBE-625): the provider, its sealed client secret, the
+      // identity link and the SCIM token hash; only the per-session SSO context is left out.
+      expect(script).toContain("COPY public.sso_providers ");
+      expect(script).toContain(SSO_BACKED_UP.sealed);
+      expect(script).toContain(SSO_BACKED_UP.subject);
+      expect(script).toContain(SSO_BACKED_UP.scimHash);
       for (const token of Object.values(OAUTH_TOKENS)) expect(script).toContain(token);
     });
 
     it("stores that dump only encrypted (no readable data or credentials in any file)", async () => {
       const raw = (await allBackupBytes(backupDir)).toString("latin1");
-      for (const value of [...Object.values(OAUTH_TOKENS), ...PERSONAL_DATA, password]) {
+      for (const value of [
+        ...Object.values(OAUTH_TOKENS),
+        ...Object.values(SSO_BACKED_UP),
+        ...PERSONAL_DATA,
+        password,
+      ]) {
         expect(raw, value).not.toContain(value);
       }
     });
