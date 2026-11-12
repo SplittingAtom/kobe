@@ -94,4 +94,20 @@ describe("site-admin memberships on upgrade (KOBE-638)", () => {
       expect(await code(c, insert, [teamId, userId, adminId, randomUUID()])).toBe("23514");
     });
   });
+
+  it("takes a team.site_admin.* notice naming the admin, the member and the role (review M1)", async () => {
+    await asAdmin(async (c) => {
+      const insert = `INSERT INTO notifications (team_id, user_id, kind, actor_user_id, subject_user_id, team_role)
+        VALUES ($1, $2, $3, $4, $5, $6)`;
+      const kind = "team.site_admin.member_role_changed";
+      expect(
+        await code(c, insert, [teamId, userId, kind, adminId, userId, "contributor"]),
+      ).toBeUndefined();
+      expect(await code(c, insert, [teamId, userId, kind, adminId, null, "member"])).toBe("23514");
+      expect(await code(c, insert, [teamId, userId, kind, null, userId, null])).toBe("23514");
+      expect(
+        await code(c, insert, [teamId, userId, "team.member.added", adminId, userId, null]),
+      ).toBe("23514");
+    });
+  });
 });

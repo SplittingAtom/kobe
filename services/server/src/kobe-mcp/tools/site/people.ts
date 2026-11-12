@@ -321,7 +321,8 @@ export const siteInvitesCreate = kobeTool({
   title: "Invite someone to Kobe",
   description:
     "Invites an email address to create a Kobe account (Site console › Users › Invite); Kobe " +
-    "emails the invitation. Joining a team is a separate team invitation from that team's admin. " +
+    "emails the invitation. Joining a team is separate: a team invitation from that team's admin, " +
+    "or site_team_members_add once the account exists. " +
     "Refused when the address already has an account. The person is always asked to approve; " +
     "never retry a refused or denied call.",
   scope: "site",

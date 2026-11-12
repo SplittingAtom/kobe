@@ -91,6 +91,43 @@ export function teamMemberAddedMessage(
   };
 }
 
+/** What a Site admin did to a team's membership from the Site console (KOBE-638 review M1). */
+export type SiteAdminChange = "added" | "role_changed" | "removed" | "taken_over";
+
+/** Tells a team admin what a Site admin changed in their team's membership (review M1). */
+export function siteAdminChangeMessage(
+  input: Branded & {
+    readonly to: string;
+    readonly adminName: string;
+    readonly teamName: string;
+    readonly change: SiteAdminChange;
+    readonly memberNames: readonly string[];
+    readonly role?: keyof typeof ROLE_NAMES;
+    readonly signInUrl: string;
+  },
+): MailMessage {
+  const admin = oneLine(input.adminName);
+  const team = oneLine(input.teamName);
+  const app = oneLine(input.appName);
+  const names = input.memberNames.map((n) => oneLine(n)).join(", ") || "a member";
+  const role = input.role ? ROLE_NAMES[input.role] : null;
+  const what = {
+    added: `added ${names} to the ${team} team${role ? ` as ${role}` : ""}`,
+    role_changed: `changed the team role of ${names} in the ${team} team${role ? ` to ${role}` : ""}`,
+    removed: `removed ${names} from the ${team} team`,
+    taken_over: `took over the membership of ${names} in the ${team} team from the identity provider`,
+  }[input.change];
+  return {
+    to: input.to,
+    subject: `A site admin changed the ${team} team's members on ${app}`,
+    text: [
+      `${admin}, a site admin, ${what} from the Site console.`,
+      "",
+      `You get this as a team admin of ${team}. The team's audit log has the details: ${input.signInUrl}`,
+    ].join("\n"),
+  };
+}
+
 export function passwordResetMessage(
   input: Branded & {
     readonly to: string;

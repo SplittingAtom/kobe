@@ -22,6 +22,9 @@ export interface KobeNotification {
   readonly skillSemver?: string | undefined;
   /** `skill.version.site_published`: the Site admin who published it (KOBE-495). */
   readonly actorName?: string | undefined;
+  /** `team.site_admin.*`: the member and their team role (KOBE-638 review M1). */
+  readonly subjectName?: string | undefined;
+  readonly teamRole?: "team_admin" | "contributor" | "member" | undefined;
   readonly readAt: string | null;
   readonly createdAt: string;
 }

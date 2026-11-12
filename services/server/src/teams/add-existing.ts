@@ -6,6 +6,7 @@ import {
   isNull,
   or,
   sql,
+  teamInvitations,
   teamMembers,
   users,
   withTeam,
@@ -14,6 +15,7 @@ import {
   type TeamRole,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
+import { normalizeEmail } from "../invitations/site-invites.js";
 import { SITE_ADMIN_VIA } from "./members.js";
 
 /** Most users one Add takes (the Site console picker sends a handful). */
@@ -24,7 +26,16 @@ export const CANDIDATES_MAX = 20;
 /** Why an Add was refused; nothing was added (all or nothing). */
 export type AddMembersError =
   /** A Site admin reaches team content only through break-glass, never by adding themselves. */
-  "self_add_refused" | "user_not_found" | "user_deactivated" | "already_member";
+  | "self_add_refused"
+  | "user_not_found"
+  | "user_deactivated"
+  /**
+   * The account's address is not verified (an identity provider did not vouch for it): the same
+   * rule as accepting a team invitation (review L1), so nobody gets a team role by an address that
+   * may be someone else's.
+   */
+  | "user_unverified"
+  | "already_member";
 
 export type AddMembersResult =
   | { readonly ok: true; readonly added: readonly string[] }
@@ -72,7 +83,12 @@ async function addInTx(
   input: { readonly role: TeamRole; readonly actorId: string },
 ): Promise<void> {
   const found = await tx
-    .select({ id: users.id, deactivatedAt: users.deactivatedAt })
+    .select({
+      id: users.id,
+      email: users.email,
+      deactivatedAt: users.deactivatedAt,
+      emailVerified: users.emailVerified,
+    })
     .from(users)
     .where(inArray(users.id, [...userIds]))
     .for("share");
@@ -81,6 +97,7 @@ async function addInTx(
     const user = byId.get(userId);
     if (!user) throw new Refused("user_not_found", userId);
     if (user.deactivatedAt !== null) throw new Refused("user_deactivated", userId);
+    if (!user.emailVerified) throw new Refused("user_unverified", userId);
   }
   const inserted = await tx
     .insert(teamMembers)
@@ -92,6 +109,26 @@ async function addInTx(
   const added = new Set(inserted.map((r) => r.userId));
   const existing = userIds.find((u) => !added.has(u));
   if (existing !== undefined) throw new Refused("already_member", existing);
+  // Their pending invitations to this team are moot now (review L3): revoked, audited.
+  const revoked = await tx
+    .delete(teamInvitations)
+    .where(
+      and(
+        eq(teamInvitations.teamId, teamId),
+        inArray(
+          teamInvitations.email,
+          found.map((u) => normalizeEmail(u.email)),
+        ),
+      ),
+    )
+    .returning({ id: teamInvitations.id });
+  for (const { id } of revoked) {
+    await recordAudit(tx, {
+      action: "identity.team_invitation.revoked",
+      teamId,
+      target: { invitationId: id },
+    });
+  }
   for (const userId of userIds) {
     await recordAudit(tx, {
       action: "identity.member.added",
@@ -111,35 +148,34 @@ export interface Candidate {
 }
 
 /**
- * Users a Site admin can add to the team (KOBE-638): active, not already members, never the
- * caller, matched by name or email (case-insensitive substring), at most {@link CANDIDATES_MAX}.
+ * Users a Site admin can add to the team (KOBE-638): active, verified address (review L1), not
+ * already members, never the caller, matched by name or email (case-insensitive substring), at most {@link CANDIDATES_MAX}.
  */
 export async function searchCandidates(
   db: KobeDb,
   teamId: string,
   input: { readonly query: string; readonly actorId: string },
 ): Promise<Candidate[]> {
-  const members = await withTeam(db, teamId, (tx) =>
-    tx
-      .select({ userId: teamMembers.userId })
-      .from(teamMembers)
-      .where(eq(teamMembers.teamId, teamId)),
-  );
-  const exclude = [input.actorId, ...members.map((m) => m.userId)];
   const pattern = `%${input.query.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
-  const rows = await db
-    .select({ userId: users.id, name: users.name, email: users.email })
-    .from(users)
-    .where(
-      and(
-        isNull(users.deactivatedAt),
-        sql`NOT (${inArray(users.id, exclude)})`,
-        input.query === ""
-          ? undefined
-          : or(sql`${users.name} ILIKE ${pattern}`, sql`${users.email} ILIKE ${pattern}`),
-      ),
-    )
-    .orderBy(asc(users.name), asc(users.email))
-    .limit(CANDIDATES_MAX);
+  // NOT EXISTS, not a list of every member's id (review I3): any team size, one round trip.
+  const rows = await withTeam(db, teamId, (tx) =>
+    tx
+      .select({ userId: users.id, name: users.name, email: users.email })
+      .from(users)
+      .where(
+        and(
+          isNull(users.deactivatedAt),
+          eq(users.emailVerified, true),
+          sql`${users.id} <> ${input.actorId}`,
+          sql`NOT EXISTS (SELECT 1 FROM team_members tm
+                WHERE tm.team_id = ${teamId} AND tm.user_id = ${users.id})`,
+          input.query === ""
+            ? undefined
+            : or(sql`${users.name} ILIKE ${pattern}`, sql`${users.email} ILIKE ${pattern}`),
+        ),
+      )
+      .orderBy(asc(users.name), asc(users.email))
+      .limit(CANDIDATES_MAX),
+  );
   return rows;
 }

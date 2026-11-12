@@ -75,6 +75,16 @@ export const NOTIFICATION_KINDS = [
    * (`actor_name`) and nothing else (the team is the notification's own).
    */
   "team.member.added",
+  /**
+   * A Site admin changed the team's membership from the Site console (KOBE-638 review M1): told
+   * to the team's active team admins. Names the admin (`actor_name`), the member (`subject_name`)
+   * and the team role (`team_role`: the new one, or the one they had when removed; none on a
+   * Take over).
+   */
+  "team.site_admin.member_added",
+  "team.site_admin.member_role_changed",
+  "team.site_admin.member_removed",
+  "team.site_admin.member_taken_over",
 ] as const;
 /** Kinds about a catalog skill: they name it (`skill_id`, `skill_name`), not a schedule. */
 export const SKILL_NOTIFICATION_KINDS = NOTIFICATION_KINDS.filter((k) => k.startsWith("skill."));
@@ -118,6 +128,9 @@ export const notificationSchema = z
      * Site admin who added the user (KOBE-638).
      */
     actor_name: z.string().min(1).max(200).optional(),
+    /** `team.site_admin.*`: the member the change was about (KOBE-638 review M1). */
+    subject_name: z.string().min(1).max(200).optional(),
+    team_role: z.enum(["team_admin", "contributor", "member"]).optional(),
     read_at: timestampSchema.nullable(),
     created_at: timestampSchema,
   })

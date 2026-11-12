@@ -15,6 +15,7 @@ import { users } from "./auth.js";
 import { registrySkills } from "./registry.js";
 import { runs } from "./runs.js";
 import { SCHEDULE_PAUSED_BY } from "./schedules.js";
+import { teamRole } from "./team-members.js";
 import { teams } from "./teams.js";
 import { threads } from "./threads.js";
 
@@ -46,6 +47,15 @@ export const NOTIFICATION_KINDS = [
   "skill.version.site_published",
   /** A Site admin added the user to the team from the Site console (KOBE-638). */
   "team.member.added",
+  /**
+   * A Site admin changed the team's membership from the Site console (KOBE-638 review M1): told
+   * to the team's active team admins, naming the admin (`actor_user_id`), the member
+   * (`subject_user_id`) and the team role (`team_role`: the new one, or the one removed).
+   */
+  "team.site_admin.member_added",
+  "team.site_admin.member_role_changed",
+  "team.site_admin.member_removed",
+  "team.site_admin.member_taken_over",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
@@ -83,6 +93,10 @@ export const notifications = pgTable(
      * `team.member.added`: the Site admin who added the user (KOBE-638).
      */
     actorUserId: uuid().references(() => users.id),
+    /** `team.site_admin.*`: the member the Site admin's change was about (KOBE-638 review M1). */
+    subjectUserId: uuid().references(() => users.id),
+    /** `team.site_admin.*`: the member's new team role, or the one they had when removed. */
+    teamRole: teamRole(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     readAt: timestamp({ withTimezone: true }),
   },
@@ -117,7 +131,12 @@ export const notifications = pgTable(
     check("notifications_paused_by", sql`${t.pausedBy} IN (${list(SCHEDULE_PAUSED_BY)})`),
     check(
       "notifications_actor",
-      sql`(${t.kind} IN ('skill.version.site_published', 'team.member.added')) = (${t.actorUserId} IS NOT NULL)`,
+      sql`(${t.kind} = 'skill.version.site_published' OR ${t.kind} LIKE 'team.%') = (${t.actorUserId} IS NOT NULL)`,
+    ),
+    check(
+      "notifications_subject",
+      sql`(${t.kind} LIKE 'team.site_admin.%') = (${t.subjectUserId} IS NOT NULL)
+        AND (${t.teamRole} IS NULL OR ${t.kind} LIKE 'team.site_admin.%')`,
     ),
     check("notifications_skipped_count", sql`${t.skippedCount} >= 0`),
     // The notifier is at-least-once: one notification per run and kind.

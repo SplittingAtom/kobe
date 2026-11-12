@@ -120,7 +120,7 @@ describe("Site console team members (KOBE-638)", () => {
     const calls = stubApi({
       [`GET ${BASE}/members`]: [200, ROSTER],
       [`PATCH ${BASE}/members/u-bob`]: [200, { userId: "u-bob", role: "contributor" }],
-      [`DELETE ${BASE}/members/u-bob`]: [204],
+      [`DELETE ${BASE}/members/u-bob?expectedRole=member`]: [204],
       [`POST ${BASE}/members/u-cy/take-over`]: [200, { userId: "u-cy", managedBy: null }],
     });
     renderSite(<TeamMembersPanel team={TEAM} />);
@@ -128,8 +128,10 @@ describe("Site console team members (KOBE-638)", () => {
     await userEvent.selectOptions(screen.getByLabelText("Role of Bob"), "contributor");
     await userEvent.click(screen.getByRole("button", { name: "Save role of Bob" }));
     await screen.findByText("Bob is now Contributor in Finance.");
+    // The role the roster showed is the condition (review L2).
     expect(JSON.parse(String(must(calls.find((c) => c.method === "PATCH")).body))).toEqual({
       role: "contributor",
+      expectedRole: "member",
     });
 
     await userEvent.click(screen.getByRole("button", { name: "Remove Bob" }));
@@ -141,7 +143,7 @@ describe("Site console team members (KOBE-638)", () => {
     await screen.findByText("Cy's membership is no longer managed by Contoso.");
     expect(summary(calls)).toEqual(
       expect.arrayContaining([
-        `DELETE ${BASE}/members/u-bob`,
+        `DELETE ${BASE}/members/u-bob?expectedRole=member`,
         `POST ${BASE}/members/u-cy/take-over`,
       ]),
     );
@@ -163,5 +165,25 @@ describe("Site console team members (KOBE-638)", () => {
     await userEvent.selectOptions(screen.getByLabelText("Role of Ann"), "member");
     await userEvent.click(screen.getByRole("button", { name: "Save role of Ann" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/at least one team admin/);
+  });
+
+  it("says so when the member changed since the roster loaded, and reloads (review L2)", async () => {
+    const calls = stubApi({
+      [`GET ${BASE}/members`]: [200, ROSTER],
+      [`DELETE ${BASE}/members/u-bob?expectedRole=member`]: [
+        409,
+        {
+          code: "changed_since_approval",
+          message:
+            "The member's role changed since you loaded it; nothing was changed. Check the current role and try again.",
+        },
+      ],
+    });
+    renderSite(<TeamMembersPanel team={TEAM} />);
+    await screen.findByRole("table");
+    await userEvent.click(screen.getByRole("button", { name: "Remove Bob" }));
+    await answerConfirm("Remove Bob from Finance?", "Remove Bob");
+    expect((await screen.findByRole("alert")).textContent).toMatch(/changed since you loaded it/);
+    expect(summary(calls).filter((c) => c === `GET ${BASE}/members`)).toHaveLength(2);
   });
 });

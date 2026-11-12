@@ -16,6 +16,7 @@ import {
   takeOverMember,
 } from "../teams/members.js";
 import { mailMembersAdded } from "../teams/notify-added.js";
+import { notifyTeamAdmins } from "../teams/notify-admins.js";
 import { addMembersSchema, idSchema, memberRoleSchema, teamRoleSchema } from "../teams/schemas.js";
 
 type Ctx = Context<{ Variables: AuthVariables }>;
@@ -27,6 +28,10 @@ const ADD_ERRORS = {
   ],
   user_not_found: [404, "No Kobe user with that id."],
   user_deactivated: [409, "That account is deactivated. Reactivate it first."],
+  user_unverified: [
+    409,
+    "That account's email address is not verified, so it can't be added. Invite the person instead.",
+  ],
   already_member: [409, "That user is already a member of this team."],
 } as const satisfies Record<AddMembersError, readonly [number, string]>;
 
@@ -91,6 +96,13 @@ export function siteTeamMembersRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
       role: body.role,
       adderName: actor.name,
     });
+    await notifyTeamAdmins(deps, {
+      team: t.team,
+      actor,
+      change: "added",
+      memberIds: result.added,
+      role: body.role,
+    });
     return c.json({ added: result.added.map((userId) => ({ userId, role: body.role })) }, 201);
   });
 
@@ -109,6 +121,13 @@ export function siteTeamMembersRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
     );
     if (!result.ok) return membershipError(c, result.error);
     await afterMemberRoleChanged(deps, t.team.id, t.userId);
+    await notifyTeamAdmins(deps, {
+      team: t.team,
+      actor: c.get("user"),
+      change: "role_changed",
+      memberIds: [t.userId],
+      role: body.role,
+    });
     return c.json({ userId: t.userId, role: body.role });
   });
 
@@ -121,6 +140,13 @@ export function siteTeamMembersRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
     const result = await removeMember(db, t.team.id, t.userId, expected?.data, SITE_ADMIN_VIA);
     if (!result.ok) return membershipError(c, result.error);
     await afterMemberRemoved(deps, t.team.id, t.userId);
+    await notifyTeamAdmins(deps, {
+      team: t.team,
+      actor: c.get("user"),
+      change: "removed",
+      memberIds: [t.userId],
+      ...(expected?.data ? { role: expected.data } : {}),
+    });
     return c.body(null, 204);
   });
 
@@ -130,6 +156,12 @@ export function siteTeamMembersRoutes(deps: ServerDeps): Hono<{ Variables: AuthV
     if (!t.userId) return invalidRequest(c);
     const result = await takeOverMember(db, t.team.id, t.userId, SITE_ADMIN_VIA);
     if (!result.ok) return membershipError(c, result.error);
+    await notifyTeamAdmins(deps, {
+      team: t.team,
+      actor: c.get("user"),
+      change: "taken_over",
+      memberIds: [t.userId],
+    });
     return c.json({ userId: t.userId, managedBy: null });
   });
 

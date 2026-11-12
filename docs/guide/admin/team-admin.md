@@ -33,8 +33,9 @@ workspace; switch workspace first to manage another.
 - **Members and roles**: who is in the team; change a role or remove a member. A removed member's
   checkouts are discarded and their sandbox is cleaned up. A member a site admin added from the
   Site console shows **Added by a site admin** under Joined; site admins can also change roles and
-  remove members there. Every such change is in **Audit** under the site admin's name, marked as
-  made by a site admin. Team admins add people by invitation only.
+  remove members there. You are told each time (a notification naming the site admin and the
+  member, and an email when mail is set up), and every such change is in **Audit** under the site
+  admin's name, marked as made by a site admin. Team admins add people by invitation only.
 - **Invitations**: invite people by email; they join when they accept.
 
 ## Workspace settings

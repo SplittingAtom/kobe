@@ -18,7 +18,8 @@ import { MemoryMailer } from "./testing/mailer.js";
 const PUBLIC_URL = "http://kobe.test";
 const PASSWORD = "a long enough password";
 
-type Person = "owner" | "siteAdmin" | "alice" | "bob" | "carol" | "dave" | "erin" | "gone";
+type Person =
+  "owner" | "siteAdmin" | "alice" | "bob" | "carol" | "dave" | "erin" | "gone" | "unv" | "fay";
 const PEOPLE: readonly Person[] = [
   "owner",
   "siteAdmin",
@@ -28,6 +29,8 @@ const PEOPLE: readonly Person[] = [
   "dave",
   "erin",
   "gone",
+  "unv",
+  "fay",
 ];
 const ids = {} as Record<Person, string>;
 const as = {} as Record<Person, TestBrowser>;
@@ -67,6 +70,20 @@ async function auditSince(seq: number) {
   }>(
     `SELECT action, team_id, actor_id, target FROM audit_log WHERE seq > $1 AND action LIKE 'identity.member.%' ORDER BY seq`,
     [seq],
+  );
+  return rows;
+}
+
+/** Alice's (Finance's team admin's) notices of a Site admin's changes, oldest first. */
+async function adminNotices(kind: string) {
+  const { rows } = await adminPg.query<{
+    actor_user_id: string;
+    subject_user_id: string;
+    team_role: string | null;
+  }>(
+    `SELECT actor_user_id, subject_user_id, team_role FROM notifications
+      WHERE team_id = $1 AND user_id = $2 AND kind = $3 ORDER BY created_at, id`,
+    [team, ids.alice, kind],
   );
   return rows;
 }
@@ -113,6 +130,8 @@ beforeAll(async () => {
     else other = res.json.team.id;
   }
   await adminPg.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [ids.gone]);
+  // An SSO account whose address the identity provider did not vouch for (review L1).
+  await adminPg.query(`UPDATE users SET email_verified = false WHERE id = $1`, [ids.unv]);
 });
 
 afterAll(async () => {
@@ -206,6 +225,61 @@ describe("add (ac-2, ac-4)", () => {
     );
     const teamAudit = await as.alice.get("/v1/team/audit?action=identity.member.added");
     expect(JSON.stringify(teamAudit.json)).toContain(ids.bob);
+    // Review M1: the team's admins are told, naming the Site admin, the member and the role.
+    expect(await adminNotices("team.site_admin.member_added")).toEqual([
+      { actor_user_id: ids.siteAdmin, subject_user_id: ids.bob, team_role: "contributor" },
+    ]);
+    const aliceBell = await as.alice.get("/v1/notifications");
+    expect(aliceBell.json.notifications).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "team.site_admin.member_added",
+          actor_name: "siteAdmin",
+          subject_name: "bob",
+          team_role: "contributor",
+        }),
+      ]),
+    );
+    expect(mailer.to(email("alice"))).toEqual([
+      expect.objectContaining({
+        subject: "A site admin changed the finance team's members on Kobe",
+        text: expect.stringContaining("siteAdmin, a site admin, added bob to the finance team"),
+      }),
+    ]);
+    // Never the added member (they have their own notice), never the Site admin.
+    const { rows } = await adminPg.query(
+      `SELECT user_id FROM notifications WHERE kind LIKE 'team.site_admin.%' AND user_id = ANY($1)`,
+      [[ids.bob, ids.siteAdmin]],
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it("refuses an account whose address is not verified, like an invitation (review L1)", async () => {
+    expect(
+      await as.siteAdmin.post(members(), { userIds: [ids.unv], role: "member" }),
+    ).toMatchObject({ status: 409, json: { code: "user_unverified", userId: ids.unv } });
+    expect(await row("unv")).toBeNull();
+    const all = await as.siteAdmin.get(`/v1/site/teams/${team}/candidates?q=unv`);
+    expect(all.json.candidates).toEqual([]);
+  });
+
+  it("revokes the person's pending invitation to the team, audited (review L3)", async () => {
+    const invite = await as.alice.post("/v1/team/invites", { email: email("fay"), role: "member" });
+    expect(invite.status, JSON.stringify(invite.json)).toBe(202);
+    const seq = await lastSeq();
+    expect(
+      (await as.siteAdmin.post(members(), { userIds: [ids.fay], role: "member" })).status,
+    ).toBe(201);
+    const { rows } = await adminPg.query(
+      `SELECT id FROM team_invitations WHERE team_id = $1 AND email = $2`,
+      [team, email("fay")],
+    );
+    expect(rows).toEqual([]);
+    const { rows: revoked } = await adminPg.query(
+      `SELECT actor_id FROM audit_log WHERE seq > $1 AND action = 'identity.team_invitation.revoked' AND team_id = $2`,
+      [seq, team],
+    );
+    expect(revoked).toEqual([{ actor_id: ids.siteAdmin }]);
   });
 
   it("adds several users in one call", async () => {
@@ -288,6 +362,10 @@ describe("role change and removal (ac-3, ac-4)", () => {
         expectedRole: "contributor",
       }),
     ).toMatchObject({ status: 409, json: { code: "changed_since_approval" } });
+    // Review M1: Alice (team admin) is told; Bob, now a team admin too, is the subject, not told.
+    expect(await adminNotices("team.site_admin.member_role_changed")).toEqual([
+      { actor_user_id: ids.siteAdmin, subject_user_id: ids.bob, team_role: "team_admin" },
+    ]);
   });
 
   it("never drops the last active team admin", async () => {
@@ -330,6 +408,12 @@ describe("role change and removal (ac-3, ac-4)", () => {
       }),
     ]);
     expect((await as.siteAdmin.delete(`${members()}/${ids.dave}`)).status).toBe(404);
+    expect(
+      await as.siteAdmin.delete(`${members()}/${ids.fay}?expectedRole=contributor`),
+    ).toMatchObject({ status: 409, json: { code: "changed_since_approval" } });
+    expect(await adminNotices("team.site_admin.member_removed")).toEqual([
+      { actor_user_id: ids.siteAdmin, subject_user_id: ids.dave, team_role: "member" },
+    ]);
   });
 
   it("never changes the caller's own membership here", async () => {

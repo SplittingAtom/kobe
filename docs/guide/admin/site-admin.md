@@ -32,7 +32,10 @@ access, which is time-boxed, read-only, audited and shown to the team.
   there you can:
   - **Add existing users** without an invitation: search by name or email, tick one or several,
     choose a team role (Member, Contributor or Team admin) and **Add**. They are in the team at
-    once and are told in Kobe (and by email). Deactivated users can't be added.
+    once and are told in Kobe (and by email); a pending invitation of theirs to the team is
+    withdrawn. Deactivated users and accounts whose email address isn't verified (for example a
+    single sign-on account whose provider didn't vouch for the address) can't be added: invite
+    those people instead.
   - **Change a team role** or **Remove** a member, with the same rules and effects as the Team
     console: a team always keeps one active team admin; a removed member's schedules there pause,
     their sandbox is cleaned up and their shared threads go private.
@@ -41,7 +44,8 @@ access, which is time-boxed, read-only, audited and shown to the team.
 
   You can't add yourself or change your own membership here: site admins reach team content only
   through break-glass. Site roles never change here. Every change is in the team's own audit log
-  under your name, marked as made by a site admin, so the team's admins see it.
+  under your name, marked as made by a site admin, and the team's admins are told in Kobe (and by
+  email) each time.
 
 - **Gallery agents**: the site's agents on the Agents page's Site tab: edit, compare with the
   repository, reset, evaluate, export, approve proposals.

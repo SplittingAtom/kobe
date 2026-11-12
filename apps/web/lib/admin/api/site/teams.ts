@@ -95,19 +95,31 @@ export function addTeamMembers(
   });
 }
 
+/**
+ * `expectedRole`: the role the roster showed (review L2); the server refuses with 409
+ * `changed_since_approval` when someone changed it since.
+ */
 export function setTeamMemberRole(
   teamId: string,
   userId: string,
   role: TeamRole,
+  expectedRole: TeamRole,
 ): Promise<ApiResult<unknown>> {
   return apiRequest(`/v1/site/teams/${enc(teamId)}/members/${enc(userId)}`, {
     method: "PATCH",
-    json: { role },
+    json: { role, expectedRole },
   });
 }
 
-export function removeTeamMember(teamId: string, userId: string): Promise<ApiResult<void>> {
-  return apiRequest(`/v1/site/teams/${enc(teamId)}/members/${enc(userId)}`, { method: "DELETE" });
+export function removeTeamMember(
+  teamId: string,
+  userId: string,
+  expectedRole: TeamRole,
+): Promise<ApiResult<void>> {
+  return apiRequest(
+    `/v1/site/teams/${enc(teamId)}/members/${enc(userId)}?expectedRole=${enc(expectedRole)}`,
+    { method: "DELETE" },
+  );
 }
 
 /** Take over (SSO10) from the Site console: the provider stops managing the membership. */

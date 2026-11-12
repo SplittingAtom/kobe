@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (two local commits on `kobe-638-site-team-members`, not pushed)
+- **Status:** in review (three local commits on `kobe-638-site-team-members`, not pushed)
 - **Branch / worktree:** `kobe-638-site-team-members` in `../Kobe-wt638` (from group branch `kobe-sso`)
 - **Depends on:** KOBE-627 (managed rows, Take over, `teams/after-change.ts`). Chris 2026-11-12
   (final): site admins manage members; self-add refused.
@@ -69,7 +69,38 @@
   `site_teams_create`'s description no longer says site admins can't add members.
 - `teams.db.test.ts` "leaves membership … to the team's own admins" rewritten to the new rule.
 
+## Review fixes (docs/ledger/review-638.md, Opus security + DB review)
+
+- **M1:** every Site console add, role change, removal and Take over tells the team's active team
+  admins (`teams/notify-admins.ts`): in-app `team.site_admin.member_added|member_role_changed|
+member_removed|member_taken_over` naming the site admin, the member and the team role, and one
+  email per admin when mail is configured. Never the site admin or the member changed. Needs
+  migration `0214_notifications_site_admin_changes` (`notifications.subject_user_id`, `team_role`,
+  kind/actor/subject checks) and the protocol fields `subject_name`, `team_role` (additive), in
+  the review-fix commit itself (the coordinator asked for one commit; no RLS change). Written after
+  the change commits, best effort (the audit log is the record).
+- **L1:** an Add refuses an unverified address (409 `user_unverified`, same `users.email_verified`
+  rule as accepting an invitation; local, invited and verified SSO/SCIM users pass); the candidate
+  search leaves unverified accounts out.
+- **L2:** the panel sends `expectedRole` (the roster's role) on role change and removal; the
+  409 `changed_since_approval` message now reads "changed since you loaded it…", and the roster
+  reloads after a refused removal.
+- **L3:** a direct Add deletes the person's pending invitations to that team, each audited
+  `identity.team_invitation.revoked` (actor: the site admin).
+- **I1:** stale texts fixed (`site_invites_create` description, `site-invites.ts`, `team.ts`).
+- **I2 (left as is):** `deactivated` is visible to every member on `/v1/team/members`; deactivated
+  members can't sign in anyway and the roster is team metadata. Strip it for non-admins if Chris
+  prefers.
+- **I3:** candidate search uses `NOT EXISTS` against `team_members` (inside `withTeam`).
+- **I4 (left as is):** the added member's in-app notice shows in that team's bell (team-scoped);
+  the email covers the gap.
+
 ## Open questions (for Chris or the coordinator)
+
+- **Review M1(b), for Chris:** should a site admin be allowed to add another site admin or the
+  Owner to a team (or promote them to team admin)? The reason for refusing self-add applies to
+  every site admin (an accomplice admin could then invite the first one). Today it is allowed,
+  and the team's admins are told (M1).
 
 - Self-removal from the Site console is refused with the rest of self changes; fine?
 - Browser spec picks a team member2 is not in (`KOBE_SITE_MEMBERS_TEAM` slug, else the first);

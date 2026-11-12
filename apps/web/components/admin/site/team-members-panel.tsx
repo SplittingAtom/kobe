@@ -54,7 +54,7 @@ export function TeamMembersPanel({ team }: { readonly team: SiteTeam }) {
 
   async function changeRole(m: RosterMember, role: TeamRole) {
     await mutation.run(
-      () => setTeamMemberRole(team.id, m.userId, role),
+      () => setTeamMemberRole(team.id, m.userId, role, m.role),
       () => `${m.name} is now ${roleLabel(role)} in ${team.name}.`,
     );
     setGeneration((n) => n + 1);
@@ -72,11 +72,12 @@ export function TeamMembersPanel({ team }: { readonly team: SiteTeam }) {
       trigger,
     );
     if (!yes) return;
-    const done = await mutation.run(
-      () => removeTeamMember(team.id, m.userId),
+    await mutation.run(
+      () => removeTeamMember(team.id, m.userId, m.role),
       () => `${m.name} was removed from ${team.name}.`,
     );
-    if (done) reload();
+    // A refusal (e.g. the role changed since the roster loaded) shows the current state too.
+    reload();
   }
 
   async function takeOver(m: RosterMember, trigger: HTMLElement | null) {
