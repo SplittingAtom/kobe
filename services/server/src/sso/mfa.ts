@@ -9,14 +9,23 @@ export interface MfaProof {
 }
 
 /**
- * Spec §8 (SSO3): the sign-in proved multi-factor authentication when any `amr` value (RFC 8176)
- * of the provider's `mfa_rule` is present, or the `acr` matches one exactly, or (Entra only) the
- * `acrs` claim carries a listed authentication context. Exact, case-sensitive matches only.
+ * Spec §8 (SSO3): the claim value that proved multi-factor authentication, as `amr:<v>`,
+ * `acr:<v>` or `acrs:<v>`; null when none did. Any `amr` value (RFC 8176) of the provider's
+ * `mfa_rule`, or the `acr` exactly, or (Entra only) an `acrs` authentication context. Exact,
+ * case-sensitive matches only. Rule values are short printable ASCII (schemas.ts), so the result
+ * is safe to audit (review L3).
  */
+export function mfaEvidence(kind: "entra" | "oidc", rule: MfaRule, proof: MfaProof): string | null {
+  const amr = proof.amr.find((v) => rule.amr_any.includes(v));
+  if (amr !== undefined) return `amr:${amr}`;
+  if (proof.acr !== null && rule.acr_any.includes(proof.acr)) return `acr:${proof.acr}`;
+  const acrs = kind === "entra" ? proof.acrs.find((v) => rule.acrs_any.includes(v)) : undefined;
+  return acrs === undefined ? null : `acrs:${acrs}`;
+}
+
+/** Whether the sign-in proved multi-factor authentication under the rule (`mfaEvidence`). */
 export function mfaProven(kind: "entra" | "oidc", rule: MfaRule, proof: MfaProof): boolean {
-  if (proof.amr.some((v) => rule.amr_any.includes(v))) return true;
-  if (proof.acr !== null && rule.acr_any.includes(proof.acr)) return true;
-  return kind === "entra" && proof.acrs.some((v) => rule.acrs_any.includes(v));
+  return mfaEvidence(kind, rule, proof) !== null;
 }
 
 /**

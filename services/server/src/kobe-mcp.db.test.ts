@@ -707,7 +707,7 @@ describe("review fixes (KOBE-619)", () => {
     expect(await delegationBacked(db, d, { ssoEnabled: true })).toBe(false);
   });
 
-  it("KOBE-629: under require_2fa a delegation without TOTP needs an MFA-proving SSO backing session", async () => {
+  it("KOBE-629: under require_2fa a delegation needs a backing session that passed 2FA itself", async () => {
     const w = await world();
     const s = await sandboxFor(w.team, w.admin);
     const { rows } = await fx.admin.query<{ id: string }>(
@@ -737,6 +737,23 @@ describe("review fixes (KOBE-619)", () => {
       [w.admin.id],
     );
     expect(await delegationBacked(db, d, opts)).toBe(true);
+    // Review L1: an SSO backing session counts only on its own proof; Kobe TOTP never stands in.
+    await fx.admin.query(
+      `UPDATE session_sso_contexts SET mfa_satisfied = false
+        WHERE session_id IN (SELECT id FROM sessions WHERE user_id = $1)`,
+      [w.admin.id],
+    );
+    await fx.admin.query(`UPDATE users SET two_factor_enabled = true WHERE id = $1`, [w.admin.id]);
+    expect(await delegationBacked(db, d, opts)).toBe(false);
+    // A local backing session counts with the person's enrolled TOTP, and only with it.
+    await fx.admin.query(
+      `DELETE FROM session_sso_contexts
+        WHERE session_id IN (SELECT id FROM sessions WHERE user_id = $1)`,
+      [w.admin.id],
+    );
+    expect(await delegationBacked(db, d, opts)).toBe(true);
+    await fx.admin.query(`UPDATE users SET two_factor_enabled = false WHERE id = $1`, [w.admin.id]);
+    expect(await delegationBacked(db, d, opts)).toBe(false);
   });
 
   it("L3: the role change itself refuses another before-state (409 changed_since_approval)", async () => {

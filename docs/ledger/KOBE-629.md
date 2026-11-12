@@ -41,13 +41,41 @@
   enrolled TOTP does not make their non-MFA SSO session pass. Such a session can only exist if
   `require_2fa` was turned on after the sign-in; it gets `mfa_missing` (sign in again).
   Delegations can't tell which session backs them (no session id on the run), so there it is
-  `two_factor_enabled OR` a live pre-run SSO session with `mfa_satisfied`.
+  `two_factor_enabled OR` a live pre-run SSO session with `mfa_satisfied` (tightened by review
+  L1, below).
 - **`acrs` is read and requested only for `kind: entra`** ("(Entra)" in §8); a generic provider
   uses `amr`/`acr`.
 - **Enrolment refusal also covers `verify-totp` and backup codes**: `verify-totp` with a session
   is how Better Auth confirms a pending secret, and backup codes are a second factor too.
 - Entra preset kept as is (`amr_any` default + `acrs_any: ["c1"]`) until the real-tenant check.
 - `kobe_totp_fallback` (§8 opt-in) not built: SSO7 says no fallback.
+
+## Security review (816f578d; `review-629.md`, not committed) — fixes in the follow-up commit
+
+- **M1**: the `SSO_MFA_REQUIRED` refusal now covers passkey registration (3 paths) and
+  `/change-password` as well as TOTP/backup codes (`MFA_GUARDED_PATHS`, `auth.ts`); SSO-only
+  accounts still get `SSO_ONLY_ACCOUNT` first. Also: `PUT /v1/site/settings
+{requireTwoFactor: true}` deletes every SSO session without MFA proof.
+- **L1 + I2**: under `require_2fa` every delegation is checked with `ssoMfaProof`: a backing
+  session passes as a cookie request would (local: TOTP enrolled; SSO: only its own
+  `mfa_satisfied`). Refusal code: `two_factor_enrollment_required` when the person can still enrol
+  (local password, no TOTP), else `mfa_missing` (cookie path's code).
+- **L2**: a changed `mfa_rule` (console PATCH or Helm values) ends that provider's SSO sessions;
+  `identity.sso.provider.updated` carries `sessionsEnded` (audit schema + `docs/audit-log.md`).
+- **L3**: no migration: `acrs` is not stored on `session_sso_contexts`; the evidence that proved
+  MFA (`amr:<v>`, `acr:<v>` or `acrs:<v>`, `mfaEvidence`) goes into `auth.sign_in.succeeded`
+  (`mfa?`). Later: an `acrs text[]` column on `session_sso_contexts` (would allow re-evaluating
+  sessions on a rule change instead of ending them all).
+- **L4**: tests added (sso-sign-in.db: passkey + password refusal, pending TOTP secret confirmed
+  from a non-MFA SSO session, linked user with TOTP → `mfa_missing`, require_2fa turn-on ends weak
+  sessions, break-glass local admin password+TOTP with require_2fa on; kobe-mcp.db: TOTP never
+  stands in for an SSO backing session; site-sso.db: console and Helm rule change).
+- **I1 (note)**: Entra may report `c1` satisfied when no CA policy targets the user (excluded,
+  report-only, no P1). Real-tenant step 5 is the deciding test and must not be skipped; if `c1`
+  appears there, the preset needs `amr` evidence too.
+- **I3 (note)**: the JWT `twoFactor` claim is `users.two_factor_enabled` and ignores SSO MFA.
+  Nothing verifies it today; a future consumer must derive 2FA from the session's
+  `mfa_satisfied`, never from that claim.
 
 ## Verify on the real tenant (coordinator, after deploy to gate1)
 

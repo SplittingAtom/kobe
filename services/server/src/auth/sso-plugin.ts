@@ -20,7 +20,7 @@ import {
   type SsoProvider,
 } from "../sso/oidc-flow.js";
 import { redirectUriFor, revealClientSecret, type ProviderStore } from "../sso/providers.js";
-import { mfaProven } from "../sso/mfa.js";
+import { mfaEvidence } from "../sso/mfa.js";
 import { safeReturnTo } from "../sso/return-to.js";
 import type { SsoSettings } from "../sso/settings.js";
 import { resolveSsoUser } from "../sso/sign-in.js";
@@ -232,7 +232,8 @@ export function ssoPlugin(options: SsoPluginOptions) {
             // MFA trust (§8, SSO3): the provider's mfa_rule decides whether the IdP proved MFA.
             // Not proven while the site requires 2FA → refused before any user or session is
             // made; there is no fallback to Kobe TOTP for SSO sign-ins (SSO7).
-            const mfaSatisfied = mfaProven(p.kind, p.mfaRule, identity);
+            const mfa = mfaEvidence(p.kind, p.mfaRule, identity);
+            const mfaSatisfied = mfa !== null;
             if (!mfaSatisfied && (await readRequireTwoFactorIn(o.db))) {
               throw new SsoFlowError("mfa_missing");
             }
@@ -266,7 +267,8 @@ export function ssoPlugin(options: SsoPluginOptions) {
             await recordAuditAfter(o.db, {
               action: "auth.sign_in.succeeded",
               actor: { kind: "user", id: outcome.userId },
-              target: { method: "sso" },
+              // What proved MFA (review L3; the session row has no acrs column).
+              target: { method: "sso", ...(mfa === null ? {} : { mfa }) },
             });
             return `${o.publicOrigin}${flow.returnTo}`;
           });

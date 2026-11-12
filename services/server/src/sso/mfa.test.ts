@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acrsClaimsParameter, mfaProven } from "./mfa.js";
+import { acrsClaimsParameter, mfaEvidence, mfaProven } from "./mfa.js";
 import { ENTRA_MFA_RULE, GENERIC_MFA_RULE } from "./schemas.js";
 
 /** KOBE-629 (spec sso-oidc-scim §8, SSO3): which sign-ins prove multi-factor authentication. */
@@ -44,6 +44,18 @@ describe("mfaProven", () => {
   it("proves nothing with an empty rule", () => {
     const rule = { amr_any: [], acr_any: [], acrs_any: [] };
     expect(mfaProven("entra", rule, proof({ amr: ["mfa"], acr: "c1", acrs: ["c1"] }))).toBe(false);
+  });
+});
+
+describe("mfaEvidence (review L3: what proved it, for the audit log)", () => {
+  it("names the first matching claim value", () => {
+    expect(mfaEvidence("entra", ENTRA_MFA_RULE, proof({ amr: ["pwd"], acrs: ["c1"] }))).toBe(
+      "acrs:c1",
+    );
+    expect(mfaEvidence("oidc", GENERIC_MFA_RULE, proof({ amr: ["pwd", "otp"] }))).toBe("amr:otp");
+    const rule = { amr_any: [], acr_any: ["gold"], acrs_any: [] };
+    expect(mfaEvidence("oidc", rule, proof({ acr: "gold" }))).toBe("acr:gold");
+    expect(mfaEvidence("entra", ENTRA_MFA_RULE, proof({ amr: ["pwd"] }))).toBeNull();
   });
 });
 

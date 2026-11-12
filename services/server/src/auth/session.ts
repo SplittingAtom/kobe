@@ -13,6 +13,7 @@ import type { SiteRole } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
 import { DELEGATED_SESSION_PREFIX, delegationOf } from "../kobe-mcp/delegation.js";
 import { delegationBacked } from "../kobe-mcp/delegation-live.js";
+import { hasLocalPassword } from "./reset-links.js";
 
 export type { SiteRole } from "../authz/permissions.js";
 
@@ -94,16 +95,20 @@ export function requireSession(deps: ServerDeps) {
       ) {
         return c.json({ code: "unauthenticated", message: "Sign in to continue." }, 401);
       }
-      // Without a Kobe TOTP factor, only an SSO sign-in that proved MFA backs the run (KOBE-629).
+      // require_2fa: a backing session must have passed 2FA as a cookie request would (KOBE-629,
+      // review L1): local by enrolled TOTP, SSO only by its own MFA proof. The refusal code
+      // follows the cookie path (review I2): enrolment for a person who can still enrol (a local
+      // password, no TOTP yet), else the IdP's missing MFA.
       if (
-        !person.twoFactorEnabled &&
         (await readRequireTwoFactor(deps)) &&
         !(await delegationBacked(deps.database.db, delegation, {
           ssoEnabled: deps.sso.settings.enabled,
           ssoMfaProof: true,
         }))
       ) {
-        return c.json(TWO_FACTOR_ENROLLMENT_REQUIRED, 403);
+        const canEnrol =
+          !person.twoFactorEnabled && (await hasLocalPassword(deps.database.db, person.id));
+        return c.json(canEnrol ? TWO_FACTOR_ENROLLMENT_REQUIRED : SSO_MFA_MISSING, 403);
       }
       c.set("user", {
         id: person.id,

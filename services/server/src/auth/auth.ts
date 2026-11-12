@@ -84,13 +84,14 @@ const SSO_ONLY_ACCOUNT = {
 };
 
 /**
- * Endpoints that enrol a Kobe second factor (a TOTP secret, its confirmation, backup codes):
- * refused from an SSO session whose sign-in did not prove MFA (spec sso-oidc-scim §8, SSO7,
- * KOBE-629), so a stolen IdP password can never mint a second factor. A local session, or an SSO
+ * Endpoints that add a credential or second factor (TOTP secret, its confirmation, backup codes,
+ * a passkey, a new password): refused from an SSO session whose sign-in did not prove MFA (spec
+ * sso-oidc-scim §8, SSO7, KOBE-629 and its review M1), so a stolen IdP password can never mint a
+ * factor that later passes `require_2fa` through a local sign-in. A local session, or an SSO
  * session that proved MFA, is unaffected; the TOTP sign-in challenge carries no session.
  */
-const TOTP_ENROLMENT_PATHS = new Set([
-  "/two-factor/enable",
+const MFA_GUARDED_PATHS = new Set([
+  ...LOCAL_CREDENTIAL_PATHS,
   "/two-factor/get-totp-uri",
   "/two-factor/verify-totp",
   "/two-factor/generate-backup-codes",
@@ -99,7 +100,7 @@ const TOTP_ENROLMENT_PATHS = new Set([
 const SSO_MFA_REQUIRED = {
   code: "SSO_MFA_REQUIRED",
   message:
-    "Your organization's sign-in did not include multi-factor authentication, so this session can't set up an authenticator app. Sign in again with multi-factor authentication (your administrator sets it up with Conditional Access).",
+    "Your organization's sign-in did not include multi-factor authentication, so this session can't add a passkey, password or authenticator app. Sign in again with multi-factor authentication (your administrator sets it up with Conditional Access).",
 };
 
 /** The session is a single sign-on session whose sign-in did not prove MFA. */
@@ -257,7 +258,7 @@ export function createAuth({
             throw new APIError("FORBIDDEN", SSO_ONLY_ACCOUNT);
           }
         }
-        if (TOTP_ENROLMENT_PATHS.has(ctx.path)) {
+        if (MFA_GUARDED_PATHS.has(ctx.path)) {
           const current = await getSessionFromCtx(ctx).catch(() => null);
           if (current && (await ssoSessionWithoutMfa(db, current.session.id))) {
             throw new APIError("FORBIDDEN", SSO_MFA_REQUIRED);

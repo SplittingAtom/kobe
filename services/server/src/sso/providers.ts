@@ -329,8 +329,15 @@ export async function updateProvider(
         .where(eq(ssoProviders.id, id));
     }
     const target = { providerId: id, slug: row.slug };
+    // A changed MFA rule ends the provider's sessions: their mfa_satisfied was decided by the old
+    // rule (KOBE-629 review L2). Audited with the count.
+    const ruleMoved = patch.mfaRule !== undefined && !same(patch.mfaRule, row.mfaRule);
+    const ended = ruleMoved ? { sessionsEnded: await endProviderSessions(tx, id) } : {};
     if (changed || sealed !== undefined) {
-      await recordAudit(tx, { action: "identity.sso.provider.updated", target });
+      await recordAudit(tx, {
+        action: "identity.sso.provider.updated",
+        target: { ...target, ...ended },
+      });
     }
     if (toggled) {
       if (patch.enabled === false) await endProviderSessions(tx, id);
@@ -487,11 +494,15 @@ export async function seedHelmProviders(
         .set({ ...values, updatedAt: sql`now()` })
         .where(eq(ssoProviders.id, row.id));
       const target = { providerId: row.id, slug: p.slug };
+      // As in the console: a changed MFA rule ends the provider's sessions (KOBE-629 review L2).
+      const ended = same(values.mfaRule, row.mfaRule)
+        ? {}
+        : { sessionsEnded: await endProviderSessions(tx, row.id) };
       if (differs) {
         await recordAudit(tx, {
           actor: SYSTEM_ACTOR,
           action: "identity.sso.provider.updated",
-          target,
+          target: { ...target, ...ended },
         });
       }
       if (enabled !== row.enabled) {
