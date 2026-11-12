@@ -137,7 +137,7 @@ describe("SSRF guard on discovery (KOBE-626 ac-6)", () => {
     expect(idp.hits).toEqual([]);
   });
 
-  it.each(["10.0.0.5", "127.0.0.1", "169.254.169.254", "192.168.1.10", "fd00::1"])(
+  it.each(["10.0.0.5", "127.0.0.1", "169.254.169.254", "192.168.77.10", "fd00::1"])(
     "refuses an issuer resolving to %s",
     async (address) => {
       const idp = new FakeIdp().discovery(KC);
