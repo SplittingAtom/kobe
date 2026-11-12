@@ -2,7 +2,8 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (commit on `kobe-629-sso-mfa`, not pushed)
+- **Status:** merged into group branch `kobe-sso` (6db3b872), deployed to gate1 `local-6db3b8728e8b`
+  2026-11-12; real-tenant check deferred (no P1 tenant, Chris: wait)
 - **Branch / worktree:** `kobe-629-sso-mfa` in `../Kobe-wt629`, from group branch `kobe-sso` at
   `14b1b40b`
 - **Depends on:** KOBE-628 (sign-in, `session_sso_contexts`), KOBE-sso-review1.
@@ -117,8 +118,10 @@ Record the outcome (and any preset change) in this ledger.
 
 ## Open questions
 
-- Does the gate1 tenant have Entra ID P1 (Conditional Access)? Without it the `c1` context can't
-  be enforced and no Entra sign-in proves MFA, so `require_2fa` on gate1 would refuse all SSO.
+- gate1's tenant is Entra free tier (no Conditional Access), so the `c1` context can't be enforced
+  and `require_2fa` on gate1 would refuse all SSO. **Chris 2026-11-12: wait** — `require_2fa` stays
+  as is on gate1 and the real-tenant check above (incl. step 5, review I1) is deferred until a
+  tenant with Entra ID P1 is available. Coverage until then: the db tests below.
 
 ## Evidence (acceptance criteria → tests)
 

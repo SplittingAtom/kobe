@@ -2,7 +2,8 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (three local commits on `kobe-638-site-team-members`, not pushed)
+- **Status:** merged into group branch `kobe-sso` (6db3b872), deployed to gate1 `local-6db3b8728e8b`
+  2026-11-12, browser spec passed; ships with the SSO group PR
 - **Branch / worktree:** `kobe-638-site-team-members` in `../Kobe-wt638` (from group branch `kobe-sso`)
 - **Depends on:** KOBE-627 (managed rows, Take over, `teams/after-change.ts`). Chris 2026-11-12
   (final): site admins manage members; self-add refused.
@@ -97,14 +98,13 @@ member_removed|member_taken_over` naming the site admin, the member and the team
 
 ## Open questions (for Chris or the coordinator)
 
-- **Review M1(b), for Chris:** should a site admin be allowed to add another site admin or the
-  Owner to a team (or promote them to team admin)? The reason for refusing self-add applies to
-  every site admin (an accomplice admin could then invite the first one). Today it is allowed,
-  and the team's admins are told (M1).
+- **Review M1(b) — decided (Chris, 2026-11-12):** site admins may add other site admins (and the
+  Owner) to a team; the team's admins are told (M1). No further refusal.
 
 - Self-removal from the Site console is refused with the rest of self changes; fine?
 - Browser spec picks a team member2 is not in (`KOBE_SITE_MEMBERS_TEAM` slug, else the first);
-  it skips if member2 is in every team. Not run (coordinator runs it after deploy).
+  it skips if member2 is in every team. Ran on gate1 2026-11-12 (local-6db3b8728e8b): 2 passed,
+  after a selector fix (`exact: true` on "Role of …", which also matched "Change the role of …").
 - The schema commit must land before KOBE-629 if that branch ever needs a migration (it should not).
 
 ## Evidence (acceptance criteria → test or command output)

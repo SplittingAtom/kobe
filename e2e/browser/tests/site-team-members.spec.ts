@@ -100,7 +100,7 @@ test("a site admin adds member2 to a team without an invitation, changes the rol
     }
 
     // Change the role.
-    await row.getByLabel(`Role of ${member2.name}`).selectOption("contributor");
+    await row.getByLabel(`Role of ${member2.name}`, { exact: true }).selectOption("contributor");
     await row.getByRole("button", { name: `Save role of ${member2.name}` }).click();
     await expect(
       panel.getByText(`${member2.name} is now Contributor in ${team.name}.`),
