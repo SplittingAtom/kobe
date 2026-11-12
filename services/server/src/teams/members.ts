@@ -30,8 +30,12 @@ export interface TeamMember {
   /**
    * Kobe added them for the Skill reviewer grant (KOBE-331); taking the grant removes them.
    * `idp`: an identity provider's access mappings manage the row (KOBE-627, SSO10): see `managedBy`.
+   * `site_admin`: a Site admin added them from the Site console (KOBE-638). Null: they joined by
+   * invitation, or were the team's first admin.
    */
-  readonly addedVia: "skill_reviewer_grant" | "idp" | null;
+  readonly addedVia: "skill_reviewer_grant" | "idp" | "site_admin" | null;
+  /** Deactivated users stay members but can't sign in (KOBE-638: the roster shows the status). */
+  readonly deactivated: boolean;
   /** The provider whose mappings manage the row; a team admin can only take it over. */
   readonly managedBy: { readonly providerId: string; readonly providerName: string } | null;
 }
@@ -62,6 +66,19 @@ export function idpProviderOf(addedVia: string | null): string | null {
   return addedVia?.startsWith(IDP_PREFIX) ? addedVia.slice(IDP_PREFIX.length) : null;
 }
 
+/** `team_members.added_via` of a row a Site admin added from the Site console (KOBE-638). */
+export const SITE_ADMIN_VIA = "site_admin";
+
+/**
+ * Who changed a row when it was not the team's own admin (KOBE-638): a Site admin from the Site
+ * console. Only the audit event says so (`via: "site_admin"`, the actor is the Site admin); the
+ * rules are a person's (managed rows refused, last team admin kept).
+ */
+export type MemberChangeOrigin = typeof SITE_ADMIN_VIA;
+
+const originAudit = (origin: MemberChangeOrigin | undefined) =>
+  origin === undefined ? {} : { via: origin };
+
 /** Why Kobe itself changes a row: the Skill reviewer grant, or a provider's mappings. */
 export type MemberChangeVia = "skill_reviewer_grant" | { readonly idp: string };
 
@@ -89,6 +106,7 @@ export async function listMembers(db: KobeDb, teamId: string): Promise<TeamMembe
         role: teamMembers.role,
         joinedAt: teamMembers.createdAt,
         addedVia: teamMembers.addedVia,
+        deactivatedAt: users.deactivatedAt,
       })
       .from(teamMembers)
       .innerJoin(users, eq(users.id, teamMembers.userId))
@@ -108,14 +126,15 @@ export async function listMembers(db: KobeDb, teamId: string): Promise<TeamMembe
             .where(inArray(ssoProviders.id, providerIds))
         ).map((p) => [p.id, p.name]),
   );
-  return rows.map((r) => {
+  return rows.map(({ deactivatedAt, ...r }) => {
     const providerId = idpProviderOf(r.addedVia);
     return {
       ...r,
       joinedAt: r.joinedAt.toISOString(),
+      deactivated: deactivatedAt !== null,
       addedVia:
-        r.addedVia === "skill_reviewer_grant"
-          ? "skill_reviewer_grant"
+        r.addedVia === "skill_reviewer_grant" || r.addedVia === SITE_ADMIN_VIA
+          ? r.addedVia
           : providerId !== null
             ? "idp"
             : null,
@@ -209,9 +228,14 @@ export async function setMemberRole(
   role: TeamRole,
   /** KOBE-619: change only while the role is still this one (the approved before-state). */
   expected?: TeamRole,
+  /** KOBE-638: a Site admin's change from the Site console. */
+  origin?: MemberChangeOrigin,
 ): Promise<MembershipResult> {
   return withTeam(db, teamId, (tx) =>
-    setMemberRoleInTx(tx, teamId, userId, role, expected === undefined ? {} : { expected }),
+    setMemberRoleInTx(tx, teamId, userId, role, {
+      ...(expected === undefined ? {} : { expected }),
+      ...(origin === undefined ? {} : { origin }),
+    }),
   );
 }
 
@@ -225,7 +249,11 @@ export async function setMemberRoleInTx(
   teamId: string,
   userId: string,
   role: TeamRole,
-  opts: { readonly expected?: TeamRole; readonly via?: { readonly idp: string } } = {},
+  opts: {
+    readonly expected?: TeamRole;
+    readonly via?: { readonly idp: string };
+    readonly origin?: MemberChangeOrigin;
+  } = {},
 ): Promise<MembershipResult> {
   const lock = await lockForChange(tx, teamId, userId);
   if (lock.current === null) return fail("not_a_member");
@@ -234,11 +262,12 @@ export async function setMemberRoleInTx(
   const refusal = managedRefusal(lock, opts.via);
   if (refusal) return fail(refusal);
   if (role !== "team_admin" && losesLastActiveAdmin(lock)) return fail("last_team_admin");
-  const byProvider = opts.via !== undefined;
-  // A team admin's decision makes them the team's own member (KOBE-331 review).
+  // A person's decision makes a Skill reviewer grant row the team's own member (KOBE-331
+  // review); a provider keeps its rows managed, and the other tags only say how they joined.
+  const ownRow = opts.via === undefined && lock.addedVia === "skill_reviewer_grant";
   await tx
     .update(teamMembers)
-    .set(byProvider ? { role } : { role, addedVia: null })
+    .set(ownRow ? { role, addedVia: null } : { role })
     .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
   // Below team admin they can no longer invite: their pending invitations go too.
   if (role !== "team_admin") await revokeInvitesSentBy(tx, teamId, userId);
@@ -253,6 +282,7 @@ export async function setMemberRoleInTx(
         from: lock.current,
         to: role,
         ...(opts.via ? { via: "idp" as const, providerId: opts.via.idp } : {}),
+        ...originAudit(opts.origin),
       },
     });
   }
@@ -269,8 +299,12 @@ export async function removeMember(
   userId: string,
   /** KOBE-621: remove only while the role is still this one (the approved before-state). */
   expected?: TeamRole,
+  /** KOBE-638: a Site admin's removal from the Site console. */
+  origin?: MemberChangeOrigin,
 ): Promise<MembershipResult> {
-  return withTeam(db, teamId, (tx) => removeMemberInTx(tx, teamId, userId, undefined, expected));
+  return withTeam(db, teamId, (tx) =>
+    removeMemberInTx(tx, teamId, userId, undefined, expected, origin),
+  );
 }
 
 /**
@@ -285,6 +319,7 @@ export async function removeMemberInTx(
   userId: string,
   via?: MemberChangeVia,
   expected?: TeamRole,
+  origin?: MemberChangeOrigin,
 ): Promise<MembershipResult> {
   const lock = await lockForChange(tx, teamId, userId);
   if (lock.current === null) return fail("not_a_member");
@@ -308,7 +343,12 @@ export async function removeMemberInTx(
   await recordAudit(tx, {
     action: "identity.member.removed",
     teamId,
-    target: { userId, role: lock.current, ...auditVia(via) },
+    target: {
+      userId,
+      role: lock.current,
+      ...auditVia(via),
+      ...originAudit(via ? undefined : origin),
+    },
   });
   return OK;
 }
@@ -321,6 +361,8 @@ export async function takeOverMember(
   db: KobeDb,
   teamId: string,
   userId: string,
+  /** KOBE-638: a Site admin's Take over from the Site console. */
+  origin?: MemberChangeOrigin,
 ): Promise<MembershipResult> {
   return withTeam(db, teamId, async (tx) => {
     const lock = await lockForChange(tx, teamId, userId);
@@ -334,7 +376,7 @@ export async function takeOverMember(
     await recordAudit(tx, {
       action: "identity.member.taken_over",
       teamId,
-      target: { userId, providerId },
+      target: { userId, providerId, ...originAudit(origin) },
     });
     return OK;
   });

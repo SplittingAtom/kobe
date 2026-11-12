@@ -94,6 +94,8 @@ describe("site tool definitions", () => {
       "site_grants_take",
       "site_invites_revoke",
       "site_skill_blocklist_remove",
+      // KOBE-638: a membership, not the user or the team; they can be added again.
+      "site_team_members_remove",
     ]);
   });
 

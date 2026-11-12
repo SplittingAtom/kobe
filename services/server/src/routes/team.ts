@@ -10,7 +10,8 @@ import { idSchema, memberRoleSchema, teamRoleSchema } from "../teams/schemas.js"
 
 /**
  * The active team (`/v1/team`, spec §6.1): who you are in it and its membership (D8). People join
- * through team invitations they accept (`/v1/team/invites`, KOBE-13), never by being added.
+ * through team invitations they accept (`/v1/team/invites`, KOBE-13); since KOBE-638 a site admin
+ * can also add existing users from the Site console (`site-team-members.ts`), never team admins.
  */
 export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();

@@ -224,6 +224,21 @@ describe("audit event taxonomy", () => {
       }),
     ).toBe(true);
     expect(ok("identity.member.taken_over", { userId, providerId })).toBe(true);
+    // KOBE-638: a Site admin's changes from the Site console.
+    expect(ok("identity.member.added", { userId, role: "member", via: "site_admin" })).toBe(true);
+    expect(ok("identity.member.removed", { userId, role: "member", via: "site_admin" })).toBe(true);
+    expect(
+      ok("identity.member.role_changed", {
+        userId,
+        from: "member",
+        to: "contributor",
+        via: "site_admin",
+      }),
+    ).toBe(true);
+    expect(ok("identity.member.taken_over", { userId, providerId, via: "site_admin" })).toBe(true);
+    expect(ok("identity.member.added", { userId, role: "member", via: "site_console" })).toBe(
+      false,
+    );
     expect(AUDIT_EVENTS["identity.member.taken_over"].scope).toBe("team");
   });
 

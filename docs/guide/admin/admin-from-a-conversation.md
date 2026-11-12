@@ -61,7 +61,8 @@ Reads run without asking. Every change asks first (see below).
 | Usage and audit         | Read usage and the team audit log, page by page.                                              |
 
 With a site role, the agent can also work on the Site console: list, deactivate and reactivate
-users; list and create teams; site invitations; the model catalog (labels, prices, limits);
+users; list and create teams; list a team's members, add existing users to it, change their team
+role or remove them; site invitations; the model catalog (labels, prices, limits);
 connector status; the egress ceiling and site access requests; the skill blocklist; Skill reviewer
 grants; branding; the site budget; usage and the audit log. A Skill reviewer can claim, comment on
 and decide registry reviews.

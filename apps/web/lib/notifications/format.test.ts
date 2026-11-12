@@ -50,6 +50,46 @@ describe("notification words (KOBE-181)", () => {
     expect(notificationLabel(base, null)).toBe("One of your schedules");
   });
 
+  it("says which Site admin added the user to the team (KOBE-638)", () => {
+    const added = {
+      ...base,
+      kind: "team.member.added",
+      scheduleId: null,
+      threadId: null,
+      runId: null,
+      actorName: "Ada Admin",
+    } as const;
+    expect(notificationTitle(added)).toBe("Ada Admin added you to this team");
+    expect(notificationLabel(added, null)).toBe("Team membership");
+  });
+
+  it("tells team admins what a site admin changed (KOBE-638 review M1)", () => {
+    const told = {
+      ...base,
+      scheduleId: null,
+      threadId: null,
+      runId: null,
+      actorName: "Ada",
+      subjectName: "Bob",
+    } as const;
+    expect(
+      notificationTitle({ ...told, kind: "team.site_admin.member_added", teamRole: "member" }),
+    ).toBe("Ada (site admin) added Bob to this team as Member");
+    expect(
+      notificationTitle({
+        ...told,
+        kind: "team.site_admin.member_role_changed",
+        teamRole: "team_admin",
+      }),
+    ).toBe("Ada (site admin) changed Bob's team role to Team admin");
+    expect(notificationTitle({ ...told, kind: "team.site_admin.member_removed" })).toBe(
+      "Ada (site admin) removed Bob from this team",
+    );
+    expect(notificationLabel({ ...told, kind: "team.site_admin.member_removed" }, null)).toBe(
+      "Team membership",
+    );
+  });
+
   it("names a schedule by its recurrence and zone, or says it is gone", () => {
     const known = new Map([
       ["s1", { recurrence: { kind: "daily", at: "09:00" }, tz: "Europe/Berlin" }],

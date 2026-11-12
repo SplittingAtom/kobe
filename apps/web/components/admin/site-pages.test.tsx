@@ -340,9 +340,10 @@ describe("Teams", () => {
     await userEvent.selectOptions(within(form).getByLabelText("First team admin"), "u-bob");
     await userEvent.click(within(form).getByRole("button", { name: "Create team" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/already uses that slug/);
-    await userEvent.click(screen.getByRole("button", { name: "Members of Finance" }));
-    const roster = await screen.findByRole("list", { name: "Members of Finance" });
-    expect(roster.textContent).toMatch(/Bob \(b@x\.io\) · Team admin/);
+    await userEvent.click(screen.getByRole("button", { name: "Manage members of Finance" }));
+    const roster = await screen.findByRole("table", { name: "Members of Finance" });
+    expect(within(roster).getByRole("rowheader", { name: "Bob" })).toBeTruthy();
+    expect(roster.textContent).toMatch(/b@x\.io/);
     expect(summary(calls)).toContain("GET /v1/site/teams/t-1/members");
   });
 
