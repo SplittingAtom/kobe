@@ -180,6 +180,33 @@ export const ssoIdentities = pgTable(
 );
 
 /**
+ * An admin-expected link (§6, KOBE-630): the next SSO sign-in from `provider_id` whose verified
+ * address equals the user's and whose domain is in the provider's `allowed_email_domains` links
+ * that identity to `user_id` (`linked_via: admin_expected`). Single use (the row is deleted when it
+ * links), expires after 14 days, at most one per user and provider (a new one replaces it). Site
+ * configuration like `sso_identities`: no team content, so no RLS.
+ */
+export const ssoLinkExpectations = pgTable(
+  "sso_link_expectations",
+  {
+    providerId: uuid()
+      .notNull()
+      .references(() => ssoProviders.id, { onDelete: "cascade" }),
+    userId: uuid()
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdBy: uuid().references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp({ withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.providerId, t.userId] }),
+    index("sso_link_expectations_user_idx").on(t.userId),
+    check("sso_link_expectations_expiry", sql`${t.expiresAt} > ${t.createdAt}`),
+  ],
+);
+
+/**
  * Site configuration naming teams (§7): a claim value (an app-role value or a group object id)
  * grants a team role. Team roles only (SSO6): `team_role` has no site role. Applied by
  * `applyIdpAccess` at sign-in and on SCIM changes, each team in its own `withTeam()`.

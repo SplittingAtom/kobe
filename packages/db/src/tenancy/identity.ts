@@ -37,6 +37,8 @@ export const identity = defineDomain({
     // Single sign-on and SCIM (KOBE-625, spec sso-oidc-scim §4–§10)
     "sso_providers",
     "sso_identities",
+    // Admin-expected links (KOBE-630, §6)
+    "sso_link_expectations",
     "sso_access_mappings",
     "session_sso_contexts",
     "scim_tokens",
@@ -83,6 +85,8 @@ export const identity = defineDomain({
     // is linked or an SSO session is live; unlinking deletes the identity row.
     sso_providers: ALL_PRIVILEGES,
     sso_identities: ALL_PRIVILEGES,
+    // Single use: deleted when it links, replaced by a new one, or withdrawn (KOBE-630).
+    sso_link_expectations: ALL_PRIVILEGES,
     sso_access_mappings: ALL_PRIVILEGES,
     // A pointer only, like session_active_teams; rows also go away with their session.
     session_sso_contexts: ALL_PRIVILEGES,
