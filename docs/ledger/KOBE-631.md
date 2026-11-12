@@ -127,3 +127,7 @@ None changed in this ticket (SSO-10 owns the SSO guide pages).
 - ac-5 site-role holder: "the site-role guard" (Owner, Admin, setup Owner).
 - ac-6 no password / reset sends nothing: "SCIM-created users and local credentials".
 - Units: `sso/scim/user-input.test.ts`; web: `apps/web/components/admin/site-sso-scim.test.tsx`.
+
+## Later changes
+
+The security review fixes in [KOBE-sso-review1](KOBE-sso-review1.md) changed parts of this ticket (address source and verification, SSO9 guard, kill switch sessions, SCIM externalId and reactivation, setup Owner flag).

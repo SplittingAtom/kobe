@@ -107,3 +107,7 @@ None changed here (spec §18 assigns the SSO guide pages to SSO-10).
 
 Unit: `sso/claims.test.ts`, `sso/state.test.ts`, `sso/return-to.test.ts`; web:
 `apps/web/components/auth/sso-sign-in.test.tsx`.
+
+## Later changes
+
+The security review fixes in [KOBE-sso-review1](KOBE-sso-review1.md) changed parts of this ticket (address source and verification, SSO9 guard, kill switch sessions, SCIM externalId and reactivation, setup Owner flag).

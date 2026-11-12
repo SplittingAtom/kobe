@@ -1,6 +1,6 @@
 # Kobe — Single sign-on with OIDC (Entra ID) and SCIM provisioning
 
-Status: **decisions SSO1–SSO5 by Chris 2026-11-11 (§16); decisions SSO6–SSO10 (answers to Q1–Q5); ready for
+Status: **decisions SSO1–SSO5 by Chris 2026-11-11 (§16); decisions SSO6–SSO10 (answers to Q1–Q5); SSO11 (2026-11-11, security review); ready for
 tickets** (SSO-1..SSO-10 in §17). Hadron spec `d930af9a`; tickets SSO-1 KOBE-625, SSO-2 KOBE-626, SSO-6 KOBE-627, SSO-3 KOBE-628, SSO-4 KOBE-629, SSO-5 KOBE-630, SSO-7 KOBE-631, SSO-8 KOBE-632, SSO-9 KOBE-633, SSO-10 KOBE-634. Requested by Chris, 2026-11-11. Written against main `0694c325`.
 
 Request (Chris, 2026-11-11): "I would like to add the ability to federate user identity with an
@@ -95,7 +95,10 @@ membership code.
 timestamps.
 
 - **Site console → People → Single sign-on** (`site.users.manage`): list, add, edit,
-  enable/disable, delete (only when no identity is linked; otherwise disable). The add form asks for
+  enable/disable, delete (only when no identity is linked; otherwise disable). While any identity
+  is linked, the tenant ID, issuer and subject claim can't change either (`409
+identity_settings_locked`; a Helm provider with such a change is left as it is and logged): the
+  same `sso_identities.subject` would otherwise name someone else. The add form asks for
   kind, display name, tenant ID (Entra) or issuer (generic), client ID and client secret. The secret
   is write-only and shown as "set" afterwards. The form also shows **the redirect URI to paste into
   the app registration**: `https://<kobe>/api/auth/sso/callback/<slug>`. Saving runs discovery
@@ -152,8 +155,14 @@ timestamps.
    - **Found** → that user. If deactivated: refused (`ACCOUNT_DEACTIVATED`).
    - **Not found, a local user has the same email** → never auto-linked. Linking follows §6.
    - **Not found, no such user** → if `jit_provisioning` and the mapping (§7) yields at least one
-     team, create the user (`email_verified` true, name from `name`) and the identity
-     (`linked_via: jit`). Otherwise refuse: "Your organization has not given you access to Kobe."
+     team, create the user (name from `name`) and the identity (`linked_via: jit`).
+     **Address** (security review): generic OIDC takes `email`, verified only when
+     `email_verified === true`. The Entra preset takes `email` only when `xms_edov` is true;
+     otherwise the UPN (`upn`, then `preferred_username`), which tenant users can't edit. A UPN
+     counts as verified only when its domain is in the provider's `allowed_email_domains` (the
+     tenant's verified domains). `users.email_verified` records the result. Team invitations are
+     listed, accepted and declined only for a verified address, so a self-set `email` claim can
+     never take over someone else's invitation (nOAuth). Otherwise refuse: "Your organization has not given you access to Kobe."
      This is the only way round invite-only, and only for identities the IdP's mappings admit.
 6. **Mapping** (§7) applies, then **MFA** (§8) is judged. Then a Better Auth session is created
    through `internalAdapter.createSession`, so the deactivation hook and trigger apply. The server
@@ -163,7 +172,9 @@ timestamps.
    `auth.sign_in.failed {method: "sso", reason}`, with reasons `state_invalid`, `token_invalid`,
    `tenant_mismatch`, `no_access`, `mfa_missing`, `link_required`, `deactivated`,
    `groups_overage`. Failures redirect to `/sign-in?sso_error=<code>` with a plain message. They
-   never show token contents.
+   never show token contents. `no_access` and `link_required` reach the browser as one code,
+   `not_allowed`, so the page never reveals whether an address has a Kobe account; the audit log
+   keeps the precise reason.
 
 Rate limits (Postgres, per IP): `/sso/start/*` 20/min, `/sso/callback/*` 20/min,
 `/sso/link/*` 5/min.
@@ -198,9 +209,11 @@ never links, and never matches SCIM users, on email alone. Linking needs one of 
 account. A password-reset request for them sends nothing: a `before` hook on
 `/request-password-reset` checks for a `credential` account. Without it, Better Auth's
 `/reset-password` would create a password, and anyone controlling the mailbox could get round the
-IdP. Whether such a user may add a passkey or password while signed in is **Q4**. The
-recommendation is no in v1, so an IdP-side disable can't be outlived by a local credential when
-SCIM is off.
+IdP. Such a user can't add a passkey or password while signed in either (**SSO9**, enforced): a
+`before` hook refuses `/passkey/generate-register-options`, `/passkey/verify-registration`,
+`/passkey/register`, `/change-password` and `/two-factor/enable` with `403 SSO_ONLY_ACCOUNT` for
+any user without a `credential` account. An IdP-side disable can't be outlived by a local
+credential when SCIM is off.
 
 **Break-glass.** Local sign-in never depends on the IdP. Discovery, JWKS and the token endpoint are
 contacted only by the SSO routes. The Owner and Admins can always sign in locally. Mappings never
@@ -280,7 +293,13 @@ SSO-4 verifies this against a real tenant and adjusts the preset if needed.
   setting) plus a row in **`session_sso_contexts`** (`session_id` PK, `ON DELETE CASCADE` like
   `session_active_teams`; `provider_id`, `mfa_satisfied`, `amr`, `acr`, `auth_time`).
 - Kobe keeps no refresh token, so a session never silently outlives the IdP's view. Optional
-  `max_session_hours` per provider ends SSO sessions earlier than local ones.
+  `max_session_hours` per provider ends SSO sessions earlier than local ones: the new session's
+  expiry is capped, and `requireSession` ends an SSO session once that many hours have passed
+  since sign-in (Better Auth's refresh can't extend it).
+- **Kill switch.** With `auth.sso.enabled: false`, `requireSession` refuses every session that has
+  a `session_sso_contexts` row, and the server deletes those sessions at start-up. Local sessions
+  are untouched (break-glass). The access-mapping routes (`/v1/site/sso/...mappings`,
+  `/v1/team/sso-mappings`) answer 404 like the other SSO routes.
 - Revocation is immediate: SCIM `active: false` or `DELETE` → `deactivateUser` (sessions deleted
   in the same transaction). Provider disabled or deleted, or identity unlinked → that provider's
   sessions deleted (via `session_sso_contexts`). A mapping removal takes effect on the next request
@@ -306,7 +325,11 @@ server). Shown in the console with the token.
   schema (`409 uniqueness`, `400 invalidFilter|invalidValue`, `404`).
 - **Users**: `userName` = sign-in name (UPN) → `users.email` when it is an address. `externalId`
   must be the Entra `objectId` (the guide gives the attribute-mapping change), and it creates or
-  matches `sso_identities(provider, externalId)` (`linked_via: scim`). `name.formatted`/
+  matches `sso_identities(provider, externalId)` (`linked_via: scim`). **`externalId` is immutable
+  once set**: a PATCH or PUT with a different value is `400 mutability` (it would re-point the
+  identity, and so the sign-in, at another directory object). A SCIM address is verified only for
+  the Entra preset, when it comes from `userName` (the UPN) in one of `allowed_email_domains`;
+  otherwise `email_verified` is false (§5). `name.formatted`/
   `displayName` → `users.name`. `active`. `POST` for an email that already belongs to an unlinked
   local user → `409 uniqueness` with a detail pointing to admin-expected linking. Never silent
   linking (§6).
@@ -315,11 +338,17 @@ server). Shown in the console with the token.
   `members[value eq "<id>"]`; a probing `GET /Users?filter=userName eq "<random>"` that must answer
   an empty list; soft delete via `active: false`, then a later `DELETE`.
 - **Deactivation**: `active: false` → `deactivateUser` (sessions, verifications and egress tunnels
-  end at once), audited with `actor: scim`. `active: true` → `reactivateUser`. `DELETE` →
+  end at once), audited with `actor: scim`, recorded as `users.deactivated_via = scim:<provider>`.
+  `active: true` → `reactivateUser`, **only for a user this provider's SCIM deactivated (SSO11)**:
+  a user a site admin deactivated (`deactivated_via = admin`, also when the admin deactivates
+  someone SCIM already had) stays deactivated, SCIM gets `403` with a detail pointing to the Site
+  console, and `identity.scim.reactivation_refused` is audited. `DELETE` →
   deactivate and unlink. Kobe never deletes users. Users with a site role are **not deactivated by
   SCIM** (recommendation for **Q3**): their SSO sessions are deleted, the request is recorded, and
   the Site console shows a banner for an admin to decide. A compromised IdP can't lock out the
-  break-glass accounts.
+  break-glass accounts. The setup Owner is recognised by the durable flag `users.setup_owner`
+  (set at setup; migration 0212 backfilled it from the setup audit event, else the current
+  Owner), not by an audit row.
 - **Groups**: `scim_groups` (`provider_id`, `id`, `external_id` = Entra objectId, `display_name`)
   and `scim_group_members` (`group_id`, `user_id`), both site-wide. Every member change re-runs
   `applyIdpAccess` for the affected users, with `claim_value = external_id`. This is how overage
@@ -344,25 +373,26 @@ New events (`packages/db/src/audit/events.ts`, site scope): `identity.sso.provid
 deleted|enabled|disabled`, `identity.sso.mapping.created|deleted`, `identity.sso.mapping_conflict
 {teamId, reason}`, `identity.sso.link.created {method}` / `.removed`, `identity.sso.link_expected`,
 `identity.scim.token.created|revoked`, `identity.scim.user.created|updated|deactivated|reactivated`,
-`identity.scim.group.created|updated|deleted`, `identity.scim.deactivation_refused {userId}`, and
+`identity.scim.group.created|updated|deleted`, `identity.scim.deactivation_refused {userId}`,
+`identity.scim.reactivation_refused {userId}` (SSO11), and
 team-scope `team.member.added|role_changed|removed` with `via: "idp"`. `auth.sign_in.*` gain
 method `sso`. SCIM requests carry the actor kind `system` with `{scimTokenId}`. Target allowlists
 contain ids and codes only, never claims, tokens or email bodies.
 
 ## 13. Threat model
 
-| Threat                                | Mitigation                                                                                                                                                                                                       |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| IdP compromise                        | Damage is bounded by mappings: team roles only, no site roles (Q1). SCIM can't deactivate site-role holders (Q3). Local break-glass sign-in. Kill switch `auth.sso.enabled: false`. Every SSO change is audited. |
-| Token replay / code injection         | PKCE S256, sealed single-use `state` cookie, `nonce` checked, `iss` parameter (RFC 9207), 60 s skew, `auth_time` bound, ID token only accepted from the token endpoint over TLS.                                 |
-| Token from another tenant (`common`)  | Tenant-specific issuer only; `iss` and `tid` must match; `common`/`organizations`/`consumers` refused at save.                                                                                                   |
-| Account takeover via unverified email | Identity keyed on (`provider`, `oid`/`sub`), never email. Linking needs local proof or an admin expectation plus verified domain (`xms_edov`). No password reset for accounts without a credential.              |
-| Mapping escalation                    | Only `site.users.manage` edits mappings. The highest mapped role is capped at `team_admin`. Manual rows are untouched. A team admin can't edit managed rows. Conflicts are surfaced.                             |
-| SCIM token leak                       | Hashed at rest, shown once, per provider, rotatable and revocable, rate-limited, `last_used_at` shown. A leaked token can't touch site roles or deactivate admins, and creates users only via mapped groups.     |
-| Open redirect                         | `returnTo` relative-path only; error redirects go to fixed pages.                                                                                                                                                |
-| Login CSRF / session fixation         | `state` tied to the browser cookie; a new session id at every sign-in; the existing session is replaced.                                                                                                         |
-| SSRF via discovery                    | URL policy and allowed CIDRs; only Site admins configure providers.                                                                                                                                              |
-| Secret disclosure                     | Client secret sealed (envelope) or held in a Kubernetes Secret (Helm); never returned by the API; no IdP tokens stored.                                                                                          |
+| Threat                                | Mitigation                                                                                                                                                                                                                                                                                      |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| IdP compromise                        | Damage is bounded by mappings: team roles only, no site roles (Q1). SCIM can't deactivate site-role holders (Q3). Local break-glass sign-in. Kill switch `auth.sso.enabled: false`. Every SSO change is audited.                                                                                |
+| Token replay / code injection         | PKCE S256, sealed single-use `state` cookie, `nonce` checked, `iss` parameter (RFC 9207), 60 s skew, `auth_time` bound, ID token only accepted from the token endpoint over TLS.                                                                                                                |
+| Token from another tenant (`common`)  | Tenant-specific issuer only; `iss` and `tid` must match; `common`/`organizations`/`consumers` refused at save.                                                                                                                                                                                  |
+| Account takeover via unverified email | Identity keyed on (`provider`, `oid`/`sub`), never email. Linking needs local proof or an admin expectation plus verified domain (`xms_edov`). No password reset for accounts without a credential. Invitations match only a verified address (Entra: UPN in a verified domain, or `xms_edov`). |
+| Mapping escalation                    | Only `site.users.manage` edits mappings. The highest mapped role is capped at `team_admin`. Manual rows are untouched. A team admin can't edit managed rows. Conflicts are surfaced.                                                                                                            |
+| SCIM token leak                       | Hashed at rest, shown once, per provider, rotatable and revocable, rate-limited, `last_used_at` shown. A leaked token can't touch site roles or deactivate admins, and creates users only via mapped groups.                                                                                    |
+| Open redirect                         | `returnTo` relative-path only; error redirects go to fixed pages.                                                                                                                                                                                                                               |
+| Login CSRF / session fixation         | `state` tied to the browser cookie; a new session id at every sign-in; the existing session is replaced.                                                                                                                                                                                        |
+| SSRF via discovery                    | URL policy and allowed CIDRs; only Site admins configure providers.                                                                                                                                                                                                                             |
+| Secret disclosure                     | Client secret sealed (envelope) or held in a Kubernetes Secret (Helm); never returned by the API; no IdP tokens stored.                                                                                                                                                                         |
 
 ## 14. Backup and restore
 
@@ -441,6 +471,9 @@ and `/Me`; per-team providers.
   unavailable: it can never be linked away from local credentials, converted to SSO-only, deactivated
   by SCIM, or have its local password/passkey removed by any SSO flow; local sign-in for it works
   even with `auth.sso.enabled` on and the IdP unreachable (a CI test proves sign-in with the IdP down).
+- **SSO11. SCIM reactivates only users SCIM deactivated** (Chris, 2026-11-11, from the security
+  review): a user deactivated by a site admin stays deactivated until an admin reactivates them;
+  SCIM gets 403, audited (§10).
 
 ## 17. Tickets
 
