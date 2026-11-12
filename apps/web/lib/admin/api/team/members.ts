@@ -23,3 +23,26 @@ export function setMemberRole(
 export function removeMember(teamId: string, userId: string): Promise<ApiResult<void>> {
   return apiRequest(`/v1/team/members/${enc(userId)}`, { method: "DELETE", teamId });
 }
+
+/** Take over (KOBE-627, SSO10): a provider-managed membership becomes the team's own. */
+export function takeOverMember(teamId: string, userId: string): Promise<ApiResult<unknown>> {
+  return apiRequest(`/v1/team/members/${enc(userId)}/take-over`, { method: "POST", teamId });
+}
+
+/** An access mapping that targets this team (read-only for team admins, spec sso §7). */
+export interface TeamSsoMapping {
+  readonly id: string;
+  readonly providerId: string;
+  readonly providerName: string;
+  readonly claimValue: string;
+  readonly role: TeamRole;
+}
+
+export async function listTeamSsoMappings(
+  teamId: string,
+): Promise<ApiResult<readonly TeamSsoMapping[]>> {
+  const res = await apiRequest<{ mappings: TeamSsoMapping[] }>("/v1/team/sso-mappings", {
+    teamId,
+  });
+  return res.ok ? { ...res, data: res.data.mappings } : res;
+}

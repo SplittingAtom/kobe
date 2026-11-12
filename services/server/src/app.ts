@@ -53,6 +53,7 @@ import { siteSkillTagRoutes } from "./routes/site-skill-tags.js";
 import { siteSkillRetireRoutes } from "./routes/site-skill-retire.js";
 import { siteSkillCatalogEditRoutes } from "./routes/site-skill-catalog-edit.js";
 import { siteRolesRoutes } from "./routes/site-roles.js";
+import { siteSsoMappingRoutes } from "./routes/site-sso-mappings.js";
 import { siteBrandingPublicRoutes, siteBrandingRoutes } from "./routes/site-branding.js";
 import { siteSettingsRoutes } from "./routes/site-settings.js";
 import { threadFileLinkRoutes, workspaceFileThreadRoutes } from "./routes/thread-file-links.js";
@@ -297,6 +298,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/site/branding", siteBrandingRoutes(deps));
   api.route("/site/teams", siteTeamsRoutes(deps));
   api.route("/site/roles", siteRolesRoutes(deps));
+  api.route("/site/sso", siteSsoMappingRoutes(deps));
   api.route("/site/policy", sitePolicyRoutes(deps));
   api.route("/site/users", siteUsersRoutes(deps));
   api.route("/site/invites", siteInvitesRoutes(deps));

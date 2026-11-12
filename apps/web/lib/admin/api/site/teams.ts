@@ -16,8 +16,13 @@ export interface RosterMember {
   readonly email: string;
   readonly role: "team_admin" | "contributor" | "member";
   readonly joinedAt: string;
-  /** Kobe added them to the Registry team for the Skill reviewer grant (KOBE-331); older servers omit it. */
-  readonly addedVia?: "skill_reviewer_grant" | null;
+  /**
+   * Kobe added them to the Registry team for the Skill reviewer grant (KOBE-331), or an identity
+   * provider's access mappings manage the row (`idp`, KOBE-627); older servers omit it.
+   */
+  readonly addedVia?: "skill_reviewer_grant" | "idp" | null;
+  /** The provider whose mappings manage the row (KOBE-627, SSO10); older servers omit it. */
+  readonly managedBy?: { readonly providerId: string; readonly providerName: string } | null;
 }
 
 /** Mirrors the server's team slug rule (it names the `kobe-team-<slug>` namespace). */

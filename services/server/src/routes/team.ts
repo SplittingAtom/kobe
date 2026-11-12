@@ -1,13 +1,11 @@
 import { Hono } from "hono";
-import { withTeam } from "@kobe/db";
-import { endCheckoutsWithoutEditInTx } from "../projects/offboard.js";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import { teamPermissionsFor } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
-import { notifyWorkspaceAccess } from "../event-stream/access.js";
-import { logger } from "../logger.js";
+import { listTeamMappings } from "../sso/mappings.js";
+import { afterMemberRemoved, afterMemberRoleChanged } from "../teams/after-change.js";
 import { invalidRequest, membershipError, parseBody } from "../teams/http.js";
-import { listMembers, removeMember, setMemberRole } from "../teams/members.js";
+import { listMembers, removeMember, setMemberRole, takeOverMember } from "../teams/members.js";
 import { idSchema, memberRoleSchema, teamRoleSchema } from "../teams/schemas.js";
 
 /**
@@ -40,12 +38,7 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
       body.expectedRole,
     );
     if (!result.ok) return membershipError(c, result.error);
-    // A demoted team admin no longer edits projects without a row of their own: those checkouts
-    // end (KOBE-579); mounts are brought in line (MT2).
-    await withTeam(db, c.get("team").id, (tx) =>
-      endCheckoutsWithoutEditInTx(tx, c.get("team").id, userId.data),
-    );
-    await deps.projectMounts.reconcileUser(c.get("team").id, userId.data);
+    await afterMemberRoleChanged(deps, c.get("team").id, userId.data);
     return c.json({ userId: userId.data, role: body.role });
   });
 
@@ -59,34 +52,28 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
     const teamId = c.get("team").id;
     const result = await removeMember(db, teamId, userId.data, expected?.data);
     if (!result.ok) return membershipError(c, result.error);
-    // Their scheduled runs here stop while the sandbox still answers (KOBE-180); the schedules were
-    // paused with the removal. A failure is logged; the scheduler's owner sweep cancels what is left
-    // at its next tick (KOBE-252, scheduler/owner-sweep.ts).
-    try {
-      await deps.runs.cancelScheduledRuns(teamId, userId.data, "member_removed");
-    } catch (err) {
-      logger.error(
-        { err, team_id: teamId },
-        "cancelling scheduled runs after member removal failed",
-      );
-    }
-    // Every project mount leaves their workspace (MT4); never fails the removal (logged inside).
-    await deps.projectMounts.reconcileUser(teamId, userId.data);
-    // The removed member's sandbox in this team loses its connection on every replica (KOBE-24).
-    await deps.sandboxWire.revalidateUser(userId.data);
-    // Their open file change streams end now on every replica, not at the next recheck (KOBE-496).
-    await notifyWorkspaceAccess(deps.database.db, userId.data).catch((err: unknown) => {
-      logger.warn({ err, team_id: teamId }, "workspace access hint after member removal failed");
-    });
-    // The sandbox is destroyed at once and the volume kept 30 days (D12, KOBE-28). The removal is
-    // done either way; a failure here is finished by the offboarding sweep.
-    try {
-      await deps.offboarding.offboardMember(teamId, userId.data, "member_removed");
-    } catch (err) {
-      logger.error({ err, team_id: teamId }, "offboarding after member removal failed");
-    }
+    await afterMemberRemoved(deps, teamId, userId.data);
     return c.body(null, 204);
   });
+
+  // Take over (KOBE-627, SSO10): the membership becomes the team's own; the identity provider's
+  // mappings never touch it again. Audited `identity.member.taken_over`.
+  app.post(
+    "/members/:userId/take-over",
+    requireTeamPermission("team.members.manage"),
+    async (c) => {
+      const userId = idSchema.safeParse(c.req.param("userId"));
+      if (!userId.success) return invalidRequest(c);
+      const result = await takeOverMember(db, c.get("team").id, userId.data);
+      if (!result.ok) return membershipError(c, result.error);
+      return c.json({ userId: userId.data, managedBy: null });
+    },
+  );
+
+  // The access mappings that target this team, read-only (spec sso §7): site admins edit them.
+  app.get("/sso-mappings", requireTeamPermission("team.members.manage"), async (c) =>
+    c.json({ mappings: await listTeamMappings(db, c.get("team").id) }),
+  );
 
   return app;
 }

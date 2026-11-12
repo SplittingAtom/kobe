@@ -16,6 +16,11 @@ const MEMBERSHIP_ERRORS = {
   not_a_member: [404, "That user is not a member of this team."],
   last_team_admin: [409, "A team needs at least one team admin. Promote someone else first."],
   changed_since_approval: [409, "The member's role changed meanwhile; nothing was changed."],
+  managed_by_idp: [
+    409,
+    "The identity provider manages this membership. Take it over first, or change it in the identity provider.",
+  ],
+  not_managed: [409, "No identity provider manages this membership."],
 } as const satisfies Record<MembershipError, readonly [number, string]>;
 
 export function membershipError(c: Context, error: MembershipError) {

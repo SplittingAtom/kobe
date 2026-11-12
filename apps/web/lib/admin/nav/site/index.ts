@@ -22,3 +22,4 @@ export { default as settings } from "./settings";
 export { default as appearance } from "./appearance";
 export { default as backup } from "./backup";
 export { default as auditForwarding } from "./audit-forwarding";
+export { default as ssoMappings } from "./sso-mappings";

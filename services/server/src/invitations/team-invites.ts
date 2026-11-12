@@ -212,11 +212,19 @@ export async function acceptTeamInvite(
       .returning({ role: teamMembers.role });
     // Already a member that Kobe added for the Skill reviewer grant: accepting an invitation
     // makes them the team's own member, so taking the grant later keeps them (KOBE-331 review).
+    // A row an identity provider manages stays managed: only an audited Take over makes it the
+    // team's own (KOBE-627, SSO10).
     if (joined.length === 0)
       await tx
         .update(teamMembers)
         .set({ addedVia: null })
-        .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, user.id)));
+        .where(
+          and(
+            eq(teamMembers.teamId, teamId),
+            eq(teamMembers.userId, user.id),
+            eq(teamMembers.addedVia, "skill_reviewer_grant"),
+          ),
+        );
     const [membership] = await tx
       .select({ role: teamMembers.role })
       .from(teamMembers)

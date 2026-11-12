@@ -4,14 +4,17 @@ import Link from "next/link";
 import { useState } from "react";
 import {
   listTeamMembers,
+  listTeamSsoMappings,
   removeMember,
   setMemberRole,
+  takeOverMember,
   type TeamMember,
 } from "../../../lib/admin/api/team/members";
 import { roleLabel, type TeamRole } from "../../../lib/teams";
 import {
   Button,
   PageHeader,
+  Section,
   Select,
   Table,
   TableBody,
@@ -33,6 +36,9 @@ export const TEAM_ROLES: readonly TeamRole[] = ["team_admin", "contributor", "me
 /** Team members and roles (spec D8; `/v1/team/members`). People join by accepting an invitation. */
 /** A membership Kobe made for the Skill reviewer grant (KOBE-331 review H1b). */
 export const ADDED_BY_GRANT = "Added by Kobe: Skill reviewer";
+
+/** A membership an identity provider's access mappings manage (KOBE-627, SSO10). */
+export const managedByLabel = (providerName: string) => `Managed by ${providerName}`;
 
 export function MembersPage() {
   const access = useTeamAccess();
@@ -70,6 +76,24 @@ export function MembersPage() {
       setGenerationKey((n) => n + 1);
       reload();
     }
+  }
+
+  async function takeOver(member: TeamMember, trigger: HTMLElement | null) {
+    const provider = member.managedBy?.providerName ?? "the identity provider";
+    const yes = await confirm(
+      {
+        title: `Take over ${member.name}'s membership?`,
+        description: `${provider} stops managing it: from now on only team admins change or remove it, even when their access in ${provider} changes.`,
+        confirmLabel: "Take over",
+      },
+      trigger,
+    );
+    if (!yes) return;
+    const done = await mutation.run(
+      () => takeOverMember(teamId, member.userId),
+      () => `${member.name}'s membership is now managed by the team.`,
+    );
+    if (done) reload();
   }
 
   async function remove(member: TeamMember, trigger: HTMLElement | null) {
@@ -133,12 +157,21 @@ export function MembersPage() {
                   </TableRowHeader>
                   <TableCell>{m.email}</TableCell>
                   <TableCell>
-                    <RoleCell
-                      key={`${m.userId}:${m.role}:${generationKey}`}
-                      member={m}
-                      pending={mutation.pending}
-                      onSave={(role, trigger) => changeRole(m, role, trigger)}
-                    />
+                    {m.managedBy ? (
+                      <>
+                        {roleLabel(m.role)}
+                        <span className="block text-xs">
+                          {managedByLabel(m.managedBy.providerName)}
+                        </span>
+                      </>
+                    ) : (
+                      <RoleCell
+                        key={`${m.userId}:${m.role}:${generationKey}`}
+                        member={m}
+                        pending={mutation.pending}
+                        onSave={(role, trigger) => changeRole(m, role, trigger)}
+                      />
+                    )}
                   </TableCell>
                   <TableCell>
                     <DateTime value={m.joinedAt} />
@@ -147,15 +180,26 @@ export function MembersPage() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      disabled={mutation.pending}
-                      onClick={(e) => void remove(m, eventTrigger(e))}
-                    >
-                      {m.userId === access.user.id ? "Leave team" : "Remove"}
-                      <span className="sr-only"> {m.name}</span>
-                    </Button>
+                    {m.managedBy ? (
+                      // The identity provider decides; Take over makes the row the team's own.
+                      <Button
+                        size="sm"
+                        disabled={mutation.pending}
+                        onClick={(e) => void takeOver(m, eventTrigger(e))}
+                      >
+                        Take over<span className="sr-only"> membership of {m.name}</span>
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={mutation.pending}
+                        onClick={(e) => void remove(m, eventTrigger(e))}
+                      >
+                        {m.userId === access.user.id ? "Leave team" : "Remove"}
+                        <span className="sr-only"> {m.name}</span>
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -163,8 +207,62 @@ export function MembersPage() {
           </Table>
         )}
       </ResourceView>
+      <TeamSsoMappings teamId={teamId} />
       {confirmDialog}
     </>
+  );
+}
+
+/**
+ * The single sign-on access mappings that target this team, read-only (spec sso §7): loaded on
+ * request, since most teams have none. Site admins edit them in the Site console.
+ */
+function TeamSsoMappings({ teamId }: { readonly teamId: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Section title="Single sign-on access">
+      {open ? (
+        <TeamSsoMappingList teamId={teamId} />
+      ) : (
+        <Button size="sm" onClick={() => setOpen(true)}>
+          Show access mappings
+        </Button>
+      )}
+    </Section>
+  );
+}
+
+function TeamSsoMappingList({ teamId }: { readonly teamId: string }) {
+  const { state } = useResource(() => listTeamSsoMappings(teamId));
+  return (
+    <ResourceView state={state} label="access mappings">
+      {(mappings) =>
+        mappings.length === 0 ? (
+          <p className="text-sm">No identity provider grants access to this team.</p>
+        ) : (
+          <Table caption="Access mappings for this team (set by site admins)">
+            <TableHead>
+              <TableRow>
+                <TableHeader>Identity provider</TableHeader>
+                <TableHeader>App role or group</TableHeader>
+                <TableHeader>Team role</TableHeader>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {mappings.map((m) => (
+                <TableRow key={m.id}>
+                  <TableRowHeader>{m.providerName}</TableRowHeader>
+                  <TableCell>
+                    <code>{m.claimValue}</code>
+                  </TableCell>
+                  <TableCell>{roleLabel(m.role)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )
+      }
+    </ResourceView>
   );
 }
 
