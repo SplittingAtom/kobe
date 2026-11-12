@@ -374,6 +374,33 @@ again). Update `docs/backup-restore.md`: the row "OAuth tokens in `accounts` (if
 becomes "SSO: Kobe stores no IdP tokens; client secrets sealed under the envelope key; SCIM tokens
 as hashes".
 
+## 14a. One tenant shared with other apps
+
+Kobe is expected to share an Entra tenant with other in-house apps (Catalyst, Foundry). Kobe needs
+nothing special for single sign-on across them (it comes from the IdP's own session), but these
+conventions keep the apps separate and their users comparable. `docs/install.md` gets a "Shared
+tenant" section with them (SSO-10):
+
+- **One app registration per app**: own client id, secret, redirect URI, app roles, Conditional
+  Access and SCIM job; "Assignment required" on. Never share Kobe's registration: each app's tokens
+  carry its own audience, so a token issued for Kobe is never accepted elsewhere and vice versa.
+- **Identity key `oid` + `tid`** in every app, never email or UPN (both change).
+- **Issuer pinned to the tenant** (`https://login.microsoftonline.com/<tenant-id>/v2.0`), `tid`
+  checked; `common` and `organizations` refused.
+- **One Conditional Access MFA policy targeting all the apps**, so every app's tokens carry the MFA
+  proof Kobe trusts (SSO3, SSO7).
+- **App roles assigned to groups** with a shared naming scheme (`<App>.<Role>[.<Team>]`), avoiding
+  group overage.
+- **Separate sessions**: cookies scoped to each app's host (never the parent domain); signing out of
+  one app does not sign out of the others unless front-channel logout is configured on purpose.
+- **A local break-glass admin in each app** (Kobe's is the setup Owner, SSO10).
+
+**App-to-app calls.** When Kobe calls another app on a person's behalf (today: the Catalyst MCP
+connector with per-member API keys), the target app exposes an API scope on its own registration and
+Kobe obtains a token for that audience for the person (the connector's existing OAuth flow, or the
+on-behalf-of exchange). Kobe never forwards its own ID token or access token to another app. Moving
+the Catalyst connector to Entra tokens is follow-up ticket KOBE-635, outside SSO-1..SSO-10 (§17).
+
 ## 15. Out of scope
 
 SAML (possible later spec, SSO1); SSO-only enforcement and disabling local sign-in (SSO4);
@@ -466,7 +493,7 @@ Choosing Keycloak instead would need an `inventory.yaml` row (Apache-2.0, test-o
   `e2e.yml`. AC: runs offline in k3d; covers sign-in, JIT, refusal, MFA, deactivation via SCIM.
 - **SSO-10 Browser spec, guide and docs** (all): Playwright spec (SSO button, link flow, managed
   row in Team console, SCIM deactivation logs the browser out); guide pages (§18); `docs/install.md`
-  (Entra app registration, redirect URI, app roles, optional claims `xms_edov`, auth context, SCIM
+  (shared-tenant conventions of §14a, Entra app registration, redirect URI, app roles, optional claims `xms_edov`, auth context, SCIM
   attribute mapping `externalId ← objectId`, egress); `docs/backup-restore.md`. AC: spec green on
   gate1 against the mock IdP; site wording and hygiene checks pass; install steps reviewed against a
   real Entra tenant.
