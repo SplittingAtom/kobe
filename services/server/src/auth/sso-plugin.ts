@@ -20,6 +20,7 @@ import {
   type SsoProvider,
 } from "../sso/oidc-flow.js";
 import { redirectUriFor, revealClientSecret, type ProviderStore } from "../sso/providers.js";
+import { mfaEvidence } from "../sso/mfa.js";
 import { safeReturnTo } from "../sso/return-to.js";
 import type { SsoSettings } from "../sso/settings.js";
 import { resolveSsoUser } from "../sso/sign-in.js";
@@ -228,9 +229,14 @@ export function ssoPlugin(options: SsoPluginOptions) {
               state: flow.state,
               nonce: flow.nonce,
             });
-            // MFA trust is SSO-4 (KOBE-629): until then a site that requires 2FA refuses SSO
-            // rather than letting an SSO session enrol a Kobe TOTP factor (SSO7).
-            if (await readRequireTwoFactorIn(o.db)) throw new SsoFlowError("mfa_missing");
+            // MFA trust (§8, SSO3): the provider's mfa_rule decides whether the IdP proved MFA.
+            // Not proven while the site requires 2FA → refused before any user or session is
+            // made; there is no fallback to Kobe TOTP for SSO sign-ins (SSO7).
+            const mfa = mfaEvidence(p.kind, p.mfaRule, identity);
+            const mfaSatisfied = mfa !== null;
+            if (!mfaSatisfied && (await readRequireTwoFactorIn(o.db))) {
+              throw new SsoFlowError("mfa_missing");
+            }
             const outcome = await resolveSsoUser(runtime().afterChange(), p, identity);
             if (!outcome.ok) return refused(outcome.failure, outcome.userId);
 
@@ -248,7 +254,7 @@ export function ssoPlugin(options: SsoPluginOptions) {
               await o.db.insert(sessionSsoContexts).values({
                 sessionId: session.id,
                 providerId: p.id,
-                mfaSatisfied: false,
+                mfaSatisfied,
                 amr: [...identity.amr],
                 acr: identity.acr,
                 authTime: identity.authTime,
@@ -261,7 +267,8 @@ export function ssoPlugin(options: SsoPluginOptions) {
             await recordAuditAfter(o.db, {
               action: "auth.sign_in.succeeded",
               actor: { kind: "user", id: outcome.userId },
-              target: { method: "sso" },
+              // What proved MFA (review L3; the session row has no acrs column).
+              target: { method: "sso", ...(mfa === null ? {} : { mfa }) },
             });
             return `${o.publicOrigin}${flow.returnTo}`;
           });

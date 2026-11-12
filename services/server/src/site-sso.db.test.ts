@@ -85,6 +85,26 @@ const entraBody = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/** A live SSO session of a fresh user on the provider (KOBE-629 review L2). */
+async function ssoSessionOn(providerId: string): Promise<string> {
+  const userId = await h.createUser(`sso-${randomUUID()}@sso.test`);
+  const sessionId = randomUUID();
+  await h.admin.query(
+    `INSERT INTO sessions (id, token, user_id, expires_at) VALUES ($1, $2, $3, now() + interval '1 day')`,
+    [sessionId, `tok-${sessionId}`, userId],
+  );
+  await h.admin.query(
+    `INSERT INTO session_sso_contexts (session_id, provider_id, mfa_satisfied) VALUES ($1, $2, true)`,
+    [sessionId, providerId],
+  );
+  return sessionId;
+}
+
+async function sessionLives(sessionId: string): Promise<boolean> {
+  const { rows } = await h.admin.query(`SELECT 1 FROM sessions WHERE id = $1`, [sessionId]);
+  return rows.length === 1;
+}
+
 async function auditOf(providerId: string) {
   const { rows } = await h.admin.query<{ action: string; target: unknown; actor_kind: string }>(
     `SELECT action, target, actor_kind FROM audit_log WHERE target ->> 'providerId' = $1 ORDER BY seq`,
@@ -280,6 +300,30 @@ describe("console providers and the client secret (ac-3)", () => {
     ]);
   });
 
+  it("a changed MFA rule ends the provider's SSO sessions and audits how many (KOBE-629 L2)", async () => {
+    const kept = await ssoSessionOn(id);
+    expect((await admin.patch(`${BASE}/${id}`, { displayName: "Contoso MFA" })).status).toBe(200);
+    expect(await sessionLives(kept)).toBe(true);
+    const before = (await auditOf(id)).length;
+    const res = await admin.patch(`${BASE}/${id}`, {
+      mfaRule: { amr_any: ["mfa"], acr_any: [], acrs_any: ["c1"] },
+    });
+    expect(res.status, res.text).toBe(200);
+    expect(await sessionLives(kept)).toBe(false);
+    expect((await auditOf(id)).slice(before)).toEqual([
+      expect.objectContaining({
+        action: "identity.sso.provider.updated",
+        target: { providerId: id, slug: expect.any(String), sessionsEnded: 1 },
+      }),
+    ]);
+    // The same rule again is no change: nothing ends.
+    const again = await ssoSessionOn(id);
+    await admin.patch(`${BASE}/${id}`, {
+      mfaRule: { amr_any: ["mfa"], acr_any: [], acrs_any: ["c1"] },
+    });
+    expect(await sessionLives(again)).toBe(true);
+  });
+
   it("refuses to change the issuer, tenant or subject claim while identities are linked (finding 5)", async () => {
     const userId = await h.createUser(`locked-${randomUUID()}@sso.test`);
     await h.admin.query(
@@ -421,6 +465,23 @@ describe("Helm providers (ac-4)", () => {
     } finally {
       await h.admin.query(`DELETE FROM sso_identities WHERE provider_id = $1`, [helmId]);
     }
+  });
+
+  it("a changed Helm MFA rule ends the provider's SSO sessions (KOBE-629 L2)", async () => {
+    const db = h.deps.database.db;
+    await seedHelmProviders(db, helmEnv([HELM_PROVIDER]));
+    const sid = await ssoSessionOn(helmId);
+    await seedHelmProviders(db, helmEnv([{ ...HELM_PROVIDER, displayName: "Corp 3" }]));
+    expect(await sessionLives(sid)).toBe(true);
+    const mfaRule = { amr_any: ["mfa"], acr_any: [], acrs_any: ["c1"] };
+    await seedHelmProviders(db, helmEnv([{ ...HELM_PROVIDER, displayName: "Corp 3", mfaRule }]));
+    expect(await sessionLives(sid)).toBe(false);
+    const last = (await auditOf(helmId)).at(-1);
+    expect(last).toMatchObject({
+      action: "identity.sso.provider.updated",
+      actor_kind: "system",
+      target: { providerId: helmId, sessionsEnded: 1 },
+    });
   });
 
   it("never overwrites a console provider of the same slug", async () => {

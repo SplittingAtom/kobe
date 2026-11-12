@@ -105,6 +105,17 @@ describe("checkIdTokenClaims", () => {
     expect(check(claims, GENERIC)).toMatchObject({ ok: false, failure: "token_invalid" });
   });
 
+  it("reads Entra's acrs claim (an array, or one string) and drops anything else (KOBE-629)", () => {
+    const arr = check(entraClaims({ acrs: ["c1", 7, "c2"] }));
+    const one = check(entraClaims({ acrs: "c1" }));
+    const none = check(entraClaims());
+    const junk = check(entraClaims({ acrs: { c1: true } }));
+    expect(arr.ok && arr.identity.acrs).toEqual(["c1", "c2"]);
+    expect(one.ok && one.identity.acrs).toEqual(["c1"]);
+    expect(none.ok && none.identity.acrs).toEqual([]);
+    expect(junk.ok && junk.identity.acrs).toEqual([]);
+  });
+
   it("reports a groups overage as null values", () => {
     const base = { ...entraClaims(), iss: GENERIC.issuer, aud: GENERIC.clientId, sub: "s1" };
     const over1 = check({ ...base, _claim_names: { groups: "src1" } }, GENERIC);

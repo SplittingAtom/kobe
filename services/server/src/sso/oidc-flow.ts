@@ -8,6 +8,7 @@ import {
   type VerifiedIdentity,
 } from "./claims.js";
 import { discoverProvider } from "./discovery.js";
+import { acrsClaimsParameter } from "./mfa.js";
 import { SsoNetError, guardedFetch, type SsoNet } from "./net.js";
 import type { MfaRule } from "./schemas.js";
 
@@ -205,6 +206,7 @@ export interface StartParams {
 }
 
 export function authorizationUrl(config: oidc.Configuration, p: SsoProvider, s: StartParams): URL {
+  const claims = acrsClaimsParameter(p.kind, p.mfaRule);
   return oidc.buildAuthorizationUrl(config, {
     response_type: "code",
     redirect_uri: s.redirectUri,
@@ -214,6 +216,8 @@ export function authorizationUrl(config: oidc.Configuration, p: SsoProvider, s: 
     code_challenge: s.codeChallenge,
     code_challenge_method: "S256",
     ...(p.kind === "entra" ? { prompt: "select_account" } : {}),
+    // Entra: ask for the MFA authentication context as an essential `acrs` claim (§8, KOBE-629).
+    ...(claims === undefined ? {} : { claims }),
   });
 }
 

@@ -69,6 +69,8 @@ export interface VerifiedIdentity {
   readonly values: readonly string[] | null;
   readonly amr: readonly string[];
   readonly acr: string | null;
+  /** Entra authentication contexts (`acrs`, §8): an array, or a single string; else empty. */
+  readonly acrs: readonly string[];
   readonly authTime: Date | null;
 }
 
@@ -185,6 +187,10 @@ export function checkIdTokenClaims(input: {
         .filter((v): v is string => typeof v === "string" && v.length <= 64)
         .slice(0, AMR_MAX)
     : [];
+  const acrsRaw = typeof claims.acrs === "string" ? [claims.acrs] : claims.acrs;
+  const acrs = Array.isArray(acrsRaw)
+    ? acrsRaw.filter((v): v is string => typeof v === "string" && v.length <= 64).slice(0, AMR_MAX)
+    : [];
   const address = addressOf(claims, p);
   return {
     ok: true,
@@ -196,6 +202,7 @@ export function checkIdTokenClaims(input: {
       values: valuesOf(claims, p.accessClaim),
       amr,
       acr: str(claims.acr, VALUE_MAX),
+      acrs,
       authTime: isNum(claims.auth_time) ? new Date(claims.auth_time * 1000) : null,
     },
   };

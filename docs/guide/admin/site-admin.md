@@ -61,7 +61,10 @@ access, which is time-boxed, read-only, audited and shown to the team.
 
 - **Appearance**: the site name, logo, dark logo, favicon and style preset. See
   [Appearance](../appearance.md).
-- **Settings**: site-wide settings such as required two-factor authentication, and the site's
+- **Settings**: site-wide settings such as required two-factor authentication (local accounts
+  enrol an authenticator app; a single sign-on sign-in counts only when the identity provider
+  proved multi-factor authentication, for Microsoft Entra through a Conditional Access
+  authentication context, and is refused otherwise), and the site's
   memory and project memory switches (both the site and the team switch must be on for memory to
   work; see [Memory](../memory.md)). The **Kobe connector** setting is **Off**, **Docs only** (the
   default) or **Docs and admin tools**; see below.

@@ -339,7 +339,17 @@ const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, sh
 
 export const AUDIT_EVENTS = {
   // ── auth: Better Auth sign-in and credential changes (actor: the user) ──
-  "auth.sign_in.succeeded": event("site", { method: signInMethod }),
+  /**
+   * `mfa` (SSO only, KOBE-629 review L3): the claim value that proved MFA, e.g. `acrs:c1` or
+   * `amr:mfa`; absent when the sign-in did not prove it. A rule value, never personal data.
+   */
+  "auth.sign_in.succeeded": event("site", {
+    method: signInMethod,
+    mfa: z
+      .string()
+      .regex(/^(amr|acr|acrs):[\x21-\x7e]{1,64}$/)
+      .optional(),
+  }),
   /** Actor id null (unauthenticated); `userId` only when the attempt named an existing account. */
   "auth.sign_in.failed": event("site", {
     method: signInMethod,
@@ -450,7 +460,12 @@ export const AUDIT_EVENTS = {
     slug,
     kind: z.enum(SSO_PROVIDER_KINDS),
   }),
-  "identity.sso.provider.updated": event("site", { providerId: id, slug }),
+  /** `sessionsEnded`: the MFA rule changed, so the provider's SSO sessions ended (KOBE-629). */
+  "identity.sso.provider.updated": event("site", {
+    providerId: id,
+    slug,
+    sessionsEnded: count.optional(),
+  }),
   "identity.sso.provider.deleted": event("site", { providerId: id, slug }),
   "identity.sso.provider.enabled": event("site", { providerId: id, slug }),
   "identity.sso.provider.disabled": event("site", { providerId: id, slug }),
