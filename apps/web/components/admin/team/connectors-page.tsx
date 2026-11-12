@@ -26,7 +26,7 @@ import {
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
-import { ToolColumns } from "../connector-tools";
+import { McpUiBadge, ToolColumns } from "../connector-tools";
 import { useMutation, useResource, type Mutation } from "../use-resource";
 import { KobeConnectorCard } from "./kobe-connector-card";
 
@@ -273,6 +273,7 @@ function ToolRow({
       ) : (
         <code className={hidden ? "text-console-muted line-through" : undefined}>{t.name}</code>
       )}
+      <McpUiBadge app={t.app} />
       {drifted ? (
         <Badge tone="attention">Unavailable: changed upstream, waiting for a site admin</Badge>
       ) : (

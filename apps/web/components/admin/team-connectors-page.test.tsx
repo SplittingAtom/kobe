@@ -13,6 +13,7 @@ const tool = (name: string, over: Record<string, unknown> = {}) => ({
   read_only: false,
   open_world: true,
   status: "pinned",
+  app: null,
   ...over,
 });
 const connector = (over: Record<string, unknown> = {}) => ({
@@ -118,6 +119,43 @@ describe("Team connectors (KOBE-105)", () => {
       exposure: "custom",
       enabled_tools: ["jira__get_issue", "jira__create_issue"],
     });
+  });
+
+  it("badges tools that open an MCP-UI app, naming the template and its review (KOBE-640)", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [
+        200,
+        {
+          connectors: [
+            connector({
+              tools: [
+                tool("explore", {
+                  read_only: true,
+                  app: { resource_uri: "ui://jira/explorer", review: "approved" },
+                }),
+                tool("pick", { app: { resource_uri: "ui://jira/picker", review: "pending" } }),
+                tool("get_issue", { read_only: true }),
+              ],
+            }),
+          ],
+        },
+      ],
+    });
+    renderTeam(<TeamConnectorsPage />);
+    await screen.findByRole("article", { name: "jira" });
+    const jira = card("jira");
+    const explore = within(jira.getByRole("listitem", { name: "explore tool" }));
+    const badge = explore.getByText("MCP-UI");
+    expect(badge.closest("[title]")?.getAttribute("title")).toBe(
+      "Opens an app: ui://jira/explorer (approved)",
+    );
+    expect(explore.getByText(/Opens an app: ui:\/\/jira\/explorer \(approved\)/)).toBeTruthy();
+    const pick = within(jira.getByRole("listitem", { name: "pick tool" }));
+    expect(
+      pick.getByTitle("Opens an app: ui://jira/picker (waiting for a site admin's review)"),
+    ).toBeTruthy();
+    const plain = within(jira.getByRole("listitem", { name: "get_issue tool" }));
+    expect(plain.queryByText("MCP-UI")).toBeNull();
   });
 
   it("shows drifted tools as unavailable", async () => {

@@ -1,6 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
+import type { ToolApp, ToolAppReview } from "../../lib/admin/api/team/connectors";
+import { Badge } from "../ui/console";
 
 /**
  * Connector tools in two labelled columns, Read only and Write (KOBE-639), shared by the team
@@ -80,5 +82,31 @@ export function ToolColumns<T>({
         );
       })}
     </div>
+  );
+}
+
+const REVIEW_TEXT: Readonly<Record<ToolAppReview, string>> = {
+  approved: "approved",
+  pending: "waiting for a site admin's review",
+  missing: "template not pinned",
+};
+
+/** The tooltip and accessible text of a tool's MCP-UI badge. */
+export const appBadgeText = (app: ToolApp) =>
+  `Opens an app: ${app.resourceUri} (${REVIEW_TEXT[app.review]})`;
+
+/**
+ * The MCP-UI badge on a tool whose pinned definition names an MCP Apps template
+ * (`_meta.ui.resourceUri`, KOBE-433). Its tooltip and screen-reader text name the `ui://`
+ * template and its review state; nothing when the tool opens no app.
+ */
+export function McpUiBadge({ app }: { readonly app: ToolApp | null | undefined }) {
+  if (!app) return null;
+  const text = appBadgeText(app);
+  return (
+    <Badge tone={app.review === "approved" ? "accent" : "attention"} title={text}>
+      <span aria-hidden="true">MCP-UI</span>
+      <span className="sr-only">{text}</span>
+    </Badge>
   );
 }

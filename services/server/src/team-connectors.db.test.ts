@@ -87,6 +87,38 @@ describe("off by default", () => {
   });
 });
 
+describe("MCP Apps templates per tool (KOBE-640)", () => {
+  it("names each tool's ui:// template and whether a site admin approved it", async () => {
+    const sha = "a".repeat(64);
+    const apps = await registerConnector(h.admin, {
+      tools: [
+        { name: "open_explorer", readOnly: true, ui: { resource_uri: "ui://x/explorer" } },
+        { name: "open_picker", readOnly: true, ui: { resource_uri: "ui://x/picker" } },
+        { name: "open_gone", readOnly: true, ui: { resource_uri: "ui://x/gone" } },
+        { name: "plain", readOnly: true },
+      ],
+    });
+    for (const [uri, status, approved] of [
+      ["ui://x/explorer", "pinned", true],
+      ["ui://x/picker", "drifted", false],
+    ] as const) {
+      await h.admin.query(
+        `INSERT INTO connector_ui_resources
+           (connector_id, uri, mime_type, html, sha256, pinned_hash, status, approved)
+         VALUES ($1, $2, 'text/html;profile=mcp-app', '<p>x</p>', $3, $3, $4, $5)`,
+        [apps.id, uri, sha, status, approved],
+      );
+    }
+    const res = await member.get(BASE);
+    const c = res.json.connectors.find((x: { id: string }) => x.id === apps.id);
+    const app = (name: string) => c.tools.find((t: { name: string }) => t.name === name).app;
+    expect(app("open_explorer")).toEqual({ resource_uri: "ui://x/explorer", review: "approved" });
+    expect(app("open_picker")).toEqual({ resource_uri: "ui://x/picker", review: "pending" });
+    expect(app("open_gone")).toEqual({ resource_uri: "ui://x/gone", review: "missing" });
+    expect(app("plain")).toBeNull();
+  });
+});
+
 describe("access", () => {
   it("lets members read but only team admins change", async () => {
     expect((await member.get(BASE)).status).toBe(200);

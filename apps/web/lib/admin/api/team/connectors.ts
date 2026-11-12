@@ -9,6 +9,18 @@ const enc = encodeURIComponent;
 
 export type Exposure = "read_only" | "all" | "custom";
 
+/**
+ * A tool's MCP Apps template review (KOBE-640): `approved` renders; `pending` waits for a site
+ * admin's review (KOBE-434); `missing`: no template of that URI is pinned for the connector.
+ */
+export type ToolAppReview = "approved" | "pending" | "missing";
+
+/** The template a tool opens (`_meta.ui.resourceUri`, KOBE-433) and its review state. */
+export interface ToolApp {
+  readonly resourceUri: string;
+  readonly review: ToolAppReview;
+}
+
 export interface TeamConnectorTool {
   /** The name Pi sees; what a custom tick list stores. */
   readonly piName: string;
@@ -19,6 +31,8 @@ export interface TeamConnectorTool {
   readonly openWorld: boolean;
   /** `drifted` tools are never offered until a site admin re-approves them (KOBE-102). */
   readonly status: "pinned" | "drifted";
+  /** The MCP Apps template it opens and its review (KOBE-640); null when none (or older server). */
+  readonly app?: ToolApp | null;
 }
 
 export interface TeamConnector {
