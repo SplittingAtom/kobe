@@ -44,6 +44,8 @@ export const NOTIFICATION_KINDS = [
   "skill.version.unrevoked",
   /** A Site admin published a new version of a team-published catalog skill (KOBE-495). */
   "skill.version.site_published",
+  /** A Site admin added the user to the team from the Site console (KOBE-638). */
+  "team.member.added",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
@@ -76,7 +78,10 @@ export const notifications = pgTable(
     /** `skill.version.*`: the version retired (KOBE-340). */
     skillSemver: text(),
     pausedBy: text().$type<(typeof SCHEDULE_PAUSED_BY)[number]>(),
-    /** `skill.version.site_published`: the Site admin who published it (KOBE-495). */
+    /**
+     * `skill.version.site_published`: the Site admin who published it (KOBE-495);
+     * `team.member.added`: the Site admin who added the user (KOBE-638).
+     */
     actorUserId: uuid().references(() => users.id),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     readAt: timestamp({ withTimezone: true }),
@@ -96,13 +101,14 @@ export const notifications = pgTable(
     check("notifications_kind", sql`${t.kind} IN (${list(NOTIFICATION_KINDS)})`),
     // A run notification names its thread and run; a pause names neither and says who paused; a
     // skill notification (KOBE-338, KOBE-340) names its catalog skill and no schedule, thread or
-    // run, and a version one its version too.
+    // run, and a version one its version too; a team notification (KOBE-638) names none of them.
     check(
       "notifications_shape",
       sql`(${t.kind} = 'schedule.paused' AND ${t.threadId} IS NULL AND ${t.runId} IS NULL AND ${t.pausedBy} IS NOT NULL AND ${t.skillId} IS NULL AND ${t.skillSemver} IS NULL)
+        OR (${t.kind} LIKE 'team.%' AND ${t.scheduleId} IS NULL AND ${t.threadId} IS NULL AND ${t.runId} IS NULL AND ${t.pausedBy} IS NULL AND ${t.skillId} IS NULL AND ${t.skillSemver} IS NULL)
         OR (${t.kind} LIKE 'skill.%' AND ${t.scheduleId} IS NULL AND ${t.threadId} IS NULL AND ${t.runId} IS NULL AND ${t.pausedBy} IS NULL AND ${t.skillId} IS NOT NULL
           AND (${t.skillSemver} IS NOT NULL) = (${t.kind} LIKE 'skill.version.%'))
-        OR (${t.kind} <> 'schedule.paused' AND ${t.kind} NOT LIKE 'skill.%' AND ${t.threadId} IS NOT NULL AND ${t.runId} IS NOT NULL AND ${t.pausedBy} IS NULL AND ${t.skillId} IS NULL AND ${t.skillSemver} IS NULL)`,
+        OR (${t.kind} <> 'schedule.paused' AND ${t.kind} NOT LIKE 'skill.%' AND ${t.kind} NOT LIKE 'team.%' AND ${t.threadId} IS NOT NULL AND ${t.runId} IS NOT NULL AND ${t.pausedBy} IS NULL AND ${t.skillId} IS NULL AND ${t.skillSemver} IS NULL)`,
     ),
     check(
       "notifications_skill_semver",
@@ -111,7 +117,7 @@ export const notifications = pgTable(
     check("notifications_paused_by", sql`${t.pausedBy} IN (${list(SCHEDULE_PAUSED_BY)})`),
     check(
       "notifications_actor",
-      sql`(${t.kind} = 'skill.version.site_published') = (${t.actorUserId} IS NOT NULL)`,
+      sql`(${t.kind} IN ('skill.version.site_published', 'team.member.added')) = (${t.actorUserId} IS NOT NULL)`,
     ),
     check("notifications_skipped_count", sql`${t.skippedCount} >= 0`),
     // The notifier is at-least-once: one notification per run and kind.

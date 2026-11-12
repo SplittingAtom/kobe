@@ -93,11 +93,11 @@ function toNotification(row: Row): Notification {
 
 // A schedule notification needs its schedule (the contract names it); a skill notification
 // (KOBE-338) names a catalog skill instead, and a Site admin's new version (KOBE-495) its version
-// and the admin.
+// and the admin; a team notification (KOBE-638) only the admin.
 const mine = (v: Viewer) =>
   sql`team_id = ${v.teamId} AND user_id = ${v.userId}
     AND (schedule_id IS NOT NULL
-      OR kind IN ('skill.member_add.blocked', 'skill.version.site_published'))`;
+      OR kind IN ('skill.member_add.blocked', 'skill.version.site_published', 'team.member.added'))`;
 
 async function unreadCount(tx: KobeTx, v: Viewer): Promise<number> {
   const res = await tx.execute<{ n: number }>(sql`

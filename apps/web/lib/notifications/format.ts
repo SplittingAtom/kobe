@@ -46,6 +46,8 @@ export function notificationTitle(n: KobeNotification): string {
       return `${skillVersion(n)} is available again`;
     case "skill.version.site_published":
       return `${n.actorName ?? "A Site admin"} published ${skillVersion(n)} for the Site`;
+    case "team.member.added":
+      return `${n.actorName ?? "A Site admin"} added you to this team`;
     case "skill.member_add.blocked":
       return `A Team admin blocked ${n.skillName ?? "a catalog skill"} in this team; your Add for me was removed`;
   }
@@ -57,6 +59,7 @@ export function notificationLabel(
   known: ReadonlyMap<string, ScheduleWhen> | null,
 ): string {
   if (n.kind.startsWith("skill.")) return `Catalog skill ${n.skillName ?? ""}`.trim();
+  if (n.kind.startsWith("team.")) return "Team membership";
   return n.scheduleId === null
     ? "A schedule that no longer exists"
     : scheduleLabel(n.scheduleId, known);

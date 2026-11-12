@@ -50,6 +50,19 @@ describe("notification words (KOBE-181)", () => {
     expect(notificationLabel(base, null)).toBe("One of your schedules");
   });
 
+  it("says which Site admin added the user to the team (KOBE-638)", () => {
+    const added = {
+      ...base,
+      kind: "team.member.added",
+      scheduleId: null,
+      threadId: null,
+      runId: null,
+      actorName: "Ada Admin",
+    } as const;
+    expect(notificationTitle(added)).toBe("Ada Admin added you to this team");
+    expect(notificationLabel(added, null)).toBe("Team membership");
+  });
+
   it("names a schedule by its recurrence and zone, or says it is gone", () => {
     const known = new Map([
       ["s1", { recurrence: { kind: "daily", at: "09:00" }, tz: "Europe/Berlin" }],

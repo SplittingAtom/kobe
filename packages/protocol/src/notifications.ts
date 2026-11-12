@@ -70,6 +70,11 @@ export const NOTIFICATION_KINDS = [
    * maintainers in the publishing team; names the version and the admin (`actor_name`).
    */
   "skill.version.site_published",
+  /**
+   * A Site admin added the user to the team from the Site console (KOBE-638): names the admin
+   * (`actor_name`) and nothing else (the team is the notification's own).
+   */
+  "team.member.added",
 ] as const;
 /** Kinds about a catalog skill: they name it (`skill_id`, `skill_name`), not a schedule. */
 export const SKILL_NOTIFICATION_KINDS = NOTIFICATION_KINDS.filter((k) => k.startsWith("skill."));
@@ -77,6 +82,8 @@ export const SKILL_NOTIFICATION_KINDS = NOTIFICATION_KINDS.filter((k) => k.start
 export const SKILL_VERSION_NOTIFICATION_KINDS = NOTIFICATION_KINDS.filter((k) =>
   k.startsWith("skill.version."),
 );
+/** Kinds about the team itself (KOBE-638): no schedule, thread, run or skill. */
+export const TEAM_NOTIFICATION_KINDS = NOTIFICATION_KINDS.filter((k) => k.startsWith("team."));
 /** Kinds about a schedule: they name it (`schedule_id`). */
 export const SCHEDULE_NOTIFICATION_KINDS = NOTIFICATION_KINDS.filter((k) =>
   k.startsWith("schedule."),
@@ -95,7 +102,7 @@ export const notificationSchema = z
   .strictObject({
     notification_id: uuidSchema,
     kind: notificationKindSchema,
-    /** Set on the schedule kinds; null on `skill.member_add.blocked`. */
+    /** Set on the schedule kinds; null on the skill and team kinds. */
     schedule_id: uuidSchema.nullable(),
     thread_id: uuidSchema.nullable(),
     run_id: uuidSchema.nullable(),
@@ -106,7 +113,10 @@ export const notificationSchema = z
     skill_name: z.string().min(1).max(64).optional(),
     /** `skill.version.*`: the version (KOBE-340). */
     skill_semver: z.string().min(5).max(32).optional(),
-    /** `skill.version.site_published`: the Site admin's name (KOBE-495). */
+    /**
+     * `skill.version.site_published`: the Site admin's name (KOBE-495); `team.member.added`: the
+     * Site admin who added the user (KOBE-638).
+     */
     actor_name: z.string().min(1).max(200).optional(),
     read_at: timestampSchema.nullable(),
     created_at: timestampSchema,
@@ -115,6 +125,15 @@ export const notificationSchema = z
     (n) => {
       const skill = (SKILL_NOTIFICATION_KINDS as readonly string[]).includes(n.kind);
       const version = (SKILL_VERSION_NOTIFICATION_KINDS as readonly string[]).includes(n.kind);
+      if ((TEAM_NOTIFICATION_KINDS as readonly string[]).includes(n.kind)) {
+        return (
+          n.schedule_id === null &&
+          n.thread_id === null &&
+          n.run_id === null &&
+          n.skill_id === undefined &&
+          n.skill_semver === undefined
+        );
+      }
       return (
         (skill
           ? n.schedule_id === null && n.skill_id !== undefined && n.skill_name !== undefined
