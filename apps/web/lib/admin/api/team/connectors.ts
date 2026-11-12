@@ -11,9 +11,10 @@ export type Exposure = "read_only" | "all" | "custom";
 
 /**
  * A tool's MCP Apps template review (KOBE-640): `approved` renders; `pending` waits for a site
- * admin's review (KOBE-434); `missing`: no template of that URI is pinned for the connector.
+ * admin's review (KOBE-434); `missing`: no template of that URI is pinned for the connector;
+ * `unknown`: the site panel could not load the templates (web only).
  */
-export type ToolAppReview = "approved" | "pending" | "missing";
+export type ToolAppReview = "approved" | "pending" | "missing" | "unknown";
 
 /** The template a tool opens (`_meta.ui.resourceUri`, KOBE-433) and its review state. */
 export interface ToolApp {

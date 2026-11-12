@@ -89,6 +89,7 @@ const REVIEW_TEXT: Readonly<Record<ToolAppReview, string>> = {
   approved: "approved",
   pending: "waiting for a site admin's review",
   missing: "template not pinned",
+  unknown: "review state not loaded",
 };
 
 /** The tooltip and accessible text of a tool's MCP-UI badge. */

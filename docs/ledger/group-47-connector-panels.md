@@ -30,3 +30,34 @@
 - Docs: `docs/guide/admin/team-admin.md`, `docs/guide/connectors-and-apps.md`.
 - Tests: `services/server/src/team-connectors.db.test.ts` (three review states + null),
   `team-connectors-page.test.tsx` (badge shown/hidden, tooltip text).
+
+## KOBE-641: site connector detail panel
+
+- New read-only route `GET /v1/site/connectors/:id/teams` (`services/server/src/connectors/team-usage.ts`,
+  mounted in `routes/site-connectors.ts` behind the router-wide `site.connectors.manage`):
+  `{teams: [{id, name, slug, exposure, enabled_tools (count, custom only)}]}`, ordered by team
+  name; walks teams one `withTeam` at a time like `countTeamsUsing` (RLS); 404 for unknown/removed.
+  No migration.
+- Everything else from existing site APIs: the list row (URL, auth, credential source, status,
+  refresh/skip, counts), `GET /:id/tools` (definitions incl. annotations, input schema, `ui`),
+  `GET /:id/templates` (status, placement). Each part loads on its own; a failed part shows its
+  error, the rest still renders.
+- New console primitive `SidePanel` (`apps/web/components/ui/console/side-panel.tsx`, + test):
+  Radix Dialog at the right edge, portalled into the console root like `Dialog`, so its Escape
+  never closes the workspace panel (`data-kobe-panel`) underneath; focus returns to the name.
+- `connector-detail-panel.tsx` + `connector-detail-tools.tsx`: name in the registry row is a
+  button (`aria-haspopup="dialog"`). Site key shown only as set / not set / re-enter, never its
+  hint. Annotations: Destructive / Not destructive (hidden for read-only), Idempotent, Open/Closed
+  world; undeclared hints show MCP's default with a tooltip "Not declared…". Inputs summary up to
+  12 properties with type and required. Badge review from the templates list (`unknown` if that
+  list failed). Actions stay in the row (the ticket made them optional in the panel).
+- Docs: `docs/guide/admin/site-admin.md` (Connector registry bullet).
+- Tests: `connectors.db.test.ts` (route, 403 for non-site-admins, 404s, no key/header text),
+  `apps/web/components/admin/connector-detail-panel.test.tsx` (open, Escape/Close focus return,
+  info/teams/templates, tools, partial failure).
+
+## Gate1 browser spec
+
+`e2e/browser/tests/connector-panels.spec.ts` (owner, `KOBE_CONNECTOR` default `catalyst_2`; no
+writes, no tokens): team columns + counts + badges + narrow stacking; site name opens the panel,
+`/teams` has no key/header text, ≥3 templates, tool details, badges, Escape returns focus.

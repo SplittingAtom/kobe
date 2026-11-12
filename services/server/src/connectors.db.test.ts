@@ -255,6 +255,35 @@ describe("delete", () => {
   });
 });
 
+describe("teams using a connector (KOBE-641)", () => {
+  it("lists each team with the connector enabled and its exposure, for site admins only", async () => {
+    const id = (await create({ name: "teams-of", url: "https://t.example/mcp" })).json.connector.id;
+    const other = randomUUID();
+    await h.admin.query(`INSERT INTO teams (id, slug, name) VALUES ($1, 'ops', 'Ops')`, [other]);
+    await h.admin.query(
+      `INSERT INTO team_connectors (team_id, connector_id, exposure, enabled_tools, enabled_by)
+       VALUES ($1, $2, 'custom', ARRAY['mcp__teams_of__a', 'mcp__teams_of__b'], $3),
+              ($4, $2, 'read_only', '{}', $3)`,
+      [teamId, id, aliceId, other],
+    );
+    const res = await root.get(`${BASE}/${id}/teams`);
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({
+      teams: [
+        { id: teamId, name: "Finance", slug: "finance", exposure: "custom", enabled_tools: 2 },
+        { id: other, name: "Ops", slug: "ops", exposure: "read_only", enabled_tools: 0 },
+      ],
+    });
+    // Nothing about credentials or headers rides along.
+    expect(JSON.stringify(res.json)).not.toMatch(/key|header|secret|token/i);
+    for (const who of [alice, bob]) expect((await who.get(`${BASE}/${id}/teams`)).status).toBe(403);
+    expect((await root.get(`${BASE}/${randomUUID()}/teams`)).status).toBe(404);
+    expect((await root.get(`${BASE}/not-a-uuid/teams`)).status).toBe(404);
+    await h.admin.query(`DELETE FROM team_connectors WHERE connector_id = $1`, [id]);
+    expect((await root.get(`${BASE}/${id}/teams`)).json).toEqual({ teams: [] });
+  });
+});
+
 describe("audit", () => {
   it("records ids, names and field names, never URLs or icons", async () => {
     const { rows } = await h.admin.query(
