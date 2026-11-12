@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { KOBE_BUILTIN_CONNECTOR_ID, seedKobeBuiltinConnector } from "@kobe/db";
 import { toolHash } from "./connectors/pin.js";
 import { refreshAllConnectors, refreshConnector } from "./connectors/refresh.js";
 import type { ProbeResult } from "./connectors/probe.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 import type { TestBrowser } from "./testing/browser.js";
+import { pinnedTool } from "./testing/mcp-fixtures.js";
+
+const pinned = (connector: string, name: string) => pinnedTool(connector, { name });
 
 /**
  * Connector registry (KOBE-100, D6, D27): site admins register, edit and remove MCP servers;
@@ -252,6 +256,55 @@ describe("delete", () => {
     // The team's enablement row is kept (a later ticket decides what it means).
     const kept = await h.admin.query(`SELECT 1 FROM team_connectors WHERE connector_id = $1`, [id]);
     expect(kept.rows).toHaveLength(1);
+  });
+});
+
+describe("teams using a connector (KOBE-641)", () => {
+  it("lists each team with the connector enabled and its exposure, for site admins only", async () => {
+    const id = (await create({ name: "teams-of", url: "https://t.example/mcp" })).json.connector.id;
+    const other = randomUUID();
+    await h.admin.query(`INSERT INTO teams (id, slug, name) VALUES ($1, 'ops', 'Ops')`, [other]);
+    await h.admin.query(`UPDATE connectors SET tools_snapshot = $2::jsonb WHERE id = $1`, [
+      id,
+      JSON.stringify([pinned("teams-of", "a"), pinned("teams-of", "b")]),
+    ]);
+    // A stale tick (a tool no longer pinned) is not counted (review L5).
+    await h.admin.query(
+      `INSERT INTO team_connectors (team_id, connector_id, exposure, enabled_tools, enabled_by)
+       VALUES ($1, $2, 'custom', ARRAY['mcp__teams_of__a', 'mcp__teams_of__gone'], $3),
+              ($4, $2, 'read_only', '{}', $3)`,
+      [teamId, id, aliceId, other],
+    );
+    const res = await root.get(`${BASE}/${id}/teams`);
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({
+      teams: [
+        { id: teamId, name: "Finance", slug: "finance", exposure: "custom", enabled_tools: 1 },
+        { id: other, name: "Ops", slug: "ops", exposure: "read_only", enabled_tools: 0 },
+      ],
+    });
+    // Only these fields: nothing about credentials or headers rides along.
+    expect(Object.keys(res.json)).toEqual(["teams"]);
+    for (const t of res.json.teams) {
+      expect(Object.keys(t).toSorted()).toEqual([
+        "enabled_tools",
+        "exposure",
+        "id",
+        "name",
+        "slug",
+      ]);
+    }
+    for (const who of [alice, bob]) expect((await who.get(`${BASE}/${id}/teams`)).status).toBe(403);
+    expect((await root.get(`${BASE}/${randomUUID()}/teams`)).status).toBe(404);
+    expect((await root.get(`${BASE}/not-a-uuid/teams`)).status).toBe(404);
+    await h.admin.query(`DELETE FROM team_connectors WHERE connector_id = $1`, [id]);
+    expect((await root.get(`${BASE}/${id}/teams`)).json).toEqual({ teams: [] });
+  });
+
+  it("404s the built-in Kobe connector like every other registry route (review L3)", async () => {
+    await seedKobeBuiltinConnector(h.deps.database.db);
+    const res = await root.get(`${BASE}/${KOBE_BUILTIN_CONNECTOR_ID}/teams`);
+    expect(res.status).toBe(404);
   });
 });
 

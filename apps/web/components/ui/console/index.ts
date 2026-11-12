@@ -31,6 +31,7 @@ export { Notice, type NoticeTone } from "./notice";
 export { PageHeader } from "./page-header";
 export { PanelContent, useUnsavedChanges, type PanelCloseGuard } from "./panel-content";
 export { RowMenu, type RowMenuItem } from "./row-menu";
+export { SidePanel } from "./side-panel";
 export { Card, Section } from "./section";
 export { SideNav, SideNavGroup, SideNavLink } from "./side-nav";
 export { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs";

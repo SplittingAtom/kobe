@@ -94,18 +94,18 @@ export function distinctSiblings(
   return out;
 }
 
-/** `decide` over `items`, at most `limit` at a time, results in order. */
-export async function mapLimited<T>(
+/** `fn` over `items`, at most `limit` at a time, results in order. */
+export async function mapLimited<T, R = PolicyDecision>(
   items: readonly T[],
   limit: number,
-  decide: (item: T) => Promise<PolicyDecision>,
-): Promise<PolicyDecision[]> {
-  const results: PolicyDecision[] = new Array<PolicyDecision>(items.length);
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array<R>(items.length);
   let next = 0;
   const worker = async () => {
     while (next < items.length) {
       const i = next++;
-      results[i] = await decide(items[i] as T);
+      results[i] = await fn(items[i] as T);
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));

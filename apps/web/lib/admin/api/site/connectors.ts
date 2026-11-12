@@ -238,3 +238,23 @@ export const setSiteKey = (id: string, apiKey: string) =>
 
 export const removeSiteKey = (id: string): Promise<ApiResult<unknown>> =>
   apiRequest(`${BASE}/${encodeURIComponent(id)}/site-key`, { method: "DELETE" });
+
+/** One team that has the connector enabled (KOBE-641); the route never returns credentials. */
+export interface ConnectorTeamUse {
+  readonly id: string;
+  readonly name: string;
+  readonly slug: string;
+  readonly exposure: "read_only" | "all" | "custom";
+  /** Tools a `custom` exposure ticks; 0 otherwise. */
+  readonly enabledTools: number;
+}
+
+/** `GET /v1/site/connectors/:id/teams` (site.connectors.manage, read-only). */
+export async function listConnectorTeams(
+  id: string,
+): Promise<ApiResult<readonly ConnectorTeamUse[]>> {
+  const res = await apiRequest<{ teams: readonly ConnectorTeamUse[] }>(
+    `${BASE}/${encodeURIComponent(id)}/teams`,
+  );
+  return res.ok ? { ...res, data: res.data.teams } : res;
+}
