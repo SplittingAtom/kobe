@@ -666,7 +666,13 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       return database.db.transaction(async (tx) => {
         const [user] = await tx
           .insert(users)
-          .values({ email: email.toLowerCase(), name, emailVerified: true })
+          // The setup Owner is the permanent break-glass identity (SSO10): a durable flag.
+          .values({
+            email: email.toLowerCase(),
+            name,
+            emailVerified: true,
+            setupOwner: recordSetup === true,
+          })
           .returning({ id: users.id });
         if (!user) throw new Error("user insert returned no row");
         await tx.insert(accounts).values({

@@ -165,8 +165,22 @@ export async function revokeTeamInvite(
 }
 
 /**
+ * The user's address when it is verified, else null (review finding 1): a team invitation is
+ * matched on the address, so an address an identity provider did not vouch for (an Entra `email`
+ * without `xms_edov`, a generic `email` without `email_verified`) must never list, accept or
+ * decline someone else's invitation. Local and invited users are always verified.
+ */
+export async function verifiedEmailOf(db: KobeDb | KobeTx, userId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ email: users.email, verified: users.emailVerified })
+    .from(users)
+    .where(eq(users.id, userId));
+  return row?.verified ? normalizeEmail(row.email) : null;
+}
+
+/**
  * The invited user joins: consumes their open invitation to the team and adds the membership, in
- * one team transaction. `email` must be the signed-in user's own (verified) address. The invitation
+ * one team transaction. `email` must be the signed-in user's own address, and verified (re-read). The invitation
  * counts only while its inviter is still an active team admin of this team (the authority to grant
  * any team role): the inviter's membership and user rows are share-locked, so a concurrent demotion,
  * removal or deactivation either waits for this to finish (and then revokes nothing left) or wins
@@ -180,6 +194,8 @@ export async function acceptTeamInvite(
 ): Promise<TeamRole | null> {
   const email = normalizeEmail(user.email);
   return withTeam(db, teamId, async (tx) => {
+    // Only the user's own verified address counts (review finding 1), re-read here.
+    if ((await verifiedEmailOf(tx, user.id)) !== email) return null;
     const [invite] = await tx
       .delete(teamInvitations)
       .where(

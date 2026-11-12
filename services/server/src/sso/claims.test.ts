@@ -132,4 +132,56 @@ describe("checkIdTokenClaims", () => {
     const none = check(entraClaims({ preferred_username: "not-an-address" }));
     expect(none.ok && none.identity.email).toBeNull();
   });
+
+  describe("the address and whether it is verified (nOAuth, review finding 1)", () => {
+    const CORP: ClaimsProvider = { ...ENTRA, allowedEmailDomains: ["contoso.com"] };
+
+    it("Entra: ignores an unverified email claim and takes the UPN instead", () => {
+      // A tenant user sets their own mail attribute to someone else's address.
+      const r = check(
+        entraClaims({ email: "victim@kobe-customer.com", preferred_username: "eve@contoso.com" }),
+        CORP,
+      );
+      expect(r.ok && r.identity).toMatchObject({ email: "eve@contoso.com", emailVerified: true });
+    });
+
+    it("Entra: prefers upn over preferred_username", () => {
+      const r = check(entraClaims({ upn: "Ada.L@Contoso.com" }), CORP);
+      expect(r.ok && r.identity).toMatchObject({ email: "ada.l@contoso.com" });
+    });
+
+    it("Entra: a UPN outside the provider's verified domains is not verified", () => {
+      const guest = check(entraClaims({ preferred_username: "eve@gmail.com" }), CORP);
+      expect(guest.ok && guest.identity).toMatchObject({
+        email: "eve@gmail.com",
+        emailVerified: false,
+      });
+      const noDomains = check(entraClaims(), ENTRA);
+      expect(noDomains.ok && noDomains.identity.emailVerified).toBe(false);
+    });
+
+    it("Entra: takes email only when xms_edov is true", () => {
+      const e = check(
+        entraClaims({ email: "Ada@Mail.Contoso.com", xms_edov: true, preferred_username: "x" }),
+        CORP,
+      );
+      expect(e.ok && e.identity).toMatchObject({
+        email: "ada@mail.contoso.com",
+        emailVerified: true,
+      });
+      const unverified = check(
+        entraClaims({ email: "ada@mail.contoso.com", xms_edov: "true", preferred_username: "x" }),
+        CORP,
+      );
+      expect(unverified.ok && unverified.identity.email).toBeNull();
+    });
+
+    it("generic: email_verified must be exactly true", () => {
+      const base = { ...entraClaims(), iss: GENERIC.issuer, aud: GENERIC.clientId };
+      for (const v of [undefined, "true", 1, false]) {
+        const r = check({ ...base, email: "b@x.org", email_verified: v }, GENERIC);
+        expect(r.ok && r.identity).toMatchObject({ email: "b@x.org", emailVerified: false });
+      }
+    });
+  });
 });

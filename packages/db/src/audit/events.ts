@@ -528,6 +528,12 @@ export const AUDIT_EVENTS = {
     userId: id,
     credentialId: id.optional(),
   }),
+  /** SCIM asked to reactivate a user a site admin deactivated: refused (SSO11). */
+  "identity.scim.reactivation_refused": event("site", {
+    providerId: id,
+    userId: id,
+    credentialId: id.optional(),
+  }),
 
   // ── site: site-wide settings ──
   "site.settings.updated": event("site", {

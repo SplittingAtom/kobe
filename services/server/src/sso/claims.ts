@@ -43,13 +43,26 @@ export interface ClaimsProvider {
   readonly tenantId: string | null;
   readonly subjectClaim: "oid" | "sub";
   readonly accessClaim: "roles" | "groups";
+  /**
+   * The tenant's verified domains as the admin listed them (`allowed_email_domains`): an Entra UPN
+   * in one of them counts as a verified address. Absent or empty: no UPN is verified.
+   */
+  readonly allowedEmailDomains?: readonly string[];
 }
 
 export interface VerifiedIdentity {
   readonly subject: string;
-  /** Lower-cased address from `email` (Entra: else `preferred_username`); null when none. */
+  /**
+   * Lower-cased address. Generic: `email`. Entra: `email` only when `xms_edov` is true, else the UPN
+   * (`upn`, then `preferred_username`): users can edit their own `email` (the "nOAuth" takeover).
+   * Null when none.
+   */
   readonly email: string | null;
-  /** The token vouches for the address (`email_verified`; Entra `xms_edov`). Not proof (§6). */
+  /**
+   * The address is verified (review finding 1): generic `email_verified === true`; Entra `email`
+   * with `xms_edov === true`, or a UPN whose domain is one of the provider's verified domains. Only
+   * a verified address matches team invitations; it is never proof for linking (§6).
+   */
   readonly emailVerified: boolean;
   readonly name: string | null;
   /** Access values (app roles or group ids); null on a groups overage. */
@@ -74,14 +87,28 @@ const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFin
 const str = (v: unknown, max: number): string | null =>
   typeof v === "string" && v.length > 0 && v.length <= max ? v : null;
 
-function emailOf(claims: Claims, kind: ClaimsProvider["kind"]): string | null {
-  const candidates = kind === "entra" ? [claims.email, claims.preferred_username] : [claims.email];
-  for (const c of candidates) {
-    if (typeof c !== "string") continue;
-    const e = c.trim().toLowerCase();
-    if (e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return e;
+function addressIn(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const e = v.trim().toLowerCase();
+  return e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : null;
+}
+
+function addressOf(
+  claims: Claims,
+  p: ClaimsProvider,
+): { readonly email: string | null; readonly verified: boolean } {
+  if (p.kind !== "entra") {
+    const email = addressIn(claims.email);
+    return { email, verified: email !== null && claims.email_verified === true };
   }
-  return null;
+  if (claims.xms_edov === true) {
+    const email = addressIn(claims.email);
+    if (email !== null) return { email, verified: true };
+  }
+  const upn = addressIn(claims.upn) ?? addressIn(claims.preferred_username);
+  if (upn === null) return { email: null, verified: false };
+  const domain = upn.slice(upn.lastIndexOf("@") + 1);
+  return { email: upn, verified: (p.allowedEmailDomains ?? []).includes(domain) };
 }
 
 function nameOf(claims: Claims): string | null {
@@ -158,15 +185,13 @@ export function checkIdTokenClaims(input: {
         .filter((v): v is string => typeof v === "string" && v.length <= 64)
         .slice(0, AMR_MAX)
     : [];
-  const email = emailOf(claims, p.kind);
+  const address = addressOf(claims, p);
   return {
     ok: true,
     identity: {
       subject,
-      email,
-      emailVerified:
-        email !== null &&
-        (p.kind === "entra" ? claims.xms_edov === true : claims.email_verified === true),
+      email: address.email,
+      emailVerified: address.verified,
       name: nameOf(claims),
       values: valuesOf(claims, p.accessClaim),
       amr,

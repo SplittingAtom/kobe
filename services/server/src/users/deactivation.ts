@@ -31,6 +31,22 @@ export interface ActivationOptions {
   readonly inTx?: (tx: KobeTx, changed: boolean) => Promise<void>;
 }
 
+/** Who deactivates (SSO11): a site admin (default), or one provider's SCIM (`scim:<id>`). */
+export type DeactivatedVia = "admin" | `scim:${string}`;
+
+export interface DeactivationOptions extends ActivationOptions {
+  readonly via?: DeactivatedVia;
+}
+
+/** How a deactivation was recorded (`users.deactivated_via`); null when active or unknown. */
+export async function deactivatedVia(db: KobeDb | KobeTx, userId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ via: users.deactivatedVia, at: users.deactivatedAt })
+    .from(users)
+    .where(eq(users.id, userId));
+  return row?.at ? (row.via ?? "admin") : null;
+}
+
 /**
  * Deactivates a user (spec D7) in one transaction: marks the user, deletes every session (so every
  * cookie and the sessions behind short-lived JWTs stop working at once) and every pending
@@ -42,14 +58,23 @@ export interface ActivationOptions {
 export async function deactivateUser(
   db: KobeDb,
   userId: string,
-  options: ActivationOptions = {},
+  options: DeactivationOptions = {},
 ): Promise<boolean> {
+  const via = options.via ?? "admin";
   const changed = await db.transaction(async (tx) => {
     const changed = await tx
       .update(users)
-      .set({ deactivatedAt: new Date(), updatedAt: new Date() })
+      .set({ deactivatedAt: new Date(), deactivatedVia: via, updatedAt: new Date() })
       .where(and(eq(users.id, userId), isNull(users.deactivatedAt)))
       .returning({ id: users.id });
+    // A site admin deactivating someone SCIM already deactivated makes it theirs (SSO11): SCIM can
+    // no longer reactivate the user.
+    if (changed.length === 0 && via === "admin") {
+      await tx
+        .update(users)
+        .set({ deactivatedVia: "admin" })
+        .where(and(eq(users.id, userId), isNotNull(users.deactivatedAt)));
+    }
     // Revoke even when already deactivated: cheap, and closes anything a past bug left behind.
     await tx.delete(sessions).where(eq(sessions.userId, userId));
     await tx.delete(verifications).where(eq(verifications.value, userId));
@@ -75,7 +100,7 @@ export async function reactivateUser(
   return db.transaction(async (tx) => {
     const changed = await tx
       .update(users)
-      .set({ deactivatedAt: null, updatedAt: new Date() })
+      .set({ deactivatedAt: null, deactivatedVia: null, updatedAt: new Date() })
       .where(and(eq(users.id, userId), isNotNull(users.deactivatedAt)))
       .returning({ id: users.id });
     await options.inTx?.(tx, changed.length > 0);

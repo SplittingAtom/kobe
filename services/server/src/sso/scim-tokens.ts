@@ -152,6 +152,8 @@ export interface ScimCaller {
     readonly slug: string;
     readonly kind: "entra" | "oidc";
     readonly enabled: boolean;
+    /** The tenant's verified domains (`allowed_email_domains`): see `scimAddressVerified`. */
+    readonly allowedEmailDomains: readonly string[];
   };
 }
 
@@ -178,6 +180,7 @@ export async function authenticateScim(
       providerId: ssoProviders.id,
       kind: ssoProviders.kind,
       enabled: ssoProviders.enabled,
+      allowedEmailDomains: ssoProviders.allowedEmailDomains,
     })
     .from(scimTokens)
     .innerJoin(ssoProviders, eq(ssoProviders.id, scimTokens.providerId))
@@ -198,6 +201,12 @@ export async function authenticateScim(
   if (used.length === 0) return undefined;
   return {
     credentialId: match.id,
-    provider: { id: match.providerId, slug, kind: match.kind, enabled: match.enabled },
+    provider: {
+      id: match.providerId,
+      slug,
+      kind: match.kind,
+      enabled: match.enabled,
+      allowedEmailDomains: match.allowedEmailDomains,
+    },
   };
 }

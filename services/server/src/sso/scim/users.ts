@@ -2,7 +2,6 @@ import {
   accounts,
   and,
   asc,
-  auditLog,
   eq,
   inArray,
   pgErrorOf,
@@ -16,11 +15,17 @@ import {
   type KobeTx,
 } from "@kobe/db";
 import { recordAudit } from "../../audit/record.js";
-import { deactivateUser, reactivateUser } from "../../users/deactivation.js";
+import { deactivateUser, deactivatedVia, reactivateUser } from "../../users/deactivation.js";
 import type { UserLifecycle } from "../../users/lifecycle.js";
 import type { UserFilter } from "./filter.js";
 import type { ScimType } from "./schemas.js";
-import { addressFor, nameFrom, type UserChanges, type UserResourceInput } from "./user-input.js";
+import {
+  addressFor,
+  isAddress,
+  nameFrom,
+  type UserChanges,
+  type UserResourceInput,
+} from "./user-input.js";
 
 /**
  * SCIM Users of one provider (KOBE-631, spec sso-oidc-scim §10, SSO8/SSO9/SSO10). A SCIM User is a
@@ -34,6 +39,24 @@ import { addressFor, nameFrom, type UserChanges, type UserResourceInput } from "
 export interface ScimProvider {
   readonly id: string;
   readonly kind: "entra" | "oidc";
+  /** The tenant's verified domains (`allowed_email_domains`). */
+  readonly allowedEmailDomains: readonly string[];
+}
+
+/**
+ * Whether a SCIM-given address counts as verified (review finding 1): only an Entra `userName`
+ * (the UPN, which only a tenant admin can set) in one of the provider's verified domains. A work
+ * email, a generic provider's userName, or another domain stays unverified, so it never matches a
+ * team invitation.
+ */
+export function scimAddressVerified(
+  provider: ScimProvider,
+  userName: string,
+  address: string,
+): boolean {
+  if (provider.kind !== "entra" || !isAddress(userName)) return false;
+  if (userName.toLowerCase() !== address) return false;
+  return provider.allowedEmailDomains.includes(address.slice(address.lastIndexOf("@") + 1));
 }
 
 export interface ScimContext {
@@ -77,6 +100,15 @@ const EMAIL_TAKEN = failure(
   409,
   "A Kobe account with this address already exists and is not linked to this provider. Kobe never links accounts on email: a site admin can expect an SSO link for it (Site console → Users), or remove the user from provisioning.",
   "uniqueness",
+);
+const EXTERNAL_ID_IMMUTABLE = failure(
+  400,
+  "externalId can't change once set: it is the identity Kobe signs this person in as. Remove the user from provisioning and add the new identity instead.",
+  "mutability",
+);
+const REACTIVATION_REFUSED = failure(
+  403,
+  "This user was deactivated by a site admin in Kobe, so SCIM can't reactivate them. A site admin reactivates them in the Kobe Site console (People → Users).",
 );
 const NO_ADDRESS = failure(
   400,
@@ -220,8 +252,9 @@ export async function createScimUser(
         .values({
           email,
           name,
-          emailVerified: false,
+          emailVerified: scimAddressVerified(ctx.provider, input.userName, email),
           deactivatedAt: input.active === false ? now : null,
+          deactivatedVia: input.active === false ? scimVia(ctx.provider) : null,
         })
         .returning({ id: users.id });
       if (!user) throw new Error("user insert returned no row");
@@ -259,22 +292,29 @@ export async function createScimUser(
  * changes whether they are active (SSO8, SSO10).
  */
 async function isProtected(db: KobeDb | KobeTx, userId: string): Promise<boolean> {
-  const [role] = await db
-    .select({ role: siteRoles.role })
-    .from(siteRoles)
-    .where(eq(siteRoles.userId, userId));
-  if (role) return true;
-  const [setup] = await db
-    .select({ id: auditLog.id })
-    .from(auditLog)
-    .where(
-      and(
-        eq(auditLog.action, "identity.setup.completed"),
-        sql`${auditLog.target}->>'ownerUserId' = ${userId}`,
-      ),
-    )
-    .limit(1);
-  return setup !== undefined;
+  const [row] = await db
+    .select({ role: siteRoles.role, setupOwner: users.setupOwner })
+    .from(users)
+    .leftJoin(siteRoles, eq(siteRoles.userId, users.id))
+    .where(eq(users.id, userId));
+  // `users.setup_owner` is durable (set at setup, backfilled by 0212): no audit row needed.
+  return row !== undefined && (row.role !== null || row.setupOwner);
+}
+
+const scimVia = (provider: ScimProvider) => `scim:${provider.id}` as const;
+
+/**
+ * SCIM reactivates only users its own provider deactivated (SSO11): a user a site admin
+ * deactivated stays deactivated (403), and the attempt is audited.
+ */
+async function refuseReactivation(ctx: ScimContext, userId: string): Promise<ScimFailure> {
+  await ctx.db.transaction((tx) =>
+    recordAudit(tx, {
+      action: "identity.scim.reactivation_refused",
+      target: { providerId: ctx.provider.id, userId, credentialId: ctx.credentialId },
+    }),
+  );
+  return REACTIVATION_REFUSED;
 }
 
 async function hasLocalCredential(tx: KobeTx, userId: string): Promise<boolean> {
@@ -329,6 +369,7 @@ async function applyActive(ctx: ScimContext, userId: string, active: boolean): P
     return;
   }
   const did = await deactivateUser(ctx.db, userId, {
+    via: scimVia(ctx.provider),
     inTx: async (tx, changed) => {
       if (changed) await recordAudit(tx, { action: "identity.scim.user.deactivated", target });
     },
@@ -354,16 +395,20 @@ export async function updateScimUser(
     if (await isProtected(ctx.db, userId)) {
       return wantsActive ? PROTECTED : refuseDeactivation(ctx, userId);
     }
+    if (wantsActive && (await deactivatedVia(ctx.db, userId)) !== scimVia(ctx.provider)) {
+      return refuseReactivation(ctx, userId);
+    }
   }
   try {
     const outcome = await ctx.db.transaction(async (tx) => {
       const row = await readUser(tx, ctx.provider.id, userId, true);
       if (!row) return NOT_FOUND;
-      let externalId = row.externalId;
+      // externalId is the identity's key (the subject Kobe signs this person in as): set at
+      // creation, never moved to another directory object (review finding 2).
       if (changes.externalId !== undefined) {
         const next = externalIdFor(ctx.provider, changes.externalId);
         if (!next.ok) return next;
-        externalId = next.value;
+        if (next.value !== row.externalId) return EXTERNAL_ID_IMMUTABLE;
       }
       const userName = changes.userName ?? row.userName;
       const name = nameFrom(changes, mode === "patch") ?? row.name;
@@ -387,12 +432,12 @@ export async function updateScimUser(
           email = next;
         }
       }
-      const identityChanged = externalId !== row.externalId || userName !== row.userName;
+      const identityChanged = userName !== row.userName;
       const userChanged = email !== row.email || name !== row.name;
       if (identityChanged) {
         await tx
           .update(ssoIdentities)
-          .set({ subject: externalId, scimUserName: userName })
+          .set({ scimUserName: userName })
           .where(
             and(eq(ssoIdentities.providerId, ctx.provider.id), eq(ssoIdentities.userId, userId)),
           );
@@ -400,7 +445,14 @@ export async function updateScimUser(
       if (userChanged) {
         await tx
           .update(users)
-          .set({ email, name, updatedAt: new Date() })
+          .set({
+            email,
+            name,
+            ...(email !== row.email
+              ? { emailVerified: scimAddressVerified(ctx.provider, userName, email) }
+              : {}),
+            updatedAt: new Date(),
+          })
           .where(eq(users.id, userId));
       }
       if (identityChanged || userChanged) {
@@ -433,6 +485,7 @@ export async function deleteScimUser(ctx: ScimContext, userId: string): Promise<
   if (await isProtected(ctx.db, userId)) return refuseDeactivation(ctx, userId);
   const target = { providerId: ctx.provider.id, userId };
   const did = await deactivateUser(ctx.db, userId, {
+    via: scimVia(ctx.provider),
     inTx: async (tx, changed) => {
       await tx
         .delete(ssoIdentities)

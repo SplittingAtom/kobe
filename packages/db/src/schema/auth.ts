@@ -38,6 +38,18 @@ export const users = pgTable(
      */
     deactivatedAt: timestamp({ withTimezone: true }),
     /**
+     * Who deactivated the user (SSO11): `admin` (Site console, Kobe MCP), or `scim:<provider id>`.
+     * SCIM may reactivate only a user its own provider deactivated. NULL while active (deactivations
+     * from before the column were backfilled as `admin` by migration 0212). Not a Better Auth field.
+     */
+    deactivatedVia: text(),
+    /**
+     * The Owner the setup flow created (SSO10): the permanent break-glass identity, protected from
+     * SCIM deactivation and re-addressing even after an ownership transfer. Set at setup; backfilled
+     * from the setup audit event (else the current Owner) by migration 0212. Not a Better Auth field.
+     */
+    setupOwner: boolean().notNull().default(false),
+    /**
      * Layout preferences that follow the user across devices (KOBE-202, CE8): rail state, divider
      * share, artifact column width. NULL means defaults. The server validates the shape (zod schema
      * in @kobe/protocol); the CHECK only bounds it to a small JSON object. Not a Better Auth field.
@@ -52,6 +64,10 @@ export const users = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
+    check(
+      "users_deactivated_via",
+      sql`${t.deactivatedVia} IS NULL OR ${t.deactivatedVia} = 'admin' OR ${t.deactivatedVia} ~ '^scim:[0-9a-f-]{36}$'`,
+    ),
     check(
       "users_time_zone",
       sql`${t.timeZone} IS NULL OR char_length(${t.timeZone}) BETWEEN 1 AND 64`,

@@ -650,3 +650,177 @@ describe("SCIM errors and request limits", () => {
     expect(plainJson.status).toBe(201);
   });
 });
+
+describe("security review fixes (KOBE-sso-review1)", () => {
+  const patch = (path: string, value: unknown) => ({
+    schemas: [PATCH_OP],
+    Operations: [{ op: "Replace", path, value }],
+  });
+
+  it("marks a SCIM address verified only for an Entra UPN in a verified domain (finding 1)", async () => {
+    await h.admin.query(
+      `UPDATE sso_providers SET allowed_email_domains = '{contoso.com}' WHERE id = $1`,
+      [providers.contoso],
+    );
+    try {
+      const make = async (body: Record<string, unknown>) => {
+        const res = await scim("POST", "/contoso/Users", tokens.contoso, {
+          externalId: randomUUID(),
+          ...body,
+        });
+        expect(res.status, JSON.stringify(res.json)).toBe(201);
+        const row = await h.admin.query("SELECT email, email_verified FROM users WHERE id = $1", [
+          res.json.id,
+        ]);
+        return { id: res.json.id as string, ...row.rows[0] };
+      };
+      const upn = await make({ userName: `upn.${randomUUID()}@Contoso.com` });
+      expect(upn.email_verified).toBe(true);
+      const outside = await make({ userName: `x.${randomUUID()}@kobe-victim.test` });
+      expect(outside.email_verified).toBe(false);
+      const fromMail = await make({
+        userName: `not-an-address-${randomUUID()}`,
+        emails: [{ type: "work", value: `m.${randomUUID()}@contoso.com` }],
+      });
+      expect(fromMail.email_verified).toBe(false);
+      // A re-address follows the same rule.
+      const moved = await scim(
+        "PATCH",
+        `/contoso/Users/${upn.id}`,
+        tokens.contoso,
+        patch("userName", `moved.${randomUUID()}@kobe-victim.test`),
+      );
+      expect(moved.status).toBe(200);
+      const after = await h.admin.query("SELECT email_verified FROM users WHERE id = $1", [upn.id]);
+      expect(after.rows[0].email_verified).toBe(false);
+    } finally {
+      await h.admin.query(`UPDATE sso_providers SET allowed_email_domains = '{}' WHERE id = $1`, [
+        providers.contoso,
+      ]);
+    }
+  });
+
+  it("keeps externalId immutable once set, even for a site Admin (finding 2)", async () => {
+    const subject = randomUUID();
+    await h.deps.database.db.insert(ssoIdentities).values({
+      providerId: providers.fabrikam ?? "",
+      subject,
+      userId: adminId,
+      linkedVia: "jit",
+    });
+    const sso = await sessionFor(adminId, providers.fabrikam);
+    const res = await scim(
+      "PATCH",
+      `/fabrikam/Users/${adminId}`,
+      tokens.fabrikam,
+      patch("externalId", randomUUID()),
+    );
+    expect(res.status).toBe(400);
+    expect(res.json).toMatchObject({ status: "400", scimType: "mutability" });
+    const put = await scim("PUT", `/fabrikam/Users/${adminId}`, tokens.fabrikam, {
+      userName: "admin@scim.test",
+      externalId: randomUUID(),
+    });
+    expect(put.status).toBe(400);
+    expect(put.json.scimType).toBe("mutability");
+    const link = await h.admin.query(
+      "SELECT subject FROM sso_identities WHERE user_id = $1 AND provider_id = $2",
+      [adminId, providers.fabrikam],
+    );
+    expect(link.rows).toEqual([{ subject }]);
+    expect(await sessionExists(sso)).toBe(true);
+    // The same value (any case, for an Entra GUID) is no change.
+    const same = await scim(
+      "PATCH",
+      `/fabrikam/Users/${adminId}`,
+      tokens.fabrikam,
+      patch("externalId", subject.toUpperCase()),
+    );
+    expect(same.status).toBe(200);
+  });
+
+  it("reactivates only users SCIM deactivated; an admin's deactivation stands (SSO11)", async () => {
+    const t = tokens.contoso;
+    const created = await scim("POST", "/contoso/Users", t, {
+      userName: `fay.${randomUUID()}@contoso.com`,
+      externalId: randomUUID(),
+    });
+    const id: string = created.json.id;
+    const via = async () =>
+      (await h.admin.query("SELECT deactivated_via FROM users WHERE id = $1", [id])).rows[0]
+        .deactivated_via;
+
+    // SCIM off, SCIM on: fine.
+    expect((await scim("PATCH", `/contoso/Users/${id}`, t, patch("active", false))).status).toBe(
+      200,
+    );
+    expect(await via()).toBe(`scim:${providers.contoso}`);
+    const on = await scim("PATCH", `/contoso/Users/${id}`, t, patch("active", true));
+    expect(on.json.active).toBe(true);
+    expect(await via()).toBeNull();
+
+    // A site admin deactivates: SCIM can't undo it.
+    expect((await owner.post(`/v1/site/users/${id}/deactivate`)).status).toBe(200);
+    expect(await via()).toBe("admin");
+    const refused = await scim("PATCH", `/contoso/Users/${id}`, t, patch("active", true));
+    expect(refused.status).toBe(403);
+    expect(refused.json.detail).toMatch(/deactivated by a site admin/);
+    const row = await h.admin.query("SELECT deactivated_at FROM users WHERE id = $1", [id]);
+    expect(row.rows[0].deactivated_at).not.toBeNull();
+    expect((await auditRows("identity.scim.reactivation_refused")).at(-1).target).toMatchObject({
+      providerId: providers.contoso,
+      userId: id,
+    });
+    const put = await scim("PUT", `/contoso/Users/${id}`, t, {
+      userName: created.json.userName,
+      externalId: created.json.externalId,
+      active: true,
+    });
+    expect(put.status).toBe(403);
+
+    // The admin reactivates; SCIM deactivates; the admin deactivates again (takes it over).
+    expect((await owner.post(`/v1/site/users/${id}/reactivate`)).status).toBe(200);
+    await scim("PATCH", `/contoso/Users/${id}`, t, patch("active", false));
+    expect((await owner.post(`/v1/site/users/${id}/deactivate`)).status).toBe(200);
+    expect(await via()).toBe("admin");
+    expect((await scim("PATCH", `/contoso/Users/${id}`, t, patch("active", true))).status).toBe(
+      403,
+    );
+
+    // A user SCIM created inactive is SCIM's to activate.
+    const inactive = await scim("POST", "/contoso/Users", t, {
+      userName: `gil.${randomUUID()}@contoso.com`,
+      externalId: randomUUID(),
+      active: false,
+    });
+    const gil = await scim("PATCH", `/contoso/Users/${inactive.json.id}`, t, patch("active", true));
+    expect(gil.json.active).toBe(true);
+  });
+
+  it("protects the setup Owner by a durable flag, not by an audit row (finding 8)", async () => {
+    const setup = await h.deps.createUserWithPassword(
+      { email: "setup2@scim.test", name: "Setup", password: PASSWORD },
+      { recordSetup: true },
+    );
+    const flag = await h.admin.query("SELECT setup_owner FROM users WHERE id = $1", [setup.id]);
+    expect(flag.rows[0].setup_owner).toBe(true);
+    // A setup Owner with no audit row at all (e.g. the log was pruned) stays protected.
+    const bare = await h.createUser(`bare.${randomUUID()}@scim.test`);
+    await h.admin.query("UPDATE users SET setup_owner = true WHERE id = $1", [bare]);
+    await h.deps.database.db.insert(ssoIdentities).values({
+      providerId: providers.contoso ?? "",
+      subject: randomUUID(),
+      userId: bare,
+      linkedVia: "jit",
+    });
+    const res = await scim(
+      "PATCH",
+      `/contoso/Users/${bare}`,
+      tokens.contoso,
+      patch("active", false),
+    );
+    expect(res.status).toBe(403);
+    const row = await h.admin.query("SELECT deactivated_at FROM users WHERE id = $1", [bare]);
+    expect(row.rows[0].deactivated_at).toBeNull();
+  });
+});

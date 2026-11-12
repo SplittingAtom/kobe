@@ -33,6 +33,10 @@ export interface SsoProvider {
   readonly accessClaim: "roles" | "groups";
   readonly jitProvisioning: boolean;
   readonly mfaRule: MfaRule;
+  /** The tenant's verified domains: a UPN in one counts as a verified address (claims.ts). */
+  readonly allowedEmailDomains: readonly string[];
+  /** Caps the provider's SSO sessions (§9); null: the ordinary session lifetime. */
+  readonly maxSessionHours: number | null;
 }
 
 const PROVIDER_COLUMNS = {
@@ -47,6 +51,8 @@ const PROVIDER_COLUMNS = {
   accessClaim: ssoProviders.accessClaim,
   jitProvisioning: ssoProviders.jitProvisioning,
   mfaRule: ssoProviders.mfaRule,
+  allowedEmailDomains: ssoProviders.allowedEmailDomains,
+  maxSessionHours: ssoProviders.maxSessionHours,
 };
 
 /** An enabled provider by slug (a disabled or unknown one is undefined). */

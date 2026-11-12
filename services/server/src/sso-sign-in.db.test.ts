@@ -355,6 +355,71 @@ describe("JIT and linked sign-in", () => {
   });
 });
 
+describe("team invitations need a verified address (nOAuth, review finding 1)", () => {
+  async function invite(email: string, role: "member" | "team_admin" = "team_admin") {
+    const admin = await h.signIn("owner@sso-signin.test");
+    await admin.put("/v1/me/teams/active", { teamId });
+    admin.team = teamId;
+    const res = await admin.post("/v1/team/invites", { email, role });
+    expect(res.status, res.text).toBeLessThan(300);
+  }
+
+  it("Entra: a self-set email claim never becomes the address (the UPN does)", async () => {
+    await invite("victim1@kobe-victim.test");
+    const { browser } = await signInVia(
+      entra,
+      "corp",
+      entraUser({ email: "victim1@kobe-victim.test", preferred_username: "eve1@contoso.com" }),
+    );
+    const me = await browser.get("/v1/me");
+    expect(me.json.user.email).toBe("eve1@contoso.com");
+    expect((await browser.get("/v1/me/invites")).json.invitations).toEqual([]);
+    expect((await browser.post(`/v1/me/invites/${teamId}/accept`)).status).toBe(404);
+  });
+
+  it("generic: an unverified email lists and accepts no invitation", async () => {
+    await invite("victim2@kobe-victim.test");
+    const { browser } = await signInVia(kc, "kc", {
+      sub: "kc-nOAuth-1",
+      email: "victim2@kobe-victim.test",
+      groups: ["g-research"],
+    });
+    const me = await browser.get("/v1/me");
+    expect(me.status, me.text).toBe(200);
+    const userId = me.json.user.id as string;
+    const row = await h.admin.query(`SELECT email, email_verified FROM users WHERE id = $1`, [
+      userId,
+    ]);
+    expect(row.rows[0]).toEqual({ email: "victim2@kobe-victim.test", email_verified: false });
+    expect((await browser.get("/v1/me/invites")).json.invitations).toEqual([]);
+    expect((await browser.post(`/v1/me/invites/${teamId}/accept`)).status).toBe(404);
+    expect((await browser.post(`/v1/me/invites/${teamId}/decline`)).status).toBe(404);
+    const member = await h.admin.query(
+      `SELECT role FROM team_members WHERE team_id = $1 AND user_id = $2`,
+      [teamId, userId],
+    );
+    expect(member.rows).toEqual([{ role: "contributor" }]);
+    // The invitation is still there for the real owner of the address.
+    const open = await h.admin.query(
+      `SELECT 1 FROM team_invitations WHERE email = 'victim2@kobe-victim.test'`,
+    );
+    expect(open.rowCount).toBe(1);
+  });
+
+  it("generic: a verified email (email_verified: true) accepts its invitation", async () => {
+    await invite("verified3@kobe-victim.test", "member");
+    const { browser } = await signInVia(kc, "kc", {
+      sub: "kc-verified-3",
+      email: "verified3@kobe-victim.test",
+      email_verified: true,
+      groups: ["g-research"],
+    });
+    const list = await browser.get("/v1/me/invites");
+    expect(list.json.invitations).toHaveLength(1);
+    expect((await browser.post(`/v1/me/invites/${teamId}/accept`)).status).toBe(200);
+  });
+});
+
 describe("state, nonce and ID token checks (ac-1)", () => {
   it("refuses a tampered state parameter", async () => {
     const flow = await startAt(entra, "corp", entraUser());

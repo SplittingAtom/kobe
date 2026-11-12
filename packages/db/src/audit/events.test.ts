@@ -135,6 +135,7 @@ describe("audit event taxonomy", () => {
       "identity.scim.group.created",
       "identity.scim.group.deleted",
       "identity.scim.group.updated",
+      "identity.scim.reactivation_refused",
       "identity.scim.token.created",
       "identity.scim.token.revoked",
       "identity.scim.user.created",
@@ -201,6 +202,9 @@ describe("audit event taxonomy", () => {
     expect(ok("identity.scim.token.created", { providerId, credentialId })).toBe(true);
     expect(ok("identity.scim.user.deactivated", { providerId, userId, credentialId })).toBe(true);
     expect(ok("identity.scim.deactivation_refused", { providerId, userId, credentialId })).toBe(
+      true,
+    );
+    expect(ok("identity.scim.reactivation_refused", { providerId, userId, credentialId })).toBe(
       true,
     );
     // Memberships the mappings manage reuse the published team events, with `via: "idp"`.
