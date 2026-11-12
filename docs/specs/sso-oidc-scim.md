@@ -1,7 +1,7 @@
 # Kobe — Single sign-on with OIDC (Entra ID) and SCIM provisioning
 
 Status: **decisions SSO1–SSO5 by Chris 2026-11-11 (§16); decisions SSO6–SSO10 (answers to Q1–Q5); SSO11 (2026-11-11, security review); ready for
-tickets** (SSO-1..SSO-10 in §17). Hadron spec `d930af9a`; tickets SSO-1 KOBE-625, SSO-2 KOBE-626, SSO-6 KOBE-627, SSO-3 KOBE-628, SSO-4 KOBE-629, SSO-5 KOBE-630, SSO-7 KOBE-631, SSO-8 KOBE-632, SSO-9 KOBE-633, SSO-10 KOBE-634. Requested by Chris, 2026-11-11. Written against main `0694c325`.
+tickets** (SSO-1..SSO-10 in §17). Hadron spec `d930af9a`; tickets SSO-1 KOBE-625, SSO-2 KOBE-626, SSO-6 KOBE-627, SSO-3 KOBE-628, SSO-4 KOBE-629, SSO-5 KOBE-630, SSO-7 KOBE-631, SSO-8 KOBE-632 (roadmap: parked 2026-11-12, needs an Entra P1 tenant), SSO-9 KOBE-633, SSO-10 KOBE-634. Requested by Chris, 2026-11-11. Written against main `0694c325`.
 
 Request (Chris, 2026-11-11): "I would like to add the ability to federate user identity with an
 OIDC or SAML auth provider like Azure Entra."
