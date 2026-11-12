@@ -29,6 +29,7 @@ import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 import { DiscoveryResult } from "./sso-discovery";
+import { ScimPanel } from "./sso-scim";
 import { SsoProviderForm } from "./sso-provider-form";
 
 const HEADING = "sso-providers";
@@ -51,6 +52,7 @@ export function SiteSsoPage() {
   const [confirm, confirmDialog] = useConfirm();
   const [editing, setEditing] = useState<Editing | null>(null);
   const [tested, setTested] = useState<{ id: string; report: DiscoveryReport } | null>(null);
+  const [scimFor, setScimFor] = useState<SsoProvider | null>(null);
 
   async function toggle(p: SsoProvider, trigger: HTMLElement | null) {
     if (p.enabled) {
@@ -161,6 +163,7 @@ export function SiteSsoPage() {
                       onEdit={() => setEditing({ mode: "edit", provider: p })}
                       onToggle={(t) => void toggle(p, t)}
                       onTest={() => void test(p)}
+                      onScim={() => setScimFor(p)}
                       onDelete={(t) => void remove(p, t)}
                     />
                   ))}
@@ -170,6 +173,9 @@ export function SiteSsoPage() {
           }
         </ResourceView>
       </Section>
+      {scimFor ? (
+        <ScimPanel key={scimFor.id} provider={scimFor} onClose={() => setScimFor(null)} />
+      ) : null}
       {confirmDialog}
     </>
   );
@@ -182,6 +188,7 @@ function ProviderRow({
   onEdit,
   onToggle,
   onTest,
+  onScim,
   onDelete,
 }: {
   readonly provider: SsoProvider;
@@ -190,6 +197,7 @@ function ProviderRow({
   readonly onEdit: () => void;
   readonly onToggle: (trigger: HTMLElement | null) => void;
   readonly onTest: () => void;
+  readonly onScim: () => void;
   readonly onDelete: (trigger: HTMLElement | null) => void;
 }) {
   const helm = p.managedBy === "helm";
@@ -222,6 +230,9 @@ function ProviderRow({
         <div className="flex flex-wrap gap-1.5">
           <Button size="sm" disabled={pending} onClick={onTest}>
             Test<span className="sr-only"> {p.displayName}</span>
+          </Button>
+          <Button size="sm" disabled={pending} onClick={onScim}>
+            SCIM<span className="sr-only"> provisioning for {p.displayName}</span>
           </Button>
           {helm ? null : (
             <>

@@ -110,3 +110,52 @@ export async function testSsoProvider(id: string): Promise<ApiResult<DiscoveryRe
   });
   return res.ok ? { ...res, data: res.data.discovery } : res;
 }
+
+/** One SCIM token as the console sees it (KOBE-631): never the token or its hash. */
+export interface ScimToken {
+  readonly id: string;
+  readonly prefix: string;
+  readonly createdAt: string;
+  readonly lastUsedAt: string | null;
+  readonly revokedAt: string | null;
+}
+
+export interface ScimSetup {
+  /** The Tenant URL to paste into Entra (Provisioning → Admin credentials). */
+  readonly baseUrl: string;
+  readonly tokens: readonly ScimToken[];
+}
+
+/** A new token: `token` is in this response only, never again. */
+export interface IssuedScimToken {
+  readonly token: string;
+  readonly credential: ScimToken;
+  readonly baseUrl: string;
+  readonly replaces?: string;
+}
+
+export function getScimSetup(providerId: string): Promise<ApiResult<ScimSetup>> {
+  return apiRequest(`${BASE}/${enc(providerId)}/scim`);
+}
+
+export function createScimToken(providerId: string): Promise<ApiResult<IssuedScimToken>> {
+  return apiRequest(`${BASE}/${enc(providerId)}/scim/tokens`, { method: "POST" });
+}
+
+export function rotateScimToken(
+  providerId: string,
+  tokenId: string,
+): Promise<ApiResult<IssuedScimToken>> {
+  return apiRequest(`${BASE}/${enc(providerId)}/scim/tokens/${enc(tokenId)}/rotate`, {
+    method: "POST",
+  });
+}
+
+export function revokeScimToken(
+  providerId: string,
+  tokenId: string,
+): Promise<ApiResult<{ credential: ScimToken }>> {
+  return apiRequest(`${BASE}/${enc(providerId)}/scim/tokens/${enc(tokenId)}/revoke`, {
+    method: "POST",
+  });
+}

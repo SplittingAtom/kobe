@@ -5,8 +5,6 @@ import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
 import { jwt, twoFactor } from "better-auth/plugins";
 import {
   accounts,
-  and,
-  eq,
   jwks,
   passkeys,
   rateLimits,
@@ -25,7 +23,12 @@ import { passwordResetMessage } from "../mail/messages.js";
 import { readAppName } from "../branding/settings.js";
 import { isDeactivated } from "../users/deactivation.js";
 import { invitationPlugin, PASSWORD_MAX, PASSWORD_MIN } from "./invitation-plugin.js";
-import { claimResetLinkSend, releaseResetLinkClaim, revokeResetLinks } from "./reset-links.js";
+import {
+  claimResetLinkSend,
+  hasLocalPassword,
+  releaseResetLinkClaim,
+  revokeResetLinks,
+} from "./reset-links.js";
 import { ssoPlugin, SSO_RATE_LIMITS, type SsoRuntime } from "./sso-plugin.js";
 import { isUserVerified } from "./webauthn-flags.js";
 
@@ -85,13 +88,18 @@ export function createAuth({
    * Mails a reset link, off the request path: the response (and its timing) is the same whether or
    * not the address has an account. Deactivated accounts get nothing; while a link mailed in the last
    * few minutes is still valid no other is sent (mail bombing through many IPs). The token travels in the URL fragment, which browsers never send to
-   * servers or proxies (no token in access logs).
+   * servers or proxies (no token in access logs). An account without a local password (provisioned
+   * by SCIM or SSO, SSO9) gets nothing, and the unsent token is dropped: resetting would create a
+   * password and get round the identity provider.
    */
   async function mailResetLink(user: { id: string; email: string }, token: string) {
     if (await isDeactivated(db, user.id)) return;
     // A user made by SSO (JIT) or SCIM has no password: a reset must not give them one, or the
     // mailbox could outlive the identity provider's disable (spec sso-oidc-scim §6, SSO9).
-    if (!(await hasCredentialAccount(db, user.id))) return;
+    if (!(await hasLocalPassword(db, user.id))) {
+      await revokeResetLinks(db, user.id);
+      return;
+    }
     // Not awaited: the email must not wait on the audit write. Aggregated: anyone can request
     // resets for an address in any number.
     background.run("password reset audit failed", () =>
@@ -259,12 +267,3 @@ export function createAuth({
 }
 
 export type KobeAuth = ReturnType<typeof createAuth>;
-
-async function hasCredentialAccount(db: KobeDb, userId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ id: accounts.id })
-    .from(accounts)
-    .where(and(eq(accounts.userId, userId), eq(accounts.providerId, "credential")))
-    .limit(1);
-  return row !== undefined;
-}

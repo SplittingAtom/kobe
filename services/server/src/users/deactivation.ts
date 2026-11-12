@@ -11,6 +11,7 @@ import {
   verifications,
   withTeam,
   type KobeDb,
+  type KobeTx,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { revokeAllInvitesSentBy } from "../invitations/team-invites.js";
@@ -24,6 +25,12 @@ export async function isDeactivated(db: KobeDb, userId: string): Promise<boolean
   return row !== undefined;
 }
 
+/** Extra writes a caller makes in the same transaction as the (de)activation (e.g. SCIM's audit). */
+export interface ActivationOptions {
+  /** Runs inside the transaction, before its audit row; `changed` says whether the state moved. */
+  readonly inTx?: (tx: KobeTx, changed: boolean) => Promise<void>;
+}
+
 /**
  * Deactivates a user (spec D7) in one transaction: marks the user, deletes every session (so every
  * cookie and the sessions behind short-lived JWTs stop working at once) and every pending
@@ -32,7 +39,11 @@ export async function isDeactivated(db: KobeDb, userId: string): Promise<boolean
  * Memberships are kept (inert while deactivated) so reactivation restores access. Returns false if
  * the user was already deactivated.
  */
-export async function deactivateUser(db: KobeDb, userId: string): Promise<boolean> {
+export async function deactivateUser(
+  db: KobeDb,
+  userId: string,
+  options: ActivationOptions = {},
+): Promise<boolean> {
   const changed = await db.transaction(async (tx) => {
     const changed = await tx
       .update(users)
@@ -42,6 +53,7 @@ export async function deactivateUser(db: KobeDb, userId: string): Promise<boolea
     // Revoke even when already deactivated: cheap, and closes anything a past bug left behind.
     await tx.delete(sessions).where(eq(sessions.userId, userId));
     await tx.delete(verifications).where(eq(verifications.value, userId));
+    await options.inTx?.(tx, changed.length > 0);
     if (changed.length > 0) {
       // Egress proxies close the user's open tunnels (KOBE-38).
       await notifyEgressUserChanged(tx, userId);
@@ -55,13 +67,18 @@ export async function deactivateUser(db: KobeDb, userId: string): Promise<boolea
 }
 
 /** Reactivates a user; they sign in again with their existing credentials. False if not deactivated. */
-export async function reactivateUser(db: KobeDb, userId: string): Promise<boolean> {
+export async function reactivateUser(
+  db: KobeDb,
+  userId: string,
+  options: ActivationOptions = {},
+): Promise<boolean> {
   return db.transaction(async (tx) => {
     const changed = await tx
       .update(users)
       .set({ deactivatedAt: null, updatedAt: new Date() })
       .where(and(eq(users.id, userId), isNotNull(users.deactivatedAt)))
       .returning({ id: users.id });
+    await options.inTx?.(tx, changed.length > 0);
     if (changed.length > 0) {
       await recordAudit(tx, { action: "identity.user.reactivated", target: { userId } });
     }
