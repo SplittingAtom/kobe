@@ -64,6 +64,11 @@ export function ProfileMenu() {
           </MenuLink>
         </li>
         <li>
+          <MenuLink href="/me/sign-in-methods" onClick={close}>
+            Sign-in methods
+          </MenuLink>
+        </li>
+        <li>
           <button type="button" onClick={() => void signOut()}>
             Sign out
           </button>

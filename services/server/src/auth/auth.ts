@@ -31,6 +31,7 @@ import {
   releaseResetLinkClaim,
   revokeResetLinks,
 } from "./reset-links.js";
+import { ssoLinkPlugin } from "./sso-link-plugin.js";
 import { ssoPlugin, SSO_RATE_LIMITS, type SsoRuntime } from "./sso-plugin.js";
 import { isUserVerified } from "./webauthn-flags.js";
 
@@ -110,6 +111,32 @@ async function ssoSessionWithoutMfa(db: KobeDb, sessionId: string): Promise<bool
     .from(sessionSsoContexts)
     .where(eq(sessionSsoContexts.sessionId, sessionId));
   return row !== undefined && !row.mfaSatisfied;
+}
+
+/**
+ * Endpoints that remove a local credential: refused from an SSO session of the setup Owner
+ * (SSO10, KOBE-630), so no single sign-on path can take away the break-glass identity's password
+ * or passkey. From a local session the Owner manages them as before.
+ */
+const LOCAL_CREDENTIAL_REMOVAL_PATHS = new Set(["/passkey/delete-passkey", "/unlink-account"]);
+
+const SETUP_OWNER_LOCAL_ONLY = {
+  code: "SETUP_OWNER_LOCAL_ONLY",
+  message:
+    "The setup Owner's password and passkeys can only be removed from a session signed in with them, not through single sign-on.",
+};
+
+/** The session is an SSO session of the setup Owner. */
+async function setupOwnerSsoSession(
+  db: KobeDb,
+  session: { readonly id: string; readonly userId: string },
+): Promise<boolean> {
+  const [row] = await db
+    .select({ setupOwner: users.setupOwner })
+    .from(sessionSsoContexts)
+    .innerJoin(users, eq(users.id, session.userId))
+    .where(eq(sessionSsoContexts.sessionId, session.id));
+  return row?.setupOwner === true;
 }
 
 const PASSKEY_VERIFY_PATHS = new Set([
@@ -264,6 +291,12 @@ export function createAuth({
             throw new APIError("FORBIDDEN", SSO_MFA_REQUIRED);
           }
         }
+        if (LOCAL_CREDENTIAL_REMOVAL_PATHS.has(ctx.path)) {
+          const current = await getSessionFromCtx(ctx).catch(() => null);
+          if (current && (await setupOwnerSsoSession(db, current.session))) {
+            throw new APIError("FORBIDDEN", SETUP_OWNER_LOCAL_ONLY);
+          }
+        }
         // A passkey counts as a strong factor only with user verification (PIN/biometric).
         if (
           PASSKEY_VERIFY_PATHS.has(ctx.path) &&
@@ -310,6 +343,8 @@ export function createAuth({
         origin: origin.origin,
         authenticatorSelection: { userVerification: "required", residentKey: "required" },
       }),
+      // After the two-factor and passkey plugins: it must see whether a sign-in completed.
+      ssoLinkPlugin({ db, publicOrigin: origin.origin, secret, settings: sso?.settings }),
       jwt({
         jwt: {
           expirationTime: "5m",

@@ -16,14 +16,16 @@ import type { AfterChangeDeps } from "../teams/after-change.js";
 import { applyIdpAccessAndFollowUp } from "./access.js";
 import { desiredTeamRoles, normalizeIdpValues } from "./access-plan.js";
 import type { SsoFailure, VerifiedIdentity } from "./claims.js";
+import { linkExpected } from "./linking.js";
 import type { SsoProvider } from "./oidc-flow.js";
 
 /**
  * Who a validated SSO identity signs in as (spec sso-oidc-scim §5.5, §6, §7; KOBE-628):
  *
  * - **linked** (`sso_identities` on provider + subject) → that user; deactivated → refused;
- * - **unlinked, a user has the token's address** → `link_required`, never linked on email (§6,
- *   the "nOAuth" takeover); SSO-5 builds the proof flow;
+ * - **unlinked, a user has the token's address** → linked only through an admin-expected link
+ *   (verified address in the provider's verified domains, KOBE-630); otherwise `link_required`,
+ *   never linked on email (§6, the "nOAuth" takeover);
  * - **unlinked, new address** → a user only when JIT is on **and** the mappings give at least one
  *   team (no access, no account); the identity is linked `jit`.
  *
@@ -34,10 +36,34 @@ import type { SsoProvider } from "./oidc-flow.js";
 
 export type SsoUserOutcome =
   | { readonly ok: true; readonly userId: string; readonly created: boolean }
-  | { readonly ok: false; readonly failure: SsoFailure; readonly userId?: string };
+  | {
+      readonly ok: false;
+      readonly failure: SsoFailure;
+      readonly userId?: string;
+      /**
+       * The identity is unlinked and carries an address: the callback leaves a link intent, so a
+       * local sign-in as the owner of that address links it (§6 local proof). Set alike for
+       * `link_required` and `no_access`, so nothing tells whether the address has an account.
+       */
+      readonly linkIntent?: { readonly subject: string; readonly email: string };
+    };
 
 const refuse = (failure: SsoFailure, userId?: string): SsoUserOutcome =>
   userId === undefined ? { ok: false, failure } : { ok: false, failure, userId };
+
+/** A refusal of an unlinked identity that may still be linked by local proof. */
+const refuseLinkable = (
+  failure: "link_required" | "no_access",
+  identity: VerifiedIdentity,
+  userId?: string,
+): SsoUserOutcome => ({
+  ok: false,
+  failure,
+  ...(userId === undefined ? {} : { userId }),
+  ...(identity.email === null
+    ? {}
+    : { linkIntent: { subject: identity.subject, email: identity.email } }),
+});
 
 async function linkedUser(db: KobeDb, providerId: string, subject: string) {
   const [row] = await db
@@ -166,9 +192,19 @@ export async function resolveSsoUser(
         .select({ id: users.id })
         .from(users)
         .where(eq(users.email, identity.email));
-      if (same) return refuse("link_required", same.id);
+      if (same) {
+        // Email is never proof (§6): only an admin's expectation, checked against the provider's
+        // verified domains and a verified address, links here; else local proof is needed.
+        const expected = await linkExpected(db, p, { ...identity, email: identity.email }, same.id);
+        if (!expected) return refuseLinkable("link_required", identity, same.id);
+        linked = await linkedUser(db, p.id, identity.subject);
+        if (!linked) return refuse("token_invalid");
+      }
     }
-    if (!p.jitProvisioning) return refuse("no_access");
+  }
+  if (!linked) {
+    if (identity.values === null) return refuse("groups_overage");
+    if (!p.jitProvisioning) return refuseLinkable("no_access", identity);
     const mappings = await db
       .select({
         claimValue: ssoAccessMappings.claimValue,
@@ -178,11 +214,11 @@ export async function resolveSsoUser(
       .from(ssoAccessMappings)
       .where(eq(ssoAccessMappings.providerId, p.id));
     if (desiredTeamRoles(mappings, normalizeIdpValues(identity.values)).size === 0) {
-      return refuse("no_access");
+      return refuseLinkable("no_access", identity);
     }
     if (identity.email === null) return refuse("email_missing");
     const created = await createJitUser(db, p, { ...identity, email: identity.email });
-    if (created.kind === "email_taken") return refuse("link_required");
+    if (created.kind === "email_taken") return refuseLinkable("link_required", identity);
     if (created.kind === "created") {
       const refused = await applyAccess(deps, p, created.userId, identity.values);
       return refused ?? { ok: true, userId: created.userId, created: true };

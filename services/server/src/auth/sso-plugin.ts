@@ -23,6 +23,7 @@ import { redirectUriFor, revealClientSecret, type ProviderStore } from "../sso/p
 import { mfaEvidence } from "../sso/mfa.js";
 import { safeReturnTo } from "../sso/return-to.js";
 import type { SsoSettings } from "../sso/settings.js";
+import { LINK_INTENT_TTL_MS, LinkIntentBox, issueLinkIntent } from "../sso/link-intent.js";
 import { resolveSsoUser } from "../sso/sign-in.js";
 import { SSO_STATE_TTL_MS, SsoStateBox, consumeState, rememberState } from "../sso/state.js";
 import type { AfterChangeDeps } from "../teams/after-change.js";
@@ -73,6 +74,10 @@ export function browserSsoError(failure: SsoFailure): string {
   return failure === "no_access" || failure === "link_required" ? "not_allowed" : failure;
 }
 
+/** The link-intent cookie of the local-proof flow (§6, KOBE-630): `__Host-` on https. */
+export const linkIntentCookieName = (secure: boolean): string =>
+  secure ? "__Host-kobe-sso-link" : "kobe-sso-link";
+
 /**
  * OIDC single sign-on as Better Auth endpoints (KOBE-628, spec sso-oidc-scim §5, §9, §13), so it
  * shares Better Auth's Postgres rate limits, session creation (the deactivation hook and trigger),
@@ -113,6 +118,8 @@ export function ssoPlugin(options: SsoPluginOptions) {
   const clients = () => (clientsMemo ??= new OidcClients(runtime().net));
   const secure = new URL(o.publicOrigin).protocol === "https:";
   const cookieName = secure ? "__Host-kobe-sso" : "kobe-sso";
+  const linkCookie = linkIntentCookieName(secure);
+  const linkBox = new LinkIntentBox(o.secret);
   const cookieOptions = {
     httpOnly: true,
     secure,
@@ -238,7 +245,23 @@ export function ssoPlugin(options: SsoPluginOptions) {
               throw new SsoFlowError("mfa_missing");
             }
             const outcome = await resolveSsoUser(runtime().afterChange(), p, identity);
-            if (!outcome.ok) return refused(outcome.failure, outcome.userId);
+            if (!outcome.ok) {
+              // An unlinked identity: the next local sign-in in this browser may link it (§6).
+              if (outcome.linkIntent) {
+                const sealedIntent = await issueLinkIntent(o.db, linkBox, {
+                  providerId: p.id,
+                  ...outcome.linkIntent,
+                });
+                ctx.setCookie(linkCookie, sealedIntent, {
+                  ...cookieOptions,
+                  maxAge: LINK_INTENT_TTL_MS / 1000,
+                });
+              }
+              return refused(outcome.failure, outcome.userId);
+            }
+            // A successful SSO sign-in discards any pending link intent.
+            if (ctx.getCookie(linkCookie))
+              ctx.setCookie(linkCookie, "", { ...cookieOptions, maxAge: 0 });
 
             const adapter = ctx.context.internalAdapter;
             // A new session id at every sign-in; the browser's previous session ends (fixation).

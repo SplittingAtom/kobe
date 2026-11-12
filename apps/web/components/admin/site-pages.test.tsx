@@ -41,11 +41,15 @@ afterEach(() => {
 });
 
 describe("Users", () => {
+  // The providers list decides whether the Single sign-on action shows (404 while SSO is off).
+  const userCalls = (calls: Parameters<typeof summary>[0]) =>
+    summary(calls).filter((c) => c !== "GET /v1/site/sso/providers");
+
   it("lists users and offers only the deactivations the server allows an Admin", async () => {
     const calls = stubApi({ "GET /v1/site/users": [200, USERS] });
     renderSite(<UsersPage />, "admin");
     await screen.findByRole("table");
-    expect(summary(calls)).toEqual(["GET /v1/site/users"]);
+    expect(userCalls(calls)).toEqual(["GET /v1/site/users"]);
     expect(screen.getByRole("button", { name: "Deactivate Bob" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reactivate Gus" })).toBeTruthy();
     // Not yourself, not the Owner, and (as an Admin) not another Admin.
@@ -81,14 +85,14 @@ describe("Users", () => {
     renderSite(<UsersPage />);
     const deactivate = await screen.findByRole("button", { name: "Deactivate Bob" });
     await userEvent.click(deactivate);
-    expect(summary(calls)).toEqual(["GET /v1/site/users"]);
+    expect(userCalls(calls)).toEqual(["GET /v1/site/users"]);
     const asked = await answerConfirm("Deactivate Bob?", "Deactivate");
     expect(asked).toMatch(/Every session ends now/);
     const status = await screen.findByText(/Bob is deactivated/);
     expect(status.textContent).toMatch(/no active team admin: Finance/);
     expect(status.textContent).toMatch(/sandboxes/);
     await waitFor(() =>
-      expect(summary(calls)).toEqual([
+      expect(userCalls(calls)).toEqual([
         "GET /v1/site/users",
         "POST /v1/site/users/u-bob/deactivate",
         "GET /v1/site/users",
@@ -104,7 +108,7 @@ describe("Users", () => {
     const button = await screen.findByRole("button", { name: "Deactivate Bob" });
     await userEvent.click(button);
     await answerConfirm("Deactivate Bob?", "Cancel");
-    expect(summary(calls)).toEqual(["GET /v1/site/users"]);
+    expect(userCalls(calls)).toEqual(["GET /v1/site/users"]);
     await waitFor(() => expect(document.activeElement).toBe(button));
   });
 
@@ -117,11 +121,11 @@ describe("Users", () => {
     const reactivate = await screen.findByRole("button", { name: "Reactivate Gus" });
     await userEvent.click(reactivate);
     await answerConfirm("Reactivate Gus?", "Cancel");
-    expect(summary(calls)).toEqual(["GET /v1/site/users"]);
+    expect(userCalls(calls)).toEqual(["GET /v1/site/users"]);
     await userEvent.click(reactivate);
     expect(await answerConfirm("Reactivate Gus?", "Reactivate")).toMatch(/sign in again/);
     await screen.findByText("Gus can sign in again.");
-    expect(summary(calls)).toContain("POST /v1/site/users/u-gone/reactivate");
+    expect(userCalls(calls)).toContain("POST /v1/site/users/u-gone/reactivate");
   });
 
   it("renders a 403 from the API as the answer, whatever the UI showed", async () => {
@@ -145,6 +149,64 @@ describe("Users", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Deactivate Bob" }));
     await answerConfirm("Deactivate Bob?", "Deactivate");
     expect((await screen.findByRole("alert")).textContent).toMatch(/No Kobe user with that id/);
+  });
+  it("shows a user's single sign-on links, expects a link and unlinks (KOBE-630)", async () => {
+    const provider = {
+      id: "p-1",
+      slug: "corp",
+      displayName: "Contoso",
+      kind: "entra",
+      issuer: "https://login.microsoftonline.com/t/v2.0",
+      tenantId: "t",
+      clientId: "c",
+      subjectClaim: "oid",
+      accessClaim: "roles",
+      mfaRule: { amrAny: [], acrAny: [], acrsAny: [] },
+      allowedEmailDomains: ["x.io"],
+      jitProvisioning: true,
+      maxSessionHours: null,
+    };
+    const links = {
+      links: [
+        {
+          providerId: "p-1",
+          providerName: "Contoso",
+          linkedVia: "local_proof",
+          emailAtLink: "u-bob@x.io",
+          linkedAt: "2026-11-01T10:00:00.000Z",
+          lastSignInAt: null,
+        },
+      ],
+      expectations: [],
+    };
+    const calls = stubApi({
+      "GET /v1/site/users": [200, USERS],
+      "GET /v1/site/sso/providers": [200, { providers: [provider] }],
+      "GET /v1/site/sso/users/u-bob/links": [200, links],
+      "DELETE /v1/site/sso/users/u-bob/links/p-1": [200, { unlinked: true, sessionsEnded: 1 }],
+      "PUT /v1/site/sso/users/u-bob/link-expectations/p-1": [
+        200,
+        {
+          expectation: {
+            providerId: "p-1",
+            providerName: "Contoso",
+            createdAt: "2026-11-12T10:00:00.000Z",
+            expiresAt: "2026-11-26T10:00:00.000Z",
+          },
+        },
+      ],
+    });
+    renderSite(<UsersPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Single sign-on Bob" }));
+    expect(await screen.findByText(/Linked by you/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Unlink Contoso" }));
+    await answerConfirm("Unlink Bob from Contoso?", "Unlink");
+    await screen.findByText("Unlinked from Contoso.");
+    expect(summary(calls)).toContain("DELETE /v1/site/sso/users/u-bob/links/p-1");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: /Provider/ }), "p-1");
+    await userEvent.click(screen.getByRole("button", { name: "Expect SSO link" }));
+    await screen.findByText(/next sign-in with Contoso links automatically/);
+    expect(summary(calls)).toContain("PUT /v1/site/sso/users/u-bob/link-expectations/p-1");
   });
 });
 

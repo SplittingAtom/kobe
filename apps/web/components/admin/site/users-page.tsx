@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
+import { listSsoProviders } from "../../../lib/admin/api/site/sso";
 import {
   setUserActive,
   listUsers,
@@ -27,6 +29,7 @@ import { useSiteAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
+import { UserSsoLinks } from "./user-sso-links";
 
 const ROLE = { owner: "Owner", admin: "Admin", user: "User" } as const;
 
@@ -53,6 +56,9 @@ export function UsersPage() {
   const mutation = useMutation();
   const [confirm, confirmDialog] = useConfirm();
   const me = { userId: access.user.id, role: access.siteRole };
+  // Single sign-on links (KOBE-630): only while SSO is on (the providers list answers 404 when off).
+  const sso = useResource(listSsoProviders);
+  const [ssoUserId, setSsoUserId] = useState<string | null>(null);
 
   async function toggle(user: SiteUser, trigger: HTMLElement | null) {
     const activate = user.deactivatedAt !== null;
@@ -121,6 +127,16 @@ export function UsersPage() {
                     <DateTime value={u.createdAt} />
                   </TableCell>
                   <TableCell>
+                    {sso.state.status === "ready" && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        aria-pressed={ssoUserId === u.id}
+                        onClick={() => setSsoUserId(ssoUserId === u.id ? null : u.id)}
+                      >
+                        Single sign-on<span className="sr-only"> {u.name}</span>
+                      </Button>
+                    )}{" "}
                     {canChangeActivation(me, u) && (
                       <Button
                         size="sm"
@@ -139,6 +155,14 @@ export function UsersPage() {
           </Table>
         )}
       </ResourceView>
+      {sso.state.status === "ready" &&
+        state.status === "ready" &&
+        (() => {
+          const selected = state.data.find((u) => u.id === ssoUserId);
+          return selected ? (
+            <UserSsoLinks key={selected.id} user={selected} providers={sso.state.data} />
+          ) : null;
+        })()}
       {confirmDialog}
     </>
   );
