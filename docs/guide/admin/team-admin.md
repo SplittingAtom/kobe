@@ -36,6 +36,15 @@ workspace; switch workspace first to manage another.
   remove members there. You are told each time (a notification naming the site admin and the
   member, and an email when mail is set up), and every such change is in **Audit** under the site
   admin's name, marked as made by a site admin. Team admins add people by invitation only.
+- **Members managed by the identity provider**: with single sign-on, a membership that comes from
+  your organization's app roles or groups shows **Managed by _provider_** under Role. You can't
+  change its role or remove it here (the site refuses with "The identity provider manages this
+  membership"): to take someone's access away, have them removed from the app role or group at
+  the provider. **Take over** makes the membership the team's own after a confirmation; from then
+  on only team admins change it, even when the person's access at the provider changes. Another
+  team admin takes over your own membership. **Show access mappings** lists the provider's
+  mappings that target this team (read-only; site admins edit them). See
+  [Single sign-on](single-sign-on.md#access-mappings).
 - **Invitations**: invite people by email; they join when they accept.
 
 ## Workspace settings
