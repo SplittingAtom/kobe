@@ -53,6 +53,28 @@ Memory can be turned off at two levels, and both must be on for it to work:
 Turning memory off removes the remember and recall tools and the memory index from the next runs;
 stored files are kept.
 
+## Memory in your notifications
+
+Shared memory needs people to review it, so the **Notifications** bell in the top bar tells you
+when it is your turn. Each notification has a button that opens the place where you act:
+
+- **A proposal or suggestion arrived** (to the people who review it): a Workspace memory proposal
+  (opens the team console's **Memory** page), a reader's suggestion for a project's notes (opens
+  the project) or a Site memory proposal (opens Site memory).
+- **Your proposal or suggestion was accepted, dismissed or sent back for changes**, naming who
+  decided, or **expired** undecided. A Site proposal also tells the Site's curators when its Team
+  admin **confirmed** it.
+- **Memories to review**: Kobe found things to remember in a conversation while you were
+  elsewhere ("3 memories to review"); the button opens that conversation's To review section.
+- **A memory is 80% full**: Workspace or Site memory is close to its limit (to its curators).
+- **A reminder**: something you review has waited a week. Each waiting item reminds you once.
+- **A digest**: more than five notifications of one kind within an hour are rolled into one item
+  ("4 more Workspace memory proposals in the last hour"); the first five arrive one by one. The
+  digest becomes unread again when it grows.
+
+Notifications name people and items, never the text of a memory. These notifications come with
+the semantic memory features that are being rolled out; until then the bell shows none of them.
+
 ## What memory is not
 
 Recall finds text in your memory files; it does not search by meaning. A semantic memory, which

@@ -8,6 +8,7 @@ import type { KobeNotification } from "./api";
 import { describeRecurrence } from "../schedules/format";
 import { pausedByLabel } from "../schedules/paused-by";
 import { roleLabel } from "../teams";
+import { memoryNotificationLabel, memoryNotificationTitle } from "./memory";
 
 export interface ScheduleWhen {
   readonly recurrence: ScheduleRecurrence;
@@ -27,6 +28,8 @@ const asRole = (n: KobeNotification) => (n.teamRole ? ` as ${roleLabel(n.teamRol
 
 /** The headline: what happened to the run (or the schedule), or to a catalog skill. */
 export function notificationTitle(n: KobeNotification): string {
+  const memory = memoryNotificationTitle(n);
+  if (memory !== null) return memory;
   switch (n.kind) {
     case "schedule.run.succeeded":
       return "Scheduled run finished";
@@ -63,6 +66,8 @@ export function notificationTitle(n: KobeNotification): string {
       return `${siteAdmin(n)} took over ${member(n)}'s membership from the identity provider`;
     case "skill.member_add.blocked":
       return `A Team admin blocked ${n.skillName ?? "a catalog skill"} in this team; your Add for me was removed`;
+    default:
+      return "Notification";
   }
 }
 
@@ -73,6 +78,7 @@ export function notificationLabel(
 ): string {
   if (n.kind.startsWith("skill.")) return `Catalog skill ${n.skillName ?? ""}`.trim();
   if (n.kind.startsWith("team.")) return "Team membership";
+  if (n.kind.startsWith("memory.")) return memoryNotificationLabel(n);
   return n.scheduleId === null
     ? "A schedule that no longer exists"
     : scheduleLabel(n.scheduleId, known);

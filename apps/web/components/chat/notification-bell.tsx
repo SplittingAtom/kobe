@@ -11,6 +11,7 @@ import {
   notificationTitle,
   type ScheduleWhen,
 } from "../../lib/notifications/format";
+import { memoryNotificationLink } from "../../lib/notifications/memory";
 import { catalogHref } from "../skills/catalog-tab";
 import { createSchedulesApi } from "../../lib/schedules/api";
 import { ErrorNotice } from "../admin/error-notice";
@@ -54,15 +55,18 @@ function NotificationItem({
   label,
   onOpen,
   onOpenSkill,
+  onOpenLink,
   onMarkRead,
 }: {
   readonly note: KobeNotification;
   readonly label: string;
   readonly onOpen: (() => void) | null;
   readonly onOpenSkill: ((href: string) => void) | null;
+  readonly onOpenLink: (href: string) => void;
   readonly onMarkRead: () => void;
 }) {
   const skillHref = n.skillId ? catalogHref(n.skillId) : null;
+  const memoryLink = memoryNotificationLink(n);
   const title = notificationTitle(n);
   const unread = n.readAt === null;
   return (
@@ -78,6 +82,12 @@ function NotificationItem({
         {skillHref && onOpenSkill && (
           <button type="button" onClick={() => onOpenSkill(skillHref)}>
             Open in the catalog<span className={styles.visuallyHidden}> for {title}</span>
+          </button>
+        )}
+        {memoryLink && (
+          <button type="button" onClick={() => onOpenLink(memoryLink.href)}>
+            {memoryLink.label}
+            <span className={styles.visuallyHidden}> for {title}</span>
           </button>
         )}
         {onOpen && (
@@ -105,6 +115,7 @@ function NotificationPanel({
   onUnread,
   onOpenThread,
   onOpenSkill,
+  onOpenLink,
 }: {
   readonly id: string;
   readonly open: boolean;
@@ -116,6 +127,7 @@ function NotificationPanel({
   readonly onUnread: (count: number) => void;
   readonly onOpenThread: (threadId: string) => void;
   readonly onOpenSkill: (href: string) => void;
+  readonly onOpenLink: (href: string) => void;
 }) {
   const schedules = useResource(() => createSchedulesApi(teamId, fetchFn).list());
   // Until the caller's schedules are known (or if they fail), labels stay neutral.
@@ -135,6 +147,10 @@ function NotificationPanel({
   const openSkill = async (n: KobeNotification, href: string) => {
     if (n.readAt === null) await list.markRead([n.notificationId]);
     onOpenSkill(href);
+  };
+  const openLink = async (n: KobeNotification, href: string) => {
+    if (n.readAt === null) await list.markRead([n.notificationId]);
+    onOpenLink(href);
   };
   return (
     <section
@@ -162,7 +178,7 @@ function NotificationPanel({
       {state.status === "ready" && state.items.length === 0 && (
         <p className={styles.hint}>
           {list.unreadOnly ? "No unread notifications." : "No notifications yet."} Scheduled runs
-          report here when they end.
+          report here when they end, and memory reviews when they need you.
         </p>
       )}
       {state.status === "ready" && state.items.length > 0 && (
@@ -174,6 +190,7 @@ function NotificationPanel({
               label={notificationLabel(n, known)}
               onOpen={n.threadId === null ? null : () => void openThread(n, n.threadId as string)}
               onOpenSkill={(href) => void openSkill(n, href)}
+              onOpenLink={(href) => void openLink(n, href)}
               onMarkRead={() => void list.markRead([n.notificationId])}
             />
           ))}
@@ -192,7 +209,8 @@ function NotificationPanel({
 
 /**
  * The notification bell in the app header (spec D32, KOBE-181): unread badge, and a list of the
- * caller's scheduled-run notifications in the active team, each linking to its Scheduled thread.
+ * caller's notifications in the active team, each linking to its Scheduled thread, catalog skill
+ * or, for memory (KOBE-645), where the person decides.
  * Notifications carry ids and outcomes only (KOBE-176), never prompt or message text.
  */
 export function NotificationBell({
@@ -200,6 +218,7 @@ export function NotificationBell({
   fetchFn,
   onOpenThread,
   onOpenSkill = (href) => window.location.assign(href),
+  onOpenLink = (href) => window.location.assign(href),
   pollMs = POLL_MS,
 }: {
   readonly teamId: string;
@@ -207,6 +226,8 @@ export function NotificationBell({
   readonly onOpenThread: (threadId: string) => void;
   /** A skill notification's catalog page (KOBE-338); a full navigation by default. */
   readonly onOpenSkill?: (href: string) => void;
+  /** A memory notification's deep link (KOBE-645); a full navigation by default. */
+  readonly onOpenLink?: (href: string) => void;
   readonly pollMs?: number;
 }) {
   const api = useMemo(() => createNotificationsApi(teamId, fetchFn), [teamId, fetchFn]);
@@ -248,6 +269,10 @@ export function NotificationBell({
           onOpenSkill={(href) => {
             setOpen(false);
             onOpenSkill(href);
+          }}
+          onOpenLink={(href) => {
+            setOpen(false);
+            onOpenLink(href);
           }}
         />
       )}

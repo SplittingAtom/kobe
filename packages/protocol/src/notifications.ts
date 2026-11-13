@@ -2,6 +2,7 @@ import { z } from "zod";
 import { idSchema, riskClassSchema, timestampSchema, uuidSchema } from "./common.js";
 import { policyReasonCodeSchema } from "./policy.js";
 import { schedulePausedBySchema } from "./schedules.js";
+import { MEMORY_NOTIFICATION_KINDS } from "./semantic-memory/governance.js";
 
 /**
  * Scheduled-run contract (KOBE-176 = 65a of KOBE-65, spec D32; wire shapes in docs/ledger/KOBE-176.md).
@@ -85,6 +86,11 @@ export const NOTIFICATION_KINDS = [
   "team.site_admin.member_role_changed",
   "team.site_admin.member_removed",
   "team.site_admin.member_taken_over",
+  /**
+   * Semantic memory (KOBE-645): every phase's kinds (KOBE-377 `MEMORY_NOTIFICATION_KINDS`). They
+   * name no schedule, thread, run or skill; see {@link memoryNotificationFields} for what each names.
+   */
+  ...MEMORY_NOTIFICATION_KINDS,
 ] as const;
 /** Kinds about a catalog skill: they name it (`skill_id`, `skill_name`), not a schedule. */
 export const SKILL_NOTIFICATION_KINDS = NOTIFICATION_KINDS.filter((k) => k.startsWith("skill."));
@@ -97,6 +103,25 @@ export const TEAM_NOTIFICATION_KINDS = NOTIFICATION_KINDS.filter((k) => k.starts
 /** Kinds about a schedule: they name it (`schedule_id`). */
 export const SCHEDULE_NOTIFICATION_KINDS = NOTIFICATION_KINDS.filter((k) =>
   k.startsWith("schedule."),
+);
+/** Memory kinds about one proposal, suggestion or Site proposal: they name it (`memory_object_id`). */
+export const MEMORY_OBJECT_NOTIFICATION_KINDS = MEMORY_NOTIFICATION_KINDS.filter((k) =>
+  /^memory\.(proposal|suggestion|site_proposal)\./.test(k),
+);
+/**
+ * The kinds of a pending object someone decides on: what a `memory.review.reminder` is about. A
+ * Site proposal waits for its Team admin (received, changes_requested) or the Site (confirmed).
+ */
+export const MEMORY_PENDING_NOTIFICATION_KINDS = [
+  "memory.proposal.received",
+  "memory.suggestion.received",
+  "memory.site_proposal.received",
+  "memory.site_proposal.confirmed",
+  "memory.site_proposal.changes_requested",
+] as const;
+/** Kinds a `memory.review.digest` can roll up: every memory kind but the digest itself. */
+export const MEMORY_DIGESTIBLE_NOTIFICATION_KINDS = MEMORY_NOTIFICATION_KINDS.filter(
+  (k) => k !== "memory.review.digest",
 );
 export const notificationKindSchema = z.enum(NOTIFICATION_KINDS);
 export type NotificationKind = z.infer<typeof notificationKindSchema>;
@@ -131,11 +156,36 @@ export const notificationSchema = z
     /** `team.site_admin.*`: the member the change was about (KOBE-638 review M1). */
     subject_name: z.string().min(1).max(200).optional(),
     team_role: z.enum(["team_admin", "contributor", "member"]).optional(),
+    /** `memory.scope.near_full`: the shared scope at 80% of its item cap (`team` = Workspace). */
+    memory_scope: z.enum(["team", "site"]).optional(),
+    /** Memory proposal, suggestion and Site proposal kinds, and a reminder: the object. */
+    memory_object_id: uuidSchema.optional(),
+    /**
+     * `memory.review.digest`: the kind it rolls up; `memory.review.reminder`: the pending
+     * object's kind (absent: candidates waiting in To review).
+     */
+    related_kind: z.enum(MEMORY_DIGESTIBLE_NOTIFICATION_KINDS).optional(),
+    /** `memory.review.digest`: how many it rolled up; `candidates_ready`: how many wait. */
+    item_count: z.number().int().positive().optional(),
+    /** `memory.suggestion.*` (and a reminder about one): the project whose notes it is for. */
+    project_id: uuidSchema.optional(),
     read_at: timestampSchema.nullable(),
     created_at: timestampSchema,
   })
   .refine(
     (n) => {
+      if ((MEMORY_NOTIFICATION_KINDS as readonly string[]).includes(n.kind)) {
+        return memoryNotificationFields(n);
+      }
+      if (
+        n.memory_scope !== undefined ||
+        n.memory_object_id !== undefined ||
+        n.related_kind !== undefined ||
+        n.item_count !== undefined ||
+        n.project_id !== undefined
+      ) {
+        return false;
+      }
       const skill = (SKILL_NOTIFICATION_KINDS as readonly string[]).includes(n.kind);
       const version = (SKILL_VERSION_NOTIFICATION_KINDS as readonly string[]).includes(n.kind);
       if ((TEAM_NOTIFICATION_KINDS as readonly string[]).includes(n.kind)) {
@@ -160,6 +210,68 @@ export const notificationSchema = z
     },
   );
 export type Notification = z.infer<typeof notificationSchema>;
+
+interface MemoryFields {
+  readonly kind: NotificationKind;
+  readonly schedule_id: string | null;
+  readonly thread_id: string | null;
+  readonly run_id: string | null;
+  readonly skill_id?: string | undefined;
+  readonly skill_semver?: string | undefined;
+  readonly memory_scope?: "team" | "site" | undefined;
+  readonly memory_object_id?: string | undefined;
+  readonly related_kind?: NotificationKind | undefined;
+  readonly item_count?: number | undefined;
+  readonly project_id?: string | undefined;
+}
+
+/**
+ * What a memory notification names (KOBE-645; the DB check `notifications_memory` mirrors it):
+ * `memory.scope.near_full` its scope; `memory.review.digest` the kind it rolls up and how many;
+ * `memory.review.reminder` its pending object and that object's kind (absent: To review
+ * candidates); proposal, suggestion and Site proposal kinds their object and, optionally, who
+ * acted (`actor_name`); `memory.review.candidates_ready` its thread, how many wait and optionally
+ * the pass (`memory_object_id`). Suggestions (and reminders about one) name their project. None
+ * names a schedule, run or skill, and only candidates_ready a thread.
+ */
+export function memoryNotificationFields(n: MemoryFields): boolean {
+  const candidates = n.kind === "memory.review.candidates_ready";
+  if (
+    n.schedule_id !== null ||
+    (n.thread_id !== null) !== candidates ||
+    n.run_id !== null ||
+    n.skill_id !== undefined ||
+    n.skill_semver !== undefined
+  ) {
+    return false;
+  }
+  const suggestion =
+    n.kind.startsWith("memory.suggestion.") ||
+    (n.kind === "memory.review.reminder" && n.related_kind === "memory.suggestion.received");
+  if ((n.project_id !== undefined) !== suggestion) return false;
+  const scope = n.memory_scope !== undefined;
+  const object = n.memory_object_id !== undefined;
+  const related = n.related_kind;
+  const count = n.item_count !== undefined;
+  switch (n.kind) {
+    case "memory.scope.near_full":
+      return scope && !object && related === undefined && !count;
+    case "memory.review.digest":
+      return !scope && !object && related !== undefined && count;
+    case "memory.review.candidates_ready":
+      return !scope && related === undefined && count;
+    case "memory.review.reminder":
+      return (
+        !scope &&
+        object &&
+        !count &&
+        (related === undefined ||
+          (MEMORY_PENDING_NOTIFICATION_KINDS as readonly string[]).includes(related))
+      );
+    default:
+      return !scope && object && related === undefined && !count;
+  }
+}
 
 export const NOTIFICATIONS_PAGE_MAX = 100;
 export const NOTIFICATIONS_PAGE_DEFAULT = 50;

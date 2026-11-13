@@ -18,7 +18,8 @@ From left to right:
 - **Thread search**: type to find a conversation by its title or content.
 - **My area**: **My memory**, **My schedules**, **Agents** and **Skills**.
 - **Site console**, shown only to site admins. See [Site admin overview](../admin/site-admin.md).
-- **Notifications.**
+- **Notifications**: scheduled runs, catalog skill and team changes, and memory reviews that need
+  you (see [Memory](../memory.md#memory-in-your-notifications)). Each opens where you act.
 - **Docs**: opens this guide in a panel over your conversation, the way the consoles open. Pick a
   page from its contents; **Close** or Escape takes you back to the conversation as you left it.
   Each page has its own address (`/docs/<page>`), so you can share a link to it.
