@@ -80,6 +80,24 @@ export function assertEnabled(
   throw disabled();
 }
 
+/**
+ * A Kobe MCP admin tool's call (KOBE-650, Chris Q4): agents have no write path to memory items, and
+ * read only Workspace and Site items their person curates; personal and portable items never.
+ * The tools ask for nothing else; this refuses a call that did anyway.
+ */
+export function assertAgentRead(who: MemoryWho, scope: SemanticMemoryScope, method: string): void {
+  if (method !== "GET" && method !== "HEAD")
+    throw notAllowed("Agents never change memories: open Memory to change one.");
+  if (scope === "user" || scope === "portable")
+    throw notAllowed("Agents never read personal memories through admin tools.");
+  if (!curates(who, scope))
+    throw notAllowed(
+      scope === "team"
+        ? "Only Team admins and memory stewards read Workspace memories through admin tools."
+        : "Only Site admins and Site memory stewards read Site memories through admin tools.",
+    );
+}
+
 /** Site items show author ids only to Site admins and Site stewards (contract wall M6). */
 export const seesSiteAuthors = (who: MemoryWho): boolean =>
   siteMemoryAllows(who, "site.memory.curate");

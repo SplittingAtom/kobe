@@ -145,6 +145,17 @@ async function schedule(w: KobeWorld, active: boolean, agentId?: string): Promis
   return id;
 }
 
+/** A Workspace memory item (KOBE-650), saved by the team admin through the Memory editor route. */
+async function teamItem(w: KobeWorld): Promise<string> {
+  const r = await w.admin.browser.post("/v1/memory/semantic/items", {
+    scope: "team",
+    kind: "fact",
+    statement: `Team fact ${randomUUID()}`,
+  });
+  expect(r.status, JSON.stringify(r.json)).toBe(201);
+  return (r.json as { id: string }).id;
+}
+
 // ── the cases ──────────────────────────────────────────────────────────────────────────────────
 
 interface Case {
@@ -249,6 +260,8 @@ const CASES: Readonly<Record<string, Case>> = {
       }),
     audit: "memory.settings_changed",
   },
+  team_memory_items_list: { arrange: async (w) => (await teamItem(w), {}) },
+  team_memory_item_get: { arrange: async (w) => ({ id: await teamItem(w) }) },
   team_egress_list: { arrange: async (w) => (await enabledDomain(w), {}) },
   team_egress_enable: {
     arrange: async () => ({ domain: await ceiling(), from_enabled: false }),

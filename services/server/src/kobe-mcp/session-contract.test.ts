@@ -61,6 +61,8 @@ const SAMPLES: Readonly<Record<string, unknown>> = {
     from: MEMORY_ON,
     to: { memory_enabled: false },
   },
+  team_memory_items_list: {},
+  team_memory_item_get: { id: ID },
   team_egress_list: {},
   team_egress_enable: { domain: "*.example.com", from_enabled: false },
   team_egress_disable: { domain: "example.com", from_enabled: true },

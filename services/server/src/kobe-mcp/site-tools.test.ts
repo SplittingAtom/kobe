@@ -13,6 +13,7 @@ const base: KobeAccess = {
   mode: "admin",
   level: "read_write",
   teamRole: "team_admin",
+  memorySteward: false,
   siteRole: null,
   grants: [],
 };
@@ -62,6 +63,9 @@ describe("who lists the site tools (ac-1, ac-2, ac-4)", () => {
   });
 });
 
+/** Site tools on a route shared with the Memory editor (KOBE-650): Site memory items, read-only. */
+const SHARED_ROUTE = /^\/memory\/semantic\/items(\/site\/[0-9a-f-]+)?$/;
+
 describe("site tool definitions", () => {
   it.each(KOBE_SITE_TOOLS.map((t) => [t.name, t] as const))(
     "%s: strict input, a sample, a /site route",
@@ -71,7 +75,8 @@ describe("site tool definitions", () => {
         false,
       );
       const input = t.input.parse(KOBE_SITE_SAMPLES[name]);
-      expect(t.route(input).path.startsWith("/site/")).toBe(true);
+      const path = t.route(input).path;
+      expect(path.startsWith("/site/") || (t.readOnly && SHARED_ROUTE.test(path)), path).toBe(true);
       if (!t.readOnly) expect((t as KobeWriteTool).summary(input).length).toBeGreaterThan(5);
     },
   );

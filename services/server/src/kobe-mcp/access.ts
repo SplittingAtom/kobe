@@ -11,9 +11,9 @@ import {
 } from "@kobe/db";
 import { SITE_GRANTS, type SiteGrant } from "@kobe/protocol";
 import {
-  siteRoleAllows,
+  siteMemoryAllows,
   skillReviewAllows,
-  teamRoleAllows,
+  teamMemoryAllows,
   type SiteRole,
 } from "../authz/permissions.js";
 import type { KobeTool } from "./catalog.js";
@@ -38,6 +38,8 @@ export interface KobeAccess {
   readonly level: KobeMcpTeamLevel;
   /** The person's role in the team; null when no longer a member. */
   readonly teamRole: TeamRole | null;
+  /** A Workspace memory steward of the team (KOBE-380): adds `team.memory.curate` (KOBE-650). */
+  readonly memorySteward: boolean;
   readonly siteRole: SiteRole;
   /** The person's site grants (Skill reviewer, KOBE-622); none for an inactive account. */
   readonly grants: readonly SiteGrant[];
@@ -90,12 +92,15 @@ export async function loadKobeAccess(
     SELECT (SELECT m.role FROM public.team_members m
              WHERE m.team_id = ${teamId} AND m.user_id = ${userId}) AS team_role,
            (SELECT r.role FROM public.site_roles r WHERE r.user_id = ${userId}) AS site_role,
+           EXISTS (SELECT 1 FROM public.memory_stewards s
+                    WHERE s.team_id = ${teamId} AND s.user_id = ${userId}) AS steward,
            (SELECT u.deactivated_at IS NOT NULL FROM public.users u WHERE u.id = ${userId}) AS gone,
            (SELECT coalesce(array_agg(g."grant"::text ORDER BY g."grant"), '{}')
               FROM public.site_grants g WHERE g.user_id = ${userId}) AS grants`);
   const row = res.rows[0] as {
     team_role: TeamRole | null;
     site_role: SiteRole;
+    steward?: boolean;
     gone?: boolean;
     grants?: unknown;
   };
@@ -103,6 +108,7 @@ export async function loadKobeAccess(
   return {
     ...switches,
     teamRole: active ? row.team_role : null,
+    memorySteward: active && row.steward === true,
     siteRole: active ? (row.site_role ?? null) : null,
     grants: active ? parseGrants(row.grants) : [],
   };
@@ -130,10 +136,18 @@ export function switchesAllow(
   return switches.level === "read_write";
 }
 
-/** The person holds the tool's console permission (and is still a member of the team). */
+/**
+ * The person holds the tool's console permission (and is still a member of the team). Memory
+ * stewards (KOBE-380) hold the curate permissions as in the console (`teamMemoryAllows`,
+ * `siteMemoryAllows`); for every other permission these are the plain role checks.
+ */
 export function personAllows(tool: KobeTool, access: KobeAccess): boolean {
   if (access.teamRole === null) return false;
-  if (tool.scope === "team") return teamRoleAllows(access.teamRole, tool.permission);
+  if (tool.scope === "team")
+    return teamMemoryAllows(
+      { role: access.teamRole, memorySteward: access.memorySteward },
+      tool.permission,
+    );
   // A Skill Registry tool: the page's own action check, Skill reviewer grant included (SK22).
   if (tool.skillReview !== undefined) {
     return skillReviewAllows(
@@ -141,7 +155,7 @@ export function personAllows(tool: KobeTool, access: KobeAccess): boolean {
       tool.skillReview,
     );
   }
-  return siteRoleAllows(access.siteRole, tool.permission);
+  return siteMemoryAllows({ siteRole: access.siteRole, grants: access.grants }, tool.permission);
 }
 
 /** The tools this person may list and call now. */

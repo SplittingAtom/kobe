@@ -16,6 +16,7 @@ import {
 } from "./team-egress.js";
 import { teamInvitesCreate, teamInvitesList, teamInvitesRevoke } from "./team-invites.js";
 import { teamMembersList, teamMembersRemove, teamMembersSetRole } from "./team-members.js";
+import { teamMemoryItemGet, teamMemoryItemsList } from "./memory-items.js";
 import { teamMemoryGet, teamMemorySet } from "./team-memory.js";
 import { teamModelsList, teamModelsSet } from "./team-models.js";
 import { teamAuditList, teamUsageGet } from "./team-reports.js";
@@ -51,6 +52,8 @@ export const KOBE_ADMIN_TOOLS: readonly KobeTool[] = [
   teamBudgetsSetMember,
   teamMemoryGet,
   teamMemorySet,
+  teamMemoryItemsList,
+  teamMemoryItemGet,
   teamEgressList,
   teamEgressEnable,
   teamEgressDisable,

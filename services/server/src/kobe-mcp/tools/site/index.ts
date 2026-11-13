@@ -1,4 +1,5 @@
 import type { KobeTool } from "../../catalog.js";
+import { siteMemoryItemGet, siteMemoryItemsList } from "../memory-items.js";
 import {
   siteEgressCeilingAdd,
   siteEgressCeilingList,
@@ -82,6 +83,8 @@ export const KOBE_SITE_TOOLS: readonly KobeTool[] = [
   siteGrantsList,
   siteGrantsGive,
   siteGrantsTake,
+  siteMemoryItemsList,
+  siteMemoryItemGet,
   siteBrandingGet,
   siteBrandingSet,
   siteBudgetGet,

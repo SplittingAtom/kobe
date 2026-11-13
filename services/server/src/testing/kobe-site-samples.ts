@@ -7,6 +7,8 @@ const HASH = "a".repeat(64);
 
 export const KOBE_SITE_SAMPLES: Readonly<Record<string, unknown>> = {
   site_users_list: {},
+  site_memory_items_list: {},
+  site_memory_item_get: { id: ID },
   site_users_deactivate: { user_id: ID, from_state: "active" },
   site_users_reactivate: { user_id: ID, from_state: "deactivated" },
   site_teams_list: {},
