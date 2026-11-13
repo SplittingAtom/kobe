@@ -1094,6 +1094,16 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   `team_memory_set` now takes every workspace memory setting in `from` (read them with
   `team_memory_get`). A `helm rollback` leaves the previous release working: it ignores the new
   keys.
+
+- **Memory item store (KOBE-378).** Migration `0222_memory_version_prune` replaces the trigger
+  function that keeps memory item versions immutable: a version may now be deleted only when it
+  is not its item's current version and no run used it (the version cap, a Site memory setting,
+  default 50, prunes the oldest such versions on each edit, never while a legal hold covers the
+  item), and a new guard on the three run-record tables refuses that delete when a run in another
+  workspace used the version. The app role gains DELETE on the site-wide version tables. No data
+  changes. Default scope limits are now 300 per person per workspace and 50 portable per person
+  (1,000 per workspace and per Site); a Site that saved its own limits keeps them. On a
+  `helm rollback` the previous release never deletes versions and works unchanged.
 - **Memory stewards (KOBE-380).** Migrations `0218_memory_stewards` and
   `0219_memory_stewards_rls` add the `memory_steward` value to the `site_grant` type (Site memory
   stewards) and the empty team table `memory_stewards` (Workspace memory stewards, row-level

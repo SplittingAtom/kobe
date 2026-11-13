@@ -71,9 +71,11 @@ export const MEMORY_SITE_SETTINGS_DEFAULTS: MemorySiteSettings = Object.freeze({
   learning_model_alias: null,
   embedding_model_alias: null,
   context_budget_kib: MEMORY_CONTEXT_BUDGET_KIB_DEFAULT,
+  // SM21 defaults (KOBE-378 brief): 300 per person per Workspace, 50 portable per person,
+  // 1,000 per Workspace and per Site.
   scope_limits: Object.freeze({
-    user: SEMANTIC_MEMORY_SCOPE_MAX_ITEMS,
-    portable: SEMANTIC_MEMORY_SCOPE_MAX_ITEMS,
+    user: 300,
+    portable: 50,
     team: SEMANTIC_MEMORY_SCOPE_MAX_ITEMS,
     site: SEMANTIC_MEMORY_SCOPE_MAX_ITEMS,
   }),
