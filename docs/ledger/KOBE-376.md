@@ -128,6 +128,6 @@ Execution Time: 7.243 ms
 The versions side reads every version in the team (no GIN under RLS, as designed); the version
 cap per item (KOBE-378) bounds it.
 
-- Commands: `pnpm verify` green (a first run hit an unrelated sandbox-agent `checkouts.test.ts`
-  ENOTEMPTY tmp-cleanup flake; rerun clean); `@kobe/db test:db` 116 files / 1826 tests and
-  `@kobe/server test:db` 231 files / 2895 tests pass.
+- Commands (after the review fixes): `pnpm verify` green (one run hit an unrelated 5 s timeout
+  in server `export-markdown.test.ts`; passes alone, rerun clean); `@kobe/db test:db` 117 files /
+  1857 tests and `@kobe/server test:db` 231 files / 2895 tests pass.
