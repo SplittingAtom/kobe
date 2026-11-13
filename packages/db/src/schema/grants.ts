@@ -1,8 +1,12 @@
 import { pgEnum, pgTable, primaryKey, timestamp, uuid } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
 
-/** Grants beside the role ladder (KOBE-311, spec SK22); mirrors `SITE_GRANTS` (@kobe/protocol). */
-export const siteGrant = pgEnum("site_grant", ["skill_reviewer"]);
+/**
+ * Grants beside the role ladder (KOBE-311, spec SK22); mirrors `SITE_GRANTS` (@kobe/protocol).
+ * `memory_steward` (KOBE-380, SM19): a Site memory steward, who curates Site memory but never sets
+ * Policy or confirms Site proposals.
+ */
+export const siteGrant = pgEnum("site_grant", ["skill_reviewer", "memory_steward"]);
 export type SiteGrantKind = (typeof siteGrant.enumValues)[number];
 
 /**

@@ -9,8 +9,10 @@ import {
   runs,
   semanticMemoryItemVersions,
   semanticMemoryItems,
+  memoryStewards,
   siteMemoryItemVersions,
   siteMemoryItems,
+  teamMembers,
   threads,
   users,
 } from "../../schema/index.js";
@@ -108,5 +110,10 @@ export const memoryFixtures: Record<(typeof memory.team)[number], ProbeFixture> 
     });
     const runId = await insertRun(tx, teamId, userId);
     await tx.insert(runSiteMemoryItems).values({ teamId, runId, itemId: item.id, version: 1 });
+  },
+  memory_stewards: async (tx, teamId) => {
+    const userId = await insertUser(tx);
+    await tx.insert(teamMembers).values({ teamId, userId, role: "contributor" });
+    await tx.insert(memoryStewards).values({ teamId, userId, grantedBy: userId });
   },
 };

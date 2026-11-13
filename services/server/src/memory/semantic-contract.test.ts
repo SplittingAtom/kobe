@@ -27,6 +27,7 @@ import {
   SEMANTIC_MEMORY_STATUSES,
   SEMANTIC_MEMORY_TAG_MAX,
   SEMANTIC_MEMORY_TAGS_MAX,
+  SITE_GRANTS,
 } from "@kobe/protocol";
 
 /** KOBE-377: the semantic memory contract matches the KOBE-376 schema exactly. */
@@ -63,10 +64,14 @@ describe("semantic memory contract matches the schema", () => {
     }
   });
 
-  // KOBE-645 and KOBE-380 flip these to `toContain` when their migrations add the names.
-  it("notification kinds and the steward grant wait for their migrations (KOBE-645, KOBE-380)", () => {
+  // KOBE-645 flips this to `toContain` when its migration adds the names.
+  it("notification kinds wait for their migration (KOBE-645)", () => {
     for (const kind of MEMORY_NOTIFICATION_KINDS)
       expect(DB_NOTIFICATION_KINDS as readonly string[]).not.toContain(kind);
-    expect(siteGrant.enumValues as readonly string[]).not.toContain(MEMORY_STEWARD_SITE_GRANT);
+  });
+
+  it("the Site steward grant is a site_grant value and a SITE_GRANTS member (KOBE-380)", () => {
+    expect(siteGrant.enumValues as readonly string[]).toContain(MEMORY_STEWARD_SITE_GRANT);
+    expect(SITE_GRANTS as readonly string[]).toContain(MEMORY_STEWARD_SITE_GRANT);
   });
 });

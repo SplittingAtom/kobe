@@ -1067,6 +1067,11 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Memory stewards (KOBE-380).** Migrations `0218_memory_stewards` and
+  `0219_memory_stewards_rls` add the `memory_steward` value to the `site_grant` type (Site memory
+  stewards) and the empty team table `memory_stewards` (Workspace memory stewards, row-level
+  security per team; a steward row goes with its membership). Existing grants are kept. On a
+  `helm rollback` the previous release ignores both.
 - **Semantic memory tables (KOBE-376).** Migrations `0216_semantic_memory` and
   `0217_semantic_memory_rls` add empty tables for v1.3 Semantic Memory: the team tables
   `semantic_memory_items`, `semantic_memory_item_versions`, `run_memory_items`,
