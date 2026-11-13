@@ -67,12 +67,18 @@ export async function freshBrowser(browser: Browser): Promise<Page> {
 
 /** Answers the mock's authorize step as `person` (the test-only `mock_user` parameter). */
 export async function signInAs(page: Page, person: MockPerson): Promise<void> {
+  // Kobe's start route answers 302 to the mock's authorize URL; Playwright does not route redirected
+  // requests, so the person is added to that redirect's Location at Kobe's start step instead (its
+  // Set-Cookie, the sealed flow state, passes through unchanged).
   await page.route(
-    (url) => url.pathname.endsWith("/oauth2/v2.0/authorize"),
-    (route) => {
-      const url = new URL(route.request().url());
+    (url) => url.pathname.startsWith(`/api/auth/sso/start/${MOCK.slug}`),
+    async (route) => {
+      const response = await route.fetch({ maxRedirects: 0 });
+      const location = response.headers()["location"];
+      if (!location) return route.fulfill({ response });
+      const url = new URL(location);
       url.searchParams.set("mock_user", Buffer.from(JSON.stringify(person)).toString("base64url"));
-      return route.continue({ url: url.href });
+      return route.fulfill({ response, headers: { ...response.headers(), location: url.href } });
     },
   );
   await page.goto("/sign-in");
