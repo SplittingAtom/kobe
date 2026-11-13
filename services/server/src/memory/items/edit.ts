@@ -37,6 +37,7 @@ import {
   notifyNearFull,
 } from "./limits.js";
 import { detailOf, readItem, type ItemRow } from "./rows.js";
+import { tagsFingerprint } from "./tag-fingerprint.js";
 import { insertVersion, pruneVersions } from "./versions.js";
 import { assertEnabled, assertMayWrite, type MemoryWho } from "./who.js";
 
@@ -192,9 +193,18 @@ const metadataChanged = (row: ItemRow, after: HeldMetadata): boolean =>
   after.policy !== row.policy ||
   after.asOf !== row.as_of;
 
+const heldSnapshot = (m: HeldMetadata) => ({
+  kind: m.kind,
+  tagCount: m.tags.length,
+  tagsHmac: tagsFingerprint(m.tags),
+  policy: m.policy,
+  asOf: m.asOf,
+});
+
 /**
  * Under a Site-wide hold (KOBE-647, review L3) a change to a Site item's row fields keeps the
- * earlier values in the Site audit log: the row has no history of its own.
+ * earlier kind, Policy flag and as-of in the Site audit log (the row has no history of its own);
+ * tags only as a count and a keyed fingerprint ({@link tagsFingerprint}), never the values.
  */
 function changedUnderHold(row: ItemRow, after: HeldMetadata, version: number): ServerAuditEvent {
   return {
@@ -203,8 +213,8 @@ function changedUnderHold(row: ItemRow, after: HeldMetadata, version: number): S
     target: {
       itemId: row.id,
       version,
-      before: { kind: row.kind, tags: [...row.tags], policy: row.policy, asOf: row.as_of },
-      after: { kind: after.kind, tags: [...after.tags], policy: after.policy, asOf: after.asOf },
+      before: heldSnapshot({ kind: row.kind, tags: row.tags, policy: row.policy, asOf: row.as_of }),
+      after: heldSnapshot(after),
     },
   };
 }

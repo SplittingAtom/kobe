@@ -8,6 +8,7 @@ import {
   withSiteMemoryPurge,
 } from "./legal-hold/site-memory-hold.js";
 import { logger } from "./logger.js";
+import { tagsFingerprint } from "./memory/items/tag-fingerprint.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 
@@ -305,9 +306,23 @@ describe("row fields of held Site items (review L3)", () => {
       {
         itemId: item,
         version: 1,
-        before: { kind: "fact", tags: ["before"], policy: false, asOf: null },
-        after: { kind: "decision", tags: ["after"], policy: true, asOf: "2026-11-01" },
+        before: {
+          kind: "fact",
+          tagCount: 1,
+          tagsHmac: tagsFingerprint(["before"]),
+          policy: false,
+          asOf: null,
+        },
+        after: {
+          kind: "decision",
+          tagCount: 1,
+          tagsHmac: tagsFingerprint(["after"]),
+          policy: true,
+          asOf: "2026-11-01",
+        },
       },
     ]);
+    // Never the tag values.
+    expect(JSON.stringify(await changes(item))).not.toMatch(/"(before|after)"\]/);
   });
 });

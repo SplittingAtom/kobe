@@ -2,6 +2,7 @@ import type { SessionSigningKey } from "@kobe/session-token";
 import { NO_APP_CALLER, type AppCaller } from "./apps/app-caller.js";
 import { createNotebookFiles, type NotebookFiles } from "./notebooks/files.js";
 import type { ForwardDestination } from "./audit/forward/types.js";
+import { configureTagFingerprintKey } from "./memory/items/tag-fingerprint.js";
 import { configureUsageKey } from "./skills/usage-snapshot.js";
 import { DEFAULT_TIMEOUT_MS } from "./connectors/oauth/http.js";
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -351,6 +352,8 @@ const digest = (value: string): Buffer => createHash("sha256").update(value).dig
 export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   // Catalog usage member keys are an HMAC under this secret (KOBE-339, review-341 L1).
   configureUsageKey(options.authSecret);
+  // Tag fingerprints in the held Site item audit (KOBE-647, review P2-L3).
+  configureTagFingerprintKey(options.authSecret);
   const database = createDb(options.databaseUrl);
   const authAttempts = new AuthAttemptAudit(database.db);
   authAttempts.start();

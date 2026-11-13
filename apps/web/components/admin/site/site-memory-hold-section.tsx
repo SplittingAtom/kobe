@@ -72,9 +72,10 @@ export function SiteMemoryHoldSection() {
       <p className="mt-0 max-w-3xl text-sm text-console-muted">
         A Site-wide hold keeps the Site&apos;s own memories: no Site memory or earlier version is
         deleted or pruned while it is in force, even past the versions-kept limit, and changes to a
-        Site memory&apos;s kind, tags, Policy flag or as-of date record the earlier values in the
-        site audit log. Workspace holds above don&apos;t cover Site memory. Placing and releasing
-        need a second site admin.
+        Site memory&apos;s kind, tags, Policy flag or as-of date record the earlier and new kind,
+        Policy flag and as-of date in the site audit log, and for tags a count and a fingerprint
+        (not the tags themselves). Workspace holds above don&apos;t cover Site memory. Placing and
+        releasing need a second site admin.
       </p>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="Site-wide legal holds">

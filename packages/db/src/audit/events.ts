@@ -32,7 +32,6 @@ import {
   SEMANTIC_MEMORY_KIND_VALUES,
   SEMANTIC_MEMORY_SCOPE_VALUES,
   SEMANTIC_MEMORY_TAGS_MAX,
-  SEMANTIC_MEMORY_TAG_MAX,
 } from "../schema/semantic-memory.js";
 import { PI_TOOL_NAME_PATTERN } from "../connectors/snapshot.js";
 import { UI_RESOURCE_FAILURES, UI_RESOURCE_URI_PATTERN } from "../connectors/ui-resources.js";
@@ -341,17 +340,15 @@ const purgeCounts = {
 };
 
 const semanticMemoryScope = z.enum(SEMANTIC_MEMORY_SCOPE_VALUES);
-/** A Site item's row-level fields, recorded before and after a change under a Site hold. */
+/**
+ * A Site item's row-level fields, recorded before and after a change under a Site hold. Tags as a
+ * count and an HMAC-SHA-256 (server key) of the sorted, lowercased list (JSON), never the values
+ * (memory events carry no tag or statement).
+ */
 const heldItemMetadata = z.strictObject({
   kind: z.enum(SEMANTIC_MEMORY_KIND_VALUES),
-  tags: z
-    .array(
-      z
-        .string()
-        .min(1)
-        .max(SEMANTIC_MEMORY_TAG_MAX * 4),
-    )
-    .max(SEMANTIC_MEMORY_TAGS_MAX),
+  tagCount: z.number().int().nonnegative().max(SEMANTIC_MEMORY_TAGS_MAX),
+  tagsHmac: z.string().regex(/^[0-9a-f]{64}$/),
   policy: z.boolean(),
   asOf: z.iso.date().nullable(),
 });
@@ -2917,8 +2914,7 @@ export const AUDIT_EVENTS = {
   /**
    * A Site item's kind, tags, Policy flag or `as_of` changed while a Site-wide legal hold is in
    * force (KOBE-647, review L3): these live on the item row, which keeps no history, so the audit
-   * row is the record of the earlier value. The one memory event that carries tags: the hold
-   * exists to keep what the item said.
+   * row records the earlier and new values (tags as a count and a keyed fingerprint, never the values).
    */
   "memory.item.changed_under_hold": event("site", {
     itemId: id,

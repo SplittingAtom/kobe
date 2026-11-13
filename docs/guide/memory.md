@@ -143,7 +143,8 @@ A site admin can place a **Site-wide legal hold** under **Site console › Legal
 site admin approves, as for any legal hold). While it is in force, no Site memory and no earlier
 version of one is deleted: editing a Site memory past the versions-kept limit keeps every version,
 and Site memory cleanup skips it. Changes to a Site memory's kind, tags, Policy flag or as-of date
-are still allowed, and the site audit log records the earlier and new values. A hold on a
+are still allowed, and the site audit log records the earlier and new kind, Policy flag and
+as-of date, and for tags a count and a fingerprint (not the tags themselves). A hold on a
 workspace or a person covers that workspace's memories, not the Site's.
 
 ## What Kobe checks before a memory is saved

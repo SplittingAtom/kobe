@@ -46,13 +46,16 @@
   for Site sweeps/purges (READ COMMITTED, hold lock first, skips when held). No Site sweep or purge
   exists on main yet: KOBE-386 (sweeps) and any Site item delete must use it.
 - **L3:** `patchItem` on a Site item under a Site hold adds `memory.item.changed_under_hold` (kind,
-  tags, policy, asOf before/after) — the one memory audit event carrying tags (the hold's purpose).
+  tag count + HMAC-SHA-256 (key derived from the auth secret, purpose `memory.audit.tag-fingerprint`) of the sorted lowercased tag list, policy, asOf before/after; never tag values — coordinator decision 2026-11-13).
   Pin/archive/restore are not recorded beyond their existing events.
+
+- **Phase-2 review (review-647.md):** P2-L2 guide/console copy say tags are a count + fingerprint;
+  P2-L3 keyed HMAC (`memory/items/tag-fingerprint.ts`); P2-L4 static test
+  `legal-hold/site-memory-deletes.test.ts` fails on any Site memory delete outside the prune path or
+  `withSiteMemoryPurge`/`siteMemoryHeld`. P2-L1 (custodian-authored Site versions) waits for Chris.
 
 ## Open questions (for Chris or the coordinator)
 
-- Tags in `memory.item.changed_under_hold` break the "never a tag" note on memory audit events
-  (review L3 asked for them). Alternative: tag count only.
 - KOBE-386 must route its Site sweeps through `withSiteMemoryPurge()`.
 
 - Phase C: Site memory proposals (KOBE-653) should add the same guard to `site_memory_proposals`.
