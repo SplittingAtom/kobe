@@ -10780,7 +10780,7 @@
     "/v1/memory/semantic/items/{scope}/{id}/restore": {
       "post": {
         "operationId": "restoreSemanticMemoryItem",
-        "summary": "Restore an archived memory item",
+        "summary": "Restore an archived memory item (runs the save checks again; send overrides to save over warnings)",
         "parameters": [
           {
             "name": "scope",
@@ -10817,7 +10817,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SemanticMemoryItemAction"
+                "$ref": "#/components/schemas/RestoreSemanticMemoryItem"
               }
             }
           }
@@ -23576,6 +23576,31 @@
             "type": "integer",
             "exclusiveMinimum": 0,
             "maximum": 9007199254740991
+          }
+        },
+        "additionalProperties": false
+      },
+      "RestoreSemanticMemoryItem": {
+        "type": "object",
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "overrides": {
+            "type": "object",
+            "properties": {
+              "lint": {
+                "type": "boolean",
+                "const": true
+              },
+              "policy_conflict": {
+                "type": "boolean",
+                "const": true
+              }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
