@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { messageText, normaliseQuote, quotesOf } from "./items-export.js";
+import { messageText, quotesOf } from "./items-export.js";
 
 describe("quotesOf (KOBE-649)", () => {
   const t = "11111111-1111-4111-8111-111111111111";
@@ -31,14 +31,7 @@ describe("quotesOf (KOBE-649)", () => {
   });
 });
 
-describe("normaliseQuote and messageText (KOBE-649 M-1)", () => {
-  it("compares across whitespace, case, typographic quotes and dashes", () => {
-    expect(normaliseQuote("  “Close”\n the  BOOKS – now ")).toBe(
-      normaliseQuote('"close" the books - now'),
-    );
-    expect(normaliseQuote("ﬁve")).toBe("five");
-  });
-
+describe("messageText (KOBE-649 M-1)", () => {
   it("reads a string or the text parts of a Pi content list", () => {
     expect(messageText("hello")).toBe("hello");
     expect(

@@ -1,5 +1,6 @@
 import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import { locate, type Location } from "./items/location.js";
+import { quoteFoundIn } from "./quote-normalise.js";
 
 /**
  * The person's semantic memories for the personal export (KOBE-649, SM28): their own items in the
@@ -110,22 +111,6 @@ function chunks<T>(values: readonly T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size));
   return out;
-}
-
-/**
- * Quote comparison form: Unicode NFKC, typographic quotes and dashes as ASCII, whitespace runs as
- * one space, lower case. Stand-in for the shared quote normaliser of KOBE-379 (not on main yet);
- * switch to it when it lands so export and learning agree.
- */
-export function normaliseQuote(text: string): string {
-  return text
-    .normalize("NFKC")
-    .replace(/[‘’‚‛′]/gu, "'")
-    .replace(/[“”„‟″]/gu, '"')
-    .replace(/[‐-―]/gu, "-")
-    .replace(/\s+/gu, " ")
-    .trim()
-    .toLowerCase();
 }
 
 /** Text of a Pi message `content`: a string, or the text parts of a part list. */
@@ -249,7 +234,7 @@ async function ownThreads(
 }
 
 /**
- * The normalised text of each cited entry that the person wrote: a `user` message in a thread
+ * The text of each cited entry that the person wrote: a `user` message in a thread
  * they own in this Workspace and, in a fork, written after the fork (H-1: a fork copies the
  * source's entries with their ids and times, up to and including `forked_at_entry_id`; the
  * person's own copied messages are dropped too, the safe side). Keyed `thread_id/entry_id`.
@@ -282,8 +267,7 @@ async function ownMessages(
                                          AND f.entry_id = t.forked_at_entry_id), 0))
          )`,
     );
-    for (const r of rows)
-      texts.set(`${r.thread_id}/${r.entry_id}`, normaliseQuote(messageText(r.content)));
+    for (const r of rows) texts.set(`${r.thread_id}/${r.entry_id}`, messageText(r.content));
   }
   return texts;
 }
@@ -314,7 +298,7 @@ async function exportVersions(
     const evidence = links
       ? quotesOf(v.evidence, v.source_thread_id).filter((q) => {
           const text = texts.get(`${v.source_thread_id}/${q.entryId}`);
-          return text !== undefined && text.includes(normaliseQuote(q.quote));
+          return text !== undefined && quoteFoundIn(q.quote, text);
         })
       : [];
     return {

@@ -242,13 +242,15 @@ describe("semantic memories in the personal export (KOBE-649)", () => {
       source_entry_ids: ["m1"],
     });
     await passVersion(own.id, 2, "Books close on working day five", mine, [
-      // Kept: the person's own words (whitespace, case and curly quotes normalised).
-      { entry_id: "m1", quote: 'Close the books\n on the "fifth"  working day' },
+      // Kept: the person's own words (whitespace and curly quotes normalised by KOBE-379).
+      { entry_id: "m1", quote: 'close the books\n on the "fifth"  working day' },
       { entry_id: "m2", quote: "ASSISTANT words" },
       { entry_id: "missing", quote: "NO-SUCH-ENTRY quote" },
       { entry_id: "m1", thread_id: sharedTheirs, quote: "WRONG-THREAD quote" },
       // M-1: a valid own-message id with text that is not in that message.
       { entry_id: "m1", quote: "PARAPHRASED books close fifth day" },
+      // Exact case (KOBE-379's default): a quote that differs in case is not the person's words.
+      { entry_id: "m1", quote: "WE CLOSE THE BOOKS" },
     ]);
     const fromShared = await save(as.member, "user", "Shared-thread learning", {
       source_thread_id: sharedTheirs,
@@ -283,6 +285,7 @@ describe("semantic memories in the personal export (KOBE-649)", () => {
       "NO-SUCH-ENTRY",
       "WRONG-THREAD",
       "PARAPHRASED",
+      "WE CLOSE",
     ])
       expect(raw).not.toContain(text);
     const versions = items.find((i) => i.id === own.id)?.versions ?? [];
@@ -291,7 +294,7 @@ describe("semantic memories in the personal export (KOBE-649)", () => {
       [2, "pass", mine],
     ]);
     expect(versions[1]?.evidence).toEqual([
-      { entry_id: "m1", quote: 'Close the books\n on the "fifth"  working day' },
+      { entry_id: "m1", quote: 'close the books\n on the "fifth"  working day' },
     ]);
     // L-2: another member's thread is not named, not even by id.
     const shared = items.find((i) => i.id === fromShared.id);

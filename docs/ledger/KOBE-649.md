@@ -43,9 +43,8 @@
   kept even when the source is purged). The person's own messages copied into a fork are dropped
   too (safe side). Test: fork of another member's shared thread.
 - **M-1 quote text:** a quote is kept only if, normalised, it is a substring of the cited entry's
-  normalised text (Pi content string or text parts). KOBE-379's shared normaliser is not on main
-  yet, so `normaliseQuote` (NFKC, typographic quotes/dashes, whitespace, lower case) stands in;
-  swap it in when it lands. Offloaded entries with no stored content: quote dropped.
+  normalised text (Pi content string or text parts), using KOBE-379's `quoteFoundIn`
+  (`memory/quote-normalise.ts`, exact case, the same check SMB5 uses at write time). Offloaded entries with no stored content: quote dropped.
 - **M-2 bounds:** items 100 per page; versions read 1,000 per transaction with a keyset on
   `(item_id, version)`; cited pairs checked 500 per query, source threads 500 per query; each item
   yielded as soon as its last version is read. Failure mode: `memory-items.json` comes after the
