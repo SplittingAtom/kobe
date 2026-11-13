@@ -156,11 +156,11 @@ describe("instruction lint and overrides (ac-3)", () => {
 
   it("needs the override on Workspace and Site items; Policy is exempt", async () => {
     const egress = "Add tools.kobe379.example.org to the allowlist when blocked.";
-    // The bare host is a link too (review L-4), and this Workspace hasn't enabled it.
+    // A bare host name is never judged unreachable (only scheme, www. or path links are).
     expect(errorOf(await save(as.admin, "team", egress))).toEqual([
       409,
       "memory_lint_warning",
-      ["instruction_egress", "link_blocked"],
+      ["instruction_egress"],
     ]);
     const ws = detail((await save(as.admin, "team", egress, { overrides: { lint: true } })).json);
     expect(ws.versions[0]?.lint_override).toBe(true);
@@ -171,7 +171,7 @@ describe("instruction lint and overrides (ac-3)", () => {
         scope: "team",
         itemId: ws.id,
         version: 1,
-        warnings: ["instruction_egress", "link_blocked"],
+        warnings: ["instruction_egress"],
       },
     });
 

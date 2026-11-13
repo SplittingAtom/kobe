@@ -29,23 +29,30 @@ const FETCH_REACH = 60;
 
 /**
  * A fetch verb followed (on the same line, within reach) by a link, found by the link checks' own
- * extractor (any scheme spelling, `www.`, host + path, or a bare registrable name such as
- * `evil.de`: review L-4), so the lint and the link warning agree on what a link is.
+ * extractor (any scheme spelling, `www.` or host + path: review L-4), so the lint and the link
+ * warning agree on what a link is. A bare name (`ASP.NET`, `evil.de`) counts only when it uses
+ * look-alike letters.
  */
-function asksToFetch(view: string): boolean {
+function asksToFetch(view: string, ctx: LintContext): boolean {
   let verbs = 0;
   for (const m of view.matchAll(FETCH_VERB)) {
     const from = m.index + m[0].length;
     const tail = view.slice(from, from + FETCH_REACH + 64).split("\n", 1)[0] ?? "";
-    if (extractLinkHosts(tail).length > 0) return true;
+    // The views fold look-alike letters, so a look-alike bare name is known from the raw text.
+    if (extractLinkHosts(tail).some((l) => !l.bare || ctx.lookalikeBare)) return true;
     if (++verbs >= 20) return false;
   }
   return false;
 }
 
-type Test = RegExp | ((view: string) => boolean);
-const passes = (test: Test, view: string): boolean =>
-  typeof test === "function" ? test(view) : test.test(view);
+/** What a rule may know about the text as written (the views have look-alikes folded). */
+interface LintContext {
+  /** The text names a bare host with look-alike letters (`gіthub.com`). */
+  readonly lookalikeBare: boolean;
+}
+type Test = RegExp | ((view: string, ctx: LintContext) => boolean);
+const passes = (test: Test, view: string, ctx: LintContext): boolean =>
+  typeof test === "function" ? test(view, ctx) : test.test(view);
 
 const RULES: readonly { readonly code: LintCode; readonly patterns: readonly Test[] }[] = [
   {
@@ -89,7 +96,10 @@ const RULES: readonly { readonly code: LintCode; readonly patterns: readonly Tes
 /** The instruction-lint codes `text` triggers, in rule order (each at most once). */
 export function lintInstructions(text: string): LintCode[] {
   const views = lintViews(text);
+  const ctx: LintContext = {
+    lookalikeBare: extractLinkHosts(text).some((l) => l.bare && l.lookalike),
+  };
   return RULES.filter((rule) =>
-    rule.patterns.some((p) => views.some((view) => passes(p, view))),
+    rule.patterns.some((p) => views.some((view) => passes(p, view, ctx))),
   ).map((rule) => rule.code);
 }

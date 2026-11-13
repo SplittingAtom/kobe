@@ -84,8 +84,9 @@ Every verified bypass is a golden test (`checks.test.ts` "security review bypass
   `azure-account-key`, and `xapp-` in `slack-token`. Generic values must look random
   (`plausibleSecret`: letter + digit, no placeholder, not a dotted identifier like
   `config.api_key_v2`). Skill fixtures: the only new hit is the deliberate fake Stripe key in
-  `builtin-skills/code-review/scripts/sample.py` (the review demo's planted finding; a Caution like
-  its other findings). No other builtin skill or fixture fires.
+  `builtin-skills/code-review/scripts/sample.py` (the review demo's planted finding); it moves
+  code-review 1.0.0 from Pass to Caution. No other builtin skill or fixture fires. Each builtin
+  skill's verdict and finding rules are pinned in `services/server/src/skills/builtin-scans.test.ts`.
 - **M-1..M-3** scanner `INVISIBLE` uses `\p{Extended_Pictographic}` (digits no longer excuse a
   selector or ZWJ; keycaps and skin-tone ZWJ sequences still pass) and adds U+180B–180F,
   U+FFF9–FFFB, U+1D173–1D17A. The quote normaliser maps blank fillers (U+115F, U+1160, U+3164,
@@ -102,8 +103,10 @@ Every verified bypass is a golden test (`checks.test.ts` "security review bypass
   patch and restore. **L-4** links: `scheme:` with 0–2 slashes or backslashes, and bare names under
   an ICANN suffix (`isRegistrableHost`, `@kobe/db`, tldts), except names ending in a file
   extension that is also a ccTLD (`.md`, `.py`, `.sh`, `.zip`, …); the lint's fetch rule uses the
-  same extractor (the hard-coded TLD list is gone). Heuristic: product names like `ASP.NET`
-  or `socket.io` now count as links. **L-5** portable links judged by the Site ceiling. **L-6**
+  same extractor (the hard-coded TLD list is gone). Re-review follow-up: a bare name is listed
+  but never `link_blocked` (only scheme, `www.` or path links are), and counts for the fetch lint
+  only with look-alike letters, so `ASP.NET` or `socket.io` in prose don't warn; a look-alike
+  bare name still gets `link_lookalike`. **L-5** portable links judged by the Site ceiling. **L-6**
   `memory.policy.override` audits `conflicts: [{id, version}]` (≤25; audit schema changed).
 - ReDoS: every view and rule stays under 100 ms on 500-character adversarial inputs (tests).
 

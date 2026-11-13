@@ -21,7 +21,7 @@ import { undefang } from "./text.js";
  * Links are found as `scheme://host`, `scheme:host` and `scheme:/\host` (WHATWG reads all three
  * as a link), `www.host`, `host/path`, and bare names under an ICANN public suffix (`evil.de`),
  * except names ending in a common file extension that is also a country code (`README.md`,
- * `main.py`). Review L-4.
+ * `main.py`). Review L-4. A bare name is listed but judged for look-alike letters only.
  */
 
 export interface LinkHost {
@@ -31,6 +31,12 @@ export interface LinkHost {
   readonly canonical: string | null;
   /** The host has non-ASCII letters (a look-alike of an ASCII name, or an IDN). */
   readonly lookalike: boolean;
+  /**
+   * Written as a bare name (`evil.de`: no scheme, `www.` or path). Bare names are prose as often
+   * as links (`ASP.NET`, `socket.io`), so they only get the look-alike warning, never
+   * `link_blocked`, and only a look-alike one counts for the fetch lint.
+   */
+  readonly bare: boolean;
 }
 
 /**
@@ -83,7 +89,7 @@ export function extractLinkHosts(text: string): LinkHost[] {
     const lookalike =
       /[^\p{ASCII}]/u.test(raw) ||
       (canonical?.split(".").some((l) => l.startsWith("xn--")) ?? false);
-    seen.set(host, { host, canonical, lookalike });
+    seen.set(host, { host, canonical, lookalike, bare: m[4] !== undefined });
     if (seen.size >= 20) break;
   }
   return [...seen.values()];
@@ -123,6 +129,7 @@ export function linkWarnings(
   const lookalikes = links.filter((l) => l.lookalike).map((l) => l.host);
   const blocked = links
     .filter((l) => {
+      if (l.bare) return false;
       if (l.canonical === null) return true;
       if (model.team === null)
         return !decideEgress(model.ceiling, model.ceiling, l.canonical).allowed;

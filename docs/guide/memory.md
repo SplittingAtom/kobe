@@ -123,9 +123,8 @@ links written as `hxxp://example[.]com` are read as the plain words they stand f
   people read, you are warned about email addresses, phone numbers, and a person's name near
   sensitive information (health, pay, discipline, family or identity documents). Your own memories
   are not checked for this.
-- **Links are shown with their host.** A link is a web address in any spelling, or a bare site
-  name such as `example.de` (file names such as `README.md` are not). You are warned when a link
-  points to a host this workspace's sandboxes can't reach (it isn't on the workspace's internet
+- **Links are shown with their host.** A link is a web address in any spelling (with
+  `https:`, `www.` or a path). You are warned when a link points to a host this workspace's sandboxes can't reach (it isn't on the workspace's internet
   allowlist, or the site's allowlist no longer holds it). Site memories and memories in all your
   workspaces are judged by the site's allowlist, since they reach every workspace (each workspace
   may still allow less). A host written
