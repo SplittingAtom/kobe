@@ -1,6 +1,6 @@
 ---
 title: Agents
-summary: How to pick an agent for a conversation, browse the Personal, Team and Site rosters, create and publish your own agent, and schedule it.
+summary: How to pick an agent for a conversation, browse the Personal, Team and Site rosters, create and publish your own agent, choose how much memory it uses, and schedule it.
 section: Agents and skills
 order: 1
 audience: member
@@ -50,6 +50,23 @@ The builder has two tabs, **Identity** and **Behaviour**:
 
 **Save draft** keeps your changes; **Test chat** tries the draft without publishing. **Publish…**
 creates a new version, after a safety check. Each published version is kept in **Version history**.
+
+### Memory
+
+The builder's **Memory** section sets how much memory the agent uses, per published version:
+
+| Setting        | What the agent gets                                                                      |
+| -------------- | ---------------------------------------------------------------------------------------- |
+| **All memory** | Memory notes (My memory, project memory) and any other memories Kobe keeps. The default. |
+| **Notes only** | Memory notes only.                                                                       |
+| **Off**        | No memory at all: no memory index, no **remember** or **recall** tools.                  |
+
+The agent always uses the memory of the person running it, never yours: sharing an agent never
+shares your memory. **Save as a new version** publishes the current version again with the new
+setting (the draft is untouched), so threads keep their version and rosters that follow your latest
+version get it. Publishing the draft keeps the current setting; restoring a version restores its
+setting. A **Test chat** uses the current version's setting. Team and site memory switches still
+apply on top: an agent set to **All memory** has none where memory is switched off.
 
 **Dangerous** mode ("allowed tools run without asking") can only be set by team and site admins. It
 applies only to tools named one by one in Allowed tools, and only in interactive conversations;

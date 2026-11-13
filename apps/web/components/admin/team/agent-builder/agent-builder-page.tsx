@@ -46,6 +46,7 @@ import { fieldError } from "./field-errors";
 import { BehaviourFields } from "./behaviour-fields";
 import { DangerousBadge } from "./dangerous-badge";
 import { IdentityFields } from "./identity-fields";
+import { MEMORY_SETTING_LABELS, MemorySetting } from "./memory-setting";
 import { OrbitExportButton } from "./orbit-export-button";
 import { PublishDialog } from "./publish-dialog";
 import { leftOutText, SkillUpdates } from "./skill-updates";
@@ -409,6 +410,23 @@ function Builder({
           </div>
         )}
       </form>
+      {agent && !rosterView && (
+        <MemorySetting
+          key={`${agent.currentVersion ?? 0}:${historyKey}`}
+          teamId={teamId}
+          agentId={agent.id}
+          currentVersion={agent.currentVersion}
+          canChange={canPublish}
+          busy={mutation.pending || evaluating}
+          onChanged={(result, memory) => {
+            apply(result.agent);
+            setHistoryKey((k) => k + 1);
+            setPublished(
+              `Memory set to ${MEMORY_SETTING_LABELS[memory].label.toLowerCase()} in v${result.version.version}.`,
+            );
+          }}
+        />
+      )}
       {agent && scope === "team" && agent.currentVersion !== null && (
         <SkillUpdates
           key={`${agent.currentVersion}:${historyKey}`}

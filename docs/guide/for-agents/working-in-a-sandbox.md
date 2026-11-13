@@ -125,8 +125,8 @@ other connector (no internet access, no key). Its tools are named `mcp__kobe__<t
 - `recall` lists files, reads one, or searches by text (not by meaning).
 - Save durable facts and preferences the user would want next time, not conversation details.
 - Never store secrets, passwords or tokens in memory.
-- If the tools are missing, memory is switched off for this team or site; do not simulate it with
-  files.
+- If the tools are missing, memory is switched off for this team or site, or your agent version's
+  memory setting is **Off**; do not simulate it with files.
 
 ## When you need access
 

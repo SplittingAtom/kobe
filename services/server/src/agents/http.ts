@@ -216,6 +216,8 @@ export function versionSummary(v: AgentVersionSummary) {
     publishedAt: v.publishedAt.toISOString(),
     draftRevision: v.draftRevision,
     republishedFrom: v.republishedFrom,
+    // KOBE-646: the field of protocol `agentVersionMemoryFieldSchema`.
+    memory: v.memory,
   };
 }
 
@@ -241,6 +243,11 @@ const PUBLISH_ERRORS = {
   archived: [409, "agent_archived", "This agent is archived. Unarchive it to publish."],
   version_not_found: [404, "version_not_found", "This agent has no such version."],
   already_current: [409, "already_current", "That version is already the current one."],
+  not_published: [
+    409,
+    "not_published",
+    "Publish the agent first: the memory setting belongs to a published version.",
+  ],
   unchanged: [
     409,
     "unchanged",

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AGENT_VERSION_MEMORY_SETTINGS } from "../schema/agents.js";
 import { DOMAIN_PATTERN_SQL } from "../schema/egress.js";
 import {
   MODEL_ALIAS_PATTERN,
@@ -1853,6 +1854,13 @@ export const AUDIT_EVENTS = {
   // Versions (KOBE-46): publish freezes the draft and its tool manifest; rollback republishes.
   "agent.published": event("any", { ...agentRef, version, draftRevision: version }),
   "agent.rolled_back": event("any", { ...agentRef, version, fromVersion: version }),
+  /** The memory setting changed (KOBE-646): the current version republished with `memory`. */
+  "agent.memory_changed": event("any", {
+    ...agentRef,
+    version,
+    fromVersion: version,
+    memory: z.enum(AGENT_VERSION_MEMORY_SETTINGS),
+  }),
   /**
    * A site admin's first edit of a seeded gallery agent (KOBE-494) detached it from the repo's
    * definition: `fromGeneration` is the repo generation it was edited from.

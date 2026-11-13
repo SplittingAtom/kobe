@@ -22,6 +22,7 @@ import {
 import { DateTime, ResourceView } from "../../parts";
 import { useMutation, useResource } from "../../use-resource";
 import { ErrorNotice } from "../../error-notice";
+import { MEMORY_SETTING_LABELS } from "./memory-setting";
 import { OrbitExportButton } from "./orbit-export-button";
 
 /** Published versions, newest first; restoring one republishes it as the newest (D19). */
@@ -82,7 +83,16 @@ export function VersionHistory({
                         )}
                         {v.republishedFrom !== null && (
                           <div className="text-sm font-normal text-console-muted">
-                            Restored from v{v.republishedFrom}
+                            {/* A rollback never republishes the version just before it (that
+                                one was current), so that is a memory change (KOBE-646). */}
+                            {v.republishedFrom === v.version - 1
+                              ? `Memory changed from v${v.republishedFrom}`
+                              : `Restored from v${v.republishedFrom}`}
+                          </div>
+                        )}
+                        {v.memory !== undefined && v.memory !== "all" && (
+                          <div className="text-sm font-normal text-console-muted">
+                            Memory: {MEMORY_SETTING_LABELS[v.memory].label}
                           </div>
                         )}
                       </TableRowHeader>

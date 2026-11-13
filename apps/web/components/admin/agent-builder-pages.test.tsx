@@ -57,6 +57,11 @@ const READ = {
   "GET /v1/team/models": [200, MODELS],
   "GET /v1/agents/a-1": [200, { agent: AGENT }],
   "GET /v1/agents/a-1/versions": [200, VERSIONS],
+  // The Memory section reads the current version's setting (KOBE-646).
+  "GET /v1/agents/a-1/versions/2": [
+    200,
+    { version: { ...VERSIONS.versions[0], frontmatter: AGENT.frontmatter, prompt: AGENT.prompt } },
+  ],
 } as const;
 
 let assign: ReturnType<typeof vi.fn>;

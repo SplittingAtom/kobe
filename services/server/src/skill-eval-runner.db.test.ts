@@ -563,6 +563,8 @@ describe("skill eval runner (KOBE-325)", () => {
     const w = await world();
     const provider = newProvider();
     provider.beforeReply = async (ws, start) => {
+      // No memory context either, though the sandbox announced `memory` (KOBE-646, verified).
+      expect(start).not.toHaveProperty("memory");
       ws.sb.send({
         v: 1,
         type: "policy.check",

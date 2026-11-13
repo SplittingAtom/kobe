@@ -56,7 +56,8 @@ export class FakeEvalProvider {
     });
     const sb = await FakeSandbox.connect(this.url(), token);
     if (!isFake(sb)) throw new Error(`upgrade refused: ${sb.status}`);
-    sb.hello(sandboxId, [], undefined, ["skill_bundles", "skill_eval"]);
+    // `memory` too (KOBE-646): an eval sandbox gets no run.start.memory even when it announces it.
+    sb.hello(sandboxId, [], undefined, ["skill_bundles", "skill_eval", "memory"]);
     await sb.ready();
     const ws = new FakeWorkspace(sb);
     const base = sb.respond;
