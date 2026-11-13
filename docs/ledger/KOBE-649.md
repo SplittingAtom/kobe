@@ -34,21 +34,34 @@
   pruned past the Site cap are simply absent.
 - **Excluded:** `team` (Workspace) and Site items, other people's items, author ids (always the
   person), `pass_id`.
-- **Provenance:** `source_thread_id` / `source_entry_ids` only on versions the person wrote, the
-  item store's `detailOf` rule (ids only, no text). A `user` item may cite a thread another member
-  shared (KOBE-378 L-2); the id is kept, its text is not.
-- **Evidence quotes:** the evidence JSON contract is not fixed yet (Phase B, KOBE-389/390). The
-  reader (`quotesOf`) accepts an array of `{ entry_id, quote, thread_id? }` or `{ quotes: [...] }`
-  and drops anything else. A quote is kept only when its entry is a `user` message
-  (`payload.message.role = 'user'`) in a conversation the person owns in this Workspace and it
-  cites the version's own source thread. So assistant text, tool output, quotes from a shared
-  thread of someone else and quotes of missing entries never reach the zip. The check reads only
-  the stored row: an offloaded entry (body in object storage) whose row lacks `message.role`
-  counts as not the person's message, so its quotes are dropped (safe side).
+
+### Privacy review fixes (`docs/ledger/review-649.md`, kept untracked)
+
+- **H-1 forks:** a cited entry counts as the person's only in a thread they own, as a `user`
+  message, and in a fork only when written after the fork: `created_at > thread.created_at`
+  (copies keep the source's time) **and** `seq >` the seq of `forked_at_entry_id` (the fork point;
+  kept even when the source is purged). The person's own messages copied into a fork are dropped
+  too (safe side). Test: fork of another member's shared thread.
+- **M-1 quote text:** a quote is kept only if, normalised, it is a substring of the cited entry's
+  normalised text (Pi content string or text parts). KOBE-379's shared normaliser is not on main
+  yet, so `normaliseQuote` (NFKC, typographic quotes/dashes, whitespace, lower case) stands in;
+  swap it in when it lands. Offloaded entries with no stored content: quote dropped.
+- **M-2 bounds:** items 100 per page; versions read 1,000 per transaction with a keyset on
+  `(item_id, version)`; cited pairs checked 500 per query, source threads 500 per query; each item
+  yielded as soon as its last version is read. Failure mode: `memory-items.json` comes after the
+  threads, so a DB error there errors the response stream (`trackedDownload` without a tail,
+  `export-stream.test.ts`): the zip has no central directory and the download fails visibly;
+  it is never closed as a valid but short archive. Test: one item with 2,101 versions, each with a
+  quote (2,100 pairs), plus a following item.
+- **L-1 authors:** only versions whose `actor_user_id` is the person, whatever `actor_kind`
+  (`user`, `import`, `pass` are all the person's own action: the store writes the caller). Others
+  are left out and counted in the item's `notes`; when someone else wrote the current version,
+  `statement` is null. Portable versions are bound to the owner by key already.
+- **L-2 thread ids:** `source_thread_id`/`source_entry_ids` only when the source thread is one the
+  person owns in this Workspace; a shared thread of another member is not named at all.
+- **L-3 replacements:** `superseded_by` kept only when it is one of the person's items of the same
+  scope (so in the archive); otherwise null with a note.
 - **Legal holds:** no effect on what is exported (nothing in the path reads holds).
-- **Size / streaming:** items 100 per page, one short `withTeam` transaction per page (versions
-  for the page in one query, own-message check in one query), pushed into the zip page by page;
-  a person has at most ~1,000 items per scope (SM21) and versions are capped by the Site.
 - **Audit:** `thread.exported.memoryItems` = the person's `user` items in the Workspace plus their
   portable items, counted in the same transaction as the thread counts. Optional in the schema so
   older rows still validate.
@@ -66,7 +79,9 @@
 - **ac-2** same test: other person's user/portable items, Workspace item, Site item and the
   person's Workspace-B item absent (text checked against the raw JSON); "keeps evidence quotes
   only from the person's own messages": assistant entry, another person's shared-thread message,
-  missing entry and wrong-thread quotes dropped. Unit: `memory/items-export.test.ts`.
+  missing entry, wrong-thread and paraphrased quotes dropped, fork copies dropped; "leaves out
+  versions someone else wrote and replacements outside the archive"; "streams items with more
+  versions than one batch". Unit: `memory/items-export.test.ts`.
 - **ac-3** "is audited with the number of memories": `thread.exported` target
   `{ threads, entries, memoryItems }`, no text.
 - **ac-4** `docs/guide/chat/threads-panel.md` body + summary (→ `/llms.txt`), export README in

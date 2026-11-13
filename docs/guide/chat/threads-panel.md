@@ -19,10 +19,11 @@ anywhere.
 **Export my conversations** downloads all your threads in this workspace as a zip, as Pi sessions
 and Markdown, including every branch and each thread's folder. The zip also holds your personal
 notes and, in `memory-items.json`, your own memories: the ones you keep in this workspace and your
-portable preferences, each with its kind, tags, status, dates and every kept version (for versions
-you saved, the conversation they came from and quotes from your own messages). Workspace and Site
-memories, and anything other people wrote, are not included; a legal hold does not change what you
-get. Memories you kept in a workspace you have left are not in any export. To download one
+portable preferences, each with its kind, tags, status, dates and every kept version you wrote (with
+the conversation of yours it came from and quotes of your own messages). Workspace and Site
+memories, and anything other people wrote (including messages copied into a fork), are not
+included; an item's `notes` says when something was left out. A legal hold does not change what
+you get. Memories you kept in a workspace you have left are not in any export. To download one
 conversation as Markdown, use `/export` in it.
 
 ## Folders

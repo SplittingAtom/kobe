@@ -373,9 +373,10 @@ This archive holds the conversations you own in one Kobe team.
 - \`artifacts/<artifact id>/v<n>.<ext>\`: every version of the artifacts the assistant made.
 - \`memory/<path>\`: your personal memory files (current versions).
 - \`memory-items.json\`: your own memories (short statements Kobe knows about you): yours in this
-  workspace and your portable preferences, with every kept version and, for versions you wrote,
-  the conversation they came from and quotes from your own messages. Memories the workspace shares
-  and Site memories are not included.
+  workspace and your portable preferences, with every kept version you wrote, the conversation of
+  yours each came from, and quotes of your own messages. Memories the workspace shares, Site
+  memories and anything someone else wrote are not included; an item's \`notes\` says when
+  something was left out.
 - \`projects/<slug>/\`: each project you can read: \`commits.json\` (its history, newest first) and
   \`head/\` (its current files).
 - \`files/<file id>/<name>\`: the files you uploaded to the conversation or the assistant shared.
