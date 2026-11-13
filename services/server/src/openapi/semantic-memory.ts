@@ -23,7 +23,8 @@ import {
 
 /**
  * OpenAPI for semantic memory (v1.3, KOBE-377 contract; schemas in `@kobe/protocol`
- * semantic-memory/). Documented before the routes exist: KOBE-378 mounts the item routes,
+ * semantic-memory/). Under `/v1/memory/semantic/` so no Notes route (`/v1/memory/:id`) can answer
+ * them. Documented before the routes exist: KOBE-378 mounts the item routes,
  * KOBE-384/385 import and export, KOBE-380 the steward routes. Wire scopes are
  * `user | portable | team | site`; `team` is the Workspace.
  */
@@ -82,18 +83,22 @@ const query = (name: string, schema: JsonSchema, description?: string) => ({
 const ERR = (description: string) => json("SemanticMemoryError", description);
 const COMMON = {
   "401": json("Error", "`unauthenticated`: no session."),
-  "403": ERR("`memory_not_allowed`, or `not_a_team_member`."),
-  "409": ERR("`memory_disabled`, `no_active_team` or `team_mismatch`."),
+  "403": ERR("`memory_not_allowed`, `memory_disabled` (switched off), or `not_a_team_member`."),
+  "409": ERR("`no_active_team` or `team_mismatch`."),
 };
 const SAVE_ERRORS = {
-  "400": json("Error", "`invalid_request`: the body does not match."),
+  "400": json(
+    "Error",
+    "`invalid_request`: the body does not match, or breaks a scope rule of the stored item " +
+      "(a portable item's kind or `as_of`, `policy` off the Site).",
+  ),
   "404": ERR("`memory_item_not_found`."),
   "409": ERR(
     "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; " +
       "audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, " +
       "`memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a " +
-      "Policy item can't be pinned, nor a pinned item made Policy), `memory_disabled`, " +
-      "`no_active_team` or `team_mismatch`.",
+      "Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or " +
+      "`team_mismatch`.",
   ),
   "422": ERR("`memory_secret`: a credential was found; it can never be saved."),
 };
@@ -111,13 +116,15 @@ const itemAction = (operationId: string, summary: string, bodyName?: string) => 
 
 function itemPaths(): Record<string, Record<string, unknown>> {
   return {
-    "/v1/memory/items": {
+    "/v1/memory/semantic/items": {
       get: {
         operationId: "listSemanticMemoryItems",
         summary: "List one scope's memory items, newest first",
         description:
           "Personal scopes are always the caller's own. Workspace and Site items are read by " +
-          "every member; curators (Team admins and stewards) and Site stewards change them.",
+          "every member; curators (Team admins and stewards) and Site stewards change them. " +
+          "Workspace thread links are shown to the author and curators only; Site items carry " +
+          "no author ids except for Site admins and Site stewards.",
         parameters: [
           scopeParam("query"),
           query("status", {
@@ -140,7 +147,11 @@ function itemPaths(): Record<string, Record<string, unknown>> {
         ],
         responses: {
           "200": json("SemanticMemoryList", "A page of items and how full the scope is."),
-          "400": json("Error", "`invalid_request`: a query parameter does not match."),
+          "400": json(
+            "Error",
+            "`invalid_request`: a query parameter does not match, or `policy` on a scope other " +
+              "than `site`.",
+          ),
           ...COMMON,
         },
       },
@@ -159,7 +170,7 @@ function itemPaths(): Record<string, Record<string, unknown>> {
         },
       },
     },
-    "/v1/memory/items/{scope}/{id}": {
+    "/v1/memory/semantic/items/{scope}/{id}": {
       get: {
         operationId: "getSemanticMemoryItem",
         summary: "A memory item with its versions",
@@ -174,20 +185,20 @@ function itemPaths(): Record<string, Record<string, unknown>> {
         responses: { "200": DETAIL, ...COMMON, ...SAVE_ERRORS },
       },
     },
-    "/v1/memory/items/{scope}/{id}/archive": itemAction(
+    "/v1/memory/semantic/items/{scope}/{id}/archive": itemAction(
       "archiveSemanticMemoryItem",
       "Archive a memory item (never deleted; its versions stay)",
     ),
-    "/v1/memory/items/{scope}/{id}/restore": itemAction(
+    "/v1/memory/semantic/items/{scope}/{id}/restore": itemAction(
       "restoreSemanticMemoryItem",
       "Restore an archived memory item",
     ),
-    "/v1/memory/items/{scope}/{id}/revert": itemAction(
+    "/v1/memory/semantic/items/{scope}/{id}/revert": itemAction(
       "revertSemanticMemoryItem",
       "Undo: save an earlier version as the newest",
       "RevertSemanticMemoryItem",
     ),
-    "/v1/memory/items/{scope}/{id}/pin": itemAction(
+    "/v1/memory/semantic/items/{scope}/{id}/pin": itemAction(
       "pinSemanticMemoryItem",
       "Pin or unpin a memory item (pinned items are always in context; Policy items can't be pinned)",
       "PinSemanticMemoryItem",
@@ -197,7 +208,7 @@ function itemPaths(): Record<string, Record<string, unknown>> {
 
 function transferPaths(): Record<string, Record<string, unknown>> {
   return {
-    "/v1/memory/import/preview": {
+    "/v1/memory/semantic/import/preview": {
       post: {
         operationId: "previewSemanticMemoryImport",
         summary: "Check a JSON or CSV file row by row; stores nothing",
@@ -207,26 +218,30 @@ function transferPaths(): Record<string, Record<string, unknown>> {
           "200": json("SemanticMemoryImportPreview", "Each row with its status and issues."),
           "400": ERR("`memory_import_invalid`, or `invalid_request`."),
           ...COMMON,
+          "413": ERR("`memory_import_too_large`: over 1,000 rows or 1 MiB; nothing was read."),
         },
       },
     },
-    "/v1/memory/import/commit": {
+    "/v1/memory/semantic/import/commit": {
       post: {
         operationId: "commitSemanticMemoryImport",
-        summary: "Save the accepted rows of an import (the checks run again)",
+        summary: "Save the accepted rows of an import, all or nothing (the checks run again)",
         parameters: [TEAM_HEADER],
         requestBody: body("SemanticMemoryImportCommitRequest"),
         responses: {
-          "200": json("SemanticMemoryImportCommit", "What was saved and skipped."),
+          "200": json("SemanticMemoryImportCommit", "Every accepted row was saved."),
           "400": ERR("`memory_import_invalid`, or `invalid_request`."),
           ...COMMON,
           "409": ERR(
-            "`memory_scope_full`, `memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "Nothing was saved: `memory_import_stale` (rows changed since the preview, named in " +
+              "`import_rows`), `memory_scope_full` (with `capacity`), `memory_policy_budget_full`, " +
+              "`no_active_team` or `team_mismatch`.",
           ),
+          "413": ERR("`memory_import_too_large`: over 1,000 rows or 1 MiB; nothing was saved."),
         },
       },
     },
-    "/v1/memory/export": {
+    "/v1/memory/semantic/export": {
       get: {
         operationId: "exportSemanticMemory",
         summary: "Download one scope as JSON or CSV",
@@ -238,7 +253,10 @@ function transferPaths(): Record<string, Record<string, unknown>> {
         ],
         responses: {
           "200": {
-            description: "The export: JSON (also a valid import file) or CSV with a header row.",
+            description:
+              "The export: JSON (also a valid import file) or CSV with a header row; both keep " +
+              "status and supersession. CSV cells a spreadsheet would run as a formula (leading " +
+              "=, +, -, @, tab or CR) are prefixed with `'`, which an import removes.",
             content: {
               "application/json": {
                 schema: { $ref: "#/components/schemas/SemanticMemoryExport" },

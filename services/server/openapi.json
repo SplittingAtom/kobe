@@ -10206,11 +10206,11 @@
         }
       }
     },
-    "/v1/memory/items": {
+    "/v1/memory/semantic/items": {
       "get": {
         "operationId": "listSemanticMemoryItems",
         "summary": "List one scope's memory items, newest first",
-        "description": "Personal scopes are always the caller's own. Workspace and Site items are read by every member; curators (Team admins and stewards) and Site stewards change them.",
+        "description": "Personal scopes are always the caller's own. Workspace and Site items are read by every member; curators (Team admins and stewards) and Site stewards change them. Workspace thread links are shown to the author and curators only; Site items carry no author ids except for Site admins and Site stewards.",
         "parameters": [
           {
             "name": "scope",
@@ -10310,7 +10310,7 @@
             }
           },
           "400": {
-            "description": "`invalid_request`: a query parameter does not match.",
+            "description": "`invalid_request`: a query parameter does not match, or `policy` on a scope other than `site`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10330,7 +10330,7 @@
             }
           },
           "403": {
-            "description": "`memory_not_allowed`, or `not_a_team_member`.",
+            "description": "`memory_not_allowed`, `memory_disabled` (switched off), or `not_a_team_member`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10340,7 +10340,7 @@
             }
           },
           "409": {
-            "description": "`memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10389,7 +10389,7 @@
             }
           },
           "400": {
-            "description": "`invalid_request`: the body does not match.",
+            "description": "`invalid_request`: the body does not match, or breaks a scope rule of the stored item (a portable item's kind or `as_of`, `policy` off the Site).",
             "content": {
               "application/json": {
                 "schema": {
@@ -10409,7 +10409,7 @@
             }
           },
           "403": {
-            "description": "`memory_not_allowed`, or `not_a_team_member`.",
+            "description": "`memory_not_allowed`, `memory_disabled` (switched off), or `not_a_team_member`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10429,7 +10429,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10451,7 +10451,7 @@
         }
       }
     },
-    "/v1/memory/items/{scope}/{id}": {
+    "/v1/memory/semantic/items/{scope}/{id}": {
       "get": {
         "operationId": "getSemanticMemoryItem",
         "summary": "A memory item with its versions",
@@ -10508,7 +10508,7 @@
             }
           },
           "403": {
-            "description": "`memory_not_allowed`, or `not_a_team_member`.",
+            "description": "`memory_not_allowed`, `memory_disabled` (switched off), or `not_a_team_member`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10528,7 +10528,7 @@
             }
           },
           "409": {
-            "description": "`memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10595,7 +10595,7 @@
             }
           },
           "400": {
-            "description": "`invalid_request`: the body does not match.",
+            "description": "`invalid_request`: the body does not match, or breaks a scope rule of the stored item (a portable item's kind or `as_of`, `policy` off the Site).",
             "content": {
               "application/json": {
                 "schema": {
@@ -10615,7 +10615,7 @@
             }
           },
           "403": {
-            "description": "`memory_not_allowed`, or `not_a_team_member`.",
+            "description": "`memory_not_allowed`, `memory_disabled` (switched off), or `not_a_team_member`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10635,7 +10635,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10657,7 +10657,7 @@
         }
       }
     },
-    "/v1/memory/items/{scope}/{id}/archive": {
+    "/v1/memory/semantic/items/{scope}/{id}/archive": {
       "post": {
         "operationId": "archiveSemanticMemoryItem",
         "summary": "Archive a memory item (never deleted; its versions stay)",
@@ -10704,7 +10704,7 @@
             }
           },
           "400": {
-            "description": "`invalid_request`: the body does not match.",
+            "description": "`invalid_request`: the body does not match, or breaks a scope rule of the stored item (a portable item's kind or `as_of`, `policy` off the Site).",
             "content": {
               "application/json": {
                 "schema": {
@@ -10724,7 +10724,7 @@
             }
           },
           "403": {
-            "description": "`memory_not_allowed`, or `not_a_team_member`.",
+            "description": "`memory_not_allowed`, `memory_disabled` (switched off), or `not_a_team_member`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10744,7 +10744,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10766,7 +10766,7 @@
         }
       }
     },
-    "/v1/memory/items/{scope}/{id}/restore": {
+    "/v1/memory/semantic/items/{scope}/{id}/restore": {
       "post": {
         "operationId": "restoreSemanticMemoryItem",
         "summary": "Restore an archived memory item",
@@ -10813,7 +10813,7 @@
             }
           },
           "400": {
-            "description": "`invalid_request`: the body does not match.",
+            "description": "`invalid_request`: the body does not match, or breaks a scope rule of the stored item (a portable item's kind or `as_of`, `policy` off the Site).",
             "content": {
               "application/json": {
                 "schema": {
@@ -10833,7 +10833,7 @@
             }
           },
           "403": {
-            "description": "`memory_not_allowed`, or `not_a_team_member`.",
+            "description": "`memory_not_allowed`, `memory_disabled` (switched off), or `not_a_team_member`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10853,7 +10853,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10875,7 +10875,7 @@
         }
       }
     },
-    "/v1/memory/items/{scope}/{id}/revert": {
+    "/v1/memory/semantic/items/{scope}/{id}/revert": {
       "post": {
         "operationId": "revertSemanticMemoryItem",
         "summary": "Undo: save an earlier version as the newest",
@@ -10932,7 +10932,7 @@
             }
           },
           "400": {
-            "description": "`invalid_request`: the body does not match.",
+            "description": "`invalid_request`: the body does not match, or breaks a scope rule of the stored item (a portable item's kind or `as_of`, `policy` off the Site).",
             "content": {
               "application/json": {
                 "schema": {
@@ -10952,7 +10952,7 @@
             }
           },
           "403": {
-            "description": "`memory_not_allowed`, or `not_a_team_member`.",
+            "description": "`memory_not_allowed`, `memory_disabled` (switched off), or `not_a_team_member`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10972,7 +10972,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10994,7 +10994,7 @@
         }
       }
     },
-    "/v1/memory/items/{scope}/{id}/pin": {
+    "/v1/memory/semantic/items/{scope}/{id}/pin": {
       "post": {
         "operationId": "pinSemanticMemoryItem",
         "summary": "Pin or unpin a memory item (pinned items are always in context; Policy items can't be pinned)",
@@ -11051,7 +11051,7 @@
             }
           },
           "400": {
-            "description": "`invalid_request`: the body does not match.",
+            "description": "`invalid_request`: the body does not match, or breaks a scope rule of the stored item (a portable item's kind or `as_of`, `policy` off the Site).",
             "content": {
               "application/json": {
                 "schema": {
@@ -11071,7 +11071,7 @@
             }
           },
           "403": {
-            "description": "`memory_not_allowed`, or `not_a_team_member`.",
+            "description": "`memory_not_allowed`, `memory_disabled` (switched off), or `not_a_team_member`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11091,7 +11091,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11113,7 +11113,7 @@
         }
       }
     },
-    "/v1/memory/import/preview": {
+    "/v1/memory/semantic/import/preview": {
       "post": {
         "operationId": "previewSemanticMemoryImport",
         "summary": "Check a JSON or CSV file row by row; stores nothing",
@@ -11171,7 +11171,7 @@
             }
           },
           "403": {
-            "description": "`memory_not_allowed`, or `not_a_team_member`.",
+            "description": "`memory_not_allowed`, `memory_disabled` (switched off), or `not_a_team_member`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11181,7 +11181,17 @@
             }
           },
           "409": {
-            "description": "`memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`no_active_team` or `team_mismatch`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticMemoryError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`memory_import_too_large`: over 1,000 rows or 1 MiB; nothing was read.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11193,10 +11203,10 @@
         }
       }
     },
-    "/v1/memory/import/commit": {
+    "/v1/memory/semantic/import/commit": {
       "post": {
         "operationId": "commitSemanticMemoryImport",
-        "summary": "Save the accepted rows of an import (the checks run again)",
+        "summary": "Save the accepted rows of an import, all or nothing (the checks run again)",
         "parameters": [
           {
             "name": "X-Kobe-Team",
@@ -11221,7 +11231,7 @@
         },
         "responses": {
           "200": {
-            "description": "What was saved and skipped.",
+            "description": "Every accepted row was saved.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11251,7 +11261,7 @@
             }
           },
           "403": {
-            "description": "`memory_not_allowed`, or `not_a_team_member`.",
+            "description": "`memory_not_allowed`, `memory_disabled` (switched off), or `not_a_team_member`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11261,7 +11271,17 @@
             }
           },
           "409": {
-            "description": "`memory_scope_full`, `memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "Nothing was saved: `memory_import_stale` (rows changed since the preview, named in `import_rows`), `memory_scope_full` (with `capacity`), `memory_policy_budget_full`, `no_active_team` or `team_mismatch`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticMemoryError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`memory_import_too_large`: over 1,000 rows or 1 MiB; nothing was saved.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11273,7 +11293,7 @@
         }
       }
     },
-    "/v1/memory/export": {
+    "/v1/memory/semantic/export": {
       "get": {
         "operationId": "exportSemanticMemory",
         "summary": "Download one scope as JSON or CSV",
@@ -11320,7 +11340,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The export: JSON (also a valid import file) or CSV with a header row.",
+            "description": "The export: JSON (also a valid import file) or CSV with a header row; both keep status and supersession. CSV cells a spreadsheet would run as a formula (leading =, +, -, @, tab or CR) are prefixed with `'`, which an import removes.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11345,7 +11365,7 @@
             }
           },
           "403": {
-            "description": "`memory_not_allowed`, or `not_a_team_member`.",
+            "description": "`memory_not_allowed`, `memory_disabled` (switched off), or `not_a_team_member`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11355,7 +11375,7 @@
             }
           },
           "409": {
-            "description": "`memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11405,7 +11425,7 @@
             }
           },
           "403": {
-            "description": "`memory_not_allowed`, or `not_a_team_member`.",
+            "description": "`memory_not_allowed`, `memory_disabled` (switched off), or `not_a_team_member`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11415,7 +11435,7 @@
             }
           },
           "409": {
-            "description": "`memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11474,7 +11494,7 @@
             }
           },
           "403": {
-            "description": "`memory_not_allowed`, or `not_a_team_member`.",
+            "description": "`memory_not_allowed`, `memory_disabled` (switched off), or `not_a_team_member`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11494,7 +11514,7 @@
             }
           },
           "409": {
-            "description": "`memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11544,7 +11564,7 @@
             }
           },
           "403": {
-            "description": "`memory_not_allowed`, or `not_a_team_member`.",
+            "description": "`memory_not_allowed`, `memory_disabled` (switched off), or `not_a_team_member`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11564,7 +11584,7 @@
             }
           },
           "409": {
-            "description": "`memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11603,7 +11623,7 @@
             }
           },
           "403": {
-            "description": "`memory_not_allowed`, or `not_a_team_member`.",
+            "description": "`memory_not_allowed`, `memory_disabled` (switched off), or `not_a_team_member`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11613,7 +11633,7 @@
             }
           },
           "409": {
-            "description": "`memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -22925,8 +22945,7 @@
                   "enum": ["active", "archived", "superseded"]
                 },
                 "statement": {
-                  "type": "string",
-                  "maxLength": 500
+                  "type": "string"
                 },
                 "tags": {
                   "maxItems": 5,
@@ -22934,7 +22953,6 @@
                   "items": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 40,
                     "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                   }
                 },
@@ -23008,13 +23026,20 @@
                   "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
                 },
                 "updated_by": {
-                  "type": "string",
-                  "allOf": [
+                  "anyOf": [
                     {
-                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
                     },
                     {
-                      "pattern": "^[0-9a-f-]+$"
+                      "type": "null"
                     }
                   ]
                 }
@@ -23109,8 +23134,7 @@
             "enum": ["active", "archived", "superseded"]
           },
           "statement": {
-            "type": "string",
-            "maxLength": 500
+            "type": "string"
           },
           "tags": {
             "maxItems": 5,
@@ -23118,7 +23142,6 @@
             "items": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 40,
               "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
             }
           },
@@ -23192,13 +23215,20 @@
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
           },
           "updated_by": {
-            "type": "string",
-            "allOf": [
+            "anyOf": [
               {
-                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
               },
               {
-                "pattern": "^[0-9a-f-]+$"
+                "type": "null"
               }
             ]
           },
@@ -23214,17 +23244,23 @@
                   "maximum": 9007199254740991
                 },
                 "statement": {
-                  "type": "string",
-                  "maxLength": 500
+                  "type": "string"
                 },
                 "actor_user_id": {
-                  "type": "string",
-                  "allOf": [
+                  "anyOf": [
                     {
-                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
                     },
                     {
-                      "pattern": "^[0-9a-f-]+$"
+                      "type": "null"
                     }
                   ]
                 },
@@ -23327,8 +23363,7 @@
             "enum": ["preference", "fact", "convention", "definition", "decision"]
           },
           "statement": {
-            "type": "string",
-            "maxLength": 500
+            "type": "string"
           },
           "tags": {
             "maxItems": 5,
@@ -23336,7 +23371,6 @@
             "items": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 40,
               "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
             }
           },
@@ -23411,8 +23445,7 @@
             "maximum": 9007199254740991
           },
           "statement": {
-            "type": "string",
-            "maxLength": 500
+            "type": "string"
           },
           "kind": {
             "type": "string",
@@ -23424,7 +23457,6 @@
             "items": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 40,
               "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
             }
           },
@@ -23569,6 +23601,9 @@
                 "pinned": {
                   "type": "boolean"
                 },
+                "policy": {
+                  "type": "boolean"
+                },
                 "as_of": {
                   "anyOf": [
                     {
@@ -23609,6 +23644,7 @@
                 "statement",
                 "tags",
                 "pinned",
+                "policy",
                 "as_of",
                 "issues"
               ],
@@ -23703,15 +23739,11 @@
           },
           "created": {
             "type": "integer",
-            "minimum": 0,
-            "maximum": 9007199254740991
-          },
-          "skipped": {
-            "type": "integer",
-            "minimum": 0,
+            "exclusiveMinimum": 0,
             "maximum": 9007199254740991
           },
           "item_ids": {
+            "minItems": 1,
             "maxItems": 1000,
             "type": "array",
             "items": {
@@ -23727,7 +23759,7 @@
             }
           }
         },
-        "required": ["scope", "created", "skipped", "item_ids"],
+        "required": ["scope", "created", "item_ids"],
         "additionalProperties": false
       },
       "SemanticMemoryExport": {
@@ -23746,18 +23778,31 @@
             "format": "date-time",
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
           },
+          "include_inactive": {
+            "type": "boolean"
+          },
           "items": {
             "type": "array",
             "items": {
               "type": "object",
               "properties": {
+                "ref": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
                 "kind": {
                   "type": "string",
                   "enum": ["preference", "fact", "convention", "definition", "decision"]
                 },
                 "statement": {
-                  "type": "string",
-                  "maxLength": 500
+                  "type": "string"
                 },
                 "tags": {
                   "maxItems": 5,
@@ -23765,7 +23810,6 @@
                   "items": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 40,
                     "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                   }
                 },
@@ -23790,14 +23834,42 @@
                 "status": {
                   "type": "string",
                   "enum": ["active", "archived", "superseded"]
+                },
+                "superseded_by": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f-]+$"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
-              "required": ["kind", "statement", "tags", "pinned", "as_of", "policy", "status"],
+              "required": [
+                "ref",
+                "kind",
+                "statement",
+                "tags",
+                "pinned",
+                "as_of",
+                "policy",
+                "status",
+                "superseded_by"
+              ],
               "additionalProperties": false
             }
           }
         },
-        "required": ["format", "scope", "exported_at", "items"],
+        "required": ["format", "scope", "exported_at", "include_inactive", "items"],
         "additionalProperties": false
       },
       "SemanticMemoryError": {
@@ -23818,6 +23890,8 @@
               "memory_not_allowed",
               "memory_item_inactive",
               "memory_import_invalid",
+              "memory_import_too_large",
+              "memory_import_stale",
               "memory_policy_not_pinnable"
             ]
           },
@@ -23872,6 +23946,42 @@
               "required": ["id", "version"],
               "additionalProperties": false
             }
+          },
+          "capacity": {
+            "type": "object",
+            "properties": {
+              "count": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "max": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "needed": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": ["count", "max", "needed"],
+            "additionalProperties": false
+          },
+          "current_version": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "import_rows": {
+            "maxItems": 1000,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
           }
         },
         "required": ["code", "message"],
@@ -23921,7 +24031,7 @@
         "properties": {
           "level": {
             "type": "string",
-            "enum": ["workspace", "site"]
+            "enum": ["team", "site"]
           },
           "stewards": {
             "maxItems": 1000,

@@ -8,7 +8,7 @@ import {
   semanticMemoryKindSchema,
   semanticMemoryScopeSchema,
   semanticMemoryStatementSchema,
-} from "./items.js";
+} from "./fields.js";
 
 /**
  * `run.start.memory.semantic` (KOBE-377; spec SM23, SM24): the semantic memory items the server
@@ -23,11 +23,28 @@ import {
  * The selector (KOBE-382) decides membership; the schema checks the order and the byte budgets.
  */
 
-/** `hello.capabilities` entry of an agent that renders `run.start.memory.semantic`. */
+/**
+ * `hello.capabilities` entry of an agent that renders `run.start.memory.semantic`. It implies
+ * `memory`: `semantic` travels only inside `run.start.memory`, which the server sends only to
+ * agents listing `memory`, so an agent listing `semantic_memory` alone gets nothing (L11).
+ */
 export const CAPABILITY_SEMANTIC_MEMORY = "semantic_memory";
 
-/** Most statement bytes in one block (the rendered block, fences included, is 8 KiB; SM23). */
+/**
+ * Most bytes of the rendered "What Kobe knows" block (SM23): block header and footer, each lane's
+ * nonce fences and header, and each item's line (bullet, kind, provenance) plus its statement.
+ * {@link semanticMemoryRenderedBytes} computes it with the fixed overheads below; the selector
+ * (KOBE-382) fills to it and the renderer (KOBE-383) must stay within those overheads, so
+ * `omitted_count` stays true. The Policy cap ({@link SEMANTIC_MEMORY_POLICY_MAX_BYTES}) is a store
+ * limit over statement bytes.
+ */
 export const SEMANTIC_MEMORY_BLOCK_MAX_BYTES = 8 * 1024;
+/** Block title, untrusted-data notice and the "n more not shown" line. */
+export const SEMANTIC_MEMORY_RENDER_BLOCK_OVERHEAD_BYTES = 256;
+/** One lane (Policy or a scope): its header and nonce fences, open and close. */
+export const SEMANTIC_MEMORY_RENDER_LANE_OVERHEAD_BYTES = 160;
+/** One item: bullet, kind, provenance line and separators, besides the statement. */
+export const SEMANTIC_MEMORY_RENDER_ITEM_OVERHEAD_BYTES = 96;
 /** Most items in one block. */
 export const SEMANTIC_MEMORY_RUN_MAX_ITEMS = 100;
 
@@ -61,6 +78,24 @@ export const semanticMemoryRunRank = (item: { policy: boolean; pinned: boolean }
 const bytes = (items: readonly RunSemanticMemoryItem[]) =>
   items.reduce((sum, i) => sum + utf8ByteLength(i.statement), 0);
 
+/** The lane an item renders in: Policy, or its scope. */
+export const semanticMemoryRunLane = (item: RunSemanticMemoryItem): string =>
+  item.policy ? "policy" : item.scope;
+
+/** Bytes of the rendered block for these items (see {@link SEMANTIC_MEMORY_BLOCK_MAX_BYTES}). */
+export function semanticMemoryRenderedBytes(semantic: {
+  items: readonly RunSemanticMemoryItem[];
+  omitted_count?: number;
+}): number {
+  const lanes = new Set(semantic.items.map(semanticMemoryRunLane)).size;
+  return (
+    SEMANTIC_MEMORY_RENDER_BLOCK_OVERHEAD_BYTES +
+    lanes * SEMANTIC_MEMORY_RENDER_LANE_OVERHEAD_BYTES +
+    semantic.items.length * SEMANTIC_MEMORY_RENDER_ITEM_OVERHEAD_BYTES +
+    bytes(semantic.items)
+  );
+}
+
 export const runSemanticMemorySchema = z
   .strictObject({
     items: z.array(runSemanticMemoryItemSchema).max(SEMANTIC_MEMORY_RUN_MAX_ITEMS),
@@ -85,6 +120,7 @@ export const runSemanticMemorySchema = z
     const policy = v.items.filter((i) => i.policy);
     if (policy.length > SEMANTIC_MEMORY_POLICY_MAX_ITEMS) issue("too many Policy items");
     if (bytes(policy) > SEMANTIC_MEMORY_POLICY_MAX_BYTES) issue("Policy exceeds its byte budget");
-    if (bytes(v.items) > SEMANTIC_MEMORY_BLOCK_MAX_BYTES) issue("block exceeds its byte budget");
+    if (semanticMemoryRenderedBytes(v) > SEMANTIC_MEMORY_BLOCK_MAX_BYTES)
+      issue("rendered block exceeds its byte budget");
   });
 export type RunSemanticMemory = z.infer<typeof runSemanticMemorySchema>;

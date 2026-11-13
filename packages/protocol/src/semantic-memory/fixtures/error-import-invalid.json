@@ -1,0 +1,4 @@
+{
+  "code": "memory_import_invalid",
+  "message": "The file could not be read as CSV."
+}

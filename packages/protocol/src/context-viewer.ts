@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { timestampSchema, uuidSchema } from "./common.js";
+import { SEMANTIC_MEMORY_SCOPE_LABELS } from "./semantic-memory/fields.js";
 
 /**
  * Context viewer (KOBE-470, docs/specs/context-viewer.md): what a thread's latest model call sent
@@ -45,7 +46,7 @@ export const contextSectionKindSchema = z.enum(CONTEXT_SECTION_KINDS);
 /**
  * The `memory` kind's sections (KOBE-377; KOBE-383 teaches the splitter): the Notes index, then
  * one per semantic memory lane in the order the block renders them (Policy first, stable parts
- * before per-message picks). Lanes are the wire scopes plus Policy; labels use Workspace wording.
+ * before per-message picks). Lanes are the wire scopes plus Policy; scope labels come from `SEMANTIC_MEMORY_SCOPE_LABELS`.
  * Shown to the thread's owner only (CV2).
  */
 export const CONTEXT_MEMORY_LANES = [
@@ -60,10 +61,10 @@ export type ContextMemoryLane = (typeof CONTEXT_MEMORY_LANES)[number];
 export const CONTEXT_MEMORY_SECTION_LABELS = {
   notes: "Saved memory",
   policy: "Policy",
-  site: "Site memories",
-  team: "Workspace memories",
-  portable: "My memories in all my workspaces",
-  user: "My memories in this workspace",
+  site: SEMANTIC_MEMORY_SCOPE_LABELS.site.section,
+  team: SEMANTIC_MEMORY_SCOPE_LABELS.team.section,
+  portable: SEMANTIC_MEMORY_SCOPE_LABELS.portable.section,
+  user: SEMANTIC_MEMORY_SCOPE_LABELS.user.section,
 } as const satisfies Record<ContextMemoryLane, string>;
 
 export type ContextSectionKind = z.infer<typeof contextSectionKindSchema>;

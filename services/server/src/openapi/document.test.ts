@@ -21,6 +21,7 @@ import { threadRoutes } from "../routes/threads.js";
 import { threadFolderRoutes } from "../routes/thread-folders.js";
 import { threadFileLinkRoutes, workspaceFileThreadRoutes } from "../routes/thread-file-links.js";
 import { threadUsageRoutes } from "../routes/usage.js";
+import { memoryRoutes } from "../routes/memory.js";
 import { Hono } from "hono";
 import {
   mountAgentRosterRoutes,
@@ -163,21 +164,22 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
   it("documents the semantic memory item, import/export and steward contract (KOBE-377)", () => {
     // Contract first: the routes are mounted by KOBE-378 (items), KOBE-384/385 (import/export)
     // and KOBE-380 (stewards), which then add a "describes exactly" check here.
-    expect(documented("/v1/memory/")).toEqual(
+    expect(documented("/v1/memory/semantic/")).toEqual(
       [
-        "get /v1/memory/export",
-        "post /v1/memory/import/commit",
-        "post /v1/memory/import/preview",
-        "get /v1/memory/items",
-        "post /v1/memory/items",
-        "get /v1/memory/items/{scope}/{id}",
-        "patch /v1/memory/items/{scope}/{id}",
-        "post /v1/memory/items/{scope}/{id}/archive",
-        "post /v1/memory/items/{scope}/{id}/pin",
-        "post /v1/memory/items/{scope}/{id}/restore",
-        "post /v1/memory/items/{scope}/{id}/revert",
+        "get /v1/memory/semantic/export",
+        "post /v1/memory/semantic/import/commit",
+        "post /v1/memory/semantic/import/preview",
+        "get /v1/memory/semantic/items",
+        "post /v1/memory/semantic/items",
+        "get /v1/memory/semantic/items/{scope}/{id}",
+        "patch /v1/memory/semantic/items/{scope}/{id}",
+        "post /v1/memory/semantic/items/{scope}/{id}/archive",
+        "post /v1/memory/semantic/items/{scope}/{id}/pin",
+        "post /v1/memory/semantic/items/{scope}/{id}/restore",
+        "post /v1/memory/semantic/items/{scope}/{id}/revert",
       ].sort(),
     );
+    expect(documented("/v1/memory").every((op) => op.includes("/v1/memory/semantic/"))).toBe(true);
     expect(documented("/v1/team/memory/stewards")).toEqual(
       [
         "get /v1/team/memory/stewards",
@@ -189,6 +191,26 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
     const schemas = (doc.components as { schemas: Record<string, JsonSchemaNode> }).schemas;
     expect(schemas.SemanticMemoryItemDetail?.required).toContain("versions");
     expect(schemas.SemanticMemoryError?.properties?.code).toBeDefined();
+  });
+
+  it("no Notes route (/v1/memory) answers a semantic memory request (KOBE-377 review M1)", () => {
+    const notes = memoryRoutes(fakeDeps);
+    const semantic = documented("/v1/memory/semantic/");
+    expect(semantic.length).toBeGreaterThan(0);
+    for (const op of semantic) {
+      const [method = "", path = ""] = op.split(" ");
+      const concrete = path
+        .replace("/v1/memory", "")
+        .replace("{scope}", "team")
+        .replace("{id}", "11111111-1111-4111-8111-111111111111");
+      const hit = notes.routes.find(
+        (r) =>
+          HTTP_METHODS.has(r.method) &&
+          r.method.toLowerCase() === method &&
+          new RegExp(`^${r.path.replace(/:[A-Za-z]+/g, "[^/]+")}$`).test(concrete),
+      );
+      expect(hit, `${op} is answered by the Notes route ${hit?.path ?? ""}`).toBeUndefined();
+    }
   });
 
   it("describes exactly the team default agent routes the server mounts (KOBE-571)", () => {

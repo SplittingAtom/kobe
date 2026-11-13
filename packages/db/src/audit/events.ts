@@ -2768,13 +2768,19 @@ export const AUDIT_EVENTS = {
   // a statement, tag or evidence. Workspace items are team events; portable and Site items site
   // events (`any`). Pass, candidate, proposal and suggestion actions are reserved for Phase B/C
   // (`RESERVED_MEMORY_AUDIT_ACTIONS` in @kobe/protocol) and registered by their tickets.
-  /** An item was saved (its first version): by a person, or from an import. */
+  /**
+   * An item was saved (its first version): by a person, or from an import. Names follow the
+   * brief's SM28 pattern (`memory.item.*`); the SM28 text was not available to check them.
+   */
   "memory.item.created": event("any", {
     scope: semanticMemoryScope,
     itemId: id,
     kind: z.enum(SEMANTIC_MEMORY_KIND_VALUES),
     version,
     actorKind: z.enum(["user", "import", "pass", "proposal"]),
+    /** Created pinned, or as Policy (Site only): no separate pin or `memory.policy.set` row. */
+    pinned: z.boolean(),
+    policy: z.boolean(),
   }),
   /** An item was edited: a new version (statement) and/or changed kind, tags or `as_of`. */
   "memory.item.updated": event("any", {

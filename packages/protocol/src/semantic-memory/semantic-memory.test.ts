@@ -64,6 +64,16 @@ const GOLDEN: [string, z.ZodType][] = [
   ["error-lint", semanticMemoryErrorSchema],
   ["stewards", memoryStewardListSchema],
   ["agent-version-memory", agentVersionMemoryFieldSchema],
+  ["item-detail-portable", semanticMemoryItemDetailSchema],
+  ["item-detail-site", semanticMemoryItemDetailSchema],
+  ["create-boundary-request", createSemanticMemoryItemSchema],
+  ["error-secret", semanticMemoryErrorSchema],
+  ["error-scope-full", semanticMemoryErrorSchema],
+  ["error-version-conflict", semanticMemoryErrorSchema],
+  ["error-policy-not-pinnable", semanticMemoryErrorSchema],
+  ["error-import-invalid", semanticMemoryErrorSchema],
+  ["error-import-too-large", semanticMemoryErrorSchema],
+  ["error-import-stale", semanticMemoryErrorSchema],
 ];
 
 describe("semantic memory golden fixtures (ac-1)", () => {
@@ -129,18 +139,11 @@ describe("run.start.memory.semantic ordering and limits", () => {
   it("Policy items are never pinned (always in context)", () => {
     const [policy] = runItems();
     expect(semantic([{ ...policy, pinned: true }]).success).toBe(false);
-    const detail = fixture("item-detail");
-    expect(
-      semanticMemoryItemDetailSchema.safeParse({ ...detail, scope: "site", policy: true }).success,
-    ).toBe(false);
-    expect(
-      semanticMemoryItemDetailSchema.safeParse({
-        ...detail,
-        scope: "site",
-        policy: true,
-        pinned: false,
-      }).success,
-    ).toBe(true);
+    const detail = fixture("item-detail-site");
+    expect(semanticMemoryItemDetailSchema.safeParse(detail).success).toBe(true);
+    expect(semanticMemoryItemDetailSchema.safeParse({ ...detail, pinned: true }).success).toBe(
+      false,
+    );
     expect(
       createSemanticMemoryItemSchema.safeParse({
         ...fixture("create-request"),
@@ -200,10 +203,10 @@ describe("item API requests", () => {
   it("scopes are the wire names; the UI says Workspace", () => {
     expect(SEMANTIC_MEMORY_SCOPES).toEqual(["user", "portable", "team", "site"]);
     expect(SEMANTIC_MEMORY_SCOPE_LABELS).toEqual({
-      user: "Me in this workspace",
-      portable: "All my workspaces",
-      team: "This workspace",
-      site: "Site",
+      user: { picker: "Me in this workspace", section: "My memories in this workspace" },
+      portable: { picker: "All my workspaces", section: "My memories in all my workspaces" },
+      team: { picker: "This workspace", section: "Workspace memories" },
+      site: { picker: "Site", section: "Site memories" },
     });
   });
 
@@ -260,12 +263,15 @@ describe("import and export", () => {
       semanticMemoryExportQuerySchema.safeParse({ scope: "user", format: "xml" }).success,
     ).toBe(false);
     expect(SEMANTIC_MEMORY_CSV_COLUMNS).toEqual([
+      "ref",
       "kind",
       "statement",
       "tags",
       "pinned",
       "as_of",
       "policy",
+      "status",
+      "superseded_by",
     ]);
   });
 

@@ -1,0 +1,30 @@
+{
+  "id": "55555555-5555-4555-8555-555555555555",
+  "scope": "portable",
+  "kind": "preference",
+  "status": "superseded",
+  "statement": "Prefers bullet points.",
+  "tags": [],
+  "pinned": false,
+  "policy": false,
+  "as_of": null,
+  "owner_user_id": "77777777-7777-4777-8777-777777777777",
+  "superseded_by": "55555555-5555-4555-8555-555555555556",
+  "version": 1,
+  "created_at": "2026-11-01T09:00:00Z",
+  "updated_at": "2026-11-02T09:00:00Z",
+  "updated_by": "77777777-7777-4777-8777-777777777777",
+  "versions": [
+    {
+      "version": 1,
+      "statement": "Prefers bullet points.",
+      "actor_user_id": "77777777-7777-4777-8777-777777777777",
+      "actor_kind": "pass",
+      "lint_override": false,
+      "policy_override": false,
+      "source_thread_id": null,
+      "source_entry_ids": null,
+      "created_at": "2026-11-01T09:00:00Z"
+    }
+  ]
+}

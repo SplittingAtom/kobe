@@ -16,8 +16,11 @@ import { timestampSchema, uuidSchema } from "../common.js";
  */
 export const MEMORY_STEWARD_SITE_GRANT = "memory_steward";
 
-/** `workspace`: a Workspace steward (KOBE-380's team table); `site`: the Site grant. */
-export const MEMORY_STEWARD_LEVELS = ["workspace", "site"] as const;
+/**
+ * In the wire scope vocabulary: `team` = a Workspace steward (KOBE-380's team table); `site` = the
+ * Site grant.
+ */
+export const MEMORY_STEWARD_LEVELS = ["team", "site"] as const;
 export const memoryStewardLevelSchema = z.enum(MEMORY_STEWARD_LEVELS);
 
 /**
@@ -33,7 +36,7 @@ export const memoryStewardSchema = z.strictObject({
 export type MemorySteward = z.infer<typeof memoryStewardSchema>;
 
 /**
- * - `GET    /v1/team/memory/stewards` -> `{ level: "workspace", stewards }` (Team admins)
+ * - `GET    /v1/team/memory/stewards` -> `{ level: "team", stewards }` (Team admins)
  * - `PUT    /v1/team/memory/stewards/{userId}` -> {@link memoryStewardSchema} (a Workspace member)
  * - `DELETE /v1/team/memory/stewards/{userId}` -> 204
  * - `GET    /v1/site/memory/stewards` -> `{ level: "site", stewards }` (Site admins)

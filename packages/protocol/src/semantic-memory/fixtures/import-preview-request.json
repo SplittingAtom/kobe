@@ -1,5 +1,5 @@
 {
   "scope": "user",
   "format": "csv",
-  "content": "kind,statement,tags,pinned,as_of\nfact,Owns the EMEA report.,reporting,false,2026-10-01\n"
+  "content": "ref,kind,statement,tags,pinned,as_of,policy,status,superseded_by\n66666666-6666-4666-8666-666666666666,fact,Owns the EMEA report.,reporting,false,2026-10-01,false,active,\n"
 }

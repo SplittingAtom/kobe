@@ -1,0 +1,4 @@
+{
+  "code": "memory_policy_not_pinnable",
+  "message": "Policy is always in context, so it can't be pinned."
+}

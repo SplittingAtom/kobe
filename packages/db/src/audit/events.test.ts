@@ -274,8 +274,31 @@ describe("audit event taxonomy", () => {
         kind: "fact",
         version: 1,
         actorKind: "user",
+        pinned: false,
+        policy: false,
       }),
     ).toBe(true);
+    // Created as Policy or pinned is recorded on `created` itself (review M5).
+    expect(
+      ok("memory.item.created", {
+        scope: "site",
+        itemId,
+        kind: "convention",
+        version: 1,
+        actorKind: "user",
+        pinned: false,
+        policy: true,
+      }),
+    ).toBe(true);
+    expect(
+      ok("memory.item.created", {
+        scope: "site",
+        itemId,
+        kind: "fact",
+        version: 1,
+        actorKind: "user",
+      }),
+    ).toBe(false);
     // Never the statement.
     expect(
       ok("memory.item.created", {
