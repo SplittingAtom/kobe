@@ -1300,8 +1300,15 @@ export const AUDIT_EVENTS = {
   "thread.purge_requested": event("team", { threadId: id }),
   /** One thread hard-deleted (the owner's "Delete forever"); counts of what went with it. */
   "thread.purged": event("team", { threadId: id, ...purgeCounts }),
-  /** The user downloaded their threads in the team (Pi JSONL + Markdown zip, D18). */
-  "thread.exported": event("team", { threads: count, entries: count }),
+  /**
+   * The user downloaded their threads in the team (Pi JSONL + Markdown zip, D18); `memoryItems`:
+   * their own semantic memories in it (KOBE-649; absent on older rows).
+   */
+  "thread.exported": event("team", {
+    threads: count,
+    entries: count,
+    memoryItems: count.optional(),
+  }),
   /** The owner downloaded one conversation as Markdown (`/export`, KOBE-450); a count, no text. */
   "thread.transcript_exported": event("team", { threadId: id, entries: count }),
   /** The owner turned a connector off or back on for one conversation (KOBE-451). */
