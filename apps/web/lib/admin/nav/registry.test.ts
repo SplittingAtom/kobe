@@ -77,6 +77,8 @@ const TEAM_ADMIN = [
   "team.budgets.manage",
   "team.connectors.manage",
   "team.memory.manage",
+  "team.memory.curate",
+  "team.memory.site_proposals.confirm",
   "team.policy.manage",
   "team.egress.manage",
   "team.skills.review",
@@ -319,6 +321,15 @@ describe("role gating", () => {
       "skills",
     ]);
     expect(canOpenConsole(team("member", MEMBER))).toBe(false);
+  });
+
+  it("opens Memory, and only it, to memory stewards (KOBE-385)", () => {
+    const steward = team("member", [...MEMBER, "team.memory.curate"]);
+    expect(canOpenConsole(steward)).toBe(true);
+    expect(visibleSections(steward).map((s) => s.id)).toEqual(["memory"]);
+    const siteSteward: ConsoleAccess = { ...site("user"), grants: ["memory_steward"] };
+    expect(canOpenConsole(siteSteward)).toBe(true);
+    expect(visibleSections(siteSteward).map((s) => s.id)).toEqual(["memory"]);
   });
 
   it("never lets one console's access open the other's sections", () => {

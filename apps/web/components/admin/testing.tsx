@@ -64,8 +64,17 @@ export function forbidNativeConfirm(): void {
 
 export const ME = { id: "u-me", name: "Ada", email: "ada@x.io" };
 
-export function renderSite(ui: ReactElement, siteRole: SiteAccess["siteRole"] = "admin") {
-  const access: SiteAccess = { console: "site", user: ME, siteRole };
+export function renderSite(
+  ui: ReactElement,
+  siteRole: SiteAccess["siteRole"] = "admin",
+  grants?: SiteAccess["grants"],
+) {
+  const access: SiteAccess = {
+    console: "site",
+    user: ME,
+    siteRole,
+    ...(grants === undefined ? {} : { grants }),
+  };
   return render(<ConsoleAccessContext.Provider value={access}>{ui}</ConsoleAccessContext.Provider>);
 }
 

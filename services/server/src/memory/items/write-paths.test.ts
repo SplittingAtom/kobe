@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import * as create from "./create.js";
 import * as edit from "./edit.js";
+import * as imported from "./import.js";
 
 /**
  * KOBE-379 review H-1: every path that writes or re-activates a memory statement runs the full
@@ -52,6 +53,13 @@ describe("memory write paths (review H-1)", () => {
       );
   });
 
+  it("checks every imported row (KOBE-385): preview evaluates, commit enforces", () => {
+    expect(Object.keys(imported).sort()).toEqual(["commitImport", "previewImport"]);
+    expect(String(imported.previewImport)).toMatch(/\bclassify\b/u);
+    expect(String(imported.commitImport)).toMatch(/\bclassify\b/u);
+    expect(String(imported.commitImport)).toMatch(/\boutcomeOf\b/u);
+  });
+
   it("writes memory items and versions only from the item store", () => {
     const WRITE =
       /(?:INSERT INTO|UPDATE)\s+(?:\$\{op\.loc\.(?:items|versions)\}|(?:semantic|portable|site)_memory_item(?:s|_versions)\b)|insertVersion\(op\./u;
@@ -62,6 +70,7 @@ describe("memory write paths (review H-1)", () => {
     expect(writers).toEqual([
       "memory/items/create.ts",
       "memory/items/edit.ts",
+      "memory/items/import.ts",
       "memory/items/versions.ts",
     ]);
   });

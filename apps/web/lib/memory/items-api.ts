@@ -30,7 +30,13 @@ export interface MemoryItemList {
   readonly scope: ItemScope;
   readonly items: readonly MemoryItem[];
   readonly nextCursor: string | null;
-  readonly usage: { readonly count: number; readonly max: number };
+  /** Active items and the cap; on the Site also active Policy (items and UTF-8 bytes). */
+  readonly usage: {
+    readonly count: number;
+    readonly max: number;
+    readonly policyCount?: number;
+    readonly policyBytes?: number;
+  };
 }
 
 /** Save over a warning: `lint` (instruction, personal data, links, near-duplicate), `policyConflict`. */
@@ -44,6 +50,8 @@ export interface NewItem {
   readonly kind: ItemKind;
   readonly statement: string;
   readonly tags: readonly string[];
+  /** Site only: save as Policy (Site admins). */
+  readonly policy?: boolean;
 }
 
 export interface ItemChange {
@@ -51,6 +59,8 @@ export interface ItemChange {
   readonly statement?: string;
   readonly kind?: ItemKind;
   readonly tags?: readonly string[];
+  /** Site items only: make it Policy or ordinary (Site admins only; KOBE-380). */
+  readonly policy?: boolean;
 }
 
 const enc = encodeURIComponent;
@@ -70,6 +80,9 @@ export interface ListQuery {
   readonly scope: ItemScope;
   readonly status: ItemStatus;
   readonly pinned?: boolean;
+  readonly kind?: ItemKind | undefined;
+  /** Site only: Policy items, or everything but Policy. */
+  readonly policy?: boolean | undefined;
   readonly cursor?: string | null;
 }
 
@@ -79,6 +92,8 @@ export const ITEM_PAGE_SIZE = 100;
 export function listPath(q: ListQuery): string {
   const params = new URLSearchParams({ scope: q.scope, status: q.status });
   if (q.pinned !== undefined) params.set("pinned", String(q.pinned));
+  if (q.kind !== undefined) params.set("kind", q.kind);
+  if (q.policy !== undefined) params.set("policy", String(q.policy));
   params.set("limit", String(ITEM_PAGE_SIZE));
   if (q.cursor) params.set("cursor", q.cursor);
   return `${BASE}?${params.toString()}`;
@@ -107,7 +122,14 @@ export interface MemoryItemsApi {
   pin(item: MemoryItem, pinned: boolean): Promise<ApiResult<MemoryItem>>;
 }
 
-export function createMemoryItemsApi(teamId: string, fetchFn?: typeof fetch): MemoryItemsApi {
+/**
+ * `teamId`: the active Workspace (sent as `X-Kobe-Team`). The Site console sends the session's
+ * active Workspace too when there is one (writes need the header then); undefined when none.
+ */
+export function createMemoryItemsApi(
+  teamId: string | undefined,
+  fetchFn?: typeof fetch,
+): MemoryItemsApi {
   const at = (item: MemoryItem, action = "") =>
     `${BASE}/${enc(item.scope)}/${enc(item.id)}${action === "" ? "" : `/${action}`}`;
   const send = <T>(path: string, method: "GET" | "POST" | "PATCH", json?: unknown) =>
@@ -121,6 +143,7 @@ export function createMemoryItemsApi(teamId: string, fetchFn?: typeof fetch): Me
         kind: item.kind,
         statement: item.statement,
         tags: item.tags,
+        ...(item.policy === true ? { policy: true } : {}),
         ...(item.scope === "portable" ? { confirm_portable: true } : {}),
         ...overridesBody(overrides),
       }),
@@ -130,6 +153,7 @@ export function createMemoryItemsApi(teamId: string, fetchFn?: typeof fetch): Me
         ...(change.statement === undefined ? {} : { statement: change.statement }),
         ...(change.kind === undefined ? {} : { kind: change.kind }),
         ...(change.tags === undefined ? {} : { tags: change.tags }),
+        ...(change.policy === undefined ? {} : { policy: change.policy }),
         ...overridesBody(overrides),
       }),
     archive: (item) => send(at(item, "archive"), "POST", { expected_version: item.version }),
@@ -223,6 +247,14 @@ export function describeItemError(error: ApiError): string {
       return "This memory no longer exists.";
     case "memory_not_allowed":
       return "You can read this memory but not change it.";
+    case "memory_policy_budget_full":
+      return "Policy is full (25 items or 2 KiB of text). Remove a Policy item first.";
+    case "memory_policy_not_pinnable":
+      return "Policy is always given to agents, so it is never pinned. Unpin it first.";
+    case "memory_import_stale":
+      return "Some rows changed since the preview. Preview the file again; nothing was saved.";
+    case "memory_import_too_large":
+      return "The file is too large to import.";
     default:
       return error.message;
   }

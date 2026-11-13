@@ -23,6 +23,7 @@ export const shortName = (statement: string) => {
 /** Ids of a row's controls, so focus can return to them after the lists change. */
 export const editButtonId = (id: string) => `${itemAnchor(id)}-edit`;
 export const pinButtonId = (id: string) => `${itemAnchor(id)}-pin`;
+export const policyButtonId = (id: string) => `${itemAnchor(id)}-policy`;
 
 const sameTags = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((t, i) => t === b[i]);
@@ -42,6 +43,8 @@ export function ItemRow({
   known,
   onChanged,
   onRefreshed,
+  readOnly = false,
+  canSetPolicy = false,
 }: {
   readonly item: MemoryItem;
   readonly api: MemoryItemsApi;
@@ -49,6 +52,13 @@ export function ItemRow({
   readonly onChanged: (item: MemoryItem, done: Done, focus: FocusAfter) => void;
   /** The item as saved now (Reload after a conflict); no Undo. */
   readonly onRefreshed: (item: MemoryItem) => void;
+  /** Shown without actions (a member, or a scope the caller doesn't curate; KOBE-385). */
+  readonly readOnly?: boolean;
+  /**
+   * The caller sets Policy (Site admins, `site.memory.policy`): a Site item gets the Policy
+   * toggle. Without it a Policy item is read-only (Site stewards never change Policy).
+   */
+  readonly canSetPolicy?: boolean;
 }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   /** The version the draft started from; a newer `item.version` means someone saved meanwhile. */
@@ -59,6 +69,8 @@ export function ItemRow({
   const name = shortName(item.statement);
   const archived = item.status !== "active";
   const moved = draft !== null && item.version !== base;
+  // No actions: read-only callers, superseded history, and Policy for anyone who can't set it.
+  const locked = readOnly || item.status === "superseded" || (item.policy && !canSetPolicy);
 
   /** Cancel: back to Edit once the form is gone. */
   const [refocus, setRefocus] = useState(false);
@@ -155,6 +167,20 @@ export function ItemRow({
         ),
     );
 
+  const togglePolicy = () =>
+    void save(
+      () => api.patch(item, { expectedVersion: item.version, policy: !item.policy }),
+      (after) =>
+        onChanged(
+          after,
+          {
+            message: after.policy ? "Made Policy." : "No longer Policy.",
+            undo: () => api.patch(after, { expectedVersion: after.version, policy: !after.policy }),
+          },
+          policyButtonId(after.id),
+        ),
+    );
+
   const archive = () =>
     void save(
       () => api.archive(item),
@@ -184,43 +210,65 @@ export function ItemRow({
           <p className="m-0 mt-2 flex flex-wrap items-center gap-1 text-sm text-console-muted">
             <span>{KIND_LABELS[item.kind]}</span>
             {item.pinned && <Badge tone="accent">Pinned</Badge>}
-            {archived && <Badge>Archived</Badge>}
+            {item.policy && <Badge tone="accent">Policy</Badge>}
+            {archived && <Badge>{item.status === "superseded" ? "Superseded" : "Archived"}</Badge>}
             {item.tags.map((t) => (
               <Badge key={t}>{visible(t)}</Badge>
             ))}
           </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {archived ? (
-              <Button size="sm" disabled={busy} aria-label={`Restore: ${name}`} onClick={restore}>
-                Restore
-              </Button>
-            ) : (
-              <>
-                <Button
-                  id={editButtonId(item.id)}
-                  size="sm"
-                  disabled={busy}
-                  aria-label={`Edit: ${name}`}
-                  onClick={startEdit}
-                >
-                  Edit
+          {!locked && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {archived ? (
+                <Button size="sm" disabled={busy} aria-label={`Restore: ${name}`} onClick={restore}>
+                  Restore
                 </Button>
-                <Button
-                  id={pinButtonId(item.id)}
-                  size="sm"
-                  disabled={busy}
-                  aria-label={`Pin: ${name}`}
-                  aria-pressed={item.pinned}
-                  onClick={togglePin}
-                >
-                  Pin
-                </Button>
-                <Button size="sm" disabled={busy} aria-label={`Archive: ${name}`} onClick={archive}>
-                  Archive
-                </Button>
-              </>
-            )}
-          </div>
+              ) : (
+                <>
+                  <Button
+                    id={editButtonId(item.id)}
+                    size="sm"
+                    disabled={busy}
+                    aria-label={`Edit: ${name}`}
+                    onClick={startEdit}
+                  >
+                    Edit
+                  </Button>
+                  {!item.policy && (
+                    <Button
+                      id={pinButtonId(item.id)}
+                      size="sm"
+                      disabled={busy}
+                      aria-label={`Pin: ${name}`}
+                      aria-pressed={item.pinned}
+                      onClick={togglePin}
+                    >
+                      Pin
+                    </Button>
+                  )}
+                  {item.scope === "site" && canSetPolicy && !item.pinned && (
+                    <Button
+                      id={policyButtonId(item.id)}
+                      size="sm"
+                      disabled={busy}
+                      aria-label={`Policy: ${name}`}
+                      aria-pressed={item.policy}
+                      onClick={togglePolicy}
+                    >
+                      Policy
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    disabled={busy}
+                    aria-label={`Archive: ${name}`}
+                    onClick={archive}
+                  >
+                    Archive
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
         </>
       ) : (
         <form

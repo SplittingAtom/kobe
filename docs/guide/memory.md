@@ -92,7 +92,8 @@ while it is on at both levels that have it. Every switch is on unless an admin t
   and the site, given to the agent at the start of each run. Needs memory. (Memories arrive with
   Kobe v1.3; the switches are in place so admins can decide beforehand.)
 - **Workspace memories** (workspace): memories everyone in the workspace shares, curated by team
-  admins and memory stewards.
+  admins and memory stewards on the Team console's **Memory** page, with import and export (see
+  [Workspace memories](admin/team-admin.md#workspace-memories)).
 - **Site memories reach this workspace's runs** (workspace): knowledge the site keeps for every
   workspace. **Site Policy** reaches the workspace's runs even when this is off.
 

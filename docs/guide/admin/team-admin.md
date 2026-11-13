@@ -1,6 +1,6 @@
 ---
 title: Team admin overview
-summary: What team admins and contributors can do, and where each setting lives in the Team console (members, memory stewards, models, budgets, connectors, egress, memory, policy, agents and skills).
+summary: What team admins and contributors can do, and where each setting lives in the Team console (members, memory stewards, models, budgets, connectors, egress, memory curation with import and export, policy, agents and skills).
 section: Team admin
 order: 1
 audience: admin
@@ -52,24 +52,58 @@ workspace; switch workspace first to manage another.
   facts and conventions every member's agent can use. Any member can be a steward, whatever their
   role. Choose a member under **Make a memory steward**; **Take memory steward** ends it after a
   confirmation (what they saved stays). Stewardship ends when the person leaves the workspace.
-  Stewards can't send memories to the Site, change the memory switches, or do anything else a
-  team admin does. Every grant and every removal is in **Audit** (`memory.steward.granted`,
+  Stewards open only the console's **Memory** page (see [Workspace memories](#workspace-memories));
+  they can't send memories to the Site, change the memory switches, or do anything else a team
+  admin does. Every grant and every removal is in **Audit** (`memory.steward.granted`,
   `memory.steward.revoked`).
 - **Invitations**: invite people by email; they join when they accept.
 
 ## Workspace settings
 
-| Page                    | What you set                                                                                                                                                                                                                                                                                                                                                                                           |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Models**              | Which models from the site catalog the team may use, and the team default.                                                                                                                                                                                                                                                                                                                             |
-| **Budgets**             | Daily or monthly dollar budgets for the team, a default member budget, and budgets per member.                                                                                                                                                                                                                                                                                                         |
-| **Connectors**          | Enable registered connectors and choose each one's exposure; set the built-in **Kobe** connector's level.                                                                                                                                                                                                                                                                                              |
-| **Egress**              | Enable domains within the site ceiling, answer access requests, and inject headers for a domain.                                                                                                                                                                                                                                                                                                       |
-| **Policy**              | Team deny, ask and allow rules inside the site floor, remember limits, and members' remembered approvals.                                                                                                                                                                                                                                                                                              |
-| **Memory**              | The workspace's memory switches (memory, project notes, memories, Workspace memories, Site memories in this workspace's runs, Learn from this chat, proposing to the Site; each also needs the site's switch; off deletes nothing; Site Policy applies whatever you set) and the workspace's learning model, with which model Learn uses now. See [Memory](../memory.md#switches-that-control-memory). |
-| **Retention**           | How long the team keeps threads, within the site maximum.                                                                                                                                                                                                                                                                                                                                              |
-| **Storage and history** | Bytes and objects per workspace and project, the object budget, and how long project history is kept; limits in [Storage limits](../files/storage-limits.md).                                                                                                                                                                                                                                          |
-| **Follow-ups**          | Suggest three follow-up messages after each answer (a short model call per run).                                                                                                                                                                                                                                                                                                                       |
+| Page                    | What you set                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Models**              | Which models from the site catalog the team may use, and the team default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **Budgets**             | Daily or monthly dollar budgets for the team, a default member budget, and budgets per member.                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **Connectors**          | Enable registered connectors and choose each one's exposure; set the built-in **Kobe** connector's level.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **Egress**              | Enable domains within the site ceiling, answer access requests, and inject headers for a domain.                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| **Policy**              | Team deny, ask and allow rules inside the site floor, remember limits, and members' remembered approvals.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **Memory**              | **Memories**: the workspace's memories, Site memories and Site Policy (see [Workspace memories](#workspace-memories)). **Import and export**. **Settings**: the workspace's memory switches (memory, project notes, memories, Workspace memories, Site memories in this workspace's runs, Learn from this chat, proposing to the Site; each also needs the site's switch; off deletes nothing; Site Policy applies whatever you set) and the workspace's learning model, with which model Learn uses now. See [Memory](../memory.md#switches-that-control-memory). |
+| **Retention**           | How long the team keeps threads, within the site maximum.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **Storage and history** | Bytes and objects per workspace and project, the object budget, and how long project history is kept; limits in [Storage limits](../files/storage-limits.md).                                                                                                                                                                                                                                                                                                                                                                                                      |
+| **Follow-ups**          | Suggest three follow-up messages after each answer (a short model call per run).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+
+## Workspace memories
+
+The **Memory** page's **Memories** tab is for the workspace's curators: team admins and memory
+stewards. Anyone else who opens it reads only.
+
+- **List and filters**: one scope at a time (**Workspace memories**, or **Site memories**, which
+  you read but don't change here), filtered by kind, status (active, archived, superseded) and
+  tag. The tag filter matches the memories loaded so far; **Show more** loads more.
+- **Add, edit, archive, restore, pin and tags**: every save runs the same checks as everywhere
+  else (secrets are refused, instruction-like text, personal data, unreachable links and
+  near-duplicates are warnings you can save over, a contradiction of Site Policy needs **Save
+  anyway**, which is recorded). Every change has **Undo**. A notice appears when the workspace
+  holds 80% of its limit, and another when it is full.
+- **Site Policy**: the Policy text every agent in the workspace is given in every run, read-only.
+  Only Site admins change it.
+
+**Import and export** (curators):
+
+- **Import**: paste or choose Markdown bullets (`- [fact] Invoices go out on the 1st #billing`:
+  the kind in brackets, tags at the end), a CSV with the columns `statement,kind,tags,pinned`
+  (tags separated by `;`), or a Kobe export file, at most 200 rows. **Preview** checks every row
+  with the save checks above and stores nothing; each row says what it is: **New**,
+  **Near-duplicate**, **Conflicts with Policy**, **Blocked by Policy rules** (for example a
+  Policy row outside the Site), **Secret: never saved**, **Flagged by checks** or **Can't be
+  read**. No model reads the file. **Import** saves the new rows only, all at once; add the
+  others one by one, where you can save over a warning. If anything changed since the preview,
+  nothing is saved and Kobe asks you to preview again. Imports are audited
+  (`memory.items.imported`, counts only).
+- **Export**: the workspace's memories as JSON (a Kobe export, which imports again as it was) or
+  CSV, optionally with archived and superseded ones. Statements, kinds, tags and pins only; never
+  who wrote them or the conversations they came from. Every export is audited
+  (`memory.items.exported`).
 
 Each registered connector on the **Connectors** page lists its tools in two columns with counts:
 **Read only** (tools that declare themselves read-only) and **Write** (every other tool, including

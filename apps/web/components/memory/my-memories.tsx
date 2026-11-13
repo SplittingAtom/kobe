@@ -213,7 +213,7 @@ export function MyMemories({ teamId }: { readonly teamId: string }) {
  * the change, so a new change clears an old Undo's warning. An Undo the item outran (version
  * conflict) is withdrawn.
  */
-function UndoBar({
+export function UndoBar({
   done,
   known,
   onUndone,
@@ -265,7 +265,7 @@ function UndoBar({
 }
 
 /** How full a group is: a notice from 80% (SM21, KOBE-645's threshold), another when full. */
-function UsageNotice({ usage }: { readonly usage: MemoryItemList["usage"] }) {
+export function UsageNotice({ usage }: { readonly usage: MemoryItemList["usage"] }) {
   if (usage.count >= usage.max)
     return (
       <Notice tone="warn" title="Full">
