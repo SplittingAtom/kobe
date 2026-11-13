@@ -208,7 +208,7 @@ describe("effective (ac-1, ac-2)", () => {
     expect(saved.json).toMatchObject({ portable_enabled: false, learn_enabled: false });
     expect((await settings(w.member, "effective")).json).toMatchObject({
       scopes: { user: true, portable: false, team: true, site: true },
-      learn: { available: false, reason: "learn_off" },
+      learn: { available: false, reason: "site_learn_off" },
     });
     await settings(ia, "site", { memory_enabled: false });
     expect((await settings(w.member, "effective")).json).toMatchObject({
@@ -309,6 +309,115 @@ describe("learning model (ac-4)", () => {
     expect(await learn()).toMatchObject({
       available: false,
       reason: "learning_model_not_enabled",
+    });
+  });
+});
+
+describe("review fixes (KOBE-381 review)", () => {
+  const lastSiteAudit = async () =>
+    (
+      await fx.admin.query<{ target: Record<string, unknown> }>(
+        `SELECT target FROM audit_log WHERE action = 'memory.site_settings_changed'
+          ORDER BY seq DESC LIMIT 1`,
+      )
+    ).rows[0]?.target;
+  const siteAuditCount = async () =>
+    Number(
+      (
+        await fx.admin.query<{ n: string }>(
+          `SELECT count(*) AS n FROM audit_log WHERE action = 'memory.site_settings_changed'`,
+        )
+      ).rows[0]?.n,
+    );
+
+  it("M1: a removed Site model doesn't block other saves and is reported as removed", async () => {
+    const ia = await siteAdmin();
+    const w = await world();
+    await catalogModel("sw-gone", w.admin.id);
+    await settings(ia, "site", { settings: { learning_model_alias: "sw-gone" } });
+    await fx.admin.query(`DELETE FROM model_catalog WHERE alias = 'sw-gone'`);
+    expect((await settings(ia, "site")).json).toMatchObject({
+      removed_models: ["learning_model_alias"],
+    });
+    // The console sends the whole document, stale alias included: still saves.
+    const doc = ((await settings(ia, "site")).json as { settings: object }).settings;
+    const saved = await settings(ia, "site", { settings: { ...doc, retention_days: 400 } });
+    expect(saved.status, saved.text).toBe(200);
+    expect(saved.json).toMatchObject({
+      settings: { retention_days: 400, learning_model_alias: "sw-gone" },
+      removed_models: ["learning_model_alias"],
+    });
+    // A Workspace with nothing of its own: Learn names the cause.
+    expect((await settings(w.member, "effective")).json).toMatchObject({
+      learn: { available: false, reason: "learning_model_removed" },
+    });
+  });
+
+  it("L2/L3: no-op saves aren't audited; {} is refused; model changes audit from/to", async () => {
+    const ia = await siteAdmin();
+    const w = await world();
+    await catalogModel("sw-a", w.admin.id);
+    await catalogModel("sw-b", w.admin.id);
+    expect((await settings(ia, "site", { settings: {} })).status).toBe(400);
+    await settings(ia, "site", { settings: { learning_model_alias: "sw-a" } });
+    expect(await lastSiteAudit()).toMatchObject({
+      settings: ["learning_model_alias"],
+      learningModel: { from: null, to: "sw-a" },
+    });
+    await settings(ia, "site", { settings: { learning_model_alias: "sw-b" } });
+    expect(await lastSiteAudit()).toMatchObject({ learningModel: { from: "sw-a", to: "sw-b" } });
+    const n = await siteAuditCount();
+    await settings(ia, "site", { learn_enabled: true, settings: { learning_model_alias: "sw-b" } });
+    expect(await siteAuditCount()).toBe(n);
+
+    const teamAudits = async () =>
+      (
+        await fx.admin.query<{ target: Record<string, unknown> }>(
+          `SELECT target FROM audit_log WHERE team_id = $1 AND action = 'memory.settings_changed'
+            ORDER BY seq`,
+          [w.team],
+        )
+      ).rows.map((r) => r.target);
+    await enable(w.team, "sw-a", w.admin.id);
+    await settings(w.admin, "team", { learning_model_alias: "sw-a" });
+    await settings(w.admin, "team", { learning_model_alias: "sw-a", learn_enabled: true });
+    expect(await teamAudits()).toEqual([
+      expect.objectContaining({ learningModelAlias: "sw-a", previousLearningModelAlias: null }),
+    ]);
+  });
+
+  it("L5: a malformed stored Workspace model is unavailable, never the Site's model", async () => {
+    const ia = await siteAdmin();
+    const w = await world();
+    await enable(w.team, "sw-site5", w.admin.id);
+    await settings(ia, "site", { settings: { learning_model_alias: "sw-site5" } });
+    expect((await settings(w.member, "effective")).json).toMatchObject({
+      learn: { available: true, alias: "sw-site5", source: "site" },
+    });
+    await fx.admin.query(
+      `UPDATE teams SET settings = jsonb_set(settings, '{memory}', '{"learning_model_alias": "Bad Alias!"}')
+        WHERE id = $1`,
+      [w.team],
+    );
+    expect((await settings(w.member, "effective")).json).toMatchObject({
+      learn: { available: false, reason: "invalid_learning_model" },
+    });
+    // Choosing again repairs it.
+    await settings(w.admin, "team", { learning_model_alias: "sw-site5" });
+    expect((await settings(w.member, "effective")).json).toMatchObject({
+      learn: { available: true, source: "team" },
+    });
+  });
+
+  it("L1: concurrent Site settings saves of different fields both land", async () => {
+    const ia = await siteAdmin();
+    await Promise.all([
+      settings(ia, "site", { settings: { version_cap: 30 } }),
+      settings(ia, "site", { settings: { retention_days: 500 } }),
+      settings(ia, "site", { settings: { stale_after_days: 60 } }),
+    ]);
+    expect((await settings(ia, "site")).json).toMatchObject({
+      settings: { version_cap: 30, retention_days: 500, stale_after_days: 60 },
     });
   });
 });

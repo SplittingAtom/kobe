@@ -88,7 +88,7 @@ export function TeamMemoryPage() {
               switches={settings}
               save={(change) => putTeamMemory(teamId, change)}
               onSaved={saved}
-              notice={(s) => memoryNotice("in this workspace", s)}
+              notice={(s) => memoryNotice("in this workspace", s, "workspace")}
             />
             <ResourceView state={models.state} label="models">
               {(list) => (
@@ -124,6 +124,8 @@ function LearningModelForm({
   const mutation = useMutation();
   const [value, setValue] = useState(alias ?? "");
   const enabled = models.models.filter((m) => m.enabled);
+  // A stored choice no longer enabled (or removed) stays visible so it can be cleared (review M2).
+  const stale = alias !== null && !enabled.some((m) => m.alias === alias) ? alias : null;
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -146,6 +148,7 @@ function LearningModelForm({
       >
         <Select value={value} onChange={(e) => setValue(e.target.value)}>
           <option value="">None</option>
+          {stale !== null && <option value={stale}>{`${stale} (not enabled)`}</option>}
           {enabled.map((m) => (
             <option key={m.alias} value={m.alias}>
               {modelName(m)}

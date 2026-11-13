@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickLearningModel } from "./learning-model.js";
+import { learnSwitchReason, pickLearningModel, type ModelState } from "./learning-model.js";
 import {
   MEMORY_SITE_SETTINGS_DEFAULTS,
   memorySiteSettingsSchema,
@@ -15,7 +15,7 @@ import {
   type SiteMemorySwitches,
   type WorkspaceMemorySwitches,
 } from "./switch-model.js";
-import { parseTeamMemoryJson } from "./switches.js";
+import { parseTeamMemoryJson, storedAliasInvalid, type MemorySwitches } from "./switches.js";
 
 /** KOBE-381 ac-1, ac-2, ac-4: the effective-switch matrix and the learning model, without a DB. */
 
@@ -219,8 +219,8 @@ describe("Site memory settings", () => {
 describe("learning model (ac-4)", () => {
   const enabledIn =
     (...aliases: string[]) =>
-    (a: string) =>
-      Promise.resolve(aliases.includes(a));
+    (a: string): Promise<ModelState> =>
+      Promise.resolve(aliases.includes(a) ? "enabled" : "not_enabled");
 
   it("the Workspace's own model wins when set and enabled", async () => {
     expect(await pickLearningModel("site-m", "ws-m", enabledIn("site-m", "ws-m"))).toEqual({
@@ -250,18 +250,56 @@ describe("learning model (ac-4)", () => {
   });
 
   it("unset: unavailable with a reason, even when the Workspace has enabled models", async () => {
-    const r = await pickLearningModel(null, null, () => Promise.resolve(true));
+    const r = await pickLearningModel(null, null, () => Promise.resolve("enabled"));
     expect(r).toMatchObject({ ok: false, reason: "no_learning_model" });
     expect(r.ok ? "" : r.message).toMatch(/No learning model is set/);
+  });
+
+  it("a model removed from the catalog says so (not 'enable it')", async () => {
+    const r = await pickLearningModel("site-m", null, () => Promise.resolve("removed"));
+    expect(r).toMatchObject({ ok: false, reason: "learning_model_removed" });
+    expect(r.ok ? "" : r.message).toMatch(/removed/);
+  });
+
+  it("a malformed stored Workspace model is unavailable, never the Site's (L5)", async () => {
+    const r = await pickLearningModel("site-m", null, enabledIn("site-m"), true);
+    expect(r).toMatchObject({ ok: false, reason: "invalid_learning_model" });
+    expect(storedAliasInvalid({ learning_model_alias: "Bad Alias!" })).toBe(true);
+    expect(storedAliasInvalid({ learning_model_alias: 42 })).toBe(true);
+    expect(storedAliasInvalid({ learning_model_alias: null })).toBe(false);
+    expect(storedAliasInvalid({ learning_model_alias: "ok-1" })).toBe(false);
+    expect(storedAliasInvalid({})).toBe(false);
   });
 
   it("asks only about the one chosen alias: no thread or default model", async () => {
     const asked: string[] = [];
     await pickLearningModel("site-m", "ws-m", (a) => {
       asked.push(a);
-      return Promise.resolve(false);
+      return Promise.resolve("not_enabled");
     });
     expect(asked).toEqual(["ws-m"]);
-    expect(pickLearningModel.length).toBe(3);
+  });
+});
+
+describe("why Learn is off names the switch and its level (L4)", () => {
+  const sw = (
+    siteOff: Partial<SiteMemorySwitches> = {},
+    wsOff: Partial<WorkspaceMemorySwitches> = {},
+  ): MemorySwitches => {
+    const s = site(siteOff);
+    const w = ws(wsOff);
+    const memory = effectiveMemory(s, w);
+    return { site: s, team: w, effective: memory.notes, memory, teamAliasInvalid: false };
+  };
+  it.each([
+    [{ memoryEnabled: false }, {}, "site_memory_off"],
+    [{ memoriesEnabled: false }, {}, "site_memory_off"],
+    [{}, { memoryEnabled: false }, "memory_off"],
+    [{}, { memoriesEnabled: false }, "memory_off"],
+    [{ learnEnabled: false }, {}, "site_learn_off"],
+    [{}, { learnEnabled: false }, "learn_off"],
+    [{}, {}, null],
+  ] as const)("Site %o, Workspace %o → %s", (s, w, reason) => {
+    expect(learnSwitchReason(sw(s, w))).toBe(reason);
   });
 });

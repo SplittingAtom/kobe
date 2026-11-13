@@ -64,6 +64,16 @@ MCP tools on one shared wire schema, Site console and Workspace settings UI, gui
   `admin/team-admin.md`, `admin/admin-from-a-conversation.md` (served at /docs and /llms.txt);
   release/upgrade note in `docs/install.md` › Upgrade notes.
 
+- **Review fixes (`review-381.md`, 2026-11-13):** M1 aliases checked only when changed; GET/PUT
+  site answers carry `removed_models`, the console flags "removed — choose another". M2 a stored
+  Workspace model no longer enabled shows as "<alias> (not enabled)" and can be cleared. L1
+  advisory lock over Site switch/settings saves. L2 no-op saves unaudited, `settings: {}` refused.
+  L3 Site model changes audited `from`/`to`; Workspace audit adds `previousLearningModelAlias`.
+  L4 reasons `site_memory_off`, `memory_off`, `site_learn_off`, `learn_off`, `no_learning_model`,
+  `learning_model_not_enabled`, `learning_model_removed`, `invalid_learning_model`. L5 a malformed
+  stored Workspace alias is unavailable, never the Site's. L6 switches read once per `effective`.
+  L7 protocol comment. L8 Workspace toast names Policy; guide notes propose needs Workspace memories.
+
 ## Open questions (for Chris or the coordinator)
 
 1. Resolved 2026-11-13 (Chris, Q2): Policy reaches a Workspace with memory off; only the Site's

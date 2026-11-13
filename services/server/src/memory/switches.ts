@@ -72,6 +72,11 @@ export interface MemorySwitches {
   readonly effective: Readonly<Record<MemoryScope, boolean>>;
   /** Everything that applies (Notes, Memories, Policy, Learn, Site proposals). */
   readonly memory: EffectiveMemory;
+  /**
+   * A learning model alias is stored for the Workspace but no longer parses (review L5): Learn is
+   * unavailable, never the Site's model. `team.learningModelAlias` reads null then.
+   */
+  readonly teamAliasInvalid: boolean;
 }
 
 export async function readSiteSwitches(tx: KobeTx): Promise<SiteMemorySwitches> {
@@ -105,10 +110,24 @@ export function parseTeamMemoryJson(
   };
 }
 
+/** A stored, present alias that fails the pattern (pure). */
+export function storedAliasInvalid(raw: unknown): boolean {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const alias = (raw as Record<string, unknown>)[ALIAS_FIELD];
+  return alias !== undefined && alias !== null && !(typeof alias === "string" && ALIAS.test(alias));
+}
+
 export async function readTeamSwitches(
   tx: KobeTx,
   teamId: string,
 ): Promise<WorkspaceMemorySwitches> {
+  return (await readTeamState(tx, teamId)).switches;
+}
+
+async function readTeamState(
+  tx: KobeTx,
+  teamId: string,
+): Promise<{ switches: WorkspaceMemorySwitches; aliasInvalid: boolean }> {
   const res = await tx.execute<{
     memory_enabled: boolean | null;
     project_memory_enabled: boolean | null;
@@ -122,17 +141,21 @@ export async function readTeamSwitches(
       LEFT JOIN team_memory_settings s ON s.team_id = ${teamId}`);
   const row = res.rows[0];
   return {
-    memoryEnabled: row?.memory_enabled ?? WORKSPACE_SWITCHES_ON.memoryEnabled,
-    projectMemoryEnabled: row?.project_memory_enabled ?? WORKSPACE_SWITCHES_ON.projectMemoryEnabled,
-    ...parseTeamMemoryJson(row?.memory ?? null),
+    switches: {
+      memoryEnabled: row?.memory_enabled ?? WORKSPACE_SWITCHES_ON.memoryEnabled,
+      projectMemoryEnabled:
+        row?.project_memory_enabled ?? WORKSPACE_SWITCHES_ON.projectMemoryEnabled,
+      ...parseTeamMemoryJson(row?.memory ?? null),
+    },
+    aliasInvalid: storedAliasInvalid(row?.memory ?? null),
   };
 }
 
 export async function readSwitches(tx: KobeTx, teamId: string): Promise<MemorySwitches> {
   const site = await readSiteSwitches(tx);
-  const team = await readTeamSwitches(tx, teamId);
+  const { switches: team, aliasInvalid } = await readTeamState(tx, teamId);
   const memory = effectiveMemory(site, team);
-  return { site, team, effective: memory.notes, memory };
+  return { site, team, effective: memory.notes, memory, teamAliasInvalid: aliasInvalid };
 }
 
 /** The single gate every Notes operation passes: is `scope` on for this team? */
@@ -160,7 +183,10 @@ export async function writeTeamSwitches(
   userId: string,
   change: Change<WorkspaceMemorySwitches>,
   expected?: WorkspaceMemorySwitches,
-): Promise<WorkspaceMemorySwitches | "changed_since_approval"> {
+): Promise<
+  | { readonly before: WorkspaceMemorySwitches; readonly after: WorkspaceMemorySwitches }
+  | "changed_since_approval"
+> {
   // Team switch writes serialize per team (the row may not exist yet, so no row lock).
   await tx.execute(
     sql`SELECT pg_advisory_xact_lock(hashtextextended(${`kobe.memory-switches:${teamId}`}, 0))`,
@@ -197,13 +223,18 @@ export async function writeTeamSwitches(
                  || ${JSON.stringify(jsonChange)}::jsonb)
        WHERE id = ${teamId}`);
   }
-  return next;
+  return { before: current, after: next };
+}
+
+/** One lock for every Site memory switch and setting write (review L1). */
+export async function lockSiteMemorySettings(tx: KobeTx): Promise<void> {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('kobe.memory-site', 0))`);
 }
 
 export async function writeSiteSwitches(
   tx: KobeTx,
   change: Change<SiteMemorySwitches>,
-): Promise<SiteMemorySwitches> {
+): Promise<{ readonly before: SiteMemorySwitches; readonly after: SiteMemorySwitches }> {
   const current = await readSiteSwitches(tx);
   const next: SiteMemorySwitches = { ...current, ...definedOnly(change) };
   for (const name of SITE_SWITCH_NAMES) {
@@ -214,7 +245,7 @@ export async function writeSiteSwitches(
       .values({ key: SITE_SWITCH_KEYS[name], value })
       .onConflictDoUpdate({ target: siteSettings.key, set: { value, updatedAt: new Date() } });
   }
-  return next;
+  return { before: current, after: next };
 }
 
 function definedOnly<T extends object>(change: Change<T>): Partial<T> {

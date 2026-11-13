@@ -10,7 +10,12 @@ import {
 } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { learnAvailability } from "../memory/learning-model.js";
-import { readMemorySiteSettings, writeMemorySiteSettings } from "../memory/site-settings.js";
+import {
+  readMemorySiteSettings,
+  removedModelSettings,
+  writeMemorySiteSettings,
+  type MemorySiteSettings,
+} from "../memory/site-settings.js";
 import {
   fromWorkspaceWire,
   sitePutSchema,
@@ -21,11 +26,14 @@ import {
   workspacePutSchema,
 } from "../memory/settings-wire.js";
 import {
+  lockSiteMemorySettings,
   readSiteSwitches,
   readSwitches,
   readTeamSwitches,
   writeSiteSwitches,
   writeTeamSwitches,
+  type SiteMemorySwitches,
+  type WorkspaceMemorySwitches,
 } from "../memory/switches.js";
 import { isModelEnabled } from "../models/team-store.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
@@ -86,10 +94,14 @@ export function memorySettingsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
     const level = levelOf(c.req.query("level"));
     if (level === "site") {
       return c.json(
-        await db.transaction(async (tx) => ({
-          ...toSiteSwitchesWire(await readSiteSwitches(tx)),
-          settings: await readMemorySiteSettings(tx),
-        })),
+        await db.transaction(async (tx) => {
+          const settings = await readMemorySiteSettings(tx);
+          return siteWire(
+            await readSiteSwitches(tx),
+            settings,
+            await removedModelSettings(tx, settings),
+          );
+        }),
       );
     }
     const teamId = c.get("team").id;
@@ -98,8 +110,9 @@ export function memorySettingsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
         toWorkspaceWire(await withTeam(db, teamId, (tx) => readTeamSwitches(tx, teamId))),
       );
     const out = await withTeam(db, teamId, async (tx) => {
-      const { memory } = await readSwitches(tx, teamId);
-      const learn = await learnAvailability(tx, teamId);
+      const switches = await readSwitches(tx, teamId);
+      const { memory } = switches;
+      const learn = await learnAvailability(tx, teamId, switches);
       return {
         memory_enabled: memory.notes.user,
         project_memory_enabled: memory.notes.project,
@@ -122,23 +135,26 @@ export function memorySettingsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
 
   async function putSite(c: Context<{ Variables: TeamVariables }>) {
     const body = await parseBody(c, sitePutSchema);
-    if (!body || empty(body)) {
+    const { settings, ...switches } = body ?? {};
+    if (!body || (empty(switches) && (settings === undefined || empty(settings)))) {
       return invalidRequest(c, "Send at least one switch or setting (expected is for level=team).");
     }
-    const { settings, ...switches } = body;
     const out = await db.transaction(async (tx) => {
-      // Settings first: an unknown model alias refuses before anything is written.
+      await lockSiteMemorySettings(tx);
+      // Settings first: a new unknown model alias refuses before anything is written.
       const written = await writeMemorySiteSettings(tx, settings ?? {});
       if (!written.ok) return written;
-      const saved = await writeSiteSwitches(tx, siteSwitchChangeOf(switches));
-      await recordAudit(tx, {
-        action: "memory.site_settings_changed",
-        target: {
-          ...saved,
-          ...(written.changed.length > 0 ? { settings: [...written.changed] } : {}),
-        },
-      });
-      return { ...toSiteSwitchesWire(saved), settings: written.settings };
+      const { before, after } = await writeSiteSwitches(tx, siteSwitchChangeOf(switches));
+      const switchChanged = (Object.keys(after) as (keyof SiteMemorySwitches)[]).some(
+        (k) => before[k] !== after[k],
+      );
+      if (switchChanged || written.changed.length > 0) {
+        await recordAudit(tx, {
+          action: "memory.site_settings_changed",
+          target: { ...after, ...settingsAudit(written.before, written.settings, written.changed) },
+        });
+      }
+      return siteWire(after, written.settings, await removedModelSettings(tx, written.settings));
     });
     if ("ok" in out) return c.json({ code: out.code, message: out.message }, 400);
     return c.json(out);
@@ -163,8 +179,21 @@ export function memorySettingsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
         expected === undefined ? undefined : fromWorkspaceWire(expected),
       );
       if (saved === "changed_since_approval") return saved;
-      await recordAudit(tx, { action: "memory.settings_changed", teamId, target: { ...saved } });
-      return saved;
+      const { before, after } = saved;
+      const keys = Object.keys(after) as (keyof WorkspaceMemorySwitches)[];
+      if (keys.some((k) => before[k] !== after[k])) {
+        await recordAudit(tx, {
+          action: "memory.settings_changed",
+          teamId,
+          target: {
+            ...after,
+            ...(before.learningModelAlias !== after.learningModelAlias
+              ? { previousLearningModelAlias: before.learningModelAlias }
+              : {}),
+          },
+        });
+      }
+      return after;
     });
     if (next === "model_not_enabled") {
       return c.json(
@@ -188,4 +217,31 @@ export function memorySettingsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   }
 
   return app;
+}
+
+/** The Site level's answer: switches, settings, and model settings whose alias was removed. */
+function siteWire(
+  switches: SiteMemorySwitches,
+  settings: MemorySiteSettings,
+  removed: readonly string[],
+) {
+  return { ...toSiteSwitchesWire(switches), settings, removed_models: [...removed] };
+}
+
+/** Changed setting names, plus the model values before and after (review L3). */
+function settingsAudit(
+  before: MemorySiteSettings,
+  after: MemorySiteSettings,
+  changed: readonly string[],
+) {
+  if (changed.length === 0) return {};
+  const model = (k: "learning_model_alias" | "embedding_model_alias") =>
+    changed.includes(k) ? { from: before[k], to: after[k] } : undefined;
+  const learning = model("learning_model_alias");
+  const embedding = model("embedding_model_alias");
+  return {
+    settings: [...changed],
+    ...(learning ? { learningModel: learning } : {}),
+    ...(embedding ? { embeddingModel: embedding } : {}),
+  };
 }

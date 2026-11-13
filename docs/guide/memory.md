@@ -69,7 +69,8 @@ turns Policy off.
 - **Learn from this chat** (site and workspace): you can ask Kobe to suggest memories from a
   conversation and review every suggestion before anything is saved.
 - **Members may propose to the Site** (site and workspace): workspace memories can be proposed to
-  the site; a team admin confirms before anything leaves the workspace.
+  the site; a team admin confirms before anything leaves the workspace. Needs **Workspace
+  memories** on.
 
 Turning a switch off stops its use from the next run on; nothing stored is deleted, and turning
 it back on brings everything back.
@@ -81,7 +82,9 @@ when a team admin set one (Workspace settings › Memory, from the models enable
 otherwise the site's learning model, which the workspace must have enabled. If the chosen model is
 not enabled in the workspace, or none is set, Learn is unavailable and says why: it never switches
 to another model, and never uses the conversation's model. The Memory page of Workspace settings
-shows which model Learn uses now.
+shows which model Learn uses now, or the reason it can't run (which switch, at which level, or
+which model is missing). A chosen model that was disabled or removed stays shown as such until
+an admin picks another.
 
 ### Site memory settings
 

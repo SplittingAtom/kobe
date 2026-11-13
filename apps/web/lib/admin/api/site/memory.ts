@@ -29,9 +29,15 @@ export interface SiteMemorySettings extends MemorySwitches {
   readonly learnEnabled: boolean;
   readonly siteProposalsEnabled: boolean;
   readonly settings: SiteMemorySettingsDoc;
+  /**
+   * Model settings whose stored alias is no longer in the catalog. The server sends setting
+   * names (`learning_model_alias`); `camelizeKeys` leaves string values alone, so they are mapped
+   * here by the form. Absent from an older server.
+   */
+  readonly removedModels?: readonly string[];
 }
 
-export type SiteMemoryChange = Partial<Omit<SiteMemorySettings, "settings">> & {
+export type SiteMemoryChange = Partial<Omit<SiteMemorySettings, "settings" | "removedModels">> & {
   readonly settings?: Partial<SiteMemorySettingsDoc>;
 };
 

@@ -13,7 +13,7 @@ import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 import { MemorySwitchesForm, memoryNotice, type SwitchSpec } from "../team/memory-switches-form";
 
-type SiteSwitch = Exclude<keyof SiteMemorySettings, "settings">;
+type SiteSwitch = Exclude<keyof SiteMemorySettings, "settings" | "removedModels">;
 
 /** The Site's switches; each workspace's own switch must be on too (KOBE-381, SM27). */
 export const SITE_SWITCHES: readonly SwitchSpec<SiteSwitch>[] = [
@@ -70,10 +70,14 @@ export function MemorySwitchesSection() {
             switches={site}
             save={putSiteMemory}
             onSaved={reload}
-            notice={(s) => memoryNotice("on this site", s)}
+            notice={(s) => memoryNotice("on this site", s, "site")}
             saveLabel="Save memory settings"
           />
-          <SiteMemorySettingsForm settings={site.settings} onSaved={reload} />
+          <SiteMemorySettingsForm
+            settings={site.settings}
+            removed={site.removedModels ?? []}
+            onSaved={reload}
+          />
         </>
       )}
     </ResourceView>
@@ -189,13 +193,24 @@ const LIMIT_FIELDS: readonly (readonly [NumberKey, string])[] = [
   ["limitSite", "Site memories"],
 ];
 
+const REMOVED = "Removed from the site's models — choose another.";
+
 function SiteMemorySettingsForm({
   settings,
+  removed,
   onSaved,
 }: {
   readonly settings: SiteMemorySettingsDoc;
+  /** Model settings whose stored alias is no longer in the catalog (wire names). */
+  readonly removed: readonly string[];
   readonly onSaved: () => void;
 }) {
+  const gone = (k: "learningModelAlias" | "embeddingModelAlias", v: string) =>
+    removed.includes(
+      k === "learningModelAlias" ? "learning_model_alias" : "embedding_model_alias",
+    ) && v.trim() === (settings[k] ?? "")
+      ? REMOVED
+      : undefined;
   const mutation = useMutation();
   const [draft, setDraft] = useState<Draft>(() => draftOf(settings));
   const set = (k: keyof Draft) => (e: { target: { value: string } }) =>
@@ -223,6 +238,7 @@ function SiteMemorySettingsForm({
       <ChoiceGroup legend="Models" stacked className="my-4">
         <Field
           label="Learning model (model alias)"
+          error={gone("learningModelAlias", draft.learningModelAlias)}
           hint="Learn from this chat uses it in every workspace that has no learning model of its own; the workspace must have it enabled. Learning never falls back to another model or the conversation's model: with no usable learning model, Learn is unavailable and says why."
         >
           <TextInput
@@ -233,6 +249,7 @@ function SiteMemorySettingsForm({
         </Field>
         <Field
           label="Embedding model (model alias)"
+          error={gone("embeddingModelAlias", draft.embeddingModelAlias)}
           hint="Not used yet: only if search by meaning is added later. Search uses English word matching."
         >
           <TextInput

@@ -92,7 +92,7 @@ describe("Workspace settings › Memory (KOBE-381 ac-3)", () => {
     // Children first: a switch is disabled while what it needs is off.
     for (const name of [...WORKSPACE_LABELS].reverse()) await userEvent.click(await box(name));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    await screen.findByText(/Memory is off in this workspace.*nothing stored was deleted/);
+    await screen.findByText(/Memory is off in this workspace.*nothing stored was deleted/i);
     expect(putBody(calls)).toEqual(off);
     expect(must(calls.find((c) => c.method === "PUT")).headers.get("x-kobe-team")).toBe("t-1");
   });
@@ -132,6 +132,33 @@ describe("Workspace settings › Memory (KOBE-381 ac-3)", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save learning model" }));
     await screen.findByText(/This workspace's learning model is fast/);
     expect(putBody(calls)).toEqual({ learning_model_alias: "fast" });
+  });
+
+  it("M2: a stored model that is no longer enabled shows as such and can be cleared", async () => {
+    const calls = stubApi(
+      teamRoutes({
+        [`GET ${TEAM}`]: [200, { ...WS_ON, learning_model_alias: "slow" }],
+        [`PUT ${TEAM}`]: [200, WS_ON],
+      }),
+    );
+    renderTeam(<TeamMemoryPage />);
+    const select = (await screen.findByRole("combobox", {
+      name: /Learning model for this workspace/,
+    })) as HTMLSelectElement;
+    expect(select.value).toBe("slow");
+    expect([...select.options].map((o) => o.text)).toEqual(["None", "slow (not enabled)", "fast"]);
+    await userEvent.selectOptions(select, "");
+    await userEvent.click(screen.getByRole("button", { name: "Save learning model" }));
+    await screen.findByText(/uses the site's learning model/);
+    expect(putBody(calls)).toEqual({ learning_model_alias: null });
+  });
+
+  it("L8: turning a workspace's memory off says Site Policy still applies", async () => {
+    stubApi(teamRoutes({ [`PUT ${TEAM}`]: [200, { ...WS_ON, memory_enabled: false }] }));
+    renderTeam(<TeamMemoryPage />);
+    await userEvent.click(await box(/Allow memory in this workspace/));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText(/Site Policy still applies\. Nothing stored was deleted/);
   });
 
   it("shows the model Learn uses when one is available", async () => {
@@ -249,6 +276,23 @@ describe("Site console › Settings › Memory (KOBE-381 ac-3)", () => {
     expect(putBody(calls, SITE)).toEqual({
       settings: { ...SETTINGS, context_budget_kib: 12, learning_model_alias: "big" },
     });
+  });
+
+  it("M1: a removed Site model is flagged 'choose another' and doesn't block saving", async () => {
+    const stale = {
+      ...SITE_ON,
+      settings: { ...SETTINGS, learning_model_alias: "gone" },
+      removed_models: ["learning_model_alias"],
+    };
+    const calls = stubApi({ [`GET ${SITE}`]: [200, stale], [`PUT ${SITE}`]: [200, stale] });
+    renderSite(<MemorySwitchesSection />);
+    await screen.findByText(/Removed from the site's models — choose another/);
+    const retention = screen.getByRole("textbox", { name: /Site retention window/ });
+    await userEvent.clear(retention);
+    await userEvent.type(retention, "400");
+    await userEvent.click(screen.getByRole("button", { name: "Save site memory settings" }));
+    await screen.findByText("Site memory settings saved.");
+    expect(putBody(calls, SITE)).toMatchObject({ settings: { retention_days: 400 } });
   });
 
   it("refuses a context budget outside 4 to 16 KiB before sending", async () => {

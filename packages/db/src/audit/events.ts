@@ -2772,6 +2772,8 @@ export const AUDIT_EVENTS = {
     learnEnabled: z.boolean().optional(),
     siteProposalsEnabled: z.boolean().optional(),
     learningModelAlias: modelAlias.nullable().optional(),
+    /** The learning model before this save, when it changed (review L3). */
+    previousLearningModelAlias: modelAlias.nullable().optional(),
   }),
   /**
    * A site admin changed the site-wide memory switches or settings. `settings` (KOBE-381) names
@@ -2787,6 +2789,13 @@ export const AUDIT_EVENTS = {
     settings: z
       .array(z.string().regex(/^[a-z][a-z_]{0,40}$/))
       .max(20)
+      .optional(),
+    /** The Site learning / embedding model before and after, when it changed (review L3). */
+    learningModel: z
+      .strictObject({ from: modelAlias.nullable(), to: modelAlias.nullable() })
+      .optional(),
+    embeddingModel: z
+      .strictObject({ from: modelAlias.nullable(), to: modelAlias.nullable() })
       .optional(),
   }),
   // ── semantic memory items (v1.3, KOBE-377, SM28): ids, scopes, kinds, versions and counts, never

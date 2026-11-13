@@ -41,6 +41,8 @@ export const siteSwitchesWireShape = {
 export const siteMemoryWireSchema = z.strictObject({
   ...siteSwitchesWireShape,
   settings: memorySiteSettingsSchema,
+  /** Model settings whose stored alias is no longer in the catalog (shown as removed). */
+  removed_models: z.array(z.enum(["learning_model_alias", "embedding_model_alias"])),
 });
 export type SiteMemoryWire = z.infer<typeof siteMemoryWireSchema>;
 

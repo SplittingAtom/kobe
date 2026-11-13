@@ -76,9 +76,12 @@ export function MemorySwitchesForm<K extends string, T extends Readonly<Record<K
 export function memoryNotice(
   where: string,
   saved: { memoryEnabled: boolean; projectMemoryEnabled: boolean; memoriesEnabled: boolean },
+  level: "site" | "workspace",
 ): string {
   if (!saved.memoryEnabled)
-    return `Memory is off ${where}. Agents get no notes and no memories; nothing stored was deleted.`;
+    return level === "workspace"
+      ? `Memory is off ${where}. Agents get no notes and no memories; Site Policy still applies. Nothing stored was deleted.`
+      : `Memory is off ${where}. Agents get no notes, no memories and no Site Policy; nothing stored was deleted.`;
   if (!saved.memoriesEnabled)
     return `Memories are off ${where}; notes are on. Nothing stored was deleted.`;
   if (!saved.projectMemoryEnabled) return `Project notes are off ${where}. Memory settings saved.`;

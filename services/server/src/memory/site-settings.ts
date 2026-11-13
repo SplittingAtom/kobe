@@ -117,25 +117,56 @@ export async function readMemorySiteSettings(db: KobeDb | KobeTx): Promise<Memor
 
 const stable = (v: unknown) => JSON.stringify(v);
 
+export const MEMORY_SITE_MODEL_SETTINGS = [
+  "learning_model_alias",
+  "embedding_model_alias",
+] as const;
+export type MemorySiteModelSetting = (typeof MEMORY_SITE_MODEL_SETTINGS)[number];
+
+/**
+ * The model settings whose stored alias is no longer in the catalog (review M1): the console shows
+ * them as removed so the admin can choose another; they never block saving other settings.
+ */
+export async function removedModelSettings(
+  db: KobeDb | KobeTx,
+  settings: MemorySiteSettings,
+): Promise<MemorySiteModelSetting[]> {
+  const out: MemorySiteModelSetting[] = [];
+  for (const key of MEMORY_SITE_MODEL_SETTINGS) {
+    const a = settings[key];
+    if (a === null) continue;
+    const [m] = await db
+      .select({ alias: modelCatalog.alias })
+      .from(modelCatalog)
+      .where(eq(modelCatalog.alias, a));
+    if (!m) out.push(key);
+  }
+  return out;
+}
+
 export type SiteSettingsWrite =
   | {
       readonly ok: true;
+      readonly before: MemorySiteSettings;
       readonly settings: MemorySiteSettings;
       readonly changed: readonly MemorySiteSettingName[];
     }
   | { readonly ok: false; readonly code: "unknown_alias"; readonly message: string };
 
 /**
- * Saves the given fields over the current document (inside the caller's transaction). A model
- * alias must name a catalog model; whether a Workspace enabled it is checked when it is used.
+ * Saves the given fields over the current document (inside the caller's transaction, under
+ * `lockSiteMemorySettings`). A model alias is checked against the catalog only when it changes,
+ * so a stale stored alias never blocks saving other fields; whether a Workspace enabled it is
+ * checked when it is used.
  */
 export async function writeMemorySiteSettings(
   tx: KobeTx,
   change: { readonly [K in MemorySiteSettingName]?: MemorySiteSettings[K] | undefined },
 ): Promise<SiteSettingsWrite> {
-  for (const key of ["learning_model_alias", "embedding_model_alias"] as const) {
+  const before = await readMemorySiteSettings(tx);
+  for (const key of MEMORY_SITE_MODEL_SETTINGS) {
     const a = change[key];
-    if (a === undefined || a === null) continue;
+    if (a === undefined || a === null || a === before[key]) continue;
     const [m] = await tx
       .select({ alias: modelCatalog.alias })
       .from(modelCatalog)
@@ -144,7 +175,6 @@ export async function writeMemorySiteSettings(
       return { ok: false, code: "unknown_alias", message: `No model in the catalog is "${a}".` };
     }
   }
-  const before = await readMemorySiteSettings(tx);
   const given = Object.fromEntries(Object.entries(change).filter(([, v]) => v !== undefined));
   const next: MemorySiteSettings = { ...before, ...given };
   const changed = MEMORY_SITE_SETTING_NAMES.filter((k) => stable(before[k]) !== stable(next[k]));
@@ -155,5 +185,5 @@ export async function writeMemorySiteSettings(
       .values({ key: MEMORY_SITE_SETTINGS_KEY, value })
       .onConflictDoUpdate({ target: siteSettings.key, set: { value, updatedAt: new Date() } });
   }
-  return { ok: true, settings: next, changed };
+  return { ok: true, before, settings: next, changed };
 }
