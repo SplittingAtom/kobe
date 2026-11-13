@@ -123,8 +123,11 @@ export const REGISTRY_REVIEW_ACTIONS = [
 ] as const;
 export type RegistryReviewAction = (typeof REGISTRY_REVIEW_ACTIONS)[number];
 
-/** Site grants beside the role ladder (SK22): the smallest step toward custom roles. */
-export const SITE_GRANTS = ["skill_reviewer"] as const;
+/**
+ * Site grants beside the role ladder (SK22): the smallest step toward custom roles.
+ * `memory_steward` (KOBE-380, SM19) = a Site memory steward (`MEMORY_STEWARD_SITE_GRANT`).
+ */
+export const SITE_GRANTS = ["skill_reviewer", "memory_steward"] as const;
 export type SiteGrant = (typeof SITE_GRANTS)[number];
 
 const uuid = z.string().regex(UUID_PATTERN);

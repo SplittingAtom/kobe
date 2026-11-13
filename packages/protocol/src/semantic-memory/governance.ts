@@ -9,9 +9,9 @@ import { timestampSchema, uuidSchema } from "../common.js";
 // ----------------------------------------------------------------------------- stewards
 
 /**
- * Site steward grant (KOBE-380): a `site_grants` value beside `skill_reviewer`. KOBE-380's
- * migration adds it to the `site_grant` enum and to `SITE_GRANTS` (skill-catalog.ts), which a
- * server test keeps equal to the enum; until then it is named here only. Given and taken through
+ * Site steward grant (KOBE-380): a `site_grants` value beside `skill_reviewer`, in the
+ * `site_grant` enum and in `SITE_GRANTS` (skill-catalog.ts), which a server test keeps equal to
+ * the enum. Given and taken through
  * the existing `PUT/DELETE /v1/site/roles/grants/{userId}/memory_steward`.
  */
 export const MEMORY_STEWARD_SITE_GRANT = "memory_steward";

@@ -18,6 +18,7 @@ import {
 } from "../schema/budgets.js";
 import { BREAK_GLASS_MAX_MINUTES, BREAK_GLASS_NOTIFICATION_EVENTS } from "../schema/break-glass.js";
 import { RETENTION_PERIODS } from "../schema/retention.js";
+import { siteGrant } from "../schema/grants.js";
 import { teamRole } from "../schema/team-members.js";
 import { SSO_LINKED_VIA, SSO_PROVIDER_KINDS } from "../schema/sso.js";
 import {
@@ -460,14 +461,20 @@ export const AUDIT_EVENTS = {
     providerId: id,
     via: z.enum(["site_admin"]).optional(),
   }),
-  /** The Owner or a Site admin gave or took a site grant beside the role ladder (KOBE-331, SK22). */
+  /**
+   * The Owner or a Site admin gave or took a site grant beside the role ladder (KOBE-331, SK22):
+   * Skill reviewer, or Site memory steward (KOBE-380).
+   */
   /** `selfGranted`: the Site's only admin gave it to themselves (flagged, KOBE-336 review). */
   "identity.site_grant.granted": event("site", {
     userId: id,
-    grant: z.enum(["skill_reviewer"]),
+    grant: z.enum(siteGrant.enumValues),
     selfGranted: z.literal(true).optional(),
   }),
-  "identity.site_grant.revoked": event("site", { userId: id, grant: z.enum(["skill_reviewer"]) }),
+  "identity.site_grant.revoked": event("site", {
+    userId: id,
+    grant: z.enum(siteGrant.enumValues),
+  }),
 
   // ── identity: single sign-on and SCIM (KOBE-625, spec sso-oidc-scim §12) ──
   // Ids and codes only: never a claim value, subject, email, client secret or SCIM token. SCIM

@@ -3,7 +3,8 @@ import { ALL_PRIVILEGES, defineDomain } from "./types.js";
 /**
  * Semantic memory (v1.3, KOBE-376). Workspace items are team tables; portable and Site items are
  * site-wide, read with app-role grants and filtered by the server (no SECURITY DEFINER, KOBE-42).
- * File memory (`memory_docs`, the UI's Notes) stays in `workspace.ts`.
+ * File memory (`memory_docs`, the UI's Notes) stays in `workspace.ts`. Site stewards are the
+ * `memory_steward` value of `site_grants` (identity).
  */
 export const memory = defineDomain({
   team: [
@@ -13,6 +14,8 @@ export const memory = defineDomain({
     // Run records for the site-wide lanes: the run belongs to the Workspace.
     "run_portable_memory_items",
     "run_site_memory_items",
+    // Workspace memory stewards (KOBE-380): a grant on top of any Workspace role.
+    "memory_stewards",
   ],
   siteWide: [
     "portable_memory_items",
