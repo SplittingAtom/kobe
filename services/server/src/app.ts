@@ -39,6 +39,7 @@ import { scimRoutes } from "./routes/scim.js";
 import { siteIsolationRoutes } from "./routes/site-isolation.js";
 import { siteModelsRoutes } from "./routes/site-models.js";
 import { siteLegalHoldRoutes } from "./routes/site-legal-hold.js";
+import { siteWideLegalHoldRoutes } from "./routes/site-wide-legal-hold.js";
 import { sitePolicyRoutes } from "./routes/site-policy.js";
 import { siteRetentionRoutes } from "./routes/site-retention.js";
 import { connectorGrantRoutes } from "./routes/connector-grants.js";
@@ -332,6 +333,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/site/budget", siteBudgetRoutes(deps));
   api.route("/site/break-glass", siteBreakGlassRoutes(deps));
   api.route("/site/legal-hold", siteLegalHoldRoutes(deps));
+  api.route("/site/site-legal-hold", siteWideLegalHoldRoutes(deps));
   api.route("/site/retention", siteRetentionRoutes(deps));
   api.route("/site/connectors", siteConnectorsRoutes(deps));
   api.route("/site/skill-blocklist", siteSkillBlocklistRoutes(deps));

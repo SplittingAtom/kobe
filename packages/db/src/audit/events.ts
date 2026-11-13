@@ -31,6 +31,8 @@ import { UI_RESOURCE_PLACEMENTS } from "../schema/connector-ui-resources.js";
 import {
   SEMANTIC_MEMORY_KIND_VALUES,
   SEMANTIC_MEMORY_SCOPE_VALUES,
+  SEMANTIC_MEMORY_TAGS_MAX,
+  SEMANTIC_MEMORY_TAG_MAX,
 } from "../schema/semantic-memory.js";
 import { PI_TOOL_NAME_PATTERN } from "../connectors/snapshot.js";
 import { UI_RESOURCE_FAILURES, UI_RESOURCE_URI_PATTERN } from "../connectors/ui-resources.js";
@@ -339,6 +341,20 @@ const purgeCounts = {
 };
 
 const semanticMemoryScope = z.enum(SEMANTIC_MEMORY_SCOPE_VALUES);
+/** A Site item's row-level fields, recorded before and after a change under a Site hold. */
+const heldItemMetadata = z.strictObject({
+  kind: z.enum(SEMANTIC_MEMORY_KIND_VALUES),
+  tags: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .max(SEMANTIC_MEMORY_TAG_MAX * 4),
+    )
+    .max(SEMANTIC_MEMORY_TAGS_MAX),
+  policy: z.boolean(),
+  asOf: z.iso.date().nullable(),
+});
 
 const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, shape: T) => ({
   scope,
@@ -1458,6 +1474,25 @@ export const AUDIT_EVENTS = {
   "governance.legal_hold.release_withdrawn": event("site", { holdId: id }),
   /** A second site admin approved the release (single-admin site: flagged): purges resume. */
   "governance.legal_hold.released": event("site", {
+    ...legalHoldRef,
+    selfApproved: z.boolean(),
+  }),
+  // ── governance: Site-wide legal hold (v1.3 SM28, KOBE-647): a hold on the Site's own memory
+  // (Site items and their versions), no team or user. The hold id only, as for legal holds.
+  /** A site admin asked for a Site-wide hold. */
+  "governance.site_legal_hold.requested": event("site", legalHoldRef),
+  /** A second site admin approved (single-admin site: flagged): Site memory deletes are refused. */
+  "governance.site_legal_hold.placed": event("site", {
+    ...legalHoldRef,
+    selfApproved: z.boolean(),
+  }),
+  "governance.site_legal_hold.denied": event("site", { holdId: id }),
+  "governance.site_legal_hold.withdrawn": event("site", { holdId: id }),
+  "governance.site_legal_hold.release_requested": event("site", { holdId: id }),
+  "governance.site_legal_hold.release_denied": event("site", { holdId: id }),
+  "governance.site_legal_hold.release_withdrawn": event("site", { holdId: id }),
+  /** A second site admin approved the release (single-admin site: flagged): purges may resume. */
+  "governance.site_legal_hold.released": event("site", {
     ...legalHoldRef,
     selfApproved: z.boolean(),
   }),
@@ -2879,6 +2914,18 @@ export const AUDIT_EVENTS = {
    * never do (KOBE-380).
    */
   "memory.policy.set": event("site", { itemId: id, version, policy: z.boolean() }),
+  /**
+   * A Site item's kind, tags, Policy flag or `as_of` changed while a Site-wide legal hold is in
+   * force (KOBE-647, review L3): these live on the item row, which keeps no history, so the audit
+   * row is the record of the earlier value. The one memory event that carries tags: the hold
+   * exists to keep what the item said.
+   */
+  "memory.item.changed_under_hold": event("site", {
+    itemId: id,
+    version,
+    before: heldItemMetadata,
+    after: heldItemMetadata,
+  }),
   /**
    * Saved despite contradicting Policy (SM23): the Policy items (id and version) it contradicts,
    * at most 25 (KOBE-379 review L-6).

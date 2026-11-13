@@ -94,3 +94,44 @@ export function requestRelease(id: string, reason: string): Promise<ApiResult<Ho
     json: { reason },
   });
 }
+
+// ── Site-wide legal hold (v1.3 SM28, KOBE-647; `/v1/site/site-legal-hold`): holds the Site's own
+// memory (Site items and their versions). Same lifecycle and two-person rule; no team or user.
+
+export type SiteLegalHold = Omit<LegalHold, "team" | "scope" | "subject">;
+
+export interface SiteHoldList {
+  readonly holds: readonly SiteLegalHold[];
+  /** Whether a Site-wide hold is in force now. */
+  readonly active: boolean;
+  readonly selfApprovalAllowed: boolean;
+}
+
+type SiteHoldResponse = { readonly hold: SiteLegalHold };
+
+const SITE_HOLDS = "/v1/site/site-legal-hold";
+
+export function listSiteHolds(): Promise<ApiResult<SiteHoldList>> {
+  return apiRequest<SiteHoldList>(SITE_HOLDS);
+}
+
+export function requestSiteHold(reason: string): Promise<ApiResult<SiteHoldResponse>> {
+  return apiRequest<SiteHoldResponse>(SITE_HOLDS, { method: "POST", json: { reason } });
+}
+
+export function decideSiteHold(
+  id: string,
+  decision: HoldDecision,
+): Promise<ApiResult<SiteHoldResponse>> {
+  return apiRequest<SiteHoldResponse>(`${SITE_HOLDS}/${enc(id)}/${decision}`, { method: "POST" });
+}
+
+export function requestSiteRelease(
+  id: string,
+  reason: string,
+): Promise<ApiResult<SiteHoldResponse>> {
+  return apiRequest<SiteHoldResponse>(`${SITE_HOLDS}/${enc(id)}/release`, {
+    method: "POST",
+    json: { reason },
+  });
+}

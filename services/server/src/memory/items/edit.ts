@@ -9,6 +9,7 @@ import type {
   SemanticMemoryScope,
 } from "@kobe/protocol";
 import type { ServerAuditEvent } from "../../audit/record.js";
+import { siteMemoryHeld } from "../../legal-hold/site-memory-hold.js";
 import {
   assertExpected,
   audit,
@@ -171,8 +172,41 @@ export function patchItem(
         target: { itemId: row.id, version, policy },
       });
     events.push(...overrideAuditEvents(checks, { scope, itemId: row.id, version, teamId }));
+    const after = { kind, tags, policy, asOf };
+    if (scope === "site" && metadataChanged(row, after) && (await siteMemoryHeld(op.tx)))
+      events.push(changedUnderHold(row, after, version));
     return finish(op, row.id, events);
   });
+}
+
+interface HeldMetadata {
+  readonly kind: ItemRow["kind"];
+  readonly tags: readonly string[];
+  readonly policy: boolean;
+  readonly asOf: string | null;
+}
+
+const metadataChanged = (row: ItemRow, after: HeldMetadata): boolean =>
+  after.kind !== row.kind ||
+  !sameTags(after.tags, row.tags) ||
+  after.policy !== row.policy ||
+  after.asOf !== row.as_of;
+
+/**
+ * Under a Site-wide hold (KOBE-647, review L3) a change to a Site item's row fields keeps the
+ * earlier values in the Site audit log: the row has no history of its own.
+ */
+function changedUnderHold(row: ItemRow, after: HeldMetadata, version: number): ServerAuditEvent {
+  return {
+    action: "memory.item.changed_under_hold",
+    teamId: null,
+    target: {
+      itemId: row.id,
+      version,
+      before: { kind: row.kind, tags: [...row.tags], policy: row.policy, asOf: row.as_of },
+      after: { kind: after.kind, tags: [...after.tags], policy: after.policy, asOf: after.asOf },
+    },
+  };
 }
 
 /** Undo (KOBE-378): a new version copying an earlier one; the earlier one stays. */

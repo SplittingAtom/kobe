@@ -1,6 +1,6 @@
 ---
 title: Memory
-summary: How Kobe remembers things between conversations, the Memories and Notes tabs of My memory, how to add, edit, pin, archive or undo memories and notes, which site and workspace switches control notes and memories, and how the learning model is chosen.
+summary: How Kobe remembers things between conversations, the Memories and Notes tabs of My memory, how to add, edit, pin, archive or undo memories and notes, which site and workspace switches control notes and memories, how the learning model is chosen, and how a Site-wide legal hold keeps Site memories.
 section: Memory
 order: 1
 audience: member
@@ -136,6 +136,15 @@ workspace and 1,000 on the site), how
 many versions of a memory are kept (50), when an unconfirmed memory counts as stale (90 days), the
 retention window for archived memories (365 days), learning rate limits, and an embedding model
 that is not used yet. Search always uses English word matching; there is no language setting.
+
+### Legal hold on Site memory
+
+A site admin can place a **Site-wide legal hold** under **Site console › Legal hold** (a second
+site admin approves, as for any legal hold). While it is in force, no Site memory and no earlier
+version of one is deleted: editing a Site memory past the versions-kept limit keeps every version,
+and Site memory cleanup skips it. Changes to a Site memory's kind, tags, Policy flag or as-of date
+are still allowed, and the site audit log records the earlier and new values. A hold on a
+workspace or a person covers that workspace's memories, not the Site's.
 
 ## What Kobe checks before a memory is saved
 
