@@ -108,8 +108,13 @@ access, which is time-boxed, read-only, audited and shown to the team.
   proved multi-factor authentication, for Microsoft Entra through a Conditional Access
   authentication context, and is refused otherwise; see
   [Single sign-on](single-sign-on.md#multi-factor-authentication)), and the site's
-  memory and project memory switches (both the site and the team switch must be on for memory to
-  work; see [Memory](../memory.md)). The **Kobe connector** setting is **Off**, **Docs only** (the
+  memory switches and settings: **Allow memory** (the master switch: off means no notes, no
+  memories and no Site Policy anywhere; it is the only switch that stops Policy), project notes, memories, **Portable preferences**, **Learn from this chat**
+  and **Members may propose to the Site**, each also needing the workspace's own switch; the
+  **learning model** (used by workspaces without their own, where enabled; learning never falls back
+  to another model or the conversation's model), the context budget (4 to 16 KiB), scope limits, versions kept per memory,
+  the stale threshold, the retention window and learning rate limits. Turning a switch off deletes
+  nothing. See [Memory](../memory.md#switches-that-control-memory). The **Kobe connector** setting is **Off**, **Docs only** (the
   default) or **Docs and admin tools**; see below.
 - **Isolation**: whether agents can run. Kobe refuses to run agents unless the cluster offers a
   gVisor or Kata sandbox runtime; this page shows the check and how to fix it.

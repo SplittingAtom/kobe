@@ -251,7 +251,10 @@ export function undoMemoryAction(e: {
  *   also for `project`: a human edit is not an agent write)
  * - `DELETE /v1/memory/:id` -> 204
  * - `POST   /v1/memory/:id/restore` body {@link memoryRestoreRequestSchema} -> detail (Undo)
- * - `GET/PUT /v1/memory/settings?level=team|site` -> {@link memorySettingsSchema}
+ * - `GET/PUT /v1/memory/settings?level=team|site` -> since KOBE-381 a wider, server-defined shape
+ *   (every v1.3 switch, the learning model, Site memory settings; `services/server/src/memory/
+ *   settings-wire.ts`) of which {@link memorySettingsSchema}'s two keys are a subset: PUT still
+ *   accepts that schema; parse responses leniently, not with it.
  */
 export const memoryDocSummarySchema = z.strictObject({
   id: uuidSchema,
@@ -293,7 +296,11 @@ export type MemoryPutRequest = z.infer<typeof memoryPutRequestSchema>;
 export const memoryRestoreRequestSchema = z.strictObject({ version: z.number().int().positive() });
 export type MemoryRestoreRequest = z.infer<typeof memoryRestoreRequestSchema>;
 
-/** Both levels use the same shape; absent key = leave unchanged on PUT, default `true` when never set. */
+/**
+ * The two D24 switches; absent key = leave unchanged on PUT, default `true` when never set. Since
+ * KOBE-381 GET answers carry more keys (see the route list above), so this strict schema is for
+ * PUT bodies only.
+ */
 export const memorySettingsSchema = z.strictObject({
   memory_enabled: z.boolean().optional(),
   project_memory_enabled: z.boolean().optional(),

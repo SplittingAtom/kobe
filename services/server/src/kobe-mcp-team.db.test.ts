@@ -235,8 +235,17 @@ const CASES: Readonly<Record<string, Case>> = {
   team_memory_set: {
     arrange: () =>
       Promise.resolve({
-        from: { memory_enabled: true, project_memory_enabled: true },
-        to: { project_memory_enabled: false },
+        from: {
+          memory_enabled: true,
+          project_memory_enabled: true,
+          memories_enabled: true,
+          workspace_memories_enabled: true,
+          site_memories_enabled: true,
+          learn_enabled: true,
+          site_proposals_enabled: true,
+          learning_model_alias: null,
+        },
+        to: { project_memory_enabled: false, site_memories_enabled: false },
       }),
     audit: "memory.settings_changed",
   },
@@ -505,7 +514,16 @@ describe("route conditionals refuse a stale before-state (console paths unchange
     await stale(
       b.put("/v1/memory/settings?level=team", {
         memory_enabled: false,
-        expected: { memory_enabled: false, project_memory_enabled: true },
+        expected: {
+          memory_enabled: false,
+          project_memory_enabled: true,
+          memories_enabled: true,
+          workspace_memories_enabled: true,
+          site_memories_enabled: true,
+          learn_enabled: true,
+          site_proposals_enabled: true,
+          learning_model_alias: null,
+        },
       }),
     );
     // The console's own calls (no condition) still work.
