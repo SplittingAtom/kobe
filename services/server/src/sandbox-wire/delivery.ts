@@ -7,6 +7,7 @@ import {
   CAPABILITY_APP_CARDS,
   CAPABILITY_MCP,
   CAPABILITY_MEMORY,
+  CAPABILITY_SEMANTIC_MEMORY,
   CAPABILITY_FILE_EDITS,
   CAPABILITY_PROJECTS,
   CAPABILITY_RUN_TOKEN,
@@ -45,6 +46,7 @@ import {
 import { endRunInTx, loadRun, runStillOpen } from "./run-state.js";
 import { mirrorBranchSummaryInTx, parseBranchSummaryResult } from "./branch-summary-end.js";
 import { buildRunMemory } from "../memory/agent.js";
+import { buildRunSemantic } from "../memory/items/run-memory.js";
 import { readRunMemoryPlan, type RunMemoryPlan } from "../agents/run-memory.js";
 import { markTold, untoldNotes, type AgentNotes } from "../sync-conflicts/store.js";
 import { mintRunToken } from "./run-token.js";
@@ -763,14 +765,24 @@ export class CommandDelivery {
     // Memory indexes only reach agents that know the field (KOBE-156).
     // The agent version's memory setting (KOBE-646): `off` sends no memory at all (the sandbox
     // then lists no memory tools; the policy check denies them too).
-    if (
-      row.kind === "run.start" &&
-      !evalSandbox &&
-      this.#host.hasCapability(CAPABILITY_MEMORY) &&
-      (await this.#memoryPlan(row.runId))?.notes === true
-    ) {
+    // Semantic memory (KOBE-382) rides inside it, only for agents announcing `semantic_memory`
+    // and only when the plan allows it (`all`; never evals, eval cases or builder test chats).
+    const plan =
+      row.kind === "run.start" && !evalSandbox && this.#host.hasCapability(CAPABILITY_MEMORY)
+        ? await this.#memoryPlan(row.runId)
+        : undefined;
+    if (plan?.notes === true && row.runId !== null) {
       const memory = await this.#runMemory(row.threadId);
-      if (memory) out = { ...out, memory } as ServerToSandboxFrame;
+      const semantic =
+        memory && plan.semantic && this.#host.hasCapability(CAPABILITY_SEMANTIC_MEMORY)
+          ? await this.#runSemantic(row.runId, row.threadId, (frame as RunStartFrame).message)
+          : undefined;
+      if (memory) {
+        out = {
+          ...out,
+          memory: semantic ? { ...memory, semantic } : memory,
+        } as ServerToSandboxFrame;
+      }
     }
     // Project instructions only reach agents that know the field (KOBE-159): an older agent runs
     // without them rather than failing on an unknown key.
@@ -876,6 +888,26 @@ export class CommandDelivery {
       return await buildRunMemory(this.#ctx.memory, { ...this.#host.target, threadId });
     } catch (err) {
       this.#host.log.warn({ err }, "run.start.memory could not be built; sent without it");
+      return undefined;
+    }
+  }
+
+  /**
+   * `run.start.memory.semantic` (KOBE-382), picked for this message and recorded with the run. A
+   * failure sends the run without the block (fail closed: nothing recorded either).
+   */
+  async #runSemantic(
+    runId: string,
+    threadId: string,
+    message: string,
+  ): Promise<Awaited<ReturnType<typeof buildRunSemantic>>> {
+    const { teamId, userId } = this.#host.target;
+    try {
+      return await withTeam(this.#ctx.db, teamId, (tx) =>
+        buildRunSemantic(tx, { teamId, userId, threadId, runId, message }),
+      );
+    } catch (err) {
+      this.#host.log.warn({ err }, "run.start.memory.semantic could not be built; sent without it");
       return undefined;
     }
   }

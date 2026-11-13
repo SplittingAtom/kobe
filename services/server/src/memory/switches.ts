@@ -9,6 +9,11 @@ import {
 } from "@kobe/db";
 import type { MemoryScope } from "@kobe/protocol";
 import {
+  MEMORY_SITE_SETTINGS_KEY,
+  parseMemorySiteSettings,
+  type MemorySiteSettings,
+} from "./site-settings.js";
+import {
   SITE_SWITCH_NAMES,
   WORKSPACE_SWITCHES_ON,
   effectiveMemory,
@@ -84,6 +89,13 @@ export async function readSiteSwitches(tx: KobeTx): Promise<SiteMemorySwitches> 
     .select({ key: siteSettings.key, value: siteSettings.value })
     .from(siteSettings)
     .where(inArray(siteSettings.key, Object.values(SITE_SWITCH_KEYS)));
+  return siteSwitchesFrom(rows);
+}
+
+/** The Site switches from their `site_settings` rows (pure; other keys are ignored). */
+export function siteSwitchesFrom(
+  rows: readonly { readonly key: string; readonly value: string | null }[],
+): SiteMemorySwitches {
   const off = (key: string) => rows.some((r) => r.key === key && r.value === "false");
   const out: Record<string, boolean> = {};
   for (const name of SITE_SWITCH_NAMES) out[name] = !off(SITE_SWITCH_KEYS[name]);
@@ -141,13 +153,65 @@ async function readTeamState(
       LEFT JOIN team_memory_settings s ON s.team_id = ${teamId}`);
   const row = res.rows[0];
   return {
-    switches: {
-      memoryEnabled: row?.memory_enabled ?? WORKSPACE_SWITCHES_ON.memoryEnabled,
-      projectMemoryEnabled:
-        row?.project_memory_enabled ?? WORKSPACE_SWITCHES_ON.projectMemoryEnabled,
-      ...parseTeamMemoryJson(row?.memory ?? null),
-    },
+    switches: teamSwitchesFrom(row),
     aliasInvalid: storedAliasInvalid(row?.memory ?? null),
+  };
+}
+
+/** The Workspace switches from `team_memory_settings` and `teams.settings.memory` (pure). */
+export function teamSwitchesFrom(
+  row:
+    | {
+        readonly memory_enabled: boolean | null;
+        readonly project_memory_enabled: boolean | null;
+        readonly memory: unknown;
+      }
+    | undefined,
+): WorkspaceMemorySwitches {
+  return {
+    memoryEnabled: row?.memory_enabled ?? WORKSPACE_SWITCHES_ON.memoryEnabled,
+    projectMemoryEnabled: row?.project_memory_enabled ?? WORKSPACE_SWITCHES_ON.projectMemoryEnabled,
+    ...parseTeamMemoryJson(row?.memory ?? null),
+  };
+}
+
+/** One row of {@link runMemoryStateQuery}. */
+export interface RunMemoryStateRow extends Record<string, unknown> {
+  readonly site: { key: string; value: string | null }[] | null;
+  readonly memory_enabled: boolean | null;
+  readonly project_memory_enabled: boolean | null;
+  readonly memory: unknown;
+}
+
+/**
+ * The switches and the Site's memory settings as one SELECT (the selector's hot path, KOBE-382,
+ * joins it with its own reads to save round trips): the same values as {@link readSwitches} and
+ * `readMemorySiteSettings`, decoded by {@link parseRunMemoryState}.
+ */
+export function runMemoryStateQuery(teamId: string): ReturnType<typeof sql> {
+  const keys = [...Object.values(SITE_SWITCH_KEYS), MEMORY_SITE_SETTINGS_KEY];
+  return sql`
+    SELECT (SELECT jsonb_agg(jsonb_build_object('key', key, 'value', value)) FROM site_settings
+             WHERE key IN (${sql.join(
+               keys.map((k) => sql`${k}`),
+               sql`, `,
+             )})) AS site,
+           s.memory_enabled, s.project_memory_enabled,
+           (SELECT CASE WHEN jsonb_typeof(t.settings) = 'object'
+                        THEN t.settings -> ${TEAM_MEMORY_SETTING} END
+              FROM teams t WHERE t.id = ${teamId}) AS memory
+      FROM (SELECT 1) one
+      LEFT JOIN team_memory_settings s ON s.team_id = ${teamId}`;
+}
+
+export function parseRunMemoryState(row: RunMemoryStateRow | undefined): {
+  readonly memory: EffectiveMemory;
+  readonly settings: MemorySiteSettings;
+} {
+  const site = row?.site ?? [];
+  return {
+    memory: effectiveMemory(siteSwitchesFrom(site), teamSwitchesFrom(row)),
+    settings: parseMemorySiteSettings(site.find((r) => r.key === MEMORY_SITE_SETTINGS_KEY)?.value),
   };
 }
 

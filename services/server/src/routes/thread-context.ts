@@ -7,6 +7,7 @@ import {
   threadContextCommandResultSchema,
   threadContextResultSchema,
   type ThreadContext,
+  type ThreadContextMemories,
   type ThreadContextErrorCode,
   type ThreadContextWaking,
 } from "@kobe/protocol";
@@ -14,6 +15,7 @@ import { sealedReplyKeyPair } from "@kobe/protocol/node";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
 import { logger } from "../logger.js";
+import { readThreadMemories } from "../memory/items/run-memory.js";
 import { hitRateLimit } from "../rate-limit.js";
 import { SandboxWakeError } from "../sandbox-wire/types.js";
 import { invalidRequest } from "../teams/http.js";
@@ -89,6 +91,29 @@ export function threadContextRoutes(deps: ServerDeps): Hono<{ Variables: TeamVar
   };
   app.use(requireTeam(deps));
   app.use(requireTeamPermission("team.chat"));
+
+  /**
+   * `GET /v1/threads/{id}/context/memories` (KOBE-382, U48): the semantic memories the thread's
+   * latest run was given, from the run records (no sandbox involved). Owner only (CV2).
+   */
+  app.get("/:id/context/memories", async (c) => {
+    const id = uuidSchema.safeParse(c.req.param("id"));
+    if (!id.success) return invalidRequest(c);
+    const teamId = c.get("team").id;
+    const userId = c.get("user").id;
+    const out = await withTeam(deps.database.db, teamId, async (tx) => {
+      const viewer = { teamId, userId, projectIds: await viewerProjectIds(tx, teamId, userId) };
+      const found = await findThread(tx, viewer, id.data);
+      if (found === null) return null;
+      if (found.access !== "owner") return "not_owner" as const;
+      return readThreadMemories(tx, teamId, userId, id.data);
+    });
+    if (out === null) return c.json(NOT_FOUND, 404);
+    if (out === "not_owner") return fail(c, "not_owner");
+    c.header("cache-control", "private, no-store");
+    const body: ThreadContextMemories = { thread_id: id.data, run_id: out.runId, items: out.items };
+    return c.json(body);
+  });
 
   app.get("/:id/context", async (c) => {
     const id = uuidSchema.safeParse(c.req.param("id"));

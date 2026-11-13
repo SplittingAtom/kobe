@@ -639,6 +639,24 @@ export class FakeKobe {
    */
   readonly threadContext = new Map<string, { status: number; body: unknown }[]>();
 
+  /**
+   * `GET /v1/threads/{id}/context/memories` items (KOBE-382, wire casing), by thread id; absent:
+   * none (`run_id` null). A read-only thread is a 403 `not_owner`.
+   */
+  readonly threadMemories = new Map<string, Json[]>();
+
+  #threadMemories(thread: FakeThread): Response {
+    if (thread.read_only === true) {
+      return error(403, "not_owner", THREAD_CONTEXT_ERROR_MESSAGES.not_owner);
+    }
+    const items = this.threadMemories.get(thread.thread_id);
+    return json(200, {
+      thread_id: thread.thread_id,
+      run_id: items === undefined ? null : "00000000-0000-4000-8000-0000000000aa",
+      items: items ?? [],
+    });
+  }
+
   #threadContext(thread: FakeThread): Response {
     if (thread.read_only === true) {
       return error(403, "not_owner", THREAD_CONTEXT_ERROR_MESSAGES.not_owner);
@@ -1882,6 +1900,9 @@ export class FakeKobe {
           "content-disposition": `attachment; filename="2026-10-20-export-${thread.thread_id.slice(0, 8)}.md"`,
         },
       });
+    }
+    if (action === "context" && sub === "memories" && method === "GET") {
+      return this.#threadMemories(thread);
     }
     if (action === "context" && method === "GET") return this.#threadContext(thread);
     if (action === "usage" && method === "GET") {

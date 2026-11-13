@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   threadContextErrorSchema,
+  threadContextMemoriesSchema,
   threadContextSchema,
   threadContextWakingSchema,
   type ThreadContextErrorCode,
@@ -61,6 +62,32 @@ export function contextOpenApiPaths(): Record<string, Record<string, unknown>> {
         },
       },
     },
+    "/v1/threads/{id}/context/memories": {
+      get: {
+        operationId: "getThreadContextMemories",
+        summary: "The memories the thread's latest run was given",
+        description:
+          "The owner reads the semantic memories (Policy, Site, Workspace and their own) that " +
+          "the thread's latest run was given, from the run's records, in the order the block " +
+          "renders them: Policy, pinned items, then the items picked for that message. Each " +
+          "item is the version the run got. `run_id` is null before the first run; `items` is " +
+          "empty when the run got no memories. Statements are untrusted: show them as plain text.",
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+        ],
+        responses: {
+          "200": json("ThreadContextMemories", "The items, in render order."),
+          "400": json("Error", "`invalid_request`: bad id."),
+          "401": json("Error", "`unauthenticated`: no session."),
+          "403": json(
+            "ThreadContextError",
+            `${codes("not_owner")} (a reader the thread is shared with); also \`forbidden\`, ` +
+              "`not_a_team_member` (as `Error`).",
+          ),
+          "404": json("Error", "`thread_not_found`: unknown id, or another user's or team's."),
+        },
+      },
+    },
   };
 }
 
@@ -69,5 +96,6 @@ export function contextOpenApiSchemas(): Record<string, JsonSchema> {
     ThreadContext: schemaOf(threadContextSchema),
     ThreadContextWaking: schemaOf(threadContextWakingSchema),
     ThreadContextError: schemaOf(threadContextErrorSchema),
+    ThreadContextMemories: schemaOf(threadContextMemoriesSchema),
   };
 }

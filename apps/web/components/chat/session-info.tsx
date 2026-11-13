@@ -2,7 +2,7 @@
 
 import { useAuiState } from "@assistant-ui/react";
 import { Dialog } from "radix-ui";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { TeamModels } from "../../lib/admin/api/team/models";
 import type { UsageTotals } from "../../lib/admin/api/usage";
 import { formatTokens, formatUsd } from "../../lib/admin/usage-format";
@@ -84,6 +84,29 @@ function sum(runs: readonly Omit<UsageTotals, "reasoningTokens">[]): UsageTotals
   );
 }
 
+const MEMORIES_TITLE = "Memories the latest run was given; the context viewer lists them";
+
+/**
+ * "Memories in context (n)" (KOBE-382): how many memories the thread's latest run was given, read
+ * once when the dialog opens. Undefined (no row) for a shared reader; "—" until read or on failure.
+ */
+function useMemoriesCount(extras: KobeThreadExtras, owner: boolean): string | undefined {
+  const [count, setCount] = useState<number | null>(null);
+  const controller = extras.controller;
+  useEffect(() => {
+    if (!owner || !controller) return;
+    let current = true;
+    void controller.threadContextMemories()?.then((m) => {
+      if (current && m !== null) setCount(m.items.length);
+    });
+    return () => {
+      current = false;
+    };
+  }, [controller, owner]);
+  if (!owner) return undefined;
+  return count === null ? "—" : String(count);
+}
+
 /**
  * `/session` (KOBE-450, Pi's /session): this conversation's details and usage, read from what the
  * server already sent (the thread, the team's models, `GET /v1/threads/{id}/usage`). Read-only.
@@ -97,6 +120,7 @@ function SessionInfoDialog({
 }) {
   const { state } = extras;
   const summary = state.summary;
+  const memories = useMemoriesCount(extras, summary?.readOnly !== true);
   const models = useThreadTeamModels();
   const usageRead = useThreadUsageRead();
   const usage = usageRead?.usage;
@@ -126,6 +150,10 @@ function SessionInfoDialog({
     ["Output tokens", formatTokens(totals.outputTokens)],
     ["Thinking tokens", thinkingTokensLine(runs), THINKING_TOKENS_TITLE],
     ["Last run", last.value, last.title],
+    // Owner only (CV2): a shared reader never sees what the owner's memory gave the run.
+    ...(memories === undefined
+      ? []
+      : ([["Memories in context", memories, MEMORIES_TITLE]] as const)),
     [
       "Cost",
       totals.unpricedCalls > 0

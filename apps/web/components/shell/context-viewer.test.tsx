@@ -67,6 +67,46 @@ async function openViewer(t: string) {
 }
 
 describe("context viewer", () => {
+  it("lists the memories the latest run was given per lane, as plain text (KOBE-382)", async () => {
+    const t = thread();
+    fake.threadContext.set(t, [{ status: 200, body: contextOf(SECTIONS, { thread_id: t }) }]);
+    fake.threadMemories.set(t, [
+      {
+        id: "00000000-0000-4000-8000-000000000001",
+        version: 1,
+        lane: "policy",
+        kind: "fact",
+        statement: "Never share customer data",
+        pinned: false,
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000002",
+        version: 1,
+        lane: "team",
+        kind: "fact",
+        statement: "<i>Deploys</i> freeze on Fridays",
+        pinned: true,
+      },
+    ]);
+    const { dialog } = await openViewer(t);
+    const list = await within(dialog).findByText("Memories in context (2)");
+    const details = must(list.closest("details"));
+    expect(within(details).getByRole("region", { name: "Policy" }).textContent).toContain(
+      "Never share customer data",
+    );
+    const team = within(details).getByRole("region", { name: "Workspace memories" });
+    expect(team.textContent).toContain("Pinned · <i>Deploys</i> freeze on Fridays");
+    expect(team.querySelector("i")).toBeNull();
+  });
+
+  it("shows no memories list when the run got none", async () => {
+    const t = thread();
+    fake.threadContext.set(t, [{ status: 200, body: contextOf(SECTIONS, { thread_id: t }) }]);
+    const { dialog } = await openViewer(t);
+    await within(dialog).findByRole("region", { name: "Context text" });
+    expect(within(dialog).queryByText(/Memories in context/)).toBeNull();
+  });
+
   it("opens from the gauge over the workspace, shows labelled plain text, closes with Escape", async () => {
     const t = thread();
     fake.threadContext.set(t, [{ status: 200, body: contextOf(SECTIONS, { thread_id: t }) }]);

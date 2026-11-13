@@ -14,11 +14,13 @@ import type { FileEntry } from "../files/api";
 import { proposalExtras, type ProposalView } from "../files/editor-state";
 import { apiDownload, apiRequest, apiTextFile, type ApiResult, type TextFile } from "../api/client";
 import { readThreadContext, type ContextRead } from "./context-viewer";
+import { readThreadContextMemories } from "./context-memories";
 import { readThreadLineage } from "./lineage";
 import { readThreadBranches, writeThreadLabel } from "./branches";
 import { readThreadEgressBlocked } from "./egress-blocked";
 import type {
   ThreadBranchesResponse,
+  ThreadContextMemories,
   ThreadEgressBlockedResponse,
   ThreadLineageResponse,
 } from "@kobe/protocol";
@@ -266,6 +268,8 @@ export interface ChatApi extends FileLinksApi {
   threadUsage(threadId: string): Promise<ApiResult<ThreadUsage>>;
   /** What the thread's latest model call sent the model (KOBE-470/471), read live; owner only. */
   threadContext(threadId: string): Promise<ContextRead>;
+  /** The memories the thread's latest run was given (KOBE-382); owner only, null on failure. */
+  threadContextMemories(threadId: string): Promise<ThreadContextMemories | null>;
   /** The thread's family for the lineage strip (TL1, KOBE-535); null when the read failed. */
   threadLineage(threadId: string): Promise<ThreadLineageResponse | null>;
   /** Labels and remembered-rule runs for the Conversation tree (CT2, KOBE-545); null on failure. */
@@ -520,6 +524,7 @@ export function createChatApi(teamId: string, fetchFn?: typeof fetch): ChatApi {
     runUsage: (runId) => get(`/v1/runs/${enc(runId)}/usage`),
     threadUsage: (id) => get(`/v1/threads/${enc(id)}/usage`),
     threadContext: (id) => readThreadContext(id, teamId, fetchFn),
+    threadContextMemories: (id) => readThreadContextMemories(id, teamId, fetchFn),
     threadLineage: (id) => readThreadLineage(id, teamId, fetchFn),
     getThreadBranches: (id) => readThreadBranches(id, teamId, fetchFn),
     threadEgressBlocked: (id) => readThreadEgressBlocked(id, teamId, fetchFn),
