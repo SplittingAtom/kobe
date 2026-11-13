@@ -30,7 +30,9 @@ in `docs/install.md`. No feature code.
   from the item or team pass); a cross-team move is left to RLS (42501). The one UPDATE allowed
   (review L4) is the retention scrub on Workspace versions: `evidence`, `source_thread_id`,
   `source_entry_ids` set to NULL (each NULL or unchanged), every other column unchanged
-  (`to_jsonb(NEW) - scrubbed = to_jsonb(OLD) - scrubbed`; `statement_tsv` excluded, generated).
+  (`to_jsonb(NEW) - scrubbed = to_jsonb(OLD) - scrubbed`; `statement_tsv` excluded, generated),
+  refused with KH001 while a legal hold covers the item (coordinator 2026-11-12: holds suspend
+  retention; same rule as the delete guard).
 - **Legal hold (review M1)**, as `memory_docs` (0074): AFTER DELETE statement guards on items
   (owner's hold, or any hold in the team for `team` items, via `memory_legal_hold_covers`) and
   versions (skip cascaded rows); BEFORE TRUNCATE `legal_hold_refuse_truncate` on all five team
@@ -64,10 +66,7 @@ statement)` stored generated (Q11, no language setting).
 
 ## Open questions (for Chris or the coordinator)
 
-1. Should the retention scrub (L4) be refused while a legal hold covers the item? Today the
-   trigger allows it; retention code skips held owners (`retention/memory.ts`), and KOBE-386 can
-   add the DB check.
-2. Portable/Site items have no DB hold guard until the Site-wide hold (KOBE-386).
+1. Portable/Site items have no DB hold guard until the Site-wide hold (KOBE-386).
 
 Review 2026-11-12 (`docs/ledger/review-376.md`, untracked): M1, M2, L1-L5 fixed in 0216/0217
 (regenerated, no 0218); Q2 confirmed.

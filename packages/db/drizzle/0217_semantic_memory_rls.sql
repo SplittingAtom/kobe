@@ -112,7 +112,9 @@ ALTER TABLE "site_memory_items" ADD CONSTRAINT "site_memory_items_current_versio
 -- One UPDATE passes, on Workspace versions only: the retention scrub, which sets evidence,
 -- source_thread_id and source_entry_ids to NULL (each NULL or unchanged) and changes nothing else.
 -- statement_tsv is left out of the comparison: it is generated (not yet computed in a BEFORE row
--- trigger) and follows statement, which must not change.
+-- trigger) and follows statement, which must not change. Holds suspend retention: while a legal
+-- hold covers the item (the delete guard's rule, memory_legal_hold_covers), a scrub that changes
+-- anything is refused with KH001.
 CREATE FUNCTION "public"."semantic_memory_versions_immutable"() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
 DECLARE
@@ -134,6 +136,15 @@ BEGIN
       AND (NEW.evidence IS NULL OR NEW.evidence IS NOT DISTINCT FROM OLD.evidence)
       AND (NEW.source_thread_id IS NULL OR NEW.source_thread_id IS NOT DISTINCT FROM OLD.source_thread_id)
       AND (NEW.source_entry_ids IS NULL OR NEW.source_entry_ids IS NOT DISTINCT FROM OLD.source_entry_ids) THEN
+      IF (NEW.evidence, NEW.source_thread_id, NEW.source_entry_ids)
+          IS DISTINCT FROM (OLD.evidence, OLD.source_thread_id, OLD.source_entry_ids) THEN
+        PERFORM "public"."legal_hold_lock_shared"();
+        IF "public"."memory_legal_hold_covers"(NEW.team_id, (
+            SELECT i.owner_user_id FROM "public"."semantic_memory_items" i
+            WHERE i.team_id = NEW.team_id AND i.id = NEW.item_id)) THEN
+          RAISE EXCEPTION 'memory under legal hold cannot be scrubbed' USING ERRCODE = 'KH001';
+        END IF;
+      END IF;
       RETURN NEW;
     END IF;
   END IF;

@@ -427,6 +427,19 @@ describe("semantic memory versions are immutable", () => {
     );
   });
 
+  it("refuses the retention scrub while a legal hold covers the item", async () => {
+    const h = await hold(teamA, owner);
+    try {
+      await inTeam(teamA, async (c) => {
+        const where = `WHERE team_id = '${teamA}' AND item_id = '${item}' AND version = 2`;
+        const scrub = `UPDATE semantic_memory_item_versions SET evidence = NULL, source_thread_id = NULL, source_entry_ids = NULL ${where}`;
+        expect(await code(c, scrub)).toBe(LEGAL_HOLD_SQLSTATE);
+      });
+    } finally {
+      await release(h);
+    }
+  });
+
   it("allows only the retention scrub of provenance on Workspace versions (L4)", async () => {
     await inTeam(teamA, async (c) => {
       const where = `WHERE team_id = '${teamA}' AND item_id = '${item}' AND version = 2`;
