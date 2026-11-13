@@ -223,7 +223,7 @@ function SiteMemorySettingsForm({
       <ChoiceGroup legend="Models" stacked className="my-4">
         <Field
           label="Learning model (model alias)"
-          hint="Learn from this chat uses it in every workspace that has enabled it; a workspace without it can pick its own. Learning never falls back to the conversation's model: with no usable learning model, Learn is unavailable and says why."
+          hint="Learn from this chat uses it in every workspace that has no learning model of its own; the workspace must have it enabled. Learning never falls back to another model or the conversation's model: with no usable learning model, Learn is unavailable and says why."
         >
           <TextInput
             value={draft.learningModelAlias}

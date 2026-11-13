@@ -131,7 +131,7 @@ function LearningModelForm({
       () => putTeamMemory(teamId, { learningModelAlias: value === "" ? null : value }),
       (s) =>
         s.learningModelAlias === null
-          ? "This workspace has no learning model of its own."
+          ? "This workspace uses the site's learning model."
           : `This workspace's learning model is ${s.learningModelAlias}.`,
     );
     if (done) onSaved();
@@ -141,7 +141,7 @@ function LearningModelForm({
     <form onSubmit={onSubmit} aria-label="Learning model">
       <Field
         label="Learning model for this workspace"
-        hint="Learn from this chat uses the site's learning model when this workspace has enabled it; otherwise this one. It never falls back to the conversation's model. Only models enabled in Workspace settings › Models are offered."
+        hint="When set, Learn from this chat uses this model instead of the site's learning model; None uses the site's. If the chosen model is not enabled here, Learn is unavailable and says why: it never falls back to another model or the conversation's model. Only models enabled in Workspace settings › Models are offered."
         className="my-4"
       >
         <Select value={value} onChange={(e) => setValue(e.target.value)}>

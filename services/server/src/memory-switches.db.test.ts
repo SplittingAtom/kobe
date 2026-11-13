@@ -262,7 +262,7 @@ describe("learning model (ac-4)", () => {
     });
   });
 
-  it("the Site's model when enabled here, else the Workspace's, else not enabled", async () => {
+  it("the Workspace's model wins when set; each choice must be enabled, no fallthrough", async () => {
     const w = await world();
     const ia = await siteAdmin();
     await enable(w.team, "sw-default2", w.admin.id, true);
@@ -270,24 +270,26 @@ describe("learning model (ac-4)", () => {
     expect(
       (await settings(ia, "site", { settings: { learning_model_alias: "sw-site" } })).status,
     ).toBe(200);
-    expect((await settings(w.member, "effective")).json).toMatchObject({
-      learn: { available: false, reason: "learning_model_not_enabled" },
-    });
-    await enable(w.team, "sw-ws", w.admin.id);
-    await settings(w.admin, "team", { learning_model_alias: "sw-ws" });
-    expect((await settings(w.member, "effective")).json).toMatchObject({
-      learn: { available: true, alias: "sw-ws", source: "team" },
+    const learn = async () =>
+      ((await settings(w.member, "effective")).json as { learn: unknown }).learn;
+    // Site's model only, not enabled here: unavailable (the default model is never used).
+    expect(await learn()).toMatchObject({
+      available: false,
+      reason: "learning_model_not_enabled",
     });
     await enable(w.team, "sw-site", w.admin.id);
-    expect((await settings(w.member, "effective")).json).toMatchObject({
-      learn: { available: true, alias: "sw-site", source: "site" },
-    });
-    // Disabling the Workspace's choice later makes it unusable, never another model.
-    await fx.admin.query(`DELETE FROM team_models WHERE team_id = $1 AND alias <> 'sw-default2'`, [
+    expect(await learn()).toMatchObject({ available: true, alias: "sw-site", source: "site" });
+    // The Workspace's own model wins once set.
+    await enable(w.team, "sw-ws", w.admin.id);
+    await settings(w.admin, "team", { learning_model_alias: "sw-ws" });
+    expect(await learn()).toMatchObject({ available: true, alias: "sw-ws", source: "team" });
+    // Disabled later: unavailable, never the Site's (enabled) model or the default.
+    await fx.admin.query(`DELETE FROM team_models WHERE team_id = $1 AND alias = 'sw-ws'`, [
       w.team,
     ]);
-    expect((await settings(w.member, "effective")).json).toMatchObject({
-      learn: { available: false, reason: "learning_model_not_enabled" },
+    expect(await learn()).toMatchObject({
+      available: false,
+      reason: "learning_model_not_enabled",
     });
   });
 });

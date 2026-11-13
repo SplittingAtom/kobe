@@ -22,7 +22,7 @@ const SWITCHES_HELP =
   "memories), site_memories_enabled (Site memories reach this workspace's runs; Site Policy " +
   "reaches them anyway), learn_enabled (Learn from this chat), site_proposals_enabled (members " +
   "may propose memories to the Site) and learning_model_alias (the workspace's learning model, " +
-  "used when the Site's isn't enabled here; null = none; must be a model enabled in the workspace)";
+  "used instead of the Site's when set; null = use the Site's; must be a model enabled in the workspace)";
 
 export const teamMemoryGet = kobeTool({
   name: "team_memory_get",

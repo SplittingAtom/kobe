@@ -127,7 +127,7 @@ describe("Workspace settings › Memory (KOBE-381 ac-3)", () => {
     });
     const options = [...(select as HTMLSelectElement).options].map((o) => o.value);
     expect(options).toEqual(["", "fast"]);
-    expect(screen.getByText(/never falls back to the conversation's model/));
+    expect(screen.getByText(/never falls back to another model or the conversation's model/));
     await userEvent.selectOptions(select, "fast");
     await userEvent.click(screen.getByRole("button", { name: "Save learning model" }));
     await screen.findByText(/This workspace's learning model is fast/);

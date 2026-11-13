@@ -38,8 +38,8 @@ export interface WorkspaceMemorySwitches {
   readonly learnEnabled: boolean;
   readonly siteProposalsEnabled: boolean;
   /**
-   * The Workspace's learning model (a model alias), used when the Site's learning model is unset
-   * or not enabled in this Workspace (judge pattern, see `learning-model.ts`). Null = none.
+   * The Workspace's learning model (a model alias): when set, Learn uses it (it must be enabled
+   * in the Workspace) instead of the Site's (`learning-model.ts`). Null = the Site's.
    */
   readonly learningModelAlias: string | null;
 }

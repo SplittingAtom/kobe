@@ -31,14 +31,19 @@ import {
 export const CAPABILITY_SEMANTIC_MEMORY = "semantic_memory";
 
 /**
- * Most bytes of the rendered "What Kobe knows" block (SM23): block header and footer, each lane's
+ * Bytes of the rendered "What Kobe knows" block (SM23): block header and footer, each lane's
  * nonce fences and header, and each item's line (bullet, kind, provenance) plus its statement.
- * {@link semanticMemoryRenderedBytes} computes it with the fixed overheads below; the selector
- * (KOBE-382) fills to it and the renderer (KOBE-383) must stay within those overheads, so
- * `omitted_count` stays true. The Policy cap ({@link SEMANTIC_MEMORY_POLICY_MAX_BYTES}) is a store
- * limit over statement bytes.
+ * {@link semanticMemoryRenderedBytes} computes it with the fixed overheads below. The Site's
+ * context budget (KOBE-381, Site setting `context_budget_kib`) picks the size from
+ * {@link SEMANTIC_MEMORY_BLOCK_MIN_BYTES} to {@link SEMANTIC_MEMORY_BLOCK_MAX_BYTES}, default
+ * {@link SEMANTIC_MEMORY_BLOCK_DEFAULT_BYTES}; the selector (KOBE-382) fills to that setting and
+ * the renderer (KOBE-383) must stay within those overheads, so `omitted_count` stays true. The
+ * schema enforces the range's top: a `run.start` never carries more than the largest budget. The
+ * Policy cap ({@link SEMANTIC_MEMORY_POLICY_MAX_BYTES}) is a store limit over statement bytes.
  */
-export const SEMANTIC_MEMORY_BLOCK_MAX_BYTES = 8 * 1024;
+export const SEMANTIC_MEMORY_BLOCK_MIN_BYTES = 4 * 1024;
+export const SEMANTIC_MEMORY_BLOCK_DEFAULT_BYTES = 8 * 1024;
+export const SEMANTIC_MEMORY_BLOCK_MAX_BYTES = 16 * 1024;
 /** Block title, untrusted-data notice and the "n more not shown" line. */
 export const SEMANTIC_MEMORY_RENDER_BLOCK_OVERHEAD_BYTES = 256;
 /** One lane (Policy or a scope): its header and nonce fences, open and close. */

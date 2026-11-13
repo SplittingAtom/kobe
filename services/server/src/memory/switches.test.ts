@@ -202,22 +202,30 @@ describe("learning model (ac-4)", () => {
     (a: string) =>
       Promise.resolve(aliases.includes(a));
 
-  it("the Site's model when the Workspace enabled it", async () => {
+  it("the Workspace's own model wins when set and enabled", async () => {
     expect(await pickLearningModel("site-m", "ws-m", enabledIn("site-m", "ws-m"))).toEqual({
-      ok: true,
-      alias: "site-m",
-      source: "site",
-    });
-  });
-
-  it("else the Workspace's own model while it is enabled", async () => {
-    expect(await pickLearningModel("site-m", "ws-m", enabledIn("ws-m"))).toEqual({
       ok: true,
       alias: "ws-m",
       source: "team",
     });
-    expect(await pickLearningModel(null, "ws-m", enabledIn("ws-m"))).toMatchObject({
-      alias: "ws-m",
+  });
+
+  it("a set Workspace model that isn't enabled fails clearly, never the Site's", async () => {
+    expect(await pickLearningModel("site-m", "ws-m", enabledIn("site-m"))).toMatchObject({
+      ok: false,
+      reason: "learning_model_not_enabled",
+    });
+  });
+
+  it("no Workspace model: the Site's, if enabled in the Workspace", async () => {
+    expect(await pickLearningModel("site-m", null, enabledIn("site-m"))).toEqual({
+      ok: true,
+      alias: "site-m",
+      source: "site",
+    });
+    expect(await pickLearningModel("site-m", null, enabledIn())).toMatchObject({
+      ok: false,
+      reason: "learning_model_not_enabled",
     });
   });
 
@@ -227,15 +235,13 @@ describe("learning model (ac-4)", () => {
     expect(r.ok ? "" : r.message).toMatch(/No learning model is set/);
   });
 
-  it("not enabled: unavailable with a reason, never another model", async () => {
+  it("asks only about the one chosen alias: no thread or default model", async () => {
     const asked: string[] = [];
-    const r = await pickLearningModel("site-m", "ws-m", (a) => {
+    await pickLearningModel("site-m", "ws-m", (a) => {
       asked.push(a);
       return Promise.resolve(false);
     });
-    expect(r).toMatchObject({ ok: false, reason: "learning_model_not_enabled" });
-    // Only the two chosen aliases are ever considered: no thread or default model.
-    expect(asked).toEqual(["site-m", "ws-m"]);
+    expect(asked).toEqual(["ws-m"]);
     expect(pickLearningModel.length).toBe(3);
   });
 });

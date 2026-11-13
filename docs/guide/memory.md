@@ -70,11 +70,12 @@ it back on brings everything back.
 
 ### The learning model
 
-Learn from this chat uses a **learning model** an admin chose: the site's learning model when the
-workspace has enabled that model, otherwise the workspace's own learning model (Workspace settings
-› Memory, from the models enabled in the workspace). It never uses the conversation's model
-instead. When neither is set or enabled, Learn is unavailable and says why; the Memory page of
-Workspace settings shows which model Learn uses now.
+Learn from this chat uses a **learning model** an admin chose: the workspace's own learning model
+when a team admin set one (Workspace settings › Memory, from the models enabled in the workspace),
+otherwise the site's learning model, which the workspace must have enabled. If the chosen model is
+not enabled in the workspace, or none is set, Learn is unavailable and says why: it never switches
+to another model, and never uses the conversation's model. The Memory page of Workspace settings
+shows which model Learn uses now.
 
 ### Site memory settings
 

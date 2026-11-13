@@ -7,7 +7,12 @@ import {
   type KobeDb,
   type KobeTx,
 } from "@kobe/db";
-import { SEMANTIC_MEMORY_SCOPE_MAX_ITEMS } from "@kobe/protocol";
+import {
+  SEMANTIC_MEMORY_BLOCK_DEFAULT_BYTES,
+  SEMANTIC_MEMORY_BLOCK_MAX_BYTES,
+  SEMANTIC_MEMORY_BLOCK_MIN_BYTES,
+  SEMANTIC_MEMORY_SCOPE_MAX_ITEMS,
+} from "@kobe/protocol";
 import { logger } from "../logger.js";
 
 /**
@@ -17,15 +22,17 @@ import { logger } from "../logger.js";
  * full-text search language setting: search uses fixed English stemming (Q11).
  *
  * The values are read by the tickets that enforce them: the context budget by the selector
- * (KOBE-382, within the `run.start` contract's block cap), scope limits and the version cap by
+ * (KOBE-382; the `run.start` contract allows the whole range), scope limits and the version cap by
  * the item store (KOBE-378), the stale threshold and retention window by the sweeps (KOBE-386),
  * rate limits and the learning model by Learn (KOBE-393). The embedding model is for Phase D and
  * unused until vectors are earned.
  */
 export const MEMORY_SITE_SETTINGS_KEY = "memory.settings";
 
-export const MEMORY_CONTEXT_BUDGET_KIB_MIN = 4;
-export const MEMORY_CONTEXT_BUDGET_KIB_MAX = 16;
+/** The contract's rendered-block range, in KiB (4 to 16, default 8). */
+export const MEMORY_CONTEXT_BUDGET_KIB_MIN = SEMANTIC_MEMORY_BLOCK_MIN_BYTES / 1024;
+export const MEMORY_CONTEXT_BUDGET_KIB_MAX = SEMANTIC_MEMORY_BLOCK_MAX_BYTES / 1024;
+const MEMORY_CONTEXT_BUDGET_KIB_DEFAULT = SEMANTIC_MEMORY_BLOCK_DEFAULT_BYTES / 1024;
 
 const alias = z.string().max(64).regex(new RegExp(MODEL_ALIAS_PATTERN));
 const scopeLimit = z.number().int().min(1).max(SEMANTIC_MEMORY_SCOPE_MAX_ITEMS);
@@ -63,7 +70,7 @@ export const MEMORY_SITE_SETTING_NAMES = Object.keys(
 export const MEMORY_SITE_SETTINGS_DEFAULTS: MemorySiteSettings = Object.freeze({
   learning_model_alias: null,
   embedding_model_alias: null,
-  context_budget_kib: 8,
+  context_budget_kib: MEMORY_CONTEXT_BUDGET_KIB_DEFAULT,
   scope_limits: Object.freeze({
     user: SEMANTIC_MEMORY_SCOPE_MAX_ITEMS,
     portable: SEMANTIC_MEMORY_SCOPE_MAX_ITEMS,

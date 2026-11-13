@@ -170,12 +170,12 @@ describe("run.start.memory.semantic ordering and limits", () => {
     expect(
       semantic([{ ...pick, statement: "x".repeat(SEMANTIC_MEMORY_STATEMENT_MAX + 1) }]).success,
     ).toBe(false);
-    const many = Array.from({ length: 20 }, (_, i) => ({
+    const many = Array.from({ length: 40 }, (_, i) => ({
       ...pick,
       id: `66666666-6666-4666-8666-${String(i).padStart(12, "0")}`,
       statement: "y".repeat(500),
     }));
-    expect(20 * 500).toBeGreaterThan(SEMANTIC_MEMORY_BLOCK_MAX_BYTES);
+    expect(40 * 500).toBeGreaterThan(SEMANTIC_MEMORY_BLOCK_MAX_BYTES);
     expect(semantic(many).success).toBe(false);
     const policies = Array.from({ length: 5 }, (_, i) => ({
       ...policy,

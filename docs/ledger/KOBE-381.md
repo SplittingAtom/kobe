@@ -31,12 +31,18 @@ MCP tools on one shared wire schema, Site console and Workspace settings UI, gui
   {`learn_passes_per_hour` 1–100 (10), `saves_per_minute` 1–600 (30)}, `retention_days` 30–3650
   (365). No FTS language (Q11; a test asserts none). Ranges and rate-limit names are mine (brief
   names the settings, not bounds).
-- **Learning model** (`memory/learning-model.ts`): judge pattern exactly as `judgeModelFor`
-  minus its fallbacks: Site alias if enabled in the Workspace → Workspace override if enabled →
-  unavailable (`no_learning_model` / `learning_model_not_enabled`; `learnAvailability` adds
-  `memory_off` / `learn_off`). `pickLearningModel` takes no thread/default model at all. Saving a
-  Workspace override requires it enabled there (400 `model_not_enabled`); a Site alias must be in
-  the catalog (400 `unknown_alias`, nothing written).
+- **Learning model** (`memory/learning-model.ts`, coordinator 2026-11-13): Workspace override set
+  → it must be enabled in the Workspace, else unavailable (no fallthrough to the Site alias);
+  unset → Site alias, must be enabled, else unavailable (`no_learning_model` /
+  `learning_model_not_enabled`; `learnAvailability` adds `memory_off` / `learn_off`).
+  `pickLearningModel` takes no thread/default model at all. Saving a Workspace override requires
+  it enabled there (400 `model_not_enabled`); a Site alias must be in the catalog (400
+  `unknown_alias`, nothing written).
+- **Contract (coordinator 2026-11-13):** `packages/protocol` run-context now has
+  `SEMANTIC_MEMORY_BLOCK_MIN/DEFAULT/MAX_BYTES` = 4/8/16 KiB; the schema caps the rendered block at
+  16 KiB (KOBE-382 fills to the Site setting, no clamp). Fixture `run-start-semantic-16k.json`
+  (a ~16 KiB block parses); tests over 16 KiB refuse. The Site setting's bounds come from these
+  constants.
 - **Route** `/v1/memory/settings`: team level returns all Workspace values; PUT any subset;
   `expected` is now the **full** Workspace before-state (409 `changed_since_approval`). Site level
   returns switches + `settings`; PUT switches and/or a partial `settings`. `effective` adds
@@ -60,16 +66,12 @@ MCP tools on one shared wire schema, Site console and Workspace settings UI, gui
 
 ## Open questions (for Chris or the coordinator)
 
-1. **Context budget > 8 KiB:** the merged contract caps `run.start.memory.semantic` at
-   `SEMANTIC_MEMORY_BLOCK_MAX_BYTES` = 8 KiB, so 9–16 KiB can be saved but the selector (KOBE-382)
-   must clamp to 8 until a contract PR raises the cap.
-2. **Policy vs. Workspace master/Memories off:** implemented literally (Policy ignores only the
-   Site-memories switch, so a Workspace that turns memory off gets no Policy). Confirm.
-3. **Learning model order:** "Site alias → Workspace override" read as the judge order (Site wins
-   when enabled; the Workspace's model is used only when the Site's isn't usable there). If the
-   Workspace override should win, swap two lines in `pickLearningModel`.
-4. Retention window meaning (archived items/history?) and rate-limit names are provisional; the
-   enforcing tickets (386, 393) may rename before anything reads them.
+1. **Policy vs. Workspace master/Memories off:** implemented literally (Policy ignores only the
+   Site-memories switch, so a Workspace that turns memory off gets no Policy). Coordinator is
+   asking Chris; unchanged for now.
+2. Resolved 2026-11-13: context budget (contract raised, above), learning model order (above);
+   setting ranges, rate-limit names and the retention window's meaning stay as the defaults
+   listed in Decisions.
 
 ## Evidence (acceptance criteria → test or command output)
 

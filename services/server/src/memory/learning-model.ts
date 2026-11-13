@@ -4,11 +4,12 @@ import { readMemorySiteSettings } from "./site-settings.js";
 import { readSwitches } from "./switches.js";
 
 /**
- * The learning model (KOBE-381, SM14, Q5), resolved like the skills judge
- * (`skills/evals/start.ts` `judgeModelFor`): the Site's learning model when this Workspace
- * enabled it; else the Workspace's own learning model while it is still enabled; else Learn is
- * unavailable, with a reason. It **never** falls back to the thread's model or the Workspace
- * default: chat content goes only to a model an admin chose for learning.
+ * The learning model (KOBE-381, SM14, Q5), in the judge pattern's "fails clearly" form
+ * (`skills/evals/start.ts` `judgeModelFor`, minus its fallbacks): the Workspace's own learning
+ * model when one is set (it must be enabled in the Workspace), else the Site's learning model
+ * (it must be enabled in the Workspace), else Learn is unavailable, with a reason. A set but
+ * unusable choice never falls through to the other one, and nothing **ever** falls back to the
+ * thread's model or the Workspace default: chat content goes only to a model an admin chose.
  */
 
 export type LearningModel =
@@ -33,7 +34,7 @@ const MESSAGES: Readonly<Record<LearnUnavailableReason, string>> = {
   no_learning_model:
     "No learning model is set. A site admin sets one in Site settings › Memory, or a team admin in Workspace settings › Memory.",
   learning_model_not_enabled:
-    "The learning model isn't enabled in this workspace. A team admin enables it in Workspace settings › Models, or picks another learning model.",
+    "The learning model isn't enabled in this workspace. A team admin enables it in Workspace settings › Models, or picks another learning model in Workspace settings › Memory.",
 };
 
 const unavailable = (reason: LearnUnavailableReason): LearningModel => ({
@@ -51,12 +52,11 @@ export async function pickLearningModel(
   teamAlias: string | null,
   enabled: (alias: string) => Promise<boolean>,
 ): Promise<LearningModel> {
-  if (siteAlias !== null && (await enabled(siteAlias)))
-    return { ok: true, alias: siteAlias, source: "site" };
-  if (teamAlias !== null && (await enabled(teamAlias)))
-    return { ok: true, alias: teamAlias, source: "team" };
-  if (siteAlias === null && teamAlias === null) return unavailable("no_learning_model");
-  return unavailable("learning_model_not_enabled");
+  const [alias, source] =
+    teamAlias !== null ? [teamAlias, "team" as const] : [siteAlias, "site" as const];
+  if (alias === null) return unavailable("no_learning_model");
+  if (!(await enabled(alias))) return unavailable("learning_model_not_enabled");
+  return { ok: true, alias, source };
 }
 
 /** The model alone (inside the caller's `withTeam` transaction), whatever the switches say. */

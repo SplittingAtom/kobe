@@ -111,8 +111,8 @@ access, which is time-boxed, read-only, audited and shown to the team.
   memory switches and settings: **Allow memory** (the master switch: off means no notes and no
   memories anywhere), project notes, memories, **Portable preferences**, **Learn from this chat**
   and **Members may propose to the Site**, each also needing the workspace's own switch; the
-  **learning model** (used where a workspace has enabled it; learning never falls back to the
-  conversation's model), the context budget (4 to 16 KiB), scope limits, versions kept per memory,
+  **learning model** (used by workspaces without their own, where enabled; learning never falls back
+  to another model or the conversation's model), the context budget (4 to 16 KiB), scope limits, versions kept per memory,
   the stale threshold, the retention window and learning rate limits. Turning a switch off deletes
   nothing. See [Memory](../memory.md#switches-that-control-memory). The **Kobe connector** setting is **Off**, **Docs only** (the
   default) or **Docs and admin tools**; see below.

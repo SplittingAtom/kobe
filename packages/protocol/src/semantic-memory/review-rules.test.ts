@@ -3,7 +3,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CONTEXT_MEMORY_SECTION_LABELS,
+  SEMANTIC_MEMORY_BLOCK_DEFAULT_BYTES,
   SEMANTIC_MEMORY_BLOCK_MAX_BYTES,
+  SEMANTIC_MEMORY_BLOCK_MIN_BYTES,
   SEMANTIC_MEMORY_ERROR_HTTP_STATUS,
   SEMANTIC_MEMORY_SCOPE_LABELS,
   SEMANTIC_MEMORY_SCOPES,
@@ -45,20 +47,52 @@ const pick = (i: number, statement: string): RunSemanticMemoryItem => ({
   provenance: { actor_kind: "user", as_of: null, saved_on: "2026-11-01" },
 });
 
-describe("M2: the 8 KiB budget is the rendered block", () => {
+describe("M2: the budget is the rendered block", () => {
   it("counts fences, lane headers and per-item lines, not statements alone", () => {
     const items = Array.from({ length: 15 }, (_, i) => pick(i, "x".repeat(500)));
-    // 7,500 statement bytes fit the old statement-only count; rendered, they don't.
-    expect(15 * 500).toBeLessThan(SEMANTIC_MEMORY_BLOCK_MAX_BYTES);
+    // 7,500 statement bytes fit the default budget by a statement-only count; rendered, they don't.
+    expect(15 * 500).toBeLessThan(SEMANTIC_MEMORY_BLOCK_DEFAULT_BYTES);
     const semantic = { items, omitted_count: 0 };
-    expect(semanticMemoryRenderedBytes(semantic)).toBeGreaterThan(SEMANTIC_MEMORY_BLOCK_MAX_BYTES);
-    expect(runSemanticMemorySchema.safeParse(semantic).success).toBe(false);
+    expect(semanticMemoryRenderedBytes(semantic)).toBeGreaterThan(
+      SEMANTIC_MEMORY_BLOCK_DEFAULT_BYTES,
+    );
+  });
+
+  it("KOBE-381: the schema allows up to the largest Site budget (16 KiB), not beyond", () => {
+    expect([
+      SEMANTIC_MEMORY_BLOCK_MIN_BYTES,
+      SEMANTIC_MEMORY_BLOCK_DEFAULT_BYTES,
+      SEMANTIC_MEMORY_BLOCK_MAX_BYTES,
+    ]).toEqual([4096, 8192, 16384]);
+    const fits = Array.from({ length: 25 }, (_, i) => pick(i, "x".repeat(500)));
+    const within = { items: fits, omitted_count: 0 };
+    expect(semanticMemoryRenderedBytes(within)).toBeGreaterThan(
+      SEMANTIC_MEMORY_BLOCK_DEFAULT_BYTES,
+    );
+    expect(semanticMemoryRenderedBytes(within)).toBeLessThanOrEqual(
+      SEMANTIC_MEMORY_BLOCK_MAX_BYTES,
+    );
+    expect(runSemanticMemorySchema.safeParse(within).success).toBe(true);
+    const over = {
+      items: Array.from({ length: 30 }, (_, i) => pick(i, "x".repeat(500))),
+      omitted_count: 0,
+    };
+    expect(semanticMemoryRenderedBytes(over)).toBeGreaterThan(SEMANTIC_MEMORY_BLOCK_MAX_BYTES);
+    expect(runSemanticMemorySchema.safeParse(over).success).toBe(false);
+  });
+
+  it("the 16 KiB fixture (a full largest budget) parses", () => {
+    const run = fixture("run-start-semantic-16k").memory as { semantic: never };
+    const bytes = semanticMemoryRenderedBytes(run.semantic);
+    expect(bytes).toBeGreaterThan(SEMANTIC_MEMORY_BLOCK_DEFAULT_BYTES);
+    expect(bytes).toBeLessThanOrEqual(SEMANTIC_MEMORY_BLOCK_MAX_BYTES);
+    expect(runSemanticMemorySchema.safeParse(run.semantic).success).toBe(true);
   });
 
   it("the golden fixture fits, and the helper grows with lanes and items", () => {
     const run = fixture("run-start-semantic").memory as { semantic: never };
     const bytes = semanticMemoryRenderedBytes(run.semantic);
-    expect(bytes).toBeLessThanOrEqual(SEMANTIC_MEMORY_BLOCK_MAX_BYTES);
+    expect(bytes).toBeLessThanOrEqual(SEMANTIC_MEMORY_BLOCK_DEFAULT_BYTES);
     expect(semanticMemoryRenderedBytes({ items: [], omitted_count: 0 })).toBeGreaterThan(0);
     const one = semanticMemoryRenderedBytes({ items: [pick(1, "ab")], omitted_count: 0 });
     const two = semanticMemoryRenderedBytes({
