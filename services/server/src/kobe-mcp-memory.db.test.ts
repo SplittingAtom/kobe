@@ -124,7 +124,11 @@ describe("personal and portable items are never returned (ac-1)", () => {
     }
     const shown = await h.call(s, "team_memory_item_get", { id: team });
     expect(shown.isError, shown.text).toBeUndefined();
-    expect(shown.structured).toMatchObject({ id: team, updated_by: w.admin.id, versions_total: 1 });
+    expect(shown.structured).toMatchObject({
+      id: team,
+      updated_by: w.admin.id,
+      more_versions: false,
+    });
   });
 
   it("the route refuses an agent's personal read and every agent change", async () => {
@@ -153,7 +157,13 @@ describe("personal and portable items are never returned (ac-1)", () => {
       { method: "POST", path: `/memory/semantic/items/team/${team}/archive`, body: {} },
       { method: "POST", path: `/memory/semantic/items/team/${team}/pin`, body: { pinned: true } },
     ] as const;
-    for (const route of writes) {
+    // Refused before the body is read: a malformed body is 403 too, never 400 (review I1).
+    const malformed = [
+      { method: "POST", path: "/memory/semantic/items", body: { nonsense: true } },
+      { method: "PATCH", path: `/memory/semantic/items/team/${team}`, body: "x" },
+      { method: "POST", path: `/memory/semantic/items/nowhere/not-an-id/pin` },
+    ] as const;
+    for (const route of [...writes, ...malformed]) {
       const r = await asAdmin(route);
       expect(r.status, route.path).toBe(403);
       expect(r.body).toMatchObject({ code: "memory_not_allowed" });
@@ -169,6 +179,28 @@ describe("personal and portable items are never returned (ac-1)", () => {
       query: { scope: "team" },
     });
     expect(m.status).toBe(403);
+  });
+});
+
+describe("source conversations (review L2)", () => {
+  it("shown only to a curator who can open that conversation", async () => {
+    const w = await memoryWorld();
+    // The steward saves from their own private conversation.
+    const own = await h.sandboxFor(w.team, w.steward);
+    const id = await save(w.steward, "team", { source_thread_id: own.threadId });
+    const versions = (out: { structured?: Record<string, unknown> }) =>
+      (out.structured?.versions ?? []) as Record<string, unknown>[];
+    const mine = await h.call(own, "team_memory_item_get", { id });
+    expect(mine.isError, mine.text).toBeUndefined();
+    expect(versions(mine)[0]).toMatchObject({ source_thread_id: own.threadId });
+    // The Team admin curates but cannot open the steward's private conversation: no id.
+    const admin = await h.call(await h.sandboxFor(w.team, w.admin), "team_memory_item_get", { id });
+    expect(admin.isError, admin.text).toBeUndefined();
+    expect(versions(admin)[0]).not.toHaveProperty("source_thread_id");
+    expect(admin.text).not.toContain(own.threadId);
+    // The console still shows curators the link (unchanged for people in the browser).
+    const consoleRead = await w.admin.browser.get(`${ITEMS}/team/${id}`);
+    expect(JSON.stringify(consoleRead.json)).toContain(own.threadId);
   });
 });
 
@@ -190,7 +222,7 @@ describe("Site items (ac-1)", () => {
     const admin = await h.sandboxFor(w.team, w.siteAdmin);
     const shown = await h.call(admin, "site_memory_item_get", { id: policy });
     expect(shown.isError, shown.text).toBeUndefined();
-    expect(shown.structured).toMatchObject({ id: policy, policy: true, versions_total: 1 });
+    expect(shown.structured).toMatchObject({ id: policy, policy: true, more_versions: false });
     expect(shown.text).not.toContain(w.siteAdmin.id);
     expect(all.text).not.toContain(w.siteAdmin.id);
     // A Workspace curator without a Site right reads no Site item, even through the route.

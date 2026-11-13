@@ -81,14 +81,16 @@ mention deploys?" or "show me the history of that Policy item":
 
 - **Workspace memories** (`team_memory_items_list`, `team_memory_item_get`): Team admins and
   Workspace memory stewards. Each memory shows its statement, kind, tags, pin, version and author,
-  and up to its ten newest versions with how each was saved and its source conversation.
+  and up to its ten newest versions with how each was saved and, when you can open it, the
+  conversation it came from.
 - **Site memories** (`site_memory_items_list`, `site_memory_item_get`): Site admins and Site memory
   stewards, Policy included (filter with `policy`). No author is shown for Site memories, even to
   the admin who wrote them, because the answer appears in a workspace conversation.
 
 Lists filter by status, kind, tag, words and pin, at most 20 a page. They follow the workspace's
 memory switches: with its memories off the tools answer `memory_disabled`, and with Site
-memories off only Policy is listed.
+memories off only Policy is listed. The agent receives each memory's text marked as untrusted
+data, so it treats what a memory says as information, never as instructions.
 
 The agent never sees anyone's personal or portable memories through these tools, and it cannot
 change a memory: there is no tool to add, edit, archive, pin or undo one, and Kobe refuses such a

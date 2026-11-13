@@ -22,8 +22,8 @@ import { delegationOf } from "../kobe-mcp/delegation.js";
 import type { ServerDeps } from "../deps.js";
 import { createItem } from "../memory/items/create.js";
 import { archiveItem, patchItem, pinItem, restoreItem, revertItem } from "../memory/items/edit.js";
-import { MemoryItemError } from "../memory/items/errors.js";
-import { getItem, listItems } from "../memory/items/read.js";
+import { MemoryItemError, notAllowed } from "../memory/items/errors.js";
+import { AGENT_DETAIL_VIEW, getItem, listItems } from "../memory/items/read.js";
 import { assertAgentRead, type MemoryWho } from "../memory/items/who.js";
 import { isWorkspaceSteward } from "../memory/stewards.js";
 import { grantsOf } from "../skills/registry/grants.js";
@@ -48,6 +48,14 @@ const issueText = (e: z.ZodError) =>
 export function memoryItemRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
   const db = deps.database.db;
+  // An agent has no write path to items (KOBE-650): a Kobe admin tool's change is refused before
+  // its body or path is read, so it is always 403 (review I1). Reads are checked in `answer`.
+  app.use("*", async (c, next) => {
+    if (delegationOf(c) === undefined || c.req.method === "GET" || c.req.method === "HEAD")
+      return next();
+    const refusal = notAllowed("Agents never change memories: open Memory to change one.");
+    return c.json(refusal.body(), 403);
+  });
   /**
    * The Workspace a request runs in. `user` and `team` items need the active Workspace
    * (`requireTeam`: header, membership). Portable and Site items don't (Site admins and stewards
@@ -135,7 +143,8 @@ export function memoryItemRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   app.get("/:scope/:id", async (c) => {
     const t = target(c);
     if (t instanceof Response) return t;
-    return answer(c, t.scope, (who) => getItem(db, who, t.scope, t.id));
+    const view = delegationOf(c) === undefined ? {} : AGENT_DETAIL_VIEW;
+    return answer(c, t.scope, (who) => getItem(db, who, t.scope, t.id, view));
   });
 
   app.patch("/:scope/:id", async (c) => {

@@ -35,7 +35,7 @@ process as the delegated person:
   memories off for the Workspace → Site list holds Policy only. The Kobe MCP site/team levels apply
   as for every read tool (`read` or `read_write`).
 - **Bounded.** ≤ 20 items a page (route cursor passed through), ≤ 10 newest versions plus
-  `versions_total`, statements ≤ 500 code points: worst case well under 64 KiB.
+  `more_versions`, statements ≤ 500 code points: worst case well under 64 KiB.
 - `requestNamesTeam` moved the session's active-team read out of `routes/memory-items.ts` into
   `authz/middleware.ts` (exempt in `session-contract.test.ts`), so the item routes are
   session-independent for delegations as KOBE-619 requires. Behaviour unchanged.
@@ -65,17 +65,39 @@ ac-3 is satisfied when KOBE-406 adds these cases (406 owns the wall probe; nothi
    and delegated GETs with `scope=user|portable` answer 403 `memory_not_allowed`.
 3. `site_memory_*` output carries no author user id (`updated_by`, `actor_user_id`) and no thread
    link / evidence / rationale, for any caller including the Site admin who wrote the item.
-4. Every delegated non-GET on `/v1/memory/semantic/items/**` answers 403 (no agent write path).
-5. A Workspace curator without Site rights gets 403 on delegated Site reads.
+4. Every delegated non-GET on `/v1/memory/semantic/items/**` answers 403 (no agent write path),
+   malformed bodies included.
+5. `team_memory_item_get` never names a source conversation the caller cannot open.
+6. A Workspace curator without Site rights gets 403 on delegated Site reads.
 
 Today `kobe-mcp-memory.db.test.ts` already asserts 2–5 and the not-found half of 1 for personal
 ids; 406 should fold them into its cross-team probe so they run with every migration.
 
-## Open questions (for Chris or the coordinator)
+## Review fixes (`review-650.md`, coordinator 2026-11-13)
 
-- `stale` filter: confirm the definition (updated before `stale_after_days`? last recalled?) when
-  KOBE-386 lands, then add it to the list tools.
-- Brief naming: four `team_`/`site_` tools instead of two scoped ones (see Decisions) — OK?
+Coordinator answers: four tools OK; `stale` → note for KOBE-386 (add the filter there once 386
+defines stale); page-wise `tag` filter OK (documented above).
+
+- **L1** statements (item and every version) are fenced as untrusted data with the sandbox's
+  memory markers and a per-answer nonce (`kobe-mcp/untrusted.ts`, a server copy of
+  `sandbox-agent/src/kobe-tools/memory-fence.ts`; packages can't share it today), plus
+  `untrusted_notice`. **Other admin tools:** none fences free text today. Candidates that return
+  text written by others: `team_skill_reviews_list`/`site_skill_reviews_list` (notes, comments),
+  `team_egress_requests_list`/`site_egress_requests_list` (reasons), `team_audit_list`/
+  `site_audit_list` (targets), `team_agents_list` (names). Suggest a follow-up ticket to move the
+  fence to a shared package and apply it catalog-wide (output schema marker per free-text field).
+- **L2** a Workspace version shows `source_thread_id` only when the caller curates the scope **and**
+  can open that conversation (`findThreads`, the thread routes' predicate); else the field is
+  absent. Console behaviour unchanged (`DetailView` in `memory/items/rows.ts`, only delegations
+  pass `openableLinksOnly`).
+- **I1** `app.use("*")` in `routes/memory-items.ts` refuses every delegated non-GET/HEAD before the
+  path or body is parsed: always 403 `memory_not_allowed` (db test sends malformed bodies).
+- **I2** a delegated get loads `LIMIT 11` versions; the tool shows 10 and `more_versions`.
+  Deviation: no total count — the item detail contract is strict and protocol changes need their
+  own PR; `more_versions` is exact without one.
+- **I3** `memory-items.test.ts` maps every catalog tool (Team samples moved to
+  `testing/kobe-team-samples.ts`) to its route: the ones reaching `/memory/semantic/items` are
+  exactly the four reads, all GET, no body.
 
 ## Evidence (acceptance criteria → test or command output)
 
