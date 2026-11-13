@@ -1,7 +1,7 @@
 import { sql, type KobeTx } from "@kobe/db";
 import type { SemanticMemoryActorKind } from "@kobe/protocol";
 import { logger } from "../../logger.js";
-import type { Location } from "./location.js";
+import { workspaceTeam, type Location } from "./location.js";
 
 /**
  * Immutable versions (KOBE-378, SM8): every statement change appends a numbered version and moves
@@ -34,7 +34,7 @@ export async function insertVersion(tx: KobeTx, loc: Location, v: NewVersion): P
       INSERT INTO semantic_memory_item_versions
         (team_id, item_id, version, statement, actor_user_id, actor_kind, lint_override,
          policy_override, source_thread_id, source_entry_ids)
-      VALUES (${loc.teamId}, ${v.itemId}, ${common}, ${v.sourceThreadId ?? null}, ${entries})`);
+      VALUES (${workspaceTeam(loc)}, ${v.itemId}, ${common}, ${v.sourceThreadId ?? null}, ${entries})`);
     return;
   }
   await tx.execute(sql`
@@ -52,7 +52,7 @@ export async function insertVersion(tx: KobeTx, loc: Location, v: NewVersion): P
  */
 async function held(tx: KobeTx, loc: Location, owner: string | null): Promise<boolean> {
   const cond = loc.workspace
-    ? sql`memory_legal_hold_covers(${loc.teamId}, ${owner})`
+    ? sql`memory_legal_hold_covers(${workspaceTeam(loc)}, ${owner})`
     : loc.scope === "portable"
       ? sql`EXISTS (SELECT 1 FROM legal_holds h WHERE h.status = 'active'
                      AND (h.user_id = ${owner} OR h.user_id IS NULL))`

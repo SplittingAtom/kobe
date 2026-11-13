@@ -77,16 +77,16 @@ confirmation), versions and Undo, archive/restore, supersede, pins (10 per scope
 tags lowercased, `as_of`, the near-duplicate warning and Save anyway, the 80% warning and "full"
 (archive to make room, nothing is removed). KOBE-385: Policy limits for Site admins.
 
-## Open questions (for Chris or the coordinator)
+## Open questions (answered by the coordinator 2026-11-13)
 
-1. `memory.item.updated` on the **thread stream** (for chips) is not in the KOBE-377 run-event
-   contract and item API saves have no run; left to the ticket that saves from a thread (Phase B
-   candidates, KOBE-396) together with a contract event. Not emitted here.
-2. All item routes require an active Workspace (as the OpenAPI says): a Site admin edits Site
-   memory from any Workspace they belong to; switches of that Workspace apply to non-Policy Site
-   items. Confirm for KOBE-385's Site console.
-3. Site pruning is suspended while any legal hold is active on the Site (until KOBE-647).
-4. Near-duplicate threshold 0.6 is a guess; tune with KOBE-387's measurements.
+1. No `memory.item.updated` on the thread stream for API saves (no run, not in the contract);
+   a ticket that saves from a thread adds it with its contract event.
+2. Fixed: `user`/`team` routes need the active Workspace; `portable` and `site` routes don't
+   (Site admins/stewards may belong to none). With an active Workspace (or team header or admin
+   delegation) it is resolved as `requireTeam` does and its switches apply; without one only the
+   Site switches apply, and the Site 80% notice goes to every curator after commit.
+3. Site pruning stays suspended while any legal hold is active, until KOBE-647.
+4. `NEAR_DUPLICATE_SIMILARITY = 0.6` (`memory/items/duplicates.ts`); KOBE-387's harness tunes it.
 
 ## Evidence (acceptance criteria → test or command output)
 

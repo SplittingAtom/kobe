@@ -16,8 +16,9 @@ import { disabled, notAllowed } from "./errors.js";
  */
 export interface MemoryWho {
   readonly userId: string;
-  readonly teamId: string;
-  readonly teamRole: TeamRole;
+  /** The active Workspace; null for portable and Site requests made without one. */
+  readonly teamId: string | null;
+  readonly teamRole: TeamRole | null;
   readonly memorySteward: boolean;
   readonly siteRole: SiteRole;
   readonly grants: readonly SiteGrant[];

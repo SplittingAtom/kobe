@@ -128,7 +128,9 @@ function itemPaths(): Record<string, Record<string, unknown>> {
           "Personal scopes are always the caller's own. Workspace and Site items are read by " +
           "every member; curators (Team admins and stewards) and Site stewards change them. " +
           "Workspace thread links are shown to the author and curators only; Site items carry " +
-          "no author ids except for Site admins and Site stewards.",
+          "no author ids except for Site admins and Site stewards. `user` and `team` items need " +
+          "an active Workspace; `portable` and `site` items don't (without one, only the Site's " +
+          "switches apply).",
         parameters: [
           scopeParam("query"),
           query("status", {

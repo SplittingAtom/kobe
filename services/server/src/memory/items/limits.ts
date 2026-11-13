@@ -9,7 +9,7 @@ import { logger } from "../../logger.js";
 import { notifyMemory } from "../../notifications/memory.js";
 import type { MemorySiteSettings } from "../site-settings.js";
 import { MemoryItemError } from "./errors.js";
-import type { Location } from "./location.js";
+import { workspaceTeam, type Location } from "./location.js";
 
 /**
  * Scope limits, pins and the Policy budget (KOBE-378; SM21, SM22, SM23). Every write that can
@@ -136,11 +136,15 @@ export async function notifyNearFull(
   const at = nearFullAt(scopeLimit(settings, loc));
   if (!(before < at && after >= at)) return [];
   const recipients =
-    loc.scope === "team" ? await teamCurators(tx, loc.teamId) : await siteCurators(tx);
-  const sent = await notifyMemory(tx, loc.teamId, recipients, {
-    kind: "memory.scope.near_full",
-    scope: loc.scope,
-  });
+    loc.scope === "team" ? await teamCurators(tx, workspaceTeam(loc)) : await siteCurators(tx);
+  // A Site write made without an active Workspace tells everyone after commit.
+  const sent =
+    loc.teamId === null
+      ? []
+      : await notifyMemory(tx, loc.teamId, recipients, {
+          kind: "memory.scope.near_full",
+          scope: loc.scope,
+        });
   if (loc.scope === "team") return [];
   const told = new Set(sent.map((s) => s.userId));
   return recipients.filter((r) => !told.has(r));

@@ -12,8 +12,11 @@ type SQL = ReturnType<typeof sql>;
  */
 export interface Location {
   readonly scope: SemanticMemoryScope;
-  /** The Workspace the request runs in (Workspace rows are written with it). */
-  readonly teamId: string;
+  /**
+   * The Workspace the request runs in (Workspace rows are written with it); null for portable and
+   * Site requests made without an active Workspace.
+   */
+  readonly teamId: string | null;
   /** The caller (owner of `user` and `portable` items). */
   readonly userId: string;
   readonly items: SQL;
@@ -37,9 +40,20 @@ export interface Location {
   readonly lockKey: string;
 }
 
-export function locate(scope: SemanticMemoryScope, teamId: string, userId: string): Location {
+/** The Workspace of a `user`/`team` location (always set: those routes require one). */
+export function workspaceTeam(loc: Location): string {
+  if (loc.teamId === null) throw new Error(`memory scope ${loc.scope} needs a workspace`);
+  return loc.teamId;
+}
+
+export function locate(
+  scope: SemanticMemoryScope,
+  teamId: string | null,
+  userId: string,
+): Location {
   const base = { scope, teamId, userId };
   if (scope === "user" || scope === "team") {
+    if (teamId === null) throw new Error(`memory scope ${scope} needs a workspace`);
     return {
       ...base,
       items: sql.raw("semantic_memory_items"),

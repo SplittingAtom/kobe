@@ -2,8 +2,8 @@ import { sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
 import type { SemanticMemoryOverrides, SemanticMemoryScope } from "@kobe/protocol";
 import { recordAudit, type ServerAuditEvent } from "../../audit/record.js";
 import { readMemorySiteSettings, type MemorySiteSettings } from "../site-settings.js";
-import { readSwitches } from "../switches.js";
-import type { EffectiveMemory } from "../switch-model.js";
+import { readSiteSwitches, readSwitches } from "../switches.js";
+import { WORKSPACE_SWITCHES_ON, effectiveMemory, type EffectiveMemory } from "../switch-model.js";
 import { NEAR_DUPLICATE_WARNING, findNearDuplicates } from "./duplicates.js";
 import { MemoryItemError, notFound } from "./errors.js";
 import { deliverSiteNotices, type PendingSiteNotices } from "./limits.js";
@@ -36,19 +36,26 @@ export async function inStore<T>(
   fn: (op: Op) => Promise<T>,
 ): Promise<T> {
   let pending: PendingSiteNotices = [];
-  const out = await withTeam(db, who.teamId, async (tx) => {
+  const teamId = who.teamId;
+  const body = async (tx: KobeTx) => {
     const op: Op = {
       tx,
       who,
-      loc: locate(scope, who.teamId, who.userId),
-      memory: (await readSwitches(tx, who.teamId)).memory,
+      loc: locate(scope, teamId, who.userId),
+      // Without a Workspace only the Site's switches apply (portable and Site requests).
+      memory:
+        teamId === null
+          ? effectiveMemory(await readSiteSwitches(tx), WORKSPACE_SWITCHES_ON)
+          : (await readSwitches(tx, teamId)).memory,
       settings: await readMemorySiteSettings(tx),
       pending: [],
     };
     const value = await fn(op);
     pending = op.pending;
     return value;
-  });
+  };
+  // Workspace rows need the team's transaction (RLS); portable and Site rows are site-wide.
+  const out = teamId === null ? await db.transaction(body) : await withTeam(db, teamId, body);
   if (pending.length > 0) await deliverSiteNotices(db, pending);
   return out;
 }

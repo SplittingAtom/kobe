@@ -31,6 +31,8 @@ const ids = {
 };
 const as = {} as Record<keyof typeof ids, TestBrowser>;
 const ITEMS = "/v1/memory/semantic/items";
+/** Distinct statements, so the near-duplicate check stays quiet. */
+const unique = (label: string) => `${label} ${randomUUID()}`;
 
 const audit = async (action: string) =>
   (
@@ -494,6 +496,57 @@ describe("Site items and Policy (ac-3)", () => {
       expect(errorOf(await as.member.get(`${ITEMS}?scope=user`))).toEqual([403, "memory_disabled"]);
     } finally {
       await h.admin.query(`UPDATE teams SET settings = settings - 'memory' WHERE id = $1`, [teamA]);
+    }
+  });
+});
+
+describe("portable and Site items without an active Workspace", () => {
+  it("lets Site admins and stewards in no Workspace curate Site items; owners keep portable ones", async () => {
+    await h.createUser("lone@items.test", "admin");
+    const loneSteward = await h.createUser("lonesteward@items.test");
+    await h.admin.query(
+      `INSERT INTO site_grants (user_id, "grant", granted_by) VALUES ($1, 'memory_steward', $2)`,
+      [loneSteward, ids.site],
+    );
+    const lone = await h.signIn("lone@items.test");
+    const steward = await h.signIn("lonesteward@items.test");
+
+    const made = await create(lone, bodyOf("site", unique("Site fact saved from no workspace")));
+    expect(made.status, JSON.stringify(made.json)).toBe(201);
+    const id = detail(made.json).id;
+    expect(detail((await steward.get(item("site", id))).json).updated_by).not.toBeNull();
+    const edited = await steward.patch(item("site", id), {
+      expected_version: 1,
+      statement: unique("Edited by a steward with no workspace"),
+    });
+    expect(edited.status, JSON.stringify(edited.json)).toBe(200);
+    expect(
+      errorOf(await steward.patch(item("site", id), { expected_version: 2, policy: true })),
+    ).toEqual([403, "memory_not_allowed"]);
+    const pol = await create(
+      lone,
+      bodyOf("site", unique("Policy from no workspace"), { policy: true }),
+    );
+    expect(pol.status, JSON.stringify(pol.json)).toBe(201);
+    await h.admin.query(`UPDATE site_memory_items SET status = 'archived' WHERE id = $1`, [
+      detail(pol.json).id,
+    ]);
+    const list = semanticMemoryListResponseSchema.parse(
+      (await steward.get(`${ITEMS}?scope=site`)).json,
+    );
+    expect(list.items.map((i) => i.id)).toContain(id);
+
+    const pref = await create(steward, bodyOf("portable", unique("Prefers short summaries")));
+    expect(pref.status, JSON.stringify(pref.json)).toBe(201);
+    expect((await steward.get(item("portable", detail(pref.json).id))).status).toBe(200);
+    expect((await lone.get(item("portable", detail(pref.json).id))).status).toBe(404);
+
+    // Workspace scopes still need one.
+    for (const scope of ["user", "team"] as const) {
+      const r = await create(lone, bodyOf(scope, unique("needs a workspace")));
+      expect([r.status, r.json.code]).toEqual([400, "team_header_required"]);
+      const read = await lone.get(`${ITEMS}?scope=${scope}`);
+      expect([read.status, read.json.code]).toEqual([409, "no_active_team"]);
     }
   });
 });

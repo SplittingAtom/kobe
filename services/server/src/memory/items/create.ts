@@ -19,6 +19,7 @@ import {
   lockScope,
   notifyNearFull,
 } from "./limits.js";
+import { workspaceTeam } from "./location.js";
 import { detailOf, readItem, type ItemRow } from "./rows.js";
 import { insertVersion } from "./versions.js";
 import { assertEnabled, assertMayWrite, type MemoryWho } from "./who.js";
@@ -127,7 +128,7 @@ async function replacedItem(op: Op, id: string): Promise<ItemRow> {
 /** A source thread must be a thread of this Workspace (no key on the column; KOBE-376). */
 async function assertThreadInWorkspace(op: Op, threadId: string): Promise<void> {
   const { rows } = await op.tx.execute(
-    sql`SELECT 1 FROM threads WHERE team_id = ${op.loc.teamId} AND id = ${threadId}`,
+    sql`SELECT 1 FROM threads WHERE team_id = ${workspaceTeam(op.loc)} AND id = ${threadId}`,
   );
   if (rows.length === 0) throw invalid("source_thread_id is not a conversation in this workspace.");
 }
@@ -144,7 +145,7 @@ async function insertItem(
   const insert =
     loc.scope === "user" || loc.scope === "team"
       ? sql`INSERT INTO semantic_memory_items (team_id, scope, owner_user_id, kind, pinned, tags, as_of)
-            VALUES (${loc.teamId}, ${loc.scope}, ${loc.scope === "user" ? loc.userId : null}, ${body.kind}, ${pinned}, ${tags}, ${asOf}::date)
+            VALUES (${workspaceTeam(loc)}, ${loc.scope}, ${loc.scope === "user" ? loc.userId : null}, ${body.kind}, ${pinned}, ${tags}, ${asOf}::date)
             RETURNING id`
       : loc.scope === "portable"
         ? sql`INSERT INTO portable_memory_items (owner_user_id, kind, pinned, tags)
