@@ -64,7 +64,7 @@ in. Linking needs your Kobe password or passkey, or an administrator's **expecte
 and changes only at the provider until a team admin uses **Take over**.
 
 **Memory.** What the agent knows between conversations, on the **My memory** page: **Memories**
-(short statements you keep, in this workspace or in all your workspaces) and **Notes** (files the
+(short statements you keep, **Only in this workspace** or in **All my workspaces**) and **Notes** (files the
 agent writes, yours and a project's). See [Memory](memory.md).
 
 **Memory steward.** A grant on top of any role, not a role: a **workspace** memory steward

@@ -45,8 +45,9 @@ never to store secrets or passwords in memory; do not ask it to.
 
 The **Memories** tab of **My memory** is where you keep your own memories. It has two groups:
 
-- **This workspace**: memories only you and your agents in this workspace read. Facts,
-  conventions, definitions and decisions about your work always stay here.
+- **Only in this workspace**: memories only you and your agents in this workspace read. Facts,
+  conventions, definitions and decisions about your work always stay here. (Memories everyone in
+  the workspace shares are **Workspace memories**, kept by team admins and memory stewards.)
 - **All my workspaces**: preferences that follow you into every workspace you belong to (how you
   like answers, units, tone).
 
@@ -56,15 +57,17 @@ definition or decision) and up to five tags, separated by commas. For a preferen
 nothing about your work leaves the workspace by accident. Other kinds can't be moved there.
 
 Each memory has **Edit**, **Pin** and **Archive**. Pinned memories (up to 10 in each group) are
-always given to your agents. Archiving never deletes: **Show archived** lists archived memories
-with **Restore**. After every change the page says what happened (**Memory saved**, **Archived**,
+listed first and always given to your agents; **Show more** lists older ones. Archiving never
+deletes: **Show archived** lists archived memories with **Restore**. After every change the page says what happened (**Memory saved**, **Archived**,
 ...) with **Undo**; an undone edit brings back the version before it.
 
 Every save runs the [checks](#what-kobe-checks-before-a-memory-is-saved) first. Their warnings
 appear under the memory you were saving, a similar memory as a link to it, with **Save anyway**;
-a secret is never saved. If the memory changed in another tab since you opened it, Kobe says so
-and **Reload** shows the latest version. Each group says when it is 80% full, and when it is full
-(1,000 memories by default): archive some before adding more.
+a secret is never saved. If the memory changed in another tab since you opened it, Kobe says so;
+**Reload** shows the saved text above your draft, which is kept, and **Save** replaces it. An
+**Undo** that comes too late (the memory changed since) is withdrawn. Each group says when it is
+80% full, and when it is full (by default 300 memories only in this workspace and 50 in all your
+workspaces; a site admin can change this): archive some before adding more.
 
 ## See and edit your notes
 
@@ -122,7 +125,9 @@ an admin picks another.
 ### Site memory settings
 
 Site admins also set, under **Settings › Memory**: the context budget (how much room memories may
-take at the start of a run, 4 to 16 KiB, 8 by default), the most memories each place may hold, how
+take at the start of a run, 4 to 16 KiB, 8 by default), the most memories each place may hold (by
+default 300 per person only in a workspace, 50 per person in all their workspaces, 1,000 per
+workspace and 1,000 on the site), how
 many versions of a memory are kept (50), when an unconfirmed memory counts as stale (90 days), the
 retention window for archived memories (365 days), learning rate limits, and an embedding model
 that is not used yet. Search always uses English word matching; there is no language setting.

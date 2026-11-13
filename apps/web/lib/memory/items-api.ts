@@ -66,8 +66,28 @@ function overridesBody(o: Overrides | undefined): { overrides?: object } {
   };
 }
 
+export interface ListQuery {
+  readonly scope: ItemScope;
+  readonly status: ItemStatus;
+  readonly pinned?: boolean;
+  readonly cursor?: string | null;
+}
+
+/** The API's largest page. */
+export const ITEM_PAGE_SIZE = 100;
+
+export function listPath(q: ListQuery): string {
+  const params = new URLSearchParams({ scope: q.scope, status: q.status });
+  if (q.pinned !== undefined) params.set("pinned", String(q.pinned));
+  params.set("limit", String(ITEM_PAGE_SIZE));
+  if (q.cursor) params.set("cursor", q.cursor);
+  return `${BASE}?${params.toString()}`;
+}
+
 export interface MemoryItemsApi {
-  list(scope: ItemScope, status: ItemStatus): Promise<ApiResult<MemoryItemList>>;
+  /** One page, newest change first; `pinned` filters, `cursor` is the previous page's `nextCursor`. */
+  list(query: ListQuery): Promise<ApiResult<MemoryItemList>>;
+  get(scope: ItemScope, id: string): Promise<ApiResult<MemoryItem>>;
   /** A portable item needs `confirmPortable` (the person said yes to "Use in all my workspaces?"). */
   create(item: NewItem, overrides?: Overrides): Promise<ApiResult<MemoryItem>>;
   patch(
@@ -93,8 +113,8 @@ export function createMemoryItemsApi(teamId: string, fetchFn?: typeof fetch): Me
   const send = <T>(path: string, method: "GET" | "POST" | "PATCH", json?: unknown) =>
     apiRequest<T>(path, { method, json, teamId, fetchFn, errorDetails: true });
   return {
-    list: (scope, status) =>
-      send(`${BASE}?scope=${enc(scope)}&status=${enc(status)}&limit=100`, "GET"),
+    list: (q) => send(listPath(q), "GET"),
+    get: (scope, id) => send(`${BASE}/${enc(scope)}/${enc(id)}`, "GET"),
     create: (item, overrides) =>
       send(BASE, "POST", {
         scope: item.scope,

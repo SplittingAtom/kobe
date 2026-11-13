@@ -8,7 +8,7 @@ import { useTeamAccess } from "../admin/console-context";
 import { MemoryPanel } from "../memory/memory-panel";
 import { MyMemories } from "../memory/my-memories";
 import { ProjectPicker } from "../projects/project-picker";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/console";
+import { PageHeader, Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/console";
 
 /** `?project=<uuid>` opens that project's memory instead of the person's own. */
 function projectFromLocation(): string | null {
@@ -27,7 +27,8 @@ function showInUrl(projectId: string | null): void {
 /**
  * The one Memory page (`/me/memory`, the bar's My memory; KOBE-384, SM5): **Memories** (default,
  * the Me editor) and **Notes** (the memory files of KOBE-158, unchanged, with the project picker
- * of KOBE-164). `?tab=notes` or `?project=` opens Notes.
+ * of KOBE-164). `?tab=notes` or `?project=` opens Notes. The page's one label is My memory; the
+ * tabs name its parts (no second title, KOBE-384 review M5).
  */
 export function MyMemoryPage() {
   const teamId = useTeamAccess().team.id;
@@ -36,32 +37,36 @@ export function MyMemoryPage() {
   const target: MemoryTarget =
     projectId === null ? { scope: "user" } : { scope: "project", projectId };
   return (
-    <Tabs
-      value={tab}
-      onValueChange={(value) => {
-        const next: MemoryTab = value === "notes" ? "notes" : "memories";
-        showTabInUrl(next);
-        if (next === "notes") showInUrl(projectId);
-        setTab(next);
-      }}
-    >
-      <TabsList label="Memory">
-        <TabsTrigger value="memories">Memories</TabsTrigger>
-        <TabsTrigger value="notes">Notes</TabsTrigger>
-      </TabsList>
-      <TabsContent value="memories">
-        <MyMemories teamId={teamId} />
-      </TabsContent>
-      <TabsContent value="notes">
-        <ProjectPicker
-          value={projectId}
-          onChange={(id) => {
-            showInUrl(id);
-            setProjectId(id);
-          }}
-        />
-        <MemoryPanel key={projectId ?? "me"} teamId={teamId} target={target} />
-      </TabsContent>
-    </Tabs>
+    <>
+      <PageHeader title="My memory" />
+      <Tabs
+        value={tab}
+        onValueChange={(value) => {
+          const next: MemoryTab = value === "notes" ? "notes" : "memories";
+          showTabInUrl(next);
+          if (next === "notes") showInUrl(projectId);
+          setTab(next);
+        }}
+      >
+        <TabsList label="Memory">
+          <TabsTrigger value="memories">Memories</TabsTrigger>
+          <TabsTrigger value="notes">Notes</TabsTrigger>
+        </TabsList>
+        {/* Kept mounted while Notes is shown, so an unsent memory and the Undo bar survive. */}
+        <TabsContent value="memories" forceMount hidden={tab !== "memories"}>
+          <MyMemories teamId={teamId} />
+        </TabsContent>
+        <TabsContent value="notes">
+          <ProjectPicker
+            value={projectId}
+            onChange={(id) => {
+              showInUrl(id);
+              setProjectId(id);
+            }}
+          />
+          <MemoryPanel key={projectId ?? "me"} teamId={teamId} target={target} />
+        </TabsContent>
+      </Tabs>
+    </>
   );
 }

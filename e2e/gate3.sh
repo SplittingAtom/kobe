@@ -311,7 +311,7 @@ if [[ "$STEPS" == *" projects "* ]] && sbx_need "ac-3 (projects)"; then
   contains "...and the member loses it at once (404)" '^other_after_unshare=404:thread_not_found$' "$sh"
 fi
 
-# ---- ac-4: memory: Memory updated + Undo; project memory waits for an approval -------------------------
+# ---- ac-4: memory: Note saved + Undo; project memory waits for an approval -------------------------
 if [[ "$STEPS" == *" memory "* ]] && sbx_need "ac-4 (memory)"; then
   echo "==> ac-4: remember + Undo; a project-memory write applies only once approved"
   contains "the team's memory switches are on" '^memory_settings=200:.*"memory_enabled":true' \
@@ -473,7 +473,7 @@ if [[ "$STEPS" == *" data "* ]] && sbx_need "ac-5 (data)"; then
   lose_sandbox overnight
 fi
 
-# ---- the browser checks: frame CSP (ac-5), Memory updated chip (ac-4), version badge (ac-1) ------------
+# ---- the browser checks: frame CSP (ac-5), Note saved chip (ac-4), version badge (ac-1) ------------
 browser_env() { # the variables gate3-browser.mjs reads, except the password
   printf 'KOBE_BROWSER_BASE=%s KOBE_BROWSER_EMAIL=gate3-m1@gate3.test KOBE_BROWSER_TEAM=%s KOBE_BROWSER_ARTIFACT=%s:1 KOBE_BROWSER_MEMORY_THREAD=%s KOBE_BROWSER_PINNED_THREAD=%s' \
     "$PUBLIC_URL" "$TEAM" "${ARTIFACT:-none}" "${T_MEMORY:-none}" "${PINNED_THREAD:-none}"
@@ -484,7 +484,7 @@ if ((MODELS)) && [[ -n "${ARTIFACT:-}${T_MEMORY:-}${PINNED_THREAD:-}" ]]; then
     echo "skip browser checks (KOBE_GATE3_BROWSER=$BROWSER); run them where Chromium reaches $PUBLIC_URL:"
     echo "     cd e2e/browser && npm ci && npx playwright install chromium && $(browser_env) KOBE_BROWSER_MEMORY_PROMPT='<a remember turn>' KOBE_BROWSER_PASSWORD=<the fixtures' password> node scripts/gate3-browser.mjs"
   else
-    echo "==> browser: the chart frame's CSP, the Memory updated chip, the version badge"
+    echo "==> browser: the chart frame's CSP, the Note saved chip, the version badge"
     map="${KOBE_GATE3_BROWSER_MAP:-}"
     if [[ -z "$map" && "$context" == k3d-* ]]; then
       # The browser runs beside kubectl: it reaches the ingress through a port-forward and resolves
@@ -512,7 +512,7 @@ if ((MODELS)) && [[ -n "${ARTIFACT:-}${T_MEMORY:-}${PINNED_THREAD:-}" ]]; then
       contains "ac-5 browser: ...and no request left the page" '^beacon_hits=0$' "$br"
     fi
     if [[ -n "${T_MEMORY:-}" ]]; then
-      contains "ac-4 browser: the thread shows the Memory updated chip" '^memory_chip=visible$' "$br"
+      contains "ac-4 browser: the thread shows the Note saved chip" '^memory_chip=visible$' "$br"
       contains "ac-4 browser: ...with Undo" '^memory_undo=present$' "$br"
       contains "ac-4 browser: one click on Undo undoes it" '^memory_undone=yes$' "$br"
       show "memory doc after the browser's turn" "$(step memory-doc "\"user\":$U_M1,\"docId\":\"$DOC\"")"

@@ -17,12 +17,12 @@ const EMPTY: Draft = { statement: "", kind: "preference", tags: "" };
 export function AddMemory({
   api,
   known,
-  onDone,
+  onSaved,
   onReload,
 }: {
   readonly api: MemoryItemsApi;
   readonly known: ReadonlyMap<string, MemoryItem>;
-  readonly onDone: (done: Done) => void;
+  readonly onSaved: (item: MemoryItem, done: Done) => void;
   readonly onReload: () => void;
 }) {
   const [draft, setDraft] = useState<Draft>(EMPTY);
@@ -76,7 +76,7 @@ export function AddMemory({
       (saved) => {
         setDraft(EMPTY);
         setEverywhere(false);
-        onDone({ message: "Memory saved.", undo: () => api.archive(saved) });
+        onSaved(saved, { message: "Memory saved.", undo: () => api.archive(saved) });
       },
     );
   }
@@ -98,7 +98,11 @@ export function AddMemory({
             label="Use in all my workspaces"
             hint="Preferences can follow you into every workspace you belong to. Facts and other kinds stay in this workspace."
             checked={everywhere}
-            onChange={(e) => setEverywhere(e.target.checked)}
+            onChange={(e) => {
+              // A refusal was for the other place: Save anyway must not save there.
+              setEverywhere(e.target.checked);
+              if (problem) clear();
+            }}
           />
         )}
         {invalid && (

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import {
   SEMANTIC_MEMORY_KINDS,
   SEMANTIC_MEMORY_STATEMENT_MAX,
@@ -54,12 +55,19 @@ export function DraftFields({
   onChange,
   label,
   preferenceOnly = false,
+  autoFocus = false,
 }: {
   readonly draft: Draft;
   readonly onChange: (draft: Draft) => void;
   readonly label: string;
   readonly preferenceOnly?: boolean;
+  /** Focus the statement when the fields appear (an Edit that opened them). */
+  readonly autoFocus?: boolean;
 }) {
+  const box = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (autoFocus) box.current?.focus();
+  }, [autoFocus]);
   const length = codePointLength(draft.statement);
   return (
     <div className="flex flex-col gap-3">
@@ -68,6 +76,7 @@ export function DraftFields({
         hint={`A short statement, not an instruction. ${length} of ${SEMANTIC_MEMORY_STATEMENT_MAX} characters.`}
       >
         <Textarea
+          ref={box}
           rows={3}
           value={draft.statement}
           onChange={(e) => onChange({ ...draft, statement: e.target.value })}

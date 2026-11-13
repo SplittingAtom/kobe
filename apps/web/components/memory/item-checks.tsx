@@ -101,7 +101,11 @@ export function CheckProblem({
     </Button>
   );
   if (error.code === "memory_lint_warning") {
-    const other = checks.warnings.filter((w) => w.code !== "near_duplicate");
+    // A near-duplicate is shown as links when the answer names the items, else in its own words;
+    // a refusal without any warning still says why (never an empty notice).
+    const linked = checks.duplicates.length > 0;
+    const listed = checks.warnings.filter((w) => !(linked && w.code === "near_duplicate"));
+    const other = listed.length > 0 || linked ? listed : [{ code: "lint", message: error.message }];
     return (
       <Notice tone="warn" role="alert" title="Check this before saving" actions={anyway}>
         {other.length > 0 && (

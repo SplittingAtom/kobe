@@ -15,15 +15,17 @@ export type SemanticMemoryScope = z.infer<typeof semanticMemoryScopeSchema>;
 
 /**
  * The one map of what people read for each wire scope (Chris 2026-11-12, Q1: Workspace wording,
- * never "team"): `picker` where a scope is chosen ("This workspace", "All my workspaces"),
- * `section` where its items are listed (also the context viewer's lane label).
+ * never "team"; one label per scope, KOBE-384 review H1): every UI that names a scope uses it, in
+ * pickers, editor groups and the context viewer's lanes. "Only in this workspace" is the person's
+ * own (`user`); the shared one is "Workspace memories" (`team`), so "this workspace" never names
+ * both.
  */
 export const SEMANTIC_MEMORY_SCOPE_LABELS = {
-  user: { picker: "Me in this workspace", section: "My memories in this workspace" },
-  portable: { picker: "All my workspaces", section: "My memories in all my workspaces" },
-  team: { picker: "This workspace", section: "Workspace memories" },
-  site: { picker: "Site", section: "Site memories" },
-} as const satisfies Record<SemanticMemoryScope, { picker: string; section: string }>;
+  user: "Only in this workspace",
+  portable: "All my workspaces",
+  team: "Workspace memories",
+  site: "Site memories",
+} as const satisfies Record<SemanticMemoryScope, string>;
 
 export const SEMANTIC_MEMORY_KINDS = [
   "preference",

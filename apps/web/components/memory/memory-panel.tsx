@@ -15,7 +15,6 @@ import { useMutation, useResource } from "../admin/use-resource";
 import {
   Button,
   EmptyState,
-  PageHeader,
   Section,
   Table,
   TableBody,
@@ -54,16 +53,17 @@ export function MemoryPanel({
   const { state, reload } = useResource(async () => friendly(await api.list(target)));
   const [openId, setOpenId] = useState<string | null>(null);
   const mutation = useMutation();
-  const title = target.scope === "project" ? "Project memory" : "My notes";
+  // One page label (My memory, its h1) and the tab names: a project's files say whose they are.
+  const title = target.scope === "project" ? "Project memory" : "Files";
 
   return (
     <>
-      <PageHeader
-        title={title}
-        description={`What your agents remembered${target.scope === "project" ? " for this project" : " about you"}. Edit or delete anything you do not want kept. Agents treat this text as untrusted notes.`}
-      />
+      <p className="m-0 mb-4 text-console-muted">
+        What your agents remembered{target.scope === "project" ? " for this project" : " about you"}
+        . Edit or delete anything you do not want kept. Agents treat this text as untrusted notes.
+      </p>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
-      <Section id={FILES_HEADING} title="Files">
+      <Section id={FILES_HEADING} title={title}>
         <ResourceView state={state} label="memory">
           {(data) =>
             data.docs.length === 0 ? (
