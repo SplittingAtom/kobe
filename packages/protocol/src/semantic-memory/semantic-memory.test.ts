@@ -19,6 +19,8 @@ import {
   SEMANTIC_MEMORY_SCOPE_LABELS,
   SEMANTIC_MEMORY_SCOPES,
   SEMANTIC_MEMORY_STATEMENT_MAX,
+  SEMANTIC_MEMORY_WARNING_CODES,
+  semanticMemoryIssueSchema,
   agentVersionMemoryFieldSchema,
   createSemanticMemoryItemSchema,
   decodeServerFrame,
@@ -317,6 +319,13 @@ describe("errors, settings, names and labels (ac-3)", () => {
       [...SEMANTIC_MEMORY_ERROR_CODES].sort(),
     );
     expect(semanticMemoryErrorSchema.safeParse({ code: "nope", message: "x" }).success).toBe(false);
+  });
+
+  it("warning codes are unique issue codes, near_duplicate first (KOBE-379)", () => {
+    expect(new Set(SEMANTIC_MEMORY_WARNING_CODES).size).toBe(SEMANTIC_MEMORY_WARNING_CODES.length);
+    expect(SEMANTIC_MEMORY_WARNING_CODES[0]).toBe("near_duplicate");
+    for (const code of SEMANTIC_MEMORY_WARNING_CODES)
+      expect(semanticMemoryIssueSchema.safeParse({ code, message: "m" }).success).toBe(true);
   });
 
   it("agent-version memory setting: all | notes_only | off, absent = all", () => {
