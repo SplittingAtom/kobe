@@ -8,6 +8,7 @@ import { folderPaths } from "./export-folders.js";
 import { readOffloadedJson } from "../threads/offloaded-body.js";
 import { logger } from "../logger.js";
 import { personalMemoryForExport } from "../memory/export.js";
+import { countSemanticMemoryForExport, semanticMemoryForExport } from "../memory/items-export.js";
 import { readableProjectsForExport, projectObject } from "./export-projects.js";
 import {
   entryMarkdown,
@@ -40,6 +41,8 @@ import { artifactExtension, readArtifactBytes } from "../artifacts/serve.js";
  *  - `artifacts/<artifact id>/v<n>.<ext>`: every version of the thread's artifacts (KOBE-129);
  *  - `files/<file id>/<name>`: the thread's uploaded and shared files (KOBE-143), streamed;
  *  - `memory/<path>`: the user's personal memory files, current versions (KOBE-155);
+ *  - `memory-items.json`: the user's own semantic memories, their `user` items in this team and
+ *    their portable items, with versions (KOBE-649, `memory/items-export.ts`);
  *  - `projects/<slug>/commits.json` and `projects/<slug>/head/<path>`: each project the user
  *    may read, its commit list and head files (KOBE-579, GV5; `export-projects.ts`);
  *  - `feedback.json`: the user's own answer ratings in this team (KOBE-275), with their comments,
@@ -100,6 +103,8 @@ export const OWN_THREADS = (viewer: ExportViewer) => sql`
 export interface ExportSummary {
   readonly threads: number;
   readonly entries: number;
+  /** The person's semantic memories in the export (KOBE-649). */
+  readonly memoryItems: number;
 }
 
 /** Counts what the export holds and audits it (`thread.exported`) before the download starts. */
@@ -111,6 +116,7 @@ export async function recordExport(db: KobeDb, viewer: ExportViewer): Promise<Ex
     const summary = {
       threads: Number(res.rows[0]?.threads ?? 0),
       entries: Number(res.rows[0]?.entries ?? 0),
+      memoryItems: await countSemanticMemoryForExport(tx, viewer),
     };
     await recordAudit(tx, { action: "thread.exported", teamId: viewer.teamId, target: summary });
     return summary;
@@ -366,6 +372,11 @@ This archive holds the conversations you own in one Kobe team.
   message where it leaves the transcript (only for conversations with more than one branch).
 - \`artifacts/<artifact id>/v<n>.<ext>\`: every version of the artifacts the assistant made.
 - \`memory/<path>\`: your personal memory files (current versions).
+- \`memory-items.json\`: your own memories (short statements Kobe knows about you): yours in this
+  workspace and your portable preferences, with every kept version you wrote, the conversation of
+  yours each came from, and quotes of your own messages. Memories the workspace shares, Site
+  memories and anything someone else wrote are not included; an item's \`notes\` says when
+  something was left out.
 - \`projects/<slug>/\`: each project you can read: \`commits.json\` (its history, newest first) and
   \`head/\` (its current files).
 - \`files/<file id>/<name>\`: the files you uploaded to the conversation or the assistant shared.
@@ -590,6 +601,18 @@ export async function* exportZip(
       }
     }
   }
+  // KOBE-649: the person's own semantic memories (no object storage needed).
+  const items = file("memory-items.json");
+  items.push(strToU8('{\n  "items": ['));
+  let firstItem = true;
+  for await (const page of semanticMemoryForExport(db, viewer)) {
+    for (const it of page) {
+      items.push(strToU8(`${firstItem ? "" : ","}\n    ${JSON.stringify(it)}`));
+      firstItem = false;
+    }
+    yield* drain();
+  }
+  items.push(strToU8(`${firstItem ? "" : "\n  "}]\n}\n`), true);
   const feedback = file("feedback.json");
   feedback.push(strToU8('{\n  "feedback": ['));
   let afterFeedback: string | null = null;
