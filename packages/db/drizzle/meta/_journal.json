@@ -1541,6 +1541,20 @@
       "when": 1794552898915,
       "tag": "0219_memory_stewards_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 220,
+      "version": "7",
+      "when": 1794573039771,
+      "tag": "0220_memory_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 221,
+      "version": "7",
+      "when": 1794573044483,
+      "tag": "0221_memory_notifications_rls",
+      "breakpoints": true
     }
   ]
 }

@@ -9,6 +9,7 @@ import {
   runs,
   semanticMemoryItemVersions,
   semanticMemoryItems,
+  memoryReminders,
   memoryStewards,
   siteMemoryItemVersions,
   siteMemoryItems,
@@ -115,5 +116,16 @@ export const memoryFixtures: Record<(typeof memory.team)[number], ProbeFixture> 
     const userId = await insertUser(tx);
     await tx.insert(teamMembers).values({ teamId, userId, role: "contributor" });
     await tx.insert(memoryStewards).values({ teamId, userId, grantedBy: userId });
+  },
+  memory_reminders: async (tx, teamId) => {
+    const userId = await insertUser(tx);
+    await tx.insert(teamMembers).values({ teamId, userId, role: "team_admin" });
+    await tx.insert(memoryReminders).values({
+      teamId,
+      objectId: randomUUID(),
+      relatedKind: "memory.proposal.received",
+      userId,
+      dueAt: new Date(Date.now() + 7 * 86_400_000),
+    });
   },
 };

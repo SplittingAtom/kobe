@@ -64,10 +64,10 @@ describe("semantic memory contract matches the schema", () => {
     }
   });
 
-  // KOBE-645 flips this to `toContain` when its migration adds the names.
-  it("notification kinds wait for their migration (KOBE-645)", () => {
-    for (const kind of MEMORY_NOTIFICATION_KINDS)
-      expect(DB_NOTIFICATION_KINDS as readonly string[]).not.toContain(kind);
+  it("the DB notification kind CHECK lists every memory kind, in order (KOBE-645)", () => {
+    expect(DB_NOTIFICATION_KINDS.filter((k) => k.startsWith("memory."))).toEqual([
+      ...MEMORY_NOTIFICATION_KINDS,
+    ]);
   });
 
   it("the Site steward grant is a site_grant value and a SITE_GRANTS member (KOBE-380)", () => {

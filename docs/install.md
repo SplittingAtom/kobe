@@ -1067,6 +1067,16 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Memory notifications (KOBE-645).** Migrations `0220_memory_notifications` and
+  `0221_memory_notifications_rls` widen the `notifications` kind checks with every v1.3 memory
+  notification kind, add five nullable columns that only those kinds use (`memory_scope`,
+  `memory_object_id`, `related_kind`, `item_count`, `project_id`), and add the empty team table
+  `memory_reminders` (pending memory reviews owed one reminder; row-level security per team).
+  Existing notifications are kept unchanged. The upgrade holds an exclusive lock on
+  `notifications` while it re-checks every row against the new checks and builds two indexes, so
+  the bell and scheduled-run notices wait for it (well under a second at typical sizes; it grows
+  with the table). On a `helm rollback` the previous release ignores the new columns, table and
+  kinds.
 - **Memory stewards (KOBE-380).** Migrations `0218_memory_stewards` and
   `0219_memory_stewards_rls` add the `memory_steward` value to the `site_grant` type (Site memory
   stewards) and the empty team table `memory_stewards` (Workspace memory stewards, row-level

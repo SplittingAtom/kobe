@@ -16,6 +16,8 @@ export const memory = defineDomain({
     "run_site_memory_items",
     // Workspace memory stewards (KOBE-380): a grant on top of any Workspace role.
     "memory_stewards",
+    // Pending objects owed one 7-day reminder (KOBE-645).
+    "memory_reminders",
   ],
   siteWide: [
     "portable_memory_items",
