@@ -13,7 +13,8 @@
 # `executor` (KOBE-168: the `suite` sections with the paired tool uid on, plus e2e/executor/) and
 # `restore` (KOBE-233: a timed clean install, `kobe backup`, a new k3d cluster, `kobe restore`;
 # e2e/gate4-restore.sh) and `gate5-a`/`gate5-b` (KOBE-227: Gate 5's U17-U24 in Chromium,
-# e2e/gate5.sh). The gate shards keep their output; the `stories` job then gives one
+# e2e/gate5.sh) and `gate-sso` (KOBE-633: OIDC sign-in against a mock Entra ID and Entra's SCIM
+# requests, offline; e2e/gate-sso.sh). The gate shards keep their output; the `stories` job then gives one
 # verdict per user story U1-U16 from them (e2e/gate4.sh, KOBE-232).
 # Branch protection and the merge queue require the check named `k3d`: the last job, which passes
 # only when every image build and every shard passed.
@@ -203,6 +204,7 @@ jobs:
             gate5-a,
             gate5-b,
             gate-apps,
+            gate-sso,
             executor,
             restore,
           ]
@@ -361,6 +363,11 @@ jobs:
             # rail, against the fake MCP server's ui:// test app, in Chromium plus API checks
             # (docs/gates/gate-apps.md). The gate install's Catalyst run is the coordinator's.
             gate-apps) KOBE_E2E_SHARD=gate1-prep e2e/run.sh && e2e/gate-apps.sh 2>&1 | tee "${logs}/gate-apps.log" ;;
+            # The SSO gate (KOBE-633, spec sso-oidc-scim SSO-9): a mock Entra ID (e2e/sso/mock-entra.mjs on
+            # the server image) answers as login.microsoftonline.com through a CoreDNS rewrite, trusted
+            # through server.extraCaBundle; sign-in, JIT by mapping, refusals, MFA (acrs) and SCIM
+            # deactivation. No internet and no test switch in Kobe.
+            gate-sso) KOBE_E2E_SHARD=gate1-prep e2e/run.sh && e2e/gate-sso.sh 2>&1 | tee "${logs}/gate-sso.log" ;;
             *) echo "unknown shard ${SHARD}" >&2; exit 2 ;;
           esac
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -403,6 +410,7 @@ jobs:
             | grep -E 'pi_rejected|pi_start|could not|run failed|"level":(40|50)' | tail -60 || true
           kubectl -n kobe-gate4-infra get pods -o wide || true
           kubectl -n kobe-gate2-infra get pods -o wide || true
+          kubectl -n kobe-sso-infra logs mock-entra --tail=80 || true
           df -h /
           scripts/ci-docker-diagnostics.sh
 

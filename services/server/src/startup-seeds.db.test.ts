@@ -6,6 +6,7 @@ import { FakeBifrost } from "./models/testing/fake-bifrost.js";
 import { seedAtStart, serverJobs } from "./startup/jobs.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
+import { loadSsoSettings } from "./sso/settings.js";
 
 /**
  * What the server's start writes into a fresh site before first-run setup (KOBE-422): every row
@@ -22,6 +23,22 @@ beforeAll(async () => {
     blobs: { objects: new MemoryObjects(), prefix: "kobe/" },
     // The chart's branding defaults (KOBE-503), all three set.
     brandingDefaults: { appName: "Acme Assist", preset: "slate", showName: false },
+    // A single sign-on provider from the chart (KOBE-626): upserted at every start.
+    sso: {
+      settings: loadSsoSettings({
+        KOBE_SSO_ENABLED: "true",
+        KOBE_SSO_PROVIDERS: JSON.stringify([
+          {
+            slug: "entra",
+            displayName: "Contoso",
+            kind: "entra",
+            tenantId: "11111111-2222-4333-8444-555555555555",
+            clientId: "kobe-app",
+          },
+        ]),
+        KOBE_SSO_CLIENT_SECRET_ENTRA: "helm-secret-value",
+      }),
+    },
   });
 });
 afterAll(async () => {
@@ -136,6 +153,7 @@ describe("rows a fresh site's start writes (KOBE-422)", () => {
         "registry_skills",
         "registry_versions",
         "skill_default_syncs",
+        "sso_providers",
       ]),
     );
     const keys = await h.admin.query<{ key: string }>(`SELECT key FROM site_settings ORDER BY key`);

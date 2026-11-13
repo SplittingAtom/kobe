@@ -491,6 +491,29 @@ describe("site catalog contract (ac-5)", () => {
       name: "New team",
       admin_user_id: w.member.id,
     }),
+    site_team_members_list: async ({ w }) => ({ team_id: w.team }),
+    site_team_members_add: async ({ w }) => {
+      // Another team (the Site admin is a member of the world's own team).
+      const r = await w.siteAdmin.browser.post("/v1/site/teams", {
+        slug: `add-${short()}`,
+        name: "Add target",
+        adminUserId: w.teamAdmin.id,
+      });
+      expect(r.status, JSON.stringify(r.json)).toBe(201);
+      const teamId = (r.json as { team: { id: string } }).team.id;
+      return { team_id: teamId, user_ids: [w.member.id], role: "member" };
+    },
+    site_team_members_set_role: async ({ w }) => ({
+      team_id: w.team,
+      user_id: w.target.id,
+      from_role: "member",
+      to_role: "contributor",
+    }),
+    site_team_members_remove: async ({ w }) => ({
+      team_id: w.team,
+      user_id: w.target.id,
+      from_role: "member",
+    }),
     site_invites_list: async () => ({}),
     site_invites_create: async () => ({ email: `new-${short()}@invite.test` }),
     site_invites_revoke: async ({ w }) => {

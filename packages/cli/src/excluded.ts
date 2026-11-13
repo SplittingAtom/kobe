@@ -12,6 +12,8 @@ export const EXCLUDED_TABLES: Readonly<Record<string, string>> = {
     "session tokens are bearer credentials; a restored install signs everyone in again (D7 revocation)",
   session_active_teams:
     "per-session pointer to the active team; references `sessions` (not backed up), so its rows could not be restored",
+  session_sso_contexts:
+    "how a session was signed in through SSO (KOBE-625); references `sessions` (not backed up), so its rows could not be restored",
   verifications: "one-time email-verification and password-reset tokens, short-lived and secret",
   jwks: "JWT signing keys; the server generates a new key on first use, so backups carry no signing keys",
   rate_limits: "throwaway rate-limit counters",

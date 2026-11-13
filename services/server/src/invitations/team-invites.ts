@@ -165,8 +165,22 @@ export async function revokeTeamInvite(
 }
 
 /**
+ * The user's address when it is verified, else null (review finding 1): a team invitation is
+ * matched on the address, so an address an identity provider did not vouch for (an Entra `email`
+ * without `xms_edov`, a generic `email` without `email_verified`) must never list, accept or
+ * decline someone else's invitation. Local and invited users are always verified.
+ */
+export async function verifiedEmailOf(db: KobeDb | KobeTx, userId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ email: users.email, verified: users.emailVerified })
+    .from(users)
+    .where(eq(users.id, userId));
+  return row?.verified ? normalizeEmail(row.email) : null;
+}
+
+/**
  * The invited user joins: consumes their open invitation to the team and adds the membership, in
- * one team transaction. `email` must be the signed-in user's own (verified) address. The invitation
+ * one team transaction. `email` must be the signed-in user's own address, and verified (re-read). The invitation
  * counts only while its inviter is still an active team admin of this team (the authority to grant
  * any team role): the inviter's membership and user rows are share-locked, so a concurrent demotion,
  * removal or deactivation either waits for this to finish (and then revokes nothing left) or wins
@@ -180,6 +194,8 @@ export async function acceptTeamInvite(
 ): Promise<TeamRole | null> {
   const email = normalizeEmail(user.email);
   return withTeam(db, teamId, async (tx) => {
+    // Only the user's own verified address counts (review finding 1), re-read here.
+    if ((await verifiedEmailOf(tx, user.id)) !== email) return null;
     const [invite] = await tx
       .delete(teamInvitations)
       .where(
@@ -212,11 +228,19 @@ export async function acceptTeamInvite(
       .returning({ role: teamMembers.role });
     // Already a member that Kobe added for the Skill reviewer grant: accepting an invitation
     // makes them the team's own member, so taking the grant later keeps them (KOBE-331 review).
+    // A row an identity provider manages stays managed: only an audited Take over makes it the
+    // team's own (KOBE-627, SSO10).
     if (joined.length === 0)
       await tx
         .update(teamMembers)
         .set({ addedVia: null })
-        .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, user.id)));
+        .where(
+          and(
+            eq(teamMembers.teamId, teamId),
+            eq(teamMembers.userId, user.id),
+            eq(teamMembers.addedVia, "skill_reviewer_grant"),
+          ),
+        );
     const [membership] = await tx
       .select({ role: teamMembers.role })
       .from(teamMembers)

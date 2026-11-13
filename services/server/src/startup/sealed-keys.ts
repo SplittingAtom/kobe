@@ -5,6 +5,7 @@ import {
   modelProviders,
   scanTeams,
   sql,
+  ssoProviders,
   teamEgress,
   type KobeDb,
   type KobeTx,
@@ -96,6 +97,13 @@ export function sealedFamilies(keys: {
         secret: envelope,
         keyIds: keys.envelopeKeyIds,
         site: kidCount(sql`${connectorSiteKeys.sealed}`, sql`${connectorSiteKeys}`),
+      },
+      {
+        // KOBE-626: console-entered SSO client secrets (Helm ones stay in their Secret).
+        name: "single sign-on client secrets",
+        secret: envelope,
+        keyIds: keys.envelopeKeyIds,
+        site: kidCount(sql`${ssoProviders.clientSecretSealed}`, sql`${ssoProviders}`),
       },
     );
   }

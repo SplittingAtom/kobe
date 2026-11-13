@@ -106,7 +106,36 @@ describe("notification", () => {
       "skill.version.revoked",
       "skill.version.unrevoked",
       "skill.version.site_published",
+      "team.member.added",
+      "team.site_admin.member_added",
+      "team.site_admin.member_role_changed",
+      "team.site_admin.member_removed",
+      "team.site_admin.member_taken_over",
     ]);
+  });
+  it("parses a team notification: the Site admin, no schedule, thread, run or skill (KOBE-638)", () => {
+    const added = {
+      ...notification,
+      kind: "team.member.added",
+      schedule_id: null,
+      thread_id: null,
+      run_id: null,
+      actor_name: "Ada Admin",
+    };
+    expect(notificationSchema.safeParse(added).success).toBe(true);
+    expect(
+      notificationSchema.safeParse({ ...added, schedule_id: notification.schedule_id }).success,
+    ).toBe(false);
+    expect(
+      notificationSchema.safeParse({ ...added, skill_id: notification.schedule_id }).success,
+    ).toBe(false);
+    const told = {
+      ...added,
+      kind: "team.site_admin.member_role_changed",
+      subject_name: "Bob",
+      team_role: "contributor",
+    };
+    expect(notificationSchema.safeParse(told).success).toBe(true);
   });
   it("names the Site admin of a site-published version (KOBE-495)", () => {
     const published = {

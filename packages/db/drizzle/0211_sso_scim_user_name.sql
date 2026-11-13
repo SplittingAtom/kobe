@@ -1,0 +1,3 @@
+ALTER TABLE "sso_identities" ADD COLUMN "scim_user_name" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "sso_identities_scim_user_name" ON "sso_identities" USING btree ("provider_id",lower("scim_user_name")) WHERE "sso_identities"."scim_user_name" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "sso_identities" ADD CONSTRAINT "sso_identities_scim_user_name" CHECK ("sso_identities"."scim_user_name" IS NULL OR char_length("sso_identities"."scim_user_name") BETWEEN 1 AND 256);

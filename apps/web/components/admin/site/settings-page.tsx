@@ -82,7 +82,7 @@ function SettingsForm({
           hint={
             locked
               ? "Only the Owner can turn this off."
-              : "Everyone must enrol an authenticator app before they can use Kobe."
+              : "Everyone must enrol an authenticator app before they can use Kobe. Single sign-on counts only when your organization's sign-in proves multi-factor authentication; otherwise it is refused."
           }
           checked={requireTwoFactor}
           disabled={locked}

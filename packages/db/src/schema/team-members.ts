@@ -20,7 +20,10 @@ export const teamMembers = pgTable(
      * Who made the membership when Kobe did it (KOBE-331 review): `skill_reviewer_grant` = Kobe
      * added a Skill reviewer to the Registry team, and taking the grant removes it. Null = the
      * team's own member (an invitation, an admin's change, or a member before the grant); it never
-     * goes from null back to the grant.
+     * goes from null back to the grant. `idp:<provider uuid>` (KOBE-625, spec sso-oidc-scim §7) =
+     * the provider's access mappings manage the row; manual (null) rows are never touched by them.
+     * `site_admin` (KOBE-638) = a Site admin added them from the Site console; otherwise the team's
+     * own member like null (no mapping or grant touches it), it only says how they joined.
      */
     addedVia: text(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
@@ -29,7 +32,7 @@ export const teamMembers = pgTable(
     primaryKey({ columns: [t.teamId, t.userId] }),
     check(
       "team_members_added_via",
-      sql`${t.addedVia} IS NULL OR ${t.addedVia} = 'skill_reviewer_grant'`,
+      sql`${t.addedVia} IS NULL OR ${t.addedVia} IN ('skill_reviewer_grant', 'site_admin') OR ${t.addedVia} ~ '^idp:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'`,
     ),
   ],
 );

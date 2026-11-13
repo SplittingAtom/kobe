@@ -234,16 +234,16 @@ describe("teams (ac-1)", () => {
     expect(list.json.teams.map((t: { slug: string }) => t.slug)).toEqual(["finance", "marketing"]);
   });
 
-  it("leaves membership of existing teams to the team's own admins", async () => {
-    // D8: site admins create teams and name the first team admin, nothing more. Otherwise an
-    // accomplice account could be made team admin and add the site admin, skipping break-glass.
+  it("lets site admins manage members but never their own membership (KOBE-638)", async () => {
+    // Chris 2026-11-12 (KOBE-638) replaces D8's "team admins only": site admins add existing users,
+    // change roles and remove (site-team-members.db.test.ts); they never add or change themselves,
+    // so team content stays behind break-glass. There is no PUT.
     const path = (user: string) => `/v1/site/teams/${finance}/members/${user}`;
-    for (const user of [ids.bob, ids.siteAdmin, ids.alice]) {
-      expect((await as.siteAdmin.put(path(user), { role: "team_admin" })).status).toBe(404);
-      expect((await as.siteAdmin.patch(path(user), { role: "member" })).status).toBe(404);
-      expect((await as.siteAdmin.delete(path(user))).status).toBe(404);
-      expect((await as.owner.put(path(user), { role: "team_admin" })).status).toBe(404);
-    }
+    expect((await as.siteAdmin.put(path(ids.bob), { role: "team_admin" })).status).toBe(404);
+    expect((await as.siteAdmin.patch(path(ids.siteAdmin), { role: "member" })).status).toBe(403);
+    expect((await as.siteAdmin.delete(path(ids.siteAdmin))).status).toBe(403);
+    expect((await as.siteAdmin.patch(path(ids.bob), { role: "member" })).status).toBe(404);
+    expect((await as.siteAdmin.patch(path(ids.alice), { role: "member" })).status).toBe(409);
     const { rows } = await admin.query(
       `SELECT user_id, role FROM team_members WHERE team_id = $1`,
       [finance],

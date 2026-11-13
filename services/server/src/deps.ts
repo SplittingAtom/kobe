@@ -93,6 +93,9 @@ import { DEFAULT_UPLOAD_SETTINGS, type UploadSettings } from "./uploads/settings
 import type { ScoreSink } from "@kobe/telemetry";
 import { FeedbackScores } from "./feedback/scores.js";
 import type { BrandingDefaults } from "./branding/defaults-config.js";
+import type { SsoNet } from "./sso/net.js";
+import type { ProviderStore } from "./sso/providers.js";
+import { SSO_OFF, ssoNet, type SsoSettings } from "./sso/settings.js";
 
 export interface ServerDepsOptions {
   readonly databaseUrl: string;
@@ -158,6 +161,15 @@ export interface ServerDepsOptions {
   readonly egressHeaderSecrets?: readonly string[];
   /** Site envelope (KOBE-107, `KOBE_ENVELOPE_KEY`) for per-record secrets; unset = off. */
   readonly envelope?: Envelope;
+  /**
+   * Single sign-on (`auth.sso`, KOBE-626): the kill switch, the SSRF exceptions and the Helm
+   * providers; unset = off. `net` overrides the outbound address policy (tests only).
+   */
+  readonly sso?: {
+    readonly settings: SsoSettings;
+    readonly net?: Partial<ConnectorUrlPolicy>;
+    readonly request?: SsoNet["request"];
+  };
   /**
    * Object storage (`s3.*`, KOBE-27) for thread blobs: export reads offloaded entries, retention
    * deletes released keys (KOBE-18). Unset: nothing is read or deleted from a bucket.
@@ -293,6 +305,15 @@ export interface ServerDeps {
   /** Envelope encryption for connector credentials and other per-record secrets (KOBE-107). */
   readonly envelope: Envelope | undefined;
   /**
+   * Single sign-on (KOBE-626): `settings.enabled` is the kill switch (`auth.sso.enabled`); `net`
+   * is the SSRF-guarded outbound policy; `providers` the provider store.
+   */
+  readonly sso: {
+    readonly settings: SsoSettings;
+    readonly net: SsoNet;
+    readonly providers: ProviderStore;
+  };
+  /**
    * Budgets (KOBE-42, D30): watches spend, records and emails warnings, budget-stops runs.
    * `index.ts` starts it (LISTEN + sweep); tests call `evaluate()` / `sweep()` directly.
    */
@@ -334,6 +355,19 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   const authAttempts = new AuthAttemptAudit(database.db);
   authAttempts.start();
   const background = options.background ?? new BackgroundTasks();
+  const ssoSettings = options.sso?.settings ?? SSO_OFF;
+  const sso: ServerDeps["sso"] = {
+    settings: ssoSettings,
+    net: ssoNet(ssoSettings, options.sso?.net, options.sso?.request),
+    providers: {
+      db: database.db,
+      publicUrl: options.publicUrl,
+      settings: ssoSettings,
+      envelope: options.envelope,
+    },
+  };
+  // SSO sign-in applies access mappings, whose side effects need the finished deps (bound below).
+  const lateDeps: { deps?: ServerDeps } = {};
   const auth = createAuth({
     attempts: authAttempts,
     background,
@@ -342,6 +376,13 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     secret: options.authSecret,
     trustedProxies: options.trustedProxies,
     mailer: options.mailer,
+    sso: {
+      ...sso,
+      afterChange: () => {
+        if (!lateDeps.deps) throw new Error("server deps not ready");
+        return lateDeps.deps;
+      },
+    },
   });
   const setupDigest = digest(options.setupToken);
   const hub = createRunEventHub({
@@ -565,7 +606,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
   const feedbackScores = options.feedbackScores
     ? new FeedbackScores({ db: database.db, ...options.feedbackScores })
     : undefined;
-  return {
+  const deps: ServerDeps = {
     database,
     models: options.models
       ? {
@@ -600,6 +641,7 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     appCaller: options.appCaller ?? NO_APP_CALLER,
     approvals,
     envelope: options.envelope,
+    sso,
     egressHeaders: options.egressHeaderSecrets ? headerBox(options.egressHeaderSecrets) : undefined,
     budgets,
     blobs: options.blobs,
@@ -624,7 +666,13 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       return database.db.transaction(async (tx) => {
         const [user] = await tx
           .insert(users)
-          .values({ email: email.toLowerCase(), name, emailVerified: true })
+          // The setup Owner is the permanent break-glass identity (SSO10): a durable flag.
+          .values({
+            email: email.toLowerCase(),
+            name,
+            emailVerified: true,
+            setupOwner: recordSetup === true,
+          })
           .returning({ id: users.id });
         if (!user) throw new Error("user insert returned no row");
         await tx.insert(accounts).values({
@@ -667,4 +715,6 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
       await database.close();
     },
   };
+  lateDeps.deps = deps;
+  return deps;
 }

@@ -15,8 +15,19 @@ if (!baseURL) throw new Error("KOBE_BASE_URL is required (the deployment's https
  * k3d ingress, e2e/gate5.sh), so the pages keep the deployment's own origin.
  */
 const map = process.env["KOBE_BROWSER_MAP"];
-const launchOptions = map
-  ? { args: [`--host-resolver-rules=MAP ${new URL(baseURL).hostname} ${map}`] }
+/**
+ * KOBE_SSO_MOCK_MAP=ip:port (KOBE-634, sso.spec.ts): Chromium reaches the mock identity provider's
+ * in-cluster name (the host of KOBE_SSO_MOCK_ISSUER) through the cluster's ingress, so the
+ * provider keeps one issuer for the server and the browser (e2e/sso/gate1-mock-idp.sh).
+ */
+const ssoMap = process.env["KOBE_SSO_MOCK_MAP"];
+const ssoIssuer = process.env["KOBE_SSO_MOCK_ISSUER"];
+const resolverRules = [
+  ...(map ? [`MAP ${new URL(baseURL).hostname} ${map}`] : []),
+  ...(ssoMap && ssoIssuer ? [`MAP ${new URL(ssoIssuer).hostname} ${ssoMap}`] : []),
+];
+const launchOptions = resolverRules.length
+  ? { args: [`--host-resolver-rules=${resolverRules.join(",")}`] }
   : {};
 
 /** A test talks to real models: generous, and the compaction spec raises it further. */

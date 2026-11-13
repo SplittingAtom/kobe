@@ -6,7 +6,7 @@ import { recordAuditAfter } from "./record.js";
 export type AttemptAction =
   "auth.sign_in.failed" | "auth.sign_in.two_factor_required" | "auth.password.reset_requested";
 
-type SignInMethod = "password" | "totp" | "backup_code" | "passkey" | "invitation";
+type SignInMethod = "password" | "totp" | "backup_code" | "passkey" | "invitation" | "sso";
 
 export interface Attempt {
   readonly action: AttemptAction;

@@ -7,6 +7,7 @@ import type { ServerDeps } from "../deps.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 import { createTeamWithAdmin, findTeam, findUserId, listMembers } from "../teams/members.js";
 import { createTeamSchema, idSchema, renameTeamSchema } from "../teams/schemas.js";
+import { siteTeamMembersRoutes } from "./site-team-members.js";
 
 const UNIQUE_VIOLATION = "23505";
 
@@ -17,9 +18,9 @@ function isUniqueViolation(err: unknown): boolean {
 
 /**
  * Site admins create teams and name each team's first team admin (spec D8), rename teams and
- * read rosters (team metadata, not content). They cannot add, re-role or remove members of an
- * existing team: that belongs to the team's own admins, or a site admin could make an
- * accomplice team admin, get added, and read team content without break-glass.
+ * read rosters (team metadata, not content). Since KOBE-638 (Chris, 2026-11-12) they also add
+ * existing users, change team roles and remove members (`site-team-members.ts`), audited in the
+ * team's own log; they never add themselves (team content stays behind break-glass).
  */
 export function siteTeamsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
@@ -81,6 +82,8 @@ export function siteTeamsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
     if (!(await findTeam(db, teamId.data))) return c.json(teamNotFound, 404);
     return c.json({ members: await listMembers(db, teamId.data) });
   });
+
+  app.route("/:teamId", siteTeamMembersRoutes(deps));
 
   return app;
 }

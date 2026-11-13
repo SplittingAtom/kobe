@@ -1,0 +1,9 @@
+ALTER TABLE "notifications" DROP CONSTRAINT "notifications_kind";--> statement-breakpoint
+ALTER TABLE "notifications" DROP CONSTRAINT "notifications_actor";--> statement-breakpoint
+ALTER TABLE "notifications" ADD COLUMN "subject_user_id" uuid;--> statement-breakpoint
+ALTER TABLE "notifications" ADD COLUMN "team_role" "team_role";--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_subject_user_id_users_id_fk" FOREIGN KEY ("subject_user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_subject" CHECK (("notifications"."kind" LIKE 'team.site_admin.%') = ("notifications"."subject_user_id" IS NOT NULL)
+        AND ("notifications"."team_role" IS NULL OR "notifications"."kind" LIKE 'team.site_admin.%'));--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_kind" CHECK ("notifications"."kind" IN ('schedule.run.succeeded', 'schedule.run.failed', 'schedule.run.interrupted', 'schedule.run.skipped_actions', 'schedule.paused', 'skill.member_add.blocked', 'skill.deprecated', 'skill.version.deprecated', 'skill.version.withdrawn', 'skill.version.revoked', 'skill.version.unrevoked', 'skill.version.site_published', 'team.member.added', 'team.site_admin.member_added', 'team.site_admin.member_role_changed', 'team.site_admin.member_removed', 'team.site_admin.member_taken_over'));--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_actor" CHECK (("notifications"."kind" = 'skill.version.site_published' OR "notifications"."kind" LIKE 'team.%') = ("notifications"."actor_user_id" IS NOT NULL));

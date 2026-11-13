@@ -21,12 +21,40 @@ access, which is time-boxed, read-only, audited and shown to the team.
 ## People
 
 - **Users**: everyone with a Kobe account: site role, two-factor status, deactivate and reactivate.
+  With single sign-on on, **Single sign-on** on a row shows the person's linked organization
+  sign-ins (**Unlink**) and **Expect SSO link**: their next sign-in from the chosen provider links
+  automatically when its verified address matches theirs and lies in one of the provider's
+  verified domains (once, within 14 days). The Owner and Admins link only by signing in themselves.
+- **Single sign-on** and **SSO access mappings**: let people sign in with Microsoft Entra ID or
+  another OpenID Connect provider, decide which app roles or groups give which team role, and
+  create SCIM tokens so the provider provisions and deactivates accounts. See
+  [Single sign-on](single-sign-on.md).
 - **Invitations**: invite people by email; resend or revoke open invitations.
 - **Site roles**: who is Owner and who are Admins.
 
 ## Teams and agents
 
-- **Teams**: create teams (workspaces) with their first team admin, rename them, read rosters.
+- **Teams**: create teams (workspaces) with their first team admin and rename them. **Manage
+  members** opens a team's members: name, email, team role, how they joined (invitation, site
+  admin, or "Managed by _provider_" for single sign-on) and whether the account is active. From
+  there you can:
+  - **Add existing users** without an invitation: search by name or email, tick one or several,
+    choose a team role (Member, Contributor or Team admin) and **Add**. They are in the team at
+    once and are told in Kobe (and by email); a pending invitation of theirs to the team is
+    withdrawn. Deactivated users and accounts whose email address isn't verified (for example a
+    single sign-on account whose provider didn't vouch for the address) can't be added: invite
+    those people instead.
+  - **Change a team role** or **Remove** a member, with the same rules and effects as the Team
+    console: a team always keeps one active team admin; a removed member's schedules there pause,
+    their sandbox is cleaned up and their shared threads go private.
+  - **Take over** a membership the identity provider manages: it can't be changed or removed
+    until you do, and the identity provider stops managing it from then on.
+
+  You can't add yourself or change your own membership here: site admins reach team content only
+  through break-glass. Site roles never change here. Every change is in the team's own audit log
+  under your name, marked as made by a site admin, and the team's admins are told in Kobe (and by
+  email) each time.
+
 - **Gallery agents**: the site's agents on the Agents page's Site tab: edit, compare with the
   repository, reset, evaluate, export, approve proposals.
 - **Skill Registry**, **Skill reviews** and **Skill tags**: the registry's rules and judge, the
@@ -68,7 +96,11 @@ access, which is time-boxed, read-only, audited and shown to the team.
 
 - **Appearance**: the site name, logo, dark logo, favicon and style preset. See
   [Appearance](../appearance.md).
-- **Settings**: site-wide settings such as required two-factor authentication, and the site's
+- **Settings**: site-wide settings such as required two-factor authentication (local accounts
+  enrol an authenticator app; a single sign-on sign-in counts only when the identity provider
+  proved multi-factor authentication, for Microsoft Entra through a Conditional Access
+  authentication context, and is refused otherwise; see
+  [Single sign-on](single-sign-on.md#multi-factor-authentication)), and the site's
   memory and project memory switches (both the site and the team switch must be on for memory to
   work; see [Memory](../memory.md)). The **Kobe connector** setting is **Off**, **Docs only** (the
   default) or **Docs and admin tools**; see below.
@@ -82,8 +114,8 @@ access, which is time-boxed, read-only, audited and shown to the team.
 The built-in **Kobe** connector gives every agent the guide's docs tools. Its admin tools are off
 until you choose **Docs and admin tools** under **Settings → Kobe connector**; each team admin then
 chooses a level for their team (**Docs only**, **Read** or **Read and write**). In a team at Read
-and write, a site admin can ask the agent to deactivate or reactivate a user, create a team,
-invite someone, update the model catalog, change a connector's status, edit the egress ceiling,
+and write, a site admin can ask the agent to deactivate or reactivate a user, create a team, add
+people to a team, change their team role or remove them, invite someone, update the model catalog, change a connector's status, edit the egress ceiling,
 decide access requests, manage the skill blocklist and Skill reviewer grants, change branding or
 the site budget, and read usage and the audit log. Each change shows an **Admin change** card
 ("Whole site") first and is audited "via agent". Site roles, ownership, break-glass, legal hold,

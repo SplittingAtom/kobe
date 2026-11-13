@@ -3,8 +3,9 @@
  * the gallery agents (`services/server/src/gallery/seed.ts`, at every start), Kobe's own catalog
  * skills (`services/server/src/skills/kobe-seed.ts`, KOBE-317) with their Default tags and sync
  * jobs, the chart's branding defaults (KOBE-503, `services/server/src/branding/defaults.ts`,
- * written only while each key is unset), the built-in Kobe MCP connector row (KOBE-618), the audit
- * events of that seeding, and the background
+ * written only while each key is unset), the built-in Kobe MCP connector row (KOBE-618), the
+ * single sign-on providers the chart declares (`auth.sso.providers`, `managed_by = 'helm'`,
+ * KOBE-626), the audit events of that seeding, and the background
  * jobs' own bookkeeping in `site_settings` (retention, PII erasure, SIEM forwarding). The catalog
  * skills' bytes in the bucket (`<prefix>skills/catalog/<sha256>`) need nothing here: the restore
  * leaves objects that are not in the backup untouched, and the backup's rows name the same
@@ -39,6 +40,17 @@ const DEFAULT_SYNC_AUDIT_ACTIONS = [
   "skill.default.synced",
   "skill.default.sync_failed",
   "skill.default.applied",
+] as const;
+
+/**
+ * The system's events of the chart's SSO providers upsert (KOBE-626); a site admin's changes to a
+ * console provider carry a person as the actor, so they are real data.
+ */
+const HELM_SSO_AUDIT_ACTIONS = [
+  "identity.sso.provider.created",
+  "identity.sso.provider.updated",
+  "identity.sso.provider.enabled",
+  "identity.sso.provider.disabled",
 ] as const;
 
 /** Kobe's own catalog skills (publisher `kobe`, KOBE-317), as a subquery of their ids. */
@@ -116,13 +128,15 @@ export const STARTUP_SEEDED_ROWS: Readonly<Record<string, StartupSeed>> = {
     rows: "true",
   },
   audit_log: {
-    why: "the system's audit events of the gallery, Kobe skills and branding defaults seeds, and of the Default sync of Kobe's skills",
+    why: "the system's audit events of the gallery, Kobe skills, branding defaults and Helm SSO provider seeds, and of the Default sync of Kobe's skills",
     rows:
       `actor_kind = 'system' AND actor_id IS NULL AND (` +
       `(team_id IS NULL AND action IN (${list(GALLERY_AUDIT_ACTIONS)}) AND target ->> 'scope' = 'gallery')` +
       ` OR (team_id IS NULL AND action = 'skill.kobe.published')` +
       // Only the branding defaults seed writes this event as the system; an admin's is a person's.
       ` OR (team_id IS NULL AND action = 'site.branding.updated')` +
+      // Only the chart's SSO providers upsert writes these as the system (KOBE-626).
+      ` OR (team_id IS NULL AND action IN (${list(HELM_SSO_AUDIT_ACTIONS)}))` +
       // A site admin's Default jobs write the same system events for their skills: real data.
       ` OR (action IN (${list(DEFAULT_SYNC_AUDIT_ACTIONS)}) AND target ->> 'skillId' IN (SELECT id::text FROM (${KOBE_SKILL_IDS}) k))` +
       `)`,
@@ -130,6 +144,10 @@ export const STARTUP_SEEDED_ROWS: Readonly<Record<string, StartupSeed>> = {
   connectors: {
     why: "the built-in Kobe MCP connector row seeded at every server start (KOBE-618)",
     rows: "builtin IS NOT NULL",
+  },
+  sso_providers: {
+    why: "the single sign-on providers the chart declares (auth.sso.providers), upserted at every server start (KOBE-626); console providers are real data",
+    rows: "managed_by = 'helm'",
   },
   site_settings: {
     why: "where the retention pass, the audit PII sweep and SIEM forwarding stand (KOBE-18, KOBE-17, KOBE-19), and the chart's branding defaults no admin has changed (KOBE-503)",

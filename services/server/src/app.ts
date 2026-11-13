@@ -28,6 +28,11 @@ import { siteEgressRoutes } from "./routes/site-egress.js";
 import { siteBreakGlassRoutes } from "./routes/site-break-glass.js";
 import { siteGalleryRoutes } from "./routes/site-gallery.js";
 import { siteInvitesRoutes } from "./routes/site-invites.js";
+import { siteSsoRoutes } from "./routes/site-sso.js";
+import { siteSsoLinkRoutes } from "./routes/site-sso-links.js";
+import { meSsoLinkRoutes } from "./routes/me-sso-links.js";
+import { siteScimTokenRoutes } from "./routes/site-scim-tokens.js";
+import { scimRoutes } from "./routes/scim.js";
 import { siteIsolationRoutes } from "./routes/site-isolation.js";
 import { siteModelsRoutes } from "./routes/site-models.js";
 import { siteLegalHoldRoutes } from "./routes/site-legal-hold.js";
@@ -53,6 +58,7 @@ import { siteSkillTagRoutes } from "./routes/site-skill-tags.js";
 import { siteSkillRetireRoutes } from "./routes/site-skill-retire.js";
 import { siteSkillCatalogEditRoutes } from "./routes/site-skill-catalog-edit.js";
 import { siteRolesRoutes } from "./routes/site-roles.js";
+import { siteSsoMappingRoutes } from "./routes/site-sso-mappings.js";
 import { siteBrandingPublicRoutes, siteBrandingRoutes } from "./routes/site-branding.js";
 import { siteSettingsRoutes } from "./routes/site-settings.js";
 import { threadFileLinkRoutes, workspaceFileThreadRoutes } from "./routes/thread-file-links.js";
@@ -184,6 +190,9 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
     return c.json(clientMetadataDocument(kobeOrigin(deps.publicUrl)));
   });
 
+  // SCIM provisioning (KOBE-631): bearer-token only, outside the session API (no cookies, no CSRF).
+  app.route("/v1/scim/v2", scimRoutes(deps));
+
   const api = new Hono<{ Variables: AuthVariables }>();
   // CSRF: state-changing API calls must come from the site's own origin.
   api.use(async (c, next) => {
@@ -210,6 +219,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/me/connector-notices", meConnectorNoticesRoutes(deps));
   api.route("/me/skills", meSkillEnablementRoutes(deps));
   api.route("/me/checkouts", myCheckoutRoutes(deps));
+  api.route("/me/sso", meSsoLinkRoutes(deps));
   api.route("/me", meRoutes(deps));
   api.route("/team/policy", teamPolicyRoutes(deps));
   api.route("/team/invites", teamInvitesRoutes(deps));
@@ -297,9 +307,13 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/site/branding", siteBrandingRoutes(deps));
   api.route("/site/teams", siteTeamsRoutes(deps));
   api.route("/site/roles", siteRolesRoutes(deps));
+  api.route("/site/sso", siteSsoMappingRoutes(deps));
   api.route("/site/policy", sitePolicyRoutes(deps));
   api.route("/site/users", siteUsersRoutes(deps));
   api.route("/site/invites", siteInvitesRoutes(deps));
+  api.route("/site/sso", siteSsoRoutes(deps));
+  api.route("/site/sso", siteScimTokenRoutes(deps));
+  api.route("/site/sso", siteSsoLinkRoutes(deps));
   api.route(
     "/site/gallery/agents",
     siteGalleryRoutes(deps, options.evals ? { runner: options.evals } : {}),

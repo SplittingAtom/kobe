@@ -23,8 +23,9 @@ From left to right:
   page from its contents; **Close** or Escape takes you back to the conversation as you left it.
   Each page has its own address (`/docs/<page>`), so you can share a link to it.
 - **Dark theme**: switches between light and dark. See [Appearance](../appearance.md).
-- **Profile**: **Projects**, **My connectors**, **My approvals**, **My shared cases** and
-  **Sign out**.
+- **Profile**: **Projects**, **My connectors**, **My approvals**, **My shared cases**,
+  **Sign-in methods** (your organization's sign-ins linked to your account, with **Unlink**; shown
+  when your site uses single sign-on) and **Sign out**.
 
 ## The rail
 

@@ -661,6 +661,204 @@ in-app notice and an email (`mcp.connector.refresh_skipped`). To fix it, add you
 connector at My connector keys (in a team that enabled it) and pin or approve its tools, or give
 it a site-wide key.
 
+## Single sign-on (Microsoft Entra ID or OIDC)
+
+People can sign in with your organization's identity provider beside Kobe's own passwords and
+passkeys (spec [sso-oidc-scim](specs/sso-oidc-scim.md)). Kobe speaks OpenID Connect (no SAML):
+Microsoft Entra ID has its own preset, any other provider with the authorization code flow and
+PKCE S256 works as a generic OIDC provider. Who may sign in, and into which team with which team
+role, comes from **access mappings** of the token's app roles (recommended) or groups; nobody
+without a mapped value gets an account, and mappings never grant a site role. Optionally Entra
+provisions and deactivates accounts over **SCIM**. Kobe stores no access, refresh or ID tokens.
+
+Single sign-on is on in the chart (`auth.sso.enabled: true`) but does nothing until a provider is
+added. `auth.sso.enabled: false` is the kill switch: every provider, button, SSO route and SCIM
+endpoint is refused, every session signed in through SSO ends, and local sign-in keeps working.
+The site Owner created in first-run setup always keeps local sign-in (the break-glass account):
+no SSO flow links it away, removes its password or passkey, or deactivates it through SCIM.
+
+### Register Kobe in Microsoft Entra ID
+
+You need: Kobe's public URL (`https://<kobe>`), a **slug** for the provider (lowercase letters,
+digits and hyphens, for example `contoso`; it is part of the redirect URI and can't change), and
+an Entra role that can register applications and grant admin consent.
+
+1. **App registrations → New registration.** Name `Kobe`; supported account types **Accounts in
+   this organizational directory only (single tenant)**; redirect URI platform **Web**,
+   `https://<kobe>/api/auth/sso/callback/<slug>`. Note the **Application (client) ID** and the
+   **Directory (tenant) ID** from Overview. Kobe pins the tenant: an issuer or tenant of `common`,
+   `organizations` or `consumers` is refused, and every token's `iss` and `tid` must match.
+2. **Certificates & secrets → New client secret.** Copy the secret's **Value** (not its ID) at
+   once. Put a reminder in your calendar before it expires; renewing means pasting the new value
+   into Kobe (Site console) or into the Kubernetes Secret (Helm). Certificate credentials
+   (`private_key_jwt`) are not supported yet.
+3. **API permissions.** Microsoft Graph delegated `openid`, `profile` and `email` (keep
+   `User.Read`); **Grant admin consent** so people are not asked to consent one by one. Kobe never
+   calls Microsoft Graph.
+4. **Token configuration → Add optional claim → ID token:** `email`, `upn` and `xms_edov`
+   (accept the prompt to turn on the Microsoft Graph email permission). If `xms_edov` is not
+   offered in the list, add it in **Manifest** under `optionalClaims.idToken` as
+   `{ "name": "xms_edov", "essential": false }`. Kobe takes the `email` claim only when
+   `xms_edov` is true (the address's domain is verified by the tenant); otherwise it uses the
+   UPN, which users can't edit. Either way the address counts as verified only in the provider's
+   **allowed email domains** (step 9), and only verified addresses match invitations and admin
+   "expected links".
+5. **App roles → Create app role** for each team and role you want to grant, allowed member types
+   **Users/Groups**. Use one naming scheme across your apps, `<App>.<Role>[.<Team>]`, for example
+   value `Kobe.Member.Research` and `Kobe.TeamAdmin.Research`. The `roles` claim then carries only
+   the roles assigned to the person and never hits the groups limit.
+6. **Enterprise applications → Kobe → Properties: Assignment required = Yes.** Then **Users and
+   groups → Add user/group** and assign people or groups to the app roles. Assigning a **group**
+   needs Entra ID P1 or P2; on the free tier assign users directly. Unassigned people can't get a
+   token for Kobe at all.
+7. **Only if you map groups instead of app roles:** **Token configuration → Add groups claim →
+   Groups assigned to the application**, emitted as Group ID in the ID token. A token with more
+   than 200 groups carries an "overage" instead of the list; Kobe never calls Graph for it and
+   refuses that sign-in (`groups_overage`). App roles avoid this.
+8. **Multi-factor authentication (needs Entra ID P1 for Conditional Access).** Kobe trusts the
+   provider's MFA: with the Site console's **Require two-factor** on, an SSO sign-in counts only
+   when the token proves MFA, and Entra proves it with an **authentication context**. Under
+   **Protection → Conditional Access → Authentication contexts** create context **`c1`** (for
+   example "Kobe sign-in requires MFA", **Publish to apps** on). Then create one Conditional Access
+   policy: target resources **Authentication context → c1**, the users or groups who use Kobe,
+   grant **Require multifactor authentication**. Kobe asks Entra for `c1` at every sign-in (the
+   `claims` request parameter) and reads the `acrs` claim. Without Conditional Access (Entra
+   free tier) no token proves MFA: leave **Require two-factor** off, or every SSO sign-in is
+   refused with "did not include multi-factor authentication" (`mfa_missing`).
+9. **Add the provider to Kobe** (below), then sign in once with a test account that has an app
+   role you mapped.
+
+### Add the provider to Kobe
+
+**In the Site console** (People → **Single sign-on** → **Add provider**): kind **Microsoft Entra
+ID**, display name (the button says "Sign in with _display name_"), slug, **Directory (tenant)
+ID**, client ID, client secret, **Access from: App roles**. **Test discovery** checks the
+provider before you save; saving runs the same checks. The secret is sealed with the envelope key
+(`envelope.keySecret`, required) and never shown again. New providers start turned off: **Turn
+on** when the mappings are in place. Then add **SSO access mappings** (People): app-role value →
+team → team role.
+
+**As configuration** (read-only in the console except their mappings, upserted at every server
+start): put the client secret in a Secret and list the provider under `auth.sso.providers`.
+
+```bash
+kubectl -n kobe create secret generic kobe-sso-contoso --from-literal=client-secret='<value>'
+```
+
+```yaml
+auth:
+  sso:
+    providers:
+      - slug: contoso
+        displayName: Contoso
+        kind: entra
+        tenantId: "<directory (tenant) id>"
+        clientId: "<application (client) id>"
+        clientSecretSecret: { name: kobe-sso-contoso, key: client-secret }
+        accessClaim: roles
+        allowedEmailDomains: [contoso.com] # the tenant's verified domains
+        # mfaRule: { amr_any: [mfa], acr_any: [], acrs_any: [c1] } # the Entra default
+        # maxSessionHours: 12 # end SSO sessions earlier than local ones
+        # jitProvisioning: true # create accounts at first sign-in (needs a mapping)
+        enabled: true
+```
+
+`allowedEmailDomains`, `mfaRule`, `maxSessionHours` and `jitProvisioning` have no field in the
+console's form yet; for a console-made provider set them with
+`PATCH /v1/site/sso/providers/<id>` as a site admin. While anyone is linked to a provider, its
+tenant, issuer and subject claim can't change (`identity_settings_locked`): the same identity
+would mean someone else. Add a new provider instead.
+
+**A generic OIDC provider** (Keycloak, Okta, Authentik, ...): kind `oidc` with the exact
+`issuer`; the discovery document must name that issuer and list `S256` in
+`code_challenge_methods_supported`. The identity key is `sub` by default (`subjectClaim: oid` for
+Entra-shaped providers), an address counts as verified only with `email_verified: true`, and MFA
+is proven by an `amr` value in `mfaRule.amr_any` (default `mfa`, `hwk`, `swk`, `fido`, `otp`,
+`sc`) or an `acr` in `mfaRule.acr_any`.
+
+### Network and certificates
+
+- **Egress from the server.** The server itself calls the provider: the discovery document, the
+  signing keys and the token endpoint (the browser does the rest). For Entra that is
+  `login.microsoftonline.com` on 443; local sign-in never contacts it. Those URLs pass Kobe's SSRF
+  guard: https on an allowed port (`auth.sso.allowedPorts`, default `[443]`), no private,
+  loopback, link-local or metadata address and no redirects. The server has no egress
+  NetworkPolicy of its own; if your namespace denies egress by default, turn on
+  `auth.sso.networkPolicy.enabled` (DNS plus HTTPS to public addresses, or to
+  `auth.sso.networkPolicy.cidrs`) **beside** your own allow rules for Postgres, S3, SMTP and the
+  Kubernetes API, since it makes the server's other egress default-deny.
+- **An on-premises provider** on a private address: list its range in
+  `auth.sso.allowedInternalCidrs`, and give its CA in `server.extraCaBundle`
+  ([Private certificate authorities](#private-certificate-authorities)).
+- **SCIM is inbound:** Entra's provisioning service must reach `https://<kobe>/v1/scim/v2/<slug>`
+  from the internet. For a Kobe that is not reachable from outside, Microsoft's on-premises
+  provisioning agent is your option (outside Kobe).
+
+### SCIM provisioning from Entra (optional)
+
+With SCIM, Entra creates accounts before first sign-in, renames them, and deactivates them when
+they are unassigned or blocked; deactivation ends their sessions at once. Kobe never deletes
+users and never deactivates the Owner or a site Admin through SCIM.
+
+1. In Kobe: Site console → **Single sign-on** → the provider's **SCIM** → **Create token**. Copy
+   the token (shown once) and the **Tenant URL** (`https://<kobe>/v1/scim/v2/<slug>`). The
+   provider must be turned on.
+2. In Entra: **Enterprise applications → Kobe → Provisioning**, mode **Automatic**; **Admin
+   credentials**: Tenant URL and Secret Token; **Test Connection**.
+3. **Mappings → Provision Microsoft Entra ID Users → attribute mappings:** set **`externalId` ←
+   `objectId`** (edit the existing `externalId` row or add one). Kobe refuses a user without it
+   (`externalId is required`): the object ID is the same `oid` Kobe keys sign-ins on, so SCIM and
+   sign-in meet on one account. Keep `userName` ← `userPrincipalName` and `active` ← the default
+   expression. **Turn off "Provision Microsoft Entra ID Groups"**: Kobe has no SCIM Groups
+   endpoint yet, so team access comes from the token's app roles at sign-in.
+4. **Settings → Scope: Sync only assigned users and groups**, then **Provisioning Status: On**.
+5. Rotate the token before it leaks or with your schedule: **Rotate** adds a second token (at most
+   two live), put it in Entra, then **Revoke** the old one. After restoring an older backup,
+   rotate every SCIM token ([backup-restore.md](backup-restore.md#single-sign-on-and-scim)).
+
+### Shared tenant
+
+Kobe usually shares an Entra tenant with your other in-house apps. Single sign-on across them
+needs nothing in Kobe (it comes from Entra's own session); these conventions keep the apps
+separate and their users comparable:
+
+- **One app registration per app**, each with its own client ID, secret, redirect URI, app roles,
+  Conditional Access targeting and SCIM job, and **Assignment required** on. Never share Kobe's
+  registration with another app: each app's tokens carry its own audience (`aud` = its client
+  ID), so a token issued for Kobe is never accepted by another app and the other way round.
+- **Identity key `oid` + `tid`** in every app, never the email address or UPN (both can change).
+  Kobe keys on (`provider`, `oid`) and pins the provider to one `tid`.
+- **Issuer pinned to the tenant**, `https://login.microsoftonline.com/<tenant-id>/v2.0`, with `tid`
+  checked; `common` and `organizations` refused (Kobe refuses them at save).
+- **One Conditional Access MFA policy targeting all the apps** (step 8: add each app, or each
+  app's authentication context, to the same policy), so every app's tokens carry the MFA proof
+  Kobe trusts.
+- **App roles assigned to groups**, named `<App>.<Role>[.<Team>]` in every app
+  (`Kobe.Member.Research`, `Catalyst.Reader`), which also avoids the groups overage.
+- **Separate sessions.** Each app's cookies stay on its own host, never the parent domain (Kobe
+  sets no cookie domain). Signing out of one app does not sign out of the others, and
+  signing out of Kobe does not sign out of Entra, unless you configure front-channel logout on
+  purpose (Kobe does not offer it).
+- **A local break-glass admin in each app.** Kobe's is the Owner created in first-run setup: keep
+  its password or passkey in your secret store; it signs in even when Entra is down or
+  `auth.sso.enabled` is false.
+- **App-to-app calls.** When Kobe calls another app for a person (for example an MCP connector
+  with per-member keys), the target app exposes an API scope on its own registration and Kobe gets
+  a token for that audience for the person (the connector's OAuth flow, or on-behalf-of). Kobe
+  never forwards its own ID or access token to another app.
+
+### Check the setup
+
+- `kubectl -n kobe logs deploy/kobe-server | grep "single sign-on"`: "single sign-on providers
+  from the chart applied" for Helm providers (or the reason they were not).
+- Site console → Single sign-on → **Test**: every check passes (tenant pinned, address allowed,
+  document fetched, issuer equal, code flow, PKCE S256, endpoints allowed).
+- A test person with a mapped app role signs in and lands in the mapped team; one without lands
+  back on the sign-in page with "can't be used for this site yet". Audit log:
+  `auth.sign_in.succeeded` / `auth.sign_in.failed` with `method: sso` and the precise reason.
+- The offline proof of the whole Entra flow (mock Entra in k3d, CI shard `gate-sso`) is
+  `e2e/gate-sso.sh`.
+
 ## Install
 
 Create the Secrets the chart references, then install:

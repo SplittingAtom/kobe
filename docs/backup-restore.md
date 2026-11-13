@@ -31,13 +31,14 @@ with the operator's backup key. There is no plaintext mode.
   ran.
 - **Not backed up (by design):**
 
-  | Table                  | Why                                                                                                 |
-  | ---------------------- | --------------------------------------------------------------------------------------------------- |
-  | `sessions`             | bearer session tokens; after a restore everyone signs in again                                      |
-  | `verifications`        | one-time email-verification and password-reset tokens                                               |
-  | `jwks`                 | JWT signing keys; the server generates a new one on first use                                       |
-  | `rate_limits`          | throwaway counters                                                                                  |
-  | `session_active_teams` | per-session pointer to the active team; it references `sessions`, so its rows could not be restored |
+  | Table                  | Why                                                                                                                    |
+  | ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+  | `sessions`             | bearer session tokens; after a restore everyone signs in again                                                         |
+  | `verifications`        | one-time email-verification and password-reset tokens                                                                  |
+  | `jwks`                 | JWT signing keys; the server generates a new one on first use                                                          |
+  | `rate_limits`          | throwaway counters                                                                                                     |
+  | `session_active_teams` | per-session pointer to the active team; it references `sessions`, so its rows could not be restored                    |
+  | `session_sso_contexts` | how a session signed in through SSO (provider, MFA proof); it references `sessions`, so its rows could not be restored |
 
 - **Schema, grants and the migration journal are not in the dump.** The target gets them from
   Kobe's own migrations (`helm install`). Objects therefore stay owned by the owner role, and the
@@ -100,16 +101,19 @@ reaches a disk:
 ### Secrets
 
 A backup file never holds plaintext, because everything is encrypted under the backup key. Once
-decrypted, the dump contains every backed-up table, **including `accounts`**. Should a sign-in
-provider ever store OAuth tokens there, those tokens are in the dump too, and they are protected
-only by the backup encryption. The test suite seeds such tokens and asserts exactly this. Inside
-the encryption:
+decrypted, the dump contains every backed-up table, **including `accounts`**. Kobe's single
+sign-on stores no identity-provider tokens there (or anywhere); should a future sign-in method
+store OAuth tokens in `accounts`, they would be in the dump too, protected only by the backup
+encryption. The test suite seeds such tokens and asserts exactly this. Inside the encryption:
 
 | Data                                          | Inside the backup as                                       |
 | --------------------------------------------- | ---------------------------------------------------------- |
 | Passwords                                     | scrypt hashes (`accounts.password`)                        |
 | TOTP secrets and backup codes                 | ciphertext under the **auth secret** (`two_factors`)       |
-| OAuth tokens in `accounts` (if SSO is added)  | **as stored** (plaintext inside the encrypted dump)        |
+| SSO: identity-provider tokens                 | none: Kobe stores no access, refresh or ID tokens          |
+| SSO: client secrets (console providers)       | ciphertext under the **envelope key** (`sso_providers`)    |
+| SSO: SCIM tokens                              | SHA-256 hashes (`scim_tokens`)                             |
+| OAuth tokens in `accounts` (none today)       | **as stored** (plaintext inside the encrypted dump)        |
 | Connector grants and site-wide connector keys | ciphertext under the **envelope key** (spec D27, D28)      |
 | Model provider API keys, virtual keys         | ciphertext under the **model keys** Secret (KOBE-40)       |
 | Egress header values (KOBE-39)                | ciphertext under the **egress header** Secret              |
@@ -153,6 +157,36 @@ done
 
 `kobe backup` cannot include them: the CLI talks to Postgres and S3 only, and bundling the keys with
 the ciphertext they protect would defeat the separation.
+
+Secrets you created yourself and named in values are not in the table above but belong in the
+same store: the client secrets of single sign-on providers declared in Helm
+(`auth.sso.providers[].clientSecretSecret`) and a private CA bundle (`server.extraCaBundle`).
+
+### Single sign-on and SCIM
+
+| Table                                  | In the backup                                                                                                                       |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `sso_providers`                        | yes; a console provider's client secret sealed under the envelope key, a Helm provider's secret not at all (it stays in its Secret) |
+| `sso_identities`                       | yes: who is linked to which provider identity (`oid`/`sub`), and how                                                                |
+| `sso_access_mappings`                  | yes                                                                                                                                 |
+| `sso_link_expectations`                | yes (expected links still pending)                                                                                                  |
+| `scim_tokens`                          | yes, as SHA-256 hashes with their revoked state                                                                                     |
+| `scim_groups`, `scim_group_members`    | yes (empty until SCIM Groups ship)                                                                                                  |
+| `users.deactivated_via`, `setup_owner` | yes: who deactivated a user (an admin or SCIM) and which account is the break-glass setup Owner                                     |
+| `session_sso_contexts`                 | no (see above): SSO sessions end like every other session                                                                           |
+
+After a restore:
+
+- **Rotate every SCIM token.** The hashes are the ones of backup time, so a token revoked since
+  then works again until you revoke it once more: Site console → Single sign-on → SCIM →
+  **Rotate**, put the new token in Entra's provisioning settings, then **Revoke** the old one.
+- Console providers need the same envelope key (`envelope.keySecret`), or their client secrets
+  can't be opened and their sign-in fails until a site admin enters the secret again. Helm
+  providers need their `clientSecretSecret` and are re-applied from the chart at start.
+- SCIM changes Entra made after the backup (new, renamed or deactivated people) are not in the
+  restored database. Entra's next provisioning cycle sends them again for the people it knows
+  changed; to be sure, use **Restart provisioning** on the enterprise application.
+- Everyone signs in again, through SSO or locally.
 
 - The backup key, the S3 credentials and the database credentials.
 
@@ -248,7 +282,9 @@ transaction:
 - rows the server writes when it starts (`packages/db/src/startup-seeds.ts`): the gallery agents
   (not those a site admin customized, KOBE-494) with their published versions and the system's audit events for seeding them, and where the
   retention pass, the audit PII sweep and SIEM forwarding stand (`site_settings`), and the chart's
-  branding defaults (`branding.*`, KOBE-503) with the system's audit events for them. The started
+  branding defaults (`branding.*`, KOBE-503) with the system's audit events for them, and the
+  single sign-on providers the chart declares (`auth.sso.providers`, `managed_by = 'helm'`,
+  KOBE-626) with the system's audit events for them. The started
   site's own audit events go with them: the restored audit chain is the backup's, continued by
   the restore's event, which records the replaced chain's head and size
   (`replacedAuditHeadSeq`, `replacedAuditHeadHash`, `replacedAuditRows`). Audit anchors the

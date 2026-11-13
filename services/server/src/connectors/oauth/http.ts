@@ -21,6 +21,14 @@ export class OauthError extends Error {
   }
 }
 
+/** A 3xx answer: never followed (a hop could point at an address nobody checked). */
+export class RedirectRefusedError extends OauthError {
+  constructor() {
+    super("oauth_unreachable");
+    this.name = "RedirectRefusedError";
+  }
+}
+
 export interface OauthIo {
   readonly policy: ConnectorUrlPolicy;
   readonly timeoutMs: number;
@@ -65,13 +73,19 @@ function pinnedLookup(policy: ConnectorUrlPolicy): net.LookupFunction {
   };
 }
 
-interface RawResponse {
+export interface RawResponse {
   status: number;
   headers: Record<string, string | string[] | undefined>;
   text: string | undefined;
 }
 
-function rawRequest(
+/**
+ * One request over a connection pinned to an address the policy approved (see
+ * {@link pinnedLookup}); redirects are refused ({@link RedirectRefusedError}), time and size are
+ * capped (`text` undefined when the body is larger than {@link MAX_BODY_BYTES}). The caller checks
+ * the URL itself first (`checkConnectorUrl`). Also used by SSO discovery (KOBE-626).
+ */
+export function rawRequest(
   url: URL,
   io: OauthIo,
   init: { method: string; headers: Record<string, string>; body?: string },
@@ -91,7 +105,7 @@ function rawRequest(
         // Redirects are never followed: a hop could point at an address nobody checked.
         if (status >= 300 && status < 400) {
           res.destroy();
-          reject(new OauthError("oauth_unreachable"));
+          reject(new RedirectRefusedError());
           return;
         }
         const chunks: Buffer[] = [];

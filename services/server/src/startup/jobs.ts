@@ -22,6 +22,7 @@ import {
 import type { ServerDeps } from "../deps.js";
 import { EgressBlockedRelay } from "../egress/blocked-relay.js";
 import { resealTeamHeaders } from "../egress/header-store.js";
+import { endSsoSessionsWhenOff, seedHelmProviders } from "../sso/providers.js";
 import { EgressRequestSweeper, sweepEgressRequestNotifications } from "../egress/request-notify.js";
 import { seedGalleryAgents } from "../gallery/seed.js";
 import { seedKobeBuiltinConnector } from "@kobe/db";
@@ -108,6 +109,46 @@ export async function seedAtStart(deps: ServerDeps, logger: Logger): Promise<Sta
     })
     .catch((err: unknown) =>
       logger.error({ err }, "the built-in Kobe connector could not be seeded"),
+    );
+  // The kill switch also ends the SSO sessions still in the database (review finding 6).
+  await endSsoSessionsWhenOff(deps.database.db, deps.sso.settings)
+    .then((ended) => {
+      if (ended > 0) logger.info({ ended }, "single sign-on is off: SSO sessions ended");
+    })
+    .catch((err: unknown) => logger.error({ err }, "SSO sessions could not be ended"));
+  // The chart's SSO providers (KOBE-626), `managed_by: helm`; no IdP is contacted here.
+  await seedHelmProviders(deps.database.db, deps.sso.settings)
+    .then((seeded) => {
+      if (seeded.created.length + seeded.updated.length + seeded.retired.length > 0) {
+        logger.info(
+          { created: seeded.created, updated: seeded.updated, disabled: seeded.retired },
+          "single sign-on providers from the chart applied",
+        );
+      }
+      for (const slug of seeded.conflicts) {
+        logger.error(
+          { slug },
+          "auth.sso.providers names a slug a Site console provider already uses: the chart's provider is not applied",
+        );
+      }
+      for (const slug of seeded.locked) {
+        logger.error(
+          { slug },
+          "auth.sso.providers changes the tenant, issuer or subject claim of a provider people have signed in with: the chart's provider is not applied",
+        );
+      }
+      const missing = deps.sso.settings.helmProviders
+        .map((p) => p.slug)
+        .filter((slug) => !deps.sso.settings.helmSecrets.has(slug));
+      if (missing.length > 0) {
+        logger.error(
+          { slugs: missing },
+          "single sign-on providers from the chart have no client secret (clientSecretSecret not mounted)",
+        );
+      }
+    })
+    .catch((err: unknown) =>
+      logger.error({ err }, "single sign-on providers from the chart could not be applied"),
     );
   await seedBrandingDefaults(deps.database.db, deps.brandingDefaults)
     .then((settings) => {

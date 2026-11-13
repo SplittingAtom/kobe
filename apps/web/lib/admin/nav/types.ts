@@ -70,6 +70,12 @@ interface SectionBase {
 /** Site grants checked beside the role ladder (`/v1/me` `siteGrants`, KOBE-331, SK22). */
 export type SiteGrant = "skill_reviewer";
 
+/**
+ * Optional site features the server reports as on (`/v1/me` `siteFeatures`, KOBE-626): a section
+ * that needs one is hidden while it is off (single sign-on's kill switch `auth.sso.enabled`).
+ */
+export type SiteFeature = "sso";
+
 export interface SiteSection extends SectionBase {
   readonly console: "site";
   readonly group: SiteGroup;
@@ -77,6 +83,8 @@ export interface SiteSection extends SectionBase {
   readonly minRole: "admin" | "owner";
   /** A grant that also opens it below `minRole` (the Registry queue for Skill reviewers). */
   readonly grant?: SiteGrant;
+  /** A feature that must be on for the section to exist at all (its API answers 404 otherwise). */
+  readonly feature?: SiteFeature;
 }
 
 export interface TeamSection extends SectionBase {
@@ -138,6 +146,8 @@ export interface SiteAccess {
   readonly siteRole: SiteRole;
   /** The caller's site grants; absent means none. */
   readonly grants?: readonly SiteGrant[];
+  /** Site features that are on; absent means none. */
+  readonly features?: readonly SiteFeature[];
 }
 
 export interface TeamAccess {

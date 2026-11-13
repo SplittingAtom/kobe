@@ -4,6 +4,10 @@ import {
   AUDIT_PII_RETENTION_KEY,
   KOBE_MCP_MODES,
   auditPiiRetentionHoursSchema,
+  eq,
+  inArray,
+  sessionSsoContexts,
+  sessions,
   siteSettings,
   readAuditPiiRetentionHours,
   type KobeTx,
@@ -78,6 +82,9 @@ export function siteSettingsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
       if (requireTwoFactor !== undefined) {
         await store(tx, REQUIRE_TWO_FACTOR, String(requireTwoFactor));
       }
+      // Requiring 2FA ends every SSO session whose sign-in did not prove MFA (KOBE-629 review
+      // M1): such a session could never pass again, and must not live on at /api/auth/*.
+      if (requireTwoFactor === true) await endSsoSessionsWithoutMfa(tx);
       if (auditPiiRetentionHours !== undefined) {
         await store(tx, AUDIT_PII_RETENTION_KEY, String(auditPiiRetentionHours));
       }
@@ -99,4 +106,12 @@ export function siteSettingsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVari
   });
 
   return app;
+}
+
+async function endSsoSessionsWithoutMfa(tx: KobeTx): Promise<void> {
+  const weak = tx
+    .select({ id: sessionSsoContexts.sessionId })
+    .from(sessionSsoContexts)
+    .where(eq(sessionSsoContexts.mfaSatisfied, false));
+  await tx.delete(sessions).where(inArray(sessions.id, weak));
 }

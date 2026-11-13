@@ -1248,6 +1248,194 @@
             "type": "string",
             "pattern": "^[0-9a-fA-F:.]+/[0-9]{1,3}$"
           }
+        },
+        "sso": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "allowedInternalCidrs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F:.]+/[0-9]{1,3}$"
+              }
+            },
+            "allowedPorts": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            },
+            "providers": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["slug", "displayName", "kind", "clientId", "clientSecretSecret"],
+                "properties": {
+                  "slug": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+                  },
+                  "displayName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "kind": {
+                    "enum": ["entra", "oidc"]
+                  },
+                  "tenantId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                  },
+                  "issuer": {
+                    "type": "string",
+                    "pattern": "^https://[^\\s?#]+$",
+                    "maxLength": 2048
+                  },
+                  "clientId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "clientSecretSecret": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["name", "key"],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 253
+                      },
+                      "key": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 253
+                      }
+                    }
+                  },
+                  "accessClaim": {
+                    "enum": ["roles", "groups"]
+                  },
+                  "subjectClaim": {
+                    "enum": ["oid", "sub"]
+                  },
+                  "mfaRule": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["amr_any", "acr_any", "acrs_any"],
+                    "properties": {
+                      "amr_any": {
+                        "type": "array",
+                        "maxItems": 20,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[\\x21-\\x7e]+$"
+                        }
+                      },
+                      "acr_any": {
+                        "type": "array",
+                        "maxItems": 20,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[\\x21-\\x7e]+$"
+                        }
+                      },
+                      "acrs_any": {
+                        "type": "array",
+                        "maxItems": 20,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[\\x21-\\x7e]+$"
+                        }
+                      }
+                    }
+                  },
+                  "allowedEmailDomains": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 253
+                    }
+                  },
+                  "jitProvisioning": {
+                    "type": "boolean"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "maxSessionHours": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 8760
+                  }
+                },
+                "oneOf": [
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "entra"
+                      }
+                    },
+                    "required": ["tenantId"],
+                    "not": {
+                      "required": ["issuer"]
+                    }
+                  },
+                  {
+                    "properties": {
+                      "kind": {
+                        "const": "oidc"
+                      }
+                    },
+                    "required": ["issuer"],
+                    "not": {
+                      "required": ["tenantId"]
+                    }
+                  }
+                ]
+              }
+            },
+            "networkPolicy": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "cidrs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[0-9a-fA-F:.]+/[0-9]{1,3}$"
+                  }
+                },
+                "extraEgress": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },

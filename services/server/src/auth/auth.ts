@@ -1,14 +1,18 @@
 import { passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
+import { APIError, createAuthMiddleware, getSessionFromCtx, isAPIError } from "better-auth/api";
 import { jwt, twoFactor } from "better-auth/plugins";
 import {
   accounts,
   jwks,
   passkeys,
   rateLimits,
+  and,
+  eq,
+  gt,
   sessions,
+  sessionSsoContexts,
   twoFactors,
   users,
   verifications,
@@ -23,7 +27,15 @@ import { passwordResetMessage } from "../mail/messages.js";
 import { readAppName } from "../branding/settings.js";
 import { isDeactivated } from "../users/deactivation.js";
 import { invitationPlugin, PASSWORD_MAX, PASSWORD_MIN } from "./invitation-plugin.js";
-import { claimResetLinkSend, releaseResetLinkClaim, revokeResetLinks } from "./reset-links.js";
+import {
+  claimResetLinkSend,
+  hasLocalPassword,
+  releaseResetLinkClaim,
+  revokeResetLinks,
+} from "./reset-links.js";
+import { passkeyIsLastSignIn } from "../sso/linking.js";
+import { ssoLinkPlugin } from "./sso-link-plugin.js";
+import { ssoPlugin, SSO_RATE_LIMITS, type SsoRuntime } from "./sso-plugin.js";
 import { isUserVerified } from "./webauthn-flags.js";
 
 export interface AuthOptions {
@@ -43,6 +55,8 @@ export interface AuthOptions {
   readonly attempts: AuthAttemptAudit;
   /** Runs the reset email and its audit off the request path. */
   readonly background: BackgroundTasks;
+  /** OIDC single sign-on (KOBE-628); unset: no SSO routes at all. */
+  readonly sso?: SsoRuntime;
 }
 
 /** Password-reset links work once, for 30 minutes. */
@@ -51,6 +65,117 @@ export const RESET_TOKEN_TTL_SECONDS = 30 * 60;
 const ACCOUNT_DEACTIVATED = {
   code: "ACCOUNT_DEACTIVATED",
   message: "This account is deactivated. Ask a site admin to reactivate it.",
+};
+
+/**
+ * Endpoints that add a local credential or factor to the signed-in account (SSO9, review finding 3):
+ * refused for a user with no `credential` account (made by SSO JIT or SCIM), who signs in only
+ * through the identity provider, so an IdP-side disable can never be outlived by a local passkey
+ * or password. TOTP enrolment is refused too (it would be a Kobe factor the IdP doesn't govern).
+ */
+const LOCAL_CREDENTIAL_PATHS = new Set([
+  "/passkey/generate-register-options",
+  "/passkey/verify-registration",
+  "/passkey/register",
+  "/change-password",
+  "/two-factor/enable",
+]);
+
+const SSO_ONLY_ACCOUNT = {
+  code: "SSO_ONLY_ACCOUNT",
+  message:
+    "This account signs in through your organization's identity provider and can't have a Kobe password, passkey or authenticator app.",
+};
+
+/**
+ * Endpoints that add a credential or second factor (TOTP secret, its confirmation, backup codes,
+ * a passkey, a new password): refused from an SSO session whose sign-in did not prove MFA (spec
+ * sso-oidc-scim §8, SSO7, KOBE-629 and its review M1), so a stolen IdP password can never mint a
+ * factor that later passes `require_2fa` through a local sign-in. A local session, or an SSO
+ * session that proved MFA, is unaffected; the TOTP sign-in challenge carries no session.
+ */
+const MFA_GUARDED_PATHS = new Set([
+  ...LOCAL_CREDENTIAL_PATHS,
+  // Removing a factor too (KOBE-630 review M2): it would also rotate the session.
+  "/two-factor/disable",
+  "/two-factor/get-totp-uri",
+  "/two-factor/verify-totp",
+  "/two-factor/generate-backup-codes",
+]);
+
+const SSO_MFA_REQUIRED = {
+  code: "SSO_MFA_REQUIRED",
+  message:
+    "Your organization's sign-in did not include multi-factor authentication, so this session can't add a passkey, password or authenticator app. Sign in again with multi-factor authentication (your administrator sets it up with Conditional Access).",
+};
+
+/** The session is a single sign-on session whose sign-in did not prove MFA. */
+async function ssoSessionWithoutMfa(db: KobeDb, sessionId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ mfaSatisfied: sessionSsoContexts.mfaSatisfied })
+    .from(sessionSsoContexts)
+    .where(eq(sessionSsoContexts.sessionId, sessionId));
+  return row !== undefined && !row.mfaSatisfied;
+}
+
+/**
+ * Endpoints that remove a local credential or factor: refused from an SSO session of the setup Owner
+ * (SSO10, KOBE-630), so no single sign-on path can take away the break-glass identity's password
+ * or passkey. From a local session the Owner manages them as before.
+ */
+const LOCAL_CREDENTIAL_REMOVAL_PATHS = new Set([
+  "/passkey/delete-passkey",
+  "/unlink-account",
+  // Its second factor too (review L3).
+  "/two-factor/disable",
+]);
+
+const SETUP_OWNER_LOCAL_ONLY = {
+  code: "SETUP_OWNER_LOCAL_ONLY",
+  message:
+    "The setup Owner's password, passkeys and authenticator app can only be removed from a session signed in with them, not through single sign-on.",
+};
+
+/** The session is an SSO session of the setup Owner. */
+async function setupOwnerSsoSession(
+  db: KobeDb,
+  session: { readonly id: string; readonly userId: string },
+): Promise<boolean> {
+  const [row] = await db
+    .select({ setupOwner: users.setupOwner })
+    .from(sessionSsoContexts)
+    .innerJoin(users, eq(users.id, session.userId))
+    .where(eq(sessionSsoContexts.sessionId, session.id));
+  return row?.setupOwner === true;
+}
+
+/**
+ * Endpoints after which Better Auth replaces the session with a new one (new id, old one deleted):
+ * an SSO session's `session_sso_contexts` row is carried over to the new session (KOBE-630 review
+ * M2), so unlink, the kill switch, max hours and the MFA and setup-Owner guards keep applying.
+ */
+const SESSION_ROTATING_PATHS = new Set([
+  "/two-factor/enable",
+  "/two-factor/disable",
+  "/two-factor/verify-totp",
+  "/two-factor/verify-backup-code",
+  "/two-factor/verify-otp",
+  "/change-password",
+]);
+
+type SsoContextRow = typeof sessionSsoContexts.$inferSelect;
+
+async function ssoContextOf(db: KobeDb, sessionId: string): Promise<SsoContextRow | undefined> {
+  const [row] = await db
+    .select()
+    .from(sessionSsoContexts)
+    .where(eq(sessionSsoContexts.sessionId, sessionId));
+  return row;
+}
+
+const LAST_SIGN_IN_METHOD = {
+  code: "LAST_SIGN_IN_METHOD",
+  message: "This passkey is your only way to sign in to Kobe, so it can't be removed.",
 };
 
 const PASSKEY_VERIFY_PATHS = new Set([
@@ -72,17 +197,31 @@ export function createAuth({
   mailer,
   attempts,
   background,
+  sso,
 }: AuthOptions) {
   const origin = new URL(publicUrl);
+  // The SSO context of the session a rotating endpoint started from, keyed by the shared Request.
+  const rotatingFrom = new WeakMap<
+    object,
+    { userId: string; createdAt: Date; context: SsoContextRow }
+  >();
 
   /**
    * Mails a reset link, off the request path: the response (and its timing) is the same whether or
    * not the address has an account. Deactivated accounts get nothing; while a link mailed in the last
    * few minutes is still valid no other is sent (mail bombing through many IPs). The token travels in the URL fragment, which browsers never send to
-   * servers or proxies (no token in access logs).
+   * servers or proxies (no token in access logs). An account without a local password (provisioned
+   * by SCIM or SSO, SSO9) gets nothing, and the unsent token is dropped: resetting would create a
+   * password and get round the identity provider.
    */
   async function mailResetLink(user: { id: string; email: string }, token: string) {
     if (await isDeactivated(db, user.id)) return;
+    // A user made by SSO (JIT) or SCIM has no password: a reset must not give them one, or the
+    // mailbox could outlive the identity provider's disable (spec sso-oidc-scim §6, SSO9).
+    if (!(await hasLocalPassword(db, user.id))) {
+      await revokeResetLinks(db, user.id);
+      return;
+    }
     // Not awaited: the email must not wait on the audit write. Aggregated: anyone can request
     // resets for an address in any number.
     background.run("password reset audit failed", () =>
@@ -159,6 +298,7 @@ export function createAuth({
         "/reset-password": { window: 60, max: 5 },
         "/invitation/lookup": { window: 60, max: 10 },
         "/invitation/accept": { window: 60, max: 5 },
+        ...SSO_RATE_LIMITS,
       },
     },
     databaseHooks: {
@@ -183,6 +323,46 @@ export function createAuth({
     telemetry: { enabled: false },
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
+        if (LOCAL_CREDENTIAL_PATHS.has(ctx.path)) {
+          const current = await getSessionFromCtx(ctx).catch(() => null);
+          if (current && !(await hasLocalPassword(db, current.user.id))) {
+            throw new APIError("FORBIDDEN", SSO_ONLY_ACCOUNT);
+          }
+        }
+        if (MFA_GUARDED_PATHS.has(ctx.path)) {
+          const current = await getSessionFromCtx(ctx).catch(() => null);
+          if (current && (await ssoSessionWithoutMfa(db, current.session.id))) {
+            throw new APIError("FORBIDDEN", SSO_MFA_REQUIRED);
+          }
+        }
+        if (SESSION_ROTATING_PATHS.has(ctx.path) && ctx.request) {
+          const current = await getSessionFromCtx(ctx).catch(() => null);
+          const context = current ? await ssoContextOf(db, current.session.id) : undefined;
+          if (current && context) {
+            rotatingFrom.set(ctx.request, {
+              userId: current.user.id,
+              createdAt: new Date(current.session.createdAt),
+              context,
+            });
+          }
+        }
+        if (ctx.path === "/passkey/delete-passkey") {
+          const current = await getSessionFromCtx(ctx).catch(() => null);
+          const id = (ctx.body as { id?: unknown } | undefined)?.id;
+          if (
+            current &&
+            typeof id === "string" &&
+            (await passkeyIsLastSignIn(db, current.user.id, id))
+          ) {
+            throw new APIError("FORBIDDEN", LAST_SIGN_IN_METHOD);
+          }
+        }
+        if (LOCAL_CREDENTIAL_REMOVAL_PATHS.has(ctx.path)) {
+          const current = await getSessionFromCtx(ctx).catch(() => null);
+          if (current && (await setupOwnerSsoSession(db, current.session))) {
+            throw new APIError("FORBIDDEN", SETUP_OWNER_LOCAL_ONLY);
+          }
+        }
         // A passkey counts as a strong factor only with user verification (PIN/biometric).
         if (
           PASSKEY_VERIFY_PATHS.has(ctx.path) &&
@@ -201,6 +381,25 @@ export function createAuth({
         return undefined;
       }),
       after: createAuthMiddleware(async (ctx) => {
+        // Carry an SSO session's context over to the session Better Auth replaced it with.
+        const from = ctx.request ? rotatingFrom.get(ctx.request) : undefined;
+        const next = ctx.context.newSession;
+        if (
+          from &&
+          next &&
+          next.user.id === from.userId &&
+          next.session.id !== from.context.sessionId
+        ) {
+          await db
+            .insert(sessionSsoContexts)
+            .values({ ...from.context, sessionId: next.session.id })
+            .onConflictDoNothing();
+          // max_session_hours counts from the original sign-in, not from the rotation.
+          await db
+            .update(sessions)
+            .set({ createdAt: from.createdAt })
+            .where(and(eq(sessions.id, next.session.id), gt(sessions.createdAt, from.createdAt)));
+        }
         // A changed password also kills any reset link still in a mailbox.
         if (
           ctx.path === "/change-password" &&
@@ -221,6 +420,7 @@ export function createAuth({
     },
     plugins: [
       invitationPlugin({ db, publicOrigin: origin.origin }),
+      ssoPlugin({ db, publicOrigin: origin.origin, secret, attempts, sso }),
       twoFactor({ issuer: "Kobe" }),
       passkey({
         rpID: origin.hostname,
@@ -228,6 +428,8 @@ export function createAuth({
         origin: origin.origin,
         authenticatorSelection: { userVerification: "required", residentKey: "required" },
       }),
+      // After the two-factor and passkey plugins: it must see whether a sign-in completed.
+      ssoLinkPlugin({ db, publicOrigin: origin.origin, secret, settings: sso?.settings }),
       jwt({
         jwt: {
           expirationTime: "5m",

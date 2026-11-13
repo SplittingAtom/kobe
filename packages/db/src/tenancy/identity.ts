@@ -34,6 +34,16 @@ export const identity = defineDomain({
     "break_glass_notifications",
     "legal_holds",
     "audit_log",
+    // Single sign-on and SCIM (KOBE-625, spec sso-oidc-scim §4–§10)
+    "sso_providers",
+    "sso_identities",
+    // Admin-expected links (KOBE-630, §6)
+    "sso_link_expectations",
+    "sso_access_mappings",
+    "session_sso_contexts",
+    "scim_tokens",
+    "scim_groups",
+    "scim_group_members",
   ],
   grants: {
     // No DELETE on `teams`: foreign-key cascades bypass RLS and would wipe another team's rows.
@@ -71,12 +81,28 @@ export const identity = defineDomain({
     // The record behind legal-hold audit events (KOBE-17): requested, decided, released; never
     // deleted. Transitions and the two-person rule are checked by the legal_holds_guard trigger.
     legal_holds: ["SELECT", "INSERT", "UPDATE"],
+    // Single sign-on (KOBE-625). Deleting a provider is refused by foreign keys while an identity
+    // is linked or an SSO session is live; unlinking deletes the identity row.
+    sso_providers: ALL_PRIVILEGES,
+    sso_identities: ALL_PRIVILEGES,
+    // Single use: deleted when it links, replaced by a new one, or withdrawn (KOBE-630).
+    sso_link_expectations: ALL_PRIVILEGES,
+    sso_access_mappings: ALL_PRIVILEGES,
+    // A pointer only, like session_active_teams; rows also go away with their session.
+    session_sso_contexts: ALL_PRIVILEGES,
+    // Hash only; revoked, never deleted (UPDATE only on the columns below; the scim_tokens_guard
+    // trigger makes revocation final). Rows go with their provider (cascade).
+    scim_tokens: ["SELECT", "INSERT"],
+    scim_groups: ALL_PRIVILEGES,
+    scim_group_members: ALL_PRIVILEGES,
   },
   columnGrants: {
     // Erasure of the client IP and user agent after the retention period (KOBE-17). The
     // audit_log_erase_pii trigger allows only setting all three to NULL, on rows past the period
     // and not under legal hold; the hash chain covers a commitment, not the values.
     audit_log: { UPDATE: ["ip", "user_agent", "pii_salt"] },
+    // Use and revocation of a SCIM token (KOBE-625): the hash and provider never change.
+    scim_tokens: { UPDATE: ["last_used_at", "revoked_at"] },
   },
   teamReferencing: {
     user_last_teams:
@@ -100,5 +126,9 @@ export const identity = defineDomain({
       "in it) must exist before any team context and be visible to every site admin who may " +
       "approve or release it. It holds the team id, an optional user id and the requester's " +
       "reason, never team content.",
+    sso_access_mappings:
+      "Site configuration naming teams, no team content (KOBE-625, spec sso-oidc-scim §7): an " +
+      "IdP claim value grants a team role. Edited only with site.users.manage; applied to " +
+      "team_members inside withTeam() for each team.",
   },
 });

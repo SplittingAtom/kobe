@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { BlockList, isIP } from "node:net";
 import type { Context, MiddlewareHandler } from "hono";
 import { createMiddleware } from "hono/factory";
-import type { AuditActor, AuditVia } from "@kobe/db";
+import { SYSTEM_ACTOR, type AuditActor, type AuditVia } from "@kobe/db";
 import type { AuthVariables } from "../auth/session.js";
 import type { ServerDeps } from "../deps.js";
 import { delegationOf } from "../kobe-mcp/delegation.js";
@@ -93,6 +93,15 @@ function requestContext(deps: ServerDeps) {
 export function auditRequestContext(deps: ServerDeps): MiddlewareHandler {
   const contextOf = requestContext(deps);
   return createMiddleware(async (c, next) => runWithAuditContext(contextOf(c), next));
+}
+
+/**
+ * The system as the actor of everything audited in the request, with the client's address kept in
+ * the context (KOBE-631: SCIM requests carry no user; their events name the SCIM credential).
+ */
+export function auditSystemContext(deps: ServerDeps): MiddlewareHandler {
+  const contextOf = requestContext(deps);
+  return createMiddleware(async (c, next) => runWithAuditContext(contextOf(c, SYSTEM_ACTOR), next));
 }
 
 /**

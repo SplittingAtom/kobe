@@ -28,7 +28,8 @@ const HOUR = 3_600_000;
  * Site invitations (spec D6/D7, §6.1 `/v1/site/invites`): site admins invite people into
  * the install by email. The link carries a single-use token (hashed at rest, 72 h); the invitee
  * sets a password and is signed in. Team membership then comes from each team's own admins (team
- * invitations the invitee accepts), never from site admins (D8, KOBE-14).
+ * invitations the invitee accepts) or, since KOBE-638, from a site admin adding the account in
+ * Site console › Teams (`site-team-members.ts`).
  */
 export function siteInvitesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
