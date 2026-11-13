@@ -104,10 +104,12 @@ skipped. Ask a team admin for a team allow rule if the tool should run unattende
 ## Memory
 
 **The agent forgot something.** Check **My memory**: the note may not have been saved, or memory
-may be switched off for your team. Ask the agent to "remember" it explicitly.
+may be switched off for your workspace. Ask the agent to "remember" it explicitly, or add it
+yourself as a memory on the **Memories** tab.
 
-**The agent remembered something wrong.** Open **My memory**, edit or delete the file, or press
-**Undo** on the **Memory updated** chip right after it was saved.
+**The agent remembered something wrong.** Open **My memory**: on the **Notes** tab edit or delete
+the file, or press **Undo** on the **Note saved** chip right after it was saved; on the **Memories**
+tab edit or archive the memory.
 
 ## Single sign-on
 

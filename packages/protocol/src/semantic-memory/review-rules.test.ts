@@ -215,9 +215,7 @@ describe("lows", () => {
   it("L3: one scope vocabulary; context labels come from the scope map", () => {
     expect(memoryStewardLevelSchema.options).toEqual(["team", "site"]);
     for (const scope of SEMANTIC_MEMORY_SCOPES)
-      expect(CONTEXT_MEMORY_SECTION_LABELS[scope]).toBe(
-        SEMANTIC_MEMORY_SCOPE_LABELS[scope].section,
-      );
+      expect(CONTEXT_MEMORY_SECTION_LABELS[scope]).toBe(SEMANTIC_MEMORY_SCOPE_LABELS[scope]);
   });
 
   it("L6: statements refuse control characters but keep newlines; tags are trimmed", () => {

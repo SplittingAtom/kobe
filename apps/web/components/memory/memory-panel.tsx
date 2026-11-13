@@ -15,7 +15,6 @@ import { useMutation, useResource } from "../admin/use-resource";
 import {
   Button,
   EmptyState,
-  PageHeader,
   Section,
   Table,
   TableBody,
@@ -39,7 +38,7 @@ function friendly<T>(
 }
 
 /**
- * The memory files of one scope the person can see (`/v1/memory`, KOBE-155): list, open, edit,
+ * The Notes tab of the Memory page (KOBE-384; files since KOBE-155..164, D24): the memory files of one scope the person can see (`/v1/memory`, KOBE-155): list, open, edit,
  * delete, and version history. Everything shown is plain text (never HTML or markdown, so no
  * links or images from stored text), with hidden characters as visible escapes.
  */
@@ -54,16 +53,17 @@ export function MemoryPanel({
   const { state, reload } = useResource(async () => friendly(await api.list(target)));
   const [openId, setOpenId] = useState<string | null>(null);
   const mutation = useMutation();
-  const title = target.scope === "project" ? "Project memory" : "My memory";
+  // One page label (My memory, its h1) and the tab names: a project's files say whose they are.
+  const title = target.scope === "project" ? "Project memory" : "Files";
 
   return (
     <>
-      <PageHeader
-        title={title}
-        description={`What your agents remembered${target.scope === "project" ? " for this project" : " about you"}. Edit or delete anything you do not want kept. Agents treat this text as untrusted notes.`}
-      />
+      <p className="m-0 mb-4 text-console-muted">
+        What your agents remembered{target.scope === "project" ? " for this project" : " about you"}
+        . Edit or delete anything you do not want kept. Agents treat this text as untrusted notes.
+      </p>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
-      <Section id={FILES_HEADING} title="Files">
+      <Section id={FILES_HEADING} title={title}>
         <ResourceView state={state} label="memory">
           {(data) =>
             data.docs.length === 0 ? (

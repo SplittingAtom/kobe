@@ -207,10 +207,10 @@ describe("item API requests", () => {
   it("scopes are the wire names; the UI says Workspace", () => {
     expect(SEMANTIC_MEMORY_SCOPES).toEqual(["user", "portable", "team", "site"]);
     expect(SEMANTIC_MEMORY_SCOPE_LABELS).toEqual({
-      user: { picker: "Me in this workspace", section: "My memories in this workspace" },
-      portable: { picker: "All my workspaces", section: "My memories in all my workspaces" },
-      team: { picker: "This workspace", section: "Workspace memories" },
-      site: { picker: "Site", section: "Site memories" },
+      user: "Only in this workspace",
+      portable: "All my workspaces",
+      team: "Workspace memories",
+      site: "Site memories",
     });
   });
 
@@ -362,8 +362,8 @@ describe("errors, settings, names and labels (ac-3)", () => {
       policy: "Policy",
       site: "Site memories",
       team: "Workspace memories",
-      portable: "My memories in all my workspaces",
-      user: "My memories in this workspace",
+      portable: "All my workspaces",
+      user: "Only in this workspace",
     });
   });
 });

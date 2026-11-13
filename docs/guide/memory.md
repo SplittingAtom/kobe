@@ -1,20 +1,28 @@
 ---
 title: Memory
-summary: How Kobe remembers things between conversations, where personal and project memory live, how to read, edit or undo them, which site and workspace switches control notes and memories, and how the learning model is chosen.
+summary: How Kobe remembers things between conversations, the Memories and Notes tabs of My memory, how to add, edit, pin, archive or undo memories and notes, which site and workspace switches control notes and memories, and how the learning model is chosen.
 section: Memory
 order: 1
 audience: member
 ---
 
-Memory lets the agent keep notes that last beyond one conversation: your preferences, facts about
-your work, decisions a project made. Memory is a set of plain Markdown files that you can read and
-edit at any time. This page explains how it works and how to control it.
+Memory lets the agent keep what it should know beyond one conversation: your preferences, facts
+about your work, decisions a project made. It comes in two forms, side by side on one page, **My
+memory** in the top bar (`/me/memory`):
 
-## Two kinds of memory
+- **Memories** (the first tab): short statements, one per line, such as "Prefers answers in
+  euros". You add and edit them yourself, and the agent is given them at the start of each run.
+  See [Your memories](#your-memories).
+- **Notes** (the second tab): plain Markdown files the agent writes with its **remember** tool and
+  reads with **recall**. The rest of this section is about notes.
 
-- **My memory** is about you. Only you and your own agents read it. The agent saves to it straight
-  away; the conversation shows a **Memory updated** chip with **Undo**.
-- **Project memory** belongs to a project. Everyone who can read the project can read it. Because
+This page explains how both work and how to control them.
+
+## Two kinds of notes
+
+- **My notes** are about you. Only you and your own agents read them. The agent saves to them
+  straight away; the conversation shows a **Note saved** chip with **Undo**.
+- **Project memory** (a project's notes) belongs to a project. Everyone who can read the project can read it. Because
   it is shared, an agent's write to it waits for approval by a project member before it is stored.
   The agent writes project memory only in a conversation of an editor or owner of that project.
 
@@ -33,14 +41,42 @@ Ask in plain words: "Remember that I report in euros", "What do you remember abo
 "Forget what you saved about my old manager" (or delete it yourself, below). The agent is told
 never to store secrets or passwords in memory; do not ask it to.
 
-## See and edit your memory
+## Your memories
 
-Open **My memory** in the top bar (`/me/memory`). The page lists your memory files with their size
-and when they were updated. Open a file to read it, **Edit** and **Save** it, **Delete** it, or open
+The **Memories** tab of **My memory** is where you keep your own memories. It has two groups:
+
+- **Only in this workspace**: memories only you and your agents in this workspace read. Facts,
+  conventions, definitions and decisions about your work always stay here. (Memories everyone in
+  the workspace shares are **Workspace memories**, kept by team admins and memory stewards.)
+- **All my workspaces**: preferences that follow you into every workspace you belong to (how you
+  like answers, units, tone).
+
+**Add a memory** with its text (at most 500 characters), its kind (preference, fact, convention,
+definition or decision) and up to five tags, separated by commas. For a preference you can tick
+**Use in all my workspaces**; Kobe then asks **Use in all my workspaces?** and shows the text, so
+nothing about your work leaves the workspace by accident. Other kinds can't be moved there.
+
+Each memory has **Edit**, **Pin** and **Archive**. Pinned memories (up to 10 in each group) are
+listed first and always given to your agents; **Show more** lists older ones. Archiving never
+deletes: **Show archived** lists archived memories with **Restore**. After every change the page says what happened (**Memory saved**, **Archived**,
+...) with **Undo**; an undone edit brings back the version before it.
+
+Every save runs the [checks](#what-kobe-checks-before-a-memory-is-saved) first. Their warnings
+appear under the memory you were saving, a similar memory as a link to it, with **Save anyway**;
+a secret is never saved. If the memory changed in another tab since you opened it, Kobe says so;
+**Reload** shows the saved text above your draft, which is kept, and **Save** replaces it. An
+**Undo** that comes too late (the memory changed since) is withdrawn. Each group says when it is
+80% full, and when it is full (by default 300 memories only in this workspace and 50 in all your
+workspaces; a site admin can change this): archive some before adding more.
+
+## See and edit your notes
+
+Open the **Notes** tab of **My memory** (`/me/memory?tab=notes`). It lists your memory files with
+their size and when they were updated. Open a file to read it, **Edit** and **Save** it, **Delete** it, or open
 its **Version history** to restore an earlier version. Everything is shown as plain text.
 
-To see a project's memory, pick the project at the top of the same page, or use **Project memory**
-on the project's page. Readers can read it; what you can change follows your project role.
+To see a project's memory, pick the project at the top of the Notes tab, or use **Project memory**
+on the project's page (it opens on the Notes tab). Readers can read it; what you can change follows your project role.
 
 ## Switches that control memory
 
@@ -93,7 +129,9 @@ an admin picks another.
 ### Site memory settings
 
 Site admins also set, under **Settings › Memory**: the context budget (how much room memories may
-take at the start of a run, 4 to 16 KiB, 8 by default), the most memories each place may hold, how
+take at the start of a run, 4 to 16 KiB, 8 by default), the most memories each place may hold (by
+default 300 per person only in a workspace, 50 per person in all their workspaces, 1,000 per
+workspace and 1,000 on the site), how
 many versions of a memory are kept (50), when an unconfirmed memory counts as stale (90 days), the
 retention window for archived memories (365 days), learning rate limits, and an embedding model
 that is not used yet. Search always uses English word matching; there is no language setting.
@@ -175,9 +213,8 @@ the semantic memory features that are being rolled out; until then the bell show
 
 ## What memory is not
 
-Recall finds text in your memory files; it does not search by meaning. A semantic memory, which
-would let the agent find related notes by meaning across conversations, is planned but not
-available yet.
+Recall finds text in your memory files; it does not search by meaning. Memories are matched to a
+conversation by their words, not by meaning.
 
 ## Related
 

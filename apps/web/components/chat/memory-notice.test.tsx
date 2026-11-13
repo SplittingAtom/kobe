@@ -6,7 +6,7 @@ import { FakeKobe } from "../../lib/chat/testing/fake-kobe";
 import { must } from "../../lib/testing/must";
 import { composer, openApp, streaming } from "./testing";
 
-/** The "Memory updated" chip and its Undo (KOBE-158, ac-1) in the chat over the fake server. */
+/** The "Note saved" chip and its Undo (KOBE-158, ac-1) in the chat over the fake server. */
 let fake: FakeKobe;
 const DOC = "00000000-0000-4000-8000-0000000d0c01";
 
@@ -36,13 +36,13 @@ async function remembered(extra: Record<string, unknown>, path = "prefs.md") {
     version: 2,
     ...extra,
   });
-  await screen.findByText(/Memory updated/);
+  await screen.findByText(/Note saved/);
   return user;
 }
 
 const memoryCalls = () => fake.requests.filter((r) => r.path.startsWith("/v1/memory"));
 
-describe("Memory updated chip", () => {
+describe("Note saved chip", () => {
   it("Undo restores the prior version of an edited doc", async () => {
     const user = await remembered({ previous_version: 1 });
     await user.click(screen.getByRole("button", { name: /Undo memory update prefs\.md/ }));
@@ -72,14 +72,14 @@ describe("Memory updated chip", () => {
       new Response(JSON.stringify({ code: "memory_disabled", message: "off" }), { status: 403 }),
     );
     await user.click(screen.getByRole("button", { name: /Undo memory update/ }));
-    await screen.findByText(/Memory is turned off for this team/);
+    await screen.findByText(/Memory is turned off for this workspace/);
     await user.click(screen.getByRole("button", { name: /Undo memory update/ }));
     await screen.findByText("Undone.");
   });
 
   it("shows the agent's path as plain text with invisible characters escaped", async () => {
     await remembered({ previous_version: 1 }, "a‮b<img src=x>.md");
-    const chip = screen.getByText(/Memory updated/);
+    const chip = screen.getByText(/Note saved/);
     expect(chip.textContent).toContain("a\\u202eb<img src=x>.md");
     expect(chip.querySelector("img")).toBeNull();
   });

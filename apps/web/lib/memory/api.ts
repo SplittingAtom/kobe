@@ -98,7 +98,7 @@ export function describeMemoryError(error: {
   readonly code: string;
   readonly message: string;
 }): string {
-  if (error.code === "memory_disabled") return "Memory is turned off for this team.";
+  if (error.code === "memory_disabled") return "Memory is turned off for this workspace.";
   if (error.code === "version_conflict")
     return "This file changed since you opened it. Reload and try again.";
   if (error.code === "index_full")

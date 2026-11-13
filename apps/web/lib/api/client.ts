@@ -13,6 +13,11 @@ export interface ApiError {
   readonly message: string;
   /** A 409 `proposal_not_allowed`'s machine reason (KOBE-592), when the body carries one. */
   readonly reason?: string;
+  /**
+   * The rest of a 4xx body, camelized, when the request asked for it (`errorDetails`): e.g. the
+   * memory checks' `warnings` and `duplicates` (KOBE-384). Never set for 5xx answers.
+   */
+  readonly details?: Readonly<Record<string, unknown>>;
 }
 
 export type ApiResult<T> =
@@ -39,6 +44,8 @@ export interface RequestOptions {
   readonly keepalive?: boolean | undefined;
   /** Cancels the request (a search superseded by the next keystroke). */
   readonly signal?: AbortSignal | undefined;
+  /** Keep a 4xx body's other fields in `error.details` (memory check results, KOBE-384). */
+  readonly errorDetails?: boolean | undefined;
   readonly fetchFn?: typeof fetch | undefined;
 }
 
@@ -151,6 +158,7 @@ export async function apiRequest<T>(
     idempotencyKey,
     keepalive,
     signal,
+    errorDetails,
     fetchFn = fetch,
   } = options;
   const headers = new Headers({ accept: "application/json" });
@@ -182,7 +190,16 @@ export async function apiRequest<T>(
     return { ok: false, error: fallback(0) };
   }
   const parsed = await readJson(res);
-  if (!res.ok) return { ok: false, error: toError(res.status, parsed) };
+  if (!res.ok) {
+    const error = toError(res.status, parsed);
+    const keep = errorDetails && res.status < 500 && parsed !== null && typeof parsed === "object";
+    return {
+      ok: false,
+      error: keep
+        ? { ...error, details: camelizeKeys(parsed) as Readonly<Record<string, unknown>> }
+        : error,
+    };
+  }
   return { ok: true, status: res.status, data: camelizeKeys(parsed) as T };
 }
 

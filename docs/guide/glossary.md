@@ -63,8 +63,9 @@ in. Linking needs your Kobe password or passkey, or an administrator's **expecte
 **Managed member.** A team membership an access mapping made; it shows "Managed by _provider_"
 and changes only at the provider until a team admin uses **Take over**.
 
-**Memory.** Notes the agent keeps between conversations: **My memory** and **project memory**. See
-[Memory](memory.md).
+**Memory.** What the agent knows between conversations, on the **My memory** page: **Memories**
+(short statements you keep, **Only in this workspace** or in **All my workspaces**) and **Notes** (files the
+agent writes, yours and a project's). See [Memory](memory.md).
 
 **Memory steward.** A grant on top of any role, not a role: a **workspace** memory steward
 (given by a team admin on **Members and roles**) curates the workspace's shared memories with the

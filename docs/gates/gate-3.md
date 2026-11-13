@@ -120,15 +120,15 @@ shares it with the project.
 | `403 read_only` on post and rename; fork `201`, private and writable, invisible to the author | Readable and forkable, not writable.                         |
 | unshared: `404` at once                                                                       | Sharing is revocable.                                        |
 
-## ac-4 Memory: Memory updated + Undo; project memory asks (U10, KOBE-155..158)
+## ac-4 Memory: Note saved (then Memory updated) + Undo; project memory asks (U10, KOBE-155..158)
 
-| Check                                                                                                               | What it proves                                                               |
-| ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `memory.updated` `user:<doc>:<path>:v1:none`, then `…:v2:1`                                                         | A `remember` write is announced with what Undo needs.                        |
-| restore version 1: `200`, the content is v1's again, `current_version=3`                                            | Undo reverts the doc (as a new version).                                     |
-| browser: a `remember` turn sent in the chat shows the "Memory updated" chip; one click on Undo says Undone          | The member sees it in the chat, live, and can undo it there.                 |
-| project write: `approval.requested` for `remember`, `doc_before_decision=absent`, then `memory.updated` `project:…` | A project-memory write waits for an approval and applies only once approved. |
-| a second project write denied: the doc never appears                                                                | Denial applies nothing.                                                      |
+| Check                                                                                                                                          | What it proves                                                               |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `memory.updated` `user:<doc>:<path>:v1:none`, then `…:v2:1`                                                                                    | A `remember` write is announced with what Undo needs.                        |
+| restore version 1: `200`, the content is v1's again, `current_version=3`                                                                       | Undo reverts the doc (as a new version).                                     |
+| browser: a `remember` turn sent in the chat shows the "Note saved" chip (named "Memory updated" until KOBE-384); one click on Undo says Undone | The member sees it in the chat, live, and can undo it there.                 |
+| project write: `approval.requested` for `remember`, `doc_before_decision=absent`, then `memory.updated` `project:…`                            | A project-memory write waits for an approval and applies only once approved. |
+| a second project write denied: the doc never appears                                                                                           | Denial applies nothing.                                                      |
 
 ## ac-5 CSV → chart under CSP; the sandbox is lost and nothing is (U3, U15)
 

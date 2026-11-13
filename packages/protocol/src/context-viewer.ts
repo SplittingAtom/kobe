@@ -61,10 +61,10 @@ export type ContextMemoryLane = (typeof CONTEXT_MEMORY_LANES)[number];
 export const CONTEXT_MEMORY_SECTION_LABELS = {
   notes: "Saved memory",
   policy: "Policy",
-  site: SEMANTIC_MEMORY_SCOPE_LABELS.site.section,
-  team: SEMANTIC_MEMORY_SCOPE_LABELS.team.section,
-  portable: SEMANTIC_MEMORY_SCOPE_LABELS.portable.section,
-  user: SEMANTIC_MEMORY_SCOPE_LABELS.user.section,
+  site: SEMANTIC_MEMORY_SCOPE_LABELS.site,
+  team: SEMANTIC_MEMORY_SCOPE_LABELS.team,
+  portable: SEMANTIC_MEMORY_SCOPE_LABELS.portable,
+  user: SEMANTIC_MEMORY_SCOPE_LABELS.user,
 } as const satisfies Record<ContextMemoryLane, string>;
 
 export type ContextSectionKind = z.infer<typeof contextSectionKindSchema>;
