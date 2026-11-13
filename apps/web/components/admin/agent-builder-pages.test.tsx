@@ -358,6 +358,44 @@ describe("Agent builder: version history", () => {
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Triage v1");
   });
 
+  it("labels a memory change from the stored rows and warns when a restore changes memory (KOBE-646)", async () => {
+    // v3 republished v2 with memory off (a memory change); v2 is a restore of v1 (same memory).
+    const three = {
+      version: 3,
+      published_by: "u-me",
+      published_at: "2026-10-03T10:00:00Z",
+      draft_revision: null,
+      republished_from: 2,
+      memory: "off",
+    };
+    const history = {
+      current_version: 3,
+      versions: [
+        three,
+        { ...VERSIONS.versions[0], republished_from: 1, draft_revision: null, memory: "all" },
+        { ...VERSIONS.versions[1], memory: "all" },
+      ],
+      next_before: null,
+    };
+    stubApi({
+      ...READ,
+      "GET /v1/agents/a-1": [200, { agent: { ...AGENT, currentVersion: 3 } }],
+      "GET /v1/agents/a-1/versions": [200, history],
+      "GET /v1/agents/a-1/versions/3": [
+        200,
+        { version: { ...three, frontmatter: AGENT.frontmatter, prompt: AGENT.prompt } },
+      ],
+    });
+    renderTeam(<AgentBuilderPage agentId="a-1" />);
+    const region = await screen.findByRole("region", { name: "Version history" });
+    expect(await within(region).findByText("Memory changed from v2")).toBeTruthy();
+    expect(within(region).getByText("Restored from v1")).toBeTruthy();
+    expect(within(region).getByText("Memory: Off")).toBeTruthy();
+    await userEvent.click(within(region).getByRole("button", { name: "Restore version 1" }));
+    const text = await answerConfirm("Restore version 1 as the newest version?", "Cancel");
+    expect(text).toContain("Memory: Off → All memory.");
+  });
+
   it("doesn't restore when the user declines the confirmation", async () => {
     const calls = stubApi(READ);
     renderTeam(<AgentBuilderPage agentId="a-1" />);

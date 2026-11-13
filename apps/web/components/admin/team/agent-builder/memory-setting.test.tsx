@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { getAgentVersion, setTeamAgentMemory } from "../../../../lib/admin/api/team/agent-builder";
 import { stubApi } from "../../testing";
 import { MemorySetting } from "./memory-setting";
 
@@ -22,12 +23,15 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const show = (props: Partial<Parameters<typeof MemorySetting>[0]> = {}) => {
+const show = (props: Partial<{ currentVersion: number | null; canChange: boolean }> = {}) => {
   const onChanged = vi.fn();
   render(
     <MemorySetting
-      teamId="t-1"
       agentId={AGENT}
+      api={{
+        readVersion: (v) => getAgentVersion("t-1", AGENT, v),
+        save: (memory) => setTeamAgentMemory("t-1", AGENT, memory),
+      }}
       currentVersion={2}
       canChange
       busy={false}

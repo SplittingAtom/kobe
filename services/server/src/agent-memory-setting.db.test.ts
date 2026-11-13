@@ -6,9 +6,9 @@ import {
   CAPABILITY_MEMORY,
   MEMORY_TOOLS,
   agentVersionMemoryFieldSchema,
+  memoryResultFrameSchema,
   runMemoryContextSchema,
   type AgentMemorySetting,
-  type PolicyEngine,
 } from "@kobe/protocol";
 import { readRunMemoryPlan } from "./agents/run-memory.js";
 import { loadRunAgentTools } from "./policy/run-agent-tools.js";
@@ -29,15 +29,6 @@ const objects = new MemoryObjects();
 const sandboxes: FakeSandbox[] = [];
 let listener: Awaited<ReturnType<typeof sandboxListener>>;
 
-const engine: PolicyEngine = {
-  decide: () =>
-    Promise.resolve({
-      effect: "allow" as const,
-      risk: "read" as const,
-      reasons: [{ code: "team_allow_rule" as const, stage: "user_allow" as const, message: "ok" }],
-    }),
-};
-
 let owner: Person;
 let runner: Person;
 let team: string;
@@ -46,8 +37,8 @@ beforeAll(async () => {
   await fx.setup([{}], () => ({
     blobs: { objects, prefix: "kobe/" },
     agents: { publishRate: { windowMs: 60_000, max: 10_000 } },
+    // The real policy engine (KOBE-646 L1): an `off` run's memory tools are denied by it.
     sandboxWire: {
-      engine,
       sweep: false,
       tuning: { batchWindowMs: 20, resultPollMs: 200, lostGraceMs: 0, helloTimeoutMs: 1_000 },
     },
@@ -74,10 +65,14 @@ afterAll(async () => {
 
 const json = (res: { json: unknown }) => JSON.stringify(res.json);
 
-async function createAgent(name: string, scope: "team" | "personal" = "team"): Promise<string> {
+async function createAgent(
+  name: string,
+  scope: "team" | "personal" = "team",
+  extra: object = {},
+): Promise<string> {
   const res = await owner.browser.post("/v1/agents", {
     scope,
-    frontmatter: { name },
+    frontmatter: { name, ...extra },
     prompt: `You are ${name}.`,
   });
   expect(res.status, json(res)).toBe(201);
@@ -124,7 +119,7 @@ async function pinnedRun(agentId: string, version: number | null, who: Person = 
   });
 }
 
-async function runStart(run: { threadId: string; runId: string }, who: Person = runner) {
+async function connected(run: { threadId: string; runId: string }, who: Person = runner) {
   const sandboxId = randomUUID();
   const sb = await FakeSandbox.connect(
     listener.url,
@@ -142,8 +137,56 @@ async function runStart(run: { threadId: string; runId: string }, who: Person = 
     );
   expect(res).toEqual({ ok: true });
   const start = await sb.until(() => sb.frames("run.start")[0]);
+  return { sb, start: start as { memory?: unknown } };
+}
+
+async function runStart(run: { threadId: string; runId: string }, who: Person = runner) {
+  const { sb, start } = await connected(run, who);
   sb.close();
-  return start as { memory?: unknown };
+  return start;
+}
+
+let seq = 0;
+type Run = { threadId: string; runId: string };
+
+/** policy.check of a memory tool, as the sandbox sends it before the frame. */
+async function check(sb: FakeSandbox, run: Run, callId: string, tool: string, input: object) {
+  const request_id = `c${seq++}`;
+  sb.send({
+    v: 1,
+    type: "policy.check",
+    request_id,
+    run_id: run.runId,
+    thread_id: run.threadId,
+    tool_call_id: callId,
+    tool,
+    input,
+  });
+  return sb.until(() => sb.frames("policy.result").find((r) => r.request_id === request_id), 5000);
+}
+
+async function memoryFrame(
+  sb: FakeSandbox,
+  run: Run,
+  type: "memory.put" | "memory.read",
+  callId: string,
+  input: object,
+) {
+  const request_id = `m${seq++}`;
+  sb.send({
+    v: 1,
+    type,
+    request_id,
+    run_id: run.runId,
+    thread_id: run.threadId,
+    tool_call_id: callId,
+    input,
+  });
+  const res = await sb.until(
+    () => sb.frames("memory.result").find((r) => r.request_id === request_id),
+    5000,
+  );
+  return memoryResultFrameSchema.parse(res);
 }
 
 const plan = (runId: string) =>
@@ -278,5 +321,64 @@ describe("run assembly uses the runner's memory as the version says (ac-3)", () 
   it("a thread without an agent is all", async () => {
     const runId = await fx.run(team, runner);
     expect(await plan(runId)).toEqual({ setting: "all", notes: true, semantic: true });
+  });
+
+  it("an off run refuses the memory frames end to end; nothing is stored (L1)", async () => {
+    const PUT = { scope: "user", path: "MEMORY.md", content: "- leaked", mode: "replace" };
+    const READ = { scope: "user", path: "MEMORY.md" };
+    // Control: the same engine allows recall on an `all` run.
+    const allRun = await pinnedRun(agentId, versions.all);
+    const open = await connected(allRun);
+    const allowed = await check(open.sb, allRun, "x", "recall", READ);
+    open.sb.close();
+    expect(allowed).toMatchObject({ decision: "allow" });
+
+    const run = await pinnedRun(agentId, versions.off);
+    const { sb } = await connected(run);
+    for (const [tool, frame, input] of [
+      ["remember", "memory.put", PUT],
+      ["recall", "memory.read", READ],
+    ] as const) {
+      const callId = `off-${tool}`;
+      const decided = await check(sb, run, callId, tool, input);
+      expect(decided).toMatchObject({
+        decision: "deny",
+        reasons: [expect.objectContaining({ code: "agent_tool_deny" })],
+      });
+      // A sandbox that sends the frame anyway is refused: the call was never allowed.
+      expect(await memoryFrame(sb, run, frame, callId, input)).toMatchObject({
+        ok: false,
+        error: { code: "not_allowed" },
+      });
+    }
+    sb.close();
+    const notes = await runner.browser.get("/v1/memory?scope=user");
+    expect(JSON.stringify(notes.json)).not.toContain("leaked");
+  });
+});
+
+describe("Dangerous versions (L3)", () => {
+  it("refuses a memory change of a Dangerous version by someone who may not use it", async () => {
+    const id = await createAgent("Wild", "team", {
+      approval_mode: "dangerous",
+      tools: { allow: ["mcp__jira__search"] },
+    });
+    await publish(id);
+    // The owner (team admin) is demoted to contributor: still publishes, not Dangerous.
+    await fx.admin.query(
+      `UPDATE team_members SET role = 'contributor' WHERE team_id = $1 AND user_id = $2`,
+      [team, owner.id],
+    );
+    try {
+      const res = await setMemory(id, "off");
+      expect(res.status, json(res)).toBe(403);
+      expect(res.json).toMatchObject({ code: "dangerous_mode_forbidden" });
+    } finally {
+      await fx.admin.query(
+        `UPDATE team_members SET role = 'team_admin' WHERE team_id = $1 AND user_id = $2`,
+        [team, owner.id],
+      );
+    }
+    expect((await setMemoryOk(id, "off")).memory).toBe("off");
   });
 });

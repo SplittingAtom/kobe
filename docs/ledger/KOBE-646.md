@@ -50,11 +50,28 @@
 - **Docs:** `docs/guide/agents/agents.md` (Memory subsection + summary, which feeds `/llms.txt`),
   `docs/guide/memory.md`, `docs/guide/for-agents/working-in-a-sandbox.md`.
 
-## Open questions (for Chris or the coordinator)
+## Coordinator answers and review fixes (2026-11-13)
 
-1. The gallery agent editor (site console) has no Memory section yet; the route works there
-   (`mountVersionRoutes`). Add it if site admins should set it from the UI.
-2. A memory-change version has no eval score ("Not evaluated") even though tools are unchanged.
+- Gallery editor gets the same Memory section (`MemorySetting` takes its read/save calls; gallery
+  API `getGalleryVersion`, `setGalleryAgentMemory`); test in `gallery-agent-editor.test.tsx`.
+- "Not evaluated" stays (memory changes behaviour, re-evaluate); said in the guide.
+- Opus review (`review-646.md`, not committed): M1 adopt copies the adopted version's `memory`
+  into v1 (`publishDraftIn` `memory` override; test in `agent-ownership.db.test.ts`); forks start
+  at `all` (forker is the author; in the guide). L1 end-to-end test with the real engine: on an
+  `off` run `policy.check` remember/recall → `agent_tool_deny`, `memory.put`/`memory.read` →
+  `not_allowed`, nothing stored. L2 restore confirmation says "Memory: Off → All memory." when the
+  setting changes. L3 Dangerous check moved into `setAgentMemory` after `lockAgent`
+  (`dangerous_forbidden` → 403 `dangerous_mode_forbidden`); rollback's pre-lock check is
+  unchanged (outside this ticket). L4 "Memory changed from vN" comes from the stored rows (source
+  version on the page with a different setting; a restore copies the setting), not numbers.
+
+## For KOBE-382/383/399 (review I3)
+
+`notes_only` blocks semantic memory only through `readRunMemoryPlan(...).semantic`; it must be
+enforced **server-side** there: the selector must not fill `run.start.memory.semantic`, and if
+item recall reuses the `recall` tool name `toolsDeny` cannot tell the two apart, so `readMemory`
+must check `plan.semantic` itself. Any new memory tool (e.g. `show_memory_item`) joins the `off`
+deny list (`MEMORY_TOOLS` or its own list in `loadRunAgentTools`).
 
 ## Evidence (acceptance criteria → test or command output)
 

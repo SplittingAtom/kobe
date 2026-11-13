@@ -1,4 +1,5 @@
 /** Site console: gallery agents (`/v1/site`, site.gallery.manage). Responses arrive camelized. */
+import type { AgentMemorySetting } from "@kobe/protocol";
 import { apiRequest, type ApiResult } from "../../../api/client";
 import { revisionTag, type AgentSummary } from "../agents";
 import type { AgentDetail, DefinitionBody } from "../team/agent-builder";
@@ -55,6 +56,10 @@ export interface GalleryVersion {
   readonly version: number;
   readonly publishedBy: string | null;
   readonly publishedAt: string;
+  /** For a rollback or a memory change: the version it republished. */
+  readonly republishedFrom?: number | null;
+  /** The version's memory setting (KOBE-646); absent from servers before it (= `all`). */
+  readonly memory?: AgentMemorySetting;
 }
 
 /** The site's models and active connectors the gallery agent editor offers. */
@@ -100,6 +105,20 @@ export async function listGalleryVersions(
   );
   return res.ok ? { ...res, data: res.data.versions } : res;
 }
+
+/** One published version (`GET …/{id}/versions/{n}`), for its memory setting (KOBE-646). */
+export const getGalleryVersion = (
+  id: string,
+  version: number,
+): Promise<ApiResult<{ readonly version: GalleryVersion }>> =>
+  apiRequest(`${GALLERY_PATH}/${enc(id)}/versions/${version}`);
+
+/** Changes the memory setting: the current version republished with `memory` (KOBE-646). */
+export const setGalleryAgentMemory = (
+  id: string,
+  memory: AgentMemorySetting,
+): Promise<ApiResult<{ readonly agent: GalleryAgentDetail; readonly version: GalleryVersion }>> =>
+  apiRequest(`${GALLERY_PATH}/${enc(id)}/memory`, { method: "POST", json: { memory } });
 
 export const compareGalleryAgent = (id: string): Promise<ApiResult<GalleryComparison>> =>
   apiRequest(`${GALLERY_PATH}/${enc(id)}/compare`);

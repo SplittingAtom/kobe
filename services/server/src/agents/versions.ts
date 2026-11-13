@@ -1,5 +1,10 @@
 import { suspendedInTeam } from "./inventory.js";
-import { agentSkills, validateAgentDefinition, type AgentDefinition } from "@kobe/agent-file";
+import {
+  agentSkills,
+  isDangerousMode,
+  validateAgentDefinition,
+  type AgentDefinition,
+} from "@kobe/agent-file";
 import {
   and,
   desc,
@@ -94,7 +99,9 @@ export type PublishError =
   /** The tool manifest changed since the eval scored it (KOBE-93): evaluate again. */
   | "eval_stale"
   /** A memory change (KOBE-646) needs a published version to republish. */
-  | "not_published";
+  | "not_published"
+  /** The version is in Dangerous mode and the caller may not use it (AC1). */
+  | "dangerous_forbidden";
 
 /** Limits on versions (review M3): versions are immutable and never deleted by the app. */
 export interface VersionLimits {
@@ -416,6 +423,11 @@ export interface PublishDraftInput {
   readonly limits?: VersionLimits;
   /** Runs in the same transaction after a successful publish (KOBE-494: the Customized mark). */
   readonly afterWrite?: (tx: KobeTx) => Promise<void>;
+  /**
+   * The new version's memory setting instead of the current version's (KOBE-646): adopt copies
+   * the adopted version's into the copy's v1.
+   */
+  readonly memory?: AgentMemorySetting;
 }
 
 /**
@@ -459,7 +471,7 @@ export async function publishDraftIn(
     publishedBy: input.publishedBy,
     draftRevision: agent.revision,
     republishedFrom: null,
-    memory: await currentMemory(tx, location, agent),
+    memory: input.memory ?? (await currentMemory(tx, location, agent)),
   });
   if (!inserted.ok) return inserted;
   const published = inserted.value;
@@ -607,6 +619,11 @@ export async function setAgentMemory(
   input: {
     readonly publishedBy: string;
     readonly memory: AgentMemorySetting;
+    /**
+     * Whether the caller may republish a Dangerous version (AC1). Checked on the version read
+     * under the agent's lock, so a Dangerous publish just before cannot slip through.
+     */
+    readonly mayUseDangerousMode: boolean;
     readonly limits?: VersionLimits;
     /** Runs in the same transaction after a successful change (KOBE-494). */
     readonly afterWrite?: (tx: KobeTx) => Promise<void>;
@@ -619,6 +636,9 @@ export async function setAgentMemory(
     if (agent.currentVersion === null) return { ok: false, error: "not_published" };
     const source = await readVersion(tx, location.scope, id, agent.currentVersion);
     if (!source) return { ok: false, error: "version_not_found" };
+    if (isDangerousMode(source.definition.frontmatter) && !input.mayUseDangerousMode) {
+      return { ok: false, error: "dangerous_forbidden" };
+    }
     if (source.memory === input.memory) return { ok: false, error: "unchanged" };
     const inserted = await insertVersion(tx, location, agent, {
       limits: input.limits ?? DEFAULT_VERSION_LIMITS,

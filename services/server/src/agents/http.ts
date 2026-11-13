@@ -248,6 +248,11 @@ const PUBLISH_ERRORS = {
     "not_published",
     "Publish the agent first: the memory setting belongs to a published version.",
   ],
+  dangerous_forbidden: [
+    403,
+    "dangerous_mode_forbidden",
+    "Only site and team admins can use the Dangerous approval mode. Choose another approval mode.",
+  ],
   unchanged: [
     409,
     "unchanged",

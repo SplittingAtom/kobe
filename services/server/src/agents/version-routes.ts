@@ -315,8 +315,9 @@ export function mountVersionRoutes<E extends { Variables: object }>(
   });
 
   // KOBE-646: the memory setting changes by republishing the current version with it. Not gated
-  // by the eval (definition and tools are the current version's); same rights, rate and Dangerous
-  // rule as a rollback.
+  // by the eval (definition and tools are the current version's; the new version shows "Not
+  // evaluated", and a re-evaluation is right since memory changes behaviour); same rights and rate
+  // as a rollback; the Dangerous rule is checked under the agent's lock.
   app.post("/:id/memory", async (c) => {
     const found = await resolve(c);
     if (!found) return notFound(c);
@@ -325,19 +326,15 @@ export function mountVersionRoutes<E extends { Variables: object }>(
     if (!found.access.publish) return forbidden(c, "Your team role doesn't allow publishing it.");
     if (!(await withinRate(c))) return rateLimited(c);
     return guardUnreadable(c, async () => {
-      const current = found.agent.currentVersion;
-      const source =
-        current === null ? null : await getVersion(db, found.location, found.agent.id, current);
-      if (source && isDangerousMode(source.definition.frontmatter)) {
-        if (!options.mayUseDangerousMode(c)) return dangerousForbidden(c);
-      }
       const result = await setAgentMemory(db, found.location, found.agent.id, {
         publishedBy: options.userId(c),
         memory: body.memory,
+        mayUseDangerousMode: options.mayUseDangerousMode(c),
         limits,
         ...afterWrite(c, found),
       });
       if (result.ok) return publishedResponse(c, result.value, found.access);
+      if (result.error === "dangerous_forbidden") return dangerousForbidden(c);
       if (result.error === "unchanged") {
         return c.json(
           {

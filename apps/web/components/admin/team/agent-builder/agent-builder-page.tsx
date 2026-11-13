@@ -5,9 +5,11 @@ import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import {
   createTeamAgent,
+  getAgentVersion,
   getTeamAgent,
   rollbackTeamAgent,
   saveTeamAgent,
+  setTeamAgentMemory,
   type AgentDetail,
   type AgentEval,
 } from "../../../../lib/admin/api/team/agent-builder";
@@ -51,7 +53,7 @@ import { OrbitExportButton } from "./orbit-export-button";
 import { PublishDialog } from "./publish-dialog";
 import { leftOutText, SkillUpdates } from "./skill-updates";
 import { AgentTestPane } from "./test-pane";
-import { VersionHistory } from "./version-history";
+import { VersionHistory, type MemoryChange } from "./version-history";
 import { useNavigate } from "../../../shell/use-navigate";
 import { TEAM_TAB_HREF } from "../../../../lib/agents/redirects";
 
@@ -254,12 +256,21 @@ function Builder({
     return done;
   }
 
-  async function restore(version: number, trigger: HTMLElement | null) {
+  async function restore(version: number, trigger: HTMLElement | null, memory?: MemoryChange) {
     if (!agent) return;
+    // KOBE-646 (review L2): a restore brings back that version's memory setting; say so.
+    const notes = [
+      ...(memory
+        ? [
+            `Memory: ${MEMORY_SETTING_LABELS[memory.from].label} → ${MEMORY_SETTING_LABELS[memory.to].label}.`,
+          ]
+        : []),
+      ...(dirty ? ["Your unsaved changes in the form are replaced."] : []),
+    ];
     const yes = await confirm(
       {
         title: `Restore version ${version} as the newest version?`,
-        ...(dirty ? { description: "Your unsaved changes in the form are replaced." } : {}),
+        ...(notes.length > 0 ? { description: notes.join(" ") } : {}),
         confirmLabel: `Restore version ${version}`,
         tone: "primary",
       },
@@ -413,8 +424,11 @@ function Builder({
       {agent && !rosterView && (
         <MemorySetting
           key={`${agent.currentVersion ?? 0}:${historyKey}`}
-          teamId={teamId}
           agentId={agent.id}
+          api={{
+            readVersion: (version) => getAgentVersion(teamId, agent.id, version),
+            save: (memory) => setTeamAgentMemory(teamId, agent.id, memory),
+          }}
           currentVersion={agent.currentVersion}
           canChange={canPublish}
           busy={mutation.pending || evaluating}
@@ -516,7 +530,7 @@ function Builder({
           canExport={canExport}
           canRestore={canPublish}
           restoring={mutation.pending}
-          onRestore={(v, trigger) => void restore(v, trigger)}
+          onRestore={(v, trigger, memory) => void restore(v, trigger, memory)}
         />
       )}
       {confirmDialog}

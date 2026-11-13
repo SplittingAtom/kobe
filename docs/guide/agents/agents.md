@@ -64,9 +64,13 @@ The builder's **Memory** section sets how much memory the agent uses, per publis
 The agent always uses the memory of the person running it, never yours: sharing an agent never
 shares your memory. **Save as a new version** publishes the current version again with the new
 setting (the draft is untouched), so threads keep their version and rosters that follow your latest
-version get it. Publishing the draft keeps the current setting; restoring a version restores its
-setting. A **Test chat** uses the current version's setting. Team and site memory switches still
-apply on top: an agent set to **All memory** has none where memory is switched off.
+version get it. The new version shows **Not evaluated** in Version history: memory changes how
+the agent behaves, so evaluate it again before relying on its old score. Publishing the draft keeps
+the current setting; restoring a version restores its setting (the confirmation says when that
+changes memory). An adopted copy keeps the setting of the version it copied; a fork starts at
+**All memory**. A **Test chat** uses the current version's setting. Site admins set it the same way
+for gallery agents. Team and site memory switches still apply on top: an agent set to **All
+memory** has none where memory is switched off.
 
 **Dangerous** mode ("allowed tools run without asking") can only be set by team and site admins. It
 applies only to tools named one by one in Allowed tools, and only in interactive conversations;

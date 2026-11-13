@@ -1,10 +1,6 @@
 import { AGENT_MEMORY_SETTINGS, type AgentMemorySetting } from "@kobe/protocol";
 import { useState } from "react";
-import {
-  getAgentVersion,
-  setTeamAgentMemory,
-  type PublishedAgent,
-} from "../../../../lib/admin/api/team/agent-builder";
+import type { ApiResult } from "../../../../lib/api/client";
 import { Button, ChoiceGroup, Radio, Section } from "../../../ui/console";
 import { ErrorNotice } from "../../error-notice";
 import { ResourceView } from "../../parts";
@@ -29,26 +25,39 @@ export const MEMORY_SETTING_LABELS: Readonly<
 };
 
 /**
+ * How the section reaches its agent: the team builder (`/v1/agents`) and the gallery editor
+ * (`/v1/site/gallery/agents`) pass their own calls; `R` is their publish answer.
+ */
+export interface MemorySettingApi<R> {
+  /** One published version; `memory` absent (older servers) reads as `all`. */
+  readonly readVersion: (
+    version: number,
+  ) => Promise<ApiResult<{ readonly version: { readonly memory?: AgentMemorySetting } }>>;
+  /** `POST …/{id}/memory`: the current version republished with `memory`. */
+  readonly save: (memory: AgentMemorySetting) => Promise<ApiResult<R>>;
+}
+
+/**
  * The agent's memory setting (KOBE-646, Chris Q3): part of each published version, so a change
  * publishes the current version again as a new one with the new setting (threads and pinned
  * rosters keep their version; rosters that follow the latest version get it). Runs always use the
  * memory of the person running the agent, never its owner's.
  */
-export function MemorySetting({
-  teamId,
+export function MemorySetting<R>({
   agentId,
+  api,
   currentVersion,
   canChange,
   busy,
   onChanged,
 }: {
-  readonly teamId: string;
   readonly agentId: string;
+  readonly api: MemorySettingApi<R>;
   readonly currentVersion: number | null;
   readonly canChange: boolean;
   /** Another change to the agent is running: no second one meanwhile. */
   readonly busy: boolean;
-  readonly onChanged: (result: PublishedAgent, memory: AgentMemorySetting) => void;
+  readonly onChanged: (result: R, memory: AgentMemorySetting) => void;
 }) {
   return (
     <Section
@@ -63,7 +72,7 @@ export function MemorySetting({
       ) : (
         <CurrentSetting
           key={currentVersion}
-          teamId={teamId}
+          api={api}
           agentId={agentId}
           version={currentVersion}
           canChange={canChange}
@@ -75,28 +84,28 @@ export function MemorySetting({
   );
 }
 
-function CurrentSetting({
-  teamId,
+function CurrentSetting<R>({
+  api,
   agentId,
   version,
   canChange,
   busy,
   onChanged,
 }: {
-  readonly teamId: string;
+  readonly api: MemorySettingApi<R>;
   readonly agentId: string;
   readonly version: number;
   readonly canChange: boolean;
   readonly busy: boolean;
-  readonly onChanged: (result: PublishedAgent, memory: AgentMemorySetting) => void;
+  readonly onChanged: (result: R, memory: AgentMemorySetting) => void;
 }) {
-  const { state } = useResource(() => getAgentVersion(teamId, agentId, version));
+  const { state } = useResource(() => api.readVersion(version));
   return (
     <ResourceView state={state} label="memory setting">
       {(data) => (
         <SettingForm
           agentId={agentId}
-          teamId={teamId}
+          api={api}
           current={data.version.memory ?? "all"}
           canChange={canChange}
           busy={busy}
@@ -107,20 +116,20 @@ function CurrentSetting({
   );
 }
 
-function SettingForm({
-  teamId,
+function SettingForm<R>({
+  api,
   agentId,
   current,
   canChange,
   busy,
   onChanged,
 }: {
-  readonly teamId: string;
+  readonly api: MemorySettingApi<R>;
   readonly agentId: string;
   readonly current: AgentMemorySetting;
   readonly canChange: boolean;
   readonly busy: boolean;
-  readonly onChanged: (result: PublishedAgent, memory: AgentMemorySetting) => void;
+  readonly onChanged: (result: R, memory: AgentMemorySetting) => void;
 }) {
   const [picked, setPicked] = useState<AgentMemorySetting>(current);
   const save = useMutation();
@@ -148,7 +157,7 @@ function SettingForm({
           loading={save.pending}
           onClick={() =>
             void save.run(async () => {
-              const res = await setTeamAgentMemory(teamId, agentId, picked);
+              const res = await api.save(picked);
               if (res.ok) onChanged(res.data, picked);
               return res;
             })

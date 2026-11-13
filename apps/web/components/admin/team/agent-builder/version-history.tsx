@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { useState } from "react";
+import type { AgentMemorySetting } from "@kobe/protocol";
 import {
   listTeamAgentVersions,
   type AgentVersionSummary,
@@ -25,6 +26,28 @@ import { ErrorNotice } from "../../error-notice";
 import { MEMORY_SETTING_LABELS } from "./memory-setting";
 import { OrbitExportButton } from "./orbit-export-button";
 
+/** A restore that changes the memory setting: the current version's, and the restored one's. */
+export interface MemoryChange {
+  readonly from: AgentMemorySetting;
+  readonly to: AgentMemorySetting;
+}
+
+const memoryOf = (v: AgentVersionSummary | undefined): AgentMemorySetting => v?.memory ?? "all";
+
+/**
+ * A memory change (KOBE-646) republishes a version with only its memory setting changed; a
+ * restore copies the version's setting too. So a republished version whose setting differs from
+ * its source's (both on the page) is a memory change, read from the stored rows.
+ */
+function memoryChangedFrom(
+  v: AgentVersionSummary,
+  versions: readonly AgentVersionSummary[],
+): AgentVersionSummary | undefined {
+  if (v.republishedFrom === null) return undefined;
+  const source = versions.find((s) => s.version === v.republishedFrom);
+  return source && memoryOf(source) !== memoryOf(v) ? source : undefined;
+}
+
 /** Published versions, newest first; restoring one republishes it as the newest (D19). */
 export function VersionHistory({
   teamId,
@@ -43,7 +66,8 @@ export function VersionHistory({
   readonly canExport: boolean;
   readonly canRestore: boolean;
   readonly restoring: boolean;
-  readonly onRestore: (version: number, trigger: HTMLElement | null) => void;
+  /** `memory`: set when restoring changes the memory setting (KOBE-646): from now, to restored. */
+  readonly onRestore: (version: number, trigger: HTMLElement | null, memory?: MemoryChange) => void;
 }) {
   const { state } = useResource(() => listTeamAgentVersions(teamId, agentId));
   const more = useMutation();
@@ -83,9 +107,7 @@ export function VersionHistory({
                         )}
                         {v.republishedFrom !== null && (
                           <div className="text-sm font-normal text-console-muted">
-                            {/* A rollback never republishes the version just before it (that
-                                one was current), so that is a memory change (KOBE-646). */}
-                            {v.republishedFrom === v.version - 1
+                            {memoryChangedFrom(v, versions)
                               ? `Memory changed from v${v.republishedFrom}`
                               : `Restored from v${v.republishedFrom}`}
                           </div>
@@ -130,7 +152,17 @@ export function VersionHistory({
                             <Button
                               size="sm"
                               disabled={restoring}
-                              onClick={(e) => onRestore(v.version, eventTrigger(e))}
+                              onClick={(e) => {
+                                const now = memoryOf(
+                                  versions.find((c) => c.version === currentVersion),
+                                );
+                                const to = memoryOf(v);
+                                onRestore(
+                                  v.version,
+                                  eventTrigger(e),
+                                  now === to ? undefined : { from: now, to },
+                                );
+                              }}
                             >
                               {`Restore version ${v.version}`}
                             </Button>
