@@ -473,10 +473,12 @@ describe("semantic memory versions are immutable", () => {
   it("refuses every other UPDATE and direct DELETE, for the app role and the owner", async () => {
     await inTeam(teamA, async (c) => {
       for (const table of VERSION_TABLES) {
-        // The app role has no UPDATE or DELETE on the site-wide versions (42501 before the trigger).
+        // The app role has no UPDATE on the site-wide versions (42501 before the trigger).
         const refused = table === "semantic_memory_item_versions" ? "55000" : "42501";
         expect(await code(c, `UPDATE ${table} SET lint_override = true`), table).toBe(refused);
-        expect(await code(c, `DELETE FROM ${table}`), table).toBe(refused);
+        // DELETE reaches the trigger everywhere since 0222 (the version cap may prune
+        // non-current versions); a current version is still refused.
+        expect(await code(c, `DELETE FROM ${table}`), table).toBe("55000");
       }
     });
     await admin.query("BEGIN");
