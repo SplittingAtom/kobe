@@ -61,15 +61,15 @@ served them), the two console pages, guide, browser spec.
   in the contract; changing it needs its own contract PR).
 - **Site console and the team header**: writes in a session with an active Workspace need
   `X-Kobe-Team`, so the Site page sends the session's active Workspace (`/v1/me/teams`).
+- **Curation vs switches (coordinator 2026-11-13):** Site curators curating Site items use the
+  Site's switches only, never their active Workspace's (`items/context.ts` `inStore`); switches
+  govern what reaches runs. Supersedes KOBE-378 review L-4 (test updated). Workspace items never
+  depended on the Workspace's Site memories switch. Test: transfer db test "curation ignores…".
 - **TODO (KOBE-386)**: the status filter has no "stale" yet — KOBE-386 defines staleness; add it
   to `STATUS_LABELS` in `components/memory/curator-memories.tsx` (or a separate filter) then.
 
 ## Open questions (for Chris or the coordinator)
 
-- A Site admin curating from the Site console is subject to their active Workspace's switches
-  (as every Site memory request with a Workspace is, KOBE-378): with that Workspace's Site
-  memories off, Site items other than Policy can't be listed or edited there. Acceptable, or
-  should the Site console call without a Workspace (needs a server change)?
 - Rows left out of an import (near-duplicates, warnings) are added one by one with Save anyway;
   the commit API supports `overrides` for a bulk "save anyway" if wanted later.
 

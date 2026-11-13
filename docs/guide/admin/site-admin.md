@@ -110,7 +110,8 @@ access, which is time-boxed, read-only, audited and shown to the team.
   ([Workspace memories](team-admin.md#workspace-memories)): Markdown bullets, CSV or a Kobe
   export, at most 200 rows, a preview that checks every row with no model, then the new rows
   only; a Policy row imports only for Site admins and only while Policy has room. Exports are
-  audited. The memory switches stay under **Settings**.
+  audited. Your own workspace's memory switches don't limit what you curate here (they decide
+  what reaches that workspace's runs). The memory switches stay under **Settings**.
 
 ## System
 

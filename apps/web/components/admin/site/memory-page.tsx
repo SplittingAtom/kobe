@@ -20,7 +20,8 @@ const POLICY_ROLES: ReadonlySet<string> = new Set(["owner", "admin"]);
  * guard; the server refuses anyone else). The memory switches stay in Settings.
  *
  * Requests carry the session's active Workspace when there is one (`X-Kobe-Team`, which the
- * server needs on writes then); its switches apply as they do for every Site memory request.
+ * server needs on writes then); its switches don't limit curation (they govern what reaches its
+ * runs).
  */
 export function SiteMemoryPage() {
   const access = useSiteAccess();

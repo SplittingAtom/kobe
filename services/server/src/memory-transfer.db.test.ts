@@ -271,3 +271,55 @@ describe("export (ac-3)", () => {
     expect(new Set(preview.rows.map((row) => row.status))).toEqual(new Set(["duplicate"]));
   });
 });
+
+describe("curation ignores the curator's active Workspace switches (coordinator 2026-11-13)", () => {
+  it("a Site admin whose Workspace has Site memories off still manages every Site item", async () => {
+    const off = await as.admin.put("/v1/memory/settings?level=team", {
+      site_memories_enabled: false,
+    });
+    expect(off.status, JSON.stringify(off.json)).toBe(200);
+    try {
+      // Members of that Workspace now see Policy only.
+      const memberList = await as.member.get(`${ITEMS}?scope=site`);
+      expect(memberList.status).toBe(200);
+      const seen = (memberList.json as { items: { policy: boolean }[] }).items;
+      expect(seen.every((i) => i.policy)).toBe(true);
+
+      const made = await as.site.post(ITEMS, {
+        scope: "site",
+        kind: "fact",
+        statement: `Curated while switched off ${randomUUID()}`,
+      });
+      expect(made.status, JSON.stringify(made.json)).toBe(201);
+      const item = semanticMemoryItemDetailSchema.parse(made.json);
+      const list = await as.site.get(`${ITEMS}?scope=site&policy=false`);
+      expect(list.status).toBe(200);
+      expect(JSON.stringify(list.json)).toContain(item.id);
+      const path = `${ITEMS}/site/${item.id}`;
+      expect((await as.site.patch(path, { expected_version: 1, tags: ["ops"] })).status).toBe(200);
+      expect(
+        (await as.site.post(`${path}/pin`, { pinned: true, expected_version: 1 })).status,
+      ).toBe(200);
+      expect(
+        (await as.site.post(`${path}/pin`, { pinned: false, expected_version: 1 })).status,
+      ).toBe(200);
+      expect((await as.site.patch(path, { expected_version: 1, policy: true })).status).toBe(200);
+      expect((await as.site.patch(path, { expected_version: 1, policy: false })).status).toBe(200);
+      expect((await as.site.post(`${path}/archive`, {})).status).toBe(200);
+      expect((await as.site.post(`${path}/restore`, {})).status).toBe(200);
+      // A Site steward too; import and export as well.
+      const file = {
+        scope: "site",
+        format: "csv",
+        content: `statement,kind\nSteward row ${randomUUID()},fact\n`,
+      };
+      expect((await as.siteSteward.post(PREVIEW, file)).status).toBe(200);
+      expect((await as.siteSteward.post(COMMIT, { ...file, accept: [0] })).status).toBe(200);
+      expect((await as.site.get("/v1/memory/semantic/export?scope=site")).status).toBe(200);
+      // A Team admin's Workspace items aren't blocked by the Workspace's Site memories switch.
+      expect((await as.admin.get(`${ITEMS}?scope=team`)).status).toBe(200);
+    } finally {
+      await as.admin.put("/v1/memory/settings?level=team", { site_memories_enabled: true });
+    }
+  });
+});
