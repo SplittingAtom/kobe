@@ -7,7 +7,9 @@ import type {
   SemanticMemoryStatus,
   SemanticMemoryVersion,
 } from "@kobe/protocol";
-import type { Location } from "./location.js";
+import { findThreads } from "../../threads/repository.js";
+import { viewerProjectIds } from "../../threads/references.js";
+import { workspaceTeam, type Location } from "./location.js";
 import { curates, seesSiteAuthors, type MemoryWho } from "./who.js";
 
 /** One item with its current statement, as the store reads it. */
@@ -86,12 +88,24 @@ export function itemToWire(loc: Location, who: MemoryWho, r: ItemRow): SemanticM
   };
 }
 
-/** The item with every version, newest first; thread links only for their author and curators. */
+/**
+ * How much of an item's history a reader gets. The console reads every version, links for their
+ * author and curators. A Kobe admin tool (KOBE-650 review I2, L2) reads the newest
+ * `versionsLimit` and sees a link only when it curates the scope and can open that conversation,
+ * since the answer is kept in a conversation others may read.
+ */
+export interface DetailView {
+  readonly versionsLimit?: number;
+  readonly openableLinksOnly?: boolean;
+}
+
+/** The item with its versions, newest first; thread links only for their author and curators. */
 export async function detailOf(
   tx: KobeTx,
   loc: Location,
   who: MemoryWho,
   row: ItemRow,
+  view: DetailView = {},
 ): Promise<SemanticMemoryItemDetail> {
   const links = loc.workspace
     ? sql`source_thread_id, source_entry_ids`
@@ -100,11 +114,17 @@ export async function detailOf(
     SELECT version, statement, actor_user_id, actor_kind, lint_override, policy_override,
            ${links}, created_at
       FROM ${loc.versions} WHERE ${loc.versionsOfItem(row.id)}
-     ORDER BY version DESC`);
+     ORDER BY version DESC
+     ${view.versionsLimit === undefined ? sql`` : sql`LIMIT ${view.versionsLimit}`}`);
+  const openable = view.openableLinksOnly ? await openableThreads(tx, loc, who, rows) : undefined;
   const authors = loc.scope !== "site" || seesSiteAuthors(who);
   const curator = curates(who, loc.scope);
   const versions: SemanticMemoryVersion[] = rows.map((v) => {
-    const showLinks = loc.workspace && (curator || v.actor_user_id === who.userId);
+    const showLinks =
+      loc.workspace &&
+      (openable === undefined
+        ? curator || v.actor_user_id === who.userId
+        : curator && v.source_thread_id !== null && openable.has(v.source_thread_id));
     return {
       version: v.version,
       statement: v.statement,
@@ -118,4 +138,22 @@ export async function detailOf(
     };
   });
   return { ...itemToWire(loc, who, row), versions };
+}
+
+/** The source conversations among `rows` the caller may open (the thread routes' predicate). */
+async function openableThreads(
+  tx: KobeTx,
+  loc: Location,
+  who: MemoryWho,
+  rows: readonly VersionRow[],
+): Promise<ReadonlySet<string>> {
+  const ids = [...new Set(rows.flatMap((r) => (r.source_thread_id ? [r.source_thread_id] : [])))];
+  if (!loc.workspace || ids.length === 0) return new Set();
+  const teamId = workspaceTeam(loc);
+  const viewer = {
+    teamId,
+    userId: who.userId,
+    projectIds: await viewerProjectIds(tx, teamId, who.userId),
+  };
+  return new Set((await findThreads(tx, viewer, ids)).keys());
 }

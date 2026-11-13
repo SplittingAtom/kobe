@@ -60,6 +60,8 @@ const TEAM_TOOLS = [
   "team_budgets_set_member",
   "team_memory_get",
   "team_memory_set",
+  "team_memory_items_list",
+  "team_memory_item_get",
   "team_egress_list",
   "team_egress_enable",
   "team_egress_disable",

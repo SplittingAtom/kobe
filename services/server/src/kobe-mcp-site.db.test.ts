@@ -480,6 +480,16 @@ describe("site catalog contract (ac-5)", () => {
   type Ctx = { readonly w: World };
   const samples: Readonly<Record<string, (ctx: Ctx) => Promise<Record<string, unknown>>>> = {
     site_users_list: async () => ({}),
+    site_memory_items_list: async () => ({}),
+    site_memory_item_get: async ({ w }) => {
+      const r = await w.siteAdmin.browser.post("/v1/memory/semantic/items", {
+        scope: "site",
+        kind: "fact",
+        statement: `Site fact ${short()}`,
+      });
+      expect(r.status, JSON.stringify(r.json)).toBe(201);
+      return { id: (r.json as { id: string }).id };
+    },
     site_users_deactivate: async ({ w }) => ({ user_id: w.target.id, from_state: "active" }),
     site_users_reactivate: async ({ w }) => {
       await fx.admin.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [w.target.id]);

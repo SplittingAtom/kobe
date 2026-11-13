@@ -13,8 +13,7 @@ import {
   type SemanticMemoryScope,
 } from "@kobe/protocol";
 import {
-  TEAM_HEADER,
-  readActiveTeamId,
+  requestNamesTeam,
   requireTeam,
   type ActiveTeam,
   type TeamVariables,
@@ -24,9 +23,9 @@ import { delegationOf } from "../kobe-mcp/delegation.js";
 import type { ServerDeps } from "../deps.js";
 import { createItem } from "../memory/items/create.js";
 import { archiveItem, patchItem, pinItem, restoreItem, revertItem } from "../memory/items/edit.js";
-import { MemoryItemError } from "../memory/items/errors.js";
-import { getItem, listItems } from "../memory/items/read.js";
-import type { MemoryWho } from "../memory/items/who.js";
+import { MemoryItemError, notAllowed } from "../memory/items/errors.js";
+import { AGENT_DETAIL_VIEW, getItem, listItems } from "../memory/items/read.js";
+import { assertAgentRead, type MemoryWho } from "../memory/items/who.js";
 import { isWorkspaceSteward } from "../memory/stewards.js";
 import { grantsOf } from "../skills/registry/grants.js";
 import { invalidRequest } from "../teams/http.js";
@@ -50,6 +49,14 @@ const issueText = (e: z.ZodError) =>
 export function memoryItemRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
   const db = deps.database.db;
+  // An agent has no write path to items (KOBE-650): a Kobe admin tool's change is refused before
+  // its body or path is read, so it is always 403 (review I1). Reads are checked in `answer`.
+  app.use("*", async (c, next) => {
+    if (delegationOf(c) === undefined || c.req.method === "GET" || c.req.method === "HEAD")
+      return next();
+    const refusal = notAllowed("Agents never change memories: open Memory to change one.");
+    return c.json(refusal.body(), 403);
+  });
   /**
    * The Workspace a request runs in. `user` and `team` items need the active Workspace
    * (`requireTeam`: header, membership). Portable and Site items don't (Site admins and stewards
@@ -57,13 +64,8 @@ export function memoryItemRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
    * it is resolved the same way and its switches apply; without one only the Site's do.
    */
   const resolveTeam = async (c: Ctx, scope: SemanticMemoryScope): Promise<Response | undefined> => {
-    if (scope !== "user" && scope !== "team") {
-      const named =
-        c.req.header(TEAM_HEADER) !== undefined ||
-        delegationOf(c) !== undefined ||
-        (await readActiveTeamId(deps, c.get("sessionId"))) !== null;
-      if (!named) return undefined;
-    }
+    if (scope !== "user" && scope !== "team" && !(await requestNamesTeam(deps, c)))
+      return undefined;
     let passed = false;
     const refused = await requireTeam(deps)(c, async () => {
       passed = true;
@@ -91,7 +93,10 @@ export function memoryItemRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
     };
   };
 
-  /** Resolves the Workspace, runs a store call and maps refusals to the contract's answers. */
+  /**
+   * Resolves the Workspace, runs a store call and maps refusals to the contract's answers. A Kobe
+   * MCP admin tool's call (KOBE-650) may only read Workspace or Site items its person curates.
+   */
   const answer = async (
     c: Ctx,
     scope: SemanticMemoryScope,
@@ -101,7 +106,9 @@ export function memoryItemRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
     const refused = await resolveTeam(c, scope);
     if (refused) return refused;
     try {
-      return c.json(await fn(await whoOf(c)), status);
+      const who = await whoOf(c);
+      if (delegationOf(c) !== undefined) assertAgentRead(who, scope, c.req.method);
+      return c.json(await fn(who), status);
     } catch (err) {
       if (!(err instanceof MemoryItemError)) throw err;
       return c.json(err.body(), err.status as 400);
@@ -137,7 +144,8 @@ export function memoryItemRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   app.get("/:scope/:id", async (c) => {
     const t = target(c);
     if (t instanceof Response) return t;
-    return answer(c, t.scope, (who) => getItem(db, who, t.scope, t.id));
+    const view = delegationOf(c) === undefined ? {} : AGENT_DETAIL_VIEW;
+    return answer(c, t.scope, (who) => getItem(db, who, t.scope, t.id, view));
   });
 
   app.patch("/:scope/:id", async (c) => {

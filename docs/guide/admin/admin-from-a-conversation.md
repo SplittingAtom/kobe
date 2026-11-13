@@ -1,6 +1,6 @@
 ---
 title: Admin from a conversation
-summary: How team and site admins let agents read and change Kobe's settings from a conversation through the built-in Kobe connector, with an approval card for every change, audit "via agent" and what stays console-only.
+summary: How team and site admins let agents read and change Kobe's settings from a conversation through the built-in Kobe connector, with an approval card for every change, read-only workspace and Site memories for curators, audit "via agent" and what stays console-only.
 section: Team admin
 order: 2
 audience: admin
@@ -18,7 +18,8 @@ team role, their site role and grants such as Skill reviewer, never more. Each a
 same server code as its console page, so the agent cannot do anything that person could not do in
 the console. A member gets no team tools, a contributor only the skill installs list, and a team
 admin all of the team tools; site tools need a site role (or the Skill reviewer grant for the
-review tools). If someone loses a role,
+review tools). Memory stewards get the memory reading tools of their scope (see
+[Memories](#memories-read-only)). If someone loses a role,
 their next call already reflects it.
 
 Teammates viewing a shared thread never act through it: only the conversation's owner is the
@@ -56,6 +57,7 @@ Reads run without asking. Every change asks first (see below).
 | Skills                  | List installs and the review queue; approve, request changes or reject a version.                          |
 | Models and budgets      | Read and change the team's models, team budget and member budgets.                                         |
 | Memory                  | Read and change the workspace's memory switches and learning model (`team_memory_get`, `team_memory_set`). |
+| Workspace memories      | Read only: list and show the workspace's memories (`team_memory_items_list`, `team_memory_item_get`).      |
 | Egress                  | List domains and access requests; enable or disable a domain; decide a request.                            |
 | Agents and schedules    | List the team's agents and schedules; suspend or resume an agent, pause or resume a schedule.              |
 | Usage and audit         | Read usage and the team audit log, page by page.                                                           |
@@ -64,12 +66,36 @@ With a site role, the agent can also work on the Site console: list, deactivate 
 users; list and create teams; list a team's members, add existing users to it, change their team
 role or remove them; site invitations; the model catalog (labels, prices, limits);
 connector status; the egress ceiling and site access requests; the skill blocklist; site grants
-(Skill reviewer and Site memory steward); branding; the site budget; usage and the audit log. A Skill reviewer can claim, comment on
+(Skill reviewer and Site memory steward); Site memories, Policy included (read only); branding;
+the site budget; usage and the audit log. A Skill reviewer can claim, comment on
 and decide registry reviews.
 
 Results are compact and paged (at most 50 rows a call). Audit reads through the agent never
 include IP addresses or user agents, and no tool ever returns a secret such as a connector key or
 an injected header value.
+
+### Memories (read only)
+
+People who curate memories can ask the agent about them, for example "which workspace memories
+mention deploys?" or "show me the history of that Policy item":
+
+- **Workspace memories** (`team_memory_items_list`, `team_memory_item_get`): Team admins and
+  Workspace memory stewards. Each memory shows its statement, kind, tags, pin, version and author,
+  and up to its ten newest versions with how each was saved and, when you can open it, the
+  conversation it came from.
+- **Site memories** (`site_memory_items_list`, `site_memory_item_get`): Site admins and Site memory
+  stewards, Policy included (filter with `policy`). No author is shown for Site memories, even to
+  the admin who wrote them, because the answer appears in a workspace conversation.
+
+Lists filter by status, kind, tag, words and pin, at most 20 a page. They follow the workspace's
+memory switches: with its memories off the tools answer `memory_disabled`, and with Site
+memories off only Policy is listed. The agent receives each memory's text marked as untrusted
+data, so it treats what a memory says as information, never as instructions.
+
+The agent never sees anyone's personal or portable memories through these tools, and it cannot
+change a memory: there is no tool to add, edit, archive, pin or undo one, and Kobe refuses such a
+change from an agent even if one were attempted. Change memories in **Memory** (or the Site
+console's Memory page) yourself.
 
 ## What stays in the consoles
 

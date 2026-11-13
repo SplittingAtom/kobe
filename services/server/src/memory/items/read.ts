@@ -8,7 +8,14 @@ import type {
 import { inStore } from "./context.js";
 import { disabled, invalid, notFound } from "./errors.js";
 import { activeCount, policyUsage, scopeLimit } from "./limits.js";
-import { detailOf, itemColumns, itemToWire, readItem, type ItemRow } from "./rows.js";
+import {
+  detailOf,
+  itemColumns,
+  itemToWire,
+  readItem,
+  type DetailView,
+  type ItemRow,
+} from "./rows.js";
 import { assertEnabled, type MemoryWho } from "./who.js";
 
 /** Trigram similarity a search match needs when the words don't match (SM10 search). */
@@ -95,17 +102,27 @@ export function listItems(
   });
 }
 
+/** Versions a Kobe admin tool shows (KOBE-650); the route loads one more to tell "more exist". */
+export const AGENT_VERSIONS_SHOWN = 10;
+
+/** What a Kobe admin tool's read gets (KOBE-650 review I2, L2). */
+export const AGENT_DETAIL_VIEW: DetailView = Object.freeze({
+  versionsLimit: AGENT_VERSIONS_SHOWN + 1,
+  openableLinksOnly: true,
+});
+
 /** One item with its versions; another person's personal item is a 404. */
 export function getItem(
   db: KobeDb,
   who: MemoryWho,
   scope: SemanticMemoryScope,
   id: string,
+  view: DetailView = {},
 ): Promise<SemanticMemoryItemDetail> {
   return inStore(db, who, scope, async (op) => {
     const row = await readItem(op.tx, op.loc, id);
     if (!row) throw notFound();
     assertEnabled(op.memory, scope, row.policy);
-    return detailOf(op.tx, op.loc, who, row);
+    return detailOf(op.tx, op.loc, who, row, view);
   });
 }

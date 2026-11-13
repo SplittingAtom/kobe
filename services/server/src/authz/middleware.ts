@@ -1,3 +1,4 @@
+import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { z } from "zod";
 import { eq, getMembership, sessionActiveTeams, teams, type TeamRole } from "@kobe/db";
@@ -53,6 +54,19 @@ export async function readActiveTeamId(
     .from(sessionActiveTeams)
     .where(eq(sessionActiveTeams.sessionId, sessionId));
   return row?.teamId ?? null;
+}
+
+/**
+ * Whether the request names a team: the team header, a Kobe MCP admin tool's delegation (its
+ * run's team, KOBE-619) or the session's active team (spec D9). For routes where a team is
+ * optional (memory items of the portable and Site scopes, KOBE-378); `requireTeam` then resolves it.
+ */
+export async function requestNamesTeam(
+  deps: ServerDeps,
+  c: Context<{ Variables: TeamVariables }>,
+): Promise<boolean> {
+  if (c.req.header(TEAM_HEADER) !== undefined || delegationOf(c) !== undefined) return true;
+  return (await readActiveTeamId(deps, c.get("sessionId"))) !== null;
 }
 
 /**
