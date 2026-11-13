@@ -20,6 +20,12 @@ import {
   textArray,
   type Op,
 } from "./context.js";
+import {
+  NO_OVERRIDES,
+  assertNoSecret,
+  overrideAuditEvents,
+  type MemoryCheckOutcome,
+} from "../checks.js";
 import { MemoryItemError, inactive, invalid } from "./errors.js";
 import {
   assertPinRoom,
@@ -69,7 +75,7 @@ async function appendStatement(
   op: Op,
   row: ItemRow,
   statement: string,
-  lintOverride: boolean,
+  checks: MemoryCheckOutcome,
 ): Promise<number> {
   const version = row.current_version + 1;
   await insertVersion(op.tx, op.loc, {
@@ -77,8 +83,8 @@ async function appendStatement(
     version,
     statement,
     actorKind: "user",
-    lintOverride,
-    policyOverride: false,
+    lintOverride: checks.lintOverride,
+    policyOverride: checks.policyOverride,
   });
   await op.tx.execute(sql`
     UPDATE ${op.loc.items} i SET current_version = ${version}, updated_at = now()
@@ -122,8 +128,8 @@ export function patchItem(
     if (policy && (statementChanged || !row.policy))
       await assertPolicyBudget(op.tx, [row.id], statement);
     const checks = statementChanged
-      ? await saveChecks(op, statement, body.overrides, [row.id])
-      : { lintOverride: false, warnings: [] };
+      ? await saveChecks(op, { statement, policy, except: [row.id] }, body.overrides)
+      : NO_OVERRIDES;
 
     const kind = body.kind ?? row.kind;
     const tags = body.tags ? normaliseTags(body.tags) : row.tags;
@@ -135,7 +141,7 @@ export function patchItem(
       ...(asOf !== row.as_of ? (["as_of"] as const) : []),
     ];
     const version = statementChanged
-      ? await appendStatement(op, row, statement, checks.lintOverride)
+      ? await appendStatement(op, row, statement, checks)
       : row.current_version;
     const asOfSql = op.loc.scope === "portable" ? sql`` : sql`, as_of = ${asOf}::date`;
     const policySql = op.loc.scope === "site" ? sql`, policy = ${policy}` : sql``;
@@ -159,12 +165,7 @@ export function patchItem(
         teamId: null,
         target: { itemId: row.id, version, policy },
       });
-    if (checks.lintOverride)
-      events.push({
-        action: "memory.lint.override",
-        teamId,
-        target: { scope, itemId: row.id, version, warnings: checks.warnings },
-      });
+    events.push(...overrideAuditEvents(checks, { scope, itemId: row.id, version, teamId }));
     return finish(op, row.id, events);
   });
 }
@@ -187,8 +188,12 @@ export function revertItem(
     const earlier = rows[0];
     if (!earlier) throw invalid(`This memory has no version ${body.version} (any more).`);
     if (row.policy) await assertPolicyBudget(op.tx, [row.id], earlier.statement);
-    const checks = await saveChecks(op, earlier.statement, body.overrides, [row.id]);
-    const version = await appendStatement(op, row, earlier.statement, checks.lintOverride);
+    const checks = await saveChecks(
+      op,
+      { statement: earlier.statement, policy: row.policy, except: [row.id] },
+      body.overrides,
+    );
+    const version = await appendStatement(op, row, earlier.statement, checks);
     const teamId = auditTeam(op.loc);
     const events: ServerAuditEvent[] = [
       {
@@ -197,12 +202,7 @@ export function revertItem(
         target: { scope, itemId: row.id, fromVersion: body.version, version },
       },
     ];
-    if (checks.lintOverride)
-      events.push({
-        action: "memory.lint.override",
-        teamId,
-        target: { scope, itemId: row.id, version, warnings: checks.warnings },
-      });
+    events.push(...overrideAuditEvents(checks, { scope, itemId: row.id, version, teamId }));
     return finish(op, row.id, events);
   });
 }
@@ -247,6 +247,8 @@ export function restoreItem(
     if (row.status === "superseded")
       throw inactive("Superseded memories stay as history; save a new one instead.");
     if (row.status === "active") return finish(op, row.id, []);
+    // The restored version passed the checks when it was saved; a secret never comes back.
+    assertNoSecret(row.statement);
     await lockScope(op.tx, op.loc);
     const before = await assertRoom(op.tx, op.loc, op.settings, 1);
     if (row.policy) await assertPolicyBudget(op.tx, [row.id], row.statement);

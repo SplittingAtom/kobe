@@ -31,6 +31,7 @@ export {
   isActiveTeamMember,
   loadEgressCeiling,
   loadTeamEgress,
+  loadTeamEgressIn,
   loadTeamEgressHeaders,
   notifyEgressChanged,
   notifyEgressUserChanged,

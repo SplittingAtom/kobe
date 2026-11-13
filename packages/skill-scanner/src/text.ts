@@ -19,8 +19,8 @@ function maskValue(value: string): string {
   return value.slice(0, keep) + "*".repeat(Math.max(value.length - keep, 4));
 }
 
-/** Masks every secret-shaped value so excerpts never carry one. */
-function maskSecrets(text: string): string {
+/** Masks every secret-shaped value so excerpts never carry one (also used by memory checks). */
+export function maskSecrets(text: string): string {
   return SECRET_RULES.reduce((acc, rule) => {
     const global = new RegExp(rule.pattern.source, rule.pattern.flags + "g");
     return acc.replace(global, (match: string, ...rest: unknown[]) => {
@@ -36,7 +36,11 @@ function excerptOf(view: string): string {
   return masked.length > max ? masked.slice(0, max) + "…" : masked;
 }
 
-function matchSecret(view: string): string | undefined {
+/**
+ * The first {@link SECRET_RULES} rule matching `view`, or undefined. Shared with the semantic
+ * memory checks (KOBE-379), so a credential is recognised the same way in skills and memories.
+ */
+export function matchSecret(view: string): string | undefined {
   for (const rule of SECRET_RULES) {
     const m = rule.pattern.exec(view);
     if (!m) continue;
