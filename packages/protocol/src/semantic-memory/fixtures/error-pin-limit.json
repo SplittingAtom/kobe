@@ -1,0 +1,4 @@
+{
+  "code": "memory_pin_limit",
+  "message": "This scope already has 10 pinned memories. Unpin one first."
+}

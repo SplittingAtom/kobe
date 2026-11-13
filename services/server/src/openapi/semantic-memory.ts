@@ -91,15 +91,20 @@ const SAVE_ERRORS = {
   "400": json(
     "Error",
     "`invalid_request`: the body does not match, or breaks a scope rule of the stored item " +
-      "(a portable item's kind or `as_of`, `policy` off the Site).",
+      "(a portable item's kind or `as_of`, `policy` off the Site, a source thread you can't " +
+      "read, Undo to a version that was pruned); `team_header_required`: a change in an " +
+      "active Workspace without `X-Kobe-Team`.",
   ),
   "404": ERR("`memory_item_not_found`."),
   "409": ERR(
     "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; " +
-      "audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, " +
-      "`memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a " +
-      "Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or " +
-      "`team_mismatch`.",
+      "audited; a near-duplicate of an active item in the same scope is the warning " +
+      "`near_duplicate` with the items in `duplicates`), `memory_scope_full` (the scope's " +
+      "limit is reached; nothing is ever evicted: archive items first), " +
+      "`memory_policy_budget_full` (25 Policy items or 2 KiB), `memory_pin_limit` (10 pinned " +
+      "per scope), `memory_version_conflict`, `memory_item_inactive`, " +
+      "`memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be " +
+      "pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
   ),
   "422": ERR("`memory_secret`: a credential was found; it can never be saved."),
 };
@@ -125,7 +130,9 @@ function itemPaths(): Record<string, Record<string, unknown>> {
           "Personal scopes are always the caller's own. Workspace and Site items are read by " +
           "every member; curators (Team admins and stewards) and Site stewards change them. " +
           "Workspace thread links are shown to the author and curators only; Site items carry " +
-          "no author ids except for Site admins and Site stewards.",
+          "no author ids except for Site admins and Site stewards. `user` and `team` items need " +
+          "an active Workspace; `portable` and `site` items don't (without one, only the Site's " +
+          "switches apply).",
         parameters: [
           scopeParam("query"),
           query("status", {
@@ -160,8 +167,11 @@ function itemPaths(): Record<string, Record<string, unknown>> {
         operationId: "createSemanticMemoryItem",
         summary: "Save a memory item",
         description:
-          "Runs the save checks (secret scan, lint, Policy conflict, limits). Portable items " +
-          "are preferences; Policy exists only on the Site.",
+          "Runs the save checks (secret scan, lint, Policy conflict, near-duplicate, limits). " +
+          "Portable items are preferences and need `confirm_portable: true`; Policy exists only " +
+          "on the Site and only Site admins set it. Tags are stored lowercased. When the scope " +
+          "reaches 80% of its limit, its curators get one `memory.scope.near_full` notification " +
+          "per crossing (Workspace and Site scopes).",
         parameters: [TEAM_HEADER],
         requestBody: body("CreateSemanticMemoryItem"),
         responses: {
@@ -181,6 +191,10 @@ function itemPaths(): Record<string, Record<string, unknown>> {
       patch: {
         operationId: "editSemanticMemoryItem",
         summary: "Edit a memory item (a statement change adds a version)",
+        description:
+          "Versions are immutable. Past the Site's version cap (default 50) the oldest versions " +
+          "are pruned on write, except the current one, any version a run used, and while a " +
+          "legal hold covers the item.",
         parameters: [scopeParam("path"), ID, TEAM_HEADER],
         requestBody: body("PatchSemanticMemoryItem"),
         responses: { "200": DETAIL, ...COMMON, ...SAVE_ERRORS },
@@ -188,7 +202,7 @@ function itemPaths(): Record<string, Record<string, unknown>> {
     },
     "/v1/memory/semantic/items/{scope}/{id}/archive": itemAction(
       "archiveSemanticMemoryItem",
-      "Archive a memory item (never deleted; its versions stay)",
+      "Archive a memory item (never deleted; its versions stay; archiving unpins it)",
       "SemanticMemoryItemAction",
       false,
     ),

@@ -1,0 +1,6 @@
+{
+  "code": "memory_lint_warning",
+  "message": "A similar memory already exists. Save anyway if this one is different.",
+  "warnings": [{ "code": "near_duplicate", "message": "Similar to a memory you already have." }],
+  "duplicates": [{ "id": "7a0c2f1e-4b8d-4c5e-9f3a-2d1b6e8c9a01", "version": 2, "similarity": 0.82 }]
+}

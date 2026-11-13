@@ -222,6 +222,9 @@ const createRules = (
     as_of?: string | undefined;
     source_thread_id?: string | undefined;
     source_entry_ids?: string[] | undefined;
+    confirm_portable?: true | undefined;
+    supersedes_id?: string | undefined;
+    supersedes_expected_version?: number | undefined;
   },
   ctx: z.RefinementCtx,
 ) => {
@@ -234,6 +237,12 @@ const createRules = (
     issue("kind", "portable items are preferences");
   if (v.scope === "portable" && v.as_of !== undefined)
     issue("as_of", "portable items have no as_of");
+  // KOBE-378 (SM6): a portable item follows the person into every Workspace; saving one is an
+  // explicit choice.
+  if ((v.scope === "portable") !== (v.confirm_portable === true))
+    issue("confirm_portable", "send confirm_portable: true exactly when saving a portable item");
+  if (v.supersedes_expected_version !== undefined && v.supersedes_id === undefined)
+    issue("supersedes_expected_version", "only with supersedes_id");
   const linked = v.source_thread_id !== undefined || v.source_entry_ids !== undefined;
   if (linked && v.scope !== "user" && v.scope !== "team")
     issue("source_thread_id", "thread links stay in the Workspace");
@@ -244,6 +253,9 @@ const createRules = (
 /**
  * `POST /v1/memory/semantic/items`. `supersedes_id`: an active item of the same scope this one
  * replaces (it becomes `superseded`). Source links name the conversation (Workspace scopes only).
+ * `confirm_portable: true` is required for (and only for) a portable item (KOBE-378). Tags are
+ * stored trimmed and lowercased, duplicates dropped. The source thread must be one the caller
+ * can read.
  */
 export const createSemanticMemoryItemSchema = z
   .strictObject({
@@ -255,9 +267,15 @@ export const createSemanticMemoryItemSchema = z
     policy: z.boolean().optional(),
     as_of: semanticMemoryDateSchema.optional(),
     supersedes_id: uuidSchema.optional(),
+    /**
+     * The replaced item's version the editor saw (KOBE-378 review L-6): when it moved on, 409
+     * `memory_version_conflict` and nothing is saved. Absent = no check.
+     */
+    supersedes_expected_version: version.optional(),
     source_thread_id: uuidSchema.optional(),
     source_entry_ids: semanticMemorySourceEntryIdsSchema.optional(),
     overrides: semanticMemoryOverridesSchema.optional(),
+    confirm_portable: z.literal(true).optional(),
   })
   .superRefine(createRules);
 export type CreateSemanticMemoryItem = z.infer<typeof createSemanticMemoryItemSchema>;

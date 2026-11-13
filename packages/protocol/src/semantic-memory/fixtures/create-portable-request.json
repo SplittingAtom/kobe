@@ -1,1 +1,6 @@
-{ "scope": "portable", "kind": "preference", "statement": "Prefers metric units." }
+{
+  "scope": "portable",
+  "kind": "preference",
+  "statement": "Prefers metric units.",
+  "confirm_portable": true
+}
