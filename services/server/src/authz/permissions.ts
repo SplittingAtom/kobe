@@ -34,6 +34,14 @@ export const SITE_PERMISSIONS = {
   "site.skills.review": "admin",
   /** Give and take site grants such as Skill reviewer (KOBE-331, SK22). */
   "site.grants.manage": "admin",
+  /**
+   * Semantic memory (KOBE-380, SM19): curate Site items (Site admins; also the Site memory
+   * steward grant, see siteMemoryAllows), make an item Policy or not, and accept or dismiss the
+   * Site proposals Team admins confirmed (Site admins only).
+   */
+  "site.memory.curate": "admin",
+  "site.memory.policy": "admin",
+  "site.memory.site_proposals.decide": "admin",
   "site.egress.manage": "admin",
   "site.retention.manage": "admin",
   "site.legal_hold.manage": "admin",
@@ -78,6 +86,13 @@ export const TEAM_PERMISSIONS = {
   "team.eval.manage": "team_admin",
   // The team's memory switches (KOBE-155, D24).
   "team.memory.manage": "team_admin",
+  /**
+   * Semantic memory (KOBE-380, SM19): curate Workspace items (Team admins; also Workspace memory
+   * stewards of any role, see teamMemoryAllows) and confirm a Workspace item as a Site proposal
+   * (Team admins only). Contributors and Members get no memory rights from the role.
+   */
+  "team.memory.curate": "team_admin",
+  "team.memory.site_proposals.confirm": "team_admin",
   // The team's audit view (D6): events recorded for this team only (KOBE-15).
   "team.audit.read": "team_admin",
   "team.schedules.pause": "team_admin",
@@ -105,10 +120,17 @@ export function sitePermissionsFor(role: SiteRole): SitePermission[] {
     .sort();
 }
 
-/** Sorted team permissions of a role; none for a non-member. */
-export function teamPermissionsFor(role: TeamRole | null): TeamPermission[] {
+/**
+ * Sorted team permissions of a role; none for a non-member. `memorySteward`: the caller is a
+ * Workspace memory steward (KOBE-380), which adds {@link MEMORY_STEWARD_TEAM_PERMISSIONS}.
+ */
+export function teamPermissionsFor(
+  role: TeamRole | null,
+  grants: { readonly memorySteward?: boolean } = {},
+): TeamPermission[] {
+  const who = { role, memorySteward: grants.memorySteward === true };
   return (Object.keys(TEAM_PERMISSIONS) as TeamPermission[])
-    .filter((p) => teamRoleAllows(role, p))
+    .filter((p) => teamMemoryAllows(who, p))
     .sort();
 }
 
@@ -151,4 +173,44 @@ export interface SkillReviewWho {
 export function skillReviewAllows(who: SkillReviewWho, action: SkillReviewAction): boolean {
   if (siteRoleAllows(who.siteRole, "site.skills.review")) return true;
   return who.grants.includes("skill_reviewer") && SKILL_REVIEWER_ACTIONS.has(action);
+}
+
+/**
+ * Memory stewards (KOBE-380, spec SM19): a grant on top of any role, never a role. A Workspace
+ * steward (a `memory_stewards` row, given by a Team admin) curates Workspace memory; a Site
+ * steward (the `memory_steward` site grant, given by a Site admin) curates Site memory. Neither
+ * sets Policy, confirms or decides Site proposals, changes memory switches or gains any non-memory
+ * right: the grants add exactly these permissions.
+ */
+export const MEMORY_STEWARD_TEAM_PERMISSIONS = [
+  "team.memory.curate",
+] as const satisfies readonly TeamPermission[];
+export const MEMORY_STEWARD_SITE_PERMISSIONS = [
+  "site.memory.curate",
+] as const satisfies readonly SitePermission[];
+
+const TEAM_STEWARD: ReadonlySet<TeamPermission> = new Set(MEMORY_STEWARD_TEAM_PERMISSIONS);
+const SITE_STEWARD: ReadonlySet<SitePermission> = new Set(MEMORY_STEWARD_SITE_PERMISSIONS);
+
+export interface TeamMemoryWho {
+  readonly role: TeamRole | null;
+  /** Holds a `memory_stewards` row in this Workspace (only a member can). */
+  readonly memorySteward: boolean;
+}
+
+/** {@link teamRoleAllows} plus the Workspace memory steward grant; never for a non-member. */
+export function teamMemoryAllows(who: TeamMemoryWho, permission: TeamPermission): boolean {
+  if (teamRoleAllows(who.role, permission)) return true;
+  return who.role !== null && who.memorySteward && TEAM_STEWARD.has(permission);
+}
+
+export interface SiteMemoryWho {
+  readonly siteRole: SiteRole;
+  readonly grants: readonly SiteGrant[];
+}
+
+/** {@link siteRoleAllows} plus the `memory_steward` site grant. */
+export function siteMemoryAllows(who: SiteMemoryWho, permission: SitePermission): boolean {
+  if (siteRoleAllows(who.siteRole, permission)) return true;
+  return who.grants.includes("memory_steward") && SITE_STEWARD.has(permission);
 }

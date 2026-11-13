@@ -15,6 +15,7 @@ import {
   type TeamRole,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
+import { revokeWorkspaceStewardInTx } from "../memory/stewards.js";
 import { revokeInvitesSentBy } from "../invitations/team-invites.js";
 import { endProjectStandingInTx } from "../projects/offboard.js";
 import { pauseOwnerSchedulesInTx } from "../schedules/offboard.js";
@@ -327,6 +328,8 @@ export async function removeMemberInTx(
   const refusal = managedRefusal(lock, via);
   if (refusal) return fail(refusal);
   if (losesLastActiveAdmin(lock)) return fail("last_team_admin");
+  // The memory steward grant goes with the membership (the FK would cascade it unaudited).
+  await revokeWorkspaceStewardInTx(tx, teamId, userId);
   await tx
     .delete(teamMembers)
     .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));

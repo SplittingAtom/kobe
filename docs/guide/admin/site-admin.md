@@ -1,6 +1,6 @@
 ---
 title: Site admin overview
-summary: What site admins do and where each setting lives in the Site console (people, teams, models, connectors, egress ceiling, policy floor, appearance, audit and backups).
+summary: What site admins do and where each setting lives in the Site console (people, grants such as Site memory steward, teams, models, connectors, egress ceiling, policy floor, appearance, audit and backups).
 section: Site admin
 order: 1
 audience: admin
@@ -30,7 +30,14 @@ access, which is time-boxed, read-only, audited and shown to the team.
   create SCIM tokens so the provider provisions and deactivates accounts. See
   [Single sign-on](single-sign-on.md).
 - **Invitations**: invite people by email; resend or revoke open invitations.
-- **Site roles**: who is Owner and who are Admins.
+- **Site roles**: who is Owner and who are Admins, and two grants that sit beside the roles and
+  are given and taken by Site admins (audited as `identity.site_grant.granted` and `.revoked`):
+  - **Skill reviewers** review Skill Registry submissions.
+  - **Site memory stewards** curate Site memory: they add, edit, archive and pin the facts and
+    conventions every workspace sees. They can't make an item Policy, accept proposals that
+    workspaces send to the Site or change memory switches, and the grant gives no other Site
+    right (no Site console pages). Site admins can already do all of this, so only users are
+    offered. **Take Site memory steward** ends it after a confirmation; what they saved stays.
 
 ## Teams and agents
 
@@ -116,7 +123,7 @@ until you choose **Docs and admin tools** under **Settings → Kobe connector**;
 chooses a level for their team (**Docs only**, **Read** or **Read and write**). In a team at Read
 and write, a site admin can ask the agent to deactivate or reactivate a user, create a team, add
 people to a team, change their team role or remove them, invite someone, update the model catalog, change a connector's status, edit the egress ceiling,
-decide access requests, manage the skill blocklist and Skill reviewer grants, change branding or
+decide access requests, manage the skill blocklist and site grants (Skill reviewer, Site memory steward), change branding or
 the site budget, and read usage and the audit log. Each change shows an **Admin change** card
 ("Whole site") first and is audited "via agent". Site roles, ownership, break-glass, legal hold,
 retention, deletions, connector registration, provider keys and the site settings themselves stay

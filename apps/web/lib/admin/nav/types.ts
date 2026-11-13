@@ -67,8 +67,11 @@ interface SectionBase {
   readonly status: SectionStatus;
 }
 
-/** Site grants checked beside the role ladder (`/v1/me` `siteGrants`, KOBE-331, SK22). */
-export type SiteGrant = "skill_reviewer";
+/**
+ * Site grants checked beside the role ladder (`/v1/me` `siteGrants`, KOBE-331, SK22); the Site
+ * memory steward since KOBE-380.
+ */
+export type SiteGrant = "skill_reviewer" | "memory_steward";
 
 /**
  * Optional site features the server reports as on (`/v1/me` `siteFeatures`, KOBE-626): a section

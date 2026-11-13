@@ -1,5 +1,6 @@
 /** Site console: site roles (`/v1/site`, read: site.users.manage; change: Owner only). Responses arrive camelized. */
 import { apiRequest, type ApiResult } from "../../../api/client";
+import type { SiteGrant } from "../../nav/types";
 
 const enc = encodeURIComponent;
 
@@ -23,12 +24,12 @@ export function transferOwnership(userId: string): Promise<ApiResult<unknown>> {
   return apiRequest("/v1/site/roles/transfer-ownership", { method: "POST", json: { userId } });
 }
 
-/** A site grant beside the ladder (KOBE-331, SK22): today only the Skill reviewer. */
+/** A site grant beside the ladder: Skill reviewer (KOBE-331, SK22) or Site memory steward (KOBE-380). */
 export interface SiteGrantHolder {
   readonly userId: string;
   readonly name: string;
   readonly email: string;
-  readonly grant: "skill_reviewer";
+  readonly grant: SiteGrant;
   readonly grantedBy: string;
   readonly grantedAt: string;
 }
@@ -38,13 +39,13 @@ export async function listSiteGrants(): Promise<ApiResult<readonly SiteGrantHold
   return res.ok ? { ...res, data: res.data.grants } : res;
 }
 
-export function giveSkillReviewer(userId: string): Promise<ApiResult<unknown>> {
-  return apiRequest(`/v1/site/roles/grants/${enc(userId)}/skill_reviewer`, {
+export function giveSiteGrant(userId: string, grant: SiteGrant): Promise<ApiResult<unknown>> {
+  return apiRequest(`/v1/site/roles/grants/${enc(userId)}/${enc(grant)}`, {
     method: "PUT",
     json: {},
   });
 }
 
-export function takeSkillReviewer(userId: string): Promise<ApiResult<unknown>> {
-  return apiRequest(`/v1/site/roles/grants/${enc(userId)}/skill_reviewer`, { method: "DELETE" });
+export function takeSiteGrant(userId: string, grant: SiteGrant): Promise<ApiResult<unknown>> {
+  return apiRequest(`/v1/site/roles/grants/${enc(userId)}/${enc(grant)}`, { method: "DELETE" });
 }

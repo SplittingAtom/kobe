@@ -85,6 +85,7 @@ describe("Members and roles", () => {
   it("shows the last-team-admin refusal and resets the list", async () => {
     const calls = stubApi({
       "GET /v1/team/members": [200, MEMBERS],
+      "GET /v1/team/memory/stewards": [200, { level: "team", stewards: [] }],
       [`PATCH /v1/team/members/${ME.id}`]: [
         409,
         {
@@ -99,7 +100,9 @@ describe("Members and roles", () => {
     await answerConfirm("Change your own role?", "Change my role");
     expect((await screen.findByRole("alert")).textContent).toMatch(/at least one team admin/);
     expect(assign).not.toHaveBeenCalled();
-    await waitFor(() => expect(summary(calls).filter((c) => c.startsWith("GET"))).toHaveLength(2));
+    await waitFor(() =>
+      expect(summary(calls).filter((c) => c.startsWith("GET /v1/team/members"))).toHaveLength(2),
+    );
     // The refused choice is undone in the row.
     await waitFor(() =>
       expect((screen.getByLabelText("Role of Ada") as HTMLSelectElement).value).toBe("team_admin"),

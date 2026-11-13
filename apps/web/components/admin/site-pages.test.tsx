@@ -299,8 +299,11 @@ describe("Site roles", () => {
     await screen.findByRole("table");
     expect(screen.getByText(/Only the Owner grants or revokes Admin/)).toBeTruthy();
     await screen.findByRole("form", { name: "Give Skill reviewer" });
+    // And Site memory stewards (KOBE-380).
+    await screen.findByRole("form", { name: "Give Site memory steward" });
     expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual([
       "Make Skill reviewer",
+      "Make Site memory steward",
     ]);
     expect(screen.queryByRole("form", { name: "Transfer ownership" })).toBeNull();
   });

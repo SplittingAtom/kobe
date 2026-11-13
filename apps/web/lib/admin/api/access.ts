@@ -17,7 +17,7 @@ interface MeBody {
   readonly siteFeatures?: readonly string[];
 }
 
-const SITE_GRANTS: readonly SiteGrant[] = ["skill_reviewer"];
+const SITE_GRANTS: readonly SiteGrant[] = ["skill_reviewer", "memory_steward"];
 const SITE_FEATURES: readonly SiteFeature[] = ["sso"];
 
 interface TeamBody {

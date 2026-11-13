@@ -355,11 +355,11 @@ const grantsAnswer = z.object({ grants: z.array(grantRow) });
 
 export const siteGrantsList = kobeTool({
   name: "site_grants_list",
-  title: "List Skill reviewer grants",
+  title: "List site grants",
   description:
-    "Lists who holds a site grant such as Skill reviewer (reviews Skill Registry submissions " +
-    "without being a site admin) (Site console › Users › Grants). Paged: pass next_cursor back " +
-    "as cursor.",
+    "Lists who holds a site grant: Skill reviewer (reviews Skill Registry submissions without " +
+    "being a site admin) or memory_steward (Site memory steward: curates Site memory, never " +
+    "Policy) (Site console › Site roles). Paged: pass next_cursor back as cursor.",
   scope: "site",
   permission: "site.users.manage",
   readOnly: true,
@@ -405,12 +405,13 @@ async function holds(call: KobeRouteCaller, userId: string, grant: string) {
 
 export const siteGrantsGive = kobeTool({
   name: "site_grants_give",
-  title: "Give the Skill reviewer grant",
+  title: "Give a site grant",
   description:
-    "Gives a user a site grant (Skill reviewer: may review, approve, request changes on and " +
-    "reject Skill Registry submissions, never block) and adds them to the Registry team (Site " +
-    "console › Users › Grants). Another admin must grant you; never a deactivated account. The " +
-    "person is always asked to approve; never retry a refused or denied call.",
+    "Gives a user a site grant: skill_reviewer (may review, approve, request changes on and " +
+    "reject Skill Registry submissions, never block; also adds them to the Registry team) or " +
+    "memory_steward (Site memory steward: curates Site memory, never sets Policy or accepts Site " +
+    "proposals) (Site console › Site roles). Another admin must grant you; never a deactivated " +
+    "account. The person is always asked to approve; never retry a refused or denied call.",
   scope: "site",
   permission: "site.grants.manage",
   readOnly: false,
@@ -432,11 +433,11 @@ export const siteGrantsGive = kobeTool({
 
 export const siteGrantsTake = kobeTool({
   name: "site_grants_take",
-  title: "Take the Skill reviewer grant",
+  title: "Take a site grant",
   description:
-    "Takes a site grant (Skill reviewer) from a user, and the Registry team membership the grant " +
-    "made (Site console › Users › Grants). The person is always asked to approve; never retry a " +
-    "refused or denied call.",
+    "Takes a site grant (skill_reviewer or memory_steward) from a user; for Skill reviewer also " +
+    "the Registry team membership the grant made (Site console › Site roles). The person is always " +
+    "asked to approve; never retry a refused or denied call.",
   scope: "site",
   permission: "site.grants.manage",
   readOnly: false,

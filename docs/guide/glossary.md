@@ -66,6 +66,12 @@ and changes only at the provider until a team admin uses **Take over**.
 **Memory.** Notes the agent keeps between conversations: **My memory** and **project memory**. See
 [Memory](memory.md).
 
+**Memory steward.** A grant on top of any role, not a role: a **workspace** memory steward
+(given by a team admin on **Members and roles**) curates the workspace's shared memories with the
+team admins; a **Site** memory steward (given by a site admin in **Site roles**) curates Site
+memory. Stewards never set Policy or send memories to the Site. See
+[Team admin overview](admin/team-admin.md#team).
+
 **Model.** The AI model that writes the answers. See [Models and thinking levels](models.md).
 
 **My files.** Your private files in the workspace, mounted at `/workspace` in your sandbox; the
