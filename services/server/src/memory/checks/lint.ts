@@ -59,7 +59,7 @@ const RULES: readonly { readonly code: LintCode; readonly patterns: readonly Reg
       /\b(?:add|put|include|append|whitelist|allowlist|unblock|enable|open|allow|permit|grant)\b[^\n]{0,60}?\b(?:to|on|in|into)\s+(?:the\s+)?(?:egress\s+|domain\s+|network\s+)?(?:allow[\s-]?list|white[\s-]?list|ceiling)\b/u,
       /\b(?:enable|turn on|open|allow|widen|expand|grant|unblock)\s+(?:\w+\s+){0,2}(?:egress|internet|network|outbound)\b/u,
       /\b(?:request|ask for|requests?)\s+(?:\w+\s+)?access\s+to\b/u,
-      /\b(?:whitelist|allowlist|unblock)\s+\S+/u,
+      new RegExp(String.raw`${LEAD}(?:whitelist|allowlist|unblock)\s+\S+`, "u"),
       /\b(?:use|enable|add|connect(?: to)?|install|call|switch on|turn on)\s+(?:the\s+|a\s+|an\s+)?(?:[\w.-]+\s+){0,2}(?:connector|mcp(?:\s+server)?|integration)s?\b/u,
     ],
   },

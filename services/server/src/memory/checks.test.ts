@@ -166,6 +166,7 @@ describe("instruction lint", () => {
     "The build agent must run on Linux.",
     "Deploys go out on Tuesdays; version 1.3.0 shipped in October.",
     "Our tech debt list lives in the wiki.",
+    "The allowlist is managed by site admins.",
   ])("leaves a plain statement alone: %s", (text) => {
     expect(lintInstructions(text)).toEqual([]);
   });
