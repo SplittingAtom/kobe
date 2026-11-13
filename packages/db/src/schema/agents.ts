@@ -227,6 +227,14 @@ export interface StoredSkillManifest {
   readonly skills: readonly StoredFrozenSkill[];
 }
 
+/**
+ * Memory setting of an agent version (KOBE-646, v1.3 SM23, Chris Q3): `all` (Notes and semantic
+ * memory), `notes_only` (Notes only), `off` (no memory at all). Always the runner's memory, never
+ * the agent owner's. Mirrors protocol `AGENT_MEMORY_SETTINGS` (a server test keeps them equal).
+ */
+export const AGENT_VERSION_MEMORY_SETTINGS = ["all", "notes_only", "off"] as const;
+export type AgentVersionMemorySetting = (typeof AGENT_VERSION_MEMORY_SETTINGS)[number];
+
 const versionColumns = () => ({
   version: integer().notNull(),
   frontmatter: jsonb().$type<Record<string, unknown>>().notNull(),
@@ -246,12 +254,20 @@ const versionColumns = () => ({
   draftRevision: integer(),
   /** For a rollback: the version whose content this one republishes. */
   republishedFrom: integer(),
+  /** KOBE-646: frozen with the version like the rest; versions from before it read `all`. */
+  memory: text().$type<AgentVersionMemorySetting>().notNull().default("all"),
 });
 
 const versionChecks = (
   prefix: string,
   t: Record<
-    "version" | "prompt" | "frontmatter" | "toolManifest" | "draftRevision" | "republishedFrom",
+    | "version"
+    | "prompt"
+    | "frontmatter"
+    | "toolManifest"
+    | "draftRevision"
+    | "republishedFrom"
+    | "memory",
     AnyPgColumn
   >,
 ) => [
@@ -272,6 +288,10 @@ const versionChecks = (
   check(
     `${prefix}_origin`,
     sql`(${t.draftRevision} IS NULL) <> (${t.republishedFrom} IS NULL) AND (${t.draftRevision} IS NULL OR ${t.draftRevision} > 0) AND (${t.republishedFrom} IS NULL OR (${t.republishedFrom} > 0 AND ${t.republishedFrom} < ${t.version}))`,
+  ),
+  check(
+    `${prefix}_memory`,
+    sql`${t.memory} IN (${sql.raw(AGENT_VERSION_MEMORY_SETTINGS.map((v) => `'${v}'`).join(", "))})`,
   ),
 ];
 

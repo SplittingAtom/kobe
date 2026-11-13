@@ -1562,6 +1562,13 @@
       "when": 1794574440449,
       "tag": "0222_memory_version_prune",
       "breakpoints": true
+    },
+    {
+      "idx": 223,
+      "version": "7",
+      "when": 1794581857307,
+      "tag": "0223_agent_version_memory",
+      "breakpoints": true
     }
   ]
 }
