@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idSchema, timestampSchema, utf8ByteLength, uuidSchema } from "./common.js";
+import { runSemanticMemorySchema } from "./semantic-memory/run-context.js";
 
 /**
  * File memory contract (KOBE-153 = 56a of KOBE-56, spec D24). Additive: an agent without
@@ -214,6 +215,12 @@ export type MemoryIndex = z.infer<typeof memoryIndexSchema>;
 export const runMemoryContextSchema = z.strictObject({
   scopes: z.array(memoryScopeSchema).max(MEMORY_SCOPES.length),
   indexes: z.array(memoryIndexSchema).max(MEMORY_SCOPES.length),
+  /**
+   * Semantic memory items for this run (KOBE-377, semantic-memory/run-context.ts). Additive:
+   * absent from older servers and sent only to agents whose hello also lists
+   * `CAPABILITY_SEMANTIC_MEMORY`. With Notes off, `scopes` and `indexes` are empty.
+   */
+  semantic: runSemanticMemorySchema.optional(),
 });
 export type RunMemoryContext = z.infer<typeof runMemoryContextSchema>;
 

@@ -243,6 +243,88 @@ describe("audit event taxonomy", () => {
     expect(AUDIT_EVENTS["identity.member.taken_over"].scope).toBe("team");
   });
 
+  it("records semantic memory actions by ids, scopes, kinds and counts only (KOBE-377, SM28)", () => {
+    const ok = (action: string, target: unknown) =>
+      (AUDIT_EVENTS as Record<string, { target: z.ZodType }>)[action]?.target.safeParse(target)
+        .success ?? false;
+    const itemId = "11111111-1111-4111-8111-111111111111";
+    expect(
+      [
+        "memory.item.created",
+        "memory.item.updated",
+        "memory.item.reverted",
+        "memory.item.archived",
+        "memory.item.restored",
+        "memory.item.pinned",
+        "memory.item.unpinned",
+        "memory.item.superseded",
+        "memory.items.imported",
+        "memory.items.exported",
+        "memory.policy.set",
+        "memory.policy.override",
+        "memory.lint.override",
+        "memory.steward.granted",
+        "memory.steward.revoked",
+      ].filter((a) => !isAuditAction(a)),
+    ).toEqual([]);
+    expect(
+      ok("memory.item.created", {
+        scope: "team",
+        itemId,
+        kind: "fact",
+        version: 1,
+        actorKind: "user",
+      }),
+    ).toBe(true);
+    // Never the statement.
+    expect(
+      ok("memory.item.created", {
+        scope: "team",
+        itemId,
+        kind: "fact",
+        version: 1,
+        actorKind: "user",
+        statement: "x",
+      }),
+    ).toBe(false);
+    expect(
+      ok("memory.item.created", {
+        scope: "project",
+        itemId,
+        kind: "fact",
+        version: 1,
+        actorKind: "user",
+      }),
+    ).toBe(false);
+    expect(
+      ok("memory.item.updated", {
+        scope: "portable",
+        itemId,
+        version: 3,
+        previousVersion: 2,
+        changed: ["statement", "tags"],
+      }),
+    ).toBe(true);
+    expect(
+      ok("memory.lint.override", { scope: "user", itemId, version: 1, warnings: ["instruction"] }),
+    ).toBe(true);
+    expect(ok("memory.policy.override", { scope: "team", itemId, version: 1, conflicts: 2 })).toBe(
+      true,
+    );
+    expect(ok("memory.policy.set", { itemId, version: 1, policy: true })).toBe(true);
+    expect(
+      ok("memory.items.exported", {
+        scope: "site",
+        format: "csv",
+        count: 3,
+        includeInactive: false,
+      }),
+    ).toBe(true);
+    expect(AUDIT_EVENTS["memory.item.created"].scope).toBe("any");
+    expect(AUDIT_EVENTS["memory.policy.set"].scope).toBe("site");
+    expect(AUDIT_EVENTS["memory.steward.granted"].scope).toBe("team");
+  });
+
   it("is documented: docs/audit-log.md lists every action", () => {
     const doc = readFileSync(new URL("../../../../docs/audit-log.md", import.meta.url), "utf8");
     expect(AUDIT_ACTIONS.filter((a) => !doc.includes(`\`${a}\``))).toEqual([]);

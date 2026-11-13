@@ -1,0 +1,5 @@
+{
+  "code": "memory_lint_warning",
+  "message": "Check the warnings, then save anyway if this is right.",
+  "warnings": [{ "code": "instruction", "message": "Reads like an instruction to the agent." }]
+}

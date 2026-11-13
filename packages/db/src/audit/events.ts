@@ -26,6 +26,10 @@ import {
   PROJECT_VISIBILITY_VALUES,
 } from "../schema/projects.js";
 import { UI_RESOURCE_PLACEMENTS } from "../schema/connector-ui-resources.js";
+import {
+  SEMANTIC_MEMORY_KIND_VALUES,
+  SEMANTIC_MEMORY_SCOPE_VALUES,
+} from "../schema/semantic-memory.js";
 import { PI_TOOL_NAME_PATTERN } from "../connectors/snapshot.js";
 import { UI_RESOURCE_FAILURES, UI_RESOURCE_URI_PATTERN } from "../connectors/ui-resources.js";
 
@@ -331,6 +335,8 @@ const purgeCounts = {
   /** MCP Apps results of the purged threads (KOBE-438); absent from earlier rows. */
   appResults: count.optional(),
 };
+
+const semanticMemoryScope = z.enum(SEMANTIC_MEMORY_SCOPE_VALUES);
 
 const event = <const S extends AuditScope, T extends z.ZodRawShape>(scope: S, shape: T) => ({
   scope,
@@ -2758,6 +2764,83 @@ export const AUDIT_EVENTS = {
     memoryEnabled: z.boolean(),
     projectMemoryEnabled: z.boolean(),
   }),
+  // ── semantic memory items (v1.3, KOBE-377, SM28): ids, scopes, kinds, versions and counts, never
+  // a statement, tag or evidence. Workspace items are team events; portable and Site items site
+  // events (`any`). Pass, candidate, proposal and suggestion actions are reserved for Phase B/C
+  // (`RESERVED_MEMORY_AUDIT_ACTIONS` in @kobe/protocol) and registered by their tickets.
+  /** An item was saved (its first version): by a person, or from an import. */
+  "memory.item.created": event("any", {
+    scope: semanticMemoryScope,
+    itemId: id,
+    kind: z.enum(SEMANTIC_MEMORY_KIND_VALUES),
+    version,
+    actorKind: z.enum(["user", "import", "pass", "proposal"]),
+  }),
+  /** An item was edited: a new version (statement) and/or changed kind, tags or `as_of`. */
+  "memory.item.updated": event("any", {
+    scope: semanticMemoryScope,
+    itemId: id,
+    version,
+    previousVersion: version,
+    changed: z
+      .array(z.enum(["statement", "kind", "tags", "as_of"]))
+      .min(1)
+      .max(4),
+  }),
+  /** Undo: a new version copying an earlier one. */
+  "memory.item.reverted": event("any", {
+    scope: semanticMemoryScope,
+    itemId: id,
+    fromVersion: version,
+    version,
+  }),
+  /** Archived (never deleted: versions stay) or restored from the archive. */
+  "memory.item.archived": event("any", { scope: semanticMemoryScope, itemId: id, version }),
+  "memory.item.restored": event("any", { scope: semanticMemoryScope, itemId: id, version }),
+  "memory.item.pinned": event("any", { scope: semanticMemoryScope, itemId: id }),
+  "memory.item.unpinned": event("any", { scope: semanticMemoryScope, itemId: id }),
+  /** A new item replaced this one (same scope). */
+  "memory.item.superseded": event("any", {
+    scope: semanticMemoryScope,
+    itemId: id,
+    supersededBy: id,
+  }),
+  /** An import committed: counts only. */
+  "memory.items.imported": event("any", {
+    scope: semanticMemoryScope,
+    format: z.enum(["json", "csv"]),
+    created: count,
+    skipped: count,
+  }),
+  /** A scope was exported: counts only. */
+  "memory.items.exported": event("any", {
+    scope: semanticMemoryScope,
+    format: z.enum(["json", "csv"]),
+    count,
+    includeInactive: z.boolean(),
+  }),
+  /** A Site admin or Site steward made a Site item Policy, or Policy an ordinary item (SM23). */
+  "memory.policy.set": event("site", { itemId: id, version, policy: z.boolean() }),
+  /** Saved despite contradicting Policy (SM23): how many Policy items it contradicts. */
+  "memory.policy.override": event("any", {
+    scope: semanticMemoryScope,
+    itemId: id,
+    version,
+    conflicts: count,
+  }),
+  /** Saved over lint warnings (SM18): the warnings' codes. */
+  "memory.lint.override": event("any", {
+    scope: semanticMemoryScope,
+    itemId: id,
+    version,
+    warnings: z
+      .array(z.string().regex(/^[a-z][a-z0-9_]{0,63}$/))
+      .min(1)
+      .max(20),
+  }),
+  /** A Team admin made a member a Workspace memory steward, or took it back (KOBE-380). */
+  "memory.steward.granted": event("team", { userId: id }),
+  "memory.steward.revoked": event("team", { userId: id }),
   // ── connector grants (KOBE-108): a user's own API key; ids and names only, never the key or its hint ──
   /** A user added their API key for a connector their team enabled. */
   "mcp.grant.added": event("team", { connectorId: id, name: z.string().max(64) }),

@@ -1,0 +1,41 @@
+{
+  "id": "44444444-4444-4444-8444-444444444444",
+  "scope": "team",
+  "kind": "definition",
+  "status": "active",
+  "statement": "ARR means annual recurring revenue, excluding services.",
+  "tags": ["finance", "glossary"],
+  "pinned": true,
+  "policy": false,
+  "as_of": null,
+  "owner_user_id": null,
+  "superseded_by": null,
+  "version": 2,
+  "created_at": "2026-10-20T09:00:00Z",
+  "updated_at": "2026-10-21T09:00:00Z",
+  "updated_by": "77777777-7777-4777-8777-777777777777",
+  "versions": [
+    {
+      "version": 2,
+      "statement": "ARR means annual recurring revenue, excluding services.",
+      "actor_user_id": "77777777-7777-4777-8777-777777777777",
+      "actor_kind": "user",
+      "lint_override": false,
+      "policy_override": false,
+      "source_thread_id": null,
+      "source_entry_ids": null,
+      "created_at": "2026-10-21T09:00:00Z"
+    },
+    {
+      "version": 1,
+      "statement": "ARR means annual recurring revenue.",
+      "actor_user_id": "77777777-7777-4777-8777-777777777777",
+      "actor_kind": "pass",
+      "lint_override": false,
+      "policy_override": false,
+      "source_thread_id": "22222222-2222-4222-8222-222222222222",
+      "source_entry_ids": ["e1a2b3c4"],
+      "created_at": "2026-10-20T09:00:00Z"
+    }
+  ]
+}

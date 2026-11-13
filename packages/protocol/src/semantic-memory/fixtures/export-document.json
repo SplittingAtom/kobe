@@ -1,0 +1,16 @@
+{
+  "format": "kobe.memory.v1",
+  "scope": "site",
+  "exported_at": "2026-11-12T10:00:00Z",
+  "items": [
+    {
+      "kind": "convention",
+      "statement": "Never share customer names outside the account team.",
+      "tags": [],
+      "pinned": false,
+      "as_of": null,
+      "policy": true,
+      "status": "active"
+    }
+  ]
+}

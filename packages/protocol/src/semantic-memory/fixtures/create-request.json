@@ -1,0 +1,8 @@
+{
+  "scope": "team",
+  "kind": "decision",
+  "statement": "Quarterly reports use the finance team's revenue figures.",
+  "tags": ["reporting"],
+  "as_of": "2026-11-01",
+  "overrides": { "lint": true }
+}

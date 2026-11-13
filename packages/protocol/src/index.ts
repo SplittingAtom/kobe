@@ -9,6 +9,7 @@ export * from "./remember.js";
 export * from "./events.js";
 export * from "./artifacts.js";
 export * from "./memory.js";
+export * from "./semantic-memory/index.js";
 export * from "./project-commits.js";
 export * from "./projects.js";
 export * from "./uploads.js";

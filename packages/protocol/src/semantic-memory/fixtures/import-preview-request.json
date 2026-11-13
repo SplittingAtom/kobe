@@ -1,0 +1,5 @@
+{
+  "scope": "user",
+  "format": "csv",
+  "content": "kind,statement,tags,pinned,as_of\nfact,Owns the EMEA report.,reporting,false,2026-10-01\n"
+}

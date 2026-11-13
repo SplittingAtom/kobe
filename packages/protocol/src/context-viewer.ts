@@ -20,7 +20,10 @@ export const CONTEXT_SECTION_KINDS = [
   "agent_instructions",
   /** The skills index Pi lists in the prompt. */
   "skills",
-  /** The saved-memory index (KOBE-157). */
+  /**
+   * The saved-memory index (KOBE-157) and, since v1.3, one section per semantic memory lane, each
+   * labelled from {@link CONTEXT_MEMORY_SECTION_LABELS}.
+   */
   "memory",
   /** The file the member had open when sending (KOBE-462). */
   "viewing_file",
@@ -38,6 +41,31 @@ export const CONTEXT_SECTION_KINDS = [
   "other",
 ] as const;
 export const contextSectionKindSchema = z.enum(CONTEXT_SECTION_KINDS);
+
+/**
+ * The `memory` kind's sections (KOBE-377; KOBE-383 teaches the splitter): the Notes index, then
+ * one per semantic memory lane in the order the block renders them (Policy first, stable parts
+ * before per-message picks). Lanes are the wire scopes plus Policy; labels use Workspace wording.
+ * Shown to the thread's owner only (CV2).
+ */
+export const CONTEXT_MEMORY_LANES = [
+  "notes",
+  "policy",
+  "site",
+  "team",
+  "portable",
+  "user",
+] as const;
+export type ContextMemoryLane = (typeof CONTEXT_MEMORY_LANES)[number];
+export const CONTEXT_MEMORY_SECTION_LABELS = {
+  notes: "Saved memory",
+  policy: "Policy",
+  site: "Site memories",
+  team: "Workspace memories",
+  portable: "My memories in all my workspaces",
+  user: "My memories in this workspace",
+} as const satisfies Record<ContextMemoryLane, string>;
+
 export type ContextSectionKind = z.infer<typeof contextSectionKindSchema>;
 
 /** Longest section text, in UTF-16 code units; longer text is cut and ends with the marker. */

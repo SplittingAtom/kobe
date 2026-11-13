@@ -160,6 +160,37 @@ describe("OpenAPI document (KOBE-34 ac-1)", () => {
     expect(Object.keys(schemas.PromoteFolderBody?.properties ?? {})).toEqual(["path", "name"]);
   });
 
+  it("documents the semantic memory item, import/export and steward contract (KOBE-377)", () => {
+    // Contract first: the routes are mounted by KOBE-378 (items), KOBE-384/385 (import/export)
+    // and KOBE-380 (stewards), which then add a "describes exactly" check here.
+    expect(documented("/v1/memory/")).toEqual(
+      [
+        "get /v1/memory/export",
+        "post /v1/memory/import/commit",
+        "post /v1/memory/import/preview",
+        "get /v1/memory/items",
+        "post /v1/memory/items",
+        "get /v1/memory/items/{scope}/{id}",
+        "patch /v1/memory/items/{scope}/{id}",
+        "post /v1/memory/items/{scope}/{id}/archive",
+        "post /v1/memory/items/{scope}/{id}/pin",
+        "post /v1/memory/items/{scope}/{id}/restore",
+        "post /v1/memory/items/{scope}/{id}/revert",
+      ].sort(),
+    );
+    expect(documented("/v1/team/memory/stewards")).toEqual(
+      [
+        "get /v1/team/memory/stewards",
+        "put /v1/team/memory/stewards/{userId}",
+        "delete /v1/team/memory/stewards/{userId}",
+      ].sort(),
+    );
+    expect(documented("/v1/site/memory/stewards")).toEqual(["get /v1/site/memory/stewards"]);
+    const schemas = (doc.components as { schemas: Record<string, JsonSchemaNode> }).schemas;
+    expect(schemas.SemanticMemoryItemDetail?.required).toContain("versions");
+    expect(schemas.SemanticMemoryError?.properties?.code).toBeDefined();
+  });
+
   it("describes exactly the team default agent routes the server mounts (KOBE-571)", () => {
     expect(documented("/v1/team/default-agent")).toEqual(
       mountedOperations("/v1/team/default-agent", teamDefaultAgentRoutes(fakeDeps)),
