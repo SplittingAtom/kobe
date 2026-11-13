@@ -79,17 +79,27 @@ export const MEMORY_NOTIFICATION_KINDS = [
   "memory.review.reminder",
   /** Curators' periodic digest of what changed in shared memory. */
   "memory.review.digest",
-  // Phase B: Workspace proposals (KOBE-397) and readers' Suggest to editors (KOBE-652).
+  /** A learning pass left candidates in To review and the panel did not open (KOBE-396 fallback). */
+  "memory.review.candidates_ready",
+  // Phase B: Workspace proposals (KOBE-397, expiry KOBE-651) and readers' Suggest to editors
+  // (KOBE-652).
   "memory.proposal.received",
   "memory.proposal.accepted",
   "memory.proposal.dismissed",
+  "memory.proposal.changes_requested",
+  "memory.proposal.expired",
   "memory.suggestion.received",
   "memory.suggestion.accepted",
   "memory.suggestion.dismissed",
-  // Phase C: Site proposals (KOBE-403).
+  "memory.suggestion.expired",
+  // Phase C: Site proposals (KOBE-403; step 1 confirmed by a Team admin, request changes, expiry
+  // KOBE-653).
   "memory.site_proposal.received",
+  "memory.site_proposal.confirmed",
+  "memory.site_proposal.changes_requested",
   "memory.site_proposal.accepted",
   "memory.site_proposal.dismissed",
+  "memory.site_proposal.expired",
 ] as const;
 export type MemoryNotificationKind = (typeof MEMORY_NOTIFICATION_KINDS)[number];
 
