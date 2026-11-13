@@ -1,5 +1,5 @@
 /**
- * The caller's notifications: scheduled runs and skill notices (`/v1/notifications`, KOBE-179; contract KOBE-176).
+ * The caller's notifications: scheduled runs, skill, team and memory notices (`/v1/notifications`, KOBE-179; contract KOBE-176).
  * Responses arrive camelized; request bodies use the route's snake_case. Every call sends
  * `X-Kobe-Team`: notifications belong to the active team.
  */
@@ -25,6 +25,12 @@ export interface KobeNotification {
   /** `team.site_admin.*`: the member and their team role (KOBE-638 review M1). */
   readonly subjectName?: string | undefined;
   readonly teamRole?: "team_admin" | "contributor" | "member" | undefined;
+  /** Memory kinds (KOBE-645): see `memoryNotificationFields` in @kobe/protocol. */
+  readonly memoryScope?: "team" | "site" | undefined;
+  readonly memoryObjectId?: string | undefined;
+  readonly relatedKind?: NotificationKind | undefined;
+  readonly itemCount?: number | undefined;
+  readonly projectId?: string | undefined;
   readonly readAt: string | null;
   readonly createdAt: string;
 }

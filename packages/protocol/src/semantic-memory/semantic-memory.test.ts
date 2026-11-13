@@ -311,11 +311,11 @@ describe("errors, settings, names and labels (ac-3)", () => {
     );
   });
 
-  it("notification kinds are memory.* and not yet in the live list (KOBE-645 adds them)", () => {
+  it("notification kinds are memory.* and in the live list (KOBE-645)", () => {
     expect(MEMORY_NOTIFICATION_KINDS.length).toBeGreaterThan(0);
     for (const kind of MEMORY_NOTIFICATION_KINDS) {
       expect(kind).toMatch(/^memory\.[a-z_]+\.[a-z_]+$/);
-      expect(NOTIFICATION_KINDS as readonly string[]).not.toContain(kind);
+      expect(NOTIFICATION_KINDS as readonly string[]).toContain(kind);
     }
     expect(MEMORY_NOTIFICATION_KINDS).toContain("memory.suggestion.received");
     expect(new Set(MEMORY_NOTIFICATION_KINDS).size).toBe(MEMORY_NOTIFICATION_KINDS.length);

@@ -354,3 +354,45 @@ describe("a skill notification (KOBE-338)", () => {
     );
   });
 });
+
+describe("a memory notification (KOBE-645)", () => {
+  it("names who proposed and deep-links to the proposal, marking it read", async () => {
+    const P = "00000000-0000-4000-8000-00000000d001";
+    stubApi({
+      [COUNT]: [200, page([], 1)],
+      [ALL]: [
+        200,
+        page(
+          [
+            note(N1, {
+              kind: "memory.proposal.received",
+              schedule_id: null,
+              thread_id: null,
+              run_id: null,
+              memory_object_id: P,
+              actor_name: "Ann",
+            }),
+          ],
+          1,
+        ),
+      ],
+      [MINE]: [200, schedules],
+      [READ]: [200, { updated: 1, unread_count: 0 }],
+    });
+    const onOpenLink = vi.fn();
+    render(
+      <IconActionProvider>
+        <NotificationBell teamId="t-1" onOpenThread={vi.fn()} onOpenLink={onOpenLink} />
+      </IconActionProvider>,
+    );
+    await userEvent.click(await bell());
+    const panel = await screen.findByRole("region", { name: "Notifications" });
+    expect(await within(panel).findByText("Ann proposed a Workspace memory")).toBeTruthy();
+    expect(within(panel).getByText(/Workspace memory ·/)).toBeTruthy();
+    expect(within(panel).queryByRole("button", { name: /Open conversation/ })).toBeNull();
+    await userEvent.click(within(panel).getByRole("button", { name: /Open the proposal/ }));
+    await waitFor(() =>
+      expect(onOpenLink).toHaveBeenCalledWith(`/admin/team/memory?proposal=${P}`),
+    );
+  });
+});

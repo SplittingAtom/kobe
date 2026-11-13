@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   EVENT_PAYLOAD_SCHEMAS,
+  MEMORY_NOTIFICATION_KINDS,
   NOTIFICATIONS_PAGE_MAX,
   NOTIFICATION_KINDS,
   SKIPPED_ACTIONS_MAX,
@@ -111,7 +112,118 @@ describe("notification", () => {
       "team.site_admin.member_role_changed",
       "team.site_admin.member_removed",
       "team.site_admin.member_taken_over",
+      ...MEMORY_NOTIFICATION_KINDS,
     ]);
+  });
+  describe("memory kinds (KOBE-645)", () => {
+    const memory = {
+      ...notification,
+      schedule_id: null,
+      thread_id: null,
+      run_id: null,
+      skipped_count: undefined,
+    };
+    const object = EXAMPLE_IDS.agent;
+    const project = EXAMPLE_IDS.thread;
+    const ok = (n: Record<string, unknown>) => notificationSchema.safeParse(n).success;
+    it("parses every memory kind with what it names", () => {
+      expect(ok({ ...memory, kind: "memory.scope.near_full", memory_scope: "team" })).toBe(true);
+      expect(
+        ok({
+          ...memory,
+          kind: "memory.review.digest",
+          related_kind: "memory.proposal.received",
+          item_count: 6,
+        }),
+      ).toBe(true);
+      expect(ok({ ...memory, kind: "memory.review.reminder", memory_object_id: object })).toBe(
+        true,
+      );
+      expect(
+        ok({
+          ...memory,
+          kind: "memory.review.candidates_ready",
+          thread_id: EXAMPLE_IDS.thread,
+          item_count: 3,
+        }),
+      ).toBe(true);
+      expect(
+        ok({
+          ...memory,
+          kind: "memory.review.reminder",
+          memory_object_id: object,
+          related_kind: "memory.site_proposal.confirmed",
+        }),
+      ).toBe(true);
+      expect(ok({ ...memory, kind: "memory.proposal.expired", memory_object_id: object })).toBe(
+        true,
+      );
+      expect(
+        ok({
+          ...memory,
+          kind: "memory.review.reminder",
+          memory_object_id: object,
+          related_kind: "memory.suggestion.received",
+          project_id: project,
+        }),
+      ).toBe(true);
+      expect(
+        ok({
+          ...memory,
+          kind: "memory.proposal.received",
+          memory_object_id: object,
+          actor_name: "Ann",
+        }),
+      ).toBe(true);
+      expect(
+        ok({
+          ...memory,
+          kind: "memory.suggestion.accepted",
+          memory_object_id: object,
+          project_id: project,
+        }),
+      ).toBe(true);
+      expect(
+        ok({ ...memory, kind: "memory.site_proposal.dismissed", memory_object_id: object }),
+      ).toBe(true);
+    });
+    it("refuses what a memory kind does not name", () => {
+      expect(ok({ ...memory, kind: "memory.scope.near_full" })).toBe(false);
+      expect(ok({ ...memory, kind: "memory.scope.near_full", memory_scope: "user" })).toBe(false);
+      expect(ok({ ...memory, kind: "memory.review.digest", item_count: 6 })).toBe(false);
+      expect(
+        ok({
+          ...memory,
+          kind: "memory.review.digest",
+          related_kind: "memory.review.digest",
+          item_count: 6,
+        }),
+      ).toBe(false);
+      expect(ok({ ...memory, kind: "memory.review.reminder" })).toBe(false);
+      expect(ok({ ...memory, kind: "memory.review.candidates_ready", item_count: 3 })).toBe(false);
+      expect(
+        ok({
+          ...memory,
+          kind: "memory.proposal.received",
+          memory_object_id: object,
+          thread_id: EXAMPLE_IDS.thread,
+        }),
+      ).toBe(false);
+      expect(ok({ ...memory, kind: "memory.proposal.received" })).toBe(false);
+      expect(ok({ ...memory, kind: "memory.suggestion.received", memory_object_id: object })).toBe(
+        false,
+      );
+      expect(
+        ok({
+          ...memory,
+          kind: "memory.proposal.received",
+          memory_object_id: object,
+          schedule_id: notification.schedule_id,
+        }),
+      ).toBe(false);
+      // Older kinds carry no memory fields.
+      expect(ok({ ...notification, memory_object_id: object })).toBe(false);
+    });
   });
   it("parses a team notification: the Site admin, no schedule, thread, run or skill (KOBE-638)", () => {
     const added = {

@@ -65,6 +65,11 @@ type Row = {
   actor_name: string | null;
   subject_name: string | null;
   team_role: "team_admin" | "contributor" | "member" | null;
+  memory_scope: "team" | "site" | null;
+  memory_object_id: string | null;
+  related_kind: NotificationKind | null;
+  item_count: number | null;
+  project_id: string | null;
   read_at: Date | null;
   created_at: Date;
   created_key: string;
@@ -90,6 +95,13 @@ function toNotification(row: Row): Notification {
     ...(row.actor_name !== null ? { actor_name: row.actor_name } : {}),
     ...(row.subject_name !== null ? { subject_name: row.subject_name } : {}),
     ...(row.team_role !== null ? { team_role: row.team_role } : {}),
+    ...(row.memory_scope !== null ? { memory_scope: row.memory_scope } : {}),
+    ...(row.memory_object_id !== null ? { memory_object_id: row.memory_object_id } : {}),
+    ...(row.related_kind !== null
+      ? { related_kind: row.related_kind as NonNullable<Notification["related_kind"]> }
+      : {}),
+    ...(row.item_count !== null ? { item_count: row.item_count } : {}),
+    ...(row.project_id !== null ? { project_id: row.project_id } : {}),
     read_at: row.read_at === null ? null : iso(row.read_at),
     created_at: iso(row.created_at),
   };
@@ -97,12 +109,13 @@ function toNotification(row: Row): Notification {
 
 // A schedule notification needs its schedule (the contract names it); a skill notification
 // (KOBE-338) names a catalog skill instead, and a Site admin's new version (KOBE-495) its version
-// and the admin; a team notification (KOBE-638) the admin and, for team admins, the member.
+// and the admin; a team notification (KOBE-638) the admin and, for team admins, the member; a
+// memory notification (KOBE-645) what its kind names.
 const mine = (v: Viewer) =>
   sql`team_id = ${v.teamId} AND user_id = ${v.userId}
     AND (schedule_id IS NOT NULL
       OR kind IN ('skill.member_add.blocked', 'skill.version.site_published')
-      OR kind LIKE 'team.%')`;
+      OR kind LIKE 'team.%' OR kind LIKE 'memory.%')`;
 
 async function unreadCount(tx: KobeTx, v: Viewer): Promise<number> {
   const res = await tx.execute<{ n: number }>(sql`
@@ -126,7 +139,7 @@ export async function listNotifications(
              (SELECT u.name FROM users u WHERE u.id = notifications.actor_user_id) AS actor_name,
              (SELECT u.name FROM users u WHERE u.id = notifications.subject_user_id)
                AS subject_name,
-             team_role,
+             team_role, memory_scope, memory_object_id, related_kind, item_count, project_id,
              read_at, created_at,
              to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_key
         FROM notifications

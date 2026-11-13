@@ -31,6 +31,7 @@ import type { BifrostAdmin } from "../models/bifrost-admin.js";
 import type { ModelsConfig } from "../models/config.js";
 import { ModelGatewaySync } from "../models/sync.js";
 import { NotificationEmailSweeper, sweepNotificationEmails } from "../notifications/email.js";
+import { MEMORY_REMINDER_LOCK, MemoryReminderJob } from "../notifications/memory.js";
 import { OFFBOARDING_SWEEP_LOCK } from "../offboarding/index.js";
 import { RetentionJob } from "../retention/job.js";
 import { createPgReconcileLock } from "../sandbox/reconcile-lock.js";
@@ -246,6 +247,12 @@ function sweepJobs(o: ServerJobsOptions): ServerJob[] {
   // Request-access (KOBE-39) and scheduled-run (KOBE-179) emails: retries and leftovers.
   const egressRequests = new EgressRequestSweeper(deps);
   const notificationEmails = new NotificationEmailSweeper(deps);
+  // Memory review reminders (KOBE-645): one replica sends what is due.
+  const memoryReminders = new MemoryReminderJob({
+    db,
+    lock: lockFor(o, MEMORY_REMINDER_LOCK, "memory reminders"),
+    logger: o.logger,
+  });
   return [
     job(
       "break-glass",
@@ -296,6 +303,14 @@ function sweepJobs(o: ServerJobsOptions): ServerJob[] {
         return () => notificationEmails.stop();
       },
       () => sweepNotificationEmails(deps),
+    ),
+    job(
+      "memory-reminders",
+      () => {
+        memoryReminders.start();
+        return () => memoryReminders.stop();
+      },
+      () => memoryReminders.runOnce(),
     ),
   ];
 }
