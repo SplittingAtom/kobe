@@ -100,10 +100,11 @@ memory sections (KOBE-382/383), notifications (KOBE-645); `/llms.txt` follows th
    2026-11-13). Rename before KOBE-378 writes rows if SM28 differs.
 2. Resolved 2026-11-13 (coordinator): Policy items are never pinned (always in context); refused with `memory_policy_not_pinnable` (409); schemas refuse `policy && pinned`.
 
-3. Review L10 (open): portable item events are `site` events, so Site admins see that a person
-   has a portable preference and its kind (never the statement); the Workspace steward events are
-   registered ahead of KOBE-380. Both kept; confirm.
-4. Review L7 (not done, optional): archive/restore/pin take no `expected_version`.
+3. Review L10 confirmed (coordinator 2026-11-13): steward events registered now; portable item
+   events are site-scoped and carry id/kind/action only, never the statement (in docs/audit-log.md).
+4. Review L7 done (coordinator 2026-11-13): archive/restore (optional body) and pin take an
+   optional `expected_version`; mismatch is 409 `memory_version_conflict`. L11 stated in
+   run-context.ts: `semantic_memory` implies `memory`.
 5. Review L8: `openapi.json` has no reflow. `git diff --histogram` (or `--patience`) shows pure
    insertions (2,611 lines); git's default diff misaligns repeated JSON lines.
 

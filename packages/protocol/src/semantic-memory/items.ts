@@ -29,8 +29,10 @@ import {
  * - `POST   /v1/memory/semantic/items` body {@link createSemanticMemoryItemSchema} -> 201 detail
  * - `GET    /v1/memory/semantic/items/{scope}/{id}` -> {@link semanticMemoryItemDetailSchema}
  * - `PATCH  /v1/memory/semantic/items/{scope}/{id}` body {@link patchSemanticMemoryItemSchema}
- * - `POST   /v1/memory/semantic/items/{scope}/{id}/archive` (never deletes; versions stay)
- * - `POST   /v1/memory/semantic/items/{scope}/{id}/restore` (un-archive)
+ * - `POST   /v1/memory/semantic/items/{scope}/{id}/archive` body {@link semanticMemoryItemActionSchema}
+ *   (optional; never deletes, versions stay)
+ * - `POST   /v1/memory/semantic/items/{scope}/{id}/restore` body {@link semanticMemoryItemActionSchema}
+ *   (optional; un-archive)
  * - `POST   /v1/memory/semantic/items/{scope}/{id}/revert` body {@link revertSemanticMemoryItemSchema}
  *   (Undo: a new version copying an earlier one)
  * - `POST   /v1/memory/semantic/items/{scope}/{id}/pin` body {@link pinSemanticMemoryItemSchema}
@@ -298,8 +300,21 @@ export const revertSemanticMemoryItemSchema = z.strictObject({
 export type RevertSemanticMemoryItem = z.infer<typeof revertSemanticMemoryItemSchema>;
 
 /**
+ * Optimistic concurrency for archive, restore and pin (same pattern as a patch): when
+ * `expected_version` is sent and the item moved on, 409 `memory_version_conflict`. Absent = no
+ * check. Archive and restore take this as their (optional) body.
+ */
+export const semanticMemoryItemActionSchema = z.strictObject({
+  expected_version: version.optional(),
+});
+export type SemanticMemoryItemAction = z.infer<typeof semanticMemoryItemActionSchema>;
+
+/**
  * Pin or unpin. Pinning a Policy item is refused with `memory_policy_not_pinnable` (Policy is
  * always in context).
  */
-export const pinSemanticMemoryItemSchema = z.strictObject({ pinned: z.boolean() });
+export const pinSemanticMemoryItemSchema = z.strictObject({
+  pinned: z.boolean(),
+  expected_version: version.optional(),
+});
 export type PinSemanticMemoryItem = z.infer<typeof pinSemanticMemoryItemSchema>;

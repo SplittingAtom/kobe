@@ -10692,6 +10692,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SemanticMemoryItemAction"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "The item with its versions, newest first.",
@@ -10801,6 +10811,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SemanticMemoryItemAction"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "The item with its versions, newest first.",
@@ -23529,9 +23549,25 @@
         "properties": {
           "pinned": {
             "type": "boolean"
+          },
+          "expected_version": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
           }
         },
         "required": ["pinned"],
+        "additionalProperties": false
+      },
+      "SemanticMemoryItemAction": {
+        "type": "object",
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
         "additionalProperties": false
       },
       "SemanticMemoryImportPreviewRequest": {

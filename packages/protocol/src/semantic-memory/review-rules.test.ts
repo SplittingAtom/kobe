@@ -16,6 +16,8 @@ import {
   semanticMemoryExportToCsv,
   semanticMemoryImportCommitResponseSchema,
   semanticMemoryImportRowSchema,
+  semanticMemoryItemActionSchema,
+  pinSemanticMemoryItemSchema,
   semanticMemoryItemDetailSchema,
   semanticMemoryItemSchema,
   semanticMemoryRenderedBytes,
@@ -198,6 +200,18 @@ describe("lows", () => {
         statement: "Say Workspace, not team.",
         policy: true,
       }).success,
+    ).toBe(true);
+  });
+});
+
+describe("L7: archive, restore and pin take an optional expected_version", () => {
+  it("accepts it, or nothing; refuses junk", () => {
+    expect(semanticMemoryItemActionSchema.safeParse({}).success).toBe(true);
+    expect(semanticMemoryItemActionSchema.safeParse({ expected_version: 3 }).success).toBe(true);
+    expect(semanticMemoryItemActionSchema.safeParse({ expected_version: 0 }).success).toBe(false);
+    expect(semanticMemoryItemActionSchema.safeParse({ other: 1 }).success).toBe(false);
+    expect(
+      pinSemanticMemoryItemSchema.safeParse({ pinned: true, expected_version: 2 }).success,
     ).toBe(true);
   });
 });

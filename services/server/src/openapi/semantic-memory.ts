@@ -17,6 +17,7 @@ import {
   semanticMemoryImportCommitResponseSchema,
   semanticMemoryImportPreviewRequestSchema,
   semanticMemoryImportPreviewResponseSchema,
+  semanticMemoryItemActionSchema,
   semanticMemoryItemDetailSchema,
   semanticMemoryListResponseSchema,
 } from "@kobe/protocol";
@@ -104,12 +105,12 @@ const SAVE_ERRORS = {
 };
 const DETAIL = json("SemanticMemoryItemDetail", "The item with its versions, newest first.");
 
-const itemAction = (operationId: string, summary: string, bodyName?: string) => ({
+const itemAction = (operationId: string, summary: string, bodyName: string, required = true) => ({
   post: {
     operationId,
     summary,
     parameters: [scopeParam("path"), ID, TEAM_HEADER],
-    ...(bodyName ? { requestBody: body(bodyName) } : {}),
+    requestBody: { ...body(bodyName), required },
     responses: { "200": DETAIL, ...COMMON, ...SAVE_ERRORS },
   },
 });
@@ -188,10 +189,14 @@ function itemPaths(): Record<string, Record<string, unknown>> {
     "/v1/memory/semantic/items/{scope}/{id}/archive": itemAction(
       "archiveSemanticMemoryItem",
       "Archive a memory item (never deleted; its versions stay)",
+      "SemanticMemoryItemAction",
+      false,
     ),
     "/v1/memory/semantic/items/{scope}/{id}/restore": itemAction(
       "restoreSemanticMemoryItem",
       "Restore an archived memory item",
+      "SemanticMemoryItemAction",
+      false,
     ),
     "/v1/memory/semantic/items/{scope}/{id}/revert": itemAction(
       "revertSemanticMemoryItem",
@@ -329,6 +334,7 @@ export function semanticMemoryOpenApiSchemas(): Record<string, JsonSchema> {
     PatchSemanticMemoryItem: schemaOf(patchSemanticMemoryItemSchema, "input"),
     RevertSemanticMemoryItem: schemaOf(revertSemanticMemoryItemSchema, "input"),
     PinSemanticMemoryItem: schemaOf(pinSemanticMemoryItemSchema, "input"),
+    SemanticMemoryItemAction: schemaOf(semanticMemoryItemActionSchema, "input"),
     SemanticMemoryImportPreviewRequest: schemaOf(semanticMemoryImportPreviewRequestSchema, "input"),
     SemanticMemoryImportPreview: schemaOf(semanticMemoryImportPreviewResponseSchema, "output"),
     SemanticMemoryImportCommitRequest: schemaOf(semanticMemoryImportCommitRequestSchema, "input"),
