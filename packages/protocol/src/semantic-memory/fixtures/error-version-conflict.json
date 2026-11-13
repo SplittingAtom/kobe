@@ -1,0 +1,5 @@
+{
+  "code": "memory_version_conflict",
+  "message": "Someone changed this memory. Reload and try again.",
+  "current_version": 3
+}

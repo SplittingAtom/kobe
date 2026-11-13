@@ -1,0 +1,4 @@
+{
+  "code": "memory_import_too_large",
+  "message": "Import at most 1,000 rows and 1 MiB at a time."
+}

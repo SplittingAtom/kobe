@@ -1,0 +1,41 @@
+{
+  "format": "kobe.memory.v1",
+  "scope": "site",
+  "exported_at": "2026-11-12T10:00:00Z",
+  "include_inactive": true,
+  "items": [
+    {
+      "ref": "33333333-3333-4333-8333-333333333333",
+      "kind": "convention",
+      "statement": "Never share customer names outside the account team.",
+      "tags": [],
+      "pinned": false,
+      "as_of": null,
+      "policy": true,
+      "status": "active",
+      "superseded_by": null
+    },
+    {
+      "ref": "99999999-9999-4999-8999-999999999991",
+      "kind": "fact",
+      "statement": "=HYPERLINK(\"http://example.test\") is how links were written.",
+      "tags": [],
+      "pinned": false,
+      "as_of": null,
+      "policy": false,
+      "status": "superseded",
+      "superseded_by": "99999999-9999-4999-8999-999999999992"
+    },
+    {
+      "ref": "99999999-9999-4999-8999-999999999992",
+      "kind": "fact",
+      "statement": "Links are written as plain URLs.",
+      "tags": [],
+      "pinned": false,
+      "as_of": null,
+      "policy": false,
+      "status": "archived",
+      "superseded_by": null
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "code": "memory_scope_full",
+  "message": "This import needs room for 200 items; the scope has room for 100. Nothing was saved.",
+  "capacity": {
+    "count": 900,
+    "max": 1000,
+    "needed": 200
+  }
+}

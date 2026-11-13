@@ -1,0 +1,5 @@
+{
+  "code": "memory_import_stale",
+  "message": "Some rows changed since the preview. Preview the file again. Nothing was saved.",
+  "import_rows": [3, 7]
+}

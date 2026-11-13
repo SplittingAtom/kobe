@@ -1,0 +1,4 @@
+ref,kind,statement,tags,pinned,as_of,policy,status,superseded_by
+33333333-3333-4333-8333-333333333333,convention,Never share customer names outside the account team.,,false,,true,active,
+99999999-9999-4999-8999-999999999991,fact,"'=HYPERLINK(""http://example.test"") is how links were written.",,false,,false,superseded,99999999-9999-4999-8999-999999999992
+99999999-9999-4999-8999-999999999992,fact,Links are written as plain URLs.,,false,,false,archived,

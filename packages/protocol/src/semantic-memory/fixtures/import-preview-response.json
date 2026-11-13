@@ -1,0 +1,55 @@
+{
+  "scope": "user",
+  "rows": [
+    {
+      "index": 0,
+      "status": "new",
+      "kind": "fact",
+      "statement": "Owns the EMEA report.",
+      "tags": ["reporting"],
+      "pinned": false,
+      "as_of": "2026-10-01",
+      "issues": [],
+      "policy": false
+    },
+    {
+      "index": 1,
+      "status": "blocked",
+      "kind": "fact",
+      "statement": "The deploy token is [secret removed].",
+      "tags": [],
+      "pinned": false,
+      "as_of": null,
+      "issues": [
+        {
+          "code": "memory_secret",
+          "message": "This looks like a secret and can't be saved."
+        }
+      ],
+      "policy": false
+    },
+    {
+      "index": 2,
+      "status": "invalid",
+      "kind": null,
+      "statement": "",
+      "tags": [],
+      "pinned": false,
+      "policy": false,
+      "as_of": null,
+      "issues": [
+        {
+          "code": "statement_blank",
+          "message": "The statement is empty."
+        }
+      ]
+    }
+  ],
+  "counts": {
+    "new": 1,
+    "duplicate": 0,
+    "warning": 0,
+    "invalid": 1,
+    "blocked": 1
+  }
+}
