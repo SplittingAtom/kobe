@@ -549,4 +549,65 @@ describe("semantic memory under legal hold (M1)", () => {
       expect(await code(c, del, [teamA, [mine, shared]])).toBeUndefined();
     });
   });
+
+  it("refuses a portable or Site item delete that cascades into a held Workspace's run records (M3)", async () => {
+    const pt = await inTeam(teamA, (c) => portableItem(c, owner), true);
+    const st = await inTeam(teamA, (c) => siteItem(c), true);
+    await inTeam(
+      teamB,
+      async (c) => {
+        await c.query(
+          `INSERT INTO run_portable_memory_items (team_id, run_id, item_id, version) VALUES ($1, $2, $3, 1)`,
+          [teamB, runB, pt],
+        );
+        await c.query(
+          `INSERT INTO run_site_memory_items (team_id, run_id, item_id, version) VALUES ($1, $2, $3, 1)`,
+          [teamB, runB, st],
+        );
+      },
+      true,
+    );
+    const left = `SELECT (SELECT count(*) FROM run_portable_memory_items WHERE item_id = $1)::int AS p,
+                         (SELECT count(*) FROM run_site_memory_items WHERE item_id = $2)::int AS s,
+                         (SELECT count(*) FROM portable_memory_item_versions WHERE item_id = $1)::int AS pv,
+                         (SELECT count(*) FROM site_memory_item_versions WHERE item_id = $2)::int AS sv`;
+    // Team B holds the run's owner; the delete is issued from team A's context.
+    const h = await hold(teamB, owner);
+    try {
+      await inTeam(teamA, async (c) => {
+        const portable = `DELETE FROM portable_memory_items WHERE id = $1`;
+        expect(await code(c, portable, [pt])).toBe(LEGAL_HOLD_SQLSTATE);
+        expect(await code(c, `DELETE FROM site_memory_items WHERE id = $1`, [st])).toBe(
+          LEGAL_HOLD_SQLSTATE,
+        );
+      });
+      expect((await admin.query(left, [pt, st])).rows).toEqual([{ p: 1, s: 1, pv: 1, sv: 1 }]);
+      // Inside the held Workspace the run is visible: the owner's hold decides directly.
+      await inTeam(teamB, async (c) => {
+        const direct = `DELETE FROM run_portable_memory_items WHERE team_id = $1 AND item_id = $2`;
+        expect(await code(c, direct, [teamB, pt])).toBe(LEGAL_HOLD_SQLSTATE);
+      });
+    } finally {
+      await release(h);
+    }
+    // A hold on someone else in team B doesn't cover this run's records from inside team B.
+    const h2 = await hold(teamB, other);
+    try {
+      await inTeam(teamB, async (c) => {
+        const direct = `DELETE FROM run_site_memory_items WHERE team_id = $1 AND item_id = $2`;
+        expect(await code(c, direct, [teamB, st])).toBeUndefined();
+      });
+    } finally {
+      await release(h2);
+    }
+    await inTeam(
+      teamA,
+      async (c) => {
+        await c.query(`DELETE FROM portable_memory_items WHERE id = $1`, [pt]);
+        await c.query(`DELETE FROM site_memory_items WHERE id = $1`, [st]);
+      },
+      true,
+    );
+    expect((await admin.query(left, [pt, st])).rows).toEqual([{ p: 0, s: 0, pv: 0, sv: 0 }]);
+  });
 });

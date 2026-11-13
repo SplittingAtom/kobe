@@ -36,7 +36,12 @@ in `docs/install.md`. No feature code.
 - **Legal hold (review M1)**, as `memory_docs` (0074): AFTER DELETE statement guards on items
   (owner's hold, or any hold in the team for `team` items, via `memory_legal_hold_covers`) and
   versions (skip cascaded rows); BEFORE TRUNCATE `legal_hold_refuse_truncate` on all five team
-  tables. Portable/Site items wait for the Site-wide hold (KOBE-386).
+  tables. Re-review M3: an AFTER DELETE guard on `run_portable_memory_items` /
+  `run_site_memory_items` refuses a site-wide item's cascade into a held Workspace (the item and
+  its versions stay). Visible run (active team): the run owner's hold decides, as `run_events`.
+  Invisible run (cascade from another team's context, which FORCE RLS hides from the trigger):
+  any active hold in that Workspace refuses (conservative, no SECURITY DEFINER, team never set).
+  Portable/Site items no held run used wait for the Site-wide hold (KOBE-386).
 - **current_version (review L2):** DEFERRABLE INITIALLY DEFERRED FK to the version row on all
   three item tables (SQL-only in 0217): item + first version in one transaction.
 - **Portable actor = owner (L1):** the versions→items key is `(item_id, actor_user_id)` →
@@ -68,8 +73,8 @@ statement)` stored generated (Q11, no language setting).
 
 1. Portable/Site items have no DB hold guard until the Site-wide hold (KOBE-386).
 
-Review 2026-11-12 (`docs/ledger/review-376.md`, untracked): M1, M2, L1-L5 fixed in 0216/0217
-(regenerated, no 0218); Q2 confirmed.
+Review 2026-11-12 (`docs/ledger/review-376.md`, untracked): M1, M2, L1-L5, scrub-under-hold and
+M3 fixed in 0216/0217 (regenerated, no 0218); Q2 confirmed.
 
 ## Evidence (acceptance criteria → test or command output)
 

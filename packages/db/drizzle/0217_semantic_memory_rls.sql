@@ -41,9 +41,11 @@ CREATE POLICY "team_isolation" ON "run_site_memory_items"
 -- Legal hold (D18), as memory_docs (0074): a `user` item is held with its owner; a `team` item has
 -- no owner, so any active hold in its team covers it (memory_legal_hold_covers with a NULL owner).
 -- Deleting held items or versions, or truncating any of the team tables, is refused. Archiving and
--- superseding are UPDATEs and remove nothing. Run records are not content: they go with their run
--- or item (the item's guard decides), and only TRUNCATE is refused. Portable and Site items wait
--- for the Site-wide hold (KOBE-386).
+-- superseding are UPDATEs and remove nothing. Workspace run records go with their run (the runs
+-- guard decides, 0042) or item (the item's guard decides). Portable and Site run records can also
+-- go through a site-wide item, which has no guard yet: their own guard (below) refuses that cascade
+-- into a held Workspace, which also keeps the item and its versions. TRUNCATE is refused on every
+-- team table. Portable and Site items no held run used wait for the Site-wide hold (KOBE-386).
 CREATE FUNCTION "public"."semantic_memory_items_legal_hold_guard"() RETURNS trigger
   LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
 BEGIN
@@ -77,6 +79,36 @@ $$;--> statement-breakpoint
 CREATE TRIGGER "semantic_memory_item_versions_legal_hold" AFTER DELETE ON "semantic_memory_item_versions"
   REFERENCING OLD TABLE AS gone
   FOR EACH STATEMENT EXECUTE FUNCTION "public"."semantic_memory_item_versions_legal_hold_guard"();--> statement-breakpoint
+-- Run records of the portable and Site lanes follow their run's thread owner, as run_events (0042),
+-- when the run is visible: in the active team, a missing run means the rows left with the run's
+-- cascade, whose own guard already decided. A cascade from a site-wide item reaches other
+-- Workspaces too, whose runs and threads this trigger cannot see (FORCE RLS applies to it, and it
+-- never sets the team): there any active hold in that Workspace refuses the delete (conservative;
+-- the item and its versions stay, and the server reports the hold). Reading kobe.team_id is not
+-- setting it. Proven by the M3 test in semantic-memory.db.test.ts.
+CREATE FUNCTION "public"."run_site_lane_memory_items_legal_hold_guard"() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
+BEGIN
+  PERFORM "public"."legal_hold_lock_shared"();
+  IF EXISTS (
+    SELECT 1 FROM (SELECT DISTINCT d.team_id, d.run_id FROM gone d) g
+    LEFT JOIN "public"."runs" r ON r.team_id = g.team_id AND r.id = g.run_id
+    LEFT JOIN "public"."threads" t ON t.team_id = r.team_id AND t.id = r.thread_id
+    WHERE (r.id IS NOT NULL AND "public"."legal_hold_covers"(g.team_id, t.owner_user_id))
+      OR (r.id IS NULL
+        AND g.team_id IS DISTINCT FROM NULLIF(current_setting('kobe.team_id', true), '')::uuid
+        AND "public"."memory_legal_hold_covers"(g.team_id, NULL))) THEN
+    RAISE EXCEPTION 'run memory records under legal hold cannot be deleted' USING ERRCODE = 'KH001';
+  END IF;
+  RETURN NULL;
+END;
+$$;--> statement-breakpoint
+CREATE TRIGGER "run_portable_memory_items_legal_hold" AFTER DELETE ON "run_portable_memory_items"
+  REFERENCING OLD TABLE AS gone
+  FOR EACH STATEMENT EXECUTE FUNCTION "public"."run_site_lane_memory_items_legal_hold_guard"();--> statement-breakpoint
+CREATE TRIGGER "run_site_memory_items_legal_hold" AFTER DELETE ON "run_site_memory_items"
+  REFERENCING OLD TABLE AS gone
+  FOR EACH STATEMENT EXECUTE FUNCTION "public"."run_site_lane_memory_items_legal_hold_guard"();--> statement-breakpoint
 CREATE TRIGGER "semantic_memory_items_legal_hold_truncate" BEFORE TRUNCATE ON "semantic_memory_items"
   FOR EACH STATEMENT EXECUTE FUNCTION "public"."legal_hold_refuse_truncate"();--> statement-breakpoint
 CREATE TRIGGER "semantic_memory_item_versions_legal_hold_truncate" BEFORE TRUNCATE ON "semantic_memory_item_versions"
