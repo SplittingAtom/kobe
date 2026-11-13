@@ -89,6 +89,22 @@ A roster follows your latest published version unless its admins pin one. **With
 or **Withdraw from the site** takes it back. The Reach column shows where it went, including
 "Declined for _team_" with the admin's note.
 
+### Adopt an agent into a roster
+
+A roster's admins can make a lent agent their own. On an assigned entry's row menu, **Adopt into
+_team_** (team admins, Team tab) or **Adopt into the site** (site admins, Site tab) asks "Adopt
+_agent_ into _team_?" and, on **Adopt**, does it all in one step:
+
+- the agent's current published version is copied as **v1** of a new agent: on a team roster a
+  team-owned agent whose creator is the admin who adopted it; on the site roster a site-owned
+  gallery agent with no repository definition, which releases never update or reset;
+- the roster entry is removed, so the roster runs the copy from then on;
+- the copy remembers which agent and version it came from, and keeps that version's memory
+  setting.
+
+Adopt works whether or not the agent's owner is still around, and leaves the owner's agent as it
+is. An agent bound to a team (a fork of that team's content) can only be adopted into that team.
+
 ## Schedule an agent
 
 A schedule sends a prompt to one of your agents at set times; its runs appear as conversations.
