@@ -2,6 +2,7 @@ import { sql, type KobeDb } from "@kobe/db";
 import type {
   PatchSemanticMemoryItem,
   PinSemanticMemoryItem,
+  RestoreSemanticMemoryItem,
   RevertSemanticMemoryItem,
   SemanticMemoryItemAction,
   SemanticMemoryItemDetail,
@@ -22,7 +23,7 @@ import {
 } from "./context.js";
 import {
   NO_OVERRIDES,
-  assertNoSecret,
+  assertNoSecretInTags,
   overrideAuditEvents,
   type MemoryCheckOutcome,
 } from "../checks.js";
@@ -101,7 +102,10 @@ async function appendStatement(
 /**
  * Edit (KOBE-378): a statement change is a new immutable version (with the save checks); kind,
  * tags, `as_of` and `policy` change the item. Rules of the stored item the body can't see are
- * `invalid_request`; a Policy change needs `site.memory.policy`.
+ * `invalid_request`; a Policy change needs `site.memory.policy`. A Policy change runs the save
+ * checks on the (unchanged) statement too (KOBE-379 review L-1: Policy is lint- and
+ * conflict-exempt, so an item leaving Policy is checked as a plain Site item); overrides are
+ * audited at the current version. A change of tags alone scans the tags for secrets.
  */
 export function patchItem(
   db: KobeDb,
@@ -127,12 +131,13 @@ export function patchItem(
     const policy = body.policy ?? row.policy;
     if (policy && (statementChanged || !row.policy))
       await assertPolicyBudget(op.tx, [row.id], statement);
-    const checks = statementChanged
-      ? await saveChecks(op, { statement, policy, except: [row.id] }, body.overrides)
-      : NO_OVERRIDES;
-
     const kind = body.kind ?? row.kind;
     const tags = body.tags ? normaliseTags(body.tags) : row.tags;
+    const checked = statementChanged || policy !== row.policy;
+    const checks = checked
+      ? await saveChecks(op, { statement, policy, except: [row.id], tags }, body.overrides)
+      : NO_OVERRIDES;
+    if (!checked && body.tags) assertNoSecretInTags(tags);
     const asOf = body.as_of === undefined ? row.as_of : body.as_of;
     const changed = [
       ...(statementChanged ? (["statement"] as const) : []),
@@ -233,13 +238,16 @@ export function archiveItem(
   });
 }
 
-/** Restore from the archive: needs room in the scope (and in Policy for a Policy item). */
+/**
+ * Restore from the archive: needs room in the scope (and in Policy for a Policy item), and passes
+ * the save checks like a new save (warnings and Policy conflicts need the body's `overrides`).
+ */
 export function restoreItem(
   db: KobeDb,
   who: MemoryWho,
   scope: Scope,
   id: string,
-  body: SemanticMemoryItemAction,
+  body: RestoreSemanticMemoryItem,
 ): Promise<SemanticMemoryItemDetail> {
   return inStore(db, who, scope, async (op) => {
     const row = await prepare(op, id, false);
@@ -247,21 +255,29 @@ export function restoreItem(
     if (row.status === "superseded")
       throw inactive("Superseded memories stay as history; save a new one instead.");
     if (row.status === "active") return finish(op, row.id, []);
-    // The restored version passed the checks when it was saved; a secret never comes back.
-    assertNoSecret(row.statement);
     await lockScope(op.tx, op.loc);
     const before = await assertRoom(op.tx, op.loc, op.settings, 1);
     if (row.policy) await assertPolicyBudget(op.tx, [row.id], row.statement);
+    // Restoring puts the text back in the agent's context: every save check runs, against
+    // today's Policy, rules and egress (KOBE-379 review H-1), with the body's overrides.
+    const checks = await saveChecks(
+      op,
+      { statement: row.statement, policy: row.policy, except: [row.id], tags: row.tags },
+      body.overrides,
+    );
     await op.tx.execute(sql`
       UPDATE ${op.loc.items} i SET status = 'active', updated_at = now()
        WHERE ${op.loc.where} AND i.id = ${row.id}`);
     op.pending = await notifyNearFull(op.tx, op.loc, op.settings, before, before + 1);
+    const teamId = auditTeam(op.loc);
+    const at = { scope, itemId: row.id, version: row.current_version, teamId };
     return finish(op, row.id, [
       {
         action: "memory.item.restored",
-        teamId: auditTeam(op.loc),
+        teamId,
         target: { scope, itemId: row.id, version: row.current_version },
       },
+      ...overrideAuditEvents(checks, at),
     ]);
   });
 }

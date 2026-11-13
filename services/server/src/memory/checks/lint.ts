@@ -1,5 +1,6 @@
 import type { SemanticMemoryWarningCode } from "@kobe/protocol";
 import { PROSE_RULES } from "@kobe/skill-scanner";
+import { extractLinkHosts } from "./links.js";
 import { lintViews } from "./text.js";
 
 /**
@@ -15,13 +16,38 @@ import { lintViews } from "./text.js";
 type LintCode = Extract<SemanticMemoryWarningCode, `instruction_${string}`>;
 
 const AGENT = String.raw`(?:you|the (?:assistant|agent|model|ai|bot)|kobe|claude)`;
-/** Something on the web: a URL, `www.`, a host with a path, or a host with a common TLD. */
-const WEB = String.raw`(?:https?://|ftp://|www\.|\b[a-z0-9-]+(?:\.[a-z0-9-]+)+/|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|ai|dev|app|co|xyz|ru|cn|info|biz|me|sh|site|online|top|link|zip)\b)`;
-
 /** Where an imperative verb starts: a sentence or clause, or after "please", "always", "you should" */
 const LEAD = String.raw`(?:^|[.!?;:,(]\s*|\b(?:please|always|first|then|and|or|to|must|should|will|can|could|never|just)\s+)`;
 
-const RULES: readonly { readonly code: LintCode; readonly patterns: readonly RegExp[] }[] = [
+/** A verb asking to fetch, open or send something. */
+const FETCH_VERB = new RegExp(
+  String.raw`${LEAD}(?:fetch|visit|open|download|curl|wget|browse(?: to)?|go to|navigate to|load|retrieve|read|get|check|pull|install from|post to|upload to|send (?:\w+ ){0,3}to)\b`,
+  "gu",
+);
+/** Characters after the verb where the link may start. */
+const FETCH_REACH = 60;
+
+/**
+ * A fetch verb followed (on the same line, within reach) by a link, found by the link checks' own
+ * extractor (any scheme spelling, `www.`, host + path, or a bare registrable name such as
+ * `evil.de`: review L-4), so the lint and the link warning agree on what a link is.
+ */
+function asksToFetch(view: string): boolean {
+  let verbs = 0;
+  for (const m of view.matchAll(FETCH_VERB)) {
+    const from = m.index + m[0].length;
+    const tail = view.slice(from, from + FETCH_REACH + 64).split("\n", 1)[0] ?? "";
+    if (extractLinkHosts(tail).length > 0) return true;
+    if (++verbs >= 20) return false;
+  }
+  return false;
+}
+
+type Test = RegExp | ((view: string) => boolean);
+const passes = (test: Test, view: string): boolean =>
+  typeof test === "function" ? test(view) : test.test(view);
+
+const RULES: readonly { readonly code: LintCode; readonly patterns: readonly Test[] }[] = [
   {
     code: "instruction_imperative",
     patterns: [
@@ -46,12 +72,7 @@ const RULES: readonly { readonly code: LintCode; readonly patterns: readonly Reg
   },
   {
     code: "instruction_fetch",
-    patterns: [
-      new RegExp(
-        String.raw`${LEAD}(?:fetch|visit|open|download|curl|wget|browse(?: to)?|go to|navigate to|load|retrieve|read|get|check|pull|install from|post to|upload to|send (?:\w+ ){0,3}to)\b[^\n]{0,40}?${WEB}`,
-        "u",
-      ),
-    ],
+    patterns: [asksToFetch],
   },
   {
     code: "instruction_egress",
@@ -68,7 +89,7 @@ const RULES: readonly { readonly code: LintCode; readonly patterns: readonly Reg
 /** The instruction-lint codes `text` triggers, in rule order (each at most once). */
 export function lintInstructions(text: string): LintCode[] {
   const views = lintViews(text);
-  return RULES.filter((rule) => rule.patterns.some((p) => views.some((view) => p.test(view)))).map(
-    (rule) => rule.code,
-  );
+  return RULES.filter((rule) =>
+    rule.patterns.some((p) => views.some((view) => passes(p, view))),
+  ).map((rule) => rule.code);
 }

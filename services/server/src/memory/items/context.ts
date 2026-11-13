@@ -77,13 +77,19 @@ export function assertExpected(row: ItemRow, expected: number | undefined): void
 }
 
 /**
- * The save checks every statement write of the item store runs: `memory/checks.ts`
- * ({@link checkMemoryWrite}, KOBE-379) with the near-duplicate check (KOBE-378). `policy`: the
- * item is (or becomes) Policy. `except`: the item itself and any item the save replaces.
+ * The save checks every statement write of the item store runs (create, edit, a Policy change,
+ * Undo, restore): `memory/checks.ts` ({@link checkMemoryWrite}, KOBE-379) with the
+ * near-duplicate check (KOBE-378). `policy`: the item is (or becomes) Policy. `except`: the item
+ * itself and any item the save replaces. `tags`: scanned for secrets.
  */
 export function saveChecks(
   op: Op,
-  subject: { statement: string; policy: boolean; except?: readonly string[] },
+  subject: {
+    statement: string;
+    policy: boolean;
+    except?: readonly string[];
+    tags?: readonly string[];
+  },
   overrides: SemanticMemoryOverrides | undefined,
 ): Promise<MemoryCheckOutcome> {
   return checkMemoryWrite(op, { scope: op.loc.scope, ...subject }, overrides);

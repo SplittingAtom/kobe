@@ -3,6 +3,7 @@ import {
   pipesDownloadToInterpreter,
   SECRET_RULES,
   plausibleSecret,
+  plausibleSplitToken,
 } from "./rules.js";
 import { INVISIBLE, PROSE_RULES } from "./prose.js";
 import { SCAN_LIMITS, type Finding, type FindingCategory } from "./types.js";
@@ -45,6 +46,24 @@ export function matchSecret(view: string): string | undefined {
     const m = rule.pattern.exec(view);
     if (!m) continue;
     if (rule.group === 0 || plausibleSecret(m[rule.group] ?? "")) return rule.id;
+  }
+  return undefined;
+}
+
+/**
+ * The first rule whose token core ({@link SecretRule.split}) is in `collapsed`: text with the
+ * spaces, hyphens and dots between token characters removed (KOBE-379 review M-4: a token typed in
+ * groups). Only prefix-anchored rules take part, and the token must look random
+ * ({@link plausibleSplitToken}), so joined prose words don't count. At most 32 candidates per rule.
+ */
+export function matchSplitSecret(collapsed: string): string | undefined {
+  for (const rule of SECRET_RULES) {
+    if (!rule.split) continue;
+    let seen = 0;
+    for (const m of collapsed.matchAll(rule.split)) {
+      if (plausibleSplitToken(m[0])) return rule.id;
+      if (++seen >= 32) break;
+    }
   }
   return undefined;
 }

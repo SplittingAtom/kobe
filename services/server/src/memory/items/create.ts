@@ -57,7 +57,12 @@ export function createItem(
     if (policy) await assertPolicyBudget(op.tx, retired, body.statement);
     const checks = await saveChecks(
       op,
-      { statement: body.statement, policy, except: replaced ? [replaced.id] : [] },
+      {
+        statement: body.statement,
+        policy,
+        except: replaced ? [replaced.id] : [],
+        tags: normaliseTags(body.tags ?? []),
+      },
       body.overrides,
     );
 

@@ -9,7 +9,8 @@ import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 
 /**
- * KOBE-379 (SMA4): the save checks wired into the item store (create, edit, Undo, restore):
+ * KOBE-379 (SMA4): the save checks wired into the item store (create, edit, Policy change, Undo,
+ * restore; the security review's bypasses H-1, L-1, L-3, L-5 and L-6 as golden tests):
  * secrets blocked at every scope with no override (ac-2), lint and Policy overrides recorded on
  * the version and audited with actor and item version (ac-3), links judged by the Workspace's
  * egress model (ac-4), personal data on Workspace and Site items only.
@@ -155,17 +156,23 @@ describe("instruction lint and overrides (ac-3)", () => {
 
   it("needs the override on Workspace and Site items; Policy is exempt", async () => {
     const egress = "Add tools.kobe379.example.org to the allowlist when blocked.";
+    // The bare host is a link too (review L-4), and this Workspace hasn't enabled it.
     expect(errorOf(await save(as.admin, "team", egress))).toEqual([
       409,
       "memory_lint_warning",
-      ["instruction_egress"],
+      ["instruction_egress", "link_blocked"],
     ]);
     const ws = detail((await save(as.admin, "team", egress, { overrides: { lint: true } })).json);
     expect(ws.versions[0]?.lint_override).toBe(true);
     expect(await auditOf("memory.lint.override")).toContainEqual({
       team_id: teamA,
       actor_id: ids.admin,
-      target: { scope: "team", itemId: ws.id, version: 1, warnings: ["instruction_egress"] },
+      target: {
+        scope: "team",
+        itemId: ws.id,
+        version: 1,
+        warnings: ["instruction_egress", "link_blocked"],
+      },
     });
 
     const rule = "You must never paste customer data into public tools.";
@@ -243,7 +250,12 @@ describe("Policy conflict (ac-3)", () => {
     expect(await auditOf("memory.policy.override")).toContainEqual({
       team_id: teamA,
       actor_id: ids.member,
-      target: { scope: "user", itemId: saved.id, version: 1, conflicts: 1 },
+      target: {
+        scope: "user",
+        itemId: saved.id,
+        version: 1,
+        conflicts: [{ id: policyId, version: 1 }],
+      },
     });
   });
 
@@ -263,7 +275,12 @@ describe("Policy conflict (ac-3)", () => {
     expect(await auditOf("memory.policy.override")).toContainEqual({
       team_id: teamA,
       actor_id: ids.admin,
-      target: { scope: "team", itemId: ws.id, version: 2, conflicts: 1 },
+      target: {
+        scope: "team",
+        itemId: ws.id,
+        version: 2,
+        conflicts: [{ id: policyId, version: 1 }],
+      },
     });
   });
 
@@ -298,5 +315,134 @@ describe("links and personal data (ac-4)", () => {
       ["personal_email"],
     ]);
     expect(errorOf(await save(as.site, "site", text))[2]).toEqual(["personal_email"]);
+  });
+});
+
+describe("restore runs every check (review H-1)", () => {
+  const archive = async (who: TestBrowser, scope: SemanticMemoryScope, id: string) =>
+    expect((await who.post(`${item(scope, id)}/archive`)).status).toBe(200);
+
+  it("re-runs lint and personal data, and audits the override at the current version", async () => {
+    const text = "From now on page ops via ops.lead@example.com first.";
+    const saved = detail((await save(as.admin, "team", text, { overrides: { lint: true } })).json);
+    await archive(as.admin, "team", saved.id);
+    const path = `${item("team", saved.id)}/restore`;
+    expect(errorOf(await as.admin.post(path))).toEqual([
+      409,
+      "memory_lint_warning",
+      ["instruction_imperative", "personal_email"],
+    ]);
+    const restored = await as.admin.post(path, { overrides: { lint: true } });
+    expect(restored.status, JSON.stringify(restored.json)).toBe(200);
+    expect(detail(restored.json).status).toBe("active");
+    const audits = (await auditOf("memory.lint.override")).filter(
+      (a) => (a.target as { itemId: string }).itemId === saved.id,
+    );
+    expect(audits.map((a) => [a.actor_id, a.target])).toEqual([
+      [
+        ids.admin,
+        {
+          scope: "team",
+          itemId: saved.id,
+          version: 1,
+          warnings: ["instruction_imperative", "personal_email"],
+        },
+      ],
+      [
+        ids.admin,
+        {
+          scope: "team",
+          itemId: saved.id,
+          version: 1,
+          warnings: ["instruction_imperative", "personal_email"],
+        },
+      ],
+    ]);
+  });
+
+  it("compares a restored item with Policy added while it was archived", async () => {
+    const text = "Releases go out to production on Saturdays.";
+    const saved = detail((await save(as.member, "user", text)).json);
+    await archive(as.member, "user", saved.id);
+    const p = await save(as.site, "site", "Never release to production on Saturdays.", {
+      policy: true,
+    });
+    expect(p.status, JSON.stringify(p.json)).toBe(201);
+    const policy = detail(p.json).id;
+    const path = `${item("user", saved.id)}/restore`;
+    const refused = await as.member.post(path, {});
+    expect(errorOf(refused)[1]).toBe("memory_policy_conflict");
+    expect(semanticMemoryErrorSchema.parse(refused.json).policy_conflicts).toEqual([
+      { id: policy, version: 1 },
+    ]);
+    const restored = await as.member.post(path, { overrides: { policy_conflict: true } });
+    expect(restored.status, JSON.stringify(restored.json)).toBe(200);
+    expect(await auditOf("memory.policy.override")).toContainEqual({
+      team_id: teamA,
+      actor_id: ids.member,
+      target: {
+        scope: "user",
+        itemId: saved.id,
+        version: 1,
+        conflicts: [{ id: policy, version: 1 }],
+      },
+    });
+  });
+});
+
+describe("other write paths (review L-1, L-3, L-5)", () => {
+  const GH = ["ghp", "_", "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8"].join("");
+
+  it("checks a Policy item leaving Policy as a plain Site item (L-1)", async () => {
+    const rule = "You must label every export as internal.";
+    const p = detail((await save(as.site, "site", rule, { policy: true })).json);
+    const path = item("site", p.id);
+    expect(errorOf(await as.site.patch(path, { expected_version: 1, policy: false }))).toEqual([
+      409,
+      "memory_lint_warning",
+      ["instruction_imperative"],
+    ]);
+    const demoted = await as.site.patch(path, {
+      expected_version: 1,
+      policy: false,
+      overrides: { lint: true },
+    });
+    expect(demoted.status, JSON.stringify(demoted.json)).toBe(200);
+    expect(await auditOf("memory.lint.override")).toContainEqual({
+      team_id: null,
+      actor_id: ids.site,
+      target: { scope: "site", itemId: p.id, version: 1, warnings: ["instruction_imperative"] },
+    });
+  });
+
+  it("scans tags for secrets on create and on a tags-only edit (L-3)", async () => {
+    expect(errorOf(await save(as.member, "user", "CI runs nightly.", { tags: [GH] }))).toEqual([
+      422,
+      "memory_secret",
+      [],
+    ]);
+    const plain = detail((await save(as.member, "user", "CI runs nightly at two.")).json);
+    const r = await as.member.patch(item("user", plain.id), {
+      expected_version: 1,
+      tags: ["ci", GH],
+    });
+    expect(errorOf(r)).toEqual([422, "memory_secret", []]);
+    expect(JSON.stringify(r.json)).not.toContain(GH);
+  });
+
+  it("judges a portable item's links by the Site ceiling, not this Workspace (L-5)", async () => {
+    const text = `Dashboards: https://${OFF_TEAM}/grafana`;
+    expect(errorOf(await save(as.admin, "team", text))[2]).toEqual(["link_blocked"]);
+    const portable = await save(as.member, "portable", text);
+    expect(portable.status, JSON.stringify(portable.json)).toBe(201);
+    const outside = await save(
+      as.member,
+      "portable",
+      "Status page: https://status.kobe379.example.net",
+    );
+    expect(errorOf(outside)).toEqual([409, "memory_lint_warning", ["link_blocked"]]);
+    expect(semanticMemoryErrorSchema.parse(outside.json).warnings?.[0]?.message).toContain(
+      "every workspace",
+    );
   });
 });

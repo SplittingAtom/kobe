@@ -18,6 +18,7 @@ import {
   semanticMemoryImportPreviewRequestSchema,
   semanticMemoryImportPreviewResponseSchema,
   semanticMemoryItemActionSchema,
+  restoreSemanticMemoryItemSchema,
   semanticMemoryItemDetailSchema,
   semanticMemoryListResponseSchema,
 } from "@kobe/protocol";
@@ -208,8 +209,8 @@ function itemPaths(): Record<string, Record<string, unknown>> {
     ),
     "/v1/memory/semantic/items/{scope}/{id}/restore": itemAction(
       "restoreSemanticMemoryItem",
-      "Restore an archived memory item",
-      "SemanticMemoryItemAction",
+      "Restore an archived memory item (runs the save checks again; send overrides to save over warnings)",
+      "RestoreSemanticMemoryItem",
       false,
     ),
     "/v1/memory/semantic/items/{scope}/{id}/revert": itemAction(
@@ -349,6 +350,7 @@ export function semanticMemoryOpenApiSchemas(): Record<string, JsonSchema> {
     RevertSemanticMemoryItem: schemaOf(revertSemanticMemoryItemSchema, "input"),
     PinSemanticMemoryItem: schemaOf(pinSemanticMemoryItemSchema, "input"),
     SemanticMemoryItemAction: schemaOf(semanticMemoryItemActionSchema, "input"),
+    RestoreSemanticMemoryItem: schemaOf(restoreSemanticMemoryItemSchema, "input"),
     SemanticMemoryImportPreviewRequest: schemaOf(semanticMemoryImportPreviewRequestSchema, "input"),
     SemanticMemoryImportPreview: schemaOf(semanticMemoryImportPreviewResponseSchema, "output"),
     SemanticMemoryImportCommitRequest: schemaOf(semanticMemoryImportCommitRequestSchema, "input"),

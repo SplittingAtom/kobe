@@ -5,6 +5,7 @@ import {
   createSemanticMemoryItemSchema,
   patchSemanticMemoryItemSchema,
   pinSemanticMemoryItemSchema,
+  restoreSemanticMemoryItemSchema,
   revertSemanticMemoryItemSchema,
   semanticMemoryItemActionSchema,
   semanticMemoryListQuerySchema,
@@ -158,7 +159,7 @@ export function memoryItemRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
   app.post("/:scope/:id/restore", async (c) => {
     const t = target(c);
     if (t instanceof Response) return t;
-    const body = await readBody(c, semanticMemoryItemActionSchema, true);
+    const body = await readBody(c, restoreSemanticMemoryItemSchema, true);
     if (!body.success) return invalidRequest(c, issueText(body.error));
     return answer(c, t.scope, (who) => restoreItem(db, who, t.scope, t.id, body.data));
   });

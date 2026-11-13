@@ -19,9 +19,11 @@ overrides)`, run inside the save's transaction. The store calls it through
   `evaluateMemoryWrite` (never throws) and `importRowStatus`; overrides are audited with
   `overrideAuditEvents`. The near-duplicate check (KOBE-378) moved into the same evaluation.
 - **Rules** (files under `memory/checks/`):
-  - `secrets.ts`: `matchSecret` from `@kobe/skill-scanner` (newly exported with `SECRET_RULES`,
-    `maskSecrets`, `INVISIBLE`; no rule changes, so no `RULE_SET_VERSION` bump). Statement,
-    justification and note. `memory_secret` (422) at every scope, Policy included, no override.
+  - `secrets.ts`: `matchSecret` / `matchSplitSecret` from `@kobe/skill-scanner` (exported with
+    `SECRET_RULES`, `maskSecrets`, `INVISIBLE`, `IGNORABLE`). Statement, justification, note and
+    tags. `memory_secret` (422) at every scope, Policy included, no override. Review fixes changed
+    the shared rules, so `RULE_SET_VERSION` is `2026.11.13.6` (`RULE_SET` 6: stored skill scans
+    are rescanned).
   - `lint.ts`: `instruction_imperative` (agent-addressed orders, "from now on", "ignore …
     instructions", plus the scanner's prompt-injection/conceal/exfiltration prose rules),
     `instruction_tools`, `instruction_fetch`, `instruction_egress` (allowlist/whitelist/unblock,
@@ -32,8 +34,9 @@ overrides)`, run inside the save's transaction. The store calls it through
   - `links.ts`: every link host (scheme, `www.`, host + path; user info and port stripped);
     `link_blocked` when `decideEgress` (the proxy's own decision, `@kobe/db`) refuses it under the
     Workspace's enablement ∩ ceiling, read in the save's transaction (`loadEgressCeiling` now
-    takes a tx; new `loadTeamEgressIn`); Site items and portable items without a Workspace are
-    judged by the ceiling. `link_lookalike` for non-ASCII/punycode hosts (shown as `xn--…`). IP
+    takes a tx; new `loadTeamEgressIn`); Site and portable items are judged by the ceiling
+    (review L-5: the reviewer's first option; the portable message says each workspace may allow
+    less). `link_lookalike` for non-ASCII/punycode hosts (shown as `xn--…`). IP
     literals are always `link_blocked`.
   - `policy.ts`: FTS candidates against active Policy (current versions' `statement_tsv`,
     `english`): ≥ 2 shared lexemes (all for a one-word Policy) and ≥ half of the Policy's. A
@@ -56,19 +59,59 @@ warnings}` (personal scopes too, as KOBE-378 already did for near-duplicates: st
   user/portable, Team admins + stewards for team, Site curators for site), recorded as
   `policy_override`, audited `memory.policy.override {scope,itemId,version,conflicts}`. Actor
   comes from the request's audit context (tested: `actor_id`).
-- **Restore** runs the secret scan only (`assertNoSecret`): the version passed the checks when
-  saved and restore has no overrides in the contract.
+- **Restore** runs the full checks (review H-1); the restore body is now
+  `restoreSemanticMemoryItemSchema` (`expected_version?`, `overrides?`; contract change in
+  `@kobe/protocol`, OpenAPI `RestoreSemanticMemoryItem`). Restore and a Policy change add no
+  version, so their overrides are audited at the current version only (versions are immutable).
 - **Shared quote normaliser:** `services/server/src/memory/quote-normalise.ts`
   (`normaliseQuote`, `quoteFoundIn`) for KOBE-393.
 - **Docs:** `docs/guide/memory.md` "What Kobe checks before a memory is saved".
+
+## Security review fixes (review-379, 2026-11-13)
+
+Every verified bypass is a golden test (`checks.test.ts` "security review bypasses",
+`memory-checks.db.test.ts` "restore runs every check" and "other write paths",
+`memory/items/write-paths.test.ts`, skill-scanner `scanner.test.ts`).
+
+- **H-1** restore runs `saveChecks` (lint, personal data, links, near-duplicate, Policy conflict,
+  overrides audited). Write paths are listed in `items/write-paths.test.ts`: create, patch
+  (statement or Policy change; tags-only edits scan the tags for secrets), Undo, restore run the
+  checks; archive and pin are exempt (no text enters use). A source sweep fails on any other file
+  writing the item/version tables.
+- **H-2** shared `SECRET_RULES` gained `connection-string` (URL user info password),
+  `password-unquoted` (`password=…`, `DB_PASSWORD=…`, `pwd: …`, "password is …"), `stripe-key`
+  (`sk_/rk_ live|test`, `whsec_`), `gitlab-token` (`glpat-` and siblings), `jwt`,
+  `azure-account-key`, and `xapp-` in `slack-token`. Generic values must look random
+  (`plausibleSecret`: letter + digit, no placeholder, not a dotted identifier like
+  `config.api_key_v2`). Skill fixtures: the only new hit is the deliberate fake Stripe key in
+  `builtin-skills/code-review/scripts/sample.py` (the review demo's planted finding; a Caution like
+  its other findings). No other builtin skill or fixture fires.
+- **M-1..M-3** scanner `INVISIBLE` uses `\p{Extended_Pictographic}` (digits no longer excuse a
+  selector or ZWJ; keycaps and skin-tone ZWJ sequences still pass) and adds U+180B–180F,
+  U+FFF9–FFFB, U+1D173–1D17A. The quote normaliser maps blank fillers (U+115F, U+1160, U+3164,
+  U+FFA0, U+2800) to a space and keeps emoji. The rule views (`plainText`) also drop every
+  default-ignorable code point (new `IGNORABLE`) and, after NFKD, every combining mark.
+- **M-4** a collapsed view (up to three spaces/hyphens/dots between token characters removed) is
+  read only by prefix-anchored rules (`SecretRule.split`, `matchSplitSecret`), and the token must
+  have a digit and no 9-letter lower-case run, so joined prose ("ghp_ prefix marks…") never
+  blocks.
+- **M-5** base64/base64url (24+) and hex (32+) runs, at most 8 per text and 4 KiB each, are
+  decoded once and rescanned when they read as text.
+- **L-1** a Policy change runs the checks on the unchanged statement. **L-2** justification and
+  note get lint and (Workspace/Site) personal data. **L-3** tags are secret-scanned on create,
+  patch and restore. **L-4** links: `scheme:` with 0–2 slashes or backslashes, and bare names under
+  an ICANN suffix (`isRegistrableHost`, `@kobe/db`, tldts), except names ending in a file
+  extension that is also a ccTLD (`.md`, `.py`, `.sh`, `.zip`, …); the lint's fetch rule uses the
+  same extractor (the hard-coded TLD list is gone). Heuristic: product names like `ASP.NET`
+  or `socket.io` now count as links. **L-5** portable links judged by the Site ceiling. **L-6**
+  `memory.policy.override` audits `conflicts: [{id, version}]` (≤25; audit schema changed).
+- ReDoS: every view and rule stays under 100 ms on 500-character adversarial inputs (tests).
 
 ## Open questions (for Chris or the coordinator)
 
 - Personal-scope lint is enforced like Workspace/Site (409 until "Save anyway", audited). If
   Chris wants it advisory only (save without a round trip), the item response needs a
   `warnings` field (contract change).
-- Restore re-runs only the secret scan; a Policy added since the item was archived is not
-  re-checked on restore.
 - Policy conflict is a lexical candidate match; it can flag related-but-compatible statements
   (by design "candidate", overridable). Phase B may want the learning model to confirm.
 

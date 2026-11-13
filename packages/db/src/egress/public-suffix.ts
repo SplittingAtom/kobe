@@ -37,6 +37,16 @@ export function isPublicSuffix(name: string): boolean {
   return parse(name, PSL).publicSuffix === name;
 }
 
+/**
+ * Whether `name` (canonical host) is a registrable name under an ICANN public suffix
+ * (`evil.de`, `docs.example.co.uk`; not `main.zzz` or a bare suffix). Used to spot bare host
+ * names in prose (KOBE-379 memory link checks).
+ */
+export function isRegistrableHost(name: string): boolean {
+  const parsed = parse(name, { allowPrivateDomains: false });
+  return parsed.isIcann === true && typeof parsed.domain === "string" && parsed.domain !== "";
+}
+
 /** Why a canonical pattern is not acceptable, or undefined. */
 export function publicSuffixProblem(pattern: string): string | undefined {
   if (!pattern.startsWith("*.")) return undefined;

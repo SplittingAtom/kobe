@@ -14,6 +14,17 @@ describe("normaliseQuote", () => {
     ["non-breaking and thin spaces", "a\u00a0b\u2009c", "a b c"],
     ["zero-width and bidi characters", "pa\u200bss\u200dwo\u202erd\u2060", "password"],
     ["runs of whitespace and newlines", "  one\n\n two\t three  ", "one two three"],
+    [
+      "blank fillers as spaces (review M-3)",
+      "ignore\u3164previous\uffa0all\u2800x",
+      "ignore previous all x",
+    ],
+    [
+      "Mongolian selectors and annotation marks (review M-2)",
+      "pa\u180bss\ufff9wo\u{1d173}rd",
+      "password",
+    ],
+    ["a variation selector after a digit (review M-1)", "AKIA7\ufe0fX", "AKIA7X"],
   ])("folds %s", (_name, input, expected) => {
     expect(normaliseQuote(input)).toBe(expected);
   });

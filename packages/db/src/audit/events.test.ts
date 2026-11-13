@@ -331,8 +331,13 @@ describe("audit event taxonomy", () => {
     expect(
       ok("memory.lint.override", { scope: "user", itemId, version: 1, warnings: ["instruction"] }),
     ).toBe(true);
-    expect(ok("memory.policy.override", { scope: "team", itemId, version: 1, conflicts: 2 })).toBe(
+    // KOBE-379 review L-6: the Policy items saved over, not a count.
+    const conflicts = [{ id: itemId, version: 2 }];
+    expect(ok("memory.policy.override", { scope: "team", itemId, version: 1, conflicts })).toBe(
       true,
+    );
+    expect(ok("memory.policy.override", { scope: "team", itemId, version: 1, conflicts: 2 })).toBe(
+      false,
     );
     expect(ok("memory.policy.set", { itemId, version: 1, policy: true })).toBe(true);
     expect(
