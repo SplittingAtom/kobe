@@ -7,7 +7,8 @@
 ## Plan
 
 Schema only: `packages/db/src/schema/semantic-memory.ts`, migrations `0216_semantic_memory`
-(generated) + `0217_semantic_memory_rls` (custom: RLS, immutability trigger), new tenancy area
+(generated) + `0217_semantic_memory_rls` (custom: RLS, legal-hold guards, deferred
+current-version keys, immutability trigger), new tenancy area
 `tenancy/memory.ts` (+ probe fixtures `testing/probe-fixtures/memory.ts`), tests, an upgrade note
 in `docs/install.md`. No feature code.
 
@@ -16,27 +17,42 @@ in `docs/install.md`. No feature code.
 - **Tables.** Workspace (team tables, canonical `team_isolation` policy, ENABLE + FORCE RLS,
   composite keys): `semantic_memory_items` (scope `user|team`, owner set exactly for `user`),
   `semantic_memory_item_versions`, `run_memory_items` (FK `(team_id, run_id)` → runs and
-  `(team_id, item_id, version)` → versions, both cascade). Portable (site-wide, like
+  `(team_id, item_id, version)` → versions, both cascade), plus the run records of the
+  site-wide lanes `run_portable_memory_items` / `run_site_memory_items` (team tables; FK
+  `(team_id, run_id)` → runs and `(item_id, version)` → that lane's versions, both cascade;
+  review M2, Policy is always in context). Portable (site-wide, like
   `personal_skills`): `portable_memory_items` (kind = `preference` only) + versions. Site
   (site-wide, like `site_settings`): `site_memory_items` (`policy` flag) + versions.
 - **New area file** `tenancy/memory.ts` (the brief named it); `memory_docs` (Notes) stays in
   `workspace.ts`. Grants as personal skills: items full DML, versions SELECT + INSERT only.
 - **Versions immutable** via `semantic_memory_versions_immutable()` (invoker rights, pinned
-  `search_path`), copied from `skill_versions_immutable` (0051): no UPDATE, no direct DELETE;
-  cascades from the item or team pass; a cross-team move is left to RLS (42501).
+  `search_path`), copied from `skill_versions_immutable` (0051): no direct DELETE (cascades
+  from the item or team pass); a cross-team move is left to RLS (42501). The one UPDATE allowed
+  (review L4) is the retention scrub on Workspace versions: `evidence`, `source_thread_id`,
+  `source_entry_ids` set to NULL (each NULL or unchanged), every other column unchanged
+  (`to_jsonb(NEW) - scrubbed = to_jsonb(OLD) - scrubbed`; `statement_tsv` excluded, generated).
+- **Legal hold (review M1)**, as `memory_docs` (0074): AFTER DELETE statement guards on items
+  (owner's hold, or any hold in the team for `team` items, via `memory_legal_hold_covers`) and
+  versions (skip cascaded rows); BEFORE TRUNCATE `legal_hold_refuse_truncate` on all five team
+  tables. Portable/Site items wait for the Site-wide hold (KOBE-386).
+- **current_version (review L2):** DEFERRABLE INITIALLY DEFERRED FK to the version row on all
+  three item tables (SQL-only in 0217): item + first version in one transaction.
+- **Portable actor = owner (L1):** the versions→items key is `(item_id, actor_user_id)` →
+  `(id, owner_user_id)`. **No `pass_id` on portable versions (L5).**
 - **Statement:** 1..500 chars after trimming; `statement_tsv` = `to_tsvector('english'::regconfig,
 statement)` stored generated (Q11, no language setting).
 - **Policy only in the Site table:** no `policy` column elsewhere and no `policy` kind anywhere.
 - **Supersession:** `superseded_by` set exactly when `status = 'superseded'`; self-FK stays inside
   the Workspace (`(team_id, superseded_by)`) or the owner (`(superseded_by, owner_user_id)` on
   portable). NO ACTION, so the replacement can't be deleted alone.
-- **Tags:** ≤ 5, no empty/NULL element, ≤ 200 chars total. `as_of` (date) on Workspace and Site
+- **Tags (L3):** ≤ 5, each 1..40 chars, no NULL element, no control characters (per-tag cap
+  without a function: tags joined by newline must not hold 41 non-newline characters in a row). `as_of` (date) on Workspace and Site
   items (facts/decisions); not on portable (preferences only).
 - **Provenance:** Workspace versions carry `pass_id` (exactly when `actor_kind = 'pass'`),
   `source_thread_id`, `source_entry_ids` (≤ 50, need a thread), `evidence` (array/object, ≤ 16 KiB).
   No FKs on pass/thread ids (passes don't exist yet, and purges must not block on history; same
   rule as `memory_doc_versions.run_id`). **Portable and Site versions have no thread links or
-  evidence** (walls: those are Workspace content). Site versions take `actor_kind`
+  evidence** (walls; confirmed by review Q2). Site versions take `actor_kind`
   `user|import|proposal` with `proposal_id` (KOBE-402, no FK yet) instead of `pass`.
 - `actor_user_id` NOT NULL on every version (a person always clicks save; users are never deleted).
 - **Indexes:** GIN tsvector + `gin_trgm_ops` only on `portable_memory_item_versions` and
@@ -44,31 +60,35 @@ statement)` stored generated (Q11, no language setting).
   `(team_id, owner_user_id, status) WHERE scope = 'user'`; versions use their PK.
 - **pg_trgm:** already created by `0013_thread_search.sql` (`CREATE EXTENSION IF NOT EXISTS`,
   trusted since PG 13, so the DB owner can create it); 0216 needs nothing extra.
-- No break-glass policy, legal-hold guard or stewards here (KOBE-386 / KOBE-380).
+- No break-glass policy (fails closed until KOBE-386) and no stewards (KOBE-380).
 
 ## Open questions (for Chris or the coordinator)
 
-1. `run_memory_items` records only Workspace items (as the brief says). Portable and Site items a
-   run used have no record table; if the context viewer / Gate D measurement needs them, a later
-   migration adds `run_portable_memory_items` / `run_site_memory_items` (or nullable columns).
-2. Portable versions keep no `source_thread_id`/`evidence` (they'd cross Workspaces). Provenance
-   of an inferred portable preference then lives only on its candidate (KOBE-389). OK?
-3. Legal hold / break-glass coverage of the new tables is left to KOBE-386.
+1. Should the retention scrub (L4) be refused while a legal hold covers the item? Today the
+   trigger allows it; retention code skips held owners (`retention/memory.ts`), and KOBE-386 can
+   add the DB check.
+2. Portable/Site items have no DB hold guard until the Site-wide hold (KOBE-386).
+
+Review 2026-11-12 (`docs/ledger/review-376.md`, untracked): M1, M2, L1-L5 fixed in 0216/0217
+(regenerated, no 0218); Q2 confirmed.
 
 ## Evidence (acceptance criteria → test or command output)
 
-- **ac-1:** `probe.db.test.ts` (fixtures for the 3 Workspace tables, raw SQL, no app filters) and
-  `catalog.db.test.ts` green; `semantic-memory-upgrade.db.test.ts` "refuses run records and
-  replacements that point into another Workspace" (invisible, 23503 composite FK, 42501 RLS).
+- **ac-1:** `probe.db.test.ts` (fixtures for the 5 team tables, raw SQL, no app filters) and
+  `catalog.db.test.ts` green; `semantic-memory.db.test.ts` "refuses run records and
+  replacements that point into another Workspace" (invisible, 23503 composite FK, 42501 RLS),
+  run records of every lane cascade with their item across Workspaces (M2), legal hold (M1).
   `tenancy.test.ts` asserts the split.
 - **ac-2:** upgrade test: portable/Site have no team_id and no RLS; app-role privileges exactly
   items = S/I/U/D, versions = S/I; no SECURITY DEFINER anywhere; trigger `search_path` pinned.
-- **ac-3:** upgrade test: non-preference portable kinds 23514; `policy` column 42703 outside the
+- **ac-3:** `semantic-memory.db.test.ts`: non-preference portable kinds 23514; `policy` column 42703 outside the
   Site table, `policy` kind 23514; 501 chars and blank 23514 in all three version tables, 500 OK;
   generation expression is `to_tsvector('english'::regconfig, statement)`; stemming
-  `'report':4 'run':1 'week':3`.
+  `'report':4 'run':1 'week':3`. Also L1 (23503), L2 (23503 at commit), L3, L4 (scrub OK,
+  every other UPDATE 55000), L5 (42703).
 - **ac-4:** upgrade test lists GIN indexes on the semantic tables: exactly the four on the
-  portable/Site version tables. Plans below.
+  portable/Site version tables. Plans below (indexes on the Workspace items unchanged by the review
+  fixes, so the plans stand).
 
 ### EXPLAIN plans (app role inside a team, FORCE RLS; 20 Workspaces × 1,000 team + 10 × 300 user items, ANALYZE)
 

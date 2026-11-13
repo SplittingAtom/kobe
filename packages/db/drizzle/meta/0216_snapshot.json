@@ -1,5 +1,5 @@
 {
-  "id": "b32c26fb-e360-43f1-abbf-c42f971f5953",
+  "id": "0893f77d-a079-4f09-9a9d-3b252db7ee59",
   "prevId": "ba197990-fd86-4cf8-8a1b-9edd63e45ff2",
   "version": "7",
   "dialect": "postgresql",
@@ -23767,12 +23767,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "pass_id": {
-          "name": "pass_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -23827,10 +23821,12 @@
           "tableFrom": "portable_memory_item_versions",
           "tableTo": "portable_memory_items",
           "columnsFrom": [
-            "item_id"
+            "item_id",
+            "actor_user_id"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "owner_user_id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -23859,10 +23855,6 @@
         "portable_memory_item_versions_actor": {
           "name": "portable_memory_item_versions_actor",
           "value": "\"portable_memory_item_versions\".\"actor_kind\" IN ('user', 'import', 'pass')"
-        },
-        "portable_memory_item_versions_pass": {
-          "name": "portable_memory_item_versions_pass",
-          "value": "(\"portable_memory_item_versions\".\"actor_kind\" = 'pass') = (\"portable_memory_item_versions\".\"pass_id\" IS NOT NULL)"
         }
       },
       "isRLSEnabled": false
@@ -24019,7 +24011,7 @@
         },
         "portable_memory_items_tags": {
           "name": "portable_memory_items_tags",
-          "value": "cardinality(\"portable_memory_items\".\"tags\") <= 5 AND array_position(\"portable_memory_items\".\"tags\", NULL) IS NULL AND '' <> ALL(\"portable_memory_items\".\"tags\") AND char_length(array_to_string(\"portable_memory_items\".\"tags\", '')) <= 200"
+          "value": "cardinality(\"portable_memory_items\".\"tags\") <= 5 AND array_position(\"portable_memory_items\".\"tags\", NULL) IS NULL AND '' <> ALL(\"portable_memory_items\".\"tags\") AND array_to_string(\"portable_memory_items\".\"tags\", '') !~ '[[:cntrl:]]' AND array_to_string(\"portable_memory_items\".\"tags\", chr(10)) !~ ('[^' || chr(10) || ']{41}')"
         },
         "portable_memory_items_version": {
           "name": "portable_memory_items_version",
@@ -24137,6 +24129,244 @@
       "compositePrimaryKeys": {
         "run_memory_items_team_id_run_id_item_id_pk": {
           "name": "run_memory_items_team_id_run_id_item_id_pk",
+          "columns": [
+            "team_id",
+            "run_id",
+            "item_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.run_portable_memory_items": {
+      "name": "run_portable_memory_items",
+      "schema": "",
+      "columns": {
+        "team_id": {
+          "name": "team_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "run_portable_memory_items_item_idx": {
+          "name": "run_portable_memory_items_item_idx",
+          "columns": [
+            {
+              "expression": "item_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "version",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "run_portable_memory_items_team_id_teams_id_fk": {
+          "name": "run_portable_memory_items_team_id_teams_id_fk",
+          "tableFrom": "run_portable_memory_items",
+          "tableTo": "teams",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "run_portable_memory_items_run_fk": {
+          "name": "run_portable_memory_items_run_fk",
+          "tableFrom": "run_portable_memory_items",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "team_id",
+            "run_id"
+          ],
+          "columnsTo": [
+            "team_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "run_portable_memory_items_version_fk": {
+          "name": "run_portable_memory_items_version_fk",
+          "tableFrom": "run_portable_memory_items",
+          "tableTo": "portable_memory_item_versions",
+          "columnsFrom": [
+            "item_id",
+            "version"
+          ],
+          "columnsTo": [
+            "item_id",
+            "version"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "run_portable_memory_items_team_id_run_id_item_id_pk": {
+          "name": "run_portable_memory_items_team_id_run_id_item_id_pk",
+          "columns": [
+            "team_id",
+            "run_id",
+            "item_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.run_site_memory_items": {
+      "name": "run_site_memory_items",
+      "schema": "",
+      "columns": {
+        "team_id": {
+          "name": "team_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "run_site_memory_items_item_idx": {
+          "name": "run_site_memory_items_item_idx",
+          "columns": [
+            {
+              "expression": "item_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "version",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "run_site_memory_items_team_id_teams_id_fk": {
+          "name": "run_site_memory_items_team_id_teams_id_fk",
+          "tableFrom": "run_site_memory_items",
+          "tableTo": "teams",
+          "columnsFrom": [
+            "team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "run_site_memory_items_run_fk": {
+          "name": "run_site_memory_items_run_fk",
+          "tableFrom": "run_site_memory_items",
+          "tableTo": "runs",
+          "columnsFrom": [
+            "team_id",
+            "run_id"
+          ],
+          "columnsTo": [
+            "team_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "run_site_memory_items_version_fk": {
+          "name": "run_site_memory_items_version_fk",
+          "tableFrom": "run_site_memory_items",
+          "tableTo": "site_memory_item_versions",
+          "columnsFrom": [
+            "item_id",
+            "version"
+          ],
+          "columnsTo": [
+            "item_id",
+            "version"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "run_site_memory_items_team_id_run_id_item_id_pk": {
+          "name": "run_site_memory_items_team_id_run_id_item_id_pk",
           "columns": [
             "team_id",
             "run_id",
@@ -24553,7 +24783,7 @@
         },
         "semantic_memory_items_tags": {
           "name": "semantic_memory_items_tags",
-          "value": "cardinality(\"semantic_memory_items\".\"tags\") <= 5 AND array_position(\"semantic_memory_items\".\"tags\", NULL) IS NULL AND '' <> ALL(\"semantic_memory_items\".\"tags\") AND char_length(array_to_string(\"semantic_memory_items\".\"tags\", '')) <= 200"
+          "value": "cardinality(\"semantic_memory_items\".\"tags\") <= 5 AND array_position(\"semantic_memory_items\".\"tags\", NULL) IS NULL AND '' <> ALL(\"semantic_memory_items\".\"tags\") AND array_to_string(\"semantic_memory_items\".\"tags\", '') !~ '[[:cntrl:]]' AND array_to_string(\"semantic_memory_items\".\"tags\", chr(10)) !~ ('[^' || chr(10) || ']{41}')"
         },
         "semantic_memory_items_version": {
           "name": "semantic_memory_items_version",
@@ -24861,7 +25091,7 @@
         },
         "site_memory_items_tags": {
           "name": "site_memory_items_tags",
-          "value": "cardinality(\"site_memory_items\".\"tags\") <= 5 AND array_position(\"site_memory_items\".\"tags\", NULL) IS NULL AND '' <> ALL(\"site_memory_items\".\"tags\") AND char_length(array_to_string(\"site_memory_items\".\"tags\", '')) <= 200"
+          "value": "cardinality(\"site_memory_items\".\"tags\") <= 5 AND array_position(\"site_memory_items\".\"tags\", NULL) IS NULL AND '' <> ALL(\"site_memory_items\".\"tags\") AND array_to_string(\"site_memory_items\".\"tags\", '') !~ '[[:cntrl:]]' AND array_to_string(\"site_memory_items\".\"tags\", chr(10)) !~ ('[^' || chr(10) || ']{41}')"
         },
         "site_memory_items_version": {
           "name": "site_memory_items_version",

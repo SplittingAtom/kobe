@@ -66,6 +66,8 @@ describe("tenancy registry", () => {
       "semantic_memory_items",
       "semantic_memory_item_versions",
       "run_memory_items",
+      "run_portable_memory_items",
+      "run_site_memory_items",
     ]) {
       expect(isTeamTable(t)).toBe(true);
     }

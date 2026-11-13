@@ -6,7 +6,14 @@ import { ALL_PRIVILEGES, defineDomain } from "./types.js";
  * File memory (`memory_docs`, the UI's Notes) stays in `workspace.ts`.
  */
 export const memory = defineDomain({
-  team: ["semantic_memory_items", "semantic_memory_item_versions", "run_memory_items"],
+  team: [
+    "semantic_memory_items",
+    "semantic_memory_item_versions",
+    "run_memory_items",
+    // Run records for the site-wide lanes: the run belongs to the Workspace.
+    "run_portable_memory_items",
+    "run_site_memory_items",
+  ],
   siteWide: [
     "portable_memory_items",
     "portable_memory_item_versions",

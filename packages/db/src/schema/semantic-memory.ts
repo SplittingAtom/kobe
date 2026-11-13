@@ -98,7 +98,10 @@ const itemColumns = () => ({
     .array()
     .notNull()
     .default(sql`'{}'::text[]`),
-  /** Newest row of the versions table (a row exists only with its first version). */
+  /**
+   * Newest row of the versions table. A DEFERRABLE INITIALLY DEFERRED key to that row (SQL-only,
+   * `*_semantic_memory_rls`) means an item and its first version go in one transaction.
+   */
   currentVersion: integer().notNull().default(1),
   createdAt: ts().notNull().defaultNow(),
   updatedAt: ts().notNull().defaultNow(),
@@ -124,10 +127,12 @@ const itemChecks = (
     `${prefix}_superseded`,
     sql`(${t.status} = 'superseded') = (${t.supersededBy} IS NOT NULL) AND ${t.supersededBy} IS DISTINCT FROM ${t.id}`,
   ),
-  // No empty tag; array_position finds a NULL element too.
+  // ≤ 5 tags of 1..40 characters, no NULL element (array_position finds one), no control
+  // characters. The per-tag cap without a function: tags joined by a newline (which no tag may
+  // hold) must not contain a run of 41 non-newline characters.
   check(
     `${prefix}_tags`,
-    sql`cardinality(${t.tags}) <= ${n(SEMANTIC_MEMORY_TAGS_MAX)} AND array_position(${t.tags}, NULL) IS NULL AND '' <> ALL(${t.tags}) AND char_length(array_to_string(${t.tags}, '')) <= ${n(SEMANTIC_MEMORY_TAGS_MAX * SEMANTIC_MEMORY_TAG_MAX)}`,
+    sql`cardinality(${t.tags}) <= ${n(SEMANTIC_MEMORY_TAGS_MAX)} AND array_position(${t.tags}, NULL) IS NULL AND '' <> ALL(${t.tags}) AND array_to_string(${t.tags}, '') !~ '[[:cntrl:]]' AND array_to_string(${t.tags}, chr(10)) !~ ('[^' || chr(10) || ']{${n(SEMANTIC_MEMORY_TAG_MAX + 1)}}')`,
   ),
   check(`${prefix}_version`, sql`${t.currentVersion} >= 1`),
 ];
@@ -228,6 +233,8 @@ export const semanticMemoryItems = pgTable(
  * Provenance: `source_thread_id` and `source_entry_ids` name the conversation (no key, so a purged
  * thread leaves history alone; the server checks the thread is in this Workspace), `evidence` holds
  * the quotes a learning pass verified, and `pass_id` the pass (no key: passes are purged first).
+ * The one UPDATE the immutability trigger allows sets `evidence`, `source_thread_id` and
+ * `source_entry_ids` to NULL (the retention scrub when the thread goes).
  */
 export const semanticMemoryItemVersions = pgTable(
   "semantic_memory_item_versions",
@@ -330,28 +337,30 @@ export const portableMemoryItems = pgTable(
   ],
 );
 
-/** Site-wide (†): immutable versions of portable items (app role: SELECT and INSERT only). */
+/**
+ * Site-wide (†): immutable versions of portable items (app role: SELECT and INSERT only). The
+ * actor is always the item's owner (the key includes it). No `pass_id`: passes are Workspace rows,
+ * so pass provenance stays on the candidate in its Workspace (`actor_kind = 'pass'` says enough).
+ */
 export const portableMemoryItemVersions = pgTable(
   "portable_memory_item_versions",
   {
     itemId: uuid().notNull(),
     ...versionColumns(),
     actorKind: text().$type<SemanticMemoryActorKind>().notNull(),
-    passId: uuid(),
   },
   (t): PgTableExtraConfigValue[] => [
     primaryKey({ columns: [t.itemId, t.version] }),
     foreignKey({
       name: "portable_memory_item_versions_item_fk",
-      columns: [t.itemId],
-      foreignColumns: [portableMemoryItems.id],
+      columns: [t.itemId, t.actorUserId],
+      foreignColumns: [portableMemoryItems.id, portableMemoryItems.ownerUserId],
     }).onDelete("cascade"),
     ...versionChecks("portable_memory_item_versions", t),
     check(
       "portable_memory_item_versions_actor",
       sql`${t.actorKind} IN (${list(SEMANTIC_MEMORY_ACTOR_KIND_VALUES)})`,
     ),
-    passCheck("portable_memory_item_versions", t.actorKind, t.passId),
     ...searchIndexes("portable_memory_item_versions", t),
   ],
 );
@@ -413,5 +422,65 @@ export const siteMemoryItemVersions = pgTable(
       sql`(${t.actorKind} = 'proposal') = (${t.proposalId} IS NOT NULL)`,
     ),
     ...searchIndexes("site_memory_item_versions", t),
+  ],
+);
+
+// ---------------------------------------------------------------------------------------------
+// Run records for the portable and Site lanes (team tables: the run is the Workspace's)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Team table: which portable item versions a run was given. Goes with the run, and with the item
+ * (the cascade from the site-wide row reaches every Workspace: referential actions ignore RLS).
+ * Only ids of the run owner's own preferences, read owner-only like the context viewer.
+ */
+export const runPortableMemoryItems = pgTable(
+  "run_portable_memory_items",
+  {
+    teamId: teamRef(),
+    runId: uuid().notNull(),
+    itemId: uuid().notNull(),
+    version: integer().notNull(),
+    createdAt: ts().notNull().defaultNow(),
+  },
+  (t): PgTableExtraConfigValue[] => [
+    primaryKey({ columns: [t.teamId, t.runId, t.itemId] }),
+    foreignKey({
+      name: "run_portable_memory_items_run_fk",
+      columns: [t.teamId, t.runId],
+      foreignColumns: [runs.teamId, runs.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "run_portable_memory_items_version_fk",
+      columns: [t.itemId, t.version],
+      foreignColumns: [portableMemoryItemVersions.itemId, portableMemoryItemVersions.version],
+    }).onDelete("cascade"),
+    index("run_portable_memory_items_item_idx").on(t.itemId, t.version),
+  ],
+);
+
+/** Team table: which Site item versions (Policy included) a run was given (SM23, U48, Gate D). */
+export const runSiteMemoryItems = pgTable(
+  "run_site_memory_items",
+  {
+    teamId: teamRef(),
+    runId: uuid().notNull(),
+    itemId: uuid().notNull(),
+    version: integer().notNull(),
+    createdAt: ts().notNull().defaultNow(),
+  },
+  (t): PgTableExtraConfigValue[] => [
+    primaryKey({ columns: [t.teamId, t.runId, t.itemId] }),
+    foreignKey({
+      name: "run_site_memory_items_run_fk",
+      columns: [t.teamId, t.runId],
+      foreignColumns: [runs.teamId, runs.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "run_site_memory_items_version_fk",
+      columns: [t.itemId, t.version],
+      foreignColumns: [siteMemoryItemVersions.itemId, siteMemoryItemVersions.version],
+    }).onDelete("cascade"),
+    index("run_site_memory_items_item_idx").on(t.itemId, t.version),
   ],
 );

@@ -1069,8 +1069,9 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
 
 - **Semantic memory tables (KOBE-376).** Migrations `0216_semantic_memory` and
   `0217_semantic_memory_rls` add empty tables for v1.3 Semantic Memory: the team tables
-  `semantic_memory_items`, `semantic_memory_item_versions` and `run_memory_items` (row-level
-  security per team), and the site-wide `portable_memory_items`, `site_memory_items` and their
+  `semantic_memory_items`, `semantic_memory_item_versions`, `run_memory_items`,
+  `run_portable_memory_items` and `run_site_memory_items` (row-level security per team, legal-hold
+  guards as for Notes), and the site-wide `portable_memory_items`, `site_memory_items` and their
   `*_versions` tables (full-text and trigram indexes; the `pg_trgm` extension is already present
   since migration 0013). Nothing reads them yet, so the upgrade changes no behaviour and a
   `helm rollback` leaves the previous release working.
