@@ -76,9 +76,9 @@ describe("tenancy registry", () => {
     const all = ["SELECT", "INSERT", "UPDATE", "DELETE"];
     const siteWide: Record<string, string[]> = {
       portable_memory_items: all,
-      portable_memory_item_versions: ["SELECT", "INSERT"],
+      portable_memory_item_versions: ["SELECT", "INSERT", "DELETE"],
       site_memory_items: all,
-      site_memory_item_versions: ["SELECT", "INSERT"],
+      site_memory_item_versions: ["SELECT", "INSERT", "DELETE"],
     };
     for (const [t, privileges] of Object.entries(siteWide)) {
       expect(SITE_WIDE_TABLES).toContain(t);

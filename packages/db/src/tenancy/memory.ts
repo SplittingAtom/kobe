@@ -28,12 +28,13 @@ export const memory = defineDomain({
   grants: {
     // Portable preferences (like personal_skills): the server confines rows to their owner.
     portable_memory_items: ALL_PRIVILEGES,
-    // Versions are immutable: append and read only (a trigger backs this up).
-    portable_memory_item_versions: ["SELECT", "INSERT"],
+    // Versions are immutable: append and read; DELETE only for the version cap (KOBE-378), which
+    // the trigger limits to non-current versions no run used (0222).
+    portable_memory_item_versions: ["SELECT", "INSERT", "DELETE"],
     // Site items (like site_settings): read in every Workspace; the server writes them only for
     // Site admins and stewards. DELETE: a purge of a Site item (its versions go with it).
     site_memory_items: ALL_PRIVILEGES,
-    site_memory_item_versions: ["SELECT", "INSERT"],
+    site_memory_item_versions: ["SELECT", "INSERT", "DELETE"],
   },
   teamReferencing: {},
 });

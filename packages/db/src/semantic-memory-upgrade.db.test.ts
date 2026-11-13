@@ -123,9 +123,9 @@ describe("semantic memory tables on upgrade (KOBE-376)", () => {
       );
       const all = ["SELECT", "INSERT", "UPDATE", "DELETE"];
       expect(rows).toEqual([
-        { name: "portable_memory_item_versions", privs: ["SELECT", "INSERT"] },
+        { name: "portable_memory_item_versions", privs: ["SELECT", "INSERT", "DELETE"] },
         { name: "portable_memory_items", privs: all },
-        { name: "site_memory_item_versions", privs: ["SELECT", "INSERT"] },
+        { name: "site_memory_item_versions", privs: ["SELECT", "INSERT", "DELETE"] },
         { name: "site_memory_items", privs: all },
       ]);
     });
