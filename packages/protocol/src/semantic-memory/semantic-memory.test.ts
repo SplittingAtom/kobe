@@ -74,6 +74,8 @@ const GOLDEN: [string, z.ZodType][] = [
   ["error-import-invalid", semanticMemoryErrorSchema],
   ["error-import-too-large", semanticMemoryErrorSchema],
   ["error-import-stale", semanticMemoryErrorSchema],
+  ["error-near-duplicate", semanticMemoryErrorSchema],
+  ["error-pin-limit", semanticMemoryErrorSchema],
 ];
 
 describe("semantic memory golden fixtures (ac-1)", () => {
@@ -219,7 +221,13 @@ describe("item API requests", () => {
     expect(create({ policy: true }).success).toBe(false);
     expect(create({ scope: "site", policy: true }).success).toBe(true);
     expect(create({ scope: "portable" }).success).toBe(false);
-    expect(create({ scope: "portable", kind: "preference", as_of: undefined }).success).toBe(true);
+    expect(create({ scope: "portable", kind: "preference", as_of: undefined }).success).toBe(false);
+    expect(
+      create({ scope: "portable", kind: "preference", as_of: undefined, confirm_portable: true })
+        .success,
+    ).toBe(true);
+    // KOBE-378: confirm_portable only (and always) on a portable save.
+    expect(create({ confirm_portable: true }).success).toBe(false);
     expect(create({ scope: "site", source_thread_id: fixture("item-detail").id }).success).toBe(
       false,
     );

@@ -57,6 +57,8 @@ export const SEMANTIC_MEMORY_TAG_MAX = 40;
 export const SEMANTIC_MEMORY_SOURCE_ENTRIES_MAX = 50;
 /** Most active items per scope (per person for user/portable, per Workspace, per Site; SM21). */
 export const SEMANTIC_MEMORY_SCOPE_MAX_ITEMS = 1000;
+/** Most pinned active items per scope (KOBE-378; per person for user/portable). */
+export const SEMANTIC_MEMORY_PINS_MAX = 10;
 /** Policy (SM23): at most 25 items and 2 KiB of statements, always in context. */
 export const SEMANTIC_MEMORY_POLICY_MAX_ITEMS = 25;
 export const SEMANTIC_MEMORY_POLICY_MAX_BYTES = 2 * 1024;

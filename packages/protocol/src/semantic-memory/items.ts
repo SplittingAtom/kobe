@@ -222,6 +222,7 @@ const createRules = (
     as_of?: string | undefined;
     source_thread_id?: string | undefined;
     source_entry_ids?: string[] | undefined;
+    confirm_portable?: true | undefined;
   },
   ctx: z.RefinementCtx,
 ) => {
@@ -234,6 +235,10 @@ const createRules = (
     issue("kind", "portable items are preferences");
   if (v.scope === "portable" && v.as_of !== undefined)
     issue("as_of", "portable items have no as_of");
+  // KOBE-378 (SM6): a portable item follows the person into every Workspace; saving one is an
+  // explicit choice.
+  if ((v.scope === "portable") !== (v.confirm_portable === true))
+    issue("confirm_portable", "send confirm_portable: true exactly when saving a portable item");
   const linked = v.source_thread_id !== undefined || v.source_entry_ids !== undefined;
   if (linked && v.scope !== "user" && v.scope !== "team")
     issue("source_thread_id", "thread links stay in the Workspace");
@@ -244,6 +249,8 @@ const createRules = (
 /**
  * `POST /v1/memory/semantic/items`. `supersedes_id`: an active item of the same scope this one
  * replaces (it becomes `superseded`). Source links name the conversation (Workspace scopes only).
+ * `confirm_portable: true` is required for (and only for) a portable item (KOBE-378). Tags are
+ * stored trimmed and lowercased, duplicates dropped.
  */
 export const createSemanticMemoryItemSchema = z
   .strictObject({
@@ -258,6 +265,7 @@ export const createSemanticMemoryItemSchema = z
     source_thread_id: uuidSchema.optional(),
     source_entry_ids: semanticMemorySourceEntryIdsSchema.optional(),
     overrides: semanticMemoryOverridesSchema.optional(),
+    confirm_portable: z.literal(true).optional(),
   })
   .superRefine(createRules);
 export type CreateSemanticMemoryItem = z.infer<typeof createSemanticMemoryItemSchema>;

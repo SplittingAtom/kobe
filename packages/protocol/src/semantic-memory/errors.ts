@@ -21,7 +21,11 @@ export const SEMANTIC_MEMORY_ERROR_CODES = [
   "memory_disabled",
   /** No learning model is set or enabled for the Workspace (Q5: never falls back). */
   "memory_learning_model_unavailable",
-  /** Lint warnings (instruction, personal data, links; SM18) in `warnings`. Overridable, audited. */
+  /**
+   * Lint warnings (instruction, personal data, links; SM18) in `warnings`. Overridable, audited.
+   * A near-duplicate of an active item in the same scope is the warning `near_duplicate`, with
+   * the items in `duplicates` (KOBE-378, every save path).
+   */
   "memory_lint_warning",
   /** `expected_version` is not the current version any more. */
   "memory_version_conflict",
@@ -42,6 +46,8 @@ export const SEMANTIC_MEMORY_ERROR_CODES = [
   "memory_import_stale",
   /** Policy items are always in context: pinning one (or making a pinned item Policy) is refused. */
   "memory_policy_not_pinnable",
+  /** The scope already has its maximum of pinned active items (10; KOBE-378). Unpin one first. */
+  "memory_pin_limit",
 ] as const;
 export const semanticMemoryErrorCodeSchema = z.enum(SEMANTIC_MEMORY_ERROR_CODES);
 export type SemanticMemoryErrorCode = z.infer<typeof semanticMemoryErrorCodeSchema>;
@@ -62,6 +68,7 @@ export const SEMANTIC_MEMORY_ERROR_HTTP_STATUS = {
   memory_import_too_large: 413,
   memory_import_stale: 409,
   memory_policy_not_pinnable: 409,
+  memory_pin_limit: 409,
 } as const satisfies Record<SemanticMemoryErrorCode, number>;
 
 /** One check's finding: a stable code and a sentence for people. Never the matched secret. */
@@ -80,6 +87,21 @@ export const semanticMemoryErrorSchema = z.strictObject({
   policy_conflicts: z
     .array(z.strictObject({ id: uuidSchema, version: z.number().int().positive() }))
     .max(25)
+    .optional(),
+  /**
+   * `memory_lint_warning` with `near_duplicate`: active items of the same scope whose current
+   * statement is similar (trigram similarity 0..1), most similar first. Only items the caller
+   * can read.
+   */
+  duplicates: z
+    .array(
+      z.strictObject({
+        id: uuidSchema,
+        version: z.number().int().positive(),
+        similarity: z.number().min(0).max(1),
+      }),
+    )
+    .max(5)
     .optional(),
   /** `memory_scope_full`: active items, the cap, and how many the request needed. */
   capacity: z

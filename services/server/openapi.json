@@ -10354,7 +10354,7 @@
       "post": {
         "operationId": "createSemanticMemoryItem",
         "summary": "Save a memory item",
-        "description": "Runs the save checks (secret scan, lint, Policy conflict, limits). Portable items are preferences; Policy exists only on the Site.",
+        "description": "Runs the save checks (secret scan, lint, Policy conflict, near-duplicate, limits). Portable items are preferences and need `confirm_portable: true`; Policy exists only on the Site and only Site admins set it. Tags are stored lowercased. When the scope reaches 80% of its limit, its curators get one `memory.scope.near_full` notification per crossing (Workspace and Site scopes).",
         "parameters": [
           {
             "name": "X-Kobe-Team",
@@ -10429,7 +10429,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited; a near-duplicate of an active item in the same scope is the warning `near_duplicate` with the items in `duplicates`), `memory_scope_full` (the scope's limit is reached; nothing is ever evicted: archive items first), `memory_policy_budget_full` (25 Policy items or 2 KiB), `memory_pin_limit` (10 pinned per scope), `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10542,6 +10542,7 @@
       "patch": {
         "operationId": "editSemanticMemoryItem",
         "summary": "Edit a memory item (a statement change adds a version)",
+        "description": "Versions are immutable. Past the Site's version cap (default 50) the oldest versions are pruned on write, except the current one, any version a run used, and while a legal hold covers the item.",
         "parameters": [
           {
             "name": "scope",
@@ -10635,7 +10636,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited; a near-duplicate of an active item in the same scope is the warning `near_duplicate` with the items in `duplicates`), `memory_scope_full` (the scope's limit is reached; nothing is ever evicted: archive items first), `memory_policy_budget_full` (25 Policy items or 2 KiB), `memory_pin_limit` (10 pinned per scope), `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10660,7 +10661,7 @@
     "/v1/memory/semantic/items/{scope}/{id}/archive": {
       "post": {
         "operationId": "archiveSemanticMemoryItem",
-        "summary": "Archive a memory item (never deleted; its versions stay)",
+        "summary": "Archive a memory item (never deleted; its versions stay; archiving unpins it)",
         "parameters": [
           {
             "name": "scope",
@@ -10754,7 +10755,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited; a near-duplicate of an active item in the same scope is the warning `near_duplicate` with the items in `duplicates`), `memory_scope_full` (the scope's limit is reached; nothing is ever evicted: archive items first), `memory_policy_budget_full` (25 Policy items or 2 KiB), `memory_pin_limit` (10 pinned per scope), `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10873,7 +10874,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited; a near-duplicate of an active item in the same scope is the warning `near_duplicate` with the items in `duplicates`), `memory_scope_full` (the scope's limit is reached; nothing is ever evicted: archive items first), `memory_policy_budget_full` (25 Policy items or 2 KiB), `memory_pin_limit` (10 pinned per scope), `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10992,7 +10993,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited; a near-duplicate of an active item in the same scope is the warning `near_duplicate` with the items in `duplicates`), `memory_scope_full` (the scope's limit is reached; nothing is ever evicted: archive items first), `memory_policy_budget_full` (25 Policy items or 2 KiB), `memory_pin_limit` (10 pinned per scope), `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11111,7 +11112,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited; a near-duplicate of an active item in the same scope is the warning `near_duplicate` with the items in `duplicates`), `memory_scope_full` (the scope's limit is reached; nothing is ever evicted: archive items first), `memory_policy_budget_full` (25 Policy items or 2 KiB), `memory_pin_limit` (10 pinned per scope), `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -23451,6 +23452,10 @@
               }
             },
             "additionalProperties": false
+          },
+          "confirm_portable": {
+            "type": "boolean",
+            "const": true
           }
         },
         "required": ["scope", "kind", "statement"],
@@ -23928,7 +23933,8 @@
               "memory_import_invalid",
               "memory_import_too_large",
               "memory_import_stale",
-              "memory_policy_not_pinnable"
+              "memory_policy_not_pinnable",
+              "memory_pin_limit"
             ]
           },
           "message": {
@@ -23980,6 +23986,38 @@
                 }
               },
               "required": ["id", "version"],
+              "additionalProperties": false
+            }
+          },
+          "duplicates": {
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "version": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "similarity": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": ["id", "version", "similarity"],
               "additionalProperties": false
             }
           },
