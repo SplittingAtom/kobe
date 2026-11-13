@@ -1070,8 +1070,11 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
 - **Memory stewards (KOBE-380).** Migrations `0218_memory_stewards` and
   `0219_memory_stewards_rls` add the `memory_steward` value to the `site_grant` type (Site memory
   stewards) and the empty team table `memory_stewards` (Workspace memory stewards, row-level
-  security per team; a steward row goes with its membership). Existing grants are kept. On a
-  `helm rollback` the previous release ignores both.
+  security per team; a steward row goes with its membership). Existing grants are kept. The
+  previous release can't read a `memory_steward` grant row (its Site roles grant list and the
+  admin tools fail on it): before a `helm rollback` past this release, take every Site memory
+  steward grant in **Site roles**, or roll forward instead. The `memory_stewards` table is ignored
+  by older releases.
 - **Semantic memory tables (KOBE-376).** Migrations `0216_semantic_memory` and
   `0217_semantic_memory_rls` add empty tables for v1.3 Semantic Memory: the team tables
   `semantic_memory_items`, `semantic_memory_item_versions`, `run_memory_items`,

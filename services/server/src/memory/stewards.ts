@@ -3,6 +3,7 @@ import {
   and,
   asc,
   eq,
+  isNull,
   memoryStewards,
   siteGrants,
   teamMembers,
@@ -37,20 +38,23 @@ const toWire = (r: Row): MemorySteward => ({
   granted_at: r.grantedAt.toISOString(),
 });
 
-/** The Workspace's stewards, by name. */
+/** The Workspace's stewards with active accounts, by name (a deactivated one counts for nothing). */
 export async function listWorkspaceStewards(db: KobeDb, teamId: string): Promise<MemorySteward[]> {
   const rows = await withTeam(db, teamId, (tx) =>
     tx
       .select(STEWARD_COLUMNS)
       .from(memoryStewards)
       .innerJoin(users, eq(users.id, memoryStewards.userId))
-      .where(eq(memoryStewards.teamId, teamId))
+      .where(and(eq(memoryStewards.teamId, teamId), isNull(users.deactivatedAt)))
       .orderBy(asc(users.name), asc(memoryStewards.userId)),
   );
   return rows.map(toWire);
 }
 
-/** Whether `userId` is a steward of the Workspace (read per request, so revoking works at once). */
+/**
+ * Whether `userId` is an active steward of the Workspace (read per request, so revoking works at
+ * once; a deactivated account is never a steward, as in `grantsOf`).
+ */
 export async function isWorkspaceSteward(
   db: KobeDb,
   teamId: string,
@@ -60,16 +64,26 @@ export async function isWorkspaceSteward(
     tx
       .select({ userId: memoryStewards.userId })
       .from(memoryStewards)
-      .where(and(eq(memoryStewards.teamId, teamId), eq(memoryStewards.userId, userId))),
+      .innerJoin(users, eq(users.id, memoryStewards.userId))
+      .where(
+        and(
+          eq(memoryStewards.teamId, teamId),
+          eq(memoryStewards.userId, userId),
+          isNull(users.deactivatedAt),
+        ),
+      ),
   );
   return rows.length > 0;
 }
 
 export type GrantStewardResult =
   | { readonly ok: true; readonly steward: MemorySteward; readonly changed: boolean }
-  | { readonly ok: false; readonly code: "user_not_found" };
+  | { readonly ok: false; readonly code: "user_not_found" | "user_deactivated" };
 
-/** Makes a member of the Workspace a steward (any role); idempotent, audited once. */
+/**
+ * Makes an active member of the Workspace a steward (any role); idempotent, audited once. A
+ * deactivated account is refused (as `giveGrant`), so a grant never springs to life on reactivation.
+ */
 export async function grantWorkspaceSteward(
   db: KobeDb,
   teamId: string,
@@ -79,11 +93,14 @@ export async function grantWorkspaceSteward(
   return withTeam(db, teamId, async (tx) => {
     // The membership row is held while the grant is written, so a concurrent removal waits.
     const [member] = await tx
-      .select({ userId: teamMembers.userId })
+      .select({ deactivatedAt: users.deactivatedAt })
       .from(teamMembers)
+      .innerJoin(users, eq(users.id, teamMembers.userId))
       .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)))
       .for("share");
     if (!member) return { ok: false as const, code: "user_not_found" as const };
+    if (member.deactivatedAt !== null)
+      return { ok: false as const, code: "user_deactivated" as const };
     const added = await tx
       .insert(memoryStewards)
       .values({ teamId, userId, grantedBy: by })

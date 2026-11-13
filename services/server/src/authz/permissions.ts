@@ -216,3 +216,28 @@ export function siteMemoryAllows(who: SiteMemoryWho, permission: SitePermission)
   if (siteRoleAllows(who.siteRole, permission)) return true;
   return who.grants.includes("memory_steward") && SITE_STEWARD.has(permission);
 }
+
+/**
+ * A write to Site memory (KOBE-380 review M-1, SM23): an item create/patch/archive/restore/pin/
+ * revert (`item`), or accepting a Site proposal (`proposal`). The item store (KOBE-378) and the
+ * Site proposal accept route (KOBE-402/403) must call {@link siteMemoryWriteAllows}.
+ */
+export interface SiteMemoryWrite {
+  readonly via: "item" | "proposal";
+  /** The body names `policy`, true or false (accepting a proposal "as Policy" included). */
+  readonly policyField: boolean;
+  /** The target item is Policy now: editing, archiving, pinning or reverting it changes Policy. */
+  readonly targetIsPolicy: boolean;
+}
+
+/**
+ * Curate (`item`) or decide (`proposal`) as for {@link siteMemoryAllows}; any Policy change also
+ * needs `site.memory.policy` (Site admins and the Owner only), so a Site steward never sets,
+ * clears or edits Policy.
+ */
+export function siteMemoryWriteAllows(who: SiteMemoryWho, write: SiteMemoryWrite): boolean {
+  const base = write.via === "item" ? "site.memory.curate" : "site.memory.site_proposals.decide";
+  if (!siteMemoryAllows(who, base)) return false;
+  if (write.policyField || write.targetIsPolicy) return siteMemoryAllows(who, "site.memory.policy");
+  return true;
+}

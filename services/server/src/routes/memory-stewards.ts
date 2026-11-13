@@ -39,6 +39,11 @@ export function teamMemoryStewardRoutes(deps: ServerDeps): Hono<{ Variables: Tea
     const userId = idSchema.safeParse(c.req.param("userId"));
     if (!userId.success) return invalidRequest(c, "userId must be a user id.");
     const r = await grantWorkspaceSteward(db, c.get("team").id, userId.data, c.get("user").id);
+    if (!r.ok && r.code === "user_deactivated")
+      return c.json(
+        { code: "user_deactivated", message: "Reactivate the account before granting." },
+        409,
+      );
     if (!r.ok)
       return c.json({ code: "user_not_found", message: "Not a member of this workspace." }, 404);
     return c.json(r.steward);

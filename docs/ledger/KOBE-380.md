@@ -48,6 +48,16 @@ site.memory.site_proposals.decide]` (coordinator 2026-11-13, spec: Team admin co
   works there; titles/descriptions now name both grants. The team member tools list no grants,
   so no Workspace steward tool was added.
 - `memory.policy.set` audit comment corrected: Site stewards never set Policy.
+- **Review 2026-11-13 (`docs/ledger/review-380.md`, untracked):** M-1: `siteMemoryWriteAllows(who,
+{via: item|proposal, policyField, targetIsPolicy})` in `permissions.ts`: any body naming
+  `policy` (true or false) or any write to an item that is Policy needs `site.memory.policy`
+  (Site admins/Owner); KOBE-378's item store and the Site proposal accept route (KOBE-402/403)
+  must call it, and accept never takes a `policy` flag from a steward. L-1/L-2: deactivated
+  members are refused (409 `user_deactivated`) and the Workspace list and `isWorkspaceSteward`
+  ignore deactivated accounts. L-3: install note says the old release can't read
+  `memory_steward` rows (take the grants or roll forward). L-4: glossary aligned. I-1: comment in
+  0218 (and 0219) that the new enum value can't be used in the same transaction; `db:rebase`
+  regenerates 0218 and would drop that comment, 0219 keeps it.
 - No route consumes `team.memory.curate`/`site.memory.*` yet: the item store (KOBE-378 and later)
   gates with `teamMemoryAllows` + `isWorkspaceSteward` and `siteMemoryAllows` + `grantsOf`.
 
@@ -57,6 +67,9 @@ site.memory.site_proposals.decide]` (coordinator 2026-11-13, spec: Team admin co
    (Team admins only); Site stewards may accept or dismiss Site proposals; neither sets Policy.
 2. Site admins are not offered the Site steward grant in the UI; the server still allows it.
    Fine as is (coordinator 2026-11-13).
+
+3. `overrides.policy_conflict` (save despite contradicting Policy): left to KOBE-378. The spec
+   lets curators override with audit, so stewards would too; confirm there.
 
 ## Evidence (acceptance criteria → test or command output)
 

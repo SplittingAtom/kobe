@@ -7,6 +7,7 @@ import {
   TEAM_PERMISSIONS,
   SKILL_REVIEW_ACTIONS,
   siteMemoryAllows,
+  siteMemoryWriteAllows,
   sitePermissionsFor,
   siteRoleAllows,
   skillReviewAllows,
@@ -247,5 +248,39 @@ describe("memory stewards beside the ladders (KOBE-380, SM19)", () => {
     const steward = { siteRole: null, grants: ["memory_steward"] } as const;
     for (const action of SKILL_REVIEW_ACTIONS)
       expect(skillReviewAllows(steward, action)).toBe(false);
+  });
+});
+
+describe("Policy on Site memory writes (KOBE-380 review M-1, SM23)", () => {
+  const steward = { siteRole: null, grants: ["memory_steward"] } as const;
+  const admin = { siteRole: "admin", grants: [] } as const;
+  const owner = { siteRole: "owner", grants: [] } as const;
+  const user = { siteRole: null, grants: [] } as const;
+  const plain = { policyField: false, targetIsPolicy: false } as const;
+
+  it.each(["item", "proposal"] as const)("%s: a steward writes ordinary items only", (via) => {
+    expect(siteMemoryWriteAllows(steward, { via, ...plain })).toBe(true);
+    // Setting `policy` either way, or touching an item that is Policy, is a Policy change.
+    expect(siteMemoryWriteAllows(steward, { via, ...plain, policyField: true })).toBe(false);
+    expect(siteMemoryWriteAllows(steward, { via, ...plain, targetIsPolicy: true })).toBe(false);
+  });
+
+  it.each(["item", "proposal"] as const)(
+    "%s: Site admins and the Owner may change Policy",
+    (via) => {
+      for (const who of [admin, owner]) {
+        expect(siteMemoryWriteAllows(who, { via, policyField: true, targetIsPolicy: true })).toBe(
+          true,
+        );
+      }
+    },
+  );
+
+  it("refuses plain users and Skill reviewers everything", () => {
+    const reviewer = { siteRole: null, grants: ["skill_reviewer"] } as const;
+    for (const who of [user, reviewer]) {
+      expect(siteMemoryWriteAllows(who, { via: "item", ...plain })).toBe(false);
+      expect(siteMemoryWriteAllows(who, { via: "proposal", ...plain })).toBe(false);
+    }
   });
 });

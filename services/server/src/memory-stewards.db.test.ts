@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { memoryStewardListSchema, memoryStewardSchema } from "@kobe/protocol";
+import { isWorkspaceSteward } from "./memory/stewards.js";
 import type { TestBrowser } from "./testing/browser.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 
@@ -114,6 +115,25 @@ describe("Workspace memory stewards (KOBE-380)", () => {
     // A steward still can't do what the role doesn't allow, e.g. manage members or switches.
     expect((await as.member.get(STEWARDS)).status).toBe(403);
     expect((await as.member.put(`${STEWARDS}/${ids.other}`, {})).status).toBe(403);
+  });
+
+  it("refuses a deactivated member and ignores a deactivated steward (review L-1, L-2)", async () => {
+    await h.admin.query(`UPDATE users SET deactivated_at = now() WHERE id = $1`, [ids.other]);
+    const r = await as.admin.put(`${STEWARDS}/${ids.other}`, {});
+    expect([r.status, r.json.code]).toEqual([409, "user_deactivated"]);
+    await h.admin.query(
+      `INSERT INTO memory_stewards (team_id, user_id, granted_by) VALUES ($1, $2, $3)`,
+      [teamA, ids.other, ids.admin],
+    );
+    const list = memoryStewardListSchema.parse((await as.admin.get(STEWARDS)).json);
+    expect(list.stewards.map((s) => s.user_id)).not.toContain(ids.other);
+    expect(await isWorkspaceSteward(h.deps.database.db, teamA, ids.other)).toBe(false);
+    await h.admin.query(`DELETE FROM memory_stewards WHERE team_id = $1 AND user_id = $2`, [
+      teamA,
+      ids.other,
+    ]);
+    await h.admin.query(`UPDATE users SET deactivated_at = NULL WHERE id = $1`, [ids.other]);
+    expect(await isWorkspaceSteward(h.deps.database.db, teamA, ids.member)).toBe(true);
   });
 
   it("takes the grant (audited) and refuses a second take (ac-2)", async () => {
