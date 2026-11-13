@@ -14,6 +14,7 @@ import {
   versionSummary,
 } from "./http.js";
 import {
+  agentMemoryBodySchema,
   rollbackSchema,
   VERSION_PAGE_DEFAULT,
   versionParamSchema,
@@ -25,6 +26,7 @@ import {
   listVersions,
   publishAgent,
   rollbackAgent,
+  setAgentMemory,
   unarchiveAgent,
   UnreadableVersionError,
   type Published,
@@ -309,6 +311,40 @@ export function mountVersionRoutes<E extends { Variables: object }>(
       return result.ok
         ? publishedResponse(c, result.value, found.access)
         : publishError(c, result.error);
+    });
+  });
+
+  // KOBE-646: the memory setting changes by republishing the current version with it. Not gated
+  // by the eval (definition and tools are the current version's; the new version shows "Not
+  // evaluated", and a re-evaluation is right since memory changes behaviour); same rights and rate
+  // as a rollback; the Dangerous rule is checked under the agent's lock.
+  app.post("/:id/memory", async (c) => {
+    const found = await resolve(c);
+    if (!found) return notFound(c);
+    const body = await parseBody(c, agentMemoryBodySchema);
+    if (!body) return invalidRequest(c, "Give memory: all, notes_only or off.");
+    if (!found.access.publish) return forbidden(c, "Your team role doesn't allow publishing it.");
+    if (!(await withinRate(c))) return rateLimited(c);
+    return guardUnreadable(c, async () => {
+      const result = await setAgentMemory(db, found.location, found.agent.id, {
+        publishedBy: options.userId(c),
+        memory: body.memory,
+        mayUseDangerousMode: options.mayUseDangerousMode(c),
+        limits,
+        ...afterWrite(c, found),
+      });
+      if (result.ok) return publishedResponse(c, result.value, found.access);
+      if (result.error === "dangerous_forbidden") return dangerousForbidden(c);
+      if (result.error === "unchanged") {
+        return c.json(
+          {
+            code: "unchanged",
+            message: "The agent's current version already uses that memory setting.",
+          },
+          409,
+        );
+      }
+      return publishError(c, result.error);
     });
   });
 

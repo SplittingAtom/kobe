@@ -5,9 +5,11 @@ import { useMemo, useRef, useState } from "react";
 import {
   getGalleryAgent,
   getGalleryBuilderOptions,
+  getGalleryVersion,
   listGalleryVersions,
   publishGalleryAgent,
   saveGalleryAgent,
+  setGalleryAgentMemory,
   type GalleryAgentDetail,
 } from "../../../lib/admin/api/site/gallery";
 import { SITE_TAB_HREF } from "../../../lib/agents/redirects";
@@ -47,6 +49,7 @@ import { BehaviourFields } from "../team/agent-builder/behaviour-fields";
 import { BuilderSourcesContext, type BuilderSources } from "../team/agent-builder/builder-sources";
 import { DangerousBadge } from "../team/agent-builder/dangerous-badge";
 import { IdentityFields } from "../team/agent-builder/identity-fields";
+import { MEMORY_SETTING_LABELS, MemorySetting } from "../team/agent-builder/memory-setting";
 import { useMutation, useResource } from "../use-resource";
 import { CustomizedBadge, UpdateAvailable } from "./gallery-customization";
 
@@ -276,6 +279,30 @@ function Editor({ initial }: { readonly initial: GalleryAgentDetail }) {
           </div>
         )}
       </form>
+      <MemorySetting
+        key={`${agent.currentVersion ?? 0}:${historyKey}`}
+        agentId={agent.id}
+        api={{
+          readVersion: (version) => getGalleryVersion(agent.id, version),
+          save: (memory) => setGalleryAgentMemory(agent.id, memory),
+        }}
+        currentVersion={agent.currentVersion}
+        canChange={!readOnly}
+        busy={mutation.pending}
+        onChanged={(result, memory) =>
+          void mutation.run(
+            async () => {
+              // As after a publish: the answer predates the Customized marker, read it again.
+              const fresh = await getGalleryAgent(agent.id);
+              apply(fresh.ok ? fresh.data.agent : result.agent);
+              setHistoryKey((k) => k + 1);
+              return fresh;
+            },
+            () =>
+              `Memory set to ${MEMORY_SETTING_LABELS[memory].label.toLowerCase()} in v${result.version.version}.`,
+          )
+        }
+      />
       <GalleryVersions key={historyKey} agentId={agent.id} current={agent.currentVersion} />
       {confirmDialog}
     </>
@@ -312,6 +339,11 @@ function GalleryVersions({
                     <TableRowHeader>
                       v{v.version}
                       {v.version === current && " (current)"}
+                      {v.memory !== undefined && v.memory !== "all" && (
+                        <div className="text-sm font-normal text-console-muted">
+                          Memory: {MEMORY_SETTING_LABELS[v.memory].label}
+                        </div>
+                      )}
                     </TableRowHeader>
                     <TableCell>
                       <DateTime value={v.publishedAt} />

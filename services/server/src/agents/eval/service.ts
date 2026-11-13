@@ -354,4 +354,6 @@ const PUBLISH_FAILURES = {
   unchanged: "it equals the current version.",
   version_limit: "the agent is at its version limit.",
   eval_stale: "the tool policy changed during the evaluation; publish again to re-run it.",
+  not_published: "the agent has no published version.",
+  dangerous_forbidden: "only site and team admins can use the Dangerous approval mode.",
 } as const;

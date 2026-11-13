@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AGENT_VERSION_MEMORY_SETTINGS,
   AUDIT_EVENTS,
   isAuditAction,
   NOTIFICATION_KINDS as DB_NOTIFICATION_KINDS,
@@ -16,6 +17,7 @@ import {
   siteGrant,
 } from "@kobe/db";
 import {
+  AGENT_MEMORY_SETTINGS,
   MEMORY_NOTIFICATION_KINDS,
   MEMORY_STEWARD_SITE_GRANT,
   RESERVED_MEMORY_AUDIT_ACTIONS,
@@ -73,5 +75,9 @@ describe("semantic memory contract matches the schema", () => {
   it("the Site steward grant is a site_grant value and a SITE_GRANTS member (KOBE-380)", () => {
     expect(siteGrant.enumValues as readonly string[]).toContain(MEMORY_STEWARD_SITE_GRANT);
     expect(SITE_GRANTS as readonly string[]).toContain(MEMORY_STEWARD_SITE_GRANT);
+  });
+
+  it("the agent-version memory setting is the same in the DB CHECK and the contract (KOBE-646)", () => {
+    expect([...AGENT_VERSION_MEMORY_SETTINGS]).toEqual([...AGENT_MEMORY_SETTINGS]);
   });
 });

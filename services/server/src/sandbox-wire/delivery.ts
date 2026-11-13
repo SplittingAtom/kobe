@@ -45,6 +45,7 @@ import {
 import { endRunInTx, loadRun, runStillOpen } from "./run-state.js";
 import { mirrorBranchSummaryInTx, parseBranchSummaryResult } from "./branch-summary-end.js";
 import { buildRunMemory } from "../memory/agent.js";
+import { readRunMemoryPlan, type RunMemoryPlan } from "../agents/run-memory.js";
 import { markTold, untoldNotes, type AgentNotes } from "../sync-conflicts/store.js";
 import { mintRunToken } from "./run-token.js";
 import { slotOf } from "./slots.js";
@@ -760,7 +761,14 @@ export class CommandDelivery {
       await this.#ctx.projectMounts?.reconcileUser(teamId, userId);
     }
     // Memory indexes only reach agents that know the field (KOBE-156).
-    if (row.kind === "run.start" && !evalSandbox && this.#host.hasCapability(CAPABILITY_MEMORY)) {
+    // The agent version's memory setting (KOBE-646): `off` sends no memory at all (the sandbox
+    // then lists no memory tools; the policy check denies them too).
+    if (
+      row.kind === "run.start" &&
+      !evalSandbox &&
+      this.#host.hasCapability(CAPABILITY_MEMORY) &&
+      (await this.#memoryPlan(row.runId))?.notes === true
+    ) {
       const memory = await this.#runMemory(row.threadId);
       if (memory) out = { ...out, memory } as ServerToSandboxFrame;
     }
@@ -843,6 +851,21 @@ export class CommandDelivery {
     void markTold(this.#ctx.db, { teamId, userId }, ids).catch((err: unknown) =>
       this.#host.log.warn({ err }, "sync conflicts could not be marked told"),
     );
+  }
+
+  /** The run's memory plan (KOBE-646); unreadable means no memory (fail closed). */
+  async #memoryPlan(runId: string | null): Promise<RunMemoryPlan | undefined> {
+    if (runId === null) return undefined;
+    const { teamId } = this.#host.target;
+    try {
+      return await withTeam(this.#ctx.db, teamId, (tx) => readRunMemoryPlan(tx, { teamId, runId }));
+    } catch (err) {
+      this.#host.log.warn(
+        { err },
+        "the run's memory setting could not be read; sent without memory",
+      );
+      return undefined;
+    }
   }
 
   /** `run.start.memory`; a failed read means no context (every memory call is still enforced). */

@@ -96,7 +96,8 @@ after saving.
 ## Agents and skills
 
 - **Team agents**: the team's roster on the Agents page (Team tab): approve or decline proposals,
-  pin versions, suspend agents, see usage.
+  pin versions, suspend agents, see usage, and **Adopt into _team_** to make a member's assigned
+  agent team-owned (see [Agents](../agents/agents.md#adopt-an-agent-into-a-roster)).
 - **Default agent**: the agent new conversations start with.
 - **Agent evaluation**: run a safety evaluation before agents publish, and set the allowed attack
   rate.

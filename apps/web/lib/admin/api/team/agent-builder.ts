@@ -1,4 +1,5 @@
 /** Team console: the agent builder's calls (`/v1/agents`, drafts and versions, KOBE-45/46). */
+import type { AgentMemorySetting } from "@kobe/protocol";
 import { apiRequest, apiTextFile, type ApiResult, type TextFile } from "../../../api/client";
 import { revisionTag, type AgentSaved, type AgentSummary } from "../agents";
 
@@ -41,6 +42,8 @@ export interface AgentVersionSummary {
   readonly publishedAt: string;
   readonly draftRevision: number;
   readonly republishedFrom: number | null;
+  /** The version's memory setting (KOBE-646); absent from servers before it (= `all`). */
+  readonly memory?: AgentMemorySetting;
 }
 
 export interface VersionPage {
@@ -178,6 +181,17 @@ export const rollbackTeamAgent = (
   version: number,
 ): Promise<ApiResult<PublishedAgent>> =>
   apiRequest(`/v1/agents/${enc(id)}/rollback`, { method: "POST", json: { version }, teamId });
+
+/**
+ * Changes the memory setting (KOBE-646): the current version is republished as a new version
+ * with `memory` (`POST /v1/agents/{id}/memory`).
+ */
+export const setTeamAgentMemory = (
+  teamId: string,
+  id: string,
+  memory: AgentMemorySetting,
+): Promise<ApiResult<PublishedAgent>> =>
+  apiRequest(`/v1/agents/${enc(id)}/memory`, { method: "POST", json: { memory }, teamId });
 
 /** A published version as Orbit YAML (`GET /v1/agents/{id}/versions/{n}/orbit`, KOBE-91). */
 export const exportTeamAgentToOrbit = (

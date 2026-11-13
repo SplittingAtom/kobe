@@ -1,5 +1,10 @@
 import { suspendedInTeam } from "./inventory.js";
-import { agentSkills, validateAgentDefinition, type AgentDefinition } from "@kobe/agent-file";
+import {
+  agentSkills,
+  isDangerousMode,
+  validateAgentDefinition,
+  type AgentDefinition,
+} from "@kobe/agent-file";
 import {
   and,
   desc,
@@ -15,7 +20,7 @@ import {
   type KobeDb,
   type KobeTx,
 } from "@kobe/db";
-import { canonicalJson } from "@kobe/protocol";
+import { canonicalJson, type AgentMemorySetting } from "@kobe/protocol";
 import { recordAudit } from "../audit/record.js";
 import { agentAccess, type AgentActor } from "./access.js";
 import { readPublishFloor } from "./floor.js";
@@ -65,8 +70,10 @@ export interface AgentVersionSummary {
   readonly publishedAt: Date;
   /** The draft revision published; null for a rollback. */
   readonly draftRevision: number | null;
-  /** For a rollback: the version it republished. */
+  /** For a rollback or a memory change: the version it republished. */
   readonly republishedFrom: number | null;
+  /** The version's memory setting (KOBE-646): `all`, `notes_only` or `off`. */
+  readonly memory: AgentMemorySetting;
 }
 
 export interface AgentVersionRecord extends AgentVersionSummary {
@@ -90,7 +97,11 @@ export type PublishError =
   | "unchanged"
   | "version_limit"
   /** The tool manifest changed since the eval scored it (KOBE-93): evaluate again. */
-  | "eval_stale";
+  | "eval_stale"
+  /** A memory change (KOBE-646) needs a published version to republish. */
+  | "not_published"
+  /** The version is in Dangerous mode and the caller may not use it (AC1). */
+  | "dangerous_forbidden";
 
 /** Limits on versions (review M3): versions are immutable and never deleted by the app. */
 export interface VersionLimits {
@@ -117,6 +128,7 @@ const SUMMARY_COLUMNS = (t: typeof teamAgentVersions | typeof siteAgentVersions)
   publishedAt: t.publishedAt,
   draftRevision: t.draftRevision,
   republishedFrom: t.republishedFrom,
+  memory: t.memory,
 });
 const FULL_COLUMNS = (t: typeof teamAgentVersions | typeof siteAgentVersions) => ({
   ...SUMMARY_COLUMNS(t),
@@ -249,6 +261,11 @@ interface NewVersion {
   readonly expectedManifest?: ToolManifest;
   /** A rollback restores the frozen skill versions of the version it republishes (KOBE-318). */
   readonly skillManifest?: SkillManifest | null;
+  /**
+   * The new version's memory setting (KOBE-646): a publish keeps the current version's, a
+   * rollback restores the republished version's, a memory change sets it.
+   */
+  readonly memory: AgentMemorySetting;
 }
 
 /**
@@ -268,7 +285,10 @@ export const contentKey = (
     ...(skills ? { skills } : {}),
   });
 
-/** Whether `definition` + `manifest` equal the agent's current version (an unreadable one never does). */
+/**
+ * Whether `definition` + `manifest` (+ memory setting) equal the agent's current version (an
+ * unreadable one never does).
+ */
 async function sameAsCurrent(
   tx: KobeTx,
   location: AgentLocation,
@@ -276,12 +296,14 @@ async function sameAsCurrent(
   definition: AgentDefinition,
   manifest: ToolManifest,
   skills: SkillManifest | null,
+  memory: AgentMemorySetting,
 ): Promise<boolean> {
   if (agent.currentVersion === null) return false;
   try {
     const current = await readVersion(tx, location.scope, agent.id, agent.currentVersion);
     return (
       current !== null &&
+      current.memory === memory &&
       contentKey(current.definition, current.toolManifest, current.skillManifest) ===
         contentKey(definition, manifest, skills)
     );
@@ -319,7 +341,17 @@ async function insertVersion(
           agentSkills(input.definition.frontmatter).names,
         );
   const skillManifest = frozen.manifest;
-  if (await sameAsCurrent(tx, location, agent, input.definition, manifest, skillManifest)) {
+  if (
+    await sameAsCurrent(
+      tx,
+      location,
+      agent,
+      input.definition,
+      manifest,
+      skillManifest,
+      input.memory,
+    )
+  ) {
     return { ok: false, error: "unchanged" };
   }
   if ((agent.currentVersion ?? 0) >= input.limits.maxVersions) {
@@ -335,6 +367,7 @@ async function insertVersion(
     publishedAt: now,
     draftRevision: input.draftRevision,
     republishedFrom: input.republishedFrom,
+    memory: input.memory,
   };
   let row: FullRow | undefined;
   let updated: Row | undefined;
@@ -390,6 +423,11 @@ export interface PublishDraftInput {
   readonly limits?: VersionLimits;
   /** Runs in the same transaction after a successful publish (KOBE-494: the Customized mark). */
   readonly afterWrite?: (tx: KobeTx) => Promise<void>;
+  /**
+   * The new version's memory setting instead of the current version's (KOBE-646): adopt copies
+   * the adopted version's into the copy's v1.
+   */
+  readonly memory?: AgentMemorySetting;
 }
 
 /**
@@ -433,6 +471,7 @@ export async function publishDraftIn(
     publishedBy: input.publishedBy,
     draftRevision: agent.revision,
     republishedFrom: null,
+    memory: input.memory ?? (await currentMemory(tx, location, agent)),
   });
   if (!inserted.ok) return inserted;
   const published = inserted.value;
@@ -479,6 +518,7 @@ export async function publishEvaluated(
       publishedBy: input.publishedBy,
       draftRevision: input.draftRevision,
       republishedFrom: null,
+      memory: await currentMemory(tx, location, agent),
       ...(input.expectedManifest ? { expectedManifest: input.expectedManifest } : {}),
     });
     if (!inserted.ok) return inserted;
@@ -527,6 +567,7 @@ export async function rollbackAgent(
       draftRevision: null,
       republishedFrom: source.version,
       skillManifest: source.skillManifest,
+      memory: source.memory,
       ...(input.expectedManifest ? { expectedManifest: input.expectedManifest } : {}),
     });
     if (!inserted.ok) return inserted;
@@ -538,6 +579,86 @@ export async function rollbackAgent(
         ...ref(location, agent),
         version: published.version.version,
         fromVersion: source.version,
+      },
+    });
+    await input.afterWrite?.(tx);
+    return { ok: true, value: published };
+  });
+}
+
+/**
+ * The memory setting a publish from the draft keeps (KOBE-646): the current version's, or `all`
+ * for a first publish. The draft has no memory setting of its own; it changes only by
+ * {@link setAgentMemory}.
+ */
+export async function currentMemory(
+  tx: KobeTx,
+  location: Pick<AgentLocation, "scope">,
+  agent: Pick<AgentRecord, "id" | "currentVersion">,
+): Promise<AgentMemorySetting> {
+  if (agent.currentVersion === null) return "all";
+  const t = location.scope === "team" ? teamAgentVersions : siteAgentVersions;
+  const [row] = await tx
+    .select({ memory: t.memory })
+    .from(t)
+    .where(and(eq(t.agentId, agent.id), eq(t.version, agent.currentVersion)));
+  return row?.memory ?? "all";
+}
+
+/**
+ * Changes the agent's memory setting (KOBE-646, Chris Q3): the current version's content
+ * (definition, frozen skill versions; tool manifest recomputed against today's floor, as a
+ * rollback) is republished as a new version with `memory`, so threads and pinned roster entries
+ * keep the version they have and "follow latest" picks the change up (agents-roster version
+ * rule). The draft is left alone. `unchanged` when the setting is already `memory`.
+ */
+export async function setAgentMemory(
+  db: KobeDb,
+  location: AgentLocation,
+  id: string,
+  input: {
+    readonly publishedBy: string;
+    readonly memory: AgentMemorySetting;
+    /**
+     * Whether the caller may republish a Dangerous version (AC1). Checked on the version read
+     * under the agent's lock, so a Dangerous publish just before cannot slip through.
+     */
+    readonly mayUseDangerousMode: boolean;
+    readonly limits?: VersionLimits;
+    /** Runs in the same transaction after a successful change (KOBE-494). */
+    readonly afterWrite?: (tx: KobeTx) => Promise<void>;
+  },
+): Promise<Result<Published, PublishError>> {
+  return inLocation(db, location, async (tx) => {
+    const agent = await lockAgent(tx, location, id);
+    if (!agent) return { ok: false, error: "not_found" };
+    if (agent.archivedAt) return { ok: false, error: "archived" };
+    if (agent.currentVersion === null) return { ok: false, error: "not_published" };
+    const source = await readVersion(tx, location.scope, id, agent.currentVersion);
+    if (!source) return { ok: false, error: "version_not_found" };
+    if (isDangerousMode(source.definition.frontmatter) && !input.mayUseDangerousMode) {
+      return { ok: false, error: "dangerous_forbidden" };
+    }
+    if (source.memory === input.memory) return { ok: false, error: "unchanged" };
+    const inserted = await insertVersion(tx, location, agent, {
+      limits: input.limits ?? DEFAULT_VERSION_LIMITS,
+      definition: source.definition,
+      publishedBy: input.publishedBy,
+      draftRevision: null,
+      republishedFrom: source.version,
+      skillManifest: source.skillManifest,
+      memory: input.memory,
+    });
+    if (!inserted.ok) return inserted;
+    const published = inserted.value;
+    await recordAudit(tx, {
+      action: "agent.memory_changed",
+      teamId: auditTeam(location),
+      target: {
+        ...ref(location, agent),
+        version: published.version.version,
+        fromVersion: source.version,
+        memory: input.memory,
       },
     });
     await input.afterWrite?.(tx);
@@ -895,6 +1016,8 @@ export async function resolveDraftAgent(
       toolManifest: computeToolManifest(draft.definition.frontmatter, floor, now),
       // A draft freezes nothing: the test pane runs today's newest approved versions.
       skillManifest: null,
+      // The draft has no memory setting (KOBE-646): a test chat runs with the current version's.
+      memory: await currentMemory(tx, agent, agent),
     },
   };
 }

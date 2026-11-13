@@ -62,8 +62,10 @@ access, which is time-boxed, read-only, audited and shown to the team.
   under your name, marked as made by a site admin, and the team's admins are told in Kobe (and by
   email) each time.
 
-- **Gallery agents**: the site's agents on the Agents page's Site tab: edit, compare with the
-  repository, reset, evaluate, export, approve proposals.
+- **Gallery agents**: the site's agents on the Agents page's Site tab: edit, set memory, compare
+  with the repository, reset, evaluate, export, approve proposals, and **Adopt into the site** to
+  turn a member's assigned agent into a site-owned gallery agent (see
+  [Agents](../agents/agents.md#adopt-an-agent-into-a-roster)).
 - **Skill Registry**, **Skill reviews** and **Skill tags**: the registry's rules and judge, the
   review queue for submitted skills, and topic tags and site default skills.
 

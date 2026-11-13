@@ -1,6 +1,6 @@
 ---
 title: Agents
-summary: How to pick an agent for a conversation, browse the Personal, Team and Site rosters, create and publish your own agent, and schedule it.
+summary: How to pick an agent for a conversation, browse the Personal, Team and Site rosters, create and publish your own agent, choose how much memory it uses, and schedule it.
 section: Agents and skills
 order: 1
 audience: member
@@ -51,6 +51,27 @@ The builder has two tabs, **Identity** and **Behaviour**:
 **Save draft** keeps your changes; **Test chat** tries the draft without publishing. **Publish…**
 creates a new version, after a safety check. Each published version is kept in **Version history**.
 
+### Memory
+
+The builder's **Memory** section sets how much memory the agent uses, per published version:
+
+| Setting        | What the agent gets                                                                      |
+| -------------- | ---------------------------------------------------------------------------------------- |
+| **All memory** | Memory notes (My memory, project memory) and any other memories Kobe keeps. The default. |
+| **Notes only** | Memory notes only.                                                                       |
+| **Off**        | No memory at all: no memory index, no **remember** or **recall** tools.                  |
+
+The agent always uses the memory of the person running it, never yours: sharing an agent never
+shares your memory. **Save as a new version** publishes the current version again with the new
+setting (the draft is untouched), so threads keep their version and rosters that follow your latest
+version get it. The new version shows **Not evaluated** in Version history: memory changes how
+the agent behaves, so evaluate it again before relying on its old score. Publishing the draft keeps
+the current setting; restoring a version restores its setting (the confirmation says when that
+changes memory). An adopted copy keeps the setting of the version it copied; a fork starts at
+**All memory**. A **Test chat** uses the current version's setting. Site admins set it the same way
+for gallery agents. Team and site memory switches still apply on top: an agent set to **All
+memory** has none where memory is switched off.
+
 **Dangerous** mode ("allowed tools run without asking") can only be set by team and site admins. It
 applies only to tools named one by one in Allowed tools, and only in interactive conversations;
 deny rules and the team's ask rules still apply.
@@ -67,6 +88,22 @@ From your agent's row menu:
 A roster follows your latest published version unless its admins pin one. **Withdraw from _team_**
 or **Withdraw from the site** takes it back. The Reach column shows where it went, including
 "Declined for _team_" with the admin's note.
+
+### Adopt an agent into a roster
+
+A roster's admins can make a lent agent their own. On an assigned entry's row menu, **Adopt into
+_team_** (team admins, Team tab) or **Adopt into the site** (site admins, Site tab) asks "Adopt
+_agent_ into _team_?" and, on **Adopt**, does it all in one step:
+
+- the agent's current published version is copied as **v1** of a new agent: on a team roster a
+  team-owned agent whose creator is the admin who adopted it; on the site roster a site-owned
+  gallery agent with no repository definition, which releases never update or reset;
+- the roster entry is removed, so the roster runs the copy from then on;
+- the copy remembers which agent and version it came from, and keeps that version's memory
+  setting.
+
+Adopt works whether or not the agent's owner is still around, and leaves the owner's agent as it
+is. An agent bound to a team (a fork of that team's content) can only be adopted into that team.
 
 ## Schedule an agent
 

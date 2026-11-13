@@ -75,7 +75,11 @@ async function adoptIn(tx: KobeTx, input: AdoptInput): Promise<AdoptResult> {
   }
   if (agent.currentVersion === null) return fail("agent_not_published");
   const [version] = await tx
-    .select({ frontmatter: siteAgentVersions.frontmatter, prompt: siteAgentVersions.prompt })
+    .select({
+      frontmatter: siteAgentVersions.frontmatter,
+      prompt: siteAgentVersions.prompt,
+      memory: siteAgentVersions.memory,
+    })
     .from(siteAgentVersions)
     .where(
       and(
@@ -83,7 +87,9 @@ async function adoptIn(tx: KobeTx, input: AdoptInput): Promise<AdoptResult> {
         eq(siteAgentVersions.version, agent.currentVersion),
       ),
     );
-  const definition = version ? validateAgentDefinition(version) : null;
+  const definition = version
+    ? validateAgentDefinition({ frontmatter: version.frontmatter, prompt: version.prompt })
+    : null;
   if (!definition?.ok) return fail("invalid_agent");
   const location: AgentLocation =
     target === "team" ? { scope: "team", teamId: teamId ?? "" } : { scope: "gallery" };
@@ -99,6 +105,8 @@ async function adoptIn(tx: KobeTx, input: AdoptInput): Promise<AdoptResult> {
   const published = await publishDraftIn(tx, location, created.value.id, {
     publishedBy: input.userId,
     expectedRevision: undefined,
+    // KOBE-646 (review M1): the copy runs with the adopted version's memory setting.
+    ...(version ? { memory: version.memory } : {}),
   });
   if (!published.ok) throw new AdoptPublishError(published.error);
   const now = new Date();

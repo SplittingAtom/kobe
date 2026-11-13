@@ -72,6 +72,8 @@ const READ = {
   [`GET ${BASE}/a-1`]: [200, { agent: AGENT }],
   [`GET ${BASE}/builder-options`]: [200, OPTIONS],
   [`GET ${BASE}/a-1/versions`]: [200, VERSIONS],
+  // The Memory section reads the current version's setting (KOBE-646).
+  [`GET ${BASE}/a-1/versions/2`]: [200, { version: VERSIONS.versions[0] }],
 } as const;
 
 describe("gallery agent editor", () => {
@@ -174,5 +176,59 @@ describe("gallery agent editor", () => {
     renderSite(<GalleryAgentEditor agentId="a-1" />);
     await screen.findByText(/archived, so it can't be changed/);
     expect(screen.queryByRole("button", { name: "Save draft" })).toBeNull();
+  });
+
+  it("changes the memory setting as a new version, like the team builder (KOBE-646)", async () => {
+    const changed = { ...AGENT, currentVersion: 3, gallery: CUSTOMIZED };
+    const calls = stubApi({
+      ...READ,
+      [`GET ${BASE}/a-1`]: [
+        [200, { agent: AGENT }],
+        [200, { agent: changed }],
+      ],
+      [`GET ${BASE}/a-1/versions/3`]: [
+        200,
+        {
+          version: {
+            version: 3,
+            published_by: "u-me",
+            published_at: "2026-10-23T10:00:00Z",
+            memory: "notes_only",
+          },
+        },
+      ],
+      [`POST ${BASE}/a-1/memory`]: [
+        201,
+        {
+          agent: changed,
+          version: { version: 3, published_by: "u-me", published_at: "2026-10-23T10:00:00Z" },
+        },
+      ],
+    });
+    renderSite(<GalleryAgentEditor agentId="a-1" />);
+    const all = (await screen.findByRole("radio", { name: "All memory" })) as HTMLInputElement;
+    await waitFor(() => expect(all.checked).toBe(true));
+    await userEvent.click(screen.getByRole("radio", { name: "Notes only" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save as a new version" }));
+    await screen.findByText("Memory set to notes only in v3.");
+    const post = must(calls.find((c) => c.method === "POST"));
+    expect(JSON.parse(String(post.body))).toEqual({ memory: "notes_only" });
+    expect(screen.getByText("Current version: v3.")).toBeTruthy();
+    await waitFor(() =>
+      expect((screen.getByRole("radio", { name: "Notes only" }) as HTMLInputElement).checked).toBe(
+        true,
+      ),
+    );
+  });
+
+  it("keeps the memory setting read-only on an archived agent", async () => {
+    stubApi({
+      ...READ,
+      [`GET ${BASE}/a-1`]: [200, { agent: { ...AGENT, archivedAt: "2026-10-02T10:00:00Z" } }],
+    });
+    renderSite(<GalleryAgentEditor agentId="a-1" />);
+    const off = (await screen.findByRole("radio", { name: "Off" })) as HTMLInputElement;
+    expect(off.disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Save as a new version" })).toBeNull();
   });
 });

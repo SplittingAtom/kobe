@@ -494,6 +494,17 @@ describe("adopt (AR10, ac-3)", () => {
     expect(twice.json.code).toBe("invalid_transition");
   });
 
+  it("carries the memory setting of the adopted version into the copy's v1 (KOBE-646 M1)", async () => {
+    const agent = await personal("bob", "Bob Quiet");
+    expect((await assign("bob", agent, "team")).status).toBe(201);
+    const off = await as.bob.post(`/v1/agents/${agent}/memory`, { memory: "off" });
+    expect(off.status, JSON.stringify(off.json)).toBe(201);
+    const res = await as.alice.post(`/v1/team/agent-roster/${agent}/adopt`);
+    expect(res.status, JSON.stringify(res.json)).toBe(201);
+    const v1 = await as.alice.get(`/v1/agents/${res.json.agent.id}/versions/1`);
+    expect(v1.json.version).toMatchObject({ version: 1, memory: "off" });
+  });
+
   it("a site admin copies a site entry into a gallery agent without a repository key", async () => {
     const agent = await personal("bob", "Bob Site Adopt");
     expect((await assign("bob", agent, "site")).status).toBe(202);

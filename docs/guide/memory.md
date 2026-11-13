@@ -75,6 +75,10 @@ turns Policy off.
 Turning a switch off stops its use from the next run on; nothing stored is deleted, and turning
 it back on brings everything back.
 
+An agent can also use less memory than the switches allow: its **Memory** setting (**All
+memory**, **Notes only** or **Off**, see [Agents](agents/agents.md#memory)) is part of each
+published version. It always uses your memory when you run it, never its owner's.
+
 ### The learning model
 
 Learn from this chat uses a **learning model** an admin chose: the workspace's own learning model

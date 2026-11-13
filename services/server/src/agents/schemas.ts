@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { agentSlugSchema } from "@kobe/agent-file";
 import { agentStatus } from "@kobe/db";
-import { AGENT_FORK_NAME_MAX } from "@kobe/protocol";
+import { AGENT_FORK_NAME_MAX, agentMemorySettingSchema } from "@kobe/protocol";
 
 export const agentIdSchema = z.uuid();
 
@@ -54,6 +54,9 @@ export const versionParamSchema = z
 
 /** `POST /:id/rollback`: republish this older version as the newest (D19). */
 export const rollbackSchema = z.object({ version: versionNumberSchema }).strict();
+
+/** `POST /v1/agents/{id}/memory` (KOBE-646): the setting the new version gets (contract KOBE-377). */
+export const agentMemoryBodySchema = z.object({ memory: agentMemorySettingSchema }).strict();
 
 export const VERSION_PAGE_DEFAULT = 50;
 export const VERSION_PAGE_MAX = 200;

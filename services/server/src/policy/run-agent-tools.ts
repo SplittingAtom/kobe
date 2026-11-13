@@ -2,6 +2,8 @@ import { explicitToolNames } from "@kobe/agent-file";
 import { sql, type KobeTx, type TeamRole } from "@kobe/db";
 import { toolManifestSchema, withSiteNames } from "../agents/manifest.js";
 import type { SiteRole } from "../authz/permissions.js";
+import { MEMORY_TOOLS } from "@kobe/protocol";
+import { readRunMemoryPlan } from "../agents/run-memory.js";
 import { mayUseDangerousMode } from "./dangerous-mode.js";
 
 /**
@@ -16,6 +18,10 @@ import { mayUseDangerousMode } from "./dangerous-mode.js";
  *   scheduled, not a skill eval) and **whoever published that version** is still active and still
  *   a site admin or an admin of this team; otherwise the agent behaves as in its default mode.
  *   Drafts never run in Dangerous mode. The caller also requires an `auto` site floor.
+ *
+ * - KOBE-646: an agent version whose memory setting is `off` (for a test chat, the current
+ *   version's) also denies the memory tools (`remember`, `recall`), the server's own line behind
+ *   the sandbox, which lists them only when `run.start.memory` came.
  *
  * `tools.allow` is not returned for enforcement: it only decides which tools Dangerous may allow.
  * An unreadable version throws (the call is then denied).
@@ -36,6 +42,15 @@ interface RunAgentRow extends Record<string, unknown> {
 }
 
 export async function loadRunAgentTools(
+  tx: KobeTx,
+  run: { readonly teamId: string; readonly runId: string },
+): Promise<RunAgentTools> {
+  const tools = await agentTools(tx, run);
+  const plan = await readRunMemoryPlan(tx, run);
+  return plan.notes ? tools : { ...tools, toolsDeny: [...tools.toolsDeny, ...MEMORY_TOOLS] };
+}
+
+async function agentTools(
   tx: KobeTx,
   run: { readonly teamId: string; readonly runId: string },
 ): Promise<RunAgentTools> {
