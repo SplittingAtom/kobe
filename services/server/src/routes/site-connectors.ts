@@ -34,6 +34,7 @@ import {
   reviewConnectorTemplates,
 } from "../connectors/template-review.js";
 import { setPlacementSchema, setTemplatePlacement } from "../connectors/template-placement.js";
+import { listTeamsUsing } from "../connectors/team-usage.js";
 import type { ServerDeps } from "../deps.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 import { PIN_MESSAGES } from "./connector-messages.js";
@@ -271,6 +272,13 @@ export function siteConnectorsRoutes(deps: ServerDeps): Hono<{ Variables: AuthVa
           },
       409,
     );
+  });
+
+  // The teams that enabled it, with their exposure (KOBE-641 detail panel). Read-only.
+  app.get("/:id/teams", async (c) => {
+    const id = idSchema.safeParse(c.req.param("id"));
+    const teams = id.success ? await listTeamsUsing(db, id.data) : undefined;
+    return teams ? c.json({ teams }) : notFound(c);
   });
 
   // MCP Apps templates (KOBE-434): approved vs live versions for the review, without the bytes.

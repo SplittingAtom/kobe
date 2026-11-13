@@ -16,6 +16,8 @@ use both.
 A site admin registers a connector in the **Connector registry**. Team admins then enable it for
 the team in the team console's **Connectors** page and choose which of its tools the team may use:
 **Read-only tools**, **All tools** or **Chosen tools**. You see the connectors your team enables.
+That page lists each connector's tools under **Read only** and **Write**; a tool that opens an app
+card is marked **MCP-UI**.
 
 The agent never holds the connector's credentials. Its calls go through Kobe's MCP proxy, which
 adds the credential on the way out, checks the call against your team's rules and records it.

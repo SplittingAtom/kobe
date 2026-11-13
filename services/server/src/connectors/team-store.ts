@@ -1,17 +1,21 @@
 import {
   and,
   asc,
+  connectorUiResources,
   connectors,
   eq,
+  inArray,
   isNull,
   parseToolsSnapshot,
   teamConnectors,
   withTeam,
   type ConnectorExposureKind,
   type KobeDb,
+  type KobeTx,
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { usableSiteKeyIds } from "./site-key.js";
+import { modelVisible } from "./visibility.js";
 
 /**
  * Team connector enablement (spec D27, KOBE-104). Connectors are off by default: no
@@ -27,6 +31,64 @@ export interface TeamConnectorToolView {
   /** MCP default: a tool is open-world unless it says openWorldHint: false. */
   readonly open_world: boolean;
   readonly status: "pinned" | "drifted";
+  /** The MCP Apps template the tool opens (`_meta.ui.resourceUri`, KOBE-433/640), else null. */
+  readonly app: ToolAppView | null;
+  /**
+   * False for an app-only tool (`_meta.ui.visibility` without `"model"`, KOBE-435): never offered
+   * to Pi under any exposure (`exposedTools`), so the panel marks it not offered.
+   */
+  readonly model_visible: boolean;
+}
+
+/**
+ * `approved`: pinned and approved by a site admin, so it renders; `pending`: changed or new upstream,
+ * waiting for review (KOBE-434); `missing`: no template of that URI is pinned for the connector.
+ */
+export type ToolAppReview = "approved" | "pending" | "missing";
+
+export interface ToolAppView {
+  readonly resource_uri: string;
+  readonly review: ToolAppReview;
+}
+
+/** A connector's templates by URI: whether each one is served (pinned and approved). */
+export type TemplateStates = ReadonlyMap<string, ReadonlyMap<string, boolean>>;
+
+/** The templates of these connectors, keyed by connector then URI (site-wide table, D27). */
+export async function templateStates(
+  tx: KobeTx,
+  connectorIds: readonly string[],
+): Promise<TemplateStates> {
+  if (connectorIds.length === 0) return new Map();
+  const rows = await tx
+    .select({
+      connectorId: connectorUiResources.connectorId,
+      uri: connectorUiResources.uri,
+      status: connectorUiResources.status,
+      approved: connectorUiResources.approved,
+    })
+    .from(connectorUiResources)
+    .where(inArray(connectorUiResources.connectorId, [...connectorIds]));
+  const out = new Map<string, Map<string, boolean>>();
+  for (const r of rows) {
+    const byUri = out.get(r.connectorId) ?? new Map<string, boolean>();
+    byUri.set(r.uri, r.status === "pinned" && r.approved);
+    out.set(r.connectorId, byUri);
+  }
+  return out;
+}
+
+/** The tool's template and its review state, or null when it declares none. */
+export function toolApp(
+  uri: string | undefined,
+  templates: ReadonlyMap<string, boolean> | undefined,
+): ToolAppView | null {
+  if (uri === undefined) return null;
+  const served = templates?.get(uri);
+  return {
+    resource_uri: uri,
+    review: served === undefined ? "missing" : served ? "approved" : "pending",
+  };
 }
 
 export interface TeamConnectorView {
@@ -57,6 +119,7 @@ function view(
   row: Row,
   e: Enablement | undefined,
   siteKeys: ReadonlySet<string>,
+  templates: TemplateStates,
 ): TeamConnectorView {
   return {
     id: row.id,
@@ -76,6 +139,8 @@ function view(
       read_only: t.annotations.readOnlyHint === true,
       open_world: t.annotations.openWorldHint !== false,
       status: t.status,
+      app: toolApp(t.ui?.resource_uri, templates.get(row.id)),
+      model_visible: modelVisible(t),
     })),
   };
 }
@@ -97,7 +162,11 @@ export async function listTeamConnectors(db: KobeDb, teamId: string): Promise<Te
       tx,
       rows.filter((r) => r.credentialSource === "site").map((r) => r.id),
     );
-    return rows.map((r) => view(r, byId.get(r.id), siteKeys));
+    const templates = await templateStates(
+      tx,
+      rows.map((r) => r.id),
+    );
+    return rows.map((r) => view(r, byId.get(r.id), siteKeys, templates));
   });
 }
 
@@ -123,7 +192,11 @@ export async function listGalleryConnectors(db: KobeDb): Promise<TeamConnectorVi
       tx,
       rows.filter((r) => r.credentialSource === "site").map((r) => r.id),
     );
-    return rows.map((r) => view(r, { exposure: "all", enabledTools: [] }, siteKeys));
+    const templates = await templateStates(
+      tx,
+      rows.map((r) => r.id),
+    );
+    return rows.map((r) => view(r, { exposure: "all", enabledTools: [] }, siteKeys, templates));
   });
 }
 
@@ -216,7 +289,10 @@ export async function setTeamConnector(
       });
     }
     const siteKeys = row.credentialSource === "site" ? await usableSiteKeyIds(tx, [row.id]) : NONE;
-    return { ok: true, connector: view(row, next, siteKeys) } as const;
+    return {
+      ok: true,
+      connector: view(row, next, siteKeys, await templateStates(tx, [row.id])),
+    } as const;
   });
 }
 

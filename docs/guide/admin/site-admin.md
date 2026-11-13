@@ -66,7 +66,14 @@ access, which is time-boxed, read-only, audited and shown to the team.
   this catalog.
 - **Connector registry**: register MCP servers teams may enable, their credentials (a site key or
   each member's own key), pinned tools, and where their apps open (in the conversation, the
-  artifact column or the rail).
+  artifact column or the rail). Select a connector's name to open its details at the side: server
+  URL, authentication and whose key it uses (never the key itself), status and when Kobe last
+  checked it for changes, which teams enabled it and with what exposure, its app templates
+  (`ui://`) with their approval and where each opens, and every tool under **Read only** or
+  **Write** with its description, risk hints (destructive, idempotent, open world), inputs, whether
+  it is pinned or awaiting approval, and an **MCP-UI** badge when it opens an app. The details are
+  read-only; **Review**, **Re-probe**, **Enable**/**Disable** and **Site key** stay in the row.
+  Escape or **Close** returns to the list.
 
 ## Safety
 

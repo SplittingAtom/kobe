@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import {
   AUTH_LABELS,
   CREDENTIAL_LABELS,
@@ -18,6 +18,7 @@ import {
   Badge,
   Button,
   EmptyState,
+  FOCUS_RING,
   Field,
   FormRow,
   PageHeader,
@@ -38,6 +39,7 @@ import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView } from "../parts";
 import { useFocusAfterRemoval } from "../use-focus-after-removal";
 import { useMutation, useResource, type Mutation } from "../use-resource";
+import { ConnectorDetailPanel } from "./connector-detail-panel";
 import { SiteKeyPanel } from "./connector-site-key";
 import { RefreshSkipped } from "./connector-refresh-skipped";
 import { ReprobeButton, needsReview } from "./connector-reprobe";
@@ -65,6 +67,13 @@ export function ConnectorsPage() {
   const [editing, setEditing] = useState<Connector | null>(null);
   const [reviewing, setReviewing] = useState<Connector | null>(null);
   const [keyFor, setKeyFor] = useState<string | null>(null);
+  // The connector whose detail panel is open (KOBE-641) and the name that opened it.
+  const [detailFor, setDetailFor] = useState<string | null>(null);
+  const detailOpener = useRef<HTMLElement | null>(null);
+  const detailConnector =
+    detailFor !== null && state.status === "ready"
+      ? state.data.find((c) => c.id === detailFor)
+      : undefined;
   // Bumped by a Re-probe so an open review loads the tools again (KOBE-430).
   const [reviewRound, setReviewRound] = useState(0);
   // Looked up in the latest list, so the panel shows the hint the last save returned.
@@ -99,6 +108,10 @@ export function ConnectorsPage() {
               onEdit={setEditing}
               onReview={setReviewing}
               onSiteKey={(c) => setKeyFor(c.id)}
+              onDetails={(c, opener) => {
+                detailOpener.current = opener;
+                setDetailFor(c.id);
+              }}
               onChanged={reload}
               onReprobed={(c, outcome) => {
                 reload();
@@ -116,6 +129,14 @@ export function ConnectorsPage() {
           mutation={mutation}
           onChanged={reload}
           onClose={() => setReviewing(null)}
+        />
+      ) : null}
+      {detailConnector ? (
+        <ConnectorDetailPanel
+          key={detailConnector.id}
+          connector={detailConnector}
+          onClose={() => setDetailFor(null)}
+          returnFocus={() => detailOpener.current}
         />
       ) : null}
       {keyConnector ? (
@@ -262,6 +283,7 @@ function ConnectorTable({
   onEdit,
   onReview,
   onSiteKey,
+  onDetails,
   onChanged,
   onReprobed,
 }: {
@@ -270,6 +292,7 @@ function ConnectorTable({
   readonly onEdit: (c: Connector) => void;
   readonly onReview: (c: Connector) => void;
   readonly onSiteKey: (c: Connector) => void;
+  readonly onDetails: (c: Connector, opener: HTMLElement) => void;
   readonly onChanged: () => void;
   readonly onReprobed: Parameters<typeof ReprobeButton>[0]["onDone"];
 }) {
@@ -345,7 +368,14 @@ function ConnectorTable({
                       referrerPolicy="no-referrer"
                     />
                   ) : null}
-                  {c.name}
+                  <button
+                    type="button"
+                    aria-haspopup="dialog"
+                    className={`cursor-pointer rounded border-0 bg-transparent p-0 font-semibold text-console-fg underline underline-offset-2 ${FOCUS_RING}`}
+                    onClick={(e) => onDetails(c, e.currentTarget)}
+                  >
+                    {c.name}
+                  </button>
                 </span>
               </TableRowHeader>
               <TableCell>

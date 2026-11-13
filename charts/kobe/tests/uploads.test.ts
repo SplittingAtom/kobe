@@ -46,7 +46,7 @@ describe("upload settings", () => {
     const env = serverEnv();
     expect(env.KOBE_UPLOAD_MAX_FILE_BYTES).toBe(String(100 * 1024 ** 2));
     expect(env.KOBE_UPLOAD_MAX_MESSAGE_BYTES).toBe(String(500 * 1024 ** 2));
-    expect(env.KOBE_TEAM_STORAGE_QUOTA_BYTES).toBe(String(10 * 1024 ** 3));
+    expect(env.KOBE_TEAM_STORAGE_QUOTA_BYTES).toBe(String(50 * 1024 ** 3));
     expect(env.KOBE_UPLOAD_ORPHAN_HOURS).toBe("24");
     // Workspaces GV2/GV3 (KOBE-579): the object budget and the per-project history cap.
     expect(env.KOBE_TEAM_MAX_OBJECTS).toBe("2000000");
@@ -57,7 +57,7 @@ describe("upload settings", () => {
     const env = serverEnv({
       "server.uploads.maxFileBytes": "2097152",
       "server.uploads.maxMessageBytes": "4194304",
-      "server.uploads.teamStorageQuotaBytes": "53687091200",
+      "server.uploads.teamStorageQuotaBytes": "107374182400",
       "server.uploads.orphanHours": "72",
       "server.uploads.teamMaxObjects": "5000",
       "server.uploads.projectHistoryMaxCommits": "50",
@@ -65,7 +65,7 @@ describe("upload settings", () => {
     expect(env).toMatchObject({
       KOBE_UPLOAD_MAX_FILE_BYTES: "2097152",
       KOBE_UPLOAD_MAX_MESSAGE_BYTES: "4194304",
-      KOBE_TEAM_STORAGE_QUOTA_BYTES: "53687091200",
+      KOBE_TEAM_STORAGE_QUOTA_BYTES: "107374182400",
       KOBE_UPLOAD_ORPHAN_HOURS: "72",
       KOBE_TEAM_MAX_OBJECTS: "5000",
       KOBE_PROJECT_HISTORY_MAX_COMMITS: "50",

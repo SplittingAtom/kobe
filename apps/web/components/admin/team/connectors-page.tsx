@@ -26,6 +26,7 @@ import {
 import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
+import { McpUiBadge, ToolColumns } from "../connector-tools";
 import { useMutation, useResource, type Mutation } from "../use-resource";
 import { KobeConnectorCard } from "./kobe-connector-card";
 
@@ -74,9 +75,11 @@ export function TeamConnectorsPage() {
   );
 }
 
-/** Ticks that still name a pinned tool; a tool that drifted since is dropped, not sent. */
+/** Ticks that still name a pinned tool Pi can see; drifted and app-only ones are dropped. */
 function pinnedTicks(c: TeamConnector): string[] {
-  const pinned = new Set(c.tools.filter((t) => t.status === "pinned").map((t) => t.piName));
+  const pinned = new Set(
+    c.tools.filter((t) => t.status === "pinned" && t.modelVisible !== false).map((t) => t.piName),
+  );
   return c.enabledTools.filter((t) => pinned.has(t));
 }
 
@@ -166,7 +169,10 @@ function ConnectorCard({
           </ChoiceGroup>
         )}
         <ToolList
+          connectorName={c.name}
           tools={c.tools}
+          saved={c.enabled ? (c.exposure ?? "read_only") : null}
+          exposure={exposure}
           choosing={!blocked && exposure === "custom"}
           ticked={ticked}
           onToggle={toggleTick}
@@ -196,13 +202,21 @@ function ConnectorCard({
 }
 
 function ToolList({
+  connectorName,
   tools,
+  saved,
+  exposure,
   choosing,
   ticked,
   onToggle,
   disabled,
 }: {
+  readonly connectorName: string;
   readonly tools: readonly TeamConnectorTool[];
+  /** The team's saved exposure; null while the connector is not enabled. */
+  readonly saved: Exposure | null;
+  /** The exposure as chosen in the form, maybe not saved yet. */
+  readonly exposure: Exposure;
   readonly choosing: boolean;
   readonly ticked: readonly string[];
   readonly onToggle: (piName: string) => void;
@@ -216,39 +230,86 @@ function ToolList({
         that doesn&apos;t say otherwise as able to reach outside systems. Read-only exposure offers
         only tools that declare themselves read-only.
       </p>
-      <ul aria-label="Tools" className="m-0 my-2 grid list-none gap-1 p-0">
-        {tools.map((t) => {
-          const drifted = t.status === "drifted";
-          return (
-            <li
-              key={t.piName}
-              aria-label={`${t.name} tool`}
-              className="flex flex-wrap items-center gap-x-2 gap-y-1"
-            >
-              {choosing ? (
-                <Checkbox
-                  label={t.name}
-                  checked={!drifted && ticked.includes(t.piName)}
-                  disabled={disabled || drifted}
-                  onChange={() => onToggle(t.piName)}
-                />
-              ) : (
-                <code>{t.name}</code>
-              )}
-              {drifted ? (
-                <Badge tone="attention">
-                  Unavailable: changed upstream, waiting for a site admin
-                </Badge>
-              ) : (
-                <>
-                  <span className={HINT}>{t.readOnly ? "Read-only" : "Write"}</span>
-                  <span className={HINT}>{t.openWorld ? "Open-world" : "Closed-world"}</span>
-                </>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+      <ToolColumns
+        connectorName={connectorName}
+        tools={tools}
+        isReadOnly={(t) => t.readOnly}
+        toolName={(t) => t.name}
+        renderTool={(t) => (
+          <ToolRow
+            tool={t}
+            offer={offerOf(t, saved, exposure)}
+            choosing={choosing}
+            ticked={ticked}
+            onToggle={onToggle}
+            disabled={disabled}
+          />
+        )}
+      />
+    </>
+  );
+}
+
+/**
+ * Whether the team's agents get the tool, as the server's `exposedTools` decides: an app-only
+ * tool (`_meta.ui.visibility` without "model") never, under any exposure; a Write tool not while
+ * the saved exposure is Read-only tools. A Read-only choice not saved yet is said as a "would".
+ */
+type Offer = "offered" | "app_only" | "not_read_only" | "would_not_read_only";
+
+const OFFER_TEXT: Readonly<Record<Exclude<Offer, "offered">, string>> = {
+  app_only: "Not offered (app only)",
+  not_read_only: "Not offered to the team (Read-only tools)",
+  would_not_read_only: "Would not be offered under Read-only tools",
+};
+
+function offerOf(t: TeamConnectorTool, saved: Exposure | null, draft: Exposure): Offer {
+  if (t.modelVisible === false) return "app_only";
+  if (t.readOnly) return "offered";
+  if (saved === "read_only") return "not_read_only";
+  return draft === "read_only" ? "would_not_read_only" : "offered";
+}
+
+function ToolRow({
+  tool: t,
+  offer,
+  choosing,
+  ticked,
+  onToggle,
+  disabled,
+}: {
+  readonly tool: TeamConnectorTool;
+  readonly offer: Offer;
+  readonly choosing: boolean;
+  readonly ticked: readonly string[];
+  readonly onToggle: (piName: string) => void;
+  readonly disabled: boolean;
+}) {
+  const drifted = t.status === "drifted";
+  const appOnly = offer === "app_only";
+  return (
+    <>
+      {choosing ? (
+        <Checkbox
+          label={t.name}
+          checked={!drifted && !appOnly && ticked.includes(t.piName)}
+          disabled={disabled || drifted || appOnly}
+          onChange={() => onToggle(t.piName)}
+        />
+      ) : (
+        <code className={offer === "offered" ? undefined : "text-console-muted line-through"}>
+          {t.name}
+        </code>
+      )}
+      <McpUiBadge app={t.app} />
+      {drifted ? (
+        <Badge tone="attention">Unavailable: changed upstream, waiting for a site admin</Badge>
+      ) : (
+        <>
+          <span className={HINT}>{t.openWorld ? "Open-world" : "Closed-world"}</span>
+          {offer === "offered" ? null : <Badge>{OFFER_TEXT[offer]}</Badge>}
+        </>
+      )}
     </>
   );
 }

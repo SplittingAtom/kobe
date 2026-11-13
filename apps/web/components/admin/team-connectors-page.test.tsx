@@ -13,6 +13,7 @@ const tool = (name: string, over: Record<string, unknown> = {}) => ({
   read_only: false,
   open_world: true,
   status: "pinned",
+  app: null,
   ...over,
 });
 const connector = (over: Record<string, unknown> = {}) => ({
@@ -48,14 +49,166 @@ describe("Team connectors (KOBE-105)", () => {
     const jira = card("jira");
     expect(jira.getByText("Not enabled")).toBeTruthy();
     const get = jira.getByRole("listitem", { name: "get_issue tool" });
-    expect(within(get).getByText("Read-only")).toBeTruthy();
     expect(within(get).getByText("Closed-world")).toBeTruthy();
     const create = jira.getByRole("listitem", { name: "create_issue tool" });
-    expect(within(create).getByText("Write")).toBeTruthy();
     expect(within(create).getByText("Open-world")).toBeTruthy();
     expect(
       jira.getByText(/doesn.t declare itself read-only is treated as able to change data/i),
     ).toBeTruthy();
+  });
+
+  it("splits the tools into Read only and Write columns with counts (KOBE-639)", async () => {
+    stubApi({ [`GET ${BASE}`]: [200, { connectors: [connector()] }] });
+    renderTeam(<TeamConnectorsPage />);
+    await screen.findByRole("article", { name: "jira" });
+    const jira = card("jira");
+    const readOnly = within(jira.getByRole("region", { name: "Read only tools of jira" }));
+    const write = within(jira.getByRole("region", { name: "Write tools of jira" }));
+    expect(readOnly.getByRole("heading", { name: /Read only.*1/ })).toBeTruthy();
+    expect(write.getByRole("heading", { name: /Write.*2/ })).toBeTruthy();
+    expect(readOnly.getByRole("listitem", { name: "get_issue tool" })).toBeTruthy();
+    // No readOnlyHint (or false) is Write, like exposure read_only on the server.
+    expect(write.getByRole("listitem", { name: "create_issue tool" })).toBeTruthy();
+    expect(write.getByRole("listitem", { name: "move_issue tool" })).toBeTruthy();
+    expect(readOnly.queryByRole("listitem", { name: "create_issue tool" })).toBeNull();
+  });
+
+  it("shows a short empty state in a column without tools", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [200, { connectors: [connector({ tools: [tool("create_issue")] })] }],
+    });
+    renderTeam(<TeamConnectorsPage />);
+    await screen.findByRole("article", { name: "jira" });
+    const readOnly = within(card("jira").getByRole("region", { name: "Read only tools of jira" }));
+    expect(readOnly.getByText("No read-only tools.")).toBeTruthy();
+    expect(readOnly.getByRole("heading", { name: /Read only.*0/ })).toBeTruthy();
+  });
+
+  it("marks Write tools as not offered while the saved exposure is Read-only tools", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [200, { connectors: [connector({ enabled: true, exposure: "read_only" })] }],
+    });
+    renderTeam(<TeamConnectorsPage />);
+    await screen.findByRole("article", { name: "jira" });
+    const jira = card("jira");
+    const create = jira.getByRole("listitem", { name: "create_issue tool" });
+    expect(within(create).getByText("Not offered to the team (Read-only tools)")).toBeTruthy();
+    const get = jira.getByRole("listitem", { name: "get_issue tool" });
+    expect(within(get).queryByText(/Not offered/)).toBeNull();
+    // Choosing All tools without saving changes nothing the team has (review M2).
+    await userEvent.click(jira.getByLabelText(/All tools/));
+    expect(within(create).getByText("Not offered to the team (Read-only tools)")).toBeTruthy();
+  });
+
+  it("says a Write tool would not be offered while Read-only tools is chosen but not saved", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [200, { connectors: [connector({ enabled: true, exposure: "all" })] }],
+    });
+    renderTeam(<TeamConnectorsPage />);
+    await screen.findByRole("article", { name: "jira" });
+    const jira = card("jira");
+    const create = jira.getByRole("listitem", { name: "create_issue tool" });
+    expect(within(create).queryByText(/offered/)).toBeNull();
+    await userEvent.click(jira.getByLabelText(/Read-only tools/));
+    expect(within(create).getByText("Would not be offered under Read-only tools")).toBeTruthy();
+    expect(within(create).queryByText(/Not offered to the team/)).toBeNull();
+  });
+
+  it("marks app-only tools as not offered under every exposure, like the server (review M1)", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [
+        200,
+        {
+          connectors: [
+            connector({
+              enabled: true,
+              exposure: "all",
+              tools: [
+                tool("render", { read_only: true, model_visible: false }),
+                tool("get_issue", { read_only: true }),
+              ],
+            }),
+          ],
+        },
+      ],
+    });
+    renderTeam(<TeamConnectorsPage />);
+    await screen.findByRole("article", { name: "jira" });
+    const jira = card("jira");
+    const render = () => within(jira.getByRole("listitem", { name: "render tool" }));
+    expect(render().getByText("Not offered (app only)")).toBeTruthy();
+    expect(
+      within(jira.getByRole("listitem", { name: "get_issue tool" })).queryByText(/Not offered/),
+    ).toBeNull();
+    await userEvent.click(jira.getByLabelText(/Chosen tools/));
+    expect(render().getByText("Not offered (app only)")).toBeTruthy();
+    expect((jira.getByLabelText("render") as HTMLInputElement).disabled).toBe(true);
+    await userEvent.click(jira.getByLabelText(/Read-only tools/));
+    expect(render().getByText("Not offered (app only)")).toBeTruthy();
+  });
+
+  it("ticks tools in both columns under Chosen tools", async () => {
+    const calls = stubApi({
+      [`GET ${BASE}`]: [200, { connectors: [connector()] }],
+      [`PUT ${BASE}/c-1`]: [200, { connector: connector({ enabled: true, exposure: "custom" }) }],
+    });
+    renderTeam(<TeamConnectorsPage />);
+    await screen.findByRole("article", { name: "jira" });
+    const jira = card("jira");
+    await userEvent.click(jira.getByLabelText(/Chosen tools/));
+    const readOnly = within(jira.getByRole("region", { name: "Read only tools of jira" }));
+    const write = within(jira.getByRole("region", { name: "Write tools of jira" }));
+    await userEvent.click(readOnly.getByLabelText("get_issue"));
+    await userEvent.click(write.getByLabelText("create_issue"));
+    await userEvent.click(jira.getByRole("button", { name: /Enable/ }));
+    const put = calls.find((c) => c.method === "PUT");
+    expect(JSON.parse(String(put?.body))).toEqual({
+      exposure: "custom",
+      enabled_tools: ["jira__get_issue", "jira__create_issue"],
+    });
+  });
+
+  it("badges tools that open an MCP-UI app, naming the template and its review (KOBE-640)", async () => {
+    stubApi({
+      [`GET ${BASE}`]: [
+        200,
+        {
+          connectors: [
+            connector({
+              tools: [
+                tool("explore", {
+                  read_only: true,
+                  app: { resource_uri: "ui://jira/explorer", review: "approved" },
+                }),
+                tool("pick", { app: { resource_uri: "ui://jira/picker", review: "pending" } }),
+                tool("get_issue", { read_only: true }),
+              ],
+            }),
+          ],
+        },
+      ],
+    });
+    renderTeam(<TeamConnectorsPage />);
+    await screen.findByRole("article", { name: "jira" });
+    const jira = card("jira");
+    const explore = within(jira.getByRole("listitem", { name: "explore tool" }));
+    // A focusable trigger named by the template and its review; its tooltip opens on focus.
+    const badge = explore.getByRole("button", {
+      name: "MCP-UI: Opens an app: ui://jira/explorer (approved)",
+    });
+    badge.focus();
+    expect(document.activeElement).toBe(badge);
+    expect(
+      (await screen.findAllByText("Opens an app: ui://jira/explorer (approved)")).length,
+    ).toBeGreaterThan(0);
+    const pick = within(jira.getByRole("listitem", { name: "pick tool" }));
+    expect(
+      pick.getByRole("button", {
+        name: "MCP-UI: Opens an app: ui://jira/picker (waiting for a site admin's review)",
+      }),
+    ).toBeTruthy();
+    const plain = within(jira.getByRole("listitem", { name: "get_issue tool" }));
+    expect(plain.queryByText("MCP-UI")).toBeNull();
   });
 
   it("shows drifted tools as unavailable", async () => {
