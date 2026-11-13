@@ -228,6 +228,14 @@ describe("item API requests", () => {
     ).toBe(true);
     // KOBE-378: confirm_portable only (and always) on a portable save.
     expect(create({ confirm_portable: true }).success).toBe(false);
+    // Review L-6: the replaced item's expected version only with supersedes_id.
+    expect(create({ supersedes_expected_version: 2 }).success).toBe(false);
+    expect(
+      create({
+        supersedes_id: "22222222-2222-4222-8222-222222222222",
+        supersedes_expected_version: 2,
+      }).success,
+    ).toBe(true);
     expect(create({ scope: "site", source_thread_id: fixture("item-detail").id }).success).toBe(
       false,
     );

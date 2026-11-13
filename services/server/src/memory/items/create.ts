@@ -2,6 +2,7 @@ import { sql, type KobeDb } from "@kobe/db";
 import type { CreateSemanticMemoryItem, SemanticMemoryItemDetail } from "@kobe/protocol";
 import type { ServerAuditEvent } from "../../audit/record.js";
 import {
+  assertExpected,
   audit,
   auditTeam,
   inStore,
@@ -19,6 +20,8 @@ import {
   lockScope,
   notifyNearFull,
 } from "./limits.js";
+import { findThread } from "../../threads/repository.js";
+import { viewerProjectIds } from "../../threads/references.js";
 import { workspaceTeam } from "./location.js";
 import { detailOf, readItem, type ItemRow } from "./rows.js";
 import { insertVersion } from "./versions.js";
@@ -41,7 +44,9 @@ export function createItem(
       policyField: body.policy !== undefined,
       targetIsPolicy: false,
     });
-    const replaced = body.supersedes_id ? await replacedItem(op, body.supersedes_id) : undefined;
+    const replaced = body.supersedes_id
+      ? await replacedItem(op, body.supersedes_id, body.supersedes_expected_version)
+      : undefined;
     if (body.source_thread_id) await assertThreadInWorkspace(op, body.source_thread_id);
 
     await lockScope(op.tx, op.loc);
@@ -118,19 +123,25 @@ export function createItem(
 }
 
 /** The active item a save replaces: same scope, and the caller may change it. */
-async function replacedItem(op: Op, id: string): Promise<ItemRow> {
+async function replacedItem(op: Op, id: string, expected?: number): Promise<ItemRow> {
   const row = await loadForWrite(op, id);
+  assertExpected(row, expected);
   assertMayWrite(op.who, op.loc.scope, { policyField: false, targetIsPolicy: row.policy });
   if (row.status !== "active") throw inactive("The memory to replace is not active.");
   return row;
 }
 
-/** A source thread must be a thread of this Workspace (no key on the column; KOBE-376). */
+/**
+ * A source thread must be a conversation of this Workspace the caller can read (own, or shared
+ * with them; the thread routes' predicate), so a version never points at a thread its author
+ * couldn't open (review L-2). No key on the column (KOBE-376).
+ */
 async function assertThreadInWorkspace(op: Op, threadId: string): Promise<void> {
-  const { rows } = await op.tx.execute(
-    sql`SELECT 1 FROM threads WHERE team_id = ${workspaceTeam(op.loc)} AND id = ${threadId}`,
-  );
-  if (rows.length === 0) throw invalid("source_thread_id is not a conversation in this workspace.");
+  const teamId = workspaceTeam(op.loc);
+  const userId = op.who.userId;
+  const viewer = { teamId, userId, projectIds: await viewerProjectIds(op.tx, teamId, userId) };
+  if (!(await findThread(op.tx, viewer, threadId)))
+    throw invalid("source_thread_id is not a conversation you can read in this workspace.");
 }
 
 async function insertItem(

@@ -68,6 +68,17 @@ additions (protocol + OpenAPI); (3) the store (`services/server/src/memory/items
   ids/versions/counts only. `memory.policy.set` when `policy` flips.
 - `overrides.policy_conflict` accepted and ignored until KOBE-379's checks exist.
 
+- **Review 2026-11-13 (`docs/ledger/review-378.md`, untracked):** M-1 pruning takes
+  `legal_hold_lock_shared()` before the hold check (portable/Site versions have no DB guard). L-1:
+  run records in other Workspaces are invisible (RLS, no SECURITY DEFINER), so the prune query can
+  exclude only visible run-used versions; a refused delete is kept and at most 2 refusals are tried
+  per write (logged). Excluding them entirely needs a "used" marker (migration) — propose with the
+  run-record writer (KOBE-382). L-2 source thread must pass `findThread` (own or shared). L-3 role
+  refusal is `memory_not_allowed`; team-resolution codes documented in OpenAPI. L-4 both sides of
+  a Policy flip must be enabled. L-5 concurrency tests. L-6 `supersedes_expected_version`
+  (contract field, 409 `memory_version_conflict`). I-1: without a Workspace any signed-in user
+  reads Site memories and Policy (Site = organisation); confirm with Chris.
+
 ## Docs
 
 API behaviour: OpenAPI descriptions (`openapi/semantic-memory.ts`, `openapi.json`), upgrade note in
@@ -104,4 +115,6 @@ tags lowercased, `as_of`, the near-duplicate warning and Save anyway, the 80% wa
 - **ac-4:** limits test "near-duplicates" (create, edit, Undo, other scope not compared, Save
   anyway audited), "stores as_of and lowercase tags", "version cap" (run-used version kept,
   portable/Site pruned, hold keeps all, release prunes). Migration: `memory-version-prune-upgrade.db.test.ts`.
-- Unit: `services/server/src/memory/items/items.test.ts`.
+- Unit: `services/server/src/memory/items/items.test.ts`. Review fixes:
+  `services/server/src/memory-items-review.db.test.ts` (hold lock, thread access, Policy flip, supersede
+  version, parallel creates/pins/Policy saves: exactly the room wins, one notice).

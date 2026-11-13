@@ -48,7 +48,10 @@ async function prepare(
   policyAfter: (row: ItemRow) => boolean = (row) => row.policy,
 ): Promise<ItemRow> {
   const row = await loadForWrite(op, id);
-  assertEnabled(op.memory, op.loc.scope, row.policy || policyAfter(row));
+  // Both sides of the write must be on: a Policy item turned plain lands in Site memories, which
+  // this Workspace may have switched off (review L-4), and the reverse reads a plain item.
+  assertEnabled(op.memory, op.loc.scope, row.policy);
+  assertEnabled(op.memory, op.loc.scope, policyAfter(row));
   assertMayWrite(op.who, op.loc.scope, { policyField, targetIsPolicy: row.policy });
   return row;
 }

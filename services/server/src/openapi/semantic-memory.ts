@@ -91,7 +91,9 @@ const SAVE_ERRORS = {
   "400": json(
     "Error",
     "`invalid_request`: the body does not match, or breaks a scope rule of the stored item " +
-      "(a portable item's kind or `as_of`, `policy` off the Site).",
+      "(a portable item's kind or `as_of`, `policy` off the Site, a source thread you can't " +
+      "read, Undo to a version that was pruned); `team_header_required`: a change in an " +
+      "active Workspace without `X-Kobe-Team`.",
   ),
   "404": ERR("`memory_item_not_found`."),
   "409": ERR(

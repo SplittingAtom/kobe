@@ -70,7 +70,10 @@ export function memoryItemRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariab
     if (!passed)
       return refused ?? c.json({ code: "no_active_team", message: "Choose a team first." }, 409);
     if (!teamRoleAllows(c.get("team").role, "team.chat"))
-      return c.json({ code: "forbidden", message: "Your team role doesn't allow that." }, 403);
+      return c.json(
+        { code: "memory_not_allowed", message: "Your workspace role doesn't allow that." },
+        403,
+      );
     return undefined;
   };
 

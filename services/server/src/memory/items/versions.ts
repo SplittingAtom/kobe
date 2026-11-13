@@ -1,4 +1,4 @@
-import { sql, type KobeTx } from "@kobe/db";
+import { lockLegalHolds, sql, type KobeTx } from "@kobe/db";
 import type { SemanticMemoryActorKind } from "@kobe/protocol";
 import { logger } from "../../logger.js";
 import { workspaceTeam, type Location } from "./location.js";
@@ -51,6 +51,10 @@ export async function insertVersion(tx: KobeTx, loc: Location, v: NewVersion): P
  * (KOBE-647) narrows it.
  */
 async function held(tx: KobeTx, loc: Location, owner: string | null): Promise<boolean> {
+  // The hold lock first (as retention/memory.ts): a hold being approved waits for this write, or
+  // this write waits for it and then sees it. Portable and Site versions have no DB hold guard, so
+  // this check is their only protection (review M-1).
+  await lockLegalHolds(tx);
   const cond = loc.workspace
     ? sql`memory_legal_hold_covers(${workspaceTeam(loc)}, ${owner})`
     : loc.scope === "portable"
@@ -60,6 +64,13 @@ async function held(tx: KobeTx, loc: Location, owner: string | null): Promise<bo
   const { rows } = await tx.execute<{ held: boolean }>(sql`SELECT ${cond} AS held`);
   return rows[0]?.held === true;
 }
+
+/**
+ * Refused deletes tolerated per write (review L-1): a portable or Site version a run in another
+ * Workspace used is invisible to the candidate query (team tables under RLS; no SECURITY DEFINER),
+ * so it is found only by the 0222 guard refusing it. Stop trying after this many in one write.
+ */
+const MAX_REFUSED_PER_WRITE = 2;
 
 /**
  * Prunes the item's oldest versions past `cap`: never the current version, never a version a run
@@ -85,7 +96,9 @@ export async function pruneVersions(
        AND NOT EXISTS (SELECT 1 FROM ${loc.runs} r WHERE r.item_id = v.item_id AND r.version = v.version)
      ORDER BY v.version ASC LIMIT ${excess}`);
   let pruned = 0;
+  let refused = 0;
   for (const { version } of rows) {
+    if (refused >= MAX_REFUSED_PER_WRITE) break;
     try {
       await tx.transaction(async (sp) => {
         await sp.execute(
@@ -95,7 +108,8 @@ export async function pruneVersions(
       pruned += 1;
     } catch (err) {
       // A run in another Workspace used it (55000) or a hold arrived (KH001): keep it.
-      logger.debug({ err, itemId: item.id, version }, "memory version kept past the cap");
+      refused += 1;
+      logger.info({ err, itemId: item.id, version }, "memory version kept past the cap");
     }
   }
   return pruned;
