@@ -247,8 +247,10 @@ describe("what a Site-wide hold freezes (ac-2)", () => {
     const item = await siteItem();
     const db = h.deps.database.db;
     const purge = () =>
-      withSiteMemoryPurge(db, async (tx) => {
-        await tx.execute(sql`DELETE FROM site_memory_items WHERE id = ${item}`);
+      withSiteMemoryPurge(db, async (tx, unheld) => {
+        await tx.execute(
+          sql`DELETE FROM site_memory_items i WHERE i.id = ${item} AND ${unheld(sql`i.id`)}`,
+        );
         return 1;
       });
     const id = await place();
@@ -272,6 +274,82 @@ describe("what a Site-wide hold freezes (ac-2)", () => {
         isolationLevel: "repeatable read",
       }),
     ).rejects.toBeInstanceOf(SiteHoldIsolationError);
+  });
+});
+
+describe("a person's legal hold keeps the Site memories they wrote (P2-L1, Chris 2026-11-13)", () => {
+  /** A third site admin approves, so the owner (a site admin) can be the subject. */
+  let approver = "";
+  beforeAll(async () => {
+    approver = await h.createUser("approver@slh.test", "admin");
+  });
+  const userHold = async (subject: string): Promise<string> => {
+    const hold =
+      (
+        await h.admin.query<{ id: string }>(
+          `INSERT INTO legal_holds (team_id, user_id, reason, placed_by) VALUES ($1, $2, 'custodian', $3) RETURNING id`,
+          [team, subject, ids.admin],
+        )
+      ).rows[0]?.id ?? "";
+    await h.admin.query(
+      `UPDATE legal_holds SET status = 'active', approved_by = $2 WHERE id = $1`,
+      [hold, approver],
+    );
+    return hold;
+  };
+  const releaseUserHold = async (hold: string) => {
+    await h.admin.query(
+      `UPDATE legal_holds SET release_requested_by = $2, release_requested_at = now(), release_reason = 'done' WHERE id = $1`,
+      [hold, ids.admin],
+    );
+    await h.admin.query(
+      `UPDATE legal_holds SET status = 'released', released_by = $2 WHERE id = $1`,
+      [hold, approver],
+    );
+  };
+
+  it("a held author's Site item edited past the cap keeps every version until the hold ends", async () => {
+    const held = await siteItem(); // written by the owner
+    const hold = await userHold(ids.owner);
+    try {
+      await editStatement(held, 1, 6);
+      expect(await versionsOf(held)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    } finally {
+      await releaseUserHold(hold);
+    }
+    await editStatement(held, 7, 1);
+    expect(await versionsOf(held)).toEqual([4, 5, 6, 7, 8]);
+  });
+
+  it("an unheld author's Site item prunes while someone else is held", async () => {
+    const item = await siteItem(); // the owner writes it
+    const hold = await userHold(ids.member);
+    try {
+      await editStatement(item, 1, 6);
+      expect(await versionsOf(item)).toEqual([3, 4, 5, 6, 7]);
+    } finally {
+      await releaseUserHold(hold);
+    }
+  });
+
+  it("Site purges skip items a held person wrote", async () => {
+    const item = await siteItem();
+    const db = h.deps.database.db;
+    const purge = () =>
+      withSiteMemoryPurge(db, async (tx, unheld) => {
+        const res = await tx.execute(
+          sql`DELETE FROM site_memory_items i WHERE i.id = ${item} AND ${unheld(sql`i.id`)}`,
+        );
+        return res.rowCount ?? 0;
+      });
+    const hold = await userHold(ids.owner);
+    try {
+      expect(await purge()).toEqual({ held: false, value: 0 });
+      expect(await versionsOf(item)).toEqual([1]);
+    } finally {
+      await releaseUserHold(hold);
+    }
+    expect(await purge()).toEqual({ held: false, value: 1 });
   });
 });
 

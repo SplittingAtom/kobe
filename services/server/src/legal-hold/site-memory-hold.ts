@@ -1,5 +1,7 @@
 import { lockLegalHolds, sql, type KobeDb, type KobeTx } from "@kobe/db";
 
+type SQL = ReturnType<typeof sql>;
+
 /**
  * The Site-wide legal hold as purges see it (v1.3 SM28, KOBE-647). Every server path that deletes
  * Site memory items or versions (the version cap's pruning, Site memory sweeps and purges) asks
@@ -38,21 +40,34 @@ export async function siteMemoryHeld(tx: KobeTx): Promise<boolean> {
   return rows[0]?.held === true;
 }
 
+/**
+ * A person's legal hold also keeps the Site memories they wrote (review P2-L1, Chris 2026-11-13):
+ * true for a Site item none of whose versions was written by a person under an active hold on
+ * them (`legal_holds.user_id`; a team-wide hold names no person and does not reach the Site).
+ * Read after the hold lock ({@link siteMemoryHeld} takes it). `itemId`: the item id column or value.
+ */
+export const siteItemAuthorsUnheld = (itemId: SQL): SQL => sql`NOT EXISTS (
+  SELECT 1 FROM site_memory_item_versions av
+    JOIN legal_holds h ON h.user_id = av.actor_user_id AND h.status = 'active'
+   WHERE av.item_id = ${itemId})`;
+
 export type SitePurgeOutcome<T> = { readonly held: true } | { readonly held: false; value: T };
 
 /**
  * Runs a Site memory purge or sweep batch in one READ COMMITTED transaction, hold lock first:
- * `purge` runs only when no Site-wide hold is in force, and its deletes stay inside the lock.
+ * `purge` runs only when no Site-wide hold is in force, and its deletes stay inside the lock. Every
+ * delete must also filter its items with `unheld` ({@link siteItemAuthorsUnheld}), so items a held
+ * person wrote are skipped.
  */
 export function withSiteMemoryPurge<T>(
   db: KobeDb,
-  purge: (tx: KobeTx) => Promise<T>,
+  purge: (tx: KobeTx, unheld: (itemId: SQL) => SQL) => Promise<T>,
 ): Promise<SitePurgeOutcome<T>> {
   return db.transaction(
     async (tx): Promise<SitePurgeOutcome<T>> => {
       await tx.execute(sql.raw(`SET LOCAL lock_timeout = '5s'`));
       if (await siteMemoryHeld(tx)) return { held: true };
-      return { held: false, value: await purge(tx) };
+      return { held: false, value: await purge(tx, siteItemAuthorsUnheld) };
     },
     { isolationLevel: "read committed" },
   );

@@ -74,8 +74,9 @@ export function SiteMemoryHoldSection() {
         deleted or pruned while it is in force, even past the versions-kept limit, and changes to a
         Site memory&apos;s kind, tags, Policy flag or as-of date record the earlier and new kind,
         Policy flag and as-of date in the site audit log, and for tags a count and a fingerprint
-        (not the tags themselves). Workspace holds above don&apos;t cover Site memory. Placing and
-        releasing need a second site admin.
+        (not the tags themselves). A hold above on one user also keeps the Site memories that user
+        wrote; a whole-team hold doesn&apos;t cover Site memory. Placing and releasing need a second
+        site admin.
       </p>
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="Site-wide legal holds">

@@ -144,8 +144,9 @@ site admin approves, as for any legal hold). While it is in force, no Site memor
 version of one is deleted: editing a Site memory past the versions-kept limit keeps every version,
 and Site memory cleanup skips it. Changes to a Site memory's kind, tags, Policy flag or as-of date
 are still allowed, and the site audit log records the earlier and new kind, Policy flag and
-as-of date, and for tags a count and a fingerprint (not the tags themselves). A hold on a
-workspace or a person covers that workspace's memories, not the Site's.
+as-of date, and for tags a count and a fingerprint (not the tags themselves). A hold on one person also keeps every version of the Site memories that person wrote, for as long
+as it lasts (edits still work; nothing of those memories is pruned or cleaned up). A hold on a whole
+workspace covers that workspace's memories, not the Site's.
 
 ## What Kobe checks before a memory is saved
 

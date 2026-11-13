@@ -1,6 +1,6 @@
 import { lockLegalHolds, sql, type KobeTx } from "@kobe/db";
 import type { SemanticMemoryActorKind } from "@kobe/protocol";
-import { siteMemoryHeld } from "../../legal-hold/site-memory-hold.js";
+import { siteItemAuthorsUnheld, siteMemoryHeld } from "../../legal-hold/site-memory-hold.js";
 import { logger } from "../../logger.js";
 import { workspaceTeam, type Location } from "./location.js";
 
@@ -49,10 +49,23 @@ export async function insertVersion(tx: KobeTx, loc: Location, v: NewVersion): P
  * (`memory_legal_hold_covers`: the owner's hold, any hold in the team for `team` items). Portable
  * items: any active hold on the owner or any team-wide hold (a portable item reaches every
  * Workspace the person is in). Site items: a Site-wide hold (KOBE-647), checked before any delete
- * so an edit past the cap under a hold keeps every version instead of failing KH001 (review M1).
+ * so an edit past the cap under a hold keeps every version instead of failing KH001 (review M1),
+ * or a hold on a person who wrote any of the item's versions (P2-L1).
  */
-async function held(tx: KobeTx, loc: Location, owner: string | null): Promise<boolean> {
-  if (loc.scope === "site") return siteMemoryHeld(tx);
+async function held(
+  tx: KobeTx,
+  loc: Location,
+  itemId: string,
+  owner: string | null,
+): Promise<boolean> {
+  if (loc.scope === "site") {
+    if (await siteMemoryHeld(tx)) return true;
+    // A person's hold keeps every version of the Site items they wrote (P2-L1; lock taken above).
+    const { rows } = await tx.execute<{ unheld: boolean }>(
+      sql`SELECT ${siteItemAuthorsUnheld(sql`${itemId}::uuid`)} AS unheld`,
+    );
+    return rows[0]?.unheld !== true;
+  }
   // The hold lock first (as retention/memory.ts): a hold being approved waits for this write, or
   // this write waits for it and then sees it. Portable versions have no DB hold guard, so this
   // check is their only protection (review M-1).
@@ -89,7 +102,7 @@ export async function pruneVersions(
   );
   const excess = (count[0]?.n ?? 0) - cap;
   if (excess <= 0) return 0;
-  if (await held(tx, loc, item.owner)) return 0;
+  if (await held(tx, loc, item.id, item.owner)) return 0;
   const { rows } = await tx.execute<{ version: number }>(sql`
     SELECT v.version FROM ${loc.versions} v
      WHERE ${loc.versionsOfItem(item.id)} AND v.version <> ${item.currentVersion}
