@@ -36,7 +36,7 @@ export async function notifyEgressUserChanged(tx: KobeTx, userId: string): Promi
 }
 
 /** The site ceiling: patterns teams may enable (rows with `in_ceiling`). */
-export async function loadEgressCeiling(db: KobeDb): Promise<string[]> {
+export async function loadEgressCeiling(db: KobeDb | KobeTx): Promise<string[]> {
   const rows = await db
     .select({ domain: egressDomains.domain })
     .from(egressDomains)
@@ -49,6 +49,18 @@ export async function loadTeamEgress(db: KobeDb, teamId: string): Promise<string
   const rows = await withTeam(db, teamId, (tx) =>
     tx.select({ domain: teamEgress.domain }).from(teamEgress).where(eq(teamEgress.teamId, teamId)),
   );
+  return rows.map((r) => r.domain);
+}
+
+/**
+ * {@link loadTeamEgress} inside a transaction that already runs as `teamId` (`withTeam`), e.g. the
+ * semantic memory link check (KOBE-379), which reads it in the save's own transaction.
+ */
+export async function loadTeamEgressIn(tx: KobeTx, teamId: string): Promise<string[]> {
+  const rows = await tx
+    .select({ domain: teamEgress.domain })
+    .from(teamEgress)
+    .where(eq(teamEgress.teamId, teamId));
   return rows.map((r) => r.domain);
 }
 

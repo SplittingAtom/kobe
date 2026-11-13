@@ -31,8 +31,8 @@ import {
  * - `PATCH  /v1/memory/semantic/items/{scope}/{id}` body {@link patchSemanticMemoryItemSchema}
  * - `POST   /v1/memory/semantic/items/{scope}/{id}/archive` body {@link semanticMemoryItemActionSchema}
  *   (optional; never deletes, versions stay)
- * - `POST   /v1/memory/semantic/items/{scope}/{id}/restore` body {@link semanticMemoryItemActionSchema}
- *   (optional; un-archive)
+ * - `POST   /v1/memory/semantic/items/{scope}/{id}/restore` body {@link restoreSemanticMemoryItemSchema}
+ *   (optional; un-archive, with the save checks: KOBE-379)
  * - `POST   /v1/memory/semantic/items/{scope}/{id}/revert` body {@link revertSemanticMemoryItemSchema}
  *   (Undo: a new version copying an earlier one)
  * - `POST   /v1/memory/semantic/items/{scope}/{id}/pin` body {@link pinSemanticMemoryItemSchema}
@@ -326,6 +326,17 @@ export const semanticMemoryItemActionSchema = z.strictObject({
   expected_version: version.optional(),
 });
 export type SemanticMemoryItemAction = z.infer<typeof semanticMemoryItemActionSchema>;
+
+/**
+ * Restore from the archive (optional body). Restoring runs every save check again (KOBE-379
+ * review H-1: a Policy or rule added while the item was archived applies), so it takes the same
+ * `overrides` as a save; `memory_lint_warning` and `memory_policy_conflict` as for a save.
+ */
+export const restoreSemanticMemoryItemSchema = z.strictObject({
+  expected_version: version.optional(),
+  overrides: semanticMemoryOverridesSchema.optional(),
+});
+export type RestoreSemanticMemoryItem = z.infer<typeof restoreSemanticMemoryItemSchema>;
 
 /**
  * Pin or unpin. Pinning a Policy item is refused with `memory_policy_not_pinnable` (Policy is

@@ -12,6 +12,7 @@ import {
   textArray,
   type Op,
 } from "./context.js";
+import { overrideAuditEvents } from "../checks.js";
 import { inactive, invalid } from "./errors.js";
 import {
   assertPinRoom,
@@ -56,9 +57,13 @@ export function createItem(
     if (policy) await assertPolicyBudget(op.tx, retired, body.statement);
     const checks = await saveChecks(
       op,
-      body.statement,
+      {
+        statement: body.statement,
+        policy,
+        except: replaced ? [replaced.id] : [],
+        tags: normaliseTags(body.tags ?? []),
+      },
       body.overrides,
-      replaced ? [replaced.id] : [],
     );
 
     const id = await insertItem(op, body, policy);
@@ -68,7 +73,7 @@ export function createItem(
       statement: body.statement,
       actorKind: "user",
       lintOverride: checks.lintOverride,
-      policyOverride: false,
+      policyOverride: checks.policyOverride,
       sourceThreadId: body.source_thread_id,
       sourceEntryIds: body.source_entry_ids,
     });
@@ -108,12 +113,7 @@ export function createItem(
         teamId,
         target: { scope, itemId: replaced.id, supersededBy: id },
       });
-    if (checks.lintOverride)
-      events.push({
-        action: "memory.lint.override",
-        teamId,
-        target: { scope, itemId: id, version: 1, warnings: checks.warnings },
-      });
+    events.push(...overrideAuditEvents(checks, { scope, itemId: id, version: 1, teamId }));
     const row = await readItem(op.tx, op.loc, id);
     if (!row) throw new Error("memory item vanished inside its own transaction");
     const detail = await detailOf(op.tx, op.loc, who, row);

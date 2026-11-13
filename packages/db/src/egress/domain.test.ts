@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DOMAIN_PATTERN_SQL } from "../schema/egress.js";
-import { isPublicSuffix, isSharedHosting } from "./public-suffix.js";
+import { isPublicSuffix, isRegistrableHost, isSharedHosting } from "./public-suffix.js";
 import {
   decideEgress,
   findMatchingPattern,
@@ -103,6 +103,13 @@ describe("public suffixes and shared hosting", () => {
     }
     expect(isPublicSuffix("co.uk")).toBe(true);
     expect(isPublicSuffix("example.co.uk")).toBe(false);
+  });
+
+  it("spots registrable names under ICANN suffixes (KOBE-379 bare hosts)", () => {
+    for (const host of ["evil.de", "docs.example.co.uk", "files.example.zip"])
+      expect(isRegistrableHost(host), host).toBe(true);
+    for (const name of ["co.uk", "main.zzz", "localhost", "de"])
+      expect(isRegistrableHost(name), name).toBe(false);
   });
 });
 

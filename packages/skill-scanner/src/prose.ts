@@ -34,12 +34,24 @@ export const PROSE_RULES: readonly ProseRule[] = [
 
 /**
  * Invisible formatting characters that hide text from a reviewer: zero-width and bidi controls,
- * the Unicode Tag block (U+E0000 to E007F, "ASCII smuggling"), variation selectors, Hangul fillers,
- * the Mongolian vowel separator, the combining grapheme joiner and line/paragraph separators.
- * Emoji keep working: one variation selector right after an emoji, and a zero-width joiner between
- * emoji, are presentation, not smuggling (a run of selectors is still flagged).
+ * the Unicode Tag block (U+E0000 to E007F, "ASCII smuggling"), variation selectors (also the
+ * Mongolian free variation selectors U+180B to 180F), Hangul fillers, interlinear annotation
+ * marks (U+FFF9 to FFFB), musical formatting controls (U+1D173 to 1D17A), the combining grapheme
+ * joiner and line/paragraph separators. Emoji keep working: one variation selector right after a
+ * pictograph (or before a keycap mark), and a zero-width joiner between pictographs, are
+ * presentation, not smuggling (a run of selectors, or one after a digit, is still flagged:
+ * KOBE-379 review M-1).
  */
 export const INVISIBLE =
   // The combining marks in the classes are matched one at a time, on purpose.
   // eslint-disable-next-line no-misleading-character-class
-  /[\u00ad\u034f\u061c\u115f\u1160\u180e\u200b\u200c\u200e\u200f\u202a-\u202e\u2028\u2029\u2060-\u2064\u2066-\u2069\u3164\ufeff\uffa0\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}]|(?<!\p{Emoji})[\ufe00-\ufe0f]|(?<![\p{Emoji}\ufe0f])\u200d|\u200d(?!\p{Emoji})/u;
+  /[\u00ad\u034f\u061c\u115f\u1160\u180b-\u180f\u200b\u200c\u200e\u200f\u202a-\u202e\u2028\u2029\u2060-\u2064\u2066-\u2069\u3164\ufeff\uffa0\ufff9-\ufffb\u{1d173}-\u{1d17a}\u{e0000}-\u{e007f}\u{e0100}-\u{e01ef}]|(?<!\p{Extended_Pictographic})[\ufe00-\ufe0f](?!\u20e3)|(?<![\p{Extended_Pictographic}\ufe0f\u{1f3fb}-\u{1f3ff}])\u200d|\u200d(?!\p{Extended_Pictographic})/u;
+
+/**
+ * Every default-ignorable code point (Unicode's own set: format controls, variation selectors,
+ * fillers, tags) plus the interlinear annotation marks, with no emoji exception: what a text view
+ * for matching drops unconditionally (KOBE-379 memory checks; emoji presentation never matters to
+ * a rule). Hangul and Braille blanks render as a space: map them first (see the memory checks'
+ * quote normaliser).
+ */
+export const IGNORABLE = /[\p{Default_Ignorable_Code_Point}\ufff9-\ufffb]/u;

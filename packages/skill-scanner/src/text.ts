@@ -3,6 +3,7 @@ import {
   pipesDownloadToInterpreter,
   SECRET_RULES,
   plausibleSecret,
+  plausibleSplitToken,
 } from "./rules.js";
 import { INVISIBLE, PROSE_RULES } from "./prose.js";
 import { SCAN_LIMITS, type Finding, type FindingCategory } from "./types.js";
@@ -19,8 +20,8 @@ function maskValue(value: string): string {
   return value.slice(0, keep) + "*".repeat(Math.max(value.length - keep, 4));
 }
 
-/** Masks every secret-shaped value so excerpts never carry one. */
-function maskSecrets(text: string): string {
+/** Masks every secret-shaped value so excerpts never carry one (also used by memory checks). */
+export function maskSecrets(text: string): string {
   return SECRET_RULES.reduce((acc, rule) => {
     const global = new RegExp(rule.pattern.source, rule.pattern.flags + "g");
     return acc.replace(global, (match: string, ...rest: unknown[]) => {
@@ -36,11 +37,33 @@ function excerptOf(view: string): string {
   return masked.length > max ? masked.slice(0, max) + "…" : masked;
 }
 
-function matchSecret(view: string): string | undefined {
+/**
+ * The first {@link SECRET_RULES} rule matching `view`, or undefined. Shared with the semantic
+ * memory checks (KOBE-379), so a credential is recognised the same way in skills and memories.
+ */
+export function matchSecret(view: string): string | undefined {
   for (const rule of SECRET_RULES) {
     const m = rule.pattern.exec(view);
     if (!m) continue;
     if (rule.group === 0 || plausibleSecret(m[rule.group] ?? "")) return rule.id;
+  }
+  return undefined;
+}
+
+/**
+ * The first rule whose token core ({@link SecretRule.split}) is in `collapsed`: text with the
+ * spaces, hyphens and dots between token characters removed (KOBE-379 review M-4: a token typed in
+ * groups). Only prefix-anchored rules take part, and the token must look random
+ * ({@link plausibleSplitToken}), so joined prose words don't count. At most 32 candidates per rule.
+ */
+export function matchSplitSecret(collapsed: string): string | undefined {
+  for (const rule of SECRET_RULES) {
+    if (!rule.split) continue;
+    let seen = 0;
+    for (const m of collapsed.matchAll(rule.split)) {
+      if (plausibleSplitToken(m[0])) return rule.id;
+      if (++seen >= 32) break;
+    }
   }
   return undefined;
 }

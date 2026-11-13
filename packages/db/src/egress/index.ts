@@ -21,7 +21,12 @@ export {
   sealHeaders,
   type InjectedHeader,
 } from "./header-rules.js";
-export { isPublicSuffix, isSharedHosting, publicSuffixProblem } from "./public-suffix.js";
+export {
+  isPublicSuffix,
+  isRegistrableHost,
+  isSharedHosting,
+  publicSuffixProblem,
+} from "./public-suffix.js";
 export {
   CEILING_CHANGED,
   EGRESS_BLOCKED_CHANNEL,
@@ -31,6 +36,7 @@ export {
   isActiveTeamMember,
   loadEgressCeiling,
   loadTeamEgress,
+  loadTeamEgressIn,
   loadTeamEgressHeaders,
   notifyEgressChanged,
   notifyEgressUserChanged,

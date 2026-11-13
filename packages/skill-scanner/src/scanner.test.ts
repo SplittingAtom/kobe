@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  INVISIBLE,
   RULE_SET_VERSION,
   SCAN_LIMITS,
+  matchSecret,
+  matchSplitSecret,
   scanSkillBundle,
   type FindingCategory,
   type ScanFile,
@@ -176,6 +179,107 @@ describe("secrets", () => {
     "const AKIA_PREFIX = 'AKIA';",
   ])("ignores %s", (t) => {
     expect(cats("c.py", t + "\n")).not.toContain("secret");
+  });
+});
+
+describe("secrets people paste into prose (KOBE-379 review H-2)", () => {
+  const PW = ["Hunter2", "Hunter2", "Hx9"].join("");
+  const b64url = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const JWT = [
+    b64url({ alg: "HS256", typ: "JWT" }),
+    b64url({ sub: "1234567890" }),
+    "s1gNaTuRe_x9Q",
+  ].join(".");
+  it.each([
+    [
+      "a connection string password",
+      `postgres://admin:${PW}@db.internal:5432/prod`,
+      "connection-string",
+    ],
+    ["an unquoted assignment", `password = ${PW}`, "password-unquoted"],
+    ["an env line", `DB_PASSWORD=${PW}`, "password-unquoted"],
+    ["a pwd: value", `pwd: ${PW}`, "password-unquoted"],
+    ["a prose password", `The prod DB password is Tr0ub4dor&3xyzabc`, "password-unquoted"],
+    ["a Stripe live key", ["sk", "_live_", "4eC39HqLyjWDarjtT1zdp7dc"].join(""), "stripe-key"],
+    ["a Stripe restricted key", ["rk", "_live_", "51H8xYzAbCdEf12345678"].join(""), "stripe-key"],
+    ["a GitLab token", ["glpat", "-", "xY9zAbCdEf12GhIjKlMn"].join(""), "gitlab-token"],
+    ["a JWT", JWT, "jwt"],
+    [
+      "a Slack app token",
+      ["xapp", "-1-A0123456789-", "1234567890123-abcdef"].join(""),
+      "slack-token",
+    ],
+    ["an Azure account key", `AccountKey=${"Ab1+".repeat(11)}==`, "azure-account-key"],
+  ])("finds %s", (_n, text, rule) => {
+    expect(matchSecret(text)).toBe(rule);
+  });
+
+  it.each([
+    "postgres://user:password@localhost:5432/app",
+    "postgres://postgres:kobe-dev-only@pg:5432/postgres",
+    "The password is required for every login.",
+    "password = config.api_key_v2",
+    'api_key = os.environ["API_KEY"]',
+    "token = getToken(user1)",
+    "Set DB_PASSWORD=${DB_PASSWORD} in the env file.",
+    "Publishable keys start with pk_live_ and are safe in the browser.",
+    "Tokens look like eyJhbGciOi... but this is not one.",
+  ])("ignores %s", (text) => {
+    expect(matchSecret(text)).toBeUndefined();
+  });
+
+  it("finds a token typed in short groups, not joined prose words (review M-4)", () => {
+    const join = (s: string, n: number, sep: string) =>
+      (s.match(new RegExp(`.{1,${n}}`, "g")) ?? []).join(sep);
+    const collapse = (s: string) => s.replace(/(?<=[A-Za-z0-9_])[\s.-]{1,3}(?=[A-Za-z0-9_])/g, "");
+    expect(matchSplitSecret(collapse(join(GH, 3, " ")))).toBe("github-token");
+    expect(matchSplitSecret(collapse(`${GH.slice(0, 20)}-${GH.slice(20)}`))).toBe("github-token");
+    expect(matchSplitSecret(collapse(join(AWS.replace("EXAMPLE", "EXAMPLF"), 2, "\n")))).toBe(
+      "aws-access-key",
+    );
+    expect(
+      matchSplitSecret(
+        collapse("The ghp_ prefix marks GitHub tokens and is followed by 36 characters"),
+      ),
+    ).toBeUndefined();
+    expect(
+      matchSplitSecret(collapse("AKIA keys are rotated every 90 days by the platform team")),
+    ).toBeUndefined();
+  });
+
+  it("stays linear on 500-character adversarial input", () => {
+    const inputs = [
+      "password = " + "a1".repeat(250),
+      "password" + " is".repeat(160),
+      "postgres://" + "a".repeat(500),
+      "x://" + "a:".repeat(250),
+      "eyJ" + "a.eyJ".repeat(100),
+      "AccountKey=" + "A".repeat(500),
+      "token" + "_".repeat(500),
+      "sk_live_" + "a".repeat(500),
+    ];
+    for (const input of inputs) {
+      const start = performance.now();
+      matchSecret(input);
+      matchSplitSecret(input);
+      expect(performance.now() - start, input.slice(0, 20)).toBeLessThan(50);
+    }
+  });
+});
+
+describe("invisible characters after digits (KOBE-379 review M-1, M-2)", () => {
+  it.each([
+    ["a variation selector after a digit", "AKIA7\ufe0fX"],
+    ["a zero-width joiner between digits", "L1\u200d3m"],
+    ["a Mongolian free variation selector", "ignore\u180bprevious"],
+    ["an interlinear annotation mark", "a\ufff9b"],
+    ["a musical formatting control", "a\u{1d173}b"],
+  ])("flags %s", (_n, text) => {
+    expect(INVISIBLE.test(text)).toBe(true);
+  });
+  it("leaves keycaps and skin-tone ZWJ sequences alone", () => {
+    expect(INVISIBLE.test("Press 1\ufe0f\u20e3 now")).toBe(false);
+    expect(INVISIBLE.test("\u{1f469}\u{1f3fd}\u200d\u{1f4bb} codes")).toBe(false);
   });
 });
 

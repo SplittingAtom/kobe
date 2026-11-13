@@ -19,6 +19,7 @@ import {
   semanticMemoryImportCommitResponseSchema,
   semanticMemoryImportRowSchema,
   semanticMemoryItemActionSchema,
+  restoreSemanticMemoryItemSchema,
   pinSemanticMemoryItemSchema,
   semanticMemoryItemDetailSchema,
   semanticMemoryItemSchema,
@@ -235,6 +236,21 @@ describe("lows", () => {
         policy: true,
       }).success,
     ).toBe(true);
+  });
+});
+
+describe("KOBE-379 H-1: restore runs the save checks and takes overrides", () => {
+  it("accepts overrides with or without expected_version; archive does not", () => {
+    const ok = (v: unknown) => restoreSemanticMemoryItemSchema.safeParse(v).success;
+    expect(ok({})).toBe(true);
+    expect(ok({ expected_version: 2, overrides: { lint: true, policy_conflict: true } })).toBe(
+      true,
+    );
+    expect(ok({ overrides: { lint: false } })).toBe(false);
+    expect(ok({ overrides: { other: true } })).toBe(false);
+    expect(semanticMemoryItemActionSchema.safeParse({ overrides: { lint: true } }).success).toBe(
+      false,
+    );
   });
 });
 

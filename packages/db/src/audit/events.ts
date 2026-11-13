@@ -2864,12 +2864,15 @@ export const AUDIT_EVENTS = {
    * never do (KOBE-380).
    */
   "memory.policy.set": event("site", { itemId: id, version, policy: z.boolean() }),
-  /** Saved despite contradicting Policy (SM23): how many Policy items it contradicts. */
+  /**
+   * Saved despite contradicting Policy (SM23): the Policy items (id and version) it contradicts,
+   * at most 25 (KOBE-379 review L-6).
+   */
   "memory.policy.override": event("any", {
     scope: semanticMemoryScope,
     itemId: id,
     version,
-    conflicts: count,
+    conflicts: z.array(z.strictObject({ id, version })).min(1).max(25),
   }),
   /** Saved over lint warnings (SM18): the warnings' codes. */
   "memory.lint.override": event("any", {

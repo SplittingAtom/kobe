@@ -4,7 +4,7 @@ import { recordAudit, type ServerAuditEvent } from "../../audit/record.js";
 import { readMemorySiteSettings, type MemorySiteSettings } from "../site-settings.js";
 import { readSiteSwitches, readSwitches } from "../switches.js";
 import { WORKSPACE_SWITCHES_ON, effectiveMemory, type EffectiveMemory } from "../switch-model.js";
-import { NEAR_DUPLICATE_WARNING, findNearDuplicates } from "./duplicates.js";
+import { checkMemoryWrite, type MemoryCheckOutcome } from "../checks.js";
 import { MemoryItemError, notFound } from "./errors.js";
 import { deliverSiteNotices, type PendingSiteNotices } from "./limits.js";
 import { locate, type Location } from "./location.js";
@@ -77,25 +77,22 @@ export function assertExpected(row: ItemRow, expected: number | undefined): void
 }
 
 /**
- * The save checks every statement write runs (KOBE-378): the near-duplicate warning, which
- * `overrides.lint` saves over (returned codes are audited). Secret scan, lint and Policy conflict
- * join here with KOBE-379 (`memory/checks.ts`).
+ * The save checks every statement write of the item store runs (create, edit, a Policy change,
+ * Undo, restore): `memory/checks.ts` ({@link checkMemoryWrite}, KOBE-379) with the
+ * near-duplicate check (KOBE-378). `policy`: the item is (or becomes) Policy. `except`: the item
+ * itself and any item the save replaces. `tags`: scanned for secrets.
  */
-export async function saveChecks(
+export function saveChecks(
   op: Op,
-  statement: string,
+  subject: {
+    statement: string;
+    policy: boolean;
+    except?: readonly string[];
+    tags?: readonly string[];
+  },
   overrides: SemanticMemoryOverrides | undefined,
-  except: readonly string[] = [],
-): Promise<{ readonly lintOverride: boolean; readonly warnings: string[] }> {
-  const matches = await findNearDuplicates(op.tx, op.loc, statement, except);
-  if (matches.length === 0) return { lintOverride: false, warnings: [] };
-  if (overrides?.lint !== true)
-    throw new MemoryItemError(
-      "memory_lint_warning",
-      "A similar memory already exists. Save anyway if this one is different.",
-      { warnings: [NEAR_DUPLICATE_WARNING], duplicates: matches },
-    );
-  return { lintOverride: true, warnings: [NEAR_DUPLICATE_WARNING.code] };
+): Promise<MemoryCheckOutcome> {
+  return checkMemoryWrite(op, { scope: op.loc.scope, ...subject }, overrides);
 }
 
 /** Workspace items are audited in the team log; portable and Site items in the site log. */

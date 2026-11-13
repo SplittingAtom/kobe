@@ -71,6 +71,36 @@ export const SEMANTIC_MEMORY_ERROR_HTTP_STATUS = {
   memory_pin_limit: 409,
 } as const satisfies Record<SemanticMemoryErrorCode, number>;
 
+/**
+ * Codes of the save checks' warnings (KOBE-379, `memory/checks.ts` in the server; SM18), carried in
+ * `warnings` of `memory_lint_warning` and in import rows' `issues`. Saving over any of them is
+ * `overrides.lint` (audited with the codes). Policy items skip the `instruction_*` codes;
+ * `personal_*` apply to Workspace and Site items only.
+ */
+export const SEMANTIC_MEMORY_WARNING_CODES = [
+  /** A similar active item exists in the scope (KOBE-378). */
+  "near_duplicate",
+  /** Tells the agent what to do ("you must…", "ignore previous instructions", "from now on…"). */
+  "instruction_imperative",
+  /** Mentions tools, approvals or the system prompt ("skip approval", "call the X tool"). */
+  "instruction_tools",
+  /** Asks to fetch, open or download a URL. */
+  "instruction_fetch",
+  /** Asks to widen egress or use a connector ("add X to the allowlist", "use the Y connector"). */
+  "instruction_egress",
+  /** An email address (Workspace and Site items). */
+  "personal_email",
+  /** A phone number (Workspace and Site items). */
+  "personal_phone",
+  /** A name near a sensitive word: health, pay, discipline, family… (Workspace and Site items). */
+  "personal_sensitive",
+  /** A link to a host this Workspace's sandboxes can't reach (its egress allowlist and the Site's). */
+  "link_blocked",
+  /** A link whose host uses look-alike (non-ASCII) letters; shown in its punycode form. */
+  "link_lookalike",
+] as const;
+export type SemanticMemoryWarningCode = (typeof SEMANTIC_MEMORY_WARNING_CODES)[number];
+
 /** One check's finding: a stable code and a sentence for people. Never the matched secret. */
 export const semanticMemoryIssueSchema = z.strictObject({
   code: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),

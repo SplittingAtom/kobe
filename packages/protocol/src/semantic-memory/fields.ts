@@ -51,6 +51,12 @@ export type SemanticMemoryActorKind = z.infer<typeof semanticMemoryActorKindSche
 
 /** Longest statement, in code points (SM3; the DB check counts `char_length`, so do we). */
 export const SEMANTIC_MEMORY_STATEMENT_MAX = 500;
+/**
+ * Longest justification (why a candidate or proposal should be kept) and reviewer note, in code
+ * points (SM9; KOBE-379 checks them on every write path that carries them).
+ */
+export const SEMANTIC_MEMORY_JUSTIFICATION_MAX = 1000;
+export const SEMANTIC_MEMORY_NOTE_MAX = 500;
 export const SEMANTIC_MEMORY_TAGS_MAX = 5;
 export const SEMANTIC_MEMORY_TAG_MAX = 40;
 /** Most thread entries one version cites. */

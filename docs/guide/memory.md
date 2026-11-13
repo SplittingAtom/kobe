@@ -94,6 +94,59 @@ many versions of a memory are kept (50), when an unconfirmed memory counts as st
 retention window for archived memories (365 days), learning rate limits, and an embedding model
 that is not used yet. Search always uses English word matching; there is no language setting.
 
+## What Kobe checks before a memory is saved
+
+Memories are short statements: facts, preferences, conventions, definitions and decisions. Every
+way of saving one (the editor, an edit or **Undo**, restoring from the archive, turning Site Policy
+on or off, an import, accepting a suggestion from **Learn from this chat**, approving a proposal)
+runs the same checks first. Restoring an archived memory is checked like a new save, so Policy
+added or rules changed while it was archived apply to it. The checks read the text the way a
+person would: look-alike letters from other alphabets, invisible characters and accents, blank
+filler characters (read as spaces), full-width letters, letters spaced out ("i g n o r e") and
+links written as `hxxp://example[.]com` are read as the plain words they stand for.
+
+- **Secrets are never saved.** A password, API key, access token or private key stops the save,
+  at every level, Site Policy included, and nobody can save it anyway. That includes a password in
+  a connection string (`postgres://user:password@host`), "the password is …" written in a
+  sentence, Stripe and GitLab keys, sign-in tokens (JWTs), a token typed in groups or split with
+  hyphens, and a token hidden in base64 or hex. Tags are checked too. Remove it and save again;
+  keep credentials in a connector or your password manager.
+- **Instructions to the agent get a warning.** A memory states something; it never gives the agent
+  orders. You are warned when a memory reads like an order to the agent ("you must…", "from now
+  on…", "ignore previous instructions"), mentions tools, approvals or the system prompt ("skip
+  approval", "call the shell tool"), asks the agent to fetch or open a web address, or asks to
+  widen internet access or use a connector ("add example.com to the allowlist", "use the CRM
+  connector"). A memory can't change any of these: internet access is asked for with **Request
+  access**, connectors are set up by admins, and approvals follow the site's rules. Site **Policy**
+  is exempt from this check, because Policy is the site's own rules.
+- **Personal data in shared memories gets a warning.** In Workspace and Site memories, which many
+  people read, you are warned about email addresses, phone numbers, and a person's name near
+  sensitive information (health, pay, discipline, family or identity documents). Your own memories
+  are not checked for this.
+- **Links are shown with their host.** A link is a web address in any spelling (with
+  `https:`, `www.` or a path). You are warned when a link points to a host this workspace's sandboxes can't reach (it isn't on the workspace's internet
+  allowlist, or the site's allowlist no longer holds it). Site memories and memories in all your
+  workspaces are judged by the site's allowlist, since they reach every workspace (each workspace
+  may still allow less). A host written
+  with look-alike letters (`gіthub.com` with a Cyrillic "і") is shown in its encoded form
+  (`xn--…`) with its own warning, so it can't pass for the real site.
+- **Similar memories get a warning.** When the same place already holds a very similar memory,
+  you are shown it first.
+- **Contradicting Site Policy stops the save.** When a memory may contradict a Policy item (it is
+  about the same thing but says otherwise, or adds to it), the save stops and names the Policy
+  item. Restating Policy is fine.
+- **Length limits.** A memory holds at most 500 characters; the reason given with a suggestion or
+  proposal at most 1,000, and a reviewer's note at most 500.
+
+For each warning you can **Save anyway**. On your own memories that is your call. On Workspace and
+Site memories it is a deliberate tick. Either way the memory's version records that it was saved
+over a warning (for a restore or a Policy change, which add no version, the audit log alone
+records it), and the audit log records who did it, on which memory and version, and which warnings
+it overrode (never the text). Saving over a Policy conflict is a separate choice, made by the
+memory's owner for your own memories and by curators (team admins and memory stewards, or the
+site's memory curators) for shared ones; it is recorded and audited the same way, naming the
+Policy items saved over.
+
 ## Memory in your notifications
 
 Shared memory needs people to review it, so the **Notifications** bell in the top bar tells you
