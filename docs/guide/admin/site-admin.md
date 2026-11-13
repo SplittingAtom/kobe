@@ -34,8 +34,8 @@ access, which is time-boxed, read-only, audited and shown to the team.
   are given and taken by Site admins (audited as `identity.site_grant.granted` and `.revoked`):
   - **Skill reviewers** review Skill Registry submissions.
   - **Site memory stewards** curate Site memory: they add, edit, archive and pin the facts and
-    conventions every workspace sees. They can't make an item Policy, accept proposals that
-    workspaces send to the Site or change memory switches, and the grant gives no other Site
+    conventions every workspace sees, and accept or dismiss the proposals team admins send to
+    the Site. They can't make an item Policy or change memory switches, and the grant gives no other Site
     right (no Site console pages). Site admins can already do all of this, so only users are
     offered. **Take Site memory steward** ends it after a confirmation; what they saved stays.
 

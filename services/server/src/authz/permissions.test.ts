@@ -206,12 +206,14 @@ describe("memory stewards beside the ladders (KOBE-380, SM19)", () => {
     }
   });
 
-  /** Exhaustive over site permissions: a Site steward holds only site.memory.curate. */
+  /** Exhaustive over site permissions: a Site steward curates and decides Site proposals only. */
   it.each(Object.keys(SITE_PERMISSIONS) as SitePermission[])(
     "%s: a plain user with the memory_steward grant",
     (permission) => {
       const steward = { siteRole: null, grants: ["memory_steward"] } as const;
-      expect(siteMemoryAllows(steward, permission)).toBe(permission === "site.memory.curate");
+      expect(siteMemoryAllows(steward, permission)).toBe(
+        permission === "site.memory.curate" || permission === "site.memory.site_proposals.decide",
+      );
     },
   );
 
@@ -228,11 +230,14 @@ describe("memory stewards beside the ladders (KOBE-380, SM19)", () => {
     }
   });
 
-  it("keeps a Site steward out of Policy and Site proposals (ac-3)", () => {
-    expect(MEMORY_STEWARD_SITE_PERMISSIONS).toEqual(["site.memory.curate"]);
+  it("lets a Site steward accept or dismiss Site proposals but never set Policy (ac-3)", () => {
+    expect(MEMORY_STEWARD_SITE_PERMISSIONS).toEqual([
+      "site.memory.curate",
+      "site.memory.site_proposals.decide",
+    ]);
     const steward = { siteRole: null, grants: ["memory_steward"] } as const;
     expect(siteMemoryAllows(steward, "site.memory.policy")).toBe(false);
-    expect(siteMemoryAllows(steward, "site.memory.site_proposals.decide")).toBe(false);
+    expect(siteMemoryAllows(steward, "site.memory.site_proposals.decide")).toBe(true);
     expect(sitePermissionsFor(null)).toEqual([]);
   });
 

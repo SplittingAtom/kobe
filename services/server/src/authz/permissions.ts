@@ -35,9 +35,9 @@ export const SITE_PERMISSIONS = {
   /** Give and take site grants such as Skill reviewer (KOBE-331, SK22). */
   "site.grants.manage": "admin",
   /**
-   * Semantic memory (KOBE-380, SM19): curate Site items (Site admins; also the Site memory
-   * steward grant, see siteMemoryAllows), make an item Policy or not, and accept or dismiss the
-   * Site proposals Team admins confirmed (Site admins only).
+   * Semantic memory (KOBE-380, SM19): curate Site items and accept or dismiss the Site proposals
+   * Team admins confirmed (Site admins; also the Site memory steward grant, see
+   * siteMemoryAllows), and make an item Policy or not (Site admins only).
    */
   "site.memory.curate": "admin",
   "site.memory.policy": "admin",
@@ -178,15 +178,17 @@ export function skillReviewAllows(who: SkillReviewWho, action: SkillReviewAction
 /**
  * Memory stewards (KOBE-380, spec SM19): a grant on top of any role, never a role. A Workspace
  * steward (a `memory_stewards` row, given by a Team admin) curates Workspace memory; a Site
- * steward (the `memory_steward` site grant, given by a Site admin) curates Site memory. Neither
- * sets Policy, confirms or decides Site proposals, changes memory switches or gains any non-memory
- * right: the grants add exactly these permissions.
+ * steward (the `memory_steward` site grant, given by a Site admin) curates Site memory and accepts
+ * or dismisses Site proposals (spec: Team admin confirms, Site admin or Site steward accepts).
+ * Neither sets Policy; a Workspace steward never confirms a Site proposal; neither changes memory
+ * switches or gains any non-memory right: the grants add exactly these permissions.
  */
 export const MEMORY_STEWARD_TEAM_PERMISSIONS = [
   "team.memory.curate",
 ] as const satisfies readonly TeamPermission[];
 export const MEMORY_STEWARD_SITE_PERMISSIONS = [
   "site.memory.curate",
+  "site.memory.site_proposals.decide",
 ] as const satisfies readonly SitePermission[];
 
 const TEAM_STEWARD: ReadonlySet<TeamPermission> = new Set(MEMORY_STEWARD_TEAM_PERMISSIONS);

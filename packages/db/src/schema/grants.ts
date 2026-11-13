@@ -4,7 +4,7 @@ import { users } from "./auth.js";
 /**
  * Grants beside the role ladder (KOBE-311, spec SK22); mirrors `SITE_GRANTS` (@kobe/protocol).
  * `memory_steward` (KOBE-380, SM19): a Site memory steward, who curates Site memory but never sets
- * Policy or confirms Site proposals.
+ * Policy; it may accept or dismiss Site proposals.
  */
 export const siteGrant = pgEnum("site_grant", ["skill_reviewer", "memory_steward"]);
 export type SiteGrantKind = (typeof siteGrant.enumValues)[number];

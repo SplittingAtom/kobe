@@ -28,7 +28,9 @@ Two commits: (1) the migration alone, (2) the feature (permissions, routes, UI, 
   `site.memory.policy`, `site.memory.site_proposals.decide` (admin). Stewards are grants beside
   the ladders, like `skill_reviewer`: `teamMemoryAllows({role, memorySteward})` and
   `siteMemoryAllows({siteRole, grants})` add exactly `MEMORY_STEWARD_TEAM_PERMISSIONS =
-[team.memory.curate]` / `MEMORY_STEWARD_SITE_PERMISSIONS = [site.memory.curate]`. A Workspace
+[team.memory.curate]` / `MEMORY_STEWARD_SITE_PERMISSIONS = [site.memory.curate,
+site.memory.site_proposals.decide]` (coordinator 2026-11-13, spec: Team admin confirms, Site
+  admin or Site steward accepts; stewards never set Policy). A Workspace
   steward needs membership (non-member → nothing). Contributors/Members get no `team.memory.*`.
   `team.memory.manage` (switches) stays Team admin only.
 - `GET /v1/team` now also returns `memorySteward` and includes `team.memory.curate` in
@@ -51,11 +53,10 @@ Two commits: (1) the migration alone, (2) the feature (permissions, routes, UI, 
 
 ## Open questions (for Chris or the coordinator)
 
-1. "Can't confirm Site proposals" read as both: Workspace stewards can't confirm a Workspace item
-   as a Site proposal (Team admins only), and Site stewards can't accept/dismiss Site proposals
-   (Site admins only). Confirm.
-2. Site admins are not offered the Site steward grant in the UI (it adds nothing); the server
-   still allows it (generic grant rules). Fine?
+1. Answered (coordinator 2026-11-13): Workspace stewards can't confirm/send items to the Site
+   (Team admins only); Site stewards may accept or dismiss Site proposals; neither sets Policy.
+2. Site admins are not offered the Site steward grant in the UI; the server still allows it.
+   Fine as is (coordinator 2026-11-13).
 
 ## Evidence (acceptance criteria → test or command output)
 
@@ -65,7 +66,8 @@ Two commits: (1) the migration alone, (2) the feature (permissions, routes, UI, 
 - **ac-2:** `memory-stewards.db.test.ts` (grant/revoke, idempotent, audited in the team log;
   membership removal audited; Site grant audited `identity.site_grant.*`); web
   `components/admin/memory-stewards.test.tsx` (Members page + Site roles sections).
-- **ac-3:** permissions tests (no Policy, no Site proposals, no switches, no non-memory rights;
+- **ac-3:** permissions tests (no Policy, Workspace stewards can't confirm Site proposals, Site
+  stewards may decide them, no switches, no non-memory rights;
   grants don't mix with Skill reviewer); DB test (`siteRole` null, Site console routes 403, no
   Registry membership, steward can't manage stewards).
 - **ac-4:** commit 1 holds only the migration (+ the enum mirrors it forces);

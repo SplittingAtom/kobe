@@ -409,8 +409,8 @@ export const siteGrantsGive = kobeTool({
   description:
     "Gives a user a site grant: skill_reviewer (may review, approve, request changes on and " +
     "reject Skill Registry submissions, never block; also adds them to the Registry team) or " +
-    "memory_steward (Site memory steward: curates Site memory, never sets Policy or accepts Site " +
-    "proposals) (Site console › Site roles). Another admin must grant you; never a deactivated " +
+    "memory_steward (Site memory steward: curates Site memory and decides Site proposals, never " +
+    "sets Policy) (Site console › Site roles). Another admin must grant you; never a deactivated " +
     "account. The person is always asked to approve; never retry a refused or denied call.",
   scope: "site",
   permission: "site.grants.manage",
