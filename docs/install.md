@@ -1077,6 +1077,22 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
   the bell and scheduled-run notices wait for it (well under a second at typical sizes; it grows
   with the table). On a `helm rollback` the previous release ignores the new columns, table and
   kinds.
+
+- **Memory switches widened (KOBE-381).** No migration. **Allow memory** (Site console ›
+  Settings and each workspace's Workspace settings › Memory) is now the master switch for notes
+  **and** v1.3 memories: where it is off, memories stay off too. New switches (Memories, Workspace
+  memories, Site memories reach this workspace's runs, Portable preferences, Learn from this chat,
+  Members may propose to the Site) are AND-ed across the levels that have them and read as **on**
+  until an admin turns them off, so the upgrade changes no behaviour. Site values are new
+  `site_settings` keys (`memory.memories_enabled`, `memory.portable_enabled`,
+  `memory.learn_enabled`, `memory.site_proposals_enabled`, and the JSON document
+  `memory.settings`: learning and embedding model, context budget 4–16 KiB, scope limits, version
+  cap, stale threshold, retention window, rate limits); workspace values are the `memory` key of
+  `teams.settings`. Learn needs a learning model the workspace has enabled and never falls back to
+  the conversation's model. Turning a switch off deletes nothing. The admin tool
+  `team_memory_set` now takes every workspace memory setting in `from` (read them with
+  `team_memory_get`). A `helm rollback` leaves the previous release working: it ignores the new
+  keys.
 - **Memory stewards (KOBE-380).** Migrations `0218_memory_stewards` and
   `0219_memory_stewards_rls` add the `memory_steward` value to the `site_grant` type (Site memory
   stewards) and the empty team table `memory_stewards` (Workspace memory stewards, row-level

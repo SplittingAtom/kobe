@@ -13,6 +13,17 @@ import { seqCursor } from "./team-reports.js";
 /** Unit checks of the Team console tools (KOBE-621, spec kobe-admin-mcp §5, KA-4). */
 
 const ID = "00000000-0000-4000-8000-000000000001";
+/** Every Workspace memory setting at its default (KOBE-381). */
+const MEMORY_ON = {
+  memory_enabled: true,
+  project_memory_enabled: true,
+  memories_enabled: true,
+  workspace_memories_enabled: true,
+  site_memories_enabled: true,
+  learn_enabled: true,
+  site_proposals_enabled: true,
+  learning_model_alias: null,
+};
 /** Site tools have their own unit checks (`kobe-mcp/site-tools.test.ts`, KOBE-622). */
 const TEAM_WRITES = KOBE_ADMIN_TOOLS.filter(isWriteTool).filter((t) => t.scope === "team");
 const ID2 = "00000000-0000-4000-8000-000000000002";
@@ -386,7 +397,7 @@ function sampleOf(name: string): unknown {
     },
     team_budgets_set_member: { user_id: ID, from: null, to: AMOUNTS },
     team_memory_set: {
-      from: { memory_enabled: true, project_memory_enabled: true },
+      from: MEMORY_ON,
       to: { memory_enabled: false },
     },
     team_egress_enable: { domain: "*.example.com", from_enabled: false },

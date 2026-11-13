@@ -312,21 +312,21 @@ describe("switches", () => {
 
   it("team level: members read, only team admins change; a disabled scope refuses", async () => {
     const w = await world();
-    expect((await settings(w.member, "team")).json).toEqual({
+    expect((await settings(w.member, "team")).json).toMatchObject({
       memory_enabled: true,
       project_memory_enabled: true,
     });
     expect((await settings(w.member, "team", { memory_enabled: false })).status).toBe(403);
     const off = await settings(w.admin, "team", { memory_enabled: false });
-    expect(off.json).toEqual({ memory_enabled: false, project_memory_enabled: true });
+    expect(off.json).toMatchObject({ memory_enabled: false, project_memory_enabled: true });
     expect(await auditOf(w.team, "memory.settings_changed")).toEqual([
-      { memoryEnabled: false, projectMemoryEnabled: true },
+      expect.objectContaining({ memoryEnabled: false, projectMemoryEnabled: true }),
     ]);
     const refused = await put(w.member, "x.md", "x");
     expect(refused.status).toBe(403);
     expect(refused.json).toMatchObject({ code: "memory_disabled" });
     expect((await w.member.browser.get("/v1/memory?scope=user")).status).toBe(403);
-    expect((await settings(w.member, "effective")).json).toEqual({
+    expect((await settings(w.member, "effective")).json).toMatchObject({
       memory_enabled: false,
       project_memory_enabled: false,
     });
@@ -337,7 +337,7 @@ describe("switches", () => {
     const w = await world();
     await settings(w.admin, "team", { project_memory_enabled: false });
     expect((await put(w.member, "x.md", "x")).status).toBe(200);
-    expect((await settings(w.member, "effective")).json).toEqual({
+    expect((await settings(w.member, "effective")).json).toMatchObject({
       memory_enabled: true,
       project_memory_enabled: false,
     });
@@ -352,7 +352,7 @@ describe("switches", () => {
     expect((await settings({ browser: ia } as Person, "install")).status).toBe(400);
     try {
       const off = await settings({ browser: ia } as Person, "site", { memory_enabled: false });
-      expect(off.json).toEqual({ memory_enabled: false, project_memory_enabled: true });
+      expect(off.json).toMatchObject({ memory_enabled: false, project_memory_enabled: true });
       expect((await put(w.member, "x.md", "x")).json).toMatchObject({ code: "memory_disabled" });
       await settings({ browser: ia } as Person, "site", { memory_enabled: true });
       expect((await put(w.member, "x.md", "x")).status).toBe(200);

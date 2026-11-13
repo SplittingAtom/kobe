@@ -1,7 +1,5 @@
 import { Hono } from "hono";
-import type { MiddlewareHandler } from "hono";
-import { z } from "zod";
-import { memorySettingsSchema, type MemorySettings } from "@kobe/protocol";
+import type { Context, MiddlewareHandler } from "hono";
 import { withTeam } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import {
@@ -11,14 +9,25 @@ import {
   type TeamVariables,
 } from "../authz/middleware.js";
 import type { ServerDeps } from "../deps.js";
+import { learnAvailability } from "../memory/learning-model.js";
+import { readMemorySiteSettings, writeMemorySiteSettings } from "../memory/site-settings.js";
+import {
+  fromWorkspaceWire,
+  sitePutSchema,
+  siteSwitchChangeOf,
+  toSiteSwitchesWire,
+  toWorkspaceWire,
+  workspaceChangeOf,
+  workspacePutSchema,
+} from "../memory/settings-wire.js";
 import {
   readSiteSwitches,
   readSwitches,
   readTeamSwitches,
   writeSiteSwitches,
   writeTeamSwitches,
-  type SwitchPair,
 } from "../memory/switches.js";
+import { isModelEnabled } from "../models/team-store.js";
 import { invalidRequest, parseBody } from "../teams/http.js";
 
 /** Runs the middlewares in order, then `next` (a response from one of them ends the chain). */
@@ -41,36 +50,19 @@ const chain =
     return at(0);
   };
 
-/**
- * The PUT body; at the team level it may carry `expected` (KOBE-621): the team's switches as the
- * caller saw them, another state is a 409 `changed_since_approval`.
- */
-const putSchema = memorySettingsSchema.extend({
-  expected: z
-    .strictObject({ memory_enabled: z.boolean(), project_memory_enabled: z.boolean() })
-    .optional(),
-});
-
 const LEVELS = ["team", "site", "effective"] as const;
 type Level = (typeof LEVELS)[number];
 
-const wire = (p: SwitchPair): MemorySettings => ({
-  memory_enabled: p.memoryEnabled,
-  project_memory_enabled: p.projectMemoryEnabled,
-});
-
-const changeOf = (body: MemorySettings): Partial<SwitchPair> => ({
-  ...(body.memory_enabled !== undefined ? { memoryEnabled: body.memory_enabled } : {}),
-  ...(body.project_memory_enabled !== undefined
-    ? { projectMemoryEnabled: body.project_memory_enabled }
-    : {}),
-});
+const empty = (o: object) => Object.values(o).every((v) => v === undefined);
 
 /**
- * `GET/PUT /v1/memory/settings?level=team|site` (KOBE-155, D24): the two AND-ed switch levels,
- * plus `GET ?level=effective` (any member) for what applies to the active team now.
- * Team level: read by members, changed by team admins. Site level: site admins only.
- * Changes are audited (switch values only).
+ * `GET/PUT /v1/memory/settings?level=team|site` (KOBE-155, D24; widened by KOBE-381, SM27): the
+ * AND-ed switch levels, plus `GET ?level=effective` (any member) for what applies to the active
+ * Workspace now (Notes, Memories per scope, Policy, Learn with its model or the reason it is
+ * unavailable, Site proposals). Team level: read by members, changed by team admins (with the
+ * learning model override, which must be enabled in the Workspace). Site level: site admins only,
+ * with the Site memory settings. Changes are audited (values only; Site settings by name).
+ * Turning anything off deletes nothing.
  */
 export function memorySettingsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }> {
   const app = new Hono<{ Variables: TeamVariables }>();
@@ -93,70 +85,107 @@ export function memorySettingsRoutes(deps: ServerDeps): Hono<{ Variables: TeamVa
   app.get("/", async (c) => {
     const level = levelOf(c.req.query("level"));
     if (level === "site") {
-      return c.json(wire(await db.transaction((tx) => readSiteSwitches(tx))));
+      return c.json(
+        await db.transaction(async (tx) => ({
+          ...toSiteSwitchesWire(await readSiteSwitches(tx)),
+          settings: await readMemorySiteSettings(tx),
+        })),
+      );
     }
     const teamId = c.get("team").id;
     if (level === "team")
-      return c.json(wire(await withTeam(db, teamId, (tx) => readTeamSwitches(tx, teamId))));
-    const s = await withTeam(db, teamId, (tx) => readSwitches(tx, teamId));
-    return c.json({
-      memory_enabled: s.effective.user,
-      project_memory_enabled: s.effective.project,
+      return c.json(
+        toWorkspaceWire(await withTeam(db, teamId, (tx) => readTeamSwitches(tx, teamId))),
+      );
+    const out = await withTeam(db, teamId, async (tx) => {
+      const { memory } = await readSwitches(tx, teamId);
+      const learn = await learnAvailability(tx, teamId);
+      return {
+        memory_enabled: memory.notes.user,
+        project_memory_enabled: memory.notes.project,
+        memories_enabled: memory.memories,
+        scopes: memory.scopes,
+        policy: memory.policy,
+        site_proposals_enabled: memory.siteProposals,
+        learn: learn.ok
+          ? { available: true, alias: learn.alias, source: learn.source }
+          : { available: false, reason: learn.reason, message: learn.message },
+      };
     });
+    return c.json(out);
   });
 
   app.put("/", async (c) => {
-    const body = await parseBody(c, putSchema);
-    if (!body || (body.memory_enabled === undefined && body.project_memory_enabled === undefined)) {
-      return invalidRequest(c, "Send memory_enabled and/or project_memory_enabled.");
+    if (levelOf(c.req.query("level")) === "site") return putSite(c);
+    return putTeam(c);
+  });
+
+  async function putSite(c: Context<{ Variables: TeamVariables }>) {
+    const body = await parseBody(c, sitePutSchema);
+    if (!body || empty(body)) {
+      return invalidRequest(c, "Send at least one switch or setting (expected is for level=team).");
     }
-    if (levelOf(c.req.query("level")) === "site") {
-      if (body.expected !== undefined) return invalidRequest(c, "expected is for level=team.");
-      const next = await db.transaction(async (tx) => {
-        const saved = await writeSiteSwitches(tx, changeOf(body));
-        await recordAudit(tx, {
-          action: "memory.site_settings_changed",
-          target: {
-            memoryEnabled: saved.memoryEnabled,
-            projectMemoryEnabled: saved.projectMemoryEnabled,
-          },
-        });
-        return saved;
-      });
-      return c.json(wire(next));
-    }
-    const teamId = c.get("team").id;
-    const expected =
-      body.expected === undefined
-        ? undefined
-        : {
-            memoryEnabled: body.expected.memory_enabled,
-            projectMemoryEnabled: body.expected.project_memory_enabled,
-          };
-    const next = await withTeam(db, teamId, async (tx) => {
-      const saved = await writeTeamSwitches(tx, teamId, c.get("user").id, changeOf(body), expected);
-      if (saved === "changed_since_approval") return saved;
+    const { settings, ...switches } = body;
+    const out = await db.transaction(async (tx) => {
+      // Settings first: an unknown model alias refuses before anything is written.
+      const written = await writeMemorySiteSettings(tx, settings ?? {});
+      if (!written.ok) return written;
+      const saved = await writeSiteSwitches(tx, siteSwitchChangeOf(switches));
       await recordAudit(tx, {
-        action: "memory.settings_changed",
-        teamId,
+        action: "memory.site_settings_changed",
         target: {
-          memoryEnabled: saved.memoryEnabled,
-          projectMemoryEnabled: saved.projectMemoryEnabled,
+          ...saved,
+          ...(written.changed.length > 0 ? { settings: [...written.changed] } : {}),
         },
       });
+      return { ...toSiteSwitchesWire(saved), settings: written.settings };
+    });
+    if ("ok" in out) return c.json({ code: out.code, message: out.message }, 400);
+    return c.json(out);
+  }
+
+  async function putTeam(c: Context<{ Variables: TeamVariables }>) {
+    const body = await parseBody(c, workspacePutSchema);
+    const { expected, ...rest } = body ?? {};
+    if (!body || empty(rest)) {
+      return invalidRequest(c, "Send at least one switch or learning_model_alias.");
+    }
+    const teamId = c.get("team").id;
+    const change = workspaceChangeOf(rest);
+    const next = await withTeam(db, teamId, async (tx) => {
+      const alias = change.learningModelAlias;
+      if (alias && !(await isModelEnabled(tx, teamId, alias))) return "model_not_enabled" as const;
+      const saved = await writeTeamSwitches(
+        tx,
+        teamId,
+        c.get("user").id,
+        change,
+        expected === undefined ? undefined : fromWorkspaceWire(expected),
+      );
+      if (saved === "changed_since_approval") return saved;
+      await recordAudit(tx, { action: "memory.settings_changed", teamId, target: { ...saved } });
       return saved;
     });
+    if (next === "model_not_enabled") {
+      return c.json(
+        {
+          code: "model_not_enabled",
+          message: "Enable that model in Workspace settings › Models first; nothing was changed.",
+        },
+        400,
+      );
+    }
     if (next === "changed_since_approval") {
       return c.json(
         {
           code: next,
-          message: "The team's memory switches changed meanwhile; nothing was changed.",
+          message: "The workspace's memory settings changed meanwhile; nothing was changed.",
         },
         409,
       );
     }
-    return c.json(wire(next));
-  });
+    return c.json(toWorkspaceWire(next));
+  }
 
   return app;
 }

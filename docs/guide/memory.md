@@ -1,6 +1,6 @@
 ---
 title: Memory
-summary: How Kobe remembers things between conversations, where personal and project memory live, how to read, edit or undo them, and which switches control memory.
+summary: How Kobe remembers things between conversations, where personal and project memory live, how to read, edit or undo them, which site and workspace switches control notes and memories, and how the learning model is chosen.
 section: Memory
 order: 1
 audience: member
@@ -44,14 +44,45 @@ on the project's page. Readers can read it; what you can change follows your pro
 
 ## Switches that control memory
 
-Memory can be turned off at two levels, and both must be on for it to work:
+Memory has switches at two levels, the site (site admins, in the site console's **Settings ›
+Memory**) and each workspace (team admins, in **Workspace settings › Memory**). A switch works only
+while it is on at both levels that have it. Every switch is on unless an admin turned it off.
 
-- In the team console's **Memory** page, team admins switch **memory** (agents can remember notes
-  about a person and recall them in later chats) and **project memory** (needs memory to be on).
-- Site admins have the same two switches for the whole site, in the site console's **Settings**.
+- **Allow memory** (site and workspace) is the master switch. Off means no notes (the remember and
+  recall tools and the memory index) **and** no memories in that workspace or on the site.
+- **Allow project notes** (site and workspace): project memory, as above. Needs memory.
+- **Allow memories** (site and workspace): short statements Kobe knows about you, your workspace
+  and the site, given to the agent at the start of each run. Needs memory. (Memories arrive with
+  Kobe v1.3; the switches are in place so admins can decide beforehand.)
+- **Workspace memories** (workspace): memories everyone in the workspace shares, curated by team
+  admins and memory stewards.
+- **Site memories reach this workspace's runs** (workspace): knowledge the site keeps for every
+  workspace. **Site Policy** reaches the workspace's runs even when this is off.
+- **Portable preferences** (site): your preferences (how you like answers, units, tone) follow you
+  into every workspace you belong to. Facts about work never leave their workspace.
+- **Learn from this chat** (site and workspace): you can ask Kobe to suggest memories from a
+  conversation and review every suggestion before anything is saved.
+- **Members may propose to the Site** (site and workspace): workspace memories can be proposed to
+  the site; a team admin confirms before anything leaves the workspace.
 
-Turning memory off removes the remember and recall tools and the memory index from the next runs;
-stored files are kept.
+Turning a switch off stops its use from the next run on; nothing stored is deleted, and turning
+it back on brings everything back.
+
+### The learning model
+
+Learn from this chat uses a **learning model** an admin chose: the site's learning model when the
+workspace has enabled that model, otherwise the workspace's own learning model (Workspace settings
+› Memory, from the models enabled in the workspace). It never uses the conversation's model
+instead. When neither is set or enabled, Learn is unavailable and says why; the Memory page of
+Workspace settings shows which model Learn uses now.
+
+### Site memory settings
+
+Site admins also set, under **Settings › Memory**: the context budget (how much room memories may
+take at the start of a run, 4 to 16 KiB, 8 by default), the most memories each place may hold, how
+many versions of a memory are kept (50), when an unconfirmed memory counts as stale (90 days), the
+retention window for archived memories (365 days), learning rate limits, and an embedding model
+that is not used yet. Search always uses English word matching; there is no language setting.
 
 ## What memory is not
 

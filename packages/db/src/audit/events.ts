@@ -2765,11 +2765,29 @@ export const AUDIT_EVENTS = {
   "memory.settings_changed": event("team", {
     memoryEnabled: z.boolean(),
     projectMemoryEnabled: z.boolean(),
+    // KOBE-381 (absent on older rows): the v1.3 Workspace switches and learning model override.
+    memoriesEnabled: z.boolean().optional(),
+    workspaceMemoriesEnabled: z.boolean().optional(),
+    siteMemoriesEnabled: z.boolean().optional(),
+    learnEnabled: z.boolean().optional(),
+    siteProposalsEnabled: z.boolean().optional(),
+    learningModelAlias: modelAlias.nullable().optional(),
   }),
-  /** A site admin changed the site-wide memory switches. */
+  /**
+   * A site admin changed the site-wide memory switches or settings. `settings` (KOBE-381) names
+   * the Site memory settings whose values changed; the values themselves are in Site settings.
+   */
   "memory.site_settings_changed": event("site", {
     memoryEnabled: z.boolean(),
     projectMemoryEnabled: z.boolean(),
+    memoriesEnabled: z.boolean().optional(),
+    portableEnabled: z.boolean().optional(),
+    learnEnabled: z.boolean().optional(),
+    siteProposalsEnabled: z.boolean().optional(),
+    settings: z
+      .array(z.string().regex(/^[a-z][a-z_]{0,40}$/))
+      .max(20)
+      .optional(),
   }),
   // ── semantic memory items (v1.3, KOBE-377, SM28): ids, scopes, kinds, versions and counts, never
   // a statement, tag or evidence. Workspace items are team events; portable and Site items site

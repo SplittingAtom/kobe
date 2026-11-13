@@ -14,6 +14,17 @@ import { KOBE_ADMIN_TOOLS } from "./tools/index.js";
  */
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ID = "00000000-0000-4000-8000-000000000001";
+/** Every Workspace memory setting at its default (KOBE-381). */
+const MEMORY_ON = {
+  memory_enabled: true,
+  project_memory_enabled: true,
+  memories_enabled: true,
+  workspace_memories_enabled: true,
+  site_memories_enabled: true,
+  learn_enabled: true,
+  site_proposals_enabled: true,
+  learning_model_alias: null,
+};
 const AMOUNTS = { monthly_usd: 10, daily_usd: null, monthly_tokens: null, daily_tokens: null };
 const SAMPLES: Readonly<Record<string, unknown>> = {
   team_members_list: {},
@@ -47,7 +58,7 @@ const SAMPLES: Readonly<Record<string, unknown>> = {
   team_budgets_set_member: { user_id: ID, from: null, to: AMOUNTS },
   team_memory_get: {},
   team_memory_set: {
-    from: { memory_enabled: true, project_memory_enabled: true },
+    from: MEMORY_ON,
     to: { memory_enabled: false },
   },
   team_egress_list: {},

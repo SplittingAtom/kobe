@@ -49,16 +49,16 @@ and a line saying which admin tools you have in this team.
 
 Reads run without asking. Every change asks first (see below).
 
-| Area                    | From a conversation                                                                           |
-| ----------------------- | --------------------------------------------------------------------------------------------- |
-| Members and invitations | List members, change a role, remove a member; list, send and revoke invitations.              |
-| Connectors              | List the team's connectors, change a connector's exposure, disable one.                       |
-| Skills                  | List installs and the review queue; approve, request changes or reject a version.             |
-| Models and budgets      | Read and change the team's models, team budget and member budgets.                            |
-| Memory                  | Read and change the team's memory switches.                                                   |
-| Egress                  | List domains and access requests; enable or disable a domain; decide a request.               |
-| Agents and schedules    | List the team's agents and schedules; suspend or resume an agent, pause or resume a schedule. |
-| Usage and audit         | Read usage and the team audit log, page by page.                                              |
+| Area                    | From a conversation                                                                                        |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Members and invitations | List members, change a role, remove a member; list, send and revoke invitations.                           |
+| Connectors              | List the team's connectors, change a connector's exposure, disable one.                                    |
+| Skills                  | List installs and the review queue; approve, request changes or reject a version.                          |
+| Models and budgets      | Read and change the team's models, team budget and member budgets.                                         |
+| Memory                  | Read and change the workspace's memory switches and learning model (`team_memory_get`, `team_memory_set`). |
+| Egress                  | List domains and access requests; enable or disable a domain; decide a request.                            |
+| Agents and schedules    | List the team's agents and schedules; suspend or resume an agent, pause or resume a schedule.              |
+| Usage and audit         | Read usage and the team audit log, page by page.                                                           |
 
 With a site role, the agent can also work on the Site console: list, deactivate and reactivate
 users; list and create teams; list a team's members, add existing users to it, change their team
