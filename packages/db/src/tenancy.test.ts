@@ -60,6 +60,33 @@ describe("tenancy registry", () => {
     expect(table?.columns.map((c) => snake(c.name))).not.toContain("team_id");
   });
 
+  // KOBE-376 (v1.3 SMA1): semantic memory is split by tenancy, never one mixed table.
+  it("splits semantic memory into Workspace team tables and site-wide portable and Site tables", () => {
+    for (const t of [
+      "semantic_memory_items",
+      "semantic_memory_item_versions",
+      "run_memory_items",
+      "run_portable_memory_items",
+      "run_site_memory_items",
+    ]) {
+      expect(isTeamTable(t)).toBe(true);
+    }
+    const all = ["SELECT", "INSERT", "UPDATE", "DELETE"];
+    const siteWide: Record<string, string[]> = {
+      portable_memory_items: all,
+      portable_memory_item_versions: ["SELECT", "INSERT"],
+      site_memory_items: all,
+      site_memory_item_versions: ["SELECT", "INSERT"],
+    };
+    for (const [t, privileges] of Object.entries(siteWide)) {
+      expect(SITE_WIDE_TABLES).toContain(t);
+      expect(appPrivilegesFor(t)).toEqual(privileges);
+      expect(TEAM_REFERENCING_SITE_WIDE).not.toHaveProperty(t);
+      const table = schemaTables.find((s) => s.name === t);
+      expect(table?.columns.map((c) => snake(c.name))).not.toContain("team_id");
+    }
+  });
+
   // KOBE-625 (spec sso-oidc-scim §4–§10): single sign-on and SCIM are site configuration, not
   // team content. Only the access mappings name teams; SCIM tokens are revoked, never deleted.
   it("keeps the SSO and SCIM tables site-wide with least-privilege grants (KOBE-625)", () => {
