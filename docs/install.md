@@ -1067,6 +1067,13 @@ Migrations report what an upgrade changed in the migration Job's log (`"msg":"mi
 from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it during the upgrade
 (`kubectl logs -f job/<release>-migrate`) or read it from your log aggregation afterwards.
 
+- **Semantic memory tables (KOBE-376).** Migrations `0216_semantic_memory` and
+  `0217_semantic_memory_rls` add empty tables for v1.3 Semantic Memory: the team tables
+  `semantic_memory_items`, `semantic_memory_item_versions` and `run_memory_items` (row-level
+  security per team), and the site-wide `portable_memory_items`, `site_memory_items` and their
+  `*_versions` tables (full-text and trigram indexes; the `pg_trgm` extension is already present
+  since migration 0013). Nothing reads them yet, so the upgrade changes no behaviour and a
+  `helm rollback` leaves the previous release working.
 - **Thread–file links (KOBE-610).** Migrations `0205_thread_file_links` and
   `0206_thread_file_links_rls` add the team table `thread_file_links` (which workspace files each
   thread read or wrote) and triggers on `workspace_files`, `workspace_moves` and `project_files`

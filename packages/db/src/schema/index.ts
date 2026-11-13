@@ -66,3 +66,4 @@ export * from "./agent-roster.js";
 export * from "./agent-transfers.js";
 export * from "./thread-file-links.js";
 export * from "./sso.js";
+export * from "./semantic-memory.js";

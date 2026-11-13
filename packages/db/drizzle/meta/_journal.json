@@ -1513,6 +1513,20 @@
       "when": 1794514961345,
       "tag": "0215_sso_link_expectations",
       "breakpoints": true
+    },
+    {
+      "idx": 216,
+      "version": "7",
+      "when": 1794542913553,
+      "tag": "0216_semantic_memory",
+      "breakpoints": true
+    },
+    {
+      "idx": 217,
+      "version": "7",
+      "when": 1794542923602,
+      "tag": "0217_semantic_memory_rls",
+      "breakpoints": true
     }
   ]
 }
