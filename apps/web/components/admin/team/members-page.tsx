@@ -30,6 +30,7 @@ import { useTeamAccess } from "../console-context";
 import { MutationStatus } from "../error-notice";
 import { DateTime, ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
+import { MemoryStewardsSection } from "./memory-stewards-section";
 
 export const TEAM_ROLES: readonly TeamRole[] = ["team_admin", "contributor", "member"];
 
@@ -150,82 +151,85 @@ export function MembersPage() {
       <MutationStatus error={mutation.error} notice={mutation.notice} />
       <ResourceView state={state} label="members">
         {(members) => (
-          <Table caption={`Members of ${access.team.name}`}>
-            <TableHead>
-              <TableRow>
-                <TableHeader>Name</TableHeader>
-                <TableHeader>Email</TableHeader>
-                <TableHeader>Role</TableHeader>
-                <TableHeader>Joined</TableHeader>
-                <TableHeader>
-                  <span className="sr-only">Actions</span>
-                </TableHeader>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {members.map((m) => (
-                <TableRow key={m.userId}>
-                  <TableRowHeader>
-                    {m.name}
-                    {m.userId === access.user.id && " (you)"}
-                    {m.deactivated && <span className="block text-xs">Deactivated</span>}
-                  </TableRowHeader>
-                  <TableCell>{m.email}</TableCell>
-                  <TableCell>
-                    {m.managedBy ? (
-                      <>
-                        {roleLabel(m.role)}
-                        <span className="block text-xs">
-                          {managedByLabel(m.managedBy.providerName)}
-                        </span>
-                      </>
-                    ) : (
-                      <RoleCell
-                        key={`${m.userId}:${m.role}:${generationKey}`}
-                        member={m}
-                        pending={mutation.pending}
-                        onSave={(role, trigger) => changeRole(m, role, trigger)}
-                      />
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <DateTime value={m.joinedAt} />
-                    {m.addedVia === "skill_reviewer_grant" && (
-                      <span className="block text-xs">{ADDED_BY_GRANT}</span>
-                    )}
-                    {m.addedVia === "site_admin" && (
-                      <span className="block text-xs">{ADDED_BY_SITE_ADMIN}</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {m.managedBy ? (
-                      // The identity provider decides; Take over makes the row the team's own.
-                      // Never your own row: another team admin takes it over (review finding 4).
-                      m.userId === access.user.id ? null : (
+          <>
+            <Table caption={`Members of ${access.team.name}`}>
+              <TableHead>
+                <TableRow>
+                  <TableHeader>Name</TableHeader>
+                  <TableHeader>Email</TableHeader>
+                  <TableHeader>Role</TableHeader>
+                  <TableHeader>Joined</TableHeader>
+                  <TableHeader>
+                    <span className="sr-only">Actions</span>
+                  </TableHeader>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {members.map((m) => (
+                  <TableRow key={m.userId}>
+                    <TableRowHeader>
+                      {m.name}
+                      {m.userId === access.user.id && " (you)"}
+                      {m.deactivated && <span className="block text-xs">Deactivated</span>}
+                    </TableRowHeader>
+                    <TableCell>{m.email}</TableCell>
+                    <TableCell>
+                      {m.managedBy ? (
+                        <>
+                          {roleLabel(m.role)}
+                          <span className="block text-xs">
+                            {managedByLabel(m.managedBy.providerName)}
+                          </span>
+                        </>
+                      ) : (
+                        <RoleCell
+                          key={`${m.userId}:${m.role}:${generationKey}`}
+                          member={m}
+                          pending={mutation.pending}
+                          onSave={(role, trigger) => changeRole(m, role, trigger)}
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <DateTime value={m.joinedAt} />
+                      {m.addedVia === "skill_reviewer_grant" && (
+                        <span className="block text-xs">{ADDED_BY_GRANT}</span>
+                      )}
+                      {m.addedVia === "site_admin" && (
+                        <span className="block text-xs">{ADDED_BY_SITE_ADMIN}</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {m.managedBy ? (
+                        // The identity provider decides; Take over makes the row the team's own.
+                        // Never your own row: another team admin takes it over (review finding 4).
+                        m.userId === access.user.id ? null : (
+                          <Button
+                            size="sm"
+                            disabled={mutation.pending}
+                            onClick={(e) => void takeOver(m, eventTrigger(e))}
+                          >
+                            Take over<span className="sr-only"> membership of {m.name}</span>
+                          </Button>
+                        )
+                      ) : (
                         <Button
                           size="sm"
+                          variant="danger"
                           disabled={mutation.pending}
-                          onClick={(e) => void takeOver(m, eventTrigger(e))}
+                          onClick={(e) => void remove(m, eventTrigger(e))}
                         >
-                          Take over<span className="sr-only"> membership of {m.name}</span>
+                          {m.userId === access.user.id ? "Leave team" : "Remove"}
+                          <span className="sr-only"> {m.name}</span>
                         </Button>
-                      )
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        disabled={mutation.pending}
-                        onClick={(e) => void remove(m, eventTrigger(e))}
-                      >
-                        {m.userId === access.user.id ? "Leave team" : "Remove"}
-                        <span className="sr-only"> {m.name}</span>
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <MemoryStewardsSection teamId={teamId} members={members} />
+          </>
         )}
       </ResourceView>
       <TeamSsoMappings teamId={teamId} />

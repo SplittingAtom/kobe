@@ -1,13 +1,20 @@
 import { describe, expect, it } from "vitest";
+import type { TeamRole } from "@kobe/db";
 import {
+  MEMORY_STEWARD_SITE_PERMISSIONS,
+  MEMORY_STEWARD_TEAM_PERMISSIONS,
   SITE_PERMISSIONS,
   TEAM_PERMISSIONS,
   SKILL_REVIEW_ACTIONS,
+  siteMemoryAllows,
+  siteMemoryWriteAllows,
   sitePermissionsFor,
   siteRoleAllows,
   skillReviewAllows,
+  teamMemoryAllows,
   teamPermissionsFor,
   teamRoleAllows,
+  type SiteRole,
   type SitePermission,
   type SkillReviewAction,
   type TeamPermission,
@@ -36,6 +43,8 @@ describe("team permission matrix (spec D8)", () => {
     ["team.retention.manage", false, false, true],
     ["team.eval.manage", false, false, true],
     ["team.memory.manage", false, false, true],
+    ["team.memory.curate", false, false, true],
+    ["team.memory.site_proposals.confirm", false, false, true],
     ["team.audit.read", false, false, true],
     ["team.schedules.pause", false, false, true],
     ["team.agents.suspend", false, false, true],
@@ -73,6 +82,9 @@ describe("site permission matrix (spec D8)", () => {
     ["site.skills.catalog.manage", false, true, true],
     ["site.skills.review", false, true, true],
     ["site.grants.manage", false, true, true],
+    ["site.memory.curate", false, true, true],
+    ["site.memory.policy", false, true, true],
+    ["site.memory.site_proposals.decide", false, true, true],
     ["site.break_glass.request", false, true, true],
     ["site.roles.manage", false, false, true],
     ["site.ownership.transfer", false, false, true],
@@ -149,5 +161,126 @@ describe("Skill reviewer grant beside the ladder (KOBE-331, SK22)", () => {
     expect(sitePermissionsFor(null)).toEqual([]);
     expect(siteRoleAllows(null, "site.skills.review")).toBe(false);
     expect(sitePermissionsFor("admin")).not.toContain("site.roles.manage");
+  });
+});
+
+describe("memory stewards beside the ladders (KOBE-380, SM19)", () => {
+  const TEAM_ROLES: readonly (TeamRole | null)[] = [null, "member", "contributor", "team_admin"];
+  const SITE_ROLES: readonly SiteRole[] = [null, "admin", "owner"];
+
+  /** Who may curate Workspace memory: Team admins, and stewards of any role; never a non-member. */
+  it.each(TEAM_ROLES.flatMap((role) => [false, true].map((steward) => [role, steward] as const)))(
+    "team.memory.curate: role=%s steward=%s",
+    (role, steward) => {
+      const expected = role === "team_admin" || (role !== null && steward);
+      expect(teamMemoryAllows({ role, memorySteward: steward }, "team.memory.curate")).toBe(
+        expected,
+      );
+    },
+  );
+
+  it("gives a Contributor no memory rights from the role (ac-1)", () => {
+    const perms = teamPermissionsFor("contributor");
+    expect(perms.filter((p) => p.startsWith("team.memory."))).toEqual([]);
+    expect(teamPermissionsFor("member").filter((p) => p.startsWith("team.memory."))).toEqual([]);
+  });
+
+  it("adds exactly team.memory.curate to a Workspace steward of any role (ac-3)", () => {
+    expect(MEMORY_STEWARD_TEAM_PERMISSIONS).toEqual(["team.memory.curate"]);
+    for (const role of ["member", "contributor"] as const) {
+      const steward = teamPermissionsFor(role, { memorySteward: true });
+      expect(steward).toEqual([...teamPermissionsFor(role), "team.memory.curate"].sort());
+    }
+    expect(teamPermissionsFor("team_admin", { memorySteward: true })).toEqual(
+      teamPermissionsFor("team_admin"),
+    );
+    expect(teamPermissionsFor(null, { memorySteward: true })).toEqual([]);
+  });
+
+  it("never lets a Workspace steward confirm a Site proposal or manage memory switches (ac-3)", () => {
+    for (const role of ["member", "contributor"] as const) {
+      const who = { role, memorySteward: true };
+      expect(teamMemoryAllows(who, "team.memory.site_proposals.confirm")).toBe(false);
+      expect(teamMemoryAllows(who, "team.memory.manage")).toBe(false);
+      expect(teamMemoryAllows(who, "team.members.manage")).toBe(false);
+      expect(teamMemoryAllows(who, "team.policy.manage")).toBe(false);
+    }
+  });
+
+  /** Exhaustive over site permissions: a Site steward curates and decides Site proposals only. */
+  it.each(Object.keys(SITE_PERMISSIONS) as SitePermission[])(
+    "%s: a plain user with the memory_steward grant",
+    (permission) => {
+      const steward = { siteRole: null, grants: ["memory_steward"] } as const;
+      expect(siteMemoryAllows(steward, permission)).toBe(
+        permission === "site.memory.curate" || permission === "site.memory.site_proposals.decide",
+      );
+    },
+  );
+
+  it("lets Site admins and the Owner do every memory action, users none (ac-1)", () => {
+    for (const permission of [
+      "site.memory.curate",
+      "site.memory.policy",
+      "site.memory.site_proposals.decide",
+    ] as const) {
+      for (const siteRole of SITE_ROLES) {
+        const who = { siteRole, grants: [] };
+        expect(siteMemoryAllows(who, permission)).toBe(siteRole !== null);
+      }
+    }
+  });
+
+  it("lets a Site steward accept or dismiss Site proposals but never set Policy (ac-3)", () => {
+    expect(MEMORY_STEWARD_SITE_PERMISSIONS).toEqual([
+      "site.memory.curate",
+      "site.memory.site_proposals.decide",
+    ]);
+    const steward = { siteRole: null, grants: ["memory_steward"] } as const;
+    expect(siteMemoryAllows(steward, "site.memory.policy")).toBe(false);
+    expect(siteMemoryAllows(steward, "site.memory.site_proposals.decide")).toBe(true);
+    expect(sitePermissionsFor(null)).toEqual([]);
+  });
+
+  it("does not mix the grants: a Skill reviewer is no steward, a steward no reviewer", () => {
+    const reviewer = { siteRole: null, grants: ["skill_reviewer"] } as const;
+    expect(siteMemoryAllows(reviewer, "site.memory.curate")).toBe(false);
+    const steward = { siteRole: null, grants: ["memory_steward"] } as const;
+    for (const action of SKILL_REVIEW_ACTIONS)
+      expect(skillReviewAllows(steward, action)).toBe(false);
+  });
+});
+
+describe("Policy on Site memory writes (KOBE-380 review M-1, SM23)", () => {
+  const steward = { siteRole: null, grants: ["memory_steward"] } as const;
+  const admin = { siteRole: "admin", grants: [] } as const;
+  const owner = { siteRole: "owner", grants: [] } as const;
+  const user = { siteRole: null, grants: [] } as const;
+  const plain = { policyField: false, targetIsPolicy: false } as const;
+
+  it.each(["item", "proposal"] as const)("%s: a steward writes ordinary items only", (via) => {
+    expect(siteMemoryWriteAllows(steward, { via, ...plain })).toBe(true);
+    // Setting `policy` either way, or touching an item that is Policy, is a Policy change.
+    expect(siteMemoryWriteAllows(steward, { via, ...plain, policyField: true })).toBe(false);
+    expect(siteMemoryWriteAllows(steward, { via, ...plain, targetIsPolicy: true })).toBe(false);
+  });
+
+  it.each(["item", "proposal"] as const)(
+    "%s: Site admins and the Owner may change Policy",
+    (via) => {
+      for (const who of [admin, owner]) {
+        expect(siteMemoryWriteAllows(who, { via, policyField: true, targetIsPolicy: true })).toBe(
+          true,
+        );
+      }
+    },
+  );
+
+  it("refuses plain users and Skill reviewers everything", () => {
+    const reviewer = { siteRole: null, grants: ["skill_reviewer"] } as const;
+    for (const who of [user, reviewer]) {
+      expect(siteMemoryWriteAllows(who, { via: "item", ...plain })).toBe(false);
+      expect(siteMemoryWriteAllows(who, { via: "proposal", ...plain })).toBe(false);
+    }
   });
 });

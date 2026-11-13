@@ -1,6 +1,6 @@
 ---
 title: Team admin overview
-summary: What team admins and contributors can do, and where each setting lives in the Team console (members, models, budgets, connectors, egress, memory, policy, agents and skills).
+summary: What team admins and contributors can do, and where each setting lives in the Team console (members, memory stewards, models, budgets, connectors, egress, memory, policy, agents and skills).
 section: Team admin
 order: 1
 audience: admin
@@ -19,7 +19,9 @@ can do.
 | **Contributor** | Everything a member can, plus build and publish team agents, publish team skills and create projects.   |
 | **Team admin**  | Everything, plus run the Team console.                                                                  |
 
-A workspace always has at least one team admin: the last one cannot be removed or demoted. Project
+A workspace always has at least one team admin: the last one cannot be removed or demoted.
+**Memory steward** is not a role but a grant on top of any of these roles (see below).
+Contributors and members get no rights over the workspace's shared memory from their role. Project
 roles (owner, editor, reader) are separate; team admins can do everything in every project. See
 [Workspaces, My files and projects](../files/workspaces-and-projects.md).
 
@@ -45,6 +47,14 @@ workspace; switch workspace first to manage another.
   team admin takes over your own membership. **Show access mappings** lists the provider's
   mappings that target this team (read-only; site admins edit them). See
   [Single sign-on](single-sign-on.md#access-mappings).
+- **Memory stewards** (on **Members and roles**): members who curate the workspace's shared
+  memory together with team admins: they add, edit, archive and pin **Workspace memories**, the
+  facts and conventions every member's agent can use. Any member can be a steward, whatever their
+  role. Choose a member under **Make a memory steward**; **Take memory steward** ends it after a
+  confirmation (what they saved stays). Stewardship ends when the person leaves the workspace.
+  Stewards can't send memories to the Site, change the memory switches, or do anything else a
+  team admin does. Every grant and every removal is in **Audit** (`memory.steward.granted`,
+  `memory.steward.revoked`).
 - **Invitations**: invite people by email; they join when they accept.
 
 ## Workspace settings

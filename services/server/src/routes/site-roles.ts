@@ -14,7 +14,8 @@ import { idSchema, siteRoleChangeSchema, transferOwnershipSchema } from "../team
 /**
  * Site roles (spec D8): one Owner (transferable), Admins, everyone else a User. Site admins
  * see who holds which role; only the Owner grants or revokes Admin and transfers ownership.
- * Site grants (KOBE-331): the Owner or a Site admin gives and takes the Skill reviewer grant.
+ * Site grants (KOBE-331): the Owner or a Site admin gives and takes the Skill reviewer grant and
+ * (KOBE-380) the Site memory steward grant.
  */
 export function siteRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariables }> {
   const app = new Hono<{ Variables: AuthVariables }>();
@@ -90,7 +91,7 @@ export function siteRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
 
   app.put("/grants/:userId/:grant", requireSitePermission("site.grants.manage"), async (c) => {
     const p = grantParams(c);
-    if (!p) return invalidRequest(c, "Name a user and the grant skill_reviewer.");
+    if (!p) return invalidRequest(c, "Name a user and a grant: skill_reviewer or memory_steward.");
     const r = await giveGrant(db, p.userId, p.grant, c.get("user").id);
     if (r.ok) return c.json({ userId: p.userId, grant: p.grant, changed: r.changed });
     if (r.code === "user_not_found") return c.json(userNotFound, 404);
@@ -111,7 +112,7 @@ export function siteRolesRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
 
   app.delete("/grants/:userId/:grant", requireSitePermission("site.grants.manage"), async (c) => {
     const p = grantParams(c);
-    if (!p) return invalidRequest(c, "Name a user and the grant skill_reviewer.");
+    if (!p) return invalidRequest(c, "Name a user and a grant: skill_reviewer or memory_steward.");
     if (!(await findUserId(db, { id: p.userId }))) return c.json(userNotFound, 404);
     const { changed, removedFrom } = await takeGrant(db, p.userId, p.grant);
     if (!changed)

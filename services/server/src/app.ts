@@ -20,6 +20,7 @@ import { notificationRoutes } from "./routes/notifications.js";
 import { fileRoutes } from "./routes/files.js";
 import { memoryRoutes } from "./routes/memory.js";
 import { memorySettingsRoutes } from "./routes/memory-settings.js";
+import { siteMemoryStewardRoutes, teamMemoryStewardRoutes } from "./routes/memory-stewards.js";
 import { uploadRoutes } from "./routes/uploads.js";
 import { approvalRoutes } from "./routes/approvals.js";
 import { egressRequestRoutes } from "./routes/egress-requests.js";
@@ -242,6 +243,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/team/skills", teamSkillUsageRoutes(deps));
   api.route("/team/offboarded", teamOffboardedRoutes(deps));
   api.route("/team/agent-roster", teamAgentRosterRoutes(deps));
+  api.route("/team/memory/stewards", teamMemoryStewardRoutes(deps));
   api.route("/team", teamRoutes(deps));
   api.route("/runs", runEventsRoutes(deps));
   api.route("/runs", runRoutes(deps));
@@ -307,6 +309,7 @@ export function createApp(deps?: ServerDeps, options: AppOptions = {}): Hono {
   api.route("/site/branding", siteBrandingRoutes(deps));
   api.route("/site/teams", siteTeamsRoutes(deps));
   api.route("/site/roles", siteRolesRoutes(deps));
+  api.route("/site/memory/stewards", siteMemoryStewardRoutes(deps));
   api.route("/site/sso", siteSsoMappingRoutes(deps));
   api.route("/site/policy", sitePolicyRoutes(deps));
   api.route("/site/users", siteUsersRoutes(deps));

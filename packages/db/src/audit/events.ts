@@ -2832,7 +2832,10 @@ export const AUDIT_EVENTS = {
     count,
     includeInactive: z.boolean(),
   }),
-  /** A Site admin or Site steward made a Site item Policy, or Policy an ordinary item (SM23). */
+  /**
+   * A Site admin made a Site item Policy, or Policy an ordinary item (SM23); Site memory stewards
+   * never do (KOBE-380).
+   */
   "memory.policy.set": event("site", { itemId: id, version, policy: z.boolean() }),
   /** Saved despite contradicting Policy (SM23): how many Policy items it contradicts. */
   "memory.policy.override": event("any", {

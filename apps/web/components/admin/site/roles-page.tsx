@@ -33,6 +33,7 @@ import { MutationStatus } from "../error-notice";
 import { ResourceView } from "../parts";
 import { useMutation, useResource } from "../use-resource";
 import { SkillReviewersSection } from "./skill-reviewers-section";
+import { SiteMemoryStewardsSection } from "./memory-stewards-section";
 
 interface RolesData {
   readonly holders: readonly SiteRoleHolder[];
@@ -220,6 +221,7 @@ export function RolesPage() {
         }}
       </ResourceView>
       <SkillReviewersSection />
+      <SiteMemoryStewardsSection />
       {confirmDialog}
     </>
   );

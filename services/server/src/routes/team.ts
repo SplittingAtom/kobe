@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { requireTeam, requireTeamPermission, type TeamVariables } from "../authz/middleware.js";
 import { teamPermissionsFor } from "../authz/permissions.js";
 import type { ServerDeps } from "../deps.js";
+import { isWorkspaceSteward } from "../memory/stewards.js";
 import { listTeamMappings } from "../sso/mappings.js";
 import { afterMemberRemoved, afterMemberRoleChanged } from "../teams/after-change.js";
 import { invalidRequest, membershipError, parseBody } from "../teams/http.js";
@@ -18,9 +19,16 @@ export function teamRoutes(deps: ServerDeps): Hono<{ Variables: TeamVariables }>
   const db = deps.database.db;
   app.use(requireTeam(deps));
 
-  app.get("/", (c) => {
+  // `memorySteward` (KOBE-380): a Workspace memory steward also holds `team.memory.curate`.
+  app.get("/", async (c) => {
     const { id, slug, name, role } = c.get("team");
-    return c.json({ team: { id, slug, name }, role, permissions: teamPermissionsFor(role) });
+    const memorySteward = await isWorkspaceSteward(db, id, c.get("user").id);
+    return c.json({
+      team: { id, slug, name },
+      role,
+      memorySteward,
+      permissions: teamPermissionsFor(role, { memorySteward }),
+    });
   });
 
   app.get("/members", requireTeamPermission("team.members.read"), async (c) =>
