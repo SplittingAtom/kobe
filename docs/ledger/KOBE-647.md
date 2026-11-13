@@ -1,0 +1,54 @@
+# KOBE-647: SMA11a: Site-wide legal hold for Site memories
+
+<!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
+
+- **Status:** in progress — phase 1 (migration alone) committed; phase 2 (server, console, docs) waits for
+  a base with KOBE-378's item store
+- **Branch / worktree:** `kobe-647-sm-site-hold` in `../Kobe-wt647` (based on `kobe-646-sm-migration`)
+- **Depends on:** KOBE-378, KOBE-646 (migration 0223)
+
+## Plan
+
+1. Migration alone: `0224_site_legal_holds` (generated table) + `0225_site_legal_hold_guard` (custom SQL:
+   lifecycle trigger, KH001 guards on the Site memory tables). Upgrade test.
+2. Server: sweeps / version cap / purge skip held Site rows (hold lock first, as `retention/memory.ts`);
+   Site console create/release; `governance.site_legal_hold.*` audit events; guide + `/llms.txt`.
+
+## Decisions
+
+- **Separate site-wide table `site_legal_holds`, not a nullable `legal_holds.team_id`.** `legal_holds`
+  rows are read by `legal_hold_covers`, `memory_legal_hold_covers`, `audit_log_pii_held`,
+  `legal_hold_refuse_truncate`, `legalHoldsForTeam`/`isUnderLegalHold` and the server store, all of
+  which assume a team; a team-less row would silently change some of them (e.g. "any active hold"
+  truncate refusal, the console list joining teams) and make `teamId` nullable across the server.
+  The new table has no team_id (site-wide like `site_settings`, no RLS), grants SELECT/INSERT/UPDATE
+  only (never deleted), reuses the `legal_hold_status` enum and the same CHECKs minus the subject.
+- **Guard is a copy of `legal_holds_guard()` without subject checks**
+  (`legal_hold_other_admin_exists(who, NULL)`); `legal_holds_guard()` is untouched. Approval takes the same exclusive advisory lock
+  (`kobe.legal_hold`), so `legal_hold_lock_shared()` orders Site purges too. Release does not reset the
+  audit PII sweep (a Site hold covers no audit rows).
+- **Scope of the hold:** any active Site hold refuses every DELETE on `site_memory_items` and
+  `site_memory_item_versions` (statement-level AFTER DELETE, transition table) — purge, version-cap
+  pruning and item cascades alike — and TRUNCATE of both (owner backstop). UPDATEs (archive, supersede)
+  stay allowed. `run_site_memory_items` is Workspace data: it follows its run under Workspace holds
+  (0217); its only Site-side removal path (item/version delete) is refused in the same statement.
+- Two migration files (generated + custom) because `db:rebase` regenerates generated files and would
+  drop hand-added SQL (same split as 0216/0217).
+
+## Open questions (for Chris or the coordinator)
+
+- Phase C: Site memory proposals (KOBE-653) should add the same guard to `site_memory_proposals`.
+
+## Evidence (acceptance criteria → test or command output)
+
+- ac-1: `packages/db/src/site-legal-hold-upgrade.db.test.ts` (9 tests; review L1 added the run-record paths: lifecycle, two-person rule,
+  self-approval, withdraw/deny, no DELETE grant, KH001 on purge/prune/truncate incl. pre-upgrade items,
+  Workspace memory unaffected, approval waits for purges, invoker + pinned search_path). catalog, probe,
+  drizzle-privileges, app-role-capabilities, legal-hold, memory-version-prune-upgrade, semantic-memory,
+  migrate: 1150 passed. `db:check` clean after commit.
+
+## Phase 2 reminders (review of 65b6f027)
+
+- M1: check the Site hold before pruning and skip the prune (an edit past the cap must not fail KH001).
+- L2: sweeps run in READ COMMITTED (the guard reads holds with a fresh statement snapshot).
+- L3: metadata changes on held Site items audited with before/after.

@@ -1569,6 +1569,20 @@
       "when": 1794581857307,
       "tag": "0223_agent_version_memory",
       "breakpoints": true
+    },
+    {
+      "idx": 224,
+      "version": "7",
+      "when": 1794586716792,
+      "tag": "0224_site_legal_holds",
+      "breakpoints": true
+    },
+    {
+      "idx": 225,
+      "version": "7",
+      "when": 1794586721427,
+      "tag": "0225_site_legal_hold_guard",
+      "breakpoints": true
     }
   ]
 }
