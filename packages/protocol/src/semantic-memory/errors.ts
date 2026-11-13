@@ -30,6 +30,8 @@ export const SEMANTIC_MEMORY_ERROR_CODES = [
   "memory_item_inactive",
   /** The import file could not be read as the named format. */
   "memory_import_invalid",
+  /** Policy items are always in context: pinning one (or making a pinned item Policy) is refused. */
+  "memory_policy_not_pinnable",
 ] as const;
 export const semanticMemoryErrorCodeSchema = z.enum(SEMANTIC_MEMORY_ERROR_CODES);
 export type SemanticMemoryErrorCode = z.infer<typeof semanticMemoryErrorCodeSchema>;
@@ -47,6 +49,7 @@ export const SEMANTIC_MEMORY_ERROR_HTTP_STATUS = {
   memory_not_allowed: 403,
   memory_item_inactive: 409,
   memory_import_invalid: 400,
+  memory_policy_not_pinnable: 409,
 } as const satisfies Record<SemanticMemoryErrorCode, number>;
 
 /** One check's finding: a stable code and a sentence for people. Never the matched secret. */

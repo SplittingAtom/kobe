@@ -19,7 +19,7 @@ import {
  * in `run_memory_items` / `run_portable_memory_items` / `run_site_memory_items`.
  *
  * Order is stable-first (Chris 2026-11-12, Q6), so the cacheable prefix changes least: every
- * Policy item, then pinned items, then the per-message picks (re-picked on every message, SM24).
+ * Policy item (always included, never pinned), then pinned items, then the per-message picks (re-picked on every message, SM24).
  * The selector (KOBE-382) decides membership; the schema checks the order and the byte budgets.
  */
 
@@ -71,6 +71,7 @@ export const runSemanticMemorySchema = z
     const issue = (message: string) => ctx.addIssue({ code: "custom", path: ["items"], message });
     v.items.forEach((item, i) => {
       if (item.policy && item.scope !== "site") issue(`item ${i}: Policy exists only on the Site`);
+      if (item.policy && item.pinned) issue(`item ${i}: Policy items are never pinned`);
       if (item.scope === "portable" && item.kind !== "preference")
         issue(`item ${i}: portable items are preferences`);
       if (item.scope === "portable" && item.provenance.as_of !== null)

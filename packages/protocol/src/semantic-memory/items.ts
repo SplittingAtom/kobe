@@ -108,7 +108,7 @@ const sourceEntryIds = z.array(idSchema).min(1).max(SEMANTIC_MEMORY_SOURCE_ENTRI
  * portable items (preferences); `owner_user_id` is set on `user` and `portable` items;
  * `version` is the current version; `updated_by` that version's author.
  */
-export const semanticMemoryItemSchema = z.strictObject({
+const itemObject = z.strictObject({
   id: uuidSchema,
   scope: semanticMemoryScopeSchema,
   kind: semanticMemoryKindSchema,
@@ -125,6 +125,16 @@ export const semanticMemoryItemSchema = z.strictObject({
   updated_at: timestampSchema,
   updated_by: uuidSchema,
 });
+
+/** Policy is always in context, so a Policy item is never pinned (coordinator 2026-11-13). */
+const POLICY_NOT_PINNED = {
+  message: "Policy items are always in context and can't be pinned",
+  path: ["pinned"],
+};
+const policyNotPinned = (v: { policy?: boolean | undefined; pinned?: boolean | undefined }) =>
+  !(v.policy === true && v.pinned === true);
+
+export const semanticMemoryItemSchema = itemObject.refine(policyNotPinned, POLICY_NOT_PINNED);
 export type SemanticMemoryItem = z.infer<typeof semanticMemoryItemSchema>;
 
 /**
@@ -148,9 +158,9 @@ export const semanticMemoryVersionSchema = z.strictObject({
 export type SemanticMemoryVersion = z.infer<typeof semanticMemoryVersionSchema>;
 
 /** Item with its history, newest version first. */
-export const semanticMemoryItemDetailSchema = semanticMemoryItemSchema.extend({
-  versions: z.array(semanticMemoryVersionSchema).min(1),
-});
+export const semanticMemoryItemDetailSchema = itemObject
+  .extend({ versions: z.array(semanticMemoryVersionSchema).min(1) })
+  .refine(policyNotPinned, POLICY_NOT_PINNED);
 export type SemanticMemoryItemDetail = z.infer<typeof semanticMemoryItemDetailSchema>;
 
 /** Query booleans arrive as strings. */
@@ -212,6 +222,7 @@ const scopeRules = <
     scope: SemanticMemoryScope;
     kind: SemanticMemoryKind;
     policy?: boolean | undefined;
+    pinned?: boolean | undefined;
     as_of?: string | null | undefined;
     source_thread_id?: string | undefined;
     source_entry_ids?: string[] | undefined;
@@ -222,6 +233,7 @@ const scopeRules = <
 ) => {
   if (v.policy === true && v.scope !== "site")
     ctx.addIssue({ code: "custom", path: ["policy"], message: "Policy exists only on the Site" });
+  if (!policyNotPinned(v)) ctx.addIssue({ code: "custom", ...POLICY_NOT_PINNED });
   if (v.scope === "portable" && v.kind !== "preference")
     ctx.addIssue({ code: "custom", path: ["kind"], message: "portable items are preferences" });
   if (v.scope === "portable" && v.as_of != null)
@@ -293,5 +305,9 @@ export const revertSemanticMemoryItemSchema = z.strictObject({
 });
 export type RevertSemanticMemoryItem = z.infer<typeof revertSemanticMemoryItemSchema>;
 
+/**
+ * Pin or unpin. Pinning a Policy item is refused with `memory_policy_not_pinnable` (Policy is
+ * always in context); so is making a pinned item Policy with a patch (unpin it first).
+ */
 export const pinSemanticMemoryItemSchema = z.strictObject({ pinned: z.boolean() });
 export type PinSemanticMemoryItem = z.infer<typeof pinSemanticMemoryItemSchema>;

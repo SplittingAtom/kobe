@@ -126,6 +126,32 @@ describe("run.start.memory.semantic ordering and limits", () => {
     expect(semantic([{ ...pinned, policy: true }]).success).toBe(false);
   });
 
+  it("Policy items are never pinned (always in context)", () => {
+    const [policy] = runItems();
+    expect(semantic([{ ...policy, pinned: true }]).success).toBe(false);
+    const detail = fixture("item-detail");
+    expect(
+      semanticMemoryItemDetailSchema.safeParse({ ...detail, scope: "site", policy: true }).success,
+    ).toBe(false);
+    expect(
+      semanticMemoryItemDetailSchema.safeParse({
+        ...detail,
+        scope: "site",
+        policy: true,
+        pinned: false,
+      }).success,
+    ).toBe(true);
+    expect(
+      createSemanticMemoryItemSchema.safeParse({
+        ...fixture("create-request"),
+        scope: "site",
+        policy: true,
+        pinned: true,
+      }).success,
+    ).toBe(false);
+    expect(SEMANTIC_MEMORY_ERROR_HTTP_STATUS.memory_policy_not_pinnable).toBe(409);
+  });
+
   it("portable items are preferences without as_of", () => {
     const [, , portable] = runItems();
     expect(semantic([{ ...portable, kind: "fact" }]).success).toBe(false);

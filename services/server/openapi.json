@@ -10429,7 +10429,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `memory_disabled`, `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10635,7 +10635,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `memory_disabled`, `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10744,7 +10744,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `memory_disabled`, `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10853,7 +10853,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `memory_disabled`, `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10972,7 +10972,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `memory_disabled`, `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10997,7 +10997,7 @@
     "/v1/memory/items/{scope}/{id}/pin": {
       "post": {
         "operationId": "pinSemanticMemoryItem",
-        "summary": "Pin or unpin a memory item (pinned items are always in context)",
+        "summary": "Pin or unpin a memory item (pinned items are always in context; Policy items can't be pinned)",
         "parameters": [
           {
             "name": "scope",
@@ -11091,7 +11091,7 @@
             }
           },
           "409": {
-            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_disabled`, `no_active_team` or `team_mismatch`.",
+            "description": "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, `memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a Policy item can't be pinned, nor a pinned item made Policy), `memory_disabled`, `no_active_team` or `team_mismatch`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -23817,7 +23817,8 @@
               "memory_item_not_found",
               "memory_not_allowed",
               "memory_item_inactive",
-              "memory_import_invalid"
+              "memory_import_invalid",
+              "memory_policy_not_pinnable"
             ]
           },
           "message": {

@@ -91,7 +91,9 @@ const SAVE_ERRORS = {
   "409": ERR(
     "`memory_lint_warning` or `memory_policy_conflict` (send `overrides` to save anyway; " +
       "audited), `memory_scope_full`, `memory_policy_budget_full`, `memory_version_conflict`, " +
-      "`memory_item_inactive`, `memory_disabled`, `no_active_team` or `team_mismatch`.",
+      "`memory_item_inactive`, `memory_policy_not_pinnable` (Policy is always in context: a " +
+      "Policy item can't be pinned, nor a pinned item made Policy), `memory_disabled`, " +
+      "`no_active_team` or `team_mismatch`.",
   ),
   "422": ERR("`memory_secret`: a credential was found; it can never be saved."),
 };
@@ -187,7 +189,7 @@ function itemPaths(): Record<string, Record<string, unknown>> {
     ),
     "/v1/memory/items/{scope}/{id}/pin": itemAction(
       "pinSemanticMemoryItem",
-      "Pin or unpin a memory item (pinned items are always in context)",
+      "Pin or unpin a memory item (pinned items are always in context; Policy items can't be pinned)",
       "PinSemanticMemoryItem",
     ),
   };

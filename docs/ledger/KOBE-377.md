@@ -77,8 +77,7 @@ memory sections (KOBE-382/383), notifications (KOBE-645); `/llms.txt` follows th
 1. SM28's exact audit names were not available offline (spec not in the worktree, Hadron off
    limits); names above follow the brief's patterns. Rename before KOBE-378 writes rows if SM28
    differs.
-2. Should Policy items be pinnable? The schema allows `pinned` on a Policy item; the run order
-   treats Policy first regardless.
+2. Resolved 2026-11-13 (coordinator): Policy items are never pinned (always in context); refused with `memory_policy_not_pinnable` (409); schemas refuse `policy && pinned`.
 
 ## Evidence (acceptance criteria → test or command output)
 
