@@ -2,7 +2,7 @@
 
 <!-- Keep under ~150 lines: decisions and links to evidence, not pasted logs. -->
 
-- **Status:** in review (local commit, not pushed)
+- **Status:** review fixes in (second local commit, not pushed); review in `review-382.md` (untracked)
 - **Branch / worktree:** `kobe-382-sm-selection` in `../Kobe-wt382`, on `kobe-646-sm-agent-memory`
   (PR #542)
 - **Depends on:** KOBE-377 (contract), KOBE-378 (store/tables), KOBE-381 (switches, Site
@@ -102,6 +102,30 @@ Breakdown at the last row (p50): lanes UNION 24 ms (EXPLAIN: exec 17 ms + planni
 context/state 3 ms, insert 2 ms, transaction 2 ms, server-side trigram/selection 3–4 ms. p95
 moves with the VM's load (load average 4–6 during the runs); in-cluster Postgres (sub-ms RTT)
 removes ~10 ms of round trips.
+
+## Review fixes (review-382.md)
+
+- **M1** stickiness only ranks: eligible = pinned, a word matched, or a person-lane preference
+  (`select.ts eligible`, SQL filter). Unit + db test (unrelated next message drops last picks).
+- **L1** pinned items are taken right after Policy in render order (lane, id), never by score;
+  floors and flow-on apply to per-message picks only. Unit test with pins bigger than the floors.
+- **L2** records are written when the sandbox accepts the `run.start` (`delivery.ts`
+  `#memoryRecorded`, the sync-conflicts pattern); a run that already has records gets exactly
+  those again (`run-records.ts readRunRecords`, `fresh: false`). Db tests: refused start → no
+  records; second build → same ids, no second set.
+- **L3** earlier messages walk up from `runs.parent_entry_id` (else `threads.leaf_entry_id`),
+  stopping at two user messages or 500 entries; a sibling branch never counts (db test).
+- **L4** the route reads the latest message run **with records** and says `latest: false` when a
+  newer run came after it; the context viewer labels it "From an earlier message" (web test).
+- **L5** Policy fills the budget in id order and never past it (rest counted as omitted); a failed
+  build falls back to `buildPolicyOnly` (db test for the fallback).
+- **Info 1 (Chris):** Site Policy reaches every non-isolated run: `memoryPlan().policy`;
+  `notes_only` → Notes + Policy, `off` → `{scopes: [], indexes: [], semantic: Policy}`; test chats
+  and evals none. Guide (memory, agents) updated.
+- **Perf:** the lanes UNION runs as a named prepared statement on the transaction's connection
+  (`executePrepared`, sha256-named per shape): lanes query p50 24 → 19 ms, p95 29 ms. Strict-mode
+  selection (no record write now): p50 37–44 ms, p95 55–84 ms under load average 5–10 (another
+  agent's verify); one run in three passed 50 ms.
 
 ## Open
 

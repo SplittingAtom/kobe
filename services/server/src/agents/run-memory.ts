@@ -8,8 +8,9 @@ import { agentMemorySettingSchema, type AgentMemorySetting } from "@kobe/protoco
  * Kobe knows" block and item recall.
  *
  * - `all` → Notes (`run.start.memory`, `remember`/`recall`) and semantic memory.
- * - `notes_only` → Notes only.
- * - `off` → no memory at all: no `run.start.memory`, the memory tools withheld.
+ * - `notes_only` → Notes and Site Policy only.
+ * - `off` → no Notes (the memory tools withheld) and no memories except Site Policy, which
+ *   reaches every run (Chris 2026-11-13); `run.start.memory` then carries only Policy.
  *
  * Isolated runs keep today's rules whatever the setting: a skill eval (KOBE-325) gets no memory;
  * a builder test chat (KOBE-85, `threads.is_test`) runs its draft with the current version's
@@ -21,6 +22,12 @@ export interface RunMemoryPlan {
   readonly notes: boolean;
   /** `run.start.memory.semantic` and item recall (applied by KOBE-382/383/399). */
   readonly semantic: boolean;
+  /**
+   * Site Policy in `run.start.memory.semantic`, whatever the setting (Chris 2026-11-13, review
+   * Info 1): `notes_only` and `off` drop every other memory, never Policy; only the Site master
+   * switch stops it. Isolated runs (test chats, skill evals) get none.
+   */
+  readonly policy: boolean;
 }
 
 export type RunIsolation = "none" | "test_chat" | "skill_eval";
@@ -33,6 +40,7 @@ export function memoryPlan(
     setting,
     notes: setting !== "off" && isolation !== "skill_eval",
     semantic: setting === "all" && isolation === "none",
+    policy: isolation === "none",
   };
 }
 

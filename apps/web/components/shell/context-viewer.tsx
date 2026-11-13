@@ -176,6 +176,11 @@ function ContextMemoriesList({ memories }: { readonly memories: ThreadContextMem
   return (
     <details className={styles.memories} data-context-memories>
       <summary>Memories in context ({memories.items.length})</summary>
+      {!memories.latest && (
+        <p className={styles.memoryNote} role="note" data-memories-earlier>
+          From an earlier message: the newest one has not been given its memories yet.
+        </p>
+      )}
       {memoryLanes(memories.items).map((lane) => (
         <section key={lane.lane} aria-label={lane.label} data-memory-lane={lane.lane}>
           <h3 className={styles.memoryLane}>{lane.label}</h3>

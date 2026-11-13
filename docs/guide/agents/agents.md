@@ -58,8 +58,11 @@ The builder's **Memory** section sets how much memory the agent uses, per publis
 | Setting        | What the agent gets                                                                      |
 | -------------- | ---------------------------------------------------------------------------------------- |
 | **All memory** | Memory notes (My memory, project memory) and any other memories Kobe keeps. The default. |
-| **Notes only** | Memory notes only.                                                                       |
-| **Off**        | No memory at all: no memory index, no **remember** or **recall** tools.                  |
+| **Notes only** | Memory notes and Site Policy.                                                            |
+| **Off**        | Site Policy only: no memory index, no **remember** or **recall** tools.                  |
+
+**Site Policy** (the site's rules) reaches every run whatever this setting says; only the site's
+**Allow memory** switch stops it.
 
 The agent always uses the memory of the person running it, never yours: sharing an agent never
 shares your memory. **Save as a new version** publishes the current version again with the new

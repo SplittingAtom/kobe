@@ -243,11 +243,12 @@ export const threadContextError = (code: ThreadContextErrorCode): ThreadContextE
 
 /**
  * `GET /v1/threads/{id}/context/memories` (KOBE-382, U48, CV2): the semantic memory items the
- * thread's latest run was given (`run_memory_items` and its portable and Site siblings), in the
- * order the block renders them (Policy, pinned, per-message picks; lanes in
+ * thread's latest run with records was given (`run_memory_items` and its portable and Site
+ * siblings), in the order the block renders them (Policy, pinned, per-message picks; lanes in
  * {@link CONTEXT_MEMORY_LANES} order). The context viewer lists them per lane and Session info
  * counts them. Owner only, like the context: a shared reader gets 403 `not_owner`. `run_id` is
- * null before the first run; `items` is empty when that run got no semantic block.
+ * null while no run has records. `latest` is false when a newer run came after that one (queued,
+ * not delivered yet, or given no memories): the web labels the list as an earlier message's.
  */
 export const threadContextMemoryItemSchema = z.strictObject({
   id: uuidSchema,
@@ -263,6 +264,7 @@ export type ThreadContextMemoryItem = z.infer<typeof threadContextMemoryItemSche
 export const threadContextMemoriesSchema = z.strictObject({
   thread_id: uuidSchema,
   run_id: uuidSchema.nullable(),
+  latest: z.boolean(),
   items: z.array(threadContextMemoryItemSchema).max(SEMANTIC_MEMORY_RUN_MAX_ITEMS),
 });
 export type ThreadContextMemories = z.infer<typeof threadContextMemoriesSchema>;

@@ -68,10 +68,10 @@ export function contextOpenApiPaths(): Record<string, Record<string, unknown>> {
         summary: "The memories the thread's latest run was given",
         description:
           "The owner reads the semantic memories (Policy, Site, Workspace and their own) that " +
-          "the thread's latest run was given, from the run's records, in the order the block " +
+          "the thread's latest run with records was given (`latest` false when a newer run " +
+          "came after it), in the order the block " +
           "renders them: Policy, pinned items, then the items picked for that message. Each " +
-          "item is the version the run got. `run_id` is null before the first run; `items` is " +
-          "empty when the run got no memories. Statements are untrusted: show them as plain text.",
+          "item is the version the run got. `run_id` is null while no run has records. Statements are untrusted: show them as plain text.",
         parameters: [
           { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
         ],

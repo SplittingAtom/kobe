@@ -97,6 +97,27 @@ describe("context viewer", () => {
     const team = within(details).getByRole("region", { name: "Workspace memories" });
     expect(team.textContent).toContain("Pinned · <i>Deploys</i> freeze on Fridays");
     expect(team.querySelector("i")).toBeNull();
+    expect(within(details).queryByRole("note")).toBeNull();
+  });
+
+  it("labels an earlier message's memories while the newest has none yet (L4)", async () => {
+    const t = thread();
+    fake.threadContext.set(t, [{ status: 200, body: contextOf(SECTIONS, { thread_id: t }) }]);
+    fake.threadMemories.set(t, [
+      {
+        id: "00000000-0000-4000-8000-000000000003",
+        version: 1,
+        lane: "policy",
+        kind: "fact",
+        statement: "Never share customer data",
+        pinned: false,
+      },
+    ]);
+    fake.threadMemoriesEarlier.add(t);
+    const { dialog } = await openViewer(t);
+    const list = await within(dialog).findByText("Memories in context (1)");
+    const details = must(list.closest("details"));
+    expect(within(details).getByRole("note").textContent).toMatch(/From an earlier message/);
   });
 
   it("shows no memories list when the run got none", async () => {

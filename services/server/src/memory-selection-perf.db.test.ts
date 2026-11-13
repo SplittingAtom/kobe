@@ -4,12 +4,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withTeam } from "@kobe/db";
 import { runSemanticMemorySchema, semanticMemoryRenderedBytes } from "@kobe/protocol";
 import { buildRunSemantic } from "./memory/items/run-memory.js";
+import { recordRunMemory } from "./memory/items/run-records.js";
 import { openHarness, type Harness } from "./testing/harness.js";
 
 /**
  * KOBE-382 ac-4: the selector at the scope limits (SM21 defaults: 1,000 Workspace items with three
  * versions each, 300 of the runner's own, 50 portable, 1,000 Site items, 25 Policy items at the
- * 2 KiB cap) answers within 50 ms at the 95th percentile, recording included. Numbers go in
+ * 2 KiB cap) answers within 50 ms at the 95th percentile, selection only. Numbers go in
  * docs/ledger/KOBE-382.md.
  */
 let h: Harness;
@@ -122,17 +123,24 @@ beforeAll(async () => {
   const previous = rows.find((r) => r.status === "completed")?.id ?? "";
   runId = rows.find((r) => r.status === "running")?.id ?? "";
   // The previous run's records make some items sticky.
-  await build(previous, "deploy release friday");
+  const given = await build(previous, "deploy release friday");
+  await withTeam(h.deps.database.db, team, (tx) =>
+    recordRunMemory(tx, team, previous, given.items),
+  );
 });
 
 afterAll(async () => {
   await h?.close();
 });
 
-const build = (run: string, message: string) =>
-  withTeam(h.deps.database.db, team, (tx) =>
+/** One selection, as delivery runs it (records are written later, once the start is accepted). */
+const build = async (run: string, message: string) => {
+  const out = await withTeam(h.deps.database.db, team, (tx) =>
     buildRunSemantic(tx, { teamId: team, userId: runner, threadId, runId: run, message }),
   );
+  if (out === undefined) throw new Error("no selection");
+  return out.semantic;
+};
 
 const message = (i: number) => MESSAGES[i % MESSAGES.length] ?? "hello";
 const MESSAGES = [
@@ -151,7 +159,7 @@ const MESSAGES = [
 const P95_MAX_MS = process.env.KOBE_PERF_STRICT === "1" ? 50 : 200;
 
 describe("selector performance at scope limits (ac-4)", () => {
-  it(`answers within ${P95_MAX_MS} ms at p95, recording included`, async () => {
+  it(`answers within ${P95_MAX_MS} ms at p95, selection only`, async () => {
     for (let i = 0; i < 10; i++) await build(runId, message(i));
     const times: number[] = [];
     let last;

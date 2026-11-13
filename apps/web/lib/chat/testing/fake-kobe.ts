@@ -644,6 +644,8 @@ export class FakeKobe {
    * none (`run_id` null). A read-only thread is a 403 `not_owner`.
    */
   readonly threadMemories = new Map<string, Json[]>();
+  /** Threads whose memories are an earlier run's (`latest: false`). */
+  readonly threadMemoriesEarlier = new Set<string>();
 
   #threadMemories(thread: FakeThread): Response {
     if (thread.read_only === true) {
@@ -653,6 +655,7 @@ export class FakeKobe {
     return json(200, {
       thread_id: thread.thread_id,
       run_id: items === undefined ? null : "00000000-0000-4000-8000-0000000000aa",
+      latest: !this.threadMemoriesEarlier.has(thread.thread_id),
       items: items ?? [],
     });
   }

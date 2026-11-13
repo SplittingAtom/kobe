@@ -33,7 +33,7 @@ describe("memoryLanes", () => {
 
 describe("readThreadContextMemories", () => {
   it("reads the route with the team header and validates it", async () => {
-    const body = { thread_id: item(9, "team").id, run_id: null, items: [] };
+    const body = { thread_id: item(9, "team").id, run_id: null, latest: true, items: [] };
     const fetchFn = vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
     expect(await readThreadContextMemories("t 1", "team-1", fetchFn as typeof fetch)).toEqual(body);
     const [url, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit];

@@ -10,6 +10,7 @@ import {
 } from "@kobe/protocol";
 import {
   LANE_FLOOR_BYTES,
+  RENDER_LANES,
   PREFERENCE_BASE,
   STICKY_BONUS,
   memoryScore,
@@ -69,18 +70,23 @@ describe("selectRunMemory", () => {
     expect(runSemanticMemorySchema.safeParse(s).success).toBe(true);
   });
 
-  it("keeps Policy even when the lanes get nothing", () => {
+  it("takes Policy before the lanes, and never past the budget (L5)", () => {
     const policy = Array.from({ length: 25 }, (_, k) =>
       item("site", { id: 100 + k, policy: true, bytes: 80 }),
     );
-    const s = selectRunMemory({
-      policy,
-      lanes: { user: [cand(item("user", { bytes: 400 }))] },
-      budgetBytes: SEMANTIC_MEMORY_BLOCK_MIN_BYTES,
-    });
-    expect(s.items.filter((i) => i.policy)).toHaveLength(25);
-    expect(s.items.some((i) => !i.policy)).toBe(false);
-    expect(s.omitted_count).toBe(1);
+    const lanes = { user: [cand(item("user", { bytes: 400 }))] };
+    const roomy = selectRunMemory({ policy, lanes, budgetBytes: budget });
+    expect(roomy.items.filter((i) => i.policy)).toHaveLength(25);
+    // At the smallest budget the 25 items of the 2 KiB cap render to 4,816 bytes: Policy fills
+    // the budget in id order, the rest (and the lanes) count as omitted.
+    const tight = selectRunMemory({ policy, lanes, budgetBytes: SEMANTIC_MEMORY_BLOCK_MIN_BYTES });
+    const given = tight.items.filter((i) => i.policy);
+    expect(given.length).toBeGreaterThan(18);
+    expect(given.length).toBeLessThan(25);
+    expect(ids(given)).toEqual(ids(policy.slice(0, given.length)));
+    expect(tight.items.some((i) => !i.policy)).toBe(false);
+    expect(semanticMemoryRenderedBytes(tight)).toBeLessThanOrEqual(SEMANTIC_MEMORY_BLOCK_MIN_BYTES);
+    expect(tight.omitted_count).toBe(25 - given.length + 1);
   });
 
   it("gives each lane its floor before the best items elsewhere take the rest", () => {
@@ -171,13 +177,52 @@ describe("selectRunMemory", () => {
     expect(memoryScore(cand(b, { textRank: 0.2, sticky: true }), "team")).toBeCloseTo(
       0.2 + 0.1 + STICKY_BONUS,
     );
-    // A sticky item is a candidate even with no word matched.
+    // Stickiness only ranks: an item the previous run got that matches nothing now is not
+    // given again (M1, re-picked every message).
     const s = selectRunMemory({
       policy: [],
       lanes: { team: [cand(a, { textRank: 0, sticky: true })] },
       budgetBytes: budget,
     });
-    expect(ids(s.items)).toEqual([a.id]);
+    expect(ids(s.items)).toEqual([]);
+    expect(s.omitted_count).toBe(0);
+  });
+
+  it("gives pinned items by render order, whatever this message scores them (L1)", () => {
+    // Pinned items larger than the floors, in every lane, at the smallest budget.
+    const pins = (["user", "portable", "team", "site"] as const).flatMap((lane, l) =>
+      Array.from({ length: 4 }, (_, k) =>
+        item(lane, { id: 300 + l * 10 + k, pinned: true, bytes: 450 }),
+      ),
+    );
+    const policy = [item("site", { id: 299, policy: true, bytes: 300 })];
+    const run = (seed: number) =>
+      selectRunMemory({
+        policy,
+        lanes: Object.fromEntries(
+          (["user", "portable", "team", "site"] as const).map((lane) => [
+            lane,
+            [
+              ...pins
+                .filter((p) => p.scope === lane)
+                .map((p, k) =>
+                  cand(p, { textRank: ((k + seed) % 4) / 4, sticky: (k + seed) % 2 === 0 }),
+                ),
+              cand(item(lane, { id: 400 + seed * 10 + RENDER_LANES.indexOf(lane), bytes: 30 }), {
+                textRank: 2,
+              }),
+            ],
+          ]),
+        ),
+        budgetBytes: SEMANTIC_MEMORY_BLOCK_MIN_BYTES,
+      });
+    const a = run(1);
+    const b = run(2);
+    const prefix = (s: typeof a) => s.items.filter((i) => i.policy || i.pinned);
+    expect(prefix(a).length).toBeGreaterThan(1);
+    expect(prefix(a)).toEqual(prefix(b));
+    // Render order: site, team, portable, user; the first pins of the Site lane come first.
+    expect(prefix(a)[1]?.scope).toBe("site");
   });
 
   it("uses whole items only: a misfit is skipped, a smaller one still fits", () => {

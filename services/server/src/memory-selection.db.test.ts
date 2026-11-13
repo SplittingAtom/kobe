@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { sql, withTeam } from "@kobe/db";
 import {
   CAPABILITY_MEMORY,
@@ -8,6 +8,7 @@ import {
   threadContextMemoriesSchema,
   type RunMemoryContext,
 } from "@kobe/protocol";
+import { buildPolicyOnly, buildRunSemantic } from "./memory/items/run-memory.js";
 import { EventStreamFixture, must, type Person } from "./testing/event-stream-fixture.js";
 import { FakeSandbox, FakeSandboxAuth, isFake, sandboxListener } from "./testing/fake-sandbox.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
@@ -177,7 +178,7 @@ async function addRun(team: string, threadId: string) {
 async function memoryOf(
   team: string,
   run: Run,
-  opts: { who?: Person; caps?: string[]; message?: string } = {},
+  opts: { who?: Person; caps?: string[]; message?: string; accept?: boolean } = {},
 ): Promise<RunMemoryContext | undefined> {
   const who = opts.who ?? runner;
   const sandboxId = randomUUID();
@@ -187,9 +188,34 @@ async function memoryOf(
   );
   if (!isFake(sb)) throw new Error(`upgrade refused: ${sb.status}`);
   sandboxes.push(sb);
+  try {
+    return await startAndRead(sb, sandboxId, team, run, who, opts);
+  } finally {
+    sb.close();
+  }
+}
+
+async function startAndRead(
+  sb: FakeSandbox,
+  sandboxId: string,
+  team: string,
+  run: Run,
+  who: Person,
+  opts: { caps?: string[]; message?: string; accept?: boolean },
+): Promise<RunMemoryContext | undefined> {
   sb.hello(sandboxId, [], undefined, opts.caps ?? [CAPABILITY_MEMORY, CAPABILITY_SEMANTIC_MEMORY]);
   await sb.ready();
-  const res = await fx.replica(0).deps.sandboxWire.router.startRun(
+  // The fake answers every command (an accepted start); a refusal is answered here instead.
+  if (opts.accept === false) {
+    sb.respond = (f) => {
+      if (f.type !== "run.start") return undefined;
+      queueMicrotask(() =>
+        sb.result(f.command_id, false, { code: "pi_rejected", message: "refused" }),
+      );
+      return null;
+    };
+  }
+  const started = fx.replica(0).deps.sandboxWire.router.startRun(
     { teamId: team, userId: who.id },
     {
       runId: run.runId,
@@ -197,10 +223,24 @@ async function memoryOf(
       message: opts.message ?? `Tell me about ${WORD}`,
     },
   );
-  expect(res).toEqual({ ok: true });
-  const start = (await sb.until(() => sb.frames("run.start")[0])) as { memory?: unknown };
-  sb.close();
-  return start.memory === undefined ? undefined : runMemoryContextSchema.parse(start.memory);
+  const start = (await sb.until(() => sb.frames("run.start")[0])) as {
+    command_id: string;
+    memory?: unknown;
+  };
+  const memory =
+    start.memory === undefined ? undefined : runMemoryContextSchema.parse(start.memory);
+  if (opts.accept === false) {
+    // Refused: nothing may be recorded (L2).
+    await started;
+  } else {
+    // Accepted (answered by the fake): the run's memories are recorded now (L2), never before.
+    expect(await started).toEqual({ ok: true });
+    const given = memory?.semantic?.items.length ?? 0;
+    await vi.waitFor(async () => expect((await records(team, run.runId)).length).toBe(given), {
+      timeout: 5_000,
+    });
+  }
+  return memory;
 }
 
 /** Ends a run so the thread takes another (or can move). */
@@ -273,10 +313,76 @@ describe("run.start.memory.semantic (ac-1, ac-2)", () => {
     await finish(run);
     const next = { threadId: run.threadId, runId: await addRun(teamA, run.threadId) };
     const ids = idsOf(await memoryOf(teamA, next, { message: "lorem ipsum dolor" }));
-    // Policy and pins stay; the per-message picks follow the new message (the previous run's
-    // items stay as sticky candidates).
+    // Policy and pins stay; the per-message picks follow the new message: what the previous run
+    // got is only a bonus for items that match again, never a reason on its own (M1).
     expect(ids.slice(0, 2)).toEqual([item.policy, item.pinned]);
     expect(ids).not.toContain(item.unrelated);
+    for (const k of ["team", "mine", "site"]) expect(ids).not.toContain(item[k]);
+    // Preferences are always candidates in the person lanes.
+    expect(ids).toContain(item.portable);
+  });
+
+  it("gives a start delivered again exactly what was recorded, with no second set (L2)", async () => {
+    const run = await newRun(teamA);
+    const first = idsOf(await memoryOf(teamA, run));
+    const input = { teamId: teamA, userId: runner.id, threadId: run.threadId, runId: run.runId };
+    const again = await withTeam(fx.db, teamA, (tx) =>
+      buildRunSemantic(tx, { ...input, message: "lorem ipsum dolor" }),
+    );
+    expect(again?.fresh).toBe(false);
+    expect(again?.semantic.items.map((i) => i.id)).toEqual(first);
+    expect((await records(teamA, run.runId)).length).toBe(first.length);
+  });
+
+  it("records nothing for a start the sandbox never accepted (L2)", async () => {
+    const run = await newRun(teamA);
+    expect(idsOf(await memoryOf(teamA, run, { accept: false }))).toContain(item.team);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await records(teamA, run.runId)).toEqual([]);
+  });
+
+  it("reads earlier messages on the run's branch only (L3)", async () => {
+    const onPath = `kiwi${randomBytes(3).toString("hex")}`;
+    const sibling = `mango${randomBytes(3).toString("hex")}`;
+    const pathItem = await seed({ scope: "team", team: teamA, statement: `About ${onPath}` });
+    const siblingItem = await seed({ scope: "team", team: teamA, statement: `About ${sibling}` });
+    const run = await newRun(teamA);
+    const user = (text: string) =>
+      JSON.stringify({ message: { role: "user", content: [{ type: "text", text }] } });
+    await fx.admin.query(
+      `INSERT INTO thread_entries (team_id, thread_id, entry_id, parent_id, type, payload) VALUES
+         ($1, $2, 'root', NULL, 'message', $3::jsonb),
+         ($1, $2, 'side', 'root', 'message', $4::jsonb),
+         ($1, $2, 'main', 'root', 'message', $5::jsonb)`,
+      [teamA, run.threadId, user("hello"), user(`tell me ${sibling}`), user(`and ${onPath}`)],
+    );
+    await fx.admin.query(`UPDATE runs SET parent_entry_id = 'main' WHERE id = $1`, [run.runId]);
+    // The selection itself (the wire would first restore this hand-made session into Pi).
+    const built = await withTeam(fx.db, teamA, (tx) =>
+      buildRunSemantic(tx, {
+        teamId: teamA,
+        userId: runner.id,
+        threadId: run.threadId,
+        runId: run.runId,
+        message: "lorem ipsum dolor",
+      }),
+    );
+    const ids = (built?.semantic.items ?? []).map((i) => i.id);
+    expect(ids).toContain(pathItem);
+    expect(ids).not.toContain(siblingItem);
+  });
+
+  it("falls back to Site Policy alone when the full build fails (L5)", async () => {
+    const run = await newRun(teamA);
+    const input = {
+      teamId: teamA,
+      userId: runner.id,
+      threadId: run.threadId,
+      runId: run.runId,
+      message: `about ${WORD}`,
+    };
+    const policy = await withTeam(fx.db, teamA, (tx) => buildPolicyOnly(tx, input));
+    expect(policy?.items.map((i) => i.id)).toEqual([item.policy]);
   });
 
   it("follows the switches: Site memories off keep Policy; Workspace memory off leaves Policy only", async () => {
@@ -340,12 +446,15 @@ describe("exclusions (ac-3)", () => {
     const notes = await setMemory(agentId, "notes_only");
     const notesRun = await newRun(teamA, runner, { agentId, agentVersion: notes });
     const notesMemory = await memoryOf(teamA, notesRun);
-    expect(notesMemory).toBeDefined();
-    expect(notesMemory?.semantic).toBeUndefined();
+    // Notes as before; of the memories only Site Policy (Chris 2026-11-13, Info 1).
+    expect(notesMemory?.scopes).toEqual(["user"]);
+    expect(idsOf(notesMemory)).toEqual([item.policy]);
     const off = await setMemory(agentId, "off");
     const offRun = await newRun(teamA, runner, { agentId, agentVersion: off });
-    expect(await memoryOf(teamA, offRun)).toBeUndefined();
-    expect(await records(teamA, offRun.runId)).toEqual([]);
+    const offMemory = await memoryOf(teamA, offRun);
+    expect(offMemory).toMatchObject({ scopes: [], indexes: [] });
+    expect(idsOf(offMemory)).toEqual([item.policy]);
+    expect((await records(teamA, offRun.runId)).map((r) => r.item_id)).toEqual([item.policy]);
   });
 });
 
@@ -384,11 +493,23 @@ describe("GET /v1/threads/{id}/context/memories (ac-2, CV2)", () => {
     const res = await runner.browser.get(url(run.threadId));
     expect(res.status, JSON.stringify(res.json)).toBe(200);
     const body = threadContextMemoriesSchema.parse(res.json);
-    expect(body.run_id).toBe(run.runId);
+    expect(body).toMatchObject({ run_id: run.runId, latest: true });
     expect(body.items.map((i) => i.id)).toEqual(given);
     expect(body.items[0]).toMatchObject({ id: item.policy, lane: "policy" });
     expect(body.items.find((i) => i.id === item.portable)?.lane).toBe("portable");
     expect(body.items.find((i) => i.id === item.mine)?.lane).toBe("user");
+  });
+
+  it("shows the latest run with records, labelled, while a newer one is queued (L4)", async () => {
+    const run = await newRun(teamA);
+    const given = idsOf(await memoryOf(teamA, run));
+    await finish(run);
+    const queued = await addRun(teamA, run.threadId);
+    const res = await runner.browser.get(url(run.threadId));
+    const body = threadContextMemoriesSchema.parse(res.json);
+    expect(body).toMatchObject({ run_id: run.runId, latest: false });
+    expect(body.items.map((i) => i.id)).toEqual(given);
+    expect(queued).not.toBe(run.runId);
   });
 
   it("answers an empty list before any run", async () => {
@@ -400,7 +521,7 @@ describe("GET /v1/threads/{id}/context/memories (ac-2, CV2)", () => {
     });
     const res = await runner.browser.get(url(threadId));
     expect(res.status).toBe(200);
-    expect(res.json).toEqual({ thread_id: threadId, run_id: null, items: [] });
+    expect(res.json).toEqual({ thread_id: threadId, run_id: null, latest: true, items: [] });
   });
 
   it("refuses a shared reader (403 not_owner) and hides the thread from others (404)", async () => {

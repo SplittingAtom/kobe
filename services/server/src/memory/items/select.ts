@@ -9,10 +9,11 @@ import {
 
 /**
  * Semantic memory selection for one run (KOBE-382; spec SM23, SM24, Chris Q6), without the
- * database. Re-picked on every message. Policy first (always, all of it), then four lanes
- * (person-in-Workspace `user`, `portable`, Workspace `team`, `site`) share what is left of the
- * Site's context budget: each lane first gets up to a 1 KiB floor, then the rest flows to the
- * best remaining candidates of any lane. Within a lane, pinned items come first, then relevance.
+ * database. Re-picked on every message. Policy first (all of it that fits the budget), then
+ * pinned items in render order, then four lanes (person-in-Workspace `user`, `portable`,
+ * Workspace `team`, `site`) share what is left of the Site's context budget for the per-message
+ * picks: each lane first gets up to a 1 KiB floor, then the rest flows to the best remaining
+ * candidates of any lane. Nothing ever goes past the budget.
  * Whole items only: an item that does not fit is skipped, never cut. `omitted_count` counts the
  * eligible items left out.
  *
@@ -84,13 +85,13 @@ export function memoryScore(c: Candidate, lane: SelectLane): number {
 }
 
 /**
- * A candidate counts at all: pinned, a person-lane preference, sticky, or a word of the query
- * matched (trigram similarity only ranks; it never makes an item a candidate on its own).
+ * A candidate counts at all: pinned, a person-lane preference, or a word of this message's query
+ * matched. Stickiness and trigram similarity only rank: an item the previous run got is never a
+ * candidate on that alone (re-picked every message, Q6).
  */
 export function eligible(c: Candidate, lane: SelectLane): boolean {
   return (
     c.item.pinned ||
-    c.sticky ||
     c.matched ||
     (c.item.kind === "preference" && (lane === "user" || lane === "portable"))
   );
@@ -113,16 +114,35 @@ const rankOrder = (a: Ranked, b: Ranked) =>
   Number(b.item.pinned) - Number(a.item.pinned) || b.score - a.score || byId(a.item, b.item);
 
 export function selectRunMemory(input: SelectInput): RunSemanticMemory {
-  const policy = [...input.policy].sort(byId);
   const picked: Ranked[] = [];
+  const policy: RunSemanticMemoryItem[] = [];
   const lanesUsed = new Set<string>();
   let spent = SEMANTIC_MEMORY_RENDER_BLOCK_OVERHEAD_BYTES;
-  if (policy.length > 0) {
-    lanesUsed.add("policy");
-    spent +=
-      SEMANTIC_MEMORY_RENDER_LANE_OVERHEAD_BYTES + policy.reduce((s, i) => s + itemCost(i), 0);
+  let omitted = 0;
+  const count = () => policy.length + picked.length;
+  /** Charges `item` to `lane` when it fits in `limit`; a lane's header is paid by its first item. */
+  const fits = (lane: string, item: RunSemanticMemoryItem, limit: number): boolean => {
+    if (count() >= SEMANTIC_MEMORY_RUN_MAX_ITEMS) return false;
+    const cost =
+      itemCost(item) + (lanesUsed.has(lane) ? 0 : SEMANTIC_MEMORY_RENDER_LANE_OVERHEAD_BYTES);
+    if (spent + cost > limit) return false;
+    spent += cost;
+    lanesUsed.add(lane);
+    return true;
+  };
+  // Policy first, by id, within the budget (the store caps it at 25 items and 2 KiB of
+  // statements; at the smallest budget the rendered overheads can still leave some out).
+  for (const item of [...input.policy].sort(byId)) {
+    if (fits("policy", item, input.budgetBytes)) policy.push(item);
+    else omitted += 1;
   }
+  const take = (r: Ranked, limit: number): boolean => {
+    if (!fits(r.lane, r.item, limit)) return false;
+    picked.push(r);
+    return true;
+  };
   const queues = new Map<SelectLane, Ranked[]>();
+  const pinned: Ranked[] = [];
   let eligibleCount = 0;
   for (const lane of SELECT_LANES) {
     const list = input.lanes[lane];
@@ -132,21 +152,17 @@ export function selectRunMemory(input: SelectInput): RunSemanticMemory {
       .map((c) => ({ lane, item: c.item, score: memoryScore(c, lane) }))
       .sort(rankOrder);
     eligibleCount += ranked.length + (input.beyond?.[lane] ?? 0);
-    queues.set(lane, ranked);
+    pinned.push(...ranked.filter((r) => r.item.pinned));
+    queues.set(
+      lane,
+      ranked.filter((r) => !r.item.pinned),
+    );
   }
-  const count = () => policy.length + picked.length;
-  /** Takes `r` when it fits in `limit` bytes; the lane's header is paid by its first item. */
-  const take = (r: Ranked, limit: number): boolean => {
-    if (count() >= SEMANTIC_MEMORY_RUN_MAX_ITEMS) return false;
-    const cost =
-      itemCost(r.item) + (lanesUsed.has(r.lane) ? 0 : SEMANTIC_MEMORY_RENDER_LANE_OVERHEAD_BYTES);
-    if (spent + cost > limit) return false;
-    spent += cost;
-    lanesUsed.add(r.lane);
-    picked.push(r);
-    return true;
-  };
-  // Floors: each lane in turn fills up to 1 KiB of its own (whole items; a misfit is skipped).
+  // Pinned items next, in render order (lane, then id), never by this message's score: the
+  // Policy + pinned prefix depends only on what is pinned, so it stays the same between messages.
+  for (const r of pinned.sort(stable)) take(r, input.budgetBytes);
+  // Floors: each lane in turn fills up to 1 KiB of per-message picks (whole items; a misfit is
+  // skipped).
   for (const lane of SELECT_LANES) {
     const queue = queues.get(lane);
     if (queue === undefined) continue;
@@ -159,13 +175,15 @@ export function selectRunMemory(input: SelectInput): RunSemanticMemory {
   const remaining = [...queues.values()].flat().sort(rankOrder);
   for (const r of remaining) take(r, input.budgetBytes);
 
-  const laneIndex = (lane: SelectLane) => RENDER_LANES.indexOf(lane);
-  const stable = (a: Ranked, b: Ranked) =>
-    laneIndex(a.lane) - laneIndex(b.lane) || byId(a.item, b.item);
-  const pinned = picked.filter((r) => r.item.pinned).sort(stable);
+  const pinnedOut = picked.filter((r) => r.item.pinned).sort(stable);
   const picks = picked.filter((r) => !r.item.pinned).sort(stable);
   return {
-    items: [...policy, ...pinned.map((r) => r.item), ...picks.map((r) => r.item)],
-    omitted_count: eligibleCount - picked.length,
+    items: [...policy, ...pinnedOut.map((r) => r.item), ...picks.map((r) => r.item)],
+    omitted_count: omitted + eligibleCount - picked.length,
   };
 }
+
+const laneIndex = (lane: SelectLane) => RENDER_LANES.indexOf(lane);
+/** Render order: lane, then id. */
+const stable = (a: Ranked, b: Ranked) =>
+  laneIndex(a.lane) - laneIndex(b.lane) || byId(a.item, b.item);
