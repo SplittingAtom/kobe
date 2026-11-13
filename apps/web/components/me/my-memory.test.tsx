@@ -30,7 +30,11 @@ const detail = (over: Record<string, unknown> = {}) => ({
 const LIST = "/v1/memory?scope=user";
 const ONE = `/v1/memory/${DOC}`;
 
-beforeEach(forbidNativeConfirm);
+beforeEach(() => {
+  forbidNativeConfirm();
+  // The memory files are the Notes tab since KOBE-384 (Memories is the default tab).
+  window.history.replaceState(null, "", "/me/memory?tab=notes");
+});
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -188,7 +192,7 @@ describe("Memory panel (KOBE-158, ac-2)", () => {
   it("shows why memory is unavailable when it is switched off", async () => {
     stubApi({ [`GET ${LIST}`]: [403, { code: "memory_disabled", message: "off" }] });
     renderTeam(<MyMemoryPage />, MEMBER);
-    await screen.findByText(/Memory is turned off for this team/);
+    await screen.findByText(/Memory is turned off for this workspace/);
   });
 });
 
@@ -215,7 +219,7 @@ describe("Memory panel project picker (KOBE-164)", () => {
   afterEach(() => window.history.replaceState(null, "", "/"));
 
   it("switches between my memory and a project's, and keeps the choice in the address", async () => {
-    window.history.replaceState(null, "", "/me/memory");
+    window.history.replaceState(null, "", "/me/memory?tab=notes");
     const calls = stubApi({
       "GET /v1/projects?include_archived=true": [
         200,
@@ -235,10 +239,10 @@ describe("Memory panel project picker (KOBE-164)", () => {
     await userEvent.selectOptions(picker, "Launch");
     expect(await screen.findByRole("button", { name: "Open plan.md" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Project memory" })).toBeTruthy();
-    expect(window.location.search).toBe(`?project=${PROJECT}`);
+    expect(window.location.search).toBe(`?tab=notes&project=${PROJECT}`);
     await userEvent.selectOptions(picker, "Me");
     await screen.findByRole("button", { name: "Open MEMORY.md" });
-    expect(window.location.search).toBe("");
+    expect(window.location.search).toBe("?tab=notes");
     expect(calls.map((c) => c.url)).toContain(`/v1/memory?scope=project&project_id=${PROJECT}`);
   });
 
@@ -252,7 +256,7 @@ describe("Memory panel project picker (KOBE-164)", () => {
     expect(await screen.findByRole("heading", { name: "Project memory" })).toBeTruthy();
     expect(((await screen.findByLabelText("Memory of")) as HTMLSelectElement).value).toBe(PROJECT);
     cleanup();
-    window.history.replaceState(null, "", "/me/memory");
+    window.history.replaceState(null, "", "/me/memory?tab=notes");
     stubApi({
       "GET /v1/projects?include_archived=true": [200, { projects: [] }],
       [`GET ${LIST}`]: [200, { docs: [] }],

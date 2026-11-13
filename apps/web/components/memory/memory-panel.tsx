@@ -39,7 +39,7 @@ function friendly<T>(
 }
 
 /**
- * The memory files of one scope the person can see (`/v1/memory`, KOBE-155): list, open, edit,
+ * The Notes tab of the Memory page (KOBE-384; files since KOBE-155..164, D24): the memory files of one scope the person can see (`/v1/memory`, KOBE-155): list, open, edit,
  * delete, and version history. Everything shown is plain text (never HTML or markdown, so no
  * links or images from stored text), with hidden characters as visible escapes.
  */
@@ -54,7 +54,7 @@ export function MemoryPanel({
   const { state, reload } = useResource(async () => friendly(await api.list(target)));
   const [openId, setOpenId] = useState<string | null>(null);
   const mutation = useMutation();
-  const title = target.scope === "project" ? "Project memory" : "My memory";
+  const title = target.scope === "project" ? "Project memory" : "My notes";
 
   return (
     <>

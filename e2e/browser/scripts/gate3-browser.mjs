@@ -5,7 +5,7 @@
 //         /v1/artifacts/:id/versions/:n/frame): its inline script runs, its origin is opaque, and
 //         its fetch() to an outside address is blocked by the CSP (the violation is reported and no
 //         request leaves the page; a request that did leave would be answered by the route below).
-//   ac-4  a `remember` turn sent in the chat shows the "Memory updated" chip, and its Undo works.
+//   ac-4  a `remember` turn sent in the chat shows the "Note saved" chip, and its Undo works.
 //   ac-1  a thread pinned to an older agent version shows "v<N> available" with a switch; one
 //         click moves the thread to v<N> (gate3.sh then checks that its next run uses it).
 //
@@ -114,7 +114,7 @@ async function frameCheck(context, page) {
 }
 
 /**
- * ac-4: the "Memory updated" chip with Undo. The chip is a notice of the live run (a thread opened
+ * ac-4: the "Note saved" chip with Undo. The chip is a notice of the live run (a thread opened
  * later, on another device, shows its entries only), so the browser sends the `remember` turn
  * itself in the memory thread and watches the chip appear; then one click on Undo.
  */
@@ -127,7 +127,7 @@ async function memoryChip(page) {
   await page.locator('[data-role="assistant"]').first().waitFor({ timeout: SHELL_MS });
   await composer.fill(env("KOBE_BROWSER_MEMORY_PROMPT"));
   await composer.press("Enter");
-  const chip = page.getByText(/Memory updated/).first();
+  const chip = page.getByText(/Note saved/).first();
   const visible = await chip.waitFor({ timeout: RUN_MS }).then(
     () => true,
     () => false,

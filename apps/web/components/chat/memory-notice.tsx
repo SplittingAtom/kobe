@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * The "Memory updated" chip for `memory.updated` (KOBE-158, D24) with Undo: restores the prior
+ * The "Note saved" chip for `memory.updated` (KOBE-158, D24; named so since KOBE-384: items say
+ * "Memory saved") with Undo: restores the prior
  * version (history is kept), or deletes the doc when the write created it. The path comes from the
  * agent, so it is shown as plain text with invisible characters escaped, never as markup.
  */
@@ -33,8 +34,8 @@ export function MemoryNotice({ payload }: { readonly payload: Updated }) {
 
   return (
     <p className={styles.notice}>
-      Memory updated: <span className={styles.toolName}>{visible(payload.path)}</span> (
-      {payload.scope === "project" ? "project" : "personal"} memory)
+      Note saved: <span className={styles.toolName}>{visible(payload.path)}</span> (
+      {payload.scope === "project" ? "project notes" : "my notes"})
       {phase === "undone" ? (
         <span role="status"> Undone.</span>
       ) : (
