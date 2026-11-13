@@ -44,7 +44,7 @@
     "fflate": "^0.8.3",
     "hono": "^4.13.13",
     "isomorphic-git": "1.44.2",
-    "nodemailer": "^10.0.16",
+    "nodemailer": "^10.5.0",
     "openid-client": "6.8.8",
     "pg": "^8.23.1",
     "pino": "^10.4.0",
