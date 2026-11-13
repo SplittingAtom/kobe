@@ -6,7 +6,8 @@ import { TestBrowser } from "./testing/browser.js";
 import { MemoryObjects } from "./testing/memory-objects.js";
 import { learningModelFor } from "./memory/learning-model.js";
 import { MEMORY_SITE_SETTINGS_KEY } from "./memory/site-settings.js";
-import { SITE_SWITCH_KEYS } from "./memory/switches.js";
+import { buildRunMemory } from "./memory/agent.js";
+import { SITE_SWITCH_KEYS, readSwitches, semanticRunLanes } from "./memory/switches.js";
 
 /**
  * KOBE-381: `/v1/memory/settings` with the v1.3 switches (master widening, Memories, Workspace
@@ -161,16 +162,32 @@ describe("effective (ac-1, ac-2)", () => {
       memory_enabled: true,
       memories_enabled: false,
       scopes: { user: false, portable: false, team: false, site: false },
-      policy: false,
+      policy: true,
     });
     await settings(w.admin, "team", { memories_enabled: true, memory_enabled: false });
     expect(await eff()).toMatchObject({
       memory_enabled: false,
       project_memory_enabled: false,
       memories_enabled: false,
-      policy: false,
+      scopes: { user: false, portable: false, team: false, site: false },
+      // Policy is governance (Q2): a Workspace's master switch doesn't stop it.
+      policy: true,
       learn: { available: false, reason: "memory_off" },
     });
+    // run.start: no Notes scopes or indexes; the semantic lanes are Policy alone.
+    const thread = randomUUID();
+    expect(
+      await buildRunMemory(
+        { db: fx.db, blobs: undefined },
+        {
+          teamId: w.team,
+          userId: w.member.id,
+          threadId: thread,
+        },
+      ),
+    ).toEqual({ scopes: [], indexes: [] });
+    const { memory } = await withTeam(fx.db, w.team, (tx) => readSwitches(tx, w.team));
+    expect(semanticRunLanes(memory)).toEqual(["policy"]);
   });
 
   it("Policy reaches a Workspace that opted out of Site memories (ac-2)", async () => {
@@ -197,6 +214,8 @@ describe("effective (ac-1, ac-2)", () => {
     expect((await settings(w.member, "effective")).json).toMatchObject({
       memory_enabled: false,
       memories_enabled: false,
+      // Only the Site's master switch stops Policy (Q2).
+      policy: false,
     });
     // Notes refuse too (the master switch is the D24 one).
     const put = await w.member.browser.put("/v1/memory", {

@@ -49,7 +49,8 @@ Memory**) and each workspace (team admins, in **Workspace settings › Memory**)
 while it is on at both levels that have it. Every switch is on unless an admin turned it off.
 
 - **Allow memory** (site and workspace) is the master switch. Off means no notes (the remember and
-  recall tools and the memory index) **and** no memories in that workspace or on the site.
+  recall tools and the memory index) **and** no memories in that workspace or on the site; Site
+  Policy still applies unless the site's switch is off (below).
 - **Allow project notes** (site and workspace): project memory, as above. Needs memory.
 - **Allow memories** (site and workspace): short statements Kobe knows about you, your workspace
   and the site, given to the agent at the start of each run. Needs memory. (Memories arrive with
@@ -58,6 +59,11 @@ while it is on at both levels that have it. Every switch is on unless an admin t
   admins and memory stewards.
 - **Site memories reach this workspace's runs** (workspace): knowledge the site keeps for every
   workspace. **Site Policy** reaches the workspace's runs even when this is off.
+
+**Site Policy** is governance: the site's rules reach every workspace's runs even when a
+workspace turns memory, memories or Site memories off. Only the site's own **Allow memory** switch
+turns Policy off.
+
 - **Portable preferences** (site): your preferences (how you like answers, units, tone) follow you
   into every workspace you belong to. Facts about work never leave their workspace.
 - **Learn from this chat** (site and workspace): you can ask Kobe to suggest memories from a

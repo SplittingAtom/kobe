@@ -1080,7 +1080,8 @@ from `RAISE NOTICE`). The hook Job is deleted once it succeeds, so follow it dur
 
 - **Memory switches widened (KOBE-381).** No migration. **Allow memory** (Site console ›
   Settings and each workspace's Workspace settings › Memory) is now the master switch for notes
-  **and** v1.3 memories: where it is off, memories stay off too. New switches (Memories, Workspace
+  **and** v1.3 memories: where it is off, memories stay off too (Site Policy still reaches a
+  workspace that turned it off; only the Site switch stops Policy). New switches (Memories, Workspace
   memories, Site memories reach this workspace's runs, Portable preferences, Learn from this chat,
   Members may propose to the Site) are AND-ed across the levels that have them and read as **on**
   until an admin turns them off, so the upgrade changes no behaviour. Site values are new

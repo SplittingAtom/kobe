@@ -95,8 +95,9 @@ export interface EffectiveMemory {
   /** Which semantic scopes reach this Workspace's runs and editors. */
   readonly scopes: Readonly<Record<SemanticMemoryScope, boolean>>;
   /**
-   * Site Policy items reach this Workspace's runs. Needs Memories, and ignores the Workspace's
-   * "Site memories reach this Workspace's runs" switch (SM27).
+   * Site Policy items reach this Workspace's runs. Policy is governance (Chris 2026-11-13, Q2):
+   * only the Site's master switch turns it off; no Workspace switch (master, Memories, Site
+   * memories) and no other Site switch does.
    */
   readonly policy: boolean;
   /** The Learn switches allow learning (a learning model is checked separately). */
@@ -124,7 +125,7 @@ export function effectiveMemory(
       team: memories && ws.workspaceMemoriesEnabled,
       site: memories && ws.siteMemoriesEnabled,
     },
-    policy: memories,
+    policy: site.memoryEnabled,
     learn: memories && site.learnEnabled && ws.learnEnabled,
     siteProposals:
       memories &&
@@ -132,4 +133,14 @@ export function effectiveMemory(
       site.siteProposalsEnabled &&
       ws.siteProposalsEnabled,
   };
+}
+
+/**
+ * The `run.start.memory.semantic` lanes the selector (KOBE-382) may fill for this Workspace, in
+ * render order: Policy first, then each enabled scope. A Workspace with memory off still gets the
+ * Policy lane (and nothing else).
+ */
+export function semanticRunLanes(e: EffectiveMemory): readonly ("policy" | SemanticMemoryScope)[] {
+  const scopes = (["site", "team", "portable", "user"] as const).filter((s) => e.scopes[s]);
+  return [...(e.policy ? (["policy"] as const) : []), ...scopes];
 }

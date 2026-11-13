@@ -21,8 +21,8 @@ MCP tools on one shared wire schema, Site console and Workspace settings UI, gui
 - **AND rules** (`memory/switch-model.ts`, pure): master = Site ∧ Workspace `memoryEnabled` (gates
   Notes **and** Memories: the widening); memories = master ∧ both Memories; scopes user = memories,
   portable = memories ∧ Site portable, team = memories ∧ Workspace memories, site = memories ∧
-  Workspace site-memories; **policy = memories** (ignores only "Site memories reach this
-  Workspace's runs", per SM27); learn = memories ∧ both Learn; siteProposals = memories ∧ Workspace
+  Workspace site-memories; **policy = Site master only** (Chris 2026-11-13, Q2: Policy is governance; no Workspace switch
+  and no other Site switch stops it; `semanticRunLanes` gives KOBE-382 the lanes, Policy first); learn = memories ∧ both Learn; siteProposals = memories ∧ Workspace
   memories ∧ both propose switches. `readSwitches().effective` keeps the Notes shape for existing
   callers; `.memory` carries the rest for KOBE-382/393/397.
 - **Site settings** (`memory/site-settings.ts`): learning model, embedding model (Phase D, unused),
@@ -66,9 +66,9 @@ MCP tools on one shared wire schema, Site console and Workspace settings UI, gui
 
 ## Open questions (for Chris or the coordinator)
 
-1. **Policy vs. Workspace master/Memories off:** implemented literally (Policy ignores only the
-   Site-memories switch, so a Workspace that turns memory off gets no Policy). Coordinator is
-   asking Chris; unchanged for now.
+1. Resolved 2026-11-13 (Chris, Q2): Policy reaches a Workspace with memory off; only the Site's
+   master switch stops it. Tests: `switches.test.ts` "Policy", db "effective" (no Notes in
+   `run.start.memory`, lanes = Policy alone).
 2. Resolved 2026-11-13: context budget (contract raised, above), learning model order (above);
    setting ranges, rate-limit names and the retention window's meaning stay as the defaults
    listed in Decisions.

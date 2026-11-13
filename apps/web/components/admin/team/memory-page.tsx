@@ -23,7 +23,7 @@ export const WORKSPACE_SWITCHES: readonly SwitchSpec<WorkspaceSwitch>[] = [
   {
     key: "memoryEnabled",
     label: "Allow memory in this workspace",
-    hint: "The master switch. Off: agents get no notes (remember and recall) and no memories in this workspace. Nothing stored is deleted, and turning it back on brings everything back.",
+    hint: "The master switch. Off: agents get no notes (remember and recall) and no memories in this workspace; Site Policy still applies (only the site can turn it off). Nothing stored is deleted, and turning it back on brings everything back.",
   },
   {
     key: "projectMemoryEnabled",

@@ -20,7 +20,7 @@ export const SITE_SWITCHES: readonly SwitchSpec<SiteSwitch>[] = [
   {
     key: "memoryEnabled",
     label: "Allow memory on this site",
-    hint: "The master switch. Off: no workspace's agents get notes (remember and recall) or memories. Nothing stored is deleted.",
+    hint: "The master switch. Off: no workspace's agents get notes (remember and recall), memories or Site Policy; it is the only switch that stops Policy. Nothing stored is deleted.",
   },
   {
     key: "projectMemoryEnabled",

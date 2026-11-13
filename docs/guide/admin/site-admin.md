@@ -108,8 +108,8 @@ access, which is time-boxed, read-only, audited and shown to the team.
   proved multi-factor authentication, for Microsoft Entra through a Conditional Access
   authentication context, and is refused otherwise; see
   [Single sign-on](single-sign-on.md#multi-factor-authentication)), and the site's
-  memory switches and settings: **Allow memory** (the master switch: off means no notes and no
-  memories anywhere), project notes, memories, **Portable preferences**, **Learn from this chat**
+  memory switches and settings: **Allow memory** (the master switch: off means no notes, no
+  memories and no Site Policy anywhere; it is the only switch that stops Policy), project notes, memories, **Portable preferences**, **Learn from this chat**
   and **Members may propose to the Site**, each also needing the workspace's own switch; the
   **learning model** (used by workspaces without their own, where enabled; learning never falls back
   to another model or the conversation's model), the context budget (4 to 16 KiB), scope limits, versions kept per memory,

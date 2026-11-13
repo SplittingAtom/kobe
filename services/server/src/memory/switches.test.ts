@@ -11,6 +11,7 @@ import {
   WORKSPACE_SWITCHES_ON,
   WORKSPACE_SWITCH_NAMES,
   effectiveMemory,
+  semanticRunLanes,
   type SiteMemorySwitches,
   type WorkspaceMemorySwitches,
 } from "./switch-model.js";
@@ -51,7 +52,11 @@ describe("effective memory switches (ac-1)", () => {
 
   it("the master switch at either level turns off Notes and Memories (the widening)", () => {
     expect(effectiveMemory(site({ memoryEnabled: false }), ws())).toEqual(ALL_OFF);
-    expect(effectiveMemory(site(), ws({ memoryEnabled: false }))).toEqual(ALL_OFF);
+    // Policy is governance: only the Site's master switch turns it off (Q2).
+    expect(effectiveMemory(site(), ws({ memoryEnabled: false }))).toEqual({
+      ...ALL_OFF,
+      policy: true,
+    });
   });
 
   it("Memories off at either level keeps Notes", () => {
@@ -59,7 +64,7 @@ describe("effective memory switches (ac-1)", () => {
       effectiveMemory(site({ memoriesEnabled: false }), ws()),
       effectiveMemory(site(), ws({ memoriesEnabled: false })),
     ]) {
-      expect(e).toEqual({ ...ALL_OFF, notes: { user: true, project: true } });
+      expect(e).toEqual({ ...ALL_OFF, notes: { user: true, project: true }, policy: true });
     }
   });
 
@@ -67,15 +72,15 @@ describe("effective memory switches (ac-1)", () => {
   const SITE_ROWS: Record<(typeof SITE_SWITCH_NAMES)[number], object> = {
     memoryEnabled: ALL_OFF,
     projectMemoryEnabled: { ...ALL_ON, notes: { user: true, project: false } },
-    memoriesEnabled: { ...ALL_OFF, notes: { user: true, project: true } },
+    memoriesEnabled: { ...ALL_OFF, notes: { user: true, project: true }, policy: true },
     portableEnabled: { ...ALL_ON, scopes: { ...ALL_ON.scopes, portable: false } },
     learnEnabled: { ...ALL_ON, learn: false },
     siteProposalsEnabled: { ...ALL_ON, siteProposals: false },
   };
   const WS_ROWS: Record<(typeof WORKSPACE_SWITCH_NAMES)[number], object> = {
-    memoryEnabled: ALL_OFF,
+    memoryEnabled: { ...ALL_OFF, policy: true },
     projectMemoryEnabled: { ...ALL_ON, notes: { user: true, project: false } },
-    memoriesEnabled: { ...ALL_OFF, notes: { user: true, project: true } },
+    memoriesEnabled: { ...ALL_OFF, notes: { user: true, project: true }, policy: true },
     workspaceMemoriesEnabled: {
       ...ALL_ON,
       scopes: { ...ALL_ON.scopes, team: false },
@@ -122,9 +127,24 @@ describe("Policy (ac-2)", () => {
     expect(e.policy).toBe(true);
   });
 
-  it("still needs Memories (and the master switch)", () => {
-    expect(effectiveMemory(site({ memoriesEnabled: false }), ws()).policy).toBe(false);
-    expect(effectiveMemory(site(), ws({ memoryEnabled: false })).policy).toBe(false);
+  it("reaches a Workspace that turned memory off; only the Site's master switch stops it (Q2)", () => {
+    const wsOff = effectiveMemory(site(), ws({ memoryEnabled: false }));
+    expect(wsOff.policy).toBe(true);
+    expect(wsOff.notes).toEqual({ user: false, project: false });
+    // The run.start semantic block gets the Policy lane and no other; no Notes.
+    expect(semanticRunLanes(wsOff)).toEqual(["policy"]);
+    expect(effectiveMemory(site(), ws({ memoriesEnabled: false })).policy).toBe(true);
+    expect(effectiveMemory(site({ memoriesEnabled: false }), ws()).policy).toBe(true);
+    const siteOff = effectiveMemory(site({ memoryEnabled: false }), ws());
+    expect(siteOff.policy).toBe(false);
+    expect(semanticRunLanes(siteOff)).toEqual([]);
+    expect(semanticRunLanes(effectiveMemory(site(), ws()))).toEqual([
+      "policy",
+      "site",
+      "team",
+      "portable",
+      "user",
+    ]);
   });
 });
 
