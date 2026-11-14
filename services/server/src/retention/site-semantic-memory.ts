@@ -20,7 +20,8 @@ type SQL = ReturnType<typeof sql>;
  * first, nothing while a Site-wide hold is in force, never an item a held person wrote). Portable
  * deletes take the hold lock first and skip a person under any active hold of theirs, or who is a
  * member of a Workspace under a Workspace-wide hold (Q2: a portable item reaches every Workspace
- * its owner is in, so a hold there covers it). Portable items are kept when their owner is
+ * its owner is in, so a hold there covers it); nothing portable goes while a Site-wide hold is in
+ * force (Chris 2026-11-13, review L1/N1). Portable items are kept when their owner is
  * deactivated; only a site admin's purge ({@link purgePortableForUser}) removes them early.
  *
  * Run records of these lanes live in Workspace tables this transaction cannot see (RLS, no
@@ -189,6 +190,14 @@ async function siteAudit(
   });
 }
 
+/** A Site-wide hold is in force (after the hold lock). */
+async function siteHoldActive(tx: KobeTx): Promise<boolean> {
+  const { rows } = await tx.execute<{ held: boolean }>(
+    sql`SELECT public.site_legal_hold_active() AS held`,
+  );
+  return rows[0]?.held === true;
+}
+
 /** Portable deletes: READ COMMITTED (a hold approved during the lock wait is seen), lock first. */
 function withPortablePurge<T>(db: KobeDb, purge: (tx: KobeTx) => Promise<T>): Promise<T> {
   return db.transaction(
@@ -223,7 +232,8 @@ async function purgeLane(
             // Members of held Workspaces are read before the transaction (review M1).
             const holds = await snapshotPortableHolds(db);
             return withPortablePurge(db, async (tx) =>
-              (await portableHoldsUnchanged(tx, holds))
+              // A Site-wide hold freezes portable memories too (Chris 2026-11-13, N1).
+              !(await siteHoldActive(tx)) && (await portableHoldsUnchanged(tx, holds))
                 ? {
                     held: false as const,
                     value: await one(tx, (owner) => portableOwnerUnheld(owner, holds.members)),
@@ -291,10 +301,7 @@ async function portablePurgeBatch(
     if (!row) return { status: "not_found" };
     if (!row.deactivated) return { status: "active" };
     // A Site-wide hold also stops the purge (Chris 2026-11-13, review L1).
-    const site = await tx.execute<{ held: boolean }>(
-      sql`SELECT public.site_legal_hold_active() AS held`,
-    );
-    if (site.rows[0]?.held === true) return { status: "held" };
+    if (await siteHoldActive(tx)) return { status: "held" };
     if (!(await portableHoldsUnchanged(tx, holds))) return { status: "changed" };
     const held = await tx.execute<{ held: boolean }>(
       sql`SELECT NOT ${portableOwnerUnheld(sql`${userId}::uuid`, holds.members)} AS held`,

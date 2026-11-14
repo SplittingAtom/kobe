@@ -211,7 +211,7 @@ archived for you. What goes, and when:
 - **Legal holds.** A legal hold suspends all of this: a hold on a person keeps their memories (in
   every workspace and the ones that follow them) and the Site memories they wrote; a hold on a
   workspace keeps that workspace's memories and the memories that follow each of its members; a
-  Site-wide hold keeps Site memories.
+  Site-wide hold keeps Site memories and every memory that follows a person.
 
 ## What Kobe checks before a memory is saved
 

@@ -7,6 +7,8 @@ type SQL = ReturnType<typeof sql>;
  * its owner into every Workspace they are in, so it is held when an active hold names the owner,
  * or when the owner is a member of a Workspace under a Workspace-wide hold (`legal_holds.user_id`
  * NULL). A Workspace-wide hold on a Workspace the owner is not in does not reach their items.
+ * A Site-wide hold (KOBE-647) freezes every portable item (Chris 2026-11-13, review N1); each
+ * delete path checks `site_legal_hold_active()` after the hold lock as well.
  * Portable tables have no DB hold guard: these checks, after the hold lock, are their protection
  * (the sweeps, the admin purge and the version cap's prune all use them).
  *

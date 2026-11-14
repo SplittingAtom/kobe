@@ -53,7 +53,7 @@ export async function insertVersion(tx: KobeTx, loc: Location, v: NewVersion): P
  * Whether a legal hold suspends pruning for the item. Workspace items: the KOBE-376 rule
  * (`memory_legal_hold_covers`: the owner's hold, any hold in the team for `team` items). Portable
  * items: an active hold on the owner, or a Workspace-wide hold on a Workspace the owner is a member
- * of (KOBE-386 Q2; legal-hold/portable-hold.ts). Site items: a Site-wide hold (KOBE-647), checked before any delete
+ * of (KOBE-386 Q2; legal-hold/portable-hold.ts), and any Site-wide hold (N1). Site items: a Site-wide hold (KOBE-647), checked before any delete
  * so an edit past the cap under a hold keeps every version instead of failing KH001 (review M1),
  * or a hold on a person who wrote any of the item's versions (P2-L1).
  */
@@ -80,6 +80,13 @@ async function held(
   // (review M1); otherwise keep every version this time (the safe direction).
   if (!loc.workspace && (!portableHolds || !(await portableHoldsUnchanged(tx, portableHolds))))
     return true;
+  // A Site-wide hold freezes portable memories on every delete path (Chris 2026-11-13, N1).
+  if (!loc.workspace) {
+    const site = await tx.execute<{ held: boolean }>(
+      sql`SELECT public.site_legal_hold_active() AS held`,
+    );
+    if (site.rows[0]?.held === true) return true;
+  }
   const cond = loc.workspace
     ? sql`memory_legal_hold_covers(${workspaceTeam(loc)}, ${owner})`
     : sql`NOT ${portableOwnerUnheld(sql`${owner}::uuid`, portableHolds?.members ?? [])}`;

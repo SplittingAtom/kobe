@@ -40,11 +40,14 @@ export async function inStore<T>(
   who: MemoryWho,
   scope: SemanticMemoryScope,
   fn: (op: Op) => Promise<T>,
+  /** The call may prune versions: portable holds are read first (reads skip it, review N2). */
+  options: { readonly prunes?: boolean } = {},
 ): Promise<T> {
   let pending: PendingSiteNotices = [];
   const teamId = who.teamId;
   // Read before the transaction opens: never a second pooled connection inside it (review M1).
-  const portableHolds = scope === "portable" ? await snapshotPortableHolds(db) : undefined;
+  const portableHolds =
+    scope === "portable" && options.prunes ? await snapshotPortableHolds(db) : undefined;
   const body = async (tx: KobeTx) => {
     const op: Op = {
       tx,

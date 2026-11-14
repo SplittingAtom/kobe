@@ -429,16 +429,22 @@ describe("Site and portable sweep (ac-1, ac-5)", () => {
     });
   });
 
-  it("deletes no Site memory while a Site-wide hold is in force", async () => {
+  it("deletes no Site or portable memory while a Site-wide hold is in force (N1)", async () => {
     const archived = await site({ status: "archived", updated: 90 });
     const live = await site({ versions: [100, 50, 5] });
+    const pArchived = await portable(ids.finn, { status: "archived", updated: 90 });
+    const pLive = await portable(ids.finn, { versions: [100, 50, 5] });
     await placeSiteHold();
     await pass();
     expect(await exists("site_memory_items", archived)).toBe(true);
     expect(await versionsOf("site", live)).toEqual([1, 2, 3]);
+    expect(await exists("portable_memory_items", pArchived)).toBe(true);
+    expect(await versionsOf("portable", pLive)).toEqual([1, 2, 3]);
     await clearHolds();
     await pass();
     expect(await exists("site_memory_items", archived)).toBe(false);
+    expect(await exists("portable_memory_items", pArchived)).toBe(false);
+    expect(await versionsOf("portable", pLive)).toEqual([2, 3]);
   });
 
   it("keeps the Site items a held person wrote", async () => {

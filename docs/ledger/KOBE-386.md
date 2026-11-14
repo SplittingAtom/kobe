@@ -84,8 +84,9 @@ the admin for a purge).
   then refused). A membership added to a held Workspace during the purge is not seen (accepted).
 - **M2** Admin purge in batches of 100 (each its own READ COMMITTED transaction, hold lock and every
   check repeated), at most 20 per call; `remaining` tells the console to call again (idempotent).
-- **L1** A Site-wide hold refuses the admin purge (409 `legal_hold`). Sweeps unchanged (Chris
-  named the purge only).
+- **L1/N1** A Site-wide hold freezes portable memories on every delete path: the admin purge
+  (409 `legal_hold`), the nightly portable sweep and the version cap's prune (hold lock first).
+- **N2** Portable holds are read only by calls that may prune (patch, revert), not by reads.
 - **L2** Every admin purge batch is audited, also with zero rows; the offboarding semantic purge too.
 - **L3** Single admin kept; typed confirmation: the console's confirm dialog takes `confirmText`
   (button disabled until the person's email is typed) and the route requires `confirmEmail`
