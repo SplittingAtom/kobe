@@ -97,11 +97,6 @@ const maxHeight = (placement: Placement) =>
   placement === "inline" ? INLINE_MAX_HEIGHT : EXPANDED_MAX_HEIGHT;
 
 /**
- * The rail frame's explicit height for a report, or null to fill the section: only a report taller
- * than the section by more than 1 px (the SDK reports Math.ceil(document height)) sets one, and a
- * section with no layout yet (hidden tab, height 0) never pins the frame (KOBE-575).
- */
-/**
  * `containerDimensions.maxHeight` for the host context: the column's real height when expanded
  * and laid out (KOBE-657), otherwise the placement's cap.
  */
@@ -110,6 +105,11 @@ function containerMaxHeight(placement: Placement, frame: HTMLIFrameElement | nul
   return placement === "expanded" && laidOut > 0 ? laidOut : maxHeight(placement);
 }
 
+/**
+ * The rail frame's explicit height for a report, or null to fill the section: only a report taller
+ * than the section by more than 1 px (the SDK reports Math.ceil(document height)) sets one, and a
+ * section with no layout yet (hidden tab, height 0) never pins the frame (KOBE-575).
+ */
 function railFrameHeight(report: number, room: number): number | null {
   return room > 0 && report > room + 1 ? report : null;
 }
