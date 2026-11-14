@@ -77,6 +77,9 @@ checks every call they make like any other tool call.
 - **Where it opens.** A site admin decides whether an app opens in the conversation, in the
   artifact column ("Opened in the side column", with **Show app**) or in the rail's **Apps** tab
   as a picker. A picker in the rail fills in your message draft but never sends it for you.
+- **Size.** In the conversation an app card starts 360 px tall and grows with its content up to
+  720 px. In the artifact column an app always fills the column's height and scrolls inside
+  itself, following the column when you resize it.
 
 ## Related
 

@@ -34,6 +34,9 @@ import { buildHostContext, type Placement } from "../../lib/apps/host-context";
  * (`placement: "rail"`: it fills its section and scrolls inside it), whose calls name the thread
  * on screen (`threadId`) so the server checks it as it checks a card's thread. There a report only
  * sets the frame's height when the app's content is taller than the section (KOBE-575).
+ * Expanded into the artifact column (KOBE-657) the frame always equals the column and the app
+ * scrolls inside its own document: reports never size it, and the app's host context gives the
+ * column's real height as `containerDimensions.maxHeight`, sent again when the column resizes.
  */
 export const INLINE_HEIGHT = 360;
 export const INLINE_MAX_HEIGHT = 720;
@@ -81,7 +84,10 @@ export interface AppFrameProps {
   /** `ui/request-display-mode`: the mode actually shown. */
   readonly onDisplayMode?: ((mode: DisplayMode) => DisplayMode) | undefined;
   readonly fetchFn?: typeof fetch | undefined;
-  /** Start at this height (a card coming back keeps its last one, MA10). Ignored in the rail. */
+  /**
+   * Start at this height (a card coming back keeps its last one, MA10). Ignored in the rail and
+   * expanded (KOBE-657), where the frame fills its section or column.
+   */
   readonly initialHeight?: number | undefined;
   /** The app's height after each size change. */
   readonly onHeight?: ((height: number) => void) | undefined;
@@ -95,6 +101,15 @@ const maxHeight = (placement: Placement) =>
  * than the section by more than 1 px (the SDK reports Math.ceil(document height)) sets one, and a
  * section with no layout yet (hidden tab, height 0) never pins the frame (KOBE-575).
  */
+/**
+ * `containerDimensions.maxHeight` for the host context: the column's real height when expanded
+ * and laid out (KOBE-657), otherwise the placement's cap.
+ */
+function containerMaxHeight(placement: Placement, frame: HTMLIFrameElement | null): number {
+  const laidOut = frame?.clientHeight ?? 0;
+  return placement === "expanded" && laidOut > 0 ? laidOut : maxHeight(placement);
+}
+
 function railFrameHeight(report: number, room: number): number | null {
   return room > 0 && report > room + 1 ? report : null;
 }
@@ -135,7 +150,8 @@ export function AppFrame(props: AppFrameProps & { readonly ref?: Ref<AppFrameHan
     }),
     [],
   );
-  const fill = props.placement === "rail";
+  // The rail and the artifact column (KOBE-657) both give the frame their full height.
+  const fill = props.placement !== "inline";
   return (
     <section
       className={`flex flex-col overflow-hidden rounded-md border border-border bg-card${
@@ -184,7 +200,7 @@ function FrameInstance(
       hostContext: () =>
         buildHostContext(current().placement, {
           width: frame.current?.clientWidth ?? 0,
-          maxHeight: maxHeight(current().placement),
+          maxHeight: containerMaxHeight(current().placement, frame.current),
         }),
       handlers: {
         callTool: async (name, args) => {
@@ -284,6 +300,26 @@ function FrameInstance(
     };
   }, [placement]);
 
+  // Expanded (KOBE-657): the app learns the column's new height whenever it changes; a hidden tab
+  // (no layout, height 0) sends nothing.
+  useEffect(() => {
+    const element = frame.current;
+    if (placement !== "expanded" || element === null || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    let last = element.clientHeight;
+    const observer = new ResizeObserver(() => {
+      const next = element.clientHeight;
+      if (next === last || next <= 0) return;
+      last = next;
+      bridge.current?.notify("ui/notifications/host-context-changed", {
+        containerDimensions: { width: Math.round(element.clientWidth), maxHeight: next },
+      });
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [placement]);
+
   useEffect(() => {
     bridge.current?.notify("ui/notifications/host-context-changed", {
       displayMode: placement === "expanded" ? "fullscreen" : "inline",
@@ -298,10 +334,12 @@ function FrameInstance(
       sandbox={APP_FRAME_SANDBOX}
       referrerPolicy="no-referrer"
       // Block: an inline iframe sits on the text baseline and leaves a gap under it (KOBE-575).
-      className="block w-full border-0 bg-background"
+      className={`block w-full border-0 bg-background${
+        placement === "expanded" ? " min-h-0 flex-1" : ""
+      }`}
       style={
         placement === "expanded"
-          ? { height: "100%", minHeight: height }
+          ? { height: "100%" }
           : placement === "rail"
             ? { height: railHeight ?? "100%" }
             : { height }

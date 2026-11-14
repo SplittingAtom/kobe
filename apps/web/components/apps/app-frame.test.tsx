@@ -400,3 +400,110 @@ describe("AppFrame in the rail (KOBE-575)", () => {
     }
   });
 });
+
+describe("AppFrame expanded in the artifact column (KOBE-657)", () => {
+  /** A fake ResizeObserver: `resizeAll()` runs every live callback, as the browser would. */
+  const live: { target: Element | null; run: () => void }[] = [];
+  class FakeResizeObserver {
+    private readonly entry: { target: Element | null; run: () => void };
+    constructor(callback: ResizeObserverCallback) {
+      this.entry = { target: null, run: () => callback([], this as unknown as ResizeObserver) };
+      live.push(this.entry);
+    }
+    observe(target: Element) {
+      this.entry.target = target;
+    }
+    unobserve() {}
+    disconnect() {
+      this.entry.target = null;
+    }
+  }
+
+  afterEach(() => {
+    live.length = 0;
+    vi.unstubAllGlobals();
+  });
+
+  /** An expanded frame laid out `clientHeight` px tall (and 600 px wide); `resize` changes it. */
+  function mountExpanded(clientHeight: number) {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const mounted = mount({ placement: "expanded" });
+    let height = clientHeight;
+    Object.defineProperty(mounted.iframe, "clientHeight", {
+      get: () => height,
+      configurable: true,
+    });
+    Object.defineProperty(mounted.iframe, "clientWidth", { get: () => 600, configurable: true });
+    const resize = (next: number) =>
+      act(() => {
+        height = next;
+        for (const o of live) if (o.target === mounted.iframe) o.run();
+      });
+    return { ...mounted, resize };
+  }
+
+  const hostContextChanges = (posted: () => unknown[]) =>
+    posted().filter(
+      (m) => (m as { method?: string }).method === "ui/notifications/host-context-changed",
+    ) as { params: Record<string, unknown> }[];
+
+  it("always equals the column: a 1500 px report sets no minHeight", async () => {
+    const { iframe, fromApp } = mountExpanded(800);
+    expect(iframe.style.height).toBe("100%");
+    expect(iframe.style.minHeight).toBe("");
+    await fromApp({
+      jsonrpc: "2.0",
+      method: "ui/notifications/size-changed",
+      params: { height: 1500 },
+    });
+    expect(iframe.style.height).toBe("100%");
+    expect(iframe.style.minHeight).toBe("");
+  });
+
+  it("still reports the app's height to its owner (MA10)", async () => {
+    const onHeight = vi.fn();
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const { fromApp } = mount({ placement: "expanded", onHeight });
+    await fromApp({
+      jsonrpc: "2.0",
+      method: "ui/notifications/size-changed",
+      params: { height: 1500 },
+    });
+    expect(onHeight).toHaveBeenCalledWith(1500);
+  });
+
+  it("tells the app the column's real height, not 4000", async () => {
+    const { fromApp, posted } = mountExpanded(800);
+    await fromApp({ jsonrpc: "2.0", id: 1, method: "ui/initialize", params: {} });
+    await settle();
+    const reply = posted().find((m) => (m as { id?: unknown }).id === 1) as {
+      result: { hostContext: { containerDimensions: unknown } };
+    };
+    expect(reply.result.hostContext.containerDimensions).toEqual({ width: 600, maxHeight: 800 });
+  });
+
+  it("sends a host-context change with the new height when the column is resized", async () => {
+    const { posted, resize } = mountExpanded(800);
+    await resize(520);
+    const changes = hostContextChanges(posted);
+    expect(changes.at(-1)?.params).toMatchObject({
+      containerDimensions: { width: 600, maxHeight: 520 },
+    });
+    // The same height again (or a hidden tab with no layout) sends nothing more.
+    const count = hostContextChanges(posted).length;
+    await resize(520);
+    await resize(0);
+    expect(hostContextChanges(posted)).toHaveLength(count);
+  });
+
+  it("keeps inline sizing: inline host context still says 720 and resizes send nothing", async () => {
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    const { fromApp, posted } = mount();
+    await fromApp({ jsonrpc: "2.0", id: 1, method: "ui/initialize", params: {} });
+    await settle();
+    const reply = posted().find((m) => (m as { id?: unknown }).id === 1) as {
+      result: { hostContext: { containerDimensions: { maxHeight: number } } };
+    };
+    expect(reply.result.hostContext.containerDimensions.maxHeight).toBe(INLINE_MAX_HEIGHT);
+  });
+});
