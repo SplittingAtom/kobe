@@ -97,6 +97,19 @@ describe("JSON import", () => {
     expect(rows[2]?.error).toBe("The statement is empty.");
   });
 
+  it("reads a file with a byte order mark and counts rows before reading them", () => {
+    const doc = JSON.stringify({
+      format: "kobe.memory.v1",
+      items: [{ kind: "fact", statement: "x" }],
+    });
+    expect(parseImport("json", `\uFEFF${doc}`)).toHaveLength(1);
+    const many = JSON.stringify({
+      format: "kobe.memory.v1",
+      items: Array.from({ length: 1001 }, () => 0),
+    });
+    expect(codeOf(() => parseImport("json", many))).toBe("memory_import_too_large");
+  });
+
   it("refuses a file that is not a Kobe memory export", () => {
     expect(codeOf(() => parseImport("json", "{"))).toBe("memory_import_invalid");
     expect(codeOf(() => parseImport("json", '{"items":[]}'))).toBe("memory_import_invalid");

@@ -68,6 +68,21 @@ served them), the two console pages, guide, browser spec.
 - **TODO (KOBE-386)**: the status filter has no "stale" yet — KOBE-386 defines staleness; add it
   to `STATUS_LABELS` in `components/memory/curator-memories.tsx` (or a separate filter) then.
 
+## Security review fixes (review-385, untracked; no C/H)
+
+- **M-1** `bodyLimit` on `/import/*` (2 MiB + 64 KiB, 413 `memory_import_too_large`).
+- **M-2** per-person rate limits (preview 20/min, commit 10/min, export 20/min; 429
+  `rate_limited`); near-duplicates and Policy lexemes prefetched in one query each
+  (`findNearDuplicatesMany`, `readPolicyAndLexemesMany`, `CheckMemo` in `checks.ts`), egress model
+  read once; every accepted row (archived/superseded too) needs room under the scope cap.
+- **L-1** secret scan (statement + tags) runs first on every row; a blocked row's text and tags
+  are withheld. **L-2** Policy rows follow the Policy switch (`policy_disabled`), others the
+  scope's (`scope_disabled`); a Site import of Policy alone works while Site memories are off.
+  **L-3** in-file repeats carry `near_duplicate` in their findings (lint override recorded and
+  audited). **L-4** export is `POST /export` (body = the query's fields; OpenAPI + web updated).
+- **Info** JSON BOM stripped, JSON row count checked before mapping, CSV formula leads include
+  full-width forms and leads after spaces (protocol `FORMULA_LEAD`), conflict wording.
+
 ## Open questions (for Chris or the coordinator)
 
 - Rows left out of an import (near-duplicates, warnings) are added one by one with Save anyway;

@@ -13,6 +13,7 @@ import {
   revertSemanticMemoryItemSchema,
   semanticMemoryErrorSchema,
   semanticMemoryExportDocumentSchema,
+  semanticMemoryExportQuerySchema,
   semanticMemoryImportCommitRequestSchema,
   semanticMemoryImportCommitResponseSchema,
   semanticMemoryImportPreviewRequestSchema,
@@ -239,6 +240,7 @@ function transferPaths(): Record<string, Record<string, unknown>> {
           "400": ERR("`memory_import_invalid`, or `invalid_request`."),
           ...COMMON,
           "413": ERR("`memory_import_too_large`: over 1,000 rows or 1 MiB; nothing was read."),
+          "429": json("Error", "`rate_limited`: too many imports; wait a minute."),
         },
       },
     },
@@ -258,25 +260,27 @@ function transferPaths(): Record<string, Record<string, unknown>> {
               "`no_active_team` or `team_mismatch`.",
           ),
           "413": ERR("`memory_import_too_large`: over 1,000 rows or 1 MiB; nothing was saved."),
+          "429": json("Error", "`rate_limited`: too many imports; wait a minute."),
         },
       },
     },
     "/v1/memory/semantic/export": {
-      get: {
+      post: {
         operationId: "exportSemanticMemory",
-        summary: "Download one scope as JSON or CSV",
-        parameters: [
-          scopeParam("query"),
-          query("format", { type: "string", enum: ["json", "csv"], default: "json" }),
-          query("include_inactive", { type: "boolean", default: false }),
-          TEAM_HEADER,
-        ],
+        summary: "Download one scope as JSON or CSV (curators for Workspace and Site; audited)",
+        description:
+          "A POST because it writes an audit row (`memory.items.exported`), so it passes the " +
+          "API's Origin check. Personal scopes are the caller's own; Workspace and Site exports " +
+          "are for their curators. Rate-limited per person (429 `rate_limited`).",
+        parameters: [TEAM_HEADER],
+        requestBody: body("SemanticMemoryExportRequest"),
         responses: {
           "200": {
             description:
               "The export: JSON (also a valid import file) or CSV with a header row; both keep " +
               "status and supersession. CSV cells a spreadsheet would run as a formula (leading " +
-              "=, +, -, @, tab or CR) are prefixed with `'`, which an import removes.",
+              "=, +, -, @ or their full-width forms, possibly after spaces; tab or CR) are " +
+              "prefixed with `'`, which an import removes.",
             content: {
               "application/json": {
                 schema: { $ref: "#/components/schemas/SemanticMemoryExport" },
@@ -356,6 +360,7 @@ export function semanticMemoryOpenApiSchemas(): Record<string, JsonSchema> {
     SemanticMemoryImportCommitRequest: schemaOf(semanticMemoryImportCommitRequestSchema, "input"),
     SemanticMemoryImportCommit: schemaOf(semanticMemoryImportCommitResponseSchema, "output"),
     SemanticMemoryExport: schemaOf(semanticMemoryExportDocumentSchema, "output"),
+    SemanticMemoryExportRequest: schemaOf(semanticMemoryExportQuerySchema, "input"),
     SemanticMemoryError: schemaOf(semanticMemoryErrorSchema, "output"),
     MemorySteward: schemaOf(memoryStewardSchema, "output"),
     MemoryStewardList: schemaOf(memoryStewardListSchema, "output"),

@@ -274,14 +274,14 @@ describe("Site console Memory page (ac-1, ac-3)", () => {
   it("exports a scope (audited by the server)", async () => {
     const calls = stubApi({
       ...routes,
-      "GET /v1/memory/semantic/export?scope=site&format=csv": [200, new Uint8Array([97])],
+      "POST /v1/memory/semantic/export": [200, new Uint8Array([97])],
     });
     renderSite(<SiteMemoryPage />, "admin");
     await userEvent.click(await screen.findByRole("tab", { name: "Import and export" }));
     await userEvent.click(await screen.findByRole("button", { name: "Export CSV" }));
     expect(await screen.findByText("Exported Site memories as CSV.")).toBeTruthy();
-    expect(calls.some((c) => c.url === "/v1/memory/semantic/export?scope=site&format=csv")).toBe(
-      true,
-    );
+    const sent = calls.find((c) => c.url === "/v1/memory/semantic/export");
+    expect(sent?.method).toBe("POST");
+    expect(JSON.parse(String(sent?.body))).toEqual({ scope: "site", format: "csv" });
   });
 });

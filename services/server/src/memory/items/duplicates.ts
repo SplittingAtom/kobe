@@ -53,3 +53,42 @@ export async function findNearDuplicates(
      LIMIT ${MAX_MATCHES}`);
   return rows.map((r) => ({ id: r.id, version: r.version, similarity: Number(r.similarity) }));
 }
+
+/**
+ * Batch form for imports (review-385 M-2): every statement's near-duplicates in one query
+ * (`unnest … WITH ORDINALITY` with a lateral match), keyed by statement.
+ */
+export async function findNearDuplicatesMany(
+  tx: KobeTx,
+  loc: Location,
+  statements: readonly string[],
+): Promise<Map<string, NearDuplicate[]>> {
+  const unique = [...new Set(statements)];
+  const out = new Map<string, NearDuplicate[]>(unique.map((s) => [s, []]));
+  if (unique.length === 0) return out;
+  const { rows } = await tx.execute<{
+    n: number;
+    id: string;
+    version: number;
+    similarity: number;
+  }>(sql`
+    SELECT t.n::int AS n, m.id, m.version, m.similarity
+      FROM unnest(ARRAY[${sql.join(
+        unique.map((s) => sql`${s}`),
+        sql`, `,
+      )}]::text[]) WITH ORDINALITY AS t(statement, n)
+      CROSS JOIN LATERAL (
+        SELECT i.id, i.current_version AS version,
+               round(similarity(v.statement, t.statement)::numeric, 3)::float8 AS similarity
+          FROM ${loc.items} i JOIN ${loc.versions} v ON ${loc.versionOf} AND v.version = i.current_version
+         WHERE ${loc.where} AND i.status = 'active'
+           AND similarity(v.statement, t.statement) >= ${NEAR_DUPLICATE_SIMILARITY}
+         ORDER BY similarity DESC, i.id
+         LIMIT ${MAX_MATCHES}) m
+     ORDER BY t.n, m.similarity DESC, m.id`);
+  for (const r of rows)
+    out
+      .get(unique[r.n - 1] as string)
+      ?.push({ id: r.id, version: r.version, similarity: Number(r.similarity) });
+  return out;
+}

@@ -24,6 +24,9 @@ const as = {} as Record<keyof typeof ids, TestBrowser>;
 const ITEMS = "/v1/memory/semantic/items";
 const PREVIEW = "/v1/memory/semantic/import/preview";
 const COMMIT = "/v1/memory/semantic/import/commit";
+const EXPORT = "/v1/memory/semantic/export";
+/** Export is a POST (review-385 L-4: it writes an audit row, so it goes through the Origin check). */
+const exportAs = (who: TestBrowser, body: Record<string, unknown>) => who.post(EXPORT, body);
 const AWS = ["AKIA", "IOSFODNN7", "EXAMPLF"].join("");
 
 const errorOf = (r: { status: number; json: unknown }) => [
@@ -229,7 +232,7 @@ describe("Policy rows and the Site (ac-3)", () => {
 
 describe("export (ac-3)", () => {
   it("exports a scope as JSON or CSV for curators, audited; members may not", async () => {
-    const json = await as.steward.get("/v1/memory/semantic/export?scope=team");
+    const json = await exportAs(as.steward, { scope: "team" });
     expect(json.status, json.text).toBe(200);
     const doc = semanticMemoryExportDocumentSchema.parse(json.json);
     expect(doc.items.map((i) => i.statement)).toContain(
@@ -239,14 +242,14 @@ describe("export (ac-3)", () => {
       /attachment; filename="kobe-memories-team-/,
     );
 
-    const csv = await as.site.get("/v1/memory/semantic/export?scope=site&format=csv");
+    const csv = await exportAs(as.site, { scope: "site", format: "csv" });
     expect(csv.status).toBe(200);
     expect(csv.headers.get("content-type")).toMatch(/^text\/csv/);
     expect(csv.text.split("\r\n")[0]).toBe(
       "ref,kind,statement,tags,pinned,as_of,policy,status,superseded_by",
     );
 
-    expect(errorOf(await as.member.get("/v1/memory/semantic/export?scope=team"))).toEqual([
+    expect(errorOf(await exportAs(as.member, { scope: "team" }))).toEqual([
       403,
       "memory_not_allowed",
     ]);
@@ -260,7 +263,7 @@ describe("export (ac-3)", () => {
   });
 
   it("re-imports an export as it was", async () => {
-    const doc = (await as.admin.get("/v1/memory/semantic/export?scope=team")).json;
+    const doc = (await exportAs(as.admin, { scope: "team" })).json;
     const r = await as.admin.post(PREVIEW, {
       scope: "team",
       format: "json",
@@ -315,11 +318,157 @@ describe("curation ignores the curator's active Workspace switches (coordinator 
       };
       expect((await as.siteSteward.post(PREVIEW, file)).status).toBe(200);
       expect((await as.siteSteward.post(COMMIT, { ...file, accept: [0] })).status).toBe(200);
-      expect((await as.site.get("/v1/memory/semantic/export?scope=site")).status).toBe(200);
+      expect((await exportAs(as.site, { scope: "site" })).status).toBe(200);
       // A Team admin's Workspace items aren't blocked by the Workspace's Site memories switch.
       expect((await as.admin.get(`${ITEMS}?scope=team`)).status).toBe(200);
     } finally {
       await as.admin.put("/v1/memory/settings?level=team", { site_memories_enabled: true });
     }
+  });
+});
+
+describe("security review fixes (review-385)", () => {
+  const siteSettings = (value: Record<string, unknown>) =>
+    h.admin.query(
+      `INSERT INTO site_settings (key, value) VALUES ('memory.settings', $1)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [JSON.stringify(value)],
+    );
+
+  it("M-1: refuses an oversized body before reading it", async () => {
+    const r = await as.member.post(PREVIEW, {
+      scope: "user",
+      format: "csv",
+      content: "x".repeat(3 * 1024 * 1024),
+    });
+    expect(errorOf(r)).toEqual([413, "memory_import_too_large"]);
+  });
+
+  it("M-2: rate-limits previews per person", async () => {
+    const who = await h.createUser("ratelimit@transfer.test");
+    await h.admin.query(
+      `INSERT INTO team_members (team_id, user_id, role) VALUES ($1, $2, 'member')`,
+      [teamA, who],
+    );
+    const b = await h.signIn("ratelimit@transfer.test");
+    await b.put("/v1/me/teams/active", { teamId: teamA });
+    b.team = teamA;
+    const body = { scope: "user", format: "csv", content: "statement,kind\nRate row,fact\n" };
+    const statuses: number[] = [];
+    for (let i = 0; i < 21; i += 1) statuses.push((await b.post(PREVIEW, body)).status);
+    expect(statuses.slice(0, 20).every((s) => s === 200)).toBe(true);
+    expect(statuses[20]).toBe(429);
+  });
+
+  it("M-2: archived and superseded rows count against the scope cap", async () => {
+    await siteSettings({ scope_limits: { user: 3, portable: 50, team: 1000, site: 1000 } });
+    try {
+      const file = JSON.stringify({
+        format: "kobe.memory.v1",
+        items: Array.from({ length: 4 }, (_, i) => ({
+          kind: "fact",
+          statement: `Archived row ${i} ${randomUUID()}`,
+          status: "archived",
+        })),
+      });
+      const r = await as.member.post(COMMIT, {
+        scope: "user",
+        format: "json",
+        content: file,
+        accept: [0, 1, 2, 3],
+      });
+      expect(errorOf(r)).toEqual([409, "memory_scope_full"]);
+    } finally {
+      await h.admin.query(`DELETE FROM site_settings WHERE key = 'memory.settings'`);
+    }
+  });
+
+  it("L-1: never echoes a secret, even on a row a scope rule stops", async () => {
+    const file = [
+      "statement,kind,policy",
+      `Key ${AWS} goes here,fact,true`,
+      `Key ${AWS} without a kind,,`,
+    ].join("\n");
+    const r = await as.admin.post(PREVIEW, { scope: "team", format: "csv", content: file });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    expect(JSON.stringify(r.json)).not.toContain(AWS);
+    const rows = semanticMemoryImportPreviewResponseSchema.parse(r.json).rows;
+    expect(rows.map((row) => row.status)).toEqual(["blocked", "blocked"]);
+  });
+
+  it("L-2: Policy rows follow the Policy switch; other Site rows the Site memories switch", async () => {
+    const off = await as.site.put("/v1/memory/settings?level=site", { memories_enabled: false });
+    expect(off.status, JSON.stringify(off.json)).toBe(200);
+    try {
+      const file = JSON.stringify({
+        format: "kobe.memory.v1",
+        items: [
+          { kind: "fact", statement: `Policy while memories off ${randomUUID()}`, policy: true },
+          { kind: "fact", statement: `Plain while memories off ${randomUUID()}` },
+        ],
+      });
+      const r = await as.site.post(PREVIEW, { scope: "site", format: "json", content: file });
+      expect(r.status, JSON.stringify(r.json)).toBe(200);
+      const rows = semanticMemoryImportPreviewResponseSchema.parse(r.json).rows;
+      expect(rows.map((row) => [row.status, row.issues.map((i) => i.code)])).toEqual([
+        ["new", []],
+        ["invalid", ["scope_disabled"]],
+      ]);
+    } finally {
+      await as.site.put("/v1/memory/settings?level=site", { memories_enabled: true });
+    }
+  });
+
+  it("L-3: an in-file repeat saved anyway is recorded and audited as a lint override", async () => {
+    const text = `Repeated in the file ${randomUUID()}`;
+    const file = `statement,kind\n${text},fact\n${text},fact\n`;
+    const preview = semanticMemoryImportPreviewResponseSchema.parse(
+      (await as.admin.post(PREVIEW, { scope: "team", format: "csv", content: file })).json,
+    );
+    expect(preview.rows.map((row) => row.status)).toEqual(["new", "duplicate"]);
+    const r = await as.admin.post(COMMIT, {
+      scope: "team",
+      format: "csv",
+      content: file,
+      accept: [0, 1],
+      overrides: { lint: true },
+    });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    const [, second] = semanticMemoryImportCommitResponseSchema.parse(r.json).item_ids;
+    const saved = semanticMemoryItemDetailSchema.parse(
+      (await as.admin.get(`${ITEMS}/team/${second}`)).json,
+    );
+    expect(saved.versions[0]?.lint_override).toBe(true);
+    expect(await auditOf("memory.lint.override")).toContainEqual(
+      expect.objectContaining({
+        target: expect.objectContaining({ itemId: second, warnings: ["near_duplicate"] }),
+      }),
+    );
+  });
+
+  it("L-4: export is not served on GET", async () => {
+    expect((await as.site.get(`${EXPORT}?scope=site`)).status).not.toBe(200);
+  });
+
+  it("a Site steward without any Workspace still can't import Policy", async () => {
+    const id = await h.createUser("lonesteward@transfer.test");
+    await h.admin.query(
+      `INSERT INTO site_grants (user_id, "grant", granted_by) VALUES ($1, 'memory_steward', $2)`,
+      [id, ids.site],
+    );
+    const b = await h.signIn("lonesteward@transfer.test");
+    const file = JSON.stringify({
+      format: "kobe.memory.v1",
+      items: [{ kind: "fact", statement: `Lone steward policy ${randomUUID()}`, policy: true }],
+    });
+    const body = { scope: "site", format: "json", content: file };
+    const preview = semanticMemoryImportPreviewResponseSchema.parse(
+      (await b.post(PREVIEW, body)).json,
+    );
+    expect(preview.rows[0]?.issues.map((i) => i.code)).toEqual(["policy_not_allowed"]);
+    expect(errorOf(await b.post(COMMIT, { ...body, accept: [0] }))).toEqual([
+      409,
+      "memory_import_stale",
+    ]);
   });
 });

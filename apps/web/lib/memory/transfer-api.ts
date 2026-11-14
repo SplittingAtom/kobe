@@ -52,7 +52,7 @@ export const ROW_CLASS_LABELS: Readonly<Record<RowClass, string>> = {
   "policy-blocked": "Blocked by Policy rules",
   secret: "Secret: never saved",
   "lint-flagged": "Flagged by checks",
-  unreadable: "Can't be read",
+  unreadable: "Can't be imported",
 };
 
 export function rowClass(row: ImportRow): RowClass {
@@ -106,11 +106,13 @@ export function createTransferApi(teamId: string | undefined, fetchFn?: typeof f
         fetchFn,
         errorDetails: true,
       }),
-    exportScope: (scope, format, includeInactive) => {
-      const params = new URLSearchParams({ scope, format });
-      if (includeInactive) params.set("include_inactive", "true");
-      return apiDownload(`/v1/memory/semantic/export?${params.toString()}`, { teamId, fetchFn });
-    },
+    // A POST: an export writes an audit row (review-385 L-4).
+    exportScope: (scope, format, includeInactive) =>
+      apiDownload("/v1/memory/semantic/export", {
+        teamId,
+        fetchFn,
+        json: { scope, format, ...(includeInactive ? { include_inactive: true } : {}) },
+      }),
   };
 }
 

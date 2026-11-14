@@ -96,10 +96,12 @@ stewards. Anyone else who opens it reads only.
   with the save checks above and stores nothing; each row says what it is: **New**,
   **Near-duplicate**, **Conflicts with Policy**, **Blocked by Policy rules** (for example a
   Policy row outside the Site), **Secret: never saved**, **Flagged by checks** or **Can't be
-  read**. No model reads the file. **Import** saves the new rows only, all at once; add the
+  imported** (unreadable, or memories turned off). No model reads the file. A row holding a
+  secret is never shown back, whatever else is wrong with it. **Import** saves the new rows only, all at once; add the
   others one by one, where you can save over a warning. If anything changed since the preview,
-  nothing is saved and Kobe asks you to preview again. Imports are audited
-  (`memory.items.imported`, counts only).
+  nothing is saved and Kobe asks you to preview again. Archived rows in a file count against the
+  workspace's limit like active ones. Imports and exports are limited per person per minute.
+  Imports are audited (`memory.items.imported`, counts only).
 - **Export**: the workspace's memories as JSON (a Kobe export, which imports again as it was) or
   CSV, optionally with archived and superseded ones. Statements, kinds, tags and pins only; never
   who wrote them or the conversations they came from. Every export is audited

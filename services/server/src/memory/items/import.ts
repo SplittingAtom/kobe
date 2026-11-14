@@ -14,21 +14,25 @@ import {
   type SemanticMemoryScope,
 } from "@kobe/protocol";
 import type { ServerAuditEvent } from "../../audit/record.js";
+import { readPolicyAndLexemesMany } from "../checks/policy.js";
+import { findSecret } from "../checks/secrets.js";
 import {
   enforceMemoryFindings,
   evaluateMemoryWrite,
   importRowStatus,
   overrideAuditEvents,
+  type CheckMemo,
   type MemoryCheckOutcome,
   type MemoryFindings,
 } from "../checks.js";
 import { parseImport, type ImportRow } from "../transfer/parse.js";
+import { NEAR_DUPLICATE_WARNING, findNearDuplicatesMany } from "./duplicates.js";
 import { audit, auditTeam, inStore, textArray, type Op } from "./context.js";
-import { MemoryItemError, invalid } from "./errors.js";
+import { MemoryItemError, disabled, invalid } from "./errors.js";
 import { assertRoom, lockScope, notifyNearFull, policyUsage } from "./limits.js";
 import { workspaceTeam } from "./location.js";
 import { insertVersion } from "./versions.js";
-import { assertEnabled, assertMayWrite, type MemoryWho } from "./who.js";
+import { assertMayWrite, type MemoryWho } from "./who.js";
 
 /**
  * Import (KOBE-385; contract KOBE-377 `transfer.ts`, SM21, Q10). Preview reads the file, applies
@@ -54,6 +58,8 @@ interface Classified {
   readonly findings: MemoryFindings | null;
   /** The row only fails the Policy budget (commit answers `memory_policy_budget_full`). */
   readonly overBudget: boolean;
+  /** What the secret found looks like (a blocked row). */
+  readonly secretLabel: string | null;
 }
 
 const STATEMENT_SHOWN_MAX = 1000;
@@ -96,6 +102,45 @@ function scopeRuleIssue(
 
 const normalised = (s: string) => s.normalize("NFKC").replace(/\s+/gu, " ").trim().toLowerCase();
 
+/** A credential anywhere in the row, scanned before anything else (review-385 L-1). */
+const secretIn = (row: ImportRow) =>
+  [row.statement, ...row.tags].map(findSecret).find((hit) => hit !== undefined) ?? null;
+
+/** The switches, per row (review-385 L-2): Policy follows the Policy switch, the rest the scope's. */
+function switchIssue(row: ImportRow, op: Op): SemanticMemoryIssue | null {
+  if (row.policy && !op.memory.policy)
+    return rule("policy_disabled", "Policy is turned off for the site.");
+  if (!row.policy && !op.memory.scopes[op.loc.scope])
+    return rule("scope_disabled", "Memories here are turned off; only Policy can be imported.");
+  return null;
+}
+
+/** One query each for the rows' near-duplicates and Policy lexemes (review-385 M-2). */
+async function prefetch(op: Op, rows: readonly ImportRow[]): Promise<CheckMemo> {
+  const statements = rows.filter((r) => r.error === null).map((r) => r.statement);
+  const duplicates = await findNearDuplicatesMany(op.tx, op.loc, statements);
+  const { policies, lexemes } = op.memory.policy
+    ? await readPolicyAndLexemesMany(
+        op.tx,
+        rows.filter((r) => r.error === null && !r.policy).map((r) => r.statement),
+      )
+    : { policies: [], lexemes: new Map<string, string[]>() };
+  return { duplicates, policies, lexemes, egress: new Map() };
+}
+
+const invalidRow = (
+  row: ImportRow,
+  issue: SemanticMemoryIssue,
+  overBudget = false,
+): Classified => ({
+  row,
+  status: "invalid",
+  issues: [issue],
+  findings: null,
+  overBudget,
+  secretLabel: null,
+});
+
 /**
  * Every row's status and issues, in file order. `only`: the rows that count (commit's accepted
  * rows); the Policy budget and in-file repeats are counted over those alone.
@@ -111,13 +156,29 @@ async function classify(
   const policy = rows.some((r) => r.policy) ? await policyUsage(op.tx) : { count: 0, bytes: 0 };
   let policyCount = policy.count;
   let policyBytes = policy.bytes;
+  const memo = await prefetch(op, rows);
+  const env = { ...op, memo };
   const seen = new Map<string, number>();
   const out: Classified[] = [];
   for (const row of rows) {
     const counted = only === undefined || only.has(row.index);
-    const ruleIssue = scopeRuleIssue(row, scope, op.who, refs);
+    const secret = secretIn(row);
+    if (secret) {
+      out.push({
+        row,
+        status: "blocked",
+        issues: [
+          rule("secret", `This looks like ${secret.label}. Secrets can never be saved in memory.`),
+        ],
+        findings: null,
+        overBudget: false,
+        secretLabel: secret.label,
+      });
+      continue;
+    }
+    const ruleIssue = scopeRuleIssue(row, scope, op.who, refs) ?? switchIssue(row, op);
     if (ruleIssue) {
-      out.push({ row, status: "invalid", issues: [ruleIssue], findings: null, overBudget: false });
+      out.push(invalidRow(row, ruleIssue));
       continue;
     }
     if (row.policy && row.status === "active" && counted) {
@@ -130,64 +191,76 @@ async function classify(
           "policy_budget",
           `Policy holds at most ${SEMANTIC_MEMORY_POLICY_MAX_ITEMS} items and ${SEMANTIC_MEMORY_POLICY_MAX_BYTES} bytes; this row would pass it.`,
         );
-        out.push({ row, status: "invalid", issues: [issue], findings: null, overBudget: true });
+        out.push(invalidRow(row, issue, true));
         continue;
       }
       policyCount += 1;
       policyBytes += bytes;
     }
-    const findings = await evaluateMemoryWrite(op, {
+    let findings = await evaluateMemoryWrite(env, {
       scope,
       policy: row.policy,
       statement: row.statement,
       tags: row.tags,
     });
-    let status: RowStatus = importRowStatus(findings);
+    const key = normalised(row.statement);
+    const first = seen.get(key);
+    let repeat: SemanticMemoryIssue | null = null;
+    if (counted && first === undefined) seen.set(key, row.index);
+    else if (counted && first !== undefined && importRowStatus(findings) === "new") {
+      // An in-file repeat is a near-duplicate like one of a saved item: saved only over
+      // `overrides.lint`, recorded and audited (review-385 L-3).
+      findings = { ...findings, warnings: [...findings.warnings, NEAR_DUPLICATE_WARNING] };
+      repeat = rule("near_duplicate", `Repeats row ${first + 1} of this file.`);
+    }
     const issues: SemanticMemoryIssue[] = [];
     if (findings.invalid !== null) issues.push(rule("invalid_row", findings.invalid));
-    if (findings.secret !== null)
-      issues.push(
-        rule(
-          "secret",
-          `This looks like ${findings.secret.label}. Secrets can never be saved in memory.`,
-        ),
-      );
-    issues.push(...findings.warnings);
+    issues.push(...(repeat ? findings.warnings.slice(0, -1) : findings.warnings));
+    if (repeat) issues.push(repeat);
     if (findings.policyConflicts.length > 0)
       issues.push(
         rule(
           "policy_conflict",
-          "This may contradict Site Policy. Only a curator can save it anyway, and that is recorded.",
+          "This may contradict Site Policy. Saving it anyway is recorded in the audit log.",
         ),
       );
-    const key = normalised(row.statement);
-    const first = seen.get(key);
-    if (counted && first === undefined) seen.set(key, row.index);
-    else if (counted && first !== undefined && status === "new") {
-      status = "duplicate";
-      issues.push(rule("near_duplicate", `Repeats row ${first + 1} of this file.`));
-    }
-    out.push({ row, status, issues: issues.slice(0, ISSUES_MAX), findings, overBudget: false });
+    out.push({
+      row,
+      status: repeat ? "duplicate" : importRowStatus(findings),
+      issues: issues.slice(0, ISSUES_MAX),
+      findings,
+      overBudget: false,
+      secretLabel: null,
+    });
   }
   return out;
 }
 
 function wireRow(c: Classified): SemanticMemoryImportRow {
   const { row, status } = c;
-  const label = c.findings?.secret?.label;
-  const shown =
-    status === "blocked" ? `[withheld: looks like ${label ?? "a secret"}]` : row.statement;
+  const blocked = status === "blocked";
+  const shown = blocked ? `[withheld: looks like ${c.secretLabel ?? "a secret"}]` : row.statement;
   return {
     index: row.index,
     status,
     kind: row.kind,
     statement: [...shown].slice(0, STATEMENT_SHOWN_MAX).join(""),
-    tags: row.tags.slice(0, 20).map((t) => [...t].slice(0, 100).join("")),
+    tags: blocked ? [] : row.tags.slice(0, 20).map((t) => [...t].slice(0, 100).join("")),
     pinned: row.pinned,
     policy: row.policy,
     as_of: row.asOf,
     issues: c.issues,
   };
+}
+
+/**
+ * The scope must be on; on the Site, Policy alone may be imported while Site memories are off
+ * (rows are then checked one by one: {@link switchIssue}).
+ */
+function assertImportEnabled(op: Op): void {
+  const scope = op.loc.scope;
+  if (op.memory.scopes[scope] || (scope === "site" && op.memory.policy)) return;
+  throw disabled();
 }
 
 /** Preview: every row classified; nothing is stored. */
@@ -198,7 +271,7 @@ export function previewImport(
 ): Promise<SemanticMemoryImportPreviewResponse> {
   const rows = parseImport(req.format, req.content);
   return inStore(db, who, req.scope, async (op) => {
-    assertEnabled(op.memory, req.scope);
+    assertImportEnabled(op);
     assertMayWrite(who, req.scope);
     const classified = await classify(op, rows);
     const counts = Object.fromEntries(SEMANTIC_MEMORY_IMPORT_ROW_STATUSES.map((s) => [s, 0])) as {
@@ -241,7 +314,7 @@ export function commitImport(
     throw invalid("accept names a row the file doesn't have.");
   return inStore(db, who, req.scope, async (op) => {
     const scope = req.scope;
-    assertEnabled(op.memory, scope);
+    assertImportEnabled(op);
     assertMayWrite(who, scope);
     await lockScope(op.tx, op.loc);
     if (rows.some((r) => accept.has(r.index) && r.policy))
@@ -270,7 +343,9 @@ export function commitImport(
         );
 
     const active = classified.filter((c) => c.row.status === "active");
-    const before = await assertRoom(op.tx, op.loc, op.settings, active.length);
+    // Every imported row needs room, archived and superseded ones too (review-385 M-2): an
+    // import can't grow a scope's history past its cap.
+    const before = await assertRoom(op.tx, op.loc, op.settings, classified.length);
     await assertPinsFit(op, active.filter((c) => c.row.pinned).length);
 
     const ids = new Map<number, string>();

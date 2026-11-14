@@ -70,7 +70,7 @@ export function parseImport(format: SemanticMemoryTransferFormat, content: strin
 function readJson(content: string): RawRow[] {
   let doc: unknown;
   try {
-    doc = JSON.parse(content);
+    doc = JSON.parse(content.startsWith("\uFEFF") ? content.slice(1) : content);
   } catch {
     throw unreadable("The file is not valid JSON.");
   }
@@ -79,6 +79,8 @@ function readJson(content: string): RawRow[] {
   const { format, items } = doc as { format?: unknown; items?: unknown };
   if (format !== SEMANTIC_MEMORY_EXPORT_FORMAT || !Array.isArray(items))
     throw unreadable(`The file is not a Kobe memory export (${SEMANTIC_MEMORY_EXPORT_FORMAT}).`);
+  // Before any per-row work (review-385 I-1).
+  if (items.length > SEMANTIC_MEMORY_IMPORT_MAX_ROWS) throw tooLarge();
   return items.map((i: unknown) =>
     i !== null && typeof i === "object" && !Array.isArray(i) ? (i as RawRow) : {},
   );
