@@ -145,6 +145,11 @@ function itemPaths(): Record<string, Record<string, unknown>> {
           query("kind", { type: "string", enum: [...SEMANTIC_MEMORY_KINDS] }),
           query("pinned", { type: "boolean" }),
           query("policy", { type: "boolean" }, "Site only: Policy items, or all but Policy."),
+          query(
+            "stale",
+            { type: "boolean" },
+            "Only stale items (true) or only fresh ones (false): active items neither changed nor dated (as_of) within the Site's stale threshold.",
+          ),
           query("q", { type: "string", maxLength: 200 }, "Full-text and trigram search."),
           query("limit", {
             type: "integer",

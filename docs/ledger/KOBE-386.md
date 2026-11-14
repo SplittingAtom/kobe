@@ -20,8 +20,10 @@
 
 Holds: Workspace rows use `memory_legal_hold_covers` (owner's hold; any hold in the team for
 `team` items) after `lockLegalHolds`. Site rows: `withSiteMemoryPurge` (Site-wide hold → nothing;
-`unheld(item)` skips items a held person wrote). Portable rows: the version cap's rule (any active
-hold on the owner, or any Workspace-wide hold), after the hold lock.
+`unheld(item)` skips items a held person wrote). Portable rows (Q2, coordinator 2026-11-13): an active
+hold on the owner, or a Workspace-wide hold on a Workspace the owner is a member of (members read
+per held Workspace with `withTeam`, inside the locked transaction). The version cap's prune
+(`memory/items/versions.ts`) keeps its broader rule (any Workspace-wide hold): it only keeps more.
 
 Run records of the portable/Site lanes are in Workspace tables the site-wide transaction cannot
 see, so each portable/Site delete runs in a savepoint: a delete the 0217/0222 guards refuse (a run
@@ -52,19 +54,20 @@ the admin for a purge).
    Workspace must not touch portable items, so the purge is a site-wide `Offboarding.purgePortable`
    behind a site-admin route (same who-may-act rules as deactivation), not `offboardMember`.
    Respects `KOBE_RETENTION_PAUSED` (503 `retention_paused`).
-6. **Stale (KOBE-381 `stale_after_days`)**: not needed here. Sweeps never act on staleness
-   ("never auto-evict or auto-archive"), the brief does not use it, and the KOBE-385 branch has no
-   TODO for it. Left undefined for the ticket that shows it.
+6. **Stale** (coordinator 2026-11-13; `memory/items/stale.ts`): an active item whose `updated_at`
+   and `as_of` (when set) are both older than the Site's `stale_after_days` (default 90; UTC,
+   `as_of` fresh on the cutoff day). Computed `stale` flag on every item response (list, get,
+   create/edit) and `stale=true|false` list filter; both optional in the contract, openapi.json
+   regenerated. A review label: nothing archives or deletes by it.
 7. **JIT duplicate:** portable items are keyed on `users.id`; a new account starts empty with no
    code change. Tested with a second account (not through the OIDC flow).
 
-## Open questions (for Chris or the coordinator)
+## Resolved questions (coordinator 2026-11-13)
 
-1. "Source deleted" / "former member" are UI labels: after the scrub the wire shows a version with
-   no evidence and no thread, which looks like one that never had a source. Without a column the
-   UI can only infer it (e.g. `actor_kind = 'pass'` always had a source). Fine for v1.3?
-2. Team-wide holds freeze every portable item site-wide (the version cap's rule, conservative,
-   since `team_members` rows of other Workspaces are not visible here). OK, or narrow later?
+1. "Source deleted" / "former member" stay UI inferences (after the scrub a version has no
+   evidence and no thread; `actor_kind = 'pass'` always had a source). Accepted, with the other
+   decisions above.
+2. Workspace-wide holds freeze only portable items of that Workspace's members (done, tested).
 
 ## Docs
 
@@ -82,6 +85,9 @@ the guide. Audit names in `docs/audit-log.md`.
 - ac-2: › offboarding (30-day purge, former-member item stays, portable stays; inside window /
   hold / returned member keep; no-sandbox owner gets the window) and › deactivation (admin purge:
   active 409, held 409, purge + audit as admin).
+- Q2: › Workspace-wide holds and portable items (sweep + admin purge, member vs non-member).
+- Stale: › stale (flags, `stale=true|false`, threshold setting); `memory/items/stale.test.ts`;
+  protocol `semantic-memory.test.ts`.
 - ac-3: › deactivation (SCIM deactivate → sweeps → refused by another source → reactivated by the
   same source: rows and versions byte-identical, listed again; JIT duplicate empty).
 - ac-4: guide pages above; `site-pages.test.tsx` covers the Purge memories button.

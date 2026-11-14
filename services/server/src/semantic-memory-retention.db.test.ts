@@ -22,7 +22,16 @@ import {
  */
 let h: Harness;
 const log = pino({ level: "silent" });
-const ids = { owner: "", admin: "", alice: "", bob: "", carol: "", dora: "", erin: "" };
+const ids = {
+  owner: "",
+  admin: "",
+  alice: "",
+  bob: "",
+  carol: "",
+  dora: "",
+  erin: "",
+  finn: "",
+};
 const as = {} as { admin: TestBrowser };
 let team = "";
 let auditFloor = 0;
@@ -54,6 +63,7 @@ interface ItemSpec {
   readonly versions?: readonly number[];
   readonly actor?: string;
   readonly sourceThread?: string;
+  readonly asOf?: string;
 }
 
 const statusOf = (spec: ItemSpec) => spec.status ?? (spec.supersededBy ? "superseded" : "active");
@@ -65,8 +75,8 @@ async function ws(spec: ItemSpec): Promise<string> {
   await h.admin.query(
     `WITH i AS (
        INSERT INTO semantic_memory_items
-         (team_id, id, scope, owner_user_id, kind, status, superseded_by, current_version, updated_at)
-       VALUES ($1, $2, $3, $4, 'fact', $5, $6, $7, $8))
+         (team_id, id, scope, owner_user_id, kind, status, superseded_by, current_version, updated_at, as_of)
+       VALUES ($1, $2, $3, $4, 'fact', $5, $6, $7, $8, $12::date))
      INSERT INTO semantic_memory_item_versions
        (team_id, item_id, version, statement, actor_user_id, actor_kind, created_at,
         source_thread_id, source_entry_ids, evidence)
@@ -86,6 +96,7 @@ async function ws(spec: ItemSpec): Promise<string> {
       spec.actor ?? spec.owner ?? ids.alice,
       spec.sourceThread ?? null,
       ages.map(ago),
+      spec.asOf ?? null,
     ],
   );
   return id;
@@ -233,7 +244,7 @@ beforeAll(async () => {
   h = await openHarness();
   ids.owner = await h.createUser("owner@smret.test", "owner");
   ids.admin = await h.createUser("admin@smret.test", "admin");
-  for (const who of ["alice", "bob", "carol", "dora", "erin"] as const)
+  for (const who of ["alice", "bob", "carol", "dora", "erin", "finn"] as const)
     ids[who] = await h.createUser(`${who}@smret.test`);
   team = randomUUID();
   await h.admin.query(`INSERT INTO teams (id, slug, name) VALUES ($1, 'smret', 'SMRet')`, [team]);
@@ -447,6 +458,68 @@ describe("Site and portable sweep (ac-1, ac-5)", () => {
     expect(await exists("portable_memory_items", archived)).toBe(false);
     expect(await versionsOf("portable", live)).toEqual([2, 3]);
     expect(await exists("portable_memory_items", held)).toBe(true);
+  });
+});
+
+describe("Workspace-wide holds and portable items (Q2)", () => {
+  it("freeze only the portable items of members of the held Workspace", async () => {
+    // finn is in no Workspace; dora is a member of the held one.
+    const doras = await portable(ids.dora, { status: "archived", updated: 90 });
+    const finns = await portable(ids.finn, { status: "archived", updated: 90 });
+    const finnVersions = await portable(ids.finn, { versions: [100, 50, 5] });
+    await placeHold(null);
+    await pass();
+    expect(await exists("portable_memory_items", doras)).toBe(true);
+    expect(await exists("portable_memory_items", finns)).toBe(false);
+    expect(await versionsOf("portable", finnVersions)).toEqual([2, 3]);
+  });
+
+  it("refuse an admin purge only for members of the held Workspace", async () => {
+    await portable(ids.dora);
+    await portable(ids.finn);
+    await deactivateUser(h.deps.database.db, ids.dora, { via: SCIM });
+    await deactivateUser(h.deps.database.db, ids.finn, { via: SCIM });
+    await placeHold(null);
+    const dora = await as.admin.post(`/v1/site/users/${ids.dora}/portable-memory/purge`);
+    expect([dora.status, dora.json.code]).toEqual([409, "legal_hold"]);
+    const finn = await as.admin.post(`/v1/site/users/${ids.finn}/portable-memory/purge`);
+    expect(finn.status, JSON.stringify(finn.json)).toBe(200);
+    expect(finn.json).toMatchObject({ purged: 1, kept: 0 });
+  });
+});
+
+describe("stale (KOBE-386, threshold from KOBE-381)", () => {
+  it("flags active items neither changed nor dated within the threshold, and filters on it", async () => {
+    const old = await ws({ owner: ids.alice, updated: 100, versions: [100] });
+    const fresh = await ws({ owner: ids.alice, updated: 10, versions: [10] });
+    const dated = await ws({
+      owner: ids.alice,
+      updated: 100,
+      versions: [100],
+      asOf: ago(5).slice(0, 10),
+    });
+    const alice = await h.signIn("alice@smret.test");
+    await alice.put("/v1/me/teams/active", { teamId: team });
+    alice.team = team;
+    const ITEMS = "/v1/memory/semantic/items";
+    const list = await alice.get(`${ITEMS}?scope=user`);
+    expect(list.status, JSON.stringify(list.json)).toBe(200);
+    const flags = Object.fromEntries(
+      (list.json.items as { id: string; stale: boolean }[]).map((i) => [i.id, i.stale]),
+    );
+    expect(flags).toEqual({ [old]: true, [fresh]: false, [dated]: false });
+    const only = await alice.get(`${ITEMS}?scope=user&stale=true`);
+    expect((only.json.items as { id: string }[]).map((i) => i.id)).toEqual([old]);
+    const not = await alice.get(`${ITEMS}?scope=user&stale=false`);
+    expect((not.json.items as { id: string }[]).map((i) => i.id).sort()).toEqual(
+      [fresh, dated].sort(),
+    );
+    expect((await alice.get(`${ITEMS}/user/${old}`)).json.stale).toBe(true);
+    // The threshold is the Site setting.
+    await h.admin.query(`UPDATE site_settings SET value = $1 WHERE key = 'memory.settings'`, [
+      JSON.stringify({ retention_days: 30, stale_after_days: 7 }),
+    ]);
+    expect((await alice.get(`${ITEMS}/user/${fresh}`)).json.stale).toBe(true);
   });
 });
 

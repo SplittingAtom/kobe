@@ -68,7 +68,7 @@ async function prepare(
 async function finish(op: Op, id: string, events: ServerAuditEvent[]) {
   const row = await readItem(op.tx, op.loc, id);
   if (!row) throw new Error("memory item vanished inside its own transaction");
-  const detail = await detailOf(op.tx, op.loc, op.who, row);
+  const detail = await detailOf(op.tx, op.loc, op.who, row, op.settings.stale_after_days);
   await audit(op, events);
   return detail;
 }

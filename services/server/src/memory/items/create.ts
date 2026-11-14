@@ -116,7 +116,7 @@ export function createItem(
     events.push(...overrideAuditEvents(checks, { scope, itemId: id, version: 1, teamId }));
     const row = await readItem(op.tx, op.loc, id);
     if (!row) throw new Error("memory item vanished inside its own transaction");
-    const detail = await detailOf(op.tx, op.loc, who, row);
+    const detail = await detailOf(op.tx, op.loc, who, row, op.settings.stale_after_days);
     await audit(op, events);
     return detail;
   });

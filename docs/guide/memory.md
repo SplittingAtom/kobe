@@ -171,7 +171,7 @@ Site admins also set, under **Settings › Memory**: the context budget (how muc
 take at the start of a run, 4 to 16 KiB, 8 by default), the most memories each place may hold (by
 default 300 per person only in a workspace, 50 per person in all their workspaces, 1,000 per
 workspace and 1,000 on the site), how
-many versions of a memory are kept (50), when an unconfirmed memory counts as stale (90 days), the
+many versions of a memory are kept (50), when a memory counts as stale (90 days: an active memory not changed, and not dated with an as-of date, within that time; stale memories are only marked for review, never removed), the
 retention window for archived memories (365 days), learning rate limits, and an embedding model
 that is not used yet. Search always uses English word matching; there is no language setting.
 
@@ -210,7 +210,8 @@ archived for you. What goes, and when:
   for you by single sign-on, instead of your old one, starts with no memories.
 - **Legal holds.** A legal hold suspends all of this: a hold on a person keeps their memories (in
   every workspace and the ones that follow them) and the Site memories they wrote; a hold on a
-  workspace keeps that workspace's memories; a Site-wide hold keeps Site memories.
+  workspace keeps that workspace's memories and the memories that follow each of its members; a
+  Site-wide hold keeps Site memories.
 
 ## What Kobe checks before a memory is saved
 
