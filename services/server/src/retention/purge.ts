@@ -11,7 +11,7 @@ import {
 } from "@kobe/db";
 import { PERIOD_DAYS, TRASH_RETENTION_DAYS, effectiveAt } from "./periods.js";
 import { readMaximumLayer, readTeamLayer } from "./settings.js";
-import { scrubEvidenceInTx } from "./semantic-memory.js";
+import { BATCH_SCRUB, scrubEvidenceInTx } from "./semantic-memory.js";
 
 /**
  * Hard purge of threads (spec D18, KOBE-18): everything a thread owns goes with it — entries, runs,
@@ -306,7 +306,7 @@ export async function purgeBatchInTx(
     DELETE FROM threads WHERE team_id = ${teamId} AND id = ANY(${uuidArray(ids)})`);
   // Evidence quotes drop with their source conversation (KOBE-386, SM28); the memory stays.
   // Held memories keep theirs until the sweep finds them released (retention/semantic-memory.ts).
-  await scrubEvidenceInTx(tx, teamId, ids);
+  for (let n = 0; n < 20; n++) if ((await scrubEvidenceInTx(tx, teamId, ids)) < BATCH_SCRUB) break;
   const result: PurgeBatchResult = {
     threads: ids.length,
     ...owned,

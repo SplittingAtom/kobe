@@ -70,6 +70,31 @@ the admin for a purge).
    decisions above.
 2. Workspace-wide holds freeze only portable items of that Workspace's members (done, tested).
 
+## Review fixes (docs/ledger/review-386.md; Chris 2026-11-13 on L1/L3)
+
+- **H1** A return reopens the 30-day record (`offboarding/reopen.ts`: `retain_until` cleared on the
+  `destroyed` row) in every membership insert (invitation accept, SSO access mapping, site admin
+  add, Registry grant), on reactivation (lifecycle `reactivated` → `Offboarding.reopen`) and as a
+  sweep backstop (active members' rows). `offboardSandbox` treats a `destroyed` row without
+  `retain_until` as a new departure (fresh 30 days); `offboardUser` and `departedNotOffboarded`
+  reach reopened rows. The retained volume stays until a wake (reinstate) or the next purge.
+- **M1** No pooled connection inside an open transaction: `snapshotPortableHolds` reads held
+  Workspaces' members before the transaction; after the hold lock the set of Workspace-wide holds
+  must be unchanged (prune: else keep every version; sweep: next pass; admin purge: retry 3×,
+  then refused). A membership added to a held Workspace during the purge is not seen (accepted).
+- **M2** Admin purge in batches of 100 (each its own READ COMMITTED transaction, hold lock and every
+  check repeated), at most 20 per call; `remaining` tells the console to call again (idempotent).
+- **L1** A Site-wide hold refuses the admin purge (409 `legal_hold`). Sweeps unchanged (Chris
+  named the purge only).
+- **L2** Every admin purge batch is audited, also with zero rows; the offboarding semantic purge too.
+- **L3** Single admin kept; typed confirmation: the console's confirm dialog takes `confirmText`
+  (button disabled until the person's email is typed) and the route requires `confirmEmail`
+  matching the account (400 `confirmation_mismatch`). Guard messages name the purge (I3).
+- **L4** The nightly evidence scrub runs in batches of 500 (the thread purge loops its own ids).
+- **L5** Items left with no deletable candidate (refusals, supersede cycles) are reported and
+  audited as `kept`.
+- **I1** Guide: "former member" applies once the person is removed from the Workspace.
+
 ## Docs
 
 Guide: `docs/guide/memory.md` new section "How long memories are kept"; `admin/site-admin.md`
@@ -90,6 +115,9 @@ the guide. Audit names in `docs/audit-log.md`.
   `memory-items-limits.db.test.ts` › version cap (prune kept for a held Workspace's member only).
 - Stale: › stale (flags, `stale=true|false`, threshold setting); `memory/items/stale.test.ts`;
   protocol `semantic-memory.test.ts`.
+- Review: › a second departure (H1: rejoin, invitation path, reactivation), › deactivation (typed
+  confirmation, Site-wide hold, zero-row audit + cycle, 250 items in 3 audited batches);
+  `confirm-dialog.test.tsx`, `site-pages.test.tsx`.
 - ac-3: › deactivation (SCIM deactivate → sweeps → refused by another source → reactivated by the
   same source: rows and versions byte-identical, listed again; JIT duplicate empty).
 - ac-4: guide pages above; `site-pages.test.tsx` covers the Purge memories button.

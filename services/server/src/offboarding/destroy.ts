@@ -66,11 +66,11 @@ export async function offboardSandbox(
       SELECT state, pvc, sandbox_id, retain_until FROM sandboxes
        WHERE team_id = ${teamId} AND user_id = ${userId} FOR UPDATE`);
     const row = current.rows[0];
-    // KOBE-386: personal semantic memories need the 30-day record even without a sandbox, and a
-    // member who came back (without waking a sandbox) and left again starts a new window.
+    // KOBE-386: personal semantic memories need the 30-day record even without a sandbox. A
+    // `destroyed` row without `retain_until` was reopened by a return (review H1, reopen.ts) or
+    // finished: this departure records a fresh 30 days either way.
     const memories = await ownsPersonalItems(tx, teamId, userId);
-    if (row?.state === "destroyed" && !(memories && row.retain_until === null))
-      return "already_offboarded";
+    if (row?.state === "destroyed" && row.retain_until !== null) return "already_offboarded";
     const workspace = await tx.execute(sql`
       SELECT 1 FROM workspace_sync WHERE team_id = ${teamId} AND user_id = ${userId}`);
     if (!row && !destroyed.sandboxId && workspace.rowCount === 0 && !memories) return "no_sandbox";
@@ -103,15 +103,22 @@ export async function offboardSandbox(
   });
 }
 
-/** Every team in which the user still has a sandbox that is not offboarded yet. */
+/**
+ * Every team in which the user still has a sandbox that is not offboarded yet, or a reopened record
+ * (a member who returned, KOBE-386 review H1): a deactivation starts a fresh 30 days there too.
+ */
 export async function liveSandboxTeams(ctx: OffboardingContext, userId: string): Promise<string[]> {
   const all = await ctx.db.select({ id: teams.id }).from(teams);
   const found: string[] = [];
   for (const team of all) {
     const rows = await withTeam(ctx.db, team.id, (tx) =>
       tx.execute(sql`
-        SELECT 1 FROM sandboxes
-         WHERE team_id = ${team.id} AND user_id = ${userId} AND state <> 'destroyed'`),
+        SELECT 1 FROM sandboxes s
+         WHERE s.team_id = ${team.id} AND s.user_id = ${userId}
+           AND (s.state <> 'destroyed'
+                OR (s.retain_until IS NULL AND EXISTS (
+                      SELECT 1 FROM team_members m
+                       WHERE m.team_id = s.team_id AND m.user_id = s.user_id)))`),
     );
     if ((rows.rowCount ?? 0) > 0) found.push(team.id);
   }

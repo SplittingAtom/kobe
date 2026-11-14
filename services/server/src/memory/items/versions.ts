@@ -1,6 +1,10 @@
-import { lockLegalHolds, sql, type KobeDb, type KobeTx } from "@kobe/db";
+import { lockLegalHolds, sql, type KobeTx } from "@kobe/db";
 import type { SemanticMemoryActorKind } from "@kobe/protocol";
-import { portableOwnerUnheld, workspaceHeldMembers } from "../../legal-hold/portable-hold.js";
+import {
+  portableHoldsUnchanged,
+  portableOwnerUnheld,
+  type PortableHoldSnapshot,
+} from "../../legal-hold/portable-hold.js";
 import { siteItemAuthorsUnheld, siteMemoryHeld } from "../../legal-hold/site-memory-hold.js";
 import { logger } from "../../logger.js";
 import { workspaceTeam, type Location } from "./location.js";
@@ -54,7 +58,7 @@ export async function insertVersion(tx: KobeTx, loc: Location, v: NewVersion): P
  * or a hold on a person who wrote any of the item's versions (P2-L1).
  */
 async function held(
-  db: KobeDb,
+  portableHolds: PortableHoldSnapshot | undefined,
   tx: KobeTx,
   loc: Location,
   itemId: string,
@@ -72,9 +76,13 @@ async function held(
   // this write waits for it and then sees it. Portable versions have no DB hold guard, so this
   // check is their only protection (review M-1).
   await lockLegalHolds(tx);
+  // Portable: the Workspace-wide holds read before the transaction must still be the ones in force
+  // (review M1); otherwise keep every version this time (the safe direction).
+  if (!loc.workspace && (!portableHolds || !(await portableHoldsUnchanged(tx, portableHolds))))
+    return true;
   const cond = loc.workspace
     ? sql`memory_legal_hold_covers(${workspaceTeam(loc)}, ${owner})`
-    : sql`NOT ${portableOwnerUnheld(sql`${owner}::uuid`, await workspaceHeldMembers(db, tx))}`;
+    : sql`NOT ${portableOwnerUnheld(sql`${owner}::uuid`, portableHolds?.members ?? [])}`;
   const { rows } = await tx.execute<{ held: boolean }>(sql`SELECT ${cond} AS held`);
   return rows[0]?.held === true;
 }
@@ -93,7 +101,8 @@ const MAX_REFUSED_PER_WRITE = 2;
  * its own savepoint, so a refused one is skipped and the write goes on. Returns how many went.
  */
 export async function pruneVersions(
-  db: KobeDb,
+  /** Portable items: the Workspace-wide holds read before the transaction (`Op.portableHolds`). */
+  portableHolds: PortableHoldSnapshot | undefined,
   tx: KobeTx,
   loc: Location,
   item: { readonly id: string; readonly currentVersion: number; readonly owner: string | null },
@@ -104,7 +113,7 @@ export async function pruneVersions(
   );
   const excess = (count[0]?.n ?? 0) - cap;
   if (excess <= 0) return 0;
-  if (await held(db, tx, loc, item.id, item.owner)) return 0;
+  if (await held(portableHolds, tx, loc, item.id, item.owner)) return 0;
   const { rows } = await tx.execute<{ version: number }>(sql`
     SELECT v.version FROM ${loc.versions} v
      WHERE ${loc.versionsOfItem(item.id)} AND v.version <> ${item.currentVersion}

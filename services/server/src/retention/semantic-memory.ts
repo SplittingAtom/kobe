@@ -21,6 +21,7 @@ import { recordAudit } from "../audit/record.js";
 
 const BATCH_ITEMS = 200;
 const BATCH_VERSIONS = 500;
+export const BATCH_SCRUB = 500;
 
 export interface SemanticPurgeCounts {
   readonly items: number;
@@ -60,12 +61,15 @@ export async function scrubEvidenceInTx(
       ? sql`NOT EXISTS (SELECT 1 FROM threads t
                          WHERE t.team_id = v.team_id AND t.id = v.source_thread_id)`
       : sql`v.source_thread_id = ANY(${uuidArray(threadIds)})`;
+  // Bounded (review L4): the sweep repeats it; a thread batch names at most its own threads.
   const res = await tx.execute(sql`
-    UPDATE semantic_memory_item_versions v
+    UPDATE semantic_memory_item_versions d
        SET evidence = NULL, source_thread_id = NULL, source_entry_ids = NULL
-      FROM semantic_memory_items i
-     WHERE v.team_id = ${teamId} AND i.team_id = v.team_id AND i.id = v.item_id
-       AND v.source_thread_id IS NOT NULL AND ${gone} AND ${NOT_HELD}`);
+     WHERE d.team_id = ${teamId} AND (d.item_id, d.version) IN (
+       SELECT v.item_id, v.version FROM semantic_memory_item_versions v
+         JOIN semantic_memory_items i ON i.team_id = v.team_id AND i.id = v.item_id
+        WHERE v.team_id = ${teamId} AND v.source_thread_id IS NOT NULL AND ${gone} AND ${NOT_HELD}
+        LIMIT ${BATCH_SCRUB})`);
   return res.rowCount ?? 0;
 }
 
@@ -123,7 +127,8 @@ async function audited(
   counts: SemanticPurgeCounts,
   userId?: string,
 ): Promise<void> {
-  if (counts.items + counts.versions + counts.scrubbed === 0) return;
+  // An offboarding purge is always recorded, even one that found nothing (review L2).
+  if (reason === "retention" && counts.items + counts.versions + counts.scrubbed === 0) return;
   await recordAudit(tx, {
     action: "retention.semantic_memory_purged",
     actor: SYSTEM_ACTOR,
@@ -173,10 +178,15 @@ export async function purgeSemanticMemory(
   cutoff: Date | null,
   options: { readonly stop?: () => boolean } = {},
 ): Promise<SemanticPurgeCounts> {
-  const scrubbed = await batch(db, teamId, async (tx) => ({
-    ...NO_SEMANTIC_PURGE,
-    scrubbed: await scrubEvidenceInTx(tx, teamId),
-  }));
+  let scrubbed = NO_SEMANTIC_PURGE;
+  for (let n = 0; n < 1000 && !options.stop?.(); n++) {
+    const one = await batch(db, teamId, async (tx) => ({
+      ...NO_SEMANTIC_PURGE,
+      scrubbed: await scrubEvidenceInTx(tx, teamId),
+    }));
+    scrubbed = add(scrubbed, one);
+    if (one.scrubbed < BATCH_SCRUB) break;
+  }
   if (cutoff === null) return scrubbed;
   const items = await repeat(db, teamId, options.stop, (tx) => itemBatch(tx, teamId, cutoff));
   const versions = await repeat(db, teamId, options.stop, (tx) => versionBatch(tx, teamId, cutoff));

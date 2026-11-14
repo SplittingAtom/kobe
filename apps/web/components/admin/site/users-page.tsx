@@ -93,16 +93,25 @@ export function UsersPage() {
         description:
           "Their portable memories (preferences that follow them across workspaces) are deleted for good. Reactivating them later won't bring these back.",
         confirmLabel: "Purge memories",
+        confirmText: user.email,
       },
       trigger,
     );
     if (!yes) return;
     await mutation.run(
-      () => purgePortableMemory(user.id),
+      () => purgePortableMemory(user.id, user.email),
       (result) =>
-        result.kept > 0
-          ? `Purged ${result.purged} of ${user.name}'s memories; ${result.kept} stay while a workspace legal hold covers a run that used them.`
-          : `Purged ${result.purged} of ${user.name}'s memories.`,
+        [
+          `Purged ${result.purged} of ${user.name}'s memories.`,
+          result.kept > 0
+            ? `${result.kept} stay: a run in a workspace under legal hold used them.`
+            : "",
+          result.remaining > 0
+            ? `${result.remaining} are left; choose Purge memories again to continue.`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
     );
   }
 

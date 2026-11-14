@@ -12,6 +12,8 @@ import {
   teamsLeftWithoutActiveAdmin,
 } from "../users/deactivation.js";
 
+const purgeBodySchema = z.strictObject({ confirmEmail: z.string().min(3).max(320) });
+
 const expectedStateSchema = z.strictObject({
   expectedState: z.enum(["active", "deactivated"]).optional(),
 });
@@ -51,11 +53,23 @@ export function siteUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
     });
   });
 
-  /** Checks that the caller may change this user's activation; a Response when not. */
-  async function guard(c: Context<{ Variables: AuthVariables }>, userId: string) {
+  /**
+   * Checks that the caller may change this user's activation (or purge their memories, `what`);
+   * a Response when not.
+   */
+  async function guard(
+    c: Context<{ Variables: AuthVariables }>,
+    userId: string,
+    what: "activation" | "purge" = "activation",
+  ) {
+    const act = what === "purge" ? "purge the memories of" : "deactivate or reactivate";
     if (userId === c.get("user").id) {
       return c.json(
-        { code: "cannot_change_self", message: "You can't deactivate or reactivate yourself." },
+        {
+          code: "cannot_change_self",
+          message:
+            what === "purge" ? "You can't purge your own memories." : `You can't ${act} yourself.`,
+        },
         400,
       );
     }
@@ -73,10 +87,7 @@ export function siteUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
       );
     }
     if (target.role === "admin" && c.get("siteRole") !== "owner") {
-      return c.json(
-        { code: "forbidden", message: "Only the Owner can deactivate or reactivate an Admin." },
-        403,
-      );
+      return c.json({ code: "forbidden", message: `Only the Owner can ${act} an Admin.` }, 403);
     }
     return null;
   }
@@ -146,8 +157,24 @@ export function siteUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
   app.post("/:userId/portable-memory/purge", async (c) => {
     const userId = idSchema.safeParse(c.req.param("userId"));
     if (!userId.success) return invalidRequest(c);
-    const refused = await guard(c, userId.data);
+    const body = purgeBodySchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return invalidRequest(c, "Type the person's email address to confirm.");
+    const refused = await guard(c, userId.data, "purge");
     if (refused) return refused;
+    // One site admin is enough (Chris 2026-11-13, review L3), with a typed confirmation: the
+    // person's email address, checked here as well as in the console.
+    const [target] = await db
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.id, userId.data));
+    if (!target || target.email.toLowerCase() !== body.data.confirmEmail.trim().toLowerCase())
+      return c.json(
+        {
+          code: "confirmation_mismatch",
+          message: "The email address typed doesn't match this person; nothing was purged.",
+        },
+        400,
+      );
     const outcome = await deps.offboarding.purgePortable(userId.data);
     switch (outcome.status) {
       case "purged":
@@ -155,6 +182,8 @@ export function siteUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
           userId: userId.data,
           purged: outcome.counts.items,
           kept: outcome.counts.kept,
+          // More than one call's batches: call again to continue (idempotent).
+          remaining: outcome.remaining,
         });
       case "not_found":
         return c.json({ code: "user_not_found", message: "No Kobe user with that id." }, 404);

@@ -44,6 +44,50 @@ async function open() {
   return screen.findByRole("alertdialog", { name: "Revoke the invitation to c@x.io?" });
 }
 
+function Purge() {
+  const [confirm, dialog] = useConfirm();
+  const [answer, setAnswer] = useState("none");
+  return (
+    <div data-kobe-console="">
+      <button
+        type="button"
+        onClick={async () => {
+          setAnswer(
+            String(
+              await confirm({
+                title: "Purge Gus's memories?",
+                confirmLabel: "Purge memories",
+                confirmText: "gus@x.io",
+              }),
+            ),
+          );
+        }}
+      >
+        Purge
+      </button>
+      <p data-testid="answer">{answer}</p>
+      {dialog}
+    </div>
+  );
+}
+
+describe("typed confirmation (KOBE-386)", () => {
+  it("keeps the confirm button disabled until the exact text is typed", async () => {
+    render(<Purge />);
+    await userEvent.click(screen.getByRole("button", { name: "Purge" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Purge Gus's memories?" });
+    const go = within(dialog).getByRole("button", { name: "Purge memories" });
+    expect((go as HTMLButtonElement).disabled).toBe(true);
+    const field = within(dialog).getByLabelText(/Type gus@x.io to confirm/);
+    await userEvent.type(field, "gus@x.i");
+    expect((go as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.type(field, "O ");
+    expect((go as HTMLButtonElement).disabled).toBe(false);
+    await userEvent.click(go);
+    await waitFor(() => expect(answer()).toBe("true"));
+  });
+});
+
 describe("useConfirm / ConfirmDialog", () => {
   it("asks in an alert dialog in the console root, described, with focus on Cancel", async () => {
     const dialog = await open();

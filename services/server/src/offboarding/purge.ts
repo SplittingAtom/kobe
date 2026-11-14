@@ -330,7 +330,16 @@ export async function departedNotOffboarded(
     const rows = await withTeam(ctx.db, team.id, (tx) =>
       tx.execute<{ user_id: string }>(sql`
         SELECT s.user_id FROM sandboxes s
-         WHERE s.team_id = ${team.id} AND s.state <> 'destroyed'
+         WHERE s.team_id = ${team.id}
+           AND (s.state <> 'destroyed'
+                -- A reopened record (KOBE-386 review H1) whose person left again unnoticed.
+                OR (s.retain_until IS NULL
+                    AND (s.pvc IS NOT NULL
+                         OR EXISTS (SELECT 1 FROM workspace_sync w
+                                     WHERE w.team_id = s.team_id AND w.user_id = s.user_id)
+                         OR EXISTS (SELECT 1 FROM semantic_memory_items i
+                                     WHERE i.team_id = s.team_id AND i.scope = 'user'
+                                       AND i.owner_user_id = s.user_id))))
            AND (NOT EXISTS (SELECT 1 FROM team_members m
                              WHERE m.team_id = s.team_id AND m.user_id = s.user_id)
                 OR EXISTS (SELECT 1 FROM users u
@@ -343,9 +352,9 @@ export async function departedNotOffboarded(
 }
 
 /**
- * Departed owners of personal semantic memories with no open 30-day record (KOBE-386): never had
- * a sandbox there, or came back without waking one and left again. The sweep offboards them
- * (`offboardSandbox` records the window), so their memories go 30 days later.
+ * Departed owners of personal semantic memories with no sandbox record at all (KOBE-386): they
+ * never had a sandbox there. The sweep offboards them (`offboardSandbox` records the window), so
+ * their memories go 30 days later. A reopened record is caught by `departedNotOffboarded`.
  */
 export async function departedMemoryOwners(
   ctx: OffboardingContext,
@@ -363,8 +372,7 @@ export async function departedMemoryOwners(
                             WHERE m.team_id = i.team_id AND m.user_id = i.owner_user_id
                               AND u.deactivated_at IS NULL)
            AND NOT EXISTS (SELECT 1 FROM sandboxes s
-                            WHERE s.team_id = i.team_id AND s.user_id = i.owner_user_id
-                              AND (s.state <> 'destroyed' OR s.retain_until IS NOT NULL))
+                            WHERE s.team_id = i.team_id AND s.user_id = i.owner_user_id)
          LIMIT ${limit - found.length}`),
     );
     found.push(...rows.rows.map((r) => ({ teamId: team.id, userId: r.user_id })));

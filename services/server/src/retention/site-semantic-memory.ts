@@ -1,6 +1,10 @@
 import { SYSTEM_ACTOR, lockLegalHolds, sql, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
-import { portableOwnerUnheld, workspaceHeldMembers } from "../legal-hold/portable-hold.js";
+import {
+  portableHoldsUnchanged,
+  portableOwnerUnheld,
+  snapshotPortableHolds,
+} from "../legal-hold/portable-hold.js";
 import { withSiteMemoryPurge } from "../legal-hold/site-memory-hold.js";
 import { logger } from "../logger.js";
 
@@ -169,7 +173,8 @@ async function siteAudit(
   counts: SitePurgeCounts,
   userId?: string,
 ): Promise<void> {
-  if (counts.items + counts.versions + counts.kept === 0) return;
+  // An admin's purge is always recorded, even one that removed nothing (review L2).
+  if (reason === "retention" && counts.items + counts.versions + counts.kept === 0) return;
   await recordAudit(tx, {
     action: "retention.site_memory_purged",
     ...(reason === "retention" ? { actor: SYSTEM_ACTOR } : {}),
@@ -214,13 +219,19 @@ async function purgeLane(
     const outcome =
       lane === "site"
         ? await withSiteMemoryPurge(db, one)
-        : {
-            held: false as const,
-            value: await withPortablePurge(db, async (tx) => {
-              const frozen = await workspaceHeldMembers(db, tx);
-              return one(tx, (owner) => portableOwnerUnheld(owner, frozen));
-            }),
-          };
+        : await (async () => {
+            // Members of held Workspaces are read before the transaction (review M1).
+            const holds = await snapshotPortableHolds(db);
+            return withPortablePurge(db, async (tx) =>
+              (await portableHoldsUnchanged(tx, holds))
+                ? {
+                    held: false as const,
+                    value: await one(tx, (owner) => portableOwnerUnheld(owner, holds.members)),
+                  }
+                : // A Workspace-wide hold changed meanwhile: the next pass goes on.
+                  { held: true as const },
+            );
+          })();
     if (outcome.held) break;
     total = add(total, outcome.value);
     if (outcome.value.found === 0) break;
@@ -244,55 +255,111 @@ export async function purgeSiteSemanticMemory(
 }
 
 export type PortablePurgeOutcome =
-  | { readonly status: "purged"; readonly counts: SitePurgeCounts }
+  | {
+      readonly status: "purged";
+      readonly counts: SitePurgeCounts;
+      /** Left for another call (the batch budget ran out); 0 when the purge finished. */
+      readonly remaining: number;
+    }
   | { readonly status: "active" | "held" | "not_found" };
 
-/**
- * A site admin's purge of a deactivated person's portable memories (Q7, KOBE-386): until then
- * deactivation keeps them, and reactivation finds them unchanged. Refused for an active account
- * and while a hold covers the person (their own, or a Workspace-wide hold on a Workspace they are
- * in). Items another of the
- * person's items supersedes into go after it; a refused delete (a held Workspace's run record) is
- * kept and counted. Audited as the admin (`retention.site_memory_purged`, counts only).
- */
-export function purgePortableForUser(db: KobeDb, userId: string): Promise<PortablePurgeOutcome> {
-  return withPortablePurge(db, async (tx): Promise<PortablePurgeOutcome> => {
+/** Batches per admin purge call (each its own transaction, hold lock first; review M2). */
+const PURGE_MAX_BATCHES = 20;
+/** Tries when the Workspace-wide holds change between the snapshot and the lock. */
+const SNAPSHOT_TRIES = 3;
+
+type PurgeBatch =
+  | { readonly status: "active" | "held" | "not_found" | "changed" }
+  | {
+      readonly status: "ok";
+      readonly counts: SitePurgeCounts;
+      readonly selected: number;
+      readonly left: number;
+    };
+
+/** One batch of an admin purge in its own READ COMMITTED transaction, re-checking everything. */
+async function portablePurgeBatch(
+  db: KobeDb,
+  userId: string,
+  refused: string[],
+): Promise<PurgeBatch> {
+  const holds = await snapshotPortableHolds(db);
+  return withPortablePurge(db, async (tx): Promise<PurgeBatch> => {
     const user = await tx.execute<{ deactivated: boolean }>(sql`
       SELECT deactivated_at IS NOT NULL AS deactivated FROM users WHERE id = ${userId} FOR SHARE`);
     const row = user.rows[0];
     if (!row) return { status: "not_found" };
     if (!row.deactivated) return { status: "active" };
+    // A Site-wide hold also stops the purge (Chris 2026-11-13, review L1).
+    const site = await tx.execute<{ held: boolean }>(
+      sql`SELECT public.site_legal_hold_active() AS held`,
+    );
+    if (site.rows[0]?.held === true) return { status: "held" };
+    if (!(await portableHoldsUnchanged(tx, holds))) return { status: "changed" };
     const held = await tx.execute<{ held: boolean }>(
-      sql`SELECT NOT ${portableOwnerUnheld(
-        sql`${userId}::uuid`,
-        await workspaceHeldMembers(db, tx),
-      )} AS held`,
+      sql`SELECT NOT ${portableOwnerUnheld(sql`${userId}::uuid`, holds.members)} AS held`,
     );
     if (held.rows[0]?.held === true) return { status: "held" };
-    const tried: string[] = [];
+    // Items nothing else of theirs supersedes into first, so the supersede links never block.
+    const next = await tx.execute<{ id: string; versions: number }>(sql`
+      SELECT i.id::text AS id,
+             (SELECT count(*) FROM portable_memory_item_versions v WHERE v.item_id = i.id)::int
+               AS versions
+        FROM portable_memory_items i
+       WHERE i.owner_user_id = ${userId} AND ${notIn(sql`i.id::text`, refused)}
+         AND NOT EXISTS (SELECT 1 FROM portable_memory_items r
+                          WHERE r.superseded_by = i.id AND ${notIn(sql`r.id::text`, refused)})
+       ORDER BY i.id LIMIT ${BATCH}`);
     let counts = NO_SITE_PURGE;
-    for (;;) {
-      const next = await tx.execute<{ id: string; versions: number }>(sql`
-        SELECT i.id::text AS id,
-               (SELECT count(*) FROM portable_memory_item_versions v WHERE v.item_id = i.id)::int
-                 AS versions
-          FROM portable_memory_items i
-         WHERE i.owner_user_id = ${userId} AND ${notIn(sql`i.id::text`, tried)}
-           AND NOT EXISTS (SELECT 1 FROM portable_memory_items r
-                            WHERE r.superseded_by = i.id AND ${notIn(sql`r.id::text`, tried)})
-         ORDER BY i.id LIMIT ${BATCH}`);
-      if (next.rows.length === 0) break;
-      for (const { id, versions } of next.rows) {
-        tried.push(id);
-        const ok = await tryDelete(
-          tx,
-          sql`DELETE FROM portable_memory_items WHERE id = ${id} AND owner_user_id = ${userId}`,
-          { itemId: id },
-        );
-        counts = add(counts, ok ? { items: 1, versions, kept: 0 } : { ...NO_SITE_PURGE, kept: 1 });
-      }
+    for (const { id, versions } of next.rows) {
+      const ok = await tryDelete(
+        tx,
+        sql`DELETE FROM portable_memory_items WHERE id = ${id} AND owner_user_id = ${userId}`,
+        { itemId: id },
+      );
+      if (!ok) refused.push(id);
+      counts = add(counts, ok ? { items: 1, versions, kept: 0 } : { ...NO_SITE_PURGE, kept: 1 });
     }
-    await siteAudit(tx, "portable", "offboarding", counts, userId);
-    return { status: "purged", counts };
+    const left = await tx.execute<{ n: number }>(sql`
+      SELECT count(*)::int AS n FROM portable_memory_items WHERE owner_user_id = ${userId}`);
+    const n = left.rows[0]?.n ?? 0;
+    // Nothing more can go (refused, or a supersede cycle, review L5): what is left is kept, and
+    // counted once here (the earlier batches counted their own refusals).
+    const stuck = next.rows.length === 0 ? Math.max(0, n - refused.length) : 0;
+    const audited = { ...counts, kept: counts.kept + stuck };
+    await siteAudit(tx, "portable", "offboarding", audited, userId);
+    return { status: "ok", counts: audited, selected: next.rows.length, left: n };
   });
+}
+
+/**
+ * A site admin's purge of a deactivated person's portable memories (Q7, KOBE-386): until then
+ * deactivation keeps them, and reactivation finds them unchanged. Refused for an active account,
+ * while a Site-wide hold is in force (L1), and while a hold covers the person (their own, or a
+ * Workspace-wide hold on a Workspace they are in). Runs in bounded batches, each in its own
+ * transaction with the hold lock and every check repeated (review M2); a call that runs out of
+ * batches reports `remaining`, and calling again continues (idempotent). Items another of the
+ * person's items supersedes into go after it; a refused delete (a held Workspace's run record) or
+ * a supersede cycle is kept and counted (`kept`). Every batch is audited as the admin, also when
+ * it removed nothing (`retention.site_memory_purged`, counts only; review L2).
+ */
+export async function purgePortableForUser(
+  db: KobeDb,
+  userId: string,
+): Promise<PortablePurgeOutcome> {
+  const refused: string[] = [];
+  let counts = NO_SITE_PURGE;
+  let left = 0;
+  for (let b = 0; b < PURGE_MAX_BATCHES; b++) {
+    let batch: PurgeBatch = { status: "changed" };
+    for (let t = 0; t < SNAPSHOT_TRIES && batch.status === "changed"; t++)
+      batch = await portablePurgeBatch(db, userId, refused);
+    if (batch.status === "changed") return { status: "held" };
+    // A hold or a reactivation mid-purge stops it; what went is audited batch by batch.
+    if (batch.status !== "ok") return { status: batch.status };
+    counts = add(counts, batch.counts);
+    left = batch.left;
+    if (batch.selected === 0 || left === 0) return { status: "purged", counts, remaining: 0 };
+  }
+  return { status: "purged", counts, remaining: Math.max(0, left - refused.length) };
 }

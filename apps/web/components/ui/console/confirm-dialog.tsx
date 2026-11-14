@@ -1,10 +1,11 @@
 "use client";
 
 import { AlertDialog } from "radix-ui";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { consolePortalContainer } from "../chat-portal";
 import { Button } from "./button";
 import { consoleMain, focusable, focusWhenEnabled } from "./focus-return";
+import { TextInput } from "./inputs";
 
 export interface ConfirmOptions {
   readonly title: string;
@@ -14,6 +15,11 @@ export interface ConfirmOptions {
   readonly cancelLabel?: string;
   /** `danger` (the default) for removing, revoking, leaving; `primary` otherwise. */
   readonly tone?: "danger" | "primary";
+  /**
+   * A typed confirmation for an irreversible change (KOBE-386): the confirm button stays disabled
+   * until this exact text (case-insensitive, trimmed) is typed into the field it labels.
+   */
+  readonly confirmText?: string;
 }
 
 /**
@@ -34,6 +40,7 @@ export function ConfirmDialog({
   confirmLabel,
   cancelLabel = "Cancel",
   tone = "danger",
+  confirmText,
   returnFocus,
   fallbackFocus = consoleMain,
 }: ConfirmOptions & {
@@ -44,6 +51,13 @@ export function ConfirmDialog({
   readonly returnFocus?: HTMLElement | null;
   readonly fallbackFocus?: () => HTMLElement | null;
 }) {
+  const [typed, setTyped] = useState("");
+  const inputId = useId();
+  useEffect(() => {
+    if (open) setTyped("");
+  }, [open, confirmText]);
+  const matches =
+    confirmText === undefined || typed.trim().toLowerCase() === confirmText.trim().toLowerCase();
   return (
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialog.Portal container={consolePortalContainer()}>
@@ -78,12 +92,33 @@ export function ConfirmDialog({
               {description}
             </AlertDialog.Description>
           )}
+          {confirmText !== undefined && (
+            <div className="mt-4 flex flex-col gap-1">
+              <label htmlFor={inputId} className="text-sm">
+                Type <strong>{confirmText}</strong> to confirm
+              </label>
+              <TextInput
+                id={inputId}
+                value={typed}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(e) => setTyped(e.currentTarget.value)}
+              />
+            </div>
+          )}
           <div className="mt-5 flex flex-wrap justify-end gap-2">
             <AlertDialog.Cancel asChild>
               <Button>{cancelLabel}</Button>
             </AlertDialog.Cancel>
             <AlertDialog.Action asChild>
-              <Button variant={tone} onClick={onConfirm}>
+              <Button
+                variant={tone}
+                disabled={!matches}
+                onClick={(e) => {
+                  if (!matches) return e.preventDefault();
+                  onConfirm();
+                }}
+              >
                 {confirmLabel}
               </Button>
             </AlertDialog.Action>

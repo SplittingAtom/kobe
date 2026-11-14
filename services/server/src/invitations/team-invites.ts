@@ -16,6 +16,7 @@ import {
 } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
 import { normalizeEmail } from "./site-invites.js";
+import { reopenRetentionInTx } from "../offboarding/reopen.js";
 
 /** Team invitations stay open for 14 days (no secret involved: acceptance needs a signed-in user). */
 export const TEAM_INVITE_TTL_DAYS = 14;
@@ -226,6 +227,8 @@ export async function acceptTeamInvite(
       .values({ teamId, userId: user.id, role: invite.role })
       .onConflictDoNothing()
       .returning({ role: teamMembers.role });
+    // A returning member's old 30-day record is reopened (KOBE-386 review H1).
+    if (joined.length > 0) await reopenRetentionInTx(tx, teamId, [user.id]);
     // Already a member that Kobe added for the Skill reviewer grant: accepting an invitation
     // makes them the team's own member, so taking the grant later keeps them (KOBE-331 review).
     // A row an identity provider manages stays managed: only an audited Take over makes it the

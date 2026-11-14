@@ -605,6 +605,11 @@ export function createServerDeps(options: ServerDepsOptions): ServerDeps {
     name: "sandbox-offboarding",
     run: (userId) => offboarding.offboardUser(userId, "deactivated"),
   });
+  // A reactivated member's 30-day records reopen, so a later departure starts afresh (KOBE-386).
+  lifecycle.on("reactivated", {
+    name: "sandbox-offboarding-reopen",
+    run: (userId) => offboarding.reopen(userId),
+  });
 
   const feedbackScores = options.feedbackScores
     ? new FeedbackScores({ db: database.db, ...options.feedbackScores })

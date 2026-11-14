@@ -200,13 +200,13 @@ archived for you. What goes, and when:
 - **Evidence.** When the conversation a memory was learned from is deleted for good, the quote and
   the link to that conversation go with it; the memory itself stays (its source is deleted).
 - **Leaving a workspace.** Your own memories in a workspace are deleted 30 days after you leave it
-  (or after your account is deactivated); coming back within the 30 days keeps them. Workspace and
-  Site memories you wrote stay, shown as written by a former member. Leaving a workspace changes
+  (or after your account is deactivated); coming back within the 30 days keeps them, and leaving again later starts a new 30 days. Workspace and
+  Site memories you wrote stay (once you are removed from the workspace, they show as written by a former member). Leaving a workspace changes
   nothing for the memories that follow you.
 - **Deactivation.** When your account is deactivated (by a site admin, or by your organization's
   identity provider through single sign-on), the memories that follow you are kept, unchanged,
   and are there again when your account is reactivated. Only a site admin removes them earlier,
-  with **Purge memories** on the deactivated account (Site console › Users). A new account made
+  with **Purge memories** on the deactivated account (Site console › Users), never while a legal hold covers you or a Site-wide hold is in force. A new account made
   for you by single sign-on, instead of your old one, starts with no memories.
 - **Legal holds.** A legal hold suspends all of this: a hold on a person keeps their memories (in
   every workspace and the ones that follow them) and the Site memories they wrote; a hold on a

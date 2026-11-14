@@ -93,7 +93,7 @@ async function appendStatement(
     UPDATE ${op.loc.items} i SET current_version = ${version}, updated_at = now()
      WHERE ${op.loc.where} AND i.id = ${row.id}`);
   await pruneVersions(
-    op.db,
+    op.portableHolds,
     op.tx,
     op.loc,
     { id: row.id, currentVersion: version, owner: row.owner_user_id },

@@ -47,9 +47,20 @@ export interface PortablePurgeResult {
   readonly purged: number;
   /** Kept because a run in a workspace under legal hold used them. */
   readonly kept: number;
+  /** Left for another purge (one call works in bounded batches); 0 when done. */
+  readonly remaining: number;
 }
 
-/** Purges a deactivated person's portable memories (KOBE-386; kept until then). */
-export function purgePortableMemory(userId: string): Promise<ApiResult<PortablePurgeResult>> {
-  return apiRequest(`/v1/site/users/${enc(userId)}/portable-memory/purge`, { method: "POST" });
+/**
+ * Purges a deactivated person's portable memories (KOBE-386; kept until then). `confirmEmail`: the
+ * person's email address as the admin typed it (the server checks it too).
+ */
+export function purgePortableMemory(
+  userId: string,
+  confirmEmail: string,
+): Promise<ApiResult<PortablePurgeResult>> {
+  return apiRequest(`/v1/site/users/${enc(userId)}/portable-memory/purge`, {
+    method: "POST",
+    json: { confirmEmail },
+  });
 }

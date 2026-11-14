@@ -23,8 +23,10 @@ access, which is time-boxed, read-only, audited and shown to the team.
 - **Users**: everyone with a Kobe account: site role, two-factor status, deactivate and reactivate.
   Deactivating keeps the person's memories that follow them across workspaces, so reactivating
   restores them unchanged. On a deactivated account, **Purge memories** deletes those memories for
-  good after a confirmation (refused while a legal hold covers the person; memories a run in a
-  held workspace used stay). Their own memories in each workspace go 30 days after deactivation,
+  good once you type the person's email address to confirm (refused while a legal hold covers the
+  person or a Site-wide hold is in force; memories a run in a held workspace used stay; a very
+  large purge reports how many are left: choose it again to continue). Every purge is in the
+  site audit log (`retention.site_memory_purged`), also one that found nothing. Their own memories in each workspace go 30 days after deactivation,
   as when they leave a workspace. See [Memory](../memory.md#how-long-memories-are-kept).
   With single sign-on on, **Single sign-on** on a row shows the person's linked organization
   sign-ins (**Unlink**) and **Expect SSO link**: their next sign-in from the chosen provider links

@@ -112,12 +112,12 @@ describe("Users", () => {
     await waitFor(() => expect(document.activeElement).toBe(button));
   });
 
-  it("offers Purge memories only for deactivated users, asks first and reports kept ones (KOBE-386)", async () => {
+  it("offers Purge memories only for deactivated users, needs the typed email and reports what is left (KOBE-386)", async () => {
     const calls = stubApi({
       "GET /v1/site/users": [200, USERS],
       "POST /v1/site/users/u-gone/portable-memory/purge": [
         200,
-        { user_id: "u-gone", purged: 3, kept: 1 },
+        { user_id: "u-gone", purged: 3, kept: 1, remaining: 2 },
       ],
     });
     renderSite(<UsersPage />);
@@ -127,12 +127,22 @@ describe("Users", () => {
     await answerConfirm("Purge Gus's personal memories?", "Cancel");
     expect(userCalls(calls)).toEqual(["GET /v1/site/users"]);
     await userEvent.click(purge);
-    expect(await answerConfirm("Purge Gus's personal memories?", "Purge memories")).toMatch(
-      /won't bring these back/,
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Purge Gus's personal memories?",
+    });
+    expect(dialog.textContent).toMatch(/won't bring these back/);
+    const go = within(dialog).getByRole("button", { name: "Purge memories" });
+    expect((go as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.type(
+      within(dialog).getByLabelText(/Type u-gone@x.io to confirm/),
+      "u-gone@x.io",
     );
+    await userEvent.click(go);
     const status = await screen.findByText(/Purged 3 of Gus's memories/);
-    expect(status.textContent).toMatch(/1 stay while a workspace legal hold/);
-    expect(userCalls(calls)).toContain("POST /v1/site/users/u-gone/portable-memory/purge");
+    expect(status.textContent).toMatch(/1 stay: a run in a workspace under legal hold/);
+    expect(status.textContent).toMatch(/2 are left; choose Purge memories again/);
+    const sent = calls.find((c) => c.url.endsWith("/portable-memory/purge"));
+    expect(JSON.parse(String(sent?.body))).toEqual({ confirmEmail: "u-gone@x.io" });
   });
 
   it("asks before reactivating", async () => {
