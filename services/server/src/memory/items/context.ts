@@ -15,6 +15,8 @@ type SQL = ReturnType<typeof sql>;
 
 /** One store call: the scope's location, the switches and Site settings, in one transaction. */
 export interface Op {
+  /** For reads another Workspace's RLS needs (`withTeam` on its own connection). */
+  readonly db: KobeDb;
   readonly tx: KobeTx;
   readonly loc: Location;
   readonly who: MemoryWho;
@@ -39,6 +41,7 @@ export async function inStore<T>(
   const teamId = who.teamId;
   const body = async (tx: KobeTx) => {
     const op: Op = {
+      db,
       tx,
       who,
       loc: locate(scope, teamId, who.userId),

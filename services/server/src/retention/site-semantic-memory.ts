@@ -1,5 +1,6 @@
-import { SYSTEM_ACTOR, lockLegalHolds, sql, withTeam, type KobeDb, type KobeTx } from "@kobe/db";
+import { SYSTEM_ACTOR, lockLegalHolds, sql, type KobeDb, type KobeTx } from "@kobe/db";
 import { recordAudit } from "../audit/record.js";
+import { portableOwnerUnheld, workspaceHeldMembers } from "../legal-hold/portable-hold.js";
 import { withSiteMemoryPurge } from "../legal-hold/site-memory-hold.js";
 import { logger } from "../logger.js";
 
@@ -51,35 +52,6 @@ const notIn = (column: SQL, values: readonly string[]) =>
         values.map((v) => sql`${v}`),
         sql`, `,
       )}]::text[]))`;
-
-/**
- * A portable item's owner is free of holds (lock taken by the caller): no active hold names them,
- * and they are not a member of a Workspace under a Workspace-wide hold (`frozen`, from
- * {@link workspaceHeldMembers}; KOBE-386 Q2).
- */
-export const portableOwnerUnheld = (owner: SQL, frozen: readonly string[]): SQL => sql`(NOT EXISTS (
-  SELECT 1 FROM legal_holds h WHERE h.status = 'active' AND h.user_id = ${owner})
-  AND ${notIn(sql`${owner}::text`, frozen)})`;
-
-/**
- * Members of every Workspace under an active Workspace-wide hold (`legal_holds.user_id` NULL),
- * read inside the caller's transaction after the hold lock (no hold can be approved meanwhile).
- * `team_members` stays behind its RLS: each held Workspace is read in its own `withTeam`.
- */
-async function workspaceHeldMembers(db: KobeDb, tx: KobeTx): Promise<string[]> {
-  const holds = await tx.execute<{ team_id: string }>(sql`
-    SELECT DISTINCT team_id FROM legal_holds WHERE status = 'active' AND user_id IS NULL`);
-  const members = new Set<string>();
-  for (const { team_id } of holds.rows) {
-    const rows = await withTeam(db, team_id, (t) =>
-      t.execute<{ user_id: string }>(
-        sql`SELECT user_id FROM team_members WHERE team_id = ${team_id}`,
-      ),
-    );
-    for (const r of rows.rows) members.add(r.user_id);
-  }
-  return [...members];
-}
 
 /** Runs one delete in a savepoint; false when a guard refused it (kept). */
 async function tryDelete(tx: KobeTx, statement: SQL, what: Record<string, unknown>) {

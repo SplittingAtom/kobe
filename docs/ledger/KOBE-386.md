@@ -23,7 +23,8 @@ Holds: Workspace rows use `memory_legal_hold_covers` (owner's hold; any hold in 
 `unheld(item)` skips items a held person wrote). Portable rows (Q2, coordinator 2026-11-13): an active
 hold on the owner, or a Workspace-wide hold on a Workspace the owner is a member of (members read
 per held Workspace with `withTeam`, inside the locked transaction). The version cap's prune
-(`memory/items/versions.ts`) keeps its broader rule (any Workspace-wide hold): it only keeps more.
+(`memory/items/versions.ts`) uses the same rule (`legal-hold/portable-hold.ts`; `Op.db` added for
+the per-Workspace reads); Site and Workspace items keep their KOBE-647/376 rules.
 
 Run records of the portable/Site lanes are in Workspace tables the site-wide transaction cannot
 see, so each portable/Site delete runs in a savepoint: a delete the 0217/0222 guards refuse (a run
@@ -85,7 +86,8 @@ the guide. Audit names in `docs/audit-log.md`.
 - ac-2: › offboarding (30-day purge, former-member item stays, portable stays; inside window /
   hold / returned member keep; no-sandbox owner gets the window) and › deactivation (admin purge:
   active 409, held 409, purge + audit as admin).
-- Q2: › Workspace-wide holds and portable items (sweep + admin purge, member vs non-member).
+- Q2: › Workspace-wide holds and portable items (sweep + admin purge, member vs non-member);
+  `memory-items-limits.db.test.ts` › version cap (prune kept for a held Workspace's member only).
 - Stale: › stale (flags, `stale=true|false`, threshold setting); `memory/items/stale.test.ts`;
   protocol `semantic-memory.test.ts`.
 - ac-3: › deactivation (SCIM deactivate → sweeps → refused by another source → reactivated by the

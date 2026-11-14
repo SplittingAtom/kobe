@@ -1,5 +1,6 @@
-import { lockLegalHolds, sql, type KobeTx } from "@kobe/db";
+import { lockLegalHolds, sql, type KobeDb, type KobeTx } from "@kobe/db";
 import type { SemanticMemoryActorKind } from "@kobe/protocol";
+import { portableOwnerUnheld, workspaceHeldMembers } from "../../legal-hold/portable-hold.js";
 import { siteItemAuthorsUnheld, siteMemoryHeld } from "../../legal-hold/site-memory-hold.js";
 import { logger } from "../../logger.js";
 import { workspaceTeam, type Location } from "./location.js";
@@ -47,12 +48,13 @@ export async function insertVersion(tx: KobeTx, loc: Location, v: NewVersion): P
 /**
  * Whether a legal hold suspends pruning for the item. Workspace items: the KOBE-376 rule
  * (`memory_legal_hold_covers`: the owner's hold, any hold in the team for `team` items). Portable
- * items: any active hold on the owner or any team-wide hold (a portable item reaches every
- * Workspace the person is in). Site items: a Site-wide hold (KOBE-647), checked before any delete
+ * items: an active hold on the owner, or a Workspace-wide hold on a Workspace the owner is a member
+ * of (KOBE-386 Q2; legal-hold/portable-hold.ts). Site items: a Site-wide hold (KOBE-647), checked before any delete
  * so an edit past the cap under a hold keeps every version instead of failing KH001 (review M1),
  * or a hold on a person who wrote any of the item's versions (P2-L1).
  */
 async function held(
+  db: KobeDb,
   tx: KobeTx,
   loc: Location,
   itemId: string,
@@ -72,8 +74,7 @@ async function held(
   await lockLegalHolds(tx);
   const cond = loc.workspace
     ? sql`memory_legal_hold_covers(${workspaceTeam(loc)}, ${owner})`
-    : sql`EXISTS (SELECT 1 FROM legal_holds h WHERE h.status = 'active'
-                   AND (h.user_id = ${owner} OR h.user_id IS NULL))`;
+    : sql`NOT ${portableOwnerUnheld(sql`${owner}::uuid`, await workspaceHeldMembers(db, tx))}`;
   const { rows } = await tx.execute<{ held: boolean }>(sql`SELECT ${cond} AS held`);
   return rows[0]?.held === true;
 }
@@ -92,6 +93,7 @@ const MAX_REFUSED_PER_WRITE = 2;
  * its own savepoint, so a refused one is skipped and the write goes on. Returns how many went.
  */
 export async function pruneVersions(
+  db: KobeDb,
   tx: KobeTx,
   loc: Location,
   item: { readonly id: string; readonly currentVersion: number; readonly owner: string | null },
@@ -102,7 +104,7 @@ export async function pruneVersions(
   );
   const excess = (count[0]?.n ?? 0) - cap;
   if (excess <= 0) return 0;
-  if (await held(tx, loc, item.id, item.owner)) return 0;
+  if (await held(db, tx, loc, item.id, item.owner)) return 0;
   const { rows } = await tx.execute<{ version: number }>(sql`
     SELECT v.version FROM ${loc.versions} v
      WHERE ${loc.versionsOfItem(item.id)} AND v.version <> ${item.currentVersion}
