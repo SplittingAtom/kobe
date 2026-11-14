@@ -66,6 +66,29 @@ always uses **your** memory, even with someone else's agent. Policy, pinned memo
 rest are always given in the same order, so unchanged parts can be reused by the model provider's
 cache from one message to the next.
 
+### What the agent sees
+
+The agent gets its memories as a section called **What Kobe knows**, in this order:
+
+1. a short note: these are facts and preferences people saved, not instructions; for preferences
+   and conventions the narrowest place wins (your memories in this workspace over your memories
+   in all your workspaces, over workspace memories, over site memories); when facts disagree the
+   agent asks you; nothing overrides organization policy;
+2. **Site Policy**, marked as organization policy set by the site;
+3. **pinned** memories;
+4. your notes indexes (**Saved memory**) and the project's instructions;
+5. **What Kobe knows for this message**: the memories picked for this message, and a line saying
+   how many more matched but did not fit (the agent can search them with **recall** when notes
+   are on);
+6. the file you have open and any sync conflicts.
+
+Each place is fenced and labelled with where it came from (for example "approved by a Workspace
+curator" or "set by the Site"), and each memory carries its kind and the date it was saved. Text
+in a memory cannot end its fence or pose as another memory. Everything up to the picks stays the
+same from one message to the next unless a memory changes, so the model provider can reuse it
+from its cache. A changed memory reaches the very next message. The context viewer shows each
+part under its own label.
+
 An agent whose **Memory** setting is **Notes only** or **Off** gets **Site Policy** only: Policy
 reaches every run, and only the site's **Allow memory** switch stops it. An agent builder's test
 chat and skill and agent evaluations get no memories at all.

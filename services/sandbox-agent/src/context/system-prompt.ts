@@ -3,6 +3,7 @@ import { MEMORY_HEADER } from "../memory/context.js";
 import { PROJECT_HEADER } from "../memory/project-context.js";
 import { VIEWING_HEADER } from "../memory/viewing-context.js";
 import { CONFLICTS_HEADER } from "../memory/conflict-context.js";
+import { KNOWN_HEADER, PICKS_HEADER, type SemanticSection } from "../memory/semantic-context.js";
 
 /**
  * The system prompt of a model call, split into the context viewer's sections (KOBE-470, CV3).
@@ -29,6 +30,11 @@ export interface KobePromptParts {
   readonly viewing: string;
   /** Sync conflicts told at the run's start (KOBE-492); optional for older parts. */
   readonly conflicts?: string;
+  /** What Kobe knows (KOBE-383): the stable part and the per-message picks, with their lanes. */
+  readonly known?: string;
+  readonly picks?: string;
+  readonly knownSections?: readonly SemanticSection[];
+  readonly picksSections?: readonly SemanticSection[];
 }
 
 const SECTION_KINDS: Readonly<Record<string, ContextSectionKind>> = {
@@ -89,18 +95,37 @@ function section(name: string, text: string): RawSection {
   return { kind: kindOfSection(name), label: labelOfSection(name), text };
 }
 
+type TextPart = "memory" | "project" | "viewing" | "conflicts" | "known" | "picks";
+
+/** kobe-tools' parts in the order it appends them (kobe-tools/memory-hooks.ts, KOBE-383). */
 const KOBE_SECTIONS: readonly {
-  readonly part: keyof KobePromptParts;
+  readonly part: TextPart;
   readonly header: string;
   readonly kind: ContextSectionKind;
   readonly label: string;
+  /** The part's own sections (What Kobe knows: one per lane), when the agent wrote them. */
+  readonly sections?: "knownSections" | "picksSections";
 }[] = [
+  {
+    part: "known",
+    header: KNOWN_HEADER,
+    kind: "memory",
+    label: "What Kobe knows",
+    sections: "knownSections",
+  },
   { part: "memory", header: MEMORY_HEADER, kind: "memory", label: "Saved memory" },
   {
     part: "project",
     header: PROJECT_HEADER,
     kind: "agent_instructions",
     label: "Project instructions",
+  },
+  {
+    part: "picks",
+    header: PICKS_HEADER,
+    kind: "memory",
+    label: "What Kobe knows for this message",
+    sections: "picksSections",
   },
   { part: "viewing", header: VIEWING_HEADER, kind: "viewing_file", label: "Viewed file" },
   {
@@ -111,6 +136,16 @@ const KOBE_SECTIONS: readonly {
   },
 ];
 
+function partSections(s: (typeof KOBE_SECTIONS)[number], parts: KobePromptParts): RawSection[] {
+  const text = parts[s.part] ?? "";
+  const own = s.sections === undefined ? undefined : parts[s.sections];
+  // Lane sections only when they still add up to the part (joined by "\n", semantic-context.ts).
+  if (own !== undefined && own.length > 0 && own.map((o) => o.text).join("\n") === text) {
+    return own.map((o) => ({ kind: s.kind, label: o.label, text: o.text }));
+  }
+  return [{ kind: s.kind, label: s.label, text }];
+}
+
 /** A forced prompt: Pi's rendered prompt, then kobe-tools' parts (each after a blank line). */
 export function splitForcedPrompt(text: string, parts: KobePromptParts | undefined): RawSection[] {
   if (parts !== undefined) {
@@ -119,7 +154,7 @@ export function splitForcedPrompt(text: string, parts: KobePromptParts | undefin
     if (present.length > 0 && text.endsWith(suffix)) {
       return [
         ...splitRenderedPrompt(text.slice(0, text.length - suffix.length)),
-        ...present.map((s) => ({ kind: s.kind, label: s.label, text: parts[s.part] ?? "" })),
+        ...present.flatMap((s) => partSections(s, parts)),
       ];
     }
   }

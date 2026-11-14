@@ -7,6 +7,8 @@ import { TOOL_COMMIT_PROJECT, TOOL_RECALL, TOOL_REMEMBER } from "./protocol.js";
  * run's memory file (`KOBE_MEMORY_FILE`, memory/context-file.ts) before every prompt, so a change
  * to memory never restarts Pi:
  *  - `tools`: whether memory is on for this run; `remember` / `recall` are active only then;
+ *  - `known` / `picks` (KOBE-383): "What Kobe knows", the stable part first and the per-message
+ *    picks after the project instructions; added with or without Notes (Policy reaches every agent);
  *  - `text`: the run's memory section (already sanitised, capped and fenced by the agent), added
  *    to that run's system prompt only: not part of the launch, not stored in the session;
  *  - `project` and `viewing` (KOBE-245, KOBE-462): the project instructions and the fenced file
@@ -18,6 +20,10 @@ import { TOOL_COMMIT_PROJECT, TOOL_RECALL, TOOL_REMEMBER } from "./protocol.js";
 export interface MemoryRunFile {
   readonly tools: boolean;
   readonly text: string;
+  /** What Kobe knows, stable part (KOBE-383): first, with or without Notes. */
+  readonly known: string;
+  /** What Kobe knows, per-message picks (KOBE-383): after the project instructions. */
+  readonly picks: string;
   /** The project-instructions block (KOBE-245); independent of whether memory is on. */
   readonly project: string;
   /** The viewed-file section (KOBE-462); independent of whether memory is on. */
@@ -32,6 +38,8 @@ export interface MemoryRunFile {
 const OFF: MemoryRunFile = {
   tools: false,
   text: "",
+  known: "",
+  picks: "",
   project: "",
   viewing: "",
   conflicts: "",
@@ -58,13 +66,17 @@ export function readMemoryRunFile(
     const viewing = optionalText(record.viewing);
     const conflicts = optionalText(record.conflicts);
     const conflictsLive = optionalText(record.conflicts_live);
-    if ([project, viewing, conflicts, conflictsLive].includes(false)) return OFF;
+    const known = optionalText(record.known);
+    const picks = optionalText(record.picks);
+    if ([project, viewing, conflicts, conflictsLive, known, picks].includes(false)) return OFF;
     // Absent in files from an older agent: no write access (fail closed).
     const projectWrite = record.project_write ?? false;
     if (typeof projectWrite !== "boolean") return OFF;
     return {
       tools,
       text: tools ? text : "",
+      known: known || "",
+      picks: picks || "",
       project: project || "",
       viewing: viewing || "",
       conflicts: conflicts || "",
@@ -104,8 +116,10 @@ export function installMemoryHooks(
   };
   pi.on("input", syncTools as never);
   pi.on("before_agent_start", ((event: { systemPrompt: string }) => {
-    const { text, project, viewing, conflicts } = state();
-    const parts = [text, project, viewing, conflicts].filter((part) => part !== "");
+    // Stable first, so the provider caches the longest prefix (KOBE-383, Q6): What Kobe knows'
+    // stable part, Notes, project instructions; then what changes per message.
+    const { known, text, project, picks, viewing, conflicts } = state();
+    const parts = [known, text, project, picks, viewing, conflicts].filter((part) => part !== "");
     return parts.length === 0
       ? undefined
       : { systemPrompt: `${event.systemPrompt}\n\n${parts.join("\n\n")}` };

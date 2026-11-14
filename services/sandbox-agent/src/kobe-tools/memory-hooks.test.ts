@@ -28,6 +28,8 @@ describe("readMemoryRunFile", () => {
     expect(readMemoryRunFile(undefined)).toEqual({
       tools: false,
       text: "",
+      known: "",
+      picks: "",
       project: "",
       viewing: "",
       conflicts: "",
@@ -41,6 +43,8 @@ describe("readMemoryRunFile", () => {
     ).toEqual({
       tools: false,
       text: "",
+      known: "",
+      picks: "",
       project: "",
       viewing: "",
       conflicts: "",
@@ -50,6 +54,8 @@ describe("readMemoryRunFile", () => {
     expect(readMemoryRunFile("/x", () => "not json")).toEqual({
       tools: false,
       text: "",
+      known: "",
+      picks: "",
       project: "",
       viewing: "",
       conflicts: "",
@@ -59,6 +65,8 @@ describe("readMemoryRunFile", () => {
     expect(readMemoryRunFile("/x", file({ tools: "yes", text: 1 }))).toEqual({
       tools: false,
       text: "",
+      known: "",
+      picks: "",
       project: "",
       viewing: "",
       conflicts: "",
@@ -70,6 +78,8 @@ describe("readMemoryRunFile", () => {
     expect(readMemoryRunFile("/x", file({ tools: false, text: "secret" }))).toEqual({
       tools: false,
       text: "",
+      known: "",
+      picks: "",
       project: "",
       viewing: "",
       conflicts: "",
@@ -79,6 +89,8 @@ describe("readMemoryRunFile", () => {
     expect(readMemoryRunFile("/x", file({ tools: true, text: "idx" }))).toEqual({
       tools: true,
       text: "idx",
+      known: "",
+      picks: "",
       project: "",
       viewing: "",
       conflicts: "",
@@ -89,6 +101,8 @@ describe("readMemoryRunFile", () => {
     expect(readMemoryRunFile("/x", file({ tools: false, text: "", project: "P" }))).toEqual({
       tools: false,
       text: "",
+      known: "",
+      picks: "",
       project: "P",
       viewing: "",
       conflicts: "",
@@ -141,6 +155,55 @@ describe("installMemoryHooks", () => {
     });
   });
 
+  it("orders What Kobe knows for caching: stable part, Notes, project, picks, then viewing and conflicts (KOBE-383)", () => {
+    const pi = fakePi([]);
+    installMemoryHooks(pi.api, "/f", () =>
+      JSON.stringify({
+        tools: true,
+        text: "NOTES",
+        known: "KNOWN",
+        picks: "PICKS",
+        project: "PROJ",
+        viewing: "VIEW",
+        conflicts: "CONF",
+      }),
+    );
+    expect(pi.fire("before_agent_start", { systemPrompt: "base" })).toEqual({
+      systemPrompt: "base\n\nKNOWN\n\nNOTES\n\nPROJ\n\nPICKS\n\nVIEW\n\nCONF",
+    });
+  });
+
+  it("keeps What Kobe knows with Notes off (Policy reaches every agent, KOBE-383)", () => {
+    const pi = fakePi(["bash", "remember", "recall"]);
+    installMemoryHooks(pi.api, "/f", () =>
+      JSON.stringify({ tools: false, text: "NOTES", known: "KNOWN", picks: "" }),
+    );
+    pi.fire("input");
+    expect(pi.active()).toEqual(["bash"]);
+    expect(pi.fire("before_agent_start", { systemPrompt: "base" })).toEqual({
+      systemPrompt: "base\n\nKNOWN",
+    });
+  });
+
+  it("fails closed on a malformed What Kobe knows field", () => {
+    const pi = fakePi([]);
+    installMemoryHooks(pi.api, "/f", () => JSON.stringify({ tools: true, text: "N", known: 1 }));
+    expect(pi.fire("before_agent_start", { systemPrompt: "base" })).toBeUndefined();
+  });
+
+  it("a changed item reaches the next run's prompt from the file alone, no restart (KOBE-383 ac-2)", () => {
+    let content: unknown = { tools: true, text: "", known: "KNOWN v1" };
+    const pi = fakePi([]);
+    installMemoryHooks(pi.api, "/f", () => JSON.stringify(content));
+    expect(pi.fire("before_agent_start", { systemPrompt: "base" })).toEqual({
+      systemPrompt: "base\n\nKNOWN v1",
+    });
+    content = { tools: true, text: "", known: "KNOWN v2" };
+    expect(pi.fire("before_agent_start", { systemPrompt: "base" })).toEqual({
+      systemPrompt: "base\n\nKNOWN v2",
+    });
+  });
+
   it("strips invisible characters from a remember call before kobe-policy sees it", () => {
     const pi = fakePi([]);
     installMemoryHooks(pi.api, undefined);
@@ -166,6 +229,8 @@ describe("viewed file in the run's prompt (KOBE-462)", () => {
     expect(readMemoryRunFile("/x", file({ tools: false, text: "", viewing: 3 }))).toEqual({
       tools: false,
       text: "",
+      known: "",
+      picks: "",
       project: "",
       viewing: "",
       conflicts: "",
@@ -210,6 +275,8 @@ describe("sync conflict notes (KOBE-492)", () => {
     expect(readMemoryRunFile("/x", file({ tools: true, text: "m", conflicts_live: 1 }))).toEqual({
       tools: false,
       text: "",
+      known: "",
+      picks: "",
       project: "",
       viewing: "",
       conflicts: "",

@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 
 /**
  * Untrusted framing for saved memory (KOBE-157, review of #205). Memory text was written by people
@@ -14,6 +14,16 @@ export const MARKER_END = "<<<END UNTRUSTED MEMORY";
 /** Unpredictable to whoever wrote the memory: fresh for every recall and every run. */
 export function newNonce(): string {
   return randomBytes(8).toString("hex");
+}
+
+/**
+ * A fence nonce that stays the same for every run of one thread (KOBE-383): the HMAC of the thread
+ * id under a key the caller keeps to itself, so the block around it is byte-stable across runs and
+ * the model provider can cache it, yet one thread's nonce tells nothing about another's, and text
+ * in memory cannot predict it.
+ */
+export function deriveNonce(key: Uint8Array, id: string): string {
+  return createHmac("sha256", key).update(`kobe-memory-fence:${id}`).digest("hex").slice(0, 16);
 }
 
 export const beginMarker = (nonce: string): string => `${MARKER_BEGIN} ${nonce}>>>`;
@@ -44,7 +54,8 @@ export function sanitizeUntrusted(value: string): string {
   return folded.replace(HIDDEN, "").replace(/<{3,}/g, (run) => run.split("").join(" "));
 }
 
-const oneLine = (value: string): string => sanitizeUntrusted(value).replace(/\s+/g, " ").trim();
+export const oneLine = (value: string): string =>
+  sanitizeUntrusted(value).replace(/\s+/g, " ").trim();
 
 /** At most `maxBytes` of UTF-8, never cutting a character in half. */
 export function capBytes(value: string, maxBytes: number): { text: string; cut: boolean } {
@@ -76,4 +87,16 @@ export function untrustedMemoryBlock(
   if (note !== undefined) lines.push(note);
   lines.push(endMarker(nonce));
   return lines.join("\n");
+}
+
+/**
+ * A fenced list (KOBE-383, "What Kobe knows"): a label line, then one line per entry, each
+ * sanitised to a single line so an entry can neither close the fence nor fake another entry.
+ */
+export function untrustedLinesBlock(
+  nonce: string,
+  label: string,
+  lines: readonly string[],
+): string {
+  return [beginMarker(nonce), oneLine(label), ...lines.map(oneLine), endMarker(nonce)].join("\n");
 }

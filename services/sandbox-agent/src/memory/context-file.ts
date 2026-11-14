@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { writeFileAtomic } from "../atomic-file.js";
+import type { SemanticSection } from "./semantic-context.js";
 
 /**
  * The per-run memory file (KOBE-157): `<runtimeDir>/memory-context.json`, agent-owned like the model
@@ -12,7 +13,18 @@ export const MEMORY_FILE_ENV = "KOBE_MEMORY_FILE";
 
 export interface MemoryFileContent {
   readonly tools: boolean;
+  /** The Notes section (KOBE-157); empty with Notes off. */
   readonly text: string;
+  /**
+   * What Kobe knows, stable part (KOBE-383: title, preamble, Policy, pinned items): first in the
+   * run's additions, with or without Notes. Absent when the run has no semantic memory.
+   */
+  readonly known?: string;
+  /** The per-message picks and the overflow line (KOBE-383): after the project instructions. */
+  readonly picks?: string;
+  /** The context viewer's sections of `known` / `picks` (agent memory only, not in the file). */
+  readonly knownSections?: readonly SemanticSection[];
+  readonly picksSections?: readonly SemanticSection[];
   /** Project instructions block (KOBE-245); empty for a non-project run. */
   readonly project: string;
   /** The viewed-file section (KOBE-462); empty when the run has none. */
@@ -44,6 +56,8 @@ export class MemoryContextFile {
     const text = JSON.stringify({
       tools: content.tools,
       text: content.text,
+      known: content.known ?? "",
+      picks: content.picks ?? "",
       project: content.project,
       viewing: content.viewing ?? "",
       conflicts: content.conflicts ?? "",
