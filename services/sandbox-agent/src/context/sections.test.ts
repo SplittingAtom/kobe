@@ -134,7 +134,7 @@ describe("system prompt sections (KOBE-470)", () => {
         "memory:Policy",
         "memory:Workspace memories (pinned)",
         "memory:Saved memory",
-        "memory:My memories in this workspace",
+        "memory:Only in this workspace",
         "viewing_file:Viewed file",
       ]);
       // A part's lane sections are joined by one newline, the parts by a blank line.

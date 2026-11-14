@@ -144,8 +144,8 @@ describe("What Kobe knows (KOBE-383)", () => {
     ]);
     expect(r.picksSections.map((s) => s.label)).toEqual([
       "Workspace memories",
-      "My memories in all my workspaces",
-      "My memories in this workspace",
+      "All my workspaces",
+      "Only in this workspace",
     ]);
     expect(r.knownSections.map((s) => s.text).join("\n")).toBe(r.known);
     expect(r.picksSections.map((s) => s.text).join("\n")).toBe(r.picks);
