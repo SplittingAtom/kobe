@@ -163,6 +163,7 @@ export function memoryRouteKit(deps: ServerDeps) {
       memorySteward: team ? await isWorkspaceSteward(db, team.id, userId) : false,
       siteRole: c.get("siteRole"),
       grants: await grantsOf(db, userId),
+      viaAgent: delegationOf(c) !== undefined,
     };
   };
 

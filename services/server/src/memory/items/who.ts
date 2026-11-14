@@ -22,6 +22,11 @@ export interface MemoryWho {
   readonly memorySteward: boolean;
   readonly siteRole: SiteRole;
   readonly grants: readonly SiteGrant[];
+  /**
+   * The call comes from a Kobe admin tool inside a run (KOBE-650): it reads what that Workspace's
+   * runs may see, so the Workspace's switches apply even to Site curators.
+   */
+  readonly viaAgent?: boolean;
 }
 
 /** What a write touches on a Site item (KOBE-380 review M-1): any Policy change needs admins. */

@@ -162,6 +162,14 @@ describe("personal and portable items are never returned (ac-1)", () => {
       { method: "POST", path: "/memory/semantic/items", body: { nonsense: true } },
       { method: "PATCH", path: `/memory/semantic/items/team/${team}`, body: "x" },
       { method: "POST", path: `/memory/semantic/items/nowhere/not-an-id/pin` },
+      // Import and export (KOBE-385) too: an agent never imports, and export writes an audit row.
+      {
+        method: "POST",
+        path: "/memory/semantic/import/commit",
+        body: { scope: "team", format: "csv", content: "statement,kind\nx,fact\n", accept: [0] },
+      },
+      { method: "POST", path: "/memory/semantic/import/preview", body: { nonsense: true } },
+      { method: "POST", path: "/memory/semantic/export", body: { scope: "team" } },
     ] as const;
     for (const route of [...writes, ...malformed]) {
       const r = await asAdmin(route);

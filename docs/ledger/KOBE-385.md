@@ -65,6 +65,9 @@ served them), the two console pages, guide, browser spec.
   Site's switches only, never their active Workspace's (`items/context.ts` `inStore`); switches
   govern what reaches runs. Supersedes KOBE-378 review L-4 (test updated). Workspace items never
   depended on the Workspace's Site memories switch. Test: transfer db test "curation ignores…".
+  Rebased on main with KOBE-650: a Kobe admin tool's call (`MemoryWho.viaAgent`) keeps the
+  Workspace's switches (it reads what that Workspace's runs see), and `refuseAgentWrites` (403
+  before the body) also guards import, commit and export (kobe-mcp-memory db test).
 - **TODO (KOBE-386)**: the status filter has no "stale" yet — KOBE-386 defines staleness; add it
   to `STATUS_LABELS` in `components/memory/curator-memories.tsx` (or a separate filter) then.
 
