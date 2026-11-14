@@ -148,6 +148,44 @@ describe("site legal hold page", () => {
   });
 });
 
+const siteHold = (over: Record<string, unknown> = {}) => {
+  const { team: _t, scope: _s, subject: _u, ...rest } = hold({ id: "s-1", ...over });
+  return rest;
+};
+
+describe("Site-wide legal hold (KOBE-647)", () => {
+  it("requests a Site-wide hold with a reason, and a second admin places one", async () => {
+    const calls = stubApi({
+      "GET /v1/site/legal-hold": [200, { holds: [], selfApprovalAllowed: false }],
+      "GET /v1/site/teams": [200, TEAMS],
+      "GET /v1/site/site-legal-hold": [
+        200,
+        { holds: [siteHold()], active: false, selfApprovalAllowed: false },
+      ],
+      "POST /v1/site/site-legal-hold": [201, { hold: siteHold({ id: "s-2" }) }],
+      "POST /v1/site/site-legal-hold/s-1/approve": [200, { hold: siteHold({ status: "active" }) }],
+    });
+    renderSite(<LegalHoldPage />);
+    await screen.findByText("Site memory is not held");
+    const form = await screen.findByRole("form", { name: "Request a Site-wide legal hold" });
+    await userEvent.type(
+      within(form).getByLabelText("Reason for the Site-wide hold"),
+      "Litigation matter 9",
+    );
+    await userEvent.click(within(form).getByRole("button", { name: "Request Site-wide hold" }));
+    await screen.findByText(/Requested a Site-wide hold. A second site admin must place it/);
+    const post = must(calls.find((c) => c.method === "POST"));
+    expect(post.url).toBe("/v1/site/site-legal-hold");
+    expect(JSON.parse(String(post.body))).toEqual({ reason: "Litigation matter 9" });
+
+    const table = await screen.findByRole("table", { name: "Site-wide holds" });
+    await userEvent.click(within(table).getByRole("button", { name: "Place" }));
+    await answerConfirm(/^Place the Site-wide legal hold\?/, "Place");
+    await screen.findByText(/Site memories and their versions are kept/);
+    expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/s-1/approve"))).toBe(true);
+  });
+});
+
 describe("site legal hold confirmation", () => {
   it("sends nothing when the decision is cancelled", async () => {
     const calls = stubApi({

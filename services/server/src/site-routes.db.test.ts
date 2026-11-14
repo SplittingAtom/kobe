@@ -21,6 +21,7 @@ const READS = [
   "budget",
   "break-glass",
   "legal-hold",
+  "site-legal-hold",
   "retention",
   "connectors",
   "skill-blocklist",

@@ -16,6 +16,9 @@ export const requestHoldSchema = z.strictObject({
 });
 export type RequestHoldBody = z.infer<typeof requestHoldSchema>;
 
+/** `POST /v1/site/site-legal-hold` (KOBE-647): a Site-wide hold names no team, only a reason. */
+export const requestSiteHoldSchema = z.strictObject({ reason });
+
 /** `POST /v1/site/legal-hold/{id}/release`: why the hold can end. */
 export const requestReleaseSchema = z.strictObject({ reason });
 

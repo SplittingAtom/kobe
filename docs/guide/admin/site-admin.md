@@ -1,6 +1,6 @@
 ---
 title: Site admin overview
-summary: What site admins do and where each setting lives in the Site console (people, grants such as Site memory steward, teams, models, connectors, egress ceiling, policy floor, Site memory and Policy with import and export, appearance, audit and backups).
+summary: What site admins do and where each setting lives in the Site console (people, grants such as Site memory steward, teams, models, connectors, egress ceiling, policy floor, Site memory and Policy with import and export, appearance, legal holds including the Site-wide hold on Site memory, audit and backups).
 section: Site admin
 order: 1
 audience: admin
@@ -98,7 +98,9 @@ access, which is time-boxed, read-only, audited and shown to the team.
 - **Usage and spend**: spend by team, user, agent and model, and the site budget every team's
   spend counts against.
 - **Retention maximum**: the longest retention any team may choose.
-- **Legal hold**: suspend purges for a team or user (needs two people).
+- **Legal hold**: suspend purges for a team or user, or hold the Site's own memory with a
+  **Site-wide hold** (each needs two people). See
+  [Memory](../memory.md#legal-hold-on-site-memory).
 - **Break-glass**: request and approve time-boxed, read-only, audited access to one team.
 - **Memory**: the Site's memories and Policy, for Site admins and Site memory stewards. The
   **Memories** tab lists them with filters (kind, status, tag, and Policy only or not Policy) and
@@ -126,7 +128,7 @@ access, which is time-boxed, read-only, audited and shown to the team.
   memories and no Site Policy anywhere; it is the only switch that stops Policy), project notes, memories, **Portable preferences**, **Learn from this chat**
   and **Members may propose to the Site**, each also needing the workspace's own switch; the
   **learning model** (used by workspaces without their own, where enabled; learning never falls back
-  to another model or the conversation's model), the context budget (4 to 16 KiB), scope limits (by default 300 memories per person in each workspace, 50 portable preferences per person, 1,000 per workspace and 1,000 on the Site; saving stops at the limit and nothing is ever removed to make room, and curators are told when a workspace or the Site reaches 80%), versions kept per memory (default 50; older versions are pruned on edit, except versions a run used and while a legal hold applies),
+  to another model or the conversation's model), the context budget (4 to 16 KiB), scope limits (by default 300 memories per person in each workspace, 50 portable preferences per person, 1,000 per workspace and 1,000 on the Site; saving stops at the limit and nothing is ever removed to make room, and curators are told when a workspace or the Site reaches 80%), versions kept per memory (default 50; older versions are pruned on edit, except versions a run used and while a legal hold applies: a Site-wide hold for Site memories),
   the stale threshold, the retention window and learning rate limits. Turning a switch off deletes
   nothing. See [Memory](../memory.md#switches-that-control-memory). The **Kobe connector** setting is **Off**, **Docs only** (the
   default) or **Docs and admin tools**; see below.
