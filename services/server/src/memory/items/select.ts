@@ -2,6 +2,7 @@ import {
   SEMANTIC_MEMORY_RENDER_BLOCK_OVERHEAD_BYTES,
   SEMANTIC_MEMORY_RENDER_ITEM_OVERHEAD_BYTES,
   SEMANTIC_MEMORY_RENDER_LANE_OVERHEAD_BYTES,
+  semanticMemoryRunFence,
   SEMANTIC_MEMORY_RUN_MAX_ITEMS,
   type RunSemanticMemory,
   type RunSemanticMemoryItem,
@@ -120,24 +121,26 @@ export function selectRunMemory(input: SelectInput): RunSemanticMemory {
   let spent = SEMANTIC_MEMORY_RENDER_BLOCK_OVERHEAD_BYTES;
   let omitted = 0;
   const count = () => policy.length + picked.length;
-  /** Charges `item` to `lane` when it fits in `limit`; a lane's header is paid by its first item. */
-  const fits = (lane: string, item: RunSemanticMemoryItem, limit: number): boolean => {
+  /** Charges `item` when it fits in `limit`; a fence's overhead is paid by its first item. */
+  const fits = (item: RunSemanticMemoryItem, limit: number): boolean => {
     if (count() >= SEMANTIC_MEMORY_RUN_MAX_ITEMS) return false;
+    // One fence per lane and part (stable or picks), as the sandbox draws it (KOBE-383).
+    const fence = semanticMemoryRunFence(item);
     const cost =
-      itemCost(item) + (lanesUsed.has(lane) ? 0 : SEMANTIC_MEMORY_RENDER_LANE_OVERHEAD_BYTES);
+      itemCost(item) + (lanesUsed.has(fence) ? 0 : SEMANTIC_MEMORY_RENDER_LANE_OVERHEAD_BYTES);
     if (spent + cost > limit) return false;
     spent += cost;
-    lanesUsed.add(lane);
+    lanesUsed.add(fence);
     return true;
   };
   // Policy first, by id, within the budget (the store caps it at 25 items and 2 KiB of
   // statements; at the smallest budget the rendered overheads can still leave some out).
   for (const item of [...input.policy].sort(byId)) {
-    if (fits("policy", item, input.budgetBytes)) policy.push(item);
+    if (fits(item, input.budgetBytes)) policy.push(item);
     else omitted += 1;
   }
   const take = (r: Ranked, limit: number): boolean => {
-    if (!fits(r.lane, r.item, limit)) return false;
+    if (!fits(r.item, limit)) return false;
     picked.push(r);
     return true;
   };

@@ -4,6 +4,9 @@ import {
   SEMANTIC_MEMORY_BLOCK_MIN_BYTES,
   runSemanticMemorySchema,
   semanticMemoryRenderedBytes,
+  SEMANTIC_MEMORY_RENDER_BLOCK_OVERHEAD_BYTES,
+  SEMANTIC_MEMORY_RENDER_ITEM_OVERHEAD_BYTES,
+  SEMANTIC_MEMORY_RENDER_LANE_OVERHEAD_BYTES,
   type RunSemanticMemoryItem,
   type SemanticMemoryKind,
   type SemanticMemoryScope,
@@ -55,6 +58,9 @@ function cand(i: RunSemanticMemoryItem, parts: Partial<Omit<Candidate, "item">> 
 
 const ids = (items: readonly RunSemanticMemoryItem[]) => items.map((i) => i.id);
 const budget = SEMANTIC_MEMORY_BLOCK_DEFAULT_BYTES;
+const BLOCK = SEMANTIC_MEMORY_RENDER_BLOCK_OVERHEAD_BYTES;
+const LANE = SEMANTIC_MEMORY_RENDER_LANE_OVERHEAD_BYTES;
+const ITEM = SEMANTIC_MEMORY_RENDER_ITEM_OVERHEAD_BYTES;
 
 describe("selectRunMemory", () => {
   it("puts every Policy item first, whatever the lanes hold", () => {
@@ -77,11 +83,11 @@ describe("selectRunMemory", () => {
     const lanes = { user: [cand(item("user", { bytes: 400 }))] };
     const roomy = selectRunMemory({ policy, lanes, budgetBytes: budget });
     expect(roomy.items.filter((i) => i.policy)).toHaveLength(25);
-    // At the smallest budget the 25 items of the 2 KiB cap render to 4,816 bytes: Policy fills
-    // the budget in id order, the rest (and the lanes) count as omitted.
+    // At the smallest budget the 25 items of the 2 KiB cap render to 5,200 bytes (KOBE-383
+    // overheads): Policy fills the budget in id order, the rest (and the lanes) count as omitted.
     const tight = selectRunMemory({ policy, lanes, budgetBytes: SEMANTIC_MEMORY_BLOCK_MIN_BYTES });
     const given = tight.items.filter((i) => i.policy);
-    expect(given.length).toBeGreaterThan(18);
+    expect(given.length).toBeGreaterThan(15);
     expect(given.length).toBeLessThan(25);
     expect(ids(given)).toEqual(ids(policy.slice(0, given.length)));
     expect(tight.items.some((i) => !i.policy)).toBe(false);
@@ -171,7 +177,7 @@ describe("selectRunMemory", () => {
       lanes: {
         team: [cand(a, { textRank: 0.3 }), cand(b, { textRank: 0.2, sticky: true })],
       },
-      budgetBytes: 256 + 160 + 96 + 900 + 10,
+      budgetBytes: BLOCK + LANE + ITEM + 900 + 10,
     });
     expect(ids(sticky.items)).toEqual([b.id]);
     expect(memoryScore(cand(b, { textRank: 0.2, sticky: true }), "team")).toBeCloseTo(
@@ -225,13 +231,32 @@ describe("selectRunMemory", () => {
     expect(prefix(a)[1]?.scope).toBe("site");
   });
 
+  it("charges a lane's fence twice when it has pinned items and picks (KOBE-383 review L1)", () => {
+    const pinned = item("team", { bytes: 100, pinned: true });
+    const pick = item("team", { bytes: 100 });
+    const one = BLOCK + LANE + 2 * ITEM + 200;
+    const s = selectRunMemory({
+      policy: [],
+      lanes: { team: [cand(pinned), cand(pick, { textRank: 1 })] },
+      budgetBytes: one,
+    });
+    expect(ids(s.items)).toEqual([pinned.id]);
+    const both = selectRunMemory({
+      policy: [],
+      lanes: { team: [cand(pinned), cand(pick, { textRank: 1 })] },
+      budgetBytes: one + LANE,
+    });
+    expect(ids(both.items)).toEqual([pinned.id, pick.id]);
+    expect(semanticMemoryRenderedBytes(both)).toBe(one + LANE);
+  });
+
   it("uses whole items only: a misfit is skipped, a smaller one still fits", () => {
     const big = item("team", { bytes: 500 });
     const small = item("team", { bytes: 20 });
     const s = selectRunMemory({
       policy: [],
       lanes: { team: [cand(big, { textRank: 2 }), cand(small, { textRank: 1 })] },
-      budgetBytes: 256 + 160 + 96 + 100,
+      budgetBytes: BLOCK + LANE + ITEM + 100,
     });
     expect(ids(s.items)).toEqual([small.id]);
     expect(s.items[0]?.statement).toBe(small.statement);

@@ -44,9 +44,17 @@ export const CAPABILITY_SEMANTIC_MEMORY = "semantic_memory";
 export const SEMANTIC_MEMORY_BLOCK_MIN_BYTES = 4 * 1024;
 export const SEMANTIC_MEMORY_BLOCK_DEFAULT_BYTES = 8 * 1024;
 export const SEMANTIC_MEMORY_BLOCK_MAX_BYTES = 16 * 1024;
-/** Block title, untrusted-data notice and the "n more not shown" line. */
-export const SEMANTIC_MEMORY_RENDER_BLOCK_OVERHEAD_BYTES = 256;
-/** One lane (Policy or a scope): its header and nonce fences, open and close. */
+/**
+ * Both headers ("What Kobe knows" and "… for this message"), the preamble with the untrusted-data
+ * notice, and the "n more not shown" line (KOBE-383: measured from the sandbox's renderer, which
+ * tests that it stays within each overhead).
+ */
+export const SEMANTIC_MEMORY_RENDER_BLOCK_OVERHEAD_BYTES = 640;
+/**
+ * One fence: its label line and nonce markers, open and close. A lane gets one fence among the
+ * stable items (Policy, pinned) and another among the per-message picks when it has both
+ * ({@link semanticMemoryRunFence}).
+ */
 export const SEMANTIC_MEMORY_RENDER_LANE_OVERHEAD_BYTES = 160;
 /** One item: bullet, kind, provenance line and separators, besides the statement. */
 export const SEMANTIC_MEMORY_RENDER_ITEM_OVERHEAD_BYTES = 96;
@@ -87,12 +95,24 @@ const bytes = (items: readonly RunSemanticMemoryItem[]) =>
 export const semanticMemoryRunLane = (item: RunSemanticMemoryItem): string =>
   item.policy ? "policy" : item.scope;
 
-/** Bytes of the rendered block for these items (see {@link SEMANTIC_MEMORY_BLOCK_MAX_BYTES}). */
+/**
+ * The fence an item renders in (KOBE-383): its lane, in the stable part (Policy, pinned) or among
+ * the per-message picks. The server's selector and this estimate charge one fence overhead per
+ * distinct value, so they count what the renderer draws.
+ */
+export const semanticMemoryRunFence = (item: { policy: boolean; pinned: boolean; scope: string }) =>
+  `${item.policy ? "policy" : item.scope}:${item.policy || item.pinned ? "stable" : "pick"}`;
+
+/**
+ * Bytes of the rendered block for these items (see {@link SEMANTIC_MEMORY_BLOCK_MAX_BYTES}): an
+ * upper bound of what the sandbox renders for statements as sent (it never lets a statement grow
+ * past its byte length when sanitising, so the bound holds).
+ */
 export function semanticMemoryRenderedBytes(semantic: {
   items: readonly RunSemanticMemoryItem[];
   omitted_count?: number;
 }): number {
-  const lanes = new Set(semantic.items.map(semanticMemoryRunLane)).size;
+  const lanes = new Set(semantic.items.map(semanticMemoryRunFence)).size;
   return (
     SEMANTIC_MEMORY_RENDER_BLOCK_OVERHEAD_BYTES +
     lanes * SEMANTIC_MEMORY_RENDER_LANE_OVERHEAD_BYTES +

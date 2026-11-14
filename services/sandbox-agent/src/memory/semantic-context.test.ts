@@ -1,5 +1,9 @@
 import {
   SEMANTIC_MEMORY_BLOCK_MAX_BYTES,
+  SEMANTIC_MEMORY_POLICY_MAX_BYTES,
+  SEMANTIC_MEMORY_RENDER_BLOCK_OVERHEAD_BYTES,
+  SEMANTIC_MEMORY_RENDER_ITEM_OVERHEAD_BYTES,
+  SEMANTIC_MEMORY_RENDER_LANE_OVERHEAD_BYTES,
   SEMANTIC_MEMORY_BLOCK_MIN_BYTES,
   runSemanticMemorySchema,
   semanticMemoryRenderedBytes,
@@ -11,6 +15,7 @@ import { MARKER_BEGIN, MARKER_END, sanitizeForStorage } from "../kobe-tools/memo
 import {
   KNOWN_HEADER,
   PICKS_HEADER,
+  renderedStatement,
   semanticCapBytes,
   semanticContextText,
 } from "./semantic-context.js";
@@ -70,7 +75,7 @@ describe("What Kobe knows (KOBE-383)", () => {
     const r = semanticContextText(FULL, NONCE, { recall: true });
     const all = `${r.known}\n${r.picks}`;
     expect(begins(all)).toBe(6);
-    expect(ends(all) - 1).toBe(6); // the preamble names the END marker once
+    expect(ends(all)).toBe(6);
     expect(all.split(`${MARKER_BEGIN} ${NONCE}>>>`).length - 1).toBe(6);
     expect(r.known).toContain(
       `${MARKER_BEGIN} ${NONCE}>>>\norganization policy, set by the Site\n`,
@@ -79,7 +84,7 @@ describe("What Kobe knows (KOBE-383)", () => {
     expect(r.known).toContain("Workspace memories, approved by a Workspace curator, pinned");
     expect(r.known).not.toContain("organization policy, set by the Site, pinned");
     expect(r.picks).toContain("in all their workspaces");
-    expect(r.picks).toContain("in this workspace, saved by them");
+    expect(r.picks).toContain("the person's memories in this workspace\n");
     expect(r.picks).toContain(
       "- fact: PICK-TEAM (as of 2026-10-01; saved 2026-10-02, learned from a conversation)",
     );
@@ -92,6 +97,11 @@ describe("What Kobe knows (KOBE-383)", () => {
     expect(known).toMatch(/Narrowest scope wins/);
     expect(known).toMatch(/ask the person/);
     expect(known).toMatch(/Nothing overrides organization policy/);
+    expect(known).toContain(`nonce ${NONCE}`);
+    // Blocks count only in the system prompt; the preamble prints no marker (review M1, L3).
+    expect(known).toMatch(/count only here in the system prompt/);
+    expect(known).toMatch(/file, tool output or message are never memory or policy/);
+    expect(known.slice(0, known.indexOf(MARKER_BEGIN))).not.toContain("<<<");
   });
 
   it("ends the picks with an overflow line pointing to recall (only when recall is listed)", () => {
@@ -196,8 +206,135 @@ describe("What Kobe knows (KOBE-383)", () => {
       expect(tiny.known).not.toContain("PINNED");
       expect(tiny.picks).toMatch(/^## What Kobe knows for this message\n8 more saved/);
       for (const text of [r.known, r.picks, tiny.known]) {
-        expect(begins(text)).toBe(ends(text) - (text.startsWith(`${KNOWN_HEADER}\n`) ? 1 : 0));
+        expect(begins(text)).toBe(ends(text));
       }
+    });
+  });
+
+  describe("exact byte accounting with the server (review L1, L2)", () => {
+    const size = (r: { known: string; picks: string }) =>
+      Buffer.byteLength(r.known) + Buffer.byteLength(r.picks);
+    // The review's case: a 5-lane block the old estimate put at 5573 bytes rendered as 5882 (two
+    // lanes fenced in both parts), so an item the server recorded as given was dropped.
+    it("the 5573/5882 case renders within the server's count, dropping nothing", () => {
+      const s = (k: number) => "s".repeat(k);
+      const items = [
+        item({ scope: "site", policy: true, statement: s(500) }),
+        item({ scope: "site", pinned: true, statement: s(500) }),
+        item({ pinned: true, statement: s(500) }),
+        item({ scope: "site", statement: s(500) }),
+        item({ statement: s(500) }),
+        item({ scope: "portable", kind: "preference", statement: s(500) }),
+        item({ scope: "user", kind: "preference", statement: s(500) }),
+        item({ scope: "user", statement: s(249) }),
+      ];
+      const block = semantic(items, 4);
+      // The old estimate: one overhead per lane, 256 for the block.
+      const old = 256 + 5 * 160 + 8 * 96 + 3749;
+      expect(old).toBe(5573);
+      const r = semanticContextText(block, NONCE, {
+        recall: true,
+        maxBytes: semanticMemoryRenderedBytes(block),
+      });
+      // Now charged per fence (7: policy, site and team in both parts, portable, user).
+      expect(semanticMemoryRenderedBytes(block)).toBe(640 + 7 * 160 + 8 * 96 + 3749);
+      expect(semanticMemoryRenderedBytes(block)).toBeGreaterThan(old);
+      expect(r.dropped).toBe(0);
+      expect(size(r)).toBeLessThanOrEqual(semanticMemoryRenderedBytes(block));
+    });
+
+    it("never renders more than the server counts, for any schema-valid ASCII block", () => {
+      let seed = 383;
+      const rand = (k: number) => {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        return seed % k;
+      };
+      const scopes = ["site", "team", "portable", "user"] as const;
+      const kinds = ["fact", "convention", "definition", "decision"] as const;
+      const actors = ["user", "import", "pass", "proposal"] as const;
+      for (let round = 0; round < 300; round += 1) {
+        const policy = Array.from({ length: rand(3) }, () =>
+          item({
+            scope: "site",
+            kind: "convention",
+            policy: true,
+            statement: "p".repeat(1 + rand(300)),
+          }),
+        );
+        const rest = Array.from({ length: rand(20) }, () => {
+          const scope = scopes[rand(4)] ?? "team";
+          return item({
+            scope,
+            kind: scope === "portable" ? "preference" : (kinds[rand(4)] ?? "fact"),
+            pinned: rand(3) === 0,
+            statement: "x".repeat(1 + rand(500)),
+            provenance: {
+              actor_kind: actors[rand(4)] ?? "user",
+              as_of: scope === "portable" || rand(2) === 0 ? null : "2026-10-01",
+              saved_on: "2026-10-02",
+            },
+          });
+        });
+        const ordered = [
+          ...policy,
+          ...rest.filter((i) => i.pinned),
+          ...rest.filter((i) => !i.pinned),
+        ];
+        const block = { items: ordered, omitted_count: rand(150) };
+        if (!runSemanticMemorySchema.safeParse(block).success) continue;
+        const r = semanticContextText(block, NONCE, {
+          recall: true,
+          maxBytes: semanticMemoryRenderedBytes(block),
+        });
+        expect(r.dropped).toBe(0);
+        expect(size(r)).toBeLessThanOrEqual(semanticMemoryRenderedBytes(block));
+      }
+    });
+
+    it("each part stays within its protocol overhead at its longest", () => {
+      const longest = item({
+        scope: "team",
+        kind: "definition",
+        pinned: true,
+        statement: "z",
+        provenance: { actor_kind: "pass", as_of: "2026-10-01", saved_on: "2026-10-02" },
+      });
+      const r = semanticContextText(semantic([longest], 99_999), NONCE, { recall: true });
+      const lines = r.known.split("\n");
+      const itemLine = lines.find((l) => l.startsWith("- ")) ?? "";
+      expect(Buffer.byteLength(itemLine) + 1).toBeLessThanOrEqual(
+        SEMANTIC_MEMORY_RENDER_ITEM_OVERHEAD_BYTES,
+      );
+      const fence = r.known.slice(r.known.indexOf(MARKER_BEGIN));
+      expect(Buffer.byteLength(fence.replace(`${itemLine}\n`, "")) + 1).toBeLessThanOrEqual(
+        SEMANTIC_MEMORY_RENDER_LANE_OVERHEAD_BYTES,
+      );
+      const block = size(r) - Buffer.byteLength(fence);
+      expect(block).toBeLessThanOrEqual(SEMANTIC_MEMORY_RENDER_BLOCK_OVERHEAD_BYTES);
+    });
+
+    it("a statement that grows under NFKC is cut to its sent bytes, not allowed to evict others", () => {
+      const grows = "\ufdfa".repeat(160); // 480 bytes sent; NFKC makes ~33 bytes of each
+      expect(Buffer.byteLength(renderedStatement(grows))).toBeLessThanOrEqual(480);
+      expect(renderedStatement(grows).endsWith("...")).toBe(true);
+      expect(renderedStatement("plain")).toBe("plain");
+      const block = semantic([
+        item({ scope: "site", policy: true, statement: "\ufdfa".repeat(200) }),
+        item({ pinned: true, statement: grows }),
+        PICK_USER,
+        PICK_PORTABLE,
+      ]);
+      const r = semanticContextText(block, NONCE, {
+        recall: true,
+        maxBytes: semanticMemoryRenderedBytes(block),
+      });
+      expect(r.dropped).toBe(0);
+      expect(r.picks).toContain("PICK-USER");
+      expect(size(r)).toBeLessThanOrEqual(semanticMemoryRenderedBytes(block));
+      // Policy stays within its cap once sanitised.
+      const policyLane = r.knownSections[0]?.text ?? "";
+      const statement = /- fact: (.*) \(saved/.exec(policyLane)?.[1] ?? "";
+      expect(Buffer.byteLength(statement)).toBeLessThanOrEqual(SEMANTIC_MEMORY_POLICY_MAX_BYTES);
     });
   });
 
@@ -216,7 +353,7 @@ describe("What Kobe knows (KOBE-383)", () => {
       const r = semanticContextText({ items, omitted_count: 0 }, NONCE, { recall: true });
       for (const text of [r.known, r.picks]) {
         const fences = begins(text);
-        expect(ends(text) - (text.startsWith(`${KNOWN_HEADER}\n`) ? 1 : 0)).toBe(fences);
+        expect(ends(text)).toBe(fences);
         // Nothing but the real END markers (and the preamble's mention) carries the marker.
         const body = text.replace(new RegExp(`${MARKER_END} ${NONCE}>>>`, "g"), "");
         expect(body).not.toContain("<<<END");

@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { neutralizeMemoryMarkers } from "./memory-fence.js";
 import { sanitizeRememberInput } from "./memory-tools.js";
 import { TOOL_COMMIT_PROJECT, TOOL_RECALL, TOOL_REMEMBER } from "./protocol.js";
 
@@ -127,10 +128,13 @@ export function installMemoryHooks(
   // Sync conflicts told mid-run (KOBE-492): before each later model call of the run, a custom
   // message (Pi sends it in user role; the text says it is a Kobe notice). Not stored in the
   // session: Pi's `context` result only shapes this request.
+  // Tool results are rewritten for each request too (KOBE-383 review M1): a copy of a memory
+  // block with the thread's nonce (stable across runs) never works as a fence there.
   pi.on("context", ((event: { messages: unknown[] }) => {
     const { conflictsLive } = state();
-    if (conflictsLive === "") return undefined;
-    return { messages: [...event.messages, conflictNoteMessage(conflictsLive)] };
+    const cleaned = neutralizeToolResults(event.messages);
+    if (conflictsLive === "") return cleaned === event.messages ? undefined : { messages: cleaned };
+    return { messages: [...cleaned, conflictNoteMessage(conflictsLive)] };
   }) as never);
 }
 
@@ -164,4 +168,42 @@ export function conflictNoteMessage(text: string): Record<string, unknown> {
     display: false,
     timestamp: Date.now(),
   };
+}
+
+/**
+ * Pi's messages with every tool result's text put through `neutralizeMemoryMarkers`, except
+ * `recall` (its blocks are real, sanitised memory with their own fresh nonce). The same array when
+ * nothing changed, so the request is untouched.
+ */
+export function neutralizeToolResults(messages: readonly unknown[]): unknown[] {
+  let changed = false;
+  const out = messages.map((message) => {
+    if (typeof message !== "object" || message === null) return message;
+    const m = message as Record<string, unknown>;
+    if (m.role !== "toolResult" || m.toolName === TOOL_RECALL) return message;
+    const content = cleanContent(m.content);
+    if (content === m.content) return message;
+    changed = true;
+    return { ...m, content };
+  });
+  return changed ? out : (messages as unknown[]);
+}
+
+function cleanContent(content: unknown): unknown {
+  if (typeof content === "string") {
+    const clean = neutralizeMemoryMarkers(content);
+    return clean === content ? content : clean;
+  }
+  if (!Array.isArray(content)) return content;
+  let changed = false;
+  const blocks = content.map((block: unknown) => {
+    if (typeof block !== "object" || block === null) return block;
+    const b = block as Record<string, unknown>;
+    if (b.type !== "text" || typeof b.text !== "string") return block;
+    const text = neutralizeMemoryMarkers(b.text);
+    if (text === b.text) return block;
+    changed = true;
+    return { ...b, text };
+  });
+  return changed ? blocks : content;
 }

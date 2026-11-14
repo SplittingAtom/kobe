@@ -54,21 +54,37 @@
 - **Size cap.** `run.start` carries no budget, so the cap is the size the server filled to,
   `semanticMemoryRenderedBytes(semantic)`, raised to the smallest Site budget (4 KiB, which the real
   budget is never below) and limited to 16 KiB. Over the cap, whole items are dropped from the end
-  (picks, then pinned, never Policy) and added to the overflow count; no fence is ever cut. The
-  preamble and the two headers take more than the contract's 256-byte block overhead, but item
-  lines take well under 96 bytes each, so a block filled to the largest budget renders without
-  dropping anything (test). Only a tiny block goes over the computed number, and it stays far under
-  4 KiB.
+  (picks, then pinned, never Policy) and added to the overflow count; no fence is ever cut. Since
+  the review fixes (L1, L2) the server's count is an upper bound, so this never triggers.
 - One nonce for all lanes, not one per scope: each fence carries a scope label, and sanitising
   already stops a forged marker; one nonce keeps the notice short.
+
+## Security review fixes (`docs/ledger/review-383.md`)
+
+- **M1** (stable nonce lets a copied block forge Policy): nonce stays per thread (caching).
+  `neutralizeMemoryMarkers` (`kobe-tools/memory-fence.ts`) runs `sanitizeUntrusted` on every line
+  holding a memory marker or look-alike, leaving other lines byte for byte; used for the viewed
+  file and, in kobe-tools' `context` hook, for every tool result except `recall` (real memory with
+  its own fresh nonce; the transcript itself is not changed). Project instructions and sync
+  conflicts were already fully sanitised (tests added). Both memory sections now say blocks count
+  only in the system prompt; a copy in a file, tool output or message is never memory or policy.
+- **L1** (renderer exceeded the server's estimate): protocol now charges one fence per lane _and_
+  part (`semanticMemoryRunFence`: stable or picks), block overhead 256 → 640; the server selector
+  uses the same helper. Overheads are upper bounds of what the renderer draws (tests: each part
+  within its overhead; 300 random schema-valid ASCII blocks and the 5573/5882 case render within
+  the server's count with nothing dropped). Effect: fewer bytes for items at a given budget (at
+  4 KiB only 18 of 25 maximal Policy rules fit, was 19+).
+- **L2** (NFKC growth): `renderedStatement` never lets a sanitised statement exceed its sent bytes
+  (cut at a character boundary with `...`), so Policy stays within its cap and nothing is evicted;
+  final guard against `SYSTEM_PROMPT_MAX_BYTES`.
+- **L3**: the preamble names the nonce, never a whole marker.
 
 ## Open questions (for Chris or the coordinator)
 
 - The overflow line points to `recall`, but `recall` does not search semantic items until the
   ticket that adds `recall({query})` over items lands. Until then it searches Notes only.
-- Contract wording (`run-context.ts`) says the renderer stays within each fixed overhead; it stays
-  within the total instead (see Size cap). A follow-up contract PR could raise the block overhead
-  to ~512 bytes so the selector accounts for it exactly.
+- The protocol estimator changed inside this feature PR (review L1, coordinator's call): contract
+  rule says contract changes go in their own PR.
 - Re-picking every message still changes the prompt at the picks, so the conversation history
   after the system prompt is uncached whenever the picks change. Gate A measures what is left.
 

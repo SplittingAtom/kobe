@@ -4,14 +4,17 @@ import { createHmac, randomBytes } from "node:crypto";
  * Untrusted framing for saved memory (KOBE-157, review of #205). Memory text was written by people
  * or earlier runs, possibly another member of the project, and approved project memory reaches
  * every member's context. Before the model sees it: sanitised (below), size-capped and fenced
- * between markers that carry a random per-use nonce, so text written earlier cannot close the fence
- * even if some look-alike of the marker slipped past the sanitising. Dependency-free (node
+ * between markers that carry a nonce: per thread for the run's memory blocks in the system prompt
+ * (KOBE-383, {@link deriveNonce}), fresh per call for `recall` results. Text written earlier cannot
+ * close the fence even if some look-alike of the marker slipped past the sanitising, and other text
+ * in the system prompt or a tool result never carries a working marker
+ * ({@link neutralizeMemoryMarkers}). Dependency-free (node
  * builtins only), like the rest of kobe-tools.
  */
 export const MARKER_BEGIN = "<<<BEGIN UNTRUSTED MEMORY";
 export const MARKER_END = "<<<END UNTRUSTED MEMORY";
 
-/** Unpredictable to whoever wrote the memory: fresh for every recall and every run. */
+/** Unpredictable to whoever wrote the memory: fresh for every call (`recall` results). */
 export function newNonce(): string {
   return randomBytes(8).toString("hex");
 }
@@ -99,4 +102,23 @@ export function untrustedLinesBlock(
   lines: readonly string[],
 ): string {
   return [beginMarker(nonce), oneLine(label), ...lines.map(oneLine), endMarker(nonce)].join("\n");
+}
+
+const MARKER_LINE = /<(?: <){2,}\s*(?:BEGIN|END)\s+UNTRUSTED\s+MEMORY/i;
+
+/**
+ * Text kept verbatim (a viewed file, a tool result) with every line that holds a memory marker, or
+ * a look-alike of one, put through {@link sanitizeUntrusted} (KOBE-383 review M1): the thread's
+ * nonce is stable across runs, so a copy of a real memory block (the model can be led to write one
+ * into a file) must never reproduce a working fence. Other lines stay byte for byte.
+ */
+export function neutralizeMemoryMarkers(text: string): string {
+  if (!/UNTRUSTED/i.test(sanitizeUntrusted(text))) return text;
+  return text
+    .split("\n")
+    .map((line) => {
+      const clean = sanitizeUntrusted(line);
+      return MARKER_LINE.test(clean) ? clean.replace(/\n/g, " ") : line;
+    })
+    .join("\n");
 }

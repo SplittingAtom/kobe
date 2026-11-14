@@ -44,6 +44,7 @@ describe("memoryContextText", () => {
     );
     expect(text).toContain("likes tea");
     expect(text).toMatch(/recall/);
+    expect(text).toMatch(/count only here in the system prompt/);
   });
 
   it("uses a different nonce each run", () => {

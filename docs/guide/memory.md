@@ -84,7 +84,9 @@ The agent gets its memories as a section called **What Kobe knows**, in this ord
 
 Each place is fenced and labelled with where it came from (for example "approved by a Workspace
 curator" or "set by the Site"), and each memory carries its kind and the date it was saved. Text
-in a memory cannot end its fence or pose as another memory. Everything up to the picks stays the
+in a memory cannot end its fence or pose as another memory, and the agent is told that memory
+only ever appears there: a copy of a memory block in a file, a tool's output or a message never
+counts (Kobe also breaks such copies in the open file and in tool output). Everything up to the picks stays the
 same from one message to the next unless a memory changes, so the model provider can reuse it
 from its cache. A changed memory reaches the very next message. The context viewer shows each
 part under its own label.
