@@ -135,6 +135,36 @@ describe("/session (Pi's /session)", { timeout: 30_000 }, () => {
     expect(within(dialog).getByText("Runs").nextElementSibling?.textContent).toBe("1");
     expect(messagePosts()).toEqual([]);
   });
+
+  it("counts the memories the latest run was given, for the owner only (KOBE-382)", async () => {
+    const t = conversation();
+    fake.threadMemories.set(t, [
+      {
+        id: "00000000-0000-4000-8000-000000000001",
+        version: 1,
+        lane: "policy",
+        kind: "fact",
+        statement: "Never share customer data",
+        pinned: false,
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000002",
+        version: 2,
+        lane: "user",
+        kind: "preference",
+        statement: "Answers in British English",
+        pinned: true,
+      },
+    ]);
+    const input = await opened(t);
+    const user = userEvent.setup();
+    await user.type(input, "/session");
+    await menu();
+    await user.keyboard("{Enter}");
+    const dialog = await screen.findByRole("dialog", { name: "This conversation" }, WAIT);
+    const term = within(dialog).getByText("Memories in context");
+    await waitFor(() => expect(term.nextElementSibling?.textContent).toBe("2"));
+  });
 });
 
 describe("/export (Pi's /export)", { timeout: 30_000 }, () => {

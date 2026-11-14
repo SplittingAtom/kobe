@@ -1,6 +1,6 @@
 "use client";
 
-import type { ThreadContext } from "@kobe/protocol";
+import type { ThreadContext, ThreadContextMemories } from "@kobe/protocol";
 import {
   createContext,
   useCallback,
@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import { formatTokens } from "../../lib/admin/usage-format";
+import { memoryLanes } from "../../lib/chat/context-memories";
 import {
   WAKE_GIVE_UP_MS,
   approximateNotice,
@@ -81,7 +82,7 @@ function useContextRead(read: () => Promise<ContextRead> | null) {
       clearTimeout(timer);
     };
   }, [attempt]);
-  return { phase, context, again: () => setAttempt((n) => n + 1) };
+  return { phase, context, attempt, again: () => setAttempt((n) => n + 1) };
 }
 
 /** "Waking your sandbox… 6 s", counting while it wakes. */
@@ -144,6 +145,59 @@ function Notices({ context }: { readonly context: ThreadContext }) {
   );
 }
 
+/** Reads the memories the latest run was given (KOBE-382) on open and with each refresh. */
+function useMemoriesRead(
+  read: (() => Promise<ThreadContextMemories | null> | null) | undefined,
+  attempt: number,
+) {
+  const [memories, setMemories] = useState<ThreadContextMemories | null>(null);
+  const readRef = useRef(read);
+  useEffect(() => {
+    readRef.current = read;
+  });
+  useEffect(() => {
+    let current = true;
+    void readRef.current?.()?.then((m) => {
+      if (current) setMemories(m);
+    });
+    return () => {
+      current = false;
+    };
+  }, [attempt]);
+  return memories;
+}
+
+/**
+ * Memories in context (KOBE-382, U48): what the latest run was given, per lane (Policy, Site,
+ * Workspace, then the owner's own), from the run's records. Statements are plain text.
+ */
+function ContextMemoriesList({ memories }: { readonly memories: ThreadContextMemories }) {
+  if (memories.items.length === 0) return null;
+  return (
+    <details className={styles.memories} data-context-memories>
+      <summary>Memories in context ({memories.items.length})</summary>
+      {!memories.latest && (
+        <p className={styles.memoryNote} role="note" data-memories-earlier>
+          From an earlier message: the newest one has not been given its memories yet.
+        </p>
+      )}
+      {memoryLanes(memories.items).map((lane) => (
+        <section key={lane.lane} aria-label={lane.label} data-memory-lane={lane.lane}>
+          <h3 className={styles.memoryLane}>{lane.label}</h3>
+          <ul className={styles.memoryList}>
+            {lane.items.map((item) => (
+              <li key={item.id}>
+                {item.pinned && <span className={styles.memoryPin}>Pinned · </span>}
+                {item.statement}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </details>
+  );
+}
+
 function PhaseLine({ phase, onRetry }: { readonly phase: Phase; readonly onRetry: () => void }) {
   if (phase.status === "loading") {
     return (
@@ -179,15 +233,19 @@ function PhaseLine({ phase, onRetry }: { readonly phase: Phase; readonly onRetry
  */
 export function ContextViewer({
   read,
+  readMemories,
   fallbackWindow,
   onClose,
 }: {
   readonly read: () => Promise<ContextRead> | null;
+  /** The latest run's memories (KOBE-382); absent: not shown. */
+  readonly readMemories?: () => Promise<ThreadContextMemories | null> | null;
   /** The gauge's window (the thread's next model), used when the answer has none. */
   readonly fallbackWindow: number | null;
   readonly onClose: () => void;
 }) {
-  const { phase, context, again } = useContextRead(read);
+  const { phase, context, again, attempt } = useContextRead(read);
+  const memories = useMemoriesRead(readMemories, attempt);
   const text = useRef<ContextTextHandle>(null);
   const model = useMemo(
     () => (context === null ? null : gaugeModel(context, fallbackWindow)),
@@ -210,6 +268,7 @@ export function ContextViewer({
         </div>
         <PhaseLine phase={phase} onRetry={again} />
         {context !== null && <Notices context={context} />}
+        {memories !== null && <ContextMemoriesList memories={memories} />}
         {context !== null && model !== null && (
           <div className={styles.columns}>
             <ContextText sections={context.sections} handle={text} />
@@ -256,6 +315,7 @@ export function ContextViewerHost({ children }: { readonly children: ReactNode }
       {open !== null && open.threadId === threadId && controller !== null && (
         <ContextViewer
           read={controller.threadContext}
+          readMemories={controller.threadContextMemories}
           fallbackWindow={open.window}
           onClose={close}
         />

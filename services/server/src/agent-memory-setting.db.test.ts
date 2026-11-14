@@ -21,7 +21,7 @@ import { MemoryObjects } from "./testing/memory-objects.js";
  * The agent editor's API republishes the current version with a new setting (a new version, so
  * pins and "follow latest" behave as for any version); run assembly gives the **runner's** memory
  * as the run's version says: `off` → no `run.start.memory` and the memory tools denied by the
- * agent's own deny list; `notes_only` → Notes as today (semantic memory comes with KOBE-382).
+ * agent's own deny list; `notes_only` → Notes and Site Policy (KOBE-382).
  */
 const fx = new EventStreamFixture();
 const auth = new FakeSandboxAuth();
@@ -292,6 +292,7 @@ describe("run assembly uses the runner's memory as the version says (ac-3)", () 
       setting,
       notes: setting !== "off",
       semantic: setting === "all",
+      policy: true,
     });
     const start = await runStart(run);
     const tools = (await deny(run.runId)).toolsDeny;
@@ -311,16 +312,31 @@ describe("run assembly uses the runner's memory as the version says (ac-3)", () 
   it("a test chat runs with the current version's setting and never gets semantic memory", async () => {
     // The agent's current version is `off`.
     const run = await pinnedRun(agentId, null);
-    expect(await plan(run.runId)).toEqual({ setting: "off", notes: false, semantic: false });
+    expect(await plan(run.runId)).toEqual({
+      setting: "off",
+      notes: false,
+      semantic: false,
+      policy: false,
+    });
     expect((await deny(run.runId)).toolsDeny).toEqual(expect.arrayContaining([...MEMORY_TOOLS]));
     const fresh = await createAgent("Fresh");
     const unpublished = await pinnedRun(fresh, null);
-    expect(await plan(unpublished.runId)).toEqual({ setting: "all", notes: true, semantic: false });
+    expect(await plan(unpublished.runId)).toEqual({
+      setting: "all",
+      notes: true,
+      semantic: false,
+      policy: false,
+    });
   });
 
   it("a thread without an agent is all", async () => {
     const runId = await fx.run(team, runner);
-    expect(await plan(runId)).toEqual({ setting: "all", notes: true, semantic: true });
+    expect(await plan(runId)).toEqual({
+      setting: "all",
+      notes: true,
+      semantic: true,
+      policy: true,
+    });
   });
 
   it("an off run refuses the memory frames end to end; nothing is stored (L1)", async () => {

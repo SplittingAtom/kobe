@@ -4830,6 +4830,76 @@
         }
       }
     },
+    "/v1/threads/{id}/context/memories": {
+      "get": {
+        "operationId": "getThreadContextMemories",
+        "summary": "The memories the thread's latest run was given",
+        "description": "The owner reads the semantic memories (Policy, Site, Workspace and their own) that the thread's latest run with records was given (`latest` false when a newer run came after it), in the order the block renders them: Policy, pinned items, then the items picked for that message. Each item is the version the run got. `run_id` is null while no run has records. Statements are untrusted: show them as plain text.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The items, in render order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadContextMemories"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request`: bad id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated`: no session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`not_owner` (a reader the thread is shared with); also `forbidden`, `not_a_team_member` (as `Error`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThreadContextError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`thread_not_found`: unknown id, or another user's or team's.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/approvals": {
       "get": {
         "operationId": "listApprovals",
@@ -16096,6 +16166,87 @@
             "additionalProperties": false
           }
         ]
+      },
+      "ThreadContextMemories": {
+        "type": "object",
+        "properties": {
+          "thread_id": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              {
+                "pattern": "^[0-9a-f-]+$"
+              }
+            ]
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "allOf": [
+                  {
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  {
+                    "pattern": "^[0-9a-f-]+$"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latest": {
+            "type": "boolean"
+          },
+          "items": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f-]+$"
+                    }
+                  ]
+                },
+                "version": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "lane": {
+                  "type": "string",
+                  "enum": ["policy", "site", "team", "portable", "user"]
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": ["preference", "fact", "convention", "definition", "decision"]
+                },
+                "statement": {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "pinned": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["id", "version", "lane", "kind", "statement", "pinned"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["thread_id", "run_id", "latest", "items"],
+        "additionalProperties": false
       },
       "Approval": {
         "type": "object",

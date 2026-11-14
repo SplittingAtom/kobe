@@ -41,6 +41,43 @@ Ask in plain words: "Remember that I report in euros", "What do you remember abo
 "Forget what you saved about my old manager" (or delete it yourself, below). The agent is told
 never to store secrets or passwords in memory; do not ask it to.
 
+## Memories in a run
+
+Besides notes, each run can be given **memories**: short statements about you, your workspace and
+the site. Kobe picks them again for every message you send, so they follow the conversation:
+
+- **Site Policy** always comes first (at most 25 rules, 2 KiB). It fits in the room the site
+  allows (8 KiB by default); only at the smallest setting can the last rules be left out.
+- **Pinned** memories come next, always in the same order.
+- Then four places share the rest of the room for the memories picked for this message: **your
+  memories in this workspace**, **your memories in all your workspaces** (portable preferences),
+  **workspace memories** and **site memories**. Each place is sure of a small share (1 KiB), and
+  what one does not use goes to the others.
+- The picks are the memories that best match your message, the conversation's title, your
+  previous two messages on this branch of the conversation and the names of the agent and
+  project. Your preferences are always considered. Recent memories count a little more, and so
+  do memories the previous message got, but only when they match this message too.
+- Memories are given whole, never cut. If some that matched did not fit, the agent is told how
+  many were left out.
+
+Only memories you can see reach your runs: your own (never another person's), your current
+workspace's (never another workspace's), and site memories while the workspace allows them. A run
+always uses **your** memory, even with someone else's agent. Policy, pinned memories and then the
+rest are always given in the same order, so unchanged parts can be reused by the model provider's
+cache from one message to the next.
+
+An agent whose **Memory** setting is **Notes only** or **Off** gets **Site Policy** only: Policy
+reaches every run, and only the site's **Allow memory** switch stops it. An agent builder's test
+chat and skill and agent evaluations get no memories at all.
+
+### See which memories a run got
+
+Open the context viewer (the context gauge under the composer): **Memories in context (n)** lists
+what your latest message's run was given, grouped by place, each with the version it got. While
+your newest message is still waiting, it shows the previous message's and says so. The
+`/session` dialog shows the same count as **Memories in context**. Both are yours only: people a
+conversation is shared with never see what your memory gave it.
+
 ## Your memories
 
 The **Memories** tab of **My memory** is where you keep your own memories. It has two groups:
@@ -114,7 +151,8 @@ it back on brings everything back.
 
 An agent can also use less memory than the switches allow: its **Memory** setting (**All
 memory**, **Notes only** or **Off**, see [Agents](agents/agents.md#memory)) is part of each
-published version. It always uses your memory when you run it, never its owner's.
+published version. It always uses your memory when you run it, never its owner's. Site Policy
+reaches its runs whatever the setting.
 
 ### The learning model
 

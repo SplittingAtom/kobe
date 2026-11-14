@@ -180,6 +180,12 @@ export class ThreadController {
     return id === null ? null : this.#api.threadContext(id);
   };
 
+  /** The memories this thread's latest run was given (KOBE-382); null for a draft. */
+  readonly threadContextMemories = () => {
+    const id = this.#state.threadId;
+    return id === null ? null : this.#api.threadContextMemories(id);
+  };
+
   /** How this thread's runs ended and its approvals were decided (KOBE-209); null for a draft. */
   readonly threadMarkers = () => {
     const id = this.#state.threadId;

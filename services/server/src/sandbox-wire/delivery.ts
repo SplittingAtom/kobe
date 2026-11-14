@@ -7,6 +7,7 @@ import {
   CAPABILITY_APP_CARDS,
   CAPABILITY_MCP,
   CAPABILITY_MEMORY,
+  CAPABILITY_SEMANTIC_MEMORY,
   CAPABILITY_FILE_EDITS,
   CAPABILITY_PROJECTS,
   CAPABILITY_RUN_TOKEN,
@@ -22,6 +23,8 @@ import {
   threadBranchSummaryFrameSchema,
   threadCompactFrameSchema,
   type PiGetEntriesData,
+  type RunSemanticMemory,
+  type RunSemanticMemoryItem,
   type RunStartFrame,
   type ServerToSandboxFrame,
   type ThreadBranchSummaryFrame,
@@ -45,6 +48,8 @@ import {
 import { endRunInTx, loadRun, runStillOpen } from "./run-state.js";
 import { mirrorBranchSummaryInTx, parseBranchSummaryResult } from "./branch-summary-end.js";
 import { buildRunMemory } from "../memory/agent.js";
+import { buildPolicyOnly, buildRunSemantic } from "../memory/items/run-memory.js";
+import { recordRunMemory } from "../memory/items/run-records.js";
 import { readRunMemoryPlan, type RunMemoryPlan } from "../agents/run-memory.js";
 import { markTold, untoldNotes, type AgentNotes } from "../sync-conflicts/store.js";
 import { mintRunToken } from "./run-token.js";
@@ -160,6 +165,11 @@ export class CommandDelivery {
   readonly #synced = new Set<string>();
   /** Sync conflicts a `run.start` carried, marked told when it is accepted (KOBE-492). */
   readonly #conflictNotes = new WeakMap<IssuedCommand, readonly string[]>();
+  /** Semantic memory a `run.start` carried, recorded once the sandbox accepts it (KOBE-382). */
+  readonly #memoryRecords = new WeakMap<
+    IssuedCommand,
+    { readonly runId: string; readonly items: readonly RunSemanticMemoryItem[] }
+  >();
   #draining = false;
   #again = false;
   #closed = false;
@@ -226,6 +236,7 @@ export class CommandDelivery {
   /** Records a command's outcome (and its effect on the run, for `run.start`). */
   settle(issued: IssuedCommand, outcome: CommandOutcome): void {
     this.#conflictsTold(issued, outcome);
+    this.#memoryRecorded(issued, outcome);
     if (issued.kind === "internal") {
       issued.resolve(outcome);
       return;
@@ -763,14 +774,34 @@ export class CommandDelivery {
     // Memory indexes only reach agents that know the field (KOBE-156).
     // The agent version's memory setting (KOBE-646): `off` sends no memory at all (the sandbox
     // then lists no memory tools; the policy check denies them too).
-    if (
-      row.kind === "run.start" &&
-      !evalSandbox &&
-      this.#host.hasCapability(CAPABILITY_MEMORY) &&
-      (await this.#memoryPlan(row.runId))?.notes === true
-    ) {
-      const memory = await this.#runMemory(row.threadId);
-      if (memory) out = { ...out, memory } as ServerToSandboxFrame;
+    // Semantic memory (KOBE-382) rides inside it, only for agents announcing `semantic_memory`:
+    // the full block for `all`, Site Policy alone for `notes_only` and `off` (Policy reaches every
+    // run, Chris 2026-11-13), nothing for evals, eval cases or builder test chats.
+    const plan =
+      row.kind === "run.start" && !evalSandbox && this.#host.hasCapability(CAPABILITY_MEMORY)
+        ? await this.#memoryPlan(row.runId)
+        : undefined;
+    if (plan !== undefined && row.runId !== null) {
+      const memory = plan.notes ? await this.#runMemory(row.threadId) : undefined;
+      const semantic =
+        plan.policy && this.#host.hasCapability(CAPABILITY_SEMANTIC_MEMORY)
+          ? await this.#runSemantic(row.runId, row.threadId, (frame as RunStartFrame).message, {
+              policyOnly: !plan.semantic,
+            })
+          : undefined;
+      if (memory || semantic) {
+        // Without Notes (`off`, or their read failed) the envelope lists no Notes scope.
+        const notes = memory ?? { scopes: [], indexes: [] };
+        out = {
+          ...out,
+          memory: semantic ? { ...notes, semantic: semantic.semantic } : notes,
+        } as ServerToSandboxFrame;
+        // Recorded once the sandbox accepts the start (`settle`), as sync conflicts are told.
+        const issued = this.#issued.get(commandId);
+        if (semantic?.fresh === true && issued !== undefined) {
+          this.#memoryRecords.set(issued, { runId: row.runId, items: semantic.semantic.items });
+        }
+      }
     }
     // Project instructions only reach agents that know the field (KOBE-159): an older agent runs
     // without them rather than failing on an unknown key.
@@ -878,6 +909,45 @@ export class CommandDelivery {
       this.#host.log.warn({ err }, "run.start.memory could not be built; sent without it");
       return undefined;
     }
+  }
+
+  /**
+   * `run.start.memory.semantic` (KOBE-382), picked for this message and recorded with the run. A
+   * failure sends the run without the block (fail closed: nothing recorded either).
+   */
+  async #runSemantic(
+    runId: string,
+    threadId: string,
+    message: string,
+    opts: { readonly policyOnly: boolean },
+  ): Promise<{ readonly semantic: RunSemanticMemory; readonly fresh: boolean } | undefined> {
+    const { teamId, userId } = this.#host.target;
+    const input = { teamId, userId, threadId, runId, message, policyOnly: opts.policyOnly };
+    try {
+      return await withTeam(this.#ctx.db, teamId, (tx) => buildRunSemantic(tx, input));
+    } catch (err) {
+      this.#host.log.warn({ err }, "run.start.memory.semantic could not be built; Policy only");
+    }
+    // Fail closed to Policy only (L5): a broken lane never drops the Site's Policy.
+    try {
+      const policy = await withTeam(this.#ctx.db, teamId, (tx) => buildPolicyOnly(tx, input));
+      return policy === undefined ? undefined : { semantic: policy, fresh: true };
+    } catch (err) {
+      this.#host.log.warn({ err }, "run.start Site Policy could not be read; sent without it");
+      return undefined;
+    }
+  }
+
+  /** A `run.start` that carried freshly picked memories was accepted: record them (KOBE-382). */
+  #memoryRecorded(issued: IssuedCommand, outcome: CommandOutcome): void {
+    const pending = this.#memoryRecords.get(issued);
+    if (pending === undefined) return;
+    this.#memoryRecords.delete(issued);
+    if (!outcome.ok) return;
+    const { teamId } = this.#host.target;
+    void withTeam(this.#ctx.db, teamId, (tx) =>
+      recordRunMemory(tx, teamId, pending.runId, pending.items),
+    ).catch((err: unknown) => this.#host.log.warn({ err }, "run memory records not written"));
   }
 
   async #failRunStart(row: CommandRow, outcome: CommandOutcome): Promise<void> {
