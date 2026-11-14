@@ -3,6 +3,7 @@ import {
   CAPABILITY_APP_CARDS,
   CAPABILITY_MCP,
   CAPABILITY_MEMORY,
+  CAPABILITY_SEMANTIC_MEMORY,
   CAPABILITY_FILES,
   CAPABILITY_PROJECTS,
   CAPABILITY_SKILL_DRAFTS,
@@ -574,6 +575,8 @@ export class Agent {
         ? []
         : [CAPABILITY_NOTEBOOKS, CAPABILITY_NOTEBOOK_START]),
       ...(this.#memoryEnabled() ? [CAPABILITY_MEMORY] : []),
+      // What Kobe knows (KOBE-383): rendered from run.start.memory.semantic, so only with memory.
+      ...(this.#memoryEnabled() ? [CAPABILITY_SEMANTIC_MEMORY] : []),
       // Per-session MCP config (KOBE-111) needs the proxy URL, a session to trade tokens with, and
       // Pi's MCP extension (built into Pi 1.0.x).
       ...(this.#deps.mcp === undefined ? [] : [CAPABILITY_MCP]),

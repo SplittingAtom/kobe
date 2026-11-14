@@ -18,6 +18,7 @@ import {
   PREFERENCE_BASE,
   RECENCY_DAYS,
   RECENCY_WEIGHT,
+  SELECT_LANES,
   STICKY_BONUS,
   selectRunMemory,
   type Candidate,
@@ -307,6 +308,31 @@ export async function buildRunSemantic(
 }
 
 /**
+ * The relevance harness's view of one run (KOBE-387, `e2e/memory-eval.sh relevance`): the
+ * candidates of every enabled lane with their relevance parts, read exactly as
+ * {@link buildRunSemantic} reads them, and the selection it would make. Nothing is recorded and
+ * run records are ignored, so the same run can be asked about many messages.
+ */
+export async function readRunCandidates(
+  tx: KobeTx,
+  input: RunSemanticInput,
+): Promise<{ readonly candidates: LaneCandidates; readonly semantic: RunSemanticMemory }> {
+  const context = await readQueryContext(tx, input);
+  const { memory, settings } = context;
+  const lanes = SELECT_LANES.filter((s) => memory.scopes[s]);
+  const q: Query = {
+    words: queryWords(context.text),
+    message: trigrams(input.message.slice(0, TRIGRAM_MESSAGE_MAX_CHARS)),
+    sticky: context.sticky,
+  };
+  const rows = await readLanes(tx, input, memory.policy, lanes, q);
+  return {
+    candidates: toCandidates(rows, lanes, q).candidates,
+    semantic: select(rows, lanes, q, settings.context_budget_kib * 1024),
+  };
+}
+
+/**
  * The fallback when the full build fails (L5): Site Policy alone, so a broken lane never drops
  * governance. Undefined when the Site master is off or there is no Policy.
  */
@@ -345,13 +371,15 @@ async function readLanes(
   );
 }
 
-function select(
+type LaneCandidates = Partial<Record<SelectLane, Candidate[]>>;
+
+/** The candidates of each lane with their relevance parts, and the eligible ones not read. */
+function toCandidates(
   rows: readonly ItemRow[],
   lanes: readonly SelectLane[],
   q: Query,
-  budgetBytes: number,
-): RunSemanticMemory {
-  const candidates: Partial<Record<SelectLane, Candidate[]>> = {};
+): { readonly candidates: LaneCandidates; readonly beyond: Partial<Record<SelectLane, number>> } {
+  const candidates: LaneCandidates = {};
   const beyond: Partial<Record<SelectLane, number>> = {};
   for (const lane of lanes) {
     const mine = rows.filter((r) => r.lane === lane);
@@ -365,6 +393,16 @@ function select(
     }));
     beyond[lane] = Number(mine[0]?.total ?? 0) - mine.length;
   }
+  return { candidates, beyond };
+}
+
+function select(
+  rows: readonly ItemRow[],
+  lanes: readonly SelectLane[],
+  q: Query,
+  budgetBytes: number,
+): RunSemanticMemory {
+  const { candidates, beyond } = toCandidates(rows, lanes, q);
   return runSemanticMemorySchema.parse(
     selectRunMemory({
       policy: rows.filter((r) => r.lane === "policy").map((r) => toItem("site", true, r)),

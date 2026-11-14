@@ -1,0 +1,1157 @@
+{
+  "about": "KOBE-387 query set for the memory relevance eval, written by a separate author from items.json only, without seeing the retrieval code.",
+  "queries": [
+    {
+      "id": "q001",
+      "kind": "preference",
+      "style": "literal",
+      "query": "Can you put the comparison of the three vendors in a table?",
+      "expected": ["pref-tables-compare"]
+    },
+    {
+      "id": "q002",
+      "kind": "preference",
+      "style": "literal",
+      "query": "Please write this announcement in British English spelling.",
+      "expected": ["pref-uk-spelling"],
+      "negatives": ["conv-doc-language"]
+    },
+    {
+      "id": "q003",
+      "kind": "preference",
+      "style": "literal",
+      "query": "Should I use emoji in this document you're drafting for me?",
+      "expected": ["pref-no-emoji"]
+    },
+    {
+      "id": "q004",
+      "kind": "preference",
+      "style": "literal",
+      "query": "Give me the short version: should we archive the old dashboards?",
+      "expected": ["pref-short-answers"],
+      "negatives": ["pref-markdown-headings"]
+    },
+    {
+      "id": "q005",
+      "kind": "preference",
+      "style": "literal",
+      "query": "What date format should I use in the report?",
+      "expected": ["pref-iso-dates"],
+      "negatives": ["conv-meeting-notes"]
+    },
+    {
+      "id": "q006",
+      "kind": "preference",
+      "style": "literal",
+      "query": "Which clock and time zone do you use when you give me meeting times?",
+      "expected": ["pref-24h-clock"],
+      "negatives": ["conv-utc-storage"]
+    },
+    {
+      "id": "q007",
+      "kind": "preference",
+      "style": "literal",
+      "query": "How do you format the SQL you share with me?",
+      "expected": ["pref-sql-uppercase"],
+      "negatives": ["conv-dbt-sql-style"]
+    },
+    {
+      "id": "q008",
+      "kind": "preference",
+      "style": "literal",
+      "query": "Can you make a bar chart of monthly signups? No pie charts.",
+      "expected": ["pref-no-pie-charts"]
+    },
+    {
+      "id": "q009",
+      "kind": "preference",
+      "style": "literal",
+      "query": "What tone do I want in customer emails?",
+      "expected": ["pref-customer-email-tone"],
+      "negatives": ["pref-first-name"]
+    },
+    {
+      "id": "q010",
+      "kind": "preference",
+      "style": "literal",
+      "query": "Show the costs in pounds with the £ sign.",
+      "expected": ["pref-gbp"],
+      "negatives": ["conv-board-pack-rounding"]
+    },
+    {
+      "id": "q011",
+      "kind": "preference",
+      "style": "paraphrase",
+      "query": "When's a good slot for the sync with Ana? I need my later hours free to concentrate.",
+      "expected": ["pref-morning-meetings"],
+      "negatives": ["conv-async-standup"]
+    },
+    {
+      "id": "q012",
+      "kind": "preference",
+      "style": "paraphrase",
+      "query": "When you critique a pull request for me, what layout do I like for the issues you spot?",
+      "expected": ["pref-review-findings"],
+      "negatives": ["conv-pr-approval"]
+    },
+    {
+      "id": "q013",
+      "kind": "preference",
+      "style": "paraphrase",
+      "query": "Which language do I want for crunching numbers in notebooks?",
+      "expected": ["pref-python-over-r"]
+    },
+    {
+      "id": "q014",
+      "kind": "preference",
+      "style": "paraphrase",
+      "query": "What's the right way to greet me in a message?",
+      "expected": ["pref-first-name"],
+      "negatives": ["pref-customer-email-tone"]
+    },
+    {
+      "id": "q015",
+      "kind": "preference",
+      "style": "paraphrase",
+      "query": "What shades should the graph use so everyone can tell the series apart, including people with red-green vision deficiency?",
+      "expected": ["pref-colourblind-palette"],
+      "negatives": ["pref-no-pie-charts"]
+    },
+    {
+      "id": "q016",
+      "kind": "preference",
+      "style": "paraphrase",
+      "query": "Do I want distances in miles or something else?",
+      "expected": ["pref-metric-units"]
+    },
+    {
+      "id": "q017",
+      "kind": "preference",
+      "style": "paraphrase",
+      "query": "When you suggest an approach, what extra info do I expect alongside it?",
+      "expected": ["pref-reason-and-alternative"]
+    },
+    {
+      "id": "q018",
+      "kind": "preference",
+      "style": "paraphrase",
+      "query": "How many presentation pages is too many for me?",
+      "expected": ["pref-few-slides"]
+    },
+    {
+      "id": "q019",
+      "kind": "preference",
+      "style": "paraphrase",
+      "query": "What's the cap on how much text I want in a reply to a quick question?",
+      "expected": ["pref-short-answers"],
+      "negatives": ["pref-markdown-headings"]
+    },
+    {
+      "id": "q020",
+      "kind": "preference",
+      "style": "paraphrase",
+      "query": "Which program should I be assumed to use when you show me command-line examples that open a file?",
+      "expected": ["pref-vim"]
+    },
+    {
+      "id": "q021",
+      "kind": "preference",
+      "style": "paraphrase",
+      "query": "When you write sample code in Microsoft's JavaScript superset, how rigorous should the annotations be?",
+      "expected": ["pref-ts-strict"]
+    },
+    {
+      "id": "q022",
+      "kind": "preference",
+      "style": "paraphrase",
+      "query": "Do I need you to give a reference for numbers you mention?",
+      "expected": ["pref-cite-sources"]
+    },
+    {
+      "id": "q023",
+      "kind": "preference",
+      "style": "indirect",
+      "query": "Write a quick script to analyse last month's signups.",
+      "expected": ["pref-python-over-r", "dec-no-new-r"]
+    },
+    {
+      "id": "q024",
+      "kind": "preference",
+      "style": "indirect",
+      "query": "Draft my weekly update for Jonas.",
+      "expected": ["pref-weekly-status"],
+      "negatives": ["conv-async-standup"]
+    },
+    {
+      "id": "q025",
+      "kind": "preference",
+      "style": "indirect",
+      "query": "Put together a summary of the platform migration for the leadership team.",
+      "expected": ["pref-exec-no-jargon"],
+      "negatives": ["pref-short-answers"]
+    },
+    {
+      "id": "q026",
+      "kind": "preference",
+      "style": "indirect",
+      "query": "Reply to the Halden Freight contact about their renewal question.",
+      "expected": ["pref-customer-email-tone"],
+      "negatives": ["pref-first-name"]
+    },
+    {
+      "id": "q027",
+      "kind": "preference",
+      "style": "indirect",
+      "query": "Build me a deck for Thursday's pricing review.",
+      "expected": ["pref-few-slides"],
+      "negatives": ["pref-tables-compare"]
+    },
+    {
+      "id": "q028",
+      "kind": "preference",
+      "style": "indirect",
+      "query": "Plot revenue by plan for the last four quarters.",
+      "expected": ["pref-no-pie-charts", "pref-colourblind-palette", "pref-gbp"]
+    },
+    {
+      "id": "q029",
+      "kind": "preference",
+      "style": "indirect",
+      "query": "Set up a time with Priya's team to go over the dashboards.",
+      "expected": ["pref-morning-meetings", "pref-24h-clock"],
+      "negatives": ["fact-oncall-rota"]
+    },
+    {
+      "id": "q030",
+      "kind": "preference",
+      "style": "indirect",
+      "query": "Which of these two candidate vendors for e-signatures would you pick for us?",
+      "expected": ["pref-reason-and-alternative"],
+      "negatives": ["pref-tables-compare"]
+    },
+    {
+      "id": "q031",
+      "kind": "fact",
+      "style": "literal",
+      "query": "Where is our headquarters and where's the second office?",
+      "expected": ["fact-offices"]
+    },
+    {
+      "id": "q032",
+      "kind": "fact",
+      "style": "literal",
+      "query": "When does the fiscal year start?",
+      "expected": ["fact-fiscal-year"]
+    },
+    {
+      "id": "q033",
+      "kind": "fact",
+      "style": "literal",
+      "query": "How many employees did we have at the end of FY2026?",
+      "expected": ["fact-headcount"],
+      "negatives": ["fact-customer-count"]
+    },
+    {
+      "id": "q034",
+      "kind": "fact",
+      "style": "literal",
+      "query": "Who is the CEO and who is the CFO?",
+      "expected": ["fact-leadership"],
+      "negatives": ["fact-team-leads"]
+    },
+    {
+      "id": "q035",
+      "kind": "fact",
+      "style": "literal",
+      "query": "What day are salaries paid?",
+      "expected": ["fact-payday"]
+    },
+    {
+      "id": "q036",
+      "kind": "fact",
+      "style": "literal",
+      "query": "How many days of annual leave do I get?",
+      "expected": ["fact-annual-leave"]
+    },
+    {
+      "id": "q037",
+      "kind": "fact",
+      "style": "literal",
+      "query": "Where do I send IT support requests?",
+      "expected": ["fact-it-help"]
+    },
+    {
+      "id": "q038",
+      "kind": "fact",
+      "style": "literal",
+      "query": "Where do I submit expenses and how long do I have?",
+      "expected": ["fact-expenses"]
+    },
+    {
+      "id": "q039",
+      "kind": "fact",
+      "style": "literal",
+      "query": "Do we have a SOC 2 report and when does it renew?",
+      "expected": ["fact-soc2"]
+    },
+    {
+      "id": "q040",
+      "kind": "fact",
+      "style": "literal",
+      "query": "Which warehouse do we use for analytics?",
+      "expected": ["fact-warehouse"]
+    },
+    {
+      "id": "q041",
+      "kind": "fact",
+      "style": "paraphrase",
+      "query": "Who owns GDPR compliance at the company, and where should a subject access query be sent?",
+      "expected": ["fact-dpo"],
+      "negatives": ["def-personal-data"]
+    },
+    {
+      "id": "q042",
+      "kind": "fact",
+      "style": "paraphrase",
+      "query": "Who is the top-paying client we have?",
+      "expected": ["fact-largest-customer"],
+      "negatives": ["fact-customer-count"]
+    },
+    {
+      "id": "q043",
+      "kind": "fact",
+      "style": "paraphrase",
+      "query": "Who runs the group that maintains our pipelines and warehouse?",
+      "expected": ["fact-team-leads"],
+      "negatives": ["fact-leadership"]
+    },
+    {
+      "id": "q044",
+      "kind": "fact",
+      "style": "paraphrase",
+      "query": "How do alerts reach the engineer who is covering out-of-hours, and when does the handover happen?",
+      "expected": ["fact-oncall-rota"],
+      "negatives": ["dec-oncall-pay"]
+    },
+    {
+      "id": "q045",
+      "kind": "fact",
+      "style": "paraphrase",
+      "query": "Which orchestration tool did we drop in spring, and what took its place?",
+      "expected": ["fact-airflow-retired", "dec-dagster"]
+    },
+    {
+      "id": "q046",
+      "kind": "fact",
+      "style": "paraphrase",
+      "query": "How long do we hold the unprocessed clickstream dumps before wiping them?",
+      "expected": ["fact-raw-retention"]
+    },
+    {
+      "id": "q047",
+      "kind": "fact",
+      "style": "paraphrase",
+      "query": "What was our subscriber count when the third quarter closed?",
+      "expected": ["fact-customer-count"],
+      "negatives": ["fact-headcount"]
+    },
+    {
+      "id": "q048",
+      "kind": "fact",
+      "style": "paraphrase",
+      "query": "Did customers leave faster last quarter than the one before?",
+      "expected": ["fact-churn-q3"],
+      "negatives": ["def-churned-customer"]
+    },
+    {
+      "id": "q049",
+      "kind": "fact",
+      "style": "paraphrase",
+      "query": "What are the tiers of our subscription offering, and how is the top one charged?",
+      "expected": ["fact-plans"],
+      "negatives": ["def-seat"]
+    },
+    {
+      "id": "q050",
+      "kind": "fact",
+      "style": "paraphrase",
+      "query": "How late are we on collecting money from customers compared with the goal?",
+      "expected": ["fact-dso"],
+      "negatives": ["def-run-rate"]
+    },
+    {
+      "id": "q051",
+      "kind": "fact",
+      "style": "paraphrase",
+      "query": "How often is the pre-release environment's contents reloaded from the live system?",
+      "expected": ["fact-staging-refresh"],
+      "negatives": ["dec-masked-staging"]
+    },
+    {
+      "id": "q052",
+      "kind": "fact",
+      "style": "paraphrase",
+      "query": "At what point do we count consulting income as earned?",
+      "expected": ["fact-services-revenue-recognition"],
+      "negatives": ["def-run-rate"]
+    },
+    {
+      "id": "q053",
+      "kind": "fact",
+      "style": "indirect",
+      "query": "I need to build a dashboard for the support team's ticket backlog; where should it live?",
+      "expected": ["fact-metabase"]
+    },
+    {
+      "id": "q054",
+      "kind": "fact",
+      "style": "indirect",
+      "query": "Can you check whether the nightly models have run this morning?",
+      "expected": ["fact-dbt-repo"],
+      "negatives": ["fact-staging-refresh"]
+    },
+    {
+      "id": "q055",
+      "kind": "fact",
+      "style": "indirect",
+      "query": "Remind me when my next one-to-one is and who I'm meeting.",
+      "expected": ["fact-my-manager"],
+      "negatives": ["fact-team-leads"]
+    },
+    {
+      "id": "q056",
+      "kind": "fact",
+      "style": "indirect",
+      "query": "Will my machine handle loading a 20 GB parquet file locally?",
+      "expected": ["fact-my-laptop"]
+    },
+    {
+      "id": "q057",
+      "kind": "fact",
+      "style": "indirect",
+      "query": "Suggest some features to try in what I'm building this sprint.",
+      "expected": ["fact-my-project", "dec-churn-model-xgboost"]
+    },
+    {
+      "id": "q058",
+      "kind": "fact",
+      "style": "indirect",
+      "query": "I want to see the ARR dashboard but I don't have a login.",
+      "expected": ["fact-arr-dashboard-owner"],
+      "negatives": ["def-arr"]
+    },
+    {
+      "id": "q059",
+      "kind": "fact",
+      "style": "indirect",
+      "query": "I'm moving to the Lisbon office in the autumn; do I still get UK bank holidays?",
+      "expected": ["fact-annual-leave", "fact-offices"]
+    },
+    {
+      "id": "q060",
+      "kind": "fact",
+      "style": "indirect",
+      "query": "Plan the budget forecast so it lines up with our reporting calendar for next year.",
+      "expected": ["fact-fiscal-year"],
+      "negatives": ["fact-payday"]
+    },
+    {
+      "id": "q061",
+      "kind": "convention",
+      "style": "literal",
+      "query": "How should I name my git branch for DATA-512?",
+      "expected": ["conv-branch-names"]
+    },
+    {
+      "id": "q062",
+      "kind": "convention",
+      "style": "literal",
+      "query": "What format do we use for commit messages?",
+      "expected": ["conv-commit-messages"]
+    },
+    {
+      "id": "q063",
+      "kind": "convention",
+      "style": "literal",
+      "query": "What are the SQL style rules for dbt models?",
+      "expected": ["conv-dbt-sql-style"],
+      "negatives": ["pref-sql-uppercase"]
+    },
+    {
+      "id": "q064",
+      "kind": "convention",
+      "style": "literal",
+      "query": "How many approvals does a pull request need before merge?",
+      "expected": ["conv-pr-approval"]
+    },
+    {
+      "id": "q065",
+      "kind": "convention",
+      "style": "literal",
+      "query": "How should I name new Snowflake tables and timestamp columns?",
+      "expected": ["conv-table-naming"],
+      "negatives": ["conv-utc-storage"]
+    },
+    {
+      "id": "q066",
+      "kind": "convention",
+      "style": "literal",
+      "query": "Where do meeting notes go and what do I call the page?",
+      "expected": ["conv-meeting-notes"]
+    },
+    {
+      "id": "q067",
+      "kind": "convention",
+      "style": "literal",
+      "query": "What do I name the Slack channel when we have an incident?",
+      "expected": ["conv-incident-channel"],
+      "negatives": ["def-p1"]
+    },
+    {
+      "id": "q068",
+      "kind": "convention",
+      "style": "literal",
+      "query": "How soon do postmortems have to be written?",
+      "expected": ["conv-postmortems"],
+      "negatives": ["conv-incident-channel"]
+    },
+    {
+      "id": "q069",
+      "kind": "convention",
+      "style": "literal",
+      "query": "Can we deploy to production on a Friday afternoon?",
+      "expected": ["conv-deploy-freeze"]
+    },
+    {
+      "id": "q070",
+      "kind": "convention",
+      "style": "literal",
+      "query": "Where should passwords and credentials be stored?",
+      "expected": ["conv-secrets"]
+    },
+    {
+      "id": "q071",
+      "kind": "convention",
+      "style": "paraphrase",
+      "query": "In which zone should I persist when an event happened, and where is it fine to shift it to the viewer's zone?",
+      "expected": ["conv-utc-storage"],
+      "negatives": ["pref-24h-clock"]
+    },
+    {
+      "id": "q072",
+      "kind": "convention",
+      "style": "paraphrase",
+      "query": "Which spelling variety should a whitepaper for clients use versus an in-house wiki page?",
+      "expected": ["conv-doc-language"],
+      "negatives": ["pref-uk-spelling"]
+    },
+    {
+      "id": "q073",
+      "kind": "convention",
+      "style": "paraphrase",
+      "query": "How do we rate effort on work items, and what do we do with something enormous?",
+      "expected": ["conv-estimates"]
+    },
+    {
+      "id": "q074",
+      "kind": "convention",
+      "style": "paraphrase",
+      "query": "Can I reveal which client we did this project for in a conference presentation?",
+      "expected": ["conv-customer-names-public"]
+    },
+    {
+      "id": "q075",
+      "kind": "convention",
+      "style": "paraphrase",
+      "query": "What's the deadline for deleting a release toggle from the code once every customer has it?",
+      "expected": ["conv-feature-flags"]
+    },
+    {
+      "id": "q076",
+      "kind": "convention",
+      "style": "paraphrase",
+      "query": "How thoroughly must our shared libraries be exercised by automated checks before the pipeline goes green?",
+      "expected": ["conv-test-coverage"]
+    },
+    {
+      "id": "q077",
+      "kind": "convention",
+      "style": "paraphrase",
+      "query": "How should numbers appear in slides for the directors' quarterly meeting?",
+      "expected": ["conv-board-pack-rounding"],
+      "negatives": ["pref-gbp", "pref-few-slides"]
+    },
+    {
+      "id": "q078",
+      "kind": "convention",
+      "style": "paraphrase",
+      "query": "Where do I ask the analysts for a one-off pull of numbers?",
+      "expected": ["conv-data-requests"]
+    },
+    {
+      "id": "q079",
+      "kind": "convention",
+      "style": "paraphrase",
+      "query": "Who has to sign off on my code change before it can go in?",
+      "expected": ["conv-pr-approval"],
+      "negatives": ["pref-review-findings"]
+    },
+    {
+      "id": "q080",
+      "kind": "convention",
+      "style": "paraphrase",
+      "query": "What's the cut-off for posting my daily update to the group?",
+      "expected": ["conv-async-standup"],
+      "negatives": ["pref-weekly-status", "pref-morning-meetings"]
+    },
+    {
+      "id": "q081",
+      "kind": "convention",
+      "style": "paraphrase",
+      "query": "What happens to a report page nobody has claimed after a few months?",
+      "expected": ["conv-dashboard-owner"],
+      "negatives": ["fact-arr-dashboard-owner"]
+    },
+    {
+      "id": "q082",
+      "kind": "convention",
+      "style": "paraphrase",
+      "query": "While a major outage is ongoing, how frequently do we have to tell everyone where things stand?",
+      "expected": ["conv-incident-channel"],
+      "negatives": ["def-p1"]
+    },
+    {
+      "id": "q083",
+      "kind": "convention",
+      "style": "indirect",
+      "query": "Open a pull request for the churn join fix, ticket DATA-431.",
+      "expected": ["conv-branch-names", "conv-commit-messages"],
+      "negatives": ["conv-dbt-sql-style"]
+    },
+    {
+      "id": "q084",
+      "kind": "convention",
+      "style": "indirect",
+      "query": "Write a dbt model that aggregates daily usage per account.",
+      "expected": ["conv-dbt-sql-style", "conv-table-naming"],
+      "negatives": ["pref-sql-uppercase"]
+    },
+    {
+      "id": "q085",
+      "kind": "convention",
+      "style": "indirect",
+      "query": "The payments API is down, what do I do right now?",
+      "expected": ["conv-incident-channel"],
+      "negatives": ["conv-postmortems"]
+    },
+    {
+      "id": "q086",
+      "kind": "convention",
+      "style": "indirect",
+      "query": "I'm about to ship the new export screen to production on the last Friday of the quarter.",
+      "expected": ["conv-deploy-freeze", "conv-feature-flags"]
+    },
+    {
+      "id": "q087",
+      "kind": "convention",
+      "style": "indirect",
+      "query": "Write up the notes from today's planning meeting.",
+      "expected": ["conv-meeting-notes"],
+      "negatives": ["pref-weekly-status"]
+    },
+    {
+      "id": "q088",
+      "kind": "convention",
+      "style": "indirect",
+      "query": "Share the API key for the vendor sandbox with Dara in our team chat.",
+      "expected": ["conv-secrets"]
+    },
+    {
+      "id": "q089",
+      "kind": "convention",
+      "style": "indirect",
+      "query": "Draft the blog post about how Halden Freight uses our dashboards.",
+      "expected": ["conv-customer-names-public", "conv-doc-language"],
+      "negatives": ["pref-uk-spelling"]
+    },
+    {
+      "id": "q090",
+      "kind": "convention",
+      "style": "indirect",
+      "query": "Prepare the revenue table for the board pack.",
+      "expected": ["conv-board-pack-rounding"],
+      "negatives": ["def-run-rate"]
+    },
+    {
+      "id": "q091",
+      "kind": "definition",
+      "style": "literal",
+      "query": "How do we define ARR?",
+      "expected": ["def-arr"],
+      "negatives": ["def-run-rate", "def-mrr"]
+    },
+    {
+      "id": "q092",
+      "kind": "definition",
+      "style": "literal",
+      "query": "What is MRR for us and which plan do we report it for?",
+      "expected": ["def-mrr"],
+      "negatives": ["def-arr"]
+    },
+    {
+      "id": "q093",
+      "kind": "definition",
+      "style": "literal",
+      "query": "How is net revenue retention calculated here?",
+      "expected": ["def-nrr"],
+      "negatives": ["def-churned-customer"]
+    },
+    {
+      "id": "q094",
+      "kind": "definition",
+      "style": "literal",
+      "query": "What counts as an active user?",
+      "expected": ["def-active-user"],
+      "negatives": ["def-stickiness"]
+    },
+    {
+      "id": "q095",
+      "kind": "definition",
+      "style": "literal",
+      "query": "When exactly does a customer count as churned?",
+      "expected": ["def-churned-customer"],
+      "negatives": ["fact-churn-q3"]
+    },
+    {
+      "id": "q096",
+      "kind": "definition",
+      "style": "literal",
+      "query": "What's a sales-qualified lead at Larkspur?",
+      "expected": ["def-sql-lead"],
+      "negatives": ["pref-sql-uppercase"]
+    },
+    {
+      "id": "q097",
+      "kind": "definition",
+      "style": "literal",
+      "query": "How do we calculate customer acquisition cost?",
+      "expected": ["def-cac"]
+    },
+    {
+      "id": "q098",
+      "kind": "definition",
+      "style": "literal",
+      "query": "What makes an incident a P1?",
+      "expected": ["def-p1"],
+      "negatives": ["def-uptime"]
+    },
+    {
+      "id": "q099",
+      "kind": "definition",
+      "style": "literal",
+      "query": "What is included in gross margin?",
+      "expected": ["def-gross-margin"],
+      "negatives": ["def-run-rate"]
+    },
+    {
+      "id": "q100",
+      "kind": "definition",
+      "style": "literal",
+      "query": "What does time to value mean for us?",
+      "expected": ["def-time-to-value"]
+    },
+    {
+      "id": "q101",
+      "kind": "definition",
+      "style": "paraphrase",
+      "query": "What's our headline number for the yearly size of locked-in customer deals?",
+      "expected": ["def-arr"],
+      "negatives": ["def-run-rate"]
+    },
+    {
+      "id": "q102",
+      "kind": "definition",
+      "style": "paraphrase",
+      "query": "Which package is the only one for which we publish the shorter-period recurring figure, and how is it derived?",
+      "expected": ["def-mrr"],
+      "negatives": ["def-arr"]
+    },
+    {
+      "id": "q103",
+      "kind": "definition",
+      "style": "paraphrase",
+      "query": "How do we compute what share of the income from our year-ago clients we're still getting today?",
+      "expected": ["def-nrr"],
+      "negatives": ["def-expansion"]
+    },
+    {
+      "id": "q104",
+      "kind": "definition",
+      "style": "paraphrase",
+      "query": "Do robot logins factor into how many humans we say are engaged each month?",
+      "expected": ["def-active-user"],
+      "negatives": ["def-stickiness"]
+    },
+    {
+      "id": "q105",
+      "kind": "definition",
+      "style": "paraphrase",
+      "query": "How do we work out the outlay needed to land each additional account?",
+      "expected": ["def-cac"],
+      "negatives": ["def-gross-margin"]
+    },
+    {
+      "id": "q106",
+      "kind": "definition",
+      "style": "paraphrase",
+      "query": "How do we group customers by the period in which they first joined, for comparing batches?",
+      "expected": ["def-signup-cohort"]
+    },
+    {
+      "id": "q107",
+      "kind": "definition",
+      "style": "paraphrase",
+      "query": "What does it take to call a work item finished for us?",
+      "expected": ["def-done"],
+      "negatives": ["conv-estimates", "conv-pr-approval"]
+    },
+    {
+      "id": "q108",
+      "kind": "definition",
+      "style": "paraphrase",
+      "query": "Do read-only people on an account cost the customer anything per head?",
+      "expected": ["def-seat"],
+      "negatives": ["fact-plans"]
+    },
+    {
+      "id": "q109",
+      "kind": "definition",
+      "style": "paraphrase",
+      "query": "What's the maximum lag we allow between source updates and our most important tables?",
+      "expected": ["def-freshness", "def-tier1"],
+      "negatives": ["def-uptime"]
+    },
+    {
+      "id": "q110",
+      "kind": "definition",
+      "style": "paraphrase",
+      "query": "Does obfuscating customer contact details with a one-way function take them out of the scope of privacy rules?",
+      "expected": ["def-personal-data"],
+      "negatives": ["fact-dpo", "dec-masked-staging"]
+    },
+    {
+      "id": "q111",
+      "kind": "definition",
+      "style": "paraphrase",
+      "query": "How do we measure the share of time that our service was reachable, and which scheduled work doesn't hurt the score?",
+      "expected": ["def-uptime"],
+      "negatives": ["def-freshness"]
+    },
+    {
+      "id": "q112",
+      "kind": "definition",
+      "style": "paraphrase",
+      "query": "Why do engineers and clients use different words for the thing that holds a client's boards?",
+      "expected": ["def-project-space"]
+    },
+    {
+      "id": "q113",
+      "kind": "definition",
+      "style": "indirect",
+      "query": "Draft the retention slide for the board pack.",
+      "expected": ["def-nrr", "dec-board-nrr"],
+      "negatives": ["fact-churn-q3", "def-churned-customer"]
+    },
+    {
+      "id": "q114",
+      "kind": "definition",
+      "style": "indirect",
+      "query": "Write the revenue paragraph for the investor update.",
+      "expected": ["def-run-rate"],
+      "negatives": ["def-arr"]
+    },
+    {
+      "id": "q115",
+      "kind": "definition",
+      "style": "indirect",
+      "query": "Count how many customers we lost in January for the monthly report.",
+      "expected": ["def-churned-customer"],
+      "negatives": ["fact-churn-q3"]
+    },
+    {
+      "id": "q116",
+      "kind": "definition",
+      "style": "indirect",
+      "query": "Design the SLA alerting for the models feeding the board pack.",
+      "expected": ["def-freshness", "def-tier1"],
+      "negatives": ["def-uptime"]
+    },
+    {
+      "id": "q117",
+      "kind": "definition",
+      "style": "indirect",
+      "query": "Build a query that lists leads we should hand to the account executives.",
+      "expected": ["def-sql-lead"],
+      "negatives": ["pref-sql-uppercase"]
+    },
+    {
+      "id": "q118",
+      "kind": "definition",
+      "style": "indirect",
+      "query": "Chart how engaged our users are each day relative to the whole month, over the past year.",
+      "expected": ["def-stickiness", "def-active-user"]
+    },
+    {
+      "id": "q119",
+      "kind": "definition",
+      "style": "indirect",
+      "query": "Report how much our existing customers grew last quarter through upgrades.",
+      "expected": ["def-expansion"],
+      "negatives": ["def-nrr"]
+    },
+    {
+      "id": "q120",
+      "kind": "definition",
+      "style": "indirect",
+      "query": "Decide whether yesterday's outage affecting 15% of customers needs the all-hands escalation.",
+      "expected": ["def-p1"],
+      "negatives": ["def-uptime"]
+    },
+    {
+      "id": "q121",
+      "kind": "decision",
+      "style": "literal",
+      "query": "Why did we choose Snowflake over BigQuery?",
+      "expected": ["dec-snowflake"],
+      "negatives": ["fact-warehouse"]
+    },
+    {
+      "id": "q122",
+      "kind": "decision",
+      "style": "literal",
+      "query": "Are we still allowed to write new pipelines for Airflow, or is it Dagster now?",
+      "expected": ["dec-dagster", "fact-airflow-retired"]
+    },
+    {
+      "id": "q123",
+      "kind": "decision",
+      "style": "literal",
+      "query": "Can I start a new analysis in R?",
+      "expected": ["dec-no-new-r", "pref-python-over-r"]
+    },
+    {
+      "id": "q124",
+      "kind": "decision",
+      "style": "literal",
+      "query": "Are we going to buy Looker?",
+      "expected": ["dec-keep-metabase"],
+      "negatives": ["fact-metabase"]
+    },
+    {
+      "id": "q125",
+      "kind": "decision",
+      "style": "literal",
+      "query": "Why does the churn model use XGBoost instead of a neural network?",
+      "expected": ["dec-churn-model-xgboost"],
+      "negatives": ["fact-my-project"]
+    },
+    {
+      "id": "q126",
+      "kind": "decision",
+      "style": "literal",
+      "query": "When does the Growth plan price go up, and do existing customers pay more?",
+      "expected": ["dec-growth-price-rise"],
+      "negatives": ["fact-plans"]
+    },
+    {
+      "id": "q127",
+      "kind": "decision",
+      "style": "literal",
+      "query": "Where is customer data hosted? Do we have a US region?",
+      "expected": ["dec-eu-hosting"],
+      "negatives": ["fact-warehouse", "dec-snowflake"]
+    },
+    {
+      "id": "q128",
+      "kind": "decision",
+      "style": "literal",
+      "query": "How much do on-call engineers get paid for being on the rota?",
+      "expected": ["dec-oncall-pay"],
+      "negatives": ["fact-oncall-rota"]
+    },
+    {
+      "id": "q129",
+      "kind": "decision",
+      "style": "literal",
+      "query": "Is hiring frozen at the moment?",
+      "expected": ["dec-hiring-freeze"]
+    },
+    {
+      "id": "q130",
+      "kind": "decision",
+      "style": "literal",
+      "query": "How many days a week do we have to be in the office?",
+      "expected": ["dec-office-days"]
+    },
+    {
+      "id": "q131",
+      "kind": "decision",
+      "style": "paraphrase",
+      "query": "Can we adopt a vendor product that has its own passwords instead of our identity provider?",
+      "expected": ["dec-sso-only"],
+      "negatives": ["conv-secrets"]
+    },
+    {
+      "id": "q132",
+      "kind": "decision",
+      "style": "paraphrase",
+      "query": "Am I permitted to drop a client's spreadsheet into ChatGPT to summarise it?",
+      "expected": ["dec-approved-ai"],
+      "negatives": ["conv-secrets", "def-personal-data"]
+    },
+    {
+      "id": "q133",
+      "kind": "decision",
+      "style": "paraphrase",
+      "query": "When is the old way for clients to download their records as a spreadsheet going away?",
+      "expected": ["dec-csv-export-sunset"]
+    },
+    {
+      "id": "q134",
+      "kind": "decision",
+      "style": "paraphrase",
+      "query": "Why did we stop paying an outside vendor for user-behaviour tracking?",
+      "expected": ["dec-snowplow"]
+    },
+    {
+      "id": "q135",
+      "kind": "decision",
+      "style": "paraphrase",
+      "query": "Why do we self-host our SQL transformation framework rather than subscribe to the vendor's hosted service?",
+      "expected": ["dec-dbt-core"],
+      "negatives": ["fact-dbt-repo"]
+    },
+    {
+      "id": "q136",
+      "kind": "decision",
+      "style": "paraphrase",
+      "query": "Which number do directors look at first to judge how well we hold on to clients?",
+      "expected": ["dec-board-nrr"],
+      "negatives": ["fact-churn-q3", "def-churned-customer"]
+    },
+    {
+      "id": "q137",
+      "kind": "decision",
+      "style": "paraphrase",
+      "query": "What should the analysts be focusing on for the final quarter of this financial year?",
+      "expected": ["dec-q4-priority"],
+      "negatives": ["dec-hiring-freeze"]
+    },
+    {
+      "id": "q138",
+      "kind": "decision",
+      "style": "paraphrase",
+      "query": "Which version of the open-source relational engine should new services' backing stores run?",
+      "expected": ["dec-postgres-17"]
+    },
+    {
+      "id": "q139",
+      "kind": "decision",
+      "style": "paraphrase",
+      "query": "Can I load live client records onto my notebook computer to debug something at home?",
+      "expected": ["dec-masked-staging"],
+      "negatives": ["def-personal-data"]
+    },
+    {
+      "id": "q140",
+      "kind": "decision",
+      "style": "paraphrase",
+      "query": "During which hours can a client reach our helpdesk Monday to Friday, and what extra coverage do the biggest accounts get in a crisis?",
+      "expected": ["dec-support-hours"],
+      "negatives": ["def-p1"]
+    },
+    {
+      "id": "q141",
+      "kind": "decision",
+      "style": "paraphrase",
+      "query": "Are we planning to run infrastructure in America for clients there?",
+      "expected": ["dec-eu-hosting"]
+    },
+    {
+      "id": "q142",
+      "kind": "decision",
+      "style": "paraphrase",
+      "query": "Can I open a vacancy for a marketing manager next month?",
+      "expected": ["dec-hiring-freeze"]
+    },
+    {
+      "id": "q143",
+      "kind": "decision",
+      "style": "indirect",
+      "query": "Set up a new scheduled job to refresh the usage tables every night.",
+      "expected": ["dec-dagster", "dec-dbt-core"]
+    },
+    {
+      "id": "q144",
+      "kind": "decision",
+      "style": "indirect",
+      "query": "Rewrite the old quarterly churn report from the R notebook.",
+      "expected": ["dec-no-new-r", "pref-python-over-r"]
+    },
+    {
+      "id": "q145",
+      "kind": "decision",
+      "style": "indirect",
+      "query": "Draft the customer announcement about the Growth plan price change.",
+      "expected": ["dec-growth-price-rise"],
+      "negatives": ["fact-plans"]
+    },
+    {
+      "id": "q146",
+      "kind": "decision",
+      "style": "indirect",
+      "query": "Pick a model type for the churn prediction project's first prototype.",
+      "expected": ["dec-churn-model-xgboost"],
+      "negatives": ["fact-my-project"]
+    },
+    {
+      "id": "q147",
+      "kind": "decision",
+      "style": "indirect",
+      "query": "Write the migration notice for customers still pulling CSVs from the old endpoint.",
+      "expected": ["dec-csv-export-sunset"]
+    },
+    {
+      "id": "q148",
+      "kind": "decision",
+      "style": "indirect",
+      "query": "Draft the data team's roadmap for the next three months.",
+      "expected": ["dec-q4-priority"],
+      "negatives": ["fact-team-leads"]
+    },
+    {
+      "id": "q149",
+      "kind": "decision",
+      "style": "indirect",
+      "query": "Help me choose a database for the new internal booking service.",
+      "expected": ["dec-postgres-17"],
+      "negatives": ["dec-snowflake", "fact-warehouse"]
+    },
+    {
+      "id": "q150",
+      "kind": "decision",
+      "style": "indirect",
+      "query": "Can we trial a new internal wiki product from a startup I found?",
+      "expected": ["dec-sso-only"],
+      "negatives": ["conv-secrets"]
+    },
+    {
+      "id": "q151",
+      "kind": "definition",
+      "style": "paraphrase",
+      "query": "What's our revenue metric?",
+      "expected": ["def-arr"],
+      "negatives": ["def-run-rate", "fact-arr-dashboard-owner"]
+    }
+  ]
+}

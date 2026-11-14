@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { neutralizeMemoryMarkers } from "./memory-fence.js";
 import { sanitizeRememberInput } from "./memory-tools.js";
 import { TOOL_COMMIT_PROJECT, TOOL_RECALL, TOOL_REMEMBER } from "./protocol.js";
 
@@ -7,6 +8,8 @@ import { TOOL_COMMIT_PROJECT, TOOL_RECALL, TOOL_REMEMBER } from "./protocol.js";
  * run's memory file (`KOBE_MEMORY_FILE`, memory/context-file.ts) before every prompt, so a change
  * to memory never restarts Pi:
  *  - `tools`: whether memory is on for this run; `remember` / `recall` are active only then;
+ *  - `known` / `picks` (KOBE-383): "What Kobe knows", the stable part first and the per-message
+ *    picks after the project instructions; added with or without Notes (Policy reaches every agent);
  *  - `text`: the run's memory section (already sanitised, capped and fenced by the agent), added
  *    to that run's system prompt only: not part of the launch, not stored in the session;
  *  - `project` and `viewing` (KOBE-245, KOBE-462): the project instructions and the fenced file
@@ -18,6 +21,10 @@ import { TOOL_COMMIT_PROJECT, TOOL_RECALL, TOOL_REMEMBER } from "./protocol.js";
 export interface MemoryRunFile {
   readonly tools: boolean;
   readonly text: string;
+  /** What Kobe knows, stable part (KOBE-383): first, with or without Notes. */
+  readonly known: string;
+  /** What Kobe knows, per-message picks (KOBE-383): after the project instructions. */
+  readonly picks: string;
   /** The project-instructions block (KOBE-245); independent of whether memory is on. */
   readonly project: string;
   /** The viewed-file section (KOBE-462); independent of whether memory is on. */
@@ -32,6 +39,8 @@ export interface MemoryRunFile {
 const OFF: MemoryRunFile = {
   tools: false,
   text: "",
+  known: "",
+  picks: "",
   project: "",
   viewing: "",
   conflicts: "",
@@ -58,13 +67,17 @@ export function readMemoryRunFile(
     const viewing = optionalText(record.viewing);
     const conflicts = optionalText(record.conflicts);
     const conflictsLive = optionalText(record.conflicts_live);
-    if ([project, viewing, conflicts, conflictsLive].includes(false)) return OFF;
+    const known = optionalText(record.known);
+    const picks = optionalText(record.picks);
+    if ([project, viewing, conflicts, conflictsLive, known, picks].includes(false)) return OFF;
     // Absent in files from an older agent: no write access (fail closed).
     const projectWrite = record.project_write ?? false;
     if (typeof projectWrite !== "boolean") return OFF;
     return {
       tools,
       text: tools ? text : "",
+      known: known || "",
+      picks: picks || "",
       project: project || "",
       viewing: viewing || "",
       conflicts: conflicts || "",
@@ -104,8 +117,10 @@ export function installMemoryHooks(
   };
   pi.on("input", syncTools as never);
   pi.on("before_agent_start", ((event: { systemPrompt: string }) => {
-    const { text, project, viewing, conflicts } = state();
-    const parts = [text, project, viewing, conflicts].filter((part) => part !== "");
+    // Stable first, so the provider caches the longest prefix (KOBE-383, Q6): What Kobe knows'
+    // stable part, Notes, project instructions; then what changes per message.
+    const { known, text, project, picks, viewing, conflicts } = state();
+    const parts = [known, text, project, picks, viewing, conflicts].filter((part) => part !== "");
     return parts.length === 0
       ? undefined
       : { systemPrompt: `${event.systemPrompt}\n\n${parts.join("\n\n")}` };
@@ -113,10 +128,13 @@ export function installMemoryHooks(
   // Sync conflicts told mid-run (KOBE-492): before each later model call of the run, a custom
   // message (Pi sends it in user role; the text says it is a Kobe notice). Not stored in the
   // session: Pi's `context` result only shapes this request.
+  // Tool results are rewritten for each request too (KOBE-383 review M1): a copy of a memory
+  // block with the thread's nonce (stable across runs) never works as a fence there.
   pi.on("context", ((event: { messages: unknown[] }) => {
     const { conflictsLive } = state();
-    if (conflictsLive === "") return undefined;
-    return { messages: [...event.messages, conflictNoteMessage(conflictsLive)] };
+    const cleaned = neutralizeToolResults(event.messages);
+    if (conflictsLive === "") return cleaned === event.messages ? undefined : { messages: cleaned };
+    return { messages: [...cleaned, conflictNoteMessage(conflictsLive)] };
   }) as never);
 }
 
@@ -150,4 +168,42 @@ export function conflictNoteMessage(text: string): Record<string, unknown> {
     display: false,
     timestamp: Date.now(),
   };
+}
+
+/**
+ * Pi's messages with every tool result's text put through `neutralizeMemoryMarkers`, except
+ * `recall` (its blocks are real, sanitised memory with their own fresh nonce). The same array when
+ * nothing changed, so the request is untouched.
+ */
+export function neutralizeToolResults(messages: readonly unknown[]): unknown[] {
+  let changed = false;
+  const out = messages.map((message) => {
+    if (typeof message !== "object" || message === null) return message;
+    const m = message as Record<string, unknown>;
+    if (m.role !== "toolResult" || m.toolName === TOOL_RECALL) return message;
+    const content = cleanContent(m.content);
+    if (content === m.content) return message;
+    changed = true;
+    return { ...m, content };
+  });
+  return changed ? out : (messages as unknown[]);
+}
+
+function cleanContent(content: unknown): unknown {
+  if (typeof content === "string") {
+    const clean = neutralizeMemoryMarkers(content);
+    return clean === content ? content : clean;
+  }
+  if (!Array.isArray(content)) return content;
+  let changed = false;
+  const blocks = content.map((block: unknown) => {
+    if (typeof block !== "object" || block === null) return block;
+    const b = block as Record<string, unknown>;
+    if (b.type !== "text" || typeof b.text !== "string") return block;
+    const text = neutralizeMemoryMarkers(b.text);
+    if (text === b.text) return block;
+    changed = true;
+    return { ...b, text };
+  });
+  return changed ? blocks : content;
 }

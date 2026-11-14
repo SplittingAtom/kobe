@@ -1,0 +1,95 @@
+{
+  "about": "KOBE-387 memory for the cache replay (docs/gates/gate-7a.md step 2): 3 Policy rules, 2 pinned Workspace memories, 12 more across the four places. Seed once per install (KOBE_EVAL_SEED=1) and keep it for both the before and the after replay. Policy needs a Site admin; the rest the replaying member (Workspace items: a curator).",
+  "items": [
+    {
+      "scope": "site",
+      "kind": "convention",
+      "policy": true,
+      "statement": "Never paste customer personal data into replies; refer to customers by account id."
+    },
+    {
+      "scope": "site",
+      "kind": "convention",
+      "policy": true,
+      "statement": "Figures quoted to customers must come from the board pack or Metabase, never estimates."
+    },
+    {
+      "scope": "site",
+      "kind": "convention",
+      "policy": true,
+      "statement": "Do not give legal or tax advice; point people to the finance or legal team."
+    },
+    {
+      "scope": "team",
+      "kind": "definition",
+      "pinned": true,
+      "statement": "ARR is the annualised value of all active subscription contracts on the last day of the month; services and overages are excluded."
+    },
+    {
+      "scope": "team",
+      "kind": "convention",
+      "pinned": true,
+      "statement": "Timestamps are stored in UTC; convert to local time only in the presentation layer."
+    },
+    {
+      "scope": "team",
+      "kind": "fact",
+      "statement": "The analytics warehouse is Snowflake in eu-west-1; dbt Core runs in Dagster at 05:00 UTC."
+    },
+    {
+      "scope": "team",
+      "kind": "decision",
+      "statement": "2026-06: the board pack's headline retention metric is NRR, replacing logo churn."
+    },
+    {
+      "scope": "team",
+      "kind": "definition",
+      "statement": "An active user ran at least one query or opened a dashboard in the last 28 days; service accounts do not count."
+    },
+    {
+      "scope": "team",
+      "kind": "fact",
+      "statement": "Logo churn in Q3 FY2026 was 2.1%, up from 1.6% in Q2."
+    },
+    {
+      "scope": "site",
+      "kind": "fact",
+      "statement": "The fiscal year starts on 1 February and ends on 31 January."
+    },
+    {
+      "scope": "site",
+      "kind": "decision",
+      "statement": "2026-03: all customer data is hosted in the EU (Frankfurt and Dublin)."
+    },
+    {
+      "scope": "site",
+      "kind": "definition",
+      "statement": "A P1 incident is any outage or data loss affecting more than 10% of customers or any Enterprise customer's production use."
+    },
+    {
+      "scope": "user",
+      "kind": "preference",
+      "statement": "Keep answers short: lead with the answer in one or two sentences."
+    },
+    {
+      "scope": "user",
+      "kind": "fact",
+      "statement": "I am working on the churn prediction model for the Growth plan."
+    },
+    {
+      "scope": "portable",
+      "kind": "preference",
+      "statement": "Dates as ISO 8601; times on the 24-hour clock."
+    },
+    {
+      "scope": "portable",
+      "kind": "preference",
+      "statement": "Show money in GBP with the pound sign."
+    },
+    {
+      "scope": "portable",
+      "kind": "preference",
+      "statement": "Write Python examples with type hints."
+    }
+  ]
+}

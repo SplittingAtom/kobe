@@ -1,3 +1,4 @@
+import type { RunSemanticMemory } from "@kobe/protocol";
 import { describe, expect, it } from "vitest";
 import {
   COMPACTION_SUMMARY_PREFIX,
@@ -7,7 +8,7 @@ import {
 } from "./sections.js";
 import { splitForcedPrompt, splitRenderedPrompt } from "./system-prompt.js";
 import { VIEWING_HEADER, viewingContextText } from "../memory/viewing-context.js";
-import { memoryContextText } from "../memory/context.js";
+import { memoryContextText, memoryRunFileContent } from "../memory/context.js";
 
 /** Pi 1.0.0's rendered prompt: preamble, then tagged sections joined by blank lines. */
 const RENDERED = [
@@ -72,6 +73,87 @@ describe("system prompt sections (KOBE-470)", () => {
     const sections = splitForcedPrompt(forced, { memory: "other", project: "", viewing: "" });
     expect(kinds(sections).slice(-2)).toEqual(["memory:Saved memory", "viewing_file:Viewed file"]);
     expect(sections.at(-2)?.text).toBe(memory);
+  });
+
+  describe("What Kobe knows (KOBE-383)", () => {
+    const base = {
+      version: 1,
+      kind: "fact",
+      pinned: false,
+      provenance: { actor_kind: "user", as_of: null, saved_on: "2026-11-01" },
+    } as const;
+    const semantic: RunSemanticMemory = {
+      items: [
+        {
+          ...base,
+          id: "00000000-0000-4000-8000-000000000001",
+          scope: "site",
+          policy: true,
+          statement: "P",
+        },
+        {
+          ...base,
+          id: "00000000-0000-4000-8000-000000000002",
+          scope: "team",
+          policy: false,
+          pinned: true,
+          statement: "T",
+        },
+        {
+          ...base,
+          id: "00000000-0000-4000-8000-000000000003",
+          scope: "user",
+          policy: false,
+          statement: "U",
+        },
+      ],
+      omitted_count: 1,
+    };
+    const file = memoryRunFileContent(
+      {
+        scopes: ["user"],
+        indexes: [{ scope: "user", content: "- tea", version: 1, truncated: false }],
+        semantic,
+      },
+      "0123456789abcdef",
+    );
+    const parts = {
+      memory: file.text,
+      project: "",
+      viewing: viewing,
+      known: file.known ?? "",
+      picks: file.picks ?? "",
+      knownSections: file.knownSections ?? [],
+      picksSections: file.picksSections ?? [],
+    };
+    const forced = [RENDERED, parts.known, parts.memory, parts.picks, viewing].join("\n\n");
+
+    it("labels each lane, in the order the prompt carries them", () => {
+      const sections = splitForcedPrompt(forced, parts);
+      expect(kinds(sections).slice(-5)).toEqual([
+        "memory:Policy",
+        "memory:Workspace memories (pinned)",
+        "memory:Saved memory",
+        "memory:Only in this workspace",
+        "viewing_file:Viewed file",
+      ]);
+      // A part's lane sections are joined by one newline, the parts by a blank line.
+      const texts = sections.slice(-5).map((s) => s.text);
+      expect(`${texts[0]}\n${texts[1]}`).toBe(parts.known);
+      expect(texts.slice(2)).toEqual([parts.memory, parts.picks, viewing]);
+    });
+
+    it("finds the parts by their headers when the run's parts changed since", () => {
+      const sections = splitForcedPrompt(forced, { memory: "other", project: "", viewing: "" });
+      expect(kinds(sections).slice(-4)).toEqual([
+        "memory:What Kobe knows",
+        "memory:Saved memory",
+        "memory:What Kobe knows for this message",
+        "viewing_file:Viewed file",
+      ]);
+      expect(sections.at(-4)?.text).toBe(parts.known);
+      expect(sections.at(-2)?.text).toBe(parts.picks);
+    });
   });
 
   describe("at most one viewed-file section (KOBE-473)", () => {

@@ -162,6 +162,29 @@ describe.skipIf(!PI_AVAILABLE)("memory tools in real Pi, through kobe-sandbox-ag
     expect(t.server.frames("policy.check")).toEqual([]);
   }, 120_000);
 
+  it("announces semantic memory with memory, and renders What Kobe knows (KOBE-383)", async () => {
+    const t = await start();
+    const caps = (t.server.frames("hello")[0] as { capabilities?: string[] }).capabilities ?? [];
+    expect(caps).toContain("semantic_memory");
+    const policy = {
+      id: "00000000-0000-4000-8000-000000000001",
+      version: 1,
+      scope: "site",
+      kind: "convention",
+      statement: "policy-marker",
+      policy: true,
+      pinned: false,
+      provenance: { actor_kind: "user", as_of: null, saved_on: "2026-11-01" },
+    };
+    const prompt = await systemPromptOf(t, {
+      memory: { scopes: [], indexes: [], semantic: { items: [policy], omitted_count: 0 } },
+    });
+    expect(prompt).toContain("## What Kobe knows");
+    expect(prompt).toContain("organization policy, set by the Site");
+    expect(prompt).toContain("policy-marker");
+    expect(prompt).not.toContain("Look up saved memory");
+  }, 120_000);
+
   it("injects the index as untrusted data, and nothing when memory is off", async () => {
     const t = await start();
     const prompt = await systemPromptOf(t, {

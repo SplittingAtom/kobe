@@ -23,7 +23,7 @@ import type {
   SyncConflict,
 } from "@kobe/protocol";
 import { MEMORY_FILE_ENV, MEMORY_FILE_NAME, MemoryContextFile } from "../memory/context-file.js";
-import { memoryRunFileContent } from "../memory/context.js";
+import { memoryRunFileContent, threadFenceNonce } from "../memory/context.js";
 import { conflictNoteText } from "../memory/conflict-context.js";
 import { PiProcess, PiProcessError, type PiExit, type PiRecord } from "../pi/pi-process.js";
 import type { PiIdentities, PiIdentity } from "../pi/identities.js";
@@ -737,7 +737,8 @@ export class Thread {
   ): Promise<void> {
     this.#liveConflicts = [];
     await this.#memoryFile?.write(
-      memoryRunFileContent(memory, undefined, project, viewing, conflicts),
+      // Per-thread fence nonce (KOBE-383): the memory blocks stay byte-stable across runs.
+      memoryRunFileContent(memory, threadFenceNonce(this.id), project, viewing, conflicts),
     );
   }
 
@@ -773,6 +774,10 @@ export class Thread {
           project: written.project,
           viewing: written.viewing ?? "",
           conflicts: written.conflicts ?? "",
+          known: written.known ?? "",
+          picks: written.picks ?? "",
+          knownSections: written.knownSections ?? [],
+          picksSections: written.picksSections ?? [],
         };
   }
 

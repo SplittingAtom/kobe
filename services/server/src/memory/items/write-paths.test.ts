@@ -29,7 +29,9 @@ function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
     if (statSync(path).isDirectory()) return sources(path);
-    return name.endsWith(".ts") && !name.endsWith(".test.ts") ? [path] : [];
+    // Tests and the eval harness's seeding (KOBE-387, `*.eval.ts`) write fixtures directly.
+    const fixture = name.endsWith(".test.ts") || name.endsWith(".eval.ts");
+    return name.endsWith(".ts") && !fixture ? [path] : [];
   });
 }
 

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { VIEWING_CONTENT_MAX_BYTES, type RunViewingContext } from "@kobe/protocol";
-import { sanitizeUntrusted } from "../kobe-tools/memory-fence.js";
+import { neutralizeMemoryMarkers, sanitizeUntrusted } from "../kobe-tools/memory-fence.js";
 
 /**
  * The viewed file in the model's context (KOBE-462, `run.start.viewing`; spec FE6): the workspace
@@ -10,7 +10,9 @@ import { sanitizeUntrusted } from "../kobe-tools/memory-fence.js";
  * Trust: the file's text is data, not instructions (an agent, a teammate's upload or a web page
  * may have written it). It is fenced between markers that carry a random per-run nonce, so the
  * text cannot close the fence; it is kept verbatim inside (the model proposes edits against it,
- * so sanitising would invent changes). The path is a one-line label, sanitised.
+ * so sanitising would invent changes), except a line holding a memory marker, which is sanitised so
+ * a copied memory block never works as one (KOBE-383 review M1). The path is a one-line label,
+ * sanitised.
  */
 export const VIEWING_HEADER = "## The file the user is looking at";
 
@@ -40,7 +42,7 @@ export function viewingContextText(
   if (viewing.content === undefined) {
     return [...intro, "It is not a text file, so its content is not shown here."].join("\n");
   }
-  const content = viewing.content.slice(0, VIEWING_CONTENT_MAX_BYTES);
+  const content = neutralizeMemoryMarkers(viewing.content.slice(0, VIEWING_CONTENT_MAX_BYTES));
   const fence = nonce ?? freshNonce(content);
   const lines = [
     ...intro,
