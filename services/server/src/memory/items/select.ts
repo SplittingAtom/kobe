@@ -72,17 +72,16 @@ export interface SelectInput {
 
 const recency = (ageDays: number) => Math.max(0, 1 - Math.max(0, ageDays) / RECENCY_DAYS);
 
+/** Relevance alone (SM24), without the preference base or stickiness. */
+export function relevanceScore(c: Candidate): number {
+  return c.textRank + TRIGRAM_WEIGHT * c.trigram + RECENCY_WEIGHT * recency(c.ageDays);
+}
+
 /** The score of one candidate in its lane (pure; the SQL ordering mirrors it). */
 export function memoryScore(c: Candidate, lane: SelectLane): number {
   const base =
     c.item.kind === "preference" && (lane === "user" || lane === "portable") ? PREFERENCE_BASE : 0;
-  return (
-    c.textRank +
-    TRIGRAM_WEIGHT * c.trigram +
-    RECENCY_WEIGHT * recency(c.ageDays) +
-    base +
-    (c.sticky ? STICKY_BONUS : 0)
-  );
+  return relevanceScore(c) + base + (c.sticky ? STICKY_BONUS : 0);
 }
 
 /**

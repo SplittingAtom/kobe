@@ -1,0 +1,858 @@
+{
+  "about": "KOBE-387 seeded memory store for the relevance eval (fictional company Larkspur). Written before the queries; see README.md. scope: user = the runner's own in the Workspace, portable = the runner's portable preferences, team = the Workspace, site = the Site. age_days sets the version's age (recency).",
+  "items": [
+    {
+      "id": "pref-tables-compare",
+      "scope": "user",
+      "kind": "preference",
+      "age_days": 40,
+      "statement": "Prefers comparisons laid out as a table, one column per option, instead of bullet lists."
+    },
+    {
+      "id": "pref-uk-spelling",
+      "scope": "user",
+      "kind": "preference",
+      "age_days": 120,
+      "statement": "Write in British English spelling (colour, organise, licence)."
+    },
+    {
+      "id": "pref-no-emoji",
+      "scope": "user",
+      "kind": "preference",
+      "age_days": 200,
+      "statement": "Never use emoji in replies or in documents drafted for me."
+    },
+    {
+      "id": "pref-short-answers",
+      "scope": "user",
+      "kind": "preference",
+      "age_days": 15,
+      "statement": "Keep answers short: lead with the answer in one or two sentences, details only if asked."
+    },
+    {
+      "id": "pref-python-over-r",
+      "scope": "user",
+      "kind": "preference",
+      "age_days": 90,
+      "statement": "For data analysis scripts, use Python with pandas rather than R."
+    },
+    {
+      "id": "pref-iso-dates",
+      "scope": "user",
+      "kind": "preference",
+      "age_days": 60,
+      "statement": "Dates as ISO 8601 (2026-03-14), never 03/14/2026 or 14/03/2026."
+    },
+    {
+      "id": "pref-24h-clock",
+      "scope": "user",
+      "kind": "preference",
+      "age_days": 60,
+      "statement": "Use the 24-hour clock and state the time zone (Europe/London) for times."
+    },
+    {
+      "id": "pref-sql-uppercase",
+      "scope": "user",
+      "kind": "preference",
+      "age_days": 30,
+      "statement": "In SQL I share, keywords in upper case and one clause per line."
+    },
+    {
+      "id": "pref-no-pie-charts",
+      "scope": "user",
+      "kind": "preference",
+      "age_days": 75,
+      "statement": "When making charts, avoid pie charts; use bar or line charts with labelled axes."
+    },
+    {
+      "id": "pref-customer-email-tone",
+      "scope": "user",
+      "kind": "preference",
+      "age_days": 10,
+      "statement": "Draft emails to customers in a warm but direct tone, no more than five sentences, signed with first name only."
+    },
+    {
+      "id": "pref-morning-meetings",
+      "scope": "user",
+      "kind": "preference",
+      "age_days": 150,
+      "statement": "Prefers meetings scheduled before 11:00; afternoons are kept for focused work."
+    },
+    {
+      "id": "pref-review-findings",
+      "scope": "user",
+      "kind": "preference",
+      "age_days": 25,
+      "statement": "In code reviews, point out problems as numbered findings with severity, not inline prose."
+    },
+    {
+      "id": "pref-gbp",
+      "scope": "user",
+      "kind": "preference",
+      "age_days": 45,
+      "statement": "Show money in GBP with the £ sign unless the source data is in another currency, then show both."
+    },
+    {
+      "id": "pref-few-slides",
+      "scope": "user",
+      "kind": "preference",
+      "age_days": 300,
+      "statement": "Slide decks: at most one idea per slide and no more than ten slides."
+    },
+
+    {
+      "id": "pref-vim",
+      "scope": "portable",
+      "kind": "preference",
+      "age_days": 365,
+      "statement": "Code snippets for the terminal assume vim as the editor, not nano."
+    },
+    {
+      "id": "pref-reason-and-alternative",
+      "scope": "portable",
+      "kind": "preference",
+      "age_days": 100,
+      "statement": "When recommending something, give the main reason and one alternative considered."
+    },
+    {
+      "id": "pref-metric-units",
+      "scope": "portable",
+      "kind": "preference",
+      "age_days": 250,
+      "statement": "Use metric units (kilometres, kilograms, Celsius)."
+    },
+    {
+      "id": "pref-first-name",
+      "scope": "portable",
+      "kind": "preference",
+      "age_days": 180,
+      "statement": "Call me by my first name; no formal salutations such as Dear."
+    },
+    {
+      "id": "pref-ts-strict",
+      "scope": "portable",
+      "kind": "preference",
+      "age_days": 50,
+      "statement": "Write TypeScript examples with strict types; avoid any."
+    },
+    {
+      "id": "pref-cite-sources",
+      "scope": "portable",
+      "kind": "preference",
+      "age_days": 20,
+      "statement": "Cite the source document or link for any figure quoted."
+    },
+    {
+      "id": "pref-exec-no-jargon",
+      "scope": "portable",
+      "kind": "preference",
+      "age_days": 70,
+      "statement": "Summaries for executives avoid technical jargon and acronyms unless defined."
+    },
+    {
+      "id": "pref-weekly-status",
+      "scope": "portable",
+      "kind": "preference",
+      "age_days": 35,
+      "statement": "Weekly status summaries use three headings: Done, Next, Blocked."
+    },
+    {
+      "id": "pref-colourblind-palette",
+      "scope": "portable",
+      "kind": "preference",
+      "age_days": 140,
+      "statement": "Charts should use a colour-blind-safe palette."
+    },
+    {
+      "id": "pref-markdown-headings",
+      "scope": "portable",
+      "kind": "preference",
+      "age_days": 90,
+      "statement": "Long answers use Markdown headings; short ones none."
+    },
+
+    {
+      "id": "fact-offices",
+      "scope": "site",
+      "kind": "fact",
+      "age_days": 400,
+      "statement": "Larkspur's headquarters are in Leeds; the second office is in Lisbon."
+    },
+    {
+      "id": "fact-fiscal-year",
+      "scope": "site",
+      "kind": "fact",
+      "age_days": 380,
+      "statement": "The fiscal year starts on 1 February and ends on 31 January."
+    },
+    {
+      "id": "fact-headcount",
+      "scope": "site",
+      "kind": "fact",
+      "age_days": 280,
+      "statement": "Larkspur had 214 employees at the end of FY2026."
+    },
+    {
+      "id": "fact-leadership",
+      "scope": "site",
+      "kind": "fact",
+      "age_days": 200,
+      "statement": "Amara Okafor is the CEO; Tomasz Wilk is the CFO."
+    },
+    {
+      "id": "fact-payday",
+      "scope": "site",
+      "kind": "fact",
+      "age_days": 390,
+      "statement": "Salaries are paid on the 25th of each month, or the previous working day."
+    },
+    {
+      "id": "fact-annual-leave",
+      "scope": "site",
+      "kind": "fact",
+      "age_days": 330,
+      "statement": "Everyone gets 27 days of annual leave plus the public holidays of their office's country."
+    },
+    {
+      "id": "fact-it-help",
+      "scope": "site",
+      "kind": "fact",
+      "age_days": 160,
+      "statement": "IT support requests go to the #it-help channel; urgent laptop problems by phone on extension 4400."
+    },
+    {
+      "id": "fact-expenses",
+      "scope": "site",
+      "kind": "fact",
+      "age_days": 210,
+      "statement": "Expenses are submitted in Pleo within 30 days of the purchase."
+    },
+    {
+      "id": "fact-soc2",
+      "scope": "site",
+      "kind": "fact",
+      "age_days": 30,
+      "statement": "Larkspur has a SOC 2 Type II report, renewed every October."
+    },
+    {
+      "id": "fact-dpo",
+      "scope": "site",
+      "kind": "fact",
+      "age_days": 110,
+      "statement": "The data protection officer is Helena Costa; personal-data requests go to privacy@larkspur.example."
+    },
+    {
+      "id": "fact-warehouse",
+      "scope": "team",
+      "kind": "fact",
+      "age_days": 240,
+      "statement": "The analytics warehouse is Snowflake, account in the eu-west-1 region."
+    },
+    {
+      "id": "fact-dbt-repo",
+      "scope": "team",
+      "kind": "fact",
+      "age_days": 95,
+      "statement": "dbt models live in the larkspur-dbt repository; the production job runs at 05:00 UTC daily."
+    },
+    {
+      "id": "fact-largest-customer",
+      "scope": "team",
+      "kind": "fact",
+      "age_days": 55,
+      "statement": "Our largest customer by contract value is Halden Freight (about £1.2M a year)."
+    },
+    {
+      "id": "fact-oncall-rota",
+      "scope": "team",
+      "kind": "fact",
+      "age_days": 130,
+      "statement": "On-call paging is done through PagerDuty; the data platform rota changes every Monday at 10:00."
+    },
+    {
+      "id": "fact-metabase",
+      "scope": "team",
+      "kind": "fact",
+      "age_days": 170,
+      "statement": "Company dashboards are built in Metabase at metrics.larkspur.example."
+    },
+    {
+      "id": "fact-airflow-retired",
+      "scope": "team",
+      "kind": "fact",
+      "age_days": 230,
+      "statement": "Airflow was retired in March 2026; all scheduling now runs in Dagster."
+    },
+    {
+      "id": "fact-raw-retention",
+      "scope": "team",
+      "kind": "fact",
+      "age_days": 190,
+      "statement": "Raw event files in the landing bucket are kept for 400 days, then deleted."
+    },
+    {
+      "id": "fact-team-leads",
+      "scope": "team",
+      "kind": "fact",
+      "age_days": 80,
+      "statement": "Priya Raman leads the data platform team; Jonas Berg is the engineering manager."
+    },
+    {
+      "id": "fact-customer-count",
+      "scope": "team",
+      "kind": "fact",
+      "age_days": 40,
+      "statement": "We had 1,840 paying customer accounts at the end of Q3 FY2026."
+    },
+    {
+      "id": "fact-churn-q3",
+      "scope": "team",
+      "kind": "fact",
+      "age_days": 40,
+      "statement": "Logo churn in Q3 FY2026 was 2.1%, up from 1.6% in Q2."
+    },
+    {
+      "id": "fact-plans",
+      "scope": "team",
+      "kind": "fact",
+      "age_days": 150,
+      "statement": "There are three plans: Starter, Growth and Enterprise; Enterprise is priced per seat with a 50-seat minimum."
+    },
+    {
+      "id": "fact-staging-refresh",
+      "scope": "team",
+      "kind": "fact",
+      "age_days": 65,
+      "statement": "The staging database is refreshed from production every Sunday night with personal data masked."
+    },
+    {
+      "id": "fact-dso",
+      "scope": "team",
+      "kind": "fact",
+      "age_days": 40,
+      "statement": "Accounts receivable days (DSO) were 48 at the end of Q3, against a target of 40."
+    },
+    {
+      "id": "fact-services-revenue-recognition",
+      "scope": "team",
+      "kind": "fact",
+      "age_days": 260,
+      "statement": "Professional services revenue is recognised when the work is delivered, not when it is invoiced."
+    },
+    {
+      "id": "fact-my-manager",
+      "scope": "user",
+      "kind": "fact",
+      "age_days": 80,
+      "statement": "My manager is Jonas Berg; our one-to-one is on Thursdays."
+    },
+    {
+      "id": "fact-my-laptop",
+      "scope": "user",
+      "kind": "fact",
+      "age_days": 300,
+      "statement": "My work laptop is a 2024 MacBook Pro with 32 GB of memory."
+    },
+    {
+      "id": "fact-my-project",
+      "scope": "user",
+      "kind": "fact",
+      "age_days": 20,
+      "statement": "I am currently working on the churn prediction model for the Growth plan."
+    },
+
+    {
+      "id": "def-arr",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 120,
+      "statement": "ARR (annual recurring revenue) is the annualised value of all active subscription contracts on the last day of the month; one-off services and usage overages are excluded."
+    },
+    {
+      "id": "def-mrr",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 120,
+      "statement": "MRR is ARR divided by twelve; we report it only for the Starter plan, which bills monthly."
+    },
+    {
+      "id": "def-nrr",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 110,
+      "statement": "Net revenue retention (NRR) is this month's ARR from customers who were customers twelve months ago, divided by their ARR then."
+    },
+    {
+      "id": "def-run-rate",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 210,
+      "statement": "Revenue run rate in investor updates is last month's total invoiced revenue times twelve, services included."
+    },
+    {
+      "id": "def-active-user",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 140,
+      "statement": "An active user is a person who ran at least one query or opened a dashboard in the last 28 days; API-only service accounts do not count."
+    },
+    {
+      "id": "def-churned-customer",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 100,
+      "statement": "A customer counts as churned on the day their last subscription contract ends without renewal, not when they give notice."
+    },
+    {
+      "id": "def-sql-lead",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 220,
+      "statement": "A sales-qualified lead (SQL) is a lead with a booked discovery call and a company of more than 50 employees."
+    },
+    {
+      "id": "def-cac",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 180,
+      "statement": "Customer acquisition cost is sales and marketing spend in a quarter divided by new customers won in that quarter."
+    },
+    {
+      "id": "def-p1",
+      "scope": "site",
+      "kind": "definition",
+      "age_days": 240,
+      "statement": "A P1 incident is any outage or data loss affecting more than 10% of customers or any Enterprise customer's production use."
+    },
+    {
+      "id": "def-gross-margin",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 200,
+      "statement": "Gross margin excludes R&D and counts hosting, support salaries and third-party data costs as cost of revenue."
+    },
+    {
+      "id": "def-project-space",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 310,
+      "statement": "In our product a project is the customer-facing container for dashboards; internally the table is called space."
+    },
+    {
+      "id": "def-freshness",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 90,
+      "statement": "Data freshness means the age of the newest row in a model; the SLA is under 6 hours for tier-1 models."
+    },
+    {
+      "id": "def-tier1",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 90,
+      "statement": "Tier-1 dbt models are the ones that feed the board pack and the customer-facing usage page."
+    },
+    {
+      "id": "def-time-to-value",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 160,
+      "statement": "Time to value is the number of days from contract signature to the customer's first shared dashboard."
+    },
+    {
+      "id": "def-seat",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 150,
+      "statement": "A seat is a named user with an editor or admin role; viewers are free and not counted as seats."
+    },
+    {
+      "id": "def-expansion",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 110,
+      "statement": "Expansion revenue is the increase in ARR from existing customers through upgrades or added seats, net of downgrades."
+    },
+    {
+      "id": "def-stickiness",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 140,
+      "statement": "Stickiness is daily active users divided by monthly active users, averaged over the month."
+    },
+    {
+      "id": "def-done",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 60,
+      "statement": "A ticket is done when it is merged, deployed to production and the owner has checked it there."
+    },
+    {
+      "id": "def-personal-data",
+      "scope": "site",
+      "kind": "definition",
+      "age_days": 270,
+      "statement": "Personal data here includes names, emails, IP addresses and device ids; hashed emails still count as personal data."
+    },
+    {
+      "id": "def-signup-cohort",
+      "scope": "team",
+      "kind": "definition",
+      "age_days": 200,
+      "statement": "A signup cohort is all accounts created in the same calendar month (UTC)."
+    },
+    {
+      "id": "def-uptime",
+      "scope": "site",
+      "kind": "definition",
+      "age_days": 230,
+      "statement": "Uptime is measured per calendar month from the external probe; planned maintenance announced 72 hours ahead is excluded."
+    },
+    {
+      "id": "fact-arr-dashboard-owner",
+      "scope": "team",
+      "kind": "fact",
+      "age_days": 70,
+      "statement": "The ARR dashboard in Metabase is owned by finance; ask Tomasz Wilk's team for access."
+    },
+
+    {
+      "id": "conv-branch-names",
+      "scope": "team",
+      "kind": "convention",
+      "age_days": 200,
+      "statement": "Branch names follow <ticket>-<short-slug>, for example DATA-412-fix-churn-join."
+    },
+    {
+      "id": "conv-commit-messages",
+      "scope": "team",
+      "kind": "convention",
+      "age_days": 200,
+      "statement": "Commit messages use conventional commits: feat:, fix:, chore:, docs:."
+    },
+    {
+      "id": "conv-dbt-sql-style",
+      "scope": "team",
+      "kind": "convention",
+      "age_days": 150,
+      "statement": "dbt SQL uses lowercase keywords, CTEs instead of subqueries, and one model per file named stg_, int_ or mart_."
+    },
+    {
+      "id": "conv-pr-approval",
+      "scope": "team",
+      "kind": "convention",
+      "age_days": 120,
+      "statement": "Every pull request needs one approving review from someone outside the author's pod before merge."
+    },
+    {
+      "id": "conv-table-naming",
+      "scope": "team",
+      "kind": "convention",
+      "age_days": 260,
+      "statement": "Snowflake tables are snake_case and plural; timestamps end in _at and dates in _on."
+    },
+    {
+      "id": "conv-meeting-notes",
+      "scope": "team",
+      "kind": "convention",
+      "age_days": 90,
+      "statement": "Meeting notes go in Notion under Team > Meetings, titled with the date (YYYY-MM-DD) and topic."
+    },
+    {
+      "id": "conv-incident-channel",
+      "scope": "site",
+      "kind": "convention",
+      "age_days": 170,
+      "statement": "During an incident, open a channel named #inc-YYYYMMDD-short-name and post updates every 30 minutes."
+    },
+    {
+      "id": "conv-postmortems",
+      "scope": "site",
+      "kind": "convention",
+      "age_days": 170,
+      "statement": "Postmortems are blameless, written within five working days, and reviewed at the Friday ops meeting."
+    },
+    {
+      "id": "conv-deploy-freeze",
+      "scope": "site",
+      "kind": "convention",
+      "age_days": 140,
+      "statement": "No production deploys after 15:00 on Fridays or during the last two days of the fiscal quarter."
+    },
+    {
+      "id": "conv-dashboard-owner",
+      "scope": "team",
+      "kind": "convention",
+      "age_days": 100,
+      "statement": "Every Metabase dashboard has an owner named in its description; unowned dashboards are archived after 90 days."
+    },
+    {
+      "id": "conv-secrets",
+      "scope": "site",
+      "kind": "convention",
+      "age_days": 300,
+      "statement": "Credentials live in 1Password vaults; never paste them into Slack, tickets or notebooks."
+    },
+    {
+      "id": "conv-utc-storage",
+      "scope": "team",
+      "kind": "convention",
+      "age_days": 280,
+      "statement": "Timestamps are stored in UTC; convert to local time only in the presentation layer."
+    },
+    {
+      "id": "conv-doc-language",
+      "scope": "site",
+      "kind": "convention",
+      "age_days": 190,
+      "statement": "Customer-facing documents use American English; internal ones use British English."
+    },
+    {
+      "id": "conv-estimates",
+      "scope": "team",
+      "kind": "convention",
+      "age_days": 75,
+      "statement": "Tickets are estimated in t-shirt sizes (S, M, L); anything bigger than L must be split."
+    },
+    {
+      "id": "conv-data-requests",
+      "scope": "team",
+      "kind": "convention",
+      "age_days": 110,
+      "statement": "Ad-hoc data requests from other teams come in through the Data Requests form, not direct messages."
+    },
+    {
+      "id": "conv-async-standup",
+      "scope": "team",
+      "kind": "convention",
+      "age_days": 50,
+      "statement": "Stand-up is asynchronous in #data-standup by 10:00 each weekday."
+    },
+    {
+      "id": "conv-feature-flags",
+      "scope": "site",
+      "kind": "convention",
+      "age_days": 210,
+      "statement": "New product features ship behind a LaunchDarkly flag that is removed within two sprints of full rollout."
+    },
+    {
+      "id": "conv-test-coverage",
+      "scope": "team",
+      "kind": "convention",
+      "age_days": 130,
+      "statement": "Python packages need tests for every public function; CI fails below 80% line coverage."
+    },
+    {
+      "id": "conv-board-pack-rounding",
+      "scope": "team",
+      "kind": "convention",
+      "age_days": 160,
+      "statement": "Figures in the board pack are rounded to one decimal place and shown in thousands of pounds."
+    },
+    {
+      "id": "conv-customer-names-public",
+      "scope": "site",
+      "kind": "convention",
+      "age_days": 240,
+      "statement": "Never name customers in public talks or blog posts without written permission from marketing."
+    },
+
+    {
+      "id": "dec-snowflake",
+      "scope": "team",
+      "kind": "decision",
+      "age_days": 360,
+      "statement": "2025-11: we chose Snowflake over BigQuery for the warehouse because of EU data residency and existing contracts."
+    },
+    {
+      "id": "dec-dagster",
+      "scope": "team",
+      "kind": "decision",
+      "age_days": 300,
+      "statement": "2026-01: Dagster replaces Airflow for orchestration; new pipelines must not be written for Airflow."
+    },
+    {
+      "id": "dec-no-new-r",
+      "scope": "team",
+      "kind": "decision",
+      "age_days": 280,
+      "statement": "2026-02: no new R code; existing R reports are ported to Python by the end of FY2027."
+    },
+    {
+      "id": "dec-keep-metabase",
+      "scope": "team",
+      "kind": "decision",
+      "age_days": 220,
+      "statement": "2026-04: we keep Metabase for internal dashboards and will not buy Looker; revisit in 2027."
+    },
+    {
+      "id": "dec-churn-model-xgboost",
+      "scope": "team",
+      "kind": "decision",
+      "age_days": 160,
+      "statement": "2026-06: the churn model uses gradient boosted trees (XGBoost) rather than a neural network, for explainability."
+    },
+    {
+      "id": "dec-growth-price-rise",
+      "scope": "team",
+      "kind": "decision",
+      "age_days": 120,
+      "statement": "2026-07: Growth plan list price rises 8% from 1 September 2026 for new customers; existing customers keep their price until renewal."
+    },
+    {
+      "id": "dec-eu-hosting",
+      "scope": "site",
+      "kind": "decision",
+      "age_days": 250,
+      "statement": "2026-03: all customer data is hosted in the EU (Frankfurt and Dublin); no US region for now."
+    },
+    {
+      "id": "dec-oncall-pay",
+      "scope": "site",
+      "kind": "decision",
+      "age_days": 190,
+      "statement": "2026-05: on-call engineers get a fixed £300 per week on rota plus time off in lieu after a night page."
+    },
+    {
+      "id": "dec-hiring-freeze",
+      "scope": "site",
+      "kind": "decision",
+      "age_days": 95,
+      "statement": "2026-08: hiring is frozen for non-engineering roles until the end of Q4 FY2026."
+    },
+    {
+      "id": "dec-office-days",
+      "scope": "site",
+      "kind": "decision",
+      "age_days": 280,
+      "statement": "2026-02: people work from the office at least two days a week, Tuesday and one day of their choice."
+    },
+    {
+      "id": "dec-sso-only",
+      "scope": "site",
+      "kind": "decision",
+      "age_days": 60,
+      "statement": "2026-09: all internal tools must use Okta single sign-on; tools without SSO are being retired."
+    },
+    {
+      "id": "dec-approved-ai",
+      "scope": "site",
+      "kind": "decision",
+      "age_days": 30,
+      "statement": "2026-10: Kobe is the approved AI assistant; pasting customer data into other chatbots is not allowed."
+    },
+    {
+      "id": "dec-dbt-core",
+      "scope": "team",
+      "kind": "decision",
+      "age_days": 220,
+      "statement": "2026-04: we run dbt Core in Dagster instead of paying for dbt Cloud."
+    },
+    {
+      "id": "dec-board-nrr",
+      "scope": "team",
+      "kind": "decision",
+      "age_days": 160,
+      "statement": "2026-06: the board pack's headline retention metric is NRR, replacing logo churn."
+    },
+    {
+      "id": "dec-q4-priority",
+      "scope": "team",
+      "kind": "decision",
+      "age_days": 45,
+      "statement": "Q4 FY2026 priority for the data team is the self-serve usage page for Enterprise customers."
+    },
+    {
+      "id": "dec-csv-export-sunset",
+      "scope": "team",
+      "kind": "decision",
+      "age_days": 60,
+      "statement": "2026-09: the legacy CSV export endpoint will be switched off on 31 January 2027; customers move to the API."
+    },
+    {
+      "id": "dec-snowplow",
+      "scope": "team",
+      "kind": "decision",
+      "age_days": 190,
+      "statement": "2026-05: event collection moves from Segment to our own Snowplow pipeline to cut cost."
+    },
+    {
+      "id": "dec-masked-staging",
+      "scope": "site",
+      "kind": "decision",
+      "age_days": 250,
+      "statement": "2026-03: staging may only contain masked personal data; no production copies on laptops."
+    },
+    {
+      "id": "dec-postgres-17",
+      "scope": "team",
+      "kind": "decision",
+      "age_days": 120,
+      "statement": "2026-07: application databases standardise on PostgreSQL 17."
+    },
+    {
+      "id": "dec-support-hours",
+      "scope": "site",
+      "kind": "decision",
+      "age_days": 300,
+      "statement": "2026-01: customer support covers 07:00-19:00 UK time on weekdays; Enterprise gets 24/7 for P1 incidents."
+    },
+
+    {
+      "id": "noise-espresso",
+      "scope": "site",
+      "kind": "fact",
+      "age_days": 100,
+      "statement": "The Leeds office kitchen has an espresso machine on the third floor; descale it on Fridays."
+    },
+    {
+      "id": "noise-parking",
+      "scope": "site",
+      "kind": "fact",
+      "age_days": 200,
+      "statement": "Lisbon office parking spaces are booked through the Facilities app."
+    },
+    {
+      "id": "noise-cycle-scheme",
+      "scope": "site",
+      "kind": "fact",
+      "age_days": 330,
+      "statement": "The cycle-to-work scheme opens for applications each April."
+    },
+    {
+      "id": "noise-slack-focus",
+      "scope": "team",
+      "kind": "convention",
+      "age_days": 70,
+      "statement": "Set your Slack status to focus to mute non-urgent pings."
+    },
+    {
+      "id": "noise-guest-wifi",
+      "scope": "site",
+      "kind": "fact",
+      "age_days": 20,
+      "statement": "The guest Wi-Fi network is Larkspur-Guest; its password changes monthly and is shown on the reception screen."
+    },
+    {
+      "id": "noise-offsite",
+      "scope": "team",
+      "kind": "fact",
+      "age_days": 15,
+      "statement": "The data team's offsite is in Porto from 12 to 14 May 2027."
+    },
+    {
+      "id": "noise-library",
+      "scope": "site",
+      "kind": "fact",
+      "age_days": 260,
+      "statement": "The Leeds office has a lending library of business and technical books."
+    },
+    {
+      "id": "noise-swag",
+      "scope": "site",
+      "kind": "decision",
+      "age_days": 220,
+      "statement": "2026-04: new joiners get a hoodie and a notebook, no other swag."
+    }
+  ]
+}

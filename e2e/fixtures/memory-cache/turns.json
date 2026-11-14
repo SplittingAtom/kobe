@@ -1,0 +1,25 @@
+{
+  "about": "KOBE-387 cache replay: 20 fixed messages sent one per turn in one new thread, each after the previous run ended (docs/gates/gate-7a.md step 3). They touch the seeded memory so the per-message picks change between turns, as in real use. No tools are asked for, so a turn is one or two model calls.",
+  "turns": [
+    "Without using any tools: in two sentences, how do we define ARR?",
+    "Without using any tools: what is our headline retention metric in the board pack, and why that one?",
+    "Without using any tools: when does our fiscal year start and end?",
+    "Without using any tools: what counts as an active user for us?",
+    "Without using any tools: what was logo churn last quarter compared with the one before?",
+    "Without using any tools: sketch the outline of a one-page churn update for the leadership team.",
+    "Without using any tools: which warehouse do we use and in which region?",
+    "Without using any tools: when does the nightly dbt job run, in UK time?",
+    "Without using any tools: what makes an incident a P1?",
+    "Without using any tools: where is customer data hosted?",
+    "Without using any tools: write a short Python function that converts a UTC timestamp to Europe/London.",
+    "Without using any tools: suggest three features for the churn prediction model I'm building.",
+    "Without using any tools: how should I present a revenue figure of 1234567 pounds in a slide title?",
+    "Without using any tools: what's the difference between ARR and NRR, in one paragraph?",
+    "Without using any tools: draft a two-sentence note to finance asking for the latest board pack numbers.",
+    "Without using any tools: can I estimate next quarter's churn for a customer email?",
+    "Without using any tools: list the dates of the four fiscal quarters of FY2027.",
+    "Without using any tools: what should I check before quoting an active-user count to a customer?",
+    "Without using any tools: summarise what we discussed in this thread in five bullets.",
+    "Without using any tools: thanks; one line on what you'd do next."
+  ]
+}
