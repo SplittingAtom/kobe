@@ -26,7 +26,7 @@ describe("memoryLanes", () => {
     expect(lanes.map((l) => [l.lane, l.label, l.items.length])).toEqual([
       ["policy", "Policy", 1],
       ["team", "Workspace memories", 1],
-      ["user", "My memories in this workspace", 2],
+      ["user", "Only in this workspace", 2],
     ]);
   });
 });
