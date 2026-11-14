@@ -17,7 +17,7 @@ const expectedStateSchema = z.strictObject({
 });
 
 /**
- * Site users (spec D7, §6.1 `/v1/site/users`): list, deactivate, reactivate. Deactivation
+ * Site users (spec D7, §6.1 `/v1/site/users`): list, deactivate, reactivate, purge portable memories. Deactivation
  * blocks every sign-in method and all API access at once and revokes every session; memberships
  * are kept so reactivation restores the user's teams. Admins act on Users; only the Owner acts on
  * Admins (as with granting Admin); the Owner can't be deactivated (transfer ownership first).
@@ -135,6 +135,48 @@ export function siteUsersRoutes(deps: ServerDeps): Hono<{ Variables: AuthVariabl
     if (want.check && !did) return changed(c);
     const incompleteSteps = await deps.lifecycle.emit("reactivated", userId.data);
     return c.json({ userId: userId.data, deactivated: false, incompleteSteps });
+  });
+
+  /**
+   * Purge a deactivated person's portable memories (v1.3 Q7, KOBE-386): deactivation keeps them
+   * and reactivation restores them unchanged until a site admin purges them here. Refused for an
+   * active account (409 `user_active`) and while a legal hold covers the person (409
+   * `legal_hold`). Same rules as deactivation for who may act on whom.
+   */
+  app.post("/:userId/portable-memory/purge", async (c) => {
+    const userId = idSchema.safeParse(c.req.param("userId"));
+    if (!userId.success) return invalidRequest(c);
+    const refused = await guard(c, userId.data);
+    if (refused) return refused;
+    const outcome = await deps.offboarding.purgePortable(userId.data);
+    switch (outcome.status) {
+      case "purged":
+        return c.json({
+          userId: userId.data,
+          purged: outcome.counts.items,
+          kept: outcome.counts.kept,
+        });
+      case "not_found":
+        return c.json({ code: "user_not_found", message: "No Kobe user with that id." }, 404);
+      case "active":
+        return c.json(
+          { code: "user_active", message: "Deactivate the account before purging its memories." },
+          409,
+        );
+      case "held":
+        return c.json(
+          { code: "legal_hold", message: "A legal hold covers this person; nothing was purged." },
+          409,
+        );
+      case "paused":
+        return c.json(
+          {
+            code: "retention_paused",
+            message: "Retention is paused on this site; nothing was purged.",
+          },
+          503,
+        );
+    }
   });
 
   return app;

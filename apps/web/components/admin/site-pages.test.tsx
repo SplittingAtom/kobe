@@ -112,6 +112,29 @@ describe("Users", () => {
     await waitFor(() => expect(document.activeElement).toBe(button));
   });
 
+  it("offers Purge memories only for deactivated users, asks first and reports kept ones (KOBE-386)", async () => {
+    const calls = stubApi({
+      "GET /v1/site/users": [200, USERS],
+      "POST /v1/site/users/u-gone/portable-memory/purge": [
+        200,
+        { user_id: "u-gone", purged: 3, kept: 1 },
+      ],
+    });
+    renderSite(<UsersPage />);
+    const purge = await screen.findByRole("button", { name: "Purge memories Gus" });
+    expect(screen.queryByRole("button", { name: "Purge memories Bob" })).toBeNull();
+    await userEvent.click(purge);
+    await answerConfirm("Purge Gus's personal memories?", "Cancel");
+    expect(userCalls(calls)).toEqual(["GET /v1/site/users"]);
+    await userEvent.click(purge);
+    expect(await answerConfirm("Purge Gus's personal memories?", "Purge memories")).toMatch(
+      /won't bring these back/,
+    );
+    const status = await screen.findByText(/Purged 3 of Gus's memories/);
+    expect(status.textContent).toMatch(/1 stay while a workspace legal hold/);
+    expect(userCalls(calls)).toContain("POST /v1/site/users/u-gone/portable-memory/purge");
+  });
+
   it("asks before reactivating", async () => {
     const calls = stubApi({
       "GET /v1/site/users": [200, USERS],

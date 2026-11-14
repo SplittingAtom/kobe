@@ -40,3 +40,16 @@ export function setUserActive(
     method: "POST",
   });
 }
+
+export interface PortablePurgeResult {
+  readonly userId: string;
+  /** Portable memories removed. */
+  readonly purged: number;
+  /** Kept because a run in a workspace under legal hold used them. */
+  readonly kept: number;
+}
+
+/** Purges a deactivated person's portable memories (KOBE-386; kept until then). */
+export function purgePortableMemory(userId: string): Promise<ApiResult<PortablePurgeResult>> {
+  return apiRequest(`/v1/site/users/${enc(userId)}/portable-memory/purge`, { method: "POST" });
+}

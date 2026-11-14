@@ -9,9 +9,18 @@ import {
   type OffboardOutcome,
 } from "./destroy.js";
 import { listOffboarded, startExport, type ExportStart, type OffboardedMember } from "./export.js";
-import { departedNotOffboarded, dueForPurge, purgeDeparted } from "./purge.js";
+import {
+  departedMemoryOwners,
+  departedNotOffboarded,
+  dueForPurge,
+  purgeDeparted,
+} from "./purge.js";
 import { reinstateReturning } from "./reinstate.js";
 import { sweepDepartedDrafts } from "../retention/skill-drafts.js";
+import {
+  purgePortableForUser,
+  type PortablePurgeOutcome,
+} from "../retention/site-semantic-memory.js";
 import { sweepDepartedSkillEvals } from "../retention/skill-evals.js";
 import {
   RETAIN_DAYS,
@@ -54,6 +63,11 @@ export interface Offboarding {
   ): Promise<OffboardOutcome>;
   /** Account deactivated: every team's sandbox of the user. Throws if any team failed. */
   offboardUser(userId: string, trigger: OffboardTrigger): Promise<void>;
+  /**
+   * A site admin purges a deactivated person's portable memories (Q7, KOBE-386); until then they
+   * are kept, and reactivation finds them unchanged. `paused`: KOBE_RETENTION_PAUSED.
+   */
+  purgePortable(userId: string): Promise<PortablePurgeOutcome | { readonly status: "paused" }>;
   /** Team removed: every member's sandbox. Throws if any failed. */
   offboardTeam(teamId: string): Promise<number>;
   /** A returning member's wake: drops the old retained volume. False: refuse (legal hold). */
@@ -116,6 +130,18 @@ export function createOffboarding(options: OffboardingOptions): Offboarding {
         );
       }
     }
+    // KOBE-386: departed owners of personal semantic memories with no sandbox record get one.
+    for (const departed of await departedMemoryOwners(ctx, SWEEP_LIMIT)) {
+      try {
+        if ((await offboardSandbox(ctx, departed, "reconciled")) === "offboarded") offboarded += 1;
+      } catch (err) {
+        failed += 1;
+        log.error(
+          { err, team_id: departed.teamId, user_id: departed.userId },
+          "offboarding of a memory owner failed",
+        );
+      }
+    }
     for (const due of await dueForPurge(ctx, SWEEP_LIMIT)) {
       try {
         const outcome = await purgeDeparted(ctx, due);
@@ -151,6 +177,8 @@ export function createOffboarding(options: OffboardingOptions): Offboarding {
       const teamIds = await liveSandboxTeams(ctx, userId);
       await settle(teamIds, (teamId) => offboardSandbox(ctx, { teamId, userId }, trigger));
     },
+    purgePortable: async (userId) =>
+      ctx.paused ? { status: "paused" as const } : purgePortableForUser(ctx.db, userId),
     async offboardTeam(teamId) {
       const userIds = await liveSandboxUsers(ctx, teamId);
       await settle(userIds, (userId) => offboardSandbox(ctx, { teamId, userId }, "team_removed"));

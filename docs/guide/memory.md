@@ -1,6 +1,6 @@
 ---
 title: Memory
-summary: How Kobe remembers things between conversations, the Memories and Notes tabs of My memory, how to add, edit, pin, archive or undo memories and notes, which site and workspace switches control notes and memories, how the learning model is chosen, and how a Site-wide legal hold keeps Site memories.
+summary: How Kobe remembers things between conversations, the Memories and Notes tabs of My memory, how to add, edit, pin, archive or undo memories and notes, which site and workspace switches control notes and memories, how the learning model is chosen, how long memories are kept, and how a Site-wide legal hold keeps Site memories.
 section: Memory
 order: 1
 audience: member
@@ -185,6 +185,32 @@ are still allowed, and the site audit log records the earlier and new kind, Poli
 as-of date, and for tags a count and a fingerprint (not the tags themselves). A hold on one person also keeps every version of the Site memories that person wrote, for as long
 as it lasts (edits still work; nothing of those memories is pruned or cleaned up). A hold on a whole
 workspace covers that workspace's memories, not the Site's.
+
+## How long memories are kept
+
+Kobe never deletes a memory you still use: a live memory stays however old it is, and nothing is
+archived for you. What goes, and when:
+
+- **Archived and replaced memories, and earlier versions.** In a workspace they are deleted once
+  they are older than the workspace's retention period (none while the workspace keeps
+  conversations forever). Memories that follow you across workspaces and Site memories use the
+  site's retention window for archived memories (**Settings › Memory**, 365 days by default). The
+  current version of a memory is never deleted, nor a version a run used (the run's record keeps
+  it).
+- **Evidence.** When the conversation a memory was learned from is deleted for good, the quote and
+  the link to that conversation go with it; the memory itself stays (its source is deleted).
+- **Leaving a workspace.** Your own memories in a workspace are deleted 30 days after you leave it
+  (or after your account is deactivated); coming back within the 30 days keeps them. Workspace and
+  Site memories you wrote stay, shown as written by a former member. Leaving a workspace changes
+  nothing for the memories that follow you.
+- **Deactivation.** When your account is deactivated (by a site admin, or by your organization's
+  identity provider through single sign-on), the memories that follow you are kept, unchanged,
+  and are there again when your account is reactivated. Only a site admin removes them earlier,
+  with **Purge memories** on the deactivated account (Site console › Users). A new account made
+  for you by single sign-on, instead of your old one, starts with no memories.
+- **Legal holds.** A legal hold suspends all of this: a hold on a person keeps their memories (in
+  every workspace and the ones that follow them) and the Site memories they wrote; a hold on a
+  workspace keeps that workspace's memories; a Site-wide hold keeps Site memories.
 
 ## What Kobe checks before a memory is saved
 

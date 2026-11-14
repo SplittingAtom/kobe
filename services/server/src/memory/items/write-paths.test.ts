@@ -72,6 +72,9 @@ describe("memory write paths (review H-1)", () => {
       "memory/items/edit.ts",
       "memory/items/import.ts",
       "memory/items/versions.ts",
+      // KOBE-386: the retention scrub only clears evidence and thread links (0222 refuses any
+      // other change to a version), never a statement.
+      "retention/semantic-memory.ts",
     ]);
   });
 });

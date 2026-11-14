@@ -130,9 +130,14 @@ Provisioning works only while the provider is turned on. What SCIM does:
   Entra, map **objectId** to **externalId**: Kobe refuses a user without it.
 - **Deactivates** an account when the provider says so: every session ends at once, the person is
   signed out in the browser. Deleting the user at the provider
-  deactivates and unlinks them; Kobe never deletes accounts.
+  deactivates and unlinks them; Kobe never deletes accounts. The memories that follow the person
+  across workspaces are kept until a site admin purges them (Site console › Users › **Purge
+  memories**); their own memories in each workspace go 30 days later. See
+  [Memory](../memory.md#how-long-memories-are-kept).
 - **Reactivates** only accounts SCIM itself deactivated. Someone a site admin deactivated stays
-  deactivated until a site admin reactivates them (`identity.scim.reactivation_refused`).
+  deactivated until a site admin reactivates them (`identity.scim.reactivation_refused`). A
+  reactivated account finds its memories unchanged; a new account the provider creates instead
+  of the old one (just-in-time) starts with none.
 - **Never deactivates the Owner, a site Admin or the setup Owner.** It ends their SSO sessions,
   refuses the request and records it (`identity.scim.deactivation_refused`); deactivate them in
   **Users** if you mean to.

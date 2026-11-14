@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { listSsoProviders } from "../../../lib/admin/api/site/sso";
 import {
+  purgePortableMemory,
   setUserActive,
   listUsers,
   type DeactivationResult,
@@ -85,6 +86,26 @@ export function UsersPage() {
     if (done) reload();
   }
 
+  async function purgeMemories(user: SiteUser, trigger: HTMLElement | null) {
+    const yes = await confirm(
+      {
+        title: `Purge ${user.name}'s personal memories?`,
+        description:
+          "Their portable memories (preferences that follow them across workspaces) are deleted for good. Reactivating them later won't bring these back.",
+        confirmLabel: "Purge memories",
+      },
+      trigger,
+    );
+    if (!yes) return;
+    await mutation.run(
+      () => purgePortableMemory(user.id),
+      (result) =>
+        result.kept > 0
+          ? `Purged ${result.purged} of ${user.name}'s memories; ${result.kept} stay while a workspace legal hold covers a run that used them.`
+          : `Purged ${result.purged} of ${user.name}'s memories.`,
+    );
+  }
+
   return (
     <>
       <PageHeader
@@ -146,6 +167,16 @@ export function UsersPage() {
                       >
                         {u.deactivatedAt ? "Reactivate" : "Deactivate"}
                         <span className="sr-only"> {u.name}</span>
+                      </Button>
+                    )}{" "}
+                    {u.deactivatedAt !== null && canChangeActivation(me, u) && (
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={mutation.pending}
+                        onClick={(e) => void purgeMemories(u, eventTrigger(e))}
+                      >
+                        Purge memories<span className="sr-only"> {u.name}</span>
                       </Button>
                     )}
                   </TableCell>

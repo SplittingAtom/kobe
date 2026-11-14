@@ -2,6 +2,7 @@ import { SYSTEM_ACTOR, eq, sql, teams, withTeam } from "@kobe/db";
 import { currentAuditContext } from "../audit/context.js";
 import { recordAudit } from "../audit/record.js";
 import { logger } from "../logger.js";
+import { ownsPersonalItems } from "../retention/semantic-memory.js";
 import { offboardSkillEvals } from "./skill-evals.js";
 import {
   RETAIN_DAYS,
@@ -60,14 +61,19 @@ export async function offboardSandbox(
       state: string;
       pvc: string | null;
       sandbox_id: string | null;
+      retain_until: string | Date | null;
     }>(sql`
-      SELECT state, pvc, sandbox_id FROM sandboxes
+      SELECT state, pvc, sandbox_id, retain_until FROM sandboxes
        WHERE team_id = ${teamId} AND user_id = ${userId} FOR UPDATE`);
     const row = current.rows[0];
-    if (row?.state === "destroyed") return "already_offboarded";
+    // KOBE-386: personal semantic memories need the 30-day record even without a sandbox, and a
+    // member who came back (without waking a sandbox) and left again starts a new window.
+    const memories = await ownsPersonalItems(tx, teamId, userId);
+    if (row?.state === "destroyed" && !(memories && row.retain_until === null))
+      return "already_offboarded";
     const workspace = await tx.execute(sql`
       SELECT 1 FROM workspace_sync WHERE team_id = ${teamId} AND user_id = ${userId}`);
-    if (!row && !destroyed.sandboxId && workspace.rowCount === 0) return "no_sandbox";
+    if (!row && !destroyed.sandboxId && workspace.rowCount === 0 && !memories) return "no_sandbox";
     const pvc = destroyed.pvc ?? row?.pvc ?? null;
     const sandboxId = destroyed.sandboxId ?? row?.sandbox_id ?? null;
     const saved = await tx.execute<{ retain_until: string | Date }>(sql`
